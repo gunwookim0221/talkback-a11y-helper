@@ -1,5 +1,7 @@
 # Testing Pipeline
 
+[System Overview 보기](system-overview.md) | [Architecture 보기](architecture.md)
+
 ## Overview
 
 이 문서는 TalkBack 기반 접근성 QA 자동화 검증 파이프라인을 단계별로 설명합니다. 핵심은 헬퍼 앱을 통해 현재 접근성 포커스를 수집하고, 예상 발화와 실제 발화를 비교해 PASS/FAIL을 판단하는 것입니다.
@@ -60,15 +62,11 @@ adb exec-out screencap
 - Expected Utterance(예상 발화)와 OCR 추출 결과(실제 발화)를 비교합니다.
 - 일치/유사도 기준에 따라 PASS 또는 FAIL을 판정합니다.
 
-## Known Limitations
+## 제한 사항 및 향후 개선
 
-- Samsung 기기에서는 TTS 로그가 인코딩될 수 있습니다.
-- speech overlay가 UIAutomator XML dump에 나타나지 않을 수 있습니다.
-- `RecyclerView` / `WebView` / Compose UI에서 traversal 순서가 달라질 수 있습니다.
+제한 사항 및 향후 개선 방향은 [System Overview](system-overview.md#known-limitations) 문서를 참고하세요.
 
-## Future Improvements
 
-- 공간 기반 navigation 개선
-- container-aware traversal
-- locale 기반 speech prediction
-- OCR 기반 검증 개선
+---
+
+다른 문서 보기: [System Overview](system-overview.md) | [Architecture](architecture.md)
