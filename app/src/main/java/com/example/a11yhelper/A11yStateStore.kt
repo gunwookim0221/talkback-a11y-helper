@@ -1,7 +1,6 @@
 package com.example.a11yhelper
 
 import android.content.Context
-import android.os.Environment
 import android.util.Log
 import org.json.JSONObject
 import java.io.File
@@ -35,12 +34,13 @@ object A11yStateStore {
 
     fun saveToExternalFile(context: Context): Result<String> {
         return runCatching {
-            val base = Environment.getExternalStorageDirectory()
+            val base = context.getExternalFilesDir(null)
+                ?: throw IllegalStateException("External files directory is not available")
             val target = File(base, "a11y_focus.json")
             target.writeText(lastFocusJson)
             target.absolutePath
         }.onFailure {
-            Log.w(TAG, "Failed to save /sdcard/a11y_focus.json", it)
+            Log.w(TAG, "Failed to save a11y_focus.json in app external files directory", it)
         }
     }
 }

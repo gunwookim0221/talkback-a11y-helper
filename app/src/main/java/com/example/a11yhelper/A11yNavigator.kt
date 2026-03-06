@@ -1,8 +1,14 @@
 package com.example.a11yhelper
 
+import android.content.res.Resources
+import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 object A11yNavigator {
+    private val ROW_THRESHOLD_PX: Int = dpToPx(12f).coerceAtLeast(1)
+
     data class NavOutcome(
         val success: Boolean,
         val reason: String,
@@ -11,21 +17,38 @@ object A11yNavigator {
         val targetNode: AccessibilityNodeInfo?
     )
 
-    fun collectNavigableNodes(root: AccessibilityNodeInfo?): List<AccessibilityNodeInfo> {
+    fun collectNavigableNodes(
+        root: AccessibilityNodeInfo?,
+        foregroundPackageName: String? = root?.packageName?.toString()
+    ): List<AccessibilityNodeInfo> {
         if (root == null) return emptyList()
-        val out = mutableListOf<AccessibilityNodeInfo>()
+
+        val candidates = mutableListOf<AccessibilityNodeInfo>()
         val stack = ArrayDeque<AccessibilityNodeInfo>()
         stack.add(root)
+
         while (stack.isNotEmpty()) {
             val node = stack.removeLast()
             if (isNodeCandidate(node)) {
-                out.add(node)
+                candidates.add(node)
             }
             for (i in node.childCount - 1 downTo 0) {
                 node.getChild(i)?.let { stack.add(it) }
             }
         }
-        return out
+
+        return candidates
+            .map { node ->
+                val bounds = Rect().also { node.getBoundsInScreen(it) }
+                NodeSortMeta(
+                    node = node,
+                    bounds = bounds,
+                    isEmptyBounds = bounds.width() <= 0 || bounds.height() <= 0,
+                    packagePriority = packagePriority(node, foregroundPackageName)
+                )
+            }
+            .sortedWith(NODE_SPATIAL_COMPARATOR)
+            .map { it.node }
     }
 
     fun navigate(root: AccessibilityNodeInfo?, direction: Int): NavOutcome {
@@ -63,4 +86,43 @@ object A11yNavigator {
     private fun isNodeCandidate(node: AccessibilityNodeInfo): Boolean {
         return node.isVisibleToUser && (node.isFocusable || node.isClickable || !node.text.isNullOrBlank() || !node.contentDescription.isNullOrBlank())
     }
+
+    private fun packagePriority(node: AccessibilityNodeInfo, foregroundPackageName: String?): Int {
+        if (foregroundPackageName.isNullOrBlank()) return 0
+        val nodePackage = node.packageName?.toString()
+        return if (nodePackage == foregroundPackageName) 0 else 1
+    }
+
+    private fun rowKey(top: Int): Int = top / ROW_THRESHOLD_PX
+
+    private val NODE_SPATIAL_COMPARATOR = Comparator<NodeSortMeta> { a, b ->
+        compareValuesBy(
+            a,
+            b,
+            { it.packagePriority },
+            { if (it.isEmptyBounds) 1 else 0 },
+            { rowKey(it.bounds.top) },
+            { it.bounds.left },
+            { it.bounds.top }
+        ).takeIf { it != 0 }
+            ?: run {
+                if (abs(a.bounds.top - b.bounds.top) <= ROW_THRESHOLD_PX) {
+                    compareValuesBy(a, b, { it.bounds.left }, { it.bounds.top })
+                } else {
+                    a.bounds.top.compareTo(b.bounds.top)
+                }
+            }
+    }
+
+    private fun dpToPx(dp: Float): Int {
+        val density = Resources.getSystem().displayMetrics.density
+        return (dp * density).roundToInt()
+    }
+
+    private data class NodeSortMeta(
+        val node: AccessibilityNodeInfo,
+        val bounds: Rect,
+        val isEmptyBounds: Boolean,
+        val packagePriority: Int
+    )
 }
