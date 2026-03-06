@@ -1,5 +1,7 @@
 # Architecture
 
+[System Overview 보기](system-overview.md) | [Testing Pipeline 보기](testing-pipeline.md)
+
 ## Overview
 
 `talkback-a11y-helper`는 **Android `AccessibilityService` 기반의 헬퍼 앱**으로, TalkBack 접근성 자동화 테스트를 안정적으로 수행하기 위한 중간 제어 계층입니다. 일반적인 입력 자동화(터치/키 이벤트)만으로는 TalkBack의 실제 탐색 동작을 재현하기 어렵기 때문에, 접근성 트리를 직접 해석하고 현재 포커스를 추적하는 전용 헬퍼 앱이 필요합니다.
@@ -80,15 +82,11 @@ AccessibilityService
 - JSON 파일 저장
 - broadcast 응답
 
-## Known Limitations
+## 제한 사항 및 향후 개선
 
-- Samsung 기기에서는 TTS 로그가 인코딩/암호화되어 발화 텍스트를 직접 확인하기 어려울 수 있습니다.
-- speech overlay 텍스트가 UIAutomator XML dump에 나타나지 않을 수 있습니다.
-- `RecyclerView` / `WebView` / Compose UI에서는 traversal 순서가 달라질 수 있습니다.
+제한 사항 및 향후 개선 방향은 [System Overview](system-overview.md#known-limitations) 문서를 참고하세요.
 
-## Future Improvements
 
-- 공간(geometry) 기반 navigation 개선
-- container-aware traversal 강화
-- locale 기반 speech prediction 정밀화
-- OCR 기반 검증 파이프라인 고도화
+---
+
+다른 문서 보기: [System Overview](system-overview.md) | [Testing Pipeline](testing-pipeline.md)
