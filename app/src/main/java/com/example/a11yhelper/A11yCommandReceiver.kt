@@ -4,22 +4,27 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import android.view.accessibility.AccessibilityNodeInfo
 
 class A11yCommandReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "A11Y_HELPER"
         private const val ACTION_GET_FOCUS = "com.example.a11yhelper.GET_FOCUS"
         private const val ACTION_FOCUS_RESULT = "com.example.a11yhelper.FOCUS_RESULT"
-        private const val ACTION_NEXT = "com.example.a11yhelper.NEXT"
-        private const val ACTION_PREV = "com.example.a11yhelper.PREV"
+        private const val ACTION_DUMP_TREE = "com.example.a11yhelper.DUMP_TREE"
+        private const val ACTION_FOCUS_TARGET = "com.example.a11yhelper.FOCUS_TARGET"
+        private const val ACTION_CLICK_TARGET = "com.example.a11yhelper.CLICK_TARGET"
+        private const val EXTRA_TARGET_TEXT = "targetText"
+        private const val EXTRA_TARGET_VIEW_ID = "targetViewId"
     }
 
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action ?: return
         when (action) {
             ACTION_GET_FOCUS -> handleGetFocus(context, intent)
-            ACTION_NEXT -> handleNavigate(+1)
-            ACTION_PREV -> handleNavigate(-1)
+            ACTION_DUMP_TREE -> handleDumpTree()
+            ACTION_FOCUS_TARGET -> handleTargetAction(intent, AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+            ACTION_CLICK_TARGET -> handleTargetAction(intent, AccessibilityNodeInfo.ACTION_CLICK)
             else -> Unit
         }
     }
@@ -42,12 +47,32 @@ class A11yCommandReceiver : BroadcastReceiver() {
         context.sendBroadcast(reply)
     }
 
-    private fun handleNavigate(direction: Int) {
+    private fun handleDumpTree() {
         val service = A11yHelperService.instance
         if (service == null) {
-            Log.w(TAG, "NAV_RESULT {\"success\":false,\"reason\":\"Service not connected\"}")
+            Log.w(TAG, "DUMP_TREE_RESULT [] // Service not connected")
             return
         }
-        service.handleNavigation(direction)
+        service.dumpTree()
+    }
+
+    private fun handleTargetAction(intent: Intent, action: Int) {
+        val service = A11yHelperService.instance
+        if (service == null) {
+            Log.w(TAG, "TARGET_ACTION_RESULT {\"success\":false,\"reason\":\"Service not connected\"}")
+            return
+        }
+
+        val query = A11yNavigator.TargetQuery(
+            targetText = intent.getStringExtra(EXTRA_TARGET_TEXT),
+            targetViewId = intent.getStringExtra(EXTRA_TARGET_VIEW_ID)
+        )
+
+        if (query.targetText.isNullOrBlank() && query.targetViewId.isNullOrBlank()) {
+            Log.w(TAG, "TARGET_ACTION_RESULT {\"success\":false,\"reason\":\"targetText or targetViewId is required\"}")
+            return
+        }
+
+        service.performTargetAction(query, action)
     }
 }

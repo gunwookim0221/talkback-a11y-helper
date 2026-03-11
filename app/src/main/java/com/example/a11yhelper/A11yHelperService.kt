@@ -35,6 +35,10 @@ class A11yHelperService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         val type = event.eventType
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            Log.i(TAG, "SCREEN_CHANGED")
+        }
+
         if (type != AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED &&
             type != AccessibilityEvent.TYPE_VIEW_FOCUSED &&
             type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
@@ -67,28 +71,29 @@ class A11yHelperService : AccessibilityService() {
         return source
     }
 
-    fun handleNavigation(direction: Int): JSONObject {
-        val root = rootInActiveWindow
-        val result = A11yNavigator.navigate(root, direction)
+    fun dumpTree() {
+        val dumpArray = A11yNavigator.dumpTreeFlat(rootInActiveWindow)
+        Log.i(TAG, "DUMP_TREE_RESULT $dumpArray")
+    }
 
-        val json = JSONObject().apply {
+    fun performTargetAction(query: A11yNavigator.TargetQuery, action: Int): JSONObject {
+        val outcome = A11yNavigator.findAndPerformAction(rootInActiveWindow, query, action)
+        val resultJson = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
-            put("direction", if (direction > 0) "NEXT" else "PREV")
-            put("success", result.success)
-            put("reason", result.reason)
-            put("fromIndex", result.fromIndex)
-            put("targetIndex", result.targetIndex)
-            if (result.targetNode != null) {
-                put("target", FocusSnapshot.fromNode(result.targetNode).toJson())
+            put("success", outcome.success)
+            put("reason", outcome.reason)
+            put("action", if (action == AccessibilityNodeInfo.ACTION_CLICK) "CLICK" else "FOCUS")
+            put("targetText", query.targetText ?: JSONObject.NULL)
+            put("targetViewId", query.targetViewId ?: JSONObject.NULL)
+            if (outcome.target != null) {
+                put("target", FocusSnapshot.fromNode(outcome.target).toJson())
             }
         }
 
-        Log.i(TAG, "NAV_RESULT $json")
-
-        if (result.success && result.targetNode != null) {
-            A11yStateStore.update(FocusSnapshot.fromNode(result.targetNode))
+        Log.i(TAG, "TARGET_ACTION_RESULT $resultJson")
+        if (outcome.success && outcome.target != null) {
+            A11yStateStore.update(FocusSnapshot.fromNode(outcome.target))
         }
-
-        return json
+        return resultJson
     }
 }
