@@ -39,8 +39,8 @@ class A11yAdbClient:
         self._run(["logcat", "-c"])
 
     def dump_tree(self, wait_seconds: float = 2.0) -> list[dict[str, Any]]:
-        self.clear_logcat()
-        self._run(["shell", "am", "broadcast", "-a", ACTION_DUMP_TREE])
+        self.clear_logcat()        
+        self._run(["shell", "am", "broadcast", "-a", ACTION_DUMP_TREE, "-p", "com.example.a11yhelper"])
         time.sleep(wait_seconds)
 
         logs = self._run(["logcat", "-d", "-s", LOG_TAG])
