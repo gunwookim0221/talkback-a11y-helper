@@ -31,7 +31,8 @@ class A11yAdbClient:
             text=True,
             capture_output=True,
             timeout=timeout,
-            encoding='utf-8',
+            encoding='utf-8',    # 안드로이드 로그 인코딩 지정
+            errors='ignore'      # 깨진 글자가 있어도 무시하고 진행
         )
         return proc.stdout.strip()
 
