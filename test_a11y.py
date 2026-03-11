@@ -234,8 +234,8 @@ def main() -> None:
     print(f"DUMP_TREE 노드 개수: {len(tree)}")
 
     with open("ui_tree.json", "w", encoding="utf-8") as f:
-    json.dump(tree, f, ensure_ascii=False, indent=2)
-    print("[INFO] 전체 UI 트리를 ui_tree.json 파일로 저장했습니다.")
+        json.dump(tree, f, ensure_ascii=False, indent=2)
+        print("[INFO] 전체 UI 트리를 ui_tree.json 파일로 저장했습니다.")
 
     print("AND 조건 예제 실행:")
     print(
