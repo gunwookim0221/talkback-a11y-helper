@@ -20,7 +20,8 @@
 adb shell am broadcast -a com.example.a11yhelper.DUMP_TREE
 ```
 
-- 로그의 `DUMP_TREE_RESULT [...]`를 파싱해 Python 스크립트가 원하는 대상 노드를 찾습니다.
+- 로그에서 `DUMP_TREE_PART ...` 조각을 우선 순서대로 합쳐 JSON으로 파싱합니다.
+- 조각 로그가 없으면 기존 `DUMP_TREE_RESULT [...]` 단일 로그를 fallback으로 파싱합니다.
 
 ## Step 4 – 타겟 노드 직접 제어
 

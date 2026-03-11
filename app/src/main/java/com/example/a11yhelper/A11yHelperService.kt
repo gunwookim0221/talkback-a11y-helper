@@ -73,7 +73,21 @@ class A11yHelperService : AccessibilityService() {
 
     fun dumpTree() {
         val dumpArray = A11yNavigator.dumpTreeFlat(rootInActiveWindow)
-        Log.i(TAG, "DUMP_TREE_RESULT $dumpArray")
+        val dumpString = dumpArray.toString()
+        val chunkSize = 3000
+
+        if (dumpString.length <= chunkSize) {
+            Log.i(TAG, "DUMP_TREE_RESULT $dumpString")
+            return
+        }
+
+        var startIndex = 0
+        while (startIndex < dumpString.length) {
+            val endIndex = minOf(startIndex + chunkSize, dumpString.length)
+            Log.i(TAG, "DUMP_TREE_PART ${dumpString.substring(startIndex, endIndex)}")
+            startIndex = endIndex
+        }
+        Log.i(TAG, "DUMP_TREE_END")
     }
 
     fun performTargetAction(query: A11yNavigator.TargetQuery, action: Int): JSONObject {
