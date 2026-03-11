@@ -45,7 +45,7 @@ adb shell am broadcast -a com.example.a11yhelper.GET_FOCUS --ez saveFile true
 adb shell am broadcast -a com.example.a11yhelper.DUMP_TREE
 ```
 
-- logcat: `A11Y_HELPER DUMP_TREE_RESULT [...]`
+- logcat: 짧은 결과는 `A11Y_HELPER DUMP_TREE_RESULT [...]` 1회 출력, 긴 결과는 `A11Y_HELPER DUMP_TREE_PART ...` 여러 줄 + `A11Y_HELPER DUMP_TREE_END` 출력
 - 각 노드 필드: `text`, `contentDescription`, `className`, `viewIdResourceName`, `boundsInScreen`, `clickable`, `focusable`, `isVisibleToUser`
 
 ### 3) 특정 타겟 접근성 포커스

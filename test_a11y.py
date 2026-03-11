@@ -55,7 +55,7 @@ class A11yAdbClient:
         # 로그가 바로 안 찍힐 수 있으므로 반복해서 확인합니다.
         while time.time() - start_time < wait_seconds:
             logs = self._run(["logcat", "-d"])
-            if "DUMP_TREE_RESULT" in logs:
+            if ("DUMP_TREE_PART" in logs and "DUMP_TREE_END" in logs) or "DUMP_TREE_RESULT" in logs:
                 break
             time.sleep(0.5)
 
@@ -63,12 +63,18 @@ class A11yAdbClient:
         a11y_lines = [line for line in logs.splitlines() if "A11Y_HELPER" in line]
         print(f"[DEBUG] 4. A11Y_HELPER 관련 로그 총 {len(a11y_lines)}줄 발견")
         
-        payload = self._extract_json_payload(logs, "DUMP_TREE_RESULT")
+        payload_parts = self._extract_all_payloads(logs, "DUMP_TREE_PART")
+        if payload_parts:
+            payload = "".join(payload_parts)
+            print(f"[DEBUG] chunk 로그 {len(payload_parts)}개를 병합했습니다.")
+        else:
+            payload = self._extract_json_payload(logs, "DUMP_TREE_RESULT")
+
         if payload is None:
-            # 만약 DUMP_TREE_RESULT가 없다면 전체 로그 중 태그가 있는 라인이라도 출력해봅니다.
+            # 만약 DUMP_TREE 로그를 찾지 못하면 전체 로그 중 태그가 있는 라인이라도 출력해봅니다.
             if a11y_lines:
                 print(f"[DEBUG] 발견된 마지막 로그 내용: {a11y_lines[-1]}")
-            raise RuntimeError("DUMP_TREE_RESULT 로그를 찾지 못했습니다. 기기의 '접근성 서비스'가 켜져 있는지 다시 확인해 주세요.")
+            raise RuntimeError("DUMP_TREE 로그를 찾지 못했습니다. 기기의 '접근성 서비스'가 켜져 있는지 다시 확인해 주세요.")
 
         print(f"[DEBUG] 5. JSON 추출 성공! (길이: {len(payload)}자)")
         
@@ -117,6 +123,16 @@ class A11yAdbClient:
             cmd += ["--es", "targetClassName", class_name]
 
         return self._run(cmd)
+
+    @staticmethod
+    def _extract_all_payloads(log_text: str, prefix: str) -> list[str]:
+        pattern = re.compile(rf"{re.escape(prefix)}\s+(.*)$")
+        payloads: list[str] = []
+        for line in log_text.splitlines():
+            m = pattern.search(line)
+            if m:
+                payloads.append(m.group(1).strip())
+        return payloads
 
     @staticmethod
     def _extract_json_payload(log_text: str, prefix: str) -> str | None:
