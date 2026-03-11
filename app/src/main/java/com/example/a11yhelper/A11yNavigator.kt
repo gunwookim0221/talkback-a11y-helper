@@ -78,8 +78,12 @@ object A11yNavigator {
         nodeClassName: String?,
         query: TargetQuery
     ): Boolean {
-        if (!query.targetText.isNullOrBlank() && query.targetText != nodeText) {
-            return false
+        val normalizedTargetText = query.targetText?.trim()?.takeIf { it.isNotEmpty() }
+        if (normalizedTargetText != null) {
+            val normalizedNodeText = nodeText?.trim() ?: return false
+            if (!normalizedNodeText.contains(normalizedTargetText)) {
+                return false
+            }
         }
         if (!query.targetViewId.isNullOrBlank() && query.targetViewId != nodeViewId) {
             return false

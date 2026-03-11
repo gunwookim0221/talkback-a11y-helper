@@ -20,6 +20,39 @@ class A11yNavigatorTest {
         assertTrue(matched)
     }
 
+
+    @Test
+    fun matchesTarget_matchesWhenTrimmedNodeTextContainsTrimmedTargetText() {
+        val query = A11yNavigator.TargetQuery(targetText = "수면환경", targetViewId = null, targetClassName = null)
+
+        val matched = A11yNavigator.matchesTarget(
+            nodeText = "  수면환경 설정\n",
+            nodeViewId = "com.test:id/title",
+            nodeClassName = "android.widget.TextView",
+            query = query
+        )
+
+        assertTrue(matched)
+    }
+
+    @Test
+    fun matchesTarget_returnsFalseWhenViewIdDoesNotExactlyMatchEvenIfTextContains() {
+        val query = A11yNavigator.TargetQuery(
+            targetText = "확인",
+            targetViewId = "com.test:id/ok",
+            targetClassName = null
+        )
+
+        val matched = A11yNavigator.matchesTarget(
+            nodeText = "확인 버튼",
+            nodeViewId = "com.test:id/not_ok",
+            nodeClassName = "android.widget.Button",
+            query = query
+        )
+
+        assertFalse(matched)
+    }
+
     @Test
     fun matchesTarget_matchesViewId() {
         val query = A11yNavigator.TargetQuery(targetText = null, targetViewId = "com.test:id/submit", targetClassName = null)
