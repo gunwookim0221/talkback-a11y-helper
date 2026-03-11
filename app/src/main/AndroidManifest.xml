@@ -43,6 +43,8 @@
                 <action android:name="com.example.a11yhelper.NEXT" />
                 <action android:name="com.example.a11yhelper.PREV" />
                 <action android:name="com.example.a11yhelper.CLICK_FOCUSED" />
+                <action android:name="com.example.a11yhelper.SCROLL" />
+                <action android:name="com.example.a11yhelper.SET_TEXT" />
             </intent-filter>
         </receiver>
 

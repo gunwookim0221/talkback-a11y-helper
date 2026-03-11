@@ -20,6 +20,8 @@ ACTION_CLICK_TARGET = "com.example.a11yhelper.CLICK_TARGET"
 ACTION_NEXT = "com.example.a11yhelper.NEXT"
 ACTION_PREV = "com.example.a11yhelper.PREV"
 ACTION_CLICK_FOCUSED = "com.example.a11yhelper.CLICK_FOCUSED"
+ACTION_SCROLL = "com.example.a11yhelper.SCROLL"
+ACTION_SET_TEXT = "com.example.a11yhelper.SET_TEXT"
 LOG_TAG = "A11Y_HELPER"
 
 
@@ -207,6 +209,39 @@ class A11yAdbClient:
         print(f"[CLICK_FOCUSED] success={bool(result.get('success'))} payload={result}")
         return result
 
+    def scroll_next(self) -> dict[str, Any]:
+        return self._scroll_action(forward=True)
+
+    def scroll_prev(self) -> dict[str, Any]:
+        return self._scroll_action(forward=False)
+
+    def input_text(self, text: str) -> dict[str, Any]:
+        print("[DEBUG] 1. 로그 초기화(logcat -c) 수행...")
+        self.clear_logcat()
+        self._broadcast(ACTION_SET_TEXT, ["--es", "text", text])
+        _, payload = self._read_log_result(("SET_TEXT_RESULT",))
+        result = self._parse_json_payload(payload, "SET_TEXT_RESULT")
+        print(f"[SET_TEXT] success={bool(result.get('success'))} payload={result}")
+        return result
+
+    def get_announcements(self, wait_seconds: float = 2.0) -> list[str]:
+        start_time = time.time()
+        announcements: list[str] = []
+
+        while time.time() - start_time < wait_seconds:
+            logs = self._run(["logcat", "-d"])
+            for line in logs.splitlines():
+                if "A11Y_ANNOUNCEMENT:" not in line:
+                    continue
+                _, payload = line.split("A11Y_ANNOUNCEMENT:", 1)
+                text = payload.strip()
+                if text:
+                    announcements.append(text)
+            if announcements:
+                break
+            time.sleep(0.3)
+        return announcements
+
     def get_current_focus(self) -> dict[str, Any]:
         print("[DEBUG] 1. 로그 초기화(logcat -c) 수행...")
         self.clear_logcat()
@@ -224,6 +259,16 @@ class A11yAdbClient:
         result = self._parse_json_payload(payload, "NAV_RESULT")
         direction = result.get("direction", "UNKNOWN")
         print(f"[{direction}] NAV_RESULT success={bool(result.get('success'))} payload={result}")
+        return result
+
+    def _scroll_action(self, forward: bool) -> dict[str, Any]:
+        print("[DEBUG] 1. 로그 초기화(logcat -c) 수행...")
+        self.clear_logcat()
+        self._broadcast(ACTION_SCROLL, ["--ez", "forward", "true" if forward else "false"])
+        _, payload = self._read_log_result(("SCROLL_RESULT",))
+        result = self._parse_json_payload(payload, "SCROLL_RESULT")
+        direction = "NEXT" if forward else "PREV"
+        print(f"[SCROLL_{direction}] SCROLL_RESULT success={bool(result.get('success'))} payload={result}")
         return result
 
     @staticmethod
