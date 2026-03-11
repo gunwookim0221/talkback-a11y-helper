@@ -39,19 +39,40 @@ class A11yAdbClient:
         self._run(["logcat", "-c"])
 
     def dump_tree(self, wait_seconds: float = 2.0) -> list[dict[str, Any]]:
+        print("[DEBUG] 1. 로그 초기화(logcat -c) 수행...")
         self.clear_logcat()        
-        self._run(["shell", "am", "broadcast", "-a", ACTION_DUMP_TREE, "-p", "com.example.a11yhelper"])
+        
+        print("[DEBUG] 2. 브로드캐스트 명령 전송 중...")
+        cmd_out = self._run(["shell", "am", "broadcast", "-a", ACTION_DUMP_TREE, "-p", "com.example.a11yhelper"])
+        print(f"[DEBUG] 브로드캐스트 응답: {cmd_out}")
+        
+        print(f"[DEBUG] 3. {wait_seconds}초 대기...")
         time.sleep(wait_seconds)
 
-        logs = self._run(["logcat", "-d", "-s", LOG_TAG])
+        print("[DEBUG] 4. 로그 가져오기 (-s 태그 필터 제외)...")
+        # 윈도우 ADB 버그를 피하기 위해 전체 로그를 가져온 뒤 파이썬에서 문자열로 찾습니다.
+        logs = self._run(["logcat", "-d"])
+        
+        a11y_lines = [line for line in logs.splitlines() if "A11Y_HELPER" in line]
+        print(f"[DEBUG] 5. A11Y_HELPER 관련 로그 총 {len(a11y_lines)}줄 발견")
+        if a11y_lines:
+            print(f"[DEBUG] 가장 마지막 줄 미리보기: {a11y_lines[-1][:200]} ...")
+            
         payload = self._extract_json_payload(logs, "DUMP_TREE_RESULT")
         if payload is None:
-            raise RuntimeError("DUMP_TREE_RESULT 로그를 찾지 못했습니다.")
+            raise RuntimeError("DUMP_TREE_RESULT 로그를 찾지 못했습니다. (위 디버그 로그를 확인해 주세요)")
 
-        data = json.loads(payload)
+        print(f"[DEBUG] 6. JSON 추출 성공! (길이: {len(payload)}자)")
+        
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"JSON 파싱 에러 (로그가 길어서 안드로이드가 중간에 잘랐을 수 있습니다): {e}")
+            
         if not isinstance(data, list):
             raise RuntimeError("DUMP_TREE_RESULT payload가 JSON 배열이 아닙니다.")
         return data
+        
 
     def focus_target(
         self,
@@ -79,7 +100,8 @@ class A11yAdbClient:
         if not any([text, view_id, class_name]):
             raise ValueError("text, view_id, class_name 중 최소 하나는 필요합니다.")
 
-        cmd = ["shell", "am", "broadcast", "-a", action]
+        # 여기에도 "-p", "com.example.a11yhelper" 를 필수로 추가합니다!
+        cmd = ["shell", "am", "broadcast", "-a", action, "-p", "com.example.a11yhelper"]
         if text:
             cmd += ["--es", "targetText", text]
         if view_id:
