@@ -41,13 +41,13 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ### 1) 현재 포커스 JSON 요청
 
 ```bash
-adb shell am broadcast -a com.example.a11yhelper.GET_FOCUS --ez saveFile true
+adb shell am broadcast -a com.example.a11yhelper.GET_FOCUS -p com.example.a11yhelper --ez saveFile true
 ```
 
 ### 2) 전체 화면 트리 덤프
 
 ```bash
-adb shell am broadcast -a com.example.a11yhelper.DUMP_TREE
+adb shell am broadcast -a com.example.a11yhelper.DUMP_TREE -p com.example.a11yhelper
 ```
 
 - logcat: 짧은 결과는 `A11Y_HELPER DUMP_TREE_RESULT [...]` 1회 출력, 긴 결과는 `A11Y_HELPER DUMP_TREE_PART ...` 여러 줄 + `A11Y_HELPER DUMP_TREE_END` 출력
@@ -56,9 +56,9 @@ adb shell am broadcast -a com.example.a11yhelper.DUMP_TREE
 ### 3) 특정 타겟 접근성 포커스
 
 ```bash
-adb shell am broadcast -a com.example.a11yhelper.FOCUS_TARGET --es targetText "확인"
-adb shell am broadcast -a com.example.a11yhelper.FOCUS_TARGET --es targetViewId "com.example.app:id/btn_ok"
-adb shell am broadcast -a com.example.a11yhelper.FOCUS_TARGET --es targetText "확인" --es targetClassName "android.widget.Button"
+adb shell am broadcast -a com.example.a11yhelper.FOCUS_TARGET -p com.example.a11yhelper --es targetText "확인"
+adb shell am broadcast -a com.example.a11yhelper.FOCUS_TARGET -p com.example.a11yhelper --es targetViewId "com.example.app:id/btn_ok"
+adb shell am broadcast -a com.example.a11yhelper.FOCUS_TARGET -p com.example.a11yhelper --es targetText "확인" --es targetClassName "android.widget.Button"
 ```
 
 - logcat: `A11Y_HELPER TARGET_ACTION_RESULT {...}`
@@ -66,9 +66,9 @@ adb shell am broadcast -a com.example.a11yhelper.FOCUS_TARGET --es targetText "�
 ### 4) 특정 타겟 클릭
 
 ```bash
-adb shell am broadcast -a com.example.a11yhelper.CLICK_TARGET --es targetText "확인"
-adb shell am broadcast -a com.example.a11yhelper.CLICK_TARGET --es targetViewId "com.example.app:id/btn_ok"
-adb shell am broadcast -a com.example.a11yhelper.CLICK_TARGET --es targetText "확인" --es targetClassName "android.widget.Button"
+adb shell am broadcast -a com.example.a11yhelper.CLICK_TARGET -p com.example.a11yhelper --es targetText "확인"
+adb shell am broadcast -a com.example.a11yhelper.CLICK_TARGET -p com.example.a11yhelper --es targetViewId "com.example.app:id/btn_ok"
+adb shell am broadcast -a com.example.a11yhelper.CLICK_TARGET -p com.example.a11yhelper --es targetText "확인" --es targetClassName "android.widget.Button"
 ```
 
 - logcat: `A11Y_HELPER TARGET_ACTION_RESULT {...}`
@@ -76,8 +76,8 @@ adb shell am broadcast -a com.example.a11yhelper.CLICK_TARGET --es targetText "�
 ### 5) 접근성 포커스 다음/이전 이동
 
 ```bash
-adb shell am broadcast -a com.example.a11yhelper.NEXT
-adb shell am broadcast -a com.example.a11yhelper.PREV
+adb shell am broadcast -a com.example.a11yhelper.NEXT -p com.example.a11yhelper
+adb shell am broadcast -a com.example.a11yhelper.PREV -p com.example.a11yhelper
 ```
 
 - logcat: `A11Y_HELPER NAV_RESULT {"success":...,"direction":"NEXT|PREV"}`
@@ -85,7 +85,7 @@ adb shell am broadcast -a com.example.a11yhelper.PREV
 ### 6) 현재 접근성 포커스 클릭
 
 ```bash
-adb shell am broadcast -a com.example.a11yhelper.CLICK_FOCUSED
+adb shell am broadcast -a com.example.a11yhelper.CLICK_FOCUSED -p com.example.a11yhelper
 ```
 
 - logcat: `A11Y_HELPER TARGET_ACTION_RESULT {"success":...,"action":"CLICK_FOCUSED"}`
@@ -96,9 +96,10 @@ adb shell am broadcast -a com.example.a11yhelper.CLICK_FOCUSED
 adb logcat -d | grep A11Y_HELPER
 ```
 
-## `test_a11y.py` 타겟 액션 확인 동작
+## `test_a11y.py` 타겟/내비게이션 확인 동작
 
-- `click_target` / `focus_target` 실행 시 스크립트가 먼저 `adb logcat -c`로 로그를 초기화합니다.
-- 브로드캐스트 전송 후 최대 3초 동안 `adb logcat -d`를 반복 조회해 최신 `TARGET_ACTION_RESULT` 로그를 찾습니다.
-- 찾은 JSON에서 `success`, `reason`을 파싱해서 사람이 읽기 쉬운 형태로 출력합니다.
-- 실패(`success=false`) 시 요청에 사용한 조건(`targetText`, `targetViewId`, `targetClassName`)도 함께 출력합니다.
+- `A11yAdbClient`는 기본 패키지명(`com.example.a11yhelper`)을 멤버로 관리하고, 모든 브로드캐스트에 `-p {package_name}`을 자동으로 붙입니다.
+- 타겟 기반 제어는 `select_object(t/r/c)`(포커스)와 `touch_object(t/r/c)`(클릭)로 제공되며, 입력된 조건은 AND 조합으로 전달됩니다.
+- 내비게이션 제어는 `move_next()`, `move_prev()`, `click_focused()`를 제공합니다.
+- 상태 조회는 `get_current_focus()`로 `FOCUS_RESULT` 로그 JSON을 딕셔너리로 반환합니다.
+- 각 함수는 실행 뒤 `adb logcat -d`를 반복 조회해 `TARGET_ACTION_RESULT` 또는 `NAV_RESULT`(포커스 조회는 `FOCUS_RESULT`)를 파싱하고 성공 여부를 출력합니다.

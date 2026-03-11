@@ -14,8 +14,12 @@ from typing import Any
 
 
 ACTION_DUMP_TREE = "com.example.a11yhelper.DUMP_TREE"
+ACTION_GET_FOCUS = "com.example.a11yhelper.GET_FOCUS"
 ACTION_FOCUS_TARGET = "com.example.a11yhelper.FOCUS_TARGET"
 ACTION_CLICK_TARGET = "com.example.a11yhelper.CLICK_TARGET"
+ACTION_NEXT = "com.example.a11yhelper.NEXT"
+ACTION_PREV = "com.example.a11yhelper.PREV"
+ACTION_CLICK_FOCUSED = "com.example.a11yhelper.CLICK_FOCUSED"
 LOG_TAG = "A11Y_HELPER"
 
 
@@ -39,14 +43,58 @@ class A11yAdbClient:
     def clear_logcat(self) -> None:
         self._run(["logcat", "-c"])
 
+    def _broadcast(self, action: str, extras: list[str] | None = None) -> str:
+        cmd = ["shell", "am", "broadcast", "-a", action, "-p", self.package_name]
+        if extras:
+            cmd.extend(extras)
+        print("[DEBUG] 브로드캐스트 명령 전송 중...")
+        cmd_out = self._run(cmd)
+        print(f"[DEBUG] 브로드캐스트 응답: {cmd_out}")
+        return cmd_out
+
+    def _read_log_result(self, prefixes: tuple[str, ...], wait_seconds: float = 3.0) -> tuple[str, str]:
+        print(f"[DEBUG] 로그 대기 및 수집 (최대 {wait_seconds}초)...")
+        start_time = time.time()
+        logs = ""
+        while time.time() - start_time < wait_seconds:
+            logs = self._run(["logcat", "-d"])
+            for prefix in prefixes:
+                payload = self._extract_json_payload(logs, prefix)
+                if payload:
+                    return prefix, payload
+            time.sleep(0.5)
+        raise RuntimeError(f"결과 로그를 찾지 못했습니다. expected={prefixes}")
+
+    @staticmethod
+    def _parse_json_payload(payload: str, label: str) -> dict[str, Any]:
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"{label} JSON 파싱 실패: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise RuntimeError(f"{label} JSON 형식이 올바르지 않습니다.")
+        return parsed
+
+    @staticmethod
+    def _build_target_extras(
+        text: str | None,
+        view_id: str | None,
+        class_name: str | None,
+    ) -> list[str]:
+        extras: list[str] = []
+        if text:
+            extras += ["--es", "targetText", text]
+        if view_id:
+            extras += ["--es", "targetViewId", view_id]
+        if class_name:
+            extras += ["--es", "targetClassName", class_name]
+        return extras
+
     def dump_tree(self, wait_seconds: float = 3.0) -> list[dict[str, Any]]:
         print("[DEBUG] 1. 로그 초기화(logcat -c) 수행...")
         self.clear_logcat()        
         
-        print("[DEBUG] 2. 브로드캐스트 명령 전송 중...")
-        # 패키지명을 명시적으로 지정하여 전송
-        cmd_out = self._run(["shell", "am", "broadcast", "-a", ACTION_DUMP_TREE, "-p", self.package_name])
-        print(f"[DEBUG] 브로드캐스트 응답: {cmd_out}")
+        cmd_out = self._broadcast(ACTION_DUMP_TREE)
         
         print(f"[DEBUG] 3. 로그 대기 및 수집 (최대 {wait_seconds}초)...")
         start_time = time.time()
@@ -87,21 +135,43 @@ class A11yAdbClient:
         return data
         
 
-    def focus_target(
+    def select_object(
         self,
         text: str | None = None,
         view_id: str | None = None,
         class_name: str | None = None,
-    ) -> str:
-        return self._target_action(ACTION_FOCUS_TARGET, text, view_id, class_name)
+        t: str | None = None,
+        r: str | None = None,
+        c: str | None = None,
+    ) -> dict[str, Any]:
+        return self._target_action(
+            ACTION_FOCUS_TARGET,
+            t if t is not None else text,
+            r if r is not None else view_id,
+            c if c is not None else class_name,
+        )
 
-    def click_target(
+    def touch_object(
         self,
         text: str | None = None,
         view_id: str | None = None,
         class_name: str | None = None,
-    ) -> str:
-        return self._target_action(ACTION_CLICK_TARGET, text, view_id, class_name)
+        t: str | None = None,
+        r: str | None = None,
+        c: str | None = None,
+    ) -> dict[str, Any]:
+        return self._target_action(
+            ACTION_CLICK_TARGET,
+            t if t is not None else text,
+            r if r is not None else view_id,
+            c if c is not None else class_name,
+        )
+
+    def focus_target(self, text: str | None = None, view_id: str | None = None, class_name: str | None = None) -> dict[str, Any]:
+        return self.select_object(text=text, view_id=view_id, class_name=class_name)
+
+    def click_target(self, text: str | None = None, view_id: str | None = None, class_name: str | None = None) -> dict[str, Any]:
+        return self.touch_object(text=text, view_id=view_id, class_name=class_name)
 
     def _target_action(
         self,
@@ -109,56 +179,56 @@ class A11yAdbClient:
         text: str | None,
         view_id: str | None,
         class_name: str | None,
-    ) -> str:
+    ) -> dict[str, Any]:
         if not any([text, view_id, class_name]):
             raise ValueError("text, view_id, class_name 중 최소 하나는 필요합니다.")
 
         print("[DEBUG] 1. 로그 초기화(logcat -c) 수행...")
         self.clear_logcat()
 
-        # 여기에도 "-p", "com.example.a11yhelper" 를 필수로 추가합니다!
-        cmd = ["shell", "am", "broadcast", "-a", action, "-p", "com.example.a11yhelper"]
-        if text:
-            cmd += ["--es", "targetText", text]
-        if view_id:
-            cmd += ["--es", "targetViewId", view_id]
-        if class_name:
-            cmd += ["--es", "targetClassName", class_name]
-
-        print("[DEBUG] 2. 브로드캐스트 명령 전송 중...")
-        cmd_out = self._run(cmd)
-        print(f"[DEBUG] 브로드캐스트 응답: {cmd_out}")
-
-        wait_seconds = 3.0
-        print(f"[DEBUG] 3. 로그 대기 및 수집 (최대 {wait_seconds}초)...")
-        start_time = time.time()
-        logs = ""
-        payload: str | None = None
-
-        while time.time() - start_time < wait_seconds:
-            logs = self._run(["logcat", "-d"])
-            payload = self._extract_json_payload(logs, "TARGET_ACTION_RESULT")
-            if payload:
-                break
-            time.sleep(0.5)
-
-        if payload is None:
-            raise RuntimeError("TARGET_ACTION_RESULT 로그를 찾지 못했습니다.")
-
+        self._broadcast(action, self._build_target_extras(text, view_id, class_name))
+        _, payload = self._read_log_result(("TARGET_ACTION_RESULT",))
         result = self._parse_target_action_result(payload)
         print(self._format_target_action_result(result, text, view_id, class_name))
-        return cmd_out
+        return result
+
+    def move_next(self) -> dict[str, Any]:
+        return self._navigation_action(ACTION_NEXT)
+
+    def move_prev(self) -> dict[str, Any]:
+        return self._navigation_action(ACTION_PREV)
+
+    def click_focused(self) -> dict[str, Any]:
+        print("[DEBUG] 1. 로그 초기화(logcat -c) 수행...")
+        self.clear_logcat()
+        self._broadcast(ACTION_CLICK_FOCUSED)
+        _, payload = self._read_log_result(("TARGET_ACTION_RESULT",))
+        result = self._parse_json_payload(payload, "TARGET_ACTION_RESULT")
+        print(f"[CLICK_FOCUSED] success={bool(result.get('success'))} payload={result}")
+        return result
+
+    def get_current_focus(self) -> dict[str, Any]:
+        print("[DEBUG] 1. 로그 초기화(logcat -c) 수행...")
+        self.clear_logcat()
+        self._broadcast(ACTION_GET_FOCUS)
+        _, payload = self._read_log_result(("FOCUS_RESULT",))
+        result = self._parse_json_payload(payload, "FOCUS_RESULT")
+        print(f"[GET_FOCUS] 포커스 객체 확인 완료: {result}")
+        return result
+
+    def _navigation_action(self, action: str) -> dict[str, Any]:
+        print("[DEBUG] 1. 로그 초기화(logcat -c) 수행...")
+        self.clear_logcat()
+        self._broadcast(action)
+        _, payload = self._read_log_result(("NAV_RESULT",))
+        result = self._parse_json_payload(payload, "NAV_RESULT")
+        direction = result.get("direction", "UNKNOWN")
+        print(f"[{direction}] NAV_RESULT success={bool(result.get('success'))} payload={result}")
+        return result
 
     @staticmethod
     def _parse_target_action_result(payload: str) -> dict[str, Any]:
-        try:
-            parsed = json.loads(payload)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"TARGET_ACTION_RESULT JSON 파싱 실패: {exc}") from exc
-
-        if not isinstance(parsed, dict):
-            raise RuntimeError("TARGET_ACTION_RESULT JSON 형식이 올바르지 않습니다.")
-        return parsed
+        return A11yAdbClient._parse_json_payload(payload, "TARGET_ACTION_RESULT")
 
     @staticmethod
     def _format_target_action_result(
