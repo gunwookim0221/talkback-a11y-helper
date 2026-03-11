@@ -40,6 +40,9 @@
                 <action android:name="com.example.a11yhelper.DUMP_TREE" />
                 <action android:name="com.example.a11yhelper.FOCUS_TARGET" />
                 <action android:name="com.example.a11yhelper.CLICK_TARGET" />
+                <action android:name="com.example.a11yhelper.NEXT" />
+                <action android:name="com.example.a11yhelper.PREV" />
+                <action android:name="com.example.a11yhelper.CLICK_FOCUSED" />
             </intent-filter>
         </receiver>
 
