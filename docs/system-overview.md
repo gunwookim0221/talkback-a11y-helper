@@ -4,7 +4,7 @@
 
 ## Overview
 
-이 시스템은 Android 단말 내부의 헬퍼 앱만이 아니라, PC/CI 자동화 환경까지 포함한 **종단 간 접근성 자동화 아키텍처**입니다. 핵심 목표는 TalkBack 탐색 결과를 안정적으로 수집하고, 이를 검증 가능한 구조화 데이터(JSON)로 반환하는 것입니다.
+이 시스템은 Android 단말 내부의 헬퍼 앱과 PC/CI 자동화 환경을 연결하여, 접근성 트리 기반으로 UI를 직접 제어하고 검증 가능한 JSON 데이터를 반환합니다.
 
 ## End-to-End Flow
 
@@ -12,51 +12,26 @@
 PC Automation Script
     -> ADB broadcast
     -> Helper App
-    -> Accessibility Tree
+    -> Accessibility Tree Dump / Target Action
     -> Target App UI
 ```
 
 ## Automation Communication Flow
 
-다음은 Python 스크립트 또는 CI 잡에서 실제로 수행되는 일반 흐름입니다.
+1. Automation Script(Python/CI)가 액션을 선택합니다.
+2. `adb broadcast` 명령으로 헬퍼 앱에 제어 신호를 보냅니다.
+3. 헬퍼 앱이 접근성 트리를 순회하거나 타겟 노드를 검색합니다.
+4. 덤프 결과 또는 타겟 액션 수행 결과를 JSON/로그로 제공합니다.
 
-1. Automation Script (Python/CI)가 테스트 시나리오를 실행합니다.
-2. `adb broadcast` 명령으로 헬퍼 앱에 제어 신호를 전송합니다.
-3. 헬퍼 앱이 명령을 수신하고 접근성 트리를 탐색합니다.
-4. 현재 포커스 노드 정보를 수집/정규화합니다.
-5. 결과를 JSON 형태로 반환(또는 저장/출력)합니다.
+## Supported Broadcast Actions
 
-## Why a Helper App Is Required
-
-TalkBack 자동화에는 일반 입력 자동화만으로 해결되지 않는 제약이 있습니다.
-
-- `adb swipe`는 TalkBack navigation을 재현하지 못합니다.
-- DPAD/TAB navigation은 TalkBack 읽기 순서와 다를 수 있습니다.
-- 일부 기기에서는 TTS 로그가 암호화되어 logcat만으로 실제 발화를 확인하기 어렵습니다.
-
-따라서 헬퍼 앱은 접근성 이벤트/노드 중심의 인터페이스를 제공하여, 기기별 편차가 큰 환경에서도 비교적 일관된 자동화 신호를 제공합니다.
+- `com.example.a11yhelper.GET_FOCUS`
+- `com.example.a11yhelper.DUMP_TREE`
+- `com.example.a11yhelper.FOCUS_TARGET` (`targetText` 또는 `targetViewId`)
+- `com.example.a11yhelper.CLICK_TARGET` (`targetText` 또는 `targetViewId`)
 
 ## Stability Characteristics
 
-이 아키텍처는 다음 특성으로 인해 접근성 QA 자동화에 유리합니다.
-
-- 좌표 입력이 아닌 접근성 상태 중심 검증
-- 스크립트-디바이스 간 명령 채널 표준화(ADB broadcast)
-- 포커스/역할/상태 정보를 구조화된 JSON으로 전달
-
-## Known Limitations
-
-- Samsung 기기에서는 TTS 로그가 인코딩/암호화될 수 있습니다.
-- speech overlay가 UIAutomator XML dump에서 관찰되지 않을 수 있습니다.
-- `RecyclerView` / `WebView` / Compose UI에서 traversal 순서가 달라질 수 있습니다.
-
-## Future Improvements
-
-- 공간 기반 navigation 알고리즘 고도화
-- container-aware traversal 도입
-- locale 기반 speech prediction 확장
-- OCR 기반 검증 정확도 향상
-
----
-
-다른 문서 보기: [Architecture](architecture.md) | [Testing Pipeline](testing-pipeline.md)
+- 좌표 입력 대신 접근성 노드 자체를 기준으로 제어
+- 전체 화면 트리를 Flat JSON으로 수집해 외부 스크립트가 파싱하기 쉬움
+- 텍스트/뷰 ID 기반 직접 포커스/클릭으로 시나리오 제어 단순화
