@@ -16,6 +16,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val ACTION_CLICK_TARGET = "com.example.a11yhelper.CLICK_TARGET"
         private const val EXTRA_TARGET_TEXT = "targetText"
         private const val EXTRA_TARGET_VIEW_ID = "targetViewId"
+        private const val EXTRA_TARGET_CLASS_NAME = "targetClassName"
     }
 
     override fun onReceive(context: Context, intent: Intent?) {
@@ -65,11 +66,18 @@ class A11yCommandReceiver : BroadcastReceiver() {
 
         val query = A11yNavigator.TargetQuery(
             targetText = intent.getStringExtra(EXTRA_TARGET_TEXT),
-            targetViewId = intent.getStringExtra(EXTRA_TARGET_VIEW_ID)
+            targetViewId = intent.getStringExtra(EXTRA_TARGET_VIEW_ID),
+            targetClassName = intent.getStringExtra(EXTRA_TARGET_CLASS_NAME)
         )
 
-        if (query.targetText.isNullOrBlank() && query.targetViewId.isNullOrBlank()) {
-            Log.w(TAG, "TARGET_ACTION_RESULT {\"success\":false,\"reason\":\"targetText or targetViewId is required\"}")
+        if (query.targetText.isNullOrBlank() &&
+            query.targetViewId.isNullOrBlank() &&
+            query.targetClassName.isNullOrBlank()
+        ) {
+            Log.w(
+                TAG,
+                "TARGET_ACTION_RESULT {\"success\":false,\"reason\":\"At least one of targetText, targetViewId, targetClassName is required\"}"
+            )
             return
         }
 

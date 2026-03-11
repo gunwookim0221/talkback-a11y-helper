@@ -27,13 +27,13 @@ adb shell am broadcast -a com.example.a11yhelper.DUMP_TREE
 포커스 이동:
 
 ```bash
-adb shell am broadcast -a com.example.a11yhelper.FOCUS_TARGET --es targetText "확인"
+adb shell am broadcast -a com.example.a11yhelper.FOCUS_TARGET --es targetText "확인" --es targetClassName "android.widget.Button"
 ```
 
 클릭 실행:
 
 ```bash
-adb shell am broadcast -a com.example.a11yhelper.CLICK_TARGET --es targetViewId "com.example.app:id/btn_ok"
+adb shell am broadcast -a com.example.a11yhelper.CLICK_TARGET --es targetViewId "com.example.app:id/btn_ok" --es targetClassName "android.widget.Button"
 ```
 
 ## Step 5 – 현재 포커스 스냅샷 확인
