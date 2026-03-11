@@ -85,6 +85,7 @@ class A11yHelperService : AccessibilityService() {
             put("action", if (action == AccessibilityNodeInfo.ACTION_CLICK) "CLICK" else "FOCUS")
             put("targetText", query.targetText ?: JSONObject.NULL)
             put("targetViewId", query.targetViewId ?: JSONObject.NULL)
+            put("targetClassName", query.targetClassName ?: JSONObject.NULL)
             if (outcome.target != null) {
                 put("target", FocusSnapshot.fromNode(outcome.target).toJson())
             }

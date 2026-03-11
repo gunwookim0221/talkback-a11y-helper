@@ -14,7 +14,8 @@ object A11yNavigator {
 
     data class TargetQuery(
         val targetText: String?,
-        val targetViewId: String?
+        val targetViewId: String?,
+        val targetClassName: String?
     )
 
     fun dumpTreeFlat(root: AccessibilityNodeInfo?): JSONArray {
@@ -71,17 +72,31 @@ object A11yNavigator {
         return TargetActionOutcome(false, "Target node not found")
     }
 
-    fun matchesTarget(nodeText: String?, nodeViewId: String?, query: TargetQuery): Boolean {
-        val textMatched = !query.targetText.isNullOrBlank() && query.targetText == nodeText
-        val viewIdMatched = !query.targetViewId.isNullOrBlank() && query.targetViewId == nodeViewId
-        return textMatched || viewIdMatched
+    fun matchesTarget(
+        nodeText: String?,
+        nodeViewId: String?,
+        nodeClassName: String?,
+        query: TargetQuery
+    ): Boolean {
+        if (!query.targetText.isNullOrBlank() && query.targetText != nodeText) {
+            return false
+        }
+        if (!query.targetViewId.isNullOrBlank() && query.targetViewId != nodeViewId) {
+            return false
+        }
+        if (!query.targetClassName.isNullOrBlank() && query.targetClassName != nodeClassName) {
+            return false
+        }
+
+        return true
     }
 
     private fun matchesTarget(node: AccessibilityNodeInfo, query: TargetQuery): Boolean {
         val text = node.text?.toString()
         val description = node.contentDescription?.toString()
-        val byText = matchesTarget(text, node.viewIdResourceName, query)
-        val byDescription = matchesTarget(description, node.viewIdResourceName, query)
+        val className = node.className?.toString()
+        val byText = matchesTarget(text, node.viewIdResourceName, className, query)
+        val byDescription = matchesTarget(description, node.viewIdResourceName, className, query)
         return byText || byDescription
     }
 

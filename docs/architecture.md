@@ -23,7 +23,7 @@ AccessibilityService
 - 현재 접근성 포커스 노드를 추적합니다.
 - `TYPE_WINDOW_STATE_CHANGED` 이벤트를 감지해 `SCREEN_CHANGED` 로그를 남깁니다.
 - 루트 노드를 순회해 Flat JSON 배열로 트리를 덤프합니다.
-- 텍스트/뷰 ID로 노드를 찾아 `ACTION_ACCESSIBILITY_FOCUS` 또는 `ACTION_CLICK`을 수행합니다.
+- 텍스트/뷰 ID/클래스명 조건(입력된 값 모두 AND)을 기준으로 노드를 찾아 `ACTION_ACCESSIBILITY_FOCUS` 또는 `ACTION_CLICK`을 수행합니다.
 
 #### A11yCommandReceiver
 
@@ -35,7 +35,7 @@ AccessibilityService
 
 - 접근성 노드 트리를 DFS로 순회합니다.
 - 각 노드를 JSON으로 직렬화해 덤프 배열을 생성합니다.
-- `targetText`/`targetViewId` 매칭을 통해 대상 노드를 찾고 액션을 실행합니다.
+- `targetText`/`targetViewId`/`targetClassName` 매칭(입력된 조건 AND)을 통해 대상 노드를 찾고 액션을 실행합니다.
 
 #### A11yStateStore
 
