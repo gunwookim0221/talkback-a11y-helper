@@ -113,6 +113,9 @@ class A11yAdbClient:
         if not any([text, view_id, class_name]):
             raise ValueError("text, view_id, class_name 중 최소 하나는 필요합니다.")
 
+        print("[DEBUG] 1. 로그 초기화(logcat -c) 수행...")
+        self.clear_logcat()
+
         # 여기에도 "-p", "com.example.a11yhelper" 를 필수로 추가합니다!
         cmd = ["shell", "am", "broadcast", "-a", action, "-p", "com.example.a11yhelper"]
         if text:
@@ -122,7 +125,67 @@ class A11yAdbClient:
         if class_name:
             cmd += ["--es", "targetClassName", class_name]
 
-        return self._run(cmd)
+        print("[DEBUG] 2. 브로드캐스트 명령 전송 중...")
+        cmd_out = self._run(cmd)
+        print(f"[DEBUG] 브로드캐스트 응답: {cmd_out}")
+
+        wait_seconds = 3.0
+        print(f"[DEBUG] 3. 로그 대기 및 수집 (최대 {wait_seconds}초)...")
+        start_time = time.time()
+        logs = ""
+        payload: str | None = None
+
+        while time.time() - start_time < wait_seconds:
+            logs = self._run(["logcat", "-d"])
+            payload = self._extract_json_payload(logs, "TARGET_ACTION_RESULT")
+            if payload:
+                break
+            time.sleep(0.5)
+
+        if payload is None:
+            raise RuntimeError("TARGET_ACTION_RESULT 로그를 찾지 못했습니다.")
+
+        result = self._parse_target_action_result(payload)
+        print(self._format_target_action_result(result, text, view_id, class_name))
+        return cmd_out
+
+    @staticmethod
+    def _parse_target_action_result(payload: str) -> dict[str, Any]:
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"TARGET_ACTION_RESULT JSON 파싱 실패: {exc}") from exc
+
+        if not isinstance(parsed, dict):
+            raise RuntimeError("TARGET_ACTION_RESULT JSON 형식이 올바르지 않습니다.")
+        return parsed
+
+    @staticmethod
+    def _format_target_action_result(
+        result: dict[str, Any],
+        text: str | None,
+        view_id: str | None,
+        class_name: str | None,
+    ) -> str:
+        success = bool(result.get("success"))
+        reason = result.get("reason", "(reason 없음)")
+        action = result.get("action", "UNKNOWN")
+        lines = [
+            f"[{action}] TARGET_ACTION_RESULT",
+            f"  - success: {success}",
+            f"  - reason : {reason}",
+        ]
+
+        if not success:
+            lines.append("  - 요청 조건:")
+            if text:
+                lines.append(f"    * targetText: {text}")
+            if view_id:
+                lines.append(f"    * targetViewId: {view_id}")
+            if class_name:
+                lines.append(f"    * targetClassName: {class_name}")
+
+        return "\n".join(lines)
 
     @staticmethod
     def _extract_all_payloads(log_text: str, prefix: str) -> list[str]:
