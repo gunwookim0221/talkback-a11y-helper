@@ -300,41 +300,26 @@ def main() -> None:
     args = _parse_args()
     client = A11yAdbClient(adb_path=args.adb)
 
+    # 1. 현재 화면 트리 덤프 (동작 확인용)
     tree = client.dump_tree()
     print(f"DUMP_TREE 노드 개수: {len(tree)}")
 
-    with open("ui_tree.json", "w", encoding="utf-8") as f:
-        json.dump(tree, f, ensure_ascii=False, indent=2)
-        print("[INFO] 전체 UI 트리를 ui_tree.json 파일로 저장했습니다.")
-
-    print("AND 조건 예제 실행:")
-    print(
-        "  "
-        + " ".join(
-            [
-                shlex.quote(args.adb),
-                "shell am broadcast",
-                "-a",
-                ACTION_CLICK_TARGET if args.mode == "click" else ACTION_FOCUS_TARGET,
-                "--es targetText",
-                shlex.quote(args.text),
-                "--es targetClassName",
-                shlex.quote(args.class_name),
-                *(
-                    ["--es targetViewId", shlex.quote(args.view_id)]
-                    if args.view_id
-                    else []
-                ),
-            ]
-        )
-    )
-
-    if args.mode == "click":
-        output = client.click_target(text=args.text, view_id=args.view_id, class_name=args.class_name)
-        print(f"CLICK_TARGET broadcast 결과: {output}")
+    # 2. '라이프' 텍스트를 가진 객체 선택(포커스) 테스트
+    print("\n['라이프' 선택 테스트 시작]")
+    # select_object 함수는 t(text), r(resource_id), c(class_name) 인자를 지원합니다.
+    result = client.select_object(t="라이프")
+    
+    if result.get("success"):
+        print("성공: '라이프' 객체에 접근성 포커스가 이동되었습니다.")
     else:
-        output = client.focus_target(text=args.text, view_id=args.view_id, class_name=args.class_name)
-        print(f"FOCUS_TARGET broadcast 결과: {output}")
+        print(f"실패: {result.get('reason')}")
+
+    result1 = client.click_focused()
+    
+    if result1.get("success"):
+        print("성공: 객체에 접근성 포커스가 선택되었습니다.")
+    else:
+        print(f"실패: {result1.get('reason')}")
 
 
 if __name__ == "__main__":
