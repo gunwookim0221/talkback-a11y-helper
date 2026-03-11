@@ -2,6 +2,7 @@ package com.example.a11yhelper
 
 import android.accessibilityservice.AccessibilityService
 import android.util.Log
+import android.view.View
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
@@ -111,4 +112,39 @@ class A11yHelperService : AccessibilityService() {
         }
         return resultJson
     }
+    fun moveFocus(forward: Boolean): JSONObject {
+        val currentNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val targetNode = currentNode?.focusSearch(if (forward) View.FOCUS_FORWARD else View.FOCUS_BACKWARD)
+        val success = targetNode?.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS) == true
+
+        val resultJson = JSONObject().apply {
+            put("timestamp", System.currentTimeMillis())
+            put("success", success)
+            put("direction", if (forward) "NEXT" else "PREV")
+        }
+
+        Log.i(TAG, "NAV_RESULT $resultJson")
+        if (success && targetNode != null) {
+            A11yStateStore.update(FocusSnapshot.fromNode(targetNode))
+        }
+        return resultJson
+    }
+
+    fun clickFocusedNode(): JSONObject {
+        val focusedNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val success = focusedNode?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+
+        val resultJson = JSONObject().apply {
+            put("timestamp", System.currentTimeMillis())
+            put("success", success)
+            put("action", "CLICK_FOCUSED")
+        }
+
+        Log.i(TAG, "TARGET_ACTION_RESULT $resultJson")
+        if (success && focusedNode != null) {
+            A11yStateStore.update(FocusSnapshot.fromNode(focusedNode))
+        }
+        return resultJson
+    }
+
 }

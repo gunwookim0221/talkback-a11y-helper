@@ -14,6 +14,9 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val ACTION_DUMP_TREE = "com.example.a11yhelper.DUMP_TREE"
         private const val ACTION_FOCUS_TARGET = "com.example.a11yhelper.FOCUS_TARGET"
         private const val ACTION_CLICK_TARGET = "com.example.a11yhelper.CLICK_TARGET"
+        private const val ACTION_NEXT = "com.example.a11yhelper.NEXT"
+        private const val ACTION_PREV = "com.example.a11yhelper.PREV"
+        private const val ACTION_CLICK_FOCUSED = "com.example.a11yhelper.CLICK_FOCUSED"
         private const val EXTRA_TARGET_TEXT = "targetText"
         private const val EXTRA_TARGET_VIEW_ID = "targetViewId"
         private const val EXTRA_TARGET_CLASS_NAME = "targetClassName"
@@ -26,6 +29,9 @@ class A11yCommandReceiver : BroadcastReceiver() {
             ACTION_DUMP_TREE -> handleDumpTree()
             ACTION_FOCUS_TARGET -> handleTargetAction(intent, AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
             ACTION_CLICK_TARGET -> handleTargetAction(intent, AccessibilityNodeInfo.ACTION_CLICK)
+            ACTION_NEXT -> A11yHelperService.instance?.moveFocus(true)
+            ACTION_PREV -> A11yHelperService.instance?.moveFocus(false)
+            ACTION_CLICK_FOCUSED -> A11yHelperService.instance?.clickFocusedNode()
             else -> Unit
         }
     }

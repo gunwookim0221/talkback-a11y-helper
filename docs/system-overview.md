@@ -29,6 +29,9 @@ PC Automation Script
 - `com.example.a11yhelper.DUMP_TREE`
 - `com.example.a11yhelper.FOCUS_TARGET` (`targetText`, `targetViewId`, `targetClassName` 중 하나 이상)
 - `com.example.a11yhelper.CLICK_TARGET` (`targetText`, `targetViewId`, `targetClassName` 중 하나 이상)
+- `com.example.a11yhelper.NEXT`
+- `com.example.a11yhelper.PREV`
+- `com.example.a11yhelper.CLICK_FOCUSED`
 
 ## Stability Characteristics
 
