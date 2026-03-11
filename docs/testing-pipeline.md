@@ -17,7 +17,7 @@
 ## Step 3 – 전체 접근성 트리 덤프
 
 ```bash
-adb shell am broadcast -a com.example.a11yhelper.DUMP_TREE
+adb shell am broadcast -a com.example.a11yhelper.DUMP_TREE -p com.example.a11yhelper
 ```
 
 - 로그에서 `DUMP_TREE_PART ...` 조각을 우선 순서대로 합쳐 JSON으로 파싱합니다.
@@ -28,19 +28,19 @@ adb shell am broadcast -a com.example.a11yhelper.DUMP_TREE
 포커스 이동:
 
 ```bash
-adb shell am broadcast -a com.example.a11yhelper.FOCUS_TARGET --es targetText "확인" --es targetClassName "android.widget.Button"
+adb shell am broadcast -a com.example.a11yhelper.FOCUS_TARGET -p com.example.a11yhelper --es targetText "확인" --es targetClassName "android.widget.Button"
 ```
 
 클릭 실행:
 
 ```bash
-adb shell am broadcast -a com.example.a11yhelper.CLICK_TARGET --es targetViewId "com.example.app:id/btn_ok" --es targetClassName "android.widget.Button"
+adb shell am broadcast -a com.example.a11yhelper.CLICK_TARGET -p com.example.a11yhelper --es targetViewId "com.example.app:id/btn_ok" --es targetClassName "android.widget.Button"
 ```
 
 ## Step 5 – 현재 포커스 스냅샷 확인
 
 ```bash
-adb shell am broadcast -a com.example.a11yhelper.GET_FOCUS
+adb shell am broadcast -a com.example.a11yhelper.GET_FOCUS -p com.example.a11yhelper
 ```
 
 - 포커스 스냅샷 JSON으로 최종 상태를 검증합니다.
