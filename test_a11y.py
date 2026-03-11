@@ -31,6 +31,7 @@ class A11yAdbClient:
             text=True,
             capture_output=True,
             timeout=timeout,
+            encoding='utf-8',
         )
         return proc.stdout.strip()
 
