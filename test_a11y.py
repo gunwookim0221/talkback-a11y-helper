@@ -150,8 +150,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--text", default="확인", help="예제 액션에 사용할 targetText")
     parser.add_argument(
         "--class-name",
-        default="android.widget.Button",
-        help="예제 액션에 사용할 targetClassName",
+        default=None,  # 기본값을 None으로 설정하여 필수 조건에서 제외합니다.
+        help="필요한 경우에만 클래스명을 지정하여 필터링합니다.",
     )
     parser.add_argument("--view-id", default=None, help="예제 액션에 사용할 targetViewId")
     parser.add_argument(
