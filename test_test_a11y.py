@@ -7,6 +7,8 @@ from test_a11y import (
     ACTION_GET_FOCUS,
     ACTION_NEXT,
     ACTION_PREV,
+    ACTION_SCROLL,
+    ACTION_SET_TEXT,
     A11yAdbClient,
 )
 
@@ -118,6 +120,55 @@ class ClientBehaviorTest(unittest.TestCase):
         focus_result = client.get_current_focus()
         self.assertEqual(focus_result["text"], "확인")
         self.assertIn(ACTION_GET_FOCUS, client.calls[1])
+
+    def test_scroll_and_set_text_helpers(self):
+        client = FakeA11yClient()
+
+        client.logcat_payload = 'I/A11Y_HELPER: SCROLL_RESULT {"success":true,"action":"SCROLL_FORWARD"}'
+        next_result = client.scroll_next()
+        self.assertTrue(next_result["success"])
+        self.assertEqual(
+            client.calls[1],
+            [
+                "shell", "am", "broadcast", "-a", ACTION_SCROLL,
+                "-p", "com.example.custom", "--ez", "forward", "true",
+            ],
+        )
+
+        client.calls.clear()
+        client.logcat_payload = 'I/A11Y_HELPER: SCROLL_RESULT {"success":false,"action":"SCROLL_BACKWARD"}'
+        prev_result = client.scroll_prev()
+        self.assertFalse(prev_result["success"])
+        self.assertEqual(
+            client.calls[1],
+            [
+                "shell", "am", "broadcast", "-a", ACTION_SCROLL,
+                "-p", "com.example.custom", "--ez", "forward", "false",
+            ],
+        )
+
+        client.calls.clear()
+        client.logcat_payload = 'I/A11Y_HELPER: SET_TEXT_RESULT {"success":true,"action":"SET_TEXT","text":"안녕"}'
+        text_result = client.input_text("안녕")
+        self.assertTrue(text_result["success"])
+        self.assertEqual(
+            client.calls[1],
+            [
+                "shell", "am", "broadcast", "-a", ACTION_SET_TEXT,
+                "-p", "com.example.custom", "--es", "text", "안녕",
+            ],
+        )
+
+    def test_get_announcements(self):
+        client = FakeA11yClient()
+        client.logcat_payload = "\n".join([
+            "I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 첫번째",
+            "I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 두번째",
+        ])
+
+        result = client.get_announcements(wait_seconds=0.1)
+
+        self.assertEqual(result, ["첫번째", "두번째"])
 
 
 if __name__ == "__main__":

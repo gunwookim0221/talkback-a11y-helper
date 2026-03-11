@@ -17,9 +17,13 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val ACTION_NEXT = "com.example.a11yhelper.NEXT"
         private const val ACTION_PREV = "com.example.a11yhelper.PREV"
         private const val ACTION_CLICK_FOCUSED = "com.example.a11yhelper.CLICK_FOCUSED"
+        private const val ACTION_SCROLL = "com.example.a11yhelper.SCROLL"
+        private const val ACTION_SET_TEXT = "com.example.a11yhelper.SET_TEXT"
         private const val EXTRA_TARGET_TEXT = "targetText"
         private const val EXTRA_TARGET_VIEW_ID = "targetViewId"
         private const val EXTRA_TARGET_CLASS_NAME = "targetClassName"
+        private const val EXTRA_FORWARD = "forward"
+        private const val EXTRA_TEXT = "text"
     }
 
     override fun onReceive(context: Context, intent: Intent?) {
@@ -32,6 +36,8 @@ class A11yCommandReceiver : BroadcastReceiver() {
             ACTION_NEXT -> A11yHelperService.instance?.moveFocus(true)
             ACTION_PREV -> A11yHelperService.instance?.moveFocus(false)
             ACTION_CLICK_FOCUSED -> A11yHelperService.instance?.clickFocusedNode()
+            ACTION_SCROLL -> handleScroll(intent)
+            ACTION_SET_TEXT -> handleSetText(intent)
             else -> Unit
         }
     }
@@ -88,5 +94,32 @@ class A11yCommandReceiver : BroadcastReceiver() {
         }
 
         service.performTargetAction(query, action)
+    }
+
+    private fun handleScroll(intent: Intent) {
+        val service = A11yHelperService.instance
+        if (service == null) {
+            Log.w(TAG, "SCROLL_RESULT {\"success\":false,\"reason\":\"Service not connected\"}")
+            return
+        }
+
+        val forward = intent.getBooleanExtra(EXTRA_FORWARD, true)
+        service.performScroll(forward)
+    }
+
+    private fun handleSetText(intent: Intent) {
+        val service = A11yHelperService.instance
+        if (service == null) {
+            Log.w(TAG, "SET_TEXT_RESULT {\"success\":false,\"reason\":\"Service not connected\"}")
+            return
+        }
+
+        val text = intent.getStringExtra(EXTRA_TEXT)
+        if (text == null) {
+            Log.w(TAG, "SET_TEXT_RESULT {\"success\":false,\"reason\":\"Missing text extra\"}")
+            return
+        }
+
+        service.performSetText(text)
     }
 }
