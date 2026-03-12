@@ -29,6 +29,7 @@ LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 class A11yAdbClient:
     adb_path: str = "adb"
     package_name: str = "com.example.a11yhelper"
+    dev_serial: str | None = None
     start_monitor: bool = True
 
     def __post_init__(self) -> None:
@@ -41,10 +42,10 @@ class A11yAdbClient:
 
     def _resolve_serial(self, dev: Any) -> str | None:
         if dev is None:
-            return None
+            return self.dev_serial
         if isinstance(dev, str):
             return dev
-        return getattr(dev, "serial", None)
+        return getattr(dev, "serial", self.dev_serial)
 
     def _run(self, args: list[str], dev: Any = None, timeout: float = 10.0) -> str:
         serial = self._resolve_serial(dev)
@@ -122,15 +123,28 @@ class A11yAdbClient:
             time.sleep(0.2)
         return {"success": False, "reason": f"{prefix} 로그를 찾지 못했습니다."}
 
-    def dump_tree(self, wait_seconds: float = 5.0) -> list[dict[str, Any]]:
-        self.clear_logcat()        
-        self._broadcast(ACTION_DUMP_TREE)
+    @staticmethod
+    def _extract_all_payloads(log_text: str, prefix: str) -> list[str]:
+        pattern = re.compile(rf"{re.escape(prefix)}\s+(.*)$")
+        payloads: list[str] = []
+        for line in log_text.splitlines():
+            m = pattern.search(line)
+            if m:
+                payloads.append(m.group(1).strip())
+        return payloads
+
+    def clear_logcat(self, dev: Any = None) -> str:
+        return self._run(["logcat", "-c"], dev=dev)
+
+    def dump_tree(self, dev: Any = None, wait_seconds: float = 5.0) -> list[dict[str, Any]]:
+        self.clear_logcat(dev=dev)
+        self._broadcast(dev, ACTION_DUMP_TREE)
         
         start_time = time.time()
         logs = ""
         while time.time() - start_time < wait_seconds:
             # -v raw 옵션을 주어 타임스탬프를 제외한 순수 메시지만 가져오면 파싱이 더 정확해집니다.
-            logs = self._run(["logcat", "-v", "raw", "-d"]) 
+            logs = self._run(["logcat", "-v", "raw", "-d"], dev=dev)
             if "DUMP_TREE_END" in logs:
                 break
             time.sleep(1.0) # 기기 부하를 고려해 대기 시간을 조금 늘립니다.
@@ -144,7 +158,13 @@ class A11yAdbClient:
             raise RuntimeError("DUMP_TREE 로그를 찾지 못했습니다.")
     
         payload = "".join(payload_parts)
-        return json.loads(payload)
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"DUMP_TREE JSON 파싱 실패: {exc}") from exc
+        if not isinstance(parsed, list):
+            raise RuntimeError("DUMP_TREE JSON 형식이 올바르지 않습니다.")
+        return parsed
         
 
     def touch(
