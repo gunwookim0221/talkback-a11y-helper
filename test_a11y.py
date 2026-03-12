@@ -160,7 +160,11 @@ class A11yAdbClient:
         t: str | None = None,
         r: str | None = None,
         c: str | None = None,
+        wait_for_speech: bool = True  # 발화 대기 옵션 추가
     ) -> dict[str, Any]:
+        """객체를 찾아 포커스를 이동시킨 후, 음성 안내를 듣고 클릭합니다."""
+        
+        # 1. 타겟에 접근성 포커스 이동
         self.select_object(
             text=text,
             view_id=view_id,
@@ -169,6 +173,30 @@ class A11yAdbClient:
             r=r,
             c=c,
         )
+
+        # 2. 포커스 이동에 따른 음성 안내 캡처 및 동적 대기 (Smart Wait)
+        if wait_for_speech:
+            print("[DEBUG] TalkBack 발화 내용 수집 및 대기 중...")
+            # 포커스 후 시스템이 읽어주는 내용을 최대 1.5초간 수집
+            announcements = self.get_announcements(wait_seconds=1.5)
+            
+            if announcements:
+                # 마지막으로 캡처된 전체 안내 텍스트
+                speech_text = announcements[-1] 
+                print(f"  🔊 인식된 발화: '{speech_text}'")
+                
+                # 텍스트 길이에 비례한 대기 시간 계산 (한국어 평균 TTS 속도: 글자당 약 0.1~0.15초)
+                # 너무 길게 대기하는 것을 방지하기 위해 최소 0.5초, 최대 4.0초로 제한
+                dynamic_delay = len(speech_text) * 0.12 
+                wait_time = max(0.5, min(dynamic_delay, 4.0))
+                
+                print(f"  ⏱️ 글자 수({len(speech_text)}자)에 따라 {wait_time:.1f}초 대기...")
+                time.sleep(wait_time)
+            else:
+                # 캡처된 안내가 없더라도 화면 전환 여유 시간으로 0.5초 대기
+                time.sleep(0.5)
+
+        # 3. 캡처 및 대기가 끝나면 더블 탭(클릭) 액션 수행
         return self.click_focused()
 
     def focus_target(self, text: str | None = None, view_id: str | None = None, class_name: str | None = None) -> dict[str, Any]:
