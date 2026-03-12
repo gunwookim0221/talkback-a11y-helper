@@ -366,6 +366,27 @@ def main() -> None:
     else:
         print(f"실패: {result1.get('reason')}")
 
+def test_feedback():
+    client = A11yAdbClient()
+    
+    # 1. '라이프' 탭 클릭 시도
+    print("['라이프' 탭 클릭]")
+    client.touch_object(t="라이프")
+    
+    # 2. 클릭 직후 약 2초간 발생하는 음성 안내 수집
+    # TalkBack이 "라이프 탭이 선택되었습니다" 또는 "라이프 화면입니다" 등을 읽어줍니다.
+    announcements = client.get_announcements(wait_seconds=2.0)
+    
+    print(f"\n[실시간 음성 피드백 결과]")
+    if announcements:
+        for msg in announcements:
+            print(f"- TalkBack 안내 내용: {msg}")
+    else:
+        print("- 캡처된 음성 안내가 없습니다. (TalkBack 활성화 여부 확인 필요)")
 
 if __name__ == "__main__":
-    main()
+    test_feedback()
+
+
+# if __name__ == "__main__":
+#     main()
