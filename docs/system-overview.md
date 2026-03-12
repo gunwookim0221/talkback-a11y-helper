@@ -27,8 +27,9 @@ PC Automation Script
 
 - `com.example.a11yhelper.GET_FOCUS`
 - `com.example.a11yhelper.DUMP_TREE`
-- `com.example.a11yhelper.FOCUS_TARGET` (`targetText`, `targetViewId`, `targetClassName` 중 하나 이상)
-- `com.example.a11yhelper.CLICK_TARGET` (`targetText`, `targetViewId`, `targetClassName` 중 하나 이상)
+- `com.example.a11yhelper.FOCUS_TARGET` (`targetName`, `targetType`, `targetIndex`)
+- `com.example.a11yhelper.CLICK_TARGET` (`targetName`, `targetType`, `targetIndex`, `isLongClick`)
+- `com.example.a11yhelper.CHECK_TARGET` (`targetName`, `targetType`, `targetIndex`)
 - `com.example.a11yhelper.NEXT`
 - `com.example.a11yhelper.PREV`
 - `com.example.a11yhelper.CLICK_FOCUSED`
@@ -37,4 +38,4 @@ PC Automation Script
 
 - 좌표 입력 대신 접근성 노드 자체를 기준으로 제어
 - 전체 화면 트리를 Flat JSON으로 수집해 외부 스크립트가 파싱하기 쉬움
-- 텍스트/뷰 ID/클래스명 조합(입력된 조건 AND) 기반 직접 포커스/클릭으로 정밀 제어
+- `targetName`/`targetType`/`targetIndex` 기반 직접 포커스/클릭/존재확인으로 정밀 제어

@@ -24,21 +24,21 @@ AccessibilityService
 - `TYPE_ANNOUNCEMENT` 이벤트를 감지해 `A11Y_ANNOUNCEMENT` 로그를 남깁니다.
 - `TYPE_WINDOW_STATE_CHANGED` 이벤트를 감지해 `SCREEN_CHANGED` 로그를 남깁니다.
 - 루트 노드를 순회해 Flat JSON 배열로 트리를 덤프합니다.
-- 텍스트/뷰 ID/클래스명 조건(입력된 값 모두 AND)을 기준으로 노드를 찾아 `ACTION_ACCESSIBILITY_FOCUS` 또는 `ACTION_CLICK`을 수행합니다.
+- `targetName`/`targetType`/`targetIndex` 기준으로 DFS 매칭 순번을 계산해 `ACTION_ACCESSIBILITY_FOCUS`/`ACTION_CLICK`/`ACTION_LONG_CLICK`을 수행합니다.
 - 현재 포커스 노드에서 부모 방향으로 올라가며 `isScrollable=true` 노드를 찾아 스크롤 액션(`ACTION_SCROLL_FORWARD/BACKWARD`)을 수행합니다.
 - 현재 포커스 노드에 `ACTION_SET_TEXT`를 수행해 텍스트를 주입합니다.
 
 #### A11yCommandReceiver
 
 - ADB에서 전달된 `am broadcast` 명령을 수신합니다.
-- 수신 액션(`GET_FOCUS`, `DUMP_TREE`, `FOCUS_TARGET`, `CLICK_TARGET`, `NEXT`, `PREV`, `CLICK_FOCUSED`, `SCROLL`, `SET_TEXT`)을 서비스 로직으로 전달합니다.
+- 수신 액션(`GET_FOCUS`, `DUMP_TREE`, `FOCUS_TARGET`, `CLICK_TARGET`, `CHECK_TARGET`, `NEXT`, `PREV`, `CLICK_FOCUSED`, `SCROLL`, `SET_TEXT`)을 서비스 로직으로 전달합니다.
 - 실행 결과를 로그에 노출합니다.
 
 #### A11yNavigator
 
 - 접근성 노드 트리를 DFS로 순회합니다.
 - 각 노드를 JSON으로 직렬화해 덤프 배열을 생성합니다.
-- `targetText`/`targetViewId`/`targetClassName` 매칭(입력된 조건 AND)을 통해 대상 노드를 찾고 액션을 실행합니다.
+- `targetName`/`targetType`/`targetIndex` 기반으로 DFS 매칭 순번을 계산해 대상 노드를 찾고 액션(클릭/롱클릭/포커스)을 실행합니다.
 
 #### A11yStateStore
 

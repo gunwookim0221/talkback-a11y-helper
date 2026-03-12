@@ -25,7 +25,7 @@ def test_get_announcements_strips_and_deduplicates(monkeypatch):
         ]
     )
 
-    monkeypatch.setattr(client, "_run", lambda args: logs)
+    monkeypatch.setattr(client, "_run", lambda args, dev=None: logs)
 
     clock = FakeClock()
     monkeypatch.setattr("test_a11y.time.monotonic", clock.monotonic)
@@ -43,7 +43,7 @@ def test_get_announcements_polls_until_wait_seconds(monkeypatch):
     ]
     call_count = {"value": 0}
 
-    def fake_run(args):
+    def fake_run(args, dev=None):
         assert args == ["logcat", "-v", "time", "-d"]
         idx = min(call_count["value"], len(responses) - 1)
         call_count["value"] += 1
@@ -80,7 +80,7 @@ def test_get_announcements_only_reads_new_logs(monkeypatch):
     ]
     call_count = {"value": 0}
 
-    def fake_run(args):
+    def fake_run(args, dev=None):
         assert args == ["logcat", "-v", "time", "-d"]
         idx = min(call_count["value"], len(responses) - 1)
         call_count["value"] += 1
