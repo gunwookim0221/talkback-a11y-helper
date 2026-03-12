@@ -125,10 +125,10 @@ adb shell am broadcast -a com.example.a11yhelper.SET_TEXT -p com.example.a11yhel
 - `A11yAdbClient`는 백그라운드 daemon 스레드에서 `adb logcat -v raw -s A11Y_HELPER`를 실시간 감시하고, `SCREEN_CHANGED` 로그를 감지하면 `needs_update=True`로 표시합니다.
 - 클라이언트 초기 실행 시 `needs_update=True`로 시작하며, `select_object()`/`touch_object()` 실행 전 `needs_update=True`이면 `dump_tree()`를 자동 수행해 최신 UI 트리를 반영합니다.
 - `dump_tree()`가 성공하면 `needs_update=False`로 초기화되며, 클라이언트 종료 시 `close()`로 logcat 프로세스와 감시 스레드를 안전하게 정리합니다.
-- 타겟 기반 제어는 `select_object(t/r/c)`로 먼저 포커스를 이동한 뒤 `touch_object(t/r/c)`가 `click_focused()`를 호출해 클릭을 수행하며, 입력된 조건은 AND 조합으로 전달됩니다.
+- 타겟 기반 제어는 `select_object(t/r/c)`로 먼저 포커스를 이동한 뒤 `touch_object(t/r/c)`가 발화 로그를 짧게 수집해 동적 대기(Smart Wait) 후 `click_focused()`를 호출해 클릭을 수행하며, 입력된 조건은 AND 조합으로 전달됩니다.
 - 내비게이션 제어는 `move_next()`, `move_prev()`, `click_focused()`를 제공합니다.
 - 스크롤/입력 제어는 `scroll_next()`, `scroll_prev()`, `input_text(text)`를 제공합니다.
-- 음성 안내 로그 수집은 `get_announcements(wait_seconds=2.0)`를 제공하며, 접두사 뒤 메시지를 `strip()` 처리하고 중복을 제거해 반환합니다.
-- `get_announcements()`는 `wait_seconds` 동안 반복 조회하며, 시간이 남아 있으면 짧게 대기 후 다시 로그를 확인합니다.
+- 음성 안내 로그 수집은 `get_announcements(wait_seconds=2.0)`를 제공하며, `adb logcat -v time -d` 기준으로 마지막으로 처리한 로그 마커 이후의 라인만 증분 파싱합니다.
+- `get_announcements()`는 접두사 뒤 메시지를 `strip()` 처리하고 중복 제거(`seen` 집합) 후 반환하며, `wait_seconds` 동안 짧은 간격으로 반복 조회합니다.
 - 상태 조회는 `get_current_focus()`로 `FOCUS_RESULT` 로그 JSON을 딕셔너리로 반환합니다.
 - 각 함수는 실행 뒤 `adb logcat -d`를 반복 조회해 `TARGET_ACTION_RESULT` 또는 `NAV_RESULT`(포커스 조회는 `FOCUS_RESULT`)를 파싱하고 성공 여부를 출력합니다.

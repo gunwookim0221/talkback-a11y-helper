@@ -15,7 +15,7 @@ class FakeClock:
 
 
 def test_get_announcements_strips_and_deduplicates(monkeypatch):
-    client = A11yAdbClient()
+    client = A11yAdbClient(start_monitor=False)
     logs = "\n".join(
         [
             "01-01 00:00:00.000 I/A11Y_HELPER: A11Y_ANNOUNCEMENT:  첫 안내  ",
@@ -35,7 +35,7 @@ def test_get_announcements_strips_and_deduplicates(monkeypatch):
 
 
 def test_get_announcements_polls_until_wait_seconds(monkeypatch):
-    client = A11yAdbClient()
+    client = A11yAdbClient(start_monitor=False)
     responses = [
         "01-01 00:00:00.000 I/A11Y_HELPER: unrelated",
         "01-01 00:00:00.100 I/A11Y_HELPER: unrelated",
@@ -44,6 +44,7 @@ def test_get_announcements_polls_until_wait_seconds(monkeypatch):
     call_count = {"value": 0}
 
     def fake_run(args):
+        assert args == ["logcat", "-v", "time", "-d"]
         idx = min(call_count["value"], len(responses) - 1)
         call_count["value"] += 1
         return responses[idx]
@@ -58,3 +59,38 @@ def test_get_announcements_polls_until_wait_seconds(monkeypatch):
 
     assert result == ["마지막 안내"]
     assert call_count["value"] == 3
+
+
+def test_get_announcements_only_reads_new_logs(monkeypatch):
+    client = A11yAdbClient(start_monitor=False)
+    responses = [
+        "\n".join(
+            [
+                "01-01 00:00:00.100 I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 기존 안내",
+                "01-01 00:00:00.200 I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 다음 안내",
+            ]
+        ),
+        "\n".join(
+            [
+                "01-01 00:00:00.100 I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 기존 안내",
+                "01-01 00:00:00.200 I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 다음 안내",
+                "01-01 00:00:00.300 I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 새 안내",
+            ]
+        ),
+    ]
+    call_count = {"value": 0}
+
+    def fake_run(args):
+        assert args == ["logcat", "-v", "time", "-d"]
+        idx = min(call_count["value"], len(responses) - 1)
+        call_count["value"] += 1
+        return responses[idx]
+
+    monkeypatch.setattr(client, "_run", fake_run)
+
+    clock = FakeClock()
+    monkeypatch.setattr("test_a11y.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("test_a11y.time.sleep", clock.sleep)
+
+    assert client.get_announcements(wait_seconds=0.0) == ["기존 안내", "다음 안내"]
+    assert client.get_announcements(wait_seconds=0.0) == ["새 안내"]

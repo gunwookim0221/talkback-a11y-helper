@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import shlex
 import subprocess
 import threading
 import time
@@ -23,6 +22,7 @@ ACTION_CLICK_FOCUSED = "com.example.a11yhelper.CLICK_FOCUSED"
 ACTION_SCROLL = "com.example.a11yhelper.SCROLL"
 ACTION_SET_TEXT = "com.example.a11yhelper.SET_TEXT"
 LOG_TAG = "A11Y_HELPER"
+LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 
 
 @dataclass
@@ -38,6 +38,7 @@ class A11yAdbClient:
         self._monitor_proc: subprocess.Popen[str] | None = None
         self._monitor_thread: threading.Thread | None = None
         self._is_dumping_tree = False
+        self._last_log_marker: tuple[tuple[int, int, int, int, int, int], int] | None = None
 
         if self.start_monitor:
             self._monitor_thread = threading.Thread(
@@ -356,9 +357,25 @@ class A11yAdbClient:
         announcements: list[str] = []
         seen: set[str] = set()
 
+        with self._state_lock:
+            last_log_marker = self._last_log_marker
+
+        newest_log_marker = last_log_marker
+
         while True:
-            logs = self._run(["logcat", "-d"])
-            for line in logs.splitlines():
+            logs = self._run(["logcat", "-v", "time", "-d"])
+            for line_index, line in enumerate(logs.splitlines(), start=1):
+                parsed_time = self._parse_logcat_time(line)
+                if parsed_time is None:
+                    continue
+
+                marker = (parsed_time, line_index)
+                if newest_log_marker is None or marker > newest_log_marker:
+                    newest_log_marker = marker
+
+                if last_log_marker is not None and marker <= last_log_marker:
+                    continue
+
                 if "A11Y_ANNOUNCEMENT:" not in line:
                     continue
                 _, payload = line.split("A11Y_ANNOUNCEMENT:", 1)
@@ -373,7 +390,23 @@ class A11yAdbClient:
 
             time.sleep(min(0.3, wait_seconds - elapsed))
 
+        with self._state_lock:
+            self._last_log_marker = newest_log_marker
+
         return announcements
+
+    @staticmethod
+    def _parse_logcat_time(line: str) -> tuple[int, int, int, int, int, int] | None:
+        match = LOGCAT_TIME_PATTERN.match(line)
+        if not match:
+            return None
+
+        timestamp = match.group(1)
+        month_day, clock = timestamp.split(" ")
+        month, day = (int(value) for value in month_day.split("-"))
+        hour, minute, sec_millis = clock.split(":")
+        second, millis = sec_millis.split(".")
+        return (month, day, int(hour), int(minute), int(second), int(millis))
 
     def get_current_focus(self) -> dict[str, Any]:
         print("[DEBUG] 1. 로그 초기화(logcat -c) 수행...")
