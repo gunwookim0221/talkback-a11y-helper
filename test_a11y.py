@@ -122,19 +122,30 @@ class A11yAdbClient:
             time.sleep(0.2)
         return {"success": False, "reason": f"{prefix} 로그를 찾지 못했습니다."}
 
-    def dump_tree(self, dev: Any = None, wait_seconds: float = 3.0) -> list[dict[str, Any]]:
-        self._run(["logcat", "-c"], dev=dev)
-        self._broadcast(dev, ACTION_DUMP_TREE)
-        start = time.monotonic()
-        while time.monotonic() - start < wait_seconds:
-            logs = self._run(["logcat", "-d"], dev=dev)
-            payload = self._extract_json_payload(logs, "DUMP_TREE_RESULT")
-            if payload:
-                data = json.loads(payload)
-                self.needs_update = False
-                return data
-            time.sleep(0.2)
-        raise RuntimeError("DUMP_TREE 로그를 찾지 못했습니다.")
+    def dump_tree(self, wait_seconds: float = 5.0) -> list[dict[str, Any]]:
+        self.clear_logcat()        
+        self._broadcast(ACTION_DUMP_TREE)
+        
+        start_time = time.time()
+        logs = ""
+        while time.time() - start_time < wait_seconds:
+            # -v raw 옵션을 주어 타임스탬프를 제외한 순수 메시지만 가져오면 파싱이 더 정확해집니다.
+            logs = self._run(["logcat", "-v", "raw", "-d"]) 
+            if "DUMP_TREE_END" in logs:
+                break
+            time.sleep(1.0) # 기기 부하를 고려해 대기 시간을 조금 늘립니다.
+    
+        # 수집된 모든 PART 로그를 병합
+        payload_parts = self._extract_all_payloads(logs, "DUMP_TREE_PART")
+        if not payload_parts:
+            # 디버깅을 위해 로그 태그가 포함된 라인 출력
+            a11y_lines = [l for l in logs.splitlines() if "A11Y_HELPER" in l]
+            print(f"[DEBUG] 발견된 로그 요약: {a11y_lines}")
+            raise RuntimeError("DUMP_TREE 로그를 찾지 못했습니다.")
+    
+        payload = "".join(payload_parts)
+        return json.loads(payload)
+        
 
     def touch(
         self,
