@@ -2,7 +2,6 @@ import unittest
 
 from test_a11y import (
     ACTION_CLICK_FOCUSED,
-    ACTION_CLICK_TARGET,
     ACTION_FOCUS_TARGET,
     ACTION_GET_FOCUS,
     ACTION_NEXT,
@@ -83,17 +82,40 @@ class ClientBehaviorTest(unittest.TestCase):
             ],
         )
 
-    def test_touch_object_uses_click_action(self):
+    def test_touch_object_focuses_then_clicks_with_all_filters(self):
         client = FakeA11yClient()
         client.logcat_payload = (
             'I/A11Y_HELPER: TARGET_ACTION_RESULT '
-            '{"success":true,"reason":"ok","action":"CLICK"}'
+            '{"success":true,"reason":"ok","action":"FOCUS"}'
         )
 
-        result = client.touch_object(text="확인")
+        result = client.touch_object(
+            text="무시됨",
+            view_id="com.ignore:id/value",
+            class_name="android.view.View",
+            t="확인",
+            r="com.app:id/ok",
+            c="android.widget.Button",
+        )
 
         self.assertTrue(result["success"])
-        self.assertIn(ACTION_CLICK_TARGET, client.calls[1])
+        self.assertEqual(
+            client.calls[1],
+            [
+                "shell", "am", "broadcast", "-a", ACTION_FOCUS_TARGET,
+                "-p", "com.example.custom",
+                "--es", "targetText", "확인",
+                "--es", "targetViewId", "com.app:id/ok",
+                "--es", "targetClassName", "android.widget.Button",
+            ],
+        )
+        self.assertEqual(
+            client.calls[4],
+            [
+                "shell", "am", "broadcast", "-a", ACTION_CLICK_FOCUSED,
+                "-p", "com.example.custom",
+            ],
+        )
 
     def test_navigation_and_focus_helpers(self):
         client = FakeA11yClient()
