@@ -8,6 +8,7 @@ import json
 import re
 import shlex
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -28,6 +29,91 @@ LOG_TAG = "A11Y_HELPER"
 class A11yAdbClient:
     adb_path: str = "adb"
     package_name: str = "com.example.a11yhelper"
+    start_monitor: bool = True
+
+    def __post_init__(self) -> None:
+        self.needs_update = True
+        self._state_lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._monitor_proc: subprocess.Popen[str] | None = None
+        self._monitor_thread: threading.Thread | None = None
+        self._is_dumping_tree = False
+
+        if self.start_monitor:
+            self._monitor_thread = threading.Thread(
+                target=self._monitor_logcat,
+                name="a11y-logcat-monitor",
+                daemon=True,
+            )
+            self._monitor_thread.start()
+
+    def close(self) -> None:
+        self._stop_event.set()
+        with self._state_lock:
+            proc = self._monitor_proc
+
+        if proc and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+        if self._monitor_thread and self._monitor_thread.is_alive():
+            self._monitor_thread.join(timeout=1.0)
+
+    def __del__(self) -> None:
+        self.close()
+
+    def _monitor_logcat(self) -> None:
+        while not self._stop_event.is_set():
+            proc: subprocess.Popen[str] | None = None
+            try:
+                proc = subprocess.Popen(
+                    [self.adb_path, "logcat", "-v", "raw", "-s", LOG_TAG],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="ignore",
+                    bufsize=1,
+                )
+                with self._state_lock:
+                    self._monitor_proc = proc
+
+                if proc.stdout is None:
+                    break
+
+                for raw_line in proc.stdout:
+                    if self._stop_event.is_set():
+                        break
+                    if "SCREEN_CHANGED" in raw_line:
+                        with self._state_lock:
+                            self.needs_update = True
+                        print("[MONITOR] SCREEN_CHANGED 감지: 다음 액션 전 트리를 갱신합니다.")
+            except Exception as exc:  # pragma: no cover - 운영 환경 복구 루프
+                print(f"[MONITOR] logcat 감시 중 오류 발생: {exc}")
+            finally:
+                with self._state_lock:
+                    self._monitor_proc = None
+
+                if proc and proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+
+            if not self._stop_event.is_set():
+                time.sleep(0.2)
+
+    def _maybe_refresh_tree(self) -> None:
+        with self._state_lock:
+            should_refresh = self.needs_update and not self._is_dumping_tree
+
+        if should_refresh:
+            print("[DEBUG] 화면 변경 감지됨: 액션 전 dump_tree() 자동 실행")
+            self.dump_tree()
 
     def _run(self, args: list[str], timeout: float = 10.0) -> str:
         proc = subprocess.run(
@@ -92,6 +178,9 @@ class A11yAdbClient:
         return extras
 
     def dump_tree(self, wait_seconds: float = 3.0) -> list[dict[str, Any]]:
+        with self._state_lock:
+            self._is_dumping_tree = True
+
         print("[DEBUG] 1. 로그 초기화(logcat -c) 수행...")
         self.clear_logcat()        
         
@@ -132,7 +221,13 @@ class A11yAdbClient:
         except json.JSONDecodeError as e:
             # 로그가 너무 길면 adb가 자를 수 있습니다. 이 경우 에러 메시지를 상세히 띄웁니다.
             raise RuntimeError(f"JSON 파싱 실패 (로그 잘림 의심): {e}")
-            
+        finally:
+            with self._state_lock:
+                self._is_dumping_tree = False
+
+        with self._state_lock:
+            self.needs_update = False
+
         return data
         
 
@@ -145,6 +240,7 @@ class A11yAdbClient:
         r: str | None = None,
         c: str | None = None,
     ) -> dict[str, Any]:
+        self._maybe_refresh_tree()
         return self._target_action(
             ACTION_FOCUS_TARGET,
             t if t is not None else text,
@@ -163,6 +259,7 @@ class A11yAdbClient:
         wait_for_speech: bool = True  # 발화 대기 옵션 추가
     ) -> dict[str, Any]:
         """객체를 찾아 포커스를 이동시킨 후, 음성 안내를 듣고 클릭합니다."""
+        self._maybe_refresh_tree()
         
         # 1. 타겟에 접근성 포커스 이동
         self.select_object(
@@ -380,45 +477,49 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
     client = A11yAdbClient(adb_path=args.adb)
+    try:
+        # 1. 현재 화면 트리 덤프 (동작 확인용)
+        tree = client.dump_tree()
+        print(f"DUMP_TREE 노드 개수: {len(tree)}")
 
-    # 1. 현재 화면 트리 덤프 (동작 확인용)
-    tree = client.dump_tree()
-    print(f"DUMP_TREE 노드 개수: {len(tree)}")
+        # 2. '라이프' 텍스트를 가진 객체 선택(포커스) 테스트
+        print("\n['라이프' 선택 테스트 시작]")
+        # select_object 함수는 t(text), r(resource_id), c(class_name) 인자를 지원합니다.
+        result = client.select_object(t="라이프")
+        
+        if result.get("success"):
+            print("성공: '라이프' 객체에 접근성 포커스가 이동되었습니다.")
+        else:
+            print(f"실패: {result.get('reason')}")
 
-    # 2. '라이프' 텍스트를 가진 객체 선택(포커스) 테스트
-    print("\n['라이프' 선택 테스트 시작]")
-    # select_object 함수는 t(text), r(resource_id), c(class_name) 인자를 지원합니다.
-    result = client.select_object(t="라이프")
-    
-    if result.get("success"):
-        print("성공: '라이프' 객체에 접근성 포커스가 이동되었습니다.")
-    else:
-        print(f"실패: {result.get('reason')}")
-
-    result1 = client.click_focused()
-    
-    if result1.get("success"):
-        print("성공: 객체에 접근성 포커스가 선택되었습니다.")
-    else:
-        print(f"실패: {result1.get('reason')}")
+        result1 = client.click_focused()
+        
+        if result1.get("success"):
+            print("성공: 객체에 접근성 포커스가 선택되었습니다.")
+        else:
+            print(f"실패: {result1.get('reason')}")
+    finally:
+        client.close()
 
 def test_feedback():
     client = A11yAdbClient()
-    
-    # 1. '라이프' 탭 클릭 시도
-    print("['라이프' 탭 클릭]")
-    client.touch_object(t="라이프")
-    
-    # 2. 클릭 직후 약 2초간 발생하는 음성 안내 수집
-    # TalkBack이 "라이프 탭이 선택되었습니다" 또는 "라이프 화면입니다" 등을 읽어줍니다.
-    announcements = client.get_announcements(wait_seconds=2.0)
-    
-    print(f"\n[실시간 음성 피드백 결과]")
-    if announcements:
-        for msg in announcements:
-            print(f"- TalkBack 안내 내용: {msg}")
-    else:
-        print("- 캡처된 음성 안내가 없습니다. (TalkBack 활성화 여부 확인 필요)")
+    try:
+        # 1. '라이프' 탭 클릭 시도
+        print("['라이프' 탭 클릭]")
+        client.touch_object(t="라이프")
+        
+        # 2. 클릭 직후 약 2초간 발생하는 음성 안내 수집
+        # TalkBack이 "라이프 탭이 선택되었습니다" 또는 "라이프 화면입니다" 등을 읽어줍니다.
+        announcements = client.get_announcements(wait_seconds=2.0)
+        
+        print(f"\n[실시간 음성 피드백 결과]")
+        if announcements:
+            for msg in announcements:
+                print(f"- TalkBack 안내 내용: {msg}")
+        else:
+            print("- 캡처된 음성 안내가 없습니다. (TalkBack 활성화 여부 확인 필요)")
+    finally:
+        client.close()
 
 if __name__ == "__main__":
     test_feedback()

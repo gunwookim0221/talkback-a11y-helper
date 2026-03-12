@@ -122,6 +122,9 @@ adb shell am broadcast -a com.example.a11yhelper.SET_TEXT -p com.example.a11yhel
 ## `test_a11y.py` 타겟/내비게이션 확인 동작
 
 - `A11yAdbClient`는 기본 패키지명(`com.example.a11yhelper`)을 멤버로 관리하고, 모든 브로드캐스트에 `-p {package_name}`을 자동으로 붙입니다.
+- `A11yAdbClient`는 백그라운드 daemon 스레드에서 `adb logcat -v raw -s A11Y_HELPER`를 실시간 감시하고, `SCREEN_CHANGED` 로그를 감지하면 `needs_update=True`로 표시합니다.
+- 클라이언트 초기 실행 시 `needs_update=True`로 시작하며, `select_object()`/`touch_object()` 실행 전 `needs_update=True`이면 `dump_tree()`를 자동 수행해 최신 UI 트리를 반영합니다.
+- `dump_tree()`가 성공하면 `needs_update=False`로 초기화되며, 클라이언트 종료 시 `close()`로 logcat 프로세스와 감시 스레드를 안전하게 정리합니다.
 - 타겟 기반 제어는 `select_object(t/r/c)`로 먼저 포커스를 이동한 뒤 `touch_object(t/r/c)`가 `click_focused()`를 호출해 클릭을 수행하며, 입력된 조건은 AND 조합으로 전달됩니다.
 - 내비게이션 제어는 `move_next()`, `move_prev()`, `click_focused()`를 제공합니다.
 - 스크롤/입력 제어는 `scroll_next()`, `scroll_prev()`, `input_text(text)`를 제공합니다.
