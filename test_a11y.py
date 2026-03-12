@@ -225,21 +225,27 @@ class A11yAdbClient:
         return result
 
     def get_announcements(self, wait_seconds: float = 2.0) -> list[str]:
-        start_time = time.time()
+        start_time = time.monotonic()
         announcements: list[str] = []
+        seen: set[str] = set()
 
-        while time.time() - start_time < wait_seconds:
+        while True:
             logs = self._run(["logcat", "-d"])
             for line in logs.splitlines():
                 if "A11Y_ANNOUNCEMENT:" not in line:
                     continue
                 _, payload = line.split("A11Y_ANNOUNCEMENT:", 1)
-                text = payload.strip()
-                if text:
-                    announcements.append(text)
-            if announcements:
+                message = payload.strip()
+                if message and message not in seen:
+                    seen.add(message)
+                    announcements.append(message)
+
+            elapsed = time.monotonic() - start_time
+            if elapsed >= wait_seconds:
                 break
-            time.sleep(0.3)
+
+            time.sleep(min(0.3, wait_seconds - elapsed))
+
         return announcements
 
     def get_current_focus(self) -> dict[str, Any]:

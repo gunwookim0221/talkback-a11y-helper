@@ -37,9 +37,15 @@ class A11yHelperService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         val type = event.eventType
-        if (type == AccessibilityEvent.TYPE_ANNOUNCEMENT) {
-            val announcement = event.text.joinToString(separator = "") { it?.toString() ?: "" }
-            Log.i(TAG, "A11Y_ANNOUNCEMENT: $announcement")
+        if (
+            type == AccessibilityEvent.TYPE_ANNOUNCEMENT ||
+            type == AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED ||
+            type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+        ) {
+            val announcement = extractAnnouncementText(event)
+            if (announcement.isNotBlank()) {
+                Log.i(TAG, "A11Y_ANNOUNCEMENT: $announcement")
+            }
         }
 
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
@@ -65,6 +71,27 @@ class A11yHelperService : AccessibilityService() {
         }.onFailure {
             Log.e(TAG, "Failed to capture focus snapshot", it)
         }
+    }
+
+    private fun extractAnnouncementText(event: AccessibilityEvent): String {
+        val eventText = event.text
+            .mapNotNull { it?.toString()?.trim() }
+            .filter { it.isNotEmpty() }
+            .joinToString(separator = " ")
+
+        if (eventText.isNotBlank()) {
+            return eventText
+        }
+
+        val sourceNode = event.source ?: return ""
+        val sourceText = listOf(
+            sourceNode.text?.toString()?.trim().orEmpty(),
+            sourceNode.contentDescription?.toString()?.trim().orEmpty(),
+        )
+            .filter { it.isNotEmpty() }
+            .joinToString(separator = " ")
+
+        return sourceText
     }
 
     private fun resolveFocusNode(event: AccessibilityEvent): AccessibilityNodeInfo? {

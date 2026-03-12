@@ -1,0 +1,60 @@
+from __future__ import annotations
+
+from test_a11y import A11yAdbClient
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def test_get_announcements_strips_and_deduplicates(monkeypatch):
+    client = A11yAdbClient()
+    logs = "\n".join(
+        [
+            "01-01 00:00:00.000 I/A11Y_HELPER: A11Y_ANNOUNCEMENT:  첫 안내  ",
+            "01-01 00:00:00.100 I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 첫 안내",
+            "01-01 00:00:00.200 I/A11Y_HELPER: A11Y_ANNOUNCEMENT:   둘째 안내   ",
+            "01-01 00:00:00.300 I/A11Y_HELPER: A11Y_ANNOUNCEMENT:   ",
+        ]
+    )
+
+    monkeypatch.setattr(client, "_run", lambda args: logs)
+
+    clock = FakeClock()
+    monkeypatch.setattr("test_a11y.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("test_a11y.time.sleep", clock.sleep)
+
+    assert client.get_announcements(wait_seconds=0.1) == ["첫 안내", "둘째 안내"]
+
+
+def test_get_announcements_polls_until_wait_seconds(monkeypatch):
+    client = A11yAdbClient()
+    responses = [
+        "01-01 00:00:00.000 I/A11Y_HELPER: unrelated",
+        "01-01 00:00:00.100 I/A11Y_HELPER: unrelated",
+        "01-01 00:00:00.200 I/A11Y_HELPER: A11Y_ANNOUNCEMENT:  마지막 안내 ",
+    ]
+    call_count = {"value": 0}
+
+    def fake_run(args):
+        idx = min(call_count["value"], len(responses) - 1)
+        call_count["value"] += 1
+        return responses[idx]
+
+    monkeypatch.setattr(client, "_run", fake_run)
+
+    clock = FakeClock()
+    monkeypatch.setattr("test_a11y.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("test_a11y.time.sleep", clock.sleep)
+
+    result = client.get_announcements(wait_seconds=0.6)
+
+    assert result == ["마지막 안내"]
+    assert call_count["value"] == 3
