@@ -16,7 +16,6 @@ from typing import Any
 ACTION_DUMP_TREE = "com.example.a11yhelper.DUMP_TREE"
 ACTION_GET_FOCUS = "com.example.a11yhelper.GET_FOCUS"
 ACTION_FOCUS_TARGET = "com.example.a11yhelper.FOCUS_TARGET"
-ACTION_CLICK_TARGET = "com.example.a11yhelper.CLICK_TARGET"
 ACTION_NEXT = "com.example.a11yhelper.NEXT"
 ACTION_PREV = "com.example.a11yhelper.PREV"
 ACTION_CLICK_FOCUSED = "com.example.a11yhelper.CLICK_FOCUSED"
@@ -162,12 +161,15 @@ class A11yAdbClient:
         r: str | None = None,
         c: str | None = None,
     ) -> dict[str, Any]:
-        return self._target_action(
-            ACTION_CLICK_TARGET,
-            t if t is not None else text,
-            r if r is not None else view_id,
-            c if c is not None else class_name,
+        self.select_object(
+            text=text,
+            view_id=view_id,
+            class_name=class_name,
+            t=t,
+            r=r,
+            c=c,
         )
+        return self.click_focused()
 
     def focus_target(self, text: str | None = None, view_id: str | None = None, class_name: str | None = None) -> dict[str, Any]:
         return self.select_object(text=text, view_id=view_id, class_name=class_name)
