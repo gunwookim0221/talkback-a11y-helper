@@ -7,28 +7,13 @@ import org.junit.Test
 class A11yNavigatorTest {
 
     @Test
-    fun matchesTarget_matchesText() {
-        val query = A11yNavigator.TargetQuery(targetText = "확인", targetViewId = null, targetClassName = null)
-
-        val matched = A11yNavigator.matchesTarget(
-            nodeText = "확인",
-            nodeViewId = "com.test:id/ok",
-            nodeClassName = "android.widget.Button",
-            query = query
-        )
-
-        assertTrue(matched)
-    }
-
-
-    @Test
-    fun matchesTarget_matchesWhenTrimmedNodeTextContainsTrimmedTargetText() {
-        val query = A11yNavigator.TargetQuery(targetText = "수면환경", targetViewId = null, targetClassName = null)
+    fun matchesTarget_typeT_matchesTrimmedTextContains() {
+        val query = A11yNavigator.TargetQuery(targetName = "수면환경", targetType = "t", targetIndex = 0)
 
         val matched = A11yNavigator.matchesTarget(
             nodeText = "  수면환경 설정\n",
+            nodeContentDescription = null,
             nodeViewId = "com.test:id/title",
-            nodeClassName = "android.widget.TextView",
             query = query
         )
 
@@ -36,31 +21,27 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun matchesTarget_returnsFalseWhenViewIdDoesNotExactlyMatchEvenIfTextContains() {
-        val query = A11yNavigator.TargetQuery(
-            targetText = "확인",
-            targetViewId = "com.test:id/ok",
-            targetClassName = null
-        )
+    fun matchesTarget_typeB_matchesContentDescriptionContains() {
+        val query = A11yNavigator.TargetQuery(targetName = "확인", targetType = "b", targetIndex = 0)
 
         val matched = A11yNavigator.matchesTarget(
-            nodeText = "확인 버튼",
-            nodeViewId = "com.test:id/not_ok",
-            nodeClassName = "android.widget.Button",
+            nodeText = "버튼",
+            nodeContentDescription = "  확인 버튼  ",
+            nodeViewId = "com.test:id/ok",
             query = query
         )
 
-        assertFalse(matched)
+        assertTrue(matched)
     }
 
     @Test
-    fun matchesTarget_matchesViewId() {
-        val query = A11yNavigator.TargetQuery(targetText = null, targetViewId = "com.test:id/submit", targetClassName = null)
+    fun matchesTarget_typeR_matchesExactResourceId() {
+        val query = A11yNavigator.TargetQuery(targetName = "com.test:id/submit", targetType = "r", targetIndex = 0)
 
         val matched = A11yNavigator.matchesTarget(
             nodeText = "제출",
+            nodeContentDescription = "제출 버튼",
             nodeViewId = "com.test:id/submit",
-            nodeClassName = "android.widget.Button",
             query = query
         )
 
@@ -68,52 +49,30 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun matchesTarget_returnsFalseWhenNoMatch() {
-        val query = A11yNavigator.TargetQuery(targetText = "확인", targetViewId = "com.test:id/ok", targetClassName = null)
+    fun matchesTarget_typeA_matchesAnyCondition() {
+        val query = A11yNavigator.TargetQuery(targetName = "안내", targetType = "a", targetIndex = 0)
 
         val matched = A11yNavigator.matchesTarget(
-            nodeText = "취소",
-            nodeViewId = "com.test:id/cancel",
-            nodeClassName = "android.widget.Button",
-            query = query
-        )
-
-        assertFalse(matched)
-    }
-
-    @Test
-    fun matchesTarget_requiresAllProvidedConditions() {
-        val query = A11yNavigator.TargetQuery(
-            targetText = "확인",
-            targetViewId = "com.test:id/ok",
-            targetClassName = "android.widget.Button"
-        )
-
-        val matched = A11yNavigator.matchesTarget(
-            nodeText = "확인",
-            nodeViewId = "com.test:id/ok",
-            nodeClassName = "android.widget.TextView",
-            query = query
-        )
-
-        assertFalse(matched)
-    }
-
-    @Test
-    fun matchesTarget_matchesWhenAllProvidedConditionsMeet() {
-        val query = A11yNavigator.TargetQuery(
-            targetText = "확인",
-            targetViewId = "com.test:id/ok",
-            targetClassName = "android.widget.Button"
-        )
-
-        val matched = A11yNavigator.matchesTarget(
-            nodeText = "확인",
-            nodeViewId = "com.test:id/ok",
-            nodeClassName = "android.widget.Button",
+            nodeText = null,
+            nodeContentDescription = "안내 문구",
+            nodeViewId = "com.test:id/other",
             query = query
         )
 
         assertTrue(matched)
+    }
+
+    @Test
+    fun matchesTarget_returnsFalseForUnsupportedType() {
+        val query = A11yNavigator.TargetQuery(targetName = "확인", targetType = "x", targetIndex = 0)
+
+        val matched = A11yNavigator.matchesTarget(
+            nodeText = "확인",
+            nodeContentDescription = "확인 버튼",
+            nodeViewId = "com.test:id/ok",
+            query = query
+        )
+
+        assertFalse(matched)
     }
 }

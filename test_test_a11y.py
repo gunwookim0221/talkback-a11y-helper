@@ -2,45 +2,15 @@ import unittest
 from unittest.mock import patch
 
 from test_a11y import (
-    ACTION_CLICK_FOCUSED,
-    ACTION_FOCUS_TARGET,
-    ACTION_GET_FOCUS,
-    ACTION_NEXT,
-    ACTION_PREV,
-    ACTION_SCROLL,
-    ACTION_SET_TEXT,
+    ACTION_CHECK_TARGET,
+    ACTION_CLICK_TARGET,
     A11yAdbClient,
 )
 
 
-class TargetActionResultTest(unittest.TestCase):
-    def test_parse_target_action_result_success(self):
-        payload = '{"success":true,"reason":"CLICK success","action":"CLICK"}'
-        result = A11yAdbClient._parse_target_action_result(payload)
-        self.assertTrue(result["success"])
-        self.assertEqual(result["reason"], "CLICK success")
-
-    def test_parse_target_action_result_invalid_json(self):
-        with self.assertRaises(RuntimeError):
-            A11yAdbClient._parse_target_action_result('{"success":true')
-
-    def test_format_target_action_result_failure_with_conditions(self):
-        result = {
-            "success": False,
-            "reason": "No matching target node",
-            "action": "FOCUS",
-        }
-        output = A11yAdbClient._format_target_action_result(
-            result,
-            text="확인",
-            view_id="com.test:id/ok",
-            class_name="android.widget.Button",
-        )
-        self.assertIn("success: False", output)
-        self.assertIn("reason : No matching target node", output)
-        self.assertIn("targetText: 확인", output)
-        self.assertIn("targetViewId: com.test:id/ok", output)
-        self.assertIn("targetClassName: android.widget.Button", output)
+class Dev:
+    def __init__(self, serial: str):
+        self.serial = serial
 
 
 class FakeA11yClient(A11yAdbClient):
@@ -50,8 +20,8 @@ class FakeA11yClient(A11yAdbClient):
         self.logcat_payload = ""
         self.needs_update = False
 
-    def _run(self, args, timeout: float = 10.0):  # pylint: disable=unused-argument
-        self.calls.append(args)
+    def _run(self, args, dev=None, timeout: float = 10.0):  # pylint: disable=unused-argument
+        self.calls.append((args, dev))
         if args == ["logcat", "-c"]:
             return ""
         if args[:3] == ["shell", "am", "broadcast"]:
@@ -63,176 +33,84 @@ class FakeA11yClient(A11yAdbClient):
         raise AssertionError(f"unexpected args: {args}")
 
 
-class ClientBehaviorTest(unittest.TestCase):
-    def test_select_object_uses_package_and_all_filters(self):
+class TouchIsinTest(unittest.TestCase):
+    def test_touch_success_sends_new_extras_and_waits_speech(self):
         client = FakeA11yClient()
-        client.logcat_payload = (
-            'I/A11Y_HELPER: TARGET_ACTION_RESULT '
-            '{"success":true,"reason":"ok","action":"FOCUS"}'
-        )
+        dev = Dev("SER123")
+        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"reason":"ok"}'
 
-        result = client.select_object(t="확인", r="com.app:id/ok", c="android.widget.Button")
+        with patch.object(client, "_wait_for_speech_if_needed") as wait_mock:
+            ok = client.touch(dev, name="확인", wait_=1, type_="b", index_=2, long_=True)
 
-        self.assertTrue(result["success"])
-        broadcast = client.calls[1]
+        self.assertTrue(ok)
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0]
+        self.assertEqual(broadcast[1], dev)
         self.assertEqual(
-            broadcast,
+            broadcast[0],
             [
-                "shell", "am", "broadcast", "-a", ACTION_FOCUS_TARGET,
+                "shell", "am", "broadcast", "-a", ACTION_CLICK_TARGET,
                 "-p", "com.example.custom",
-                "--es", "targetText", "확인",
-                "--es", "targetViewId", "com.app:id/ok",
-                "--es", "targetClassName", "android.widget.Button",
+                "--es", "targetName", "확인",
+                "--es", "targetType", "b",
+                "--ei", "targetIndex", "2",
+                "--ez", "isLongClick", "true",
             ],
         )
+        wait_mock.assert_called_once_with(dev)
 
-    def test_touch_object_runs_focus_wait_click_flow_in_order(self):
+    def test_touch_polling_until_timeout_returns_false(self):
         client = FakeA11yClient()
-        client.logcat_payload = '\n'.join([
-            'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"reason":"ok","action":"FOCUS"}',
-            'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"reason":"ok","action":"CLICK_FOCUSED"}',
-            '01-01 00:00:00.100 I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 확인 버튼',
-        ])
+        dev = "SERIAL"
+        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":false,"reason":"not found"}'
 
-        events = []
+        clock = {"t": 0.0}
 
-        original_broadcast = client._broadcast
+        def fake_monotonic():
+            return clock["t"]
 
-        def tracking_broadcast(action, extras=None):
-            events.append(("broadcast", action))
-            return original_broadcast(action, extras)
+        def fake_sleep(sec: float):
+            clock["t"] += sec
 
-        client._broadcast = tracking_broadcast
+        with patch("test_a11y.time.monotonic", side_effect=fake_monotonic), patch("test_a11y.time.sleep", side_effect=fake_sleep):
+            ok = client.touch(dev, name="없음", wait_=1, type_="a", index_=0, long_=False)
 
-        def tracking_get_announcements(wait_seconds=2.0):
-            events.append(("wait", wait_seconds))
-            return ["확인 버튼"]
+        self.assertFalse(ok)
+        broadcast_count = len([c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]])
+        self.assertGreaterEqual(broadcast_count, 2)
 
-        client.get_announcements = tracking_get_announcements
-
-        with patch("test_a11y.time.sleep") as mock_sleep:
-            result = client.touch_object(
-                text="무시됨",
-                view_id="com.ignore:id/value",
-                class_name="android.view.View",
-                t="확인",
-                r="com.app:id/ok",
-                c="android.widget.Button",
-            )
-
-        self.assertTrue(result["success"])
-        self.assertEqual(events[0], ("broadcast", ACTION_FOCUS_TARGET))
-        self.assertEqual(events[1], ("wait", 1.5))
-        self.assertEqual(events[2], ("broadcast", ACTION_CLICK_FOCUSED))
-        mock_sleep.assert_called_once_with(0.6)
-
-    def test_navigation_and_focus_helpers(self):
+    def test_isin_uses_check_target_and_returns_true(self):
         client = FakeA11yClient()
+        dev = "SERIAL"
+        client.logcat_payload = 'I/A11Y_HELPER: CHECK_TARGET_RESULT {"success":true,"reason":"found"}'
 
-        client.logcat_payload = 'I/A11Y_HELPER: NAV_RESULT {"success":true,"direction":"NEXT"}'
-        next_result = client.move_next()
-        self.assertTrue(next_result["success"])
-        self.assertIn(ACTION_NEXT, client.calls[1])
+        ok = client.isin(dev, name="설정", wait_=1, type_="r", index_=1)
 
-        client.calls.clear()
-        client.logcat_payload = 'I/A11Y_HELPER: NAV_RESULT {"success":false,"direction":"PREV"}'
-        prev_result = client.move_prev()
-        self.assertFalse(prev_result["success"])
-        self.assertIn(ACTION_PREV, client.calls[1])
-
-        client.calls.clear()
-        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"action":"CLICK_FOCUSED"}'
-        click_focused_result = client.click_focused()
-        self.assertTrue(click_focused_result["success"])
-        self.assertIn(ACTION_CLICK_FOCUSED, client.calls[1])
-
-        client.calls.clear()
-        client.logcat_payload = 'I/A11Y_HELPER: FOCUS_RESULT {"text":"확인","className":"android.widget.Button"}'
-        focus_result = client.get_current_focus()
-        self.assertEqual(focus_result["text"], "확인")
-        self.assertIn(ACTION_GET_FOCUS, client.calls[1])
-
-    def test_scroll_and_set_text_helpers(self):
-        client = FakeA11yClient()
-
-        client.logcat_payload = 'I/A11Y_HELPER: SCROLL_RESULT {"success":true,"action":"SCROLL_FORWARD"}'
-        next_result = client.scroll_next()
-        self.assertTrue(next_result["success"])
+        self.assertTrue(ok)
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0]
         self.assertEqual(
-            client.calls[1],
+            broadcast[0],
             [
-                "shell", "am", "broadcast", "-a", ACTION_SCROLL,
-                "-p", "com.example.custom", "--ez", "forward", "true",
+                "shell", "am", "broadcast", "-a", ACTION_CHECK_TARGET,
+                "-p", "com.example.custom",
+                "--es", "targetName", "설정",
+                "--es", "targetType", "r",
+                "--ei", "targetIndex", "1",
+                "--ez", "isLongClick", "false",
             ],
         )
+
+    def test_refresh_tree_if_needed_called_in_touch_and_isin(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true}'
+        with patch.object(client, "_refresh_tree_if_needed") as refresh_mock:
+            client.touch("SER", name="확인", wait_=1)
+        refresh_mock.assert_called()
 
         client.calls.clear()
-        client.logcat_payload = 'I/A11Y_HELPER: SCROLL_RESULT {"success":false,"action":"SCROLL_BACKWARD"}'
-        prev_result = client.scroll_prev()
-        self.assertFalse(prev_result["success"])
-        self.assertEqual(
-            client.calls[1],
-            [
-                "shell", "am", "broadcast", "-a", ACTION_SCROLL,
-                "-p", "com.example.custom", "--ez", "forward", "false",
-            ],
-        )
-
-        client.calls.clear()
-        client.logcat_payload = 'I/A11Y_HELPER: SET_TEXT_RESULT {"success":true,"action":"SET_TEXT","text":"안녕"}'
-        text_result = client.input_text("안녕")
-        self.assertTrue(text_result["success"])
-        self.assertEqual(
-            client.calls[1],
-            [
-                "shell", "am", "broadcast", "-a", ACTION_SET_TEXT,
-                "-p", "com.example.custom", "--es", "text", "안녕",
-            ],
-        )
-
-    def test_get_announcements(self):
-        client = FakeA11yClient()
-        client.logcat_payload = "\n".join([
-            "01-01 00:00:00.100 I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 첫번째",
-            "01-01 00:00:00.200 I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 두번째",
-        ])
-
-        result = client.get_announcements(wait_seconds=0.1)
-
-        self.assertEqual(result, ["첫번째", "두번째"])
-
-    def test_select_object_refreshes_tree_when_needs_update(self):
-        class RefreshAwareClient(FakeA11yClient):
-            def __init__(self):
-                super().__init__()
-                self.dump_count = 0
-
-            def dump_tree(self, wait_seconds: float = 3.0):
-                self.dump_count += 1
-                self.needs_update = False
-                return []
-
-        client = RefreshAwareClient()
-        client.needs_update = True
-        client.logcat_payload = (
-            'I/A11Y_HELPER: TARGET_ACTION_RESULT '
-            '{"success":true,"reason":"ok","action":"FOCUS"}'
-        )
-
-        client.select_object(t="확인")
-
-        self.assertEqual(client.dump_count, 1)
-        self.assertFalse(client.needs_update)
-
-    def test_dump_tree_success_sets_needs_update_false(self):
-        client = FakeA11yClient()
-        client.logcat_payload = 'I/A11Y_HELPER: DUMP_TREE_RESULT [{"text":"확인"}]'
-        client.needs_update = True
-
-        result = client.dump_tree(wait_seconds=0.1)
-
-        self.assertEqual(result, [{"text": "확인"}])
-        self.assertFalse(client.needs_update)
+        client.logcat_payload = 'I/A11Y_HELPER: CHECK_TARGET_RESULT {"success":true}'
+        with patch.object(client, "_refresh_tree_if_needed") as refresh_mock:
+            client.isin("SER", name="확인", wait_=1)
+        refresh_mock.assert_called()
 
 
 if __name__ == "__main__":

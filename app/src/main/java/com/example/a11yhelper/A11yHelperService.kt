@@ -130,10 +130,16 @@ class A11yHelperService : AccessibilityService() {
             put("timestamp", System.currentTimeMillis())
             put("success", outcome.success)
             put("reason", outcome.reason)
-            put("action", if (action == AccessibilityNodeInfo.ACTION_CLICK) "CLICK" else "FOCUS")
-            put("targetText", query.targetText ?: JSONObject.NULL)
-            put("targetViewId", query.targetViewId ?: JSONObject.NULL)
-            put("targetClassName", query.targetClassName ?: JSONObject.NULL)
+            put(
+                "action", when (action) {
+                    AccessibilityNodeInfo.ACTION_CLICK -> "CLICK"
+                    AccessibilityNodeInfo.ACTION_LONG_CLICK -> "LONG_CLICK"
+                    else -> "FOCUS"
+                }
+            )
+            put("targetName", query.targetName)
+            put("targetType", query.targetType)
+            put("targetIndex", query.targetIndex)
             if (outcome.target != null) {
                 put("target", FocusSnapshot.fromNode(outcome.target).toJson())
             }
@@ -145,6 +151,23 @@ class A11yHelperService : AccessibilityService() {
         }
         return resultJson
     }
+
+    fun checkTarget(query: A11yNavigator.TargetQuery): JSONObject {
+        val outcome = A11yNavigator.findTarget(rootInActiveWindow, query)
+        val resultJson = JSONObject().apply {
+            put("timestamp", System.currentTimeMillis())
+            put("success", outcome.success)
+            put("reason", outcome.reason)
+            put("action", "CHECK_TARGET")
+            put("targetName", query.targetName)
+            put("targetType", query.targetType)
+            put("targetIndex", query.targetIndex)
+        }
+
+        Log.i(TAG, "CHECK_TARGET_RESULT $resultJson")
+        return resultJson
+    }
+
     fun moveFocus(forward: Boolean): JSONObject {
         val currentNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         val targetNode = currentNode?.focusSearch(if (forward) View.FOCUS_FORWARD else View.FOCUS_BACKWARD)
