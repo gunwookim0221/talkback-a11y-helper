@@ -44,9 +44,10 @@ class TargetActionResultTest(unittest.TestCase):
 
 class FakeA11yClient(A11yAdbClient):
     def __init__(self):
-        super().__init__(adb_path="adb", package_name="com.example.custom")
+        super().__init__(adb_path="adb", package_name="com.example.custom", start_monitor=False)
         self.calls = []
         self.logcat_payload = ""
+        self.needs_update = False
 
     def _run(self, args, timeout: float = 10.0):  # pylint: disable=unused-argument
         self.calls.append(args)
@@ -109,12 +110,12 @@ class ClientBehaviorTest(unittest.TestCase):
                 "--es", "targetClassName", "android.widget.Button",
             ],
         )
-        self.assertEqual(
-            client.calls[4],
+        self.assertIn(
             [
                 "shell", "am", "broadcast", "-a", ACTION_CLICK_FOCUSED,
                 "-p", "com.example.custom",
             ],
+            client.calls,
         )
 
     def test_navigation_and_focus_helpers(self):
@@ -191,6 +192,39 @@ class ClientBehaviorTest(unittest.TestCase):
         result = client.get_announcements(wait_seconds=0.1)
 
         self.assertEqual(result, ["첫번째", "두번째"])
+
+    def test_select_object_refreshes_tree_when_needs_update(self):
+        class RefreshAwareClient(FakeA11yClient):
+            def __init__(self):
+                super().__init__()
+                self.dump_count = 0
+
+            def dump_tree(self, wait_seconds: float = 3.0):
+                self.dump_count += 1
+                self.needs_update = False
+                return []
+
+        client = RefreshAwareClient()
+        client.needs_update = True
+        client.logcat_payload = (
+            'I/A11Y_HELPER: TARGET_ACTION_RESULT '
+            '{"success":true,"reason":"ok","action":"FOCUS"}'
+        )
+
+        client.select_object(t="확인")
+
+        self.assertEqual(client.dump_count, 1)
+        self.assertFalse(client.needs_update)
+
+    def test_dump_tree_success_sets_needs_update_false(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: DUMP_TREE_RESULT [{"text":"확인"}]'
+        client.needs_update = True
+
+        result = client.dump_tree(wait_seconds=0.1)
+
+        self.assertEqual(result, [{"text": "확인"}])
+        self.assertFalse(client.needs_update)
 
 
 if __name__ == "__main__":
