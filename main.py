@@ -6,7 +6,7 @@ def run_integration_test():
     client = A11yAdbClient()
     
     # 단말기 지정 (여러 대인 경우 시리얼 번호 입력)
-    dev_serial = "YOUR_DEVICE_SERIAL" 
+    dev_serial = "R3CX40QFDBP" 
     
     try:
         print("=== TalkBack 자동화 통합 테스트 시작 ===")
