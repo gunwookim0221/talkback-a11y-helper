@@ -113,5 +113,51 @@ class TouchIsinTest(unittest.TestCase):
         refresh_mock.assert_called()
 
 
+class ClientInterfaceCompatTest(unittest.TestCase):
+    def test_clear_logcat_is_public_and_uses_default_dev_serial(self):
+        client = A11yAdbClient(dev_serial="R3CX40QFDBP", start_monitor=False)
+        calls = []
+
+        def fake_run(args, dev=None, timeout=10.0):
+            calls.append((args, dev))
+            return ""
+
+        with patch.object(client, "_run", side_effect=fake_run):
+            client.clear_logcat()
+
+        self.assertEqual(calls, [(["logcat", "-c"], None)])
+
+    def test_run_applies_default_serial_when_dev_is_missing(self):
+        client = A11yAdbClient(adb_path="adb", dev_serial="R3CX40QFDBP", start_monitor=False)
+
+        with patch("test_a11y.subprocess.run") as run_mock:
+            run_mock.return_value.stdout = "ok"
+            result = client._run(["devices"])
+
+        self.assertEqual(result, "ok")
+        run_mock.assert_called_once()
+        cmd = run_mock.call_args.args[0]
+        self.assertEqual(cmd[:3], ["adb", "-s", "R3CX40QFDBP"])
+
+    def test_dump_tree_joins_all_part_payloads(self):
+        client = A11yAdbClient(start_monitor=False)
+        log_payload = "\n".join(
+            [
+                'A11Y_HELPER DUMP_TREE_PART [{"id":1},',
+                'A11Y_HELPER DUMP_TREE_PART {"id":2}]',
+                "A11Y_HELPER DUMP_TREE_END",
+            ]
+        )
+
+        with patch.object(client, "clear_logcat", return_value=""), patch.object(client, "_broadcast", return_value="ok"), patch.object(
+            client,
+            "_run",
+            return_value=log_payload,
+        ):
+            result = client.dump_tree(dev="R3CX40QFDBP", wait_seconds=0.1)
+
+        self.assertEqual(result, [{"id": 1}, {"id": 2}])
+
+
 if __name__ == "__main__":
     unittest.main()
