@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from test_a11y import (
     ACTION_CLICK_FOCUSED,
@@ -57,6 +58,8 @@ class FakeA11yClient(A11yAdbClient):
             return "broadcast ok"
         if args == ["logcat", "-d"]:
             return self.logcat_payload
+        if args == ["logcat", "-v", "time", "-d"]:
+            return self.logcat_payload
         raise AssertionError(f"unexpected args: {args}")
 
 
@@ -83,40 +86,45 @@ class ClientBehaviorTest(unittest.TestCase):
             ],
         )
 
-    def test_touch_object_focuses_then_clicks_with_all_filters(self):
+    def test_touch_object_runs_focus_wait_click_flow_in_order(self):
         client = FakeA11yClient()
-        client.logcat_payload = (
-            'I/A11Y_HELPER: TARGET_ACTION_RESULT '
-            '{"success":true,"reason":"ok","action":"FOCUS"}'
-        )
+        client.logcat_payload = '\n'.join([
+            'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"reason":"ok","action":"FOCUS"}',
+            'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"reason":"ok","action":"CLICK_FOCUSED"}',
+            '01-01 00:00:00.100 I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 확인 버튼',
+        ])
 
-        result = client.touch_object(
-            text="무시됨",
-            view_id="com.ignore:id/value",
-            class_name="android.view.View",
-            t="확인",
-            r="com.app:id/ok",
-            c="android.widget.Button",
-        )
+        events = []
+
+        original_broadcast = client._broadcast
+
+        def tracking_broadcast(action, extras=None):
+            events.append(("broadcast", action))
+            return original_broadcast(action, extras)
+
+        client._broadcast = tracking_broadcast
+
+        def tracking_get_announcements(wait_seconds=2.0):
+            events.append(("wait", wait_seconds))
+            return ["확인 버튼"]
+
+        client.get_announcements = tracking_get_announcements
+
+        with patch("test_a11y.time.sleep") as mock_sleep:
+            result = client.touch_object(
+                text="무시됨",
+                view_id="com.ignore:id/value",
+                class_name="android.view.View",
+                t="확인",
+                r="com.app:id/ok",
+                c="android.widget.Button",
+            )
 
         self.assertTrue(result["success"])
-        self.assertEqual(
-            client.calls[1],
-            [
-                "shell", "am", "broadcast", "-a", ACTION_FOCUS_TARGET,
-                "-p", "com.example.custom",
-                "--es", "targetText", "확인",
-                "--es", "targetViewId", "com.app:id/ok",
-                "--es", "targetClassName", "android.widget.Button",
-            ],
-        )
-        self.assertIn(
-            [
-                "shell", "am", "broadcast", "-a", ACTION_CLICK_FOCUSED,
-                "-p", "com.example.custom",
-            ],
-            client.calls,
-        )
+        self.assertEqual(events[0], ("broadcast", ACTION_FOCUS_TARGET))
+        self.assertEqual(events[1], ("wait", 1.5))
+        self.assertEqual(events[2], ("broadcast", ACTION_CLICK_FOCUSED))
+        mock_sleep.assert_called_once_with(0.6)
 
     def test_navigation_and_focus_helpers(self):
         client = FakeA11yClient()
@@ -185,8 +193,8 @@ class ClientBehaviorTest(unittest.TestCase):
     def test_get_announcements(self):
         client = FakeA11yClient()
         client.logcat_payload = "\n".join([
-            "I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 첫번째",
-            "I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 두번째",
+            "01-01 00:00:00.100 I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 첫번째",
+            "01-01 00:00:00.200 I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 두번째",
         ])
 
         result = client.get_announcements(wait_seconds=0.1)
