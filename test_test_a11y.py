@@ -99,6 +99,32 @@ class TouchIsinTest(unittest.TestCase):
             ],
         )
 
+
+    def test_actions_reset_last_announcements_first(self):
+        client = FakeA11yClient()
+        client.last_announcements = ["이전 안내"]
+        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":false,"reason":"not found"}'
+
+        clock = {"t": 0.0}
+
+        def fake_monotonic():
+            return clock["t"]
+
+        def fake_sleep(sec: float):
+            clock["t"] += sec
+
+        with patch("test_a11y.time.monotonic", side_effect=fake_monotonic), patch("test_a11y.time.sleep", side_effect=fake_sleep):
+            client.touch("SER", name="없음", wait_=0)
+
+        self.assertEqual(client.last_announcements, [])
+
+        client.last_announcements = ["이전 안내"]
+        client.logcat_payload = 'I/A11Y_HELPER: CHECK_TARGET_RESULT {"success":false,"reason":"not found"}'
+        with patch("test_a11y.time.monotonic", side_effect=fake_monotonic), patch("test_a11y.time.sleep", side_effect=fake_sleep):
+            client.isin("SER", name="없음", wait_=0)
+
+        self.assertEqual(client.last_announcements, [])
+
     def test_refresh_tree_if_needed_called_in_touch_and_isin(self):
         client = FakeA11yClient()
         client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true}'

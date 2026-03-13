@@ -23,9 +23,12 @@ def run_integration_test():
             print(f"[touch] '라이프' 클릭 결과: {success}")
             
             # 4. 음성 안내 결과 확인
-            # 이전 액션(touch) 후의 안내 메시지들 출력
-            announcements = client.get_announcements(dev=dev_serial, wait_seconds=2.0)
-            print(f"[Announcements] 수집된 음성: {announcements}")
+            # touch 내부에서 자동 수집되어 last_announcements에 저장됨
+            print(f"[Announcements:last] 최근 음성: {client.last_announcements}")
+
+            # 필요하면 logcat 버퍼 전체에서 재수집(마커 무시) 가능
+            all_announcements = client.get_announcements(dev=dev_serial, wait_seconds=2.0, only_new=False)
+            print(f"[Announcements:all-buffer] 버퍼 음성: {all_announcements}")
             
     except Exception as e:
         print(f"오류 발생: {e}")

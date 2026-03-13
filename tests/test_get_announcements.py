@@ -32,6 +32,7 @@ def test_get_announcements_strips_and_deduplicates(monkeypatch):
     monkeypatch.setattr("test_a11y.time.sleep", clock.sleep)
 
     assert client.get_announcements(wait_seconds=0.1) == ["첫 안내", "둘째 안내"]
+    assert client.last_announcements == ["첫 안내", "둘째 안내"]
 
 
 def test_get_announcements_polls_until_wait_seconds(monkeypatch):
@@ -94,3 +95,25 @@ def test_get_announcements_only_reads_new_logs(monkeypatch):
 
     assert client.get_announcements(wait_seconds=0.0) == ["기존 안내", "다음 안내"]
     assert client.get_announcements(wait_seconds=0.0) == ["새 안내"]
+
+
+def test_get_announcements_can_read_all_buffer_when_only_new_is_false(monkeypatch):
+    client = A11yAdbClient(start_monitor=False)
+    logs = "\n".join(
+        [
+            "01-01 00:00:00.100 I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 기존 안내",
+            "01-01 00:00:00.200 I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 다음 안내",
+            "01-01 00:00:00.300 I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 새 안내",
+        ]
+    )
+
+    monkeypatch.setattr(client, "_run", lambda args, dev=None: logs)
+
+    clock = FakeClock()
+    monkeypatch.setattr("test_a11y.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("test_a11y.time.sleep", clock.sleep)
+
+    assert client.get_announcements(wait_seconds=0.0) == ["기존 안내", "다음 안내", "새 안내"]
+    assert client.get_announcements(wait_seconds=0.0) == []
+    assert client.get_announcements(wait_seconds=0.0, only_new=False) == ["기존 안내", "다음 안내", "새 안내"]
+    assert client.last_announcements == ["기존 안내", "다음 안내", "새 안내"]

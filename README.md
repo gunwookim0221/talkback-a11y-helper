@@ -131,10 +131,17 @@ adb shell am broadcast -a com.example.a11yhelper.SET_TEXT -p com.example.a11yhel
 - `clear_logcat(dev=None)`
   - 외부에서 직접 호출 가능한 공개 메서드이며, 지정 단말의 logcat 버퍼를 `adb logcat -c`로 초기화합니다.
 - `touch(dev, name, wait_=5, type_='a', index_=0, long_=False)`
-  - `wait_` 동안 폴링하며 `CLICK_TARGET`을 전송하고 성공 시 Smart Wait 후 `True` 반환
-  - 실패가 계속되면 0.5초 간격 재시도 후 `False` 반환
+  - 액션 시작 시 `last_announcements`를 초기화하고, `wait_` 동안 폴링하며 `CLICK_TARGET`을 전송합니다.
+  - 성공 시 Smart Wait 단계에서 TalkBack 안내를 자동 수집하고 `client.last_announcements`에 저장한 뒤 `True`를 반환합니다.
+  - 실패가 계속되면 0.5초 간격 재시도 후 `False`를 반환합니다.
 - `isin(dev, name, wait_=5, type_='a', index_=0)`
-  - `CHECK_TARGET`으로 존재 여부만 확인하며 성공 시 즉시 `True`, 타임아웃 시 `False`
-- 공통적으로 각 루프에서 `_refresh_tree_if_needed()`를 호출해 화면 변동(팝업 등)에 대응합니다.
+  - 액션 시작 시 `last_announcements`를 초기화합니다.
+  - `CHECK_TARGET`으로 존재 여부만 확인하며 성공 시 즉시 `True`, 타임아웃 시 `False`입니다.
 - `dump_tree(dev=None, wait_seconds=5.0)`
+  - 액션 시작 시 `last_announcements`를 초기화합니다.
   - 긴 트리 로그(`DUMP_TREE_PART`)를 여러 줄로 수집한 뒤 모두 병합하여 JSON으로 파싱합니다.
+- `get_announcements(dev=None, wait_seconds=2.0, only_new=True)`
+  - `only_new=True`(기본): 내부 마커 이후의 새 `A11Y_ANNOUNCEMENT`만 수집합니다.
+  - `only_new=False`: 마커를 무시하고 현재 logcat 버퍼의 전체 안내를 수집합니다.
+  - 수집 결과는 반환값과 함께 `client.last_announcements`에도 항상 저장됩니다.
+- 공통적으로 각 루프에서 `_refresh_tree_if_needed()`를 호출해 화면 변동(팝업 등)에 대응합니다.
