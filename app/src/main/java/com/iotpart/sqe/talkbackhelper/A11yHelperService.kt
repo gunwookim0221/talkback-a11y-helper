@@ -236,6 +236,26 @@ class A11yHelperService : AccessibilityService() {
         return bestNode
     }
 
+    private fun findFirstScrollableNode(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (root == null) return null
+
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            if (node.isScrollable) {
+                return node
+            }
+
+            for (index in 0 until node.childCount) {
+                node.getChild(index)?.let { queue.add(it) }
+            }
+        }
+
+        return null
+    }
+
     private fun normalizeScrollDirection(direction: String, forward: Boolean): String {
         return when (direction.trim().lowercase()) {
             "d", "down" -> "down"
@@ -254,7 +274,13 @@ class A11yHelperService : AccessibilityService() {
             scrollNode = scrollNode.parent
         }
 
-        val fallbackUsed = scrollNode == null
+        var fallbackUsed = false
+        if (scrollNode == null) {
+            fallbackUsed = true
+            scrollNode = findFirstScrollableNode(rootInActiveWindow)
+        }
+
+        val fallbackToLargestUsed = scrollNode == null
         if (scrollNode == null) {
             scrollNode = findLargestScrollableNode(rootInActiveWindow)
         }
@@ -276,7 +302,8 @@ class A11yHelperService : AccessibilityService() {
             put("direction", normalizedDirection)
             put("hasFocusedNode", focusedNode != null)
             put("scrollableNodeFound", scrollNode != null)
-            put("fallbackToLargestScrollable", fallbackUsed)
+            put("fallbackToTreeSearchScrollable", fallbackUsed)
+            put("fallbackToLargestScrollable", fallbackToLargestUsed)
         }
 
         Log.i(TAG, "SCROLL_RESULT $resultJson")

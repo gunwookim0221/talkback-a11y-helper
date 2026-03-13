@@ -7,11 +7,11 @@ import org.junit.Test
 class A11yNavigatorTest {
 
     @Test
-    fun matchesTarget_typeT_matchesTrimmedTextContains() {
+    fun matchesTarget_typeT_matchesTrimmedTextWithExactRegexFallback() {
         val query = A11yNavigator.TargetQuery(targetName = "수면환경", targetType = "t", targetIndex = 0)
 
         val matched = A11yNavigator.matchesTarget(
-            nodeText = "  수면환경 설정\n",
+            nodeText = "  수면환경\n",
             nodeContentDescription = null,
             nodeViewId = "com.test:id/title",
             query = query
@@ -21,12 +21,12 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun matchesTarget_typeB_matchesContentDescriptionContains() {
+    fun matchesTarget_typeB_matchesContentDescriptionWithExactRegexFallback() {
         val query = A11yNavigator.TargetQuery(targetName = "확인", targetType = "b", targetIndex = 0)
 
         val matched = A11yNavigator.matchesTarget(
             nodeText = "버튼",
-            nodeContentDescription = "  확인 버튼  ",
+            nodeContentDescription = "  확인  ",
             nodeViewId = "com.test:id/ok",
             query = query
         )
@@ -152,7 +152,7 @@ class A11yNavigatorTest {
 
         val matched = A11yNavigator.matchesTarget(
             nodeText = null,
-            nodeContentDescription = "안내 문구",
+            nodeContentDescription = "안내",
             nodeViewId = "com.test:id/other",
             query = query
         )
@@ -246,6 +246,34 @@ class A11yNavigatorTest {
             nodeText = "확인",
             nodeContentDescription = null,
             nodeViewId = "com.test:id/btnXok",
+            query = query
+        )
+
+        assertFalse(matched)
+    }
+
+    @Test
+    fun matchesTarget_typeT_plainTextNoLongerContainsMatch() {
+        val query = A11yNavigator.TargetQuery(targetName = "수면환경", targetType = "t", targetIndex = 0)
+
+        val matched = A11yNavigator.matchesTarget(
+            nodeText = "수면환경 설정",
+            nodeContentDescription = null,
+            nodeViewId = "com.test:id/title",
+            query = query
+        )
+
+        assertFalse(matched)
+    }
+
+    @Test
+    fun matchesTarget_typeB_plainTextNoLongerContainsMatch() {
+        val query = A11yNavigator.TargetQuery(targetName = "확인", targetType = "b", targetIndex = 0)
+
+        val matched = A11yNavigator.matchesTarget(
+            nodeText = "버튼",
+            nodeContentDescription = "확인 버튼",
+            nodeViewId = "com.test:id/ok",
             query = query
         )
 
