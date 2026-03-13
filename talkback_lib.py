@@ -164,6 +164,21 @@ class A11yAdbClient:
                 payloads.append(m.group(1).strip())
         return payloads
 
+    @staticmethod
+    def _extract_req_payloads(log_text: str, prefix: str, req_id: str) -> list[str]:
+        pattern = re.compile(rf"{re.escape(prefix)}\s+{re.escape(req_id)}\s+(.*)$")
+        payloads: list[str] = []
+        for line in log_text.splitlines():
+            m = pattern.search(line)
+            if m:
+                payloads.append(m.group(1).strip())
+        return payloads
+
+    @staticmethod
+    def _has_req_marker(log_text: str, prefix: str, req_id: str) -> bool:
+        marker = f"{prefix} {req_id}"
+        return any(marker in line for line in log_text.splitlines())
+
     def clear_logcat(self, dev: Any = None) -> str:
         return self._run(["logcat", "-c"], dev=dev)
 
@@ -203,25 +218,28 @@ class A11yAdbClient:
     def dump_tree(self, dev: Any = None, wait_seconds: float = 5.0) -> list[dict[str, Any]]:
         self.last_announcements = []
         self.clear_logcat(dev=dev)
-        self._broadcast(dev, ACTION_DUMP_TREE)
-        
+        req_id = str(uuid.uuid4())[:8]
+        self._broadcast(dev, ACTION_DUMP_TREE, ["--es", "reqId", req_id])
+
         start_time = time.time()
         logs = ""
         while time.time() - start_time < wait_seconds:
-            # -v raw 옵션을 주어 타임스탬프를 제외한 순수 메시지만 가져오면 파싱이 더 정확해집니다.
             logs = self._run(["logcat", "-v", "raw", "-d"], dev=dev)
-            if "DUMP_TREE_END" in logs:
+            if self._has_req_marker(logs, "DUMP_TREE_END", req_id):
                 break
-            time.sleep(1.0) # 기기 부하를 고려해 대기 시간을 조금 늘립니다.
-    
-        # 수집된 모든 PART 로그를 병합
-        payload_parts = self._extract_all_payloads(logs, "DUMP_TREE_PART")
+            time.sleep(1.0)
+
+        payload_parts = self._extract_req_payloads(logs, "DUMP_TREE_PART", req_id)
         if not payload_parts:
-            # 디버깅을 위해 로그 태그가 포함된 라인 출력
+            single_result = self._extract_req_payloads(logs, "DUMP_TREE_RESULT", req_id)
+            if single_result:
+                payload_parts = [single_result[-1]]
+
+        if not payload_parts:
             a11y_lines = [l for l in logs.splitlines() if "A11Y_HELPER" in l]
             print(f"[DEBUG] 발견된 로그 요약: {a11y_lines}")
             raise RuntimeError("DUMP_TREE 로그를 찾지 못했습니다.")
-    
+
         payload = "".join(payload_parts)
         try:
             parsed = json.loads(payload)

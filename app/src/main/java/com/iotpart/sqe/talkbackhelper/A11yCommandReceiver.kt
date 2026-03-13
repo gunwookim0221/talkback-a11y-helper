@@ -40,7 +40,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         val action = intent?.action ?: return
         when (action) {
             ACTION_GET_FOCUS -> handleGetFocus(context, intent)
-            ACTION_DUMP_TREE -> handleDumpTree()
+            ACTION_DUMP_TREE -> handleDumpTree(intent)
             ACTION_FOCUS_TARGET -> handleTargetAction(intent, AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
             ACTION_CLICK_TARGET -> {
                 val actionType = if (intent.getBooleanExtra(EXTRA_IS_LONG_CLICK, false)) {
@@ -51,9 +51,9 @@ class A11yCommandReceiver : BroadcastReceiver() {
                 handleTargetAction(intent, actionType)
             }
             ACTION_CHECK_TARGET -> handleCheckTarget(intent)
-            ACTION_NEXT -> A11yHelperService.instance?.moveFocus(true, parseReqId(intent))
-            ACTION_PREV -> A11yHelperService.instance?.moveFocus(false, parseReqId(intent))
-            ACTION_CLICK_FOCUSED -> A11yHelperService.instance?.clickFocusedNode(parseReqId(intent))
+            ACTION_NEXT -> handleMoveFocus(intent, true)
+            ACTION_PREV -> handleMoveFocus(intent, false)
+            ACTION_CLICK_FOCUSED -> handleClickFocused(intent)
             ACTION_SCROLL -> handleScroll(intent)
             ACTION_SET_TEXT -> handleSetText(intent)
             else -> Unit
@@ -61,13 +61,17 @@ class A11yCommandReceiver : BroadcastReceiver() {
     }
 
     private fun handleGetFocus(context: Context, intent: Intent) {
+        val reqId = parseReqId(intent)
         A11yStateStore.ensureFallbackJson()
         val saveFile = intent.getBooleanExtra("saveFile", false)
         if (saveFile) {
             A11yStateStore.saveToExternalFile(context)
         }
 
-        val json = A11yStateStore.lastFocusJson
+        val jsonObj = runCatching { org.json.JSONObject(A11yStateStore.lastFocusJson) }
+            .getOrDefault(org.json.JSONObject())
+            .apply { put("reqId", reqId) }
+        val json = jsonObj.toString()
         Log.i(TAG, "FOCUS_RESULT $json")
 
         val reply = Intent(ACTION_FOCUS_RESULT).apply {
@@ -78,13 +82,13 @@ class A11yCommandReceiver : BroadcastReceiver() {
         context.sendBroadcast(reply)
     }
 
-    private fun handleDumpTree() {
+    private fun handleDumpTree(intent: Intent) {
         val service = A11yHelperService.instance
         if (service == null) {
             Log.w(TAG, "DUMP_TREE_RESULT [] // Service not connected")
             return
         }
-        service.dumpTree()
+        service.dumpTree(parseReqId(intent))
     }
 
     private fun handleTargetAction(intent: Intent, action: Int) {
@@ -107,6 +111,28 @@ class A11yCommandReceiver : BroadcastReceiver() {
 
         val query = parseQuery(intent) ?: return
         service.checkTarget(query, parseReqId(intent))
+    }
+
+
+
+    private fun handleMoveFocus(intent: Intent, forward: Boolean) {
+        val service = A11yHelperService.instance
+        if (service == null) {
+            Log.w(TAG, "NAV_RESULT {\"success\":false,\"reason\":\"Service not connected\"}")
+            return
+        }
+
+        service.moveFocus(forward, parseReqId(intent))
+    }
+
+    private fun handleClickFocused(intent: Intent) {
+        val service = A11yHelperService.instance
+        if (service == null) {
+            Log.w(TAG, "TARGET_ACTION_RESULT {\"success\":false,\"reason\":\"Service not connected\"}")
+            return
+        }
+
+        service.clickFocusedNode(parseReqId(intent))
     }
 
     private fun parseReqId(intent: Intent): String {

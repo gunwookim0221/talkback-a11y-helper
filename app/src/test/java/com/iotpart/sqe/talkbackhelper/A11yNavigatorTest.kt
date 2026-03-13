@@ -224,4 +224,33 @@ class A11yNavigatorTest {
         assertFalse(matched)
     }
 
+    @Test
+    fun matchesTarget_typeT_dotInPlainText_isNotTreatedAsRegex() {
+        val query = A11yNavigator.TargetQuery(targetName = "ver.1", targetType = "t", targetIndex = 0)
+
+        val matched = A11yNavigator.matchesTarget(
+            nodeText = "verx1 안내",
+            nodeContentDescription = null,
+            nodeViewId = "com.test:id/title",
+            query = query
+        )
+
+        assertFalse(matched)
+    }
+
+    @Test
+    fun matchesTarget_typeR_dotInPlainId_isExactMatchOnly() {
+        val query = A11yNavigator.TargetQuery(targetName = "com.test:id/btn.ok", targetType = "r", targetIndex = 0)
+
+        val matched = A11yNavigator.matchesTarget(
+            nodeText = "확인",
+            nodeContentDescription = null,
+            nodeViewId = "com.test:id/btnXok",
+            query = query
+        )
+
+        assertFalse(matched)
+    }
+
+
 }

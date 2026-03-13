@@ -376,20 +376,36 @@ class ClientInterfaceCompatTest(unittest.TestCase):
         client = A11yAdbClient(start_monitor=False)
         log_payload = "\n".join(
             [
-                'A11Y_HELPER DUMP_TREE_PART [{"id":1},',
-                'A11Y_HELPER DUMP_TREE_PART {"id":2}]',
-                "A11Y_HELPER DUMP_TREE_END",
+                'A11Y_HELPER DUMP_TREE_PART other [{"id":9}]',
+                'A11Y_HELPER DUMP_TREE_PART REQID801 [{"id":1},',
+                'A11Y_HELPER DUMP_TREE_PART REQID801 {"id":2}]',
+                'A11Y_HELPER DUMP_TREE_END REQID801',
             ]
         )
 
-        with patch.object(client, "clear_logcat", return_value=""), patch.object(client, "_broadcast", return_value="ok"), patch.object(
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID801-xxxx"), patch.object(client, "clear_logcat", return_value=""), patch.object(client, "_broadcast", return_value="ok") as broadcast_mock, patch.object(
             client,
             "_run",
             return_value=log_payload,
         ):
             result = client.dump_tree(dev="R3CX40QFDBP", wait_seconds=0.1)
 
+        broadcast_mock.assert_called_once_with("R3CX40QFDBP", "com.iotpart.sqe.talkbackhelper.DUMP_TREE", ["--es", "reqId", "REQID801"])
         self.assertEqual(result, [{"id": 1}, {"id": 2}])
+
+
+    def test_dump_tree_supports_single_result_with_req_id(self):
+        client = A11yAdbClient(start_monitor=False)
+        log_payload = "A11Y_HELPER DUMP_TREE_RESULT REQID802 [{\"id\":3}]\nA11Y_HELPER DUMP_TREE_END REQID802"
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID802-xxxx"), patch.object(client, "clear_logcat", return_value=""), patch.object(client, "_broadcast", return_value="ok"), patch.object(
+            client,
+            "_run",
+            return_value=log_payload,
+        ):
+            result = client.dump_tree(dev="SER", wait_seconds=0.1)
+
+        self.assertEqual(result, [{"id": 3}])
 
     def test_check_talkback_status_uses_helper_logs_when_helper_installed(self):
         client = FakeA11yClient()

@@ -121,7 +121,7 @@ object A11yNavigator {
         val targetName = query.targetName.trim()
         val targetType = query.targetType.lowercase().trim()
         val baseMatch = if (targetName.isNotBlank()) {
-            val isRegex = Regex("[\\\\.^$|?*+()\\[\\]{}]").containsMatchIn(targetName)
+            val isRegex = isRegexPattern(targetName)
             val byText = nodeText?.trim()?.let { text ->
                 if (isRegex) {
                     runCatching { Regex(targetName).containsMatchIn(text) }.getOrDefault(false)
@@ -184,8 +184,7 @@ object A11yNavigator {
     }
 
     private fun isViewIdMatched(nodeViewId: String?, target: String): Boolean {
-        val regexSpecialChars = Regex("[\\\\.^$|?*+()\\[\\]{}]")
-        val regexPattern = if (regexSpecialChars.containsMatchIn(target)) {
+        val regexPattern = if (isRegexPattern(target)) {
             target
         } else {
             "^${Regex.escape(target)}$"
@@ -196,6 +195,13 @@ object A11yNavigator {
                 ?.matches(viewId)
                 ?: false
         } ?: false
+    }
+
+    private fun isRegexPattern(target: String): Boolean {
+        return target.contains(".*") ||
+            target.contains(".+") ||
+            target.contains("^") ||
+            target.contains("$")
     }
 
     private fun nodeToJson(node: AccessibilityNodeInfo): JSONObject {
