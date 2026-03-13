@@ -72,9 +72,15 @@ class A11yAdbClient:
         return self._run(cmd, dev=dev)
 
     @staticmethod
+    def _escape_adb_string(value: str) -> str:
+        if value == "":
+            return '""'
+        return "'" + value.replace("'", "'\\''") + "'"
+
+    @staticmethod
     def _build_target_extras(name: str, type_: str, index_: int, long_: bool = False) -> list[str]:
         return [
-            "--es", "targetName", name,
+            "--es", "targetName", A11yAdbClient._escape_adb_string(name),
             "--es", "targetType", type_,
             "--ei", "targetIndex", str(index_),
             "--ez", "isLongClick", "true" if long_ else "false",
@@ -300,11 +306,11 @@ class A11yAdbClient:
     def typing(self, dev, name: str, adbTyping=False):
         try:
             if adbTyping:
-                self._run(["shell", "input", "text", name], dev=dev)
+                self._run(["shell", "input", "text", self._escape_adb_string(name)], dev=dev)
                 return None
 
             self._run(["logcat", "-c"], dev=dev)
-            self._broadcast(dev, ACTION_SET_TEXT, ["--es", "text", name])
+            self._broadcast(dev, ACTION_SET_TEXT, ["--es", "text", self._escape_adb_string(name)])
             result = self._read_log_result(dev, "SET_TEXT_RESULT")
             if bool(result.get("success")):
                 return None

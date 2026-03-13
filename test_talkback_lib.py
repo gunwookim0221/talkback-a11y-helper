@@ -45,6 +45,11 @@ class FakeA11yClient(A11yAdbClient):
 
 
 class TouchIsinTest(unittest.TestCase):
+    def test_escape_adb_string_handles_empty_space_and_single_quote(self):
+        self.assertEqual(A11yAdbClient._escape_adb_string(""), '""')
+        self.assertEqual(A11yAdbClient._escape_adb_string("수면 환경"), "'수면 환경'")
+        self.assertEqual(A11yAdbClient._escape_adb_string("O'Reilly"), "'O'\\''Reilly'")
+
     def test_touch_success_sends_new_extras_and_waits_speech(self):
         client = FakeA11yClient()
         dev = Dev("SER123")
@@ -61,7 +66,7 @@ class TouchIsinTest(unittest.TestCase):
             [
                 "shell", "am", "broadcast", "-a", ACTION_CLICK_TARGET,
                 "-p", "com.example.custom",
-                "--es", "targetName", "확인",
+                "--es", "targetName", "'확인'",
                 "--es", "targetType", "b",
                 "--ei", "targetIndex", "2",
                 "--ez", "isLongClick", "true",
@@ -103,7 +108,7 @@ class TouchIsinTest(unittest.TestCase):
             [
                 "shell", "am", "broadcast", "-a", ACTION_CHECK_TARGET,
                 "-p", "com.example.custom",
-                "--es", "targetName", "설정",
+                "--es", "targetName", "'설정'",
                 "--es", "targetType", "r",
                 "--ei", "targetIndex", "1",
                 "--ez", "isLongClick", "false",
@@ -162,7 +167,7 @@ class TouchIsinTest(unittest.TestCase):
             [
                 "shell", "am", "broadcast", "-a", ACTION_FOCUS_TARGET,
                 "-p", "com.example.custom",
-                "--es", "targetName", "다음",
+                "--es", "targetName", "'다음'",
                 "--es", "targetType", "t",
                 "--ei", "targetIndex", "3",
                 "--ez", "isLongClick", "false",
@@ -224,7 +229,7 @@ class TouchIsinTest(unittest.TestCase):
         result = client.typing("SER", "hello world", adbTyping=True)
 
         self.assertIsNone(result)
-        self.assertIn((['shell', 'input', 'text', 'hello world'], 'SER'), client.calls)
+        self.assertIn((['shell', 'input', 'text', "'hello world'"], 'SER'), client.calls)
 
     def test_typing_broadcasts_set_text_and_returns_none(self):
         client = FakeA11yClient()
@@ -239,9 +244,19 @@ class TouchIsinTest(unittest.TestCase):
             [
                 "shell", "am", "broadcast", "-a", ACTION_SET_TEXT,
                 "-p", "com.example.custom",
-                "--es", "text", "테스트",
+                "--es", "text", "'테스트'",
             ],
         )
+
+    def test_typing_escapes_single_quote_in_text(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: SET_TEXT_RESULT {"success":true}'
+
+        result = client.typing("SER", "O'Reilly", adbTyping=False)
+
+        self.assertIsNone(result)
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0]
+        self.assertEqual(broadcast[0][-1], "'O'\\''Reilly'")
 
     def test_waitforactivity_returns_true_when_activity_found(self):
         client = A11yAdbClient(start_monitor=False)
