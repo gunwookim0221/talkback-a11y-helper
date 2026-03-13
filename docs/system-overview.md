@@ -39,3 +39,4 @@ PC Automation Script
 - 좌표 입력 대신 접근성 노드 자체를 기준으로 제어
 - 전체 화면 트리를 Flat JSON으로 수집해 외부 스크립트가 파싱하기 쉬움
 - `targetName`/`targetType`/`targetIndex` 기본 매칭 + `className`/`clickable`/`focusable`/`targetText`/`targetId` AND 필터로 정밀 제어
+- `NEXT/PREV`는 클릭 가능한 부모 그룹을 우선하고, 그 자식 파편 노드는 이동 경로에서 제외
