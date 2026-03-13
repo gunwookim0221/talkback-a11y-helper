@@ -137,6 +137,39 @@ class A11yAdbClient:
     def clear_logcat(self, dev: Any = None) -> str:
         return self._run(["logcat", "-c"], dev=dev)
 
+    def check_talkback_status(self, dev: Any = None) -> bool:
+        """TalkBack 활성화 상태를 확인합니다.
+
+        1) 헬퍼 앱 설치 여부 확인
+        2) 헬퍼 앱이 있으면 최근 A11Y_ANNOUNCEMENT 로그 존재 여부로 판단
+        3) 헬퍼 앱이 없으면 enabled_accessibility_services에서 TalkBack 패키지 포함 여부로 판단
+
+        ADB 실패/단말 미연결 등 예외 상황은 모두 False를 반환합니다.
+        """
+        try:
+            package_list = self._run(["shell", "pm", "list", "packages"], dev=dev)
+        except Exception:
+            return False
+
+        helper_installed = f"package:{self.package_name}" in package_list
+
+        if helper_installed:
+            try:
+                logs = self._run(["logcat", "-v", "time", "-d"], dev=dev)
+            except Exception:
+                return False
+            return "A11Y_ANNOUNCEMENT:" in logs
+
+        try:
+            enabled_services = self._run(
+                ["shell", "settings", "get", "secure", "enabled_accessibility_services"],
+                dev=dev,
+            )
+        except Exception:
+            return False
+
+        return "com.google.android.marvin.talkback" in enabled_services
+
     def dump_tree(self, dev: Any = None, wait_seconds: float = 5.0) -> list[dict[str, Any]]:
         self.last_announcements = []
         self.clear_logcat(dev=dev)
@@ -220,6 +253,11 @@ class A11yAdbClient:
         return False
 
     def get_announcements(self, dev: Any = None, wait_seconds: float = 2.0, only_new: bool = True) -> list[str]:
+        if not self.check_talkback_status(dev=dev):
+            print("TalkBack이 꺼져 있어 음성을 수집할 수 없습니다")
+            self.last_announcements = []
+            return []
+
         start_time = time.monotonic()
         announcements: list[str] = []
         seen: set[str] = set()

@@ -26,6 +26,7 @@ def test_get_announcements_strips_and_deduplicates(monkeypatch):
     )
 
     monkeypatch.setattr(client, "_run", lambda args, dev=None: logs)
+    monkeypatch.setattr(client, "check_talkback_status", lambda dev=None: True)
 
     clock = FakeClock()
     monkeypatch.setattr("test_a11y.time.monotonic", clock.monotonic)
@@ -51,6 +52,7 @@ def test_get_announcements_polls_until_wait_seconds(monkeypatch):
         return responses[idx]
 
     monkeypatch.setattr(client, "_run", fake_run)
+    monkeypatch.setattr(client, "check_talkback_status", lambda dev=None: True)
 
     clock = FakeClock()
     monkeypatch.setattr("test_a11y.time.monotonic", clock.monotonic)
@@ -88,6 +90,7 @@ def test_get_announcements_only_reads_new_logs(monkeypatch):
         return responses[idx]
 
     monkeypatch.setattr(client, "_run", fake_run)
+    monkeypatch.setattr(client, "check_talkback_status", lambda dev=None: True)
 
     clock = FakeClock()
     monkeypatch.setattr("test_a11y.time.monotonic", clock.monotonic)
@@ -108,6 +111,7 @@ def test_get_announcements_can_read_all_buffer_when_only_new_is_false(monkeypatc
     )
 
     monkeypatch.setattr(client, "_run", lambda args, dev=None: logs)
+    monkeypatch.setattr(client, "check_talkback_status", lambda dev=None: True)
 
     clock = FakeClock()
     monkeypatch.setattr("test_a11y.time.monotonic", clock.monotonic)
