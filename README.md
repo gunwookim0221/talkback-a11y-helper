@@ -125,7 +125,7 @@ adb shell am broadcast -a com.example.a11yhelper.SET_TEXT -p com.example.a11yhel
 
 - logcat: `A11Y_HELPER SET_TEXT_RESULT {"success":...,"action":"SET_TEXT",...}`
 
-## `test_a11y.py` 레거시 호환 API
+## `talkback_lib.py` 레거시 호환 API
 
 - 다중 단말 지원: `A11yAdbClient(dev_serial="...")`로 기본 단말 시리얼을 설정할 수 있으며, 대부분 메서드는 `dev`(문자열 serial 또는 `dev.serial`) 인자를 우선 사용합니다. 내부적으로 `adb -s <serial>`로 실행됩니다.
 - `clear_logcat(dev=None)`

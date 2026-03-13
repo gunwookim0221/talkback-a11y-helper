@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from test_a11y import A11yAdbClient
+from talkback_lib import A11yAdbClient
 
 
 class FakeClock:
@@ -29,8 +29,8 @@ def test_get_announcements_strips_and_deduplicates(monkeypatch):
     monkeypatch.setattr(client, "check_talkback_status", lambda dev=None: True)
 
     clock = FakeClock()
-    monkeypatch.setattr("test_a11y.time.monotonic", clock.monotonic)
-    monkeypatch.setattr("test_a11y.time.sleep", clock.sleep)
+    monkeypatch.setattr("talkback_lib.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("talkback_lib.time.sleep", clock.sleep)
 
     assert client.get_announcements(wait_seconds=0.1) == ["첫 안내", "둘째 안내"]
     assert client.last_announcements == ["첫 안내", "둘째 안내"]
@@ -55,8 +55,8 @@ def test_get_announcements_polls_until_wait_seconds(monkeypatch):
     monkeypatch.setattr(client, "check_talkback_status", lambda dev=None: True)
 
     clock = FakeClock()
-    monkeypatch.setattr("test_a11y.time.monotonic", clock.monotonic)
-    monkeypatch.setattr("test_a11y.time.sleep", clock.sleep)
+    monkeypatch.setattr("talkback_lib.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("talkback_lib.time.sleep", clock.sleep)
 
     result = client.get_announcements(wait_seconds=0.6)
 
@@ -93,8 +93,8 @@ def test_get_announcements_only_reads_new_logs(monkeypatch):
     monkeypatch.setattr(client, "check_talkback_status", lambda dev=None: True)
 
     clock = FakeClock()
-    monkeypatch.setattr("test_a11y.time.monotonic", clock.monotonic)
-    monkeypatch.setattr("test_a11y.time.sleep", clock.sleep)
+    monkeypatch.setattr("talkback_lib.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("talkback_lib.time.sleep", clock.sleep)
 
     assert client.get_announcements(wait_seconds=0.0) == ["기존 안내", "다음 안내"]
     assert client.get_announcements(wait_seconds=0.0) == ["새 안내"]
@@ -114,8 +114,8 @@ def test_get_announcements_can_read_all_buffer_when_only_new_is_false(monkeypatc
     monkeypatch.setattr(client, "check_talkback_status", lambda dev=None: True)
 
     clock = FakeClock()
-    monkeypatch.setattr("test_a11y.time.monotonic", clock.monotonic)
-    monkeypatch.setattr("test_a11y.time.sleep", clock.sleep)
+    monkeypatch.setattr("talkback_lib.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("talkback_lib.time.sleep", clock.sleep)
 
     assert client.get_announcements(wait_seconds=0.0) == ["기존 안내", "다음 안내", "새 안내"]
     assert client.get_announcements(wait_seconds=0.0) == []
