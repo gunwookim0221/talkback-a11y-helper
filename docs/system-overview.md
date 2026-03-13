@@ -27,9 +27,9 @@ PC Automation Script
 
 - `com.iotpart.sqe.talkbackhelper.GET_FOCUS`
 - `com.iotpart.sqe.talkbackhelper.DUMP_TREE`
-- `com.iotpart.sqe.talkbackhelper.FOCUS_TARGET` (`targetName`, `targetType`, `targetIndex`)
+- `com.iotpart.sqe.talkbackhelper.FOCUS_TARGET` (`targetName`, `targetType`, `targetIndex`, `className`, `clickable`, `focusable`, `targetText`, `targetId`)
 - `com.iotpart.sqe.talkbackhelper.CLICK_TARGET` (`targetName`, `targetType`, `targetIndex`, `isLongClick`)
-- `com.iotpart.sqe.talkbackhelper.CHECK_TARGET` (`targetName`, `targetType`, `targetIndex`)
+- `com.iotpart.sqe.talkbackhelper.CHECK_TARGET` (`targetName`, `targetType`, `targetIndex`, `className`, `clickable`, `focusable`, `targetText`, `targetId`)
 - `com.iotpart.sqe.talkbackhelper.NEXT`
 - `com.iotpart.sqe.talkbackhelper.PREV`
 - `com.iotpart.sqe.talkbackhelper.CLICK_FOCUSED`
@@ -38,4 +38,4 @@ PC Automation Script
 
 - 좌표 입력 대신 접근성 노드 자체를 기준으로 제어
 - 전체 화면 트리를 Flat JSON으로 수집해 외부 스크립트가 파싱하기 쉬움
-- `targetName`/`targetType`/`targetIndex` 기반 직접 포커스/클릭/존재확인으로 정밀 제어
+- `targetName`/`targetType`/`targetIndex` 기본 매칭 + `className`/`clickable`/`focusable`/`targetText`/`targetId` AND 필터로 정밀 제어

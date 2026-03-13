@@ -79,13 +79,34 @@ class A11yAdbClient:
         return "'" + value.replace("'", "'\\''") + "'"
 
     @staticmethod
-    def _build_target_extras(name: str, type_: str, index_: int, long_: bool = False) -> list[str]:
-        return [
+    def _build_target_extras(
+        name: str,
+        type_: str,
+        index_: int,
+        long_: bool = False,
+        class_name: str | None = None,
+        clickable: bool | None = None,
+        focusable: bool | None = None,
+        target_text: str | None = None,
+        target_id: str | None = None,
+    ) -> list[str]:
+        extras = [
             "--es", "targetName", A11yAdbClient._escape_adb_string(name),
             "--es", "targetType", type_,
             "--ei", "targetIndex", str(index_),
             "--ez", "isLongClick", "true" if long_ else "false",
         ]
+        if class_name is not None:
+            extras += ["--es", "className", A11yAdbClient._escape_adb_string(class_name)]
+        if clickable is not None:
+            extras += ["--es", "clickable", "true" if clickable else "false"]
+        if focusable is not None:
+            extras += ["--es", "focusable", "true" if focusable else "false"]
+        if target_text is not None:
+            extras += ["--es", "targetText", A11yAdbClient._escape_adb_string(target_text)]
+        if target_id is not None:
+            extras += ["--es", "targetId", A11yAdbClient._escape_adb_string(target_id)]
+        return extras
 
     def _refresh_tree_if_needed(self, dev: Any = None) -> None:
         if self.needs_update:
@@ -211,14 +232,37 @@ class A11yAdbClient:
         return parsed
         
 
+    @staticmethod
+    def _split_and_conditions(name: Any, type_: str) -> tuple[str, str, str | None, str | None]:
+        if not (isinstance(name, list) and str(type_).strip().lower() == "and"):
+            return str(name), str(type_), None, None
+
+        target_text: str | None = None
+        target_id: str | None = None
+        for item in name:
+            token = str(item).strip()
+            if not token:
+                continue
+            looks_like_id = "id/" in token or token.startswith(".*")
+            if looks_like_id:
+                target_id = token
+            else:
+                target_text = token
+
+        return "", "", target_text, target_id
+
+
     def touch(
         self,
         dev,
-        name: str,
+        name: str | list[str],
         wait_: int = 5,
         type_: str = "a",
         index_: int = 0,
         long_: bool = False,
+        class_name: str = None,
+        clickable: bool = None,
+        focusable: bool = None,
     ) -> bool:
         self.last_announcements = []
         deadline = time.monotonic() + wait_
@@ -226,7 +270,18 @@ class A11yAdbClient:
             self._refresh_tree_if_needed(dev)
             self._run(["logcat", "-c"], dev=dev)
             req_id = str(uuid.uuid4())[:8]
-            extras = self._build_target_extras(name=name, type_=type_, index_=index_, long_=long_)
+            parsed_name, parsed_type, target_text, target_id = self._split_and_conditions(name, type_)
+            extras = self._build_target_extras(
+                name=parsed_name,
+                type_=parsed_type,
+                index_=index_,
+                long_=long_,
+                class_name=class_name,
+                clickable=clickable,
+                focusable=focusable,
+                target_text=target_text,
+                target_id=target_id,
+            )
             extras += ["--es", "reqId", req_id]
             self._broadcast(
                 dev,
@@ -243,10 +298,13 @@ class A11yAdbClient:
     def select(
         self,
         dev,
-        name: str,
+        name: str | list[str],
         wait_: int = 5,
         type_: str = "a",
         index_: int = 0,
+        class_name: str = None,
+        clickable: bool = None,
+        focusable: bool = None,
     ) -> bool:
         self.last_announcements = []
         deadline = time.monotonic() + wait_
@@ -254,7 +312,17 @@ class A11yAdbClient:
             self._refresh_tree_if_needed(dev)
             self._run(["logcat", "-c"], dev=dev)
             req_id = str(uuid.uuid4())[:8]
-            extras = self._build_target_extras(name=name, type_=type_, index_=index_)
+            parsed_name, parsed_type, target_text, target_id = self._split_and_conditions(name, type_)
+            extras = self._build_target_extras(
+                name=parsed_name,
+                type_=parsed_type,
+                index_=index_,
+                class_name=class_name,
+                clickable=clickable,
+                focusable=focusable,
+                target_text=target_text,
+                target_id=target_id,
+            )
             extras += ["--es", "reqId", req_id]
             self._broadcast(
                 dev,
@@ -345,10 +413,13 @@ class A11yAdbClient:
     def isin(
         self,
         dev,
-        name: str,
+        name: str | list[str],
         wait_: int = 5,
         type_: str = "a",
         index_: int = 0,
+        class_name: str = None,
+        clickable: bool = None,
+        focusable: bool = None,
     ) -> bool:
         self.last_announcements = []
         deadline = time.monotonic() + wait_
@@ -356,7 +427,17 @@ class A11yAdbClient:
             self._refresh_tree_if_needed(dev)
             self._run(["logcat", "-c"], dev=dev)
             req_id = str(uuid.uuid4())[:8]
-            extras = self._build_target_extras(name=name, type_=type_, index_=index_)
+            parsed_name, parsed_type, target_text, target_id = self._split_and_conditions(name, type_)
+            extras = self._build_target_extras(
+                name=parsed_name,
+                type_=parsed_type,
+                index_=index_,
+                class_name=class_name,
+                clickable=clickable,
+                focusable=focusable,
+                target_text=target_text,
+                target_id=target_id,
+            )
             extras += ["--es", "reqId", req_id]
             self._broadcast(
                 dev,

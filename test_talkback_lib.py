@@ -179,6 +179,57 @@ class TouchIsinTest(unittest.TestCase):
             ],
         )
 
+
+    def test_touch_supports_additional_filters(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"reqId":"REQID101"}'
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID101-xxxx"), patch.object(client, "_wait_for_speech_if_needed"):
+            ok = client.touch(
+                "SER",
+                name="확인",
+                type_="a",
+                class_name="android.widget.Button",
+                clickable=True,
+                focusable=False,
+            )
+
+        self.assertTrue(ok)
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0]
+        self.assertIn("className", broadcast[0])
+        self.assertIn("clickable", broadcast[0])
+        self.assertIn("focusable", broadcast[0])
+
+    def test_isin_supports_and_list_name_to_target_text_and_id(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: CHECK_TARGET_RESULT {"success":true,"reqId":"REQID102"}'
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID102-xxxx"):
+            ok = client.isin("SER", name=["확인", "com.example:id/btn_ok"], type_="and", index_=0)
+
+        self.assertTrue(ok)
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0][0]
+        self.assertIn("targetText", broadcast)
+        self.assertIn("'확인'", broadcast)
+        self.assertIn("targetId", broadcast)
+        self.assertIn("'com.example:id/btn_ok'", broadcast)
+        self.assertEqual(broadcast[broadcast.index("targetName") + 1], '""')
+        self.assertEqual(broadcast[broadcast.index("targetType") + 1], "")
+
+    def test_select_supports_and_list_name_with_regex_id(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"reqId":"REQID103"}'
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID103-xxxx"):
+            ok = client.select("SER", name=["로그인", ".*id/btn_login"], type_="and")
+
+        self.assertTrue(ok)
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0][0]
+        self.assertIn("targetText", broadcast)
+        self.assertIn("'로그인'", broadcast)
+        self.assertIn("targetId", broadcast)
+        self.assertIn("'.*id/btn_login'", broadcast)
+
     def test_scroll_parses_direction_and_returns_success(self):
         client = FakeA11yClient()
         client.logcat_payload = 'I/A11Y_HELPER: SCROLL_RESULT {"success":true,"reqId":"REQID004"}'
