@@ -34,6 +34,7 @@ class A11yAdbClient:
 
     def __post_init__(self) -> None:
         self.needs_update = True
+        self.last_announcements: list[str] = []
         self._state_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._monitor_proc: subprocess.Popen[str] | None = None
@@ -86,7 +87,7 @@ class A11yAdbClient:
     def _wait_for_speech_if_needed(self, dev: Any = None, enabled: bool = True) -> None:
         if not enabled:
             return
-        announcements = self.get_announcements(dev=dev, wait_seconds=1.5)
+        announcements = self.get_announcements(dev=dev, wait_seconds=1.5, only_new=True)
         if announcements:
             speech_text = announcements[-1]
             wait_time = max(0.5, min(len(speech_text) * 0.12, 4.0))
@@ -137,6 +138,7 @@ class A11yAdbClient:
         return self._run(["logcat", "-c"], dev=dev)
 
     def dump_tree(self, dev: Any = None, wait_seconds: float = 5.0) -> list[dict[str, Any]]:
+        self.last_announcements = []
         self.clear_logcat(dev=dev)
         self._broadcast(dev, ACTION_DUMP_TREE)
         
@@ -176,6 +178,7 @@ class A11yAdbClient:
         index_: int = 0,
         long_: bool = False,
     ) -> bool:
+        self.last_announcements = []
         deadline = time.monotonic() + wait_
         while time.monotonic() <= deadline:
             self._refresh_tree_if_needed(dev)
@@ -200,6 +203,7 @@ class A11yAdbClient:
         type_: str = "a",
         index_: int = 0,
     ) -> bool:
+        self.last_announcements = []
         deadline = time.monotonic() + wait_
         while time.monotonic() <= deadline:
             self._refresh_tree_if_needed(dev)
@@ -215,7 +219,7 @@ class A11yAdbClient:
             time.sleep(0.5)
         return False
 
-    def get_announcements(self, dev: Any = None, wait_seconds: float = 2.0) -> list[str]:
+    def get_announcements(self, dev: Any = None, wait_seconds: float = 2.0, only_new: bool = True) -> list[str]:
         start_time = time.monotonic()
         announcements: list[str] = []
         seen: set[str] = set()
@@ -236,7 +240,7 @@ class A11yAdbClient:
                 if newest_log_marker is None or marker > newest_log_marker:
                     newest_log_marker = marker
 
-                if last_log_marker is not None and marker <= last_log_marker:
+                if only_new and last_log_marker is not None and marker <= last_log_marker:
                     continue
 
                 if "A11Y_ANNOUNCEMENT:" not in line:
@@ -255,6 +259,8 @@ class A11yAdbClient:
 
         with self._state_lock:
             self._last_log_marker = newest_log_marker
+
+        self.last_announcements = announcements
 
         return announcements
 
