@@ -245,9 +245,23 @@ class TouchIsinTest(unittest.TestCase):
                 "shell", "am", "broadcast", "-a", ACTION_SCROLL,
                 "-p", "com.example.custom",
                 "--ez", "forward", "false",
+                "--es", "direction", "left",
                 "--es", "reqId", "REQID004",
             ],
         )
+
+    def test_scroll_normalizes_right_shortcut(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: SCROLL_RESULT {"success":true,"reqId":"REQID200"}'
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID200-xxxx"):
+            ok = client.scroll("SER", "r")
+
+        self.assertTrue(ok)
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0][0]
+        self.assertIn("--es", broadcast)
+        self.assertEqual(broadcast[broadcast.index("direction") + 1], "right")
+        self.assertEqual(broadcast[broadcast.index("forward") + 1], "true")
 
     def test_scrollfind_returns_true_when_target_appears(self):
         client = FakeA11yClient()

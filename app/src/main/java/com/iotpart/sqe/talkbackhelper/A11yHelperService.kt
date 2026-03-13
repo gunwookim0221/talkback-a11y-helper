@@ -1,6 +1,7 @@
 package com.iotpart.sqe.talkbackhelper
 
 import android.accessibilityservice.AccessibilityService
+import android.graphics.Rect
 import android.os.Bundle
 import android.util.Log
 import android.view.View
@@ -207,7 +208,45 @@ class A11yHelperService : AccessibilityService() {
         return resultJson
     }
 
-    fun performScroll(forward: Boolean, reqId: String = "none"): JSONObject {
+    private fun findLargestScrollableNode(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (root == null) return null
+
+        var bestNode: AccessibilityNodeInfo? = null
+        var bestArea = -1L
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            if (node.isScrollable) {
+                val bounds = Rect()
+                node.getBoundsInScreen(bounds)
+                val area = bounds.width().toLong() * bounds.height().toLong()
+                if (area > bestArea) {
+                    bestArea = area
+                    bestNode = node
+                }
+            }
+
+            for (index in 0 until node.childCount) {
+                node.getChild(index)?.let { queue.add(it) }
+            }
+        }
+
+        return bestNode
+    }
+
+    private fun normalizeScrollDirection(direction: String, forward: Boolean): String {
+        return when (direction.trim().lowercase()) {
+            "d", "down" -> "down"
+            "u", "up" -> "up"
+            "r", "right" -> "right"
+            "l", "left" -> "left"
+            else -> if (forward) "down" else "up"
+        }
+    }
+
+    fun performScroll(forward: Boolean, direction: String, reqId: String = "none"): JSONObject {
         val focusedNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         var scrollNode = focusedNode
 
@@ -215,7 +254,14 @@ class A11yHelperService : AccessibilityService() {
             scrollNode = scrollNode.parent
         }
 
-        val action = if (forward) {
+        val fallbackUsed = scrollNode == null
+        if (scrollNode == null) {
+            scrollNode = findLargestScrollableNode(rootInActiveWindow)
+        }
+
+        val normalizedDirection = normalizeScrollDirection(direction, forward)
+        val isForwardDirection = normalizedDirection == "down" || normalizedDirection == "right"
+        val action = if (isForwardDirection) {
             AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
         } else {
             AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
@@ -226,9 +272,11 @@ class A11yHelperService : AccessibilityService() {
             put("timestamp", System.currentTimeMillis())
             put("reqId", reqId)
             put("success", success)
-            put("action", if (forward) "SCROLL_FORWARD" else "SCROLL_BACKWARD")
+            put("action", if (isForwardDirection) "SCROLL_FORWARD" else "SCROLL_BACKWARD")
+            put("direction", normalizedDirection)
             put("hasFocusedNode", focusedNode != null)
             put("scrollableNodeFound", scrollNode != null)
+            put("fallbackToLargestScrollable", fallbackUsed)
         }
 
         Log.i(TAG, "SCROLL_RESULT $resultJson")
