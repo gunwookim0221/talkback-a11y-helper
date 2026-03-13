@@ -30,6 +30,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val EXTRA_TARGET_ID = "targetId"
         private const val EXTRA_IS_LONG_CLICK = "isLongClick"
         private const val EXTRA_FORWARD = "forward"
+        private const val EXTRA_DIRECTION = "direction"
         private const val EXTRA_TEXT = "text"
         private const val EXTRA_REQ_ID = "reqId"
         private const val DEFAULT_REQ_ID = "none"
@@ -170,7 +171,8 @@ class A11yCommandReceiver : BroadcastReceiver() {
         }
 
         val forward = intent.getBooleanExtra(EXTRA_FORWARD, true)
-        service.performScroll(forward, parseReqId(intent))
+        val direction = intent.getStringExtra(EXTRA_DIRECTION)?.trim().orEmpty()
+        service.performScroll(forward, direction, parseReqId(intent))
     }
 
     private fun handleSetText(intent: Intent) {

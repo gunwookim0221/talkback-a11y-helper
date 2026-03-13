@@ -338,18 +338,29 @@ class A11yAdbClient:
     def scroll(self, dev, direction, step_=50, time_=1000, bounds_=None) -> bool:
         _ = (step_, time_, bounds_)
         direction_token = str(direction).strip().lower()
-        forward_tokens = {"d", "down", "r", "right"}
-        backward_tokens = {"u", "up", "l", "left"}
-        forward = True if direction_token in forward_tokens else False
-        if direction_token not in forward_tokens | backward_tokens:
-            forward = True
+
+        direction_map = {
+            "d": (True, "down"),
+            "down": (True, "down"),
+            "u": (False, "up"),
+            "up": (False, "up"),
+            "r": (True, "right"),
+            "right": (True, "right"),
+            "l": (False, "left"),
+            "left": (False, "left"),
+        }
+        forward, normalized_direction = direction_map.get(direction_token, (True, "down"))
 
         self._run(["logcat", "-c"], dev=dev)
         req_id = str(uuid.uuid4())[:8]
         self._broadcast(
             dev,
             ACTION_SCROLL,
-            ["--ez", "forward", "true" if forward else "false", "--es", "reqId", req_id],
+            [
+                "--ez", "forward", "true" if forward else "false",
+                "--es", "direction", normalized_direction,
+                "--es", "reqId", req_id,
+            ],
         )
         result = self._read_log_result(dev, "SCROLL_RESULT", req_id)
         return bool(result.get("success"))
