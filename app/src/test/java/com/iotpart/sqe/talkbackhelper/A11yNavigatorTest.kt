@@ -281,4 +281,77 @@ class A11yNavigatorTest {
     }
 
 
+    private data class FakeNode(
+        val name: String,
+        val clickable: Boolean = false,
+        val focusable: Boolean = false,
+        val visible: Boolean = true,
+        var parent: FakeNode? = null
+    )
+
+    @Test
+    fun resolveToClickableAncestor_returnsNearestClickableParent() {
+        val root = FakeNode(name = "root", clickable = false)
+        val card = FakeNode(name = "card", clickable = true, parent = root)
+        val title = FakeNode(name = "title", clickable = false, parent = card)
+
+        val resolved = A11yNavigator.resolveToClickableAncestor(
+            node = title,
+            parentOf = { it.parent },
+            isClickable = { it.clickable }
+        )
+
+        assertTrue(resolved == card)
+    }
+
+    @Test
+    fun resolveToClickableAncestor_returnsOriginalNodeWhenNoClickableAncestor() {
+        val root = FakeNode(name = "root", clickable = false)
+        val title = FakeNode(name = "title", clickable = false, parent = root)
+
+        val resolved = A11yNavigator.resolveToClickableAncestor(
+            node = title,
+            parentOf = { it.parent },
+            isClickable = { it.clickable }
+        )
+
+        assertTrue(resolved == title)
+    }
+
+    @Test
+    fun buildGroupedTraversalList_excludesChildrenInsideClickableParent() {
+        val root = FakeNode(name = "root", clickable = false, focusable = false)
+        val card = FakeNode(name = "card", clickable = true, focusable = true, parent = root)
+        val icon = FakeNode(name = "icon", clickable = false, focusable = true, parent = card)
+        val text = FakeNode(name = "text", clickable = false, focusable = true, parent = card)
+        val standalone = FakeNode(name = "standalone", clickable = false, focusable = true, parent = root)
+
+        val list = A11yNavigator.buildGroupedTraversalList(
+            nodesInOrder = listOf(root, card, icon, text, standalone),
+            parentOf = { it.parent },
+            isClickable = { it.clickable },
+            isFocusable = { it.focusable },
+            isVisible = { it.visible }
+        )
+
+        assertTrue(list == listOf(card, standalone))
+    }
+
+    @Test
+    fun buildGroupedTraversalList_excludesInvisibleNodes() {
+        val root = FakeNode(name = "root", clickable = false, focusable = false)
+        val visible = FakeNode(name = "visible", clickable = true, focusable = true, visible = true, parent = root)
+        val invisible = FakeNode(name = "invisible", clickable = true, focusable = true, visible = false, parent = root)
+
+        val list = A11yNavigator.buildGroupedTraversalList(
+            nodesInOrder = listOf(root, visible, invisible),
+            parentOf = { it.parent },
+            isClickable = { it.clickable },
+            isFocusable = { it.focusable },
+            isVisible = { it.visible }
+        )
+
+        assertTrue(list == listOf(visible))
+    }
+
 }

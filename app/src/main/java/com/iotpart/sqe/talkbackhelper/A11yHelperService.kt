@@ -4,7 +4,6 @@ import android.accessibilityservice.AccessibilityService
 import android.graphics.Rect
 import android.os.Bundle
 import android.util.Log
-import android.view.View
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
@@ -173,7 +172,7 @@ class A11yHelperService : AccessibilityService() {
 
     fun moveFocus(forward: Boolean, reqId: String = "none"): JSONObject {
         val currentNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-        val targetNode = currentNode?.focusSearch(if (forward) View.FOCUS_FORWARD else View.FOCUS_BACKWARD)
+        val targetNode = A11yNavigator.findSwipeTarget(rootInActiveWindow, currentNode, forward)
         val success = targetNode?.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS) == true
 
         val resultJson = JSONObject().apply {

@@ -56,11 +56,12 @@ object A11yNavigator {
 
         while (stack.isNotEmpty()) {
             val node = stack.removeLast()
-            if (matchesTarget(node, query)) {
+            val targetNode = resolveMatchedTarget(node, query)
+            if (targetNode != null) {
                 if (matchCount != query.targetIndex) {
                     matchCount += 1
                 } else {
-                    val success = node.performAction(action)
+                    val success = targetNode.performAction(action)
                     val actionName = when (action) {
                         AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS -> "ACTION_ACCESSIBILITY_FOCUS"
                         AccessibilityNodeInfo.ACTION_CLICK -> "ACTION_CLICK"
@@ -70,7 +71,7 @@ object A11yNavigator {
                     return TargetActionOutcome(
                         success = success,
                         reason = if (success) "$actionName success" else "$actionName failed",
-                        target = node
+                        target = targetNode
                     )
                 }
             }
@@ -94,9 +95,10 @@ object A11yNavigator {
 
         while (stack.isNotEmpty()) {
             val node = stack.removeLast()
-            if (matchesTarget(node, query)) {
+            val targetNode = resolveMatchedTarget(node, query)
+            if (targetNode != null) {
                 if (matchCount == query.targetIndex) {
-                    return TargetActionOutcome(success = true, reason = "Target node found", target = node)
+                    return TargetActionOutcome(success = true, reason = "Target node found", target = targetNode)
                 }
                 matchCount += 1
             }
@@ -164,6 +166,70 @@ object A11yNavigator {
         return targetTextMatch && targetIdMatch && classNameMatch && clickableMatch && focusableMatch
     }
 
+    fun findSwipeTarget(
+        root: AccessibilityNodeInfo?,
+        currentNode: AccessibilityNodeInfo?,
+        forward: Boolean
+    ): AccessibilityNodeInfo? {
+        if (root == null) return null
+        val traversalList = buildFocusableTraversalList(root)
+        if (traversalList.isEmpty()) return null
+
+        val resolvedCurrent = currentNode?.let {
+            resolveToClickableAncestor(
+                node = it,
+                parentOf = { node -> node.parent },
+                isClickable = { node -> node.isClickable }
+            )
+        }
+
+        val currentIndex = resolvedCurrent?.let { resolved ->
+            traversalList.indexOfFirst { it == resolved }
+        } ?: -1
+
+        val targetIndex = if (forward) {
+            currentIndex + 1
+        } else {
+            if (currentIndex == -1) traversalList.lastIndex else currentIndex - 1
+        }
+
+        if (targetIndex !in traversalList.indices) return null
+        return traversalList[targetIndex]
+    }
+
+    internal fun <T> resolveToClickableAncestor(
+        node: T,
+        parentOf: (T) -> T?,
+        isClickable: (T) -> Boolean
+    ): T {
+        if (isClickable(node)) return node
+
+        var current = parentOf(node)
+        while (current != null) {
+            if (isClickable(current)) return current
+            current = parentOf(current)
+        }
+        return node
+    }
+
+    internal fun <T> buildGroupedTraversalList(
+        nodesInOrder: List<T>,
+        parentOf: (T) -> T?,
+        isClickable: (T) -> Boolean,
+        isFocusable: (T) -> Boolean,
+        isVisible: (T) -> Boolean
+    ): List<T> {
+        val results = mutableListOf<T>()
+
+        for (node in nodesInOrder) {
+            if (!isVisible(node)) continue
+            if (hasClickableAncestor(node, parentOf, isClickable)) continue
+            if (!isClickable(node) && !isFocusable(node)) continue
+            results += node
+        }
+        return results
+    }
+
     private fun matchesTarget(node: AccessibilityNodeInfo, query: TargetQuery): Boolean {
         val text = node.text?.toString()
         val description = node.contentDescription?.toString()
@@ -175,6 +241,59 @@ object A11yNavigator {
             node.isClickable,
             node.isFocusable,
             query
+        )
+    }
+
+    private fun resolveMatchedTarget(node: AccessibilityNodeInfo, query: TargetQuery): AccessibilityNodeInfo? {
+        val queryWithoutClickable = if (query.clickable != null) query.copy(clickable = null) else query
+        if (!matchesTarget(node, queryWithoutClickable)) return null
+
+        val resolvedNode = resolveToClickableAncestor(
+            node = node,
+            parentOf = { current -> current.parent },
+            isClickable = { current -> current.isClickable }
+        )
+
+        query.clickable?.let { expected ->
+            if (resolvedNode.isClickable != expected) return null
+        }
+        return resolvedNode
+    }
+
+
+    private fun <T> hasClickableAncestor(
+        node: T,
+        parentOf: (T) -> T?,
+        isClickable: (T) -> Boolean
+    ): Boolean {
+        var parent = parentOf(node)
+        while (parent != null) {
+            if (isClickable(parent)) return true
+            parent = parentOf(parent)
+        }
+        return false
+    }
+
+    private fun buildFocusableTraversalList(root: AccessibilityNodeInfo): List<AccessibilityNodeInfo> {
+        val nodesInOrder = mutableListOf<AccessibilityNodeInfo>()
+        val stack = ArrayDeque<AccessibilityNodeInfo>()
+        stack.add(root)
+
+        while (stack.isNotEmpty()) {
+            val node = stack.removeLast()
+            nodesInOrder += node
+
+            for (i in node.childCount - 1 downTo 0) {
+                node.getChild(i)?.let { stack.add(it) }
+            }
+        }
+
+        return buildGroupedTraversalList(
+            nodesInOrder = nodesInOrder,
+            parentOf = { node -> node.parent },
+            isClickable = { node -> node.isClickable },
+            isFocusable = { node -> node.isFocusable },
+            isVisible = { node -> node.isVisibleToUser }
         )
     }
 
