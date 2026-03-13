@@ -1,4 +1,4 @@
-package com.example.a11yhelper
+package com.iotpart.sqe.talkbackhelper
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -9,17 +9,17 @@ import android.view.accessibility.AccessibilityNodeInfo
 class A11yCommandReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "A11Y_HELPER"
-        private const val ACTION_GET_FOCUS = "com.example.a11yhelper.GET_FOCUS"
-        private const val ACTION_FOCUS_RESULT = "com.example.a11yhelper.FOCUS_RESULT"
-        private const val ACTION_DUMP_TREE = "com.example.a11yhelper.DUMP_TREE"
-        private const val ACTION_FOCUS_TARGET = "com.example.a11yhelper.FOCUS_TARGET"
-        private const val ACTION_CLICK_TARGET = "com.example.a11yhelper.CLICK_TARGET"
-        private const val ACTION_CHECK_TARGET = "com.example.a11yhelper.CHECK_TARGET"
-        private const val ACTION_NEXT = "com.example.a11yhelper.NEXT"
-        private const val ACTION_PREV = "com.example.a11yhelper.PREV"
-        private const val ACTION_CLICK_FOCUSED = "com.example.a11yhelper.CLICK_FOCUSED"
-        private const val ACTION_SCROLL = "com.example.a11yhelper.SCROLL"
-        private const val ACTION_SET_TEXT = "com.example.a11yhelper.SET_TEXT"
+        private const val ACTION_GET_FOCUS = "com.iotpart.sqe.talkbackhelper.GET_FOCUS"
+        private const val ACTION_FOCUS_RESULT = "com.iotpart.sqe.talkbackhelper.FOCUS_RESULT"
+        private const val ACTION_DUMP_TREE = "com.iotpart.sqe.talkbackhelper.DUMP_TREE"
+        private const val ACTION_FOCUS_TARGET = "com.iotpart.sqe.talkbackhelper.FOCUS_TARGET"
+        private const val ACTION_CLICK_TARGET = "com.iotpart.sqe.talkbackhelper.CLICK_TARGET"
+        private const val ACTION_CHECK_TARGET = "com.iotpart.sqe.talkbackhelper.CHECK_TARGET"
+        private const val ACTION_NEXT = "com.iotpart.sqe.talkbackhelper.NEXT"
+        private const val ACTION_PREV = "com.iotpart.sqe.talkbackhelper.PREV"
+        private const val ACTION_CLICK_FOCUSED = "com.iotpart.sqe.talkbackhelper.CLICK_FOCUSED"
+        private const val ACTION_SCROLL = "com.iotpart.sqe.talkbackhelper.SCROLL"
+        private const val ACTION_SET_TEXT = "com.iotpart.sqe.talkbackhelper.SET_TEXT"
         private const val EXTRA_TARGET_NAME = "targetName"
         private const val EXTRA_TARGET_TYPE = "targetType"
         private const val EXTRA_TARGET_INDEX = "targetIndex"

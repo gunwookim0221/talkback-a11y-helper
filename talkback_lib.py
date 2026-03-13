@@ -11,16 +11,16 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-ACTION_DUMP_TREE = "com.example.a11yhelper.DUMP_TREE"
-ACTION_GET_FOCUS = "com.example.a11yhelper.GET_FOCUS"
-ACTION_FOCUS_TARGET = "com.example.a11yhelper.FOCUS_TARGET"
-ACTION_CLICK_TARGET = "com.example.a11yhelper.CLICK_TARGET"
-ACTION_CHECK_TARGET = "com.example.a11yhelper.CHECK_TARGET"
-ACTION_NEXT = "com.example.a11yhelper.NEXT"
-ACTION_PREV = "com.example.a11yhelper.PREV"
-ACTION_CLICK_FOCUSED = "com.example.a11yhelper.CLICK_FOCUSED"
-ACTION_SCROLL = "com.example.a11yhelper.SCROLL"
-ACTION_SET_TEXT = "com.example.a11yhelper.SET_TEXT"
+ACTION_DUMP_TREE = "com.iotpart.sqe.talkbackhelper.DUMP_TREE"
+ACTION_GET_FOCUS = "com.iotpart.sqe.talkbackhelper.GET_FOCUS"
+ACTION_FOCUS_TARGET = "com.iotpart.sqe.talkbackhelper.FOCUS_TARGET"
+ACTION_CLICK_TARGET = "com.iotpart.sqe.talkbackhelper.CLICK_TARGET"
+ACTION_CHECK_TARGET = "com.iotpart.sqe.talkbackhelper.CHECK_TARGET"
+ACTION_NEXT = "com.iotpart.sqe.talkbackhelper.NEXT"
+ACTION_PREV = "com.iotpart.sqe.talkbackhelper.PREV"
+ACTION_CLICK_FOCUSED = "com.iotpart.sqe.talkbackhelper.CLICK_FOCUSED"
+ACTION_SCROLL = "com.iotpart.sqe.talkbackhelper.SCROLL"
+ACTION_SET_TEXT = "com.iotpart.sqe.talkbackhelper.SET_TEXT"
 LOG_TAG = "A11Y_HELPER"
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 
@@ -28,7 +28,7 @@ LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 @dataclass
 class A11yAdbClient:
     adb_path: str = "adb"
-    package_name: str = "com.example.a11yhelper"
+    package_name: str = "com.iotpart.sqe.talkbackhelper"
     dev_serial: str | None = None
     start_monitor: bool = True
 

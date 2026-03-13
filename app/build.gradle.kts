@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.a11yhelper"
+    namespace = "com.iotpart.sqe.talkbackhelper"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.a11yhelper"
+        applicationId = "com.iotpart.sqe.talkbackhelper"
         minSdk = 26
         targetSdk = 34
         versionCode = 1

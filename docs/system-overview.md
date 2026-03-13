@@ -25,14 +25,14 @@ PC Automation Script
 
 ## Supported Broadcast Actions
 
-- `com.example.a11yhelper.GET_FOCUS`
-- `com.example.a11yhelper.DUMP_TREE`
-- `com.example.a11yhelper.FOCUS_TARGET` (`targetName`, `targetType`, `targetIndex`)
-- `com.example.a11yhelper.CLICK_TARGET` (`targetName`, `targetType`, `targetIndex`, `isLongClick`)
-- `com.example.a11yhelper.CHECK_TARGET` (`targetName`, `targetType`, `targetIndex`)
-- `com.example.a11yhelper.NEXT`
-- `com.example.a11yhelper.PREV`
-- `com.example.a11yhelper.CLICK_FOCUSED`
+- `com.iotpart.sqe.talkbackhelper.GET_FOCUS`
+- `com.iotpart.sqe.talkbackhelper.DUMP_TREE`
+- `com.iotpart.sqe.talkbackhelper.FOCUS_TARGET` (`targetName`, `targetType`, `targetIndex`)
+- `com.iotpart.sqe.talkbackhelper.CLICK_TARGET` (`targetName`, `targetType`, `targetIndex`, `isLongClick`)
+- `com.iotpart.sqe.talkbackhelper.CHECK_TARGET` (`targetName`, `targetType`, `targetIndex`)
+- `com.iotpart.sqe.talkbackhelper.NEXT`
+- `com.iotpart.sqe.talkbackhelper.PREV`
+- `com.iotpart.sqe.talkbackhelper.CLICK_FOCUSED`
 
 ## Stability Characteristics
 

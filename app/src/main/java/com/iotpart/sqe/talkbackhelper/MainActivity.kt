@@ -1,4 +1,4 @@
-package com.example.a11yhelper
+package com.iotpart.sqe.talkbackhelper
 
 import android.os.Bundle
 import android.widget.TextView
