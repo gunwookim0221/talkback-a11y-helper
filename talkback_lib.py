@@ -392,20 +392,25 @@ class A11yAdbClient:
         }
         parsed_type = type_map.get(str(type_).strip().lower(), str(type_).strip().lower()[:1] or "a")
         deadline = time.monotonic() + wait_
-        toggle = True
+        direction_token = str(direction_).strip().lower()
+        if direction_token == "updown":
+            current_dir = "down"
+            can_flip = True
+        elif direction_token == "downup":
+            current_dir = "up"
+            can_flip = True
+        else:
+            current_dir = direction_
+            can_flip = False
 
         while time.monotonic() <= deadline:
             if self.isin(dev, name, wait_=0, type_=parsed_type):
                 return True
 
-            direction_token = str(direction_).strip().lower()
-            if direction_token in {"updown", "downup"}:
-                step_direction = "down" if toggle else "up"
-                toggle = not toggle
-            else:
-                step_direction = direction_
-
-            self.scroll(dev, step_direction)
+            scrolled = self.scroll(dev, current_dir)
+            if not scrolled and can_flip:
+                current_dir = "up" if current_dir == "down" else "down"
+                can_flip = False
             time.sleep(0.5)
 
         return None

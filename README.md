@@ -157,6 +157,9 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
 - `scrollFind(dev, name, wait_=30, direction_='updown', type_='all')`
   - `wait_` 시간 동안 `isin(..., wait_=0)`으로 대상 존재를 먼저 확인하고, 없으면 `scroll()`을 호출해 탐색합니다.
   - `type_` 별칭을 내부 코드로 변환합니다 (`all→a`, `text→t`, `talkback→b`, `resourceid→r`).
+  - `direction_='updown'`이면 아래(`down`)부터 시작하고, 화면 끝에서 스크롤 실패(`scroll()==False`)가 발생했을 때만 위(`up`)로 **한 번만** 방향 전환합니다.
+  - `direction_='downup'`이면 위(`up`)부터 시작하고, 마찬가지로 스크롤 실패 시에만 아래(`down`)로 한 번 전환합니다.
+  - 단일 방향(`up/down/left/right` 등) 지정 시에는 방향 전환 없이 해당 방향만 유지합니다.
   - 찾으면 `True`, 타임아웃이면 `None`을 반환합니다.
 - `typing(dev, name, adbTyping=False)`
   - `adbTyping=True`면 `adb shell input text`를 사용합니다.

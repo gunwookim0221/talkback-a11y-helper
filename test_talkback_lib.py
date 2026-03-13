@@ -277,6 +277,52 @@ class TouchIsinTest(unittest.TestCase):
         self.assertEqual(scroll_mock.call_count, 2)
         isin_mock.assert_any_call("SER", "설정", wait_=0, type_="t")
 
+    def test_scrollfind_updown_flips_only_after_scroll_failure(self):
+        client = FakeA11yClient()
+        clock = {"t": 0.0}
+
+        def fake_monotonic():
+            return clock["t"]
+
+        def fake_sleep(sec: float):
+            clock["t"] += sec
+
+        with patch.object(client, "isin", return_value=False), patch.object(
+            client,
+            "scroll",
+            side_effect=[True, False, True],
+        ) as scroll_mock, patch("talkback_lib.time.monotonic", side_effect=fake_monotonic), patch(
+            "talkback_lib.time.sleep",
+            side_effect=fake_sleep,
+        ):
+            result = client.scrollFind("SER", "없음", wait_=1.1, direction_="updown", type_="all")
+
+        self.assertIsNone(result)
+        self.assertEqual([call.args[1] for call in scroll_mock.call_args_list], ["down", "down", "up"])
+
+    def test_scrollfind_downup_starts_up_and_flips_once(self):
+        client = FakeA11yClient()
+        clock = {"t": 0.0}
+
+        def fake_monotonic():
+            return clock["t"]
+
+        def fake_sleep(sec: float):
+            clock["t"] += sec
+
+        with patch.object(client, "isin", return_value=False), patch.object(
+            client,
+            "scroll",
+            side_effect=[False, False, True],
+        ) as scroll_mock, patch("talkback_lib.time.monotonic", side_effect=fake_monotonic), patch(
+            "talkback_lib.time.sleep",
+            side_effect=fake_sleep,
+        ):
+            result = client.scrollFind("SER", "없음", wait_=1.1, direction_="downup", type_="all")
+
+        self.assertIsNone(result)
+        self.assertEqual([call.args[1] for call in scroll_mock.call_args_list], ["up", "down", "down"])
+
     def test_scrollfind_timeout_returns_none(self):
         client = FakeA11yClient()
         clock = {"t": 0.0}
