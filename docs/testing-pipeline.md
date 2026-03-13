@@ -17,11 +17,11 @@
 ## Step 3 – 전체 접근성 트리 덤프
 
 ```bash
-adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.DUMP_TREE -p com.iotpart.sqe.talkbackhelper
+adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.DUMP_TREE -p com.iotpart.sqe.talkbackhelper --es reqId "dump-001"
 ```
 
-- 로그에서 `DUMP_TREE_PART ...` 조각을 우선 순서대로 합쳐 JSON으로 파싱합니다.
-- 조각 로그가 없으면 기존 `DUMP_TREE_RESULT [...]` 단일 로그를 fallback으로 파싱합니다.
+- 로그에서 `DUMP_TREE_PART <reqId> ...` 조각 중 요청 `reqId`와 일치하는 항목만 순서대로 합쳐 JSON으로 파싱합니다.
+- 조각 로그가 없으면 `DUMP_TREE_RESULT <reqId> [...]` 단일 로그를 fallback으로 파싱합니다.
 
 ## Step 4 – 타겟 노드 직접 제어
 
@@ -40,7 +40,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.CLICK_TARGET -p com.iot
 ## Step 5 – 현재 포커스 스냅샷 확인
 
 ```bash
-adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.GET_FOCUS -p com.iotpart.sqe.talkbackhelper
+adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.GET_FOCUS -p com.iotpart.sqe.talkbackhelper --es reqId "focus-001"
 ```
 
-- 포커스 스냅샷 JSON으로 최종 상태를 검증합니다.
+- 포커스 스냅샷 JSON(`reqId` 포함)으로 최종 상태를 검증합니다.
