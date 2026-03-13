@@ -121,22 +121,17 @@ object A11yNavigator {
         val targetName = query.targetName.trim()
         val targetType = query.targetType.lowercase().trim()
         val baseMatch = if (targetName.isNotBlank()) {
-            val isRegex = isRegexPattern(targetName)
+            val regexPattern = buildRegexPattern(targetName)
+            val pattern = runCatching { Regex(regexPattern) }.getOrNull()
             val byText = nodeText?.trim()?.let { text ->
-                if (isRegex) {
-                    runCatching { Regex(targetName).containsMatchIn(text) }.getOrDefault(false)
-                } else {
-                    text.contains(targetName)
-                }
+                pattern?.containsMatchIn(text) ?: false
             } == true
             val byTalkback = nodeContentDescription?.trim()?.let { text ->
-                if (isRegex) {
-                    runCatching { Regex(targetName).containsMatchIn(text) }.getOrDefault(false)
-                } else {
-                    text.contains(targetName)
-                }
+                pattern?.containsMatchIn(text) ?: false
             } == true
-            val byResourceId = isViewIdMatched(nodeViewId, targetName)
+            val byResourceId = nodeViewId?.let { viewId ->
+                pattern?.matches(viewId) ?: false
+            } ?: false
             when (targetType) {
                 "t" -> byText
                 "b" -> byTalkback
@@ -184,11 +179,7 @@ object A11yNavigator {
     }
 
     private fun isViewIdMatched(nodeViewId: String?, target: String): Boolean {
-        val regexPattern = if (isRegexPattern(target)) {
-            target
-        } else {
-            "^${Regex.escape(target)}$"
-        }
+        val regexPattern = buildRegexPattern(target)
         return nodeViewId?.let { viewId ->
             runCatching { Regex(regexPattern) }
                 .getOrNull()
@@ -202,6 +193,14 @@ object A11yNavigator {
             target.contains(".+") ||
             target.contains("^") ||
             target.contains("$")
+    }
+
+    private fun buildRegexPattern(target: String): String {
+        return if (isRegexPattern(target)) {
+            target
+        } else {
+            "^${Regex.escape(target)}$"
+        }
     }
 
     private fun nodeToJson(node: AccessibilityNodeInfo): JSONObject {
