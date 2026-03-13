@@ -35,6 +35,62 @@ class A11yNavigatorTest {
     }
 
     @Test
+    fun matchesTarget_typeT_matchesRegexPattern() {
+        val query = A11yNavigator.TargetQuery(targetName = "수면.*설정", targetType = "t", targetIndex = 0)
+
+        val matched = A11yNavigator.matchesTarget(
+            nodeText = "수면환경 설정",
+            nodeContentDescription = null,
+            nodeViewId = "com.test:id/title",
+            query = query
+        )
+
+        assertTrue(matched)
+    }
+
+    @Test
+    fun matchesTarget_typeB_matchesRegexPattern() {
+        val query = A11yNavigator.TargetQuery(targetName = "확인\\s+버튼", targetType = "b", targetIndex = 0)
+
+        val matched = A11yNavigator.matchesTarget(
+            nodeText = "버튼",
+            nodeContentDescription = "확인   버튼",
+            nodeViewId = "com.test:id/ok",
+            query = query
+        )
+
+        assertTrue(matched)
+    }
+
+    @Test
+    fun matchesTarget_typeT_returnsFalseWhenRegexIsInvalid() {
+        val query = A11yNavigator.TargetQuery(targetName = "수면[환경", targetType = "t", targetIndex = 0)
+
+        val matched = A11yNavigator.matchesTarget(
+            nodeText = "수면환경 설정",
+            nodeContentDescription = null,
+            nodeViewId = "com.test:id/title",
+            query = query
+        )
+
+        assertFalse(matched)
+    }
+
+    @Test
+    fun matchesTarget_typeB_returnsFalseWhenRegexIsInvalid() {
+        val query = A11yNavigator.TargetQuery(targetName = "확인(버튼", targetType = "b", targetIndex = 0)
+
+        val matched = A11yNavigator.matchesTarget(
+            nodeText = "버튼",
+            nodeContentDescription = "확인 버튼",
+            nodeViewId = "com.test:id/ok",
+            query = query
+        )
+
+        assertFalse(matched)
+    }
+
+    @Test
     fun matchesTarget_typeR_matchesResourceIdRegex() {
         val query = A11yNavigator.TargetQuery(targetName = "com\\.test:id/sub.*", targetType = "r", targetIndex = 0)
 
