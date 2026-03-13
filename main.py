@@ -1,4 +1,4 @@
-from test_a11y import A11yAdbClient
+from talkback_lib import A11yAdbClient
 import time
 
 def run_integration_test():

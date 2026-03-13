@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from test_a11y import (
+from talkback_lib import (
     ACTION_CHECK_TARGET,
     ACTION_CLICK_TARGET,
     ACTION_FOCUS_TARGET,
@@ -82,7 +82,7 @@ class TouchIsinTest(unittest.TestCase):
         def fake_sleep(sec: float):
             clock["t"] += sec
 
-        with patch("test_a11y.time.monotonic", side_effect=fake_monotonic), patch("test_a11y.time.sleep", side_effect=fake_sleep):
+        with patch("talkback_lib.time.monotonic", side_effect=fake_monotonic), patch("talkback_lib.time.sleep", side_effect=fake_sleep):
             ok = client.touch(dev, name="없음", wait_=1, type_="a", index_=0, long_=False)
 
         self.assertFalse(ok)
@@ -124,14 +124,14 @@ class TouchIsinTest(unittest.TestCase):
         def fake_sleep(sec: float):
             clock["t"] += sec
 
-        with patch("test_a11y.time.monotonic", side_effect=fake_monotonic), patch("test_a11y.time.sleep", side_effect=fake_sleep):
+        with patch("talkback_lib.time.monotonic", side_effect=fake_monotonic), patch("talkback_lib.time.sleep", side_effect=fake_sleep):
             client.touch("SER", name="없음", wait_=0)
 
         self.assertEqual(client.last_announcements, [])
 
         client.last_announcements = ["이전 안내"]
         client.logcat_payload = 'I/A11Y_HELPER: CHECK_TARGET_RESULT {"success":false,"reason":"not found"}'
-        with patch("test_a11y.time.monotonic", side_effect=fake_monotonic), patch("test_a11y.time.sleep", side_effect=fake_sleep):
+        with patch("talkback_lib.time.monotonic", side_effect=fake_monotonic), patch("talkback_lib.time.sleep", side_effect=fake_sleep):
             client.isin("SER", name="없음", wait_=0)
 
         self.assertEqual(client.last_announcements, [])
@@ -193,7 +193,7 @@ class TouchIsinTest(unittest.TestCase):
             client,
             "scroll",
             return_value=True,
-        ) as scroll_mock, patch("test_a11y.time.sleep", return_value=None):
+        ) as scroll_mock, patch("talkback_lib.time.sleep", return_value=None):
             ok = client.scrollFind("SER", "설정", wait_=1, direction_="updown", type_="text")
 
         self.assertTrue(ok)
@@ -211,9 +211,9 @@ class TouchIsinTest(unittest.TestCase):
             clock["t"] += sec
 
         with patch.object(client, "isin", return_value=False), patch.object(client, "scroll", return_value=True), patch(
-            "test_a11y.time.monotonic",
+            "talkback_lib.time.monotonic",
             side_effect=fake_monotonic,
-        ), patch("test_a11y.time.sleep", side_effect=fake_sleep):
+        ), patch("talkback_lib.time.sleep", side_effect=fake_sleep):
             result = client.scrollFind("SER", "없음", wait_=1, direction_="down", type_="all")
 
         self.assertIsNone(result)
@@ -247,7 +247,7 @@ class TouchIsinTest(unittest.TestCase):
         client = A11yAdbClient(start_monitor=False)
 
         with patch.object(client, "_run", return_value="mCurrentFocus=Window{u0 com.pkg/.MainActivity}"), patch(
-            "test_a11y.time.sleep",
+            "talkback_lib.time.sleep",
             return_value=None,
         ):
             result = client.waitForActivity("SER", "MainActivity", 1000)
@@ -272,7 +272,7 @@ class ClientInterfaceCompatTest(unittest.TestCase):
     def test_run_applies_default_serial_when_dev_is_missing(self):
         client = A11yAdbClient(adb_path="adb", dev_serial="R3CX40QFDBP", start_monitor=False)
 
-        with patch("test_a11y.subprocess.run") as run_mock:
+        with patch("talkback_lib.subprocess.run") as run_mock:
             run_mock.return_value.stdout = "ok"
             result = client._run(["devices"])
 
