@@ -117,4 +117,55 @@ class A11yNavigatorTest {
 
         assertFalse(matched)
     }
+
+
+    @Test
+    fun matchesTarget_additionalConditions_allMustMatch() {
+        val query = A11yNavigator.TargetQuery(
+            targetName = "",
+            targetType = "",
+            targetIndex = 0,
+            className = "Button",
+            clickable = true,
+            focusable = true,
+            targetText = "확인",
+            targetId = "com\\.test:id/ok.*"
+        )
+
+        val matched = A11yNavigator.matchesTarget(
+            nodeText = "확인",
+            nodeContentDescription = null,
+            nodeViewId = "com.test:id/ok_button",
+            nodeClassName = "android.widget.Button",
+            nodeClickable = true,
+            nodeFocusable = true,
+            query = query
+        )
+
+        assertTrue(matched)
+    }
+
+    @Test
+    fun matchesTarget_additionalConditions_returnsFalseWhenAnyFilterFails() {
+        val query = A11yNavigator.TargetQuery(
+            targetName = "",
+            targetType = "",
+            targetIndex = 0,
+            clickable = false,
+            targetText = "확인"
+        )
+
+        val matched = A11yNavigator.matchesTarget(
+            nodeText = "확인",
+            nodeContentDescription = null,
+            nodeViewId = "com.test:id/ok_button",
+            nodeClassName = "android.widget.Button",
+            nodeClickable = true,
+            nodeFocusable = true,
+            query = query
+        )
+
+        assertFalse(matched)
+    }
+
 }

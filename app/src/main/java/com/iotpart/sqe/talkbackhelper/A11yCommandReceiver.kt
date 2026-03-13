@@ -23,6 +23,11 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val EXTRA_TARGET_NAME = "targetName"
         private const val EXTRA_TARGET_TYPE = "targetType"
         private const val EXTRA_TARGET_INDEX = "targetIndex"
+        private const val EXTRA_CLASS_NAME = "className"
+        private const val EXTRA_CLICKABLE = "clickable"
+        private const val EXTRA_FOCUSABLE = "focusable"
+        private const val EXTRA_TARGET_TEXT = "targetText"
+        private const val EXTRA_TARGET_ID = "targetId"
         private const val EXTRA_IS_LONG_CLICK = "isLongClick"
         private const val EXTRA_FORWARD = "forward"
         private const val EXTRA_TEXT = "text"
@@ -111,14 +116,19 @@ class A11yCommandReceiver : BroadcastReceiver() {
         val targetName = intent.getStringExtra(EXTRA_TARGET_NAME)?.trim().orEmpty()
         val targetType = intent.getStringExtra(EXTRA_TARGET_TYPE)?.trim().orEmpty().lowercase()
         val targetIndex = intent.getIntExtra(EXTRA_TARGET_INDEX, 0)
+        val className = intent.getStringExtra(EXTRA_CLASS_NAME)?.trim().takeUnless { it.isNullOrBlank() }
+        val clickable = parseBooleanExtra(intent.getStringExtra(EXTRA_CLICKABLE))
+        val focusable = parseBooleanExtra(intent.getStringExtra(EXTRA_FOCUSABLE))
+        val targetText = intent.getStringExtra(EXTRA_TARGET_TEXT)?.trim().takeUnless { it.isNullOrBlank() }
+        val targetId = intent.getStringExtra(EXTRA_TARGET_ID)?.trim().takeUnless { it.isNullOrBlank() }
 
-        if (targetName.isBlank()) {
-            Log.w(TAG, "TARGET_ACTION_RESULT {\"success\":false,\"reason\":\"targetName is required\"}")
+        if (targetName.isNotBlank() && targetType !in setOf("t", "b", "r", "a")) {
+            Log.w(TAG, "TARGET_ACTION_RESULT {\"success\":false,\"reason\":\"targetType must be one of t,b,r,a\"}")
             return null
         }
 
-        if (targetType !in setOf("t", "b", "r", "a")) {
-            Log.w(TAG, "TARGET_ACTION_RESULT {\"success\":false,\"reason\":\"targetType must be one of t,b,r,a\"}")
+        if (targetName.isBlank() && targetType.isNotBlank()) {
+            Log.w(TAG, "TARGET_ACTION_RESULT {\"success\":false,\"reason\":\"targetType requires non-empty targetName\"}")
             return null
         }
 
@@ -127,7 +137,29 @@ class A11yCommandReceiver : BroadcastReceiver() {
             return null
         }
 
-        return A11yNavigator.TargetQuery(targetName = targetName, targetType = targetType, targetIndex = targetIndex)
+        if (targetName.isBlank() && className == null && clickable == null && focusable == null && targetText == null && targetId == null) {
+            Log.w(TAG, "TARGET_ACTION_RESULT {\"success\":false,\"reason\":\"At least one target condition is required\"}")
+            return null
+        }
+
+        return A11yNavigator.TargetQuery(
+            targetName = targetName,
+            targetType = targetType,
+            targetIndex = targetIndex,
+            className = className,
+            clickable = clickable,
+            focusable = focusable,
+            targetText = targetText,
+            targetId = targetId
+        )
+    }
+
+    private fun parseBooleanExtra(value: String?): Boolean? {
+        return when (value?.trim()?.lowercase()) {
+            "true" -> true
+            "false" -> false
+            else -> null
+        }
     }
 
     private fun handleScroll(intent: Intent) {

@@ -15,7 +15,12 @@ object A11yNavigator {
     data class TargetQuery(
         val targetName: String,
         val targetType: String,
-        val targetIndex: Int
+        val targetIndex: Int,
+        val className: String? = null,
+        val clickable: Boolean? = null,
+        val focusable: Boolean? = null,
+        val targetText: String? = null,
+        val targetId: String? = null
     )
 
     fun dumpTreeFlat(root: AccessibilityNodeInfo?): JSONArray {
@@ -108,38 +113,76 @@ object A11yNavigator {
         nodeText: String?,
         nodeContentDescription: String?,
         nodeViewId: String?,
+        nodeClassName: String? = null,
+        nodeClickable: Boolean? = null,
+        nodeFocusable: Boolean? = null,
         query: TargetQuery
     ): Boolean {
         val targetName = query.targetName.trim()
         val targetType = query.targetType.lowercase().trim()
-        val byText = nodeText?.trim()?.contains(targetName) == true
-        val byTalkback = nodeContentDescription?.trim()?.contains(targetName) == true
-        val regexSpecialChars = Regex("[\\\\.^$|?*+()\\[\\]{}]")
-        val regexPattern = if (regexSpecialChars.containsMatchIn(targetName)) {
-            targetName
+        val baseMatch = if (targetName.isNotBlank()) {
+            val byText = nodeText?.trim()?.contains(targetName) == true
+            val byTalkback = nodeContentDescription?.trim()?.contains(targetName) == true
+            val byResourceId = isViewIdMatched(nodeViewId, targetName)
+            when (targetType) {
+                "t" -> byText
+                "b" -> byTalkback
+                "r" -> byResourceId
+                "a" -> byText || byTalkback || byResourceId
+                else -> false
+            }
         } else {
-            "^${Regex.escape(targetName)}$"
+            true
         }
-        val byResourceId = nodeViewId?.let { viewId ->
-            runCatching { Regex(regexPattern) }
-                .getOrNull()
-                ?.matches(viewId)
-                ?: false
-        } ?: false
 
-        return when (targetType) {
-            "t" -> byText
-            "b" -> byTalkback
-            "r" -> byResourceId
-            "a" -> byText || byTalkback || byResourceId
-            else -> false
-        }
+        if (!baseMatch) return false
+
+        val targetTextMatch = query.targetText?.let { targetText ->
+            nodeText?.contains(targetText) == true || nodeContentDescription?.contains(targetText) == true
+        } ?: true
+        val targetIdMatch = query.targetId?.let { targetId ->
+            isViewIdMatched(nodeViewId, targetId)
+        } ?: true
+        val classNameMatch = query.className?.let { queryClassName ->
+            nodeClassName?.contains(queryClassName) == true
+        } ?: true
+        val clickableMatch = query.clickable?.let { expected ->
+            nodeClickable == expected
+        } ?: true
+        val focusableMatch = query.focusable?.let { expected ->
+            nodeFocusable == expected
+        } ?: true
+
+        return targetTextMatch && targetIdMatch && classNameMatch && clickableMatch && focusableMatch
     }
 
     private fun matchesTarget(node: AccessibilityNodeInfo, query: TargetQuery): Boolean {
         val text = node.text?.toString()
         val description = node.contentDescription?.toString()
-        return matchesTarget(text, description, node.viewIdResourceName, query)
+        return matchesTarget(
+            text,
+            description,
+            node.viewIdResourceName,
+            node.className?.toString(),
+            node.isClickable,
+            node.isFocusable,
+            query
+        )
+    }
+
+    private fun isViewIdMatched(nodeViewId: String?, target: String): Boolean {
+        val regexSpecialChars = Regex("[\\\\.^$|?*+()\\[\\]{}]")
+        val regexPattern = if (regexSpecialChars.containsMatchIn(target)) {
+            target
+        } else {
+            "^${Regex.escape(target)}$"
+        }
+        return nodeViewId?.let { viewId ->
+            runCatching { Regex(regexPattern) }
+                .getOrNull()
+                ?.matches(viewId)
+                ?: false
+        } ?: false
     }
 
     private fun nodeToJson(node: AccessibilityNodeInfo): JSONObject {
