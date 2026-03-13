@@ -8,6 +8,7 @@ import re
 import subprocess
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -120,13 +121,15 @@ class A11yAdbClient:
             raise RuntimeError(f"{label} JSON 형식이 올바르지 않습니다.")
         return parsed
 
-    def _read_log_result(self, dev: Any, prefix: str, wait_seconds: float = 2.0) -> dict[str, Any]:
+    def _read_log_result(self, dev: Any, prefix: str, req_id: str, wait_seconds: float = 2.0) -> dict[str, Any]:
         start = time.monotonic()
         while time.monotonic() - start < wait_seconds:
             logs = self._run(["logcat", "-d"], dev=dev)
-            payload = self._extract_json_payload(logs, prefix)
-            if payload:
-                return self._parse_json_payload(payload, prefix)
+            payloads = self._extract_all_payloads(logs, prefix)
+            for payload in reversed(payloads):
+                parsed = self._parse_json_payload(payload, prefix)
+                if parsed.get("reqId") == req_id:
+                    return parsed
             time.sleep(0.2)
         return {"success": False, "reason": f"{prefix} 로그를 찾지 못했습니다."}
 
@@ -222,12 +225,15 @@ class A11yAdbClient:
         while time.monotonic() <= deadline:
             self._refresh_tree_if_needed(dev)
             self._run(["logcat", "-c"], dev=dev)
+            req_id = str(uuid.uuid4())[:8]
+            extras = self._build_target_extras(name=name, type_=type_, index_=index_, long_=long_)
+            extras += ["--es", "reqId", req_id]
             self._broadcast(
                 dev,
                 ACTION_CLICK_TARGET,
-                self._build_target_extras(name=name, type_=type_, index_=index_, long_=long_),
+                extras,
             )
-            result = self._read_log_result(dev, "TARGET_ACTION_RESULT")
+            result = self._read_log_result(dev, "TARGET_ACTION_RESULT", req_id)
             if bool(result.get("success")):
                 self._wait_for_speech_if_needed(dev)
                 return True
@@ -247,12 +253,15 @@ class A11yAdbClient:
         while time.monotonic() <= deadline:
             self._refresh_tree_if_needed(dev)
             self._run(["logcat", "-c"], dev=dev)
+            req_id = str(uuid.uuid4())[:8]
+            extras = self._build_target_extras(name=name, type_=type_, index_=index_)
+            extras += ["--es", "reqId", req_id]
             self._broadcast(
                 dev,
                 ACTION_FOCUS_TARGET,
-                self._build_target_extras(name=name, type_=type_, index_=index_),
+                extras,
             )
-            result = self._read_log_result(dev, "TARGET_ACTION_RESULT")
+            result = self._read_log_result(dev, "TARGET_ACTION_RESULT", req_id)
             if bool(result.get("success")):
                 return True
             time.sleep(0.5)
@@ -268,12 +277,13 @@ class A11yAdbClient:
             forward = True
 
         self._run(["logcat", "-c"], dev=dev)
+        req_id = str(uuid.uuid4())[:8]
         self._broadcast(
             dev,
             ACTION_SCROLL,
-            ["--ez", "forward", "true" if forward else "false"],
+            ["--ez", "forward", "true" if forward else "false", "--es", "reqId", req_id],
         )
-        result = self._read_log_result(dev, "SCROLL_RESULT")
+        result = self._read_log_result(dev, "SCROLL_RESULT", req_id)
         return bool(result.get("success"))
 
     def scrollFind(self, dev, name, wait_=30, direction_='updown', type_='all'):
@@ -310,8 +320,9 @@ class A11yAdbClient:
                 return None
 
             self._run(["logcat", "-c"], dev=dev)
-            self._broadcast(dev, ACTION_SET_TEXT, ["--es", "text", self._escape_adb_string(name)])
-            result = self._read_log_result(dev, "SET_TEXT_RESULT")
+            req_id = str(uuid.uuid4())[:8]
+            self._broadcast(dev, ACTION_SET_TEXT, ["--es", "text", self._escape_adb_string(name), "--es", "reqId", req_id])
+            result = self._read_log_result(dev, "SET_TEXT_RESULT", req_id)
             if bool(result.get("success")):
                 return None
             return False
@@ -344,12 +355,15 @@ class A11yAdbClient:
         while time.monotonic() <= deadline:
             self._refresh_tree_if_needed(dev)
             self._run(["logcat", "-c"], dev=dev)
+            req_id = str(uuid.uuid4())[:8]
+            extras = self._build_target_extras(name=name, type_=type_, index_=index_)
+            extras += ["--es", "reqId", req_id]
             self._broadcast(
                 dev,
                 ACTION_CHECK_TARGET,
-                self._build_target_extras(name=name, type_=type_, index_=index_),
+                extras,
             )
-            result = self._read_log_result(dev, "CHECK_TARGET_RESULT")
+            result = self._read_log_result(dev, "CHECK_TARGET_RESULT", req_id)
             if bool(result.get("success")):
                 return True
             time.sleep(0.5)

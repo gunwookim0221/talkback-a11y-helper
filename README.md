@@ -67,6 +67,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.FOCUS_TARGET -p com.iot
 ```
 
 - logcat: `A11Y_HELPER TARGET_ACTION_RESULT {...}`
+- 병렬 실행 시 로그 상관관계를 위해 `--es reqId "<id>"`를 함께 전달할 수 있으며, 결과 JSON에도 동일한 `reqId`가 포함됩니다.
 
 ### 4) 특정 타겟 클릭/롱클릭
 
@@ -88,8 +89,8 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.CHECK_TARGET -p com.iot
 ### 6) 접근성 포커스 다음/이전 이동
 
 ```bash
-adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.NEXT -p com.iotpart.sqe.talkbackhelper
-adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.PREV -p com.iotpart.sqe.talkbackhelper
+adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.NEXT -p com.iotpart.sqe.talkbackhelper --es reqId "run-001"
+adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.PREV -p com.iotpart.sqe.talkbackhelper --es reqId "run-002"
 ```
 
 - logcat: `A11Y_HELPER NAV_RESULT {"success":...,"direction":"NEXT|PREV"}`
@@ -131,6 +132,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
 - `clear_logcat(dev=None)`
   - 외부에서 직접 호출 가능한 공개 메서드이며, 지정 단말의 logcat 버퍼를 `adb logcat -c`로 초기화합니다.
 - `touch(dev, name, wait_=5, type_='a', index_=0, long_=False)`
+  - 호출마다 내부적으로 고유 `reqId`를 생성해 브로드캐스트에 포함하고, 동일 `reqId`를 가진 결과 로그만 소비합니다.
   - 액션 시작 시 `last_announcements`를 초기화하고, `wait_` 동안 폴링하며 `CLICK_TARGET`을 전송합니다.
   - 성공 시 Smart Wait 단계에서 TalkBack 안내를 자동 수집하고 `client.last_announcements`에 저장한 뒤 `True`를 반환합니다.
   - 실패가 계속되면 0.5초 간격 재시도 후 `False`를 반환합니다.

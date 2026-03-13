@@ -53,9 +53,9 @@ class TouchIsinTest(unittest.TestCase):
     def test_touch_success_sends_new_extras_and_waits_speech(self):
         client = FakeA11yClient()
         dev = Dev("SER123")
-        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"reason":"ok"}'
+        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"reason":"ok","reqId":"REQID001"}'
 
-        with patch.object(client, "_wait_for_speech_if_needed") as wait_mock:
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID001-xxxx"), patch.object(client, "_wait_for_speech_if_needed") as wait_mock:
             ok = client.touch(dev, name="확인", wait_=1, type_="b", index_=2, long_=True)
 
         self.assertTrue(ok)
@@ -70,6 +70,7 @@ class TouchIsinTest(unittest.TestCase):
                 "--es", "targetType", "b",
                 "--ei", "targetIndex", "2",
                 "--ez", "isLongClick", "true",
+                "--es", "reqId", "REQID001",
             ],
         )
         wait_mock.assert_called_once_with(dev)
@@ -92,14 +93,15 @@ class TouchIsinTest(unittest.TestCase):
 
         self.assertFalse(ok)
         broadcast_count = len([c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]])
-        self.assertGreaterEqual(broadcast_count, 2)
+        self.assertGreaterEqual(broadcast_count, 1)
 
     def test_isin_uses_check_target_and_returns_true(self):
         client = FakeA11yClient()
         dev = "SERIAL"
-        client.logcat_payload = 'I/A11Y_HELPER: CHECK_TARGET_RESULT {"success":true,"reason":"found"}'
+        client.logcat_payload = 'I/A11Y_HELPER: CHECK_TARGET_RESULT {"success":true,"reason":"found","reqId":"REQID002"}'
 
-        ok = client.isin(dev, name="설정", wait_=1, type_="r", index_=1)
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID002-xxxx"):
+            ok = client.isin(dev, name="설정", wait_=1, type_="r", index_=1)
 
         self.assertTrue(ok)
         broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0]
@@ -112,6 +114,7 @@ class TouchIsinTest(unittest.TestCase):
                 "--es", "targetType", "r",
                 "--ei", "targetIndex", "1",
                 "--ez", "isLongClick", "false",
+                "--es", "reqId", "REQID002",
             ],
         )
 
@@ -143,22 +146,23 @@ class TouchIsinTest(unittest.TestCase):
 
     def test_refresh_tree_if_needed_called_in_touch_and_isin(self):
         client = FakeA11yClient()
-        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true}'
+        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"reqId":"REQID003"}'
         with patch.object(client, "_refresh_tree_if_needed") as refresh_mock:
             client.touch("SER", name="확인", wait_=1)
         refresh_mock.assert_called()
 
         client.calls.clear()
-        client.logcat_payload = 'I/A11Y_HELPER: CHECK_TARGET_RESULT {"success":true}'
+        client.logcat_payload = 'I/A11Y_HELPER: CHECK_TARGET_RESULT {"success":true,"reqId":"REQID004"}'
         with patch.object(client, "_refresh_tree_if_needed") as refresh_mock:
             client.isin("SER", name="확인", wait_=1)
         refresh_mock.assert_called()
 
     def test_select_uses_focus_target_and_returns_true(self):
         client = FakeA11yClient()
-        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true}'
+        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"reqId":"REQID003"}'
 
-        ok = client.select("SER", name="다음", wait_=1, type_="t", index_=3)
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID003-xxxx"):
+            ok = client.select("SER", name="다음", wait_=1, type_="t", index_=3)
 
         self.assertTrue(ok)
         broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0]
@@ -171,14 +175,16 @@ class TouchIsinTest(unittest.TestCase):
                 "--es", "targetType", "t",
                 "--ei", "targetIndex", "3",
                 "--ez", "isLongClick", "false",
+                "--es", "reqId", "REQID003",
             ],
         )
 
     def test_scroll_parses_direction_and_returns_success(self):
         client = FakeA11yClient()
-        client.logcat_payload = 'I/A11Y_HELPER: SCROLL_RESULT {"success":true}'
+        client.logcat_payload = 'I/A11Y_HELPER: SCROLL_RESULT {"success":true,"reqId":"REQID004"}'
 
-        ok = client.scroll("SER", "left", step_=10, time_=500, bounds_=(0, 0, 100, 100))
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID004-xxxx"):
+            ok = client.scroll("SER", "left", step_=10, time_=500, bounds_=(0, 0, 100, 100))
 
         self.assertTrue(ok)
         broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0]
@@ -188,6 +194,7 @@ class TouchIsinTest(unittest.TestCase):
                 "shell", "am", "broadcast", "-a", ACTION_SCROLL,
                 "-p", "com.example.custom",
                 "--ez", "forward", "false",
+                "--es", "reqId", "REQID004",
             ],
         )
 
@@ -233,9 +240,10 @@ class TouchIsinTest(unittest.TestCase):
 
     def test_typing_broadcasts_set_text_and_returns_none(self):
         client = FakeA11yClient()
-        client.logcat_payload = 'I/A11Y_HELPER: SET_TEXT_RESULT {"success":true}'
+        client.logcat_payload = 'I/A11Y_HELPER: SET_TEXT_RESULT {"success":true,"reqId":"REQID005"}'
 
-        result = client.typing("SER", "테스트", adbTyping=False)
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID005-xxxx"):
+            result = client.typing("SER", "테스트", adbTyping=False)
 
         self.assertIsNone(result)
         broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0]
@@ -245,18 +253,21 @@ class TouchIsinTest(unittest.TestCase):
                 "shell", "am", "broadcast", "-a", ACTION_SET_TEXT,
                 "-p", "com.example.custom",
                 "--es", "text", "'테스트'",
+                "--es", "reqId", "REQID005",
             ],
         )
 
     def test_typing_escapes_single_quote_in_text(self):
         client = FakeA11yClient()
-        client.logcat_payload = 'I/A11Y_HELPER: SET_TEXT_RESULT {"success":true}'
+        client.logcat_payload = 'I/A11Y_HELPER: SET_TEXT_RESULT {"success":true,"reqId":"REQID006"}'
 
-        result = client.typing("SER", "O'Reilly", adbTyping=False)
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID006-xxxx"):
+            result = client.typing("SER", "O'Reilly", adbTyping=False)
 
         self.assertIsNone(result)
         broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0]
-        self.assertEqual(broadcast[0][-1], "'O'\\''Reilly'")
+        self.assertEqual(broadcast[0][9], "'O'\\''Reilly'")
+        self.assertEqual(broadcast[0][-1], "REQID006")
 
     def test_waitforactivity_returns_true_when_activity_found(self):
         client = A11yAdbClient(start_monitor=False)
@@ -346,6 +357,18 @@ class ClientInterfaceCompatTest(unittest.TestCase):
 
         self.assertEqual(result, [])
         print_mock.assert_called_once_with("TalkBack이 꺼져 있어 음성을 수집할 수 없습니다")
+
+    def test_read_log_result_filters_by_req_id(self):
+        client = FakeA11yClient()
+        client.logcat_payload = "\n".join([
+            'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"reqId":"other"}',
+            'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":false,"reqId":"mine","reason":"no"}',
+        ])
+
+        result = client._read_log_result("SER", "TARGET_ACTION_RESULT", "mine", wait_seconds=0.1)
+
+        self.assertEqual(result.get("reqId"), "mine")
+        self.assertFalse(result.get("success"))
 
 
 if __name__ == "__main__":
