@@ -1,41 +1,102 @@
+from __future__ import annotations
+
+import os
+import subprocess
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFont
+
 from talkback_lib import A11yAdbClient
-import time
 
-def run_integration_test():
-    # 1. 클라이언트 초기화 (adb 경로 및 패키지명 확인)
-    client = A11yAdbClient()
-    
-    # 단말기 지정 (여러 대인 경우 시리얼 번호 입력)
-    dev_serial = "R3CX40QFDBP" 
-    
+
+def take_snapshot(dev_serial: str, save_path: str) -> None:
+    """ADB screencap을 수행해 현재 화면을 로컬 파일로 저장합니다."""
+    remote_path = "/sdcard/temp.png"
+    save_file = Path(save_path)
+    save_file.parent.mkdir(parents=True, exist_ok=True)
+
+    subprocess.run(
+        ["adb", "-s", dev_serial, "shell", "screencap", "-p", remote_path],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["adb", "-s", dev_serial, "pull", remote_path, str(save_file)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _save_failure_image(snapshot_path: Path, target_name: str, actual_speech: str) -> None:
+    """Fail 케이스용 이미지에 EXPECTED/ACTUAL 오버레이를 추가해 저장합니다."""
+    error_dir = Path("error_log")
+    error_dir.mkdir(parents=True, exist_ok=True)
+    fail_path = error_dir / f"fail_{target_name}.png"
+
+    base_image = Image.open(snapshot_path).convert("RGBA")
+    overlay = Image.new("RGBA", base_image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    width, height = base_image.size
+    panel_top = int(height * 0.75)
+    draw.rectangle([(0, panel_top), (width, height)], fill=(0, 0, 0, 170))
+
+    font_size = max(24, int(height * 0.03))
     try:
-        print("=== TalkBack 자동화 통합 테스트 시작 ===")
-        
-        # 2. 존재 여부 확인 (isin) 테스트
-        # 레거시 호환: name, wait_, type_, index_ 사용
-        exists = client.isin(dev_serial, name="라이프", wait_=5, type_='a')
-        print(f"[isin] '라이프' 객체 존재 여부: {exists}")
-        
-        if exists:
-            # 3. 터치 (touch) 테스트
-            # 레거시 호환: name, wait_, type_, index_, long_ 사용
-            success = client.touch(dev_serial, name="라이프", wait_=5, type_='a', index_=0)
-            print(f"[touch] '라이프' 클릭 결과: {success}")
-            
-            # 4. 음성 안내 결과 확인
-            # touch 내부에서 자동 수집되어 last_announcements에 저장됨
-            print(f"[Announcements:last] 최근 음성: {client.last_announcements}")
+        font = ImageFont.truetype("C:/Windows/Fonts/malgun.ttf", font_size)
+    except OSError:
+        font = ImageFont.load_default()
 
-            # 필요하면 logcat 버퍼 전체에서 재수집(마커 무시) 가능
-            all_announcements = client.get_announcements(dev=dev_serial, wait_seconds=2.0, only_new=False)
-            print(f"[Announcements:all-buffer] 버퍼 음성: {all_announcements}")
-            
-    except Exception as e:
-        print(f"오류 발생: {e}")
-    finally:
-        # 5. 모니터링 스레드 및 자원 정리
-        # 리팩토링된 코드에 포함된 종료 로직 호출
-        print("자원 정리 중...")
+    expected_text = f"[EXPECTED]: {target_name}"
+    actual_text = f"[ACTUAL]: {actual_speech}"
+    draw.text((20, panel_top + 20), expected_text, font=font, fill=(255, 0, 0, 255))
+    draw.text((20, panel_top + 20 + font_size + 10), actual_text, font=font, fill=(255, 0, 0, 255))
+
+    merged = Image.alpha_composite(base_image, overlay)
+    merged.convert("RGB").save(fail_path)
+
+
+def verify_talkback_speech(dev_serial: str, client: A11yAdbClient, target_name: str) -> bool:
+    """선 스냅샷/후 검증 패턴으로 TalkBack 발화를 검증합니다."""
+    temp_path = Path(f"temp_{target_name}.png")
+
+    focused = client.select(dev_serial, target_name)
+    if not focused:
+        print(f"[WARN] 타겟 포커스 실패: {target_name}")
+
+    take_snapshot(dev_serial, str(temp_path))
+
+    announcements = client.get_announcements(dev_serial, wait_seconds=3.0)
+    actual_speech = announcements[-1] if announcements else "음성 없음"
+
+    if target_name in actual_speech:
+        if temp_path.exists():
+            os.remove(temp_path)
+        return True
+
+    _save_failure_image(temp_path, target_name, actual_speech)
+    return False
+
+
+def main() -> None:
+    client = A11yAdbClient()
+    dev_serial = "R3CX40QFDBP"
+    target_name = "수면 환경"
+
+    print("=== TalkBack 선스냅샷/후검증 테스트 시작 ===")
+    found = client.scrollFind(dev_serial, target_name, direction_="down")
+    if not found:
+        print(f"[FAIL] 스크롤 탐색 실패: {target_name}")
+        return
+
+    result = verify_talkback_speech(dev_serial, client, target_name)
+    if result:
+        print(f"[PASS] 발화 검증 성공: {target_name}")
+    else:
+        print(f"[FAIL] 발화 검증 실패: {target_name} (error_log 폴더 확인)")
+
 
 if __name__ == "__main__":
-    run_integration_test()
+    main()
