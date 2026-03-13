@@ -188,3 +188,14 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
   - 2단계-헬퍼 앱 없음(Fallback): `adb shell settings get secure enabled_accessibility_services` 출력에 `com.google.android.marvin.talkback` 포함 여부로 판단합니다.
   - ADB 실패/단말 미연결 포함 예외 상황은 모두 `False`를 반환합니다.
 - 공통적으로 각 루프에서 `_refresh_tree_if_needed()`를 호출해 화면 변동(팝업 등)에 대응합니다.
+
+## 선(先) 스냅샷, 후(後) 검증 예제 (`main.py`)
+
+- `take_snapshot(dev_serial, save_path)`
+  - `adb -s <serial> shell screencap -p /sdcard/temp.png` 후 `adb -s <serial> pull /sdcard/temp.png <save_path>`를 직접 수행합니다.
+- `verify_talkback_speech(dev_serial, client, target_name)`
+  - `client.select(...)`로 포커스 이동 직후 **즉시** 스냅샷을 저장합니다.
+  - 이후 `client.get_announcements(..., wait_seconds=3.0)`로 발화를 수집하고 마지막 문장을 검증합니다.
+  - 성공 시 임시 스냅샷을 삭제하고, 실패 시 `error_log/fail_<target>.png`에 EXPECTED/ACTUAL 오버레이를 저장합니다.
+- `main()`
+  - `scrollFind(..., direction_="down")`으로 대상을 찾은 뒤 음성 검증까지 수행하는 전체 흐름을 제공합니다.
