@@ -408,10 +408,12 @@ class A11yAdbClient:
                 return True
 
             scrolled = self.scroll(dev, current_dir)
+            if scrolled:
+                self.needs_update = True
             if not scrolled and can_flip:
                 current_dir = "up" if current_dir == "down" else "down"
                 can_flip = False
-            time.sleep(0.5)
+            time.sleep(0.8)
 
         return None
 
