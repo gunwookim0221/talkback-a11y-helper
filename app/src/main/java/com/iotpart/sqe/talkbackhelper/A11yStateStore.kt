@@ -1,4 +1,4 @@
-package com.example.a11yhelper
+package com.iotpart.sqe.talkbackhelper
 
 import android.content.Context
 import android.util.Log

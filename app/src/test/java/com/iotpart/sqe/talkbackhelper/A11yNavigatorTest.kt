@@ -1,4 +1,4 @@
-package com.example.a11yhelper
+package com.iotpart.sqe.talkbackhelper
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

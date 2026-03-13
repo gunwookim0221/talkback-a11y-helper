@@ -36,16 +36,16 @@
             android:enabled="true"
             android:exported="true">
             <intent-filter>
-                <action android:name="com.example.a11yhelper.GET_FOCUS" />
-                <action android:name="com.example.a11yhelper.DUMP_TREE" />
-                <action android:name="com.example.a11yhelper.FOCUS_TARGET" />
-                <action android:name="com.example.a11yhelper.CLICK_TARGET" />
-                <action android:name="com.example.a11yhelper.CHECK_TARGET" />
-                <action android:name="com.example.a11yhelper.NEXT" />
-                <action android:name="com.example.a11yhelper.PREV" />
-                <action android:name="com.example.a11yhelper.CLICK_FOCUSED" />
-                <action android:name="com.example.a11yhelper.SCROLL" />
-                <action android:name="com.example.a11yhelper.SET_TEXT" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.GET_FOCUS" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.DUMP_TREE" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.FOCUS_TARGET" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.CLICK_TARGET" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.CHECK_TARGET" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.NEXT" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.PREV" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.CLICK_FOCUSED" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.SCROLL" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.SET_TEXT" />
             </intent-filter>
         </receiver>
 
