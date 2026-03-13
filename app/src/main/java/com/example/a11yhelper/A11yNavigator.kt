@@ -114,7 +114,18 @@ object A11yNavigator {
         val targetType = query.targetType.lowercase().trim()
         val byText = nodeText?.trim()?.contains(targetName) == true
         val byTalkback = nodeContentDescription?.trim()?.contains(targetName) == true
-        val byResourceId = nodeViewId == targetName
+        val regexSpecialChars = Regex("[\\\\.^$|?*+()\\[\\]{}]")
+        val regexPattern = if (regexSpecialChars.containsMatchIn(targetName)) {
+            targetName
+        } else {
+            "^${Regex.escape(targetName)}$"
+        }
+        val byResourceId = nodeViewId?.let { viewId ->
+            runCatching { Regex(regexPattern) }
+                .getOrNull()
+                ?.matches(viewId)
+                ?: false
+        } ?: false
 
         return when (targetType) {
             "t" -> byText
