@@ -35,7 +35,21 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun matchesTarget_typeR_matchesExactResourceId() {
+    fun matchesTarget_typeR_matchesResourceIdRegex() {
+        val query = A11yNavigator.TargetQuery(targetName = "com\\.test:id/sub.*", targetType = "r", targetIndex = 0)
+
+        val matched = A11yNavigator.matchesTarget(
+            nodeText = "제출",
+            nodeContentDescription = "제출 버튼",
+            nodeViewId = "com.test:id/submit",
+            query = query
+        )
+
+        assertTrue(matched)
+    }
+
+    @Test
+    fun matchesTarget_typeR_plainStringStillMatchesExactResourceId() {
         val query = A11yNavigator.TargetQuery(targetName = "com.test:id/submit", targetType = "r", targetIndex = 0)
 
         val matched = A11yNavigator.matchesTarget(
@@ -46,6 +60,34 @@ class A11yNavigatorTest {
         )
 
         assertTrue(matched)
+    }
+
+    @Test
+    fun matchesTarget_typeR_returnsFalseWhenRegexIsInvalid() {
+        val query = A11yNavigator.TargetQuery(targetName = "com.test:id/[submit", targetType = "r", targetIndex = 0)
+
+        val matched = A11yNavigator.matchesTarget(
+            nodeText = "제출",
+            nodeContentDescription = "제출 버튼",
+            nodeViewId = "com.test:id/submit",
+            query = query
+        )
+
+        assertFalse(matched)
+    }
+
+    @Test
+    fun matchesTarget_typeR_returnsFalseWhenNodeViewIdIsNull() {
+        val query = A11yNavigator.TargetQuery(targetName = "com\\.test:id/sub.*", targetType = "r", targetIndex = 0)
+
+        val matched = A11yNavigator.matchesTarget(
+            nodeText = "제출",
+            nodeContentDescription = "제출 버튼",
+            nodeViewId = null,
+            query = query
+        )
+
+        assertFalse(matched)
     }
 
     @Test
