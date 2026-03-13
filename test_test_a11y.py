@@ -4,6 +4,9 @@ from unittest.mock import patch
 from test_a11y import (
     ACTION_CHECK_TARGET,
     ACTION_CLICK_TARGET,
+    ACTION_FOCUS_TARGET,
+    ACTION_SCROLL,
+    ACTION_SET_TEXT,
     A11yAdbClient,
 )
 
@@ -36,6 +39,8 @@ class FakeA11yClient(A11yAdbClient):
             return self.package_list_payload
         if args == ["shell", "settings", "get", "secure", "enabled_accessibility_services"]:
             return self.enabled_services_payload
+        if args[:3] == ["shell", "input", "text"]:
+            return ""
         raise AssertionError(f"unexpected args: {args}")
 
 
@@ -143,6 +148,111 @@ class TouchIsinTest(unittest.TestCase):
         with patch.object(client, "_refresh_tree_if_needed") as refresh_mock:
             client.isin("SER", name="확인", wait_=1)
         refresh_mock.assert_called()
+
+    def test_select_uses_focus_target_and_returns_true(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true}'
+
+        ok = client.select("SER", name="다음", wait_=1, type_="t", index_=3)
+
+        self.assertTrue(ok)
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0]
+        self.assertEqual(
+            broadcast[0],
+            [
+                "shell", "am", "broadcast", "-a", ACTION_FOCUS_TARGET,
+                "-p", "com.example.custom",
+                "--es", "targetName", "다음",
+                "--es", "targetType", "t",
+                "--ei", "targetIndex", "3",
+                "--ez", "isLongClick", "false",
+            ],
+        )
+
+    def test_scroll_parses_direction_and_returns_success(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: SCROLL_RESULT {"success":true}'
+
+        ok = client.scroll("SER", "left", step_=10, time_=500, bounds_=(0, 0, 100, 100))
+
+        self.assertTrue(ok)
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0]
+        self.assertEqual(
+            broadcast[0],
+            [
+                "shell", "am", "broadcast", "-a", ACTION_SCROLL,
+                "-p", "com.example.custom",
+                "--ez", "forward", "false",
+            ],
+        )
+
+    def test_scrollfind_returns_true_when_target_appears(self):
+        client = FakeA11yClient()
+
+        with patch.object(client, "isin", side_effect=[False, False, True]) as isin_mock, patch.object(
+            client,
+            "scroll",
+            return_value=True,
+        ) as scroll_mock, patch("test_a11y.time.sleep", return_value=None):
+            ok = client.scrollFind("SER", "설정", wait_=1, direction_="updown", type_="text")
+
+        self.assertTrue(ok)
+        self.assertEqual(scroll_mock.call_count, 2)
+        isin_mock.assert_any_call("SER", "설정", wait_=0, type_="t")
+
+    def test_scrollfind_timeout_returns_none(self):
+        client = FakeA11yClient()
+        clock = {"t": 0.0}
+
+        def fake_monotonic():
+            return clock["t"]
+
+        def fake_sleep(sec: float):
+            clock["t"] += sec
+
+        with patch.object(client, "isin", return_value=False), patch.object(client, "scroll", return_value=True), patch(
+            "test_a11y.time.monotonic",
+            side_effect=fake_monotonic,
+        ), patch("test_a11y.time.sleep", side_effect=fake_sleep):
+            result = client.scrollFind("SER", "없음", wait_=1, direction_="down", type_="all")
+
+        self.assertIsNone(result)
+
+    def test_typing_runs_adb_input_when_adbtyping_true(self):
+        client = FakeA11yClient()
+
+        result = client.typing("SER", "hello world", adbTyping=True)
+
+        self.assertIsNone(result)
+        self.assertIn((['shell', 'input', 'text', 'hello world'], 'SER'), client.calls)
+
+    def test_typing_broadcasts_set_text_and_returns_none(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: SET_TEXT_RESULT {"success":true}'
+
+        result = client.typing("SER", "테스트", adbTyping=False)
+
+        self.assertIsNone(result)
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0]
+        self.assertEqual(
+            broadcast[0],
+            [
+                "shell", "am", "broadcast", "-a", ACTION_SET_TEXT,
+                "-p", "com.example.custom",
+                "--es", "text", "테스트",
+            ],
+        )
+
+    def test_waitforactivity_returns_true_when_activity_found(self):
+        client = A11yAdbClient(start_monitor=False)
+
+        with patch.object(client, "_run", return_value="mCurrentFocus=Window{u0 com.pkg/.MainActivity}"), patch(
+            "test_a11y.time.sleep",
+            return_value=None,
+        ):
+            result = client.waitForActivity("SER", "MainActivity", 1000)
+
+        self.assertTrue(result)
 
 
 class ClientInterfaceCompatTest(unittest.TestCase):
