@@ -228,6 +228,103 @@ class A11yAdbClient:
             time.sleep(0.5)
         return False
 
+    def select(
+        self,
+        dev,
+        name: str,
+        wait_: int = 5,
+        type_: str = "a",
+        index_: int = 0,
+    ) -> bool:
+        self.last_announcements = []
+        deadline = time.monotonic() + wait_
+        while time.monotonic() <= deadline:
+            self._refresh_tree_if_needed(dev)
+            self._run(["logcat", "-c"], dev=dev)
+            self._broadcast(
+                dev,
+                ACTION_FOCUS_TARGET,
+                self._build_target_extras(name=name, type_=type_, index_=index_),
+            )
+            result = self._read_log_result(dev, "TARGET_ACTION_RESULT")
+            if bool(result.get("success")):
+                return True
+            time.sleep(0.5)
+        return False
+
+    def scroll(self, dev, direction, step_=50, time_=1000, bounds_=None) -> bool:
+        _ = (step_, time_, bounds_)
+        direction_token = str(direction).strip().lower()
+        forward_tokens = {"d", "down", "r", "right"}
+        backward_tokens = {"u", "up", "l", "left"}
+        forward = True if direction_token in forward_tokens else False
+        if direction_token not in forward_tokens | backward_tokens:
+            forward = True
+
+        self._run(["logcat", "-c"], dev=dev)
+        self._broadcast(
+            dev,
+            ACTION_SCROLL,
+            ["--ez", "forward", "true" if forward else "false"],
+        )
+        result = self._read_log_result(dev, "SCROLL_RESULT")
+        return bool(result.get("success"))
+
+    def scrollFind(self, dev, name, wait_=30, direction_='updown', type_='all'):
+        type_map = {
+            "all": "a",
+            "text": "t",
+            "talkback": "b",
+            "resourceid": "r",
+        }
+        parsed_type = type_map.get(str(type_).strip().lower(), str(type_).strip().lower()[:1] or "a")
+        deadline = time.monotonic() + wait_
+        toggle = True
+
+        while time.monotonic() <= deadline:
+            if self.isin(dev, name, wait_=0, type_=parsed_type):
+                return True
+
+            direction_token = str(direction_).strip().lower()
+            if direction_token in {"updown", "downup"}:
+                step_direction = "down" if toggle else "up"
+                toggle = not toggle
+            else:
+                step_direction = direction_
+
+            self.scroll(dev, step_direction)
+            time.sleep(0.5)
+
+        return None
+
+    def typing(self, dev, name: str, adbTyping=False):
+        try:
+            if adbTyping:
+                self._run(["shell", "input", "text", name], dev=dev)
+                return None
+
+            self._run(["logcat", "-c"], dev=dev)
+            self._broadcast(dev, ACTION_SET_TEXT, ["--es", "text", name])
+            result = self._read_log_result(dev, "SET_TEXT_RESULT")
+            if bool(result.get("success")):
+                return None
+            return False
+        except Exception:
+            return False
+
+    def waitForActivity(self, dev, ActivityName: str, waitTime: int) -> bool:
+        deadline = time.monotonic() + (waitTime / 1000.0)
+        while time.monotonic() <= deadline:
+            try:
+                output = self._run(["shell", "dumpsys", "window", "windows"], dev=dev)
+            except Exception:
+                output = ""
+
+            if "mCurrentFocus" in output or ActivityName in output:
+                return True
+            time.sleep(0.2)
+        return False
+
     def isin(
         self,
         dev,

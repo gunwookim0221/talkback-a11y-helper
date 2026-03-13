@@ -137,6 +137,24 @@ adb shell am broadcast -a com.example.a11yhelper.SET_TEXT -p com.example.a11yhel
 - `isin(dev, name, wait_=5, type_='a', index_=0)`
   - 액션 시작 시 `last_announcements`를 초기화합니다.
   - `CHECK_TARGET`으로 존재 여부만 확인하며 성공 시 즉시 `True`, 타임아웃 시 `False`입니다.
+- `select(dev, name, wait_=5, type_='a', index_=0)`
+  - `touch()`와 동일한 폴링 루틴을 사용하지만 클릭 대신 `FOCUS_TARGET` 액션으로 접근성 포커스만 이동합니다.
+  - 성공 시 `True`, 타임아웃 시 `False`를 반환합니다.
+- `scroll(dev, direction, step_=50, time_=1000, bounds_=None)`
+  - 레거시 시그니처 호환을 위해 `step_`, `time_`, `bounds_` 인자는 유지하지만 내부에서는 사용하지 않습니다.
+  - `direction`이 `d/down/r/right`이면 forward 스크롤, `u/up/l/left`이면 backward 스크롤을 수행합니다.
+  - `SCROLL_RESULT` 로그의 `success` 값을 기준으로 `True/False`를 반환합니다.
+- `scrollFind(dev, name, wait_=30, direction_='updown', type_='all')`
+  - `wait_` 시간 동안 `isin(..., wait_=0)`으로 대상 존재를 먼저 확인하고, 없으면 `scroll()`을 호출해 탐색합니다.
+  - `type_` 별칭을 내부 코드로 변환합니다 (`all→a`, `text→t`, `talkback→b`, `resourceid→r`).
+  - 찾으면 `True`, 타임아웃이면 `None`을 반환합니다.
+- `typing(dev, name, adbTyping=False)`
+  - `adbTyping=True`면 `adb shell input text`를 사용합니다.
+  - 기본값(`False`)에서는 `SET_TEXT` 브로드캐스트로 현재 포커스된 입력창에 텍스트를 설정합니다.
+  - 성공 시 `None`, 실패 시 `False`를 반환합니다.
+- `waitForActivity(dev, ActivityName, waitTime)`
+  - `waitTime`(ms) 동안 `adb shell dumpsys window windows`를 폴링합니다.
+  - 출력에 `mCurrentFocus` 또는 `ActivityName`이 포함되면 즉시 `True`, 타임아웃이면 `False`를 반환합니다.
 - `dump_tree(dev=None, wait_seconds=5.0)`
   - 액션 시작 시 `last_announcements`를 초기화합니다.
   - 긴 트리 로그(`DUMP_TREE_PART`)를 여러 줄로 수집한 뒤 모두 병합하여 JSON으로 파싱합니다.
