@@ -298,7 +298,7 @@ class TouchIsinTest(unittest.TestCase):
             result = client.scrollFind("SER", "없음", wait_=1.1, direction_="updown", type_="all")
 
         self.assertIsNone(result)
-        self.assertEqual([call.args[1] for call in scroll_mock.call_args_list], ["down", "down", "up"])
+        self.assertEqual([call.args[1] for call in scroll_mock.call_args_list], ["down", "down"])
 
     def test_scrollfind_downup_starts_up_and_flips_once(self):
         client = FakeA11yClient()
@@ -321,8 +321,51 @@ class TouchIsinTest(unittest.TestCase):
             result = client.scrollFind("SER", "없음", wait_=1.1, direction_="downup", type_="all")
 
         self.assertIsNone(result)
-        self.assertEqual([call.args[1] for call in scroll_mock.call_args_list], ["up", "down", "down"])
+        self.assertEqual([call.args[1] for call in scroll_mock.call_args_list], ["up", "down"])
 
+
+    def test_scrollfind_marks_tree_dirty_only_when_scrolled(self):
+        client = FakeA11yClient()
+        client.needs_update = False
+        clock = {"t": 0.0}
+
+        def fake_monotonic():
+            return clock["t"]
+
+        def fake_sleep(sec: float):
+            clock["t"] += sec
+
+        with patch.object(client, "isin", return_value=False), patch.object(
+            client,
+            "scroll",
+            side_effect=[False, True],
+        ), patch("talkback_lib.time.monotonic", side_effect=fake_monotonic), patch(
+            "talkback_lib.time.sleep",
+            side_effect=fake_sleep,
+        ):
+            client.scrollFind("SER", "없음", wait_=1.1, direction_="down", type_="all")
+
+        self.assertTrue(client.needs_update)
+
+    def test_scrollfind_waits_0_8_seconds_between_scrolls(self):
+        client = FakeA11yClient()
+        sleeps = []
+        clock = {"t": 0.0}
+
+        def fake_monotonic():
+            return clock["t"]
+
+        def fake_sleep(sec: float):
+            sleeps.append(sec)
+            clock["t"] += sec
+
+        with patch.object(client, "isin", return_value=False), patch.object(client, "scroll", return_value=False), patch(
+            "talkback_lib.time.monotonic",
+            side_effect=fake_monotonic,
+        ), patch("talkback_lib.time.sleep", side_effect=fake_sleep):
+            client.scrollFind("SER", "없음", wait_=0.81, direction_="down", type_="all")
+
+        self.assertIn(0.8, sleeps)
     def test_scrollfind_timeout_returns_none(self):
         client = FakeA11yClient()
         clock = {"t": 0.0}
