@@ -19,6 +19,8 @@ class FakeA11yClient(A11yAdbClient):
         self.calls = []
         self.logcat_payload = ""
         self.needs_update = False
+        self.package_list_payload = "package:com.example.custom"
+        self.enabled_services_payload = ""
 
     def _run(self, args, dev=None, timeout: float = 10.0):  # pylint: disable=unused-argument
         self.calls.append((args, dev))
@@ -30,6 +32,10 @@ class FakeA11yClient(A11yAdbClient):
             return self.logcat_payload
         if args == ["logcat", "-v", "time", "-d"]:
             return self.logcat_payload
+        if args == ["shell", "pm", "list", "packages"]:
+            return self.package_list_payload
+        if args == ["shell", "settings", "get", "secure", "enabled_accessibility_services"]:
+            return self.enabled_services_payload
         raise AssertionError(f"unexpected args: {args}")
 
 
@@ -183,6 +189,38 @@ class ClientInterfaceCompatTest(unittest.TestCase):
             result = client.dump_tree(dev="R3CX40QFDBP", wait_seconds=0.1)
 
         self.assertEqual(result, [{"id": 1}, {"id": 2}])
+
+    def test_check_talkback_status_uses_helper_logs_when_helper_installed(self):
+        client = FakeA11yClient()
+        client.package_list_payload = "package:com.example.custom\npackage:other"
+        client.logcat_payload = "01-01 00:00:00.000 I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 안내"
+
+        self.assertTrue(client.check_talkback_status(dev="SER"))
+
+    def test_check_talkback_status_falls_back_to_settings_without_helper(self):
+        client = FakeA11yClient()
+        client.package_list_payload = "package:com.other"
+        client.enabled_services_payload = "service:a:b:com.google.android.marvin.talkback/.TalkBackService"
+
+        self.assertTrue(client.check_talkback_status(dev="SER"))
+
+    def test_check_talkback_status_returns_false_on_adb_failure(self):
+        client = A11yAdbClient(start_monitor=False)
+
+        def fail_run(args, dev=None, timeout=10.0):  # pylint: disable=unused-argument
+            raise RuntimeError("adb failed")
+
+        with patch.object(client, "_run", side_effect=fail_run):
+            self.assertFalse(client.check_talkback_status(dev="SER"))
+
+    def test_get_announcements_logs_message_when_talkback_is_off(self):
+        client = A11yAdbClient(start_monitor=False)
+
+        with patch.object(client, "check_talkback_status", return_value=False), patch("builtins.print") as print_mock:
+            result = client.get_announcements(dev="SER", wait_seconds=0.0)
+
+        self.assertEqual(result, [])
+        print_mock.assert_called_once_with("TalkBack이 꺼져 있어 음성을 수집할 수 없습니다")
 
 
 if __name__ == "__main__":

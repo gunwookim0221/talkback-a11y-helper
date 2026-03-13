@@ -141,7 +141,14 @@ adb shell am broadcast -a com.example.a11yhelper.SET_TEXT -p com.example.a11yhel
   - 액션 시작 시 `last_announcements`를 초기화합니다.
   - 긴 트리 로그(`DUMP_TREE_PART`)를 여러 줄로 수집한 뒤 모두 병합하여 JSON으로 파싱합니다.
 - `get_announcements(dev=None, wait_seconds=2.0, only_new=True)`
+  - 수집 전에 `check_talkback_status(dev)`로 TalkBack 활성 여부를 확인합니다.
+  - 비활성으로 판단되면 `"TalkBack이 꺼져 있어 음성을 수집할 수 없습니다"`를 출력하고 빈 리스트를 반환합니다.
   - `only_new=True`(기본): 내부 마커 이후의 새 `A11Y_ANNOUNCEMENT`만 수집합니다.
   - `only_new=False`: 마커를 무시하고 현재 logcat 버퍼의 전체 안내를 수집합니다.
   - 수집 결과는 반환값과 함께 `client.last_announcements`에도 항상 저장됩니다.
+- `check_talkback_status(dev=None) -> bool`
+  - 1단계: `adb shell pm list packages`로 헬퍼 앱(`com.example.a11yhelper`) 설치 여부를 먼저 확인합니다.
+  - 2단계-헬퍼 앱 있음: 최근 `logcat`에 `A11Y_ANNOUNCEMENT` 로그가 있는지 확인해 상태를 판단합니다.
+  - 2단계-헬퍼 앱 없음(Fallback): `adb shell settings get secure enabled_accessibility_services` 출력에 `com.google.android.marvin.talkback` 포함 여부로 판단합니다.
+  - ADB 실패/단말 미연결 포함 예외 상황은 모두 `False`를 반환합니다.
 - 공통적으로 각 루프에서 `_refresh_tree_if_needed()`를 호출해 화면 변동(팝업 등)에 대응합니다.
