@@ -124,10 +124,11 @@ class A11yHelperService : AccessibilityService() {
         Log.i(TAG, "DUMP_TREE_END")
     }
 
-    fun performTargetAction(query: A11yNavigator.TargetQuery, action: Int): JSONObject {
+    fun performTargetAction(query: A11yNavigator.TargetQuery, action: Int, reqId: String = "none"): JSONObject {
         val outcome = A11yNavigator.findAndPerformAction(rootInActiveWindow, query, action)
         val resultJson = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
+            put("reqId", reqId)
             put("success", outcome.success)
             put("reason", outcome.reason)
             put(
@@ -152,10 +153,11 @@ class A11yHelperService : AccessibilityService() {
         return resultJson
     }
 
-    fun checkTarget(query: A11yNavigator.TargetQuery): JSONObject {
+    fun checkTarget(query: A11yNavigator.TargetQuery, reqId: String = "none"): JSONObject {
         val outcome = A11yNavigator.findTarget(rootInActiveWindow, query)
         val resultJson = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
+            put("reqId", reqId)
             put("success", outcome.success)
             put("reason", outcome.reason)
             put("action", "CHECK_TARGET")
@@ -168,13 +170,14 @@ class A11yHelperService : AccessibilityService() {
         return resultJson
     }
 
-    fun moveFocus(forward: Boolean): JSONObject {
+    fun moveFocus(forward: Boolean, reqId: String = "none"): JSONObject {
         val currentNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         val targetNode = currentNode?.focusSearch(if (forward) View.FOCUS_FORWARD else View.FOCUS_BACKWARD)
         val success = targetNode?.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS) == true
 
         val resultJson = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
+            put("reqId", reqId)
             put("success", success)
             put("direction", if (forward) "NEXT" else "PREV")
         }
@@ -186,12 +189,13 @@ class A11yHelperService : AccessibilityService() {
         return resultJson
     }
 
-    fun clickFocusedNode(): JSONObject {
+    fun clickFocusedNode(reqId: String = "none"): JSONObject {
         val focusedNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         val success = focusedNode?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
 
         val resultJson = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
+            put("reqId", reqId)
             put("success", success)
             put("action", "CLICK_FOCUSED")
         }
@@ -203,7 +207,7 @@ class A11yHelperService : AccessibilityService() {
         return resultJson
     }
 
-    fun performScroll(forward: Boolean): JSONObject {
+    fun performScroll(forward: Boolean, reqId: String = "none"): JSONObject {
         val focusedNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         var scrollNode = focusedNode
 
@@ -220,6 +224,7 @@ class A11yHelperService : AccessibilityService() {
 
         val resultJson = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
+            put("reqId", reqId)
             put("success", success)
             put("action", if (forward) "SCROLL_FORWARD" else "SCROLL_BACKWARD")
             put("hasFocusedNode", focusedNode != null)
@@ -230,7 +235,7 @@ class A11yHelperService : AccessibilityService() {
         return resultJson
     }
 
-    fun performSetText(text: String): JSONObject {
+    fun performSetText(text: String, reqId: String = "none"): JSONObject {
         val focusedNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
@@ -239,6 +244,7 @@ class A11yHelperService : AccessibilityService() {
 
         val resultJson = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
+            put("reqId", reqId)
             put("success", success)
             put("action", "SET_TEXT")
             put("text", text)

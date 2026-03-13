@@ -26,6 +26,8 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val EXTRA_IS_LONG_CLICK = "isLongClick"
         private const val EXTRA_FORWARD = "forward"
         private const val EXTRA_TEXT = "text"
+        private const val EXTRA_REQ_ID = "reqId"
+        private const val DEFAULT_REQ_ID = "none"
     }
 
     override fun onReceive(context: Context, intent: Intent?) {
@@ -43,9 +45,9 @@ class A11yCommandReceiver : BroadcastReceiver() {
                 handleTargetAction(intent, actionType)
             }
             ACTION_CHECK_TARGET -> handleCheckTarget(intent)
-            ACTION_NEXT -> A11yHelperService.instance?.moveFocus(true)
-            ACTION_PREV -> A11yHelperService.instance?.moveFocus(false)
-            ACTION_CLICK_FOCUSED -> A11yHelperService.instance?.clickFocusedNode()
+            ACTION_NEXT -> A11yHelperService.instance?.moveFocus(true, parseReqId(intent))
+            ACTION_PREV -> A11yHelperService.instance?.moveFocus(false, parseReqId(intent))
+            ACTION_CLICK_FOCUSED -> A11yHelperService.instance?.clickFocusedNode(parseReqId(intent))
             ACTION_SCROLL -> handleScroll(intent)
             ACTION_SET_TEXT -> handleSetText(intent)
             else -> Unit
@@ -87,7 +89,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         }
 
         val query = parseQuery(intent) ?: return
-        service.performTargetAction(query, action)
+        service.performTargetAction(query, action, parseReqId(intent))
     }
 
     private fun handleCheckTarget(intent: Intent) {
@@ -98,7 +100,11 @@ class A11yCommandReceiver : BroadcastReceiver() {
         }
 
         val query = parseQuery(intent) ?: return
-        service.checkTarget(query)
+        service.checkTarget(query, parseReqId(intent))
+    }
+
+    private fun parseReqId(intent: Intent): String {
+        return intent.getStringExtra(EXTRA_REQ_ID)?.trim().takeUnless { it.isNullOrBlank() } ?: DEFAULT_REQ_ID
     }
 
     private fun parseQuery(intent: Intent): A11yNavigator.TargetQuery? {
@@ -132,7 +138,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         }
 
         val forward = intent.getBooleanExtra(EXTRA_FORWARD, true)
-        service.performScroll(forward)
+        service.performScroll(forward, parseReqId(intent))
     }
 
     private fun handleSetText(intent: Intent) {
@@ -148,6 +154,6 @@ class A11yCommandReceiver : BroadcastReceiver() {
             return
         }
 
-        service.performSetText(text)
+        service.performSetText(text, parseReqId(intent))
     }
 }
