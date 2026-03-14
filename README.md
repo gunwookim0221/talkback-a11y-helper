@@ -150,6 +150,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
 - `isin(dev, name, wait_=5, type_='a', index_=0, class_name=None, clickable=None, focusable=None)`
   - 액션 시작 시 `last_announcements`를 초기화합니다.
   - 브로드캐스트 전 `dump_tree()` 결과의 **전체 노드**를 전수 조사해 사전 매칭을 수행합니다.
+  - `type_='text'`/`'t'` 매칭은 `text`뿐 아니라 `contentDescription`도 함께 검색하며, 대소문자를 구분하지 않습니다.
   - `CHECK_TARGET`으로 존재 여부만 확인하며 성공 시 즉시 `True`, 타임아웃 시 `False`입니다.
   - `targetName` 문자열은 대소문자 구분 없는 정규식 매칭으로 처리됩니다. `select()/isin()/트리 사전 매칭` 모두 `(?i)` + `re.IGNORECASE` 기준으로 동작하며, `Pet.*`는 `pet`, `Pets`, `PET` 모두 매칭됩니다.
   - 매칭 실패 시 현재 화면에서 수집한 텍스트 노드 전체를 `"현재 화면 텍스트: [...]"` 형태로 디버그 출력합니다.
@@ -161,6 +162,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
   - 레거시 시그니처 호환을 위해 `step_`, `time_`, `bounds_` 인자는 유지하지만 내부에서는 사용하지 않습니다.
   - `direction`을 `d/down→down`, `u/up→up`, `r/right→right`, `l/left→left`로 정규화해 브로드캐스트의 `direction` extra로 전달합니다.
   - 정규화된 방향 기준으로 `down/right`는 forward, `up/left`는 backward를 사용합니다.
+  - `ACTION_SCROLL` 전송 직후, 결과 판독 전 **항상 `1.5초` 대기**하여 시스템 노드 데이터 동기화 시간을 확보합니다.
   - `SCROLL_RESULT` 로그의 `success` 값을 기준으로 `True/False`를 반환합니다.
 - `scrollFind(dev, name, wait_=30, direction_='updown', type_='all')`
   - `wait_` 시간 동안 `isin(..., wait_=0)`으로 대상 존재를 먼저 확인하고, 없으면 `scroll()`을 호출해 탐색합니다.
@@ -169,10 +171,9 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
   - `direction_='downup'`이면 위(`up`)부터 시작하고, 마찬가지로 스크롤 실패 시에만 아래(`down`)로 한 번 전환합니다.
   - 단일 방향(`up/down/left/right` 등) 지정 시에는 방향 전환 없이 해당 방향만 유지합니다.
   - 스크롤이 실제로 성공(`scroll()==True`)하면 `needs_update=True`로 표시해 다음 `isin()`에서 UI 트리를 강제로 최신화합니다. 스크롤 실패 시에는 불필요한 트리 갱신을 유발하지 않습니다.
-  - 매 스크롤 시도 전/후로 `dump_tree()`를 수행하고, 노드의 `텍스트 + boundsInScreen(위치)` 조합 변화 여부를 기준으로 화면 변화를 판단합니다. 상단 고정 UI 오판을 줄이기 위해 하단부 노드 비교를 별도로 강화했습니다.
+  - 매 스크롤 시도 전/후로 `dump_tree()`를 수행하고, 노드의 `텍스트 + boundsInScreen(위치)` 조합 변화 여부를 기준으로 화면 변화를 판단합니다. 이때 화면 전체가 아니라 **상단 15%/하단 15%를 제외한 중앙 70% 영역**만 비교해, 고정 탭 바가 있어도 실제 리스트 이동을 안정적으로 감지합니다.
   - 변화가 없으면 `"화면 끝 도달 감지: 스크롤 전/후 텍스트/위치 변화가 없습니다."` 로그를 출력하고 즉시 중단합니다.
-  - 스크롤 시도 시 `top5` 대신 현재 화면의 **텍스트가 있는 전체 노드 수**와 **하단부 텍스트 노드 샘플(bottom5)** 을 로그 출력합니다.
-  - `scroll()` 성공 시 TalkBack 포커스/트리 안정화를 위해 내부에서 `2.0초` 대기한 뒤 결과를 반환합니다.
+  - 스크롤 시도 시 중앙 영역 기준으로 **텍스트 노드 개수**와 **중앙 70% 영역 텍스트 목록**을 로그 출력합니다.
   - `scrollFind()` 루프는 각 시도 사이에 `0.8초` 대기합니다.
   - 찾으면 `True`, 타임아웃이면 `None`을 반환합니다.
 - `typing(dev, name, adbTyping=False)`

@@ -340,8 +340,8 @@ class A11yAdbClient:
         key_map = {
             "a": ("text", "contentDescription", "talkback", "content_desc", "label", "viewIdResourceName", "resourceId"),
             "all": ("text", "contentDescription", "talkback", "content_desc", "label", "viewIdResourceName", "resourceId"),
-            "t": ("text",),
-            "text": ("text",),
+            "t": ("text", "contentDescription"),
+            "text": ("text", "contentDescription"),
             "b": ("talkback", "contentDescription", "content_desc", "label"),
             "talkback": ("talkback", "contentDescription", "content_desc", "label"),
             "r": ("viewIdResourceName", "resourceId"),
@@ -421,6 +421,84 @@ class A11yAdbClient:
         return -1
 
     @staticmethod
+    def _parse_bounds_tuple(bounds: str) -> tuple[int, int, int, int] | None:
+        nums = [int(x) for x in re.findall(r"-?\d+", bounds)]
+        if len(nums) >= 4:
+            return nums[0], nums[1], nums[2], nums[3]
+        return None
+
+    @staticmethod
+    def _center_viewport_vertical_range(nodes: list[dict[str, Any]]) -> tuple[float, float]:
+        tops: list[int] = []
+        bottoms: list[int] = []
+
+        def visit(node: Any) -> None:
+            if not isinstance(node, dict):
+                return
+
+            parsed = A11yAdbClient._parse_bounds_tuple(A11yAdbClient._normalize_bounds(node))
+            if parsed:
+                _, top, _, bottom = parsed
+                tops.append(top)
+                bottoms.append(bottom)
+
+            children = node.get("children")
+            if isinstance(children, list):
+                for child in children:
+                    visit(child)
+
+        for item in nodes:
+            visit(item)
+
+        if not tops or not bottoms:
+            return 0.0, 0.0
+
+        viewport_top = min(tops)
+        viewport_bottom = max(bottoms)
+        viewport_height = max(0, viewport_bottom - viewport_top)
+
+        center_top = viewport_top + (viewport_height * 0.15)
+        center_bottom = viewport_bottom - (viewport_height * 0.15)
+        return center_top, center_bottom
+
+    @staticmethod
+    def _collect_center_region_text_nodes_with_bounds(nodes: list[dict[str, Any]]) -> list[tuple[str, str]]:
+        center_top, center_bottom = A11yAdbClient._center_viewport_vertical_range(nodes)
+        pairs: list[tuple[str, str]] = []
+
+        def visit(node: Any) -> None:
+            if not isinstance(node, dict):
+                return
+
+            bounds = A11yAdbClient._normalize_bounds(node)
+            parsed = A11yAdbClient._parse_bounds_tuple(bounds)
+            if parsed:
+                _, top, _, bottom = parsed
+                center_y = (top + bottom) / 2.0
+
+                text_candidates = [
+                    node.get("text"),
+                    node.get("contentDescription"),
+                    node.get("talkback"),
+                    node.get("content_desc"),
+                    node.get("label"),
+                ]
+                text = next((str(value).strip() for value in text_candidates if isinstance(value, str) and value.strip()), "")
+
+                if text and center_top <= center_y <= center_bottom:
+                    pairs.append((text, bounds))
+
+            children = node.get("children")
+            if isinstance(children, list):
+                for child in children:
+                    visit(child)
+
+        for item in nodes:
+            visit(item)
+
+        return pairs
+
+    @staticmethod
     def _collect_text_nodes_with_bounds(nodes: list[dict[str, Any]]) -> list[tuple[str, str]]:
         pairs: list[tuple[str, str]] = []
 
@@ -449,15 +527,14 @@ class A11yAdbClient:
 
     @staticmethod
     def _has_screen_meaningful_change(before_nodes: list[dict[str, Any]], after_nodes: list[dict[str, Any]]) -> bool:
-        before_pairs = A11yAdbClient._collect_text_nodes_with_bounds(before_nodes)
-        after_pairs = A11yAdbClient._collect_text_nodes_with_bounds(after_nodes)
+        before_pairs = A11yAdbClient._collect_center_region_text_nodes_with_bounds(before_nodes)
+        after_pairs = A11yAdbClient._collect_center_region_text_nodes_with_bounds(after_nodes)
 
-        if set(before_pairs) != set(after_pairs):
-            return True
+        if not before_pairs and not after_pairs:
+            before_pairs = A11yAdbClient._collect_text_nodes_with_bounds(before_nodes)
+            after_pairs = A11yAdbClient._collect_text_nodes_with_bounds(after_nodes)
 
-        before_bottom = sorted(before_pairs, key=lambda item: A11yAdbClient._parse_bottom_from_bounds(item[1]), reverse=True)[:8]
-        after_bottom = sorted(after_pairs, key=lambda item: A11yAdbClient._parse_bottom_from_bounds(item[1]), reverse=True)[:8]
-        return before_bottom != after_bottom
+        return set(before_pairs) != set(after_pairs)
 
     @staticmethod
     def _safe_regex_search(pattern: str, value: str) -> bool:
@@ -485,10 +562,10 @@ class A11yAdbClient:
         return False
 
     def _log_scrollfind_text_nodes(self, nodes: list[dict[str, Any]]) -> None:
-        text_pairs = self._collect_text_nodes_with_bounds(nodes)
-        print(f"[DEBUG][scrollFind] 현재 화면 텍스트 노드 개수: {len(text_pairs)}")
-        bottom_samples = sorted(text_pairs, key=lambda item: self._parse_bottom_from_bounds(item[1]), reverse=True)[:5]
-        print(f"[DEBUG][scrollFind] 하단부 텍스트 노드 샘플(bottom5): {bottom_samples}")
+        center_pairs = self._collect_center_region_text_nodes_with_bounds(nodes)
+        center_texts = [text for text, _ in center_pairs]
+        print(f"[DEBUG][scrollFind] 중앙 70% 영역 텍스트 노드 개수: {len(center_pairs)}")
+        print(f"[DEBUG][scrollFind] 중앙 70% 영역 텍스트 목록: {center_texts}")
 
     def _log_visible_text_samples(self, dev: Any, max_samples: int = 10) -> None:
         try:
@@ -616,11 +693,9 @@ class A11yAdbClient:
                 "--es", "reqId", req_id,
             ],
         )
+        time.sleep(1.5)
         result = self._read_log_result(dev, "SCROLL_RESULT", req_id)
-        if bool(result.get("success")):
-            time.sleep(2.0)
-            return True
-        return False
+        return bool(result.get("success"))
 
     def scrollFind(self, dev, name, wait_=30, direction_='updown', type_='all'):
         if not self.check_helper_status(dev=dev):
