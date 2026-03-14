@@ -49,6 +49,9 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## ADB 사용 예시
 
+
+> 보안 제한: `A11yCommandReceiver`는 `android.permission.DUMP` 권한 송신자만 브로드캐스트를 보낼 수 있도록 제한됩니다(ADB shell/시스템 권한 앱).
+
 ### 1) 현재 포커스 JSON 요청
 
 ```bash

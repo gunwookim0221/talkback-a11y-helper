@@ -102,7 +102,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
             return
         }
 
-        val query = parseQuery(intent) ?: return
+        val query = parseQuery(intent, reqId) ?: return
         service.performTargetAction(query, action, reqId)
     }
 
@@ -114,7 +114,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
             return
         }
 
-        val query = parseQuery(intent) ?: return
+        val query = parseQuery(intent, reqId) ?: return
         service.checkTarget(query, reqId)
     }
 
@@ -146,7 +146,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         return intent.getStringExtra(EXTRA_REQ_ID)?.trim().takeUnless { it.isNullOrBlank() } ?: DEFAULT_REQ_ID
     }
 
-    private fun parseQuery(intent: Intent): A11yNavigator.TargetQuery? {
+    private fun parseQuery(intent: Intent, reqId: String): A11yNavigator.TargetQuery? {
         val targetName = intent.getStringExtra(EXTRA_TARGET_NAME)?.trim().orEmpty()
         val targetType = intent.getStringExtra(EXTRA_TARGET_TYPE)?.trim().orEmpty().lowercase()
         val targetIndex = intent.getIntExtra(EXTRA_TARGET_INDEX, 0)
@@ -157,22 +157,22 @@ class A11yCommandReceiver : BroadcastReceiver() {
         val targetId = intent.getStringExtra(EXTRA_TARGET_ID)?.trim().takeUnless { it.isNullOrBlank() }
 
         if (targetName.isNotBlank() && targetType !in setOf("t", "b", "r", "a")) {
-            Log.w(TAG, "TARGET_ACTION_RESULT {\"success\":false,\"reason\":\"targetType must be one of t,b,r,a\"}")
+            logFailure("TARGET_ACTION_RESULT", reqId, "targetType must be one of t,b,r,a")
             return null
         }
 
         if (targetName.isBlank() && targetType.isNotBlank()) {
-            Log.w(TAG, "TARGET_ACTION_RESULT {\"success\":false,\"reason\":\"targetType requires non-empty targetName\"}")
+            logFailure("TARGET_ACTION_RESULT", reqId, "targetType requires non-empty targetName")
             return null
         }
 
         if (targetIndex < 0) {
-            Log.w(TAG, "TARGET_ACTION_RESULT {\"success\":false,\"reason\":\"targetIndex must be >= 0\"}")
+            logFailure("TARGET_ACTION_RESULT", reqId, "targetIndex must be >= 0")
             return null
         }
 
         if (targetName.isBlank() && className == null && clickable == null && focusable == null && targetText == null && targetId == null) {
-            Log.w(TAG, "TARGET_ACTION_RESULT {\"success\":false,\"reason\":\"At least one target condition is required\"}")
+            logFailure("TARGET_ACTION_RESULT", reqId, "At least one target condition is required")
             return null
         }
 
@@ -219,7 +219,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
 
         val text = intent.getStringExtra(EXTRA_TEXT)
         if (text == null) {
-            Log.w(TAG, "SET_TEXT_RESULT {\"success\":false,\"reason\":\"Missing text extra\"}")
+            logFailure("SET_TEXT_RESULT", reqId, "Missing text extra")
             return
         }
 

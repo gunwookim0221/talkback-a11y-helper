@@ -34,7 +34,8 @@
         <receiver
             android:name=".A11yCommandReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="true"
+            android:permission="android.permission.DUMP">
             <intent-filter>
                 <action android:name="com.iotpart.sqe.talkbackhelper.GET_FOCUS" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.DUMP_TREE" />
@@ -46,6 +47,7 @@
                 <action android:name="com.iotpart.sqe.talkbackhelper.CLICK_FOCUSED" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.SCROLL" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.SET_TEXT" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.PING" />
             </intent-filter>
         </receiver>
 
