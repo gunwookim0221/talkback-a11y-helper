@@ -946,5 +946,49 @@ class HelperStatusGuardTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual([c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]], [])
 
+class VerifySpeechTest(unittest.TestCase):
+    def test_verify_speech_success_deletes_temp_snapshot(self):
+        client = A11yAdbClient(start_monitor=False)
+
+        with patch.object(client, "_take_snapshot") as snap_mock, patch.object(
+            client, "get_announcements", return_value=["Pet detail card"]
+        ), patch("talkback_lib.os.remove") as remove_mock, patch("talkback_lib.Path.exists", return_value=True):
+            ok = client.verify_speech("SER", expected_regex="Pet.*")
+
+        self.assertTrue(ok)
+        snap_mock.assert_called_once_with("SER", "temp_Pet__.png")
+        remove_mock.assert_called_once_with(Path("temp_Pet__.png"))
+
+    def test_verify_speech_failure_saves_error_snapshot(self):
+        client = A11yAdbClient(start_monitor=False)
+
+        with patch.object(client, "_take_snapshot"), patch.object(
+            client, "get_announcements", return_value=["다른 문장"]
+        ), patch.object(client, "_save_failure_image") as save_mock, patch("talkback_lib.Path.exists", return_value=True):
+            ok = client.verify_speech("SER", expected_regex="Pet.*")
+
+        self.assertFalse(ok)
+        save_mock.assert_called_once_with(Path("temp_Pet__.png"), "Pet.*", "다른 문장")
+
+    def test_save_failure_image_sanitizes_windows_filename_chars(self):
+        client = A11yAdbClient(start_monitor=False)
+        snapshot_path = Path("dummy.png")
+
+        image_mock = unittest.mock.MagicMock()
+        image_mock.convert.return_value = image_mock
+        alpha_mock = unittest.mock.MagicMock()
+        alpha_mock.convert.return_value = alpha_mock
+
+        with patch("talkback_lib.Image.open", return_value=image_mock), patch(
+            "talkback_lib.Image.new", return_value=unittest.mock.MagicMock()
+        ), patch("talkback_lib.ImageDraw.Draw"), patch("talkback_lib.ImageFont.truetype", side_effect=OSError), patch(
+            "talkback_lib.ImageFont.load_default", return_value=unittest.mock.MagicMock()
+        ), patch("talkback_lib.Image.alpha_composite", return_value=alpha_mock):
+            client._save_failure_image(snapshot_path, 'Pet:/\*?"<>|', "actual")
+
+        saved_path = alpha_mock.convert.return_value.save.call_args.args[0]
+        self.assertEqual(saved_path, Path("error_log/fail_Pet_________.png"))
+
+
 if __name__ == "__main__":
     unittest.main()

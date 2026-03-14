@@ -245,18 +245,17 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
   - 2단계-헬퍼 앱 없음(Fallback): `adb shell settings get secure enabled_accessibility_services` 출력에 `com.google.android.marvin.talkback` 포함 여부로 판단합니다.
   - ADB 실패/단말 미연결 포함 예외 상황은 모두 `False`를 반환합니다.
 - `touch/select/scroll/scrollFind/typing/isin/dump_tree`는 공통적으로 시작 시 `check_helper_status()`를 먼저 확인하며, 비활성 상태면 즉시 실패(`False` 또는 빈 리스트)를 반환합니다.
+- `verify_speech(dev, expected_regex, wait_seconds=3.0, take_error_snapshot=True)`
+  - `expected_regex`를 파일명에 안전한 문자열로 정규화한 뒤 임시 스냅샷(`temp_<safe_name>.png`)을 생성합니다.
+  - `get_announcements()`로 발화를 수집한 뒤 마지막 문장에 대해 `re.search(expected_regex, actual_speech, re.IGNORECASE)`로 검증합니다.
+  - 성공 시 임시 스냅샷을 삭제하고 `True`를 반환합니다.
+  - 실패 시 `take_error_snapshot=True`인 경우 `error_log/fail_<sanitized_target>.png`에 EXPECTED/ACTUAL 오버레이 이미지를 저장하고 `False`를 반환합니다.
 - 공통적으로 각 루프에서 `_refresh_tree_if_needed()`를 호출해 화면 변동(팝업 등)에 대응합니다.
 - 내부 `_run(args, dev=None, timeout=30.0)`의 기본 타임아웃은 30초이며, `returncode != 0`일 때 예외 대신 에러 로그를 출력하고 빈 문자열을 반환합니다.
 
 ## 선(先) 스냅샷, 후(後) 검증 예제 (`main.py`)
 
-- `take_snapshot(dev_serial, save_path)`
-  - `adb -s <serial> shell screencap -p /sdcard/temp.png` 후 `adb -s <serial> pull /sdcard/temp.png <save_path>`를 직접 수행합니다.
-- `verify_talkback_speech(dev_serial, client, target_name)`
-  - `client.select(...)`로 포커스 이동 직후 **즉시** 스냅샷을 저장합니다.
-  - 이후 `client.get_announcements(..., wait_seconds=3.0)`로 발화를 수집하고 마지막 문장을 검증합니다.
-  - 파일 저장 전 `target_name`의 윈도우 금지 문자(`* ? \ / : < > | "`)를 `_`로 치환한 안전한 이름을 사용합니다.
-  - 성공 시 임시 스냅샷을 삭제하고, 실패 시 `error_log/fail_<sanitized_target>.png`에 EXPECTED/ACTUAL 오버레이를 저장합니다.
 - `main()`
   - 시작 시 `check_helper_status()`를 먼저 확인하고, 비활성 상태면 안내 문구 출력 후 `sys.exit(1)`로 안전 종료합니다.
-  - 활성 상태에서 `scrollFind(..., direction_="down")`으로 대상을 찾은 뒤 음성 검증까지 수행하는 전체 흐름을 제공합니다.
+  - 활성 상태에서 `scrollFind(..., direction_="down")`으로 대상을 찾습니다.
+  - 발화 검증 전에 `client.select(dev_serial, target_name)`를 먼저 호출해 타겟 포커스를 맞춘 뒤, `client.verify_speech(dev_serial, expected_regex=target_name)` 결과로 PASS/FAIL을 판별합니다.

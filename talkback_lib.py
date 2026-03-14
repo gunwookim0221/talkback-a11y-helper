@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import hashlib
 import subprocess
@@ -11,7 +12,10 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+
+from PIL import Image, ImageDraw, ImageFont
 
 ACTION_DUMP_TREE = "com.iotpart.sqe.talkbackhelper.DUMP_TREE"
 ACTION_GET_FOCUS = "com.iotpart.sqe.talkbackhelper.GET_FOCUS"
@@ -227,6 +231,69 @@ class A11yAdbClient:
         except subprocess.TimeoutExpired:
             print("[WARN] logcat -c timed out, skipping...")
             return ""
+
+    def _take_snapshot(self, dev: Any, save_path: str) -> None:
+        """ADB screencap을 수행해 현재 화면을 로컬 파일로 저장합니다."""
+        remote_path = "/sdcard/temp.png"
+        save_file = Path(save_path)
+        save_file.parent.mkdir(parents=True, exist_ok=True)
+
+        self._run(["shell", "screencap", "-p", remote_path], dev=dev)
+        self._run(["pull", remote_path, str(save_file)], dev=dev)
+
+    def _save_failure_image(self, snapshot_path: Path, target_name: str, actual_speech: str) -> None:
+        """Fail 케이스용 이미지에 EXPECTED/ACTUAL 오버레이를 추가해 저장합니다."""
+        error_dir = Path("error_log")
+        error_dir.mkdir(parents=True, exist_ok=True)
+        safe_target_name = re.sub(r'[\\/*?:"<>|]', "_", target_name)
+        fail_path = error_dir / f"fail_{safe_target_name}.png"
+
+        base_image = Image.open(snapshot_path).convert("RGBA")
+        overlay = Image.new("RGBA", base_image.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+
+        width, height = base_image.size
+        panel_top = int(height * 0.75)
+        draw.rectangle([(0, panel_top), (width, height)], fill=(0, 0, 0, 170))
+
+        font_size = max(24, int(height * 0.03))
+        try:
+            font = ImageFont.truetype("C:/Windows/Fonts/malgun.ttf", font_size)
+        except OSError:
+            font = ImageFont.load_default()
+
+        expected_text = f"[EXPECTED]: {target_name}"
+        actual_text = f"[ACTUAL]: {actual_speech}"
+        draw.text((20, panel_top + 20), expected_text, font=font, fill=(255, 0, 0, 255))
+        draw.text((20, panel_top + 20 + font_size + 10), actual_text, font=font, fill=(255, 0, 0, 255))
+
+        merged = Image.alpha_composite(base_image, overlay)
+        merged.convert("RGB").save(fail_path)
+
+    def verify_speech(
+        self,
+        dev,
+        expected_regex: str,
+        wait_seconds: float = 3.0,
+        take_error_snapshot: bool = True,
+    ) -> bool:
+        safe_name = re.sub(r"[^0-9A-Za-z가-힣._-]", "_", expected_regex)
+        safe_name = safe_name.strip(" ._") or "target"
+        temp_path = Path(f"temp_{safe_name}.png")
+
+        self._take_snapshot(dev, str(temp_path))
+
+        announcements = self.get_announcements(dev=dev, wait_seconds=wait_seconds)
+        actual_speech = announcements[-1] if announcements else "음성 없음"
+
+        if re.search(expected_regex, actual_speech, re.IGNORECASE):
+            if temp_path.exists():
+                os.remove(temp_path)
+            return True
+
+        if take_error_snapshot and temp_path.exists():
+            self._save_failure_image(temp_path, expected_regex, actual_speech)
+        return False
 
     def check_talkback_status(self, dev: Any = None) -> bool:
         """TalkBack 활성화 상태를 확인합니다.
