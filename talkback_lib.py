@@ -765,7 +765,7 @@ class A11yAdbClient:
 
         scroll_attempt = 0
         while time.monotonic() <= deadline:
-            if self.isin(dev, name, wait_=0, type_=parsed_type):
+            if self.isin(dev, name, wait_=1, type_=parsed_type):
                 return True
 
             scroll_attempt += 1
