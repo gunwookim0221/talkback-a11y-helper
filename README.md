@@ -235,7 +235,8 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
 - `verify_talkback_speech(dev_serial, client, target_name)`
   - `client.select(...)`로 포커스 이동 직후 **즉시** 스냅샷을 저장합니다.
   - 이후 `client.get_announcements(..., wait_seconds=3.0)`로 발화를 수집하고 마지막 문장을 검증합니다.
-  - 성공 시 임시 스냅샷을 삭제하고, 실패 시 `error_log/fail_<target>.png`에 EXPECTED/ACTUAL 오버레이를 저장합니다.
+  - 파일 저장 전 `target_name`의 윈도우 금지 문자(`* ? \ / : < > | "`)를 `_`로 치환한 안전한 이름을 사용합니다.
+  - 성공 시 임시 스냅샷을 삭제하고, 실패 시 `error_log/fail_<sanitized_target>.png`에 EXPECTED/ACTUAL 오버레이를 저장합니다.
 - `main()`
   - 시작 시 `check_helper_status()`를 먼저 확인하고, 비활성 상태면 안내 문구 출력 후 `sys.exit(1)`로 안전 종료합니다.
   - 활성 상태에서 `scrollFind(..., direction_="down")`으로 대상을 찾은 뒤 음성 검증까지 수행하는 전체 흐름을 제공합니다.
