@@ -435,7 +435,7 @@ class TouchIsinTest(unittest.TestCase):
     def test_scrollselect_calls_select_when_scrollfind_succeeds(self):
         client = FakeA11yClient()
 
-        with patch.object(client, "scrollFind", return_value=True) as find_mock, patch.object(client, "select", return_value=True) as select_mock:
+        with patch.object(client, "scrollFind", return_value=True) as find_mock, patch.object(client, "select", return_value=True) as select_mock, patch("talkback_lib.time.sleep") as sleep_mock:
             ok = client.scrollSelect(
                 "SER",
                 name="설정",
@@ -450,10 +450,11 @@ class TouchIsinTest(unittest.TestCase):
 
         self.assertTrue(ok)
         find_mock.assert_called_once_with("SER", "설정", wait_=12, direction_="down", type_="text")
+        sleep_mock.assert_called_once_with(1.0)
         select_mock.assert_called_once_with(
             "SER",
             "설정",
-            wait_=2,
+            wait_=5,
             type_="text",
             index_=1,
             class_name="android.widget.TextView",
@@ -473,7 +474,7 @@ class TouchIsinTest(unittest.TestCase):
     def test_scrolltouch_calls_touch_when_scrollfind_succeeds(self):
         client = FakeA11yClient()
 
-        with patch.object(client, "scrollFind", return_value=True) as find_mock, patch.object(client, "touch", return_value=True) as touch_mock:
+        with patch.object(client, "scrollFind", return_value=True) as find_mock, patch.object(client, "touch", return_value=True) as touch_mock, patch("talkback_lib.time.sleep") as sleep_mock:
             ok = client.scrollTouch(
                 "SER",
                 name="확인",
@@ -489,10 +490,11 @@ class TouchIsinTest(unittest.TestCase):
 
         self.assertTrue(ok)
         find_mock.assert_called_once_with("SER", "확인", wait_=8, direction_="updown", type_="all")
+        sleep_mock.assert_called_once_with(1.0)
         touch_mock.assert_called_once_with(
             "SER",
             "확인",
-            wait_=2,
+            wait_=5,
             type_="all",
             index_=2,
             long_=True,
@@ -869,19 +871,22 @@ class ClientInterfaceCompatTest(unittest.TestCase):
 
         self.assertEqual(result, [{"id": 3}])
 
-    def test_check_talkback_status_uses_helper_logs_when_helper_installed(self):
+    def test_check_talkback_status_returns_true_when_talkback_enabled(self):
         client = FakeA11yClient()
-        client.package_list_payload = "package:com.example.custom\npackage:other"
-        client.logcat_payload = "01-01 00:00:00.000 I/A11Y_HELPER: A11Y_ANNOUNCEMENT: 안내"
-
-        self.assertTrue(client.check_talkback_status(dev="SER"))
-
-    def test_check_talkback_status_falls_back_to_settings_without_helper(self):
-        client = FakeA11yClient()
-        client.package_list_payload = "package:com.other"
         client.enabled_services_payload = "service:a:b:com.google.android.marvin.talkback/.TalkBackService"
 
         self.assertTrue(client.check_talkback_status(dev="SER"))
+        self.assertIn(
+            (["shell", "settings", "get", "secure", "enabled_accessibility_services"], "SER"),
+            client.calls,
+        )
+        self.assertNotIn((['shell', 'pm', 'list', 'packages'], 'SER'), client.calls)
+
+    def test_check_talkback_status_returns_false_when_talkback_disabled(self):
+        client = FakeA11yClient()
+        client.enabled_services_payload = "service:a:b:com.example.custom/.A11yService"
+
+        self.assertFalse(client.check_talkback_status(dev="SER"))
 
     def test_check_talkback_status_returns_false_on_adb_failure(self):
         client = A11yAdbClient(start_monitor=False)
