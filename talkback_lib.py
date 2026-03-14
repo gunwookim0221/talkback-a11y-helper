@@ -296,11 +296,6 @@ class A11yAdbClient:
         return False
 
     def check_talkback_status(self, dev: Any = None) -> bool:
-        """TalkBack 활성화 상태를 확인합니다.
-
-        enabled_accessibility_services에 TalkBack 서비스 패키지가 포함되어 있으면 True,
-        그렇지 않거나 ADB 조회가 실패하면 False를 반환합니다.
-        """
         try:
             enabled_services = self._run(
                 ["shell", "settings", "get", "secure", "enabled_accessibility_services"],
@@ -308,8 +303,8 @@ class A11yAdbClient:
             )
         except Exception:
             return False
-
-        return "com.google.android.marvin.talkback" in enabled_services
+    
+        return "talkback" in enabled_services.lower()
 
     def dump_tree(self, dev: Any = None, wait_seconds: float = 5.0) -> list[dict[str, Any]]:
         if not self.check_helper_status(dev=dev):
