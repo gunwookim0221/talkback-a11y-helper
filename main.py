@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -84,6 +85,10 @@ def main() -> None:
     client = A11yAdbClient()
     dev_serial = "R3CX40QFDBP"
     target_name = "수면 환경"
+
+    if not client.check_helper_status(dev_serial):
+        print("[GUIDE] 헬퍼 앱 접근성 서비스 활성화 후 다시 실행해 주세요.")
+        sys.exit(1)
 
     print("=== TalkBack 선스냅샷/후검증 테스트 시작 ===")
     found = client.scrollFind(dev_serial, target_name, direction_="down")

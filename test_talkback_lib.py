@@ -25,7 +25,7 @@ class FakeA11yClient(A11yAdbClient):
         self.logcat_payload = ""
         self.needs_update = False
         self.package_list_payload = "package:com.example.custom"
-        self.enabled_services_payload = ""
+        self.enabled_services_payload = "foo:com.example.custom/.A11yService"
 
     def _run(self, args, dev=None, timeout: float = 30.0):  # pylint: disable=unused-argument
         self.calls.append((args, dev))
@@ -471,6 +471,8 @@ class ClientInterfaceCompatTest(unittest.TestCase):
 
         with patch("talkback_lib.subprocess.run") as run_mock:
             run_mock.return_value.stdout = "ok"
+            run_mock.return_value.returncode = 0
+            run_mock.return_value.stderr = ""
             result = client._run(["devices"])
 
         self.assertEqual(result, "ok")
@@ -490,7 +492,7 @@ class ClientInterfaceCompatTest(unittest.TestCase):
             ]
         )
 
-        with patch("talkback_lib.uuid.uuid4", return_value="REQID801-xxxx"), patch.object(client, "clear_logcat", return_value=""), patch.object(client, "_broadcast", return_value="ok") as broadcast_mock, patch.object(
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID801-xxxx"), patch.object(client, "check_helper_status", return_value=True), patch.object(client, "clear_logcat", return_value=""), patch.object(client, "_broadcast", return_value="ok") as broadcast_mock, patch.object(
             client,
             "_run",
             return_value=log_payload,
@@ -505,7 +507,7 @@ class ClientInterfaceCompatTest(unittest.TestCase):
         client = A11yAdbClient(start_monitor=False)
         log_payload = "A11Y_HELPER DUMP_TREE_RESULT REQID802 [{\"id\":3}]\nA11Y_HELPER DUMP_TREE_END REQID802"
 
-        with patch("talkback_lib.uuid.uuid4", return_value="REQID802-xxxx"), patch.object(client, "clear_logcat", return_value=""), patch.object(client, "_broadcast", return_value="ok"), patch.object(
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID802-xxxx"), patch.object(client, "check_helper_status", return_value=True), patch.object(client, "clear_logcat", return_value=""), patch.object(client, "_broadcast", return_value="ok"), patch.object(
             client,
             "_run",
             return_value=log_payload,
@@ -558,6 +560,38 @@ class ClientInterfaceCompatTest(unittest.TestCase):
         self.assertEqual(result.get("reqId"), "mine")
         self.assertFalse(result.get("success"))
 
+
+
+
+class HelperStatusGuardTest(unittest.TestCase):
+    def test_check_helper_status_true_when_service_enabled(self):
+        client = FakeA11yClient()
+        client.enabled_services_payload = "foo:com.example.custom/.A11yService:bar"
+
+        self.assertTrue(client.check_helper_status(dev="SER"))
+
+    def test_check_helper_status_prints_colored_error_when_disabled(self):
+        client = FakeA11yClient()
+        client.enabled_services_payload = "foo:bar"
+
+        with patch("builtins.print") as print_mock:
+            result = client.check_helper_status(dev="SER")
+
+        self.assertFalse(result)
+        print_mock.assert_called_once()
+        printed = print_mock.call_args.args[0]
+        self.assertIn("\033[91m", printed)
+        self.assertIn("헬퍼 앱의 접근성 서비스가 꺼져 있습니다", printed)
+        self.assertIn("\033[0m", printed)
+
+    def test_touch_returns_false_without_action_when_helper_disabled(self):
+        client = FakeA11yClient()
+
+        with patch.object(client, "check_helper_status", return_value=False):
+            ok = client.touch("SER", name="확인")
+
+        self.assertFalse(ok)
+        self.assertEqual([c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]], [])
 
 if __name__ == "__main__":
     unittest.main()

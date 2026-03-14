@@ -168,6 +168,8 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
   - 스크롤 직후에는 TalkBack 포커스/트리 안정화를 위해 `0.8초` 대기합니다.
   - 찾으면 `True`, 타임아웃이면 `None`을 반환합니다.
 - `typing(dev, name, adbTyping=False)`
+  - 실행 시작 전 `check_helper_status(dev)`를 호출해 헬퍼 앱 접근성 서비스 활성 여부를 확인합니다.
+  - 비활성 상태면 즉시 `False`를 반환하고 실제 입력/브로드캐스트는 수행하지 않습니다.
   - `adbTyping=True`면 `adb shell input text`를 사용합니다.
   - 기본값(`False`)에서는 `SET_TEXT` 브로드캐스트로 현재 포커스된 입력창에 텍스트를 설정합니다.
   - 성공 시 `None`, 실패 시 `False`를 반환합니다.
@@ -184,13 +186,17 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
   - `only_new=False`: 마커를 무시하고 현재 logcat 버퍼의 전체 안내를 수집합니다.
   - 로그 조회 시 `A11Y_HELPER:V A11Y_ANNOUNCEMENT:V *:S` 필터를 사용해 필요한 태그만 읽습니다.
   - 수집 결과는 반환값과 함께 `client.last_announcements`에도 항상 저장됩니다.
+- `check_helper_status(dev=None) -> bool`
+  - `adb shell settings get secure enabled_accessibility_services`에서 헬퍼 앱 패키지(`com.iotpart.sqe.talkbackhelper`) 포함 여부를 확인합니다.
+  - 꺼져 있으면 빨간색 ANSI 강조로 다음 문구를 출력합니다: `⚠️ [ERROR] 헬퍼 앱의 접근성 서비스가 꺼져 있습니다. '설정 > 접근성 > 설치된 앱'에서 활성화해 주세요.`
 - `check_talkback_status(dev=None) -> bool`
   - 1단계: `adb shell pm list packages`로 헬퍼 앱(`com.iotpart.sqe.talkbackhelper`) 설치 여부를 먼저 확인합니다.
   - 2단계-헬퍼 앱 있음: 최근 `logcat`에 `A11Y_ANNOUNCEMENT` 로그가 있는지 확인해 상태를 판단합니다.
   - 2단계-헬퍼 앱 없음(Fallback): `adb shell settings get secure enabled_accessibility_services` 출력에 `com.google.android.marvin.talkback` 포함 여부로 판단합니다.
   - ADB 실패/단말 미연결 포함 예외 상황은 모두 `False`를 반환합니다.
+- `touch/select/scroll/scrollFind/typing/isin/dump_tree`는 공통적으로 시작 시 `check_helper_status()`를 먼저 확인하며, 비활성 상태면 즉시 실패(`False` 또는 빈 리스트)를 반환합니다.
 - 공통적으로 각 루프에서 `_refresh_tree_if_needed()`를 호출해 화면 변동(팝업 등)에 대응합니다.
-- 내부 `_run(args, dev=None, timeout=30.0)`의 기본 타임아웃은 30초입니다.
+- 내부 `_run(args, dev=None, timeout=30.0)`의 기본 타임아웃은 30초이며, `returncode != 0`일 때 예외 대신 에러 로그를 출력하고 빈 문자열을 반환합니다.
 
 ## 선(先) 스냅샷, 후(後) 검증 예제 (`main.py`)
 
@@ -201,4 +207,5 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
   - 이후 `client.get_announcements(..., wait_seconds=3.0)`로 발화를 수집하고 마지막 문장을 검증합니다.
   - 성공 시 임시 스냅샷을 삭제하고, 실패 시 `error_log/fail_<target>.png`에 EXPECTED/ACTUAL 오버레이를 저장합니다.
 - `main()`
-  - `scrollFind(..., direction_="down")`으로 대상을 찾은 뒤 음성 검증까지 수행하는 전체 흐름을 제공합니다.
+  - 시작 시 `check_helper_status()`를 먼저 확인하고, 비활성 상태면 안내 문구 출력 후 `sys.exit(1)`로 안전 종료합니다.
+  - 활성 상태에서 `scrollFind(..., direction_="down")`으로 대상을 찾은 뒤 음성 검증까지 수행하는 전체 흐름을 제공합니다.

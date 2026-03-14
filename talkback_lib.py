@@ -25,6 +25,8 @@ ACTION_SET_TEXT = "com.iotpart.sqe.talkbackhelper.SET_TEXT"
 LOG_TAG = "A11Y_HELPER"
 LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
+RED_TEXT = "\033[91m"
+RESET_TEXT = "\033[0m"
 
 
 @dataclass
@@ -58,14 +60,34 @@ class A11yAdbClient:
         cmd += args
         proc = subprocess.run(
             cmd,
-            check=True,
+            check=False,
             text=True,
             capture_output=True,
             timeout=timeout,
             encoding="utf-8",
             errors="ignore",
         )
+        if proc.returncode != 0:
+            stderr = (proc.stderr or "").strip()
+            print(f"[ERROR] 명령 실행 실패(returncode={proc.returncode}): {' '.join(cmd)}")
+            if stderr:
+                print(f"[ERROR] stderr: {stderr}")
+            return ""
         return proc.stdout.strip()
+
+    def check_helper_status(self, dev: Any = None) -> bool:
+        enabled_services = self._run(
+            ["shell", "settings", "get", "secure", "enabled_accessibility_services"],
+            dev=dev,
+        )
+        helper_enabled = self.package_name in enabled_services
+        if not helper_enabled:
+            print(
+                f"{RED_TEXT}⚠️ [ERROR] 헬퍼 앱의 접근성 서비스가 꺼져 있습니다. "
+                "'설정 > 접근성 > 설치된 앱'에서 활성화해 주세요."
+                f"{RESET_TEXT}"
+            )
+        return helper_enabled
 
     def _broadcast(self, dev: Any, action: str, extras: list[str] | None = None) -> str:
         cmd = ["shell", "am", "broadcast", "-a", action, "-p", self.package_name]
@@ -221,6 +243,8 @@ class A11yAdbClient:
         return "com.google.android.marvin.talkback" in enabled_services
 
     def dump_tree(self, dev: Any = None, wait_seconds: float = 5.0) -> list[dict[str, Any]]:
+        if not self.check_helper_status(dev=dev):
+            return []
         self.last_announcements = []
         self.clear_logcat(dev=dev)
         req_id = str(uuid.uuid4())[:8]
@@ -287,6 +311,8 @@ class A11yAdbClient:
         clickable: bool = None,
         focusable: bool = None,
     ) -> bool:
+        if not self.check_helper_status(dev=dev):
+            return False
         self.last_announcements = []
         deadline = time.monotonic() + wait_
         while time.monotonic() <= deadline:
@@ -329,6 +355,8 @@ class A11yAdbClient:
         clickable: bool = None,
         focusable: bool = None,
     ) -> bool:
+        if not self.check_helper_status(dev=dev):
+            return False
         self.last_announcements = []
         deadline = time.monotonic() + wait_
         while time.monotonic() <= deadline:
@@ -359,6 +387,8 @@ class A11yAdbClient:
         return False
 
     def scroll(self, dev, direction, step_=50, time_=1000, bounds_=None) -> bool:
+        if not self.check_helper_status(dev=dev):
+            return False
         _ = (step_, time_, bounds_)
         direction_token = str(direction).strip().lower()
 
@@ -389,6 +419,8 @@ class A11yAdbClient:
         return bool(result.get("success"))
 
     def scrollFind(self, dev, name, wait_=30, direction_='updown', type_='all'):
+        if not self.check_helper_status(dev=dev):
+            return False
         type_map = {
             "all": "a",
             "text": "t",
@@ -423,6 +455,8 @@ class A11yAdbClient:
         return None
 
     def typing(self, dev, name: str, adbTyping=False):
+        if not self.check_helper_status(dev=dev):
+            return False
         try:
             if adbTyping:
                 self._run(["shell", "input", "text", self._escape_adb_string(name)], dev=dev)
@@ -462,6 +496,8 @@ class A11yAdbClient:
         clickable: bool = None,
         focusable: bool = None,
     ) -> bool:
+        if not self.check_helper_status(dev=dev):
+            return False
         self.last_announcements = []
         deadline = time.monotonic() + wait_
         while time.monotonic() <= deadline:

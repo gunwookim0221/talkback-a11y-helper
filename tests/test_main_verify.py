@@ -7,9 +7,10 @@ from types import SimpleNamespace
 
 
 class DummyClient:
-    def __init__(self, announcements=None, select_result=True):
+    def __init__(self, announcements=None, select_result=True, helper_enabled=True):
         self.announcements = announcements or []
         self.select_result = select_result
+        self.helper_enabled = helper_enabled
         self.calls = []
 
     def select(self, dev_serial, target_name):
@@ -19,6 +20,10 @@ class DummyClient:
     def get_announcements(self, dev_serial, wait_seconds=0.0):
         self.calls.append(("get_announcements", dev_serial, wait_seconds))
         return self.announcements
+
+    def check_helper_status(self, dev_serial):
+        self.calls.append(("check_helper_status", dev_serial))
+        return self.helper_enabled
 
 
 def _load_main_with_fake_pil(monkeypatch):
@@ -113,3 +118,22 @@ def test_verify_talkback_speech_fail_creates_error_log(monkeypatch, tmp_path):
 
     assert result is False
     assert (Path("error_log") / "fail_수면 환경.png").exists()
+
+
+def test_main_exits_when_helper_service_disabled(monkeypatch):
+    main = _load_main_with_fake_pil(monkeypatch)
+    dummy = DummyClient(helper_enabled=False)
+
+    monkeypatch.setattr(main, "A11yAdbClient", lambda: dummy)
+
+    with monkeypatch.context() as m:
+        m.setattr(main.sys, "exit", lambda code=0: (_ for _ in ()).throw(SystemExit(code)))
+        try:
+            main.main()
+            raised = None
+        except SystemExit as exc:
+            raised = exc
+
+    assert raised is not None
+    assert raised.code == 1
+    assert dummy.calls == [("check_helper_status", "R3CX40QFDBP")]
