@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
 import subprocess
 import threading
 import time
@@ -174,7 +175,7 @@ class A11yAdbClient:
                 parsed = self._parse_json_payload(payload, prefix)
                 if parsed.get("reqId") == req_id:
                     return parsed
-            time.sleep(0.2)
+            time.sleep(0.8)
         return {"success": False, "reason": f"{prefix} 로그를 찾지 못했습니다."}
 
     @staticmethod
@@ -330,6 +331,45 @@ class A11yAdbClient:
         return samples
 
     @staticmethod
+    def _collect_all_text_nodes(nodes: list[dict[str, Any]]) -> list[str]:
+        return A11yAdbClient._collect_text_samples(nodes, max_samples=10_000)
+
+    @staticmethod
+    def _collect_matching_values(nodes: list[dict[str, Any]], type_: str) -> list[str]:
+        normalized = str(type_).strip().lower()
+        key_map = {
+            "a": ("text", "contentDescription", "talkback", "content_desc", "label", "viewIdResourceName", "resourceId"),
+            "all": ("text", "contentDescription", "talkback", "content_desc", "label", "viewIdResourceName", "resourceId"),
+            "t": ("text",),
+            "text": ("text",),
+            "b": ("talkback", "contentDescription", "content_desc", "label"),
+            "talkback": ("talkback", "contentDescription", "content_desc", "label"),
+            "r": ("viewIdResourceName", "resourceId"),
+            "resourceid": ("viewIdResourceName", "resourceId"),
+        }
+        target_keys = key_map.get(normalized, key_map["a"])
+        values: list[str] = []
+
+        def visit(node: Any) -> None:
+            if not isinstance(node, dict):
+                return
+            for key in target_keys:
+                value = node.get(key)
+                if isinstance(value, str):
+                    stripped = value.strip()
+                    if stripped:
+                        values.append(stripped)
+            children = node.get("children")
+            if isinstance(children, list):
+                for child in children:
+                    visit(child)
+
+        for item in nodes:
+            visit(item)
+
+        return values
+
+    @staticmethod
     def _normalize_case_insensitive_pattern(name: str | list[str]) -> str | list[str]:
         if isinstance(name, list):
             return [A11yAdbClient._normalize_case_insensitive_pattern(item) for item in name]
@@ -342,11 +382,37 @@ class A11yAdbClient:
     def _tree_signature(nodes: list[dict[str, Any]]) -> str:
         return json.dumps(nodes, ensure_ascii=False, sort_keys=True)
 
+    @staticmethod
+    def _tree_node_hashes(nodes: list[dict[str, Any]]) -> list[str]:
+        hashes: list[str] = []
+
+        def visit(node: Any) -> None:
+            if not isinstance(node, dict):
+                return
+            canonical = json.dumps(node, ensure_ascii=False, sort_keys=True)
+            hashes.append(hashlib.sha1(canonical.encode("utf-8")).hexdigest())
+            children = node.get("children")
+            if isinstance(children, list):
+                for child in children:
+                    visit(child)
+
+        for item in nodes:
+            visit(item)
+        return hashes
+
+    def _match_target_in_tree(self, nodes: list[dict[str, Any]], name: str, type_: str) -> bool:
+        candidates = self._collect_matching_values(nodes, type_)
+        try:
+            return any(re.search(name, text, re.IGNORECASE) for text in candidates)
+        except re.error:
+            escaped_name = re.escape(name)
+            return any(re.search(escaped_name, text, re.IGNORECASE) for text in candidates)
+
     def _log_visible_text_samples(self, dev: Any, max_samples: int = 10) -> None:
         try:
             tree_nodes = self.dump_tree(dev=dev)
-            samples = self._collect_text_samples(tree_nodes, max_samples=max_samples)
-            print(f"[DEBUG][isin] 현재 화면 텍스트 노드 샘플(최대 {max_samples}개): {samples}")
+            samples = self._collect_all_text_nodes(tree_nodes)
+            print(f"[DEBUG][isin] 현재 화면 텍스트: {samples}")
         except Exception as exc:
             print(f"[DEBUG][isin] 텍스트 노드 샘플 수집 실패: {exc}")
 
@@ -469,7 +535,10 @@ class A11yAdbClient:
             ],
         )
         result = self._read_log_result(dev, "SCROLL_RESULT", req_id)
-        return bool(result.get("success"))
+        if bool(result.get("success")):
+            time.sleep(1.5)
+            return True
+        return False
 
     def scrollFind(self, dev, name, wait_=30, direction_='updown', type_='all'):
         if not self.check_helper_status(dev=dev):
@@ -518,6 +587,13 @@ class A11yAdbClient:
                 print("[DEBUG][scrollFind] 화면 끝 도달 감지: 스크롤 전/후 덤프가 동일합니다.")
                 break
 
+            if before_tree is not None and after_tree is not None:
+                same_hashes = self._tree_node_hashes(before_tree) == self._tree_node_hashes(after_tree)
+                same_texts = self._collect_all_text_nodes(before_tree) == self._collect_all_text_nodes(after_tree)
+                if same_hashes or same_texts:
+                    print("[DEBUG][scrollFind] 화면 끝 도달 감지: 스크롤 전/후 노드 해시/텍스트가 동일합니다.")
+                    break
+
             if scrolled:
                 self.needs_update = True
             if not scrolled and can_flip:
@@ -555,7 +631,7 @@ class A11yAdbClient:
 
             if "mCurrentFocus" in output or ActivityName in output:
                 return True
-            time.sleep(0.2)
+            time.sleep(0.8)
         return False
 
     def isin(
@@ -576,6 +652,13 @@ class A11yAdbClient:
         ci_name = self._normalize_case_insensitive_pattern(name)
         print(f"[DEBUG][isin] 검색 시작 targetName={name}, targetType={type_}")
         while time.monotonic() <= deadline:
+            try:
+                tree_nodes = self.dump_tree(dev=dev)
+                if isinstance(name, str) and self._match_target_in_tree(tree_nodes, name, type_):
+                    return True
+            except Exception as exc:
+                print(f"[DEBUG][isin] 사전 트리 매칭 실패: {exc}")
+
             self._refresh_tree_if_needed(dev)
             self.clear_logcat(dev=dev)
             req_id = str(uuid.uuid4())[:8]

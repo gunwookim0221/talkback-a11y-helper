@@ -84,7 +84,9 @@ def verify_talkback_speech(dev_serial: str, client: A11yAdbClient, target_name: 
 def main() -> None:
     client = A11yAdbClient()
     dev_serial = "R3CX40QFDBP"
-    target_name = "수면 환경"
+    # 가이드: 영문 패턴 검색 시 대소문자 무시는 `(?i)` 플래그를 권장합니다.
+    # 예) "(?i)Pet.*" -> "pet", "Pets", "PET" 모두 매칭
+    target_name = "(?i)Pet.*"
 
     if not client.check_helper_status(dev_serial):
         print("[GUIDE] 헬퍼 앱 접근성 서비스 활성화 후 다시 실행해 주세요.")
