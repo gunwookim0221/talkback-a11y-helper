@@ -797,6 +797,60 @@ class A11yAdbClient:
 
         return None
 
+    def scrollSelect(
+        self,
+        dev,
+        name: str | list[str],
+        wait_: int = 30,
+        direction_: str = "updown",
+        type_: str = "all",
+        index_: int = 0,
+        class_name: str = None,
+        clickable: bool = None,
+        focusable: bool = None,
+    ) -> bool:
+        found = self.scrollFind(dev, name, wait_=wait_, direction_=direction_, type_=type_)
+        if found is not True:
+            return False
+        return self.select(
+            dev,
+            name,
+            wait_=2,
+            type_=type_,
+            index_=index_,
+            class_name=class_name,
+            clickable=clickable,
+            focusable=focusable,
+        )
+
+    def scrollTouch(
+        self,
+        dev,
+        name: str | list[str],
+        wait_: int = 30,
+        direction_: str = "updown",
+        type_: str = "all",
+        index_: int = 0,
+        long_: bool = False,
+        class_name: str = None,
+        clickable: bool = None,
+        focusable: bool = None,
+    ) -> bool:
+        found = self.scrollFind(dev, name, wait_=wait_, direction_=direction_, type_=type_)
+        if found is not True:
+            return False
+        return self.touch(
+            dev,
+            name,
+            wait_=2,
+            type_=type_,
+            index_=index_,
+            long_=long_,
+            class_name=class_name,
+            clickable=clickable,
+            focusable=focusable,
+        )
+
     def typing(self, dev, name: str, adbTyping=False):
         if not self.check_helper_status(dev=dev):
             return False

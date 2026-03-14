@@ -431,6 +431,84 @@ class TouchIsinTest(unittest.TestCase):
         self.assertEqual(broadcast[broadcast.index("direction") + 1], "right")
         self.assertEqual(broadcast[broadcast.index("forward") + 1], "true")
 
+
+    def test_scrollselect_calls_select_when_scrollfind_succeeds(self):
+        client = FakeA11yClient()
+
+        with patch.object(client, "scrollFind", return_value=True) as find_mock, patch.object(client, "select", return_value=True) as select_mock:
+            ok = client.scrollSelect(
+                "SER",
+                name="설정",
+                wait_=12,
+                direction_="down",
+                type_="text",
+                index_=1,
+                class_name="android.widget.TextView",
+                clickable=True,
+                focusable=False,
+            )
+
+        self.assertTrue(ok)
+        find_mock.assert_called_once_with("SER", "설정", wait_=12, direction_="down", type_="text")
+        select_mock.assert_called_once_with(
+            "SER",
+            "설정",
+            wait_=2,
+            type_="text",
+            index_=1,
+            class_name="android.widget.TextView",
+            clickable=True,
+            focusable=False,
+        )
+
+    def test_scrollselect_returns_false_when_scrollfind_fails(self):
+        client = FakeA11yClient()
+
+        with patch.object(client, "scrollFind", return_value=None), patch.object(client, "select") as select_mock:
+            ok = client.scrollSelect("SER", name="없음")
+
+        self.assertFalse(ok)
+        select_mock.assert_not_called()
+
+    def test_scrolltouch_calls_touch_when_scrollfind_succeeds(self):
+        client = FakeA11yClient()
+
+        with patch.object(client, "scrollFind", return_value=True) as find_mock, patch.object(client, "touch", return_value=True) as touch_mock:
+            ok = client.scrollTouch(
+                "SER",
+                name="확인",
+                wait_=8,
+                direction_="updown",
+                type_="all",
+                index_=2,
+                long_=True,
+                class_name="android.widget.Button",
+                clickable=True,
+                focusable=True,
+            )
+
+        self.assertTrue(ok)
+        find_mock.assert_called_once_with("SER", "확인", wait_=8, direction_="updown", type_="all")
+        touch_mock.assert_called_once_with(
+            "SER",
+            "확인",
+            wait_=2,
+            type_="all",
+            index_=2,
+            long_=True,
+            class_name="android.widget.Button",
+            clickable=True,
+            focusable=True,
+        )
+
+    def test_scrolltouch_returns_false_when_scrollfind_fails(self):
+        client = FakeA11yClient()
+
+        with patch.object(client, "scrollFind", return_value=False), patch.object(client, "touch") as touch_mock:
+            ok = client.scrollTouch("SER", name="없음", long_=True)
+
+        self.assertFalse(ok)
+        touch_mock.assert_not_called()
     def test_scrollfind_returns_true_when_target_appears(self):
         client = FakeA11yClient()
 
@@ -443,7 +521,7 @@ class TouchIsinTest(unittest.TestCase):
 
         self.assertTrue(ok)
         self.assertEqual(scroll_mock.call_count, 2)
-        isin_mock.assert_any_call("SER", "설정", wait_=0, type_="t")
+        isin_mock.assert_any_call("SER", "설정", wait_=1, type_="t")
 
     def test_scrollfind_updown_flips_only_after_scroll_failure(self):
         client = FakeA11yClient()
