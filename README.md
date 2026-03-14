@@ -150,7 +150,8 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
 - `isin(dev, name, wait_=5, type_='a', index_=0, class_name=None, clickable=None, focusable=None)`
   - 액션 시작 시 `last_announcements`를 초기화합니다.
   - `CHECK_TARGET`으로 존재 여부만 확인하며 성공 시 즉시 `True`, 타임아웃 시 `False`입니다.
-  - `targetName`은 내부적으로 `(?i)` 프리픽스를 붙여 대소문자 구분 없는 정규식 매칭으로 전달합니다(예: `Pet.*`는 `pet`, `Pets`, `PET` 모두 매칭).
+  - `targetName` 문자열은 대소문자 구분 없는 정규식 매칭으로 처리됩니다. 내부적으로 `re.search(pattern, text, re.IGNORECASE)` 기반으로도 보조 탐색하며, `Pet.*`는 `pet`, `Pets`, `PET` 모두 매칭됩니다.
+  - 매칭 실패 시 현재 화면에서 수집한 텍스트 노드 전체를 `"현재 화면 텍스트: [...]"` 형태로 디버그 출력합니다.
 - `select(dev, name, wait_=5, type_='a', index_=0, class_name=None, clickable=None, focusable=None)`
   - `touch()`와 동일한 폴링 루틴을 사용하지만 클릭 대신 `FOCUS_TARGET` 액션으로 접근성 포커스만 이동합니다.
   - `targetName`은 `isin()`과 동일하게 대소문자 구분 없는 정규식 매칭(`(?i)`)으로 처리합니다.
@@ -167,9 +168,10 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
   - `direction_='downup'`이면 위(`up`)부터 시작하고, 마찬가지로 스크롤 실패 시에만 아래(`down`)로 한 번 전환합니다.
   - 단일 방향(`up/down/left/right` 등) 지정 시에는 방향 전환 없이 해당 방향만 유지합니다.
   - 스크롤이 실제로 성공(`scroll()==True`)하면 `needs_update=True`로 표시해 다음 `isin()`에서 UI 트리를 강제로 최신화합니다. 스크롤 실패 시에는 불필요한 트리 갱신을 유발하지 않습니다.
-  - 매 스크롤 시도 전후로 `dump_tree()`를 수행해 화면 덤프를 비교하며, 전/후 덤프가 동일하면 `"화면 끝 도달 감지"` 로그를 출력하고 즉시 중단합니다.
+  - 매 스크롤 시도 전/후로 `dump_tree()`를 수행해 화면 상태를 비교합니다. 덤프 전체가 같거나, 노드 해시 목록/텍스트 목록이 동일하면 화면 끝으로 간주하고 `"화면 끝 도달 감지"` 로그를 출력한 뒤 즉시 중단합니다.
   - 스크롤 시도 시 현재 화면 텍스트 샘플 상위 5개를 `"현재 화면 텍스트 요약(top5)"`로 로그 출력합니다.
-  - 스크롤 직후에는 TalkBack 포커스/트리 안정화를 위해 `0.8초` 대기합니다.
+  - `scroll()` 성공 시 TalkBack 포커스/트리 안정화를 위해 내부에서 `1.5초` 대기한 뒤 결과를 반환합니다.
+  - `scrollFind()` 루프는 각 시도 사이에 `0.8초` 대기합니다.
   - 찾으면 `True`, 타임아웃이면 `None`을 반환합니다.
 - `typing(dev, name, adbTyping=False)`
   - 실행 시작 전 `check_helper_status(dev)`를 호출해 헬퍼 앱 접근성 서비스 활성 여부를 확인합니다.

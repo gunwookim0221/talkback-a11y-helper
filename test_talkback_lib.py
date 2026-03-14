@@ -253,6 +253,26 @@ class TouchIsinTest(unittest.TestCase):
         printed = [c.args[0] for c in print_mock.call_args_list if c.args]
         self.assertTrue(any("화면 끝 도달 감지" in msg for msg in printed))
 
+
+    def test_isin_uses_case_insensitive_tree_regex_matching_before_broadcast(self):
+        client = FakeA11yClient()
+
+        with patch.object(client, "dump_tree", return_value=[{"text": "PET care"}]), patch.object(client, "_broadcast") as broadcast_mock:
+            ok = client.isin("SER", name="Pet.*", wait_=0.1, type_="text")
+
+        self.assertTrue(ok)
+        broadcast_mock.assert_not_called()
+
+    def test_log_visible_text_samples_prints_full_text_list(self):
+        client = FakeA11yClient()
+
+        with patch.object(client, "dump_tree", return_value=[{"text": "Energy", "children": [{"contentDescription": "Pet care"}]}]), patch(
+            "builtins.print"
+        ) as print_mock:
+            client._log_visible_text_samples("SER")
+
+        print_mock.assert_any_call("[DEBUG][isin] 현재 화면 텍스트: ['Energy', 'Pet care']")
+
     def test_select_uses_focus_target_and_returns_true(self):
         client = FakeA11yClient()
         client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"reqId":"REQID003"}'
