@@ -848,14 +848,16 @@ class A11yAdbClient:
         name: str | list[str],
         wait_: int = 60,
         direction_: str = "updown",
-        type_: str = "all",
+        type_: str = "a",
         index_: int = 0,
         class_name: str = None,
         clickable: bool = None,
         focusable: bool = None,
     ) -> bool:
         print(f"[DEBUG][scrollSelect] 탐색 시작 (최대 {wait_}초 대기)")
-        found = self.scrollFind(dev, name, wait_=wait_, direction_=direction_, type_=type_)
+        safe_type = "a" if str(type_).strip().lower() == "all" else type_
+
+        found = self.scrollFind(dev, name, wait_=wait_, direction_=direction_, type_=safe_type)
         if found is not True:
             print("[DEBUG][scrollSelect] scrollFind 탐색 실패 (시간 초과 또는 객체 없음)")
             return False
@@ -866,7 +868,7 @@ class A11yAdbClient:
             dev,
             name,
             wait_=10,
-            type_=type_,
+            type_=safe_type,
             index_=index_,
             class_name=class_name,
             clickable=clickable,
@@ -882,7 +884,7 @@ class A11yAdbClient:
         name: str | list[str],
         wait_: int = 60,
         direction_: str = "updown",
-        type_: str = "all",
+        type_: str = "a",
         index_: int = 0,
         long_: bool = False,
         class_name: str = None,
@@ -890,7 +892,9 @@ class A11yAdbClient:
         focusable: bool = None,
     ) -> bool:
         print(f"[DEBUG][scrollTouch] 탐색 시작 (최대 {wait_}초 대기)")
-        found = self.scrollFind(dev, name, wait_=wait_, direction_=direction_, type_=type_)
+        safe_type = "a" if str(type_).strip().lower() == "all" else type_
+
+        found = self.scrollFind(dev, name, wait_=wait_, direction_=direction_, type_=safe_type)
         if found is not True:
             print("[DEBUG][scrollTouch] scrollFind 탐색 실패 (시간 초과 또는 객체 없음)")
             return False
@@ -901,7 +905,7 @@ class A11yAdbClient:
             dev,
             name,
             wait_=10,
-            type_=type_,
+            type_=safe_type,
             index_=index_,
             long_=long_,
             class_name=class_name,
