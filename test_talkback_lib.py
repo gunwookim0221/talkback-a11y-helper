@@ -1,3 +1,4 @@
+import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -7,6 +8,7 @@ from talkback_lib import (
     ACTION_FOCUS_TARGET,
     ACTION_SCROLL,
     ACTION_SET_TEXT,
+    LOGCAT_FILTER_SPECS,
     A11yAdbClient,
 )
 
@@ -25,15 +27,17 @@ class FakeA11yClient(A11yAdbClient):
         self.package_list_payload = "package:com.example.custom"
         self.enabled_services_payload = ""
 
-    def _run(self, args, dev=None, timeout: float = 10.0):  # pylint: disable=unused-argument
+    def _run(self, args, dev=None, timeout: float = 30.0):  # pylint: disable=unused-argument
         self.calls.append((args, dev))
         if args == ["logcat", "-c"]:
             return ""
         if args[:3] == ["shell", "am", "broadcast"]:
             return "broadcast ok"
-        if args == ["logcat", "-d"]:
+        if args == ["logcat", "-d", *LOGCAT_FILTER_SPECS]:
             return self.logcat_payload
-        if args == ["logcat", "-v", "time", "-d"]:
+        if args == ["logcat", "-v", "time", "-d", *LOGCAT_FILTER_SPECS]:
+            return self.logcat_payload
+        if args == ["logcat", "-v", "raw", "-d", *LOGCAT_FILTER_SPECS]:
             return self.logcat_payload
         if args == ["shell", "pm", "list", "packages"]:
             return self.package_list_payload
@@ -440,7 +444,7 @@ class ClientInterfaceCompatTest(unittest.TestCase):
         client = A11yAdbClient(dev_serial="R3CX40QFDBP", start_monitor=False)
         calls = []
 
-        def fake_run(args, dev=None, timeout=10.0):
+        def fake_run(args, dev=None, timeout=30.0):
             calls.append((args, dev))
             return ""
 
@@ -448,6 +452,19 @@ class ClientInterfaceCompatTest(unittest.TestCase):
             client.clear_logcat()
 
         self.assertEqual(calls, [(["logcat", "-c"], None)])
+
+    def test_clear_logcat_returns_empty_string_on_timeout(self):
+        client = A11yAdbClient(start_monitor=False)
+
+        with patch.object(
+            client,
+            "_run",
+            side_effect=subprocess.TimeoutExpired(cmd=["adb", "logcat", "-c"], timeout=5.0),
+        ), patch("builtins.print") as print_mock:
+            result = client.clear_logcat(dev="SER")
+
+        self.assertEqual(result, "")
+        print_mock.assert_called_once_with("[WARN] logcat -c timed out, skipping...")
 
     def test_run_applies_default_serial_when_dev_is_missing(self):
         client = A11yAdbClient(adb_path="adb", dev_serial="R3CX40QFDBP", start_monitor=False)
@@ -460,6 +477,7 @@ class ClientInterfaceCompatTest(unittest.TestCase):
         run_mock.assert_called_once()
         cmd = run_mock.call_args.args[0]
         self.assertEqual(cmd[:3], ["adb", "-s", "R3CX40QFDBP"])
+        self.assertEqual(run_mock.call_args.kwargs["timeout"], 30.0)
 
     def test_dump_tree_joins_all_part_payloads(self):
         client = A11yAdbClient(start_monitor=False)
@@ -513,7 +531,7 @@ class ClientInterfaceCompatTest(unittest.TestCase):
     def test_check_talkback_status_returns_false_on_adb_failure(self):
         client = A11yAdbClient(start_monitor=False)
 
-        def fail_run(args, dev=None, timeout=10.0):  # pylint: disable=unused-argument
+        def fail_run(args, dev=None, timeout=30.0):  # pylint: disable=unused-argument
             raise RuntimeError("adb failed")
 
         with patch.object(client, "_run", side_effect=fail_run):
