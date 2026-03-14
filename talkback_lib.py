@@ -298,26 +298,9 @@ class A11yAdbClient:
     def check_talkback_status(self, dev: Any = None) -> bool:
         """TalkBack 활성화 상태를 확인합니다.
 
-        1) 헬퍼 앱 설치 여부 확인
-        2) 헬퍼 앱이 있으면 최근 A11Y_ANNOUNCEMENT 로그 존재 여부로 판단
-        3) 헬퍼 앱이 없으면 enabled_accessibility_services에서 TalkBack 패키지 포함 여부로 판단
-
-        ADB 실패/단말 미연결 등 예외 상황은 모두 False를 반환합니다.
+        enabled_accessibility_services에 TalkBack 서비스 패키지가 포함되어 있으면 True,
+        그렇지 않거나 ADB 조회가 실패하면 False를 반환합니다.
         """
-        try:
-            package_list = self._run(["shell", "pm", "list", "packages"], dev=dev)
-        except Exception:
-            return False
-
-        helper_installed = f"package:{self.package_name}" in package_list
-
-        if helper_installed:
-            try:
-                logs = self._run(["logcat", "-v", "time", "-d", *LOGCAT_FILTER_SPECS], dev=dev)
-            except Exception:
-                return False
-            return "A11Y_ANNOUNCEMENT:" in logs
-
         try:
             enabled_services = self._run(
                 ["shell", "settings", "get", "secure", "enabled_accessibility_services"],
@@ -879,10 +862,11 @@ class A11yAdbClient:
         found = self.scrollFind(dev, name, wait_=wait_, direction_=direction_, type_=type_)
         if found is not True:
             return False
+        time.sleep(1.0)
         return self.select(
             dev,
             name,
-            wait_=2,
+            wait_=5,
             type_=type_,
             index_=index_,
             class_name=class_name,
@@ -906,10 +890,11 @@ class A11yAdbClient:
         found = self.scrollFind(dev, name, wait_=wait_, direction_=direction_, type_=type_)
         if found is not True:
             return False
+        time.sleep(1.0)
         return self.touch(
             dev,
             name,
-            wait_=2,
+            wait_=5,
             type_=type_,
             index_=index_,
             long_=long_,

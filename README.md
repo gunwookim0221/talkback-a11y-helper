@@ -209,10 +209,10 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
   - `scrollFind()` 루프는 각 시도 사이에 `0.8초` 대기합니다.
   - 찾으면 `True`, 타임아웃이면 `None`을 반환합니다.
 - `scrollSelect(dev, name, wait_=30, direction_='updown', type_='all', index_=0, class_name=None, clickable=None, focusable=None)`
-  - `scrollFind()`로 대상을 찾은 뒤 성공 시 `select(..., wait_=2)`를 호출하는 조합 편의 함수입니다.
+  - `scrollFind()`로 대상을 찾은 뒤 성공 시 `time.sleep(1.0)`으로 스크롤 애니메이션 안정화를 기다리고, `select(..., wait_=5)`를 호출하는 조합 편의 함수입니다.
   - 찾지 못하면 즉시 `False`를 반환합니다.
 - `scrollTouch(dev, name, wait_=30, direction_='updown', type_='all', index_=0, long_=False, class_name=None, clickable=None, focusable=None)`
-  - `scrollFind()`로 대상을 찾은 뒤 성공 시 `touch(..., wait_=2)`를 호출하는 조합 편의 함수입니다.
+  - `scrollFind()`로 대상을 찾은 뒤 성공 시 `time.sleep(1.0)`으로 스크롤 애니메이션 안정화를 기다리고, `touch(..., wait_=5)`를 호출하는 조합 편의 함수입니다.
   - `long_` 포함 전달 파라미터를 그대로 `touch()`에 넘기며, 찾지 못하면 `False`를 반환합니다.
 - `typing(dev, name, adbTyping=False)`
   - 실행 시작 전 `check_helper_status(dev)`를 호출해 헬퍼 앱 접근성 서비스 활성 여부를 확인합니다.
@@ -240,10 +240,8 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
   - 활성화되어 있어도 `ping()`으로 실제 명령 수신 가능 상태를 추가 검증합니다.
   - 비정상 상태면 빨간색 ANSI 강조로 안내 문구를 출력하고 `False`를 반환합니다.
 - `check_talkback_status(dev=None) -> bool`
-  - 1단계: `adb shell pm list packages`로 헬퍼 앱(`com.iotpart.sqe.talkbackhelper`) 설치 여부를 먼저 확인합니다.
-  - 2단계-헬퍼 앱 있음: 최근 `logcat`에 `A11Y_ANNOUNCEMENT` 로그가 있는지 확인해 상태를 판단합니다.
-  - 2단계-헬퍼 앱 없음(Fallback): `adb shell settings get secure enabled_accessibility_services` 출력에 `com.google.android.marvin.talkback` 포함 여부로 판단합니다.
-  - ADB 실패/단말 미연결 포함 예외 상황은 모두 `False`를 반환합니다.
+  - `adb shell settings get secure enabled_accessibility_services` 출력에 `com.google.android.marvin.talkback` 포함 여부만 확인합니다.
+  - 포함되어 있으면 `True`, 아니거나 ADB 실패/단말 미연결 포함 예외 상황이면 `False`를 반환합니다.
 - `touch/select/scroll/scrollFind/typing/isin/dump_tree`는 공통적으로 시작 시 `check_helper_status()`를 먼저 확인하며, 비활성 상태면 즉시 실패(`False` 또는 빈 리스트)를 반환합니다.
 - `verify_speech(dev, expected_regex, wait_seconds=3.0, take_error_snapshot=True)`
   - `expected_regex`를 파일명에 안전한 문자열로 정규화한 뒤 임시 스냅샷(`temp_<safe_name>.png`)을 생성합니다.
