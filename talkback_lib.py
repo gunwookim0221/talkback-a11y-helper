@@ -329,6 +329,19 @@ class A11yAdbClient:
 
         return samples
 
+    @staticmethod
+    def _normalize_case_insensitive_pattern(name: str | list[str]) -> str | list[str]:
+        if isinstance(name, list):
+            return [A11yAdbClient._normalize_case_insensitive_pattern(item) for item in name]
+        text = str(name)
+        if not text or text.startswith("(?i)"):
+            return text
+        return f"(?i){text}"
+
+    @staticmethod
+    def _tree_signature(nodes: list[dict[str, Any]]) -> str:
+        return json.dumps(nodes, ensure_ascii=False, sort_keys=True)
+
     def _log_visible_text_samples(self, dev: Any, max_samples: int = 10) -> None:
         try:
             tree_nodes = self.dump_tree(dev=dev)
@@ -398,11 +411,12 @@ class A11yAdbClient:
             return False
         self.last_announcements = []
         deadline = time.monotonic() + wait_
+        ci_name = self._normalize_case_insensitive_pattern(name)
         while time.monotonic() <= deadline:
             self._refresh_tree_if_needed(dev)
             self.clear_logcat(dev=dev)
             req_id = str(uuid.uuid4())[:8]
-            parsed_name, parsed_type, target_text, target_id = self._split_and_conditions(name, type_)
+            parsed_name, parsed_type, target_text, target_id = self._split_and_conditions(ci_name, type_)
             extras = self._build_target_extras(
                 name=parsed_name,
                 type_=parsed_type,
@@ -485,8 +499,25 @@ class A11yAdbClient:
                 return True
 
             scroll_attempt += 1
+            before_tree: list[dict[str, Any]] | None = None
+            after_tree: list[dict[str, Any]] | None = None
+            try:
+                before_tree = self.dump_tree(dev=dev)
+                before_samples = self._collect_text_samples(before_tree, max_samples=5)
+                print(f"[DEBUG][scrollFind] 현재 화면 텍스트 요약(top5): {before_samples}")
+            except Exception as exc:
+                print(f"[DEBUG][scrollFind] 스크롤 전 덤프 수집 실패: {exc}")
             print(f"[DEBUG][scrollFind] 스크롤 시도 #{scroll_attempt} (direction={current_dir})")
             scrolled = self.scroll(dev, current_dir)
+            try:
+                after_tree = self.dump_tree(dev=dev)
+            except Exception as exc:
+                print(f"[DEBUG][scrollFind] 스크롤 후 덤프 수집 실패: {exc}")
+
+            if before_tree is not None and after_tree is not None and self._tree_signature(before_tree) == self._tree_signature(after_tree):
+                print("[DEBUG][scrollFind] 화면 끝 도달 감지: 스크롤 전/후 덤프가 동일합니다.")
+                break
+
             if scrolled:
                 self.needs_update = True
             if not scrolled and can_flip:
@@ -542,12 +573,13 @@ class A11yAdbClient:
             return False
         self.last_announcements = []
         deadline = time.monotonic() + wait_
+        ci_name = self._normalize_case_insensitive_pattern(name)
         print(f"[DEBUG][isin] 검색 시작 targetName={name}, targetType={type_}")
         while time.monotonic() <= deadline:
             self._refresh_tree_if_needed(dev)
             self.clear_logcat(dev=dev)
             req_id = str(uuid.uuid4())[:8]
-            parsed_name, parsed_type, target_text, target_id = self._split_and_conditions(name, type_)
+            parsed_name, parsed_type, target_text, target_id = self._split_and_conditions(ci_name, type_)
             extras = self._build_target_extras(
                 name=parsed_name,
                 type_=parsed_type,

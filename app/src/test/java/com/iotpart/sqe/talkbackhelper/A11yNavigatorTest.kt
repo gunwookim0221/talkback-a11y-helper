@@ -280,6 +280,40 @@ class A11yNavigatorTest {
         assertFalse(matched)
     }
 
+    @Test
+    fun matchesTarget_typeT_regexIsCaseInsensitive() {
+        val query = A11yNavigator.TargetQuery(targetName = "Pet.*", targetType = "t", targetIndex = 0)
+
+        val matched = A11yNavigator.matchesTarget(
+            nodeText = "pets",
+            nodeContentDescription = null,
+            nodeViewId = "com.test:id/title",
+            query = query
+        )
+
+        assertTrue(matched)
+    }
+
+    @Test
+    fun matchesTarget_targetTextFilter_isCaseInsensitive() {
+        val query = A11yNavigator.TargetQuery(
+            targetName = "",
+            targetType = "",
+            targetIndex = 0,
+            targetText = "Pet"
+        )
+
+        val matched = A11yNavigator.matchesTarget(
+            nodeText = "pets",
+            nodeContentDescription = null,
+            nodeViewId = "com.test:id/title",
+            query = query
+        )
+
+        assertTrue(matched)
+    }
+
+
 
     private data class FakeNode(
         val name: String,

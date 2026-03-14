@@ -26,6 +26,11 @@ class FakeA11yClient(A11yAdbClient):
         self.needs_update = False
         self.package_list_payload = "package:com.example.custom"
         self.enabled_services_payload = "foo:com.example.custom/.A11yService"
+        self._dump_counter = 0
+
+    def dump_tree(self, dev=None, wait_seconds: float = 5.0):  # pylint: disable=unused-argument
+        self._dump_counter += 1
+        return [{"text": f"dump-{self._dump_counter}"}]
 
     def _run(self, args, dev=None, timeout: float = 30.0):  # pylint: disable=unused-argument
         self.calls.append((args, dev))
@@ -114,7 +119,7 @@ class TouchIsinTest(unittest.TestCase):
             [
                 "shell", "am", "broadcast", "-a", ACTION_CHECK_TARGET,
                 "-p", "com.example.custom",
-                "--es", "targetName", "'설정'",
+                "--es", "targetName", "'(?i)설정'",
                 "--es", "targetType", "r",
                 "--ei", "targetIndex", "1",
                 "--ez", "isLongClick", "false",
@@ -221,6 +226,33 @@ class TouchIsinTest(unittest.TestCase):
         printed = [c.args[0] for c in print_mock.call_args_list if c.args]
         self.assertTrue(any("[DEBUG][scrollFind] 스크롤 시도 #1" in msg for msg in printed))
         self.assertTrue(any("[DEBUG][scrollFind] 스크롤 시도 #2" in msg for msg in printed))
+
+    def test_isin_adds_case_insensitive_prefix_to_target_name(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: CHECK_TARGET_RESULT {"success":true,"reqId":"REQID900"}'
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID900-xxxx"):
+            client.isin("SER", name="Pet.*", wait_=1, type_="text")
+
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0][0]
+        self.assertEqual(broadcast[broadcast.index("targetName") + 1], "'(?i)Pet.*'")
+
+    def test_scrollfind_breaks_when_before_and_after_dump_are_identical(self):
+        client = FakeA11yClient()
+        same_tree = [{"text": "A", "boundsInScreen": {"l": 1, "t": 1, "r": 2, "b": 2}}]
+
+        with patch.object(client, "isin", return_value=False), patch.object(client, "scroll", return_value=True) as scroll_mock, patch.object(
+            client,
+            "dump_tree",
+            side_effect=[same_tree, same_tree],
+        ), patch("builtins.print") as print_mock:
+            result = client.scrollFind("SER", "없음", wait_=1, direction_="down", type_="all")
+
+        self.assertIsNone(result)
+        self.assertEqual(scroll_mock.call_count, 1)
+        printed = [c.args[0] for c in print_mock.call_args_list if c.args]
+        self.assertTrue(any("화면 끝 도달 감지" in msg for msg in printed))
+
     def test_select_uses_focus_target_and_returns_true(self):
         client = FakeA11yClient()
         client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"reqId":"REQID003"}'
@@ -235,7 +267,7 @@ class TouchIsinTest(unittest.TestCase):
             [
                 "shell", "am", "broadcast", "-a", ACTION_FOCUS_TARGET,
                 "-p", "com.example.custom",
-                "--es", "targetName", "'다음'",
+                "--es", "targetName", "'(?i)다음'",
                 "--es", "targetType", "t",
                 "--ei", "targetIndex", "3",
                 "--ez", "isLongClick", "false",
@@ -274,9 +306,9 @@ class TouchIsinTest(unittest.TestCase):
         self.assertTrue(ok)
         broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0][0]
         self.assertIn("targetText", broadcast)
-        self.assertIn("'확인'", broadcast)
+        self.assertIn("'(?i)확인'", broadcast)
         self.assertIn("targetId", broadcast)
-        self.assertIn("'com.example:id/btn_ok'", broadcast)
+        self.assertIn("'(?i)com.example:id/btn_ok'", broadcast)
         self.assertEqual(broadcast[broadcast.index("targetName") + 1], '""')
         self.assertEqual(broadcast[broadcast.index("targetType") + 1], "")
 
@@ -290,9 +322,9 @@ class TouchIsinTest(unittest.TestCase):
         self.assertTrue(ok)
         broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0][0]
         self.assertIn("targetText", broadcast)
-        self.assertIn("'로그인'", broadcast)
+        self.assertIn("'(?i)로그인'", broadcast)
         self.assertIn("targetId", broadcast)
-        self.assertIn("'.*id/btn_login'", broadcast)
+        self.assertIn("'(?i).*id/btn_login'", broadcast)
 
     def test_scroll_parses_direction_and_returns_success(self):
         client = FakeA11yClient()
