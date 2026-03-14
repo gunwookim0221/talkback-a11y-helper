@@ -140,6 +140,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
 - 다중 단말 지원: `A11yAdbClient(dev_serial="...")`로 기본 단말 시리얼을 설정할 수 있으며, 대부분 메서드는 `dev`(문자열 serial 또는 `dev.serial`) 인자를 우선 사용합니다. 내부적으로 `adb -s <serial>`로 실행됩니다.
 - `clear_logcat(dev=None)`
   - 외부에서 직접 호출 가능한 공개 메서드이며, 지정 단말의 logcat 버퍼를 `adb logcat -c`로 초기화합니다.
+  - `timeout=5.0`으로 실행되며, `subprocess.TimeoutExpired` 발생 시 `"[WARN] logcat -c timed out, skipping..."`를 출력하고 빈 문자열(`""`)을 반환합니다.
 - `touch(dev, name, wait_=5, type_='a', index_=0, long_=False, class_name=None, clickable=None, focusable=None)`
   - 호출마다 내부적으로 고유 `reqId`를 생성해 브로드캐스트에 포함하고, 동일 `reqId`를 가진 결과 로그만 소비합니다.
   - 액션 시작 시 `last_announcements`를 초기화하고, `wait_` 동안 폴링하며 `CLICK_TARGET`을 전송합니다.
@@ -181,6 +182,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
   - 비활성으로 판단되면 `"TalkBack이 꺼져 있어 음성을 수집할 수 없습니다"`를 출력하고 빈 리스트를 반환합니다.
   - `only_new=True`(기본): 내부 마커 이후의 새 `A11Y_ANNOUNCEMENT`만 수집합니다.
   - `only_new=False`: 마커를 무시하고 현재 logcat 버퍼의 전체 안내를 수집합니다.
+  - 로그 조회 시 `A11Y_HELPER:V A11Y_ANNOUNCEMENT:V *:S` 필터를 사용해 필요한 태그만 읽습니다.
   - 수집 결과는 반환값과 함께 `client.last_announcements`에도 항상 저장됩니다.
 - `check_talkback_status(dev=None) -> bool`
   - 1단계: `adb shell pm list packages`로 헬퍼 앱(`com.iotpart.sqe.talkbackhelper`) 설치 여부를 먼저 확인합니다.
@@ -188,6 +190,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
   - 2단계-헬퍼 앱 없음(Fallback): `adb shell settings get secure enabled_accessibility_services` 출력에 `com.google.android.marvin.talkback` 포함 여부로 판단합니다.
   - ADB 실패/단말 미연결 포함 예외 상황은 모두 `False`를 반환합니다.
 - 공통적으로 각 루프에서 `_refresh_tree_if_needed()`를 호출해 화면 변동(팝업 등)에 대응합니다.
+- 내부 `_run(args, dev=None, timeout=30.0)`의 기본 타임아웃은 30초입니다.
 
 ## 선(先) 스냅샷, 후(後) 검증 예제 (`main.py`)
 

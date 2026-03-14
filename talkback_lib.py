@@ -23,6 +23,7 @@ ACTION_CLICK_FOCUSED = "com.iotpart.sqe.talkbackhelper.CLICK_FOCUSED"
 ACTION_SCROLL = "com.iotpart.sqe.talkbackhelper.SCROLL"
 ACTION_SET_TEXT = "com.iotpart.sqe.talkbackhelper.SET_TEXT"
 LOG_TAG = "A11Y_HELPER"
+LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 
 
@@ -49,7 +50,7 @@ class A11yAdbClient:
             return dev
         return getattr(dev, "serial", self.dev_serial)
 
-    def _run(self, args: list[str], dev: Any = None, timeout: float = 10.0) -> str:
+    def _run(self, args: list[str], dev: Any = None, timeout: float = 30.0) -> str:
         serial = self._resolve_serial(dev)
         cmd = [self.adb_path]
         if serial:
@@ -145,7 +146,7 @@ class A11yAdbClient:
     def _read_log_result(self, dev: Any, prefix: str, req_id: str, wait_seconds: float = 2.0) -> dict[str, Any]:
         start = time.monotonic()
         while time.monotonic() - start < wait_seconds:
-            logs = self._run(["logcat", "-d"], dev=dev)
+            logs = self._run(["logcat", "-d", *LOGCAT_FILTER_SPECS], dev=dev)
             payloads = self._extract_all_payloads(logs, prefix)
             for payload in reversed(payloads):
                 parsed = self._parse_json_payload(payload, prefix)
@@ -180,7 +181,11 @@ class A11yAdbClient:
         return any(marker in line for line in log_text.splitlines())
 
     def clear_logcat(self, dev: Any = None) -> str:
-        return self._run(["logcat", "-c"], dev=dev)
+        try:
+            return self._run(["logcat", "-c"], dev=dev, timeout=5.0)
+        except subprocess.TimeoutExpired:
+            print("[WARN] logcat -c timed out, skipping...")
+            return ""
 
     def check_talkback_status(self, dev: Any = None) -> bool:
         """TalkBack 활성화 상태를 확인합니다.
@@ -200,7 +205,7 @@ class A11yAdbClient:
 
         if helper_installed:
             try:
-                logs = self._run(["logcat", "-v", "time", "-d"], dev=dev)
+                logs = self._run(["logcat", "-v", "time", "-d", *LOGCAT_FILTER_SPECS], dev=dev)
             except Exception:
                 return False
             return "A11Y_ANNOUNCEMENT:" in logs
@@ -224,7 +229,7 @@ class A11yAdbClient:
         start_time = time.time()
         logs = ""
         while time.time() - start_time < wait_seconds:
-            logs = self._run(["logcat", "-v", "raw", "-d"], dev=dev)
+            logs = self._run(["logcat", "-v", "raw", "-d", *LOGCAT_FILTER_SPECS], dev=dev)
             if self._has_req_marker(logs, "DUMP_TREE_END", req_id):
                 break
             time.sleep(1.0)
@@ -286,7 +291,7 @@ class A11yAdbClient:
         deadline = time.monotonic() + wait_
         while time.monotonic() <= deadline:
             self._refresh_tree_if_needed(dev)
-            self._run(["logcat", "-c"], dev=dev)
+            self.clear_logcat(dev=dev)
             req_id = str(uuid.uuid4())[:8]
             parsed_name, parsed_type, target_text, target_id = self._split_and_conditions(name, type_)
             extras = self._build_target_extras(
@@ -328,7 +333,7 @@ class A11yAdbClient:
         deadline = time.monotonic() + wait_
         while time.monotonic() <= deadline:
             self._refresh_tree_if_needed(dev)
-            self._run(["logcat", "-c"], dev=dev)
+            self.clear_logcat(dev=dev)
             req_id = str(uuid.uuid4())[:8]
             parsed_name, parsed_type, target_text, target_id = self._split_and_conditions(name, type_)
             extras = self._build_target_extras(
@@ -369,7 +374,7 @@ class A11yAdbClient:
         }
         forward, normalized_direction = direction_map.get(direction_token, (True, "down"))
 
-        self._run(["logcat", "-c"], dev=dev)
+        self.clear_logcat(dev=dev)
         req_id = str(uuid.uuid4())[:8]
         self._broadcast(
             dev,
@@ -423,7 +428,7 @@ class A11yAdbClient:
                 self._run(["shell", "input", "text", self._escape_adb_string(name)], dev=dev)
                 return None
 
-            self._run(["logcat", "-c"], dev=dev)
+            self.clear_logcat(dev=dev)
             req_id = str(uuid.uuid4())[:8]
             self._broadcast(dev, ACTION_SET_TEXT, ["--es", "text", self._escape_adb_string(name), "--es", "reqId", req_id])
             result = self._read_log_result(dev, "SET_TEXT_RESULT", req_id)
@@ -461,7 +466,7 @@ class A11yAdbClient:
         deadline = time.monotonic() + wait_
         while time.monotonic() <= deadline:
             self._refresh_tree_if_needed(dev)
-            self._run(["logcat", "-c"], dev=dev)
+            self.clear_logcat(dev=dev)
             req_id = str(uuid.uuid4())[:8]
             parsed_name, parsed_type, target_text, target_id = self._split_and_conditions(name, type_)
             extras = self._build_target_extras(
@@ -502,7 +507,7 @@ class A11yAdbClient:
         newest_log_marker = last_log_marker
 
         while True:
-            logs = self._run(["logcat", "-v", "time", "-d"], dev=dev)
+            logs = self._run(["logcat", "-v", "time", "-d", *LOGCAT_FILTER_SPECS], dev=dev)
             for line_index, line in enumerate(logs.splitlines(), start=1):
                 parsed_time = self._parse_logcat_time(line)
                 if parsed_time is None:
