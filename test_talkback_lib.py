@@ -161,6 +161,66 @@ class TouchIsinTest(unittest.TestCase):
             client.isin("SER", name="확인", wait_=1)
         refresh_mock.assert_called()
 
+
+    def test_isin_logs_target_name_and_type_at_start(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: CHECK_TARGET_RESULT {"success":true,"reqId":"REQID777"}'
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID777-xxxx"), patch("builtins.print") as print_mock:
+            ok = client.isin("SER", name="설정", wait_=1, type_="text")
+
+        self.assertTrue(ok)
+        print_mock.assert_any_call("[DEBUG][isin] 검색 시작 targetName=설정, targetType=text")
+
+    def test_isin_logs_visible_text_samples_when_result_false(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: CHECK_TARGET_RESULT {"success":false,"reqId":"REQID778"}'
+
+        clock = {"t": 0.0}
+
+        def fake_monotonic():
+            return clock["t"]
+
+        def fake_sleep(sec: float):
+            clock["t"] += sec
+
+        with patch("talkback_lib.time.monotonic", side_effect=fake_monotonic), patch("talkback_lib.time.sleep", side_effect=fake_sleep), patch.object(
+            client, "_log_visible_text_samples"
+        ) as sample_mock:
+            client.isin("SER", name="없음", wait_=0.6, type_="all")
+
+        self.assertGreaterEqual(sample_mock.call_count, 1)
+
+    def test_collect_text_samples_limits_to_ten(self):
+        nodes = [
+            {
+                "text": "first",
+                "children": [
+                    {"contentDescription": "second"},
+                    {"talkback": "third"},
+                ],
+            }
+        ] + [{"text": f"item-{i}"} for i in range(20)]
+
+        samples = A11yAdbClient._collect_text_samples(nodes, max_samples=10)
+
+        self.assertEqual(len(samples), 10)
+        self.assertEqual(samples[0], "first")
+
+    def test_scrollfind_logs_scroll_attempt_count(self):
+        client = FakeA11yClient()
+
+        with patch.object(client, "isin", side_effect=[False, False, True]), patch.object(
+            client,
+            "scroll",
+            return_value=True,
+        ), patch("talkback_lib.time.sleep", return_value=None), patch("builtins.print") as print_mock:
+            ok = client.scrollFind("SER", "설정", wait_=1, direction_="down", type_="text")
+
+        self.assertTrue(ok)
+        printed = [c.args[0] for c in print_mock.call_args_list if c.args]
+        self.assertTrue(any("[DEBUG][scrollFind] 스크롤 시도 #1" in msg for msg in printed))
+        self.assertTrue(any("[DEBUG][scrollFind] 스크롤 시도 #2" in msg for msg in printed))
     def test_select_uses_focus_target_and_returns_true(self):
         client = FakeA11yClient()
         client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"reqId":"REQID003"}'

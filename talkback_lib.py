@@ -298,6 +298,45 @@ class A11yAdbClient:
 
         return "", "", target_text, target_id
 
+    @staticmethod
+    def _collect_text_samples(nodes: list[dict[str, Any]], max_samples: int = 10) -> list[str]:
+        samples: list[str] = []
+
+        def visit(node: Any) -> None:
+            if len(samples) >= max_samples or not isinstance(node, dict):
+                return
+
+            for key in ("text", "contentDescription", "talkback", "content_desc", "label"):
+                value = node.get(key)
+                if isinstance(value, str):
+                    stripped = value.strip()
+                    if stripped:
+                        samples.append(stripped)
+                        if len(samples) >= max_samples:
+                            return
+
+            children = node.get("children")
+            if isinstance(children, list):
+                for child in children:
+                    visit(child)
+                    if len(samples) >= max_samples:
+                        return
+
+        for item in nodes:
+            visit(item)
+            if len(samples) >= max_samples:
+                break
+
+        return samples
+
+    def _log_visible_text_samples(self, dev: Any, max_samples: int = 10) -> None:
+        try:
+            tree_nodes = self.dump_tree(dev=dev)
+            samples = self._collect_text_samples(tree_nodes, max_samples=max_samples)
+            print(f"[DEBUG][isin] 현재 화면 텍스트 노드 샘플(최대 {max_samples}개): {samples}")
+        except Exception as exc:
+            print(f"[DEBUG][isin] 텍스트 노드 샘플 수집 실패: {exc}")
+
 
     def touch(
         self,
@@ -440,10 +479,13 @@ class A11yAdbClient:
             current_dir = direction_
             can_flip = False
 
+        scroll_attempt = 0
         while time.monotonic() <= deadline:
             if self.isin(dev, name, wait_=0, type_=parsed_type):
                 return True
 
+            scroll_attempt += 1
+            print(f"[DEBUG][scrollFind] 스크롤 시도 #{scroll_attempt} (direction={current_dir})")
             scrolled = self.scroll(dev, current_dir)
             if scrolled:
                 self.needs_update = True
@@ -500,6 +542,7 @@ class A11yAdbClient:
             return False
         self.last_announcements = []
         deadline = time.monotonic() + wait_
+        print(f"[DEBUG][isin] 검색 시작 targetName={name}, targetType={type_}")
         while time.monotonic() <= deadline:
             self._refresh_tree_if_needed(dev)
             self.clear_logcat(dev=dev)
@@ -524,6 +567,8 @@ class A11yAdbClient:
             result = self._read_log_result(dev, "CHECK_TARGET_RESULT", req_id)
             if bool(result.get("success")):
                 return True
+
+            self._log_visible_text_samples(dev)
             time.sleep(0.5)
         return False
 
