@@ -400,13 +400,95 @@ class A11yAdbClient:
             visit(item)
         return hashes
 
-    def _match_target_in_tree(self, nodes: list[dict[str, Any]], name: str, type_: str) -> bool:
-        candidates = self._collect_matching_values(nodes, type_)
+    @staticmethod
+    def _normalize_bounds(node: dict[str, Any]) -> str:
+        bounds = node.get("boundsInScreen")
+        if isinstance(bounds, dict):
+            left = bounds.get("left", bounds.get("l"))
+            top = bounds.get("top", bounds.get("t"))
+            right = bounds.get("right", bounds.get("r"))
+            bottom = bounds.get("bottom", bounds.get("b"))
+            return f"{left},{top},{right},{bottom}"
+        if isinstance(bounds, str):
+            return bounds
+        return ""
+
+    @staticmethod
+    def _parse_bottom_from_bounds(bounds: str) -> int:
+        nums = [int(x) for x in re.findall(r"-?\d+", bounds)]
+        if len(nums) >= 4:
+            return nums[3]
+        return -1
+
+    @staticmethod
+    def _collect_text_nodes_with_bounds(nodes: list[dict[str, Any]]) -> list[tuple[str, str]]:
+        pairs: list[tuple[str, str]] = []
+
+        def visit(node: Any) -> None:
+            if not isinstance(node, dict):
+                return
+            text_candidates = [
+                node.get("text"),
+                node.get("contentDescription"),
+                node.get("talkback"),
+                node.get("content_desc"),
+                node.get("label"),
+            ]
+            text = next((str(value).strip() for value in text_candidates if isinstance(value, str) and value.strip()), "")
+            if text:
+                pairs.append((text, A11yAdbClient._normalize_bounds(node)))
+
+            children = node.get("children")
+            if isinstance(children, list):
+                for child in children:
+                    visit(child)
+
+        for item in nodes:
+            visit(item)
+        return pairs
+
+    @staticmethod
+    def _has_screen_meaningful_change(before_nodes: list[dict[str, Any]], after_nodes: list[dict[str, Any]]) -> bool:
+        before_pairs = A11yAdbClient._collect_text_nodes_with_bounds(before_nodes)
+        after_pairs = A11yAdbClient._collect_text_nodes_with_bounds(after_nodes)
+
+        if set(before_pairs) != set(after_pairs):
+            return True
+
+        before_bottom = sorted(before_pairs, key=lambda item: A11yAdbClient._parse_bottom_from_bounds(item[1]), reverse=True)[:8]
+        after_bottom = sorted(after_pairs, key=lambda item: A11yAdbClient._parse_bottom_from_bounds(item[1]), reverse=True)[:8]
+        return before_bottom != after_bottom
+
+    @staticmethod
+    def _safe_regex_search(pattern: str, value: str) -> bool:
         try:
-            return any(re.search(name, text, re.IGNORECASE) for text in candidates)
+            return bool(re.search(pattern, value, re.IGNORECASE))
         except re.error:
-            escaped_name = re.escape(name)
-            return any(re.search(escaped_name, text, re.IGNORECASE) for text in candidates)
+            return bool(re.search(re.escape(pattern), value, re.IGNORECASE))
+
+    def _match_target_in_tree(self, nodes: list[dict[str, Any]], name: str | list[str], type_: str) -> bool:
+        if isinstance(name, list) and str(type_).strip().lower() == "and":
+            _, _, target_text, target_id = self._split_and_conditions(name, type_)
+            text_ok = True if not target_text else any(
+                self._safe_regex_search(target_text, text) for text in self._collect_matching_values(nodes, "t")
+            )
+            id_ok = True if not target_id else any(
+                self._safe_regex_search(target_id, text) for text in self._collect_matching_values(nodes, "r")
+            )
+            return text_ok and id_ok
+
+        patterns = name if isinstance(name, list) else [name]
+        candidates = self._collect_matching_values(nodes, type_)
+        for pattern in patterns:
+            if any(self._safe_regex_search(str(pattern), text) for text in candidates):
+                return True
+        return False
+
+    def _log_scrollfind_text_nodes(self, nodes: list[dict[str, Any]]) -> None:
+        text_pairs = self._collect_text_nodes_with_bounds(nodes)
+        print(f"[DEBUG][scrollFind] 현재 화면 텍스트 노드 개수: {len(text_pairs)}")
+        bottom_samples = sorted(text_pairs, key=lambda item: self._parse_bottom_from_bounds(item[1]), reverse=True)[:5]
+        print(f"[DEBUG][scrollFind] 하단부 텍스트 노드 샘플(bottom5): {bottom_samples}")
 
     def _log_visible_text_samples(self, dev: Any, max_samples: int = 10) -> None:
         try:
@@ -536,7 +618,7 @@ class A11yAdbClient:
         )
         result = self._read_log_result(dev, "SCROLL_RESULT", req_id)
         if bool(result.get("success")):
-            time.sleep(1.5)
+            time.sleep(2.0)
             return True
         return False
 
@@ -572,8 +654,7 @@ class A11yAdbClient:
             after_tree: list[dict[str, Any]] | None = None
             try:
                 before_tree = self.dump_tree(dev=dev)
-                before_samples = self._collect_text_samples(before_tree, max_samples=5)
-                print(f"[DEBUG][scrollFind] 현재 화면 텍스트 요약(top5): {before_samples}")
+                self._log_scrollfind_text_nodes(before_tree)
             except Exception as exc:
                 print(f"[DEBUG][scrollFind] 스크롤 전 덤프 수집 실패: {exc}")
             print(f"[DEBUG][scrollFind] 스크롤 시도 #{scroll_attempt} (direction={current_dir})")
@@ -583,15 +664,9 @@ class A11yAdbClient:
             except Exception as exc:
                 print(f"[DEBUG][scrollFind] 스크롤 후 덤프 수집 실패: {exc}")
 
-            if before_tree is not None and after_tree is not None and self._tree_signature(before_tree) == self._tree_signature(after_tree):
-                print("[DEBUG][scrollFind] 화면 끝 도달 감지: 스크롤 전/후 덤프가 동일합니다.")
-                break
-
             if before_tree is not None and after_tree is not None:
-                same_hashes = self._tree_node_hashes(before_tree) == self._tree_node_hashes(after_tree)
-                same_texts = self._collect_all_text_nodes(before_tree) == self._collect_all_text_nodes(after_tree)
-                if same_hashes or same_texts:
-                    print("[DEBUG][scrollFind] 화면 끝 도달 감지: 스크롤 전/후 노드 해시/텍스트가 동일합니다.")
+                if not self._has_screen_meaningful_change(before_tree, after_tree):
+                    print("[DEBUG][scrollFind] 화면 끝 도달 감지: 스크롤 전/후 텍스트/위치 변화가 없습니다.")
                     break
 
             if scrolled:
@@ -654,7 +729,7 @@ class A11yAdbClient:
         while time.monotonic() <= deadline:
             try:
                 tree_nodes = self.dump_tree(dev=dev)
-                if isinstance(name, str) and self._match_target_in_tree(tree_nodes, name, type_):
+                if self._match_target_in_tree(tree_nodes, ci_name, type_):
                     return True
             except Exception as exc:
                 print(f"[DEBUG][isin] 사전 트리 매칭 실패: {exc}")
