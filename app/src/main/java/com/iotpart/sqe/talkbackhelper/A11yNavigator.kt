@@ -124,7 +124,7 @@ object A11yNavigator {
         val targetType = query.targetType.lowercase().trim()
         val baseMatch = if (targetName.isNotBlank()) {
             val regexPattern = buildRegexPattern(targetName)
-            val pattern = runCatching { Regex(regexPattern) }.getOrNull()
+            val pattern = runCatching { Regex(regexPattern, setOf(RegexOption.IGNORE_CASE)) }.getOrNull()
             val byText = nodeText?.trim()?.let { text ->
                 pattern?.containsMatchIn(text) ?: false
             } == true
@@ -148,13 +148,13 @@ object A11yNavigator {
         if (!baseMatch) return false
 
         val targetTextMatch = query.targetText?.let { targetText ->
-            nodeText?.contains(targetText) == true || nodeContentDescription?.contains(targetText) == true
+            nodeText?.contains(targetText, ignoreCase = true) == true || nodeContentDescription?.contains(targetText, ignoreCase = true) == true
         } ?: true
         val targetIdMatch = query.targetId?.let { targetId ->
             isViewIdMatched(nodeViewId, targetId)
         } ?: true
         val classNameMatch = query.className?.let { queryClassName ->
-            nodeClassName?.contains(queryClassName) == true
+            nodeClassName?.contains(queryClassName, ignoreCase = true) == true
         } ?: true
         val clickableMatch = query.clickable?.let { expected ->
             nodeClickable == expected
@@ -300,7 +300,7 @@ object A11yNavigator {
     private fun isViewIdMatched(nodeViewId: String?, target: String): Boolean {
         val regexPattern = buildRegexPattern(target)
         return nodeViewId?.let { viewId ->
-            runCatching { Regex(regexPattern) }
+            runCatching { Regex(regexPattern, setOf(RegexOption.IGNORE_CASE)) }
                 .getOrNull()
                 ?.matches(viewId)
                 ?: false
