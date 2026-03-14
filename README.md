@@ -171,6 +171,11 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
   - `touch()`와 동일한 폴링 루틴을 사용하지만 클릭 대신 `FOCUS_TARGET` 액션으로 접근성 포커스만 이동합니다.
   - `targetName`은 `isin()`과 동일하게 대소문자 구분 없는 정규식 매칭(`(?i)`)으로 처리합니다.
   - 성공 시 `True`, 타임아웃 시 `False`를 반환합니다.
+- `move_focus(dev=None, direction='next')`
+  - TalkBack 탐색 포커스를 `direction` 기준으로 한 칸 이동합니다. (`'next'` 또는 `'prev'`)
+  - 실행 전 `check_helper_status(dev)` 안전 검증 후 `clear_logcat()`을 호출하고, 요청별 `reqId`를 생성해 `NEXT/PREV` 브로드캐스트를 전송합니다.
+  - 결과는 `NAV_RESULT` 로그에서 동일 `reqId`로 매칭해 판독하며, `success=True`인 경우 `_wait_for_speech_if_needed()`를 호출해 음성 안내가 시작될 시간을 대기합니다.
+  - 실패 시 `reason`을 에러 로그로 남기고 `False`를 반환합니다.
 - `scroll(dev, direction, step_=50, time_=1000, bounds_=None)`
   - 레거시 시그니처 호환을 위해 `step_`, `time_`, `bounds_` 인자는 유지하지만 내부에서는 사용하지 않습니다.
   - `direction`을 `d/down→down`, `u/up→up`, `r/right→right`, `l/left→left`로 정규화해 브로드캐스트의 `direction` extra로 전달합니다.

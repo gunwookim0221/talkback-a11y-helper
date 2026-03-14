@@ -6,6 +6,8 @@ from talkback_lib import (
     ACTION_CHECK_TARGET,
     ACTION_CLICK_TARGET,
     ACTION_FOCUS_TARGET,
+    ACTION_NEXT,
+    ACTION_PREV,
     ACTION_SCROLL,
     ACTION_SET_TEXT,
     ACTION_PING,
@@ -561,6 +563,61 @@ class TouchIsinTest(unittest.TestCase):
         printed = [c.args[0] for c in print_mock.call_args_list if c.args]
         self.assertTrue(any("중앙 70% 영역 텍스트 노드 개수" in msg for msg in printed))
         self.assertTrue(any("중앙 70% 영역 텍스트 목록: ['Pet care']" in msg for msg in printed))
+
+    def test_move_focus_next_uses_nav_result_and_waits_speech(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: NAV_RESULT {"success":true,"reason":"ok","reqId":"REQID501"}'
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID501-xxxx"), patch.object(client, "_wait_for_speech_if_needed") as wait_mock:
+            ok = client.move_focus("SER", direction="next")
+
+        self.assertTrue(ok)
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0][0]
+        self.assertEqual(
+            broadcast,
+            [
+                "shell", "am", "broadcast", "-a", ACTION_NEXT,
+                "-p", "com.example.custom",
+                "--es", "reqId", "REQID501",
+            ],
+        )
+        wait_mock.assert_called_once_with("SER")
+
+    def test_move_focus_prev_uses_prev_action(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: NAV_RESULT {"success":true,"reason":"ok","reqId":"REQID502"}'
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID502-xxxx"), patch.object(client, "_wait_for_speech_if_needed"):
+            ok = client.move_focus("SER", direction="prev")
+
+        self.assertTrue(ok)
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0][0]
+        self.assertEqual(broadcast[4], ACTION_PREV)
+
+    def test_move_focus_returns_false_and_logs_reason_on_failure(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: NAV_RESULT {"success":false,"reason":"end reached","reqId":"REQID503"}'
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID503-xxxx"), patch("builtins.print") as print_mock, patch.object(
+            client,
+            "_wait_for_speech_if_needed",
+        ) as wait_mock:
+            ok = client.move_focus("SER", direction="next")
+
+        self.assertFalse(ok)
+        wait_mock.assert_not_called()
+        print_mock.assert_any_call("[ERROR] move_focus 실패(direction=next): end reached")
+
+    def test_move_focus_invalid_direction_returns_false_without_broadcast(self):
+        client = FakeA11yClient()
+
+        with patch("builtins.print") as print_mock:
+            ok = client.move_focus("SER", direction="left")
+
+        self.assertFalse(ok)
+        print_mock.assert_any_call("[ERROR] 지원하지 않는 direction: left. 'next' 또는 'prev'를 사용해 주세요.")
+        broadcasts = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]]
+        self.assertEqual(len(broadcasts), 0)
 
     def test_has_screen_meaningful_change_detects_bottom_node_difference(self):
         before = [
