@@ -251,7 +251,7 @@ class TouchIsinTest(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual(scroll_mock.call_count, 1)
         printed = [c.args[0] for c in print_mock.call_args_list if c.args]
-        self.assertTrue(any("화면 끝 도달 감지" in msg for msg in printed))
+        self.assertTrue(any("화면 끝 도달 감지: 스크롤 전/후 텍스트/위치 변화가 없습니다." in msg for msg in printed))
 
 
     def test_isin_uses_case_insensitive_tree_regex_matching_before_broadcast(self):
@@ -482,6 +482,46 @@ class TouchIsinTest(unittest.TestCase):
             client.scrollFind("SER", "없음", wait_=0.81, direction_="down", type_="all")
 
         self.assertIn(0.8, sleeps)
+
+    def test_scroll_waits_2_seconds_after_success(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: SCROLL_RESULT {"success":true,"reqId":"REQID301"}'
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID301-xxxx"), patch("talkback_lib.time.sleep") as sleep_mock:
+            ok = client.scroll("SER", "down")
+
+        self.assertTrue(ok)
+        sleep_mock.assert_called_once_with(2.0)
+
+    def test_scrollfind_logs_text_count_and_bottom_samples(self):
+        client = FakeA11yClient()
+        tree = [
+            {"text": "Header", "boundsInScreen": {"l": 0, "t": 0, "r": 100, "b": 40}},
+            {"text": "Footer", "boundsInScreen": {"l": 0, "t": 500, "r": 100, "b": 700}},
+        ]
+
+        with patch.object(client, "isin", return_value=False), patch.object(client, "scroll", return_value=True), patch.object(
+            client,
+            "dump_tree",
+            side_effect=[tree, tree],
+        ), patch("builtins.print") as print_mock:
+            client.scrollFind("SER", "없음", wait_=1, direction_="down", type_="all")
+
+        printed = [c.args[0] for c in print_mock.call_args_list if c.args]
+        self.assertTrue(any("현재 화면 텍스트 노드 개수: 2" in msg for msg in printed))
+        self.assertTrue(any("하단부 텍스트 노드 샘플(bottom5)" in msg for msg in printed))
+
+    def test_has_screen_meaningful_change_detects_bottom_node_difference(self):
+        before = [
+            {"text": "Header", "boundsInScreen": {"l": 0, "t": 0, "r": 100, "b": 40}},
+            {"text": "Item1", "boundsInScreen": {"l": 0, "t": 300, "r": 100, "b": 350}},
+        ]
+        after = [
+            {"text": "Header", "boundsInScreen": {"l": 0, "t": 0, "r": 100, "b": 40}},
+            {"text": "Item2", "boundsInScreen": {"l": 0, "t": 300, "r": 100, "b": 350}},
+        ]
+
+        self.assertTrue(A11yAdbClient._has_screen_meaningful_change(before, after))
     def test_scrollfind_timeout_returns_none(self):
         client = FakeA11yClient()
         clock = {"t": 0.0}
