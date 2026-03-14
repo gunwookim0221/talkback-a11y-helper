@@ -20,6 +20,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val ACTION_CLICK_FOCUSED = "com.iotpart.sqe.talkbackhelper.CLICK_FOCUSED"
         private const val ACTION_SCROLL = "com.iotpart.sqe.talkbackhelper.SCROLL"
         private const val ACTION_SET_TEXT = "com.iotpart.sqe.talkbackhelper.SET_TEXT"
+        private const val ACTION_PING = "com.iotpart.sqe.talkbackhelper.PING"
         private const val EXTRA_TARGET_NAME = "targetName"
         private const val EXTRA_TARGET_TYPE = "targetType"
         private const val EXTRA_TARGET_INDEX = "targetIndex"
@@ -56,6 +57,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
             ACTION_CLICK_FOCUSED -> handleClickFocused(intent)
             ACTION_SCROLL -> handleScroll(intent)
             ACTION_SET_TEXT -> handleSetText(intent)
+            ACTION_PING -> handlePing(intent)
             else -> Unit
         }
     }
@@ -83,56 +85,61 @@ class A11yCommandReceiver : BroadcastReceiver() {
     }
 
     private fun handleDumpTree(intent: Intent) {
+        val reqId = parseReqId(intent)
         val service = A11yHelperService.instance
         if (service == null) {
-            Log.w(TAG, "DUMP_TREE_RESULT [] // Service not connected")
+            logFailure("DUMP_TREE_RESULT", reqId, "Accessibility Service is null or not running")
             return
         }
-        service.dumpTree(parseReqId(intent))
+        service.dumpTree(reqId)
     }
 
     private fun handleTargetAction(intent: Intent, action: Int) {
+        val reqId = parseReqId(intent)
         val service = A11yHelperService.instance
         if (service == null) {
-            Log.w(TAG, "TARGET_ACTION_RESULT {\"success\":false,\"reason\":\"Service not connected\"}")
+            logFailure("TARGET_ACTION_RESULT", reqId, "Accessibility Service is null or not running")
             return
         }
 
         val query = parseQuery(intent) ?: return
-        service.performTargetAction(query, action, parseReqId(intent))
+        service.performTargetAction(query, action, reqId)
     }
 
     private fun handleCheckTarget(intent: Intent) {
+        val reqId = parseReqId(intent)
         val service = A11yHelperService.instance
         if (service == null) {
-            Log.w(TAG, "CHECK_TARGET_RESULT {\"success\":false,\"reason\":\"Service not connected\"}")
+            logFailure("CHECK_TARGET_RESULT", reqId, "Accessibility Service is null or not running")
             return
         }
 
         val query = parseQuery(intent) ?: return
-        service.checkTarget(query, parseReqId(intent))
+        service.checkTarget(query, reqId)
     }
 
 
 
     private fun handleMoveFocus(intent: Intent, forward: Boolean) {
+        val reqId = parseReqId(intent)
         val service = A11yHelperService.instance
         if (service == null) {
-            Log.w(TAG, "NAV_RESULT {\"success\":false,\"reason\":\"Service not connected\"}")
+            logFailure("NAV_RESULT", reqId, "Accessibility Service is null or not running")
             return
         }
 
-        service.moveFocus(forward, parseReqId(intent))
+        service.moveFocus(forward, reqId)
     }
 
     private fun handleClickFocused(intent: Intent) {
+        val reqId = parseReqId(intent)
         val service = A11yHelperService.instance
         if (service == null) {
-            Log.w(TAG, "TARGET_ACTION_RESULT {\"success\":false,\"reason\":\"Service not connected\"}")
+            logFailure("TARGET_ACTION_RESULT", reqId, "Accessibility Service is null or not running")
             return
         }
 
-        service.clickFocusedNode(parseReqId(intent))
+        service.clickFocusedNode(reqId)
     }
 
     private fun parseReqId(intent: Intent): String {
@@ -190,21 +197,23 @@ class A11yCommandReceiver : BroadcastReceiver() {
     }
 
     private fun handleScroll(intent: Intent) {
+        val reqId = parseReqId(intent)
         val service = A11yHelperService.instance
         if (service == null) {
-            Log.w(TAG, "SCROLL_RESULT {\"success\":false,\"reason\":\"Service not connected\"}")
+            logFailure("SCROLL_RESULT", reqId, "Accessibility Service is null or not running")
             return
         }
 
         val forward = intent.getBooleanExtra(EXTRA_FORWARD, true)
         val direction = intent.getStringExtra(EXTRA_DIRECTION)?.trim().orEmpty()
-        service.performScroll(forward, direction, parseReqId(intent))
+        service.performScroll(forward, direction, reqId)
     }
 
     private fun handleSetText(intent: Intent) {
+        val reqId = parseReqId(intent)
         val service = A11yHelperService.instance
         if (service == null) {
-            Log.w(TAG, "SET_TEXT_RESULT {\"success\":false,\"reason\":\"Service not connected\"}")
+            logFailure("SET_TEXT_RESULT", reqId, "Accessibility Service is null or not running")
             return
         }
 
@@ -214,6 +223,31 @@ class A11yCommandReceiver : BroadcastReceiver() {
             return
         }
 
-        service.performSetText(text, parseReqId(intent))
+        service.performSetText(text, reqId)
+    }
+
+    private fun handlePing(intent: Intent) {
+        val reqId = parseReqId(intent)
+        val service = A11yHelperService.instance
+        if (service == null) {
+            logFailure("PING_RESULT", reqId, "Accessibility Service is null or not running")
+            return
+        }
+
+        val payload = org.json.JSONObject()
+            .put("reqId", reqId)
+            .put("success", true)
+            .put("status", "READY")
+            .toString()
+        Log.i(TAG, "PING_RESULT $payload")
+    }
+
+    private fun logFailure(resultTag: String, reqId: String, reason: String) {
+        val payload = org.json.JSONObject()
+            .put("reqId", reqId)
+            .put("success", false)
+            .put("reason", reason)
+            .toString()
+        Log.w(TAG, "$resultTag $payload")
     }
 }

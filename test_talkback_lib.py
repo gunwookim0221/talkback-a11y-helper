@@ -8,6 +8,7 @@ from talkback_lib import (
     ACTION_FOCUS_TARGET,
     ACTION_SCROLL,
     ACTION_SET_TEXT,
+    ACTION_PING,
     LOGCAT_FILTER_SPECS,
     A11yAdbClient,
 )
@@ -27,6 +28,10 @@ class FakeA11yClient(A11yAdbClient):
         self.package_list_payload = "package:com.example.custom"
         self.enabled_services_payload = "foo:com.example.custom/.A11yService"
         self._dump_counter = 0
+        self.ping_ready = True
+
+    def ping(self, dev=None, wait_=3.0):  # pylint: disable=unused-argument
+        return self.ping_ready
 
     def dump_tree(self, dev=None, wait_seconds: float = 5.0):  # pylint: disable=unused-argument
         self._dump_counter += 1
@@ -354,6 +359,42 @@ class TouchIsinTest(unittest.TestCase):
         self.assertIn("'(?i)로그인'", broadcast)
         self.assertIn("targetId", broadcast)
         self.assertIn("'(?i).*id/btn_login'", broadcast)
+
+
+
+    def test_ping_returns_true_on_ready_status(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: PING_RESULT {"success":true,"status":"READY","reqId":"REQID401"}'
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID401-xxxx"):
+            ok = A11yAdbClient.ping(client, "SER", wait_=1.0)
+
+        self.assertTrue(ok)
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0][0]
+        self.assertEqual(
+            broadcast,
+            [
+                "shell", "am", "broadcast", "-a", ACTION_PING,
+                "-p", "com.example.custom",
+                "--es", "reqId", "REQID401",
+            ],
+        )
+
+    def test_check_helper_status_fails_when_ping_not_ready(self):
+        client = FakeA11yClient()
+        client.ping_ready = False
+
+        ok = client.check_helper_status("SER")
+
+        self.assertFalse(ok)
+
+    def test_check_helper_status_returns_true_when_service_enabled_and_ping_ready(self):
+        client = FakeA11yClient()
+        client.ping_ready = True
+
+        ok = client.check_helper_status("SER")
+
+        self.assertTrue(ok)
 
     def test_scroll_parses_direction_and_returns_success(self):
         client = FakeA11yClient()

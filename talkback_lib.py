@@ -23,6 +23,7 @@ ACTION_PREV = "com.iotpart.sqe.talkbackhelper.PREV"
 ACTION_CLICK_FOCUSED = "com.iotpart.sqe.talkbackhelper.CLICK_FOCUSED"
 ACTION_SCROLL = "com.iotpart.sqe.talkbackhelper.SCROLL"
 ACTION_SET_TEXT = "com.iotpart.sqe.talkbackhelper.SET_TEXT"
+ACTION_PING = "com.iotpart.sqe.talkbackhelper.PING"
 LOG_TAG = "A11Y_HELPER"
 LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
@@ -88,7 +89,24 @@ class A11yAdbClient:
                 "'설정 > 접근성 > 설치된 앱'에서 활성화해 주세요."
                 f"{RESET_TEXT}"
             )
-        return helper_enabled
+            return False
+
+        if not self.ping(dev=dev, wait_=3.0):
+            print(
+                f"{RED_TEXT}⚠️ [ERROR] 헬퍼 앱 접근성 서비스가 명령 수신 준비 상태가 아닙니다. "
+                "서비스를 다시 시작하거나 접근성 설정을 재확인해 주세요."
+                f"{RESET_TEXT}"
+            )
+            return False
+
+        return True
+
+    def ping(self, dev: Any = None, wait_: float = 3.0) -> bool:
+        self.clear_logcat(dev=dev)
+        req_id = str(uuid.uuid4())[:8]
+        self._broadcast(dev, ACTION_PING, ["--es", "reqId", req_id])
+        result = self._read_log_result(dev, "PING_RESULT", req_id, wait_seconds=wait_)
+        return bool(result.get("success")) and result.get("status") == "READY"
 
     def _broadcast(self, dev: Any, action: str, extras: list[str] | None = None) -> str:
         cmd = ["shell", "am", "broadcast", "-a", action, "-p", self.package_name]
