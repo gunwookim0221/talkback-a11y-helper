@@ -208,12 +208,14 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
   - 스크롤 시도 시 중앙 영역 기준으로 **텍스트 노드 개수**와 **중앙 70% 영역 텍스트 목록**을 로그 출력합니다.
   - `scrollFind()` 루프는 각 시도 사이에 `0.8초` 대기합니다.
   - 찾으면 `True`, 타임아웃이면 `None`을 반환합니다.
-- `scrollSelect(dev, name, wait_=30, direction_='updown', type_='all', index_=0, class_name=None, clickable=None, focusable=None)`
-  - `scrollFind()`로 대상을 찾은 뒤 성공 시 `time.sleep(1.0)`으로 스크롤 애니메이션 안정화를 기다리고, `select(..., wait_=5)`를 호출하는 조합 편의 함수입니다.
-  - 찾지 못하면 즉시 `False`를 반환합니다.
-- `scrollTouch(dev, name, wait_=30, direction_='updown', type_='all', index_=0, long_=False, class_name=None, clickable=None, focusable=None)`
-  - `scrollFind()`로 대상을 찾은 뒤 성공 시 `time.sleep(1.0)`으로 스크롤 애니메이션 안정화를 기다리고, `touch(..., wait_=5)`를 호출하는 조합 편의 함수입니다.
-  - `long_` 포함 전달 파라미터를 그대로 `touch()`에 넘기며, 찾지 못하면 `False`를 반환합니다.
+- `scrollSelect(dev, name, wait_=60, direction_='updown', type_='all', index_=0, class_name=None, clickable=None, focusable=None)`
+  - 시작 시 `[DEBUG][scrollSelect] 탐색 시작 (최대 {wait_}초 대기)` 로그를 출력하고 `scrollFind()`로 대상을 찾습니다.
+  - 탐색 성공 시 `time.sleep(1.5)`으로 화면 안정화를 기다린 뒤 `select(..., wait_=10)`를 호출합니다.
+  - `scrollFind()` 실패 또는 `select()` 실패 원인을 각각 디버그 로그로 남기며, 실패 시 `False`를 반환합니다.
+- `scrollTouch(dev, name, wait_=60, direction_='updown', type_='all', index_=0, long_=False, class_name=None, clickable=None, focusable=None)`
+  - 시작 시 `[DEBUG][scrollTouch] 탐색 시작 (최대 {wait_}초 대기)` 로그를 출력하고 `scrollFind()`로 대상을 찾습니다.
+  - 탐색 성공 시 `time.sleep(1.5)`으로 화면 안정화를 기다린 뒤 `touch(..., wait_=10)`를 호출합니다.
+  - `scrollFind()` 실패 또는 `touch()` 실패 원인을 각각 디버그 로그로 남기며, 실패 시 `False`를 반환합니다.
 - `typing(dev, name, adbTyping=False)`
   - 실행 시작 전 `check_helper_status(dev)`를 호출해 헬퍼 앱 접근성 서비스 활성 여부를 확인합니다.
   - 비활성 상태면 즉시 `False`를 반환하고 실제 입력/브로드캐스트는 수행하지 않습니다.

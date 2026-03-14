@@ -846,7 +846,7 @@ class A11yAdbClient:
         self,
         dev,
         name: str | list[str],
-        wait_: int = 30,
+        wait_: int = 60,
         direction_: str = "updown",
         type_: str = "all",
         index_: int = 0,
@@ -854,26 +854,33 @@ class A11yAdbClient:
         clickable: bool = None,
         focusable: bool = None,
     ) -> bool:
+        print(f"[DEBUG][scrollSelect] 탐색 시작 (최대 {wait_}초 대기)")
         found = self.scrollFind(dev, name, wait_=wait_, direction_=direction_, type_=type_)
         if found is not True:
+            print("[DEBUG][scrollSelect] scrollFind 탐색 실패 (시간 초과 또는 객체 없음)")
             return False
-        time.sleep(1.0)
-        return self.select(
+        print("[DEBUG][scrollSelect] 객체 발견. 화면 안정화 대기 후 포커스 시도...")
+        time.sleep(1.5)
+
+        result = self.select(
             dev,
             name,
-            wait_=5,
+            wait_=10,
             type_=type_,
             index_=index_,
             class_name=class_name,
             clickable=clickable,
             focusable=focusable,
         )
+        if not result:
+            print("[DEBUG][scrollSelect] 객체는 화면에 있으나 포커스(select) 실패")
+        return result
 
     def scrollTouch(
         self,
         dev,
         name: str | list[str],
-        wait_: int = 30,
+        wait_: int = 60,
         direction_: str = "updown",
         type_: str = "all",
         index_: int = 0,
@@ -882,14 +889,18 @@ class A11yAdbClient:
         clickable: bool = None,
         focusable: bool = None,
     ) -> bool:
+        print(f"[DEBUG][scrollTouch] 탐색 시작 (최대 {wait_}초 대기)")
         found = self.scrollFind(dev, name, wait_=wait_, direction_=direction_, type_=type_)
         if found is not True:
+            print("[DEBUG][scrollTouch] scrollFind 탐색 실패 (시간 초과 또는 객체 없음)")
             return False
-        time.sleep(1.0)
-        return self.touch(
+        print("[DEBUG][scrollTouch] 객체 발견. 화면 안정화 대기 후 터치 시도...")
+        time.sleep(1.5)
+
+        result = self.touch(
             dev,
             name,
-            wait_=5,
+            wait_=10,
             type_=type_,
             index_=index_,
             long_=long_,
@@ -897,6 +908,9 @@ class A11yAdbClient:
             clickable=clickable,
             focusable=focusable,
         )
+        if not result:
+            print("[DEBUG][scrollTouch] 객체는 화면에 있으나 터치(touch) 실패")
+        return result
 
     def typing(self, dev, name: str, adbTyping=False):
         if not self.check_helper_status(dev=dev):

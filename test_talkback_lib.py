@@ -450,11 +450,11 @@ class TouchIsinTest(unittest.TestCase):
 
         self.assertTrue(ok)
         find_mock.assert_called_once_with("SER", "설정", wait_=12, direction_="down", type_="text")
-        sleep_mock.assert_called_once_with(1.0)
+        sleep_mock.assert_called_once_with(1.5)
         select_mock.assert_called_once_with(
             "SER",
             "설정",
-            wait_=5,
+            wait_=10,
             type_="text",
             index_=1,
             class_name="android.widget.TextView",
@@ -490,11 +490,11 @@ class TouchIsinTest(unittest.TestCase):
 
         self.assertTrue(ok)
         find_mock.assert_called_once_with("SER", "확인", wait_=8, direction_="updown", type_="all")
-        sleep_mock.assert_called_once_with(1.0)
+        sleep_mock.assert_called_once_with(1.5)
         touch_mock.assert_called_once_with(
             "SER",
             "확인",
-            wait_=5,
+            wait_=10,
             type_="all",
             index_=2,
             long_=True,
