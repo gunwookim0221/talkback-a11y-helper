@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from talkback_lib import A11yAdbClient
+from talkback_lib import A11yAdbClient, LOGCAT_FILTER_SPECS
 
 
 class FakeClock:
@@ -46,7 +46,7 @@ def test_get_announcements_polls_until_wait_seconds(monkeypatch):
     call_count = {"value": 0}
 
     def fake_run(args, dev=None):
-        assert args == ["logcat", "-v", "time", "-d"]
+        assert args == ["logcat", "-v", "time", "-d", *LOGCAT_FILTER_SPECS]
         idx = min(call_count["value"], len(responses) - 1)
         call_count["value"] += 1
         return responses[idx]
@@ -84,7 +84,7 @@ def test_get_announcements_only_reads_new_logs(monkeypatch):
     call_count = {"value": 0}
 
     def fake_run(args, dev=None):
-        assert args == ["logcat", "-v", "time", "-d"]
+        assert args == ["logcat", "-v", "time", "-d", *LOGCAT_FILTER_SPECS]
         idx = min(call_count["value"], len(responses) - 1)
         call_count["value"] += 1
         return responses[idx]
