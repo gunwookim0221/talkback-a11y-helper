@@ -263,6 +263,15 @@ class TouchIsinTest(unittest.TestCase):
         self.assertTrue(ok)
         broadcast_mock.assert_not_called()
 
+    def test_isin_text_type_matches_contentdescription_case_insensitive(self):
+        client = FakeA11yClient()
+
+        with patch.object(client, "dump_tree", return_value=[{"contentDescription": "PET care"}]), patch.object(client, "_broadcast") as broadcast_mock:
+            ok = client.isin("SER", name="Pet.*", wait_=0.1, type_="text")
+
+        self.assertTrue(ok)
+        broadcast_mock.assert_not_called()
+
     def test_log_visible_text_samples_prints_full_text_list(self):
         client = FakeA11yClient()
 
@@ -483,7 +492,7 @@ class TouchIsinTest(unittest.TestCase):
 
         self.assertIn(0.8, sleeps)
 
-    def test_scroll_waits_2_seconds_after_success(self):
+    def test_scroll_waits_1_5_seconds_after_action_scroll(self):
         client = FakeA11yClient()
         client.logcat_payload = 'I/A11Y_HELPER: SCROLL_RESULT {"success":true,"reqId":"REQID301"}'
 
@@ -491,12 +500,13 @@ class TouchIsinTest(unittest.TestCase):
             ok = client.scroll("SER", "down")
 
         self.assertTrue(ok)
-        sleep_mock.assert_called_once_with(2.0)
+        sleep_mock.assert_called_once_with(1.5)
 
-    def test_scrollfind_logs_text_count_and_bottom_samples(self):
+    def test_scrollfind_logs_center_region_texts(self):
         client = FakeA11yClient()
         tree = [
             {"text": "Header", "boundsInScreen": {"l": 0, "t": 0, "r": 100, "b": 40}},
+            {"text": "Pet care", "boundsInScreen": {"l": 0, "t": 200, "r": 100, "b": 260}},
             {"text": "Footer", "boundsInScreen": {"l": 0, "t": 500, "r": 100, "b": 700}},
         ]
 
@@ -508,8 +518,8 @@ class TouchIsinTest(unittest.TestCase):
             client.scrollFind("SER", "없음", wait_=1, direction_="down", type_="all")
 
         printed = [c.args[0] for c in print_mock.call_args_list if c.args]
-        self.assertTrue(any("현재 화면 텍스트 노드 개수: 2" in msg for msg in printed))
-        self.assertTrue(any("하단부 텍스트 노드 샘플(bottom5)" in msg for msg in printed))
+        self.assertTrue(any("중앙 70% 영역 텍스트 노드 개수" in msg for msg in printed))
+        self.assertTrue(any("중앙 70% 영역 텍스트 목록: ['Pet care']" in msg for msg in printed))
 
     def test_has_screen_meaningful_change_detects_bottom_node_difference(self):
         before = [
@@ -522,6 +532,21 @@ class TouchIsinTest(unittest.TestCase):
         ]
 
         self.assertTrue(A11yAdbClient._has_screen_meaningful_change(before, after))
+
+    def test_has_screen_meaningful_change_ignores_bottom_fixed_tab_change(self):
+        before = [
+            {"text": "Header", "boundsInScreen": {"l": 0, "t": 0, "r": 100, "b": 80}},
+            {"text": "Item1", "boundsInScreen": {"l": 0, "t": 250, "r": 100, "b": 320}},
+            {"text": "Home", "boundsInScreen": {"l": 0, "t": 880, "r": 100, "b": 980}},
+        ]
+        after = [
+            {"text": "Header", "boundsInScreen": {"l": 0, "t": 0, "r": 100, "b": 80}},
+            {"text": "Item1", "boundsInScreen": {"l": 0, "t": 250, "r": 100, "b": 320}},
+            {"text": "Settings", "boundsInScreen": {"l": 0, "t": 880, "r": 100, "b": 980}},
+        ]
+
+        self.assertFalse(A11yAdbClient._has_screen_meaningful_change(before, after))
+
     def test_scrollfind_timeout_returns_none(self):
         client = FakeA11yClient()
         clock = {"t": 0.0}
