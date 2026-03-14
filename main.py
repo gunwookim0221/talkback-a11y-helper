@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -34,7 +35,8 @@ def _save_failure_image(snapshot_path: Path, target_name: str, actual_speech: st
     """Fail 케이스용 이미지에 EXPECTED/ACTUAL 오버레이를 추가해 저장합니다."""
     error_dir = Path("error_log")
     error_dir.mkdir(parents=True, exist_ok=True)
-    fail_path = error_dir / f"fail_{target_name}.png"
+    safe_target_name = _sanitize_filename_component(target_name)
+    fail_path = error_dir / f"fail_{safe_target_name}.png"
 
     base_image = Image.open(snapshot_path).convert("RGBA")
     overlay = Image.new("RGBA", base_image.size, (0, 0, 0, 0))
@@ -61,7 +63,8 @@ def _save_failure_image(snapshot_path: Path, target_name: str, actual_speech: st
 
 def verify_talkback_speech(dev_serial: str, client: A11yAdbClient, target_name: str) -> bool:
     """선 스냅샷/후 검증 패턴으로 TalkBack 발화를 검증합니다."""
-    temp_path = Path(f"temp_{target_name}.png")
+    safe_target_name = _sanitize_filename_component(target_name)
+    temp_path = Path(f"temp_{safe_target_name}.png")
 
     focused = client.select(dev_serial, target_name)
     if not focused:
@@ -79,6 +82,13 @@ def verify_talkback_speech(dev_serial: str, client: A11yAdbClient, target_name: 
 
     _save_failure_image(temp_path, target_name, actual_speech)
     return False
+
+
+def _sanitize_filename_component(name: str) -> str:
+    """윈도우 파일명에 허용되지 않는 문자를 치환해 안전한 문자열을 반환합니다."""
+    sanitized = re.sub(r'[\*\?\\/:<>|\"]', "_", name)
+    sanitized = sanitized.strip(" ._")
+    return sanitized or "target"
 
 
 def main() -> None:

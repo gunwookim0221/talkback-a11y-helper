@@ -120,6 +120,46 @@ def test_verify_talkback_speech_fail_creates_error_log(monkeypatch, tmp_path):
     assert (Path("error_log") / "fail_수면 환경.png").exists()
 
 
+def test_sanitize_filename_component_replaces_windows_invalid_chars(monkeypatch):
+    main = _load_main_with_fake_pil(monkeypatch)
+
+    assert main._sanitize_filename_component('Pet.*:?\\<>|"/A?') == 'Pet._________A'
+    assert main._sanitize_filename_component('***') == 'target'
+
+
+def test_verify_talkback_speech_uses_sanitized_temp_filename(monkeypatch, tmp_path):
+    main = _load_main_with_fake_pil(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    captured = {}
+
+    def fake_take_snapshot(_dev_serial, save_path):
+        captured['save_path'] = save_path
+        Path(save_path).write_bytes(b'x')
+
+    monkeypatch.setattr(main, 'take_snapshot', fake_take_snapshot)
+    monkeypatch.setattr(main, '_save_failure_image', lambda *args, **kwargs: None)
+
+    client = DummyClient(announcements=['음성 없음'])
+
+    result = main.verify_talkback_speech('SERIAL', client, 'Pet.*')
+
+    assert result is False
+    assert Path(captured['save_path']).name == 'temp_Pet.png'
+
+
+def test_save_failure_image_uses_sanitized_fail_filename(monkeypatch, tmp_path):
+    main = _load_main_with_fake_pil(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    snapshot = tmp_path / 'temp.png'
+    snapshot.write_bytes(b'x')
+
+    main._save_failure_image(snapshot, 'Pet.*', '다른 안내')
+
+    assert (Path('error_log') / 'fail_Pet.png').exists()
+
+
 def test_main_exits_when_helper_service_disabled(monkeypatch):
     main = _load_main_with_fake_pil(monkeypatch)
     dummy = DummyClient(helper_enabled=False)
