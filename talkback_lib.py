@@ -715,6 +715,32 @@ class A11yAdbClient:
         result = self._read_log_result(dev, "SCROLL_RESULT", req_id)
         return bool(result.get("success"))
 
+    def move_focus(self, dev: Any = None, direction: str = "next") -> bool:
+        if not self.check_helper_status(dev=dev):
+            return False
+
+        direction_token = str(direction).strip().lower()
+        action_map = {
+            "next": ACTION_NEXT,
+            "prev": ACTION_PREV,
+        }
+        action = action_map.get(direction_token)
+        if action is None:
+            print(f"[ERROR] 지원하지 않는 direction: {direction}. 'next' 또는 'prev'를 사용해 주세요.")
+            return False
+
+        self.clear_logcat(dev=dev)
+        req_id = str(uuid.uuid4())[:8]
+        self._broadcast(dev, action, ["--es", "reqId", req_id])
+
+        result = self._read_log_result(dev, "NAV_RESULT", req_id)
+        if bool(result.get("success")):
+            self._wait_for_speech_if_needed(dev)
+            return True
+
+        print(f"[ERROR] move_focus 실패(direction={direction_token}): {result.get('reason', 'unknown')}")
+        return False
+
     def scrollFind(self, dev, name, wait_=30, direction_='updown', type_='all'):
         if not self.check_helper_status(dev=dev):
             return False
