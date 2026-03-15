@@ -127,9 +127,17 @@ def compare_and_summarize(xml_path, json_path):
 def visualize_trees(serial):
     """스크린샷을 찍고 XML/JSON 좌표를 바탕으로 네모 박스를 그립니다."""
     print("\n[*] 3. 시각화 자료(이미지)를 생성합니다...")
+    
     screenshot_path = "raw_screenshot.png"
+    remote_screenshot = "/sdcard/raw_screenshot.png"
+    
     print("  -> 스크린샷을 촬영 중입니다...")
-    subprocess.run(f"adb -s {serial} exec-out screencap -p > {screenshot_path}", shell=True)
+    # 1. 단말기 내부에 캡처 (인코딩 깨짐 방지)
+    subprocess.run(f"adb -s {serial} shell screencap -p {remote_screenshot}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # 2. PC로 파일 가져오기
+    subprocess.run(f"adb -s {serial} pull {remote_screenshot} {screenshot_path}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # 3. 단말기에 남은 찌꺼기 파일 삭제
+    subprocess.run(f"adb -s {serial} shell rm {remote_screenshot}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     if not os.path.exists(screenshot_path):
         print("  [-] 에러: 스크린샷 캡처에 실패했습니다.")
@@ -166,7 +174,7 @@ def visualize_trees(serial):
             
         nodes = a11y_data if isinstance(a11y_data, list) else a11y_data.get('nodes', [])
         for node in nodes:
-            bounds = node.get('boundsInScreen') or node.get('bounds') # 호환성
+            bounds = node.get('boundsInScreen') or node.get('bounds')
             
             if isinstance(bounds, dict):
                 x1, y1 = bounds.get('l', 0), bounds.get('t', 0)
@@ -184,7 +192,6 @@ def visualize_trees(serial):
         print(f"  [-] JSON 이미지 생성 실패: {e}")
         
     print("\n🎉 모든 작업이 완료되었습니다! 폴더에 생성된 이미지를 확인해 보세요.")
-
 def main():
     print("🚀 앱 화면 구조 자동 추출 및 비교 도구 시작")
     
