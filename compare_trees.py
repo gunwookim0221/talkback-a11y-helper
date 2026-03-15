@@ -3,6 +3,14 @@ import json
 import subprocess
 import xml.etree.ElementTree as ET
 
+import re
+
+try:
+    from PIL import Image, ImageDraw
+except ImportError:
+    print("[-] 오류: Pillow 라이브러리가 설치되지 않았습니다. 'pip install Pillow'를 실행해주세요.")
+    sys.exit(1)
+
 try:
     # 1. 클래스명 수정 반영 (A11yAdbClient)
     from talkback_lib import A11yAdbClient
@@ -163,5 +171,80 @@ def main():
     else:
         print("\n[-] 파일 추출이 정상적으로 완료되지 않아 비교를 건너뜁니다.")
 
+# =====================================================================
+# 🎨 3. 시각화 (Bounding Box Overlay) 작업 시작
+# =====================================================================
+print("\n[*] 3. 시각화 자료(이미지)를 생성합니다...")
+
+# 단말기 시리얼 변수는 기존 코드에서 감지한 변수를 사용하세요 (예: dev_serial)
+# 만약 기존 스크립트에서 단말기 시리얼 변수명이 다르다면 아래를 수정하세요.
+serial = dev_serial 
+
+# 3-1. 현재 단말기 화면 스크린샷 캡처
+screenshot_path = "raw_screenshot.png"
+print("  -> 스크린샷을 촬영 중입니다...")
+subprocess.run(f"adb -s {serial} exec-out screencap -p > {screenshot_path}", shell=True)
+
+if not os.path.exists(screenshot_path):
+    print("  [-] 에러: 스크린샷 캡처에 실패했습니다.")
+else:
+    # 3-2. 기존 UI 덤프 (XML) 바운딩 박스 그리기 (빨간색)
+    try:
+        img_legacy = Image.open(screenshot_path).convert("RGBA")
+        draw_legacy = ImageDraw.Draw(img_legacy)
+        
+        import xml.etree.ElementTree as ET
+        tree = ET.parse("legacy_tree.xml")
+        root = tree.getroot()
+        bounds_pattern = re.compile(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]')
+        
+        for node in root.iter('node'):
+            bounds_str = node.attrib.get('bounds')
+            if bounds_str:
+                match = bounds_pattern.match(bounds_str)
+                if match:
+                    x1, y1, x2, y2 = map(int, match.groups())
+                    # 노이즈가 많음을 보여주기 위해 빨간색(Red) 두꺼운 선으로 표시
+                    draw_legacy.rectangle([x1, y1, x2, y2], outline="red", width=5)
+        
+        img_legacy.save("legacy_view.png")
+        print("  -> [+] 'legacy_view.png' 생성 완료 (빨간색 박스: 91개)")
+    except Exception as e:
+        print(f"  [-] XML 이미지 생성 실패: {e}")
+
+    # 3-3. 헬퍼 접근성 트리 (JSON) 바운딩 박스 그리기 (초록색)
+    try:
+        img_a11y = Image.open(screenshot_path).convert("RGBA")
+        draw_a11y = ImageDraw.Draw(img_a11y)
+        
+        import json
+        with open("a11y_tree.json", 'r', encoding='utf-8') as f:
+            a11y_data = json.load(f)
+            
+        # JSON 구조가 리스트 형태라고 가정 (dict라면 a11y_data['nodes'] 등으로 수정 필요)
+        nodes = a11y_data if isinstance(a11y_data, list) else a11y_data.get('nodes', [])
+        
+        for node in nodes:
+            bounds = node.get('bounds')
+            if bounds:
+                # bounds가 "[0,0][100,100]" 형태의 문자열인 경우
+                if isinstance(bounds, str):
+                    match = bounds_pattern.match(bounds)
+                    if match:
+                        x1, y1, x2, y2 = map(int, match.groups())
+                        # 깔끔하고 안정적인 느낌을 주기 위해 초록색(Green)으로 표시
+                        draw_a11y.rectangle([x1, y1, x2, y2], outline="#00FF00", width=8)
+                # bounds가 [x1, y1, x2, y2] 리스트 형태인 경우
+                elif isinstance(bounds, list) and len(bounds) == 4:
+                    x1, y1, x2, y2 = bounds
+                    draw_a11y.rectangle([x1, y1, x2, y2], outline="#00FF00", width=8)
+                
+        img_a11y.save("a11y_view.png")
+        print("  -> [+] 'a11y_view.png' 생성 완료 (초록색 박스: 48개)")
+    except Exception as e:
+        print(f"  [-] JSON 이미지 생성 실패: {e}")
+
+    print("\n🎉 모든 작업이 완료되었습니다! 폴더에 생성된 두 이미지를 확인해 보세요.")
+    
 if __name__ == "__main__":
     main()
