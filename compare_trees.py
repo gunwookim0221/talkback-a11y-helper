@@ -132,7 +132,7 @@ def visualize_trees(serial):
     remote_screenshot = "/sdcard/raw_screenshot.png"
     
     print("  -> 스크린샷을 촬영 중입니다...")
-    # 1. 단말기 내부에 캡처 (인코딩 깨짐 방지)
+    # 1. 단말기 내부에 캡처
     subprocess.run(f"adb -s {serial} shell screencap -p {remote_screenshot}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     # 2. PC로 파일 가져오기
     subprocess.run(f"adb -s {serial} pull {remote_screenshot} {screenshot_path}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -148,15 +148,21 @@ def visualize_trees(serial):
         img_legacy = Image.open(screenshot_path).convert("RGBA")
         draw_legacy = ImageDraw.Draw(img_legacy)
         tree = ET.parse("legacy_tree.xml")
-        bounds_pattern = re.compile(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]')
+        bounds_pattern = re.compile(r'\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]')
         
         for node in tree.getroot().iter('node'):
             bounds_str = node.attrib.get('bounds')
             if bounds_str:
                 match = bounds_pattern.match(bounds_str)
                 if match:
-                    x1, y1, x2, y2 = map(int, match.groups())
-                    draw_legacy.rectangle([x1, y1, x2, y2], outline="red", width=5)
+                    # 안전한 좌표 정렬 (에러 방지)
+                    x_start, y_start, x_end, y_end = map(int, match.groups())
+                    x1, x2 = min(x_start, x_end), max(x_start, x_end)
+                    y1, y2 = min(y_start, y_end), max(y_start, y_end)
+                    
+                    # 너비나 높이가 0보다 큰 실제 영역만 그림
+                    if x2 > x1 and y2 > y1:
+                        draw_legacy.rectangle([x1, y1, x2, y2], outline="red", width=5)
         
         img_legacy.save("legacy_view.png")
         print("  -> [+] 'legacy_view.png' 생성 완료 (빨간색 박스)")
@@ -167,7 +173,7 @@ def visualize_trees(serial):
     try:
         img_a11y = Image.open(screenshot_path).convert("RGBA")
         draw_a11y = ImageDraw.Draw(img_a11y)
-        bounds_pattern = re.compile(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]')
+        bounds_pattern = re.compile(r'\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]')
         
         with open("a11y_tree.json", 'r', encoding='utf-8') as f:
             a11y_data = json.load(f)
@@ -176,14 +182,26 @@ def visualize_trees(serial):
         for node in nodes:
             bounds = node.get('boundsInScreen') or node.get('bounds')
             
+            x_start, y_start, x_end, y_end = 0, 0, 0, 0
+            valid = False
+            
             if isinstance(bounds, dict):
-                x1, y1 = bounds.get('l', 0), bounds.get('t', 0)
-                x2, y2 = bounds.get('r', 0), bounds.get('b', 0)
-                draw_a11y.rectangle([x1, y1, x2, y2], outline="#00FF00", width=8)
+                x_start, y_start = bounds.get('l', 0), bounds.get('t', 0)
+                x_end, y_end = bounds.get('r', 0), bounds.get('b', 0)
+                valid = True
             elif isinstance(bounds, str):
                 match = bounds_pattern.match(bounds)
                 if match:
-                    x1, y1, x2, y2 = map(int, match.groups())
+                    x_start, y_start, x_end, y_end = map(int, match.groups())
+                    valid = True
+                    
+            if valid:
+                # 안전한 좌표 정렬 (에러 방지)
+                x1, x2 = min(x_start, x_end), max(x_start, x_end)
+                y1, y2 = min(y_start, y_end), max(y_start, y_end)
+                
+                # 너비나 높이가 0보다 큰 실제 영역만 그림
+                if x2 > x1 and y2 > y1:
                     draw_a11y.rectangle([x1, y1, x2, y2], outline="#00FF00", width=8)
                 
         img_a11y.save("a11y_view.png")
@@ -192,6 +210,7 @@ def visualize_trees(serial):
         print(f"  [-] JSON 이미지 생성 실패: {e}")
         
     print("\n🎉 모든 작업이 완료되었습니다! 폴더에 생성된 이미지를 확인해 보세요.")
+    
 def main():
     print("🚀 앱 화면 구조 자동 추출 및 비교 도구 시작")
     
