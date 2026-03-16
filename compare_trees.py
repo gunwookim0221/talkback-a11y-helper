@@ -349,21 +349,30 @@ def main():
                 json.dump(clickable_nodes, f, ensure_ascii=False, indent=2)
                            
             # Focusable JSON 저장 (TalkBack 실제 포커스 기준 완벽 반영)
+            # Focusable JSON 저장 (TalkBack 실제 포커스 기준 - 엄격한 필터링 적용)
             talkback_focusable_nodes = []
             for n in nodes:
-                # 1. 명시적 포커스 가능 여부
-                is_focusable = n.get('focusable') is True or n.get('isFocusable') is True
-                # 2. 스크린리더 전용 포커스
+                # 1. 화면에 보이지 않도록 처리된 객체는 무조건 제외
+                if n.get('isVisibleToUser') is False or n.get('visibleToUser') is False:
+                    continue
+
                 is_sr_focusable = n.get('screenReaderFocusable') is True or n.get('isScreenReaderFocusable') is True
-                # 3. 클릭 가능 여부 (톡백은 클릭 가능하면 무조건 포커스를 잡음)
                 is_clickable = n.get('clickable') is True or n.get('isClickable') is True
-                # 4. 읽을거리(Text 또는 ContentDescription)가 존재하는지 여부
-                has_text = bool(n.get('text')) or bool(n.get('contentDescription'))
-            
-                # 위 조건 중 하나라도 만족하면 톡백이 멈춰서 읽어줌!
-                if is_focusable or is_sr_focusable or is_clickable or has_text:
+                
+                # 2. 공백("   ")만 있는 텍스트는 시각장애인에게 의미가 없으므로 지움(strip)
+                text = str(n.get('text') or '').strip()
+                desc = str(n.get('contentDescription') or '').strip()
+                has_text = bool(text) or bool(desc)
+                
+                class_name = str(n.get('className') or n.get('class') or '')
+                is_input = 'EditText' in class_name
+
+                # 3. [엄격한 조건]
+                # 단순 focusable=true인 '빈 껍데기 레이아웃'이 잡히는 것을 막기 위해,
+                # 클릭 가능하거나 / 스크린리더 명시 속성이 있거나 / 진짜 텍스트가 있거나 / 입력창인 경우만 통과!
+                if is_clickable or is_sr_focusable or has_text or is_input:
                     talkback_focusable_nodes.append(n)
-            
+                    
             with open(json_focusable_file, 'w', encoding='utf-8') as f:
                 json.dump(talkback_focusable_nodes, f, ensure_ascii=False, indent=2)
                 
