@@ -8,7 +8,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.0.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.0.1")
     }
 
     @Test
@@ -319,6 +319,55 @@ class A11yNavigatorTest {
     }
 
 
+
+
+    @Test
+    fun shouldExcludeAsEmptyShell_returnsTrueForClickableNodeWithoutMergedLabel() {
+        val excluded = A11yNavigator.shouldExcludeAsEmptyShell(
+            mergedText = null,
+            mergedContentDescription = "   ",
+            clickable = true,
+            childCount = 2
+        )
+
+        assertTrue(excluded)
+    }
+
+    @Test
+    fun shouldExcludeAsEmptyShell_returnsFalseWhenMergedLabelExists() {
+        val excluded = A11yNavigator.shouldExcludeAsEmptyShell(
+            mergedText = "확인",
+            mergedContentDescription = null,
+            clickable = true,
+            childCount = 3
+        )
+
+        assertFalse(excluded)
+    }
+
+    @Test
+    fun shouldExcludeAsEmptyShell_returnsTrueForNonClickableLeafWithoutMergedLabel() {
+        val excluded = A11yNavigator.shouldExcludeAsEmptyShell(
+            mergedText = null,
+            mergedContentDescription = null,
+            clickable = false,
+            childCount = 0
+        )
+
+        assertTrue(excluded)
+    }
+
+    @Test
+    fun shouldExcludeAsEmptyShell_returnsFalseForNonClickableParentWithoutMergedLabel() {
+        val excluded = A11yNavigator.shouldExcludeAsEmptyShell(
+            mergedText = null,
+            mergedContentDescription = null,
+            clickable = false,
+            childCount = 1
+        )
+
+        assertFalse(excluded)
+    }
 
     private data class FakeNode(
         val name: String,

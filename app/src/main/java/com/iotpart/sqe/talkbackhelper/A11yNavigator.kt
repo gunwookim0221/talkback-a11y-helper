@@ -7,7 +7,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.0.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.0.1"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -377,9 +377,29 @@ object A11yNavigator {
     }
 
     private fun shouldExcludeAsEmptyShell(node: FocusedNode): Boolean {
-        val hasText = !node.text.isNullOrBlank() || !node.contentDescription.isNullOrBlank()
         val current = node.node
-        return !hasText && !current.isClickable && current.childCount == 0
+        return shouldExcludeAsEmptyShell(
+            mergedText = node.text,
+            mergedContentDescription = node.contentDescription,
+            clickable = current.isClickable,
+            childCount = current.childCount
+        )
+    }
+
+    internal fun shouldExcludeAsEmptyShell(
+        mergedText: String?,
+        mergedContentDescription: String?,
+        clickable: Boolean,
+        childCount: Int
+    ): Boolean {
+        val hasMergedLabel = !mergedText.isNullOrBlank() || !mergedContentDescription.isNullOrBlank()
+        if (hasMergedLabel) return false
+
+        if (clickable) {
+            return true
+        }
+
+        return childCount == 0
     }
 
     private fun spatialComparator(yBucketSize: Int = 12): Comparator<FocusedNode> {
