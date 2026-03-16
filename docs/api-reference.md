@@ -366,6 +366,7 @@ client.move_focus(dev_serial, "prev")
 
 ### 설명
 `dump_tree` + `get_focus`를 조합해 다음 이동 시 스크롤 우선/일반 이동/루프 이동을 지능적으로 분기합니다.
+다음 노드가 하단 고정 바(`isBottomNavigationBar=True`)이고 `canScrollDown=True`이면 먼저 스크롤을 수행한 뒤 `1.2초` 대기하고 트리를 재덤프하여 상단/하단 고정 바를 제외한 첫 컨텐츠 노드에 포커스를 재설정합니다.
 
 ### Returns
 - `"moved"`: 일반 next 이동 성공

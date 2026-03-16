@@ -1082,7 +1082,7 @@ class SmartMoveFocusTest(unittest.TestCase):
         ]
 
         with patch.object(client, "dump_tree", side_effect=[first_tree, second_tree]), \
-            patch.object(client, "get_focus", return_value={"index": 0}), \
+            patch.object(client, "get_focus", return_value={"index": 1}), \
             patch.object(client, "scroll", return_value=True) as scroll_mock, \
             patch("talkback_lib.time.sleep") as sleep_mock, \
             patch.object(client, "select", return_value=True) as select_mock:
@@ -1091,7 +1091,7 @@ class SmartMoveFocusTest(unittest.TestCase):
 
         self.assertEqual(result, "scrolled")
         scroll_mock.assert_called_once_with("SER", direction="down")
-        sleep_mock.assert_called_once_with(1.0)
+        sleep_mock.assert_called_once_with(1.2)
         select_mock.assert_called_once()
 
     def test_move_focus_smart_moves_when_next_is_not_nav(self):
@@ -1125,6 +1125,35 @@ class SmartMoveFocusTest(unittest.TestCase):
 
         self.assertEqual(result, "looped")
         select_mock.assert_called_once()
+
+
+    def test_focus_first_node_uses_resource_id_first(self):
+        client = FakeA11yClient()
+        nodes = [
+            {"text": "상단바", "isTopAppBar": True, "isBottomNavigationBar": False, "boundsInScreen": {"t": 0}},
+            {"text": "콘텐츠", "isTopAppBar": False, "isBottomNavigationBar": False, "boundsInScreen": {"t": 220}, "viewIdResourceName": "pkg:id/content_1"},
+        ]
+
+        with patch.object(client, "select", return_value=True) as select_mock:
+            ok = client._focus_first_node("SER", nodes)
+
+        self.assertTrue(ok)
+        select_mock.assert_called_once_with("SER", name="^pkg:id/content_1$", type_="r", index_=0)
+
+    def test_focus_first_node_uses_text_with_type_a_when_id_missing(self):
+        client = FakeA11yClient()
+        nodes = [
+            {"text": "헤더", "isTopAppBar": True, "isBottomNavigationBar": False, "boundsInScreen": {"t": 0}},
+            {"text": "본문 첫 줄", "isTopAppBar": False, "isBottomNavigationBar": False, "boundsInScreen": {"t": 200}},
+            {"text": "탭", "isTopAppBar": False, "isBottomNavigationBar": True, "boundsInScreen": {"t": 1700}},
+        ]
+
+        with patch.object(client, "select", return_value=True) as select_mock:
+            ok = client._focus_first_node("SER", nodes)
+
+        self.assertTrue(ok)
+        expected_name = f"^{__import__('re').escape('본문 첫 줄')}$"
+        select_mock.assert_called_once_with("SER", name=expected_name, type_="a", index_=0)
 
 
 class SmartNextTest(unittest.TestCase):
