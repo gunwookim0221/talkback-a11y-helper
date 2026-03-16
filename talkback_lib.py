@@ -33,7 +33,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.4.0"
+CLIENT_ALGORITHM_VERSION = "1.4.1"
 
 
 @dataclass
@@ -1193,70 +1193,3 @@ class A11yAdbClient:
         second, millis = sec_millis.split(".")
         return (month, day, int(hour), int(minute), int(second), int(millis))
 
-
-def _focus_first_node(client: A11yAdbClient, device_id: Any, nodes: list[dict[str, Any]]) -> bool:
-    if not nodes:
-        return False
-
-    candidates = [
-        node
-        for node in nodes
-        if not bool(node.get("isTopAppBar", False))
-        and not bool(node.get("isBottomNavigationBar", node.get("isSystemNavigationBar", False)))
-    ]
-    if not candidates:
-        return False
-
-    target_node = min(
-        candidates,
-        key=lambda node: int((node.get("boundsInScreen") or {}).get("t", 10**9))
-    )
-
-    target_id = target_node.get("viewIdResourceName")
-    if isinstance(target_id, str) and target_id.strip():
-        return client.select(device_id, name=f"^{re.escape(target_id.strip())}$", type_="r", index_=0)
-
-    target_text = target_node.get("text")
-    if isinstance(target_text, str) and target_text.strip():
-        return client.select(device_id, name=f"^{re.escape(target_text.strip())}$", type_="a", index_=0)
-
-    target_desc = target_node.get("contentDescription")
-    if isinstance(target_desc, str) and target_desc.strip():
-        return client.select(device_id, name=f"^{re.escape(target_desc.strip())}$", type_="b", index_=0)
-
-    return False
-
-
-def smart_next(client: A11yAdbClient, device_id: Any) -> bool:
-    """v1.1.0: 시스템 내비게이션 바 진입 전 스크롤 우선 탐색을 적용한 next 이동."""
-    nodes = client.dump_tree(device_id)
-    if not nodes:
-        return False
-
-    metadata = getattr(client, "last_dump_metadata", {}) or {}
-    can_scroll_down = bool(metadata.get("canScrollDown", False))
-
-    current_idx = next(
-        (
-            idx
-            for idx, node in enumerate(nodes)
-            if bool(node.get("accessibilityFocused")) or bool(node.get("focused"))
-        ),
-        -1,
-    )
-
-    if current_idx == len(nodes) - 1:
-        return _focus_first_node(client, device_id, nodes)
-
-    next_idx = (current_idx + 1) % len(nodes)
-    next_node = nodes[next_idx]
-    next_is_nav = bool(next_node.get("isBottomNavigationBar", next_node.get("isSystemNavigationBar", False)))
-    current_is_nav = current_idx >= 0 and bool(
-        nodes[current_idx].get("isBottomNavigationBar", nodes[current_idx].get("isSystemNavigationBar", False))
-    )
-
-    if next_is_nav and can_scroll_down and not current_is_nav:
-        if client.scroll(device_id, direction="down"):
-            return True
-
-    return client.move_focus(device_id, direction="next")

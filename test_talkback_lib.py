@@ -14,7 +14,6 @@ from talkback_lib import (
     ACTION_PING,
     LOGCAT_FILTER_SPECS,
     A11yAdbClient,
-    smart_next,
 )
 
 
@@ -1154,51 +1153,6 @@ class SmartMoveFocusTest(unittest.TestCase):
         self.assertTrue(ok)
         expected_name = f"^{__import__('re').escape('본문 첫 줄')}$"
         select_mock.assert_called_once_with("SER", name=expected_name, type_="a", index_=0)
-
-
-class SmartNextTest(unittest.TestCase):
-    def test_smart_next_scrolls_before_entering_system_navigation(self):
-        client = unittest.mock.MagicMock()
-        client.dump_tree.return_value = [
-            {"accessibilityFocused": True, "isBottomNavigationBar": False},
-            {"isBottomNavigationBar": True},
-        ]
-        client.last_dump_metadata = {"canScrollDown": True}
-        client.scroll.return_value = True
-
-        result = smart_next(client, "SER")
-
-        self.assertTrue(result)
-        client.scroll.assert_called_once_with("SER", direction="down")
-        client.move_focus.assert_not_called()
-
-    def test_smart_next_moves_focus_when_next_is_not_navigation(self):
-        client = unittest.mock.MagicMock()
-        client.dump_tree.return_value = [
-            {"accessibilityFocused": True, "isBottomNavigationBar": False},
-            {"isBottomNavigationBar": False},
-        ]
-        client.last_dump_metadata = {"canScrollDown": True}
-
-        result = smart_next(client, "SER")
-
-        self.assertEqual(result, client.move_focus.return_value)
-        client.move_focus.assert_called_once_with("SER", direction="next")
-
-    def test_smart_next_wraps_to_first_node_at_end_of_list(self):
-        client = unittest.mock.MagicMock()
-        client.dump_tree.return_value = [
-            {"text": "상단", "isTopAppBar": True, "isBottomNavigationBar": False, "boundsInScreen": {"t": 0}},
-            {"text": "첫 항목", "isTopAppBar": False, "isBottomNavigationBar": False, "boundsInScreen": {"t": 150}, "viewIdResourceName": "pkg:id/first"},
-            {"accessibilityFocused": True, "text": "마지막 항목", "isTopAppBar": False, "isBottomNavigationBar": True, "boundsInScreen": {"t": 1800}},
-        ]
-        client.last_dump_metadata = {"canScrollDown": False}
-        client.select.return_value = True
-
-        result = smart_next(client, "SER")
-
-        self.assertTrue(result)
-        client.select.assert_called_once()
 
 
 if __name__ == "__main__":
