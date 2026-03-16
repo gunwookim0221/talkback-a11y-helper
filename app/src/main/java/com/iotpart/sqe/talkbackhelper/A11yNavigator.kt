@@ -1,11 +1,14 @@
 package com.iotpart.sqe.talkbackhelper
 
 import android.graphics.Rect
+import android.os.Build
 import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONArray
 import org.json.JSONObject
 
 object A11yNavigator {
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.0.0"
+
     data class TargetActionOutcome(
         val success: Boolean,
         val reason: String,
@@ -26,19 +29,18 @@ object A11yNavigator {
     fun dumpTreeFlat(root: AccessibilityNodeInfo?): JSONArray {
         if (root == null) return JSONArray()
 
-        val result = JSONArray()
-        val stack = ArrayDeque<AccessibilityNodeInfo>()
-        stack.add(root)
-
-        while (stack.isNotEmpty()) {
-            val node = stack.removeLast()
-            result.put(nodeToJson(node))
-
-            for (i in node.childCount - 1 downTo 0) {
-                node.getChild(i)?.let { stack.add(it) }
+        val focusNodes = buildTalkBackLikeFocusNodes(root)
+        return JSONArray().apply {
+            focusNodes.forEach { focusedNode ->
+                put(
+                    nodeToJson(
+                        node = focusedNode.node,
+                        textOverride = focusedNode.text,
+                        contentDescriptionOverride = focusedNode.contentDescription
+                    )
+                )
             }
         }
-        return result
     }
 
     fun findAndPerformAction(
@@ -275,26 +277,126 @@ object A11yNavigator {
     }
 
     private fun buildFocusableTraversalList(root: AccessibilityNodeInfo): List<AccessibilityNodeInfo> {
-        val nodesInOrder = mutableListOf<AccessibilityNodeInfo>()
-        val stack = ArrayDeque<AccessibilityNodeInfo>()
-        stack.add(root)
+        return buildTalkBackLikeFocusNodes(root).map { it.node }
+    }
 
-        while (stack.isNotEmpty()) {
-            val node = stack.removeLast()
-            nodesInOrder += node
+    private data class FocusedNode(
+        val node: AccessibilityNodeInfo,
+        val text: String?,
+        val contentDescription: String?
+    )
 
-            for (i in node.childCount - 1 downTo 0) {
-                node.getChild(i)?.let { stack.add(it) }
-            }
+    private fun buildTalkBackLikeFocusNodes(root: AccessibilityNodeInfo): List<FocusedNode> {
+        val focusNodes = mutableListOf<FocusedNode>()
+        collectFocusableNodes(node = root, containerAncestor = null, sink = focusNodes)
+
+        return focusNodes
+            .filterNot { shouldExcludeAsEmptyShell(it) }
+            .sortedWith(spatialComparator())
+    }
+
+    private fun collectFocusableNodes(
+        node: AccessibilityNodeInfo,
+        containerAncestor: AccessibilityNodeInfo?,
+        sink: MutableList<FocusedNode>
+    ) {
+        if (!node.isVisibleToUser) return
+
+        val container = isFocusContainer(node)
+        if (container) {
+            val mergedContent = collectMergedTextFromContainer(node)
+            val mergedText = mergedContent.firstOrNull()
+            val mergedDescription = mergedContent.getOrNull(1)
+            sink += FocusedNode(node, mergedText, mergedDescription)
+        } else if (containerAncestor == null && hasAnyText(node)) {
+            sink += FocusedNode(
+                node = node,
+                text = node.text?.toString(),
+                contentDescription = node.contentDescription?.toString()
+            )
         }
 
-        return buildGroupedTraversalList(
-            nodesInOrder = nodesInOrder,
-            parentOf = { node -> node.parent },
-            isClickable = { node -> node.isClickable },
-            isFocusable = { node -> node.isFocusable },
-            isVisible = { node -> node.isVisibleToUser }
+        val nextContainer = if (container) node else containerAncestor
+        for (i in 0 until node.childCount) {
+            node.getChild(i)?.let { child ->
+                collectFocusableNodes(node = child, containerAncestor = nextContainer, sink = sink)
+            }
+        }
+    }
+
+    private fun collectMergedTextFromContainer(container: AccessibilityNodeInfo): List<String> {
+        val merged = mutableListOf<String>()
+        collectDescendantReadableText(
+            node = container,
+            includeCurrentNode = true,
+            sink = merged
         )
+
+        if (merged.isEmpty()) return emptyList()
+        val mergedText = merged.joinToString(separator = " ")
+        return listOf(mergedText, mergedText)
+    }
+
+    private fun collectDescendantReadableText(
+        node: AccessibilityNodeInfo,
+        includeCurrentNode: Boolean,
+        sink: MutableList<String>
+    ) {
+        if (!node.isVisibleToUser) return
+
+        if (includeCurrentNode) {
+            node.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let(sink::add)
+            node.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let(sink::add)
+        }
+
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            if (!child.isVisibleToUser) continue
+
+            if (isFocusContainer(child)) {
+                continue
+            }
+
+            collectDescendantReadableText(
+                node = child,
+                includeCurrentNode = true,
+                sink = sink
+            )
+        }
+    }
+
+    private fun isFocusContainer(node: AccessibilityNodeInfo): Boolean {
+        val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && node.isScreenReaderFocusable
+        return node.isClickable || screenReaderFocusable
+    }
+
+    private fun hasAnyText(node: AccessibilityNodeInfo): Boolean {
+        val text = node.text?.toString()?.trim().orEmpty()
+        val description = node.contentDescription?.toString()?.trim().orEmpty()
+        return text.isNotEmpty() || description.isNotEmpty()
+    }
+
+    private fun shouldExcludeAsEmptyShell(node: FocusedNode): Boolean {
+        val hasText = !node.text.isNullOrBlank() || !node.contentDescription.isNullOrBlank()
+        val current = node.node
+        return !hasText && !current.isClickable && current.childCount == 0
+    }
+
+    private fun spatialComparator(yBucketSize: Int = 12): Comparator<FocusedNode> {
+        return compareBy<FocusedNode> { focusedNode ->
+            val rect = Rect()
+            focusedNode.node.getBoundsInScreen(rect)
+            val centerY = (rect.top + rect.bottom) / 2
+            centerY / yBucketSize
+        }.thenBy { focusedNode ->
+            val rect = Rect()
+            focusedNode.node.getBoundsInScreen(rect)
+            rect.left
+        }.thenBy { focusedNode ->
+            val rect = Rect()
+            focusedNode.node.getBoundsInScreen(rect)
+            rect.top
+        }
     }
 
     private fun isViewIdMatched(nodeViewId: String?, target: String): Boolean {
@@ -322,13 +424,17 @@ object A11yNavigator {
         }
     }
 
-    private fun nodeToJson(node: AccessibilityNodeInfo): JSONObject {
+    private fun nodeToJson(
+        node: AccessibilityNodeInfo,
+        textOverride: String? = null,
+        contentDescriptionOverride: String? = null
+    ): JSONObject {
         val rect = Rect()
         node.getBoundsInScreen(rect)
 
         return JSONObject().apply {
-            put("text", node.text?.toString() ?: JSONObject.NULL)
-            put("contentDescription", node.contentDescription?.toString() ?: JSONObject.NULL)
+            put("text", textOverride ?: node.text?.toString() ?: JSONObject.NULL)
+            put("contentDescription", contentDescriptionOverride ?: node.contentDescription?.toString() ?: JSONObject.NULL)
             put("className", node.className?.toString() ?: JSONObject.NULL)
             put("viewIdResourceName", node.viewIdResourceName ?: JSONObject.NULL)
             put(
