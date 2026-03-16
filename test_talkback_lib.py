@@ -1071,30 +1071,34 @@ class SmartMoveFocusTest(unittest.TestCase):
     def test_move_focus_smart_scrolls_and_focuses_first_when_next_is_nav_and_scrollable(self):
         client = FakeA11yClient()
         first_tree = [
-            {"text": "리스트 1", "isSystemNavigationBar": False},
-            {"text": "탭 바", "isSystemNavigationBar": True},
+            {"text": "상단바", "isTopAppBar": True, "isBottomNavigationBar": False, "boundsInScreen": {"t": 0}},
+            {"text": "리스트 1", "isTopAppBar": False, "isBottomNavigationBar": False, "boundsInScreen": {"t": 300}, "viewIdResourceName": "pkg:id/item1"},
+            {"text": "탭 바", "isTopAppBar": False, "isBottomNavigationBar": True, "boundsInScreen": {"t": 1800}},
         ]
         second_tree = [
-            {"text": "리스트 2", "isSystemNavigationBar": False},
-            {"text": "탭 바", "isSystemNavigationBar": True},
+            {"text": "상단바", "isTopAppBar": True, "isBottomNavigationBar": False, "boundsInScreen": {"t": 0}},
+            {"text": "리스트 2", "isTopAppBar": False, "isBottomNavigationBar": False, "boundsInScreen": {"t": 250}, "viewIdResourceName": "pkg:id/item2"},
+            {"text": "탭 바", "isTopAppBar": False, "isBottomNavigationBar": True, "boundsInScreen": {"t": 1800}},
         ]
 
         with patch.object(client, "dump_tree", side_effect=[first_tree, second_tree]), \
             patch.object(client, "get_focus", return_value={"index": 0}), \
             patch.object(client, "scroll", return_value=True) as scroll_mock, \
+            patch("talkback_lib.time.sleep") as sleep_mock, \
             patch.object(client, "select", return_value=True) as select_mock:
             client.last_dump_metadata = {"canScrollDown": True}
             result = client.move_focus_smart("SER", direction="next")
 
         self.assertEqual(result, "scrolled")
         scroll_mock.assert_called_once_with("SER", direction="down")
+        sleep_mock.assert_called_once_with(1.0)
         select_mock.assert_called_once()
 
     def test_move_focus_smart_moves_when_next_is_not_nav(self):
         client = FakeA11yClient()
         tree = [
-            {"text": "현재", "isSystemNavigationBar": False},
-            {"text": "다음", "isSystemNavigationBar": False},
+            {"text": "현재", "isTopAppBar": False, "isBottomNavigationBar": False},
+            {"text": "다음", "isTopAppBar": False, "isBottomNavigationBar": False},
         ]
 
         with patch.object(client, "dump_tree", return_value=tree), \
@@ -1109,8 +1113,8 @@ class SmartMoveFocusTest(unittest.TestCase):
     def test_move_focus_smart_loops_when_last_node_focused(self):
         client = FakeA11yClient()
         tree = [
-            {"text": "첫 항목", "isSystemNavigationBar": False},
-            {"text": "마지막 항목", "isSystemNavigationBar": False},
+            {"text": "첫 항목", "isTopAppBar": False, "isBottomNavigationBar": False, "boundsInScreen": {"t": 120}, "viewIdResourceName": "pkg:id/first"},
+            {"text": "마지막 항목", "isTopAppBar": False, "isBottomNavigationBar": False, "boundsInScreen": {"t": 820}},
         ]
 
         with patch.object(client, "dump_tree", return_value=tree), \
@@ -1127,8 +1131,8 @@ class SmartNextTest(unittest.TestCase):
     def test_smart_next_scrolls_before_entering_system_navigation(self):
         client = unittest.mock.MagicMock()
         client.dump_tree.return_value = [
-            {"accessibilityFocused": True, "isSystemNavigationBar": False},
-            {"isSystemNavigationBar": True},
+            {"accessibilityFocused": True, "isBottomNavigationBar": False},
+            {"isBottomNavigationBar": True},
         ]
         client.last_dump_metadata = {"canScrollDown": True}
         client.scroll.return_value = True
@@ -1142,8 +1146,8 @@ class SmartNextTest(unittest.TestCase):
     def test_smart_next_moves_focus_when_next_is_not_navigation(self):
         client = unittest.mock.MagicMock()
         client.dump_tree.return_value = [
-            {"accessibilityFocused": True, "isSystemNavigationBar": False},
-            {"isSystemNavigationBar": False},
+            {"accessibilityFocused": True, "isBottomNavigationBar": False},
+            {"isBottomNavigationBar": False},
         ]
         client.last_dump_metadata = {"canScrollDown": True}
 
@@ -1155,8 +1159,9 @@ class SmartNextTest(unittest.TestCase):
     def test_smart_next_wraps_to_first_node_at_end_of_list(self):
         client = unittest.mock.MagicMock()
         client.dump_tree.return_value = [
-            {"text": "첫 항목", "isSystemNavigationBar": False},
-            {"accessibilityFocused": True, "text": "마지막 항목", "isSystemNavigationBar": True},
+            {"text": "상단", "isTopAppBar": True, "isBottomNavigationBar": False, "boundsInScreen": {"t": 0}},
+            {"text": "첫 항목", "isTopAppBar": False, "isBottomNavigationBar": False, "boundsInScreen": {"t": 150}, "viewIdResourceName": "pkg:id/first"},
+            {"accessibilityFocused": True, "text": "마지막 항목", "isTopAppBar": False, "isBottomNavigationBar": True, "boundsInScreen": {"t": 1800}},
         ]
         client.last_dump_metadata = {"canScrollDown": False}
         client.select.return_value = True

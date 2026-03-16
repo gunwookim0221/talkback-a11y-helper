@@ -16,7 +16,8 @@ data class A11yNodeInfo(
     val isVisibleToUser: Boolean,
     val focused: Boolean,
     val accessibilityFocused: Boolean,
-    val isSystemNavigationBar: Boolean
+    val isTopAppBar: Boolean,
+    val isBottomNavigationBar: Boolean
 ) {
     fun toJson(): JSONObject {
         return JSONObject().apply {
@@ -37,7 +38,8 @@ data class A11yNodeInfo(
             put("isVisibleToUser", isVisibleToUser)
             put("focused", focused)
             put("accessibilityFocused", accessibilityFocused)
-            put("isSystemNavigationBar", isSystemNavigationBar)
+            put("isTopAppBar", isTopAppBar)
+            put("isBottomNavigationBar", isBottomNavigationBar)
         }
     }
 }
