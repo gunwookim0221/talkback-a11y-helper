@@ -4,6 +4,7 @@ import subprocess
 import xml.etree.ElementTree as ET
 import re
 import sys
+from datetime import datetime
 
 try:
     from PIL import Image, ImageDraw
@@ -52,10 +53,10 @@ def get_legacy_tree(serial, local_path):
     )
     
     if os.path.exists(local_path):
-        print(f"  -> [+] '{local_path}' 파일 다운로드 완료")
+        print(f"  -> [+] '{os.path.basename(local_path)}' 다운로드 완료")
         return True
     else:
-        print(f"  [-] 에러: '{local_path}' 파일을 가져오지 못했습니다. 화면이 꺼져있거나 권한 문제일 수 있습니다.")
+        print(f"  [-] 에러: '{local_path}' 파일을 가져오지 못했습니다.")
         return False
 
 def get_a11y_tree(serial, local_path):
@@ -71,7 +72,7 @@ def get_a11y_tree(serial, local_path):
         with open(local_path, "w", encoding="utf-8") as f:
             json.dump(a11y_data, f, ensure_ascii=False, indent=2)
             
-        print(f"  -> [+] '{local_path}' 파일 다운로드 완료")
+        print(f"  -> [+] '{os.path.basename(local_path)}' 다운로드 완료")
         return True
     except Exception as e:
         print(f"[-] 접근성 트리 추출 실패: {e}")
@@ -113,104 +114,125 @@ def compare_and_summarize(xml_path, json_path):
     print(f"🔍 [전체 노드 수 비교]")
     print(f"  - 기존 UI 덤프 (XML) : {xml_nodes}개")
     print(f"  - 헬퍼 접근성 (JSON) : {json_nodes}개")
-    print(f"  💡 분석: TalkBack에 불필요한 노드 {filtered_count}개(약 {compression_rate:.1f}%)가 완벽히 필터링되었습니다.")
+    print(f"  💡 분석: TalkBack에 불필요한 노드 {filtered_count}개(약 {compression_rate:.1f}%)가 필터링되었습니다.")
     
     print(f"\n👆 [클릭 가능(Clickable) 노드 비교]")
     print(f"  - 기존 UI 덤프 (XML) : {xml_clickable}개")
     print(f"  - 헬퍼 접근성 (JSON) : {json_clickable}개")
     if xml_clickable > json_clickable:
-        print(f"  💡 분석: 화면엔 보이지만 실제 시각장애인은 클릭할 수 없는 '가짜 버튼'이 약 {xml_clickable - json_clickable}개 존재합니다.")
+        print(f"  💡 분석: 화면엔 보이지만 실제로는 클릭할 수 없는 '가짜 버튼'이 약 {xml_clickable - json_clickable}개 존재합니다.")
     elif json_clickable > xml_clickable:
         print(f"  💡 분석: 여러 하위 노드가 병합(Merge)되어 접근성 전용 클릭 영역이 새로 생성되었습니다.")
     print("=" * 50)
 
-def visualize_trees(serial):
-    """스크린샷을 찍고 XML/JSON 좌표를 바탕으로 네모 박스를 그립니다."""
+def extract_valid_bounds(bounds, pattern):
+    """좌표 데이터를 파싱하고 안전하게 정렬하여 반환하는 헬퍼 함수"""
+    x_start, y_start, x_end, y_end = 0, 0, 0, 0
+    valid = False
+    
+    if isinstance(bounds, dict):
+        x_start, y_start = bounds.get('l', 0), bounds.get('t', 0)
+        x_end, y_end = bounds.get('r', 0), bounds.get('b', 0)
+        valid = True
+    elif isinstance(bounds, str):
+        match = pattern.match(bounds)
+        if match:
+            x_start, y_start, x_end, y_end = map(int, match.groups())
+            valid = True
+            
+    if valid:
+        x1, x2 = min(x_start, x_end), max(x_start, x_end)
+        y1, y2 = min(y_start, y_end), max(y_start, y_end)
+        if x2 > x1 and y2 > y1:
+            return [x1, y1, x2, y2]
+    return None
+
+def visualize_trees(serial, output_dir, timestamp, xml_file, json_file, json_clickable_file):
     print("\n[*] 3. 시각화 자료(이미지)를 생성합니다...")
     
-    screenshot_path = "raw_screenshot.png"
+    screenshot_path = os.path.join(output_dir, f"{timestamp}_raw_screenshot.png")
     remote_screenshot = "/sdcard/raw_screenshot.png"
     
     print("  -> 스크린샷을 촬영 중입니다...")
-    # 1. 단말기 내부에 캡처
     subprocess.run(f"adb -s {serial} shell screencap -p {remote_screenshot}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    # 2. PC로 파일 가져오기
     subprocess.run(f"adb -s {serial} pull {remote_screenshot} {screenshot_path}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    # 3. 단말기에 남은 찌꺼기 파일 삭제
     subprocess.run(f"adb -s {serial} shell rm {remote_screenshot}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     if not os.path.exists(screenshot_path):
         print("  [-] 에러: 스크린샷 캡처에 실패했습니다.")
         return
 
+    bounds_pattern = re.compile(r'\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]')
+
     # 3-1. 일반 UI (XML) 시각화 - 빨간색
     try:
         img_legacy = Image.open(screenshot_path).convert("RGBA")
         draw_legacy = ImageDraw.Draw(img_legacy)
-        tree = ET.parse("legacy_tree.xml")
-        bounds_pattern = re.compile(r'\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]')
+        tree = ET.parse(xml_file)
         
+        count = 0
         for node in tree.getroot().iter('node'):
             bounds_str = node.attrib.get('bounds')
             if bounds_str:
-                match = bounds_pattern.match(bounds_str)
-                if match:
-                    # 안전한 좌표 정렬 (에러 방지)
-                    x_start, y_start, x_end, y_end = map(int, match.groups())
-                    x1, x2 = min(x_start, x_end), max(x_start, x_end)
-                    y1, y2 = min(y_start, y_end), max(y_start, y_end)
-                    
-                    # 너비나 높이가 0보다 큰 실제 영역만 그림
-                    if x2 > x1 and y2 > y1:
-                        draw_legacy.rectangle([x1, y1, x2, y2], outline="red", width=5)
+                box = extract_valid_bounds(bounds_str, bounds_pattern)
+                if box:
+                    draw_legacy.rectangle(box, outline="red", width=5)
+                    count += 1
         
-        img_legacy.save("legacy_view.png")
-        print("  -> [+] 'legacy_view.png' 생성 완료 (빨간색 박스)")
+        legacy_img_out = os.path.join(output_dir, f"{timestamp}_legacy_view.png")
+        img_legacy.save(legacy_img_out)
+        print(f"  -> [+] '{os.path.basename(legacy_img_out)}' 생성 완료 (빨간색 박스: {count}개)")
     except Exception as e:
         print(f"  [-] XML 이미지 생성 실패: {e}")
 
-    # 3-2. 접근성 트리 (JSON) 시각화 - 초록색
+    # 3-2. 접근성 트리 전체 (JSON) 시각화 - 초록색
     try:
         img_a11y = Image.open(screenshot_path).convert("RGBA")
         draw_a11y = ImageDraw.Draw(img_a11y)
-        bounds_pattern = re.compile(r'\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]')
         
-        with open("a11y_tree.json", 'r', encoding='utf-8') as f:
+        with open(json_file, 'r', encoding='utf-8') as f:
             a11y_data = json.load(f)
             
         nodes = a11y_data if isinstance(a11y_data, list) else a11y_data.get('nodes', [])
+        count = 0
         for node in nodes:
             bounds = node.get('boundsInScreen') or node.get('bounds')
-            
-            x_start, y_start, x_end, y_end = 0, 0, 0, 0
-            valid = False
-            
-            if isinstance(bounds, dict):
-                x_start, y_start = bounds.get('l', 0), bounds.get('t', 0)
-                x_end, y_end = bounds.get('r', 0), bounds.get('b', 0)
-                valid = True
-            elif isinstance(bounds, str):
-                match = bounds_pattern.match(bounds)
-                if match:
-                    x_start, y_start, x_end, y_end = map(int, match.groups())
-                    valid = True
-                    
-            if valid:
-                # 안전한 좌표 정렬 (에러 방지)
-                x1, x2 = min(x_start, x_end), max(x_start, x_end)
-                y1, y2 = min(y_start, y_end), max(y_start, y_end)
+            box = extract_valid_bounds(bounds, bounds_pattern)
+            if box:
+                draw_a11y.rectangle(box, outline="#00FF00", width=8)
+                count += 1
                 
-                # 너비나 높이가 0보다 큰 실제 영역만 그림
-                if x2 > x1 and y2 > y1:
-                    draw_a11y.rectangle([x1, y1, x2, y2], outline="#00FF00", width=8)
-                
-        img_a11y.save("a11y_view.png")
-        print("  -> [+] 'a11y_view.png' 생성 완료 (초록색 박스)")
+        a11y_img_out = os.path.join(output_dir, f"{timestamp}_a11y_view.png")
+        img_a11y.save(a11y_img_out)
+        print(f"  -> [+] '{os.path.basename(a11y_img_out)}' 생성 완료 (초록색 박스: {count}개)")
     except Exception as e:
         print(f"  [-] JSON 이미지 생성 실패: {e}")
+
+    # 3-3. 접근성 트리 Clickable Only (JSON) 시각화 - 파란색
+    try:
+        img_a11y_click = Image.open(screenshot_path).convert("RGBA")
+        draw_a11y_click = ImageDraw.Draw(img_a11y_click)
         
-    print("\n🎉 모든 작업이 완료되었습니다! 폴더에 생성된 이미지를 확인해 보세요.")
-    
+        with open(json_clickable_file, 'r', encoding='utf-8') as f:
+            clickable_data = json.load(f)
+            
+        count = 0
+        for node in clickable_data:
+            bounds = node.get('boundsInScreen') or node.get('bounds')
+            box = extract_valid_bounds(bounds, bounds_pattern)
+            if box:
+                # Clickable 객체는 파란색(DeepSkyBlue)으로 강조
+                draw_a11y_click.rectangle(box, outline="#00BFFF", width=10)
+                count += 1
+                
+        a11y_click_img_out = os.path.join(output_dir, f"{timestamp}_a11y_clickable_view.png")
+        img_a11y_click.save(a11y_click_img_out)
+        print(f"  -> [+] '{os.path.basename(a11y_click_img_out)}' 생성 완료 (파란색 박스: {count}개)")
+    except Exception as e:
+        print(f"  [-] Clickable JSON 이미지 생성 실패: {e}")
+        
+    print(f"\n🎉 모든 작업이 완료되었습니다! '{output_dir}' 폴더를 확인해 보세요.")
+
 def main():
     print("🚀 앱 화면 구조 자동 추출 및 비교 도구 시작")
     
@@ -218,12 +240,19 @@ def main():
     if not dev_serial:
         return
 
-    xml_file = "legacy_tree.xml"
-    json_file = "a11y_tree.json"
+    # 1. 결과를 저장할 폴더 생성
+    output_dir = "compare_result"
+    os.makedirs(output_dir, exist_ok=True)
 
-    if os.path.exists(xml_file): os.remove(xml_file)
-    if os.path.exists(json_file): os.remove(json_file)
+    # 2. 실행 시간을 기반으로 한 고유 타임스탬프 생성 (예: 20240520_153022)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
+    # 3. 타임스탬프가 붙은 파일 경로 설정
+    xml_file = os.path.join(output_dir, f"{timestamp}_legacy_tree.xml")
+    json_file = os.path.join(output_dir, f"{timestamp}_a11y_tree.json")
+    json_clickable_file = os.path.join(output_dir, f"{timestamp}_a11y_clickable_tree.json")
+
+    # 일반 트리 덤프
     get_legacy_tree(dev_serial, xml_file)
     
     print("\n" + "#" * 50)
@@ -232,13 +261,29 @@ def main():
     print("#" * 50)
     input("  >> 준비가 완료되면 [Enter] 키를 누르세요...")
     
+    # 접근성 트리 덤프
     success = get_a11y_tree(dev_serial, json_file)
     
     if success and os.path.exists(xml_file) and os.path.exists(json_file):
         compare_and_summarize(xml_file, json_file)
         
-        # 여기서 시각화 함수를 호출하며 dev_serial 변수를 넘겨줍니다!
-        visualize_trees(dev_serial)
+        # 4. Clickable 객체만 필터링하여 새로운 JSON으로 저장
+        try:
+            with open(json_file, 'r', encoding='utf-8') as f:
+                a11y_data = json.load(f)
+            nodes = a11y_data if isinstance(a11y_data, list) else a11y_data.get('nodes', [])
+            
+            # clickable이 true인 노드만 수집
+            clickable_nodes = [n for n in nodes if n.get('clickable') is True or n.get('isClickable') is True]
+            
+            with open(json_clickable_file, 'w', encoding='utf-8') as f:
+                json.dump(clickable_nodes, f, ensure_ascii=False, indent=2)
+                
+        except Exception as e:
+            print(f"[-] Clickable JSON 데이터 분류 중 오류: {e}")
+        
+        # 5. 세 가지 버전의 시각화 실행
+        visualize_trees(dev_serial, output_dir, timestamp, xml_file, json_file, json_clickable_file)
     else:
         print("\n[-] 파일 추출이 정상적으로 완료되지 않아 비교를 건너뜁니다.")
 
