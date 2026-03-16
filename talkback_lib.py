@@ -33,7 +33,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.1.0"
+CLIENT_ALGORITHM_VERSION = "1.2.0"
 
 
 @dataclass
@@ -803,6 +803,98 @@ class A11yAdbClient:
 
         print(f"[ERROR] move_focus 실패(direction={direction_token}): {result.get('reason', 'unknown')}")
         return False
+
+    def get_focus(self, dev: Any = None, wait_seconds: float = 2.0) -> dict[str, Any]:
+        if not self.check_helper_status(dev=dev):
+            return {}
+
+        self.clear_logcat(dev=dev)
+        req_id = str(uuid.uuid4())[:8]
+        self._broadcast(dev, ACTION_GET_FOCUS, ["--es", "reqId", req_id])
+
+        result = self._read_log_result(dev, "FOCUS_RESULT", req_id, wait_seconds=wait_seconds)
+        if not bool(result.get("success")):
+            return {}
+
+        for key in ("node", "focusNode", "focusedNode", "focus"):
+            node = result.get(key)
+            if isinstance(node, dict):
+                return node
+
+        if any(k in result for k in ("text", "viewIdResourceName", "contentDescription", "boundsInScreen")):
+            return dict(result)
+
+        return {}
+
+    def _focus_first_node(self, dev: Any, nodes: list[dict[str, Any]]) -> bool:
+        if not nodes:
+            return False
+        first = nodes[0]
+        return self.select(
+            dev,
+            name=".*",
+            type_="all",
+            index_=0,
+            class_name=first.get("className"),
+            clickable=first.get("clickable"),
+            focusable=first.get("focusable"),
+        )
+
+    @staticmethod
+    def _match_focus_index(nodes: list[dict[str, Any]], focus_node: dict[str, Any]) -> int:
+        if not nodes or not focus_node:
+            return -1
+
+        focus_index = focus_node.get("index")
+        if isinstance(focus_index, int) and 0 <= focus_index < len(nodes):
+            return focus_index
+
+        key_candidates = ("viewIdResourceName", "text", "contentDescription", "className", "boundsInScreen")
+        for idx, node in enumerate(nodes):
+            if all(node.get(key) == focus_node.get(key) for key in key_candidates if key in focus_node):
+                return idx
+        return -1
+
+    def move_focus_smart(self, dev: Any = None, direction: str = "next") -> str:
+        direction_token = str(direction).strip().lower()
+        if direction_token != "next":
+            return "moved" if self.move_focus(dev=dev, direction=direction_token) else "failed"
+
+        nodes = self.dump_tree(dev=dev)
+        if not nodes:
+            return "failed"
+
+        metadata = getattr(self, "last_dump_metadata", {}) or {}
+        can_scroll_down = bool(metadata.get("canScrollDown", False))
+        focus_node = self.get_focus(dev=dev)
+        current_idx = self._match_focus_index(nodes, focus_node)
+
+        if current_idx < 0:
+            current_idx = next(
+                (
+                    idx
+                    for idx, node in enumerate(nodes)
+                    if bool(node.get("accessibilityFocused")) or bool(node.get("focused"))
+                ),
+                -1,
+            )
+
+        if current_idx == len(nodes) - 1:
+            return "looped" if self._focus_first_node(dev, nodes) else "failed"
+
+        next_idx = current_idx + 1
+        next_node = nodes[next_idx] if 0 <= next_idx < len(nodes) else None
+
+        if next_node is None:
+            return "looped" if self._focus_first_node(dev, nodes) else "failed"
+
+        if bool(next_node.get("isSystemNavigationBar", False)) and can_scroll_down:
+            if self.scroll(dev, direction="down"):
+                refreshed_nodes = self.dump_tree(dev=dev)
+                return "scrolled" if self._focus_first_node(dev, refreshed_nodes) else "failed"
+            return "failed"
+
+        return "moved" if self.move_focus(dev=dev, direction="next") else "failed"
 
     def scrollFind(self, dev, name, wait_=30, direction_='updown', type_='all'):
         if not self.check_helper_status(dev=dev):
