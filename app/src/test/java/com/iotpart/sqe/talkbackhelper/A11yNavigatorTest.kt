@@ -7,6 +7,11 @@ import org.junit.Test
 class A11yNavigatorTest {
 
     @Test
+    fun navigatorAlgorithmVersion_isUpdated() {
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.0.0")
+    }
+
+    @Test
     fun matchesTarget_typeT_matchesTrimmedTextWithExactRegexFallback() {
         val query = A11yNavigator.TargetQuery(targetName = "수면환경", targetType = "t", targetIndex = 0)
 
