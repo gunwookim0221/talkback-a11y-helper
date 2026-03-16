@@ -9,7 +9,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.2.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.3.0")
     }
 
 
@@ -122,6 +122,33 @@ class A11yNavigatorTest {
             viewIdResourceName = "com.test:id/header_container",
             boundsInScreen = Rect(0, 300, 1080, 500),
             screenTop = 0,
+            screenHeight = 1920
+        )
+
+        assertTrue(result)
+    }
+
+
+    @Test
+    fun isTopAppBarNode_returnsTrueForMoreMenuViewId() {
+        val result = A11yNavigator.isTopAppBarNode(
+            className = "android.widget.LinearLayout",
+            viewIdResourceName = "com.test:id/more_menu_button",
+            boundsInScreen = Rect(0, 400, 1080, 520),
+            screenTop = 0,
+            screenHeight = 1920
+        )
+
+        assertTrue(result)
+    }
+
+    @Test
+    fun isBottomNavigationBarNode_returnsTrueForMenuBarViewId() {
+        val result = A11yNavigator.isBottomNavigationBarNode(
+            className = "android.widget.LinearLayout",
+            viewIdResourceName = "com.test:id/main_menu_bar",
+            boundsInScreen = Rect(0, 600, 1080, 760),
+            screenBottom = 1920,
             screenHeight = 1920
         )
 

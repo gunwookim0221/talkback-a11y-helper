@@ -6,7 +6,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.2.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.3.0"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -558,10 +558,12 @@ object A11yNavigator {
 
         val matchesViewId = normalizedViewId.contains("title_bar") ||
             normalizedViewId.contains("header") ||
-            normalizedViewId.contains("top_bar")
+            normalizedViewId.contains("toolbar") ||
+            normalizedViewId.contains("more_menu") ||
+            normalizedViewId.contains("action_bar")
         if (matchesViewId) return true
 
-        val topBoundaryThreshold = screenTop + (screenHeight * 0.03).toInt()
+        val topBoundaryThreshold = screenTop + (screenHeight * 0.15).toInt()
         return boundsInScreen.top <= topBoundaryThreshold
     }
 
@@ -575,17 +577,19 @@ object A11yNavigator {
         val normalizedClass = className?.lowercase().orEmpty()
         val normalizedViewId = viewIdResourceName?.lowercase().orEmpty()
 
-        val matchesClass = normalizedClass.contains("bottomnavigationview") ||
+        val matchesClass = normalizedClass.contains("bottomnavigation") ||
             normalizedClass.contains("tablayout") ||
             normalizedClass.contains("navigationbar")
         if (matchesClass) return true
 
-        val matchesViewId = normalizedViewId.contains("tab") ||
+        val matchesViewId = normalizedViewId.contains("bottom") ||
             normalizedViewId.contains("footer") ||
-            normalizedViewId.contains("bottom_menu")
+            normalizedViewId.contains("tab_bar") ||
+            normalizedViewId.contains("navigation") ||
+            normalizedViewId.contains("menu_bar")
         if (matchesViewId) return true
 
-        val bottomBoundaryThreshold = screenBottom - (screenHeight * 0.03).toInt()
+        val bottomBoundaryThreshold = screenBottom - (screenHeight * 0.15).toInt()
         return boundsInScreen.bottom >= bottomBoundaryThreshold
     }
 

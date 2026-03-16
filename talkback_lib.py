@@ -33,7 +33,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.3.0"
+CLIENT_ALGORITHM_VERSION = "1.4.0"
 
 
 @dataclass
@@ -850,7 +850,7 @@ class A11yAdbClient:
 
         target_text = target_node.get("text")
         if isinstance(target_text, str) and target_text.strip():
-            return self.select(dev, name=f"^{re.escape(target_text.strip())}$", type_="t", index_=0)
+            return self.select(dev, name=f"^{re.escape(target_text.strip())}$", type_="a", index_=0)
 
         target_desc = target_node.get("contentDescription")
         if isinstance(target_desc, str) and target_desc.strip():
@@ -909,7 +909,7 @@ class A11yAdbClient:
         next_is_bottom_nav = bool(next_node.get("isBottomNavigationBar", next_node.get("isSystemNavigationBar", False)))
         if next_is_bottom_nav and can_scroll_down:
             if self.scroll(dev, direction="down"):
-                time.sleep(1.0)
+                time.sleep(1.2)
                 refreshed_nodes = self.dump_tree(dev=dev)
                 return "scrolled" if self._focus_first_node(dev, refreshed_nodes) else "failed"
             return "failed"
@@ -1218,7 +1218,7 @@ def _focus_first_node(client: A11yAdbClient, device_id: Any, nodes: list[dict[st
 
     target_text = target_node.get("text")
     if isinstance(target_text, str) and target_text.strip():
-        return client.select(device_id, name=f"^{re.escape(target_text.strip())}$", type_="t", index_=0)
+        return client.select(device_id, name=f"^{re.escape(target_text.strip())}$", type_="a", index_=0)
 
     target_desc = target_node.get("contentDescription")
     if isinstance(target_desc, str) and target_desc.strip():
