@@ -1,5 +1,6 @@
 package com.iotpart.sqe.talkbackhelper
 
+import android.graphics.Rect
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -8,7 +9,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.0.1")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.0.2")
     }
 
     @Test
@@ -377,6 +378,12 @@ class A11yNavigatorTest {
         var parent: FakeNode? = null
     )
 
+    private data class PositionedFakeNode(
+        val name: String,
+        val bounds: Rect,
+        var parent: PositionedFakeNode? = null
+    )
+
     @Test
     fun resolveToClickableAncestor_returnsNearestClickableParent() {
         val root = FakeNode(name = "root", clickable = false)
@@ -440,6 +447,36 @@ class A11yNavigatorTest {
         )
 
         assertTrue(list == listOf(visible))
+    }
+
+    @Test
+    fun compareByContainmentAndPosition_parentNodeComesFirstRegardlessOfCoordinates() {
+        val parent = PositionedFakeNode(name = "card", bounds = Rect(200, 200, 300, 300))
+        val child = PositionedFakeNode(name = "power", bounds = Rect(10, 10, 20, 20), parent = parent)
+
+        val compared = A11yNavigator.compareByContainmentAndPosition(
+            left = parent,
+            right = child,
+            parentOf = { it.parent },
+            boundsOf = { it.bounds }
+        )
+
+        assertTrue(compared < 0)
+    }
+
+    @Test
+    fun compareByContainmentAndPosition_childNodeComesAfterParentRegardlessOfCoordinates() {
+        val parent = PositionedFakeNode(name = "card", bounds = Rect(200, 200, 300, 300))
+        val child = PositionedFakeNode(name = "power", bounds = Rect(10, 10, 20, 20), parent = parent)
+
+        val compared = A11yNavigator.compareByContainmentAndPosition(
+            left = child,
+            right = parent,
+            parentOf = { it.parent },
+            boundsOf = { it.bounds }
+        )
+
+        assertTrue(compared > 0)
     }
 
 }

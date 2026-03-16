@@ -7,7 +7,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.0.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.0.2"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -403,20 +403,53 @@ object A11yNavigator {
     }
 
     private fun spatialComparator(yBucketSize: Int = 12): Comparator<FocusedNode> {
-        return compareBy<FocusedNode> { focusedNode ->
-            val rect = Rect()
-            focusedNode.node.getBoundsInScreen(rect)
-            val centerY = (rect.top + rect.bottom) / 2
-            centerY / yBucketSize
-        }.thenBy { focusedNode ->
-            val rect = Rect()
-            focusedNode.node.getBoundsInScreen(rect)
-            rect.left
-        }.thenBy { focusedNode ->
-            val rect = Rect()
-            focusedNode.node.getBoundsInScreen(rect)
-            rect.top
+        return Comparator { left, right ->
+            compareByContainmentAndPosition(
+                left = left.node,
+                right = right.node,
+                parentOf = { node -> node.parent },
+                boundsOf = { node ->
+                    Rect().also { rect ->
+                        node.getBoundsInScreen(rect)
+                    }
+                },
+                yBucketSize = yBucketSize
+            )
         }
+    }
+
+    internal fun <T> compareByContainmentAndPosition(
+        left: T,
+        right: T,
+        parentOf: (T) -> T?,
+        boundsOf: (T) -> Rect,
+        yBucketSize: Int = 12
+    ): Int {
+        if (left == right) return 0
+        if (isAncestorOf(ancestor = left, descendant = right, parentOf = parentOf)) return -1
+        if (isAncestorOf(ancestor = right, descendant = left, parentOf = parentOf)) return 1
+
+        val leftRect = boundsOf(left)
+        val rightRect = boundsOf(right)
+
+        val leftCenterYBucket = ((leftRect.top + leftRect.bottom) / 2) / yBucketSize
+        val rightCenterYBucket = ((rightRect.top + rightRect.bottom) / 2) / yBucketSize
+        if (leftCenterYBucket != rightCenterYBucket) return leftCenterYBucket - rightCenterYBucket
+        if (leftRect.left != rightRect.left) return leftRect.left - rightRect.left
+        return leftRect.top - rightRect.top
+    }
+
+    private fun <T> isAncestorOf(
+        ancestor: T,
+        descendant: T,
+        parentOf: (T) -> T?
+    ): Boolean {
+        var current = parentOf(descendant)
+        while (current != null) {
+            if (current == ancestor) return true
+            current = parentOf(current)
+        }
+        return false
     }
 
     private fun isViewIdMatched(nodeViewId: String?, target: String): Boolean {
