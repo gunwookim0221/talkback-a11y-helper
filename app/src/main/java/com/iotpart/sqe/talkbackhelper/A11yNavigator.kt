@@ -6,7 +6,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.1.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.1.1"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -501,6 +501,17 @@ object A11yNavigator {
         }
     }
 
+    internal fun <T> hasScrollableDownCandidateByAction(
+        nodesInOrder: List<T>,
+        isVisibleToUser: (T) -> Boolean,
+        isScrollable: (T) -> Boolean,
+        hasScrollForwardAction: (T) -> Boolean
+    ): Boolean {
+        return nodesInOrder.any { node ->
+            isVisibleToUser(node) && isScrollable(node) && hasScrollForwardAction(node)
+        }
+    }
+
     private fun hasScrollableDownCandidate(root: AccessibilityNodeInfo?): Boolean {
         if (root == null) return false
 
@@ -509,7 +520,15 @@ object A11yNavigator {
 
         while (queue.isNotEmpty()) {
             val node = queue.removeFirst()
-            if (node.isVisibleToUser && node.isScrollable && node.canScrollVertically(1)) {
+            val hasScrollableDown = hasScrollableDownCandidateByAction(
+                nodesInOrder = listOf(node),
+                isVisibleToUser = { it.isVisibleToUser },
+                isScrollable = { it.isScrollable },
+                hasScrollForwardAction = {
+                    it.actionList.contains(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD)
+                }
+            )
+            if (hasScrollableDown) {
                 return true
             }
 
