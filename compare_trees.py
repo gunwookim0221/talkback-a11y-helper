@@ -49,8 +49,6 @@ def get_legacy_tree(serial, local_path):
     print("    (단말기에 앱 화면을 '일반 모드'로 띄워주세요)")
     
     try:
-        # uiautomator2 라이브러리를 사용하여 단말기 연결 및 덤프
-        # (최초 실행 시 단말기에 uiautomator2 서버 앱이 자동 설치될 수 있습니다)
         d = u2.connect(serial)
         xml_content = d.dump_hierarchy()
         
@@ -71,6 +69,7 @@ def get_a11y_tree(serial, local_path):
                 print("[-] 헬퍼 서비스가 READY 상태가 아닙니다. Helper 앱이 켜져있는지 확인하세요.")
                 return False
 
+        # 헬퍼 앱이 병합 및 정렬(Spatial Sorting)을 완료한 완벽한 리스트를 반환합니다.
         a11y_data = client.dump_tree(serial) 
         
         with open(local_path, "w", encoding="utf-8") as f:
@@ -113,7 +112,7 @@ def compare_and_summarize(xml_path, json_path):
                 for item in data:
                     if item.get('clickable') is True or item.get('isClickable') is True:
                         json_clickable += 1
-                    if item.get('focusable') is True or item.get('isFocusable') is True:
+                    else:
                         json_focusable += 1
     except Exception as e:
         print(f"[!] JSON 분석 실패: {e}")
@@ -123,16 +122,15 @@ def compare_and_summarize(xml_path, json_path):
 
     print(f"🔍 [전체 노드 수 비교]")
     print(f"  - 기존 UI 덤프 (XML) : {xml_nodes}개")
-    print(f"  - 헬퍼 접근성 (JSON) : {json_nodes}개")
-    print(f"  💡 분석: TalkBack에 불필요한 노드 {filtered_count}개(약 {compression_rate:.1f}%)가 필터링되었습니다.")
+    print(f"  - 헬퍼 접근성 (JSON) : {json_nodes}개 (TalkBack 스와이프 횟수와 동일)")
+    print(f"  💡 분석: TalkBack에 불필요한 껍데기 노드 {filtered_count}개(약 {compression_rate:.1f}%)가 필터링/병합되었습니다.")
     
-    print(f"\n👆 [클릭 가능(Clickable) 노드 비교]")
+    print(f"\n👆 [클릭 가능(Clickable - 파란색) 노드 비교]")
     print(f"  - 기존 UI 덤프 (XML) : {xml_clickable}개")
     print(f"  - 헬퍼 접근성 (JSON) : {json_clickable}개")
 
-    print(f"\n🎯 [포커스 가능(Focusable) 노드 비교]")
-    print(f"  - 기존 UI 덤프 (XML) : {xml_focusable}개")
-    print(f"  - 헬퍼 접근성 (JSON) : {json_focusable}개")
+    print(f"\n🎯 [읽기 전용 포커스(Focusable - 마젠타색) 노드 비교]")
+    print(f"  - 헬퍼 접근성 (JSON) : {json_focusable}개 (단순 텍스트/정보 블록)")
     print("=" * 50)
 
 def extract_valid_bounds(bounds, pattern):
@@ -242,7 +240,7 @@ def visualize_trees(serial, output_dir, timestamp, xml_file, json_file, json_cli
     except Exception as e:
         print(f"  [-] XML Focusable 이미지 생성 실패: {e}")
 
-    # 3-4. 접근성 트리 전체 (JSON) - 초록색
+    # 3-4. 접근성 트리 전체 (JSON) - 초록색 (모든 TalkBack 포커스)
     try:
         img_a11y = base_img.copy()
         overlay = Image.new("RGBA", img_a11y.size, (255, 255, 255, 0))
@@ -251,20 +249,31 @@ def visualize_trees(serial, output_dir, timestamp, xml_file, json_file, json_cli
             a11y_data = json.load(f)
         nodes = a11y_data if isinstance(a11y_data, list) else a11y_data.get('nodes', [])
         count = 0
-        for node in nodes:
+        
+        # 순서 확인을 위해 번호표도 같이 그려줍니다. (선택사항)
+        try:
+            from PIL import ImageFont
+            font = ImageFont.load_default()
+        except:
+            font = None
+            
+        for i, node in enumerate(nodes):
             bounds = node.get('boundsInScreen') or node.get('bounds')
             box = extract_valid_bounds(bounds, bounds_pattern)
             if box:
                 draw.rectangle(box, outline=(0, 255, 0, 200), width=6)
+                if font:
+                    draw.text((box[0] + 5, box[1] + 5), str(i+1), fill=(0, 255, 0, 255), font=font)
                 count += 1
+                
         img_a11y = Image.alpha_composite(img_a11y, overlay)
         out_path = os.path.join(output_dir, f"{timestamp}_a11y_view.png")
         img_a11y.save(out_path)
-        print(f"  -> [+] '{os.path.basename(out_path)}' 생성 완료 (초록색 박스: {count}개)")
+        print(f"  -> [+] '{os.path.basename(out_path)}' 생성 완료 (초록색 박스: {count}개 - 번호 표시)")
     except Exception as e:
         print(f"  [-] JSON 전체 이미지 생성 실패: {e}")
 
-    # 3-5. 접근성 트리 Clickable Only (JSON) - 파란색
+    # 3-5. 접근성 트리 Clickable Only (JSON) - 파란색 (버튼 등 액션 객체)
     try:
         img_a11y_click = base_img.copy()
         overlay = Image.new("RGBA", img_a11y_click.size, (255, 255, 255, 0))
@@ -285,7 +294,7 @@ def visualize_trees(serial, output_dir, timestamp, xml_file, json_file, json_cli
     except Exception as e:
         print(f"  [-] JSON Clickable 이미지 생성 실패: {e}")
 
-    # 3-6. 접근성 트리 Focusable Only (JSON) - 마젠타/분홍색
+    # 3-6. 접근성 트리 Focusable Only (JSON) - 마젠타/분홍색 (읽기 전용 텍스트 블록)
     try:
         img_a11y_focus = base_img.copy()
         overlay = Image.new("RGBA", img_a11y_focus.size, (255, 255, 255, 0))
@@ -324,7 +333,7 @@ def main():
     json_clickable_file = os.path.join(output_dir, f"{timestamp}_a11y_clickable_tree.json")
     json_focusable_file = os.path.join(output_dir, f"{timestamp}_a11y_focusable_tree.json")
 
-    # 여기서 수정된 UI Automator 2 방식이 실행됩니다.
+    # UI Automator 2 덤프
     get_legacy_tree(dev_serial, xml_file)
     
     print("\n" + "#" * 50)
@@ -333,6 +342,7 @@ def main():
     print("#" * 50)
     input("  >> 준비가 완료되면 [Enter] 키를 누르세요...")
     
+    # 헬퍼 앱 덤프 (이미 그룹핑 및 정렬이 완료된 상태!)
     success = get_a11y_tree(dev_serial, json_file)
     
     if success and os.path.exists(xml_file) and os.path.exists(json_file):
@@ -343,43 +353,21 @@ def main():
                 a11y_data = json.load(f)
             nodes = a11y_data if isinstance(a11y_data, list) else a11y_data.get('nodes', [])
             
-            # Clickable JSON 저장
+            # 헬퍼가 걸러준 노드는 100% TalkBack이 읽는 노드입니다.
+            # 이 중 클릭 가능한 것(Actionable)은 파란색 파일로 분류
             clickable_nodes = [n for n in nodes if n.get('clickable') is True or n.get('isClickable') is True]
             with open(json_clickable_file, 'w', encoding='utf-8') as f:
                 json.dump(clickable_nodes, f, ensure_ascii=False, indent=2)
-                           
-            # Focusable JSON 저장 (TalkBack 실제 포커스 기준 완벽 반영)
-            # Focusable JSON 저장 (TalkBack 실제 포커스 기준 - 엄격한 필터링 적용)
-            talkback_focusable_nodes = []
-            for n in nodes:
-                # 1. 화면에 보이지 않도록 처리된 객체는 무조건 제외
-                if n.get('isVisibleToUser') is False or n.get('visibleToUser') is False:
-                    continue
-
-                is_sr_focusable = n.get('screenReaderFocusable') is True or n.get('isScreenReaderFocusable') is True
-                is_clickable = n.get('clickable') is True or n.get('isClickable') is True
                 
-                # 2. 공백("   ")만 있는 텍스트는 시각장애인에게 의미가 없으므로 지움(strip)
-                text = str(n.get('text') or '').strip()
-                desc = str(n.get('contentDescription') or '').strip()
-                has_text = bool(text) or bool(desc)
-                
-                class_name = str(n.get('className') or n.get('class') or '')
-                is_input = 'EditText' in class_name
-
-                # 3. [엄격한 조건]
-                # 단순 focusable=true인 '빈 껍데기 레이아웃'이 잡히는 것을 막기 위해,
-                # 클릭 가능하거나 / 스크린리더 명시 속성이 있거나 / 진짜 텍스트가 있거나 / 입력창인 경우만 통과!
-                if is_clickable or is_sr_focusable or has_text or is_input:
-                    talkback_focusable_nodes.append(n)
-                    
+            # 클릭 불가능한 나머지 모든 객체(읽기 전용 텍스트 덩어리 등)는 마젠타색 파일로 분류
+            focusable_nodes = [n for n in nodes if not (n.get('clickable') is True or n.get('isClickable') is True)]
             with open(json_focusable_file, 'w', encoding='utf-8') as f:
-                json.dump(talkback_focusable_nodes, f, ensure_ascii=False, indent=2)
+                json.dump(focusable_nodes, f, ensure_ascii=False, indent=2)
                 
         except Exception as e:
             print(f"[-] 데이터 분류 중 오류: {e}")
         
-        # 7장의 이미지를 포함한 시각화 실행
+        # 7장의 시각화 실행 (초록색 뷰에 정렬 순서 번호 추가 포함)
         visualize_trees(dev_serial, output_dir, timestamp, xml_file, json_file, json_clickable_file, json_focusable_file)
     else:
         print("\n[-] 파일 추출이 정상적으로 완료되지 않아 비교를 건너뜁니다.")
