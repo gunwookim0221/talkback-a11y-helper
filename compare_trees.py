@@ -13,6 +13,12 @@ except ImportError:
     sys.exit(1)
 
 try:
+    import uiautomator2 as u2
+except ImportError:
+    print("[-] 오류: uiautomator2 라이브러리가 설치되지 않았습니다. 'pip install uiautomator2'를 실행해주세요.")
+    sys.exit(1)
+
+try:
     from talkback_lib import A11yAdbClient
     client = A11yAdbClient()
 except ImportError:
@@ -39,24 +45,22 @@ def get_default_device():
         return None
 
 def get_legacy_tree(serial, local_path):
-    print("\n[*] 1. 일반 트리를 추출합니다... (UI Automator 방식)")
+    print("\n[*] 1. 일반 트리를 추출합니다... (UI Automator 2 방식)")
     print("    (단말기에 앱 화면을 '일반 모드'로 띄워주세요)")
     
-    remote_path = "/sdcard/legacy_dump.xml"
-    subprocess.run(
-        f"adb -s {serial} shell uiautomator dump {remote_path}", 
-        shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    )
-    subprocess.run(
-        f"adb -s {serial} pull {remote_path} {local_path}", 
-        shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    )
-    
-    if os.path.exists(local_path):
-        print(f"  -> [+] '{os.path.basename(local_path)}' 다운로드 완료")
+    try:
+        # uiautomator2 라이브러리를 사용하여 단말기 연결 및 덤프
+        # (최초 실행 시 단말기에 uiautomator2 서버 앱이 자동 설치될 수 있습니다)
+        d = u2.connect(serial)
+        xml_content = d.dump_hierarchy()
+        
+        with open(local_path, "w", encoding="utf-8") as f:
+            f.write(xml_content)
+            
+        print(f"  -> [+] '{os.path.basename(local_path)}' 다운로드 완료 (UI Automator 2 적용)")
         return True
-    else:
-        print(f"  [-] 에러: '{local_path}' 파일을 가져오지 못했습니다.")
+    except Exception as e:
+        print(f"  [-] 에러: UI Automator 2 덤프 실패 - {e}")
         return False
 
 def get_a11y_tree(serial, local_path):
@@ -174,7 +178,6 @@ def visualize_trees(serial, output_dir, timestamp, xml_file, json_file, json_cli
         print(f"  [-] XML 파싱 실패: {e}")
         return
 
-    # 공통: 원본 이미지를 불러옵니다.
     base_img = Image.open(screenshot_path).convert("RGBA")
 
     # 3-1. 일반 UI 전체 (XML) - 빨간색
@@ -321,6 +324,7 @@ def main():
     json_clickable_file = os.path.join(output_dir, f"{timestamp}_a11y_clickable_tree.json")
     json_focusable_file = os.path.join(output_dir, f"{timestamp}_a11y_focusable_tree.json")
 
+    # 여기서 수정된 UI Automator 2 방식이 실행됩니다.
     get_legacy_tree(dev_serial, xml_file)
     
     print("\n" + "#" * 50)
