@@ -9,7 +9,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.1.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.1.1")
     }
 
 
@@ -29,6 +29,51 @@ class A11yNavigatorTest {
 
         assertTrue(result)
     }
+
+    @Test
+    fun hasScrollableDownCandidateByAction_returnsTrueWhenVisibleScrollableAndActionExist() {
+        data class ScrollActionState(
+            val visible: Boolean,
+            val scrollable: Boolean,
+            val hasScrollForwardAction: Boolean
+        )
+        val nodes = listOf(
+            ScrollActionState(visible = false, scrollable = true, hasScrollForwardAction = true),
+            ScrollActionState(visible = true, scrollable = true, hasScrollForwardAction = true)
+        )
+
+        val result = A11yNavigator.hasScrollableDownCandidateByAction(
+            nodesInOrder = nodes,
+            isVisibleToUser = { it.visible },
+            isScrollable = { it.scrollable },
+            hasScrollForwardAction = { it.hasScrollForwardAction }
+        )
+
+        assertTrue(result)
+    }
+
+    @Test
+    fun hasScrollableDownCandidateByAction_returnsFalseWhenActionDoesNotExist() {
+        data class ScrollActionState(
+            val visible: Boolean,
+            val scrollable: Boolean,
+            val hasScrollForwardAction: Boolean
+        )
+        val nodes = listOf(
+            ScrollActionState(visible = true, scrollable = true, hasScrollForwardAction = false),
+            ScrollActionState(visible = true, scrollable = false, hasScrollForwardAction = true)
+        )
+
+        val result = A11yNavigator.hasScrollableDownCandidateByAction(
+            nodesInOrder = nodes,
+            isVisibleToUser = { it.visible },
+            isScrollable = { it.scrollable },
+            hasScrollForwardAction = { it.hasScrollForwardAction }
+        )
+
+        assertFalse(result)
+    }
+
 
     @Test
     fun isSystemNavigationBarNode_returnsTrueForBottomArea() {
