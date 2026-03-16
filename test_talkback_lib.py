@@ -6,6 +6,7 @@ from talkback_lib import (
     ACTION_CHECK_TARGET,
     ACTION_CLICK_TARGET,
     ACTION_FOCUS_TARGET,
+    ACTION_GET_FOCUS,
     ACTION_NEXT,
     ACTION_PREV,
     ACTION_SCROLL,
@@ -1053,6 +1054,73 @@ class VerifySpeechTest(unittest.TestCase):
 
         saved_path = alpha_mock.convert.return_value.save.call_args.args[0]
         self.assertEqual(saved_path, Path("error_log/fail_Pet_________.png"))
+
+
+class SmartMoveFocusTest(unittest.TestCase):
+    def test_get_focus_returns_focus_node_from_focus_result(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: FOCUS_RESULT {"success":true,"reqId":"REQID601","node":{"text":"설정","viewIdResourceName":"id/settings"}}'
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID601-xxxx"):
+            result = client.get_focus("SER")
+
+        self.assertEqual(result.get("text"), "설정")
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0][0]
+        self.assertEqual(broadcast[4], ACTION_GET_FOCUS)
+
+    def test_move_focus_smart_scrolls_and_focuses_first_when_next_is_nav_and_scrollable(self):
+        client = FakeA11yClient()
+        first_tree = [
+            {"text": "리스트 1", "isSystemNavigationBar": False},
+            {"text": "탭 바", "isSystemNavigationBar": True},
+        ]
+        second_tree = [
+            {"text": "리스트 2", "isSystemNavigationBar": False},
+            {"text": "탭 바", "isSystemNavigationBar": True},
+        ]
+
+        with patch.object(client, "dump_tree", side_effect=[first_tree, second_tree]), \
+            patch.object(client, "get_focus", return_value={"index": 0}), \
+            patch.object(client, "scroll", return_value=True) as scroll_mock, \
+            patch.object(client, "select", return_value=True) as select_mock:
+            client.last_dump_metadata = {"canScrollDown": True}
+            result = client.move_focus_smart("SER", direction="next")
+
+        self.assertEqual(result, "scrolled")
+        scroll_mock.assert_called_once_with("SER", direction="down")
+        select_mock.assert_called_once()
+
+    def test_move_focus_smart_moves_when_next_is_not_nav(self):
+        client = FakeA11yClient()
+        tree = [
+            {"text": "현재", "isSystemNavigationBar": False},
+            {"text": "다음", "isSystemNavigationBar": False},
+        ]
+
+        with patch.object(client, "dump_tree", return_value=tree), \
+            patch.object(client, "get_focus", return_value={"index": 0}), \
+            patch.object(client, "move_focus", return_value=True) as move_mock:
+            client.last_dump_metadata = {"canScrollDown": True}
+            result = client.move_focus_smart("SER", direction="next")
+
+        self.assertEqual(result, "moved")
+        move_mock.assert_called_once_with(dev="SER", direction="next")
+
+    def test_move_focus_smart_loops_when_last_node_focused(self):
+        client = FakeA11yClient()
+        tree = [
+            {"text": "첫 항목", "isSystemNavigationBar": False},
+            {"text": "마지막 항목", "isSystemNavigationBar": False},
+        ]
+
+        with patch.object(client, "dump_tree", return_value=tree), \
+            patch.object(client, "get_focus", return_value={"index": 1}), \
+            patch.object(client, "select", return_value=True) as select_mock:
+            client.last_dump_metadata = {"canScrollDown": False}
+            result = client.move_focus_smart("SER", direction="next")
+
+        self.assertEqual(result, "looped")
+        select_mock.assert_called_once()
 
 
 class SmartNextTest(unittest.TestCase):
