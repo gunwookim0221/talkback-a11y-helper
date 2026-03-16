@@ -163,12 +163,17 @@ def visualize_trees(serial, output_dir, timestamp, xml_file, json_file, json_cli
         return
 
     bounds_pattern = re.compile(r'\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]')
+    
+    try:
+        tree = ET.parse(xml_file)
+    except Exception as e:
+        print(f"  [-] XML 파싱 실패: {e}")
+        return
 
-    # 3-1. 일반 UI (XML) 시각화 - 빨간색
+    # 3-1. 일반 UI 전체 (XML) 시각화 - 빨간색
     try:
         img_legacy = Image.open(screenshot_path).convert("RGBA")
         draw_legacy = ImageDraw.Draw(img_legacy)
-        tree = ET.parse(xml_file)
         
         count = 0
         for node in tree.getroot().iter('node'):
@@ -183,9 +188,30 @@ def visualize_trees(serial, output_dir, timestamp, xml_file, json_file, json_cli
         img_legacy.save(legacy_img_out)
         print(f"  -> [+] '{os.path.basename(legacy_img_out)}' 생성 완료 (빨간색 박스: {count}개)")
     except Exception as e:
-        print(f"  [-] XML 이미지 생성 실패: {e}")
+        print(f"  [-] XML 전체 이미지 생성 실패: {e}")
 
-    # 3-2. 접근성 트리 전체 (JSON) 시각화 - 초록색
+    # 3-2. 일반 UI Clickable Only (XML) 시각화 - 주황색
+    try:
+        img_legacy_click = Image.open(screenshot_path).convert("RGBA")
+        draw_legacy_click = ImageDraw.Draw(img_legacy_click)
+        
+        count = 0
+        for node in tree.getroot().iter('node'):
+            if node.attrib.get('clickable') == 'true':
+                bounds_str = node.attrib.get('bounds')
+                if bounds_str:
+                    box = extract_valid_bounds(bounds_str, bounds_pattern)
+                    if box:
+                        draw_legacy_click.rectangle(box, outline="orange", width=8)
+                        count += 1
+                        
+        legacy_click_img_out = os.path.join(output_dir, f"{timestamp}_legacy_clickable_view.png")
+        img_legacy_click.save(legacy_click_img_out)
+        print(f"  -> [+] '{os.path.basename(legacy_click_img_out)}' 생성 완료 (주황색 박스: {count}개)")
+    except Exception as e:
+        print(f"  [-] XML Clickable 이미지 생성 실패: {e}")
+
+    # 3-3. 접근성 트리 전체 (JSON) 시각화 - 초록색
     try:
         img_a11y = Image.open(screenshot_path).convert("RGBA")
         draw_a11y = ImageDraw.Draw(img_a11y)
@@ -206,9 +232,9 @@ def visualize_trees(serial, output_dir, timestamp, xml_file, json_file, json_cli
         img_a11y.save(a11y_img_out)
         print(f"  -> [+] '{os.path.basename(a11y_img_out)}' 생성 완료 (초록색 박스: {count}개)")
     except Exception as e:
-        print(f"  [-] JSON 이미지 생성 실패: {e}")
+        print(f"  [-] JSON 전체 이미지 생성 실패: {e}")
 
-    # 3-3. 접근성 트리 Clickable Only (JSON) 시각화 - 파란색
+    # 3-4. 접근성 트리 Clickable Only (JSON) 시각화 - 파란색
     try:
         img_a11y_click = Image.open(screenshot_path).convert("RGBA")
         draw_a11y_click = ImageDraw.Draw(img_a11y_click)
@@ -221,7 +247,6 @@ def visualize_trees(serial, output_dir, timestamp, xml_file, json_file, json_cli
             bounds = node.get('boundsInScreen') or node.get('bounds')
             box = extract_valid_bounds(bounds, bounds_pattern)
             if box:
-                # Clickable 객체는 파란색(DeepSkyBlue)으로 강조
                 draw_a11y_click.rectangle(box, outline="#00BFFF", width=10)
                 count += 1
                 
@@ -229,7 +254,7 @@ def visualize_trees(serial, output_dir, timestamp, xml_file, json_file, json_cli
         img_a11y_click.save(a11y_click_img_out)
         print(f"  -> [+] '{os.path.basename(a11y_click_img_out)}' 생성 완료 (파란색 박스: {count}개)")
     except Exception as e:
-        print(f"  [-] Clickable JSON 이미지 생성 실패: {e}")
+        print(f"  [-] JSON Clickable 이미지 생성 실패: {e}")
         
     print(f"\n🎉 모든 작업이 완료되었습니다! '{output_dir}' 폴더를 확인해 보세요.")
 
@@ -282,7 +307,7 @@ def main():
         except Exception as e:
             print(f"[-] Clickable JSON 데이터 분류 중 오류: {e}")
         
-        # 5. 세 가지 버전의 시각화 실행
+        # 5. 네 가지 버전의 시각화 실행
         visualize_trees(dev_serial, output_dir, timestamp, xml_file, json_file, json_clickable_file)
     else:
         print("\n[-] 파일 추출이 정상적으로 완료되지 않아 비교를 건너뜁니다.")
