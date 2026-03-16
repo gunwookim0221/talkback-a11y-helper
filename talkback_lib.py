@@ -844,6 +844,10 @@ class A11yAdbClient:
             key=lambda node: int((node.get("boundsInScreen") or {}).get("t", 10**9))
         )
 
+        if bool(target_node.get("accessibilityFocused")):
+            print(f"[DEBUG] 타겟이 이미 포커스되어 있습니다. (이동 성공 처리)")
+            return True
+
         target_id = target_node.get("viewIdResourceName")
         if isinstance(target_id, str) and target_id.strip():
             return self.select(dev, name=f"^{re.escape(target_id.strip())}$", type_="r", index_=0)
