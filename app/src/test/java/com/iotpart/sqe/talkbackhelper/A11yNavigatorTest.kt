@@ -9,7 +9,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.1.1")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.2.0")
     }
 
 
@@ -76,10 +76,11 @@ class A11yNavigatorTest {
 
 
     @Test
-    fun isSystemNavigationBarNode_returnsTrueForBottomArea() {
-        val result = A11yNavigator.isSystemNavigationBarNode(
+    fun isBottomNavigationBarNode_returnsTrueForBottomArea() {
+        val result = A11yNavigator.isBottomNavigationBarNode(
             className = "android.widget.LinearLayout",
-            boundsInScreen = Rect(0, 1750, 1080, 1910),
+            viewIdResourceName = null,
+            boundsInScreen = Rect(0, 1850, 1080, 1915),
             screenBottom = 1920,
             screenHeight = 1920
         )
@@ -88,11 +89,39 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun isSystemNavigationBarNode_returnsTrueForTabLayoutClass() {
-        val result = A11yNavigator.isSystemNavigationBarNode(
+    fun isBottomNavigationBarNode_returnsTrueForTabLayoutClass() {
+        val result = A11yNavigator.isBottomNavigationBarNode(
             className = "com.google.android.material.tabs.TabLayout",
+            viewIdResourceName = null,
             boundsInScreen = Rect(0, 200, 1080, 320),
             screenBottom = 1920,
+            screenHeight = 1920
+        )
+
+        assertTrue(result)
+    }
+
+
+    @Test
+    fun isTopAppBarNode_returnsTrueForToolbarClass() {
+        val result = A11yNavigator.isTopAppBarNode(
+            className = "androidx.appcompat.widget.Toolbar",
+            viewIdResourceName = null,
+            boundsInScreen = Rect(0, 0, 1080, 210),
+            screenTop = 0,
+            screenHeight = 1920
+        )
+
+        assertTrue(result)
+    }
+
+    @Test
+    fun isTopAppBarNode_returnsTrueForHeaderViewId() {
+        val result = A11yNavigator.isTopAppBarNode(
+            className = "android.widget.LinearLayout",
+            viewIdResourceName = "com.test:id/header_container",
+            boundsInScreen = Rect(0, 300, 1080, 500),
+            screenTop = 0,
             screenHeight = 1920
         )
 

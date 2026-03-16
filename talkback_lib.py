@@ -33,7 +33,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.2.0"
+CLIENT_ALGORITHM_VERSION = "1.3.0"
 
 
 @dataclass
@@ -829,16 +829,34 @@ class A11yAdbClient:
     def _focus_first_node(self, dev: Any, nodes: list[dict[str, Any]]) -> bool:
         if not nodes:
             return False
-        first = nodes[0]
-        return self.select(
-            dev,
-            name=".*",
-            type_="all",
-            index_=0,
-            class_name=first.get("className"),
-            clickable=first.get("clickable"),
-            focusable=first.get("focusable"),
+
+        candidates = [
+            node
+            for node in nodes
+            if not bool(node.get("isTopAppBar", False))
+            and not bool(node.get("isBottomNavigationBar", node.get("isSystemNavigationBar", False)))
+        ]
+        if not candidates:
+            return False
+
+        target_node = min(
+            candidates,
+            key=lambda node: int((node.get("boundsInScreen") or {}).get("t", 10**9))
         )
+
+        target_id = target_node.get("viewIdResourceName")
+        if isinstance(target_id, str) and target_id.strip():
+            return self.select(dev, name=f"^{re.escape(target_id.strip())}$", type_="r", index_=0)
+
+        target_text = target_node.get("text")
+        if isinstance(target_text, str) and target_text.strip():
+            return self.select(dev, name=f"^{re.escape(target_text.strip())}$", type_="t", index_=0)
+
+        target_desc = target_node.get("contentDescription")
+        if isinstance(target_desc, str) and target_desc.strip():
+            return self.select(dev, name=f"^{re.escape(target_desc.strip())}$", type_="b", index_=0)
+
+        return False
 
     @staticmethod
     def _match_focus_index(nodes: list[dict[str, Any]], focus_node: dict[str, Any]) -> int:
@@ -888,8 +906,10 @@ class A11yAdbClient:
         if next_node is None:
             return "looped" if self._focus_first_node(dev, nodes) else "failed"
 
-        if bool(next_node.get("isSystemNavigationBar", False)) and can_scroll_down:
+        next_is_bottom_nav = bool(next_node.get("isBottomNavigationBar", next_node.get("isSystemNavigationBar", False)))
+        if next_is_bottom_nav and can_scroll_down:
             if self.scroll(dev, direction="down"):
+                time.sleep(1.0)
                 refreshed_nodes = self.dump_tree(dev=dev)
                 return "scrolled" if self._focus_first_node(dev, refreshed_nodes) else "failed"
             return "failed"
@@ -1178,20 +1198,33 @@ def _focus_first_node(client: A11yAdbClient, device_id: Any, nodes: list[dict[st
     if not nodes:
         return False
 
-    first = nodes[0]
-    target_id = first.get("viewIdResourceName")
+    candidates = [
+        node
+        for node in nodes
+        if not bool(node.get("isTopAppBar", False))
+        and not bool(node.get("isBottomNavigationBar", node.get("isSystemNavigationBar", False)))
+    ]
+    if not candidates:
+        return False
+
+    target_node = min(
+        candidates,
+        key=lambda node: int((node.get("boundsInScreen") or {}).get("t", 10**9))
+    )
+
+    target_id = target_node.get("viewIdResourceName")
     if isinstance(target_id, str) and target_id.strip():
         return client.select(device_id, name=f"^{re.escape(target_id.strip())}$", type_="r", index_=0)
 
-    target_text = first.get("text")
+    target_text = target_node.get("text")
     if isinstance(target_text, str) and target_text.strip():
         return client.select(device_id, name=f"^{re.escape(target_text.strip())}$", type_="t", index_=0)
 
-    target_desc = first.get("contentDescription")
+    target_desc = target_node.get("contentDescription")
     if isinstance(target_desc, str) and target_desc.strip():
         return client.select(device_id, name=f"^{re.escape(target_desc.strip())}$", type_="b", index_=0)
 
-    return client.move_focus(device_id, direction="next")
+    return False
 
 
 def smart_next(client: A11yAdbClient, device_id: Any) -> bool:
@@ -1217,8 +1250,10 @@ def smart_next(client: A11yAdbClient, device_id: Any) -> bool:
 
     next_idx = (current_idx + 1) % len(nodes)
     next_node = nodes[next_idx]
-    next_is_nav = bool(next_node.get("isSystemNavigationBar", False))
-    current_is_nav = current_idx >= 0 and bool(nodes[current_idx].get("isSystemNavigationBar", False))
+    next_is_nav = bool(next_node.get("isBottomNavigationBar", next_node.get("isSystemNavigationBar", False)))
+    current_is_nav = current_idx >= 0 and bool(
+        nodes[current_idx].get("isBottomNavigationBar", nodes[current_idx].get("isSystemNavigationBar", False))
+    )
 
     if next_is_nav and can_scroll_down and not current_is_nav:
         if client.scroll(device_id, direction="down"):

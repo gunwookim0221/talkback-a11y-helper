@@ -6,7 +6,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.1.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.2.0"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -36,6 +36,7 @@ object A11yNavigator {
 
         val focusNodes = buildTalkBackLikeFocusNodes(root)
         val screenRect = Rect().also { root.getBoundsInScreen(it) }
+        val screenTop = screenRect.top
         val screenBottom = screenRect.bottom
         val screenHeight = (screenRect.bottom - screenRect.top).coerceAtLeast(1)
 
@@ -44,6 +45,7 @@ object A11yNavigator {
                 node = focusedNode.node,
                 textOverride = focusedNode.text,
                 contentDescriptionOverride = focusedNode.contentDescription,
+                screenTop = screenTop,
                 screenBottom = screenBottom,
                 screenHeight = screenHeight
             )
@@ -539,25 +541,59 @@ object A11yNavigator {
         return false
     }
 
-    internal fun isSystemNavigationBarNode(
+    internal fun isTopAppBarNode(
         className: String?,
+        viewIdResourceName: String?,
+        boundsInScreen: Rect,
+        screenTop: Int,
+        screenHeight: Int
+    ): Boolean {
+        val normalizedClass = className?.lowercase().orEmpty()
+        val normalizedViewId = viewIdResourceName?.lowercase().orEmpty()
+
+        val matchesClass = normalizedClass.contains("toolbar") ||
+            normalizedClass.contains("actionbar") ||
+            normalizedClass.contains("appbarlayout")
+        if (matchesClass) return true
+
+        val matchesViewId = normalizedViewId.contains("title_bar") ||
+            normalizedViewId.contains("header") ||
+            normalizedViewId.contains("top_bar")
+        if (matchesViewId) return true
+
+        val topBoundaryThreshold = screenTop + (screenHeight * 0.03).toInt()
+        return boundsInScreen.top <= topBoundaryThreshold
+    }
+
+    internal fun isBottomNavigationBarNode(
+        className: String?,
+        viewIdResourceName: String?,
         boundsInScreen: Rect,
         screenBottom: Int,
         screenHeight: Int
     ): Boolean {
         val normalizedClass = className?.lowercase().orEmpty()
+        val normalizedViewId = viewIdResourceName?.lowercase().orEmpty()
+
         val matchesClass = normalizedClass.contains("bottomnavigationview") ||
-            normalizedClass.contains("tablayout")
+            normalizedClass.contains("tablayout") ||
+            normalizedClass.contains("navigationbar")
         if (matchesClass) return true
 
-        val bottomThreshold = (screenBottom - (screenHeight * 0.15)).toInt()
-        return boundsInScreen.bottom >= bottomThreshold
+        val matchesViewId = normalizedViewId.contains("tab") ||
+            normalizedViewId.contains("footer") ||
+            normalizedViewId.contains("bottom_menu")
+        if (matchesViewId) return true
+
+        val bottomBoundaryThreshold = screenBottom - (screenHeight * 0.03).toInt()
+        return boundsInScreen.bottom >= bottomBoundaryThreshold
     }
 
     private fun nodeToModel(
         node: AccessibilityNodeInfo,
         textOverride: String? = null,
         contentDescriptionOverride: String? = null,
+        screenTop: Int,
         screenBottom: Int,
         screenHeight: Int
     ): A11yNodeInfo {
@@ -575,8 +611,16 @@ object A11yNavigator {
             isVisibleToUser = node.isVisibleToUser,
             focused = node.isFocused,
             accessibilityFocused = node.isAccessibilityFocused,
-            isSystemNavigationBar = isSystemNavigationBarNode(
+            isTopAppBar = isTopAppBarNode(
                 className = node.className?.toString(),
+                viewIdResourceName = node.viewIdResourceName,
+                boundsInScreen = rect,
+                screenTop = screenTop,
+                screenHeight = screenHeight
+            ),
+            isBottomNavigationBar = isBottomNavigationBarNode(
+                className = node.className?.toString(),
+                viewIdResourceName = node.viewIdResourceName,
                 boundsInScreen = rect,
                 screenBottom = screenBottom,
                 screenHeight = screenHeight
