@@ -33,6 +33,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
+CLIENT_ALGORITHM_VERSION = "1.1.0"
 
 
 @dataclass
@@ -50,6 +51,7 @@ class A11yAdbClient:
         self._monitor_proc: subprocess.Popen[str] | None = None
         self._monitor_thread: threading.Thread | None = None
         self._last_log_marker: tuple[tuple[int, int, int, int, int, int], int] | None = None
+        self.last_dump_metadata: dict[str, Any] = {}
 
     def _resolve_serial(self, dev: Any) -> str | None:
         if dev is None:
@@ -338,9 +340,25 @@ class A11yAdbClient:
             parsed = json.loads(payload)
         except json.JSONDecodeError as exc:
             raise RuntimeError(f"DUMP_TREE JSON 파싱 실패: {exc}") from exc
-        if not isinstance(parsed, list):
-            raise RuntimeError("DUMP_TREE JSON 형식이 올바르지 않습니다.")
-        return parsed
+
+        if isinstance(parsed, dict):
+            nodes = parsed.get("nodes")
+            if not isinstance(nodes, list):
+                raise RuntimeError("DUMP_TREE JSON 형식이 올바르지 않습니다.")
+            self.last_dump_metadata = {
+                "algorithmVersion": parsed.get("algorithmVersion"),
+                "canScrollDown": bool(parsed.get("canScrollDown", False)),
+            }
+            return nodes
+
+        if isinstance(parsed, list):
+            self.last_dump_metadata = {
+                "algorithmVersion": None,
+                "canScrollDown": False,
+            }
+            return parsed
+
+        raise RuntimeError("DUMP_TREE JSON 형식이 올바르지 않습니다.")
         
 
     @staticmethod
@@ -1062,3 +1080,56 @@ class A11yAdbClient:
         hour, minute, sec_millis = clock.split(":")
         second, millis = sec_millis.split(".")
         return (month, day, int(hour), int(minute), int(second), int(millis))
+
+
+def _focus_first_node(client: A11yAdbClient, device_id: Any, nodes: list[dict[str, Any]]) -> bool:
+    if not nodes:
+        return False
+
+    first = nodes[0]
+    target_id = first.get("viewIdResourceName")
+    if isinstance(target_id, str) and target_id.strip():
+        return client.select(device_id, name=f"^{re.escape(target_id.strip())}$", type_="r", index_=0)
+
+    target_text = first.get("text")
+    if isinstance(target_text, str) and target_text.strip():
+        return client.select(device_id, name=f"^{re.escape(target_text.strip())}$", type_="t", index_=0)
+
+    target_desc = first.get("contentDescription")
+    if isinstance(target_desc, str) and target_desc.strip():
+        return client.select(device_id, name=f"^{re.escape(target_desc.strip())}$", type_="b", index_=0)
+
+    return client.move_focus(device_id, direction="next")
+
+
+def smart_next(client: A11yAdbClient, device_id: Any) -> bool:
+    """v1.1.0: 시스템 내비게이션 바 진입 전 스크롤 우선 탐색을 적용한 next 이동."""
+    nodes = client.dump_tree(device_id)
+    if not nodes:
+        return False
+
+    metadata = getattr(client, "last_dump_metadata", {}) or {}
+    can_scroll_down = bool(metadata.get("canScrollDown", False))
+
+    current_idx = next(
+        (
+            idx
+            for idx, node in enumerate(nodes)
+            if bool(node.get("accessibilityFocused")) or bool(node.get("focused"))
+        ),
+        -1,
+    )
+
+    if current_idx == len(nodes) - 1:
+        return _focus_first_node(client, device_id, nodes)
+
+    next_idx = (current_idx + 1) % len(nodes)
+    next_node = nodes[next_idx]
+    next_is_nav = bool(next_node.get("isSystemNavigationBar", False))
+    current_is_nav = current_idx >= 0 and bool(nodes[current_idx].get("isSystemNavigationBar", False))
+
+    if next_is_nav and can_scroll_down and not current_is_nav:
+        if client.scroll(device_id, direction="down"):
+            return True
+
+    return client.move_focus(device_id, direction="next")

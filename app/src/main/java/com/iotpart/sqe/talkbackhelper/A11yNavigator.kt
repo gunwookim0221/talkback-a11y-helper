@@ -3,11 +3,10 @@ package com.iotpart.sqe.talkbackhelper
 import android.graphics.Rect
 import android.os.Build
 import android.view.accessibility.AccessibilityNodeInfo
-import org.json.JSONArray
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.0.2"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.1.0"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -26,21 +25,35 @@ object A11yNavigator {
         val targetId: String? = null
     )
 
-    fun dumpTreeFlat(root: AccessibilityNodeInfo?): JSONArray {
-        if (root == null) return JSONArray()
+    fun dumpTreeFlat(root: AccessibilityNodeInfo?): JSONObject {
+        if (root == null) {
+            return A11yDumpResponse(
+                algorithmVersion = NAVIGATOR_ALGORITHM_VERSION,
+                canScrollDown = false,
+                nodes = emptyList()
+            ).toJson()
+        }
 
         val focusNodes = buildTalkBackLikeFocusNodes(root)
-        return JSONArray().apply {
-            focusNodes.forEach { focusedNode ->
-                put(
-                    nodeToJson(
-                        node = focusedNode.node,
-                        textOverride = focusedNode.text,
-                        contentDescriptionOverride = focusedNode.contentDescription
-                    )
-                )
-            }
+        val screenRect = Rect().also { root.getBoundsInScreen(it) }
+        val screenBottom = screenRect.bottom
+        val screenHeight = (screenRect.bottom - screenRect.top).coerceAtLeast(1)
+
+        val nodeInfos = focusNodes.map { focusedNode ->
+            nodeToModel(
+                node = focusedNode.node,
+                textOverride = focusedNode.text,
+                contentDescriptionOverride = focusedNode.contentDescription,
+                screenBottom = screenBottom,
+                screenHeight = screenHeight
+            )
         }
+
+        return A11yDumpResponse(
+            algorithmVersion = NAVIGATOR_ALGORITHM_VERSION,
+            canScrollDown = hasScrollableDownCandidate(root),
+            nodes = nodeInfos
+        ).toJson()
     }
 
     fun findAndPerformAction(
@@ -477,30 +490,78 @@ object A11yNavigator {
         }
     }
 
-    private fun nodeToJson(
+
+    internal fun <T> hasScrollableDownCandidate(
+        nodesInOrder: List<T>,
+        isScrollable: (T) -> Boolean,
+        canScrollVerticallyDown: (T) -> Boolean
+    ): Boolean {
+        return nodesInOrder.any { node ->
+            isScrollable(node) && canScrollVerticallyDown(node)
+        }
+    }
+
+    private fun hasScrollableDownCandidate(root: AccessibilityNodeInfo?): Boolean {
+        if (root == null) return false
+
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            if (node.isVisibleToUser && node.isScrollable && node.canScrollVertically(1)) {
+                return true
+            }
+
+            for (index in 0 until node.childCount) {
+                node.getChild(index)?.let { queue.add(it) }
+            }
+        }
+        return false
+    }
+
+    internal fun isSystemNavigationBarNode(
+        className: String?,
+        boundsInScreen: Rect,
+        screenBottom: Int,
+        screenHeight: Int
+    ): Boolean {
+        val normalizedClass = className?.lowercase().orEmpty()
+        val matchesClass = normalizedClass.contains("bottomnavigationview") ||
+            normalizedClass.contains("tablayout")
+        if (matchesClass) return true
+
+        val bottomThreshold = (screenBottom - (screenHeight * 0.15)).toInt()
+        return boundsInScreen.bottom >= bottomThreshold
+    }
+
+    private fun nodeToModel(
         node: AccessibilityNodeInfo,
         textOverride: String? = null,
-        contentDescriptionOverride: String? = null
-    ): JSONObject {
+        contentDescriptionOverride: String? = null,
+        screenBottom: Int,
+        screenHeight: Int
+    ): A11yNodeInfo {
         val rect = Rect()
         node.getBoundsInScreen(rect)
 
-        return JSONObject().apply {
-            put("text", textOverride ?: node.text?.toString() ?: JSONObject.NULL)
-            put("contentDescription", contentDescriptionOverride ?: node.contentDescription?.toString() ?: JSONObject.NULL)
-            put("className", node.className?.toString() ?: JSONObject.NULL)
-            put("viewIdResourceName", node.viewIdResourceName ?: JSONObject.NULL)
-            put(
-                "boundsInScreen", JSONObject().apply {
-                    put("l", rect.left)
-                    put("t", rect.top)
-                    put("r", rect.right)
-                    put("b", rect.bottom)
-                }
+        return A11yNodeInfo(
+            text = textOverride ?: node.text?.toString(),
+            contentDescription = contentDescriptionOverride ?: node.contentDescription?.toString(),
+            className = node.className?.toString(),
+            viewIdResourceName = node.viewIdResourceName,
+            boundsInScreen = rect,
+            clickable = node.isClickable,
+            focusable = node.isFocusable,
+            isVisibleToUser = node.isVisibleToUser,
+            focused = node.isFocused,
+            accessibilityFocused = node.isAccessibilityFocused,
+            isSystemNavigationBar = isSystemNavigationBarNode(
+                className = node.className?.toString(),
+                boundsInScreen = rect,
+                screenBottom = screenBottom,
+                screenHeight = screenHeight
             )
-            put("clickable", node.isClickable)
-            put("focusable", node.isFocusable)
-            put("isVisibleToUser", node.isVisibleToUser)
-        }
+        )
     }
 }

@@ -9,7 +9,49 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.0.2")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.1.0")
+    }
+
+
+    @Test
+    fun hasScrollableDownCandidate_returnsTrueWhenScrollableAndCanScrollDownExist() {
+        data class ScrollState(val scrollable: Boolean, val canScrollDown: Boolean)
+        val nodes = listOf(
+            ScrollState(scrollable = false, canScrollDown = true),
+            ScrollState(scrollable = true, canScrollDown = true)
+        )
+
+        val result = A11yNavigator.hasScrollableDownCandidate(
+            nodesInOrder = nodes,
+            isScrollable = { it.scrollable },
+            canScrollVerticallyDown = { it.canScrollDown }
+        )
+
+        assertTrue(result)
+    }
+
+    @Test
+    fun isSystemNavigationBarNode_returnsTrueForBottomArea() {
+        val result = A11yNavigator.isSystemNavigationBarNode(
+            className = "android.widget.LinearLayout",
+            boundsInScreen = Rect(0, 1750, 1080, 1910),
+            screenBottom = 1920,
+            screenHeight = 1920
+        )
+
+        assertTrue(result)
+    }
+
+    @Test
+    fun isSystemNavigationBarNode_returnsTrueForTabLayoutClass() {
+        val result = A11yNavigator.isSystemNavigationBarNode(
+            className = "com.google.android.material.tabs.TabLayout",
+            boundsInScreen = Rect(0, 200, 1080, 320),
+            screenBottom = 1920,
+            screenHeight = 1920
+        )
+
+        assertTrue(result)
     }
 
     @Test

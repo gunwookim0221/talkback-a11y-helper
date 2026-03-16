@@ -24,6 +24,7 @@
   - [waitForActivity](#waitforactivity)
   - [get_announcements](#get_announcements)
   - [verify_speech](#verify_speech)
+  - [smart_next (함수)](#smart_next-함수)
 
 ---
 
@@ -162,6 +163,8 @@ if not client.check_talkback_status(dev_serial):
 ### Signature
 `dump_tree(dev: Any = None, wait_seconds: float = 5.0) -> list[dict[str, Any]]`
 
+> 응답 포맷 버전: Android Navigator `2.1.0` / Python Client `1.1.0`
+
 ### 설명
 현재 화면의 접근성 노드 트리를 helper를 통해 덤프합니다.  
 `isin`, `scrollFind` 등 탐색/매칭 계열 함수의 기반 데이터입니다.
@@ -174,7 +177,10 @@ if not client.check_talkback_status(dev_serial):
 | `wait_seconds` | `float` | `5.0` | 덤프 로그 수집 최대 대기 시간 |
 
 ### Returns
-- `list[dict[str, Any]]`: 접근성 노드 트리(JSON 배열)
+- `list[dict[str, Any]]`: 접근성 노드 리스트(`nodes`).
+- 추가 메타데이터는 `client.last_dump_metadata`에 저장됩니다.
+  - `algorithmVersion`: Android 덤프 알고리즘 버전
+  - `canScrollDown`: 현재 화면에서 아래로 더 스크롤 가능한지 여부
 
 ### Example
 ```python
@@ -561,3 +567,22 @@ if client.check_helper_status(dev):
         speech_ok = client.verify_speech(dev, r"Wi[- ]?Fi")
         print("speech check:", speech_ok)
 ```
+
+
+---
+
+## smart_next (함수)
+
+### Signature
+`smart_next(client: A11yAdbClient, device_id: Any) -> bool`
+
+### 설명
+하단 시스템 내비게이션 바(`isSystemNavigationBar`) 진입 직전에 `canScrollDown` 메타데이터를 확인해, 본문 컨텐츠를 우선 스크롤 탐색하는 스마트 포커스 이동 함수입니다.
+
+### 동작 요약
+- 다음 노드가 일반 컨텐츠면 `move_focus(next)`를 수행합니다.
+- 다음 노드가 하단 내비게이션이고 `canScrollDown=True`이면 `scroll(down)`을 먼저 시도합니다.
+- 리스트 마지막 요소에서 호출되면 첫 요소로 순환 포커스 이동을 시도합니다.
+
+### Returns
+- `bool`: 포커스 이동 또는 스크롤 동작 성공 시 `True`
