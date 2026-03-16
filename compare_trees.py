@@ -347,11 +347,25 @@ def main():
             clickable_nodes = [n for n in nodes if n.get('clickable') is True or n.get('isClickable') is True]
             with open(json_clickable_file, 'w', encoding='utf-8') as f:
                 json.dump(clickable_nodes, f, ensure_ascii=False, indent=2)
-                
-            # Focusable JSON 저장
-            focusable_nodes = [n for n in nodes if n.get('focusable') is True or n.get('isFocusable') is True]
+                           
+            # Focusable JSON 저장 (TalkBack 실제 포커스 기준 완벽 반영)
+            talkback_focusable_nodes = []
+            for n in nodes:
+                # 1. 명시적 포커스 가능 여부
+                is_focusable = n.get('focusable') is True or n.get('isFocusable') is True
+                # 2. 스크린리더 전용 포커스
+                is_sr_focusable = n.get('screenReaderFocusable') is True or n.get('isScreenReaderFocusable') is True
+                # 3. 클릭 가능 여부 (톡백은 클릭 가능하면 무조건 포커스를 잡음)
+                is_clickable = n.get('clickable') is True or n.get('isClickable') is True
+                # 4. 읽을거리(Text 또는 ContentDescription)가 존재하는지 여부
+                has_text = bool(n.get('text')) or bool(n.get('contentDescription'))
+            
+                # 위 조건 중 하나라도 만족하면 톡백이 멈춰서 읽어줌!
+                if is_focusable or is_sr_focusable or is_clickable or has_text:
+                    talkback_focusable_nodes.append(n)
+            
             with open(json_focusable_file, 'w', encoding='utf-8') as f:
-                json.dump(focusable_nodes, f, ensure_ascii=False, indent=2)
+                json.dump(talkback_focusable_nodes, f, ensure_ascii=False, indent=2)
                 
         except Exception as e:
             print(f"[-] 데이터 분류 중 오류: {e}")
