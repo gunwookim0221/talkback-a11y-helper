@@ -13,6 +13,7 @@ from talkback_lib import (
     ACTION_PING,
     LOGCAT_FILTER_SPECS,
     A11yAdbClient,
+    smart_next,
 )
 
 
@@ -1052,6 +1053,50 @@ class VerifySpeechTest(unittest.TestCase):
 
         saved_path = alpha_mock.convert.return_value.save.call_args.args[0]
         self.assertEqual(saved_path, Path("error_log/fail_Pet_________.png"))
+
+
+class SmartNextTest(unittest.TestCase):
+    def test_smart_next_scrolls_before_entering_system_navigation(self):
+        client = unittest.mock.MagicMock()
+        client.dump_tree.return_value = [
+            {"accessibilityFocused": True, "isSystemNavigationBar": False},
+            {"isSystemNavigationBar": True},
+        ]
+        client.last_dump_metadata = {"canScrollDown": True}
+        client.scroll.return_value = True
+
+        result = smart_next(client, "SER")
+
+        self.assertTrue(result)
+        client.scroll.assert_called_once_with("SER", direction="down")
+        client.move_focus.assert_not_called()
+
+    def test_smart_next_moves_focus_when_next_is_not_navigation(self):
+        client = unittest.mock.MagicMock()
+        client.dump_tree.return_value = [
+            {"accessibilityFocused": True, "isSystemNavigationBar": False},
+            {"isSystemNavigationBar": False},
+        ]
+        client.last_dump_metadata = {"canScrollDown": True}
+
+        result = smart_next(client, "SER")
+
+        self.assertEqual(result, client.move_focus.return_value)
+        client.move_focus.assert_called_once_with("SER", direction="next")
+
+    def test_smart_next_wraps_to_first_node_at_end_of_list(self):
+        client = unittest.mock.MagicMock()
+        client.dump_tree.return_value = [
+            {"text": "첫 항목", "isSystemNavigationBar": False},
+            {"accessibilityFocused": True, "text": "마지막 항목", "isSystemNavigationBar": True},
+        ]
+        client.last_dump_metadata = {"canScrollDown": False}
+        client.select.return_value = True
+
+        result = smart_next(client, "SER")
+
+        self.assertTrue(result)
+        client.select.assert_called_once()
 
 
 if __name__ == "__main__":
