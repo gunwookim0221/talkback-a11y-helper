@@ -10,10 +10,27 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.7.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.7.2")
     }
 
 
+
+
+    @Test
+    fun isSameNodeIdentity_returnsFalseWhenFallbackDescIsDifferent() {
+        val result = A11yNavigator.isSameNodeIdentity(
+            aId = "com.test:id/card",
+            aText = "거실",
+            aContentDescription = "거실 카드",
+            aBounds = Rect(0, 0, 100, 100),
+            bId = "com.test:id/card",
+            bText = "거실",
+            bContentDescription = "침실 카드",
+            bBounds = Rect(0, 120, 100, 220)
+        )
+
+        assertFalse(result)
+    }
 
     @Test
     fun compareByContainmentAndPosition_treatsNonOverlappingRowsAsDifferentEvenWhenCentersAreClose() {
