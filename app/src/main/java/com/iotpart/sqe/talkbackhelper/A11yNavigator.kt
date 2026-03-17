@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.2"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -223,7 +223,8 @@ object A11yNavigator {
             screenTop: Int,
             screenBottom: Int,
             screenHeight: Int,
-            statusName: String
+            statusName: String,
+            isScrollAction: Boolean = false
         ): TargetActionOutcome {
             for (node in traversalList) {
                 val bounds = Rect().also { node.getBoundsInScreen(it) }
@@ -243,7 +244,7 @@ object A11yNavigator {
                 )
 
                 if (!isTopBar && !isBottomBar) {
-                    if (node.isAccessibilityFocused) {
+                    if (!isScrollAction && node.isAccessibilityFocused) {
                         Log.i("A11Y_HELPER", "[SMART_NEXT] 노드가 이미 포커스됨 (status=$statusName)")
                         return TargetActionOutcome(true, statusName, node)
                     }
@@ -295,6 +296,8 @@ object A11yNavigator {
             if (!scrolled) {
                 return TargetActionOutcome(false, "failed")
             }
+            currentNode?.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
+            Log.i("A11Y_HELPER", "[SMART_NEXT] 스크롤 후 기존 포커스 해제 및 강제 재배정")
             Thread.sleep(1200)
             val refreshedRoot = A11yHelperService.instance?.rootInActiveWindow
             val refreshedTraversal = refreshedRoot?.let { buildFocusableTraversalList(it) }.orEmpty()
@@ -302,7 +305,14 @@ object A11yNavigator {
             val refreshedTop = refreshedRect.top
             val refreshedBottom = refreshedRect.bottom
             val refreshedHeight = (refreshedBottom - refreshedTop).coerceAtLeast(1)
-            return findAndFocusFirstContent(refreshedTraversal, refreshedTop, refreshedBottom, refreshedHeight, "scrolled")
+            return findAndFocusFirstContent(
+                traversalList = refreshedTraversal,
+                screenTop = refreshedTop,
+                screenBottom = refreshedBottom,
+                screenHeight = refreshedHeight,
+                statusName = "scrolled",
+                isScrollAction = true
+            )
         }
 
         Log.i("A11Y_HELPER", "[SMART_NEXT] 일반 next 이동 수행")
