@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.8.2"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.8.3"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -403,49 +403,20 @@ object A11yNavigator {
                         continue
                     }
 
-                    if (shouldReuseExistingAccessibilityFocus(node.isAccessibilityFocused, isScrollAction)) {
-                        Log.i("A11Y_HELPER", "[SMART_NEXT] Node is already focused (status=$statusName)")
-                        Log.i("A11Y_HELPER", "[SMART_NEXT] Focused top-most content at Y=${bounds.top}")
-                        focusedAny = true
-                        focusedOutcome = TargetActionOutcome(true, statusName, node)
-                        break
-                    }
-
                     Log.i("A11Y_HELPER", "[SMART_DEBUG] Attempting focus on Index:$index, AlreadyFocused:${node.isAccessibilityFocused}")
-                    if (isBottomClippedWithPadding(bounds.bottom, effectiveBottom)) {
-                        Log.i("A11Y_HELPER", "[SMART_NEXT] Clipped node detected, requesting show-on-screen: $label")
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
-                        } else {
-                            Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SHOW_ON_SCREEN not supported on this API level")
-                        }
-                        Thread.sleep(100)
-                    }
-                    root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { latestFocus ->
-                        latestFocus.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
-                    }
-                    var focused = node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
-                    if (!focused) {
-                        Thread.sleep(100)
-                        focused = node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
-                    }
-                    if (focused) {
-                        if (shouldAlignToRealTop(bounds.top, screenTop)) {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                Log.i("A11Y_HELPER", "[SMART_NEXT] Focused node below top alignment threshold, requesting ACTION_SHOW_ON_SCREEN")
-                                node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
-                            } else {
-                                Log.i("A11Y_HELPER", "[SMART_NEXT] Top alignment skip: ACTION_SHOW_ON_SCREEN not supported on this API level")
-                            }
-                        }
-                        Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS succeeded (status=$statusName)")
-                        Log.i("A11Y_HELPER", "[SMART_NEXT] Focused top-most content at Y=${bounds.top}")
+                    focusedOutcome = performFocusWithVisibilityCheck(
+                        root = root,
+                        target = node,
+                        screenTop = screenTop,
+                        effectiveBottom = effectiveBottom,
+                        status = statusName,
+                        isScrollAction = isScrollAction
+                    )
+                    if (focusedOutcome?.success == true) {
                         focusedAny = true
-                        focusedOutcome = TargetActionOutcome(true, statusName, node)
                         break
-                    } else {
-                        Log.w("A11Y_HELPER", "[SMART_NEXT] Node focus denied, trying next candidate...")
                     }
+                    Log.w("A11Y_HELPER", "[SMART_NEXT] Node focus denied, trying next candidate...")
                 }
             }
 
@@ -475,19 +446,14 @@ object A11yNavigator {
         }
 
         fun focusOrSkip(target: AccessibilityNodeInfo, status: String): TargetActionOutcome {
-            if (target.isAccessibilityFocused) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Target already has accessibility focus, skipping focus action (status=$status)")
-                return TargetActionOutcome(true, status, target)
-            }
-            Thread.sleep(50)
-            var focused = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
-            if (!focused) {
-                Thread.sleep(100)
-                Thread.sleep(50)
-                focused = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
-            }
-            Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=$focused (status=$status)")
-            return TargetActionOutcome(focused, if (focused) status else "failed", target)
+            return performFocusWithVisibilityCheck(
+                root = root,
+                target = target,
+                screenTop = screenTop,
+                effectiveBottom = effectiveBottom,
+                status = status,
+                isScrollAction = false
+            )
         }
 
         val scrollableNode = findScrollableForwardAncestorCandidate(resolvedCurrent)
@@ -673,6 +639,64 @@ object A11yNavigator {
         return focusOrSkip(nextNode, "moved")
     }
 
+
+    internal fun performFocusWithVisibilityCheck(
+        root: AccessibilityNodeInfo,
+        target: AccessibilityNodeInfo,
+        screenTop: Int,
+        effectiveBottom: Int,
+        status: String,
+        isScrollAction: Boolean
+    ): TargetActionOutcome {
+        val label = target.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+            ?: target.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+            ?: "<no-label>"
+
+        fun requestVisibilityAdjustment(bounds: Rect) {
+            val needBottomLift = isBottomClippedWithPadding(bounds.bottom, effectiveBottom)
+            val needTopAlign = isScrollAction && shouldAlignToRealTop(bounds.top, screenTop)
+            if (!needBottomLift && !needTopAlign) return
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Visibility adjustment triggered for: $label (Y:${bounds.top})")
+                target.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
+            } else {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SHOW_ON_SCREEN not supported on this API level")
+            }
+        }
+
+        requestVisibilityAdjustment(Rect().also { target.getBoundsInScreen(it) })
+
+        root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { latestFocus ->
+            latestFocus.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
+        }
+
+        var focused = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+        if (!focused) {
+            focused = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+        }
+
+        if (!focused) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=false (status=$status)")
+            return TargetActionOutcome(false, "failed", target)
+        }
+
+        val focusedBounds = Rect().also { target.getBoundsInScreen(it) }
+        requestVisibilityAdjustment(focusedBounds)
+        Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=true (status=$status)")
+        Log.i("A11Y_HELPER", "[SMART_NEXT] Focused top-most content at Y=${focusedBounds.top}")
+        return TargetActionOutcome(true, status, target)
+    }
+
+    internal fun applyBottomNavigationSafetyGuide(
+        effectiveBottom: Int,
+        screenBottom: Int,
+        minVisibleRatio: Float = 0.85f
+    ): Int {
+        val minGuideBottom = (screenBottom * minVisibleRatio).toInt()
+        return minOf(effectiveBottom, minGuideBottom)
+    }
+
     internal fun shouldReuseExistingAccessibilityFocus(
         isAccessibilityFocused: Boolean,
         isScrollAction: Boolean
@@ -725,6 +749,10 @@ object A11yNavigator {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Effective bottom set to $effectiveBottom by node: $nodeLabel (ID: $viewId)")
             }
         }
+        effectiveBottom = applyBottomNavigationSafetyGuide(
+            effectiveBottom = effectiveBottom,
+            screenBottom = screenBottom
+        )
         return effectiveBottom
     }
 
