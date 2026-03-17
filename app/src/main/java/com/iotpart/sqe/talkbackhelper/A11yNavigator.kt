@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.1"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -218,25 +218,48 @@ object A11yNavigator {
         val screenBottom = screenRect.bottom
         val screenHeight = (screenBottom - screenTop).coerceAtLeast(1)
 
-        fun firstContentNode(): AccessibilityNodeInfo? {
-            return traversalList.firstOrNull { node ->
+        fun findAndFocusFirstContent(
+            traversalList: List<AccessibilityNodeInfo>,
+            screenTop: Int,
+            screenBottom: Int,
+            screenHeight: Int,
+            statusName: String
+        ): TargetActionOutcome {
+            for (node in traversalList) {
                 val bounds = Rect().also { node.getBoundsInScreen(it) }
                 val isTopBar = isTopAppBarNode(
-                    className = node.className?.toString(),
-                    viewIdResourceName = node.viewIdResourceName,
-                    boundsInScreen = bounds,
-                    screenTop = screenTop,
-                    screenHeight = screenHeight
+                    node.className?.toString(),
+                    node.viewIdResourceName,
+                    bounds,
+                    screenTop,
+                    screenHeight
                 )
                 val isBottomBar = isBottomNavigationBarNode(
-                    className = node.className?.toString(),
-                    viewIdResourceName = node.viewIdResourceName,
-                    boundsInScreen = bounds,
-                    screenBottom = screenBottom,
-                    screenHeight = screenHeight
+                    node.className?.toString(),
+                    node.viewIdResourceName,
+                    bounds,
+                    screenBottom,
+                    screenHeight
                 )
-                !isTopBar && !isBottomBar
+
+                if (!isTopBar && !isBottomBar) {
+                    if (node.isAccessibilityFocused) {
+                        Log.i("A11Y_HELPER", "[SMART_NEXT] 노드가 이미 포커스됨 (status=$statusName)")
+                        return TargetActionOutcome(true, statusName, node)
+                    }
+
+                    val focused = node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+                    if (focused) {
+                        Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS 성공 (status=$statusName)")
+                        return TargetActionOutcome(true, statusName, node)
+                    } else {
+                        Log.w("A11Y_HELPER", "[SMART_NEXT] 노드 포커스 거부됨, 다음 후보 탐색...")
+                    }
+                }
             }
+
+            Log.e("A11Y_HELPER", "[SMART_NEXT] 유효한 컨텐츠 노드 포커스 완전 실패 (status=failed)")
+            return TargetActionOutcome(false, "failed")
         }
 
         fun focusOrSkip(target: AccessibilityNodeInfo, status: String): TargetActionOutcome {
@@ -251,9 +274,7 @@ object A11yNavigator {
 
         if (nextIndex !in traversalList.indices || currentIndex == traversalList.lastIndex) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] 마지막 노드 도달 또는 다음 노드 없음 -> 첫 컨텐츠로 순환")
-            val firstContent = firstContentNode()
-                ?: return TargetActionOutcome(false, "failed")
-            return focusOrSkip(firstContent, "looped")
+            return findAndFocusFirstContent(traversalList, screenTop, screenBottom, screenHeight, "looped")
         }
 
         val nextNode = traversalList[nextIndex]
@@ -281,17 +302,7 @@ object A11yNavigator {
             val refreshedTop = refreshedRect.top
             val refreshedBottom = refreshedRect.bottom
             val refreshedHeight = (refreshedBottom - refreshedTop).coerceAtLeast(1)
-            val firstContent = refreshedTraversal.firstOrNull { node ->
-                val bounds = Rect().also { node.getBoundsInScreen(it) }
-                val isTopBar = isTopAppBarNode(node.className?.toString(), node.viewIdResourceName, bounds, refreshedTop, refreshedHeight)
-                val isBottomBar = isBottomNavigationBarNode(node.className?.toString(), node.viewIdResourceName, bounds, refreshedBottom, refreshedHeight)
-                !isTopBar && !isBottomBar
-            }
-            if (firstContent == null) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] 스크롤 후 첫 컨텐츠 노드 탐색 실패")
-                return TargetActionOutcome(false, "failed")
-            }
-            return focusOrSkip(firstContent, "scrolled")
+            return findAndFocusFirstContent(refreshedTraversal, refreshedTop, refreshedBottom, refreshedHeight, "scrolled")
         }
 
         Log.i("A11Y_HELPER", "[SMART_NEXT] 일반 next 이동 수행")
