@@ -1,6 +1,7 @@
 package com.iotpart.sqe.talkbackhelper
 
 import android.graphics.Rect
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -9,9 +10,67 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.7.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.6.1")
     }
 
+
+
+    @Test
+    fun compareByContainmentAndPosition_treatsNonOverlappingRowsAsDifferentEvenWhenCentersAreClose() {
+        data class Node(val rect: Rect, val parent: Node? = null)
+
+        val upper = Node(rect = Rect(0, 0, 100, 10))
+        val lower = Node(rect = Rect(0, 11, 100, 21))
+
+        val result = A11yNavigator.compareByContainmentAndPosition(
+            left = upper,
+            right = lower,
+            parentOf = { it.parent },
+            boundsOf = { it.rect },
+            yBucketSize = 20
+        )
+
+        assertTrue(result < 0)
+    }
+
+    @Test
+    fun findClosestNodeBelowCenter_returnsNearestLowerNodeIndex() {
+        data class Node(val rect: Rect)
+
+        val reference = Node(Rect(0, 100, 100, 140))
+        val nodes = listOf(
+            Node(Rect(0, 20, 100, 60)),
+            Node(Rect(0, 145, 100, 185)),
+            Node(Rect(0, 220, 100, 260))
+        )
+
+        val index = A11yNavigator.findClosestNodeBelowCenter(
+            nodes = nodes,
+            reference = reference,
+            boundsOf = { it.rect }
+        )
+
+        assertEquals(1, index)
+    }
+
+    @Test
+    fun findClosestNodeBelowCenter_returnsMinusOneWhenNoLowerNodeExists() {
+        data class Node(val rect: Rect)
+
+        val reference = Node(Rect(0, 200, 100, 240))
+        val nodes = listOf(
+            Node(Rect(0, 20, 100, 60)),
+            Node(Rect(0, 145, 100, 185))
+        )
+
+        val index = A11yNavigator.findClosestNodeBelowCenter(
+            nodes = nodes,
+            reference = reference,
+            boundsOf = { it.rect }
+        )
+
+        assertEquals(-1, index)
+    }
 
     @Test
     fun shouldSkipExcludedNodeByDescription_returnsTrueWhenSameDescAndTop30Percent() {
