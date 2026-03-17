@@ -34,7 +34,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.6.0"
+CLIENT_ALGORITHM_VERSION = "1.6.1"
 
 
 @dataclass
@@ -887,7 +887,8 @@ class A11yAdbClient:
             return "failed"
 
         self.last_announcements = []
-        self.clear_logcat(dev=dev)
+        # Keep previous logcat history for SMART_NEXT analysis continuity.
+        # self.clear_logcat(dev=dev)
         req_id = str(uuid.uuid4())[:8]
         self._broadcast(dev, ACTION_SMART_NEXT, ["--es", "reqId", req_id])
         result = self._read_log_result(dev, "SMART_NAV_RESULT", req_id, wait_seconds=3.0)

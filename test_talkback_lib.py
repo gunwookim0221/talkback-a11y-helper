@@ -1092,6 +1092,20 @@ class SmartMoveFocusTest(unittest.TestCase):
 
         self.assertEqual(result, "failed")
 
+
+    def test_move_focus_smart_next_does_not_clear_logcat(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: SMART_NAV_RESULT {"success":true,"status":"moved","reqId":"REQID704"}'
+
+        with patch.object(client, "check_helper_status", return_value=True), patch(
+            "talkback_lib.uuid.uuid4", return_value="REQID704-xxxx"
+        ):
+            result = client.move_focus_smart("SER", direction="next")
+
+        self.assertEqual(result, "moved")
+        logcat_clear_calls = [args for args, _ in client.calls if args == ["logcat", "-c"]]
+        self.assertEqual(logcat_clear_calls, [])
+
     def test_move_focus_smart_next_does_not_call_dump_or_get_focus(self):
         client = FakeA11yClient()
         client.logcat_payload = 'I/A11Y_HELPER: SMART_NAV_RESULT {"success":true,"status":"moved","reqId":"REQID703"}'
