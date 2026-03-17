@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.7.2")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.7.3")
     }
 
 
@@ -113,6 +113,43 @@ class A11yNavigatorTest {
         )
 
         assertFalse(shouldSkip)
+    }
+
+    @Test
+    fun findIndexByDescription_returnsNextStartPointWhenDescriptionExists() {
+        data class Node(val desc: String?)
+
+        val nodes = listOf(
+            Node("alpha"),
+            Node("beta"),
+            Node("gamma")
+        )
+
+        val index = A11yNavigator.findIndexByDescription(
+            nodes = nodes,
+            descriptionOf = { it.desc },
+            excludeDesc = "beta"
+        )
+
+        assertEquals(1, index)
+    }
+
+    @Test
+    fun findIndexByDescription_returnsMinusOneWhenDescriptionDoesNotExist() {
+        data class Node(val desc: String?)
+
+        val nodes = listOf(
+            Node("alpha"),
+            Node("beta")
+        )
+
+        val index = A11yNavigator.findIndexByDescription(
+            nodes = nodes,
+            descriptionOf = { it.desc },
+            excludeDesc = "delta"
+        )
+
+        assertEquals(-1, index)
     }
 
     @Test

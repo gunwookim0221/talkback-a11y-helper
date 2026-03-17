@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.7.2"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.7.3"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -264,11 +264,25 @@ object A11yNavigator {
             isScrollAction: Boolean = false,
             excludeDesc: String? = null
         ): TargetActionOutcome {
+            val excludedIndex = findIndexByDescription(
+                nodes = traversalList,
+                descriptionOf = { it.contentDescription?.toString() },
+                excludeDesc = excludeDesc
+            )
+            val startIndex = if (excludedIndex != -1) excludedIndex + 1 else 0
             var skippedExcludedNode = false
 
-            for (node in traversalList) {
+            if (excludedIndex != -1) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Excluded node found at index=$excludedIndex. Starting traversal from index=$startIndex")
+            } else if (!excludeDesc.isNullOrBlank()) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Excluded node not found. Starting traversal from beginning with top-area guard")
+            }
+
+            for (index in startIndex until traversalList.size) {
+                val node = traversalList[index]
                 val bounds = Rect().also { node.getBoundsInScreen(it) }
-                if (!skippedExcludedNode &&
+                if (excludedIndex == -1 &&
+                    !skippedExcludedNode &&
                     shouldSkipExcludedNodeByDescription(
                         nodeDesc = node.contentDescription?.toString(),
                         excludeDesc = excludeDesc,
@@ -364,6 +378,7 @@ object A11yNavigator {
                 }
 
                 Thread.sleep(1500)
+                Thread.sleep(200)
 
                 val tempRoot = A11yHelperService.instance?.rootInActiveWindow
                 tempRoot?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { oldFocus ->
@@ -420,6 +435,7 @@ object A11yNavigator {
             }
 
             Thread.sleep(1500)
+            Thread.sleep(200)
 
             val tempRoot = A11yHelperService.instance?.rootInActiveWindow
             tempRoot?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { oldFocus ->
@@ -989,6 +1005,19 @@ object A11yNavigator {
 
         val topThirtyPercentBoundary = screenTop + (screenHeight * 0.3f).toInt()
         return nodeBounds.top <= topThirtyPercentBoundary
+    }
+
+    internal fun <T> findIndexByDescription(
+        nodes: List<T>,
+        descriptionOf: (T) -> String?,
+        excludeDesc: String?
+    ): Int {
+        val normalizedExcludeDesc = excludeDesc?.trim().orEmpty()
+        if (normalizedExcludeDesc.isEmpty()) return -1
+
+        return nodes.indexOfFirst { node ->
+            descriptionOf(node)?.trim() == normalizedExcludeDesc
+        }
     }
 
     internal fun shouldIgnoreBottomResidualFocus(
