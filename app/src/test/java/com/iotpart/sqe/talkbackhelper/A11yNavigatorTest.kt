@@ -9,7 +9,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.5.4")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.5.5")
     }
 
     @Test
@@ -96,7 +96,7 @@ class A11yNavigatorTest {
 
 
     @Test
-    fun isBottomNavigationBarNode_returnsTrueForBottomArea() {
+    fun isBottomNavigationBarNode_returnsFalseForBottomAreaWithoutIdentifier() {
         val result = A11yNavigator.isBottomNavigationBarNode(
             className = "android.widget.LinearLayout",
             viewIdResourceName = null,
@@ -105,7 +105,7 @@ class A11yNavigatorTest {
             screenHeight = 1920
         )
 
-        assertTrue(result)
+        assertFalse(result)
     }
 
     @Test
@@ -121,6 +121,20 @@ class A11yNavigatorTest {
         assertTrue(result)
     }
 
+
+
+    @Test
+    fun isTopAppBarNode_returnsFalseForTopAreaWithoutIdentifier() {
+        val result = A11yNavigator.isTopAppBarNode(
+            className = "android.widget.LinearLayout",
+            viewIdResourceName = null,
+            boundsInScreen = Rect(0, 0, 1080, 180),
+            screenTop = 0,
+            screenHeight = 1920
+        )
+
+        assertFalse(result)
+    }
 
     @Test
     fun isTopAppBarNode_returnsTrueForToolbarClass() {
