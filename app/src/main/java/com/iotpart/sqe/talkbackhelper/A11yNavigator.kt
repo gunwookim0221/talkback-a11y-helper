@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.6"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.7"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -224,9 +224,24 @@ object A11yNavigator {
             screenBottom: Int,
             screenHeight: Int,
             statusName: String,
-            isScrollAction: Boolean = false
+            isScrollAction: Boolean = false,
+            excludeNode: AccessibilityNodeInfo? = null
         ): TargetActionOutcome {
+            val excludeViewId = excludeNode?.viewIdResourceName
+            val excludeText = excludeNode?.text?.toString()?.trim().orEmpty()
+
             for (node in traversalList) {
+                if (shouldExcludeNodeByIdentity(
+                        nodeViewId = node.viewIdResourceName,
+                        nodeText = node.text?.toString(),
+                        excludeViewId = excludeViewId,
+                        excludeText = excludeText
+                    )
+                ) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] 스크롤 이후 제외 대상과 동일한 노드를 건너뜁니다.")
+                    continue
+                }
+
                 val bounds = Rect().also { node.getBoundsInScreen(it) }
                 val isTopBar = isTopAppBarNode(
                     node.className?.toString(),
@@ -289,6 +304,7 @@ object A11yNavigator {
         )
 
         val scrollableNode = findScrollableForwardCandidate(root)
+            ?: findScrollableForwardAncestorCandidate(currentNode)
         if (nextIsBottomBar && scrollableNode != null) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] 다음 노드가 하단바이며 스크롤 가능 요소 존재 -> 스크롤 시도")
             val scrolled = scrollableNode.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
@@ -323,7 +339,8 @@ object A11yNavigator {
                 screenBottom = refreshedBottom,
                 screenHeight = refreshedHeight,
                 statusName = "scrolled",
-                isScrollAction = true
+                isScrollAction = true,
+                excludeNode = resolvedCurrent
             )
         }
 
@@ -703,6 +720,31 @@ object A11yNavigator {
         return null
     }
 
+    private fun findScrollableForwardAncestorCandidate(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        var current = node?.parent
+        while (current != null) {
+            if (current.isScrollable && current.actionList.contains(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD)) {
+                return current
+            }
+            current = current.parent
+        }
+        return null
+    }
+
+    internal fun shouldExcludeNodeByIdentity(
+        nodeViewId: String?,
+        nodeText: String?,
+        excludeViewId: String?,
+        excludeText: String?
+    ): Boolean {
+        val normalizedNodeText = nodeText?.trim().orEmpty()
+        val normalizedExcludeText = excludeText?.trim().orEmpty()
+
+        val sameViewId = !excludeViewId.isNullOrBlank() && !nodeViewId.isNullOrBlank() && nodeViewId == excludeViewId
+        val sameText = normalizedExcludeText.isNotEmpty() && normalizedNodeText.isNotEmpty() && normalizedNodeText == normalizedExcludeText
+        return sameViewId || sameText
+    }
+
     internal fun isTopAppBarNode(
         className: String?,
         viewIdResourceName: String?,
@@ -751,6 +793,8 @@ object A11yNavigator {
             normalizedViewId.contains("tab_bar") ||
             normalizedViewId.contains("navigation") ||
             normalizedViewId.contains("menu_bar") ||
+            normalizedViewId.contains("menu_favorites") ||
+            normalizedViewId.contains("menu_devices") ||
             normalizedViewId.contains("menu_") ||
             normalizedViewId.contains("tab_") ||
             normalizedViewId.contains("bottom_nav")

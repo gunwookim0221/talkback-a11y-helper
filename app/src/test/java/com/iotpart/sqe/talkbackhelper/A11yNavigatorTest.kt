@@ -9,7 +9,43 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.5.6")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.5.7")
+    }
+
+    @Test
+    fun shouldExcludeNodeByIdentity_returnsTrueWhenViewIdMatches() {
+        val excluded = A11yNavigator.shouldExcludeNodeByIdentity(
+            nodeViewId = "com.test:id/item_title",
+            nodeText = "거실",
+            excludeViewId = "com.test:id/item_title",
+            excludeText = "다른 텍스트"
+        )
+
+        assertTrue(excluded)
+    }
+
+    @Test
+    fun shouldExcludeNodeByIdentity_returnsTrueWhenTextMatches() {
+        val excluded = A11yNavigator.shouldExcludeNodeByIdentity(
+            nodeViewId = "com.test:id/item_title_2",
+            nodeText = "  거실 조명  ",
+            excludeViewId = "com.test:id/item_title",
+            excludeText = "거실 조명"
+        )
+
+        assertTrue(excluded)
+    }
+
+    @Test
+    fun shouldExcludeNodeByIdentity_returnsFalseWhenBothDoNotMatch() {
+        val excluded = A11yNavigator.shouldExcludeNodeByIdentity(
+            nodeViewId = "com.test:id/item_title_2",
+            nodeText = "거실",
+            excludeViewId = "com.test:id/item_title",
+            excludeText = "침실"
+        )
+
+        assertFalse(excluded)
     }
 
     @Test
