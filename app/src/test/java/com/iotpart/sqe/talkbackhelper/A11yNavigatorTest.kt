@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.7.9")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.8.0")
     }
 
 
@@ -328,9 +328,43 @@ class A11yNavigatorTest {
         val effectiveBottom = A11yNavigator.calculateEffectiveBottom(
             nodes = nodes,
             screenBottom = 1920,
+            screenHeight = 1920,
             boundsOf = { it.rect },
             classNameOf = { it.className },
             viewIdOf = { it.viewId },
+            labelOf = { it.viewId },
+            isBottomNavigation = { className, viewId, bounds ->
+                A11yNavigator.isBottomNavigationBarNode(
+                    className = className,
+                    viewIdResourceName = viewId,
+                    boundsInScreen = bounds,
+                    screenBottom = 1920,
+                    screenHeight = 1920
+                )
+            }
+        )
+
+        assertEquals(1700, effectiveBottom)
+    }
+
+
+    @Test
+    fun calculateEffectiveBottom_ignoresBottomNavIdentifierInUpperHalf() {
+        data class Node(val className: String?, val viewId: String?, val rect: Rect)
+
+        val nodes = listOf(
+            Node("android.widget.LinearLayout", "com.test:id/bottom_nav", Rect(0, 400, 1080, 520)),
+            Node("com.google.android.material.bottomnavigation.BottomNavigationView", "com.test:id/bottom_nav", Rect(0, 1700, 1080, 1920))
+        )
+
+        val effectiveBottom = A11yNavigator.calculateEffectiveBottom(
+            nodes = nodes,
+            screenBottom = 1920,
+            screenHeight = 1920,
+            boundsOf = { it.rect },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId },
+            labelOf = { it.viewId },
             isBottomNavigation = { className, viewId, bounds ->
                 A11yNavigator.isBottomNavigationBarNode(
                     className = className,
@@ -439,6 +473,33 @@ class A11yNavigatorTest {
         )
 
         assertFalse(result)
+    }
+
+
+    @Test
+    fun isBottomNavigationBarNode_returnsFalseForGenericMenuKeyword() {
+        val result = A11yNavigator.isBottomNavigationBarNode(
+            className = "android.widget.ImageButton",
+            viewIdResourceName = "com.test:id/menu_more_options",
+            boundsInScreen = Rect(0, 100, 100, 200),
+            screenBottom = 1920,
+            screenHeight = 1920
+        )
+
+        assertFalse(result)
+    }
+
+    @Test
+    fun isBottomNavigationBarNode_returnsTrueForBottomTabKeyword() {
+        val result = A11yNavigator.isBottomNavigationBarNode(
+            className = "android.widget.LinearLayout",
+            viewIdResourceName = "com.test:id/bottom_tab_home",
+            boundsInScreen = Rect(0, 1700, 1080, 1850),
+            screenBottom = 1920,
+            screenHeight = 1920
+        )
+
+        assertTrue(result)
     }
 
     @Test
