@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.7.6"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.7.7"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -267,7 +267,10 @@ object A11yNavigator {
         ): TargetActionOutcome {
             val excludedIndex = findIndexByDescription(
                 nodes = traversalList,
-                descriptionOf = { it.contentDescription?.toString() },
+                descriptionOf = {
+                    it.contentDescription?.toString()?.trim().takeUnless { text -> text.isNullOrEmpty() }
+                        ?: it.text?.toString()?.trim().takeUnless { text -> text.isNullOrEmpty() }
+                },
                 excludeDesc = excludeDesc
             )
 
@@ -283,6 +286,7 @@ object A11yNavigator {
             var skippedExcludedNode = false
             var focusedAny = false
             var focusedOutcome: TargetActionOutcome? = null
+            var isFirstFocusAttemptAfterScroll = isScrollAction
 
             if (excludedIndex != -1) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Excluded node found at index=$excludedIndex. Starting traversal from index=$traversalStartIndex")
@@ -343,11 +347,16 @@ object A11yNavigator {
 
                     if (shouldReuseExistingAccessibilityFocus(node.isAccessibilityFocused, isScrollAction)) {
                         Log.i("A11Y_HELPER", "[SMART_NEXT] Node is already focused (status=$statusName)")
+                        Log.i("A11Y_HELPER", "[SMART_NEXT] Focused top-most content at Y=${bounds.top}")
                         focusedAny = true
                         focusedOutcome = TargetActionOutcome(true, statusName, node)
                         break
                     }
 
+                    if (isFirstFocusAttemptAfterScroll) {
+                        Thread.sleep(100)
+                        isFirstFocusAttemptAfterScroll = false
+                    }
                     Thread.sleep(50)
                     var focused = node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
                     if (!focused) {
@@ -357,6 +366,7 @@ object A11yNavigator {
                     }
                     if (focused) {
                         Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS succeeded (status=$statusName)")
+                        Log.i("A11Y_HELPER", "[SMART_NEXT] Focused top-most content at Y=${bounds.top}")
                         focusedAny = true
                         focusedOutcome = TargetActionOutcome(true, statusName, node)
                         break
@@ -447,7 +457,8 @@ object A11yNavigator {
                     screenHeight = screenHeight,
                     statusName = "scrolled",
                     isScrollAction = true,
-                    excludeDesc = lastDesc
+                    excludeDesc = lastDesc,
+                    startIndex = 0
                 )
             }
 
@@ -503,7 +514,8 @@ object A11yNavigator {
                 screenHeight = refreshedHeight,
                 statusName = "scrolled",
                 isScrollAction = true,
-                excludeDesc = lastDesc
+                excludeDesc = lastDesc,
+                startIndex = 0
             )
         }
 
@@ -1131,6 +1143,7 @@ object A11yNavigator {
         return false
     }
 
+    @Suppress("UNUSED_PARAMETER")
     internal fun isBottomNavigationBarNode(
         className: String?,
         viewIdResourceName: String?,
@@ -1138,6 +1151,7 @@ object A11yNavigator {
         screenBottom: Int,
         screenHeight: Int
     ): Boolean {
+        // NOTE: 좌표 기반(bottom 20% 등) 판별은 컨텐츠 카드 오검출을 유발할 수 있어 사용하지 않는다.
         val normalizedClass = className?.lowercase().orEmpty()
         val normalizedViewId = viewIdResourceName?.lowercase().orEmpty()
 
