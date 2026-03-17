@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.7.7")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.7.8")
     }
 
 
@@ -314,6 +314,55 @@ class A11yNavigatorTest {
         )
 
         assertFalse(shouldLoop)
+    }
+
+    @Test
+    fun calculateEffectiveBottom_usesTopOfBottomNavigationNode() {
+        data class Node(val className: String?, val viewId: String?, val rect: Rect)
+
+        val nodes = listOf(
+            Node("android.widget.TextView", "com.test:id/content", Rect(0, 100, 100, 200)),
+            Node("com.google.android.material.bottomnavigation.BottomNavigationView", "com.test:id/bottom_nav", Rect(0, 1700, 1080, 1920))
+        )
+
+        val effectiveBottom = A11yNavigator.calculateEffectiveBottom(
+            nodes = nodes,
+            screenBottom = 1920,
+            boundsOf = { it.rect },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId },
+            isBottomNavigation = { className, viewId, bounds ->
+                A11yNavigator.isBottomNavigationBarNode(
+                    className = className,
+                    viewIdResourceName = viewId,
+                    boundsInScreen = bounds,
+                    screenBottom = 1920,
+                    screenHeight = 1920
+                )
+            }
+        )
+
+        assertEquals(1700, effectiveBottom)
+    }
+
+    @Test
+    fun collectVisibleHistory_collectsOnlyVisibleLabels() {
+        data class Node(val label: String?, val rect: Rect)
+
+        val history = A11yNavigator.collectVisibleHistory(
+            nodes = listOf(
+                Node("Pet Care", Rect(0, 100, 100, 200)),
+                Node("Clothing Care", Rect(0, 1900, 100, 2000)),
+                Node(" ", Rect(0, 300, 100, 400)),
+                Node(null, Rect(0, 500, 100, 600))
+            ),
+            screenTop = 0,
+            screenBottom = 1920,
+            boundsOf = { it.rect },
+            labelOf = { it.label }
+        )
+
+        assertEquals(setOf("Pet Care", "Clothing Care"), history)
     }
 
 
