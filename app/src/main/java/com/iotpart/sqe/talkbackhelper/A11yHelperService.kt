@@ -170,6 +170,24 @@ class A11yHelperService : AccessibilityService() {
         return resultJson
     }
 
+    fun moveFocusSmart(reqId: String = "none"): JSONObject {
+        val currentNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val outcome = A11yNavigator.performSmartNext(rootInActiveWindow, currentNode)
+
+        val resultJson = JSONObject().apply {
+            put("timestamp", System.currentTimeMillis())
+            put("reqId", reqId)
+            put("success", outcome.success)
+            put("status", outcome.reason)
+        }
+
+        Log.i(TAG, "SMART_NAV_RESULT $resultJson")
+        if (outcome.success && outcome.target != null) {
+            A11yStateStore.update(FocusSnapshot.fromNode(outcome.target))
+        }
+        return resultJson
+    }
+
     fun moveFocus(forward: Boolean, reqId: String = "none"): JSONObject {
         val currentNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         val targetNode = A11yNavigator.findSwipeTarget(rootInActiveWindow, currentNode, forward)

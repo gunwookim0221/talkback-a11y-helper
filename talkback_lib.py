@@ -24,6 +24,7 @@ ACTION_CLICK_TARGET = "com.iotpart.sqe.talkbackhelper.CLICK_TARGET"
 ACTION_CHECK_TARGET = "com.iotpart.sqe.talkbackhelper.CHECK_TARGET"
 ACTION_NEXT = "com.iotpart.sqe.talkbackhelper.NEXT"
 ACTION_PREV = "com.iotpart.sqe.talkbackhelper.PREV"
+ACTION_SMART_NEXT = "com.iotpart.sqe.talkbackhelper.SMART_NEXT"
 ACTION_CLICK_FOCUSED = "com.iotpart.sqe.talkbackhelper.CLICK_FOCUSED"
 ACTION_SCROLL = "com.iotpart.sqe.talkbackhelper.SCROLL"
 ACTION_SET_TEXT = "com.iotpart.sqe.talkbackhelper.SET_TEXT"
@@ -33,7 +34,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.4.1"
+CLIENT_ALGORITHM_VERSION = "1.5.0"
 
 
 @dataclass
@@ -882,43 +883,21 @@ class A11yAdbClient:
         if direction_token != "next":
             return "moved" if self.move_focus(dev=dev, direction=direction_token) else "failed"
 
-        nodes = self.dump_tree(dev=dev)
-        if not nodes:
+        if not self.check_helper_status(dev=dev):
             return "failed"
 
-        metadata = getattr(self, "last_dump_metadata", {}) or {}
-        can_scroll_down = bool(metadata.get("canScrollDown", False))
-        focus_node = self.get_focus(dev=dev)
-        current_idx = self._match_focus_index(nodes, focus_node)
-
-        if current_idx < 0:
-            current_idx = next(
-                (
-                    idx
-                    for idx, node in enumerate(nodes)
-                    if bool(node.get("accessibilityFocused")) or bool(node.get("focused"))
-                ),
-                -1,
-            )
-
-        if current_idx == len(nodes) - 1:
-            return "looped" if self._focus_first_node(dev, nodes) else "failed"
-
-        next_idx = current_idx + 1
-        next_node = nodes[next_idx] if 0 <= next_idx < len(nodes) else None
-
-        if next_node is None:
-            return "looped" if self._focus_first_node(dev, nodes) else "failed"
-
-        next_is_bottom_nav = bool(next_node.get("isBottomNavigationBar", next_node.get("isSystemNavigationBar", False)))
-        if next_is_bottom_nav and can_scroll_down:
-            if self.scroll(dev, direction="down"):
-                time.sleep(1.2)
-                refreshed_nodes = self.dump_tree(dev=dev)
-                return "scrolled" if self._focus_first_node(dev, refreshed_nodes) else "failed"
+        self.last_announcements = []
+        self.clear_logcat(dev=dev)
+        req_id = str(uuid.uuid4())[:8]
+        self._broadcast(dev, ACTION_SMART_NEXT, ["--es", "reqId", req_id])
+        result = self._read_log_result(dev, "SMART_NAV_RESULT", req_id, wait_seconds=3.0)
+        if not result.get("success"):
             return "failed"
 
-        return "moved" if self.move_focus(dev=dev, direction="next") else "failed"
+        status = str(result.get("status", "failed")).strip().lower()
+        if status in {"moved", "scrolled", "looped", "failed"}:
+            return status
+        return "failed"
 
     def scrollFind(self, dev, name, wait_=30, direction_='updown', type_='all'):
         if not self.check_helper_status(dev=dev):

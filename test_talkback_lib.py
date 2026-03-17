@@ -9,6 +9,7 @@ from talkback_lib import (
     ACTION_GET_FOCUS,
     ACTION_NEXT,
     ACTION_PREV,
+    ACTION_SMART_NEXT,
     ACTION_SCROLL,
     ACTION_SET_TEXT,
     ACTION_PING,
@@ -1067,92 +1068,38 @@ class SmartMoveFocusTest(unittest.TestCase):
         broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0][0]
         self.assertEqual(broadcast[4], ACTION_GET_FOCUS)
 
-    def test_move_focus_smart_scrolls_and_focuses_first_when_next_is_nav_and_scrollable(self):
+    def test_move_focus_smart_uses_android_side_smart_next_status(self):
         client = FakeA11yClient()
-        first_tree = [
-            {"text": "상단바", "isTopAppBar": True, "isBottomNavigationBar": False, "boundsInScreen": {"t": 0}},
-            {"text": "리스트 1", "isTopAppBar": False, "isBottomNavigationBar": False, "boundsInScreen": {"t": 300}, "viewIdResourceName": "pkg:id/item1"},
-            {"text": "탭 바", "isTopAppBar": False, "isBottomNavigationBar": True, "boundsInScreen": {"t": 1800}},
-        ]
-        second_tree = [
-            {"text": "상단바", "isTopAppBar": True, "isBottomNavigationBar": False, "boundsInScreen": {"t": 0}},
-            {"text": "리스트 2", "isTopAppBar": False, "isBottomNavigationBar": False, "boundsInScreen": {"t": 250}, "viewIdResourceName": "pkg:id/item2"},
-            {"text": "탭 바", "isTopAppBar": False, "isBottomNavigationBar": True, "boundsInScreen": {"t": 1800}},
-        ]
+        client.logcat_payload = 'I/A11Y_HELPER: SMART_NAV_RESULT {"success":true,"status":"scrolled","reqId":"REQID701"}'
 
-        with patch.object(client, "dump_tree", side_effect=[first_tree, second_tree]), \
-            patch.object(client, "get_focus", return_value={"index": 1}), \
-            patch.object(client, "scroll", return_value=True) as scroll_mock, \
-            patch("talkback_lib.time.sleep") as sleep_mock, \
-            patch.object(client, "select", return_value=True) as select_mock:
-            client.last_dump_metadata = {"canScrollDown": True}
+        with patch.object(client, "check_helper_status", return_value=True), patch(
+            "talkback_lib.uuid.uuid4", return_value="REQID701-xxxx"
+        ):
             result = client.move_focus_smart("SER", direction="next")
 
         self.assertEqual(result, "scrolled")
-        scroll_mock.assert_called_once_with("SER", direction="down")
-        sleep_mock.assert_called_once_with(1.2)
-        select_mock.assert_called_once()
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][-1][0]
+        self.assertEqual(broadcast[4], ACTION_SMART_NEXT)
 
-    def test_move_focus_smart_moves_when_next_is_not_nav(self):
+    def test_move_focus_smart_returns_failed_when_status_invalid(self):
         client = FakeA11yClient()
-        tree = [
-            {"text": "현재", "isTopAppBar": False, "isBottomNavigationBar": False},
-            {"text": "다음", "isTopAppBar": False, "isBottomNavigationBar": False},
-        ]
+        client.logcat_payload = 'I/A11Y_HELPER: SMART_NAV_RESULT {"success":true,"status":"unknown","reqId":"REQID702"}'
 
-        with patch.object(client, "dump_tree", return_value=tree), \
-            patch.object(client, "get_focus", return_value={"index": 0}), \
-            patch.object(client, "move_focus", return_value=True) as move_mock:
-            client.last_dump_metadata = {"canScrollDown": True}
+        with patch.object(client, "check_helper_status", return_value=True), patch(
+            "talkback_lib.uuid.uuid4", return_value="REQID702-xxxx"
+        ):
             result = client.move_focus_smart("SER", direction="next")
+
+        self.assertEqual(result, "failed")
+
+    def test_move_focus_smart_non_next_falls_back_to_move_focus(self):
+        client = FakeA11yClient()
+
+        with patch.object(client, "move_focus", return_value=True) as move_mock:
+            result = client.move_focus_smart("SER", direction="prev")
 
         self.assertEqual(result, "moved")
-        move_mock.assert_called_once_with(dev="SER", direction="next")
-
-    def test_move_focus_smart_loops_when_last_node_focused(self):
-        client = FakeA11yClient()
-        tree = [
-            {"text": "첫 항목", "isTopAppBar": False, "isBottomNavigationBar": False, "boundsInScreen": {"t": 120}, "viewIdResourceName": "pkg:id/first"},
-            {"text": "마지막 항목", "isTopAppBar": False, "isBottomNavigationBar": False, "boundsInScreen": {"t": 820}},
-        ]
-
-        with patch.object(client, "dump_tree", return_value=tree), \
-            patch.object(client, "get_focus", return_value={"index": 1}), \
-            patch.object(client, "select", return_value=True) as select_mock:
-            client.last_dump_metadata = {"canScrollDown": False}
-            result = client.move_focus_smart("SER", direction="next")
-
-        self.assertEqual(result, "looped")
-        select_mock.assert_called_once()
-
-
-    def test_focus_first_node_uses_resource_id_first(self):
-        client = FakeA11yClient()
-        nodes = [
-            {"text": "상단바", "isTopAppBar": True, "isBottomNavigationBar": False, "boundsInScreen": {"t": 0}},
-            {"text": "콘텐츠", "isTopAppBar": False, "isBottomNavigationBar": False, "boundsInScreen": {"t": 220}, "viewIdResourceName": "pkg:id/content_1"},
-        ]
-
-        with patch.object(client, "select", return_value=True) as select_mock:
-            ok = client._focus_first_node("SER", nodes)
-
-        self.assertTrue(ok)
-        select_mock.assert_called_once_with("SER", name="^pkg:id/content_1$", type_="r", index_=0)
-
-    def test_focus_first_node_uses_text_with_type_a_when_id_missing(self):
-        client = FakeA11yClient()
-        nodes = [
-            {"text": "헤더", "isTopAppBar": True, "isBottomNavigationBar": False, "boundsInScreen": {"t": 0}},
-            {"text": "본문 첫 줄", "isTopAppBar": False, "isBottomNavigationBar": False, "boundsInScreen": {"t": 200}},
-            {"text": "탭", "isTopAppBar": False, "isBottomNavigationBar": True, "boundsInScreen": {"t": 1700}},
-        ]
-
-        with patch.object(client, "select", return_value=True) as select_mock:
-            ok = client._focus_first_node("SER", nodes)
-
-        self.assertTrue(ok)
-        expected_name = f"^{__import__('re').escape('본문 첫 줄')}$"
-        select_mock.assert_called_once_with("SER", name=expected_name, type_="a", index_=0)
+        move_mock.assert_called_once_with(dev="SER", direction="prev")
 
 
 if __name__ == "__main__":

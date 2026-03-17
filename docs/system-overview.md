@@ -41,6 +41,7 @@ PC Automation Script
 - `com.iotpart.sqe.talkbackhelper.CHECK_TARGET` (`targetName`, `targetType`, `targetIndex`, `className`, `clickable`, `focusable`, `targetText`, `targetId`)
 - `com.iotpart.sqe.talkbackhelper.NEXT`
 - `com.iotpart.sqe.talkbackhelper.PREV`
+- `com.iotpart.sqe.talkbackhelper.SMART_NEXT`
 - `com.iotpart.sqe.talkbackhelper.CLICK_FOCUSED`
 
 ## Stability Characteristics
