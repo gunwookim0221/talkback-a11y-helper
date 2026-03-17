@@ -2,11 +2,12 @@ package com.iotpart.sqe.talkbackhelper
 
 import android.graphics.Rect
 import android.os.Build
+import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.3.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.4.0"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -181,6 +182,120 @@ object A11yNavigator {
         } ?: true
 
         return targetTextMatch && targetIdMatch && classNameMatch && clickableMatch && focusableMatch
+    }
+
+
+
+    fun performSmartNext(root: AccessibilityNodeInfo?, currentNode: AccessibilityNodeInfo?): TargetActionOutcome {
+        if (root == null) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] rootInActiveWindow 가 null 입니다.")
+            return TargetActionOutcome(false, "Root node is null")
+        }
+
+        val traversalList = buildFocusableTraversalList(root)
+        Log.i("A11Y_HELPER", "[SMART_NEXT] 탐색 노드 수=${traversalList.size}")
+        if (traversalList.isEmpty()) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] 탐색 경로가 비어있어 실패합니다.")
+            return TargetActionOutcome(false, "Traversal list is empty")
+        }
+
+        val resolvedCurrent = currentNode?.let {
+            resolveToClickableAncestor(
+                node = it,
+                parentOf = { node -> node.parent },
+                isClickable = { node -> node.isClickable }
+            )
+        }
+
+        val currentIndex = resolvedCurrent?.let { resolved ->
+            traversalList.indexOfFirst { it == resolved }
+        } ?: -1
+        val nextIndex = currentIndex + 1
+        Log.i("A11Y_HELPER", "[SMART_NEXT] currentIndex=$currentIndex, nextIndex=$nextIndex")
+
+        val screenRect = Rect().also { root.getBoundsInScreen(it) }
+        val screenTop = screenRect.top
+        val screenBottom = screenRect.bottom
+        val screenHeight = (screenBottom - screenTop).coerceAtLeast(1)
+
+        fun firstContentNode(): AccessibilityNodeInfo? {
+            return traversalList.firstOrNull { node ->
+                val bounds = Rect().also { node.getBoundsInScreen(it) }
+                val isTopBar = isTopAppBarNode(
+                    className = node.className?.toString(),
+                    viewIdResourceName = node.viewIdResourceName,
+                    boundsInScreen = bounds,
+                    screenTop = screenTop,
+                    screenHeight = screenHeight
+                )
+                val isBottomBar = isBottomNavigationBarNode(
+                    className = node.className?.toString(),
+                    viewIdResourceName = node.viewIdResourceName,
+                    boundsInScreen = bounds,
+                    screenBottom = screenBottom,
+                    screenHeight = screenHeight
+                )
+                !isTopBar && !isBottomBar
+            }
+        }
+
+        fun focusOrSkip(target: AccessibilityNodeInfo, status: String): TargetActionOutcome {
+            if (target.isAccessibilityFocused) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] 대상이 이미 accessibility focus 상태라 포커스 액션 생략(status=$status)")
+                return TargetActionOutcome(true, status, target)
+            }
+            val focused = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+            Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS 수행 결과=$focused (status=$status)")
+            return TargetActionOutcome(focused, if (focused) status else "failed", target)
+        }
+
+        if (nextIndex !in traversalList.indices || currentIndex == traversalList.lastIndex) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] 마지막 노드 도달 또는 다음 노드 없음 -> 첫 컨텐츠로 순환")
+            val firstContent = firstContentNode()
+                ?: return TargetActionOutcome(false, "failed")
+            return focusOrSkip(firstContent, "looped")
+        }
+
+        val nextNode = traversalList[nextIndex]
+        val nextBounds = Rect().also { nextNode.getBoundsInScreen(it) }
+        val nextIsBottomBar = isBottomNavigationBarNode(
+            className = nextNode.className?.toString(),
+            viewIdResourceName = nextNode.viewIdResourceName,
+            boundsInScreen = nextBounds,
+            screenBottom = screenBottom,
+            screenHeight = screenHeight
+        )
+
+        val scrollableExists = hasScrollableDownCandidate(root)
+        if (nextIsBottomBar && scrollableExists) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] 다음 노드가 하단바이며 스크롤 가능 요소 존재 -> 스크롤 시도")
+            val scrolled = root.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+            Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SCROLL_FORWARD 결과=$scrolled")
+            if (!scrolled) {
+                return TargetActionOutcome(false, "failed")
+            }
+            Thread.sleep(1200)
+            val refreshedRoot = A11yHelperService.instance?.rootInActiveWindow
+            val refreshedTraversal = refreshedRoot?.let { buildFocusableTraversalList(it) }.orEmpty()
+            val refreshedRect = Rect().also { (refreshedRoot ?: root).getBoundsInScreen(it) }
+            val refreshedTop = refreshedRect.top
+            val refreshedBottom = refreshedRect.bottom
+            val refreshedHeight = (refreshedBottom - refreshedTop).coerceAtLeast(1)
+            val firstContent = refreshedTraversal.firstOrNull { node ->
+                val bounds = Rect().also { node.getBoundsInScreen(it) }
+                val isTopBar = isTopAppBarNode(node.className?.toString(), node.viewIdResourceName, bounds, refreshedTop, refreshedHeight)
+                val isBottomBar = isBottomNavigationBarNode(node.className?.toString(), node.viewIdResourceName, bounds, refreshedBottom, refreshedHeight)
+                !isTopBar && !isBottomBar
+            }
+            if (firstContent == null) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] 스크롤 후 첫 컨텐츠 노드 탐색 실패")
+                return TargetActionOutcome(false, "failed")
+            }
+            return focusOrSkip(firstContent, "scrolled")
+        }
+
+        Log.i("A11Y_HELPER", "[SMART_NEXT] 일반 next 이동 수행")
+        return focusOrSkip(nextNode, "moved")
     }
 
     fun findSwipeTarget(

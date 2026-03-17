@@ -17,6 +17,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val ACTION_CHECK_TARGET = "com.iotpart.sqe.talkbackhelper.CHECK_TARGET"
         private const val ACTION_NEXT = "com.iotpart.sqe.talkbackhelper.NEXT"
         private const val ACTION_PREV = "com.iotpart.sqe.talkbackhelper.PREV"
+        private const val ACTION_SMART_NEXT = "com.iotpart.sqe.talkbackhelper.SMART_NEXT"
         private const val ACTION_CLICK_FOCUSED = "com.iotpart.sqe.talkbackhelper.CLICK_FOCUSED"
         private const val ACTION_SCROLL = "com.iotpart.sqe.talkbackhelper.SCROLL"
         private const val ACTION_SET_TEXT = "com.iotpart.sqe.talkbackhelper.SET_TEXT"
@@ -54,6 +55,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
             ACTION_CHECK_TARGET -> handleCheckTarget(intent)
             ACTION_NEXT -> handleMoveFocus(intent, true)
             ACTION_PREV -> handleMoveFocus(intent, false)
+            ACTION_SMART_NEXT -> handleSmartNext(context, intent)
             ACTION_CLICK_FOCUSED -> handleClickFocused(intent)
             ACTION_SCROLL -> handleScroll(intent)
             ACTION_SET_TEXT -> handleSetText(intent)
@@ -129,6 +131,22 @@ class A11yCommandReceiver : BroadcastReceiver() {
         }
 
         service.moveFocus(forward, reqId)
+    }
+
+    private fun handleSmartNext(context: Context, intent: Intent) {
+        val reqId = parseReqId(intent)
+        val service = A11yHelperService.instance
+        if (service == null) {
+            logFailure("SMART_NAV_RESULT", reqId, "Accessibility Service is null or not running")
+            return
+        }
+
+        val result = service.moveFocusSmart(reqId)
+        val reply = Intent("SMART_NAV_RESULT").apply {
+            setPackage(context.packageName)
+            putExtra("json", result.toString())
+        }
+        context.sendBroadcast(reply)
     }
 
     private fun handleClickFocused(intent: Intent) {
