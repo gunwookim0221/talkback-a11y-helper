@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.7.4")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.7.5")
     }
 
 
@@ -255,6 +255,28 @@ class A11yNavigatorTest {
         )
 
         assertFalse(reused)
+    }
+
+    @Test
+    fun shouldTriggerLoopFallback_returnsTrueWhenScrolledAndExcludeDescriptionExists() {
+        val shouldLoop = A11yNavigator.shouldTriggerLoopFallback(
+            focusedAny = false,
+            isScrollAction = true,
+            excludeDesc = "Pet Care"
+        )
+
+        assertTrue(shouldLoop)
+    }
+
+    @Test
+    fun shouldTriggerLoopFallback_returnsFalseWhenExcludeDescriptionIsBlank() {
+        val shouldLoop = A11yNavigator.shouldTriggerLoopFallback(
+            focusedAny = false,
+            isScrollAction = true,
+            excludeDesc = " "
+        )
+
+        assertFalse(shouldLoop)
     }
 
 
