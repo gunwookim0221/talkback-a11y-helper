@@ -235,7 +235,7 @@ class A11yNavigatorTest {
             canScrollVerticallyDown = { it.canScrollDown }
         )
 
-        assertTrue(result)
+        assertFalse(result)
     }
 
     @Test
@@ -904,11 +904,11 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun findNodeIndexByIdentity_returnsMatchedIndexUsingIdTextAndBounds() {
-        data class IdentityNode(val id: String?, val text: String?, val bounds: Rect)
+    fun findNodeIndexByIdentity_returnsMatchedIndexUsingIdTextDescAndBounds() {
+        data class IdentityNode(val id: String?, val text: String?, val desc: String?, val bounds: Rect)
 
-        val first = IdentityNode(id = "com.test:id/item", text = "Living Room", bounds = Rect(0, 400, 400, 520))
-        val second = IdentityNode(id = "com.test:id/item", text = "Living Room", bounds = Rect(0, 580, 400, 700))
+        val first = IdentityNode(id = "com.test:id/item", text = "Living Room", desc = "Card A", bounds = Rect(0, 400, 400, 520))
+        val second = IdentityNode(id = "com.test:id/item", text = "Living Room", desc = "Card B", bounds = Rect(0, 580, 400, 700))
         val list = listOf(first, second)
 
         val index = A11yNavigator.findNodeIndexByIdentity(
@@ -916,6 +916,7 @@ class A11yNavigatorTest {
             target = second,
             idOf = { it.id },
             textOf = { it.text },
+            contentDescriptionOf = { it.desc },
             boundsOf = { it.bounds }
         )
 
@@ -923,12 +924,12 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun findNodeIndexByIdentity_returnsNearestIndexWhenBoundsDoNotMatchButIdTextMatch() {
-        data class IdentityNode(val id: String?, val text: String?, val bounds: Rect)
+    fun findNodeIndexByIdentity_returnsNearestIndexWhenBoundsDoNotMatchButIdTextDescMatch() {
+        data class IdentityNode(val id: String?, val text: String?, val desc: String?, val bounds: Rect)
 
-        val target = IdentityNode(id = "com.test:id/item", text = "Living Room", bounds = Rect(0, 401, 400, 520))
+        val target = IdentityNode(id = "com.test:id/item", text = "Living Room", desc = "Card A", bounds = Rect(0, 401, 400, 520))
         val list = listOf(
-            IdentityNode(id = "com.test:id/item", text = "Living Room", bounds = Rect(0, 400, 400, 520))
+            IdentityNode(id = "com.test:id/item", text = "Living Room", desc = "Card A", bounds = Rect(0, 400, 400, 520))
         )
 
         val index = A11yNavigator.findNodeIndexByIdentity(
@@ -936,6 +937,7 @@ class A11yNavigatorTest {
             target = target,
             idOf = { it.id },
             textOf = { it.text },
+            contentDescriptionOf = { it.desc },
             boundsOf = { it.bounds }
         )
 
@@ -943,14 +945,14 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun findNodeIndexByIdentity_returnsClosestIndexAmongIdTextMatches() {
-        data class IdentityNode(val id: String?, val text: String?, val bounds: Rect)
+    fun findNodeIndexByIdentity_returnsClosestIndexAmongIdTextDescMatches() {
+        data class IdentityNode(val id: String?, val text: String?, val desc: String?, val bounds: Rect)
 
-        val target = IdentityNode(id = "com.test:id/item", text = "Living Room", bounds = Rect(0, 500, 400, 620))
+        val target = IdentityNode(id = "com.test:id/item", text = "Living Room", desc = "Card A", bounds = Rect(0, 500, 400, 620))
         val list = listOf(
-            IdentityNode(id = "com.test:id/item", text = "Living Room", bounds = Rect(0, 100, 400, 220)),
-            IdentityNode(id = "com.test:id/item", text = "Living Room", bounds = Rect(0, 540, 400, 660)),
-            IdentityNode(id = "com.test:id/item", text = "Living Room", bounds = Rect(0, 900, 400, 1020))
+            IdentityNode(id = "com.test:id/item", text = "Living Room", desc = "Card A", bounds = Rect(0, 100, 400, 220)),
+            IdentityNode(id = "com.test:id/item", text = "Living Room", desc = "Card A", bounds = Rect(0, 540, 400, 660)),
+            IdentityNode(id = "com.test:id/item", text = "Living Room", desc = "Card A", bounds = Rect(0, 900, 400, 1020))
         )
 
         val index = A11yNavigator.findNodeIndexByIdentity(
@@ -958,14 +960,37 @@ class A11yNavigatorTest {
             target = target,
             idOf = { it.id },
             textOf = { it.text },
+            contentDescriptionOf = { it.desc },
             boundsOf = { it.bounds }
         )
 
         assertTrue(index == 1)
     }
 
+
     @Test
-    fun isSameNodeIdentity_returnsTrueWhenStrictMatchFailsButIdAndTextMatch() {
+    fun findNodeIndexByIdentity_returnsMinusOneWhenOnlyDescriptionDiffers() {
+        data class IdentityNode(val id: String?, val text: String?, val desc: String?, val bounds: Rect)
+
+        val target = IdentityNode(id = "com.test:id/item", text = "Living Room", desc = "Card B", bounds = Rect(0, 500, 400, 620))
+        val list = listOf(
+            IdentityNode(id = "com.test:id/item", text = "Living Room", desc = "Card A", bounds = Rect(0, 540, 400, 660))
+        )
+
+        val index = A11yNavigator.findNodeIndexByIdentity(
+            nodes = list,
+            target = target,
+            idOf = { it.id },
+            textOf = { it.text },
+            contentDescriptionOf = { it.desc },
+            boundsOf = { it.bounds }
+        )
+
+        assertEquals(-1, index)
+    }
+
+    @Test
+    fun isSameNodeIdentity_returnsFalseWhenStrictMatchFailsAndDescDiffers() {
         val result = A11yNavigator.isSameNodeIdentity(
             aId = "com.test:id/item",
             aText = "거실 조명",
@@ -977,7 +1002,7 @@ class A11yNavigatorTest {
             bBounds = Rect(0, 130, 100, 230)
         )
 
-        assertTrue(result)
+        assertFalse(result)
     }
 
     @Test
