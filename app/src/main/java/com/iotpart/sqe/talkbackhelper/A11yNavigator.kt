@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.7.5"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.7.6"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -372,14 +372,15 @@ object A11yNavigator {
 
             if (shouldTriggerLoopFallback(focusedAny, isScrollAction, excludeDesc)) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] No content after scroll. Looping to first content.")
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Fallback loop triggered - resetting filters")
                 return findAndFocusFirstContent(
                     traversalList = traversalList,
                     screenTop = screenTop,
                     screenBottom = screenBottom,
                     screenHeight = screenHeight,
                     statusName = "looped",
-                    isScrollAction = true,
-                    excludeDesc = excludeDesc,
+                    isScrollAction = false,
+                    excludeDesc = null,
                     startIndex = 0
                 )
             }
