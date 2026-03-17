@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.4"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.5"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -721,8 +721,7 @@ object A11yNavigator {
             normalizedViewId.contains("action_bar")
         if (matchesViewId) return true
 
-        val topBoundaryThreshold = screenTop + (screenHeight * 0.15).toInt()
-        return boundsInScreen.top <= topBoundaryThreshold
+        return false
     }
 
     internal fun isBottomNavigationBarNode(
@@ -747,8 +746,7 @@ object A11yNavigator {
             normalizedViewId.contains("menu_bar")
         if (matchesViewId) return true
 
-        val bottomBoundaryThreshold = screenBottom - (screenHeight * 0.15).toInt()
-        return boundsInScreen.bottom >= bottomBoundaryThreshold
+        return false
     }
 
     private fun nodeToModel(
