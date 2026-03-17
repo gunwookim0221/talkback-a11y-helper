@@ -9,7 +9,58 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.5.9")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.6.0")
+    }
+
+
+    @Test
+    fun shouldSkipExcludedNodeByDescription_returnsTrueWhenSameDescAndTop30Percent() {
+        val shouldSkip = A11yNavigator.shouldSkipExcludedNodeByDescription(
+            nodeDesc = "최근 재생",
+            excludeDesc = "최근 재생",
+            nodeBounds = Rect(0, 100, 1080, 240),
+            screenTop = 0,
+            screenHeight = 1920
+        )
+
+        assertTrue(shouldSkip)
+    }
+
+    @Test
+    fun shouldSkipExcludedNodeByDescription_returnsFalseWhenDescDifferent() {
+        val shouldSkip = A11yNavigator.shouldSkipExcludedNodeByDescription(
+            nodeDesc = "최근 재생",
+            excludeDesc = "추천 콘텐츠",
+            nodeBounds = Rect(0, 100, 1080, 240),
+            screenTop = 0,
+            screenHeight = 1920
+        )
+
+        assertFalse(shouldSkip)
+    }
+
+    @Test
+    fun shouldIgnoreBottomResidualFocus_returnsTrueWhenFocusedInBottom20Percent() {
+        val shouldIgnore = A11yNavigator.shouldIgnoreBottomResidualFocus(
+            isAccessibilityFocused = true,
+            nodeBounds = Rect(0, 1700, 1080, 1860),
+            screenBottom = 1920,
+            screenHeight = 1920
+        )
+
+        assertTrue(shouldIgnore)
+    }
+
+    @Test
+    fun shouldIgnoreBottomResidualFocus_returnsFalseWhenFocusedOutsideBottom20Percent() {
+        val shouldIgnore = A11yNavigator.shouldIgnoreBottomResidualFocus(
+            isAccessibilityFocused = true,
+            nodeBounds = Rect(0, 1200, 1080, 1360),
+            screenBottom = 1920,
+            screenHeight = 1920
+        )
+
+        assertFalse(shouldIgnore)
     }
 
 
