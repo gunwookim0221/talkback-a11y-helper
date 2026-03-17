@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.7.8"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.7.9"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -385,9 +385,13 @@ object A11yNavigator {
                         Thread.sleep(100)
                         isFirstFocusAttemptAfterScroll = false
                     }
-                    if (bounds.bottom > effectiveBottom) {
+                    if (bounds.bottom > (effectiveBottom - 10)) {
                         Log.i("A11Y_HELPER", "[SMART_NEXT] Clipped node detected, requesting show-on-screen: $label")
-                        node.performAction(AccessibilityNodeInfo.ACTION_SHOW_ON_SCREEN)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
+                        } else {
+                            Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SHOW_ON_SCREEN not supported on this API level")
+                        }
                         Thread.sleep(100)
                     }
                     Thread.sleep(50)
@@ -480,7 +484,7 @@ object A11yNavigator {
                 )
 
                 Thread.sleep(700)
-                Thread.sleep(100)
+                Thread.sleep(300)
 
                 val tempRoot = A11yHelperService.instance?.rootInActiveWindow
                 tempRoot?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { oldFocus ->
@@ -577,7 +581,7 @@ object A11yNavigator {
             )
 
             Thread.sleep(700)
-            Thread.sleep(100)
+            Thread.sleep(300)
 
             val tempRoot = A11yHelperService.instance?.rootInActiveWindow
             tempRoot?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { oldFocus ->
