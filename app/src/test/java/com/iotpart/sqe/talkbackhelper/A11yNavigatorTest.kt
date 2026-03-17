@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.7.6")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.7.7")
     }
 
 
@@ -132,6 +132,31 @@ class A11yNavigatorTest {
         )
 
         assertEquals(1, index)
+    }
+
+    @Test
+    fun findIndexByDescription_matchesByContentDescriptionOrTextFallback() {
+        data class Node(val desc: String?, val text: String?)
+
+        val nodes = listOf(
+            Node(desc = null, text = "Home Care"),
+            Node(desc = "Pet Care", text = null),
+            Node(desc = null, text = "Play Room")
+        )
+
+        val indexByText = A11yNavigator.findIndexByDescription(
+            nodes = nodes,
+            descriptionOf = { it.desc?.trim().takeUnless { value -> value.isNullOrEmpty() } ?: it.text },
+            excludeDesc = "Home Care"
+        )
+        val indexByDesc = A11yNavigator.findIndexByDescription(
+            nodes = nodes,
+            descriptionOf = { it.desc?.trim().takeUnless { value -> value.isNullOrEmpty() } ?: it.text },
+            excludeDesc = "Pet Care"
+        )
+
+        assertEquals(0, indexByText)
+        assertEquals(1, indexByDesc)
     }
 
     @Test
