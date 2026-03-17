@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.7.7"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.7.8"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -254,16 +254,35 @@ object A11yNavigator {
         val screenTop = screenRect.top
         val screenBottom = screenRect.bottom
         val screenHeight = (screenBottom - screenTop).coerceAtLeast(1)
+        val effectiveBottom = calculateEffectiveBottom(
+            nodes = traversalList,
+            screenBottom = screenBottom,
+            boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+            classNameOf = { node -> node.className?.toString() },
+            viewIdOf = { node -> node.viewIdResourceName },
+            isBottomNavigation = { className, viewId, bounds ->
+                isBottomNavigationBarNode(
+                    className = className,
+                    viewIdResourceName = viewId,
+                    boundsInScreen = bounds,
+                    screenBottom = screenBottom,
+                    screenHeight = screenHeight
+                )
+            }
+        )
+        Log.i("A11Y_HELPER", "[SMART_NEXT] effectiveBottom=$effectiveBottom, screenBottom=$screenBottom")
 
         fun findAndFocusFirstContent(
             traversalList: List<AccessibilityNodeInfo>,
             screenTop: Int,
             screenBottom: Int,
+            effectiveBottom: Int,
             screenHeight: Int,
             statusName: String,
             isScrollAction: Boolean = false,
             excludeDesc: String? = null,
-            startIndex: Int = 0
+            startIndex: Int = 0,
+            visibleHistory: Set<String> = emptySet()
         ): TargetActionOutcome {
             val excludedIndex = findIndexByDescription(
                 nodes = traversalList,
@@ -300,8 +319,17 @@ object A11yNavigator {
                 val label = node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                     ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                     ?: "<no-label>"
+                val inHistory = visibleHistory.contains(label)
+                Log.i(
+                    "A11Y_HELPER",
+                    "[SMART_DEBUG] Index:$index, Label:${label.replace("\n", " ")}, Y_Bottom:${bounds.bottom}, Eff_Bottom:$effectiveBottom, InHistory:$inHistory"
+                )
                 if (isNodePhysicallyOffScreen(bounds, screenTop, screenBottom)) {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping off-screen node: $label")
+                    continue
+                }
+                if (isScrollAction && inHistory) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping history node after scroll: $label")
                     continue
                 }
                 if (excludedIndex == -1 &&
@@ -357,6 +385,11 @@ object A11yNavigator {
                         Thread.sleep(100)
                         isFirstFocusAttemptAfterScroll = false
                     }
+                    if (bounds.bottom > effectiveBottom) {
+                        Log.i("A11Y_HELPER", "[SMART_NEXT] Clipped node detected, requesting show-on-screen: $label")
+                        node.performAction(AccessibilityNodeInfo.ACTION_SHOW_ON_SCREEN)
+                        Thread.sleep(100)
+                    }
                     Thread.sleep(50)
                     var focused = node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
                     if (!focused) {
@@ -387,11 +420,13 @@ object A11yNavigator {
                     traversalList = traversalList,
                     screenTop = screenTop,
                     screenBottom = screenBottom,
+                    effectiveBottom = effectiveBottom,
                     screenHeight = screenHeight,
                     statusName = "looped",
                     isScrollAction = false,
                     excludeDesc = null,
-                    startIndex = 0
+                    startIndex = 0,
+                    visibleHistory = emptySet()
                 )
             }
 
@@ -433,8 +468,19 @@ object A11yNavigator {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Current focus clear result after scroll=$cleared")
                 }
 
-                Thread.sleep(1500)
-                Thread.sleep(200)
+                val visibleHistory = collectVisibleHistory(
+                    nodes = traversalList,
+                    screenTop = screenTop,
+                    screenBottom = screenBottom,
+                    boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+                    labelOf = { node ->
+                        node.text?.toString()?.trim().takeUnless { text -> text.isNullOrEmpty() }
+                            ?: node.contentDescription?.toString()?.trim().takeUnless { text -> text.isNullOrEmpty() }
+                    }
+                )
+
+                Thread.sleep(700)
+                Thread.sleep(100)
 
                 val tempRoot = A11yHelperService.instance?.rootInActiveWindow
                 tempRoot?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { oldFocus ->
@@ -449,21 +495,49 @@ object A11yNavigator {
                 }
 
                 val refreshedList = buildFocusableTraversalList(newRoot)
+                val refreshedRect = Rect().also { newRoot.getBoundsInScreen(it) }
+                val refreshedScreenBottom = refreshedRect.bottom
+                val refreshedScreenHeight = (refreshedRect.bottom - refreshedRect.top).coerceAtLeast(1)
+                val refreshedEffectiveBottom = calculateEffectiveBottom(
+                    nodes = refreshedList,
+                    screenBottom = refreshedScreenBottom,
+                    boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+                    classNameOf = { node -> node.className?.toString() },
+                    viewIdOf = { node -> node.viewIdResourceName },
+                    isBottomNavigation = { className, viewId, bounds ->
+                        isBottomNavigationBarNode(
+                            className = className,
+                            viewIdResourceName = viewId,
+                            boundsInScreen = bounds,
+                            screenBottom = refreshedScreenBottom,
+                            screenHeight = refreshedScreenHeight
+                        )
+                    }
+                )
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Refreshed node count=${refreshedList.size}")
                 return findAndFocusFirstContent(
                     traversalList = refreshedList,
-                    screenTop = screenTop,
-                    screenBottom = screenBottom,
-                    screenHeight = screenHeight,
+                    screenTop = refreshedRect.top,
+                    screenBottom = refreshedScreenBottom,
+                    effectiveBottom = refreshedEffectiveBottom,
+                    screenHeight = refreshedScreenHeight,
                     statusName = "scrolled",
                     isScrollAction = true,
                     excludeDesc = lastDesc,
-                    startIndex = 0
+                    startIndex = 0,
+                    visibleHistory = visibleHistory
                 )
             }
 
             Log.i("A11Y_HELPER", "[SMART_NEXT] Reached last node or next node unavailable -> looping to first content")
-            return findAndFocusFirstContent(traversalList, screenTop, screenBottom, screenHeight, "looped")
+            return findAndFocusFirstContent(
+                traversalList = traversalList,
+                screenTop = screenTop,
+                screenBottom = screenBottom,
+                effectiveBottom = effectiveBottom,
+                screenHeight = screenHeight,
+                statusName = "looped"
+            )
         }
 
         val nextNode = traversalList[nextIndex]
@@ -491,8 +565,19 @@ object A11yNavigator {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Current focus clear result after scroll=$cleared")
             }
 
-            Thread.sleep(1500)
-            Thread.sleep(200)
+            val visibleHistory = collectVisibleHistory(
+                nodes = traversalList,
+                screenTop = screenTop,
+                screenBottom = screenBottom,
+                boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+                labelOf = { node ->
+                    node.text?.toString()?.trim().takeUnless { text -> text.isNullOrEmpty() }
+                        ?: node.contentDescription?.toString()?.trim().takeUnless { text -> text.isNullOrEmpty() }
+                }
+            )
+
+            Thread.sleep(700)
+            Thread.sleep(100)
 
             val tempRoot = A11yHelperService.instance?.rootInActiveWindow
             tempRoot?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { oldFocus ->
@@ -507,15 +592,33 @@ object A11yNavigator {
             val refreshedTop = refreshedRect.top
             val refreshedBottom = refreshedRect.bottom
             val refreshedHeight = (refreshedBottom - refreshedTop).coerceAtLeast(1)
+            val refreshedEffectiveBottom = calculateEffectiveBottom(
+                nodes = refreshedTraversal,
+                screenBottom = refreshedBottom,
+                boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+                classNameOf = { node -> node.className?.toString() },
+                viewIdOf = { node -> node.viewIdResourceName },
+                isBottomNavigation = { className, viewId, bounds ->
+                    isBottomNavigationBarNode(
+                        className = className,
+                        viewIdResourceName = viewId,
+                        boundsInScreen = bounds,
+                        screenBottom = refreshedBottom,
+                        screenHeight = refreshedHeight
+                    )
+                }
+            )
             return findAndFocusFirstContent(
                 traversalList = refreshedTraversal,
                 screenTop = refreshedTop,
                 screenBottom = refreshedBottom,
+                effectiveBottom = refreshedEffectiveBottom,
                 screenHeight = refreshedHeight,
                 statusName = "scrolled",
                 isScrollAction = true,
                 excludeDesc = lastDesc,
-                startIndex = 0
+                startIndex = 0,
+                visibleHistory = visibleHistory
             )
         }
 
@@ -543,6 +646,40 @@ object A11yNavigator {
         excludeDesc: String?
     ): Boolean {
         return !focusedAny && isScrollAction && !excludeDesc.isNullOrBlank()
+    }
+
+    internal fun <T> calculateEffectiveBottom(
+        nodes: List<T>,
+        screenBottom: Int,
+        boundsOf: (T) -> Rect,
+        classNameOf: (T) -> String?,
+        viewIdOf: (T) -> String?,
+        isBottomNavigation: (String?, String?, Rect) -> Boolean
+    ): Int {
+        var effectiveBottom = screenBottom
+        nodes.forEach { node ->
+            val bounds = boundsOf(node)
+            if (isBottomNavigation(classNameOf(node), viewIdOf(node), bounds)) {
+                effectiveBottom = minOf(effectiveBottom, bounds.top)
+            }
+        }
+        return effectiveBottom
+    }
+
+    internal fun <T> collectVisibleHistory(
+        nodes: List<T>,
+        screenTop: Int,
+        screenBottom: Int,
+        boundsOf: (T) -> Rect,
+        labelOf: (T) -> String?
+    ): Set<String> {
+        return nodes.mapNotNull { node ->
+            val bounds = boundsOf(node)
+            if (isNodePhysicallyOffScreen(bounds, screenTop, screenBottom)) {
+                return@mapNotNull null
+            }
+            labelOf(node)?.trim()?.takeUnless { it.isEmpty() }
+        }.toSet()
     }
 
     fun findSwipeTarget(
