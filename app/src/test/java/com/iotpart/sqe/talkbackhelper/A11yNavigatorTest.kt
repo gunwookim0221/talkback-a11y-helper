@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.6.1")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.7.0")
     }
 
 
@@ -906,7 +906,7 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun findNodeIndexByIdentity_returnsMinusOneWhenBoundsDoNotMatch() {
+    fun findNodeIndexByIdentity_returnsNearestIndexWhenBoundsDoNotMatchButIdTextMatch() {
         data class IdentityNode(val id: String?, val text: String?, val bounds: Rect)
 
         val target = IdentityNode(id = "com.test:id/item", text = "Living Room", bounds = Rect(0, 401, 400, 520))
@@ -922,7 +922,61 @@ class A11yNavigatorTest {
             boundsOf = { it.bounds }
         )
 
-        assertTrue(index == -1)
+        assertTrue(index == 0)
+    }
+
+    @Test
+    fun findNodeIndexByIdentity_returnsClosestIndexAmongIdTextMatches() {
+        data class IdentityNode(val id: String?, val text: String?, val bounds: Rect)
+
+        val target = IdentityNode(id = "com.test:id/item", text = "Living Room", bounds = Rect(0, 500, 400, 620))
+        val list = listOf(
+            IdentityNode(id = "com.test:id/item", text = "Living Room", bounds = Rect(0, 100, 400, 220)),
+            IdentityNode(id = "com.test:id/item", text = "Living Room", bounds = Rect(0, 540, 400, 660)),
+            IdentityNode(id = "com.test:id/item", text = "Living Room", bounds = Rect(0, 900, 400, 1020))
+        )
+
+        val index = A11yNavigator.findNodeIndexByIdentity(
+            nodes = list,
+            target = target,
+            idOf = { it.id },
+            textOf = { it.text },
+            boundsOf = { it.bounds }
+        )
+
+        assertTrue(index == 1)
+    }
+
+    @Test
+    fun isSameNodeIdentity_returnsTrueWhenStrictMatchFailsButIdAndTextMatch() {
+        val result = A11yNavigator.isSameNodeIdentity(
+            aId = "com.test:id/item",
+            aText = "거실 조명",
+            aContentDescription = "거실 조명 버튼",
+            aBounds = Rect(0, 100, 100, 200),
+            bId = "com.test:id/item",
+            bText = "거실 조명",
+            bContentDescription = "다른 설명",
+            bBounds = Rect(0, 130, 100, 230)
+        )
+
+        assertTrue(result)
+    }
+
+    @Test
+    fun isSameNodeIdentity_returnsFalseWhenIdOrTextDoNotMatch() {
+        val result = A11yNavigator.isSameNodeIdentity(
+            aId = "com.test:id/item",
+            aText = "거실 조명",
+            aContentDescription = "거실 조명 버튼",
+            aBounds = Rect(0, 100, 100, 200),
+            bId = "com.test:id/item_alt",
+            bText = "거실 조명",
+            bContentDescription = "거실 조명 버튼",
+            bBounds = Rect(0, 100, 100, 200)
+        )
+
+        assertFalse(result)
     }
 
 }

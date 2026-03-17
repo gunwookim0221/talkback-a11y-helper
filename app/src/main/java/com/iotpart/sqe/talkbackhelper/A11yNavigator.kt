@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.6.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.7.0"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -717,7 +717,7 @@ object A11yNavigator {
         val targetText = textOf(target)
         val targetBounds = boundsOf(target)
 
-        return nodes.indexOfFirst { candidate ->
+        val strictMatchIndex = nodes.indexOfFirst { candidate ->
             val candidateBounds = boundsOf(candidate)
             idOf(candidate) == targetId &&
                 textOf(candidate) == targetText &&
@@ -726,19 +726,65 @@ object A11yNavigator {
                 candidateBounds.right == targetBounds.right &&
                 candidateBounds.bottom == targetBounds.bottom
         }
+
+        if (strictMatchIndex != -1) {
+            return strictMatchIndex
+        }
+
+        return nodes.withIndex()
+            .asSequence()
+            .filter { (_, candidate) ->
+                idOf(candidate) == targetId && textOf(candidate) == targetText
+            }
+            .minByOrNull { (_, candidate) ->
+                val candidateBounds = boundsOf(candidate)
+                val dx = ((candidateBounds.left + candidateBounds.right) / 2) - ((targetBounds.left + targetBounds.right) / 2)
+                val dy = ((candidateBounds.top + candidateBounds.bottom) / 2) - ((targetBounds.top + targetBounds.bottom) / 2)
+                (dx * dx) + (dy * dy)
+            }
+            ?.index
+            ?: -1
     }
 
     internal fun isSameNode(a: AccessibilityNodeInfo, b: AccessibilityNodeInfo): Boolean {
         val aBounds = Rect().also { a.getBoundsInScreen(it) }
         val bBounds = Rect().also { b.getBoundsInScreen(it) }
 
-        return a.viewIdResourceName == b.viewIdResourceName &&
-            a.text?.toString() == b.text?.toString() &&
-            a.contentDescription?.toString() == b.contentDescription?.toString() &&
+        return isSameNodeIdentity(
+            aId = a.viewIdResourceName,
+            aText = a.text?.toString(),
+            aContentDescription = a.contentDescription?.toString(),
+            aBounds = aBounds,
+            bId = b.viewIdResourceName,
+            bText = b.text?.toString(),
+            bContentDescription = b.contentDescription?.toString(),
+            bBounds = bBounds
+        )
+    }
+
+    internal fun isSameNodeIdentity(
+        aId: String?,
+        aText: String?,
+        aContentDescription: String?,
+        aBounds: Rect,
+        bId: String?,
+        bText: String?,
+        bContentDescription: String?,
+        bBounds: Rect
+    ): Boolean {
+        val strictMatch = aId == bId &&
+            aText == bText &&
+            aContentDescription == bContentDescription &&
             aBounds.left == bBounds.left &&
             aBounds.top == bBounds.top &&
             aBounds.right == bBounds.right &&
             aBounds.bottom == bBounds.bottom
+
+        if (strictMatch) {
+            return true
+        }
+
+        return aId == bId && aText == bText
     }
 
     internal fun <T> findClosestNodeBelowCenter(
