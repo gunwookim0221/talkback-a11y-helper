@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.4.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.0"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -266,10 +266,10 @@ object A11yNavigator {
             screenHeight = screenHeight
         )
 
-        val scrollableExists = hasScrollableDownCandidate(root)
-        if (nextIsBottomBar && scrollableExists) {
+        val scrollableNode = findScrollableForwardCandidate(root)
+        if (nextIsBottomBar && scrollableNode != null) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] 다음 노드가 하단바이며 스크롤 가능 요소 존재 -> 스크롤 시도")
-            val scrolled = root.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+            val scrolled = scrollableNode.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
             Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SCROLL_FORWARD 결과=$scrolled")
             if (!scrolled) {
                 return TargetActionOutcome(false, "failed")
@@ -630,7 +630,11 @@ object A11yNavigator {
     }
 
     private fun hasScrollableDownCandidate(root: AccessibilityNodeInfo?): Boolean {
-        if (root == null) return false
+        return findScrollableForwardCandidate(root) != null
+    }
+
+    private fun findScrollableForwardCandidate(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (root == null) return null
 
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
@@ -646,14 +650,14 @@ object A11yNavigator {
                 }
             )
             if (hasScrollableDown) {
-                return true
+                return node
             }
 
             for (index in 0 until node.childCount) {
                 node.getChild(index)?.let { queue.add(it) }
             }
         }
-        return false
+        return null
     }
 
     internal fun isTopAppBarNode(

@@ -164,7 +164,7 @@ if not client.check_talkback_status(dev_serial):
 ### Signature
 `dump_tree(dev: Any = None, wait_seconds: float = 5.0) -> list[dict[str, Any]]`
 
-> 응답 포맷 버전: Android Navigator `2.4.0` / Python Client `1.5.0`
+> 응답 포맷 버전: Android Navigator `2.5.0` / Python Client `1.6.0`
 
 ### 설명
 현재 화면의 접근성 노드 트리를 helper를 통해 덤프합니다.  
@@ -364,9 +364,9 @@ client.move_focus(dev_serial, "prev")
 `move_focus_smart(dev: Any = None, direction: str = "next") -> str`
 
 ### 설명
-`dump_tree` + `get_focus`를 조합해 다음 이동 시 스크롤 우선/일반 이동/루프 이동을 지능적으로 분기합니다.
-다음 노드가 하단 고정 바(`isBottomNavigationBar=True`)이고 `canScrollDown=True`이면 먼저 스크롤을 수행한 뒤 `1.2초` 대기하고 트리를 재덤프하여 상단/하단 고정 바를 제외한 첫 컨텐츠 노드에 포커스를 재설정합니다.
-클래스 외부 코드에서는 중복 로직 함수 대신 `client.move_focus_smart(dev)`를 표준 호출로 사용하세요.
+파이썬에서는 무거운 트리 분석(`dump_tree`, `get_focus`)을 수행하지 않고, `ACTION_SMART_NEXT` 브로드캐스트만 전송합니다.
+안드로이드 헬퍼가 Smart Next를 실행한 뒤 `SMART_NAV_RESULT` 로그를 반환하며, 클라이언트는 `_read_log_result(..., wait_seconds=3.0)`로 응답을 판독해 상태 문자열을 그대로 반환합니다.
+클래스 외부 코드에서는 `client.move_focus_smart(dev)`를 표준 호출로 사용하세요.
 
 ### Returns
 - `"moved"`: 일반 next 이동 성공
