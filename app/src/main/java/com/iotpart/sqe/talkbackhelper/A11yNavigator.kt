@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.3"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.4"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -298,7 +298,15 @@ object A11yNavigator {
             }
             currentNode?.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
             Log.i("A11Y_HELPER", "[SMART_NEXT] 스크롤 후 기존 포커스 해제 및 강제 재배정")
-            Thread.sleep(1200)
+            Thread.sleep(1500)
+
+            val tempRoot = A11yHelperService.instance?.rootInActiveWindow
+            tempRoot?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { oldFocus ->
+                oldFocus.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
+                Log.i("A11Y_HELPER", "[SMART_NEXT] 스크롤 후 남아있는 이전 포커스(Focus Lock) 강제 해제 완료")
+                Thread.sleep(150)
+            }
+
             val refreshedRoot = A11yHelperService.instance?.rootInActiveWindow
             val refreshedTraversal = refreshedRoot?.let { buildFocusableTraversalList(it) }.orEmpty()
             val refreshedRect = Rect().also { (refreshedRoot ?: root).getBoundsInScreen(it) }
