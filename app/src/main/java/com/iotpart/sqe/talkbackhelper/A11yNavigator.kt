@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.9"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.6.0"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -225,21 +225,25 @@ object A11yNavigator {
             screenHeight: Int,
             statusName: String,
             isScrollAction: Boolean = false,
-            excludeId: String? = null
+            excludeDesc: String? = null
         ): TargetActionOutcome {
             var skippedExcludedNode = false
 
             for (node in traversalList) {
+                val bounds = Rect().also { node.getBoundsInScreen(it) }
                 if (!skippedExcludedNode &&
-                    !excludeId.isNullOrBlank() &&
-                    node.viewIdResourceName == excludeId
+                    shouldSkipExcludedNodeByDescription(
+                        nodeDesc = node.contentDescription?.toString(),
+                        excludeDesc = excludeDesc,
+                        nodeBounds = bounds,
+                        screenTop = screenTop,
+                        screenHeight = screenHeight
+                    )
                 ) {
-                    Log.i("A11Y_HELPER", "[SMART_NEXT] Excluding node with viewId=$excludeId once after scroll.")
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Excluding node with desc=$excludeDesc once after scroll.")
                     skippedExcludedNode = true
                     continue
                 }
-
-                val bounds = Rect().also { node.getBoundsInScreen(it) }
                 val isTopBar = isTopAppBarNode(
                     node.className?.toString(),
                     node.viewIdResourceName,
@@ -256,12 +260,27 @@ object A11yNavigator {
                 )
 
                 if (!isTopBar && !isBottomBar) {
+                    val isBottomResidualFocus = shouldIgnoreBottomResidualFocus(
+                        isAccessibilityFocused = node.isAccessibilityFocused,
+                        nodeBounds = bounds,
+                        screenBottom = screenBottom,
+                        screenHeight = screenHeight
+                    )
+                    if (isBottomResidualFocus) {
+                        Log.i("A11Y_HELPER", "[SMART_NEXT] Ignoring stale bottom focused node and checking next candidate")
+                        continue
+                    }
+
                     if (shouldReuseExistingAccessibilityFocus(node.isAccessibilityFocused, isScrollAction)) {
                         Log.i("A11Y_HELPER", "[SMART_NEXT] Node is already focused (status=$statusName)")
                         return TargetActionOutcome(true, statusName, node)
                     }
 
-                    val focused = node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+                    var focused = node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+                    if (!focused) {
+                        Thread.sleep(100)
+                        focused = node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+                    }
                     if (focused) {
                         Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS succeeded (status=$statusName)")
                         return TargetActionOutcome(true, statusName, node)
@@ -280,7 +299,11 @@ object A11yNavigator {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Target already has accessibility focus, skipping focus action (status=$status)")
                 return TargetActionOutcome(true, status, target)
             }
-            val focused = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+            var focused = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+            if (!focused) {
+                Thread.sleep(100)
+                focused = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+            }
             Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=$focused (status=$status)")
             return TargetActionOutcome(focused, if (focused) status else "failed", target)
         }
@@ -305,7 +328,7 @@ object A11yNavigator {
         if (nextIsBottomBar && scrollableNode != null) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Scrollable container found for smart scroll.")
             Log.i("A11Y_HELPER", "[SMART_NEXT] Next node is bottom bar and scroll target exists -> attempting scroll")
-            val lastId = resolvedCurrent?.viewIdResourceName
+            val lastDesc = resolvedCurrent?.contentDescription?.toString()
             val scrolled = scrollableNode.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
             Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SCROLL_FORWARD result=$scrolled")
             if (!scrolled) {
@@ -339,7 +362,7 @@ object A11yNavigator {
                 screenHeight = refreshedHeight,
                 statusName = "scrolled",
                 isScrollAction = true,
-                excludeId = lastId
+                excludeDesc = lastDesc
             )
         }
 
@@ -744,6 +767,34 @@ object A11yNavigator {
             current = parentOf(current)
         }
         return null
+    }
+
+
+    internal fun shouldSkipExcludedNodeByDescription(
+        nodeDesc: String?,
+        excludeDesc: String?,
+        nodeBounds: Rect,
+        screenTop: Int,
+        screenHeight: Int
+    ): Boolean {
+        val normalizedNodeDesc = nodeDesc?.trim().orEmpty()
+        val normalizedExcludeDesc = excludeDesc?.trim().orEmpty()
+        if (normalizedNodeDesc.isEmpty() || normalizedExcludeDesc.isEmpty()) return false
+        if (normalizedNodeDesc != normalizedExcludeDesc) return false
+
+        val topThirtyPercentBoundary = screenTop + (screenHeight * 0.3f).toInt()
+        return nodeBounds.top <= topThirtyPercentBoundary
+    }
+
+    internal fun shouldIgnoreBottomResidualFocus(
+        isAccessibilityFocused: Boolean,
+        nodeBounds: Rect,
+        screenBottom: Int,
+        screenHeight: Int
+    ): Boolean {
+        if (!isAccessibilityFocused) return false
+        val bottomTwentyPercentBoundary = screenBottom - (screenHeight * 0.2f).toInt()
+        return nodeBounds.top >= bottomTwentyPercentBoundary
     }
 
     internal fun shouldExcludeNodeByIdentity(
