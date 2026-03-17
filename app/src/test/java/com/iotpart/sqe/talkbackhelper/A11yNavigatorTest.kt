@@ -9,7 +9,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.5.5")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.5.6")
     }
 
     @Test
@@ -174,6 +174,65 @@ class A11yNavigatorTest {
         )
 
         assertTrue(result)
+    }
+
+
+    @Test
+    fun isTopAppBarNode_returnsTrueForNewViewIdKeywords() {
+        val homeButton = A11yNavigator.isTopAppBarNode(
+            className = "android.widget.ImageButton",
+            viewIdResourceName = "com.test:id/home_button",
+            boundsInScreen = Rect(0, 500, 1080, 620),
+            screenTop = 0,
+            screenHeight = 1920
+        )
+        val tabTitle = A11yNavigator.isTopAppBarNode(
+            className = "android.widget.TextView",
+            viewIdResourceName = "com.test:id/tab_title_main",
+            boundsInScreen = Rect(0, 520, 1080, 640),
+            screenTop = 0,
+            screenHeight = 1920
+        )
+        val headerBar = A11yNavigator.isTopAppBarNode(
+            className = "android.widget.LinearLayout",
+            viewIdResourceName = "com.test:id/header_bar",
+            boundsInScreen = Rect(0, 540, 1080, 660),
+            screenTop = 0,
+            screenHeight = 1920
+        )
+
+        assertTrue(homeButton)
+        assertTrue(tabTitle)
+        assertTrue(headerBar)
+    }
+
+    @Test
+    fun isBottomNavigationBarNode_returnsTrueForNewViewIdKeywords() {
+        val menuPrefix = A11yNavigator.isBottomNavigationBarNode(
+            className = "android.widget.LinearLayout",
+            viewIdResourceName = "com.samsung.android.oneconnect:id/menu_favorites",
+            boundsInScreen = Rect(0, 200, 1080, 320),
+            screenBottom = 1920,
+            screenHeight = 1920
+        )
+        val tabPrefix = A11yNavigator.isBottomNavigationBarNode(
+            className = "android.widget.LinearLayout",
+            viewIdResourceName = "com.test:id/tab_devices",
+            boundsInScreen = Rect(0, 220, 1080, 340),
+            screenBottom = 1920,
+            screenHeight = 1920
+        )
+        val bottomNav = A11yNavigator.isBottomNavigationBarNode(
+            className = "android.widget.LinearLayout",
+            viewIdResourceName = "com.test:id/bottom_nav_host",
+            boundsInScreen = Rect(0, 240, 1080, 360),
+            screenBottom = 1920,
+            screenHeight = 1920
+        )
+
+        assertTrue(menuPrefix)
+        assertTrue(tabPrefix)
+        assertTrue(bottomNav)
     }
 
     @Test
