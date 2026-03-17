@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.7"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.8"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -303,9 +303,9 @@ object A11yNavigator {
             screenHeight = screenHeight
         )
 
-        val scrollableNode = findScrollableForwardCandidate(root)
-            ?: findScrollableForwardAncestorCandidate(currentNode)
+        val scrollableNode = findScrollableForwardAncestorCandidate(resolvedCurrent)
         if (nextIsBottomBar && scrollableNode != null) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] 현재 노드의 조상에서 스크롤 가능한 컨테이너 발견")
             Log.i("A11Y_HELPER", "[SMART_NEXT] 다음 노드가 하단바이며 스크롤 가능 요소 존재 -> 스크롤 시도")
             val scrolled = scrollableNode.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
             Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SCROLL_FORWARD 결과=$scrolled")
@@ -721,12 +721,28 @@ object A11yNavigator {
     }
 
     private fun findScrollableForwardAncestorCandidate(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
-        var current = node?.parent
+        return findScrollableForwardAncestorCandidate(
+            node = node,
+            parentOf = { it.parent },
+            isScrollable = { it.isScrollable },
+            hasScrollForwardAction = {
+                it.actionList.contains(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD)
+            }
+        )
+    }
+
+    internal fun <T> findScrollableForwardAncestorCandidate(
+        node: T?,
+        parentOf: (T) -> T?,
+        isScrollable: (T) -> Boolean,
+        hasScrollForwardAction: (T) -> Boolean
+    ): T? {
+        var current = node?.let(parentOf)
         while (current != null) {
-            if (current.isScrollable && current.actionList.contains(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD)) {
+            if (isScrollable(current) && hasScrollForwardAction(current)) {
                 return current
             }
-            current = current.parent
+            current = parentOf(current)
         }
         return null
     }
