@@ -481,7 +481,8 @@ object A11yNavigator {
                 nodes = traversalList,
                 target = resolved,
                 idOf = { it.viewIdResourceName },
-                textOf = { node -> node.text?.toString() ?: node.contentDescription?.toString() },
+                textOf = { node -> node.text?.toString() },
+                contentDescriptionOf = { node -> node.contentDescription?.toString() },
                 boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } }
             )
         } ?: -1
@@ -761,16 +762,19 @@ object A11yNavigator {
         target: T,
         idOf: (T) -> String?,
         textOf: (T) -> String?,
+        contentDescriptionOf: (T) -> String?,
         boundsOf: (T) -> Rect
     ): Int {
         val targetId = idOf(target)
         val targetText = textOf(target)
+        val targetContentDescription = contentDescriptionOf(target)
         val targetBounds = boundsOf(target)
 
         val strictMatchIndex = nodes.indexOfFirst { candidate ->
             val candidateBounds = boundsOf(candidate)
             idOf(candidate) == targetId &&
                 textOf(candidate) == targetText &&
+                contentDescriptionOf(candidate) == targetContentDescription &&
                 candidateBounds.left == targetBounds.left &&
                 candidateBounds.top == targetBounds.top &&
                 candidateBounds.right == targetBounds.right &&
@@ -784,7 +788,9 @@ object A11yNavigator {
         return nodes.withIndex()
             .asSequence()
             .filter { (_, candidate) ->
-                idOf(candidate) == targetId && textOf(candidate) == targetText
+                idOf(candidate) == targetId &&
+                    textOf(candidate) == targetText &&
+                    contentDescriptionOf(candidate) == targetContentDescription
             }
             .minByOrNull { (_, candidate) ->
                 val candidateBounds = boundsOf(candidate)
