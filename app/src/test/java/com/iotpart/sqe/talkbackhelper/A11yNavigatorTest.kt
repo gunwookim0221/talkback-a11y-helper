@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.7.3")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.7.4")
     }
 
 
@@ -1056,6 +1056,51 @@ class A11yNavigatorTest {
         )
 
         assertFalse(result)
+    }
+
+
+    @Test
+    fun isNodePhysicallyOffScreen_returnsTrueWhenNodeIsAboveScreen() {
+        val offScreen = A11yNavigator.isNodePhysicallyOffScreen(
+            bounds = Rect(0, -200, 100, -10),
+            screenTop = 0,
+            screenBottom = 1920
+        )
+
+        assertTrue(offScreen)
+    }
+
+    @Test
+    fun isNodePhysicallyOffScreen_returnsTrueWhenNodeIsBelowScreen() {
+        val offScreen = A11yNavigator.isNodePhysicallyOffScreen(
+            bounds = Rect(0, 2000, 100, 2100),
+            screenTop = 0,
+            screenBottom = 1920
+        )
+
+        assertTrue(offScreen)
+    }
+
+    @Test
+    fun shouldTriggerLoopFallback_returnsTrueWhenScrollExclusionFailsToFocus() {
+        val shouldLoop = A11yNavigator.shouldTriggerLoopFallback(
+            focusedAny = false,
+            isScrollAction = true,
+            excludeDesc = "최근 재생"
+        )
+
+        assertTrue(shouldLoop)
+    }
+
+    @Test
+    fun shouldTriggerLoopFallback_returnsFalseWhenExcludeDescIsNull() {
+        val shouldLoop = A11yNavigator.shouldTriggerLoopFallback(
+            focusedAny = false,
+            isScrollAction = true,
+            excludeDesc = null
+        )
+
+        assertFalse(shouldLoop)
     }
 
 }
