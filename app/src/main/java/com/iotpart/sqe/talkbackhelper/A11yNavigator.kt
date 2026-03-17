@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.7.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.6.1"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -215,16 +215,32 @@ object A11yNavigator {
         }
 
         val currentIndex = resolvedCurrent?.let { resolved ->
-            findNodeIndexByIdentity(
-                nodes = traversalList,
-                target = resolved,
-                idOf = { it.viewIdResourceName },
-                textOf = { node -> node.text?.toString() ?: node.contentDescription?.toString() },
-                boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } }
-            )
+            traversalList.indexOfFirst { candidate ->
+                isSameNode(candidate, resolved)
+            }
         } ?: -1
-        val nextIndex = currentIndex + 1
+
+        val fallbackIndex = if (currentIndex == -1) {
+            val focusedNode = currentNode ?: resolvedCurrent
+            if (focusedNode == null) {
+                -1
+            } else {
+                findClosestNodeBelowCenter(
+                    nodes = traversalList,
+                    reference = focusedNode,
+                    boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } }
+                )
+            }
+        } else {
+            -1
+        }
+
+        val nextIndex = if (currentIndex == -1 && fallbackIndex != -1) fallbackIndex else currentIndex + 1
         Log.i("A11Y_HELPER", "[SMART_NEXT] currentIndex=$currentIndex, nextIndex=$nextIndex")
+
+        if (currentIndex == -1 && fallbackIndex != -1) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Current node matching failed. Using fallback nextIndex based on vertical proximity.")
+        }
 
         val screenRect = Rect().also { root.getBoundsInScreen(it) }
         val screenTop = screenRect.top
@@ -633,7 +649,7 @@ object A11yNavigator {
         return childCount == 0
     }
 
-    private fun spatialComparator(yBucketSize: Int = 20): Comparator<FocusedNode> {
+    private fun spatialComparator(yBucketSize: Int = 5): Comparator<FocusedNode> {
         return Comparator { left, right ->
             compareByContainmentAndPosition(
                 left = left.node,
@@ -654,7 +670,7 @@ object A11yNavigator {
         right: T,
         parentOf: (T) -> T?,
         boundsOf: (T) -> Rect,
-        yBucketSize: Int = 20
+        yBucketSize: Int = 5
     ): Int {
         if (left == right) return 0
         if (isAncestorOf(ancestor = left, descendant = right, parentOf = parentOf)) return -1
@@ -663,8 +679,15 @@ object A11yNavigator {
         val leftRect = boundsOf(left)
         val rightRect = boundsOf(right)
 
-        val leftCenterYBucket = ((leftRect.top + leftRect.bottom) / 2) / yBucketSize
-        val rightCenterYBucket = ((rightRect.top + rightRect.bottom) / 2) / yBucketSize
+        val leftCenterY = (leftRect.top + leftRect.bottom) / 2
+        val rightCenterY = (rightRect.top + rightRect.bottom) / 2
+        if (kotlin.math.abs(leftCenterY - rightCenterY) < yBucketSize) {
+            if (leftRect.bottom <= rightRect.top) return -1
+            if (rightRect.bottom <= leftRect.top) return 1
+        }
+
+        val leftCenterYBucket = leftCenterY / yBucketSize
+        val rightCenterYBucket = rightCenterY / yBucketSize
         if (leftCenterYBucket != rightCenterYBucket) return leftCenterYBucket - rightCenterYBucket
         if (leftRect.left != rightRect.left) return leftRect.left - rightRect.left
         return leftRect.top - rightRect.top
@@ -703,6 +726,45 @@ object A11yNavigator {
                 candidateBounds.right == targetBounds.right &&
                 candidateBounds.bottom == targetBounds.bottom
         }
+    }
+
+    internal fun isSameNode(a: AccessibilityNodeInfo, b: AccessibilityNodeInfo): Boolean {
+        val aBounds = Rect().also { a.getBoundsInScreen(it) }
+        val bBounds = Rect().also { b.getBoundsInScreen(it) }
+
+        return a.viewIdResourceName == b.viewIdResourceName &&
+            a.text?.toString() == b.text?.toString() &&
+            a.contentDescription?.toString() == b.contentDescription?.toString() &&
+            aBounds.left == bBounds.left &&
+            aBounds.top == bBounds.top &&
+            aBounds.right == bBounds.right &&
+            aBounds.bottom == bBounds.bottom
+    }
+
+    internal fun <T> findClosestNodeBelowCenter(
+        nodes: List<T>,
+        reference: T,
+        boundsOf: (T) -> Rect
+    ): Int {
+        val referenceBounds = boundsOf(reference)
+        val referenceCenterY = (referenceBounds.top + referenceBounds.bottom) / 2
+
+        var nearestIndex = -1
+        var nearestDistance = Int.MAX_VALUE
+
+        nodes.forEachIndexed { index, node ->
+            val bounds = boundsOf(node)
+            val centerY = (bounds.top + bounds.bottom) / 2
+            if (centerY > referenceCenterY) {
+                val distance = centerY - referenceCenterY
+                if (distance < nearestDistance) {
+                    nearestDistance = distance
+                    nearestIndex = index
+                }
+            }
+        }
+
+        return nearestIndex
     }
 
     private fun isViewIdMatched(nodeViewId: String?, target: String): Boolean {
