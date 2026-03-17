@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.8"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.9"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -188,14 +188,14 @@ object A11yNavigator {
 
     fun performSmartNext(root: AccessibilityNodeInfo?, currentNode: AccessibilityNodeInfo?): TargetActionOutcome {
         if (root == null) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] rootInActiveWindow 가 null 입니다.")
+            Log.i("A11Y_HELPER", "[SMART_NEXT] rootInActiveWindow is null.")
             return TargetActionOutcome(false, "Root node is null")
         }
 
         val traversalList = buildFocusableTraversalList(root)
-        Log.i("A11Y_HELPER", "[SMART_NEXT] 탐색 노드 수=${traversalList.size}")
+        Log.i("A11Y_HELPER", "[SMART_NEXT] Nodes count=${traversalList.size}")
         if (traversalList.isEmpty()) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] 탐색 경로가 비어있어 실패합니다.")
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Traversal list is empty, failing.")
             return TargetActionOutcome(false, "Traversal list is empty")
         }
 
@@ -225,20 +225,17 @@ object A11yNavigator {
             screenHeight: Int,
             statusName: String,
             isScrollAction: Boolean = false,
-            excludeNode: AccessibilityNodeInfo? = null
+            excludeId: String? = null
         ): TargetActionOutcome {
-            val excludeViewId = excludeNode?.viewIdResourceName
-            val excludeText = excludeNode?.text?.toString()?.trim().orEmpty()
+            var skippedExcludedNode = false
 
             for (node in traversalList) {
-                if (shouldExcludeNodeByIdentity(
-                        nodeViewId = node.viewIdResourceName,
-                        nodeText = node.text?.toString(),
-                        excludeViewId = excludeViewId,
-                        excludeText = excludeText
-                    )
+                if (!skippedExcludedNode &&
+                    !excludeId.isNullOrBlank() &&
+                    node.viewIdResourceName == excludeId
                 ) {
-                    Log.i("A11Y_HELPER", "[SMART_NEXT] 스크롤 이후 제외 대상과 동일한 노드를 건너뜁니다.")
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Excluding node with viewId=$excludeId once after scroll.")
+                    skippedExcludedNode = true
                     continue
                 }
 
@@ -260,36 +257,36 @@ object A11yNavigator {
 
                 if (!isTopBar && !isBottomBar) {
                     if (shouldReuseExistingAccessibilityFocus(node.isAccessibilityFocused, isScrollAction)) {
-                        Log.i("A11Y_HELPER", "[SMART_NEXT] 노드가 이미 포커스됨 (status=$statusName)")
+                        Log.i("A11Y_HELPER", "[SMART_NEXT] Node is already focused (status=$statusName)")
                         return TargetActionOutcome(true, statusName, node)
                     }
 
                     val focused = node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
                     if (focused) {
-                        Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS 성공 (status=$statusName)")
+                        Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS succeeded (status=$statusName)")
                         return TargetActionOutcome(true, statusName, node)
                     } else {
-                        Log.w("A11Y_HELPER", "[SMART_NEXT] 노드 포커스 거부됨, 다음 후보 탐색...")
+                        Log.w("A11Y_HELPER", "[SMART_NEXT] Node focus denied, trying next candidate...")
                     }
                 }
             }
 
-            Log.e("A11Y_HELPER", "[SMART_NEXT] 유효한 컨텐츠 노드 포커스 완전 실패 (status=failed)")
+            Log.e("A11Y_HELPER", "[SMART_NEXT] Failed to focus any valid content node (status=failed)")
             return TargetActionOutcome(false, "failed")
         }
 
         fun focusOrSkip(target: AccessibilityNodeInfo, status: String): TargetActionOutcome {
             if (target.isAccessibilityFocused) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] 대상이 이미 accessibility focus 상태라 포커스 액션 생략(status=$status)")
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Target already has accessibility focus, skipping focus action (status=$status)")
                 return TargetActionOutcome(true, status, target)
             }
             val focused = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
-            Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS 수행 결과=$focused (status=$status)")
+            Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=$focused (status=$status)")
             return TargetActionOutcome(focused, if (focused) status else "failed", target)
         }
 
         if (nextIndex !in traversalList.indices || currentIndex == traversalList.lastIndex) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] 마지막 노드 도달 또는 다음 노드 없음 -> 첫 컨텐츠로 순환")
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Reached last node or next node unavailable -> looping to first content")
             return findAndFocusFirstContent(traversalList, screenTop, screenBottom, screenHeight, "looped")
         }
 
@@ -304,18 +301,20 @@ object A11yNavigator {
         )
 
         val scrollableNode = findScrollableForwardAncestorCandidate(resolvedCurrent)
+            ?: findScrollableForwardCandidate(root)
         if (nextIsBottomBar && scrollableNode != null) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] 현재 노드의 조상에서 스크롤 가능한 컨테이너 발견")
-            Log.i("A11Y_HELPER", "[SMART_NEXT] 다음 노드가 하단바이며 스크롤 가능 요소 존재 -> 스크롤 시도")
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Scrollable container found for smart scroll.")
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Next node is bottom bar and scroll target exists -> attempting scroll")
+            val lastId = resolvedCurrent?.viewIdResourceName
             val scrolled = scrollableNode.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
-            Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SCROLL_FORWARD 결과=$scrolled")
+            Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SCROLL_FORWARD result=$scrolled")
             if (!scrolled) {
                 return TargetActionOutcome(false, "failed")
             }
 
             currentNode?.let {
                 val cleared = it.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
-                Log.i("A11Y_HELPER", "[SMART_NEXT] 스크롤 후 현재 포커스 노드 해제 결과=$cleared")
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Current focus clear result after scroll=$cleared")
             }
 
             Thread.sleep(1500)
@@ -323,7 +322,7 @@ object A11yNavigator {
             val tempRoot = A11yHelperService.instance?.rootInActiveWindow
             tempRoot?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { oldFocus ->
                 oldFocus.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
-                Log.i("A11Y_HELPER", "[SMART_NEXT] 스크롤 후 남아있는 이전 포커스(Focus Lock) 강제 해제 완료")
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Cleared stale accessibility focus lock after scroll")
                 Thread.sleep(150)
             }
 
@@ -340,11 +339,11 @@ object A11yNavigator {
                 screenHeight = refreshedHeight,
                 statusName = "scrolled",
                 isScrollAction = true,
-                excludeNode = resolvedCurrent
+                excludeId = lastId
             )
         }
 
-        Log.i("A11Y_HELPER", "[SMART_NEXT] 일반 next 이동 수행")
+        Log.i("A11Y_HELPER", "[SMART_NEXT] Performing regular next navigation")
         return focusOrSkip(nextNode, "moved")
     }
 
@@ -353,7 +352,7 @@ object A11yNavigator {
         isScrollAction: Boolean
     ): Boolean {
         if (isScrollAction && isAccessibilityFocused) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] 스크롤 이후 TalkBack 자동 포커스를 재사용합니다.")
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Reusing TalkBack auto-focused node after scroll")
         }
         return isAccessibilityFocused
     }
