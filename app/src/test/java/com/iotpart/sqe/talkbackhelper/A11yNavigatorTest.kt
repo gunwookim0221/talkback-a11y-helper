@@ -9,7 +9,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.6.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.7.0")
     }
 
 
@@ -825,6 +825,45 @@ class A11yNavigatorTest {
         )
 
         assertTrue(compared > 0)
+    }
+
+    @Test
+    fun findNodeIndexByIdentity_returnsMatchedIndexUsingIdTextAndBounds() {
+        data class IdentityNode(val id: String?, val text: String?, val bounds: Rect)
+
+        val first = IdentityNode(id = "com.test:id/item", text = "Living Room", bounds = Rect(0, 400, 400, 520))
+        val second = IdentityNode(id = "com.test:id/item", text = "Living Room", bounds = Rect(0, 580, 400, 700))
+        val list = listOf(first, second)
+
+        val index = A11yNavigator.findNodeIndexByIdentity(
+            nodes = list,
+            target = second,
+            idOf = { it.id },
+            textOf = { it.text },
+            boundsOf = { it.bounds }
+        )
+
+        assertTrue(index == 1)
+    }
+
+    @Test
+    fun findNodeIndexByIdentity_returnsMinusOneWhenBoundsDoNotMatch() {
+        data class IdentityNode(val id: String?, val text: String?, val bounds: Rect)
+
+        val target = IdentityNode(id = "com.test:id/item", text = "Living Room", bounds = Rect(0, 401, 400, 520))
+        val list = listOf(
+            IdentityNode(id = "com.test:id/item", text = "Living Room", bounds = Rect(0, 400, 400, 520))
+        )
+
+        val index = A11yNavigator.findNodeIndexByIdentity(
+            nodes = list,
+            target = target,
+            idOf = { it.id },
+            textOf = { it.text },
+            boundsOf = { it.bounds }
+        )
+
+        assertTrue(index == -1)
     }
 
 }

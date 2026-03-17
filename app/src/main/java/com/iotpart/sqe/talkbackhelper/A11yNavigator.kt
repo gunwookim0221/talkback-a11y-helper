@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.6.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.7.0"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -194,6 +194,13 @@ object A11yNavigator {
 
         val traversalList = buildFocusableTraversalList(root)
         Log.i("A11Y_HELPER", "[SMART_NEXT] Nodes count=${traversalList.size}")
+        traversalList.forEachIndexed { index, node ->
+            val bounds = Rect().also { node.getBoundsInScreen(it) }
+            val label = node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: "<no-label>"
+            Log.i("A11Y_HELPER", "[SMART_NEXT] #$index: ${label.replace("\n", " ")} (Top: ${bounds.top})")
+        }
         if (traversalList.isEmpty()) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Traversal list is empty, failing.")
             return TargetActionOutcome(false, "Traversal list is empty")
@@ -208,7 +215,13 @@ object A11yNavigator {
         }
 
         val currentIndex = resolvedCurrent?.let { resolved ->
-            traversalList.indexOfFirst { it == resolved }
+            findNodeIndexByIdentity(
+                nodes = traversalList,
+                target = resolved,
+                idOf = { it.viewIdResourceName },
+                textOf = { node -> node.text?.toString() ?: node.contentDescription?.toString() },
+                boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } }
+            )
         } ?: -1
         val nextIndex = currentIndex + 1
         Log.i("A11Y_HELPER", "[SMART_NEXT] currentIndex=$currentIndex, nextIndex=$nextIndex")
@@ -398,7 +411,13 @@ object A11yNavigator {
         }
 
         val currentIndex = resolvedCurrent?.let { resolved ->
-            traversalList.indexOfFirst { it == resolved }
+            findNodeIndexByIdentity(
+                nodes = traversalList,
+                target = resolved,
+                idOf = { it.viewIdResourceName },
+                textOf = { node -> node.text?.toString() ?: node.contentDescription?.toString() },
+                boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } }
+            )
         } ?: -1
 
         val targetIndex = if (forward) {
@@ -614,7 +633,7 @@ object A11yNavigator {
         return childCount == 0
     }
 
-    private fun spatialComparator(yBucketSize: Int = 12): Comparator<FocusedNode> {
+    private fun spatialComparator(yBucketSize: Int = 20): Comparator<FocusedNode> {
         return Comparator { left, right ->
             compareByContainmentAndPosition(
                 left = left.node,
@@ -635,7 +654,7 @@ object A11yNavigator {
         right: T,
         parentOf: (T) -> T?,
         boundsOf: (T) -> Rect,
-        yBucketSize: Int = 12
+        yBucketSize: Int = 20
     ): Int {
         if (left == right) return 0
         if (isAncestorOf(ancestor = left, descendant = right, parentOf = parentOf)) return -1
@@ -662,6 +681,28 @@ object A11yNavigator {
             current = parentOf(current)
         }
         return false
+    }
+
+    internal fun <T> findNodeIndexByIdentity(
+        nodes: List<T>,
+        target: T,
+        idOf: (T) -> String?,
+        textOf: (T) -> String?,
+        boundsOf: (T) -> Rect
+    ): Int {
+        val targetId = idOf(target)
+        val targetText = textOf(target)
+        val targetBounds = boundsOf(target)
+
+        return nodes.indexOfFirst { candidate ->
+            val candidateBounds = boundsOf(candidate)
+            idOf(candidate) == targetId &&
+                textOf(candidate) == targetText &&
+                candidateBounds.left == targetBounds.left &&
+                candidateBounds.top == targetBounds.top &&
+                candidateBounds.right == targetBounds.right &&
+                candidateBounds.bottom == targetBounds.bottom
+        }
     }
 
     private fun isViewIdMatched(nodeViewId: String?, target: String): Boolean {
