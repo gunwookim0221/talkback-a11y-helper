@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.7.5")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.7.6")
     }
 
 
@@ -266,6 +266,18 @@ class A11yNavigatorTest {
         )
 
         assertTrue(shouldLoop)
+    }
+
+
+    @Test
+    fun shouldTriggerLoopFallback_returnsFalseWhenAlreadyFocused() {
+        val shouldLoop = A11yNavigator.shouldTriggerLoopFallback(
+            focusedAny = true,
+            isScrollAction = true,
+            excludeDesc = "Pet Care"
+        )
+
+        assertFalse(shouldLoop)
     }
 
     @Test
