@@ -9,7 +9,27 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.5.2")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.5.3")
+    }
+
+    @Test
+    fun shouldReuseExistingAccessibilityFocus_returnsTrueWhenAlreadyFocused_afterScroll() {
+        val reused = A11yNavigator.shouldReuseExistingAccessibilityFocus(
+            isAccessibilityFocused = true,
+            isScrollAction = true
+        )
+
+        assertTrue(reused)
+    }
+
+    @Test
+    fun shouldReuseExistingAccessibilityFocus_returnsFalseWhenNotFocused_afterScroll() {
+        val reused = A11yNavigator.shouldReuseExistingAccessibilityFocus(
+            isAccessibilityFocused = false,
+            isScrollAction = true
+        )
+
+        assertFalse(reused)
     }
 
 
