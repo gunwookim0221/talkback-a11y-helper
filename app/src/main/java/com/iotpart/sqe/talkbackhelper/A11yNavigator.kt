@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.7.3"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.7.4"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -262,25 +262,35 @@ object A11yNavigator {
             screenHeight: Int,
             statusName: String,
             isScrollAction: Boolean = false,
-            excludeDesc: String? = null
+            excludeDesc: String? = null,
+            startIndex: Int = 0
         ): TargetActionOutcome {
             val excludedIndex = findIndexByDescription(
                 nodes = traversalList,
                 descriptionOf = { it.contentDescription?.toString() },
                 excludeDesc = excludeDesc
             )
-            val startIndex = if (excludedIndex != -1) excludedIndex + 1 else 0
+            val traversalStartIndex = if (excludedIndex != -1) excludedIndex + 1 else startIndex.coerceAtLeast(0)
             var skippedExcludedNode = false
+            var focusedAny = false
+            var focusedOutcome: TargetActionOutcome? = null
 
             if (excludedIndex != -1) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Excluded node found at index=$excludedIndex. Starting traversal from index=$startIndex")
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Excluded node found at index=$excludedIndex. Starting traversal from index=$traversalStartIndex")
             } else if (!excludeDesc.isNullOrBlank()) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Excluded node not found. Starting traversal from beginning with top-area guard")
             }
 
-            for (index in startIndex until traversalList.size) {
+            for (index in traversalStartIndex until traversalList.size) {
                 val node = traversalList[index]
                 val bounds = Rect().also { node.getBoundsInScreen(it) }
+                val label = node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                    ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                    ?: "<no-label>"
+                if (isNodePhysicallyOffScreen(bounds, screenTop, screenBottom)) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping off-screen node: $label")
+                    continue
+                }
                 if (excludedIndex == -1 &&
                     !skippedExcludedNode &&
                     shouldSkipExcludedNodeByDescription(
@@ -324,7 +334,9 @@ object A11yNavigator {
 
                     if (shouldReuseExistingAccessibilityFocus(node.isAccessibilityFocused, isScrollAction)) {
                         Log.i("A11Y_HELPER", "[SMART_NEXT] Node is already focused (status=$statusName)")
-                        return TargetActionOutcome(true, statusName, node)
+                        focusedAny = true
+                        focusedOutcome = TargetActionOutcome(true, statusName, node)
+                        break
                     }
 
                     var focused = node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
@@ -334,11 +346,31 @@ object A11yNavigator {
                     }
                     if (focused) {
                         Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS succeeded (status=$statusName)")
-                        return TargetActionOutcome(true, statusName, node)
+                        focusedAny = true
+                        focusedOutcome = TargetActionOutcome(true, statusName, node)
+                        break
                     } else {
                         Log.w("A11Y_HELPER", "[SMART_NEXT] Node focus denied, trying next candidate...")
                     }
                 }
+            }
+
+            if (focusedAny) {
+                return focusedOutcome ?: TargetActionOutcome(false, "failed")
+            }
+
+            if (shouldTriggerLoopFallback(focusedAny, isScrollAction, excludeDesc)) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] No content after scroll. Looping to first content.")
+                return findAndFocusFirstContent(
+                    traversalList = traversalList,
+                    screenTop = screenTop,
+                    screenBottom = screenBottom,
+                    screenHeight = screenHeight,
+                    statusName = "looped",
+                    isScrollAction = true,
+                    excludeDesc = null,
+                    startIndex = 0
+                )
             }
 
             Log.e("A11Y_HELPER", "[SMART_NEXT] Failed to focus any valid content node (status=failed)")
@@ -473,6 +505,18 @@ object A11yNavigator {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Reusing TalkBack auto-focused node after scroll")
         }
         return isAccessibilityFocused
+    }
+
+    internal fun isNodePhysicallyOffScreen(bounds: Rect, screenTop: Int, screenBottom: Int): Boolean {
+        return bounds.bottom <= screenTop || bounds.top >= screenBottom
+    }
+
+    internal fun shouldTriggerLoopFallback(
+        focusedAny: Boolean,
+        isScrollAction: Boolean,
+        excludeDesc: String?
+    ): Boolean {
+        return !focusedAny && isScrollAction && !excludeDesc.isNullOrBlank()
     }
 
     fun findSwipeTarget(
