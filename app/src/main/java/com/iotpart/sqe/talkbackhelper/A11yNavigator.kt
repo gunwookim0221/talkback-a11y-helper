@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.7.4"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.7.5"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -270,6 +270,15 @@ object A11yNavigator {
                 descriptionOf = { it.contentDescription?.toString() },
                 excludeDesc = excludeDesc
             )
+
+            if (excludedIndex != -1) {
+                val excludedNode = traversalList[excludedIndex]
+                if (excludedNode.isAccessibilityFocused) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Forcing focus clear on excluded node to prevent duplicate announcement")
+                    excludedNode.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
+                }
+            }
+
             val traversalStartIndex = if (excludedIndex != -1) excludedIndex + 1 else startIndex.coerceAtLeast(0)
             var skippedExcludedNode = false
             var focusedAny = false
@@ -339,9 +348,11 @@ object A11yNavigator {
                         break
                     }
 
+                    Thread.sleep(50)
                     var focused = node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
                     if (!focused) {
                         Thread.sleep(100)
+                        Thread.sleep(50)
                         focused = node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
                     }
                     if (focused) {
@@ -368,7 +379,7 @@ object A11yNavigator {
                     screenHeight = screenHeight,
                     statusName = "looped",
                     isScrollAction = true,
-                    excludeDesc = null,
+                    excludeDesc = excludeDesc,
                     startIndex = 0
                 )
             }
@@ -382,9 +393,11 @@ object A11yNavigator {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Target already has accessibility focus, skipping focus action (status=$status)")
                 return TargetActionOutcome(true, status, target)
             }
+            Thread.sleep(50)
             var focused = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
             if (!focused) {
                 Thread.sleep(100)
+                Thread.sleep(50)
                 focused = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
             }
             Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=$focused (status=$status)")
