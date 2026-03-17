@@ -9,7 +9,32 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.5.7")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.5.8")
+    }
+
+
+
+    @Test
+    fun findScrollableForwardAncestorCandidate_returnsNearestScrollableAncestorWithForwardAction() {
+        data class Node(
+            val name: String,
+            val scrollable: Boolean,
+            val hasScrollForwardAction: Boolean,
+            var parent: Node? = null
+        )
+
+        val root = Node(name = "root", scrollable = true, hasScrollForwardAction = true)
+        val nonScrollableParent = Node(name = "nonScrollableParent", scrollable = false, hasScrollForwardAction = true, parent = root)
+        val leaf = Node(name = "leaf", scrollable = false, hasScrollForwardAction = false, parent = nonScrollableParent)
+
+        val result = A11yNavigator.findScrollableForwardAncestorCandidate(
+            node = leaf,
+            parentOf = { it.parent },
+            isScrollable = { it.scrollable },
+            hasScrollForwardAction = { it.hasScrollForwardAction }
+        )
+
+        assertTrue(result == root)
     }
 
     @Test
