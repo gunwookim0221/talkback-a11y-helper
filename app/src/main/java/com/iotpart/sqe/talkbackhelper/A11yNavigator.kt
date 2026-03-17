@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.7.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.7.2"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -221,6 +221,14 @@ object A11yNavigator {
         } ?: -1
 
         val fallbackIndex = if (currentIndex == -1) {
+            Log.w("A11Y_HELPER", "[SMART_NEXT] Current node matching failed. Dumping traversal identity candidates for diagnosis.")
+            traversalList.forEachIndexed { index, candidate ->
+                Log.w(
+                    "A11Y_HELPER",
+                    "[SMART_NEXT] [MATCH_DEBUG] #$index id=${candidate.viewIdResourceName} text=${candidate.text} desc=${candidate.contentDescription}"
+                )
+            }
+
             val focusedNode = currentNode ?: resolvedCurrent
             if (focusedNode == null) {
                 -1
@@ -337,7 +345,51 @@ object A11yNavigator {
             return TargetActionOutcome(focused, if (focused) status else "failed", target)
         }
 
+        val scrollableNode = findScrollableForwardAncestorCandidate(resolvedCurrent)
+            ?: findScrollableForwardCandidate(root)
+
         if (nextIndex !in traversalList.indices || currentIndex == traversalList.lastIndex) {
+            if (scrollableNode != null) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Reached last node or next unavailable, but scrollable container exists -> attempting scroll first")
+                val lastDesc = resolvedCurrent?.contentDescription?.toString()
+                val scrolled = scrollableNode.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SCROLL_FORWARD result=$scrolled")
+                if (!scrolled) {
+                    return TargetActionOutcome(false, "failed")
+                }
+
+                currentNode?.let {
+                    val cleared = it.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Current focus clear result after scroll=$cleared")
+                }
+
+                Thread.sleep(1500)
+
+                val tempRoot = A11yHelperService.instance?.rootInActiveWindow
+                tempRoot?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { oldFocus ->
+                    val staleCleared = oldFocus.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Clear stale accessibility focus result=$staleCleared")
+                }
+
+                val newRoot = A11yHelperService.instance?.rootInActiveWindow
+                if (newRoot == null) {
+                    Log.e("A11Y_HELPER", "[SMART_NEXT] Root is null after scroll")
+                    return TargetActionOutcome(false, "failed")
+                }
+
+                val refreshedList = buildFocusableTraversalList(newRoot)
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Refreshed node count=${refreshedList.size}")
+                return findAndFocusFirstContent(
+                    traversalList = refreshedList,
+                    screenTop = screenTop,
+                    screenBottom = screenBottom,
+                    screenHeight = screenHeight,
+                    statusName = "scrolled",
+                    isScrollAction = true,
+                    excludeDesc = lastDesc
+                )
+            }
+
             Log.i("A11Y_HELPER", "[SMART_NEXT] Reached last node or next node unavailable -> looping to first content")
             return findAndFocusFirstContent(traversalList, screenTop, screenBottom, screenHeight, "looped")
         }
@@ -352,8 +404,6 @@ object A11yNavigator {
             screenHeight = screenHeight
         )
 
-        val scrollableNode = findScrollableForwardAncestorCandidate(resolvedCurrent)
-            ?: findScrollableForwardCandidate(root)
         if (nextIsBottomBar && scrollableNode != null) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Scrollable container found for smart scroll.")
             Log.i("A11Y_HELPER", "[SMART_NEXT] Next node is bottom bar and scroll target exists -> attempting scroll")
@@ -784,7 +834,7 @@ object A11yNavigator {
             return true
         }
 
-        return aId == bId && aText == bText
+        return aId == bId && aText == bText && aContentDescription == bContentDescription
     }
 
     internal fun <T> findClosestNodeBelowCenter(
