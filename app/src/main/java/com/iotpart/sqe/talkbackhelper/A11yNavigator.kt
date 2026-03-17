@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.5"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.6"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -296,8 +296,12 @@ object A11yNavigator {
             if (!scrolled) {
                 return TargetActionOutcome(false, "failed")
             }
-            currentNode?.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
-            Log.i("A11Y_HELPER", "[SMART_NEXT] 스크롤 후 기존 포커스 해제 및 강제 재배정")
+
+            currentNode?.let {
+                val cleared = it.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
+                Log.i("A11Y_HELPER", "[SMART_NEXT] 스크롤 후 현재 포커스 노드 해제 결과=$cleared")
+            }
+
             Thread.sleep(1500)
 
             val tempRoot = A11yHelperService.instance?.rootInActiveWindow
@@ -718,7 +722,10 @@ object A11yNavigator {
             normalizedViewId.contains("header") ||
             normalizedViewId.contains("toolbar") ||
             normalizedViewId.contains("more_menu") ||
-            normalizedViewId.contains("action_bar")
+            normalizedViewId.contains("action_bar") ||
+            normalizedViewId.contains("home_button") ||
+            normalizedViewId.contains("tab_title") ||
+            normalizedViewId.contains("header_bar")
         if (matchesViewId) return true
 
         return false
@@ -743,7 +750,10 @@ object A11yNavigator {
             normalizedViewId.contains("footer") ||
             normalizedViewId.contains("tab_bar") ||
             normalizedViewId.contains("navigation") ||
-            normalizedViewId.contains("menu_bar")
+            normalizedViewId.contains("menu_bar") ||
+            normalizedViewId.contains("menu_") ||
+            normalizedViewId.contains("tab_") ||
+            normalizedViewId.contains("bottom_nav")
         if (matchesViewId) return true
 
         return false
