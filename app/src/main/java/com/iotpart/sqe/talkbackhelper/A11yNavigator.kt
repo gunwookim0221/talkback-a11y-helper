@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.2"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.5.3"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -244,7 +244,7 @@ object A11yNavigator {
                 )
 
                 if (!isTopBar && !isBottomBar) {
-                    if (!isScrollAction && node.isAccessibilityFocused) {
+                    if (shouldReuseExistingAccessibilityFocus(node.isAccessibilityFocused, isScrollAction)) {
                         Log.i("A11Y_HELPER", "[SMART_NEXT] 노드가 이미 포커스됨 (status=$statusName)")
                         return TargetActionOutcome(true, statusName, node)
                     }
@@ -317,6 +317,16 @@ object A11yNavigator {
 
         Log.i("A11Y_HELPER", "[SMART_NEXT] 일반 next 이동 수행")
         return focusOrSkip(nextNode, "moved")
+    }
+
+    internal fun shouldReuseExistingAccessibilityFocus(
+        isAccessibilityFocused: Boolean,
+        isScrollAction: Boolean
+    ): Boolean {
+        if (isScrollAction && isAccessibilityFocused) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] 스크롤 이후 TalkBack 자동 포커스를 재사용합니다.")
+        }
+        return isAccessibilityFocused
     }
 
     fun findSwipeTarget(
