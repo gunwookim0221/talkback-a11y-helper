@@ -44,6 +44,7 @@
                 <action android:name="com.iotpart.sqe.talkbackhelper.CHECK_TARGET" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.NEXT" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.PREV" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.SMART_NEXT" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.CLICK_FOCUSED" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.SCROLL" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.SET_TEXT" />

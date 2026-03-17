@@ -1092,6 +1092,19 @@ class SmartMoveFocusTest(unittest.TestCase):
 
         self.assertEqual(result, "failed")
 
+    def test_move_focus_smart_next_does_not_call_dump_or_get_focus(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: SMART_NAV_RESULT {"success":true,"status":"moved","reqId":"REQID703"}'
+
+        with patch.object(client, "check_helper_status", return_value=True), patch(
+            "talkback_lib.uuid.uuid4", return_value="REQID703-xxxx"
+        ), patch.object(client, "dump_tree", side_effect=AssertionError("dump_tree should not be called")), patch.object(
+            client, "get_focus", side_effect=AssertionError("get_focus should not be called")
+        ):
+            result = client.move_focus_smart("SER", direction="next")
+
+        self.assertEqual(result, "moved")
+
     def test_move_focus_smart_non_next_falls_back_to_move_focus(self):
         client = FakeA11yClient()
 
