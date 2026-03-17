@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.8.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.8.2"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -277,6 +277,20 @@ object A11yNavigator {
         )
         Log.i("A11Y_HELPER", "[SMART_NEXT] effectiveBottom=$effectiveBottom, screenBottom=$screenBottom")
 
+        fun runFocusGuardianDuringWait(iterations: Int = 10, intervalMs: Long = 100L) {
+            repeat(iterations) {
+                val guardianRoot = A11yHelperService.instance?.rootInActiveWindow ?: root
+                guardianRoot.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
+                    val label = focusedNode.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                        ?: focusedNode.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                        ?: "<no-label>"
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Suppressed auto-focus during wait: $label")
+                    focusedNode.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
+                }
+                Thread.sleep(intervalMs)
+            }
+        }
+
         fun findAndFocusFirstContent(
             traversalList: List<AccessibilityNodeInfo>,
             screenTop: Int,
@@ -398,7 +412,7 @@ object A11yNavigator {
                     }
 
                     Log.i("A11Y_HELPER", "[SMART_DEBUG] Attempting focus on Index:$index, AlreadyFocused:${node.isAccessibilityFocused}")
-                    if (bounds.bottom > (effectiveBottom - 10)) {
+                    if (isBottomClippedWithPadding(bounds.bottom, effectiveBottom)) {
                         Log.i("A11Y_HELPER", "[SMART_NEXT] Clipped node detected, requesting show-on-screen: $label")
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                             node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
@@ -407,16 +421,16 @@ object A11yNavigator {
                         }
                         Thread.sleep(100)
                     }
-                    Thread.sleep(50)
+                    root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { latestFocus ->
+                        latestFocus.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
+                    }
                     var focused = node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
                     if (!focused) {
                         Thread.sleep(100)
-                        Thread.sleep(50)
                         focused = node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
                     }
                     if (focused) {
-                        val topAlignmentThreshold = screenTop + (screenHeight * 0.2).toInt()
-                        if (bounds.top > topAlignmentThreshold) {
+                        if (shouldAlignToRealTop(bounds.top, screenTop)) {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                                 Log.i("A11Y_HELPER", "[SMART_NEXT] Focused node below top alignment threshold, requesting ACTION_SHOW_ON_SCREEN")
                                 node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
@@ -505,8 +519,7 @@ object A11yNavigator {
                     }
                 )
 
-                Thread.sleep(700)
-                Thread.sleep(300)
+                runFocusGuardianDuringWait()
 
                 val tempRoot = A11yHelperService.instance?.rootInActiveWindow
                 tempRoot?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { oldFocus ->
@@ -607,14 +620,12 @@ object A11yNavigator {
                 }
             )
 
-            Thread.sleep(700)
-            Thread.sleep(300)
+            runFocusGuardianDuringWait()
 
             val tempRoot = A11yHelperService.instance?.rootInActiveWindow
             tempRoot?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { oldFocus ->
                 oldFocus.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Cleared stale accessibility focus lock after scroll")
-                Thread.sleep(150)
             }
 
             val refreshedRoot = A11yHelperService.instance?.rootInActiveWindow
@@ -682,6 +693,14 @@ object A11yNavigator {
         excludeDesc: String?
     ): Boolean {
         return !focusedAny && isScrollAction && !excludeDesc.isNullOrBlank()
+    }
+
+    internal fun isBottomClippedWithPadding(boundsBottom: Int, effectiveBottom: Int, paddingPx: Int = 300): Boolean {
+        return boundsBottom > (effectiveBottom - paddingPx)
+    }
+
+    internal fun shouldAlignToRealTop(boundsTop: Int, screenTop: Int, topPaddingPx: Int = 300): Boolean {
+        return boundsTop > (screenTop + topPaddingPx)
     }
 
     internal fun <T> calculateEffectiveBottom(

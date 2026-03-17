@@ -10,7 +10,27 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.8.1")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.8.2")
+    }
+
+    @Test
+    fun isBottomClippedWithPadding_returnsTrueWhenInside300pxBottomPaddingBand() {
+        val clipped = A11yNavigator.isBottomClippedWithPadding(
+            boundsBottom = 1651,
+            effectiveBottom = 1920
+        )
+
+        assertTrue(clipped)
+    }
+
+    @Test
+    fun shouldAlignToRealTop_returnsTrueWhenNodeIsBelowTop300px() {
+        val shouldAlign = A11yNavigator.shouldAlignToRealTop(
+            boundsTop = 350,
+            screenTop = 0
+        )
+
+        assertTrue(shouldAlign)
     }
 
 
