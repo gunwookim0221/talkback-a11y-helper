@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.8.2")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.8.3")
     }
 
     @Test
@@ -337,6 +337,36 @@ class A11yNavigatorTest {
     }
 
     @Test
+    fun calculateEffectiveBottom_appliesSafetyGuideWhenBottomNavNearScreenEnd() {
+        data class Node(val className: String?, val viewId: String?, val rect: Rect)
+
+        val nodes = listOf(
+            Node("com.google.android.material.bottomnavigation.BottomNavigationView", "com.test:id/bottom_nav", Rect(0, 1850, 1080, 1920))
+        )
+
+        val effectiveBottom = A11yNavigator.calculateEffectiveBottom(
+            nodes = nodes,
+            screenBottom = 1920,
+            screenHeight = 1920,
+            boundsOf = { it.rect },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId },
+            labelOf = { it.viewId },
+            isBottomNavigation = { className, viewId, bounds ->
+                A11yNavigator.isBottomNavigationBarNode(
+                    className = className,
+                    viewIdResourceName = viewId,
+                    boundsInScreen = bounds,
+                    screenBottom = 1920,
+                    screenHeight = 1920
+                )
+            }
+        )
+
+        assertEquals(1632, effectiveBottom)
+    }
+
+    @Test
     fun calculateEffectiveBottom_usesTopOfBottomNavigationNode() {
         data class Node(val className: String?, val viewId: String?, val rect: Rect)
 
@@ -367,6 +397,16 @@ class A11yNavigatorTest {
         assertEquals(1700, effectiveBottom)
     }
 
+
+    @Test
+    fun applyBottomNavigationSafetyGuide_limitsTooDeepBottomTo85Percent() {
+        val adjusted = A11yNavigator.applyBottomNavigationSafetyGuide(
+            effectiveBottom = 1900,
+            screenBottom = 1920
+        )
+
+        assertEquals(1632, adjusted)
+    }
 
     @Test
     fun calculateEffectiveBottom_ignoresBottomNavIdentifierInUpperHalf() {

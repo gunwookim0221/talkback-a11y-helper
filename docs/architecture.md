@@ -46,6 +46,9 @@ AccessibilityService
 - `targetName`/`targetType`/`targetIndex` 기반 DFS 매칭 후, 추가 AND 필터(`className`/`clickable`/`focusable`/`targetText`/`targetId`)를 검증해 대상 노드를 찾고 액션(클릭/롱클릭/포커스)을 실행합니다.
 - 매칭 노드가 클릭 불가능하면 클릭 가능한 첫 조상으로 보정하고, `clickable` 필터도 보정된 노드 기준으로 검사합니다.
 - `targetName`은 공통 regex 패턴으로 정규화되어 `targetType=t|b|r` 모두 동일한 매칭 규칙을 사용합니다(명시적 regex 패턴이 없으면 exact regex로 처리). 매칭은 IGNORE_CASE 옵션으로 대소문자를 구분하지 않습니다.
+- 내비게이터 알고리즘 버전은 `A11yNavigator.NAVIGATOR_ALGORITHM_VERSION`(현재 `2.8.3`)으로 관리하며, `moved/scrolled/looped` 포커스는 공통 가시성-포커스 루틴을 통해 하단 가림(`effectiveBottom-300`) 및 스크롤 직후 상단 정렬(`screenTop+300`) 보정을 수행합니다.
+- 새 포커스 직전 기존 접근성 포커스를 한 번 더 해제(Double-Clear)해 TalkBack 자동 공지 선점을 강화하고, `ACTION_SHOW_ON_SCREEN` 호출 시 대상 라벨/좌표 로깅을 남깁니다.
+- 하단 네비게이션 경계 계산 시 화면 하단 5% 이내 값이 감지되면 사용자 체감 하단바를 반영해 `screenBottom * 0.85` 가이드를 적용합니다.
 
 #### A11yStateStore
 
