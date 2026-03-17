@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.8.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.8.1"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -314,7 +314,14 @@ object A11yNavigator {
             var skippedExcludedNode = false
             var focusedAny = false
             var focusedOutcome: TargetActionOutcome? = null
-            var isFirstFocusAttemptAfterScroll = isScrollAction
+
+            root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { currentFocus ->
+                val focusedLabel = currentFocus.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                    ?: currentFocus.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                    ?: "<no-label>"
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Interrupting TalkBack auto-focus on: $focusedLabel")
+                currentFocus.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
+            }
 
             if (excludedIndex != -1) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Excluded node found at index=$excludedIndex. Starting traversal from index=$traversalStartIndex")
@@ -390,10 +397,7 @@ object A11yNavigator {
                         break
                     }
 
-                    if (isFirstFocusAttemptAfterScroll) {
-                        Thread.sleep(100)
-                        isFirstFocusAttemptAfterScroll = false
-                    }
+                    Log.i("A11Y_HELPER", "[SMART_DEBUG] Attempting focus on Index:$index, AlreadyFocused:${node.isAccessibilityFocused}")
                     if (bounds.bottom > (effectiveBottom - 10)) {
                         Log.i("A11Y_HELPER", "[SMART_NEXT] Clipped node detected, requesting show-on-screen: $label")
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -411,6 +415,15 @@ object A11yNavigator {
                         focused = node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
                     }
                     if (focused) {
+                        val topAlignmentThreshold = screenTop + (screenHeight * 0.2).toInt()
+                        if (bounds.top > topAlignmentThreshold) {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                Log.i("A11Y_HELPER", "[SMART_NEXT] Focused node below top alignment threshold, requesting ACTION_SHOW_ON_SCREEN")
+                                node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
+                            } else {
+                                Log.i("A11Y_HELPER", "[SMART_NEXT] Top alignment skip: ACTION_SHOW_ON_SCREEN not supported on this API level")
+                            }
+                        }
                         Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS succeeded (status=$statusName)")
                         Log.i("A11Y_HELPER", "[SMART_NEXT] Focused top-most content at Y=${bounds.top}")
                         focusedAny = true
