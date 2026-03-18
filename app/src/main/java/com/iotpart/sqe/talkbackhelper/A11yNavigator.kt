@@ -8,6 +8,7 @@ import org.json.JSONObject
 
 object A11yNavigator {
     const val NAVIGATOR_ALGORITHM_VERSION: String = "2.9.1"
+    private const val TOP_AREA_HISTORY_BYPASS_PX: Int = 300
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -333,7 +334,7 @@ object A11yNavigator {
                     screenBottom,
                     screenHeight
                 )
-                val isTopArea = bounds.top < (screenTop + 200)
+                val isTopArea = bounds.top < (screenTop + TOP_AREA_HISTORY_BYPASS_PX)
                 if (shouldSkipHistoryNodeAfterScroll(isScrollAction, inHistory, isTopBar, isBottomBar, isTopArea)) {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping history node after scroll: $label")
                     continue
