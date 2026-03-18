@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.8.7"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.8.8"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -256,23 +256,13 @@ object A11yNavigator {
         val screenHeight = (screenBottom - screenTop).coerceAtLeast(1)
         val effectiveBottom = calculateEffectiveBottom(
             nodes = traversalList,
+            screenTop = screenTop,
             screenBottom = screenBottom,
-            screenHeight = screenHeight,
             boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
-            classNameOf = { node -> node.className?.toString() },
-            viewIdOf = { node -> node.viewIdResourceName },
             labelOf = { node ->
-                node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                    ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-            },
-            isBottomNavigation = { className, viewId, bounds ->
-                isBottomNavigationBarNode(
-                    className = className,
-                    viewIdResourceName = viewId,
-                    boundsInScreen = bounds,
-                    screenBottom = screenBottom,
-                    screenHeight = screenHeight
-                )
+                node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                    ?: node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                    ?: node.viewIdResourceName
             }
         )
         Log.i("A11Y_HELPER", "[SMART_NEXT] effectiveBottom=$effectiveBottom, screenBottom=$screenBottom")
@@ -488,23 +478,13 @@ object A11yNavigator {
                 val refreshedScreenHeight = (refreshedRect.bottom - refreshedRect.top).coerceAtLeast(1)
                 val refreshedEffectiveBottom = calculateEffectiveBottom(
                     nodes = refreshedList,
+                    screenTop = refreshedRect.top,
                     screenBottom = refreshedScreenBottom,
-                    screenHeight = refreshedScreenHeight,
                     boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
-                    classNameOf = { node -> node.className?.toString() },
-                    viewIdOf = { node -> node.viewIdResourceName },
                     labelOf = { node ->
-                        node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                            ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                    },
-                    isBottomNavigation = { className, viewId, bounds ->
-                        isBottomNavigationBarNode(
-                            className = className,
-                            viewIdResourceName = viewId,
-                            boundsInScreen = bounds,
-                            screenBottom = refreshedScreenBottom,
-                            screenHeight = refreshedScreenHeight
-                        )
+                        node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                            ?: node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                            ?: node.viewIdResourceName
                     }
                 )
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Refreshed node count=${refreshedList.size}")
@@ -587,7 +567,36 @@ object A11yNavigator {
             for (i in 1..15) {
                 Thread.sleep(100)
                 val tempRoot = service?.rootInActiveWindow ?: continue
-                val currentHistory = collectVisibleHistory(tempRoot)
+                val tempTraversalList = buildFocusableTraversalList(tempRoot)
+                val tempRootBounds = Rect().also { tempRoot.getBoundsInScreen(it) }
+                val currentHistory = collectVisibleHistory(
+                    nodes = tempTraversalList,
+                    screenTop = tempRootBounds.top,
+                    screenBottom = tempRootBounds.bottom,
+                    boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+                    labelOf = { node ->
+                        node.text?.toString()?.trim().takeUnless { value -> value.isNullOrEmpty() }
+                            ?: node.contentDescription?.toString()?.trim().takeUnless { value -> value.isNullOrEmpty() }
+                    },
+                    isTopAppBarNodeOf = { node, bounds ->
+                        isTopAppBarNode(
+                            node.className?.toString(),
+                            node.viewIdResourceName,
+                            bounds,
+                            tempRootBounds.top,
+                            (tempRootBounds.bottom - tempRootBounds.top).coerceAtLeast(1)
+                        )
+                    },
+                    isBottomNavigationBarNodeOf = { node, bounds ->
+                        isBottomNavigationBarNode(
+                            node.className?.toString(),
+                            node.viewIdResourceName,
+                            bounds,
+                            tempRootBounds.bottom,
+                            (tempRootBounds.bottom - tempRootBounds.top).coerceAtLeast(1)
+                        )
+                    }
+                )
                 if (currentHistory != visibleHistory) {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Tree updated after ${i * 100}ms")
                     treeUpdated = true
@@ -606,23 +615,13 @@ object A11yNavigator {
             val refreshedHeight = (refreshedBottom - refreshedTop).coerceAtLeast(1)
             val refreshedEffectiveBottom = calculateEffectiveBottom(
                 nodes = refreshedTraversal,
+                screenTop = refreshedTop,
                 screenBottom = refreshedBottom,
-                screenHeight = refreshedHeight,
                 boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
-                classNameOf = { node -> node.className?.toString() },
-                viewIdOf = { node -> node.viewIdResourceName },
                 labelOf = { node ->
-                    node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                        ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                },
-                isBottomNavigation = { className, viewId, bounds ->
-                    isBottomNavigationBarNode(
-                        className = className,
-                        viewIdResourceName = viewId,
-                        boundsInScreen = bounds,
-                        screenBottom = refreshedBottom,
-                        screenHeight = refreshedHeight
-                    )
+                    node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                        ?: node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                        ?: node.viewIdResourceName
                 }
             )
             val outcome = findAndFocusFirstContent(
@@ -780,24 +779,30 @@ object A11yNavigator {
 
     internal fun <T> calculateEffectiveBottom(
         nodes: List<T>,
+        screenTop: Int,
         screenBottom: Int,
-        screenHeight: Int,
         boundsOf: (T) -> Rect,
-        classNameOf: (T) -> String?,
-        viewIdOf: (T) -> String?,
-        labelOf: (T) -> String?,
-        isBottomNavigation: (String?, String?, Rect) -> Boolean
+        labelOf: (T) -> String?
     ): Int {
         var effectiveBottom = screenBottom
+        val screenHeight = (screenBottom - screenTop).coerceAtLeast(1)
         val lowerHalfTopBoundary = screenBottom - (screenHeight / 2)
         nodes.forEach { node ->
             val bounds = boundsOf(node)
+            val normalizedLabel = labelOf(node)?.lowercase().orEmpty()
+            val isBottomNavigation = normalizedLabel.contains("bottom") ||
+                normalizedLabel.contains("footer") ||
+                normalizedLabel.contains("tab bar") ||
+                normalizedLabel.contains("tabbar") ||
+                normalizedLabel.contains("navigation") ||
+                normalizedLabel.contains("menu") ||
+                normalizedLabel.contains("bottom_nav") ||
+                normalizedLabel.contains("bottomnav")
             val isInLowerHalf = bounds.top > lowerHalfTopBoundary
-            if (isInLowerHalf && isBottomNavigation(classNameOf(node), viewIdOf(node), bounds)) {
+            if (isInLowerHalf && isBottomNavigation) {
                 effectiveBottom = minOf(effectiveBottom, bounds.top)
                 val nodeLabel = labelOf(node).orEmpty().ifBlank { "<no-label>" }
-                val viewId = viewIdOf(node).orEmpty().ifBlank { "<no-id>" }
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Effective bottom set to $effectiveBottom by node: $nodeLabel (ID: $viewId)")
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Effective bottom set to $effectiveBottom by node: $nodeLabel")
             }
         }
         effectiveBottom = applyBottomNavigationSafetyGuide(

@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.8.7")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.8.8")
     }
 
     @Test
@@ -381,29 +381,18 @@ class A11yNavigatorTest {
 
     @Test
     fun calculateEffectiveBottom_appliesSafetyGuideWhenBottomNavNearScreenEnd() {
-        data class Node(val className: String?, val viewId: String?, val rect: Rect)
+        data class Node(val label: String?, val rect: Rect)
 
         val nodes = listOf(
-            Node("com.google.android.material.bottomnavigation.BottomNavigationView", "com.test:id/bottom_nav", Rect(0, 1850, 1080, 1920))
+            Node("bottom navigation", Rect(0, 1850, 1080, 1920))
         )
 
         val effectiveBottom = A11yNavigator.calculateEffectiveBottom(
             nodes = nodes,
+            screenTop = 0,
             screenBottom = 1920,
-            screenHeight = 1920,
             boundsOf = { it.rect },
-            classNameOf = { it.className },
-            viewIdOf = { it.viewId },
-            labelOf = { it.viewId },
-            isBottomNavigation = { className, viewId, bounds ->
-                A11yNavigator.isBottomNavigationBarNode(
-                    className = className,
-                    viewIdResourceName = viewId,
-                    boundsInScreen = bounds,
-                    screenBottom = 1920,
-                    screenHeight = 1920
-                )
-            }
+            labelOf = { it.label }
         )
 
         assertEquals(1632, effectiveBottom)
@@ -411,30 +400,19 @@ class A11yNavigatorTest {
 
     @Test
     fun calculateEffectiveBottom_usesTopOfBottomNavigationNode() {
-        data class Node(val className: String?, val viewId: String?, val rect: Rect)
+        data class Node(val label: String?, val rect: Rect)
 
         val nodes = listOf(
-            Node("android.widget.TextView", "com.test:id/content", Rect(0, 100, 100, 200)),
-            Node("com.google.android.material.bottomnavigation.BottomNavigationView", "com.test:id/bottom_nav", Rect(0, 1700, 1080, 1920))
+            Node("content", Rect(0, 100, 100, 200)),
+            Node("bottom nav", Rect(0, 1700, 1080, 1920))
         )
 
         val effectiveBottom = A11yNavigator.calculateEffectiveBottom(
             nodes = nodes,
+            screenTop = 0,
             screenBottom = 1920,
-            screenHeight = 1920,
             boundsOf = { it.rect },
-            classNameOf = { it.className },
-            viewIdOf = { it.viewId },
-            labelOf = { it.viewId },
-            isBottomNavigation = { className, viewId, bounds ->
-                A11yNavigator.isBottomNavigationBarNode(
-                    className = className,
-                    viewIdResourceName = viewId,
-                    boundsInScreen = bounds,
-                    screenBottom = 1920,
-                    screenHeight = 1920
-                )
-            }
+            labelOf = { it.label }
         )
 
         assertEquals(1700, effectiveBottom)
@@ -453,30 +431,19 @@ class A11yNavigatorTest {
 
     @Test
     fun calculateEffectiveBottom_ignoresBottomNavIdentifierInUpperHalf() {
-        data class Node(val className: String?, val viewId: String?, val rect: Rect)
+        data class Node(val label: String?, val rect: Rect)
 
         val nodes = listOf(
-            Node("android.widget.LinearLayout", "com.test:id/bottom_nav", Rect(0, 400, 1080, 520)),
-            Node("com.google.android.material.bottomnavigation.BottomNavigationView", "com.test:id/bottom_nav", Rect(0, 1700, 1080, 1920))
+            Node("bottom navigation", Rect(0, 400, 1080, 520)),
+            Node("bottom navigation", Rect(0, 1700, 1080, 1920))
         )
 
         val effectiveBottom = A11yNavigator.calculateEffectiveBottom(
             nodes = nodes,
+            screenTop = 0,
             screenBottom = 1920,
-            screenHeight = 1920,
             boundsOf = { it.rect },
-            classNameOf = { it.className },
-            viewIdOf = { it.viewId },
-            labelOf = { it.viewId },
-            isBottomNavigation = { className, viewId, bounds ->
-                A11yNavigator.isBottomNavigationBarNode(
-                    className = className,
-                    viewIdResourceName = viewId,
-                    boundsInScreen = bounds,
-                    screenBottom = 1920,
-                    screenHeight = 1920
-                )
-            }
+            labelOf = { it.label }
         )
 
         assertEquals(1700, effectiveBottom)
