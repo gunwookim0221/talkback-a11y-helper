@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.8.9"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.9.0"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -742,27 +742,75 @@ object A11yNavigator {
     }
 
     internal fun buildNodeTextSnapshot(nodes: List<AccessibilityNodeInfo>): String {
-        return nodes.joinToString(separator = "") { node ->
-            listOf(
-                node.text?.toString()?.trim().orEmpty(),
-                node.contentDescription?.toString()?.trim().orEmpty(),
-                node.viewIdResourceName?.trim().orEmpty()
-            ).joinToString(separator = "|")
+        val screenBounds = nodes.firstOrNull()?.let { node ->
+            Rect().also { node.getBoundsInScreen(it) }
         }
+        val screenTop = screenBounds?.top ?: 0
+        val screenBottom = screenBounds?.bottom ?: Int.MAX_VALUE
+        val screenHeight = (screenBottom - screenTop).coerceAtLeast(1)
+
+        return nodes.joinToString(separator = "") { node ->
+            val bounds = Rect().also { node.getBoundsInScreen(it) }
+            val isTopBar = isTopAppBarNode(
+                className = node.className?.toString(),
+                viewIdResourceName = node.viewIdResourceName,
+                boundsInScreen = bounds,
+                screenTop = screenTop,
+                screenHeight = screenHeight
+            )
+            val isBottomBar = isBottomNavigationBarNode(
+                className = node.className?.toString(),
+                viewIdResourceName = node.viewIdResourceName,
+                boundsInScreen = bounds,
+                screenBottom = screenBottom,
+                screenHeight = screenHeight
+            )
+
+            if (isTopBar || isBottomBar) {
+                ""
+            } else {
+                buildSnapshotToken(
+                    text = node.text?.toString(),
+                    contentDescription = node.contentDescription?.toString(),
+                    viewIdResourceName = node.viewIdResourceName
+                )
+            }
+        }.trim('\u001f')
     }
 
     internal fun buildNodeTextSnapshot(root: AccessibilityNodeInfo): String {
         val stack = ArrayDeque<AccessibilityNodeInfo>()
         val tokens = mutableListOf<String>()
+        val screenRect = Rect().also { root.getBoundsInScreen(it) }
+        val screenTop = screenRect.top
+        val screenBottom = screenRect.bottom
+        val screenHeight = (screenBottom - screenTop).coerceAtLeast(1)
         stack.add(root)
 
         while (stack.isNotEmpty()) {
             val node = stack.removeLast()
-            tokens += listOf(
-                node.text?.toString()?.trim().orEmpty(),
-                node.contentDescription?.toString()?.trim().orEmpty(),
-                node.viewIdResourceName?.trim().orEmpty()
-            ).joinToString(separator = "|")
+            val bounds = Rect().also { node.getBoundsInScreen(it) }
+            val isTopBar = isTopAppBarNode(
+                className = node.className?.toString(),
+                viewIdResourceName = node.viewIdResourceName,
+                boundsInScreen = bounds,
+                screenTop = screenTop,
+                screenHeight = screenHeight
+            )
+            val isBottomBar = isBottomNavigationBarNode(
+                className = node.className?.toString(),
+                viewIdResourceName = node.viewIdResourceName,
+                boundsInScreen = bounds,
+                screenBottom = screenBottom,
+                screenHeight = screenHeight
+            )
+            if (!isTopBar && !isBottomBar) {
+                tokens += buildSnapshotToken(
+                    text = node.text?.toString(),
+                    contentDescription = node.contentDescription?.toString(),
+                    viewIdResourceName = node.viewIdResourceName
+                )
+            }
 
             for (i in node.childCount - 1 downTo 0) {
                 node.getChild(i)?.let(stack::add)
@@ -788,7 +836,10 @@ object A11yNavigator {
             val newSnapshot = buildNodeTextSnapshot(newRoot)
 
             if (oldSnapshot != newSnapshot) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Tree updated successfully at loop $i")
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Tree change detected, waiting for settling...")
+                Thread.sleep(300)
+                latestRoot = service?.rootInActiveWindow ?: newRoot
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Tree updated successfully at loop $i after settling wait")
                 treeUpdated = true
                 break
             }
@@ -801,6 +852,18 @@ object A11yNavigator {
         }
 
         return latestRoot
+    }
+
+    private fun buildSnapshotToken(
+        text: String?,
+        contentDescription: String?,
+        viewIdResourceName: String?
+    ): String {
+        return listOf(
+            text?.trim().orEmpty(),
+            contentDescription?.trim().orEmpty(),
+            viewIdResourceName?.trim().orEmpty()
+        ).joinToString(separator = "|")
     }
 
     internal fun <T> calculateEffectiveBottom(
