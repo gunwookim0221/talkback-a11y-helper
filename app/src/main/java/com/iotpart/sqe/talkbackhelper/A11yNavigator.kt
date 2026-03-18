@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.8.8"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.8.9"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -463,10 +463,13 @@ object A11yNavigator {
                     }
                 )
 
-                Thread.sleep(700)
-                Thread.sleep(300)
-
-                val newRoot = A11yHelperService.instance?.rootInActiveWindow
+                val service = A11yHelperService.instance
+                val oldSnapshot = buildNodeTextSnapshot(traversalList)
+                val newRoot = pollForUpdatedRoot(
+                    service = service,
+                    oldSnapshot = oldSnapshot,
+                    fallbackRoot = root
+                )
                 if (newRoot == null) {
                     Log.e("A11Y_HELPER", "[SMART_NEXT] Root is null after scroll")
                     return TargetActionOutcome(false, "failed")
@@ -563,51 +566,12 @@ object A11yNavigator {
             )
 
             val service = A11yHelperService.instance
-            var treeUpdated = false
-            for (i in 1..15) {
-                Thread.sleep(100)
-                val tempRoot = service?.rootInActiveWindow ?: continue
-                val tempTraversalList = buildFocusableTraversalList(tempRoot)
-                val tempRootBounds = Rect().also { tempRoot.getBoundsInScreen(it) }
-                val currentHistory = collectVisibleHistory(
-                    nodes = tempTraversalList,
-                    screenTop = tempRootBounds.top,
-                    screenBottom = tempRootBounds.bottom,
-                    boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
-                    labelOf = { node ->
-                        node.text?.toString()?.trim().takeUnless { value -> value.isNullOrEmpty() }
-                            ?: node.contentDescription?.toString()?.trim().takeUnless { value -> value.isNullOrEmpty() }
-                    },
-                    isTopAppBarNodeOf = { node, bounds ->
-                        isTopAppBarNode(
-                            node.className?.toString(),
-                            node.viewIdResourceName,
-                            bounds,
-                            tempRootBounds.top,
-                            (tempRootBounds.bottom - tempRootBounds.top).coerceAtLeast(1)
-                        )
-                    },
-                    isBottomNavigationBarNodeOf = { node, bounds ->
-                        isBottomNavigationBarNode(
-                            node.className?.toString(),
-                            node.viewIdResourceName,
-                            bounds,
-                            tempRootBounds.bottom,
-                            (tempRootBounds.bottom - tempRootBounds.top).coerceAtLeast(1)
-                        )
-                    }
-                )
-                if (currentHistory != visibleHistory) {
-                    Log.i("A11Y_HELPER", "[SMART_NEXT] Tree updated after ${i * 100}ms")
-                    treeUpdated = true
-                    break
-                }
-            }
-            if (!treeUpdated) {
-                Log.w("A11Y_HELPER", "[SMART_NEXT] Tree did not change after scroll timeout.")
-            }
-
-            val refreshedRoot = service?.rootInActiveWindow
+            val oldSnapshot = buildNodeTextSnapshot(traversalList)
+            val refreshedRoot = pollForUpdatedRoot(
+                service = service,
+                oldSnapshot = oldSnapshot,
+                fallbackRoot = root
+            )
             val refreshedTraversal = refreshedRoot?.let { buildFocusableTraversalList(it) }.orEmpty()
             val refreshedRect = Rect().also { (refreshedRoot ?: root).getBoundsInScreen(it) }
             val refreshedTop = refreshedRect.top
@@ -775,6 +739,68 @@ object A11yNavigator {
         val needBottomLift = isBottomClippedWithPadding(bounds.bottom, effectiveBottom)
         val needTopAlign = isScrollAction && shouldAlignToRealTop(bounds.top, screenTop)
         return needBottomLift || needTopAlign
+    }
+
+    internal fun buildNodeTextSnapshot(nodes: List<AccessibilityNodeInfo>): String {
+        return nodes.joinToString(separator = "") { node ->
+            listOf(
+                node.text?.toString()?.trim().orEmpty(),
+                node.contentDescription?.toString()?.trim().orEmpty(),
+                node.viewIdResourceName?.trim().orEmpty()
+            ).joinToString(separator = "|")
+        }
+    }
+
+    internal fun buildNodeTextSnapshot(root: AccessibilityNodeInfo): String {
+        val stack = ArrayDeque<AccessibilityNodeInfo>()
+        val tokens = mutableListOf<String>()
+        stack.add(root)
+
+        while (stack.isNotEmpty()) {
+            val node = stack.removeLast()
+            tokens += listOf(
+                node.text?.toString()?.trim().orEmpty(),
+                node.contentDescription?.toString()?.trim().orEmpty(),
+                node.viewIdResourceName?.trim().orEmpty()
+            ).joinToString(separator = "|")
+
+            for (i in node.childCount - 1 downTo 0) {
+                node.getChild(i)?.let(stack::add)
+            }
+        }
+
+        return tokens.joinToString(separator = "")
+    }
+
+    private fun pollForUpdatedRoot(
+        service: A11yHelperService?,
+        oldSnapshot: String,
+        fallbackRoot: AccessibilityNodeInfo?
+    ): AccessibilityNodeInfo? {
+        Thread.sleep(200)
+
+        var latestRoot = fallbackRoot
+        var treeUpdated = false
+        for (i in 1..10) {
+            Thread.sleep(150)
+            val newRoot = service?.rootInActiveWindow ?: continue
+            latestRoot = newRoot
+            val newSnapshot = buildNodeTextSnapshot(newRoot)
+
+            if (oldSnapshot != newSnapshot) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Tree updated successfully at loop $i")
+                treeUpdated = true
+                break
+            }
+        }
+
+        if (!treeUpdated) {
+            Log.w("A11Y_HELPER", "[SMART_NEXT] Tree did not change after 10 polling loops. Applying final 500ms safeguard.")
+            Thread.sleep(500)
+            latestRoot = service?.rootInActiveWindow ?: latestRoot
+        }
+
+        return latestRoot
     }
 
     internal fun <T> calculateEffectiveBottom(
