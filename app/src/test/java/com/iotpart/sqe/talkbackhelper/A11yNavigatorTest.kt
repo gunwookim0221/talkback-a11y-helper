@@ -537,6 +537,29 @@ class A11yNavigatorTest {
     }
 
     @Test
+    fun shouldSkipHistoryNodeAfterScroll_returnsTrueWhenHistoryNodeIsOutsideTop300px() {
+        val skipped = A11yNavigator.shouldSkipHistoryNodeAfterScroll(
+            isScrollAction = true,
+            inHistory = true,
+            isTopBar = false,
+            isBottomBar = false,
+            isTopArea = false
+        )
+
+        assertTrue(skipped)
+    }
+
+    @Test
+    fun shouldReuseExistingAccessibilityFocus_returnsTrueWhenAlreadyFocused_withoutScroll() {
+        val reused = A11yNavigator.shouldReuseExistingAccessibilityFocus(
+            isAccessibilityFocused = true,
+            isScrollAction = false
+        )
+
+        assertTrue(reused)
+    }
+
+    @Test
     fun hasScrollableDownCandidate_returnsTrueWhenScrollableAndCanScrollDownExist() {
         data class ScrollState(val scrollable: Boolean, val canScrollDown: Boolean)
         val nodes = listOf(
