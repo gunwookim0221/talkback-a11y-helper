@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.8.5"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.8.6"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -654,10 +654,34 @@ object A11yNavigator {
             ?: target.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
             ?: "<no-label>"
 
+        val rootBounds = Rect().also { root.getBoundsInScreen(it) }
+        val rootHeight = (rootBounds.bottom - rootBounds.top).coerceAtLeast(1)
+        val initialBounds = Rect().also { target.getBoundsInScreen(it) }
+        val isTopBar = isTopAppBarNode(
+            className = target.className?.toString(),
+            viewIdResourceName = target.viewIdResourceName,
+            boundsInScreen = initialBounds,
+            screenTop = screenTop,
+            screenHeight = rootHeight
+        )
+        val isBottomBar = isBottomNavigationBarNode(
+            className = target.className?.toString(),
+            viewIdResourceName = target.viewIdResourceName,
+            boundsInScreen = initialBounds,
+            screenBottom = rootBounds.bottom,
+            screenHeight = rootHeight
+        )
+
         fun requestVisibilityAdjustment(bounds: Rect) {
-            val needBottomLift = isBottomClippedWithPadding(bounds.bottom, effectiveBottom)
-            val needTopAlign = isScrollAction && shouldAlignToRealTop(bounds.top, screenTop)
-            if (!needBottomLift && !needTopAlign) return
+            val shouldAdjustVisibility = shouldTriggerShowOnScreen(
+                bounds = bounds,
+                effectiveBottom = effectiveBottom,
+                screenTop = screenTop,
+                isScrollAction = isScrollAction,
+                isTopBar = isTopBar,
+                isBottomBar = isBottomBar
+            )
+            if (!shouldAdjustVisibility) return
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Visibility adjustment triggered for: $label (Y:${bounds.top})")
@@ -723,6 +747,22 @@ object A11yNavigator {
 
     internal fun shouldAlignToRealTop(boundsTop: Int, screenTop: Int, topPaddingPx: Int = 300): Boolean {
         return boundsTop > (screenTop + topPaddingPx)
+    }
+
+    internal fun shouldTriggerShowOnScreen(
+        bounds: Rect,
+        effectiveBottom: Int,
+        screenTop: Int,
+        isScrollAction: Boolean,
+        isTopBar: Boolean,
+        isBottomBar: Boolean
+    ): Boolean {
+        val isFixedBar = isTopBar || isBottomBar
+        if (isFixedBar) return false
+
+        val needBottomLift = isBottomClippedWithPadding(bounds.bottom, effectiveBottom)
+        val needTopAlign = isScrollAction && shouldAlignToRealTop(bounds.top, screenTop)
+        return needBottomLift || needTopAlign
     }
 
     internal fun <T> calculateEffectiveBottom(
