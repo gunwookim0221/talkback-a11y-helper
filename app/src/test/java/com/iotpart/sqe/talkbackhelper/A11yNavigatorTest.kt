@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.9.4")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.9.5")
     }
 
 
@@ -71,6 +71,46 @@ class A11yNavigatorTest {
                 contentDescriptionOf = { it.contentDescription }
             )
         )
+    }
+
+    @Test
+    fun isFixedSystemUI_returnsFalseForContentContainerClassesEvenOutsideMainScroll() {
+        data class Node(
+            val parent: Node? = null,
+            val className: String? = null,
+            val viewId: String? = null,
+            val text: String? = null,
+            val contentDescription: String? = null
+        )
+
+        val root = Node()
+        val scrollContainer = Node(parent = root, className = "androidx.recyclerview.widget.RecyclerView")
+        val cardContainer = Node(parent = root, className = "android.widget.FrameLayout", text = "Home Care")
+
+        val result = A11yNavigator.isFixedSystemUI(
+            node = cardContainer,
+            mainScrollContainer = scrollContainer,
+            parentOf = { it.parent },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId },
+            textOf = { it.text },
+            contentDescriptionOf = { it.contentDescription }
+        )
+
+        assertFalse(result)
+    }
+
+    @Test
+    fun shouldSkipHistoryNodeAfterScroll_returnsFalseForTopAreaHistoryEvenWhenFixedUi() {
+        val skipped = A11yNavigator.shouldSkipHistoryNodeAfterScroll(
+            isScrollAction = true,
+            inHistory = true,
+            isFixedUi = true,
+            isInsideMainScrollContainer = false,
+            isTopArea = true
+        )
+
+        assertFalse(skipped)
     }
 
     @Test
