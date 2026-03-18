@@ -10,7 +10,67 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.9.1")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.9.3")
+    }
+
+
+    @Test
+    fun findMainScrollContainer_returnsLargestScrollableNode() {
+        data class Node(val rect: Rect, val scrollable: Boolean)
+
+        val nodes = listOf(
+            Node(Rect(0, 0, 1080, 200), scrollable = false),
+            Node(Rect(0, 200, 1080, 1500), scrollable = true),
+            Node(Rect(0, 200, 540, 900), scrollable = true)
+        )
+
+        val container = A11yNavigator.findMainScrollContainer(
+            nodes = nodes,
+            isScrollable = { it.scrollable },
+            boundsOf = { it.rect }
+        )
+
+        assertEquals(nodes[1], container)
+    }
+
+    @Test
+    fun isFixedSystemUI_returnsTrueWhenNodeIsOutsideMainScrollContainer() {
+        data class Node(
+            val name: String,
+            val parent: Node? = null,
+            val className: String? = null,
+            val viewId: String? = null,
+            val text: String? = null,
+            val contentDescription: String? = null
+        )
+
+        val root = Node("root")
+        val toolbar = Node("toolbar", parent = root, className = "Toolbar")
+        val content = Node("content", parent = root)
+        val item = Node("item", parent = content, text = "Plant Care")
+
+        assertTrue(
+            A11yNavigator.isFixedSystemUI(
+                node = toolbar,
+                mainScrollContainer = content,
+                parentOf = { it.parent },
+                classNameOf = { it.className },
+                viewIdOf = { it.viewId },
+                textOf = { it.text },
+                contentDescriptionOf = { it.contentDescription }
+            )
+        )
+        assertFalse(
+            A11yNavigator.isFixedSystemUI(
+                node = item,
+                mainScrollContainer = content,
+                parentOf = { it.parent },
+                classNameOf = { it.className },
+                viewIdOf = { it.viewId },
+                textOf = { it.text },
+                contentDescriptionOf = { it.contentDescription }
+            )
+        )
     }
 
     @Test
@@ -493,31 +553,22 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun shouldSkipHistoryNodeAfterScroll_keepsFixedBarsNavigable() {
+    fun shouldSkipHistoryNodeAfterScroll_appliesFixedUiAndScrollableContentRules() {
         assertTrue(
             A11yNavigator.shouldSkipHistoryNodeAfterScroll(
                 isScrollAction = true,
                 inHistory = true,
-                isTopBar = false,
-                isBottomBar = false,
+                isFixedUi = false,
+                isInsideMainScrollContainer = true,
                 isTopArea = false
             )
         )
-        assertFalse(
+        assertTrue(
             A11yNavigator.shouldSkipHistoryNodeAfterScroll(
                 isScrollAction = true,
                 inHistory = true,
-                isTopBar = true,
-                isBottomBar = false,
-                isTopArea = false
-            )
-        )
-        assertFalse(
-            A11yNavigator.shouldSkipHistoryNodeAfterScroll(
-                isScrollAction = true,
-                inHistory = true,
-                isTopBar = false,
-                isBottomBar = true,
+                isFixedUi = true,
+                isInsideMainScrollContainer = false,
                 isTopArea = false
             )
         )
@@ -528,8 +579,8 @@ class A11yNavigatorTest {
         val skipped = A11yNavigator.shouldSkipHistoryNodeAfterScroll(
             isScrollAction = true,
             inHistory = true,
-            isTopBar = false,
-            isBottomBar = false,
+            isFixedUi = false,
+            isInsideMainScrollContainer = true,
             isTopArea = true
         )
 
@@ -537,12 +588,12 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun shouldSkipHistoryNodeAfterScroll_returnsTrueWhenHistoryNodeIsOutsideTop300px() {
+    fun shouldSkipHistoryNodeAfterScroll_returnsTrueWhenHistoryNodeIsOutsideTopArea() {
         val skipped = A11yNavigator.shouldSkipHistoryNodeAfterScroll(
             isScrollAction = true,
             inHistory = true,
-            isTopBar = false,
-            isBottomBar = false,
+            isFixedUi = false,
+            isInsideMainScrollContainer = true,
             isTopArea = false
         )
 

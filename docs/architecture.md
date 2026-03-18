@@ -46,11 +46,13 @@ AccessibilityService
 - `targetName`/`targetType`/`targetIndex` 기반 DFS 매칭 후, 추가 AND 필터(`className`/`clickable`/`focusable`/`targetText`/`targetId`)를 검증해 대상 노드를 찾고 액션(클릭/롱클릭/포커스)을 실행합니다.
 - 매칭 노드가 클릭 불가능하면 클릭 가능한 첫 조상으로 보정하고, `clickable` 필터도 보정된 노드 기준으로 검사합니다.
 - `targetName`은 공통 regex 패턴으로 정규화되어 `targetType=t|b|r` 모두 동일한 매칭 규칙을 사용합니다(명시적 regex 패턴이 없으면 exact regex로 처리). 매칭은 IGNORE_CASE 옵션으로 대소문자를 구분하지 않습니다.
-- 내비게이터 알고리즘 버전은 `A11yNavigator.NAVIGATOR_ALGORITHM_VERSION`(현재 `2.9.1`)으로 관리하며, `moved/scrolled/looped` 포커스는 공통 가시성-포커스 루틴을 통해 하단 가림(`effectiveBottom-300`) 및 스크롤 직후 상단 정렬(`screenTop+300`) 보정을 수행합니다.
+- 내비게이터 알고리즘 버전은 `A11yNavigator.NAVIGATOR_ALGORITHM_VERSION`(현재 `2.9.3`)으로 관리하며, `moved/scrolled/looped` 포커스는 공통 가시성-포커스 루틴을 통해 하단 가림(`effectiveBottom-300`) 및 스크롤 직후 상단 정렬(`screenTop+300`) 보정을 수행합니다.
 - `SMART_NEXT` 스크롤 폴링은 기존 스냅샷 비교 구조를 유지하되, 트리 변경 감지 시 300ms 안착 대기 후 최신 루트를 다시 읽는 3단계(변화 감지 → 추가 대기 → 최종 확인)로 보강되어 리스트 재구성 도중 중간 아이템 누락을 줄입니다.
 - 스냅샷 비교는 상단 앱바/하단 내비게이션 바로 판정되는 노드를 제외한 컨텐츠 토큰을 우선 사용하여 상태바/고정 바의 미세 갱신으로 스크롤 완료 판정이 앞당겨지는 현상을 완화합니다.
 - 이 공통 보정 루틴은 일반 콘텐츠에만 `ACTION_SHOW_ON_SCREEN`을 허용하며, `isTopAppBarNode`/`isBottomNavigationBarNode`로 분류된 고정 상단바·하단바에서는 보정 액션과 관련 로그를 모두 차단해 시스템 Bounce를 방지합니다.
-- `visibleHistory`는 일반 스크롤 콘텐츠만 저장하며, 상단바/하단바는 기록과 스크롤 후 히스토리 스킵 대상에서 모두 제외해 고정 UI를 항상 다시 탐색할 수 있게 유지합니다. 또한 스크롤 직후 화면 최상단 300px 이내 후보는 히스토리에 있어도 재포커스를 허용해 시각적 흐름과 TalkBack 포커스 위치를 맞춥니다. 이때 대상 노드가 이미 시스템 접근성 포커스를 보유하면 추가 `ACTION_ACCESSIBILITY_FOCUS`를 생략해 중복 공지를 줄입니다.
+- `findMainScrollContainer`는 화면에서 면적이 가장 큰 `isScrollable=true` 노드를 메인 스크롤 컨테이너로 선택하고, `SMART_NEXT`는 이를 기준으로 스크롤 대상과 컨텐츠/고정 UI 경계를 해석합니다.
+- `isFixedSystemUI`는 노드 또는 조상에 `Toolbar`/`ActionBar`/`BottomNavigationView` 계열 키워드가 있거나, 메인 스크롤 컨테이너의 descendant가 아니거나, `Add`/`More options` 같은 시스템 버튼이 스크롤 영역 밖에 있을 때 `Fixed UI`로 분류합니다.
+- 스크롤 후 히스토리 필터는 `Fixed UI`를 항상 스킵하고, 메인 스크롤 컨테이너 내부 일반 콘텐츠만 재포커스 대상으로 남깁니다. 다만 화면 상단 25% 이내에 도달한 스크롤 컨텐츠는 히스토리에 있어도 재포커스를 허용해 시각적 흐름과 TalkBack 포커스 위치를 맞춥니다. 이때 대상 노드가 이미 시스템 접근성 포커스를 보유하면 추가 `ACTION_ACCESSIBILITY_FOCUS`를 생략해 중복 공지를 줄입니다.
 - 스크롤 대기 구간은 스크롤 직후 반드시 200ms를 먼저 대기한 뒤, 최대 10회(150ms 간격) 동안 새 `rootInActiveWindow`의 전체 노드 텍스트/설명/리소스 ID 스냅샷 문자열을 이전 화면 스냅샷과 비교해 트리 갱신을 감지합니다. 10회 모두 실패하면 마지막으로 500ms를 한 번 더 대기한 최신 루트로 재탐색하며, 추가 포커스 강제 해제는 사용하지 않습니다.
 - 리스트 끝에서 다음 후보가 하단 탭이면 `findAndFocusFirstContent(..., allowLooping = false)`로 새 콘텐츠 유무를 확인한 뒤, 없을 때는 `moved_to_bottom_bar`로 하단 탭 포커스를 반환합니다.
 - 하단 네비게이션 경계 계산 시 화면 하단 5% 이내 값이 감지되면 사용자 체감 하단바를 반영해 `screenBottom * 0.85` 가이드를 적용합니다.

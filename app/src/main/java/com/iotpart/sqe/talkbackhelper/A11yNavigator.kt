@@ -7,8 +7,8 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.9.1"
-    private const val TOP_AREA_HISTORY_BYPASS_PX: Int = 300
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.9.3"
+    private const val TOP_AREA_HISTORY_BYPASS_RATIO: Float = 0.25f
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -289,6 +289,11 @@ object A11yNavigator {
                 },
                 excludeDesc = excludeDesc
             )
+            val localMainScrollContainer = findMainScrollContainer(
+                nodes = traversalList,
+                isScrollable = { it.isScrollable },
+                boundsOf = { candidate -> Rect().also { candidate.getBoundsInScreen(it) } }
+            )
 
             val traversalStartIndex = if (isScrollAction) {
                 startIndex.coerceAtLeast(0)
@@ -334,8 +339,19 @@ object A11yNavigator {
                     screenBottom,
                     screenHeight
                 )
-                val isTopArea = bounds.top < (screenTop + TOP_AREA_HISTORY_BYPASS_PX)
-                if (shouldSkipHistoryNodeAfterScroll(isScrollAction, inHistory, isTopBar, isBottomBar, isTopArea)) {
+                val isFixedUi = isFixedSystemUI(node, localMainScrollContainer)
+                val isInsideMainScrollContainer = localMainScrollContainer?.let { scrollContainer ->
+                    node == scrollContainer || isDescendantOf(scrollContainer, node) { candidate -> candidate.parent }
+                } ?: false
+                val topQuarterBoundary = screenTop + (screenHeight * TOP_AREA_HISTORY_BYPASS_RATIO).toInt()
+                val isTopQuarterArea = bounds.top <= topQuarterBoundary
+                if (shouldSkipHistoryNodeAfterScroll(
+                        isScrollAction = isScrollAction,
+                        inHistory = inHistory,
+                        isFixedUi = isFixedUi || isTopBar || isBottomBar,
+                        isInsideMainScrollContainer = isInsideMainScrollContainer,
+                        isTopArea = isTopQuarterArea
+                    )) {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping history node after scroll: $label")
                     continue
                 }
@@ -423,7 +439,9 @@ object A11yNavigator {
             )
         }
 
+        val mainScrollContainer = findMainScrollContainer(root)
         val scrollableNode = findScrollableForwardAncestorCandidate(resolvedCurrent)
+            ?: mainScrollContainer
             ?: findScrollableForwardCandidate(root)
 
         if (nextIndex !in traversalList.indices || currentIndex == traversalList.lastIndex) {
@@ -915,6 +933,100 @@ object A11yNavigator {
         return effectiveBottom
     }
 
+    internal fun <T> findMainScrollContainer(
+        nodes: List<T>,
+        isScrollable: (T) -> Boolean,
+        boundsOf: (T) -> Rect
+    ): T? {
+        return nodes
+            .asSequence()
+            .filter(isScrollable)
+            .maxByOrNull { node ->
+                val bounds = boundsOf(node)
+                val width = (bounds.right - bounds.left).coerceAtLeast(0)
+                val height = (bounds.bottom - bounds.top).coerceAtLeast(0)
+                width.toLong() * height.toLong()
+            }
+    }
+
+    private fun findMainScrollContainer(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (root == null) return null
+        val nodes = mutableListOf<AccessibilityNodeInfo>()
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            if (node.isVisibleToUser) {
+                nodes += node
+            }
+            for (index in 0 until node.childCount) {
+                node.getChild(index)?.let(queue::add)
+            }
+        }
+        return findMainScrollContainer(
+            nodes = nodes,
+            isScrollable = { it.isScrollable },
+            boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } }
+        )
+    }
+
+    internal fun <T> isDescendantOf(
+        ancestor: T,
+        node: T,
+        parentOf: (T) -> T?
+    ): Boolean {
+        var current = parentOf(node)
+        while (current != null) {
+            if (current == ancestor) return true
+            current = parentOf(current)
+        }
+        return false
+    }
+
+    internal fun <T> isFixedSystemUI(
+        node: T,
+        mainScrollContainer: T?,
+        parentOf: (T) -> T?,
+        classNameOf: (T) -> String?,
+        viewIdOf: (T) -> String?,
+        textOf: (T) -> String?,
+        contentDescriptionOf: (T) -> String?
+    ): Boolean {
+        val toolbarKeywords = listOf("toolbar", "actionbar", "bottomnavigationview")
+        var current: T? = node
+        while (current != null) {
+            val className = classNameOf(current)?.lowercase().orEmpty()
+            val viewId = viewIdOf(current)?.lowercase().orEmpty()
+            if (toolbarKeywords.any { keyword -> className.contains(keyword) || viewId.contains(keyword) }) {
+                return true
+            }
+            current = parentOf(current)
+        }
+
+        val outsideMainScroll = mainScrollContainer == null || (node != mainScrollContainer && !isDescendantOf(mainScrollContainer, node, parentOf))
+        if (outsideMainScroll) {
+            return true
+        }
+
+        val normalizedLabel = listOfNotNull(textOf(node), contentDescriptionOf(node))
+            .joinToString(separator = " ")
+            .lowercase()
+        val isSystemButton = normalizedLabel.contains("add") || normalizedLabel.contains("more options")
+        return isSystemButton && outsideMainScroll
+    }
+
+    private fun isFixedSystemUI(node: AccessibilityNodeInfo, mainScrollContainer: AccessibilityNodeInfo?): Boolean {
+        return isFixedSystemUI(
+            node = node,
+            mainScrollContainer = mainScrollContainer,
+            parentOf = { it.parent },
+            classNameOf = { it.className?.toString() },
+            viewIdOf = { it.viewIdResourceName },
+            textOf = { it.text?.toString() },
+            contentDescriptionOf = { it.contentDescription?.toString() }
+        )
+    }
+
     internal fun <T> collectVisibleHistory(
         nodes: List<T>,
         screenTop: Int,
@@ -939,10 +1051,15 @@ object A11yNavigator {
     internal fun shouldSkipHistoryNodeAfterScroll(
         isScrollAction: Boolean,
         inHistory: Boolean,
-        isTopBar: Boolean,
-        isBottomBar: Boolean,
+        isFixedUi: Boolean,
+        isInsideMainScrollContainer: Boolean,
         isTopArea: Boolean
-    ): Boolean = isScrollAction && inHistory && !isTopBar && !isBottomBar && !isTopArea
+    ): Boolean {
+        if (!isScrollAction || !inHistory) return false
+        if (isFixedUi) return true
+        if (isInsideMainScrollContainer && isTopArea) return false
+        return true
+    }
 
     fun findSwipeTarget(
         root: AccessibilityNodeInfo?,
