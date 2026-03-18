@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.8.3")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.8.4")
     }
 
     @Test
@@ -459,6 +459,56 @@ class A11yNavigatorTest {
         assertEquals(setOf("Pet Care", "Clothing Care"), history)
     }
 
+
+
+    @Test
+    fun collectVisibleHistory_excludesTopAndBottomBars() {
+        data class Node(val label: String?, val rect: Rect, val isTopBar: Boolean = false, val isBottomBar: Boolean = false)
+
+        val history = A11yNavigator.collectVisibleHistory(
+            nodes = listOf(
+                Node("Header", Rect(0, 0, 100, 120), isTopBar = true),
+                Node("Plant Care", Rect(0, 200, 100, 320)),
+                Node("Home", Rect(0, 1720, 100, 1840), isBottomBar = true)
+            ),
+            screenTop = 0,
+            screenBottom = 1920,
+            boundsOf = { it.rect },
+            labelOf = { it.label },
+            isTopAppBarNodeOf = { node, _ -> node.isTopBar },
+            isBottomNavigationBarNodeOf = { node, _ -> node.isBottomBar }
+        )
+
+        assertEquals(setOf("Plant Care"), history)
+    }
+
+    @Test
+    fun shouldSkipHistoryNodeAfterScroll_keepsFixedBarsNavigable() {
+        assertTrue(
+            A11yNavigator.shouldSkipHistoryNodeAfterScroll(
+                isScrollAction = true,
+                inHistory = true,
+                isTopBar = false,
+                isBottomBar = false
+            )
+        )
+        assertFalse(
+            A11yNavigator.shouldSkipHistoryNodeAfterScroll(
+                isScrollAction = true,
+                inHistory = true,
+                isTopBar = true,
+                isBottomBar = false
+            )
+        )
+        assertFalse(
+            A11yNavigator.shouldSkipHistoryNodeAfterScroll(
+                isScrollAction = true,
+                inHistory = true,
+                isTopBar = false,
+                isBottomBar = true
+            )
+        )
+    }
 
     @Test
     fun hasScrollableDownCandidate_returnsTrueWhenScrollableAndCanScrollDownExist() {

@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.8.3"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.8.4"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -358,7 +358,21 @@ object A11yNavigator {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping off-screen node: $label")
                     continue
                 }
-                if (isScrollAction && inHistory) {
+                val isTopBar = isTopAppBarNode(
+                    node.className?.toString(),
+                    node.viewIdResourceName,
+                    bounds,
+                    screenTop,
+                    screenHeight
+                )
+                val isBottomBar = isBottomNavigationBarNode(
+                    node.className?.toString(),
+                    node.viewIdResourceName,
+                    bounds,
+                    screenBottom,
+                    screenHeight
+                )
+                if (shouldSkipHistoryNodeAfterScroll(isScrollAction, inHistory, isTopBar, isBottomBar)) {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping history node after scroll: $label")
                     continue
                 }
@@ -376,20 +390,6 @@ object A11yNavigator {
                     skippedExcludedNode = true
                     continue
                 }
-                val isTopBar = isTopAppBarNode(
-                    node.className?.toString(),
-                    node.viewIdResourceName,
-                    bounds,
-                    screenTop,
-                    screenHeight
-                )
-                val isBottomBar = isBottomNavigationBarNode(
-                    node.className?.toString(),
-                    node.viewIdResourceName,
-                    bounds,
-                    screenBottom,
-                    screenHeight
-                )
 
                 if (!isTopBar && !isBottomBar) {
                     val isBottomResidualFocus = shouldIgnoreBottomResidualFocus(
@@ -482,6 +482,24 @@ object A11yNavigator {
                     labelOf = { node ->
                         node.text?.toString()?.trim().takeUnless { text -> text.isNullOrEmpty() }
                             ?: node.contentDescription?.toString()?.trim().takeUnless { text -> text.isNullOrEmpty() }
+                    },
+                    isTopAppBarNodeOf = { node, bounds ->
+                        isTopAppBarNode(
+                            node.className?.toString(),
+                            node.viewIdResourceName,
+                            bounds,
+                            screenTop,
+                            screenHeight
+                        )
+                    },
+                    isBottomNavigationBarNodeOf = { node, bounds ->
+                        isBottomNavigationBarNode(
+                            node.className?.toString(),
+                            node.viewIdResourceName,
+                            bounds,
+                            screenBottom,
+                            screenHeight
+                        )
                     }
                 )
 
@@ -583,6 +601,24 @@ object A11yNavigator {
                 labelOf = { node ->
                     node.text?.toString()?.trim().takeUnless { text -> text.isNullOrEmpty() }
                         ?: node.contentDescription?.toString()?.trim().takeUnless { text -> text.isNullOrEmpty() }
+                },
+                isTopAppBarNodeOf = { node, bounds ->
+                    isTopAppBarNode(
+                        node.className?.toString(),
+                        node.viewIdResourceName,
+                        bounds,
+                        screenTop,
+                        screenHeight
+                    )
+                },
+                isBottomNavigationBarNodeOf = { node, bounds ->
+                    isBottomNavigationBarNode(
+                        node.className?.toString(),
+                        node.viewIdResourceName,
+                        bounds,
+                        screenBottom,
+                        screenHeight
+                    )
                 }
             )
 
@@ -761,16 +797,28 @@ object A11yNavigator {
         screenTop: Int,
         screenBottom: Int,
         boundsOf: (T) -> Rect,
-        labelOf: (T) -> String?
+        labelOf: (T) -> String?,
+        isTopAppBarNodeOf: (T, Rect) -> Boolean = { _, _ -> false },
+        isBottomNavigationBarNodeOf: (T, Rect) -> Boolean = { _, _ -> false }
     ): Set<String> {
         return nodes.mapNotNull { node ->
             val bounds = boundsOf(node)
             if (isNodePhysicallyOffScreen(bounds, screenTop, screenBottom)) {
                 return@mapNotNull null
             }
+            if (isTopAppBarNodeOf(node, bounds) || isBottomNavigationBarNodeOf(node, bounds)) {
+                return@mapNotNull null
+            }
             labelOf(node)?.trim()?.takeUnless { it.isEmpty() }
         }.toSet()
     }
+
+    internal fun shouldSkipHistoryNodeAfterScroll(
+        isScrollAction: Boolean,
+        inHistory: Boolean,
+        isTopBar: Boolean,
+        isBottomBar: Boolean
+    ): Boolean = isScrollAction && inHistory && !isTopBar && !isBottomBar
 
     fun findSwipeTarget(
         root: AccessibilityNodeInfo?,
