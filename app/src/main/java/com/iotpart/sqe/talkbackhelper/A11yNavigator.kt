@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.8.6"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.8.7"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -582,10 +582,23 @@ object A11yNavigator {
                 }
             )
 
-            Thread.sleep(700)
-            Thread.sleep(300)
+            val service = A11yHelperService.instance
+            var treeUpdated = false
+            for (i in 1..15) {
+                Thread.sleep(100)
+                val tempRoot = service?.rootInActiveWindow ?: continue
+                val currentHistory = collectVisibleHistory(tempRoot)
+                if (currentHistory != visibleHistory) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Tree updated after ${i * 100}ms")
+                    treeUpdated = true
+                    break
+                }
+            }
+            if (!treeUpdated) {
+                Log.w("A11Y_HELPER", "[SMART_NEXT] Tree did not change after scroll timeout.")
+            }
 
-            val refreshedRoot = A11yHelperService.instance?.rootInActiveWindow
+            val refreshedRoot = service?.rootInActiveWindow
             val refreshedTraversal = refreshedRoot?.let { buildFocusableTraversalList(it) }.orEmpty()
             val refreshedRect = Rect().also { (refreshedRoot ?: root).getBoundsInScreen(it) }
             val refreshedTop = refreshedRect.top
