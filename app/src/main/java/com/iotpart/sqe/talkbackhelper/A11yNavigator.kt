@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.9.3"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.9.4"
     private const val TOP_AREA_HISTORY_BYPASS_RATIO: Float = 0.25f
 
     data class TargetActionOutcome(
@@ -550,10 +550,11 @@ object A11yNavigator {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Scrollable container found for smart scroll.")
             Log.i("A11Y_HELPER", "[SMART_NEXT] Next node is bottom bar and scroll target exists -> attempting scroll")
             val lastDesc = resolvedCurrent?.contentDescription?.toString()
-            val scrolled = scrollableNode.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
-            Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SCROLL_FORWARD result=$scrolled")
-            if (!scrolled) {
-                return TargetActionOutcome(false, "failed")
+            val scrollResult = scrollableNode.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+            Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SCROLL_FORWARD result=$scrollResult")
+            if (!scrollResult) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Scroll failed (end of list), moving to bottom bar.")
+                return focusOrSkip(nextNode, "moved_to_bottom_bar_direct")
             }
 
             val visibleHistory = collectVisibleHistory(
@@ -711,6 +712,7 @@ object A11yNavigator {
             return TargetActionOutcome(false, "failed", target)
         }
 
+        Thread.sleep(100)
         val focusedBounds = Rect().also { target.getBoundsInScreen(it) }
         requestVisibilityAdjustment(focusedBounds)
         Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=true (status=$status)")
