@@ -7,8 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.9.4"
-    private const val TOP_AREA_HISTORY_BYPASS_RATIO: Float = 0.25f
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.9.5"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -343,14 +342,13 @@ object A11yNavigator {
                 val isInsideMainScrollContainer = localMainScrollContainer?.let { scrollContainer ->
                     node == scrollContainer || isDescendantOf(scrollContainer, node) { candidate -> candidate.parent }
                 } ?: false
-                val topQuarterBoundary = screenTop + (screenHeight * TOP_AREA_HISTORY_BYPASS_RATIO).toInt()
-                val isTopQuarterArea = bounds.top <= topQuarterBoundary
+                val isTopContent = bounds.top < (screenTop + (screenBottom / 4))
                 if (shouldSkipHistoryNodeAfterScroll(
                         isScrollAction = isScrollAction,
                         inHistory = inHistory,
                         isFixedUi = isFixedUi || isTopBar || isBottomBar,
                         isInsideMainScrollContainer = isInsideMainScrollContainer,
-                        isTopArea = isTopQuarterArea
+                        isTopArea = isTopContent
                     )) {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping history node after scroll: $label")
                     continue
@@ -1005,6 +1003,12 @@ object A11yNavigator {
             current = parentOf(current)
         }
 
+        val className = classNameOf(node)?.substringAfterLast('.')?.lowercase().orEmpty()
+        val isStrictFixedButtonClass = className == "button" || className == "imagebutton"
+        if (!isStrictFixedButtonClass) {
+            return false
+        }
+
         val outsideMainScroll = mainScrollContainer == null || (node != mainScrollContainer && !isDescendantOf(mainScrollContainer, node, parentOf))
         if (outsideMainScroll) {
             return true
@@ -1058,9 +1062,11 @@ object A11yNavigator {
         isTopArea: Boolean
     ): Boolean {
         if (!isScrollAction || !inHistory) return false
-        if (isFixedUi) return true
+        val shouldSkip = if (isScrollAction && isTopArea) false else inHistory
+        if (!shouldSkip) return false
+        if (isFixedUi && !isTopArea) return true
         if (isInsideMainScrollContainer && isTopArea) return false
-        return true
+        return shouldSkip
     }
 
     fun findSwipeTarget(
