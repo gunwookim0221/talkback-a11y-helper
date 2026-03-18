@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.8.4"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.8.5"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -277,20 +277,6 @@ object A11yNavigator {
         )
         Log.i("A11Y_HELPER", "[SMART_NEXT] effectiveBottom=$effectiveBottom, screenBottom=$screenBottom")
 
-        fun runFocusGuardianDuringWait(iterations: Int = 10, intervalMs: Long = 100L) {
-            repeat(iterations) {
-                val guardianRoot = A11yHelperService.instance?.rootInActiveWindow ?: root
-                guardianRoot.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
-                    val label = focusedNode.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                        ?: focusedNode.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                        ?: "<no-label>"
-                    Log.i("A11Y_HELPER", "[SMART_NEXT] Suppressed auto-focus during wait: $label")
-                    focusedNode.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
-                }
-                Thread.sleep(intervalMs)
-            }
-        }
-
         fun findAndFocusFirstContent(
             traversalList: List<AccessibilityNodeInfo>,
             screenTop: Int,
@@ -301,7 +287,8 @@ object A11yNavigator {
             isScrollAction: Boolean = false,
             excludeDesc: String? = null,
             startIndex: Int = 0,
-            visibleHistory: Set<String> = emptySet()
+            visibleHistory: Set<String> = emptySet(),
+            allowLooping: Boolean = true
         ): TargetActionOutcome {
             val excludedIndex = findIndexByDescription(
                 nodes = traversalList,
@@ -312,14 +299,6 @@ object A11yNavigator {
                 excludeDesc = excludeDesc
             )
 
-            if (excludedIndex != -1) {
-                val excludedNode = traversalList[excludedIndex]
-                if (excludedNode.isAccessibilityFocused) {
-                    Log.i("A11Y_HELPER", "[SMART_NEXT] Forcing focus clear on excluded node to prevent duplicate announcement")
-                    excludedNode.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
-                }
-            }
-
             val traversalStartIndex = if (isScrollAction) {
                 startIndex.coerceAtLeast(0)
             } else {
@@ -328,14 +307,6 @@ object A11yNavigator {
             var skippedExcludedNode = false
             var focusedAny = false
             var focusedOutcome: TargetActionOutcome? = null
-
-            root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { currentFocus ->
-                val focusedLabel = currentFocus.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                    ?: currentFocus.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                    ?: "<no-label>"
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Interrupting TalkBack auto-focus on: $focusedLabel")
-                currentFocus.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
-            }
 
             if (excludedIndex != -1) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Excluded node found at index=$excludedIndex. Starting traversal from index=$traversalStartIndex")
@@ -425,6 +396,10 @@ object A11yNavigator {
             }
 
             if (shouldTriggerLoopFallback(focusedAny, isScrollAction, excludeDesc)) {
+                if (!allowLooping) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Loop fallback blocked because allowLooping=false")
+                    return TargetActionOutcome(false, "failed_no_new_content")
+                }
                 Log.i("A11Y_HELPER", "[SMART_NEXT] No content after scroll. Looping to first content.")
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Fallback loop triggered - resetting filters")
                 return findAndFocusFirstContent(
@@ -469,11 +444,6 @@ object A11yNavigator {
                     return TargetActionOutcome(false, "failed")
                 }
 
-                currentNode?.let {
-                    val cleared = it.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
-                    Log.i("A11Y_HELPER", "[SMART_NEXT] Current focus clear result after scroll=$cleared")
-                }
-
                 val visibleHistory = collectVisibleHistory(
                     nodes = traversalList,
                     screenTop = screenTop,
@@ -503,13 +473,8 @@ object A11yNavigator {
                     }
                 )
 
-                runFocusGuardianDuringWait()
-
-                val tempRoot = A11yHelperService.instance?.rootInActiveWindow
-                tempRoot?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { oldFocus ->
-                    val staleCleared = oldFocus.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
-                    Log.i("A11Y_HELPER", "[SMART_NEXT] Clear stale accessibility focus result=$staleCleared")
-                }
+                Thread.sleep(700)
+                Thread.sleep(300)
 
                 val newRoot = A11yHelperService.instance?.rootInActiveWindow
                 if (newRoot == null) {
@@ -588,11 +553,6 @@ object A11yNavigator {
                 return TargetActionOutcome(false, "failed")
             }
 
-            currentNode?.let {
-                val cleared = it.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Current focus clear result after scroll=$cleared")
-            }
-
             val visibleHistory = collectVisibleHistory(
                 nodes = traversalList,
                 screenTop = screenTop,
@@ -622,13 +582,8 @@ object A11yNavigator {
                 }
             )
 
-            runFocusGuardianDuringWait()
-
-            val tempRoot = A11yHelperService.instance?.rootInActiveWindow
-            tempRoot?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { oldFocus ->
-                oldFocus.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Cleared stale accessibility focus lock after scroll")
-            }
+            Thread.sleep(700)
+            Thread.sleep(300)
 
             val refreshedRoot = A11yHelperService.instance?.rootInActiveWindow
             val refreshedTraversal = refreshedRoot?.let { buildFocusableTraversalList(it) }.orEmpty()
@@ -657,7 +612,7 @@ object A11yNavigator {
                     )
                 }
             )
-            return findAndFocusFirstContent(
+            val outcome = findAndFocusFirstContent(
                 traversalList = refreshedTraversal,
                 screenTop = refreshedTop,
                 screenBottom = refreshedBottom,
@@ -667,8 +622,19 @@ object A11yNavigator {
                 isScrollAction = true,
                 excludeDesc = lastDesc,
                 startIndex = 0,
-                visibleHistory = visibleHistory
+                visibleHistory = visibleHistory,
+                allowLooping = false
             )
+            if (outcome.success) {
+                return outcome
+            }
+            Log.i("A11Y_HELPER", "[SMART_NEXT] No new content after scroll. Moving focus to bottom bar target.")
+            val bottomBarOutcome = focusOrSkip(nextNode, "moved_to_bottom_bar")
+            return if (bottomBarOutcome.success) {
+                TargetActionOutcome(true, "moved_to_bottom_bar", nextNode)
+            } else {
+                bottomBarOutcome
+            }
         }
 
         Log.i("A11Y_HELPER", "[SMART_NEXT] Performing regular next navigation")
@@ -702,10 +668,6 @@ object A11yNavigator {
         }
 
         requestVisibilityAdjustment(Rect().also { target.getBoundsInScreen(it) })
-
-        root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { latestFocus ->
-            latestFocus.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
-        }
 
         var focused = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
         if (!focused) {
