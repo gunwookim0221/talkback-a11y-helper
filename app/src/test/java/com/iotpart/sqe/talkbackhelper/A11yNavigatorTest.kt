@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.8.5")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.8.6")
     }
 
     @Test
@@ -35,6 +35,49 @@ class A11yNavigatorTest {
 
 
 
+
+
+    @Test
+    fun shouldTriggerShowOnScreen_returnsFalseForBottomBarEvenWhenBottomClipped() {
+        val result = A11yNavigator.shouldTriggerShowOnScreen(
+            bounds = Rect(0, 1700, 1080, 1910),
+            effectiveBottom = 1920,
+            screenTop = 0,
+            isScrollAction = false,
+            isTopBar = false,
+            isBottomBar = true
+        )
+
+        assertFalse(result)
+    }
+
+    @Test
+    fun shouldTriggerShowOnScreen_returnsFalseForTopBarEvenWhenTopAlignWouldTrigger() {
+        val result = A11yNavigator.shouldTriggerShowOnScreen(
+            bounds = Rect(0, 350, 1080, 450),
+            effectiveBottom = 1920,
+            screenTop = 0,
+            isScrollAction = true,
+            isTopBar = true,
+            isBottomBar = false
+        )
+
+        assertFalse(result)
+    }
+
+    @Test
+    fun shouldTriggerShowOnScreen_returnsTrueForRegularContentWhenAdjustmentNeeded() {
+        val result = A11yNavigator.shouldTriggerShowOnScreen(
+            bounds = Rect(0, 350, 1080, 450),
+            effectiveBottom = 1920,
+            screenTop = 0,
+            isScrollAction = true,
+            isTopBar = false,
+            isBottomBar = false
+        )
+
+        assertTrue(result)
+    }
 
     @Test
     fun isSameNodeIdentity_returnsFalseWhenFallbackDescIsDifferent() {
