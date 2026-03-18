@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.8.6")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.8.7")
     }
 
     @Test
