@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.9.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.9.1"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -333,7 +333,8 @@ object A11yNavigator {
                     screenBottom,
                     screenHeight
                 )
-                if (shouldSkipHistoryNodeAfterScroll(isScrollAction, inHistory, isTopBar, isBottomBar)) {
+                val isTopArea = bounds.top < (screenTop + 200)
+                if (shouldSkipHistoryNodeAfterScroll(isScrollAction, inHistory, isTopBar, isBottomBar, isTopArea)) {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping history node after scroll: $label")
                     continue
                 }
@@ -669,6 +670,18 @@ object A11yNavigator {
 
         requestVisibilityAdjustment(Rect().also { target.getBoundsInScreen(it) })
 
+        val currentSystemFocus = target.refresh() && target.isAccessibilityFocused
+        if (shouldReuseExistingAccessibilityFocus(
+                isAccessibilityFocused = currentSystemFocus,
+                isScrollAction = isScrollAction
+            )
+        ) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping duplicate focus action because TalkBack already focused: $label")
+            val focusedBounds = Rect().also { target.getBoundsInScreen(it) }
+            requestVisibilityAdjustment(focusedBounds)
+            return TargetActionOutcome(true, status, target)
+        }
+
         var focused = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
         if (!focused) {
             focused = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
@@ -926,8 +939,9 @@ object A11yNavigator {
         isScrollAction: Boolean,
         inHistory: Boolean,
         isTopBar: Boolean,
-        isBottomBar: Boolean
-    ): Boolean = isScrollAction && inHistory && !isTopBar && !isBottomBar
+        isBottomBar: Boolean,
+        isTopArea: Boolean
+    ): Boolean = isScrollAction && inHistory && !isTopBar && !isBottomBar && !isTopArea
 
     fun findSwipeTarget(
         root: AccessibilityNodeInfo?,

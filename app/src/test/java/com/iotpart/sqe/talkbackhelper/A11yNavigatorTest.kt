@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.9.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.9.1")
     }
 
     @Test
@@ -499,7 +499,8 @@ class A11yNavigatorTest {
                 isScrollAction = true,
                 inHistory = true,
                 isTopBar = false,
-                isBottomBar = false
+                isBottomBar = false,
+                isTopArea = false
             )
         )
         assertFalse(
@@ -507,7 +508,8 @@ class A11yNavigatorTest {
                 isScrollAction = true,
                 inHistory = true,
                 isTopBar = true,
-                isBottomBar = false
+                isBottomBar = false,
+                isTopArea = false
             )
         )
         assertFalse(
@@ -515,9 +517,23 @@ class A11yNavigatorTest {
                 isScrollAction = true,
                 inHistory = true,
                 isTopBar = false,
-                isBottomBar = true
+                isBottomBar = true,
+                isTopArea = false
             )
         )
+    }
+
+    @Test
+    fun shouldSkipHistoryNodeAfterScroll_returnsFalseForTopAreaHistoryAfterScroll() {
+        val skipped = A11yNavigator.shouldSkipHistoryNodeAfterScroll(
+            isScrollAction = true,
+            inHistory = true,
+            isTopBar = false,
+            isBottomBar = false,
+            isTopArea = true
+        )
+
+        assertFalse(skipped)
     }
 
     @Test
