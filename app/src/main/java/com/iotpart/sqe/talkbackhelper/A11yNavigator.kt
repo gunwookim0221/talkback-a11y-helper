@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.9.5"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.9.6"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -1062,11 +1062,9 @@ object A11yNavigator {
         isTopArea: Boolean
     ): Boolean {
         if (!isScrollAction || !inHistory) return false
-        val shouldSkip = if (isScrollAction && isTopArea) false else inHistory
-        if (!shouldSkip) return false
-        if (isFixedUi && !isTopArea) return true
-        if (isInsideMainScrollContainer && isTopArea) return false
-        return shouldSkip
+        if (isFixedUi) return true
+        if (isTopArea) return false
+        return inHistory
     }
 
     fun findSwipeTarget(
@@ -1661,7 +1659,10 @@ object A11yNavigator {
             normalizedViewId.contains("action_bar") ||
             normalizedViewId.contains("home_button") ||
             normalizedViewId.contains("tab_title") ||
-            normalizedViewId.contains("header_bar")
+            normalizedViewId.contains("header_bar") ||
+            normalizedViewId.contains("add_menu") ||
+            normalizedViewId.contains("add_button") ||
+            normalizedViewId.contains("menu_button")
         if (matchesViewId) return true
 
         return false
@@ -1691,6 +1692,9 @@ object A11yNavigator {
             normalizedViewId.contains("menu_bar") ||
             normalizedViewId.contains("menu_favorites") ||
             normalizedViewId.contains("menu_devices") ||
+            normalizedViewId.contains("menu_life") ||
+            normalizedViewId.contains("menu_routines") ||
+            normalizedViewId.contains("menu_menu") ||
             normalizedViewId.contains("bottom_menu") ||
             normalizedViewId.contains("bottom_tab") ||
             normalizedViewId.contains("bottom_nav")

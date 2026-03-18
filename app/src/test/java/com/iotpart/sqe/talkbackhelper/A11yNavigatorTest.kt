@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.9.5")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.9.6")
     }
 
 
@@ -101,7 +101,7 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun shouldSkipHistoryNodeAfterScroll_returnsFalseForTopAreaHistoryEvenWhenFixedUi() {
+    fun shouldSkipHistoryNodeAfterScroll_returnsTrueForFixedUiHistoryEvenInTopArea() {
         val skipped = A11yNavigator.shouldSkipHistoryNodeAfterScroll(
             isScrollAction = true,
             inHistory = true,
@@ -110,7 +110,7 @@ class A11yNavigatorTest {
             isTopArea = true
         )
 
-        assertFalse(skipped)
+        assertTrue(skipped)
     }
 
     @Test
@@ -844,10 +844,34 @@ class A11yNavigatorTest {
             screenTop = 0,
             screenHeight = 1920
         )
+        val addButton = A11yNavigator.isTopAppBarNode(
+            className = "android.widget.ImageButton",
+            viewIdResourceName = "com.test:id/add_button",
+            boundsInScreen = Rect(0, 560, 1080, 680),
+            screenTop = 0,
+            screenHeight = 1920
+        )
+        val addMenu = A11yNavigator.isTopAppBarNode(
+            className = "android.widget.ImageButton",
+            viewIdResourceName = "com.test:id/add_menu",
+            boundsInScreen = Rect(0, 580, 1080, 700),
+            screenTop = 0,
+            screenHeight = 1920
+        )
+        val menuButton = A11yNavigator.isTopAppBarNode(
+            className = "android.widget.ImageButton",
+            viewIdResourceName = "com.test:id/menu_button",
+            boundsInScreen = Rect(0, 600, 1080, 720),
+            screenTop = 0,
+            screenHeight = 1920
+        )
 
         assertTrue(homeButton)
         assertTrue(tabTitle)
         assertTrue(headerBar)
+        assertTrue(addButton)
+        assertTrue(addMenu)
+        assertTrue(menuButton)
     }
 
     @Test
@@ -873,10 +897,34 @@ class A11yNavigatorTest {
             screenBottom = 1920,
             screenHeight = 1920
         )
+        val menuLife = A11yNavigator.isBottomNavigationBarNode(
+            className = "android.widget.LinearLayout",
+            viewIdResourceName = "com.samsung.android.oneconnect:id/menu_life",
+            boundsInScreen = Rect(0, 260, 1080, 380),
+            screenBottom = 1920,
+            screenHeight = 1920
+        )
+        val menuRoutines = A11yNavigator.isBottomNavigationBarNode(
+            className = "android.widget.LinearLayout",
+            viewIdResourceName = "com.samsung.android.oneconnect:id/menu_routines",
+            boundsInScreen = Rect(0, 280, 1080, 400),
+            screenBottom = 1920,
+            screenHeight = 1920
+        )
+        val menuMenu = A11yNavigator.isBottomNavigationBarNode(
+            className = "android.widget.LinearLayout",
+            viewIdResourceName = "com.samsung.android.oneconnect:id/menu_menu",
+            boundsInScreen = Rect(0, 300, 1080, 420),
+            screenBottom = 1920,
+            screenHeight = 1920
+        )
 
         assertTrue(menuPrefix)
         assertTrue(tabPrefix)
         assertTrue(bottomNav)
+        assertTrue(menuLife)
+        assertTrue(menuRoutines)
+        assertTrue(menuMenu)
     }
 
     @Test
