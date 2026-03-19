@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.9.7"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.9.8"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -352,13 +352,14 @@ object A11yNavigator {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Strictly excluding last focused node even in top area: $label")
                     continue
                 }
-                if (shouldSkipHistoryNodeAfterScroll(
-                        isScrollAction = isScrollAction,
-                        inHistory = inHistory,
-                        isFixedUi = isFixedUi || isTopBar || isBottomBar,
-                        isInsideMainScrollContainer = isInsideMainScrollContainer,
-                        isTopArea = isTopContent
-                    )) {
+                val shouldSkipHistory = shouldSkipHistoryNodeAfterScroll(
+                    isScrollAction = isScrollAction,
+                    inHistory = inHistory,
+                    isFixedUi = isFixedUi || isTopBar || isBottomBar,
+                    isInsideMainScrollContainer = isInsideMainScrollContainer,
+                    isTopArea = isTopContent
+                )
+                if (shouldSkipHistory || (isScrollAction && inHistory)) {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping history node after scroll: $label")
                     continue
                 }
@@ -695,7 +696,20 @@ object A11yNavigator {
             }
         }
 
-        requestVisibilityAdjustment(Rect().also { target.getBoundsInScreen(it) })
+        val initialAdjustedBounds = Rect().also { target.getBoundsInScreen(it) }
+        requestVisibilityAdjustment(initialAdjustedBounds)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            shouldTriggerShowOnScreen(
+                bounds = initialAdjustedBounds,
+                effectiveBottom = effectiveBottom,
+                screenTop = screenTop,
+                isScrollAction = isScrollAction,
+                isTopBar = isTopBar,
+                isBottomBar = isBottomBar
+            )
+        ) {
+            Thread.sleep(100)
+        }
 
         val currentSystemFocus = target.refresh() && target.isAccessibilityFocused
         if (shouldReuseExistingAccessibilityFocus(
@@ -709,10 +723,13 @@ object A11yNavigator {
             return TargetActionOutcome(true, status, target)
         }
 
-        var focused = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
-        if (!focused) {
-            focused = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
-        }
+        val focused = requestAccessibilityFocusWithRetry(
+            performFocusAction = { target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS) },
+            refreshFocusState = {
+                target.refresh()
+                target.isAccessibilityFocused
+            }
+        )
 
         if (!focused) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=false (status=$status)")
@@ -734,6 +751,28 @@ object A11yNavigator {
     ): Int {
         val minGuideBottom = (screenBottom * minVisibleRatio).toInt()
         return minOf(effectiveBottom, minGuideBottom)
+    }
+
+    internal fun requestAccessibilityFocusWithRetry(
+        performFocusAction: () -> Boolean,
+        refreshFocusState: () -> Boolean,
+        maxAttempts: Int = 3,
+        retryDelayMs: Long = 50L
+    ): Boolean {
+        repeat(maxAttempts) { attempt ->
+            if (performFocusAction()) {
+                return true
+            }
+            val alreadyFocused = refreshFocusState()
+            if (alreadyFocused) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS returned false but node is already focused on attempt=${attempt + 1}")
+                return true
+            }
+            if (attempt < maxAttempts - 1) {
+                Thread.sleep(retryDelayMs)
+            }
+        }
+        return false
     }
 
     internal fun shouldReuseExistingAccessibilityFocus(
@@ -1072,8 +1111,9 @@ object A11yNavigator {
     ): Boolean {
         if (!isScrollAction || !inHistory) return false
         if (isFixedUi) return true
-        if (isTopArea) return false
-        return inHistory
+        if (!isInsideMainScrollContainer) return true
+        if (isTopArea) return true
+        return true
     }
 
     internal fun isWithinTopContentArea(
