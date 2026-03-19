@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.9.7")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.9.8")
     }
 
 
@@ -111,6 +111,59 @@ class A11yNavigatorTest {
         )
 
         assertTrue(skipped)
+    }
+
+
+    @Test
+    fun shouldSkipHistoryNodeAfterScroll_returnsTrueForHistoryInTopAreaWithinMainScroll() {
+        val skipped = A11yNavigator.shouldSkipHistoryNodeAfterScroll(
+            isScrollAction = true,
+            inHistory = true,
+            isFixedUi = false,
+            isInsideMainScrollContainer = true,
+            isTopArea = true
+        )
+
+        assertTrue(skipped)
+    }
+
+    @Test
+    fun requestAccessibilityFocusWithRetry_returnsTrueOnThirdAttempt() {
+        var attempts = 0
+
+        val result = A11yNavigator.requestAccessibilityFocusWithRetry(
+            performFocusAction = {
+                attempts += 1
+                attempts == 3
+            },
+            refreshFocusState = { false },
+            retryDelayMs = 0L
+        )
+
+        assertTrue(result)
+        assertEquals(3, attempts)
+    }
+
+    @Test
+    fun requestAccessibilityFocusWithRetry_acceptsAlreadyFocusedNodeAfterFalseResults() {
+        var attempts = 0
+        var refreshChecks = 0
+
+        val result = A11yNavigator.requestAccessibilityFocusWithRetry(
+            performFocusAction = {
+                attempts += 1
+                false
+            },
+            refreshFocusState = {
+                refreshChecks += 1
+                refreshChecks == 3
+            },
+            retryDelayMs = 0L
+        )
+
+        assertTrue(result)
+        assertEquals(3, attempts)
+        assertEquals(3, refreshChecks)
     }
 
     @Test
