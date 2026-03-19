@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.9.6")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.9.7")
     }
 
 
@@ -111,6 +111,28 @@ class A11yNavigatorTest {
         )
 
         assertTrue(skipped)
+    }
+
+    @Test
+    fun isWithinTopContentArea_usesTwentyPercentWhenSmallerThan500px() {
+        val result = A11yNavigator.isWithinTopContentArea(
+            nodeTop = 350,
+            screenTop = 0,
+            screenHeight = 1920
+        )
+
+        assertTrue(result)
+    }
+
+    @Test
+    fun isWithinTopContentArea_limitsTopAreaTo500pxOnTallScreens() {
+        val result = A11yNavigator.isWithinTopContentArea(
+            nodeTop = 550,
+            screenTop = 0,
+            screenHeight = 3200
+        )
+
+        assertFalse(result)
     }
 
     @Test

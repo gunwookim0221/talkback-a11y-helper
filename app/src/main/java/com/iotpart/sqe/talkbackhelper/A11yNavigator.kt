@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.9.6"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.9.7"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -315,6 +315,7 @@ object A11yNavigator {
                 val label = node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                     ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                     ?: "<no-label>"
+                val isLastFocusedNode = (excludeDesc != null && label == excludeDesc)
                 val inHistory = visibleHistory.contains(label)
                 Log.i(
                     "A11Y_HELPER",
@@ -342,7 +343,15 @@ object A11yNavigator {
                 val isInsideMainScrollContainer = localMainScrollContainer?.let { scrollContainer ->
                     node == scrollContainer || isDescendantOf(scrollContainer, node) { candidate -> candidate.parent }
                 } ?: false
-                val isTopContent = bounds.top < (screenTop + (screenBottom / 4))
+                val isTopContent = isWithinTopContentArea(
+                    nodeTop = bounds.top,
+                    screenTop = screenTop,
+                    screenHeight = screenHeight
+                )
+                if (isScrollAction && isLastFocusedNode) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Strictly excluding last focused node even in top area: $label")
+                    continue
+                }
                 if (shouldSkipHistoryNodeAfterScroll(
                         isScrollAction = isScrollAction,
                         inHistory = inHistory,
@@ -1065,6 +1074,16 @@ object A11yNavigator {
         if (isFixedUi) return true
         if (isTopArea) return false
         return inHistory
+    }
+
+    internal fun isWithinTopContentArea(
+        nodeTop: Int,
+        screenTop: Int,
+        screenHeight: Int,
+        topAreaMaxPx: Int = 500
+    ): Boolean {
+        val topAreaBoundary = screenTop + minOf(screenHeight / 5, topAreaMaxPx)
+        return nodeTop < topAreaBoundary
     }
 
     fun findSwipeTarget(
