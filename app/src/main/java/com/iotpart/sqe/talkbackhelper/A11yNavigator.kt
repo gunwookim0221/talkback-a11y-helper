@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.13.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.13.1"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -526,24 +526,10 @@ object A11yNavigator {
         }
 
         fun focusSequentiallyFromIndex(startIndex: Int, status: String): TargetActionOutcome {
-            var candidateIndex = startIndex
-            while (candidateIndex in traversalList.indices) {
-                val outcome = focusOrSkip(traversalList[candidateIndex], status, candidateIndex)
-                if (outcome.success) {
-                    return outcome
-                }
-                if (outcome.reason == "snap_back") {
-                    val bypassIndex = candidateIndex + 1
-                    Log.w(
-                        "A11Y_HELPER",
-                        "[SMART_NEXT] Snap-back detected at index=$candidateIndex. Bypassing to index=$bypassIndex"
-                    )
-                    candidateIndex = bypassIndex
-                    continue
-                }
-                return outcome
+            if (startIndex !in traversalList.indices) {
+                return TargetActionOutcome(false, "failed_no_candidate_after_snap_back")
             }
-            return TargetActionOutcome(false, "failed_no_candidate_after_snap_back")
+            return focusOrSkip(traversalList[startIndex], status, startIndex)
         }
 
         val mainScrollContainer = findMainScrollContainer(root)
@@ -926,8 +912,13 @@ object A11yNavigator {
                 "A11Y_HELPER",
                 "[SMART_NEXT] Snap-back detected after ACTION_ACCESSIBILITY_FOCUS success: target=${formatBoundsForLog(targetBounds)} actual=${formatBoundsForLog(afterFocusBounds)} traversalIndex=$traversalIndex label=$label"
             )
+            Log.w(
+                "A11Y_HELPER",
+                "[SMART_NEXT] Snap-back handled: Forcing success to maintain sequence at index $traversalIndex"
+            )
             recordRequestedFocusAttempt(traversalIndex)
-            return TargetActionOutcome(false, "snap_back", target)
+            Thread.sleep(100)
+            return TargetActionOutcome(true, status, target)
         }
 
         recordRequestedFocusAttempt(traversalIndex)
@@ -1011,7 +1002,7 @@ object A11yNavigator {
     internal fun requestAccessibilityFocusWithRetry(
         performFocusAction: () -> Boolean,
         refreshFocusState: () -> Boolean,
-        maxAttempts: Int = 3,
+        maxAttempts: Int = 1,
         retryDelayMs: Long = 50L
     ): Boolean {
         repeat(maxAttempts) { attempt ->

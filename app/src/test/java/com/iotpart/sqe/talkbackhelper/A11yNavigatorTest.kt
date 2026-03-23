@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.13.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.13.1")
     }
 
 
@@ -923,6 +923,28 @@ class A11yNavigatorTest {
         )
 
         assertFalse(shouldDelay)
+    }
+
+
+    @Test
+    fun requestAccessibilityFocusWithRetry_usesSingleAttemptByDefault() {
+        var actionCalls = 0
+        var refreshCalls = 0
+
+        val result = A11yNavigator.requestAccessibilityFocusWithRetry(
+            performFocusAction = {
+                actionCalls += 1
+                false
+            },
+            refreshFocusState = {
+                refreshCalls += 1
+                false
+            }
+        )
+
+        assertFalse(result)
+        assertEquals(1, actionCalls)
+        assertEquals(1, refreshCalls)
     }
 
     @Test
