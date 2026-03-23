@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.11.6")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.12.0")
     }
 
 
@@ -68,6 +68,42 @@ class A11yNavigatorTest {
         )
 
         assertTrue(result)
+    }
+
+    @Test
+    fun skipCoordinateDuplicateTraversalIndices_keepsCandidateWhenLeftOrTopDiffers() {
+        val nodes = listOf(
+            Rect(0, 100, 100, 200),
+            Rect(1, 100, 101, 200),
+            Rect(0, 101, 100, 201)
+        )
+
+        val nextIndex = A11yNavigator.skipCoordinateDuplicateTraversalIndices(
+            nodes = nodes,
+            currentBounds = Rect(0, 100, 100, 200),
+            startIndex = 1,
+            boundsOf = { it }
+        )
+
+        assertEquals(1, nextIndex)
+    }
+
+    @Test
+    fun skipCoordinateDuplicateTraversalIndices_skipsOnlyPerfectBoundsMatch() {
+        val nodes = listOf(
+            Rect(0, 100, 100, 200),
+            Rect(0, 100, 100, 200),
+            Rect(0, 100, 100, 201)
+        )
+
+        val nextIndex = A11yNavigator.skipCoordinateDuplicateTraversalIndices(
+            nodes = nodes,
+            currentBounds = Rect(0, 100, 100, 200),
+            startIndex = 1,
+            boundsOf = { it }
+        )
+
+        assertEquals(2, nextIndex)
     }
 
     @Test

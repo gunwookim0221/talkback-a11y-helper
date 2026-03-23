@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.11.6"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.12.0"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -196,14 +196,21 @@ object A11yNavigator {
             return TargetActionOutcome(false, "Root node is null")
         }
 
-        val traversalList = buildFocusableTraversalList(root)
+        val focusNodes = buildTalkBackLikeFocusNodes(root)
+        val traversalList = focusNodes.map { it.node }
         Log.i("A11Y_HELPER", "[SMART_NEXT] Nodes count=${traversalList.size}")
-        traversalList.forEachIndexed { index, node ->
-            val bounds = Rect().also { node.getBoundsInScreen(it) }
-            val label = node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+        focusNodes.forEachIndexed { index, focusedNode ->
+            val bounds = Rect().also { focusedNode.node.getBoundsInScreen(it) }
+            val label = focusedNode.text?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: focusedNode.contentDescription?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: focusedNode.node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: focusedNode.node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                 ?: "<no-label>"
-            Log.i("A11Y_HELPER", "[SMART_NEXT] #$index: ${label.replace("\n", " ")} (Top: ${bounds.top})")
+            val mergedLabel = focusedNode.mergedLabel?.replace("\n", " ") ?: "<none>"
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT] #$index: ${label.replace("\n", " ")} (L: ${bounds.left}, T: ${bounds.top}, R: ${bounds.right}, B: ${bounds.bottom}) (Merged Label: $mergedLabel)"
+            )
         }
         if (traversalList.isEmpty()) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Traversal list is empty, failing.")
@@ -233,6 +240,7 @@ object A11yNavigator {
             }
             if (duplicateNextBounds != null && currentBounds == duplicateNextBounds) {
                 val compensatedIndex = currentIndex + 1
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping invisible duplicate at index ${currentIndex + 1}")
                 Log.w(
                     "A11Y_HELPER",
                     "[SMART_NEXT] Duplicate bounds compensation triggered: currentIndex=$currentIndex -> compensatedIndex=$compensatedIndex bounds=$currentBounds"
@@ -285,6 +293,7 @@ object A11yNavigator {
                 startIndex = nextIndex,
                 boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
                 onSkip = { skippedIndex, advancedIndex ->
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping invisible duplicate at index $skippedIndex")
                     Log.i(
                         "A11Y_HELPER",
                         "[SMART_NEXT] Skipping coordinate duplicate: jumping from $skippedIndex to $advancedIndex"
@@ -856,6 +865,14 @@ object A11yNavigator {
 
         clearAccessibilityFocusAndRefresh(root)
 
+        val beforeFocusBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
+            Rect().also { focusedNode.getBoundsInScreen(it) }
+        }
+        Log.i(
+            "A11Y_HELPER",
+            "[SMART_NEXT] Before Focus: System is at ${formatBoundsForLog(beforeFocusBounds)}, Target is at ${formatBoundsForLog(targetBounds)}"
+        )
+
         val focused = requestAccessibilityFocusWithRetry(
             performFocusAction = { target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS) },
             refreshFocusState = {
@@ -865,6 +882,14 @@ object A11yNavigator {
                     traversalIndex = traversalIndex
                 )
             }
+        )
+
+        val afterFocusBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
+            Rect().also { focusedNode.getBoundsInScreen(it) }
+        }
+        Log.i(
+            "A11Y_HELPER",
+            "[SMART_NEXT] After Focus: System is at ${formatBoundsForLog(afterFocusBounds)}, Target is at ${formatBoundsForLog(targetBounds)}"
         )
 
         if (!focused) {
@@ -904,6 +929,10 @@ object A11yNavigator {
             )
             Log.i("A11Y_HELPER", "[SMART_NEXT] Successfully sent focus clear event with explicit casting")
         }
+    }
+
+    private fun formatBoundsForLog(bounds: Rect?): String {
+        return bounds?.let { "[${it.left},${it.top},${it.right},${it.bottom}]" } ?: "[null]"
     }
 
     internal fun shouldDelayBeforeFocusCommand(currentFocusedBounds: Rect?, targetBounds: Rect?): Boolean {
@@ -1426,7 +1455,8 @@ object A11yNavigator {
     private data class FocusedNode(
         val node: AccessibilityNodeInfo,
         val text: String?,
-        val contentDescription: String?
+        val contentDescription: String?,
+        val mergedLabel: String?
     )
 
     private fun buildTalkBackLikeFocusNodes(root: AccessibilityNodeInfo): List<FocusedNode> {
@@ -1450,12 +1480,13 @@ object A11yNavigator {
             val mergedContent = collectMergedTextFromContainer(node)
             val mergedText = mergedContent.firstOrNull()
             val mergedDescription = mergedContent.getOrNull(1)
-            sink += FocusedNode(node, mergedText, mergedDescription)
+            sink += FocusedNode(node, mergedText, mergedDescription, mergedText)
         } else if (containerAncestor == null && hasAnyText(node)) {
             sink += FocusedNode(
                 node = node,
                 text = node.text?.toString(),
-                contentDescription = node.contentDescription?.toString()
+                contentDescription = node.contentDescription?.toString(),
+                mergedLabel = null
             )
         }
 
