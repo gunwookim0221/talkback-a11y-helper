@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.14.3"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.14.4"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -18,6 +18,12 @@ object A11yNavigator {
         val reason: String,
         val target: AccessibilityNodeInfo? = null
     )
+
+    fun resetFocusHistory() {
+        setLastRequestedFocusIndex(-1)
+        A11yStateStore.updateLastRequestedFocusIndex(-1)
+        Log.i("A11Y_HELPER", "Focus history has been explicitly reset by external command.")
+    }
 
     data class TargetQuery(
         val targetName: String,

@@ -22,6 +22,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val ACTION_SCROLL = "com.iotpart.sqe.talkbackhelper.SCROLL"
         private const val ACTION_SET_TEXT = "com.iotpart.sqe.talkbackhelper.SET_TEXT"
         private const val ACTION_PING = "com.iotpart.sqe.talkbackhelper.PING"
+        private const val ACTION_COMMAND = "com.iotpart.sqe.talkbackhelper.ACTION_COMMAND"
         private const val EXTRA_TARGET_NAME = "targetName"
         private const val EXTRA_TARGET_TYPE = "targetType"
         private const val EXTRA_TARGET_INDEX = "targetIndex"
@@ -35,6 +36,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val EXTRA_DIRECTION = "direction"
         private const val EXTRA_TEXT = "text"
         private const val EXTRA_REQ_ID = "reqId"
+        private const val EXTRA_COMMAND = "command"
         private const val DEFAULT_REQ_ID = "none"
     }
 
@@ -60,6 +62,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
             ACTION_SCROLL -> handleScroll(intent)
             ACTION_SET_TEXT -> handleSetText(intent)
             ACTION_PING -> handlePing(intent)
+            ACTION_COMMAND -> handleExternalCommand(context, intent)
             else -> Unit
         }
     }
@@ -131,6 +134,27 @@ class A11yCommandReceiver : BroadcastReceiver() {
         }
 
         service.moveFocus(forward, reqId)
+    }
+
+    private fun handleExternalCommand(context: Context, intent: Intent) {
+        val reqId = parseReqId(intent)
+        when (intent.getStringExtra(EXTRA_COMMAND)?.trim()?.lowercase()) {
+            "reset" -> {
+                A11yNavigator.resetFocusHistory()
+                val result = org.json.JSONObject().apply {
+                    put("timestamp", System.currentTimeMillis())
+                    put("reqId", reqId)
+                    put("success", true)
+                    put("status", "reset")
+                }
+                Log.i(TAG, "COMMAND_RESULT $result")
+                context.sendBroadcast(Intent("COMMAND_RESULT").apply {
+                    setPackage(context.packageName)
+                    putExtra("json", result.toString())
+                })
+            }
+            else -> logFailure("COMMAND_RESULT", reqId, "Unsupported command")
+        }
     }
 
     private fun handleSmartNext(context: Context, intent: Intent) {
