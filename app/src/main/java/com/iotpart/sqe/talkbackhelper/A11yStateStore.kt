@@ -16,10 +16,20 @@ object A11yStateStore {
     var lastUpdatedAt: Long = 0L
         private set
 
+    @Volatile
+    var lastRequestedFocusIndex: Int = -1
+        private set
+
     fun update(snapshot: FocusSnapshot) {
         lastFocusJson = snapshot.toJson().toString()
         lastUpdatedAt = snapshot.timestamp
         Log.i(TAG, "FOCUS_UPDATE $lastFocusJson")
+    }
+
+    fun updateLastRequestedFocusIndex(index: Int) {
+        lastRequestedFocusIndex = index
+        lastUpdatedAt = System.currentTimeMillis()
+        Log.i(TAG, "FOCUS_INDEX_UPDATE index=$index")
     }
 
     fun ensureFallbackJson() {
