@@ -213,11 +213,31 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.SET_TEXT -p com.iotpart
 
 ## Advanced Usage
 
-## 🔄 Manual History Reset
+## 🔄 탐색 히스토리 관리 가이드 (Important)
 
-A11yHelper는 효율적인 탐색을 위해 마지막 방문 인덱스를 기억합니다. 하지만 **탭 전환, 페이지 이동, 팝업 닫기** 등 화면 구성이 완전히 바뀌는 시점에는 이 기억이 오히려 방해가 됩니다.
+`move_smart` 기능은 중복 탐색을 방지하기 위해 마지막 방문 위치를 기억합니다. **탭 전환이나 화면 이동 시**에는 이 기억이 탐색을 방해하므로, 반드시 다음 시퀀스에 따라 스크립트를 작성하십시오.
 
-새로운 화면에서 탐색을 시작하기 전, 반드시 다음 리셋 명령을 스크립트에 포함하십시오.
+### 권장 탐색 시퀀스
+1. **화면 이동**: `click_element` 등으로 원하는 탭/페이지 진입
+2. **히스토리 리셋**: `reset_focus_history(device)` 호출 (필수)
+3. **시작점 고정**: 화면 최상단 객체(예: `Location QR code`)에 `perform_focus` 수행
+
+### 파이썬 예시
+
+```python
+# 1. 탭 이동
+client.click_element(devices, targetName="Devices", targetType="b")
+time.sleep(1.0)
+
+# 2. 히스토리 초기화 (특정 단말 지정)
+client.reset_focus_history(devices)
+
+# 3. 우상단 객체 선택으로 탐색 시작점 고정 (Anchor)
+client.perform_focus(devices, targetName="Location QR code", targetType="b")
+
+# 4. 스마트 탐색 시작
+client.move_focus_smart(devices)
+```
 
 ### 리셋 명령 (ADB)
 
@@ -225,19 +245,11 @@ A11yHelper는 효율적인 탐색을 위해 마지막 방문 인덱스를 기억
 adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.iotpart.sqe.talkbackhelper --es command "reset"
 ```
 
-### 파이썬 예시
+### 왜 꼭 필요한가?
 
-```python
-def change_context(target_tab):
-    click(target_tab)  # 화면 이동
-    send_command("reset")  # 헬퍼 히스토리 초기화 (필수)
-    print("Context switched and helper reset.")
-```
-
-### 💡 이 수정의 이점
-
-* **유연성**: AI가 화면 전환을 잘못 판단하여 리셋하는 부작용을 막고, 사람이 의도한 시점에만 정확히 리셋할 수 있습니다.
-* **안정성**: `reset` 명령 후에는 항상 리스트의 0번 노드(가장 상단)부터 다시 탐색을 시작하므로 전수 검사 누락이 발생하지 않습니다.
+* **탭 전환 직후 오동작 방지**: 이전 화면의 마지막 포커스 인덱스가 남아 있으면 새 탭 첫 항목을 건너뛰거나 엉뚱한 카드부터 읽을 수 있습니다.
+* **앵커 기반 재현성 확보**: 리셋 후 최상단 앵커에 `perform_focus`를 주면, 이후 `move_focus_smart`가 항상 동일한 시작점에서 동작합니다.
+* **멀티 단말 안전성**: `client.reset_focus_history(devices)`처럼 대상 단말을 명시하면 병렬 실행 중 다른 기기의 히스토리를 건드리지 않습니다.
 
 위 흐름을 사용하면 화면 컨텍스트 전환 직후에도 `SMART_NEXT`의 마지막 노드 그레이스 포커스 로직은 유지한 채, 탐색 시작점만 명시적으로 재설정할 수 있습니다.
 
