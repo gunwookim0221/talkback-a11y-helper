@@ -1,4 +1,5 @@
 import subprocess
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -970,7 +971,7 @@ class ClientInterfaceCompatTest(unittest.TestCase):
         with patch.object(client, "check_talkback_status", return_value=False), patch("builtins.print") as print_mock:
             result = client.get_announcements(dev="SER", wait_seconds=0.0)
 
-        self.assertEqual(result, [])
+        self.assertEqual(result, "")
         print_mock.assert_called_once_with("TalkBack이 꺼져 있어 음성을 수집할 수 없습니다")
 
     def test_read_log_result_filters_by_req_id(self):
@@ -1023,24 +1024,24 @@ class VerifySpeechTest(unittest.TestCase):
         client = A11yAdbClient(start_monitor=False)
 
         with patch.object(client, "_take_snapshot") as snap_mock, patch.object(
-            client, "get_announcements", return_value=["Pet detail card"]
+            client, "get_announcements", return_value="Pet detail card"
         ), patch("talkback_lib.os.remove") as remove_mock, patch("talkback_lib.Path.exists", return_value=True):
             ok = client.verify_speech("SER", expected_regex="Pet.*")
 
         self.assertTrue(ok)
-        snap_mock.assert_called_once_with("SER", "temp_Pet__.png")
-        remove_mock.assert_called_once_with(Path("temp_Pet__.png"))
+        snap_mock.assert_called_once_with("SER", "temp_Pet.png")
+        remove_mock.assert_called_once_with(Path("temp_Pet.png"))
 
     def test_verify_speech_failure_saves_error_snapshot(self):
         client = A11yAdbClient(start_monitor=False)
 
         with patch.object(client, "_take_snapshot"), patch.object(
-            client, "get_announcements", return_value=["다른 문장"]
+            client, "get_announcements", return_value="다른 문장"
         ), patch.object(client, "_save_failure_image") as save_mock, patch("talkback_lib.Path.exists", return_value=True):
             ok = client.verify_speech("SER", expected_regex="Pet.*")
 
         self.assertFalse(ok)
-        save_mock.assert_called_once_with(Path("temp_Pet__.png"), "Pet.*", "다른 문장")
+        save_mock.assert_called_once_with(Path("temp_Pet.png"), "Pet.*", "다른 문장")
 
     def test_save_failure_image_sanitizes_windows_filename_chars(self):
         client = A11yAdbClient(start_monitor=False)
@@ -1048,6 +1049,7 @@ class VerifySpeechTest(unittest.TestCase):
 
         image_mock = unittest.mock.MagicMock()
         image_mock.convert.return_value = image_mock
+        image_mock.size = (200, 100)
         alpha_mock = unittest.mock.MagicMock()
         alpha_mock.convert.return_value = alpha_mock
 
