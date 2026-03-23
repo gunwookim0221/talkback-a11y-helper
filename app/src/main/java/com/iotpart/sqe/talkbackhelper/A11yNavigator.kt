@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.12.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.13.0"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -513,7 +513,7 @@ object A11yNavigator {
             return TargetActionOutcome(false, "failed")
         }
 
-        fun focusOrSkip(target: AccessibilityNodeInfo, status: String): TargetActionOutcome {
+        fun focusOrSkip(target: AccessibilityNodeInfo, status: String, traversalIndex: Int = -1): TargetActionOutcome {
             return performFocusWithVisibilityCheck(
                 root = root,
                 target = target,
@@ -521,8 +521,29 @@ object A11yNavigator {
                 effectiveBottom = effectiveBottom,
                 status = status,
                 isScrollAction = false,
-                traversalIndex = -1
+                traversalIndex = traversalIndex
             )
+        }
+
+        fun focusSequentiallyFromIndex(startIndex: Int, status: String): TargetActionOutcome {
+            var candidateIndex = startIndex
+            while (candidateIndex in traversalList.indices) {
+                val outcome = focusOrSkip(traversalList[candidateIndex], status, candidateIndex)
+                if (outcome.success) {
+                    return outcome
+                }
+                if (outcome.reason == "snap_back") {
+                    val bypassIndex = candidateIndex + 1
+                    Log.w(
+                        "A11Y_HELPER",
+                        "[SMART_NEXT] Snap-back detected at index=$candidateIndex. Bypassing to index=$bypassIndex"
+                    )
+                    candidateIndex = bypassIndex
+                    continue
+                }
+                return outcome
+            }
+            return TargetActionOutcome(false, "failed_no_candidate_after_snap_back")
         }
 
         val mainScrollContainer = findMainScrollContainer(root)
@@ -640,7 +661,7 @@ object A11yNavigator {
             Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SCROLL_FORWARD result=$scrollResult")
             if (!scrollResult) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Scroll failed (end of list), moving to bottom bar.")
-                return focusOrSkip(nextNode, "moved_to_bottom_bar_direct")
+                return focusOrSkip(nextNode, "moved_to_bottom_bar_direct", nextIndex)
             }
 
             val visibleHistory = collectVisibleHistory(
@@ -712,7 +733,7 @@ object A11yNavigator {
                 return outcome
             }
             Log.i("A11Y_HELPER", "[SMART_NEXT] No new content after scroll. Moving focus to bottom bar target.")
-            val bottomBarOutcome = focusOrSkip(nextNode, "moved_to_bottom_bar")
+            val bottomBarOutcome = focusOrSkip(nextNode, "moved_to_bottom_bar", nextIndex)
             return if (bottomBarOutcome.success) {
                 TargetActionOutcome(true, "moved_to_bottom_bar", nextNode)
             } else {
@@ -721,7 +742,7 @@ object A11yNavigator {
         }
 
         Log.i("A11Y_HELPER", "[SMART_NEXT] Performing regular next navigation")
-        return focusOrSkip(nextNode, "moved")
+        return focusSequentiallyFromIndex(nextIndex, "moved")
     }
 
 
@@ -847,7 +868,7 @@ object A11yNavigator {
             )
         ) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping duplicate focus action because current accessibility focus bounds exactly match target: $label")
-            setLastRequestedFocusIndex(traversalIndex)
+            recordRequestedFocusAttempt(traversalIndex)
             requestVisibilityAdjustment(targetBounds)
             return TargetActionOutcome(true, status, target)
         }
@@ -864,6 +885,8 @@ object A11yNavigator {
         }
 
         clearAccessibilityFocusAndRefresh(root)
+        requestInputFocusBeforeAccessibilityFocus(target, label)
+        recordRequestedFocusAttempt(traversalIndex)
 
         val beforeFocusBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
             Rect().also { focusedNode.getBoundsInScreen(it) }
@@ -894,14 +917,24 @@ object A11yNavigator {
 
         if (!focused) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=false (status=$status)")
+            recordRequestedFocusAttempt(traversalIndex)
             return TargetActionOutcome(false, "failed", target)
         }
 
-        setLastRequestedFocusIndex(traversalIndex)
+        if (afterFocusBounds != null && afterFocusBounds != targetBounds) {
+            Log.w(
+                "A11Y_HELPER",
+                "[SMART_NEXT] Snap-back detected after ACTION_ACCESSIBILITY_FOCUS success: target=${formatBoundsForLog(targetBounds)} actual=${formatBoundsForLog(afterFocusBounds)} traversalIndex=$traversalIndex label=$label"
+            )
+            recordRequestedFocusAttempt(traversalIndex)
+            return TargetActionOutcome(false, "snap_back", target)
+        }
+
+        recordRequestedFocusAttempt(traversalIndex)
         Thread.sleep(100)
         val focusedBounds = Rect().also { target.getBoundsInScreen(it) }
         requestVisibilityAdjustment(focusedBounds)
-        setLastRequestedFocusIndex(traversalIndex)
+        recordRequestedFocusAttempt(traversalIndex)
         Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=true (status=$status)")
         Log.i("A11Y_HELPER", "[SMART_NEXT] Focused top-most content at Y=${focusedBounds.top}")
         return TargetActionOutcome(true, status, target)
@@ -914,14 +947,22 @@ object A11yNavigator {
         A11yStateStore.updateLastRequestedFocusIndex(index)
     }
 
+    internal fun recordRequestedFocusAttempt(index: Int) {
+        if (index < 0) return
+        setLastRequestedFocusIndex(maxOf(lastRequestedFocusIndex, A11yStateStore.lastRequestedFocusIndex, index))
+    }
+
     internal fun clearAccessibilityFocusAndRefresh(root: AccessibilityNodeInfo) {
         root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
             val cleared = focusedNode.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Cleared accessibility focus before request: result=$cleared")
+            val clearedTwice = focusedNode.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Cleared accessibility focus before request: result=$cleared secondPass=$clearedTwice")
         }
 
         val service: android.accessibilityservice.AccessibilityService? = A11yHelperService.instance
         if (service != null && service is A11yHelperService) {
+            root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+                ?.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
             root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
                 ?.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
             (service as A11yHelperService).sendAccessibilityEvent(
@@ -929,6 +970,12 @@ object A11yNavigator {
             )
             Log.i("A11Y_HELPER", "[SMART_NEXT] Successfully sent focus clear event with explicit casting")
         }
+    }
+
+    internal fun requestInputFocusBeforeAccessibilityFocus(target: AccessibilityNodeInfo, label: String): Boolean {
+        val inputFocusResult = target.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_FOCUS priming result=$inputFocusResult label=$label")
+        return inputFocusResult
     }
 
     private fun formatBoundsForLog(bounds: Rect?): String {
