@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.14.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.14.2"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -890,7 +890,7 @@ object A11yNavigator {
             )
         ) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping duplicate focus action because current accessibility focus bounds exactly match target: $label")
-            recordRequestedFocusAttempt(traversalIndex)
+            recordRequestedFocusAttempt(traversalIndex, root)
             requestVisibilityAdjustment(targetBounds)
             return TargetActionOutcome(true, status, target)
         }
@@ -908,7 +908,7 @@ object A11yNavigator {
 
         clearAccessibilityFocusAndRefresh(root)
         requestInputFocusBeforeAccessibilityFocus(target, label)
-        recordRequestedFocusAttempt(traversalIndex)
+        recordRequestedFocusAttempt(traversalIndex, root)
 
         val beforeFocusBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
             Rect().also { focusedNode.getBoundsInScreen(it) }
@@ -943,7 +943,7 @@ object A11yNavigator {
 
         if (!focused) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=false (status=$status)")
-            recordRequestedFocusAttempt(traversalIndex)
+            recordRequestedFocusAttempt(traversalIndex, root)
             return TargetActionOutcome(false, "failed", target)
         }
 
@@ -959,16 +959,16 @@ object A11yNavigator {
                 "A11Y_HELPER",
                 "[SMART_NEXT] Snap-back handled: Forcing success to maintain sequence at index $traversalIndex"
             )
-            recordRequestedFocusAttempt(traversalIndex)
+            recordRequestedFocusAttempt(traversalIndex, root)
             Thread.sleep(100)
-            return TargetActionOutcome(true, "snap_back_handled", target)
+            return TargetActionOutcome(true, "moved", target)
         }
 
-        recordRequestedFocusAttempt(traversalIndex)
+        recordRequestedFocusAttempt(traversalIndex, root)
         Thread.sleep(100)
         val focusedBounds = Rect().also { target.getBoundsInScreen(it) }
         requestVisibilityAdjustment(focusedBounds)
-        recordRequestedFocusAttempt(traversalIndex)
+        recordRequestedFocusAttempt(traversalIndex, root)
         Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=true (status=$status)")
         Log.i("A11Y_HELPER", "[SMART_NEXT] Focused top-most content at Y=${focusedBounds.top}")
         return TargetActionOutcome(true, status, target)
@@ -981,9 +981,30 @@ object A11yNavigator {
         A11yStateStore.updateLastRequestedFocusIndex(index)
     }
 
-    internal fun recordRequestedFocusAttempt(index: Int) {
+    internal fun recordRequestedFocusAttempt(index: Int, root: AccessibilityNodeInfo? = null) {
         if (index < 0) return
-        setLastRequestedFocusIndex(maxOf(lastRequestedFocusIndex, A11yStateStore.lastRequestedFocusIndex, index))
+
+        var resolvedIndex = maxOf(lastRequestedFocusIndex, A11yStateStore.lastRequestedFocusIndex, index)
+        val focusedNode = root?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        if (root != null && focusedNode != null) {
+            val traversalNodes = buildTalkBackLikeFocusNodes(root).map { it.node }
+            val focusedIndex = findNodeIndexByIdentity(
+                nodes = traversalNodes,
+                target = focusedNode,
+                idOf = { it.viewIdResourceName },
+                textOf = { it.text?.toString() },
+                contentDescriptionOf = { it.contentDescription?.toString() },
+                boundsOf = { Rect().also(it::getBoundsInScreen) },
+                onCoordinateMatch = { matchedIndex ->
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Reconciled lastRequestedFocusIndex with actual focused coordinates at index $matchedIndex")
+                }
+            )
+            if (focusedIndex != -1) {
+                resolvedIndex = maxOf(resolvedIndex, focusedIndex)
+            }
+        }
+
+        setLastRequestedFocusIndex(resolvedIndex)
     }
 
     internal fun clearAccessibilityFocusAndRefresh(root: AccessibilityNodeInfo) {

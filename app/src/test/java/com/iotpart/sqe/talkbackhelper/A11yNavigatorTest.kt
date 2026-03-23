@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.14.1")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.14.2")
     }
 
 
@@ -149,6 +149,29 @@ class A11yNavigatorTest {
             navigatorField.setInt(null, originalNavigatorValue)
             stateField.setInt(null, originalStateValue)
         }
+    }
+
+
+    @Test
+    fun findNodeIndexByIdentity_prefersCoordinateIndexForFocusReconciliation() {
+        data class IdentityNode(val id: String?, val text: String?, val desc: String?, val bounds: Rect)
+
+        val target = IdentityNode(id = "com.test:id/current", text = "현재", desc = "현재 포커스", bounds = Rect(0, 500, 400, 620))
+        val list = listOf(
+            IdentityNode(id = "com.test:id/other", text = "다른 카드", desc = "이전 포커스", bounds = Rect(0, 300, 400, 420)),
+            IdentityNode(id = "com.test:id/changed", text = "변경된 카드", desc = "변경된 포커스", bounds = Rect(0, 500, 400, 620))
+        )
+
+        val index = A11yNavigator.findNodeIndexByIdentity(
+            nodes = list,
+            target = target,
+            idOf = { it.id },
+            textOf = { it.text },
+            contentDescriptionOf = { it.desc },
+            boundsOf = { it.bounds }
+        )
+
+        assertEquals(1, index)
     }
 
     @Test
