@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.13.2")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.14.0")
     }
 
 
@@ -1863,6 +1863,27 @@ class A11yNavigatorTest {
     }
 
     @Test
+    fun findNodeIndexByIdentity_prefersCoordinateMatchEvenWhenIdentityDiffers() {
+        data class IdentityNode(val id: String?, val text: String?, val desc: String?, val bounds: Rect)
+
+        val target = IdentityNode(id = "com.test:id/current", text = "현재", desc = "현재 카드", bounds = Rect(0, 500, 400, 620))
+        val list = listOf(
+            IdentityNode(id = "com.test:id/changed", text = "변경됨", desc = "다른 카드", bounds = Rect(0, 500, 400, 620))
+        )
+
+        val index = A11yNavigator.findNodeIndexByIdentity(
+            nodes = list,
+            target = target,
+            idOf = { it.id },
+            textOf = { it.text },
+            contentDescriptionOf = { it.desc },
+            boundsOf = { it.bounds }
+        )
+
+        assertEquals(0, index)
+    }
+
+    @Test
     fun isSameNodeIdentity_returnsFalseWhenStrictMatchFailsAndDescDiffers() {
         val result = A11yNavigator.isSameNodeIdentity(
             aId = "com.test:id/item",
@@ -1879,19 +1900,19 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun isSameNodeIdentity_requiresExactBoundsWhenIdTextAndDescriptionMatch() {
+    fun isSameNodeIdentity_returnsTrueWhenBoundsMatchExactlyEvenIfIdentityChanged() {
         val result = A11yNavigator.isSameNodeIdentity(
             aId = "com.test:id/item",
             aText = "거실 조명",
             aContentDescription = "거실 조명 버튼",
             aBounds = Rect(0, 100, 100, 200),
-            bId = "com.test:id/item",
-            bText = "거실 조명",
-            bContentDescription = "거실 조명 버튼",
-            bBounds = Rect(0, 101, 100, 201)
+            bId = "com.test:id/item_alt",
+            bText = "새 라벨",
+            bContentDescription = "새 설명",
+            bBounds = Rect(0, 100, 100, 200)
         )
 
-        assertFalse(result)
+        assertTrue(result)
     }
 
     @Test
@@ -1905,6 +1926,26 @@ class A11yNavigatorTest {
             bText = "거실 조명",
             bContentDescription = "거실 조명 버튼",
             bBounds = Rect(0, 100, 100, 200)
+        )
+
+        assertFalse(result)
+    }
+
+    @Test
+    fun isWithinSnapBackTolerance_returnsTrueWithinTenPixels() {
+        val result = A11yNavigator.isWithinSnapBackTolerance(
+            targetBounds = Rect(0, 100, 100, 200),
+            actualBounds = Rect(8, 108, 108, 208)
+        )
+
+        assertTrue(result)
+    }
+
+    @Test
+    fun isWithinSnapBackTolerance_returnsFalseBeyondTenPixels() {
+        val result = A11yNavigator.isWithinSnapBackTolerance(
+            targetBounds = Rect(0, 100, 100, 200),
+            actualBounds = Rect(11, 111, 111, 211)
         )
 
         assertFalse(result)
