@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.13.1")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.13.2")
     }
 
 
@@ -35,6 +35,36 @@ class A11yNavigatorTest {
         )
 
         assertEquals(6, nextIndex)
+    }
+
+
+    @Test
+    fun findCurrentTraversalIndex_prioritizesLastNodeMatchOverEarlierIdentityMatch() {
+        data class IdentityNode(val id: String?, val text: String?, val desc: String?, val bounds: Rect)
+
+        val first = IdentityNode("com.test:id/item", "거실", "거실 카드", Rect(0, 100, 200, 200))
+        val middle = IdentityNode("com.test:id/item_alt", "주방", "주방 카드", Rect(0, 220, 200, 320))
+        val last = IdentityNode("com.test:id/item", "거실", "거실 카드", Rect(0, 100, 200, 200))
+        val traversalList = listOf(first, middle, last)
+
+        val index = A11yNavigator.findCurrentTraversalIndex(
+            traversalList = traversalList,
+            currentNode = last,
+            isSameNodeMatch = { a, b ->
+                A11yNavigator.isSameNodeIdentity(
+                    aId = a.id,
+                    aText = a.text,
+                    aContentDescription = a.desc,
+                    aBounds = a.bounds,
+                    bId = b.id,
+                    bText = b.text,
+                    bContentDescription = b.desc,
+                    bBounds = b.bounds
+                )
+            }
+        )
+
+        assertEquals(2, index)
     }
 
     @Test
@@ -1843,6 +1873,22 @@ class A11yNavigatorTest {
             bText = "거실 조명",
             bContentDescription = "다른 설명",
             bBounds = Rect(0, 130, 100, 230)
+        )
+
+        assertFalse(result)
+    }
+
+    @Test
+    fun isSameNodeIdentity_requiresExactBoundsWhenIdTextAndDescriptionMatch() {
+        val result = A11yNavigator.isSameNodeIdentity(
+            aId = "com.test:id/item",
+            aText = "거실 조명",
+            aContentDescription = "거실 조명 버튼",
+            aBounds = Rect(0, 100, 100, 200),
+            bId = "com.test:id/item",
+            bText = "거실 조명",
+            bContentDescription = "거실 조명 버튼",
+            bBounds = Rect(0, 101, 100, 201)
         )
 
         assertFalse(result)
