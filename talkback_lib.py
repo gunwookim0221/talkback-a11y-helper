@@ -35,7 +35,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.6.2"
+CLIENT_ALGORITHM_VERSION = "1.6.3"
 
 
 @dataclass
@@ -48,6 +48,7 @@ class A11yAdbClient:
     def __post_init__(self) -> None:
         self.needs_update = True
         self.last_announcements: list[str] = []
+        self.last_merged_announcement: str = ""
         self._state_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._monitor_proc: subprocess.Popen[str] | None = None
@@ -168,10 +169,9 @@ class A11yAdbClient:
     def _wait_for_speech_if_needed(self, dev: Any = None, enabled: bool = True) -> None:
         if not enabled:
             return
-        announcements = self.get_announcements(dev=dev, wait_seconds=1.5, only_new=True)
-        if announcements:
-            speech_text = announcements[-1]
-            wait_time = max(0.5, min(len(speech_text) * 0.12, 4.0))
+        announcement = self.get_announcements(dev=dev, wait_seconds=1.5, only_new=True)
+        if announcement:
+            wait_time = max(0.5, min(len(announcement) * 0.12, 4.0))
             time.sleep(wait_time)
         else:
             time.sleep(0.5)
@@ -284,14 +284,16 @@ class A11yAdbClient:
         wait_seconds: float = 3.0,
         take_error_snapshot: bool = True,
     ) -> bool:
+        """병합된 최신 발화를 기준으로 정규식 매칭을 검증합니다."""
         safe_name = re.sub(r"[^0-9A-Za-z가-힣._-]", "_", expected_regex)
         safe_name = safe_name.strip(" ._") or "target"
         temp_path = Path(f"temp_{safe_name}.png")
 
         self._take_snapshot(dev, str(temp_path))
 
-        announcements = self.get_announcements(dev=dev, wait_seconds=wait_seconds)
-        actual_speech = announcements[-1] if announcements else "음성 없음"
+        actual_speech = self.get_announcements(dev=dev, wait_seconds=wait_seconds)
+        if not actual_speech:
+            actual_speech = "음성 없음"
 
         if re.search(expected_regex, actual_speech, re.IGNORECASE):
             if temp_path.exists():
@@ -317,6 +319,7 @@ class A11yAdbClient:
         if not self.check_helper_status(dev=dev):
             return []
         self.last_announcements = []
+        self.last_merged_announcement = ""
         self.clear_logcat(dev=dev)
         req_id = str(uuid.uuid4())[:8]
         self._broadcast(dev, ACTION_DUMP_TREE, ["--es", "reqId", req_id])
@@ -677,6 +680,7 @@ class A11yAdbClient:
         if not self.check_helper_status(dev=dev):
             return False
         self.last_announcements = []
+        self.last_merged_announcement = ""
         deadline = time.monotonic() + wait_
         while time.monotonic() <= deadline:
             self._refresh_tree_if_needed(dev)
@@ -721,6 +725,7 @@ class A11yAdbClient:
         if not self.check_helper_status(dev=dev):
             return False
         self.last_announcements = []
+        self.last_merged_announcement = ""
         deadline = time.monotonic() + wait_
         ci_name = self._normalize_case_insensitive_pattern(name)
         while time.monotonic() <= deadline:
@@ -898,6 +903,7 @@ class A11yAdbClient:
             return "failed"
 
         self.last_announcements = []
+        self.last_merged_announcement = ""
         # Keep previous logcat history for SMART_NEXT analysis continuity.
         # self.clear_logcat(dev=dev)
         req_id = str(uuid.uuid4())[:8]
@@ -1086,6 +1092,7 @@ class A11yAdbClient:
         if not self.check_helper_status(dev=dev):
             return False
         self.last_announcements = []
+        self.last_merged_announcement = ""
         deadline = time.monotonic() + wait_
         ci_name = self._normalize_case_insensitive_pattern(name)
         print(f"[DEBUG][isin] 검색 시작 targetName={name}, targetType={type_}")
@@ -1125,10 +1132,23 @@ class A11yAdbClient:
             time.sleep(0.5)
         return False
 
-    def get_announcements(self, dev: Any = None, wait_seconds: float = 2.0, only_new: bool = True) -> list[str]:
+    @staticmethod
+    def _merge_announcements(items: list[str]) -> str:
+        """발화 조각 목록을 예측 가능한 규칙으로 하나의 문자열로 병합합니다."""
+        normalized = [item.strip() for item in items if item.strip()]
+        return " ".join(normalized)
+
+    def get_partial_announcements(
+        self,
+        dev: Any = None,
+        wait_seconds: float = 2.0,
+        only_new: bool = True,
+    ) -> list[str]:
+        """수집된 raw 발화 조각 리스트를 반환합니다."""
         if not self.check_talkback_status(dev=dev):
             print("TalkBack이 꺼져 있어 음성을 수집할 수 없습니다")
             self.last_announcements = []
+            self.last_merged_announcement = ""
             return []
 
         start_time = time.monotonic()
@@ -1156,6 +1176,7 @@ class A11yAdbClient:
 
                 if "A11Y_ANNOUNCEMENT:" not in line:
                     continue
+
                 _, payload = line.split("A11Y_ANNOUNCEMENT:", 1)
                 message = payload.strip()
                 if message and message not in seen:
@@ -1172,8 +1193,24 @@ class A11yAdbClient:
             self._last_log_marker = newest_log_marker
 
         self.last_announcements = announcements
-
+        self.last_merged_announcement = self._merge_announcements(announcements)
         return announcements
+
+    def get_announcements(
+        self,
+        dev: Any = None,
+        wait_seconds: float = 2.0,
+        only_new: bool = True,
+    ) -> str:
+        """수집된 발화 조각을 병합한 최신 발화 문자열을 반환합니다."""
+        announcements = self.get_partial_announcements(
+            dev=dev,
+            wait_seconds=wait_seconds,
+            only_new=only_new,
+        )
+        merged = self._merge_announcements(announcements)
+        self.last_merged_announcement = merged
+        return merged
 
     @staticmethod
     def _parse_logcat_time(line: str) -> tuple[int, int, int, int, int, int] | None:

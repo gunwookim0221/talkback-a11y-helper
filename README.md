@@ -255,6 +255,13 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.i
 
 ## `talkback_lib.py` 레거시 호환 API
 
+- Python 클라이언트 알고리즘 버전: `CLIENT_ALGORITHM_VERSION = 1.6.3`
+- 발화 조회 API
+  - `get_announcements(...)` → 수집된 발화를 `strip`/빈 문자열 제거 후 공백으로 병합한 `str` 반환
+  - `get_partial_announcements(...)` → raw 발화 조각 `list[str]` 반환
+  - `last_announcements` → 마지막 raw 발화 조각 리스트 유지
+  - `last_merged_announcement` → 마지막 병합 발화 문자열
+
 - 다중 단말 지원: `A11yAdbClient(dev_serial="...")`로 기본 단말 시리얼을 설정할 수 있으며, 대부분 메서드는 `dev`(문자열 serial 또는 `dev.serial`) 인자를 우선 사용합니다. 내부적으로 `adb -s <serial>`로 실행됩니다.
 - `clear_logcat(dev=None)`
   - 외부에서 직접 호출 가능한 공개 메서드이며, 지정 단말의 logcat 버퍼를 `adb logcat -c`로 초기화합니다.
@@ -321,13 +328,18 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.i
 - `dump_tree(dev=None, wait_seconds=5.0)`
   - 액션 시작 시 `last_announcements`를 초기화합니다.
   - 긴 트리 로그(`DUMP_TREE_PART`)를 여러 줄로 수집한 뒤 모두 병합하여 JSON으로 파싱합니다.
-- `get_announcements(dev=None, wait_seconds=2.0, only_new=True)`
+- `get_partial_announcements(dev=None, wait_seconds=2.0, only_new=True)`
   - 수집 전에 `check_talkback_status(dev)`로 TalkBack 활성 여부를 확인합니다.
   - 비활성으로 판단되면 `"TalkBack이 꺼져 있어 음성을 수집할 수 없습니다"`를 출력하고 빈 리스트를 반환합니다.
   - `only_new=True`(기본): 내부 마커 이후의 새 `A11Y_ANNOUNCEMENT`만 수집합니다.
   - `only_new=False`: 마커를 무시하고 현재 logcat 버퍼의 전체 안내를 수집합니다.
   - 로그 조회 시 `A11Y_HELPER:V A11Y_ANNOUNCEMENT:V *:S` 필터를 사용해 필요한 태그만 읽습니다.
-  - 수집 결과는 반환값과 함께 `client.last_announcements`에도 항상 저장됩니다.
+  - 수집 결과 raw 리스트는 반환값과 함께 `client.last_announcements`에 저장됩니다.
+- `get_announcements(dev=None, wait_seconds=2.0, only_new=True)`
+  - 내부적으로 `get_partial_announcements()`를 호출합니다.
+  - 각 item에 `strip()`을 적용하고 빈 문자열을 제거한 뒤, `" ".join(...)`으로 병합한 `str`를 반환합니다.
+  - 발화가 없으면 빈 문자열(`""`)을 반환합니다.
+  - 병합 결과는 `client.last_merged_announcement`에도 저장됩니다.
 - `ping(dev=None, wait_=3.0) -> bool`
   - `PING` 브로드캐스트를 전송하고 `PING_RESULT` 로그의 `reqId/success/status`를 확인해 준비 상태(`READY`)를 반환합니다.
 - `check_helper_status(dev=None) -> bool`
@@ -340,7 +352,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.i
 - `touch/select/scroll/scrollFind/typing/isin/dump_tree`는 공통적으로 시작 시 `check_helper_status()`를 먼저 확인하며, 비활성 상태면 즉시 실패(`False` 또는 빈 리스트)를 반환합니다.
 - `verify_speech(dev, expected_regex, wait_seconds=3.0, take_error_snapshot=True)`
   - `expected_regex`를 파일명에 안전한 문자열로 정규화한 뒤 임시 스냅샷(`temp_<safe_name>.png`)을 생성합니다.
-  - `get_announcements()`로 발화를 수집한 뒤 마지막 문장에 대해 `re.search(expected_regex, actual_speech, re.IGNORECASE)`로 검증합니다.
+  - `get_announcements()`로 병합 발화를 수집한 뒤 전체 문자열에 대해 `re.search(expected_regex, actual_speech, re.IGNORECASE)`로 검증합니다.
   - 성공 시 임시 스냅샷을 삭제하고 `True`를 반환합니다.
   - 실패 시 `take_error_snapshot=True`인 경우 `error_log/fail_<sanitized_target>.png`에 EXPECTED/ACTUAL 오버레이 이미지를 저장하고 `False`를 반환합니다.
 - 공통적으로 각 루프에서 `_refresh_tree_if_needed()`를 호출해 화면 변동(팝업 등)에 대응합니다.
@@ -352,3 +364,26 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.i
   - 시작 시 `check_helper_status()`를 먼저 확인하고, 비활성 상태면 안내 문구 출력 후 `sys.exit(1)`로 안전 종료합니다.
   - 활성 상태에서 `scrollFind(..., direction_="down")`으로 대상을 찾습니다.
   - 발화 검증 전에 `client.select(dev_serial, target_name)`를 먼저 호출해 타겟 포커스를 맞춘 뒤, `client.verify_speech(dev_serial, expected_regex=target_name)` 결과로 PASS/FAIL을 판별합니다.
+
+
+## Python 클라이언트 발화 API 변경 사항
+
+```python
+from talkback_lib import A11yAdbClient
+
+client = A11yAdbClient()
+
+partial = client.get_partial_announcements(wait_seconds=2.0)
+# -> ["첫 안내", "둘째 안내", "셋째 안내"]
+
+merged = client.get_announcements(wait_seconds=2.0)
+# -> "첫 안내 둘째 안내 셋째 안내"
+
+assert client.last_announcements == partial
+assert client.last_merged_announcement == merged
+```
+
+- `get_announcements()`는 기본 실사용 API이며 병합 문자열을 반환합니다.
+- `get_partial_announcements()`는 디버깅/세부 검증용 raw 발화 조각 리스트를 반환합니다.
+- 발화가 없으면 `get_announcements()`는 빈 문자열(`""`)을 반환합니다.
+- 병합 규칙은 각 item에 `strip()` 적용 → 빈 문자열 제거 → `" ".join(...)` 순서로 고정됩니다.
