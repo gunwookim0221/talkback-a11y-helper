@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.14.2"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.14.3"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -892,7 +892,7 @@ object A11yNavigator {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping duplicate focus action because current accessibility focus bounds exactly match target: $label")
             recordRequestedFocusAttempt(traversalIndex, root)
             requestVisibilityAdjustment(targetBounds)
-            return TargetActionOutcome(true, status, target)
+            return TargetActionOutcome(true, "moved", target)
         }
         if (currentSystemFocus && actualFocusedBounds != null && actualFocusedBounds != targetBounds) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Target reports accessibilityFocused=true but actual focused bounds differ. Forcing focus action: target=$targetBounds actual=$actualFocusedBounds label=$label")
@@ -957,11 +957,11 @@ object A11yNavigator {
             )
             Log.w(
                 "A11Y_HELPER",
-                "[SMART_NEXT] Snap-back handled: Forcing success to maintain sequence at index $traversalIndex"
+                "[SMART_NEXT] Snap-back handled: Forcing 'moved' status to maintain client compatibility"
             )
             recordRequestedFocusAttempt(traversalIndex, root)
             Thread.sleep(100)
-            return TargetActionOutcome(true, "moved_via_snap_back", target)
+            return TargetActionOutcome(true, "moved", target)
         }
 
         recordRequestedFocusAttempt(traversalIndex, root)
@@ -971,7 +971,7 @@ object A11yNavigator {
         recordRequestedFocusAttempt(traversalIndex, root)
         Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=true (status=$status)")
         Log.i("A11Y_HELPER", "[SMART_NEXT] Focused top-most content at Y=${focusedBounds.top}")
-        return TargetActionOutcome(true, status, target)
+        return TargetActionOutcome(true, "moved", target)
     }
 
 
