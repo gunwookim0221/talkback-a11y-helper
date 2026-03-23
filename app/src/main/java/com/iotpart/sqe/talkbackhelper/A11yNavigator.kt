@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.11.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.11.1"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = -1
@@ -793,8 +793,10 @@ object A11yNavigator {
             val cleared = focusedNode.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
             Log.i("A11Y_HELPER", "[SMART_NEXT] Cleared accessibility focus before request: result=$cleared")
         }
-        A11yHelperService.instance?.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED)
-        Log.i("A11Y_HELPER", "[SMART_NEXT] Sent TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED to refresh accessibility focus cache")
+        A11yHelperService.instance?.let { service ->
+            service.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED)
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Sent TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED to refresh accessibility focus cache")
+        }
     }
 
     internal fun shouldDelayBeforeFocusCommand(currentFocusedBounds: Rect?, targetBounds: Rect?): Boolean {
