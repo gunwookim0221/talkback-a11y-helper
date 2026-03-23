@@ -46,7 +46,7 @@ AccessibilityService
 - `targetName`/`targetType`/`targetIndex` 기반 DFS 매칭 후, 추가 AND 필터(`className`/`clickable`/`focusable`/`targetText`/`targetId`)를 검증해 대상 노드를 찾고 액션(클릭/롱클릭/포커스)을 실행합니다.
 - 매칭 노드가 클릭 불가능하면 클릭 가능한 첫 조상으로 보정하고, `clickable` 필터도 보정된 노드 기준으로 검사합니다.
 - `targetName`은 공통 regex 패턴으로 정규화되어 `targetType=t|b|r` 모두 동일한 매칭 규칙을 사용합니다(명시적 regex 패턴이 없으면 exact regex로 처리). 매칭은 IGNORE_CASE 옵션으로 대소문자를 구분하지 않습니다.
-- 내비게이터 알고리즘 버전은 `A11yNavigator.NAVIGATOR_ALGORITHM_VERSION`(현재 `2.13.1`)으로 관리하며, `moved/scrolled/looped` 포커스는 공통 가시성-포커스 루틴을 통해 하단 가림(`effectiveBottom-300`) 및 스크롤 직후 상단 정렬(`screenTop+300`) 보정을 수행합니다.
+- 내비게이터 알고리즘 버전은 `A11yNavigator.NAVIGATOR_ALGORITHM_VERSION`(현재 `2.13.2`)으로 관리하며, `moved/scrolled/snap_back_handled` 포커스는 공통 가시성-포커스 루틴을 통해 하단 가림(`effectiveBottom-300`) 및 스크롤 직후 상단 정렬(`screenTop+300`) 보정을 수행합니다.
 - `SMART_NEXT` 스크롤 폴링은 기존 스냅샷 비교 구조를 유지하되, 트리 변경 감지 시 300ms 안착 대기 후 최신 루트를 다시 읽는 3단계(변화 감지 → 추가 대기 → 최종 확인)로 보강되어 리스트 재구성 도중 중간 아이템 누락을 줄입니다.
 - 스냅샷 비교는 상단 앱바/하단 내비게이션 바로 판정되는 노드를 제외한 컨텐츠 토큰을 우선 사용하여 상태바/고정 바의 미세 갱신으로 스크롤 완료 판정이 앞당겨지는 현상을 완화합니다.
 - 이 공통 보정 루틴은 일반 콘텐츠에만 `ACTION_SHOW_ON_SCREEN`을 허용하며, `isTopAppBarNode`/`isBottomNavigationBarNode`로 분류된 고정 상단바·하단바에서는 보정 액션과 관련 로그를 모두 차단해 시스템 Bounce를 방지합니다.
@@ -59,6 +59,9 @@ AccessibilityService
 - 공통 포커스 루틴은 이미 시스템 접근성 포커스가 있는 노드에 대한 중복 포커스 가드를 유지하며, `ACTION_SHOW_ON_SCREEN` 이후 100ms 대기 후 포커스를 시도합니다. 실제 `ACTION_ACCESSIBILITY_FOCUS`는 동일 `performSmartNext` 호출 안에서 타겟당 1회만 실행하고, 반환값이 `false`여도 직후 `accessibilityFocused=true`면 성공으로 판정합니다.
 - `performSmartNext`는 새 타겟으로 이동하기 직전에 현재 `findFocus(FOCUS_ACCESSIBILITY)` 노드가 있으면 `ACTION_CLEAR_ACCESSIBILITY_FOCUS`를 먼저 보내 포커스 락을 끊고, 이후 `val service: android.accessibilityservice.AccessibilityService? = A11yHelperService.instance`로 타입을 확정한 뒤 `(service as A11yHelperService).sendAccessibilityEvent(TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED)`를 호출해 접근성 포커스 캐시를 안전하게 갱신합니다.
 - `performSmartNext` 시작 시 순회 노드 로그는 기존 Top 단일 좌표 대신 `(L, T, R, B)` 전체 bounds와 `buildTalkBackLikeFocusNodes`가 만든 `Merged Label`을 함께 기록해, 무라벨 컨테이너가 TalkBack에서 읽는 병합 텍스트를 추적합니다.
+- `performSmartNext`는 현재 포커스 인덱스를 찾을 때 마지막 노드와의 동일성 검사를 먼저 수행해, 중간 후보가 먼저 매칭되더라도 현재 포커스가 실제 마지막 항목이면 마지막 인덱스를 우선 반환합니다. 동일성 비교 자체도 `id + text + contentDescription + exact bounds`가 모두 일치해야만 성립합니다.
+- 리스트 마지막/다음 인덱스 미존재 상황에서는 스크롤 가능한 컨테이너가 있으면 먼저 `ACTION_SCROLL_FORWARD`를 시도하고, 더 이상 스크롤할 수 없는 경우에는 `[SMART_NEXT] Reached end of list, stopping traversal` 로그와 함께 `reached_end`를 반환해 자동 루핑을 수행하지 않습니다.
+- `performFocusWithVisibilityCheck(...)`에서 snap-back이 감지되면 내부 성공 처리는 유지하되 반환 status를 `snap_back_handled`로 고정해 디버깅에서 일반 `moved`와 분리합니다.
 - 중복 포커스 재사용은 `isAccessibilityFocused` 플래그만 보지 않고 실제 시스템 포커스 노드와 타겟 노드의 `BoundsInScreen`이 완전히 일치할 때만 허용합니다. 1px이라도 다르면 별도 노드로 보고 `ACTION_ACCESSIBILITY_FOCUS`를 강제합니다.
 - `performSmartNext`는 현재 인덱스를 찾은 직후 `A11yStateStore.lastRequestedFocusIndex`와 동기화하고, 바로 다음 노드의 `BoundsInScreen`이 현재와 완전히 같을 때만 유령 노드로 간주해 `currentIndex + 1`로 보정합니다. 이때 `[SMART_NEXT] Skipping invisible duplicate at index X` 로그를 남기며, 1px이라도 좌표가 다르면 동일 행/인접 카드라도 별도 후보로 유지합니다.
 - `findAndFocusFirstContent(...)`는 루프 최상단에서 현재 시스템 포커스와 좌표가 완전히 같은 후보를 어떤 조건보다 먼저 skip하며, 특히 일반 이동(`isScrollAction=false`)에서는 동일 좌표 후보를 검증 없이 더 엄격하게 건너뜁니다.
