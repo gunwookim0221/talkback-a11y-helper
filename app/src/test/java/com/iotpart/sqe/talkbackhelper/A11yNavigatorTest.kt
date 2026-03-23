@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.9.8")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.9.10")
     }
 
 
@@ -501,20 +501,24 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun shouldReuseExistingAccessibilityFocus_returnsTrueWhenAlreadyFocused_afterScroll() {
+    fun shouldReuseExistingAccessibilityFocus_returnsTrueWhenBoundsExactlyMatch_afterScroll() {
         val reused = A11yNavigator.shouldReuseExistingAccessibilityFocus(
-            isAccessibilityFocused = true,
-            isScrollAction = true
+            label = "Plant Care",
+            isScrollAction = true,
+            currentFocusedBounds = Rect(0, 200, 1080, 360),
+            targetBounds = Rect(0, 200, 1080, 360)
         )
 
         assertTrue(reused)
     }
 
     @Test
-    fun shouldReuseExistingAccessibilityFocus_returnsFalseWhenNotFocused_afterScroll() {
+    fun shouldReuseExistingAccessibilityFocus_returnsFalseWhenBoundsDiffer_afterScroll() {
         val reused = A11yNavigator.shouldReuseExistingAccessibilityFocus(
-            isAccessibilityFocused = false,
-            isScrollAction = true
+            label = "Plant Care",
+            isScrollAction = true,
+            currentFocusedBounds = Rect(0, 200, 1080, 360),
+            targetBounds = Rect(0, 201, 1080, 360)
         )
 
         assertFalse(reused)
@@ -716,13 +720,15 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun shouldReuseExistingAccessibilityFocus_returnsTrueWhenAlreadyFocused_withoutScroll() {
+    fun shouldReuseExistingAccessibilityFocus_returnsFalseForNoLabelEvenWhenBoundsMatch() {
         val reused = A11yNavigator.shouldReuseExistingAccessibilityFocus(
-            isAccessibilityFocused = true,
-            isScrollAction = false
+            label = "<no-label>",
+            isScrollAction = false,
+            currentFocusedBounds = Rect(0, 200, 1080, 360),
+            targetBounds = Rect(0, 200, 1080, 360)
         )
 
-        assertTrue(reused)
+        assertFalse(reused)
     }
 
     @Test
