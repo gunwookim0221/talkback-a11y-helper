@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.14.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.14.1")
     }
 
 
@@ -35,6 +35,17 @@ class A11yNavigatorTest {
         )
 
         assertEquals(6, nextIndex)
+    }
+
+    @Test
+    fun resolveNextTraversalIndex_returnsOverflowWhenCurrentIndexIsLast() {
+        val nextIndex = A11yNavigator.resolveNextTraversalIndex(
+            currentIndex = 4,
+            fallbackIndex = -1,
+            lastRequestedIndex = -1
+        )
+
+        assertEquals(5, nextIndex)
     }
 
 
@@ -1916,7 +1927,7 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun isSameNodeIdentity_returnsFalseWhenIdOrTextDoNotMatch() {
+    fun isSameNodeIdentity_returnsFalseWhenIdentityDiffersAndBoundsAlsoDiffer() {
         val result = A11yNavigator.isSameNodeIdentity(
             aId = "com.test:id/item",
             aText = "거실 조명",
@@ -1925,7 +1936,7 @@ class A11yNavigatorTest {
             bId = "com.test:id/item_alt",
             bText = "거실 조명",
             bContentDescription = "거실 조명 버튼",
-            bBounds = Rect(0, 100, 100, 200)
+            bBounds = Rect(1, 100, 101, 200)
         )
 
         assertFalse(result)
