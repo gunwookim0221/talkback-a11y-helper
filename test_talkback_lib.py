@@ -13,6 +13,7 @@ from talkback_lib import (
     ACTION_SCROLL,
     ACTION_SET_TEXT,
     ACTION_PING,
+    ACTION_COMMAND,
     LOGCAT_FILTER_SPECS,
     A11yAdbClient,
 )
@@ -21,6 +22,11 @@ from talkback_lib import (
 class Dev:
     def __init__(self, serial: str):
         self.serial = serial
+
+
+class DeviceWithId:
+    def __init__(self, device_id: str):
+        self.device_id = device_id
 
 
 class FakeA11yClient(A11yAdbClient):
@@ -1067,6 +1073,31 @@ class SmartMoveFocusTest(unittest.TestCase):
         self.assertEqual(result.get("text"), "설정")
         broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0][0]
         self.assertEqual(broadcast[4], ACTION_GET_FOCUS)
+
+    def test_reset_focus_history_broadcasts_reset_for_string_device(self):
+        client = FakeA11yClient()
+
+        with patch("builtins.print") as print_mock:
+            client.reset_focus_history("SER-RESET")
+
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][-1][0]
+        self.assertEqual(
+            broadcast,
+            [
+                "shell", "am", "broadcast", "-a", ACTION_COMMAND,
+                "-p", "com.example.custom",
+                "--es", "command", "reset",
+            ],
+        )
+        print_mock.assert_called_once_with("[SER-RESET] Focus history has been explicitly reset.")
+
+    def test_reset_focus_history_accepts_device_id_object(self):
+        client = FakeA11yClient()
+
+        with patch("builtins.print") as print_mock:
+            client.reset_focus_history(DeviceWithId("DEVICE-ID-01"))
+
+        print_mock.assert_called_once_with("[DEVICE-ID-01] Focus history has been explicitly reset.")
 
     def test_move_focus_smart_uses_android_side_smart_next_status(self):
         client = FakeA11yClient()

@@ -29,12 +29,13 @@ ACTION_CLICK_FOCUSED = "com.iotpart.sqe.talkbackhelper.CLICK_FOCUSED"
 ACTION_SCROLL = "com.iotpart.sqe.talkbackhelper.SCROLL"
 ACTION_SET_TEXT = "com.iotpart.sqe.talkbackhelper.SET_TEXT"
 ACTION_PING = "com.iotpart.sqe.talkbackhelper.PING"
+ACTION_COMMAND = "com.iotpart.sqe.talkbackhelper.ACTION_COMMAND"
 LOG_TAG = "A11Y_HELPER"
 LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.6.1"
+CLIENT_ALGORITHM_VERSION = "1.6.2"
 
 
 @dataclass
@@ -59,7 +60,10 @@ class A11yAdbClient:
             return self.dev_serial
         if isinstance(dev, str):
             return dev
-        return getattr(dev, "serial", self.dev_serial)
+        serial = getattr(dev, "serial", None)
+        if serial:
+            return serial
+        return getattr(dev, "device_id", self.dev_serial)
 
     def _run(self, args: list[str], dev: Any = None, timeout: float = 30.0) -> str:
         serial = self._resolve_serial(dev)
@@ -877,6 +881,13 @@ class A11yAdbClient:
             if all(node.get(key) == focus_node.get(key) for key in key_candidates if key in focus_node):
                 return idx
         return -1
+
+    def reset_focus_history(self, dev: Any = None) -> None:
+        """안드로이드 헬퍼 앱의 탐색 히스토리 인덱스를 초기화합니다."""
+        device_id = self._resolve_serial(dev)
+        self._broadcast(dev, ACTION_COMMAND, ["--es", "command", "reset"])
+        label = device_id or "default"
+        print(f"[{label}] Focus history has been explicitly reset.")
 
     def move_focus_smart(self, dev: Any = None, direction: str = "next") -> str:
         direction_token = str(direction).strip().lower()

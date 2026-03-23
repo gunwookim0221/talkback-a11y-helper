@@ -18,6 +18,7 @@
   - [scroll](#scroll)
   - [move_focus](#move_focus)
   - [get_focus](#get_focus)
+  - [reset_focus_history](#reset_focus_history)
   - [move_focus_smart](#move_focus_smart)
   - [scrollFind](#scrollfind)
   - [scrollSelect](#scrollselect)
@@ -164,7 +165,7 @@ if not client.check_talkback_status(dev_serial):
 ### Signature
 `dump_tree(dev: Any = None, wait_seconds: float = 5.0) -> list[dict[str, Any]]`
 
-> 응답 포맷 버전: Android Navigator `2.5.9` / Python Client `1.6.1`
+> 응답 포맷 버전: Android Navigator `2.5.9` / Python Client `1.6.2`
 
 ### 설명
 현재 화면의 접근성 노드 트리를 helper를 통해 덤프합니다.  
@@ -355,6 +356,34 @@ client.move_focus(dev_serial, "prev")
 
 ### Returns
 - `dict[str, Any]`: 포커스 노드 정보. 실패 시 빈 dict.
+
+---
+
+## reset_focus_history
+
+### Signature
+`reset_focus_history(dev: Any = None) -> None`
+
+### 설명
+안드로이드 헬퍼 앱의 탐색 히스토리 인덱스를 명시적으로 초기화합니다.  
+`dev`에는 문자열 시리얼 또는 `dev.serial`/`dev.device_id`를 가진 객체를 전달할 수 있습니다.
+
+### Parameters
+
+| 이름 | 타입 | 기본값 | 설명 |
+|---|---|---|---|
+| `dev` | `Any` | `None` | 대상 디바이스. 문자열 serial 또는 디바이스 객체 |
+
+### Returns
+- `None`
+
+### Example
+```python
+client.click_element(dev, targetName="Devices", targetType="b")
+client.reset_focus_history(dev)
+client.perform_focus(dev, targetName="Location QR code", targetType="b")
+client.move_focus_smart(dev)
+```
 
 ---
 
