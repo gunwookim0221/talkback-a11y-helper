@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.9.8"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.9.10"
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -245,6 +245,12 @@ object A11yNavigator {
 
         val nextIndex = if (currentIndex == -1 && fallbackIndex != -1) fallbackIndex else currentIndex + 1
         Log.i("A11Y_HELPER", "[SMART_NEXT] currentIndex=$currentIndex, nextIndex=$nextIndex")
+
+        root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
+            val cleared = focusedNode.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
+            val focusedBounds = Rect().also { focusedNode.getBoundsInScreen(it) }
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Cleared existing accessibility focus before next move: result=$cleared bounds=$focusedBounds")
+        }
 
         if (currentIndex == -1 && fallbackIndex != -1) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Current node matching failed. Using fallback nextIndex based on vertical proximity.")
@@ -711,16 +717,27 @@ object A11yNavigator {
             Thread.sleep(100)
         }
 
+        val targetBounds = Rect().also { target.getBoundsInScreen(it) }
+        val actualFocusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
+            Rect().also { focusedNode.getBoundsInScreen(it) }
+        }
         val currentSystemFocus = target.refresh() && target.isAccessibilityFocused
         if (shouldReuseExistingAccessibilityFocus(
-                isAccessibilityFocused = currentSystemFocus,
-                isScrollAction = isScrollAction
+                label = label,
+                isScrollAction = isScrollAction,
+                currentFocusedBounds = actualFocusedBounds,
+                targetBounds = targetBounds
             )
         ) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping duplicate focus action because TalkBack already focused: $label")
-            val focusedBounds = Rect().also { target.getBoundsInScreen(it) }
-            requestVisibilityAdjustment(focusedBounds)
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping duplicate focus action because current accessibility focus bounds exactly match target: $label")
+            requestVisibilityAdjustment(targetBounds)
             return TargetActionOutcome(true, status, target)
+        }
+        if (currentSystemFocus && actualFocusedBounds != null && actualFocusedBounds != targetBounds) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Target reports accessibilityFocused=true but actual focused bounds differ. Forcing focus action: target=$targetBounds actual=$actualFocusedBounds label=$label")
+        }
+        if (label == "<no-label>" && isScrollAction) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Bypassing scrolled_auto_focused reuse for <no-label> target to break focus lock")
         }
 
         val focused = requestAccessibilityFocusWithRetry(
@@ -776,13 +793,20 @@ object A11yNavigator {
     }
 
     internal fun shouldReuseExistingAccessibilityFocus(
-        isAccessibilityFocused: Boolean,
-        isScrollAction: Boolean
+        label: String,
+        isScrollAction: Boolean,
+        currentFocusedBounds: Rect?,
+        targetBounds: Rect?
     ): Boolean {
-        if (isScrollAction && isAccessibilityFocused) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Reusing TalkBack auto-focused node after scroll")
+        if (label == "<no-label>") {
+            return false
         }
-        return isAccessibilityFocused
+
+        val hasExactBoundsMatch = currentFocusedBounds != null && targetBounds != null && currentFocusedBounds == targetBounds
+        if (isScrollAction && hasExactBoundsMatch) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Reusing TalkBack auto-focused node after scroll because bounds exactly match target")
+        }
+        return hasExactBoundsMatch
     }
 
     internal fun isNodePhysicallyOffScreen(bounds: Rect, screenTop: Int, screenBottom: Int): Boolean {
