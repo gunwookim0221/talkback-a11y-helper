@@ -10,9 +10,32 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.11.3")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.11.4")
     }
 
+
+
+    @Test
+    fun resolveNextTraversalIndex_forcesAdvanceWhenCurrentIndexIsStale() {
+        val nextIndex = A11yNavigator.resolveNextTraversalIndex(
+            currentIndex = 2,
+            fallbackIndex = -1,
+            lastRequestedIndex = 4
+        )
+
+        assertEquals(5, nextIndex)
+    }
+
+    @Test
+    fun resolveNextTraversalIndex_usesFallbackWhenCurrentIndexLookupFails() {
+        val nextIndex = A11yNavigator.resolveNextTraversalIndex(
+            currentIndex = -1,
+            fallbackIndex = 6,
+            lastRequestedIndex = 4
+        )
+
+        assertEquals(6, nextIndex)
+    }
 
     @Test
     fun findMainScrollContainer_returnsLargestScrollableNode() {
@@ -717,6 +740,17 @@ class A11yNavigatorTest {
         )
 
         assertTrue(skipped)
+    }
+
+    @Test
+    fun shouldSkipDuplicateBoundsCandidate_returnsTrueWhenBoundsMatchEvenForLabeledNode() {
+        val result = A11yNavigator.shouldSkipDuplicateBoundsCandidate(
+            currentFocusedBounds = Rect(0, 100, 300, 240),
+            candidateBounds = Rect(0, 100, 300, 240),
+            isScrollAction = false
+        )
+
+        assertTrue(result)
     }
 
     @Test

@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.11.3"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.11.4"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = -1
@@ -247,8 +247,18 @@ object A11yNavigator {
             -1
         }
 
-        val nextIndex = if (currentIndex == -1 && fallbackIndex != -1) fallbackIndex else currentIndex + 1
-        Log.i("A11Y_HELPER", "[SMART_NEXT] currentIndex=$currentIndex, nextIndex=$nextIndex")
+        val nextIndex = resolveNextTraversalIndex(
+            currentIndex = currentIndex,
+            fallbackIndex = fallbackIndex,
+            lastRequestedIndex = lastRequestedFocusIndex,
+            onForcedAdvance = { forcedIndex ->
+                Log.w(
+                    "A11Y_HELPER",
+                    "[SMART_NEXT] Detected stale currentIndex=$currentIndex behind lastRequestedFocusIndex=$lastRequestedFocusIndex. Forcing nextIndex=$forcedIndex"
+                )
+            }
+        )
+        Log.i("A11Y_HELPER", "[SMART_NEXT] currentIndex=$currentIndex, fallbackIndex=$fallbackIndex, lastRequestedFocusIndex=$lastRequestedFocusIndex, nextIndex=$nextIndex")
 
         root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
             val cleared = focusedNode.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
@@ -338,6 +348,14 @@ object A11yNavigator {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping off-screen node: $label")
                     continue
                 }
+                if (shouldSkipDuplicateBoundsCandidate(currentFocusedBounds, bounds, isScrollAction)) {
+                    val duplicateReason = if (isScrollAction) "scroll duplicate bounds" else "strict duplicate bounds precheck"
+                    Log.i(
+                        "A11Y_HELPER",
+                        "[SMART_NEXT] Skipping candidate with identical bounds to current focus at index=$index label=$label reason=$duplicateReason"
+                    )
+                    continue
+                }
                 val isTopBar = isTopAppBarNode(
                     node.className?.toString(),
                     node.viewIdResourceName,
@@ -403,10 +421,6 @@ object A11yNavigator {
                         continue
                     }
 
-                    if (label == "<no-label>" && currentFocusedBounds != null && currentFocusedBounds == bounds) {
-                        Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping duplicate <no-label> node with identical bounds at index=$index")
-                        continue
-                    }
 
                     Log.i("A11Y_HELPER", "[SMART_DEBUG] Attempting focus on Index:$index, AlreadyFocused:${node.isAccessibilityFocused}")
                     focusedOutcome = performFocusWithVisibilityCheck(
@@ -667,6 +681,34 @@ object A11yNavigator {
     }
 
 
+
+    internal fun shouldSkipDuplicateBoundsCandidate(
+        currentFocusedBounds: Rect?,
+        candidateBounds: Rect,
+        isScrollAction: Boolean
+    ): Boolean {
+        if (currentFocusedBounds == null || currentFocusedBounds != candidateBounds) return false
+        return true
+    }
+
+    internal fun resolveNextTraversalIndex(
+        currentIndex: Int,
+        fallbackIndex: Int,
+        lastRequestedIndex: Int,
+        onForcedAdvance: ((Int) -> Unit)? = null
+    ): Int {
+        return when {
+            currentIndex == -1 && fallbackIndex != -1 -> fallbackIndex
+            currentIndex != -1 && lastRequestedIndex >= 0 && currentIndex <= lastRequestedIndex -> {
+                val forcedIndex = lastRequestedIndex + 1
+                onForcedAdvance?.invoke(forcedIndex)
+                forcedIndex
+            }
+            lastRequestedIndex >= 0 -> maxOf(currentIndex + 1, lastRequestedIndex + 1)
+            else -> currentIndex + 1
+        }
+    }
+
     internal fun performFocusWithVisibilityCheck(
         root: AccessibilityNodeInfo,
         target: AccessibilityNodeInfo,
@@ -745,6 +787,7 @@ object A11yNavigator {
             )
         ) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping duplicate focus action because current accessibility focus bounds exactly match target: $label")
+            lastRequestedFocusIndex = traversalIndex
             requestVisibilityAdjustment(targetBounds)
             return TargetActionOutcome(true, status, target)
         }
