@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.14.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.14.1"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -553,13 +553,23 @@ object A11yNavigator {
             ?: mainScrollContainer
             ?: findScrollableForwardCandidate(root)
 
-        if (nextIndex !in traversalList.indices || currentIndex == traversalList.lastIndex) {
+        val lastIndex = traversalList.lastIndex
+        val shouldHandleLastNodeGracePeriod = nextIndex !in traversalList.indices
+
+        if (shouldHandleLastNodeGracePeriod || currentIndex == lastIndex) {
             if (scrollableNode != null) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Reached last node or next unavailable, but scrollable container exists -> attempting scroll first")
                 val lastDesc = resolvedCurrent?.contentDescription?.toString()
                 val scrolled = scrollableNode.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                 Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SCROLL_FORWARD result=$scrolled")
                 if (!scrolled) {
+                    if (currentIndex == lastIndex && currentIndex in traversalList.indices) {
+                        Log.i("A11Y_HELPER", "[SMART_NEXT] Ensuring last node focus visibility before termination")
+                        val lastNode = traversalList[currentIndex]
+                        lastNode.refresh()
+                        lastNode.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+                        return TargetActionOutcome(false, "reached_end", lastNode)
+                    }
                     return TargetActionOutcome(false, "failed")
                 }
 
@@ -632,6 +642,23 @@ object A11yNavigator {
                     startIndex = 0,
                     visibleHistory = visibleHistory
                 )
+            }
+
+            if (shouldHandleLastNodeGracePeriod && currentIndex < lastIndex) {
+                val graceIndex = currentIndex + 1
+                if (graceIndex in traversalList.indices) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Next index overflowed after compensation; applying last-node grace focus at index $graceIndex")
+                    return focusSequentiallyFromIndex(graceIndex, "moved")
+                }
+            }
+
+            if (currentIndex == lastIndex && currentIndex in traversalList.indices) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Ensuring last node focus visibility before termination")
+                val lastNode = traversalList[currentIndex]
+                lastNode.refresh()
+                lastNode.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Reached end of list, stopping traversal")
+                return TargetActionOutcome(false, "reached_end", lastNode)
             }
 
             Log.i("A11Y_HELPER", "[SMART_NEXT] Reached end of list, stopping traversal")
@@ -1769,7 +1796,12 @@ object A11yNavigator {
         bContentDescription: String?,
         bBounds: Rect
     ): Boolean {
-        if (aBounds == bBounds) {
+        if (
+            aBounds.left == bBounds.left &&
+            aBounds.top == bBounds.top &&
+            aBounds.right == bBounds.right &&
+            aBounds.bottom == bBounds.bottom
+        ) {
             return true
         }
 
