@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.9.10")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.11.0")
     }
 
 
@@ -729,6 +729,68 @@ class A11yNavigatorTest {
         )
 
         assertFalse(reused)
+    }
+
+    @Test
+    fun shouldDelayBeforeFocusCommand_returnsTrueForHorizontalTraversalOnSameRow() {
+        val shouldDelay = A11yNavigator.shouldDelayBeforeFocusCommand(
+            currentFocusedBounds = Rect(0, 200, 200, 320),
+            targetBounds = Rect(220, 200, 420, 320)
+        )
+
+        assertTrue(shouldDelay)
+    }
+
+    @Test
+    fun shouldDelayBeforeFocusCommand_returnsFalseWhenBoundsExactlyMatch() {
+        val shouldDelay = A11yNavigator.shouldDelayBeforeFocusCommand(
+            currentFocusedBounds = Rect(0, 200, 200, 320),
+            targetBounds = Rect(0, 200, 200, 320)
+        )
+
+        assertFalse(shouldDelay)
+    }
+
+    @Test
+    fun isAccessibilityFocusEffectivelyActive_returnsFalseForSamePreviousTraversalIndex() {
+        val field = A11yNavigator::class.java.getDeclaredField("lastRequestedFocusIndex").apply {
+            isAccessible = true
+        }
+        val originalValue = field.getInt(null)
+
+        try {
+            field.setInt(null, 7)
+
+            val result = A11yNavigator.isAccessibilityFocusEffectivelyActive(
+                isAccessibilityFocused = true,
+                traversalIndex = 7
+            )
+
+            assertFalse(result)
+        } finally {
+            field.setInt(null, originalValue)
+        }
+    }
+
+    @Test
+    fun isAccessibilityFocusEffectivelyActive_returnsTrueForDifferentTraversalIndex() {
+        val field = A11yNavigator::class.java.getDeclaredField("lastRequestedFocusIndex").apply {
+            isAccessible = true
+        }
+        val originalValue = field.getInt(null)
+
+        try {
+            field.setInt(null, 3)
+
+            val result = A11yNavigator.isAccessibilityFocusEffectivelyActive(
+                isAccessibilityFocused = true,
+                traversalIndex = 4
+            )
+
+            assertTrue(result)
+        } finally {
+            field.setInt(null, originalValue)
+        }
     }
 
     @Test

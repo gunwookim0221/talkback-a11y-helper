@@ -2,12 +2,16 @@ package com.iotpart.sqe.talkbackhelper
 
 import android.graphics.Rect
 import android.os.Build
+import android.view.accessibility.AccessibilityEvent
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.9.10"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.11.0"
+
+    @Volatile
+    private var lastRequestedFocusIndex: Int = -1
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -323,6 +327,9 @@ object A11yNavigator {
                     ?: "<no-label>"
                 val isLastFocusedNode = (excludeDesc != null && label == excludeDesc)
                 val inHistory = visibleHistory.contains(label)
+                val currentFocusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
+                    Rect().also { focusedNode.getBoundsInScreen(it) }
+                }
                 Log.i(
                     "A11Y_HELPER",
                     "[SMART_DEBUG] Index:$index, Label:${label.replace("\n", " ")}, Y_Bottom:${bounds.bottom}, Eff_Bottom:$effectiveBottom, InHistory:$inHistory"
@@ -396,6 +403,11 @@ object A11yNavigator {
                         continue
                     }
 
+                    if (label == "<no-label>" && currentFocusedBounds != null && currentFocusedBounds == bounds) {
+                        Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping duplicate <no-label> node with identical bounds at index=$index")
+                        continue
+                    }
+
                     Log.i("A11Y_HELPER", "[SMART_DEBUG] Attempting focus on Index:$index, AlreadyFocused:${node.isAccessibilityFocused}")
                     focusedOutcome = performFocusWithVisibilityCheck(
                         root = root,
@@ -403,7 +415,8 @@ object A11yNavigator {
                         screenTop = screenTop,
                         effectiveBottom = effectiveBottom,
                         status = statusName,
-                        isScrollAction = isScrollAction
+                        isScrollAction = isScrollAction,
+                        traversalIndex = index
                     )
                     if (focusedOutcome?.success == true) {
                         focusedAny = true
@@ -449,7 +462,8 @@ object A11yNavigator {
                 screenTop = screenTop,
                 effectiveBottom = effectiveBottom,
                 status = status,
-                isScrollAction = false
+                isScrollAction = false,
+                traversalIndex = -1
             )
         }
 
@@ -659,7 +673,8 @@ object A11yNavigator {
         screenTop: Int,
         effectiveBottom: Int,
         status: String,
-        isScrollAction: Boolean
+        isScrollAction: Boolean,
+        traversalIndex: Int
     ): TargetActionOutcome {
         val label = target.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
             ?: target.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
@@ -740,11 +755,21 @@ object A11yNavigator {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Bypassing scrolled_auto_focused reuse for <no-label> target to break focus lock")
         }
 
+        if (shouldDelayBeforeFocusCommand(actualFocusedBounds, targetBounds)) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Delaying 50ms before focus to stabilize horizontal traversal: label=$label index=$traversalIndex")
+            Thread.sleep(50)
+        }
+
+        clearAccessibilityFocusAndRefresh(root)
+
         val focused = requestAccessibilityFocusWithRetry(
             performFocusAction = { target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS) },
             refreshFocusState = {
                 target.refresh()
-                target.isAccessibilityFocused
+                isAccessibilityFocusEffectivelyActive(
+                    isAccessibilityFocused = target.isAccessibilityFocused,
+                    traversalIndex = traversalIndex
+                )
             }
         )
 
@@ -753,12 +778,40 @@ object A11yNavigator {
             return TargetActionOutcome(false, "failed", target)
         }
 
+        lastRequestedFocusIndex = traversalIndex
         Thread.sleep(100)
         val focusedBounds = Rect().also { target.getBoundsInScreen(it) }
         requestVisibilityAdjustment(focusedBounds)
         Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=true (status=$status)")
         Log.i("A11Y_HELPER", "[SMART_NEXT] Focused top-most content at Y=${focusedBounds.top}")
         return TargetActionOutcome(true, status, target)
+    }
+
+
+    internal fun clearAccessibilityFocusAndRefresh(root: AccessibilityNodeInfo) {
+        root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
+            val cleared = focusedNode.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Cleared accessibility focus before request: result=$cleared")
+        }
+        A11yHelperService.instance?.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED)
+        Log.i("A11Y_HELPER", "[SMART_NEXT] Sent TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED to refresh accessibility focus cache")
+    }
+
+    internal fun shouldDelayBeforeFocusCommand(currentFocusedBounds: Rect?, targetBounds: Rect?): Boolean {
+        if (currentFocusedBounds == null || targetBounds == null) return false
+        return currentFocusedBounds != targetBounds && currentFocusedBounds.top == targetBounds.top
+    }
+
+    internal fun isAccessibilityFocusEffectivelyActive(
+        isAccessibilityFocused: Boolean,
+        traversalIndex: Int
+    ): Boolean {
+        if (!isAccessibilityFocused) return false
+        if (traversalIndex != -1 && traversalIndex == lastRequestedFocusIndex) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Ignoring stale isAccessibilityFocused=true for repeated traversal index=$traversalIndex")
+            return false
+        }
+        return true
     }
 
     internal fun applyBottomNavigationSafetyGuide(
