@@ -902,8 +902,8 @@ object A11yNavigator {
         }
 
         if (shouldDelayBeforeFocusCommand(actualFocusedBounds, targetBounds)) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Delaying 50ms before focus to stabilize horizontal traversal: label=$label index=$traversalIndex")
-            Thread.sleep(50)
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Delaying 100ms before focus to stabilize horizontal traversal: label=$label index=$traversalIndex")
+            Thread.sleep(100)
         }
 
         clearAccessibilityFocusAndRefresh(root)
@@ -932,7 +932,7 @@ object A11yNavigator {
             }
         )
 
-        Thread.sleep(50)
+        Thread.sleep(150)
         val afterFocusBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
             Rect().also { focusedNode.getBoundsInScreen(it) }
         }
@@ -961,7 +961,7 @@ object A11yNavigator {
             )
             recordRequestedFocusAttempt(traversalIndex, root)
             Thread.sleep(100)
-            return TargetActionOutcome(true, "moved", target)
+            return TargetActionOutcome(true, "moved_via_snap_back", target)
         }
 
         recordRequestedFocusAttempt(traversalIndex, root)
@@ -1066,8 +1066,8 @@ object A11yNavigator {
     internal fun requestAccessibilityFocusWithRetry(
         performFocusAction: () -> Boolean,
         refreshFocusState: () -> Boolean,
-        maxAttempts: Int = 1,
-        retryDelayMs: Long = 50L
+        maxAttempts: Int = 3,
+        retryDelayMs: Long = 100L
     ): Boolean {
         repeat(maxAttempts) { attempt ->
             if (performFocusAction()) {
