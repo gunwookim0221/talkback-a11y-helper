@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.13.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.13.2"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -226,9 +226,11 @@ object A11yNavigator {
         }
 
         var currentIndex = resolvedCurrent?.let { resolved ->
-            traversalList.indexOfFirst { candidate ->
-                isSameNode(candidate, resolved)
-            }
+            findCurrentTraversalIndex(
+                traversalList = traversalList,
+                currentNode = resolved,
+                isSameNodeMatch = ::isSameNode
+            )
         } ?: -1
 
         if (currentIndex != -1) {
@@ -618,15 +620,8 @@ object A11yNavigator {
                 )
             }
 
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Reached last node or next node unavailable -> looping to first content")
-            return findAndFocusFirstContent(
-                traversalList = traversalList,
-                screenTop = screenTop,
-                screenBottom = screenBottom,
-                effectiveBottom = effectiveBottom,
-                screenHeight = screenHeight,
-                statusName = "looped"
-            )
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Reached end of list, stopping traversal")
+            return TargetActionOutcome(false, "reached_end")
         }
 
         val nextNode = traversalList[nextIndex]
@@ -918,7 +913,7 @@ object A11yNavigator {
             )
             recordRequestedFocusAttempt(traversalIndex)
             Thread.sleep(100)
-            return TargetActionOutcome(true, status, target)
+            return TargetActionOutcome(true, "snap_back_handled", target)
         }
 
         recordRequestedFocusAttempt(traversalIndex)
@@ -1716,6 +1711,21 @@ object A11yNavigator {
             ?: -1
     }
 
+    internal fun <T> findCurrentTraversalIndex(
+        traversalList: List<T>,
+        currentNode: T,
+        isSameNodeMatch: (T, T) -> Boolean
+    ): Int {
+        if (traversalList.isEmpty()) return -1
+        val lastIndex = traversalList.lastIndex
+        if (isSameNodeMatch(traversalList[lastIndex], currentNode)) {
+            return lastIndex
+        }
+        return traversalList.indexOfFirst { candidate ->
+            isSameNodeMatch(candidate, currentNode)
+        }
+    }
+
     internal fun isSameNode(a: AccessibilityNodeInfo, b: AccessibilityNodeInfo): Boolean {
         val aBounds = Rect().also { a.getBoundsInScreen(it) }
         val bBounds = Rect().also { b.getBoundsInScreen(it) }
@@ -1754,7 +1764,15 @@ object A11yNavigator {
             return true
         }
 
-        return aId == bId && aText == bText && aContentDescription == bContentDescription
+        val identityMatch = aId == bId && aText == bText && aContentDescription == bContentDescription
+        if (!identityMatch) {
+            return false
+        }
+
+        return aBounds.left == bBounds.left &&
+            aBounds.top == bBounds.top &&
+            aBounds.right == bBounds.right &&
+            aBounds.bottom == bBounds.bottom
     }
 
     internal fun <T> findClosestNodeBelowCenter(
