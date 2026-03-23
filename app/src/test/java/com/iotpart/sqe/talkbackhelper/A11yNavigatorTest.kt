@@ -2030,6 +2030,23 @@ class A11yNavigatorTest {
         assertFalse(shouldLoop)
     }
 
+
+    @Test
+    fun requestAccessibilityFocusWithRetry_usesUpdatedDefaultHardFocusPolicy() {
+        var attempts = 0
+
+        val result = A11yNavigator.requestAccessibilityFocusWithRetry(
+            performFocusAction = {
+                attempts += 1
+                false
+            },
+            refreshFocusState = { false }
+        )
+
+        assertFalse(result)
+        assertEquals(3, attempts)
+    }
+
     @Test
     fun requestAccessibilityFocusWithRetry_returnsFalseWhenSystemNeverAcceptsFocus() {
         var attempts = 0
