@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.11.5")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.11.6")
     }
 
 
@@ -557,7 +557,7 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun shouldReuseExistingAccessibilityFocus_returnsTrueWhenBoundsExactlyMatch_afterScroll() {
+    fun shouldReuseExistingAccessibilityFocus_returnsFalseEvenWhenBoundsExactlyMatch_afterScroll() {
         val reused = A11yNavigator.shouldReuseExistingAccessibilityFocus(
             label = "Plant Care",
             isScrollAction = true,
@@ -565,7 +565,7 @@ class A11yNavigatorTest {
             targetBounds = Rect(0, 200, 1080, 360)
         )
 
-        assertTrue(reused)
+        assertFalse(reused)
     }
 
     @Test
@@ -578,6 +578,26 @@ class A11yNavigatorTest {
         )
 
         assertFalse(reused)
+    }
+
+
+    @Test
+    fun skipCoordinateDuplicateTraversalIndices_skipsAllSequentialDuplicateBounds() {
+        data class Node(val bounds: Rect)
+
+        val nextIndex = A11yNavigator.skipCoordinateDuplicateTraversalIndices(
+            nodes = listOf(
+                Node(Rect(0, 0, 100, 100)),
+                Node(Rect(0, 0, 100, 100)),
+                Node(Rect(0, 0, 100, 100)),
+                Node(Rect(0, 120, 100, 220))
+            ),
+            currentBounds = Rect(0, 0, 100, 100),
+            startIndex = 1,
+            boundsOf = { it.bounds }
+        )
+
+        assertEquals(3, nextIndex)
     }
 
     @Test
