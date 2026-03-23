@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.11.4")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.11.5")
     }
 
 
@@ -35,6 +35,39 @@ class A11yNavigatorTest {
         )
 
         assertEquals(6, nextIndex)
+    }
+
+    @Test
+    fun setLastRequestedFocusIndex_updatesStateStoreTogether() {
+        val navigatorField = A11yNavigator::class.java.getDeclaredField("lastRequestedFocusIndex").apply {
+            isAccessible = true
+        }
+        val stateField = A11yStateStore::class.java.getDeclaredField("lastRequestedFocusIndex").apply {
+            isAccessible = true
+        }
+        val originalNavigatorValue = navigatorField.getInt(null)
+        val originalStateValue = stateField.getInt(null)
+
+        try {
+            A11yNavigator.setLastRequestedFocusIndex(12)
+
+            assertEquals(12, navigatorField.getInt(null))
+            assertEquals(12, stateField.getInt(null))
+        } finally {
+            navigatorField.setInt(null, originalNavigatorValue)
+            stateField.setInt(null, originalStateValue)
+        }
+    }
+
+    @Test
+    fun shouldSkipDuplicateBoundsCandidate_returnsTrueWhenBoundsPerfectlyMatch() {
+        val result = A11yNavigator.shouldSkipDuplicateBoundsCandidate(
+            currentFocusedBounds = Rect(0, 300, 500, 600),
+            candidateBounds = Rect(0, 300, 500, 600),
+            isScrollAction = true
+        )
+
+        assertTrue(result)
     }
 
     @Test

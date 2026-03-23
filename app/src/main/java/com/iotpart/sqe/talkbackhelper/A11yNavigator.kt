@@ -8,10 +8,10 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.11.4"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.11.5"
 
     @Volatile
-    private var lastRequestedFocusIndex: Int = -1
+    private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
 
     data class TargetActionOutcome(
         val success: Boolean,
@@ -218,11 +218,30 @@ object A11yNavigator {
             )
         }
 
-        val currentIndex = resolvedCurrent?.let { resolved ->
+        var currentIndex = resolvedCurrent?.let { resolved ->
             traversalList.indexOfFirst { candidate ->
                 isSameNode(candidate, resolved)
             }
         } ?: -1
+
+        if (currentIndex != -1) {
+            setLastRequestedFocusIndex(maxOf(lastRequestedFocusIndex, A11yStateStore.lastRequestedFocusIndex, currentIndex))
+
+            val currentBounds = Rect().also { traversalList[currentIndex].getBoundsInScreen(it) }
+            val duplicateNextBounds = traversalList.getOrNull(currentIndex + 1)?.let { nextNode ->
+                Rect().also { nextNode.getBoundsInScreen(it) }
+            }
+            if (duplicateNextBounds != null && currentBounds == duplicateNextBounds) {
+                val compensatedIndex = currentIndex + 1
+                Log.w(
+                    "A11Y_HELPER",
+                    "[SMART_NEXT] Duplicate bounds compensation triggered: currentIndex=$currentIndex -> compensatedIndex=$compensatedIndex bounds=$currentBounds"
+                )
+                currentIndex = compensatedIndex
+            }
+
+            setLastRequestedFocusIndex(maxOf(lastRequestedFocusIndex, currentIndex))
+        }
 
         val fallbackIndex = if (currentIndex == -1) {
             Log.w("A11Y_HELPER", "[SMART_NEXT] Current node matching failed. Dumping traversal identity candidates for diagnosis.")
@@ -259,6 +278,7 @@ object A11yNavigator {
             }
         )
         Log.i("A11Y_HELPER", "[SMART_NEXT] currentIndex=$currentIndex, fallbackIndex=$fallbackIndex, lastRequestedFocusIndex=$lastRequestedFocusIndex, nextIndex=$nextIndex")
+        Log.i("A11Y_HELPER", "[SMART_NEXT][GRID_TRACE] sequentialIndices current=$currentIndex next=$nextIndex total=${traversalList.size}")
 
         root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
             val cleared = focusedNode.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
@@ -344,16 +364,16 @@ object A11yNavigator {
                     "A11Y_HELPER",
                     "[SMART_DEBUG] Index:$index, Label:${label.replace("\n", " ")}, Y_Bottom:${bounds.bottom}, Eff_Bottom:$effectiveBottom, InHistory:$inHistory"
                 )
-                if (isNodePhysicallyOffScreen(bounds, screenTop, screenBottom)) {
-                    Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping off-screen node: $label")
-                    continue
-                }
                 if (shouldSkipDuplicateBoundsCandidate(currentFocusedBounds, bounds, isScrollAction)) {
                     val duplicateReason = if (isScrollAction) "scroll duplicate bounds" else "strict duplicate bounds precheck"
                     Log.i(
                         "A11Y_HELPER",
                         "[SMART_NEXT] Skipping candidate with identical bounds to current focus at index=$index label=$label reason=$duplicateReason"
                     )
+                    continue
+                }
+                if (isNodePhysicallyOffScreen(bounds, screenTop, screenBottom)) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping off-screen node: $label")
                     continue
                 }
                 val isTopBar = isTopAppBarNode(
@@ -787,7 +807,7 @@ object A11yNavigator {
             )
         ) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping duplicate focus action because current accessibility focus bounds exactly match target: $label")
-            lastRequestedFocusIndex = traversalIndex
+            setLastRequestedFocusIndex(traversalIndex)
             requestVisibilityAdjustment(targetBounds)
             return TargetActionOutcome(true, status, target)
         }
@@ -821,7 +841,7 @@ object A11yNavigator {
             return TargetActionOutcome(false, "failed", target)
         }
 
-        lastRequestedFocusIndex = traversalIndex
+        setLastRequestedFocusIndex(traversalIndex)
         Thread.sleep(100)
         val focusedBounds = Rect().also { target.getBoundsInScreen(it) }
         requestVisibilityAdjustment(focusedBounds)
@@ -830,6 +850,12 @@ object A11yNavigator {
         return TargetActionOutcome(true, status, target)
     }
 
+
+
+    internal fun setLastRequestedFocusIndex(index: Int) {
+        lastRequestedFocusIndex = index
+        A11yStateStore.updateLastRequestedFocusIndex(index)
+    }
 
     internal fun clearAccessibilityFocusAndRefresh(root: AccessibilityNodeInfo) {
         root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
