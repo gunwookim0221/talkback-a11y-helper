@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.14.4"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.14.5"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -387,6 +387,7 @@ object A11yNavigator {
             }
             var skippedExcludedNode = false
             var focusedAny = false
+            var focusAttempted = false
             var focusedOutcome: TargetActionOutcome? = null
 
             if (excludedIndex != -1) {
@@ -489,6 +490,7 @@ object A11yNavigator {
 
 
                     Log.i("A11Y_HELPER", "[SMART_DEBUG] Attempting focus on Index:$index, AlreadyFocused:${node.isAccessibilityFocused}")
+                    focusAttempted = true
                     focusedOutcome = performFocusWithVisibilityCheck(
                         root = root,
                         target = node,
@@ -508,6 +510,11 @@ object A11yNavigator {
 
             if (focusedAny) {
                 return focusedOutcome ?: TargetActionOutcome(false, "failed")
+            }
+
+            if (!focusedAny && isScrollAction && !focusAttempted) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] No focusable candidates remain after history/skip filtering. Treating as reached_end")
+                return TargetActionOutcome(false, "reached_end")
             }
 
             if (shouldTriggerLoopFallback(focusedAny, isScrollAction, excludeDesc)) {
@@ -621,6 +628,11 @@ object A11yNavigator {
                 }
 
                 val refreshedList = buildFocusableTraversalList(newRoot)
+                val refreshedSnapshot = buildNodeTextSnapshot(refreshedList)
+                if (oldSnapshot == refreshedSnapshot) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] No scroll progress detected, terminating to prevent loop")
+                    return TargetActionOutcome(false, "reached_end_no_scroll_progress")
+                }
                 val refreshedRect = Rect().also { newRoot.getBoundsInScreen(it) }
                 val refreshedScreenBottom = refreshedRect.bottom
                 val refreshedScreenHeight = (refreshedRect.bottom - refreshedRect.top).coerceAtLeast(1)
@@ -729,6 +741,11 @@ object A11yNavigator {
                 fallbackRoot = root
             )
             val refreshedTraversal = refreshedRoot?.let { buildFocusableTraversalList(it) }.orEmpty()
+            val refreshedSnapshot = buildNodeTextSnapshot(refreshedTraversal)
+            if (oldSnapshot == refreshedSnapshot) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] No scroll progress detected, terminating to prevent loop")
+                return TargetActionOutcome(false, "reached_end_no_scroll_progress")
+            }
             val refreshedRect = Rect().also { (refreshedRoot ?: root).getBoundsInScreen(it) }
             val refreshedTop = refreshedRect.top
             val refreshedBottom = refreshedRect.bottom
@@ -987,6 +1004,8 @@ object A11yNavigator {
         A11yStateStore.updateLastRequestedFocusIndex(index)
     }
 
+    internal fun nodeObjectId(node: AccessibilityNodeInfo): Int = System.identityHashCode(node)
+
     internal fun recordRequestedFocusAttempt(index: Int, root: AccessibilityNodeInfo? = null) {
         if (index < 0) return
 
@@ -994,19 +1013,32 @@ object A11yNavigator {
         val focusedNode = root?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         if (root != null && focusedNode != null) {
             val traversalNodes = buildTalkBackLikeFocusNodes(root).map { it.node }
-            val focusedIndex = findNodeIndexByIdentity(
-                nodes = traversalNodes,
-                target = focusedNode,
-                idOf = { it.viewIdResourceName },
-                textOf = { it.text?.toString() },
-                contentDescriptionOf = { it.contentDescription?.toString() },
-                boundsOf = { Rect().also(it::getBoundsInScreen) },
-                onCoordinateMatch = { matchedIndex ->
-                    Log.i("A11Y_HELPER", "[SMART_NEXT] Reconciled lastRequestedFocusIndex with actual focused coordinates at index $matchedIndex")
+            val focusedNodeObjectId = nodeObjectId(focusedNode)
+            val directObjectMatchIndex = traversalNodes.indexOfFirst { nodeObjectId(it) == focusedNodeObjectId }
+            if (directObjectMatchIndex != -1) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Reconciled lastRequestedFocusIndex with focused node object id at index $directObjectMatchIndex")
+                resolvedIndex = maxOf(resolvedIndex, directObjectMatchIndex)
+            } else {
+                val focusedIndex = findNodeIndexByIdentity(
+                    nodes = traversalNodes,
+                    target = focusedNode,
+                    idOf = { it.viewIdResourceName },
+                    textOf = { it.text?.toString() },
+                    contentDescriptionOf = { it.contentDescription?.toString() },
+                    boundsOf = { Rect().also(it::getBoundsInScreen) },
+                    onCoordinateMatch = { matchedIndex ->
+                        Log.w(
+                            "A11Y_HELPER",
+                            "[SMART_NEXT] Ignoring coordinate-only focus reconciliation at index $matchedIndex because focused node object id did not match"
+                        )
+                    }
+                )
+                if (focusedIndex != -1) {
+                    val candidate = traversalNodes[focusedIndex]
+                    if (nodeObjectId(candidate) == focusedNodeObjectId) {
+                        resolvedIndex = maxOf(resolvedIndex, focusedIndex)
+                    }
                 }
-            )
-            if (focusedIndex != -1) {
-                resolvedIndex = maxOf(resolvedIndex, focusedIndex)
             }
         }
 
