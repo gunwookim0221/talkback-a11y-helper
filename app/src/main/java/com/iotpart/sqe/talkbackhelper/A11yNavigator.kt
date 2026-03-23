@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.11.5"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.11.6"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -266,7 +266,7 @@ object A11yNavigator {
             -1
         }
 
-        val nextIndex = resolveNextTraversalIndex(
+        var nextIndex = resolveNextTraversalIndex(
             currentIndex = currentIndex,
             fallbackIndex = fallbackIndex,
             lastRequestedIndex = lastRequestedFocusIndex,
@@ -277,6 +277,21 @@ object A11yNavigator {
                 )
             }
         )
+        if (currentIndex in traversalList.indices) {
+            val currentBounds = Rect().also { traversalList[currentIndex].getBoundsInScreen(it) }
+            nextIndex = skipCoordinateDuplicateTraversalIndices(
+                nodes = traversalList,
+                currentBounds = currentBounds,
+                startIndex = nextIndex,
+                boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+                onSkip = { skippedIndex, advancedIndex ->
+                    Log.i(
+                        "A11Y_HELPER",
+                        "[SMART_NEXT] Skipping coordinate duplicate: jumping from $skippedIndex to $advancedIndex"
+                    )
+                }
+            )
+        }
         Log.i("A11Y_HELPER", "[SMART_NEXT] currentIndex=$currentIndex, fallbackIndex=$fallbackIndex, lastRequestedFocusIndex=$lastRequestedFocusIndex, nextIndex=$nextIndex")
         Log.i("A11Y_HELPER", "[SMART_NEXT][GRID_TRACE] sequentialIndices current=$currentIndex next=$nextIndex total=${traversalList.size}")
 
@@ -729,6 +744,22 @@ object A11yNavigator {
         }
     }
 
+    internal fun <T> skipCoordinateDuplicateTraversalIndices(
+        nodes: List<T>,
+        currentBounds: Rect,
+        startIndex: Int,
+        boundsOf: (T) -> Rect,
+        onSkip: ((Int, Int) -> Unit)? = null
+    ): Int {
+        var nextIndex = startIndex
+        while (nextIndex in nodes.indices && boundsOf(nodes[nextIndex]) == currentBounds) {
+            val skippedIndex = nextIndex
+            nextIndex += 1
+            onSkip?.invoke(skippedIndex, nextIndex)
+        }
+        return nextIndex
+    }
+
     internal fun performFocusWithVisibilityCheck(
         root: AccessibilityNodeInfo,
         target: AccessibilityNodeInfo,
@@ -845,6 +876,7 @@ object A11yNavigator {
         Thread.sleep(100)
         val focusedBounds = Rect().also { target.getBoundsInScreen(it) }
         requestVisibilityAdjustment(focusedBounds)
+        setLastRequestedFocusIndex(traversalIndex)
         Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=true (status=$status)")
         Log.i("A11Y_HELPER", "[SMART_NEXT] Focused top-most content at Y=${focusedBounds.top}")
         return TargetActionOutcome(true, status, target)
@@ -928,15 +960,7 @@ object A11yNavigator {
         currentFocusedBounds: Rect?,
         targetBounds: Rect?
     ): Boolean {
-        if (label == "<no-label>") {
-            return false
-        }
-
-        val hasExactBoundsMatch = currentFocusedBounds != null && targetBounds != null && currentFocusedBounds == targetBounds
-        if (isScrollAction && hasExactBoundsMatch) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Reusing TalkBack auto-focused node after scroll because bounds exactly match target")
-        }
-        return hasExactBoundsMatch
+        return false
     }
 
     internal fun isNodePhysicallyOffScreen(bounds: Rect, screenTop: Int, screenBottom: Int): Boolean {
