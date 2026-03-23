@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.12.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.13.0")
     }
 
 
@@ -53,6 +53,57 @@ class A11yNavigatorTest {
 
             assertEquals(12, navigatorField.getInt(null))
             assertEquals(12, stateField.getInt(null))
+        } finally {
+            navigatorField.setInt(null, originalNavigatorValue)
+            stateField.setInt(null, originalStateValue)
+        }
+    }
+
+    @Test
+    fun recordRequestedFocusAttempt_keepsFurthestRequestedIndexAcrossSnapBack() {
+        val navigatorField = A11yNavigator::class.java.getDeclaredField("lastRequestedFocusIndex").apply {
+            isAccessible = true
+        }
+        val stateField = A11yStateStore::class.java.getDeclaredField("lastRequestedFocusIndex").apply {
+            isAccessible = true
+        }
+        val originalNavigatorValue = navigatorField.getInt(null)
+        val originalStateValue = stateField.getInt(null)
+
+        try {
+            navigatorField.setInt(null, 10)
+            stateField.setInt(null, 10)
+
+            A11yNavigator.recordRequestedFocusAttempt(11)
+            A11yNavigator.recordRequestedFocusAttempt(10)
+
+            assertEquals(11, navigatorField.getInt(null))
+            assertEquals(11, stateField.getInt(null))
+        } finally {
+            navigatorField.setInt(null, originalNavigatorValue)
+            stateField.setInt(null, originalStateValue)
+        }
+    }
+
+    @Test
+    fun recordRequestedFocusAttempt_ignoresNegativeTraversalIndex() {
+        val navigatorField = A11yNavigator::class.java.getDeclaredField("lastRequestedFocusIndex").apply {
+            isAccessible = true
+        }
+        val stateField = A11yStateStore::class.java.getDeclaredField("lastRequestedFocusIndex").apply {
+            isAccessible = true
+        }
+        val originalNavigatorValue = navigatorField.getInt(null)
+        val originalStateValue = stateField.getInt(null)
+
+        try {
+            navigatorField.setInt(null, 8)
+            stateField.setInt(null, 8)
+
+            A11yNavigator.recordRequestedFocusAttempt(-1)
+
+            assertEquals(8, navigatorField.getInt(null))
+            assertEquals(8, stateField.getInt(null))
         } finally {
             navigatorField.setInt(null, originalNavigatorValue)
             stateField.setInt(null, originalStateValue)
@@ -1836,4 +1887,20 @@ class A11yNavigatorTest {
         assertFalse(shouldLoop)
     }
 
+    @Test
+    fun requestAccessibilityFocusWithRetry_returnsFalseWhenSystemNeverAcceptsFocus() {
+        var attempts = 0
+
+        val result = A11yNavigator.requestAccessibilityFocusWithRetry(
+            performFocusAction = {
+                attempts += 1
+                false
+            },
+            refreshFocusState = { false },
+            retryDelayMs = 0L
+        )
+
+        assertFalse(result)
+        assertEquals(3, attempts)
+    }
 }
