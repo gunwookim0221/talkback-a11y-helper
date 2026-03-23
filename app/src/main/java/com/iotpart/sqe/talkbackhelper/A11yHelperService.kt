@@ -5,6 +5,7 @@ import android.graphics.Rect
 import android.os.Bundle
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
@@ -32,6 +33,21 @@ class A11yHelperService : AccessibilityService() {
         if (instance === this) {
             instance = null
         }
+    }
+
+    internal fun sendAccessibilityEvent(eventType: Int) {
+        val manager = getSystemService(ACCESSIBILITY_SERVICE) as? AccessibilityManager
+        if (manager == null || !manager.isEnabled) {
+            Log.w(TAG, "AccessibilityManager unavailable; skipped eventType=$eventType")
+            return
+        }
+
+        val event = AccessibilityEvent.obtain(eventType).apply {
+            packageName = this@A11yHelperService.packageName
+            className = this@A11yHelperService.javaClass.name
+            isEnabled = true
+        }
+        manager.sendAccessibilityEvent(event)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {

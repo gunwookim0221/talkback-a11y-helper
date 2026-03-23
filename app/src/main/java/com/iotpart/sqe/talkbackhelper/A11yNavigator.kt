@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.11.2"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.11.3"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = -1
@@ -794,12 +794,14 @@ object A11yNavigator {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Cleared accessibility focus before request: result=$cleared")
         }
 
-        val service = A11yHelperService.instance
-        if (service != null) {
+        val service: android.accessibilityservice.AccessibilityService? = A11yHelperService.instance
+        if (service != null && service is A11yHelperService) {
             root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
                 ?.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
-            service.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED)
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Successfully sent focus clear event via service instance")
+            (service as A11yHelperService).sendAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED
+            )
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Successfully sent focus clear event with explicit casting")
         }
     }
 
