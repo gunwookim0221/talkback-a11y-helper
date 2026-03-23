@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.14.3")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.14.4")
     }
 
 
@@ -94,6 +94,31 @@ class A11yNavigatorTest {
 
             assertEquals(12, navigatorField.getInt(null))
             assertEquals(12, stateField.getInt(null))
+        } finally {
+            navigatorField.setInt(null, originalNavigatorValue)
+            stateField.setInt(null, originalStateValue)
+        }
+    }
+
+    @Test
+    fun resetFocusHistory_clearsNavigatorAndStateStoreTogether() {
+        val navigatorField = A11yNavigator::class.java.getDeclaredField("lastRequestedFocusIndex").apply {
+            isAccessible = true
+        }
+        val stateField = A11yStateStore::class.java.getDeclaredField("lastRequestedFocusIndex").apply {
+            isAccessible = true
+        }
+        val originalNavigatorValue = navigatorField.getInt(null)
+        val originalStateValue = stateField.getInt(null)
+
+        try {
+            navigatorField.setInt(null, 7)
+            stateField.setInt(null, 7)
+
+            A11yNavigator.resetFocusHistory()
+
+            assertEquals(-1, navigatorField.getInt(null))
+            assertEquals(-1, stateField.getInt(null))
         } finally {
             navigatorField.setInt(null, originalNavigatorValue)
             stateField.setInt(null, originalStateValue)

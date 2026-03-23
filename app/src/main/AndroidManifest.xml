@@ -49,6 +49,7 @@
                 <action android:name="com.iotpart.sqe.talkbackhelper.SCROLL" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.SET_TEXT" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.PING" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.ACTION_COMMAND" />
             </intent-filter>
         </receiver>
 
