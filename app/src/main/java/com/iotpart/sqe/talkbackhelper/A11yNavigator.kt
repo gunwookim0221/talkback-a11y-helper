@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.13.2"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.14.0"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -232,6 +232,20 @@ object A11yNavigator {
                 isSameNodeMatch = ::isSameNode
             )
         } ?: -1
+
+        if (currentIndex == -1 && resolvedCurrent != null) {
+            currentIndex = findNodeIndexByIdentity(
+                nodes = traversalList,
+                target = resolvedCurrent,
+                idOf = { it.viewIdResourceName },
+                textOf = { it.text?.toString() },
+                contentDescriptionOf = { it.contentDescription?.toString() },
+                boundsOf = { Rect().also(it::getBoundsInScreen) },
+                onCoordinateMatch = { matchedIndex ->
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Matched node by coordinates at index $matchedIndex")
+                }
+            )
+        }
 
         if (currentIndex != -1) {
             setLastRequestedFocusIndex(maxOf(lastRequestedFocusIndex, A11yStateStore.lastRequestedFocusIndex, currentIndex))
@@ -878,7 +892,10 @@ object A11yNavigator {
         )
 
         val focused = requestAccessibilityFocusWithRetry(
-            performFocusAction = { target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS) },
+            performFocusAction = {
+                target.refresh()
+                target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+            },
             refreshFocusState = {
                 target.refresh()
                 isAccessibilityFocusEffectivelyActive(
@@ -888,6 +905,7 @@ object A11yNavigator {
             }
         )
 
+        Thread.sleep(50)
         val afterFocusBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
             Rect().also { focusedNode.getBoundsInScreen(it) }
         }
@@ -902,7 +920,10 @@ object A11yNavigator {
             return TargetActionOutcome(false, "failed", target)
         }
 
-        if (afterFocusBounds != null && afterFocusBounds != targetBounds) {
+        if (afterFocusBounds != null &&
+            afterFocusBounds != targetBounds &&
+            !isWithinSnapBackTolerance(targetBounds, afterFocusBounds)
+        ) {
             Log.w(
                 "A11Y_HELPER",
                 "[SMART_NEXT] Snap-back detected after ACTION_ACCESSIBILITY_FOCUS success: target=${formatBoundsForLog(targetBounds)} actual=${formatBoundsForLog(afterFocusBounds)} traversalIndex=$traversalIndex label=$label"
@@ -1672,26 +1693,22 @@ object A11yNavigator {
         idOf: (T) -> String?,
         textOf: (T) -> String?,
         contentDescriptionOf: (T) -> String?,
-        boundsOf: (T) -> Rect
+        boundsOf: (T) -> Rect,
+        onCoordinateMatch: ((Int) -> Unit)? = null
     ): Int {
         val targetId = idOf(target)
         val targetText = textOf(target)
         val targetContentDescription = contentDescriptionOf(target)
         val targetBounds = boundsOf(target)
 
-        val strictMatchIndex = nodes.indexOfFirst { candidate ->
+        val coordinateMatchIndex = nodes.indexOfFirst { candidate ->
             val candidateBounds = boundsOf(candidate)
-            idOf(candidate) == targetId &&
-                textOf(candidate) == targetText &&
-                contentDescriptionOf(candidate) == targetContentDescription &&
-                candidateBounds.left == targetBounds.left &&
-                candidateBounds.top == targetBounds.top &&
-                candidateBounds.right == targetBounds.right &&
-                candidateBounds.bottom == targetBounds.bottom
+            candidateBounds == targetBounds
         }
 
-        if (strictMatchIndex != -1) {
-            return strictMatchIndex
+        if (coordinateMatchIndex != -1) {
+            onCoordinateMatch?.invoke(coordinateMatchIndex)
+            return coordinateMatchIndex
         }
 
         return nodes.withIndex()
@@ -1752,15 +1769,7 @@ object A11yNavigator {
         bContentDescription: String?,
         bBounds: Rect
     ): Boolean {
-        val strictMatch = aId == bId &&
-            aText == bText &&
-            aContentDescription == bContentDescription &&
-            aBounds.left == bBounds.left &&
-            aBounds.top == bBounds.top &&
-            aBounds.right == bBounds.right &&
-            aBounds.bottom == bBounds.bottom
-
-        if (strictMatch) {
+        if (aBounds == bBounds) {
             return true
         }
 
@@ -1773,6 +1782,15 @@ object A11yNavigator {
             aBounds.top == bBounds.top &&
             aBounds.right == bBounds.right &&
             aBounds.bottom == bBounds.bottom
+    }
+
+    internal fun isWithinSnapBackTolerance(targetBounds: Rect, actualBounds: Rect, tolerancePx: Int = 10): Boolean {
+        val targetCenterX = targetBounds.centerX()
+        val targetCenterY = targetBounds.centerY()
+        val actualCenterX = actualBounds.centerX()
+        val actualCenterY = actualBounds.centerY()
+        return kotlin.math.abs(targetCenterX - actualCenterX) <= tolerancePx &&
+            kotlin.math.abs(targetCenterY - actualCenterY) <= tolerancePx
     }
 
     internal fun <T> findClosestNodeBelowCenter(
