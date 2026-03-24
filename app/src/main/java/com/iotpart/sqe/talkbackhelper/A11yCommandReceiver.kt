@@ -69,6 +69,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
 
     private fun handleGetFocus(context: Context, intent: Intent) {
         val reqId = parseReqId(intent)
+        A11yHelperService.instance?.refreshCurrentFocusSnapshot()
         A11yStateStore.ensureFallbackJson()
         val saveFile = intent.getBooleanExtra("saveFile", false)
         if (saveFile) {
