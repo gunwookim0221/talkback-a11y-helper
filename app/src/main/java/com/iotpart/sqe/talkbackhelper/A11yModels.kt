@@ -1,34 +1,48 @@
 package com.iotpart.sqe.talkbackhelper
 
 import android.graphics.Rect
+import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONArray
 import org.json.JSONObject
 
 object FocusLabelBuilder {
+    private const val MERGED_LABEL_MAX_DEPTH = 5
+
     data class LabelNode(
         val text: String? = null,
         val contentDescription: String? = null,
         val children: List<LabelNode> = emptyList()
     )
 
-    fun buildMergedLabel(root: LabelNode?): String {
+    fun buildMergedLabel(root: LabelNode?, maxDepth: Int = MERGED_LABEL_MAX_DEPTH): String {
         if (root == null) return ""
         val labels = linkedSetOf<String>()
         addCandidate(labels, root.text)
         addCandidate(labels, root.contentDescription)
 
         if (labels.isEmpty()) {
-            collectChildLabels(root.children, labels)
+            collectChildLabels(root.children, labels, currentDepth = 1, maxDepth = maxDepth)
         }
         return labels.joinToString(separator = " ")
     }
 
-    private fun collectChildLabels(children: List<LabelNode>, labels: LinkedHashSet<String>) {
+    private fun collectChildLabels(
+        children: List<LabelNode>,
+        labels: LinkedHashSet<String>,
+        currentDepth: Int,
+        maxDepth: Int
+    ) {
+        if (currentDepth > maxDepth) return
         children.forEach { child ->
             addCandidate(labels, child.text)
             addCandidate(labels, child.contentDescription)
-            collectChildLabels(child.children, labels)
+            collectChildLabels(
+                children = child.children,
+                labels = labels,
+                currentDepth = currentDepth + 1,
+                maxDepth = maxDepth
+            )
         }
     }
 
@@ -172,6 +186,7 @@ data class A11yDumpResponse(
 data class FocusSnapshot(
     val timestamp: Long,
     val schemaVersion: String,
+    val snapshotBuilderVersion: String,
     val packageName: String?,
     val className: String?,
     val viewIdResourceName: String?,
@@ -195,6 +210,7 @@ data class FocusSnapshot(
         return JSONObject().apply {
             put("timestamp", timestamp)
             put("schemaVersion", schemaVersion)
+            put("snapshotBuilderVersion", snapshotBuilderVersion)
             put("packageName", packageName ?: JSONObject.NULL)
             put("className", className ?: JSONObject.NULL)
             put("viewIdResourceName", viewIdResourceName ?: JSONObject.NULL)
@@ -218,6 +234,10 @@ data class FocusSnapshot(
                     put("t", boundsInScreen.top)
                     put("r", boundsInScreen.right)
                     put("b", boundsInScreen.bottom)
+                    put("left", boundsInScreen.left)
+                    put("top", boundsInScreen.top)
+                    put("right", boundsInScreen.right)
+                    put("bottom", boundsInScreen.bottom)
                 }
             )
             put(
@@ -229,19 +249,28 @@ data class FocusSnapshot(
     }
 
     companion object {
-        const val GET_FOCUS_SCHEMA_VERSION: String = "1.1.0"
-        private const val FOCUS_CHILD_MAX_DEPTH = 3
+        private const val TAG = "A11Y_FOCUS_SNAPSHOT"
+        const val GET_FOCUS_SCHEMA_VERSION: String = "1.2.0"
+        const val SNAPSHOT_BUILDER_VERSION: String = "1.2.0"
+        private const val FOCUS_CHILD_MAX_DEPTH = 5
 
         fun fromNodeOrNull(node: AccessibilityNodeInfo?): FocusSnapshot? {
-            return node?.let { fromNode(it) }
+            if (node == null) {
+                return null
+            }
+            return fromNode(node)
         }
 
         fun fromNode(node: AccessibilityNodeInfo): FocusSnapshot {
             val rootChildSnapshot = FocusChildNode.fromNode(node, maxDepth = FOCUS_CHILD_MAX_DEPTH)
             val mergedLabel = FocusLabelBuilder.buildMergedLabel(rootChildSnapshot.toLabelNode())
+            if (mergedLabel.isNotBlank()) {
+                Log.d(TAG, "mergedLabel=$mergedLabel class=${node.className} id=${node.viewIdResourceName}")
+            }
             return FocusSnapshot(
                 timestamp = System.currentTimeMillis(),
                 schemaVersion = GET_FOCUS_SCHEMA_VERSION,
+                snapshotBuilderVersion = SNAPSHOT_BUILDER_VERSION,
                 packageName = node.packageName?.toString(),
                 className = node.className?.toString(),
                 viewIdResourceName = node.viewIdResourceName,

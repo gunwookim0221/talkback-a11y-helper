@@ -13,6 +13,7 @@ class FocusSnapshotTest {
         val snapshot = FocusSnapshot(
             timestamp = 1234L,
             schemaVersion = "1.1.0",
+            snapshotBuilderVersion = "1.2.0",
             packageName = "com.test",
             className = "android.widget.Button",
             viewIdResourceName = "com.test:id/ok",
@@ -37,6 +38,7 @@ class FocusSnapshotTest {
 
         assertEquals(1234L, json.getLong("timestamp"))
         assertEquals("1.1.0", json.getString("schemaVersion"))
+        assertEquals("1.2.0", json.getString("snapshotBuilderVersion"))
         assertEquals("com.test", json.getString("packageName"))
         assertEquals("확인", json.getString("text"))
         assertTrue(json.getBoolean("accessibilityFocused"))
@@ -47,6 +49,8 @@ class FocusSnapshotTest {
         val bounds = json.getJSONObject("boundsInScreen")
         assertEquals(1, bounds.getInt("l"))
         assertEquals(4, bounds.getInt("b"))
+        assertEquals(1, bounds.getInt("left"))
+        assertEquals(4, bounds.getInt("bottom"))
     }
 
     @Test
@@ -54,6 +58,7 @@ class FocusSnapshotTest {
         val snapshot = FocusSnapshot(
             timestamp = 1L,
             schemaVersion = "1.1.0",
+            snapshotBuilderVersion = "1.2.0",
             packageName = null,
             className = null,
             viewIdResourceName = null,

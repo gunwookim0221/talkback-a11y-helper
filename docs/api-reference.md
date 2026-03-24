@@ -356,7 +356,7 @@ client.move_focus(dev_serial, "prev")
 
 ### Returns
 - `dict[str, Any]`: 포커스 노드 정보. 실패 시 빈 dict.
-  - 주요 필드: `schemaVersion(1.1.0)`, `text`, `contentDescription`, `mergedLabel`, `talkbackLabel`, `viewIdResourceName`, `className`, `boundsInScreen`, `clickable`, `focusable`, `accessibilityFocused`, `visibleToUser`, `children`.
+  - 주요 필드: `schemaVersion(1.2.0)`, `snapshotBuilderVersion(1.2.0)`, `text`, `contentDescription`, `mergedLabel`, `talkbackLabel`, `viewIdResourceName`, `className`, `boundsInScreen`, `clickable`, `focusable`, `accessibilityFocused`, `visibleToUser`, `children`.
   - `mergedLabel`은 포커스 노드의 `text/contentDescription`이 비어 있으면 자식 노드 DFS 결과(중복 제거)를 병합해 채웁니다.
 
 ---
