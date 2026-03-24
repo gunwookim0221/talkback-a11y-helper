@@ -35,7 +35,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.6.4"
+CLIENT_ALGORITHM_VERSION = "1.6.5"
 
 
 @dataclass
@@ -1301,16 +1301,13 @@ class A11yAdbClient:
         except Exception:
             partial_announcements = []
 
-        try:
-            merged_announcement = self.get_announcements(
-                dev=dev,
-                wait_seconds=wait_seconds,
-                only_new=False,
-            )
-            step["merged_announcement"] = merged_announcement
-            step["normalized_announcement"] = self.normalize_for_comparison(merged_announcement)
-        except Exception:
-            merged_announcement = ""
+        # 발화 수집 기준(step)을 단일화하기 위해 get_announcements 재호출을 제거합니다.
+        merged_announcement = self._merge_announcements(partial_announcements)
+        step["merged_announcement"] = merged_announcement
+        step["normalized_announcement"] = self.normalize_for_comparison(merged_announcement)
+
+        saved_last_announcements = list(self.last_announcements)
+        saved_last_merged = self.last_merged_announcement
 
         try:
             focus_node = self.get_focus(dev=dev, wait_seconds=wait_seconds)
@@ -1333,11 +1330,8 @@ class A11yAdbClient:
         except Exception:
             pass
 
-        step["last_announcements"] = self._json_safe_value(self.last_announcements)
-        step["last_merged_announcement"] = self.last_merged_announcement
-        if not step["merged_announcement"] and step["last_merged_announcement"]:
-            step["merged_announcement"] = step["last_merged_announcement"]
-            step["normalized_announcement"] = self.normalize_for_comparison(step["merged_announcement"])
+        step["last_announcements"] = self._json_safe_value(saved_last_announcements)
+        step["last_merged_announcement"] = saved_last_merged
 
         return step
 
@@ -1369,4 +1363,3 @@ class A11yAdbClient:
         hour, minute, sec_millis = clock.split(":")
         second, millis = sec_millis.split(".")
         return (month, day, int(hour), int(minute), int(second), int(millis))
-
