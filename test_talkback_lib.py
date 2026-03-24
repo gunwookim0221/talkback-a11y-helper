@@ -116,6 +116,9 @@ class CollectFocusStepClient(FakeA11yClient):
 
     def dump_tree(self, dev=None, wait_seconds: float = 5.0):
         self.dump_tree_calls.append((dev, wait_seconds))
+        # 실제 dump_tree()처럼 마지막 발화 상태를 초기화하는 부작용을 재현한다.
+        self.last_announcements = []
+        self.last_merged_announcement = ""
         return list(self.dump_payload)
 
 class TouchIsinTest(unittest.TestCase):
@@ -1214,7 +1217,7 @@ class SmartMoveFocusTest(unittest.TestCase):
 
 class FocusHelpersTest(unittest.TestCase):
     def test_client_algorithm_version_is_updated(self):
-        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.6.4")
+        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.6.5")
 
     def test_extract_visible_label_from_focus_prefers_text(self):
         focus_node = {"text": "  Visible Text  ", "contentDescription": "Desc"}
@@ -1264,16 +1267,16 @@ class FocusHelpersTest(unittest.TestCase):
     def test_collect_focus_step_includes_partial_merged_and_normalized_values(self):
         client = CollectFocusStepClient()
         client.partial_payload = ["  설정  ", "버튼"]
-        client.merged_payload = "설정 버튼 Double Tap to Open"
         client.focus_payload = {"contentDescription": "설정 버튼"}
 
         step = client.collect_focus_step(dev="SERIAL", move=False, wait_seconds=0.2)
 
         self.assertEqual(step["partial_announcements"], ["  설정  ", "버튼"])
-        self.assertEqual(step["merged_announcement"], "설정 버튼 Double Tap to Open")
+        self.assertEqual(step["merged_announcement"], "설정 버튼")
         self.assertEqual(step["normalized_announcement"], "설정")
         self.assertEqual(step["last_announcements"], ["  설정  ", "버튼"])
-        self.assertEqual(step["last_merged_announcement"], "설정 버튼 Double Tap to Open")
+        self.assertEqual(step["last_merged_announcement"], "설정 버튼")
+        self.assertEqual(client.merged_calls, [])
 
 
 if __name__ == "__main__":
