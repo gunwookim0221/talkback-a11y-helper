@@ -258,7 +258,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.i
 
 ## `talkback_lib.py` 레거시 호환 API
 
-- Python 클라이언트 알고리즘 버전: `CLIENT_ALGORITHM_VERSION = 1.6.5`
+- Python 클라이언트 알고리즘 버전: `CLIENT_ALGORITHM_VERSION = 1.6.6`
 - 발화 조회 API
   - `get_announcements(...)` → 수집된 발화를 `strip`/빈 문자열 제거 후 공백으로 병합한 `str` 반환
   - `get_partial_announcements(...)` → raw 발화 조각 `list[str]` 반환
@@ -289,6 +289,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.i
 - `extract_visible_label_from_focus(focus_node)`
   - device와 무관한 static helper입니다. `get_focus()`가 반환한 포커스 노드 dict에서 대표 visible label을 추출합니다.
   - 우선순위는 `text → contentDescription → talkback → content_desc → label`이며, 각 값은 `strip()` 후 비어 있지 않은 첫 값을 반환합니다.
+  - 포커스 노드 자체에서 값을 찾지 못하면 `children`를 DFS(pre-order)로 재귀 탐색해, 동일 우선순위 기준의 첫 유효 visible label을 반환합니다.
   - 입력이 `None`이거나 dict가 아니면 예외 없이 빈 문자열(`""`)을 반환합니다.
 - `normalize_for_comparison(text)`
   - device와 무관한 static helper입니다. visible label / merged announcement 비교 전에 사용할 1차 정규화 함수입니다.

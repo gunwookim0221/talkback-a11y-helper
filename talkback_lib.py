@@ -35,7 +35,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.6.5"
+CLIENT_ALGORITHM_VERSION = "1.6.6"
 
 
 @dataclass
@@ -390,16 +390,41 @@ class A11yAdbClient:
 
     @staticmethod
     def extract_visible_label_from_focus(focus_node: Any) -> str:
-        """현재 포커스 노드에서 비교/저장용 대표 visible label을 추출합니다."""
-        if not isinstance(focus_node, dict):
+        """현재 포커스 노드(필요 시 children 포함)에서 대표 visible label을 추출합니다."""
+        return A11yAdbClient._extract_visible_label_recursive(focus_node)
+
+    @staticmethod
+    def _extract_first_label_value(node: Any) -> str:
+        """단일 노드에서 label 우선순위 기준 첫 유효 문자열을 추출합니다."""
+        if not isinstance(node, dict):
             return ""
 
         for key in ("text", "contentDescription", "talkback", "content_desc", "label"):
-            value = focus_node.get(key)
+            value = node.get(key)
             if isinstance(value, str):
                 stripped = value.strip()
                 if stripped:
                     return stripped
+        return ""
+
+    @staticmethod
+    def _extract_visible_label_recursive(node: Any) -> str:
+        """DFS(pre-order)로 현재 노드→children 순서로 대표 visible label을 탐색합니다."""
+        if not isinstance(node, dict):
+            return ""
+
+        current_value = A11yAdbClient._extract_first_label_value(node)
+        if current_value:
+            return current_value
+
+        children = node.get("children")
+        if not isinstance(children, list):
+            return ""
+
+        for child in children:
+            child_value = A11yAdbClient._extract_visible_label_recursive(child)
+            if child_value:
+                return child_value
         return ""
 
     @staticmethod
