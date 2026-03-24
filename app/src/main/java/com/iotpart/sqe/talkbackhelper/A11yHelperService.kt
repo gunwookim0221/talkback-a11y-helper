@@ -121,6 +121,19 @@ class A11yHelperService : AccessibilityService() {
         return source
     }
 
+    private fun resolveCurrentFocusNode(): AccessibilityNodeInfo? {
+        val root = rootInActiveWindow ?: return null
+        return root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            ?: root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            ?: root
+    }
+
+    fun refreshCurrentFocusSnapshot(): FocusSnapshot? {
+        val snapshot = FocusSnapshot.fromNodeOrNull(resolveCurrentFocusNode()) ?: return null
+        A11yStateStore.update(snapshot)
+        return snapshot
+    }
+
     fun dumpTree(reqId: String = "none") {
         val dumpArray = A11yNavigator.dumpTreeFlat(rootInActiveWindow)
         val dumpString = dumpArray.toString()
