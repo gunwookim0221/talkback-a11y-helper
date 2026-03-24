@@ -1217,7 +1217,7 @@ class SmartMoveFocusTest(unittest.TestCase):
 
 class FocusHelpersTest(unittest.TestCase):
     def test_client_algorithm_version_is_updated(self):
-        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.6.5")
+        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.6.6")
 
     def test_extract_visible_label_from_focus_prefers_text(self):
         focus_node = {"text": "  Visible Text  ", "contentDescription": "Desc"}
@@ -1232,6 +1232,45 @@ class FocusHelpersTest(unittest.TestCase):
     def test_extract_visible_label_from_focus_returns_empty_for_invalid_input(self):
         self.assertEqual(A11yAdbClient.extract_visible_label_from_focus(None), "")
         self.assertEqual(A11yAdbClient.extract_visible_label_from_focus("not-a-dict"), "")
+
+    def test_extract_visible_label_from_focus_uses_child_text_when_parent_is_empty(self):
+        focus_node = {
+            "text": " ",
+            "contentDescription": "",
+            "children": [
+                {"text": "  Child Visible Text  "},
+            ],
+        }
+
+        self.assertEqual(A11yAdbClient.extract_visible_label_from_focus(focus_node), "Child Visible Text")
+
+    def test_extract_visible_label_from_focus_uses_child_content_description_when_parent_is_empty(self):
+        focus_node = {
+            "text": "",
+            "contentDescription": "   ",
+            "children": [
+                {"text": " "},
+                {"contentDescription": "  Child Desc  "},
+            ],
+        }
+
+        self.assertEqual(A11yAdbClient.extract_visible_label_from_focus(focus_node), "Child Desc")
+
+    def test_extract_visible_label_from_focus_returns_first_valid_value_in_dfs_preorder(self):
+        focus_node = {
+            "text": "",
+            "children": [
+                {
+                    "text": "",
+                    "children": [
+                        {"text": "  First DFS Value  "},
+                    ],
+                },
+                {"text": "Second Value"},
+            ],
+        }
+
+        self.assertEqual(A11yAdbClient.extract_visible_label_from_focus(focus_node), "First DFS Value")
 
     def test_normalize_for_comparison_applies_whitespace_case_and_phrase_cleanup(self):
         text = "  설정\n\t버튼   선택됨 | Double Tap to Activate  "
