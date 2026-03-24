@@ -1,5 +1,6 @@
 import json
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
+SCRIPT_VERSION = "1.1.0"
 
 TAB_CONFIGS = [
     {
@@ -34,15 +36,17 @@ TAB_CONFIGS = [
     },
 ]
 
-OUTPUT_PATH = "output/talkback_compare_result.xlsx"
-
-
 def now_str() -> str:
     return time.strftime("%H:%M:%S")
 
 
 def log(msg: str) -> None:
     print(f"[{now_str()}] {msg}")
+
+
+def generate_output_path() -> str:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"output/talkback_compare_{timestamp}.xlsx"
 
 
 def to_json_text(value: Any) -> str:
@@ -192,13 +196,6 @@ def save_excel(rows: list[dict], output_path: str) -> None:
     log(f"[SAVE] saved excel: {output_path} rows={len(df)}")
 
 
-def autosave(all_rows: list[dict]) -> None:
-    try:
-        save_excel(all_rows, OUTPUT_PATH)
-    except Exception as exc:
-        log(f"[SAVE] autosave failed: {exc}")
-
-
 def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     log("=" * 80)
     log(f"[TAB-OPEN] start tab='{tab_cfg['tab_name']}'")
@@ -304,6 +301,7 @@ def collect_tab_rows(
     dev: str,
     tab_cfg: dict,
     all_rows: list[dict],
+    output_path: str,
 ) -> list[dict]:
     rows: list[dict] = []
 
@@ -317,7 +315,7 @@ def collect_tab_rows(
         }
         rows.append(row)
         all_rows.append(row)
-        autosave(all_rows)
+        save_excel(all_rows, output_path)
         return rows
 
     log(f"[TAB-TRAVERSE] collecting anchor row for tab='{tab_cfg['tab_name']}'")
@@ -337,7 +335,7 @@ def collect_tab_rows(
 
     rows.append(anchor_row)
     all_rows.append(anchor_row)
-    autosave(all_rows)
+    save_excel(all_rows, output_path)
 
     log(
         f"[ANCHOR-ROW] elapsed={anchor_elapsed:.2f}s "
@@ -400,7 +398,7 @@ def collect_tab_rows(
 
         rows.append(row)
         all_rows.append(row)
-        autosave(all_rows)
+        save_excel(all_rows, output_path)
 
         if stop:
             log(f"[INFO] stop tab={tab_cfg['tab_name']} step={step_idx} reason={reason}")
@@ -410,23 +408,25 @@ def collect_tab_rows(
 
 
 def main():
-    log("[MAIN] script start")
+    log(f"[MAIN] script start (version={SCRIPT_VERSION})")
     client = A11yAdbClient(dev_serial=DEV_SERIAL)
 
     all_rows: list[dict] = []
+    output_path = generate_output_path()
+    log(f"[MAIN] output file: {output_path}")
 
     try:
         for tab_cfg in TAB_CONFIGS:
             log(f"[MAIN] processing tab={tab_cfg['tab_name']}")
-            collect_tab_rows(client, DEV_SERIAL, tab_cfg, all_rows)
+            collect_tab_rows(client, DEV_SERIAL, tab_cfg, all_rows, output_path)
 
     except Exception as exc:
         log(f"[FATAL] script interrupted: {exc}")
-        autosave(all_rows)
+        save_excel(all_rows, output_path)
         raise
 
     finally:
-        autosave(all_rows)
+        save_excel(all_rows, output_path)
         log("[MAIN] final save complete")
 
     log("[MAIN] script end")
