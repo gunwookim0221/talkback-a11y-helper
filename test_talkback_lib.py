@@ -17,6 +17,7 @@ from talkback_lib import (
     ACTION_COMMAND,
     LOGCAT_FILTER_SPECS,
     A11yAdbClient,
+    CLIENT_ALGORITHM_VERSION,
 )
 
 
@@ -68,6 +69,54 @@ class FakeA11yClient(A11yAdbClient):
             return ""
         raise AssertionError(f"unexpected args: {args}")
 
+
+
+
+class CollectFocusStepClient(FakeA11yClient):
+    def __init__(self):
+        super().__init__()
+        self.partial_calls = []
+        self.merged_calls = []
+        self.focus_calls = []
+        self.move_focus_calls = []
+        self.move_focus_smart_calls = []
+        self.dump_tree_calls = []
+        self.partial_payload = ["  Hello  ", "버튼"]
+        self.merged_payload = "Hello Button"
+        self.focus_payload = {
+            "text": "  Hello  ",
+            "contentDescription": "ignored",
+            "viewIdResourceName": "com.example:id/hello",
+            "boundsInScreen": {"l": 1, "t": 2, "r": 3, "b": 4},
+        }
+        self.dump_payload = [{"text": "node-1"}]
+
+    def get_partial_announcements(self, dev=None, wait_seconds: float = 2.0, only_new: bool = True):
+        self.partial_calls.append((dev, wait_seconds, only_new))
+        self.last_announcements = list(self.partial_payload)
+        self.last_merged_announcement = " ".join(item.strip() for item in self.partial_payload if item.strip())
+        return list(self.partial_payload)
+
+    def get_announcements(self, dev=None, wait_seconds: float = 2.0, only_new: bool = True):
+        self.merged_calls.append((dev, wait_seconds, only_new))
+        self.last_merged_announcement = self.merged_payload
+        return self.merged_payload
+
+    def get_focus(self, dev=None, wait_seconds: float = 2.0):
+        self.focus_calls.append((dev, wait_seconds))
+        return dict(self.focus_payload)
+
+    def move_focus(self, dev=None, direction: str = "next"):
+        self.move_focus_calls.append((dev, direction))
+        return True
+
+    def move_focus_smart(self, dev=None, direction: str = "next"):
+        self.move_focus_smart_calls.append((dev, direction))
+        return "moved"
+
+    def dump_tree(self, dev=None, wait_seconds: float = 5.0):
+        self.dump_tree_calls.append((dev, wait_seconds))
+        return list(self.dump_payload)
 
 class TouchIsinTest(unittest.TestCase):
     def test_escape_adb_string_handles_empty_space_and_single_quote(self):
@@ -1160,6 +1209,71 @@ class SmartMoveFocusTest(unittest.TestCase):
 
         self.assertEqual(result, "moved")
         move_mock.assert_called_once_with(dev="SER", direction="prev")
+
+
+
+class FocusHelpersTest(unittest.TestCase):
+    def test_client_algorithm_version_is_updated(self):
+        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.6.4")
+
+    def test_extract_visible_label_from_focus_prefers_text(self):
+        focus_node = {"text": "  Visible Text  ", "contentDescription": "Desc"}
+
+        self.assertEqual(A11yAdbClient.extract_visible_label_from_focus(focus_node), "Visible Text")
+
+    def test_extract_visible_label_from_focus_falls_back_to_content_description(self):
+        focus_node = {"text": "   ", "contentDescription": "  Desc Label  ", "talkback": "TB"}
+
+        self.assertEqual(A11yAdbClient.extract_visible_label_from_focus(focus_node), "Desc Label")
+
+    def test_extract_visible_label_from_focus_returns_empty_for_invalid_input(self):
+        self.assertEqual(A11yAdbClient.extract_visible_label_from_focus(None), "")
+        self.assertEqual(A11yAdbClient.extract_visible_label_from_focus("not-a-dict"), "")
+
+    def test_normalize_for_comparison_applies_whitespace_case_and_phrase_cleanup(self):
+        text = "  설정\n\t버튼   선택됨 | Double Tap to Activate  "
+
+        self.assertEqual(A11yAdbClient.normalize_for_comparison(text), "설정")
+
+    def test_collect_focus_step_without_move_collects_current_state(self):
+        client = CollectFocusStepClient()
+
+        step = client.collect_focus_step(dev="SERIAL", step_index=3, move=False, wait_seconds=0.2)
+
+        self.assertIsNone(step["move_result"])
+        self.assertEqual(client.move_focus_calls, [])
+        self.assertEqual(client.move_focus_smart_calls, [])
+        self.assertEqual(step["step_index"], 3)
+        self.assertEqual(step["visible_label"], "Hello")
+        self.assertEqual(step["normalized_visible_label"], "hello")
+        self.assertEqual(step["focus_text"], "  Hello  ")
+        self.assertEqual(step["focus_content_description"], "ignored")
+        self.assertEqual(step["focus_view_id"], "com.example:id/hello")
+        self.assertEqual(step["focus_bounds"], "1,2,3,4")
+        self.assertEqual(step["dump_tree_nodes"], [{"text": "node-1"}])
+
+    def test_collect_focus_step_move_next_uses_move_focus_smart(self):
+        client = CollectFocusStepClient()
+
+        step = client.collect_focus_step(dev="SERIAL", step_index=1, move=True, direction="next", wait_seconds=0.2)
+
+        self.assertEqual(client.move_focus_smart_calls, [("SERIAL", "next")])
+        self.assertEqual(client.move_focus_calls, [])
+        self.assertEqual(step["move_result"], "moved")
+
+    def test_collect_focus_step_includes_partial_merged_and_normalized_values(self):
+        client = CollectFocusStepClient()
+        client.partial_payload = ["  설정  ", "버튼"]
+        client.merged_payload = "설정 버튼 Double Tap to Open"
+        client.focus_payload = {"contentDescription": "설정 버튼"}
+
+        step = client.collect_focus_step(dev="SERIAL", move=False, wait_seconds=0.2)
+
+        self.assertEqual(step["partial_announcements"], ["  설정  ", "버튼"])
+        self.assertEqual(step["merged_announcement"], "설정 버튼 Double Tap to Open")
+        self.assertEqual(step["normalized_announcement"], "설정")
+        self.assertEqual(step["last_announcements"], ["  설정  ", "버튼"])
+        self.assertEqual(step["last_merged_announcement"], "설정 버튼 Double Tap to Open")
 
 
 if __name__ == "__main__":

@@ -35,7 +35,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.6.3"
+CLIENT_ALGORITHM_VERSION = "1.6.4"
 
 
 @dataclass
@@ -387,6 +387,65 @@ class A11yAdbClient:
                 target_text = token
 
         return "", "", target_text, target_id
+
+    @staticmethod
+    def extract_visible_label_from_focus(focus_node: Any) -> str:
+        """현재 포커스 노드에서 비교/저장용 대표 visible label을 추출합니다."""
+        if not isinstance(focus_node, dict):
+            return ""
+
+        for key in ("text", "contentDescription", "talkback", "content_desc", "label"):
+            value = focus_node.get(key)
+            if isinstance(value, str):
+                stripped = value.strip()
+                if stripped:
+                    return stripped
+        return ""
+
+    @staticmethod
+    def normalize_for_comparison(text: str | None) -> str:
+        """비교 전 텍스트를 가볍게 정규화합니다.
+
+        Rules:
+        - ``None``은 빈 문자열로 변환
+        - 줄바꿈/탭을 공백으로 치환 후 `strip()` 적용
+        - 소문자화
+        - 연속 공백을 한 칸으로 축소
+        - 비교를 방해하는 대표 역할/상태 문구(한/영 일부) 제거
+        - 과도하지 않게 일부 기호(`,`, `:`, `;`, `|`)만 공백으로 정리
+        """
+        if text is None:
+            return ""
+
+        normalized = str(text).replace("\n", " ").replace("\t", " ").strip().lower()
+        normalized = re.sub(r"[,:;|]", " ", normalized)
+
+        removable_phrases = (
+            "double tap to activate",
+            "double tap to open",
+            "button",
+            "selected",
+            "disabled",
+            "버튼",
+            "선택됨",
+            "사용 안 함",
+        )
+        for phrase in removable_phrases:
+            normalized = re.sub(rf"(?<!\w){re.escape(phrase)}(?!\w)", " ", normalized)
+
+        normalized = re.sub(r"\s+", " ", normalized)
+        return normalized.strip()
+
+    @staticmethod
+    def _json_safe_value(value: Any) -> Any:
+        """dict/list/scalar 중심의 JSON 직렬화 가능한 값으로 최대한 안전하게 변환합니다."""
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, dict):
+            return {str(key): A11yAdbClient._json_safe_value(val) for key, val in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [A11yAdbClient._json_safe_value(item) for item in value]
+        return str(value)
 
     @staticmethod
     def _collect_text_samples(nodes: list[dict[str, Any]], max_samples: int = 10) -> list[str]:
@@ -1195,6 +1254,92 @@ class A11yAdbClient:
         self.last_announcements = announcements
         self.last_merged_announcement = self._merge_announcements(announcements)
         return announcements
+
+    def collect_focus_step(
+        self,
+        dev: Any = None,
+        step_index: int = 0,
+        move: bool = True,
+        direction: str = "next",
+        wait_seconds: float = 1.5,
+    ) -> dict[str, Any]:
+        """포커스 1 step 이동/수집 결과를 엑셀 row 친화적인 dict로 반환합니다."""
+        step: dict[str, Any] = {
+            "step_index": step_index,
+            "move_result": None,
+            "focus_node": {},
+            "focus_text": "",
+            "focus_content_description": "",
+            "visible_label": "",
+            "normalized_visible_label": "",
+            "partial_announcements": [],
+            "merged_announcement": "",
+            "normalized_announcement": "",
+            "dump_tree_nodes": [],
+            "focus_view_id": "",
+            "focus_bounds": "",
+            "last_announcements": [],
+            "last_merged_announcement": "",
+        }
+
+        if move:
+            try:
+                if str(direction).strip().lower() == "next":
+                    step["move_result"] = self.move_focus_smart(dev=dev, direction=direction)
+                else:
+                    step["move_result"] = self.move_focus(dev=dev, direction=direction)
+            except Exception as exc:  # defensive
+                step["move_result"] = f"error: {exc}"
+
+        try:
+            partial_announcements = self.get_partial_announcements(
+                dev=dev,
+                wait_seconds=wait_seconds,
+                only_new=True,
+            )
+            step["partial_announcements"] = self._json_safe_value(partial_announcements)
+        except Exception:
+            partial_announcements = []
+
+        try:
+            merged_announcement = self.get_announcements(
+                dev=dev,
+                wait_seconds=wait_seconds,
+                only_new=False,
+            )
+            step["merged_announcement"] = merged_announcement
+            step["normalized_announcement"] = self.normalize_for_comparison(merged_announcement)
+        except Exception:
+            merged_announcement = ""
+
+        try:
+            focus_node = self.get_focus(dev=dev, wait_seconds=wait_seconds)
+        except Exception:
+            focus_node = {}
+        safe_focus_node = self._json_safe_value(focus_node) if isinstance(focus_node, dict) else {}
+        step["focus_node"] = safe_focus_node
+        step["focus_text"] = safe_focus_node.get("text", "") if isinstance(safe_focus_node, dict) else ""
+        step["focus_content_description"] = safe_focus_node.get("contentDescription", "") if isinstance(safe_focus_node, dict) else ""
+        step["focus_view_id"] = safe_focus_node.get("viewIdResourceName", "") if isinstance(safe_focus_node, dict) else ""
+        step["focus_bounds"] = self._normalize_bounds(safe_focus_node) if isinstance(safe_focus_node, dict) else ""
+
+        visible_label = self.extract_visible_label_from_focus(safe_focus_node)
+        step["visible_label"] = visible_label
+        step["normalized_visible_label"] = self.normalize_for_comparison(visible_label)
+
+        try:
+            dump_tree_nodes = self.dump_tree(dev=dev)
+            step["dump_tree_nodes"] = self._json_safe_value(dump_tree_nodes)
+        except Exception:
+            pass
+
+        step["last_announcements"] = self._json_safe_value(self.last_announcements)
+        step["last_merged_announcement"] = self.last_merged_announcement
+        if not step["merged_announcement"] and step["last_merged_announcement"]:
+            step["merged_announcement"] = step["last_merged_announcement"]
+            step["normalized_announcement"] = self.normalize_for_comparison(step["merged_announcement"])
+
+        return step
 
     def get_announcements(
         self,

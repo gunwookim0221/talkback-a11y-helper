@@ -258,7 +258,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.i
 
 ## `talkback_lib.py` 레거시 호환 API
 
-- Python 클라이언트 알고리즘 버전: `CLIENT_ALGORITHM_VERSION = 1.6.3`
+- Python 클라이언트 알고리즘 버전: `CLIENT_ALGORITHM_VERSION = 1.6.4`
 - 발화 조회 API
   - `get_announcements(...)` → 수집된 발화를 `strip`/빈 문자열 제거 후 공백으로 병합한 `str` 반환
   - `get_partial_announcements(...)` → raw 발화 조각 `list[str]` 반환
@@ -286,6 +286,19 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.i
   - `touch()`와 동일한 폴링 루틴을 사용하지만 클릭 대신 `FOCUS_TARGET` 액션으로 접근성 포커스만 이동합니다.
   - `targetName`은 `isin()`과 동일하게 대소문자 구분 없는 정규식 매칭(`(?i)`)으로 처리합니다.
   - 성공 시 `True`, 타임아웃 시 `False`를 반환합니다.
+- `extract_visible_label_from_focus(focus_node)`
+  - device와 무관한 static helper입니다. `get_focus()`가 반환한 포커스 노드 dict에서 대표 visible label을 추출합니다.
+  - 우선순위는 `text → contentDescription → talkback → content_desc → label`이며, 각 값은 `strip()` 후 비어 있지 않은 첫 값을 반환합니다.
+  - 입력이 `None`이거나 dict가 아니면 예외 없이 빈 문자열(`""`)을 반환합니다.
+- `normalize_for_comparison(text)`
+  - device와 무관한 static helper입니다. visible label / merged announcement 비교 전에 사용할 1차 정규화 함수입니다.
+  - `None → ""`, 줄바꿈/탭 치환, `strip`, 소문자화, 연속 공백 축소를 수행합니다.
+  - 비교 방해가 큰 대표 역할/상태 문구(`버튼`, `선택됨`, `사용 안 함`, `button`, `selected`, `disabled`, `double tap to activate`, `double tap to open`)만 읽기 쉬운 규칙으로 제거합니다.
+  - punctuation은 전부 제거하지 않고 `,`, `:`, `;`, `|` 정도만 공백으로 정리합니다.
+- `collect_focus_step(dev=None, step_index=0, move=True, direction="next", wait_seconds=1.5)`
+  - 기존 `client/dev` 사용 방식과 동일한 수집용 인스턴스 메서드입니다. 다중 단말 환경에서도 기존과 같이 `dev`를 그대로 넘길 수 있습니다.
+  - `move=True`이면 `direction="next"`일 때 `move_focus_smart()`를 우선 사용하고, 그 외 방향은 `move_focus()`를 사용합니다. `move=False`이면 현재 포커스 기준으로 수집만 수행합니다.
+  - 내부적으로 `get_partial_announcements()`, `get_announcements()`, `get_focus()`, `dump_tree()`를 순서대로 최대한 방어적으로 호출하고, 엑셀 row/JSON 저장이 쉬운 snake_case dict를 반환합니다.
 - `move_focus(dev=None, direction='next')`
   - TalkBack 탐색 포커스를 `direction` 기준으로 한 칸 이동합니다. (`'next'` 또는 `'prev'`)
   - 실행 전 `check_helper_status(dev)` 안전 검증 후 `clear_logcat()`을 호출하고, 요청별 `reqId`를 생성해 `NEXT/PREV` 브로드캐스트를 전송합니다.
@@ -368,6 +381,34 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.i
   - 활성 상태에서 `scrollFind(..., direction_="down")`으로 대상을 찾습니다.
   - 발화 검증 전에 `client.select(dev_serial, target_name)`를 먼저 호출해 타겟 포커스를 맞춘 뒤, `client.verify_speech(dev_serial, expected_regex=target_name)` 결과로 PASS/FAIL을 판별합니다.
 
+
+## Python 클라이언트 helper 사용 예시
+
+```python
+from talkback_lib import A11yAdbClient
+
+client = A11yAdbClient(dev_serial="R3CX40QFDBP")
+
+step = client.collect_focus_step(
+    dev="R3CX40QFDBP",
+    step_index=1,
+    move=True,
+    direction="next",
+    wait_seconds=1.5,
+)
+
+print(step["visible_label"])
+print(step["merged_announcement"])
+print(step["normalized_visible_label"])
+print(step["normalized_announcement"])
+
+focus_node = client.get_focus(dev="R3CX40QFDBP")
+visible_label = client.extract_visible_label_from_focus(focus_node)
+normalized_label = client.normalize_for_comparison(visible_label)
+```
+
+- `extract_visible_label_from_focus()`와 `normalize_for_comparison()`는 device와 무관한 helper라서, 테스트/후처리 코드에서도 바로 재사용할 수 있습니다.
+- `collect_focus_step()`는 기존 공개 API와 동일하게 `client.collect_focus_step(dev=...)` 형태로 사용하면 됩니다.
 
 ## Python 클라이언트 발화 API 변경 사항
 
