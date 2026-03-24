@@ -10,7 +10,6 @@ from talkback_lib import A11yAdbClient
 
 DEV_SERIAL = "R3CX40QFDBP"
 
-# 처음에는 regex + b 로 시작하는 게 안전함
 TAB_CONFIGS = [
     {
         "tab_name": ".*Home.*",
@@ -34,6 +33,8 @@ TAB_CONFIGS = [
         "max_steps": 30,
     },
 ]
+
+OUTPUT_PATH = "output/talkback_compare_result.xlsx"
 
 
 def now_str() -> str:
@@ -124,6 +125,80 @@ def debug_find_tab_before_touch(client: A11yAdbClient, dev: str, tab_cfg: dict) 
         log(f"[TAB-CHECK] failed: {exc}")
 
 
+def add_rule_compare(df: pd.DataFrame) -> pd.DataFrame:
+    def compare_row(row) -> str:
+        visible = str(row.get("normalized_visible_label", "") or "").strip()
+        speech = str(row.get("normalized_announcement", "") or "").strip()
+
+        if not visible and not speech:
+            return "EMPTY"
+        if visible == speech:
+            return "EXACT"
+        if visible and speech and (visible in speech or speech in visible):
+            return "PARTIAL"
+        return "DIFF"
+
+    df["rule_compare"] = df.apply(compare_row, axis=1)
+    return df
+
+
+def stringify_complex_columns(df: pd.DataFrame) -> pd.DataFrame:
+    for col in df.columns:
+        df[col] = df[col].apply(
+            lambda x: to_json_text(x) if isinstance(x, (list, dict)) else x
+        )
+    return df
+
+
+def save_excel(rows: list[dict], output_path: str) -> None:
+    df = pd.DataFrame(rows)
+
+    if df.empty:
+        log("[SAVE] skip: no rows")
+        return
+
+    df = add_rule_compare(df)
+    df = stringify_complex_columns(df)
+
+    ordered_cols = [
+        "tab_name",
+        "step_index",
+        "status",
+        "stop_reason",
+        "step_elapsed_sec",
+        "move_result",
+        "visible_label",
+        "normalized_visible_label",
+        "merged_announcement",
+        "normalized_announcement",
+        "rule_compare",
+        "focus_text",
+        "focus_content_description",
+        "focus_view_id",
+        "focus_bounds",
+        "partial_announcements",
+        "last_announcements",
+        "last_merged_announcement",
+        "focus_node",
+        "dump_tree_nodes",
+    ]
+
+    existing_cols = [c for c in ordered_cols if c in df.columns]
+    remaining_cols = [c for c in df.columns if c not in existing_cols]
+    df = df[existing_cols + remaining_cols]
+
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    df.to_excel(output_path, index=False)
+    log(f"[SAVE] saved excel: {output_path} rows={len(df)}")
+
+
+def autosave(all_rows: list[dict]) -> None:
+    try:
+        save_excel(all_rows, OUTPUT_PATH)
+    except Exception as exc:
+        log(f"[SAVE] autosave failed: {exc}")
+
+
 def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     log("=" * 80)
     log(f"[TAB-OPEN] start tab='{tab_cfg['tab_name']}'")
@@ -154,6 +229,7 @@ def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
 
     client.reset_focus_history(dev)
     log("[TAB-OPEN] focus history reset")
+
     time.sleep(0.5)
     log("[TAB-OPEN] slept 0.5s after reset")
 
@@ -223,19 +299,25 @@ def should_stop(
     return False, fail_count, same_count, reason
 
 
-def collect_tab_rows(client: A11yAdbClient, dev: str, tab_cfg: dict) -> list[dict]:
+def collect_tab_rows(
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict,
+    all_rows: list[dict],
+) -> list[dict]:
     rows: list[dict] = []
 
     opened = open_tab_and_anchor(client, dev, tab_cfg)
     if not opened:
-        rows.append(
-            {
-                "tab_name": tab_cfg["tab_name"],
-                "step_index": -1,
-                "status": "TAB_OPEN_FAILED",
-                "stop_reason": "tab_or_anchor_failed",
-            }
-        )
+        row = {
+            "tab_name": tab_cfg["tab_name"],
+            "step_index": -1,
+            "status": "TAB_OPEN_FAILED",
+            "stop_reason": "tab_or_anchor_failed",
+        }
+        rows.append(row)
+        all_rows.append(row)
+        autosave(all_rows)
         return rows
 
     log(f"[TAB-TRAVERSE] collecting anchor row for tab='{tab_cfg['tab_name']}'")
@@ -247,11 +329,15 @@ def collect_tab_rows(client: A11yAdbClient, dev: str, tab_cfg: dict) -> list[dic
         wait_seconds=1.5,
     )
     anchor_elapsed = time.perf_counter() - anchor_start
+
     anchor_row["tab_name"] = tab_cfg["tab_name"]
     anchor_row["status"] = "ANCHOR"
     anchor_row["stop_reason"] = ""
     anchor_row["step_elapsed_sec"] = round(anchor_elapsed, 3)
+
     rows.append(anchor_row)
+    all_rows.append(anchor_row)
+    autosave(all_rows)
 
     log(
         f"[ANCHOR-ROW] elapsed={anchor_elapsed:.2f}s "
@@ -311,75 +397,16 @@ def collect_tab_rows(client: A11yAdbClient, dev: str, tab_cfg: dict) -> list[dic
         if stop:
             row["status"] = "END"
             row["stop_reason"] = reason
-            rows.append(row)
+
+        rows.append(row)
+        all_rows.append(row)
+        autosave(all_rows)
+
+        if stop:
             log(f"[INFO] stop tab={tab_cfg['tab_name']} step={step_idx} reason={reason}")
             break
 
-        rows.append(row)
-
     return rows
-
-
-def add_rule_compare(df: pd.DataFrame) -> pd.DataFrame:
-    def compare_row(row) -> str:
-        visible = str(row.get("normalized_visible_label", "") or "").strip()
-        speech = str(row.get("normalized_announcement", "") or "").strip()
-
-        if not visible and not speech:
-            return "EMPTY"
-        if visible == speech:
-            return "EXACT"
-        if visible and speech and (visible in speech or speech in visible):
-            return "PARTIAL"
-        return "DIFF"
-
-    df["rule_compare"] = df.apply(compare_row, axis=1)
-    return df
-
-
-def stringify_complex_columns(df: pd.DataFrame) -> pd.DataFrame:
-    for col in df.columns:
-        df[col] = df[col].apply(
-            lambda x: to_json_text(x) if isinstance(x, (list, dict)) else x
-        )
-    return df
-
-
-def save_excel(rows: list[dict], output_path: str) -> None:
-    df = pd.DataFrame(rows)
-    df = add_rule_compare(df)
-    df = stringify_complex_columns(df)
-
-    ordered_cols = [
-        "tab_name",
-        "step_index",
-        "status",
-        "stop_reason",
-        "step_elapsed_sec",
-        "move_result",
-        "visible_label",
-        "normalized_visible_label",
-        "merged_announcement",
-        "normalized_announcement",
-        "rule_compare",
-        "focus_text",
-        "focus_content_description",
-        "focus_view_id",
-        "focus_bounds",
-        "partial_announcements",
-        "last_announcements",
-        "last_merged_announcement",
-        "focus_node",
-        "dump_tree_nodes",
-    ]
-
-    existing_cols = [c for c in ordered_cols if c in df.columns]
-    remaining_cols = [c for c in df.columns if c not in existing_cols]
-    df = df[existing_cols + remaining_cols]
-
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    df.to_excel(output_path, index=False)
-    log(f"[INFO] saved excel: {output_path}")
 
 
 def main():
@@ -388,12 +415,20 @@ def main():
 
     all_rows: list[dict] = []
 
-    for tab_cfg in TAB_CONFIGS:
-        log(f"[MAIN] processing tab={tab_cfg['tab_name']}")
-        tab_rows = collect_tab_rows(client, DEV_SERIAL, tab_cfg)
-        all_rows.extend(tab_rows)
+    try:
+        for tab_cfg in TAB_CONFIGS:
+            log(f"[MAIN] processing tab={tab_cfg['tab_name']}")
+            collect_tab_rows(client, DEV_SERIAL, tab_cfg, all_rows)
 
-    save_excel(all_rows, "output/talkback_compare_result.xlsx")
+    except Exception as exc:
+        log(f"[FATAL] script interrupted: {exc}")
+        autosave(all_rows)
+        raise
+
+    finally:
+        autosave(all_rows)
+        log("[MAIN] final save complete")
+
     log("[MAIN] script end")
 
 
