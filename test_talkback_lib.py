@@ -1128,6 +1128,78 @@ class SmartMoveFocusTest(unittest.TestCase):
         broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0][0]
         self.assertEqual(broadcast[4], ACTION_GET_FOCUS)
 
+    def test_get_focus_keeps_get_focus_result_and_skips_dump_fallback(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: FOCUS_RESULT {"success":true,"reqId":"REQID611","node":{"text":"직접 포커스","viewIdResourceName":"id/direct"}}'
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID611-xxxx"), patch.object(client, "dump_tree") as dump_mock:
+            result = client.get_focus("SER")
+
+        self.assertEqual(result, {"text": "직접 포커스", "viewIdResourceName": "id/direct"})
+        dump_mock.assert_not_called()
+
+    def test_get_focus_fallback_prefers_accessibility_focused_node(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: FOCUS_RESULT {"success":true,"reqId":"REQID612","node":{}}'
+        dump_nodes = [
+            {"text": "일반"},
+            {"text": "복구 노드", "accessibilityFocused": True, "viewIdResourceName": "id/recovered"},
+        ]
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID612-xxxx"), patch.object(client, "dump_tree", return_value=dump_nodes):
+            result = client.get_focus("SER")
+
+        self.assertEqual(result.get("text"), "복구 노드")
+        self.assertTrue(result.get("accessibilityFocused"))
+
+    def test_get_focus_fallback_uses_focused_when_accessibility_not_found(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: FOCUS_RESULT {"success":true,"reqId":"REQID613","node":{}}'
+        dump_nodes = [
+            {"text": "노드1"},
+            {"text": "포커스됨", "focused": True, "viewIdResourceName": "id/focused"},
+        ]
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID613-xxxx"), patch.object(client, "dump_tree", return_value=dump_nodes):
+            result = client.get_focus("SER")
+
+        self.assertEqual(result.get("text"), "포커스됨")
+        self.assertTrue(result.get("focused"))
+
+    def test_get_focus_fallback_returns_empty_when_no_focus_flags(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: FOCUS_RESULT {"success":true,"reqId":"REQID614","node":{}}'
+        dump_nodes = [{"text": "A"}, {"text": "B", "focused": False, "accessibilityFocused": False}]
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID614-xxxx"), patch.object(client, "dump_tree", return_value=dump_nodes):
+            result = client.get_focus("SER")
+
+        self.assertEqual(result, {})
+
+    def test_get_focus_fallback_finds_nested_children_focus_node(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: FOCUS_RESULT {"success":true,"reqId":"REQID615","node":{}}'
+        dump_nodes = [
+            {
+                "text": "parent",
+                "children": [
+                    {"text": "child-1"},
+                    {
+                        "text": "child-2",
+                        "children": [
+                            {"text": "nested target", "accessibilityFocused": True, "contentDescription": "Sleep environment Learn more"}
+                        ],
+                    },
+                ],
+            }
+        ]
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID615-xxxx"), patch.object(client, "dump_tree", return_value=dump_nodes):
+            result = client.get_focus("SER")
+
+        self.assertEqual(result.get("text"), "nested target")
+        self.assertEqual(result.get("contentDescription"), "Sleep environment Learn more")
+
     def test_reset_focus_history_broadcasts_reset_for_string_device(self):
         client = FakeA11yClient()
 
@@ -1217,7 +1289,7 @@ class SmartMoveFocusTest(unittest.TestCase):
 
 class FocusHelpersTest(unittest.TestCase):
     def test_client_algorithm_version_is_updated(self):
-        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.6.6")
+        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.6.7")
 
     def test_extract_visible_label_from_focus_prefers_text(self):
         focus_node = {"text": "  Visible Text  ", "contentDescription": "Desc"}

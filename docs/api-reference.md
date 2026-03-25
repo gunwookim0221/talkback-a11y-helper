@@ -165,7 +165,7 @@ if not client.check_talkback_status(dev_serial):
 ### Signature
 `dump_tree(dev: Any = None, wait_seconds: float = 5.0) -> list[dict[str, Any]]`
 
-> 응답 포맷 버전: Android Navigator `2.5.9` / Python Client `1.6.2`
+> 응답 포맷 버전: Android Navigator `2.5.9` / Python Client `1.6.7`
 
 ### 설명
 현재 화면의 접근성 노드 트리를 helper를 통해 덤프합니다.  
@@ -353,6 +353,7 @@ client.move_focus(dev_serial, "prev")
 
 ### 설명
 `ACTION_GET_FOCUS` 브로드캐스트를 전송하고 `FOCUS_RESULT` 로그를 읽어 현재 TalkBack 포커스 노드 정보를 반환합니다.
+`FOCUS_RESULT`가 비어 있거나 의미 있는 필드(`text`, `contentDescription`, `viewIdResourceName`, `boundsInScreen`)가 없는 경우에는 `dump_tree()` fallback을 수행해 현재 포커스 노드를 복구합니다. fallback 탐색 우선순위는 `accessibilityFocused == True` 후 `focused == True`이며, children를 DFS(pre-order)로 재귀 탐색합니다.
 
 ### Returns
 - `dict[str, Any]`: 포커스 노드 정보. 실패 시 빈 dict.
