@@ -5,36 +5,30 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from openpyxl import load_workbook
+from openpyxl.drawing.image import Image as XLImage
+from PIL import Image
 
 from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.1.0"
+SCRIPT_VERSION = "1.2.0"
 
 TAB_CONFIGS = [
     {
         "tab_name": ".*Home.*",
         "tab_type": "b",
-        "anchor_name": "Location QR code",
-        "anchor_type": "b",
-        "max_steps": 30,
-    },
-    {
-        "tab_name": ".*Devices.*",
-        "tab_type": "b",
-        "anchor_name": "Location QR code",
-        "anchor_type": "b",
-        "max_steps": 30,
-    },
-    {
-        "tab_name": ".*Life.*",
-        "tab_type": "b",
-        "anchor_name": "Location QR code",
+        "anchor_name": ".*Location QR code.*",
         "anchor_type": "b",
         "max_steps": 30,
     },
 ]
+
+ENABLE_IMAGE_CROP = True
+ENABLE_IMAGE_INSERT_TO_EXCEL = True
+IMAGE_DIR = "output/crops"
+
 
 def now_str() -> str:
     return time.strftime("%H:%M:%S")
@@ -56,83 +50,116 @@ def to_json_text(value: Any) -> str:
         return str(value)
 
 
-def collect_text_candidates_from_tree(nodes: list[dict], max_count: int = 20) -> list[str]:
-    results: list[str] = []
-
-    def visit(node: Any) -> None:
-        if len(results) >= max_count:
-            return
-        if not isinstance(node, dict):
-            return
-
-        for key in ("text", "contentDescription", "talkback", "content_desc", "label"):
-            value = node.get(key)
-            if isinstance(value, str):
-                stripped = value.strip()
-                if stripped and stripped not in results:
-                    results.append(stripped)
-                    if len(results) >= max_count:
-                        return
-
-        children = node.get("children")
-        if isinstance(children, list):
-            for child in children:
-                visit(child)
-                if len(results) >= max_count:
-                    return
-
-    for item in nodes:
-        visit(item)
-        if len(results) >= max_count:
-            break
-
-    return results
-
-
-def debug_focus(client: A11yAdbClient, dev: str, title: str) -> None:
+def parse_bounds_str(bounds_str: str) -> tuple[int, int, int, int] | None:
+    if not bounds_str:
+        return None
     try:
-        focus = client.get_focus(dev=dev, wait_seconds=1.0)
-        visible_label = client.extract_visible_label_from_focus(focus)
-        view_id = focus.get("viewIdResourceName", "") if isinstance(focus, dict) else ""
-        bounds = client._normalize_bounds(focus) if isinstance(focus, dict) else ""
-        log(
-            f"[FOCUS:{title}] label='{visible_label}' "
-            f"view_id='{view_id}' bounds='{bounds}' raw={to_json_text(focus)}"
+        parts = [int(x.strip()) for x in bounds_str.split(",")]
+        if len(parts) != 4:
+            return None
+        l, t, r, b = parts
+        if r <= l or b <= t:
+            return None
+        return l, t, r, b
+    except Exception:
+        return None
+
+
+def sanitize_filename(value: str) -> str:
+    keep = []
+    for ch in value:
+        if ch.isalnum() or ch in ("_", "-", "."):
+            keep.append(ch)
+        else:
+            keep.append("_")
+    return "".join(keep).strip("_") or "item"
+
+
+def capture_full_screenshot(client: A11yAdbClient, dev: str, save_path: str) -> None:
+    # talkback_lib 내부 private helper 재사용
+    client._take_snapshot(dev, save_path)
+
+
+def crop_image_by_bounds(
+    screenshot_path: str,
+    bounds_str: str,
+    crop_path: str,
+    shrink_px: int = 0,
+) -> bool:
+    bounds = parse_bounds_str(bounds_str)
+    if not bounds:
+        return False
+
+    l, t, r, b = bounds
+    img = Image.open(screenshot_path)
+    width, height = img.size
+
+    l = max(0, l + shrink_px)
+    t = max(0, t + shrink_px)
+    r = min(width, r - shrink_px)
+    b = min(height, b - shrink_px)
+
+    if r <= l or b <= t:
+        return False
+
+    cropped = img.crop((l, t, r, b))
+    Path(crop_path).parent.mkdir(parents=True, exist_ok=True)
+    cropped.save(crop_path)
+    return True
+
+
+def maybe_capture_focus_crop(
+    client: A11yAdbClient,
+    dev: str,
+    row: dict,
+    output_base_dir: str,
+) -> dict:
+    row["crop_image_path"] = ""
+    row["crop_image_saved"] = False
+
+    if not ENABLE_IMAGE_CROP:
+        return row
+
+    bounds_str = str(row.get("focus_bounds", "") or "").strip()
+    if not bounds_str:
+        return row
+
+    tab_name = sanitize_filename(str(row.get("tab_name", "unknown")))
+    step_index = row.get("step_index", -1)
+    visible_label = sanitize_filename(str(row.get("visible_label", "") or "")[:40])
+
+    screenshot_dir = Path(output_base_dir) / "screens"
+    crop_dir = Path(output_base_dir) / "crops"
+    screenshot_dir.mkdir(parents=True, exist_ok=True)
+    crop_dir.mkdir(parents=True, exist_ok=True)
+
+    screenshot_path = screenshot_dir / f"{tab_name}_step_{step_index}.png"
+    crop_path = crop_dir / f"{tab_name}_step_{step_index}_{visible_label}.png"
+
+    try:
+        capture_full_screenshot(client, dev, str(screenshot_path))
+        ok = crop_image_by_bounds(
+            screenshot_path=str(screenshot_path),
+            bounds_str=bounds_str,
+            crop_path=str(crop_path),
+            shrink_px=2,
         )
+        if ok:
+            row["crop_image_path"] = str(crop_path)
+            row["crop_image_saved"] = True
     except Exception as exc:
-        log(f"[FOCUS:{title}] failed: {exc}")
+        log(f"[IMAGE] crop failed step={step_index}: {exc}")
 
-
-def debug_screen_summary(client: A11yAdbClient, dev: str, title: str) -> None:
-    try:
-        tree = client.dump_tree(dev=dev, wait_seconds=2.0)
-        texts = collect_text_candidates_from_tree(tree, max_count=20)
-        log(f"[SCREEN:{title}] node_count={len(tree)} text_samples={texts}")
-    except Exception as exc:
-        log(f"[SCREEN:{title}] failed: {exc}")
-
-
-def debug_find_tab_before_touch(client: A11yAdbClient, dev: str, tab_cfg: dict) -> None:
-    log(
-        f"[TAB-CHECK] searching tab "
-        f"name='{tab_cfg['tab_name']}' type='{tab_cfg['tab_type']}'"
-    )
-    try:
-        found = client.isin(
-            dev=dev,
-            name=tab_cfg["tab_name"],
-            type_=tab_cfg["tab_type"],
-            wait_=2,
-        )
-        log(f"[TAB-CHECK] result={found}")
-    except Exception as exc:
-        log(f"[TAB-CHECK] failed: {exc}")
+    return row
 
 
 def add_rule_compare(df: pd.DataFrame) -> pd.DataFrame:
     def compare_row(row) -> str:
         visible = str(row.get("normalized_visible_label", "") or "").strip()
         speech = str(row.get("normalized_announcement", "") or "").strip()
+
+        if row.get("status") == "ANCHOR":
+            return "SKIP"
 
         if not visible and not speech:
             return "EMPTY"
@@ -154,9 +181,47 @@ def stringify_complex_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def insert_images_to_excel(excel_path: str, image_col_name: str = "crop_image") -> None:
+    if not ENABLE_IMAGE_INSERT_TO_EXCEL:
+        return
+
+    wb = load_workbook(excel_path)
+    ws = wb.active
+
+    headers = [cell.value for cell in ws[1]]
+    if image_col_name not in headers or "crop_image_path" not in headers:
+        wb.save(excel_path)
+        return
+
+    image_col_idx = headers.index(image_col_name) + 1
+    path_col_idx = headers.index("crop_image_path") + 1
+
+    col_letter = ws.cell(row=1, column=image_col_idx).column_letter
+
+    for row_idx in range(2, ws.max_row + 1):
+        path_value = ws.cell(row=row_idx, column=path_col_idx).value
+        if not path_value:
+            continue
+
+        img_path = Path(str(path_value))
+        if not img_path.exists():
+            continue
+
+        try:
+            img = XLImage(str(img_path))
+            img.width = 90
+            img.height = 90
+            ws.add_image(img, f"{col_letter}{row_idx}")
+            ws.row_dimensions[row_idx].height = 72
+        except Exception as exc:
+            log(f"[EXCEL] image insert failed row={row_idx}: {exc}")
+
+    ws.column_dimensions[col_letter].width = 16
+    wb.save(excel_path)
+
+
 def save_excel(rows: list[dict], output_path: str) -> None:
     df = pd.DataFrame(rows)
-
     if df.empty:
         log("[SAVE] skip: no rows")
         return
@@ -180,6 +245,9 @@ def save_excel(rows: list[dict], output_path: str) -> None:
         "focus_content_description",
         "focus_view_id",
         "focus_bounds",
+        "crop_image",
+        "crop_image_path",
+        "crop_image_saved",
         "partial_announcements",
         "last_announcements",
         "last_merged_announcement",
@@ -193,69 +261,37 @@ def save_excel(rows: list[dict], output_path: str) -> None:
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     df.to_excel(output_path, index=False)
+
+    if "crop_image" in df.columns:
+        insert_images_to_excel(output_path, image_col_name="crop_image")
+
     log(f"[SAVE] saved excel: {output_path} rows={len(df)}")
 
 
 def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
-    log("=" * 80)
-    log(f"[TAB-OPEN] start tab='{tab_cfg['tab_name']}'")
-
-    debug_focus(client, dev, "before_tab_touch")
-    debug_screen_summary(client, dev, "before_tab_touch")
-    debug_find_tab_before_touch(client, dev, tab_cfg)
-
-    start_touch = time.perf_counter()
     ok = client.touch(
         dev=dev,
         name=tab_cfg["tab_name"],
         type_=tab_cfg["tab_type"],
         wait_=5,
     )
-    touch_elapsed = time.perf_counter() - start_touch
-    log(f"[TAB-OPEN] touch_result={ok} elapsed={touch_elapsed:.2f}s")
-
-    debug_focus(client, dev, "after_tab_touch")
-    debug_screen_summary(client, dev, "after_tab_touch")
-
     if not ok:
-        log(f"[ERROR] tab open failed: {tab_cfg['tab_name']}")
         return False
 
     time.sleep(1.0)
-    log("[TAB-OPEN] slept 1.0s after tab touch")
-
     client.reset_focus_history(dev)
-    log("[TAB-OPEN] focus history reset")
-
     time.sleep(0.5)
-    log("[TAB-OPEN] slept 0.5s after reset")
 
-    debug_focus(client, dev, "before_anchor_select")
-    debug_screen_summary(client, dev, "before_anchor_select")
-
-    start_anchor = time.perf_counter()
     ok = client.select(
         dev=dev,
         name=tab_cfg["anchor_name"],
         type_=tab_cfg["anchor_type"],
         wait_=8,
     )
-    anchor_elapsed = time.perf_counter() - start_anchor
-    log(
-        f"[ANCHOR] select_result={ok} "
-        f"name='{tab_cfg['anchor_name']}' type='{tab_cfg['anchor_type']}' "
-        f"elapsed={anchor_elapsed:.2f}s"
-    )
-
-    debug_focus(client, dev, "after_anchor_select")
-    debug_screen_summary(client, dev, "after_anchor_select")
-
     if not ok:
-        log(f"[ERROR] anchor focus failed: {tab_cfg['anchor_name']}")
         return False
 
     time.sleep(1.0)
-    log("[ANCHOR] slept 1.0s after anchor select")
     return True
 
 
@@ -302,6 +338,7 @@ def collect_tab_rows(
     tab_cfg: dict,
     all_rows: list[dict],
     output_path: str,
+    output_base_dir: str,
 ) -> list[dict]:
     rows: list[dict] = []
 
@@ -312,13 +349,15 @@ def collect_tab_rows(
             "step_index": -1,
             "status": "TAB_OPEN_FAILED",
             "stop_reason": "tab_or_anchor_failed",
+            "crop_image": "",
+            "crop_image_path": "",
+            "crop_image_saved": False,
         }
         rows.append(row)
         all_rows.append(row)
         save_excel(all_rows, output_path)
         return rows
 
-    log(f"[TAB-TRAVERSE] collecting anchor row for tab='{tab_cfg['tab_name']}'")
     anchor_start = time.perf_counter()
     anchor_row = client.collect_focus_step(
         dev=dev,
@@ -332,27 +371,21 @@ def collect_tab_rows(
     anchor_row["status"] = "ANCHOR"
     anchor_row["stop_reason"] = ""
     anchor_row["step_elapsed_sec"] = round(anchor_elapsed, 3)
+    anchor_row["crop_image"] = "IMAGE"
+    anchor_row = maybe_capture_focus_crop(client, dev, anchor_row, output_base_dir)
 
     rows.append(anchor_row)
     all_rows.append(anchor_row)
     save_excel(all_rows, output_path)
-
-    log(
-        f"[ANCHOR-ROW] elapsed={anchor_elapsed:.2f}s "
-        f"visible='{anchor_row.get('visible_label', '')}' "
-        f"speech='{anchor_row.get('merged_announcement', '')}' "
-        f"move_result='{anchor_row.get('move_result', '')}'"
-    )
 
     prev_visible_label = str(anchor_row.get("visible_label", "") or "").strip()
     fail_count = 0
     same_count = 0
 
     for step_idx in range(1, tab_cfg["max_steps"] + 1):
-        log("-" * 80)
         log(f"[STEP] START tab='{tab_cfg['tab_name']}' step={step_idx}")
-
         step_start = time.perf_counter()
+
         row = client.collect_focus_step(
             dev=dev,
             step_index=step_idx,
@@ -366,6 +399,8 @@ def collect_tab_rows(
         row["status"] = "OK"
         row["stop_reason"] = ""
         row["step_elapsed_sec"] = round(step_elapsed, 3)
+        row["crop_image"] = "IMAGE"
+        row = maybe_capture_focus_crop(client, dev, row, output_base_dir)
 
         move_result = str(row.get("move_result", "") or "")
         visible_label = str(row.get("visible_label", "") or "").strip()
@@ -374,7 +409,8 @@ def collect_tab_rows(
         log(
             f"[STEP] END tab='{tab_cfg['tab_name']}' step={step_idx} "
             f"elapsed={step_elapsed:.2f}s move_result='{move_result}' "
-            f"visible='{visible_label}' speech='{merged_announcement}'"
+            f"visible='{visible_label}' speech='{merged_announcement}' "
+            f"crop='{row.get('crop_image_path', '')}'"
         )
 
         stop, fail_count, same_count, reason = should_stop(
@@ -382,11 +418,6 @@ def collect_tab_rows(
             prev_visible_label=prev_visible_label,
             fail_count=fail_count,
             same_count=same_count,
-        )
-
-        log(
-            f"[STEP] counters fail_count={fail_count} "
-            f"same_count={same_count} stop={stop} reason='{reason}'"
         )
 
         if visible_label:
@@ -413,12 +444,21 @@ def main():
 
     all_rows: list[dict] = []
     output_path = generate_output_path()
+    output_base_dir = str(Path(output_path).with_suffix(""))
+
     log(f"[MAIN] output file: {output_path}")
+    log(f"[MAIN] image dir base: {output_base_dir}")
 
     try:
         for tab_cfg in TAB_CONFIGS:
-            log(f"[MAIN] processing tab={tab_cfg['tab_name']}")
-            collect_tab_rows(client, DEV_SERIAL, tab_cfg, all_rows, output_path)
+            collect_tab_rows(
+                client,
+                DEV_SERIAL,
+                tab_cfg,
+                all_rows,
+                output_path,
+                output_base_dir,
+            )
 
     except Exception as exc:
         log(f"[FATAL] script interrupted: {exc}")
@@ -434,3 +474,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
