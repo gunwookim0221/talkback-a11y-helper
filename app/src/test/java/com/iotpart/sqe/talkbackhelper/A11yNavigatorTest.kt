@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.24.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.25.0")
     }
 
     @Test
@@ -271,6 +271,22 @@ class A11yNavigatorTest {
     }
 
     @Test
+    fun isThinTrailingContentAboveBottomBar_returnsTrueWithin80pxBand() {
+        data class Node(val className: String?, val viewId: String?)
+
+        val node = Node("android.widget.TextView", "com.test:id/labs")
+        val isThinTrailing = A11yNavigator.isThinTrailingContentAboveBottomBar(
+            node = node,
+            bounds = Rect(42, 2210, 1038, 2238),
+            bottomBarTop = 2316,
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId }
+        )
+
+        assertTrue(isThinTrailing)
+    }
+
+    @Test
     fun shouldScrollBeforeBottomBar_returnsFalse_whenContentIsEffectivelyFinishedNearBottom() {
         data class Node(val className: String?, val viewId: String?, val bounds: Rect)
 
@@ -396,6 +412,77 @@ class A11yNavigatorTest {
         )
 
         assertFalse(shouldForce)
+    }
+
+    @Test
+    fun hasContinuationPatternBelowCurrentNode_returnsTrue_forGridKeyword() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect)
+
+        val nodes = listOf(
+            Node("android.widget.FrameLayout", "com.test:id/labs_grid_tile", Rect(0, 1600, 500, 1780)),
+            Node("android.widget.LinearLayout", "com.test:id/bottom_nav", Rect(0, 1800, 1000, 2000))
+        )
+
+        val result = A11yNavigator.hasContinuationPatternBelowCurrentNode(
+            traversalList = nodes,
+            currentIndex = 0,
+            nextIndex = 1,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId }
+        )
+
+        assertTrue(result)
+    }
+
+    @Test
+    fun hasContinuationContentBeforeBottomBar_returnsTrue_forTrailingContentWithin80px() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect)
+
+        val nodes = listOf(
+            Node("android.widget.TextView", "com.test:id/security", Rect(0, 1900, 1000, 2140)),
+            Node("android.widget.TextView", "com.test:id/labs", Rect(0, 2160, 1000, 2240)),
+            Node("android.widget.LinearLayout", "com.test:id/bottom_nav", Rect(0, 2320, 1000, 2480))
+        )
+
+        val result = A11yNavigator.hasContinuationContentBeforeBottomBar(
+            traversalList = nodes,
+            currentIndex = 0,
+            bottomBarIndex = 2,
+            screenTop = 0,
+            screenBottom = 2480,
+            screenHeight = 2480,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId }
+        )
+
+        assertTrue(result)
+    }
+
+    @Test
+    fun findAnchorContinuationCandidateIndex_returnsFirstNodeBelowAnchorBottom() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect)
+
+        val nodes = listOf(
+            Node("android.widget.TextView", "com.test:id/smartthings_top", Rect(0, 80, 1000, 220)),
+            Node("android.widget.TextView", "com.test:id/security", Rect(0, 900, 1000, 1120)),
+            Node("android.widget.TextView", "com.test:id/privacy_notice", Rect(0, 1220, 1000, 1440))
+        )
+
+        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+            traversalList = nodes,
+            startIndex = 0,
+            anchorBottom = 1000,
+            screenTop = 0,
+            screenBottom = 2000,
+            screenHeight = 2000,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId }
+        )
+
+        assertEquals(2, index)
     }
 
     @Test
