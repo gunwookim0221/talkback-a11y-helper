@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.14.5")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.15.0")
     }
 
 
@@ -46,6 +46,104 @@ class A11yNavigatorTest {
         )
 
         assertEquals(5, nextIndex)
+    }
+
+    @Test
+    fun shouldScrollBeforeBottomBar_returnsFalse_whenContentIsEffectivelyFinishedNearBottom() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect)
+
+        val nodes = listOf(
+            Node("android.widget.Button", "com.test:id/content_1", Rect(0, 650, 1000, 860)),
+            Node("android.widget.Button", "com.test:id/content_2", Rect(0, 870, 1000, 1040)),
+            Node("android.widget.LinearLayout", "com.test:id/bottom_nav", Rect(0, 1800, 1000, 2000))
+        )
+
+        val shouldScroll = A11yNavigator.shouldScrollBeforeBottomBar(
+            traversalList = nodes,
+            currentIndex = 1,
+            nextIndex = 2,
+            screenTop = 0,
+            screenBottom = 2000,
+            screenHeight = 2000,
+            effectiveBottom = 1800,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId },
+            canScrollForwardHint = true
+        )
+
+        assertFalse(shouldScroll)
+    }
+
+    @Test
+    fun shouldScrollBeforeBottomBar_returnsTrue_whenHiddenContentLikelihoodIsHigh() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect)
+
+        val nodes = listOf(
+            Node("android.widget.Button", "com.test:id/content_1", Rect(0, 350, 1000, 520)),
+            Node("android.widget.Button", "com.test:id/content_2", Rect(0, 540, 1000, 710)),
+            Node("android.widget.Button", "com.test:id/content_3", Rect(0, 720, 1000, 920)),
+            Node("android.widget.LinearLayout", "com.test:id/bottom_nav", Rect(0, 1800, 1000, 2000))
+        )
+
+        val shouldScroll = A11yNavigator.shouldScrollBeforeBottomBar(
+            traversalList = nodes,
+            currentIndex = 0,
+            nextIndex = 3,
+            screenTop = 0,
+            screenBottom = 2000,
+            screenHeight = 2000,
+            effectiveBottom = 1800,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId },
+            canScrollForwardHint = true
+        )
+
+        assertTrue(shouldScroll)
+    }
+
+    @Test
+    fun shouldScrollBeforeBottomBar_returnsFalse_whenCurrentFocusIsTopFilterChip() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect)
+
+        val nodes = listOf(
+            Node("com.google.android.material.chip.Chip", "com.test:id/filter_chip_laundry", Rect(0, 120, 400, 190)),
+            Node("android.widget.Button", "com.test:id/content_1", Rect(0, 500, 1000, 700)),
+            Node("android.widget.LinearLayout", "com.test:id/bottom_nav", Rect(0, 1800, 1000, 2000))
+        )
+
+        val shouldScroll = A11yNavigator.shouldScrollBeforeBottomBar(
+            traversalList = nodes,
+            currentIndex = 0,
+            nextIndex = 2,
+            screenTop = 0,
+            screenBottom = 2000,
+            screenHeight = 2000,
+            effectiveBottom = 1800,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId },
+            canScrollForwardHint = true
+        )
+
+        assertFalse(shouldScroll)
+    }
+
+    @Test
+    fun isTopLoopProneControlNode_detectsTopFilterChip() {
+        data class Node(val className: String?, val viewId: String?)
+
+        val detected = A11yNavigator.isTopLoopProneControlNode(
+            node = Node("com.google.android.material.chip.Chip", "com.test:id/category_chip"),
+            bounds = Rect(0, 130, 300, 200),
+            screenTop = 0,
+            screenHeight = 2000,
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId }
+        )
+
+        assertTrue(detected)
     }
 
 
