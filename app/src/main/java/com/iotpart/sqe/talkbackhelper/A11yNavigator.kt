@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.16.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.17.0"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -1017,23 +1017,20 @@ object A11yNavigator {
             }
         )
 
-        Thread.sleep(150)
-        val afterFocusBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
-            Rect().also { focusedNode.getBoundsInScreen(it) }
-        }
+        val focusVerification = verifyFocusStabilizationAfterAction(
+            root = root,
+            target = target,
+            targetBounds = targetBounds
+        )
+        val afterFocusBounds = focusVerification.actualBounds
         Log.i(
             "A11Y_HELPER",
             "[SMART_NEXT] After Focus: System is at ${formatBoundsForLog(afterFocusBounds)}, Target is at ${formatBoundsForLog(targetBounds)}"
         )
 
         if (!focused) {
-            val focusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
-                Rect().also { focusedNode.getBoundsInScreen(it) }
-            }
-            val effectivelyFocused = target.refresh() &&
-                target.isAccessibilityFocused &&
-                focusedBounds != null &&
-                isWithinSnapBackTolerance(targetBounds, focusedBounds)
+            val effectivelyFocused = focusVerification.isTargetAccessibilityFocused ||
+                (afterFocusBounds != null && isWithinSnapBackTolerance(targetBounds, afterFocusBounds))
             if (effectivelyFocused) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=false but actual system focus matches target bounds. Treating as success.")
                 recordRequestedFocusAttempt(traversalIndex, root)
@@ -1045,13 +1042,19 @@ object A11yNavigator {
             return TargetActionOutcome(false, "failed", target)
         }
 
-        if (afterFocusBounds != null &&
-            afterFocusBounds != targetBounds &&
-            !isWithinSnapBackTolerance(targetBounds, afterFocusBounds)
+        if (focusVerification.matchedTarget && focusVerification.retryCount > 0) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Focus stabilized to target after delay")
+        }
+
+        if (shouldTreatAsSnapBackAfterVerification(
+                actualFocusedBounds = afterFocusBounds,
+                targetBounds = targetBounds,
+                isTargetAccessibilityFocused = focusVerification.isTargetAccessibilityFocused
+            )
         ) {
             Log.w(
                 "A11Y_HELPER",
-                "[SMART_NEXT] Snap-back detected after ACTION_ACCESSIBILITY_FOCUS success: target=${formatBoundsForLog(targetBounds)} actual=${formatBoundsForLog(afterFocusBounds)} traversalIndex=$traversalIndex label=$label"
+                "[SMART_NEXT] Final focus mismatch after retries → snap_back: target=${formatBoundsForLog(targetBounds)} actual=${formatBoundsForLog(afterFocusBounds)} traversalIndex=$traversalIndex label=$label"
             )
             syncLastRequestedFocusIndexToCurrentFocus(root, buildTalkBackLikeFocusNodes(root).map { it.node })
             return TargetActionOutcome(false, "snap_back", target)
@@ -1201,6 +1204,70 @@ object A11yNavigator {
             }
         }
         return false
+    }
+
+    internal data class FocusVerificationResult(
+        val matchedTarget: Boolean,
+        val isTargetAccessibilityFocused: Boolean,
+        val actualBounds: Rect?,
+        val retryCount: Int
+    )
+
+    internal fun verifyFocusStabilizationAfterAction(
+        root: AccessibilityNodeInfo,
+        target: AccessibilityNodeInfo,
+        targetBounds: Rect,
+        maxWaitMs: Long = 250L,
+        retryIntervalMs: Long = 50L
+    ): FocusVerificationResult {
+        val maxRetries = (maxWaitMs / retryIntervalMs).toInt().coerceAtLeast(0)
+        var retryCount = 0
+        var lastActualBounds: Rect? = null
+        var lastTargetFocused = false
+
+        while (retryCount <= maxRetries) {
+            val actualBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
+                Rect().also { focusedNode.getBoundsInScreen(it) }
+            }
+            target.refresh()
+            val targetFocused = target.isAccessibilityFocused
+            val boundsMatched = actualBounds != null && isWithinSnapBackTolerance(targetBounds, actualBounds)
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT] Focus verification retry i=$retryCount, actual=${formatBoundsForLog(actualBounds)}, target=${formatBoundsForLog(targetBounds)}"
+            )
+            if (targetFocused || boundsMatched) {
+                return FocusVerificationResult(
+                    matchedTarget = true,
+                    isTargetAccessibilityFocused = targetFocused,
+                    actualBounds = actualBounds,
+                    retryCount = retryCount
+                )
+            }
+            lastActualBounds = actualBounds
+            lastTargetFocused = targetFocused
+            if (retryCount < maxRetries) {
+                Thread.sleep(retryIntervalMs)
+            }
+            retryCount += 1
+        }
+
+        return FocusVerificationResult(
+            matchedTarget = false,
+            isTargetAccessibilityFocused = lastTargetFocused,
+            actualBounds = lastActualBounds,
+            retryCount = maxRetries
+        )
+    }
+
+    internal fun shouldTreatAsSnapBackAfterVerification(
+        actualFocusedBounds: Rect?,
+        targetBounds: Rect,
+        isTargetAccessibilityFocused: Boolean
+    ): Boolean {
+        if (isTargetAccessibilityFocused) return false
+        if (actualFocusedBounds == null) return true
+        return !isWithinSnapBackTolerance(targetBounds, actualFocusedBounds)
     }
 
     internal fun <T> shouldScrollAtEndOfTraversal(
