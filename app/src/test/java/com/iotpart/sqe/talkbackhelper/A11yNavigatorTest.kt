@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.23.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.24.0")
     }
 
     @Test
@@ -350,6 +350,57 @@ class A11yNavigatorTest {
         )
 
         assertFalse(shouldScroll)
+    }
+
+    @Test
+    fun shouldScrollBeforeBottomBar_returnsTrue_whenBottomBarIsImmediateButGridContinuationIsLikely() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect)
+
+        val nodes = listOf(
+            Node("android.widget.TextView", "com.test:id/menu_voice_assistant_tile", Rect(0, 1560, 1000, 1760)),
+            Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1800, 1000, 2000))
+        )
+
+        val shouldScroll = A11yNavigator.shouldScrollBeforeBottomBar(
+            traversalList = nodes,
+            currentIndex = 0,
+            nextIndex = 1,
+            screenTop = 0,
+            screenBottom = 2000,
+            screenHeight = 2000,
+            effectiveBottom = 1800,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId },
+            canScrollForwardHint = true
+        )
+
+        assertTrue(shouldScroll)
+    }
+
+    @Test
+    fun isContinuationContentLikelyBelowCurrentNode_returnsTrue_forBottomEdgeGridBeforeBottomBar() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect)
+
+        val nodes = listOf(
+            Node("android.widget.TextView", "com.test:id/menu_voice_assistant_tile", Rect(0, 1560, 1000, 1760)),
+            Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1800, 1000, 2000))
+        )
+
+        val likely = A11yNavigator.isContinuationContentLikelyBelowCurrentNode(
+            traversalList = nodes,
+            currentIndex = 0,
+            nextIndex = 1,
+            screenTop = 0,
+            screenBottom = 2000,
+            screenHeight = 2000,
+            effectiveBottom = 1800,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId }
+        )
+
+        assertTrue(likely)
     }
 
     @Test

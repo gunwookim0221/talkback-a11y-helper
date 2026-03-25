@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.23.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.24.0"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -746,6 +746,18 @@ object A11yNavigator {
             }
         }
 
+        val continuationContentLikelyBelowCurrentGrid = isContinuationContentLikelyBelowCurrentNode(
+            traversalList = traversalList,
+            currentIndex = currentIndex,
+            nextIndex = nextIndex,
+            screenTop = screenTop,
+            screenBottom = screenBottom,
+            screenHeight = screenHeight,
+            effectiveBottom = effectiveBottom,
+            boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+            classNameOf = { node -> node.className?.toString() },
+            viewIdOf = { node -> node.viewIdResourceName }
+        )
         val shouldScrollBeforeBottomBar = shouldScrollBeforeBottomBar(
             traversalList = traversalList,
             currentIndex = currentIndex,
@@ -760,8 +772,15 @@ object A11yNavigator {
             canScrollForwardHint = scrollableNode != null
         )
 
+        if (nextIsBottomBar && continuationContentLikelyBelowCurrentGrid) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Bottom bar deferred because continuation content is likely below current grid")
+        }
+
         if (nextIsBottomBar && scrollableNode != null && shouldScrollBeforeBottomBar) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Scrollable container found for smart scroll.")
+            if (continuationContentLikelyBelowCurrentGrid) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Pre-scrolling before bottom bar due to possible continuation content")
+            }
             Log.i("A11Y_HELPER", "[SMART_NEXT] Next node is bottom bar and hidden content is likely -> attempting scroll")
             val lastDesc = resolvedCurrent?.contentDescription?.toString()
             val scrollResult = scrollableNode.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
@@ -1871,9 +1890,66 @@ object A11yNavigator {
         if (remainingContentCount <= 0) return false
 
         val isCurrentNearEffectiveBottom = currentBounds.bottom >= (effectiveBottom - nearBottomThresholdPx)
-        if (remainingContentCount <= 1 && isCurrentNearEffectiveBottom) {
+        val continuationLikelyBelowCurrentNode = isContinuationContentLikelyBelowCurrentNode(
+            traversalList = traversalList,
+            currentIndex = currentIndex,
+            nextIndex = nextIndex,
+            screenTop = screenTop,
+            screenBottom = screenBottom,
+            screenHeight = screenHeight,
+            effectiveBottom = effectiveBottom,
+            boundsOf = boundsOf,
+            classNameOf = classNameOf,
+            viewIdOf = viewIdOf
+        )
+        if (remainingContentCount <= 1 && isCurrentNearEffectiveBottom && !continuationLikelyBelowCurrentNode) {
             return false
         }
+
+        return true
+    }
+
+    internal fun <T> isContinuationContentLikelyBelowCurrentNode(
+        traversalList: List<T>,
+        currentIndex: Int,
+        nextIndex: Int,
+        screenTop: Int,
+        screenBottom: Int,
+        screenHeight: Int,
+        effectiveBottom: Int,
+        boundsOf: (T) -> Rect,
+        classNameOf: (T) -> String?,
+        viewIdOf: (T) -> String?,
+        nearBottomThresholdPx: Int = 240
+    ): Boolean {
+        if (currentIndex !in traversalList.indices || nextIndex !in traversalList.indices) return false
+        if (nextIndex <= currentIndex) return false
+        if (nextIndex - currentIndex != 1) return false
+
+        val currentNode = traversalList[currentIndex]
+        val currentBounds = boundsOf(currentNode)
+        val currentIsBottomEdgeContent = currentBounds.bottom >= (effectiveBottom - nearBottomThresholdPx)
+        if (!currentIsBottomEdgeContent) return false
+
+        val currentClass = classNameOf(currentNode)?.lowercase().orEmpty()
+        val currentViewId = viewIdOf(currentNode)?.lowercase().orEmpty()
+        val gridOrShortcutKeywords = listOf("grid", "shortcut", "menu", "tile", "icon", "assistant", "lab")
+        val currentLooksLikeGridOrShortcut = gridOrShortcutKeywords.any { keyword ->
+            currentClass.contains(keyword) || currentViewId.contains(keyword)
+        } || !isTopAppBarNode(currentClass, currentViewId, currentBounds, screenTop, screenHeight)
+
+        if (!currentLooksLikeGridOrShortcut) return false
+
+        val nextNode = traversalList[nextIndex]
+        val nextBounds = boundsOf(nextNode)
+        val nextIsBottomBar = isBottomNavigationBarNode(
+            className = classNameOf(nextNode),
+            viewIdResourceName = viewIdOf(nextNode),
+            boundsInScreen = nextBounds,
+            screenBottom = screenBottom,
+            screenHeight = screenHeight
+        )
+        if (!nextIsBottomBar) return false
 
         return true
     }
