@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.26.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.28.0")
     }
 
     @Test
@@ -582,6 +582,43 @@ class A11yNavigatorTest {
         )
 
         assertEquals(-1, index)
+    }
+
+    @Test
+    fun shouldAcceptFallbackSelectedNoLabelContinuationCandidate_returnsTrue_forContentViewportNode() {
+        val accepted = A11yNavigator.shouldAcceptFallbackSelectedNoLabelContinuationCandidate(
+            isFallbackSelectedContinuationCandidate = true,
+            isTopBar = false,
+            isBottomBar = false,
+            bounds = Rect(0, 240, 1000, 620),
+            screenTop = 0,
+            effectiveBottom = 1800
+        )
+
+        assertTrue(accepted)
+    }
+
+    @Test
+    fun shouldAcceptFallbackSelectedNoLabelContinuationCandidate_returnsFalse_forBottomBarNode() {
+        val accepted = A11yNavigator.shouldAcceptFallbackSelectedNoLabelContinuationCandidate(
+            isFallbackSelectedContinuationCandidate = true,
+            isTopBar = false,
+            isBottomBar = true,
+            bounds = Rect(0, 1840, 1000, 1990),
+            screenTop = 0,
+            effectiveBottom = 1800
+        )
+
+        assertFalse(accepted)
+    }
+
+    @Test
+    fun recoverLabelFromDescendantTexts_returnsFirstNonBlankLabel() {
+        val recovered = A11yNavigator.recoverLabelFromDescendantTexts(
+            listOf("   ", "", "Labs", "Menu")
+        )
+
+        assertEquals("Labs", recovered)
     }
 
     @Test
