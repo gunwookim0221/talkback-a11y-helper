@@ -10,7 +10,51 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.16.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.17.0")
+    }
+
+    @Test
+    fun shouldTreatAsSnapBackAfterVerification_returnsFalse_whenTargetIsAccessibilityFocused() {
+        val isSnapBack = A11yNavigator.shouldTreatAsSnapBackAfterVerification(
+            actualFocusedBounds = Rect(10, 10, 100, 100),
+            targetBounds = Rect(0, 0, 100, 100),
+            isTargetAccessibilityFocused = true
+        )
+
+        assertFalse(isSnapBack)
+    }
+
+    @Test
+    fun shouldTreatAsSnapBackAfterVerification_returnsFalse_whenBoundsAreWithinTolerance() {
+        val isSnapBack = A11yNavigator.shouldTreatAsSnapBackAfterVerification(
+            actualFocusedBounds = Rect(3, 4, 104, 106),
+            targetBounds = Rect(0, 0, 100, 100),
+            isTargetAccessibilityFocused = false
+        )
+
+        assertFalse(isSnapBack)
+    }
+
+    @Test
+    fun shouldTreatAsSnapBackAfterVerification_returnsTrue_whenBoundsMismatchAndTargetNotFocused() {
+        val isSnapBack = A11yNavigator.shouldTreatAsSnapBackAfterVerification(
+            actualFocusedBounds = Rect(60, 60, 160, 160),
+            targetBounds = Rect(0, 0, 100, 100),
+            isTargetAccessibilityFocused = false
+        )
+
+        assertTrue(isSnapBack)
+    }
+
+    @Test
+    fun shouldTreatAsSnapBackAfterVerification_returnsTrue_whenActualFocusIsMissing() {
+        val isSnapBack = A11yNavigator.shouldTreatAsSnapBackAfterVerification(
+            actualFocusedBounds = null,
+            targetBounds = Rect(0, 0, 100, 100),
+            isTargetAccessibilityFocused = false
+        )
+
+        assertTrue(isSnapBack)
     }
 
 
