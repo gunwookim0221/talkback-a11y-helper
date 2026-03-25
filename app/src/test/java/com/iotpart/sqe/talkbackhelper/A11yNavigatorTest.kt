@@ -10,7 +10,50 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.18.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.19.0")
+    }
+
+    @Test
+    fun isNodePoorlyPositionedForFocus_returnsTrue_forPartiallyVisibleTrailingContentNearBottomBar() {
+        val poorlyPositioned = A11yNavigator.isNodePoorlyPositionedForFocus(
+            bounds = Rect(0, 2260, 1000, 2320),
+            screenTop = 0,
+            effectiveBottom = 2316
+        )
+
+        assertTrue(poorlyPositioned)
+    }
+
+    @Test
+    fun shouldLiftTrailingContentBeforeFocus_returnsTrue_forThinBottomEdgeContent() {
+        val shouldLift = A11yNavigator.shouldLiftTrailingContentBeforeFocus(
+            bounds = Rect(40, 2298, 1000, 2316),
+            effectiveBottom = 2316
+        )
+
+        assertTrue(shouldLift)
+    }
+
+    @Test
+    fun isNodeFullyVisible_returnsTrue_forLastContentFallbackCase() {
+        val fullyVisible = A11yNavigator.isNodeFullyVisible(
+            bounds = Rect(0, 2080, 1000, 2300),
+            screenTop = 0,
+            effectiveBottom = 2316
+        )
+
+        assertTrue(fullyVisible)
+    }
+
+    @Test
+    fun isNodePoorlyPositionedForFocus_returnsFalse_forNormallyReadableFullyVisibleNode() {
+        val poorlyPositioned = A11yNavigator.isNodePoorlyPositionedForFocus(
+            bounds = Rect(0, 900, 1000, 1220),
+            screenTop = 0,
+            effectiveBottom = 2316
+        )
+
+        assertFalse(poorlyPositioned)
     }
 
     @Test
