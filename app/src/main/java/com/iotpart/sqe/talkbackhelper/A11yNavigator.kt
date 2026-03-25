@@ -6,9 +6,10 @@ import android.view.accessibility.AccessibilityEvent
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
+import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.25.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.26.0"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -17,6 +18,15 @@ object A11yNavigator {
         val success: Boolean,
         val reason: String,
         val target: AccessibilityNodeInfo? = null
+    )
+
+    internal data class PreScrollAnchor(
+        val viewIdResourceName: String?,
+        val mergedLabel: String?,
+        val talkbackLabel: String?,
+        val text: String?,
+        val contentDescription: String?,
+        val bounds: Rect
     )
 
     fun resetFocusHistory() {
@@ -377,7 +387,7 @@ object A11yNavigator {
             startIndex: Int = 0,
             visibleHistory: Set<String> = emptySet(),
             allowLooping: Boolean = true,
-            anchorBounds: Rect? = null
+            preScrollAnchor: PreScrollAnchor? = null
         ): TargetActionOutcome {
             val excludedIndex = findIndexByDescription(
                 nodes = traversalList,
@@ -409,19 +419,36 @@ object A11yNavigator {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Excluded node not found. Starting traversal from beginning with top-area guard")
             }
 
-            val anchorStartIndex = anchorBounds?.let { anchor ->
-                findAnchorContinuationCandidateIndex(
+            val resolvedAnchorIndex = if (isScrollAction && preScrollAnchor != null) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Using pre-scroll anchor continuity")
+                resolveAnchorIndexInRefreshedTraversal(
                     traversalList = traversalList,
-                    startIndex = traversalStartIndex,
-                    anchorBottom = anchor.bottom,
-                    screenTop = screenTop,
-                    screenBottom = screenBottom,
-                    screenHeight = screenHeight,
+                    anchor = preScrollAnchor,
                     boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
-                    classNameOf = { node -> node.className?.toString() },
-                    viewIdOf = { node -> node.viewIdResourceName }
-                )
-            } ?: traversalStartIndex
+                    viewIdOf = { node -> node.viewIdResourceName },
+                    textOf = { node -> node.text?.toString() },
+                    contentDescriptionOf = { node -> node.contentDescription?.toString() }
+                ).also { index ->
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Resolved anchor in refreshed traversal at index=$index")
+                }
+            } else {
+                -1
+            }
+            val fallbackBelowAnchorIndex = if (isScrollAction && preScrollAnchor != null && resolvedAnchorIndex == -1) {
+                traversalList.indexOfFirst { candidate ->
+                    Rect().also { candidate.getBoundsInScreen(it) }.top > preScrollAnchor.bounds.bottom
+                }.takeIf { it >= 0 } ?: traversalStartIndex
+            } else {
+                traversalStartIndex
+            }
+            val anchorStartIndex = if (resolvedAnchorIndex >= 0) {
+                (resolvedAnchorIndex + 1).coerceAtLeast(traversalStartIndex)
+            } else {
+                fallbackBelowAnchorIndex.coerceAtLeast(traversalStartIndex)
+            }
+            if (isScrollAction && preScrollAnchor != null) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting post-anchor continuation candidate index=$anchorStartIndex")
+            }
 
             for (index in anchorStartIndex until traversalList.size) {
                 val node = traversalList[index]
@@ -429,6 +456,10 @@ object A11yNavigator {
                 val label = node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                     ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                     ?: "<no-label>"
+                if (isScrollAction && preScrollAnchor != null && resolvedAnchorIndex >= 0 && index <= resolvedAnchorIndex) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping resurfaced pre-anchor item after scroll: $label")
+                    continue
+                }
                 val isLastFocusedNode = (excludeDesc != null && label == excludeDesc)
                 val inHistory = visibleHistory.contains(label)
                 val currentFocusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
@@ -488,9 +519,9 @@ object A11yNavigator {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping history node after scroll: $label")
                     continue
                 }
-                if (anchorBounds != null &&
+                if (preScrollAnchor != null &&
                     isScrollAction &&
-                    bounds.top <= anchorBounds.bottom &&
+                    bounds.top <= preScrollAnchor.bounds.bottom &&
                     isTopLoopProneControlNode(
                         node = node,
                         bounds = bounds,
@@ -501,6 +532,15 @@ object A11yNavigator {
                     )
                 ) {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping top-loop-prone control during anchored continuation: $label")
+                    continue
+                }
+                if (preScrollAnchor != null &&
+                    isScrollAction &&
+                    label == "<no-label>" &&
+                    isTopContent &&
+                    bounds.top <= preScrollAnchor.bounds.bottom
+                ) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping top <no-label> container before post-anchor validation")
                     continue
                 }
                 if (excludedIndex == -1 &&
@@ -579,7 +619,7 @@ object A11yNavigator {
                     excludeDesc = null,
                     startIndex = 0,
                     visibleHistory = emptySet(),
-                    anchorBounds = null
+                    preScrollAnchor = null
                 )
             }
 
@@ -642,7 +682,11 @@ object A11yNavigator {
             if (shouldScrollAtEnd && scrollableNode != null) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] End-of-traversal scroll allowed by policy -> attempting scroll first")
                 val lastDesc = resolvedCurrent?.contentDescription?.toString()
-                val anchorBoundsBeforeScroll = resolvedCurrent?.let { node -> Rect().also { node.getBoundsInScreen(it) } }
+                val preScrollAnchor = buildPreScrollAnchor(
+                    focusNodes = focusNodes,
+                    currentIndex = currentIndex,
+                    resolvedCurrent = resolvedCurrent
+                )
                 val scrolled = scrollableNode.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                 Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SCROLL_FORWARD result=$scrolled")
                 if (!scrolled) {
@@ -729,7 +773,7 @@ object A11yNavigator {
                     excludeDesc = lastDesc,
                     startIndex = 0,
                     visibleHistory = visibleHistory,
-                    anchorBounds = anchorBoundsBeforeScroll
+                    preScrollAnchor = preScrollAnchor
                 )
             }
 
@@ -846,7 +890,11 @@ object A11yNavigator {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Scrollable container found for smart scroll.")
             Log.i("A11Y_HELPER", "[SMART_NEXT] Next node is bottom bar and continuation/defer condition matched -> attempting scroll first")
             val lastDesc = resolvedCurrent?.contentDescription?.toString()
-            val anchorBoundsBeforeScroll = resolvedCurrent?.let { node -> Rect().also { node.getBoundsInScreen(it) } }
+            val preScrollAnchor = buildPreScrollAnchor(
+                focusNodes = focusNodes,
+                currentIndex = currentIndex,
+                resolvedCurrent = resolvedCurrent
+            )
             val scrollResult = scrollableNode.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
             Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SCROLL_FORWARD result=$scrollResult")
             if (!scrollResult) {
@@ -933,7 +981,7 @@ object A11yNavigator {
                 startIndex = 0,
                 visibleHistory = visibleHistory,
                 allowLooping = false,
-                anchorBounds = anchorBoundsBeforeScroll
+                preScrollAnchor = preScrollAnchor
             )
             if (outcome.success) {
                 return outcome
@@ -1109,6 +1157,73 @@ object A11yNavigator {
 
     internal fun isNearBottomEdge(bounds: Rect, effectiveBottom: Int, thresholdPx: Int = 180): Boolean {
         return bounds.bottom >= (effectiveBottom - thresholdPx)
+    }
+
+    private fun buildPreScrollAnchor(
+        focusNodes: List<FocusedNode>,
+        currentIndex: Int,
+        resolvedCurrent: AccessibilityNodeInfo?
+    ): PreScrollAnchor? {
+        val focusedNode = focusNodes.getOrNull(currentIndex)
+        val node = focusedNode?.node ?: resolvedCurrent ?: return null
+        val bounds = Rect().also { node.getBoundsInScreen(it) }
+        return PreScrollAnchor(
+            viewIdResourceName = node.viewIdResourceName,
+            mergedLabel = focusedNode?.mergedLabel?.trim(),
+            talkbackLabel = focusedNode?.contentDescription?.trim(),
+            text = focusedNode?.text?.trim() ?: node.text?.toString()?.trim(),
+            contentDescription = node.contentDescription?.toString()?.trim(),
+            bounds = bounds
+        )
+    }
+
+    internal fun <T> resolveAnchorIndexInRefreshedTraversal(
+        traversalList: List<T>,
+        anchor: PreScrollAnchor,
+        boundsOf: (T) -> Rect,
+        viewIdOf: (T) -> String?,
+        textOf: (T) -> String?,
+        contentDescriptionOf: (T) -> String?
+    ): Int {
+        if (traversalList.isEmpty()) return -1
+        val exact = traversalList.indexOfFirst { candidate ->
+            val label = textOf(candidate)?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: contentDescriptionOf(candidate)?.trim().takeUnless { it.isNullOrEmpty() }
+            val merged = listOfNotNull(textOf(candidate), contentDescriptionOf(candidate))
+                .joinToString(" ").trim().takeUnless { it.isNullOrEmpty() }
+            viewIdOf(candidate) == anchor.viewIdResourceName &&
+                (label == anchor.talkbackLabel || label == anchor.text || merged == anchor.mergedLabel)
+        }
+        if (exact >= 0) return exact
+
+        return traversalList.indices
+            .map { index ->
+                val candidate = traversalList[index]
+                val bounds = boundsOf(candidate)
+                val candidateLabel = textOf(candidate)?.trim().takeUnless { it.isNullOrEmpty() }
+                    ?: contentDescriptionOf(candidate)?.trim().takeUnless { it.isNullOrEmpty() }
+                val anchorLabel = anchor.mergedLabel ?: anchor.talkbackLabel ?: anchor.text ?: anchor.contentDescription
+                val labelSimilarity = normalizedLabelSimilarity(anchorLabel, candidateLabel)
+                val boundsDistance = abs(bounds.top - anchor.bounds.top) + abs(bounds.bottom - anchor.bounds.bottom)
+                Triple(index, labelSimilarity, boundsDistance)
+            }
+            .filter { (_, similarity, _) -> similarity >= 0.4f }
+            .minWithOrNull(compareByDescending<Triple<Int, Float, Int>> { it.second }.thenBy { it.third })
+            ?.first ?: -1
+    }
+
+    private fun normalizedLabelSimilarity(a: String?, b: String?): Float {
+        val left = a?.trim()?.lowercase().orEmpty()
+        val right = b?.trim()?.lowercase().orEmpty()
+        if (left.isBlank() || right.isBlank()) return 0f
+        if (left == right) return 1f
+        if (left.contains(right) || right.contains(left)) return 0.8f
+        val leftTokens = left.split(" ").filter { it.isNotBlank() }.toSet()
+        val rightTokens = right.split(" ").filter { it.isNotBlank() }.toSet()
+        if (leftTokens.isEmpty() || rightTokens.isEmpty()) return 0f
+        val intersection = leftTokens.intersect(rightTokens).size.toFloat()
+        val union = leftTokens.union(rightTokens).size.toFloat().coerceAtLeast(1f)
+        return intersection / union
     }
 
     internal fun <T> findAnchorContinuationCandidateIndex(

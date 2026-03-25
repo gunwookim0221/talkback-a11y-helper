@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.25.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.26.0")
     }
 
     @Test
@@ -268,6 +268,64 @@ class A11yNavigatorTest {
         )
 
         assertTrue(isThinTrailing)
+    }
+
+    @Test
+    fun resolveAnchorIndexInRefreshedTraversal_findsExactAnchorFirst() {
+        data class Node(val id: String?, val text: String?, val desc: String?, val bounds: Rect)
+        val nodes = listOf(
+            Node("id/history", "History", null, Rect(0, 100, 1000, 200)),
+            Node("id/security", "Security status of your devices", null, Rect(0, 400, 1000, 520)),
+            Node("id/privacy", "Privacy notice", null, Rect(0, 560, 1000, 700))
+        )
+        val anchor = A11yNavigator.PreScrollAnchor(
+            viewIdResourceName = "id/security",
+            mergedLabel = "Security status of your devices",
+            talkbackLabel = "Security status of your devices",
+            text = "Security status of your devices",
+            contentDescription = null,
+            bounds = Rect(0, 390, 1000, 510)
+        )
+
+        val index = A11yNavigator.resolveAnchorIndexInRefreshedTraversal(
+            traversalList = nodes,
+            anchor = anchor,
+            boundsOf = { it.bounds },
+            viewIdOf = { it.id },
+            textOf = { it.text },
+            contentDescriptionOf = { it.desc }
+        )
+
+        assertEquals(1, index)
+    }
+
+    @Test
+    fun resolveAnchorIndexInRefreshedTraversal_usesApproximationWhenExactMissing() {
+        data class Node(val id: String?, val text: String?, val desc: String?, val bounds: Rect)
+        val nodes = listOf(
+            Node("id/history", "History", null, Rect(0, 100, 1000, 200)),
+            Node("id/security_card", "Security status", null, Rect(0, 410, 1000, 540)),
+            Node("id/privacy", "Privacy notice", null, Rect(0, 560, 1000, 700))
+        )
+        val anchor = A11yNavigator.PreScrollAnchor(
+            viewIdResourceName = "id/security",
+            mergedLabel = "Security status of your devices",
+            talkbackLabel = "Security status of your devices",
+            text = "Security status of your devices",
+            contentDescription = null,
+            bounds = Rect(0, 400, 1000, 520)
+        )
+
+        val index = A11yNavigator.resolveAnchorIndexInRefreshedTraversal(
+            traversalList = nodes,
+            anchor = anchor,
+            boundsOf = { it.bounds },
+            viewIdOf = { it.id },
+            textOf = { it.text },
+            contentDescriptionOf = { it.desc }
+        )
+
+        assertEquals(1, index)
     }
 
     @Test
