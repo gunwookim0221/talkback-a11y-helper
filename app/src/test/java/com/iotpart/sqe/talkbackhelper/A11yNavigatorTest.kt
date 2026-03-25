@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.21.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.22.0")
     }
 
     @Test
@@ -76,6 +76,28 @@ class A11yNavigatorTest {
         )
 
         assertFalse(isSnapBack)
+    }
+
+    @Test
+    fun isTargetFocusResolved_returnsTrue_whenTargetFocusedStateArrivesLate() {
+        val resolved = A11yNavigator.isTargetFocusResolved(
+            isTargetAccessibilityFocused = true,
+            actualFocusedBounds = Rect(220, 400, 1040, 620),
+            targetBounds = Rect(0, 0, 100, 100)
+        )
+
+        assertTrue(resolved)
+    }
+
+    @Test
+    fun isTargetFocusResolved_returnsTrue_whenBoundsMatchEvenIfFocusFlagIsDelayed() {
+        val resolved = A11yNavigator.isTargetFocusResolved(
+            isTargetAccessibilityFocused = false,
+            actualFocusedBounds = Rect(502, 1200, 1012, 1396),
+            targetBounds = Rect(500, 1198, 1010, 1394)
+        )
+
+        assertTrue(resolved)
     }
 
     @Test
