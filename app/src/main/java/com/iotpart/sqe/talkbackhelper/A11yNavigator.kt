@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.26.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.27.0"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -435,16 +435,43 @@ object A11yNavigator {
                 -1
             }
             val fallbackBelowAnchorIndex = if (isScrollAction && preScrollAnchor != null && resolvedAnchorIndex == -1) {
-                traversalList.indexOfFirst { candidate ->
-                    Rect().also { candidate.getBoundsInScreen(it) }.top > preScrollAnchor.bounds.bottom
-                }.takeIf { it >= 0 } ?: traversalStartIndex
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Anchor exact match failed; using continuation fallback")
+                findAnchorContinuationCandidateIndex(
+                    traversalList = traversalList,
+                    startIndex = 0,
+                    visibleHistory = visibleHistory,
+                    screenTop = screenTop,
+                    screenBottom = screenBottom,
+                    screenHeight = screenHeight,
+                    boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+                    classNameOf = { node -> node.className?.toString() },
+                    viewIdOf = { node -> node.viewIdResourceName },
+                    labelOf = { node ->
+                        node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                            ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                    }
+                ).also { candidateIndex ->
+                    if (candidateIndex >= 0) {
+                        val candidateLabel = traversalList[candidateIndex].text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                            ?: traversalList[candidateIndex].contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                            ?: "<no-label>"
+                        Log.i(
+                            "A11Y_HELPER",
+                            "[SMART_NEXT] Selected new post-scroll content candidate index=$candidateIndex label=${candidateLabel.replace("\n", " ")}"
+                        )
+                    } else {
+                        Log.i("A11Y_HELPER", "[SMART_NEXT] No new continuation content found; allowing bottom bar")
+                    }
+                }
             } else {
                 traversalStartIndex
             }
             val anchorStartIndex = if (resolvedAnchorIndex >= 0) {
                 (resolvedAnchorIndex + 1).coerceAtLeast(traversalStartIndex)
-            } else {
+            } else if (fallbackBelowAnchorIndex >= 0) {
                 fallbackBelowAnchorIndex.coerceAtLeast(traversalStartIndex)
+            } else {
+                traversalStartIndex
             }
             if (isScrollAction && preScrollAnchor != null) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting post-anchor continuation candidate index=$anchorStartIndex")
@@ -1233,22 +1260,25 @@ object A11yNavigator {
     internal fun <T> findAnchorContinuationCandidateIndex(
         traversalList: List<T>,
         startIndex: Int,
-        anchorBottom: Int,
+        visibleHistory: Set<String>,
         screenTop: Int,
         screenBottom: Int,
         screenHeight: Int,
         boundsOf: (T) -> Rect,
         classNameOf: (T) -> String?,
-        viewIdOf: (T) -> String?
+        viewIdOf: (T) -> String?,
+        labelOf: (T) -> String?
     ): Int {
-        if (traversalList.isEmpty()) return startIndex
+        if (traversalList.isEmpty()) return -1
         return (startIndex until traversalList.size).firstOrNull { index ->
             val node = traversalList[index]
             val bounds = boundsOf(node)
-            bounds.top > anchorBottom &&
-                !isTopAppBarNode(classNameOf(node), viewIdOf(node), bounds, screenTop, screenHeight) &&
-                !isBottomNavigationBarNode(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight)
-        } ?: startIndex
+            val isTopBar = isTopAppBarNode(classNameOf(node), viewIdOf(node), bounds, screenTop, screenHeight)
+            val isBottomBar = isBottomNavigationBarNode(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight)
+            val label = labelOf(node)?.trim().orEmpty()
+            val inHistory = label.isNotEmpty() && visibleHistory.contains(label)
+            !isTopBar && !isBottomBar && !inHistory
+        } ?: -1
     }
 
     internal fun performFocusWithVisibilityCheck(
