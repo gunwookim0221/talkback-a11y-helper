@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.18.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.19.0"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -1050,39 +1050,16 @@ object A11yNavigator {
             screenHeight = rootHeight
         )
 
-        fun requestVisibilityAdjustment(bounds: Rect) {
-            val shouldAdjustVisibility = shouldTriggerShowOnScreen(
-                bounds = bounds,
-                effectiveBottom = effectiveBottom,
-                screenTop = screenTop,
-                isScrollAction = isScrollAction,
-                isTopBar = isTopBar,
-                isBottomBar = isBottomBar
-            )
-            if (!shouldAdjustVisibility) return
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Visibility adjustment triggered for: $label (Y:${bounds.top})")
-                target.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
-            } else {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SHOW_ON_SCREEN not supported on this API level")
-            }
-        }
-
-        val initialAdjustedBounds = Rect().also { target.getBoundsInScreen(it) }
-        requestVisibilityAdjustment(initialAdjustedBounds)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            shouldTriggerShowOnScreen(
-                bounds = initialAdjustedBounds,
-                effectiveBottom = effectiveBottom,
-                screenTop = screenTop,
-                isScrollAction = isScrollAction,
-                isTopBar = isTopBar,
-                isBottomBar = isBottomBar
-            )
-        ) {
-            Thread.sleep(100)
-        }
+        alignCandidateForReadableFocus(
+            root = root,
+            target = target,
+            label = label,
+            screenTop = screenTop,
+            effectiveBottom = effectiveBottom,
+            isTopBar = isTopBar,
+            isBottomBar = isBottomBar,
+            canScrollForwardHint = findScrollableForwardAncestorCandidate(target) != null || hasScrollableDownCandidate(root)
+        )
 
         val targetBounds = Rect().also { target.getBoundsInScreen(it) }
         val actualFocusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
@@ -1098,7 +1075,6 @@ object A11yNavigator {
         ) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping duplicate focus action because current accessibility focus bounds exactly match target: $label")
             recordRequestedFocusAttempt(traversalIndex, root)
-            requestVisibilityAdjustment(targetBounds)
             return TargetActionOutcome(true, "moved", target)
         }
         if (currentSystemFocus && actualFocusedBounds != null && actualFocusedBounds != targetBounds) {
@@ -1168,7 +1144,6 @@ object A11yNavigator {
             if (effectivelyFocused) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=false but actual system focus matches target bounds. Treating as success.")
                 recordRequestedFocusAttempt(traversalIndex, root)
-                requestVisibilityAdjustment(targetBounds)
                 return TargetActionOutcome(true, status, target)
             }
             Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=false (status=$status)")
@@ -1197,11 +1172,102 @@ object A11yNavigator {
         recordRequestedFocusAttempt(traversalIndex, root)
         Thread.sleep(100)
         val focusedBounds = Rect().also { target.getBoundsInScreen(it) }
-        requestVisibilityAdjustment(focusedBounds)
         recordRequestedFocusAttempt(traversalIndex, root)
         Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=true (status=$status)")
         Log.i("A11Y_HELPER", "[SMART_NEXT] Focused top-most content at Y=${focusedBounds.top}")
         return TargetActionOutcome(true, "moved", target)
+    }
+
+    internal fun isNodeFullyVisible(bounds: Rect, screenTop: Int, effectiveBottom: Int): Boolean {
+        return bounds.top >= screenTop && bounds.bottom <= effectiveBottom
+    }
+
+    internal fun isNodeBottomClipped(bounds: Rect, effectiveBottom: Int, boundaryPaddingPx: Int = 16): Boolean {
+        return bounds.bottom > effectiveBottom || bounds.bottom >= (effectiveBottom - boundaryPaddingPx)
+    }
+
+    internal fun shouldLiftTrailingContentBeforeFocus(
+        bounds: Rect,
+        effectiveBottom: Int,
+        trailingEdgeThresholdPx: Int = 60,
+        thinTrailingHeightPx: Int = 96
+    ): Boolean {
+        val height = (bounds.bottom - bounds.top).coerceAtLeast(0)
+        val touchesBottomEdge = bounds.bottom >= (effectiveBottom - trailingEdgeThresholdPx)
+        return height in 1..thinTrailingHeightPx && touchesBottomEdge
+    }
+
+    internal fun isNodePoorlyPositionedForFocus(
+        bounds: Rect,
+        screenTop: Int,
+        effectiveBottom: Int,
+        readableBottomZoneRatio: Float = 0.2f
+    ): Boolean {
+        if (!isNodeFullyVisible(bounds, screenTop, effectiveBottom)) return true
+        if (isNodeBottomClipped(bounds, effectiveBottom)) return true
+        if (shouldLiftTrailingContentBeforeFocus(bounds, effectiveBottom)) return true
+        val safeBottom = effectiveBottom - ((effectiveBottom - screenTop) * readableBottomZoneRatio).toInt()
+        return bounds.bottom > safeBottom
+    }
+
+    internal fun alignCandidateForReadableFocus(
+        root: AccessibilityNodeInfo,
+        target: AccessibilityNodeInfo,
+        label: String,
+        screenTop: Int,
+        effectiveBottom: Int,
+        isTopBar: Boolean,
+        isBottomBar: Boolean,
+        canScrollForwardHint: Boolean,
+        maxPreFocusAdjustments: Int = 1
+    ) {
+        if (isTopBar || isBottomBar) return
+        var currentBounds = Rect().also { target.getBoundsInScreen(it) }
+        val poorlyPositioned = isNodePoorlyPositionedForFocus(currentBounds, screenTop, effectiveBottom)
+        if (!poorlyPositioned) return
+
+        if (isNodeBottomClipped(currentBounds, effectiveBottom)) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Candidate is bottom-clipped, attempting pre-focus alignment")
+        }
+
+        var adjustments = 0
+        while (adjustments < maxPreFocusAdjustments) {
+            var adjusted = false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                target.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
+                adjusted = true
+            } else {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SHOW_ON_SCREEN not supported on this API level")
+            }
+
+            val shouldTryContainerScroll =
+                canScrollForwardHint && (isNodeBottomClipped(currentBounds, effectiveBottom) || shouldLiftTrailingContentBeforeFocus(currentBounds, effectiveBottom))
+            if (shouldTryContainerScroll) {
+                val scrollableNode = findScrollableForwardAncestorCandidate(target) ?: findScrollableForwardCandidate(root)
+                if (scrollableNode != null) {
+                    val scrolled = scrollableNode.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Pre-focus readable alignment scroll result=$scrolled label=$label")
+                    adjusted = adjusted || scrolled
+                }
+            } else if (!canScrollForwardHint) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Last content cannot be top-aligned, using fully-visible fallback")
+            }
+
+            if (!adjusted) break
+            Thread.sleep(100)
+            currentBounds = Rect().also { target.getBoundsInScreen(it) }
+            if (!isNodePoorlyPositionedForFocus(currentBounds, screenTop, effectiveBottom)) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Candidate fully visible after adjustment")
+                return
+            }
+            adjustments += 1
+        }
+
+        if (isNodeFullyVisible(currentBounds, screenTop, effectiveBottom)) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Candidate fully visible after adjustment")
+        } else {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Candidate remains partially visible, proceeding with best-effort focus")
+        }
     }
 
 
