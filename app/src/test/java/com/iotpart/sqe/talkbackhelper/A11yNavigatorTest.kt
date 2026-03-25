@@ -519,7 +519,7 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun findAnchorContinuationCandidateIndex_returnsFirstNodeBelowAnchorBottom() {
+    fun findAnchorContinuationCandidateIndex_returnsFirstNewContentExcludingTopAndBottomBars() {
         data class Node(val className: String?, val viewId: String?, val bounds: Rect)
 
         val nodes = listOf(
@@ -531,16 +531,57 @@ class A11yNavigatorTest {
         val index = A11yNavigator.findAnchorContinuationCandidateIndex(
             traversalList = nodes,
             startIndex = 0,
-            anchorBottom = 1000,
+            visibleHistory = setOf("Security"),
             screenTop = 0,
             screenBottom = 2000,
             screenHeight = 2000,
             boundsOf = { it.bounds },
             classNameOf = { it.className },
-            viewIdOf = { it.viewId }
+            viewIdOf = { it.viewId },
+            labelOf = { node ->
+                when (node.viewId) {
+                    "com.test:id/smartthings_top" -> "SmartThings"
+                    "com.test:id/security" -> "Security"
+                    "com.test:id/privacy_notice" -> "Privacy Notice"
+                    else -> null
+                }
+            }
         )
 
         assertEquals(2, index)
+    }
+
+    @Test
+    fun findAnchorContinuationCandidateIndex_returnsMinusOneWhenOnlyBottomBarRemains() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect)
+
+        val nodes = listOf(
+            Node("android.widget.TextView", "com.test:id/top_toolbar", Rect(0, 0, 1000, 180)),
+            Node("android.widget.TextView", "com.test:id/voice_assistant", Rect(0, 380, 1000, 620)),
+            Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1820, 1000, 2000))
+        )
+
+        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+            traversalList = nodes,
+            startIndex = 0,
+            visibleHistory = setOf("Voice assistant"),
+            screenTop = 0,
+            screenBottom = 2000,
+            screenHeight = 2000,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId },
+            labelOf = { node ->
+                when (node.viewId) {
+                    "com.test:id/top_toolbar" -> "Toolbar"
+                    "com.test:id/voice_assistant" -> "Voice assistant"
+                    "com.test:id/home_bottom_navigation" -> "Home"
+                    else -> null
+                }
+            }
+        )
+
+        assertEquals(-1, index)
     }
 
     @Test
