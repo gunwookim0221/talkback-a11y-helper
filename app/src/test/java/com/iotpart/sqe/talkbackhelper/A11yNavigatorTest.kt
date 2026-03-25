@@ -379,6 +379,26 @@ class A11yNavigatorTest {
     }
 
     @Test
+    fun shouldForcePreScrollBeforeBottomBar_returnsTrue_whenContinuationLikelyEvenIfBaseHeuristicIsFalse() {
+        val shouldForce = A11yNavigator.shouldForcePreScrollBeforeBottomBar(
+            shouldScrollBeforeBottomBar = false,
+            continuationContentLikelyBelowCurrentGrid = true
+        )
+
+        assertTrue(shouldForce)
+    }
+
+    @Test
+    fun shouldForcePreScrollBeforeBottomBar_returnsFalse_whenBothSignalsAreFalse() {
+        val shouldForce = A11yNavigator.shouldForcePreScrollBeforeBottomBar(
+            shouldScrollBeforeBottomBar = false,
+            continuationContentLikelyBelowCurrentGrid = false
+        )
+
+        assertFalse(shouldForce)
+    }
+
+    @Test
     fun isContinuationContentLikelyBelowCurrentNode_returnsTrue_forBottomEdgeGridBeforeBottomBar() {
         data class Node(val className: String?, val viewId: String?, val bounds: Rect)
 
