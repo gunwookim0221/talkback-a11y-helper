@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.20.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.21.0"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -1079,6 +1079,21 @@ object A11yNavigator {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Detected partially visible next candidate: index=$traversalIndex label=$label")
         }
 
+        val intendedTrailingCandidate = if (traversalListSnapshot != null && traversalIndex in traversalListSnapshot.indices) {
+            findNextEligibleTraversalCandidate(
+                traversalList = traversalListSnapshot,
+                fromIndex = traversalIndex,
+                screenTop = screenTop,
+                screenBottom = rootBounds.bottom,
+                screenHeight = rootHeight,
+                boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+                classNameOf = { node -> node.className?.toString() },
+                viewIdOf = { node -> node.viewIdResourceName }
+            )
+        } else {
+            null
+        }
+
         alignCandidateForReadableFocus(
             root = root,
             target = target,
@@ -1088,10 +1103,7 @@ object A11yNavigator {
             isTopBar = isTopBar,
             isBottomBar = isBottomBar,
             canScrollForwardHint = findScrollableForwardAncestorCandidate(target) != null || hasScrollableDownCandidate(root),
-            intendedTrailingCandidate = if (
-                traversalListSnapshot != null &&
-                traversalIndex + 1 in traversalListSnapshot.indices
-            ) traversalListSnapshot[traversalIndex + 1] else null
+            intendedTrailingCandidate = intendedTrailingCandidate
         )
 
         val targetBounds = Rect().also { target.getBoundsInScreen(it) }
@@ -1186,6 +1198,20 @@ object A11yNavigator {
 
         if (focusVerification.matchedTarget && focusVerification.retryCount > 0) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Focus stabilized to target after delay")
+        }
+
+        val visualStabilization = stabilizeVisualFocusAfterMove(
+            root = root,
+            target = target,
+            targetBounds = targetBounds
+        )
+        if (!visualStabilization.stabilized) {
+            Log.w(
+                "A11Y_HELPER",
+                "[SMART_NEXT] Final focus mismatch after visual stabilization → snap_back: target=${formatBoundsForLog(targetBounds)} actual=${formatBoundsForLog(visualStabilization.actualBounds)} traversalIndex=$traversalIndex label=$label"
+            )
+            syncLastRequestedFocusIndexToCurrentFocus(root, buildTalkBackLikeFocusNodes(root).map { it.node })
+            return TargetActionOutcome(false, "snap_back", target)
         }
 
         if (shouldTreatAsSnapBackAfterVerification(
@@ -1351,14 +1377,15 @@ object A11yNavigator {
         screenTop: Int,
         effectiveBottom: Int
     ): Boolean {
-        if (intendedBounds.bottom <= screenTop) return true
+        if (intendedBounds.bottom <= screenTop || intendedBounds.top < screenTop) return true
         if (trailingCandidateBounds == null) return false
-        val trailingPrimary = trailingCandidateBounds.top <= (screenTop + 48) &&
-            trailingCandidateBounds.bottom > screenTop &&
-            trailingCandidateBounds.top < intendedBounds.top
-        val intendedNoLongerVisible = !isNodePartiallyVisible(intendedBounds, screenTop, effectiveBottom) &&
-            !isNodeFullyVisible(intendedBounds, screenTop, effectiveBottom)
-        return trailingPrimary && intendedNoLongerVisible
+        val intendedVisibleHeight = visibleHeightInViewport(intendedBounds, screenTop, effectiveBottom)
+        val trailingVisibleHeight = visibleHeightInViewport(trailingCandidateBounds, screenTop, effectiveBottom)
+        val intendedNoLongerPrimary = intendedVisibleHeight <= 0 ||
+            (intendedBounds.top < screenTop && trailingVisibleHeight > 0)
+        val trailingBecamePrimary = trailingVisibleHeight > (intendedVisibleHeight + 24) &&
+            trailingCandidateBounds.top < effectiveBottom
+        return intendedNoLongerPrimary || trailingBecamePrimary
     }
 
     internal fun <T> findPartiallyVisibleNextCandidate(
@@ -1380,11 +1407,107 @@ object A11yNavigator {
             if (bounds.bottom <= currentBounds.bottom) continue
             if (isTopAppBarNode(classNameOf(candidate), viewIdOf(candidate), bounds, screenTop, screenHeight)) continue
             if (isBottomNavigationBarNode(classNameOf(candidate), viewIdOf(candidate), bounds, screenBottom, screenHeight)) continue
-            if (isNodePartiallyVisible(bounds, screenTop, effectiveBottom)) {
-                return index
-            }
+            return if (isNodePartiallyVisible(bounds, screenTop, effectiveBottom)) index else -1
         }
         return -1
+    }
+
+    internal fun visibleHeightInViewport(bounds: Rect, screenTop: Int, effectiveBottom: Int): Int {
+        val visibleTop = maxOf(bounds.top, screenTop)
+        val visibleBottom = minOf(bounds.bottom, effectiveBottom)
+        return (visibleBottom - visibleTop).coerceAtLeast(0)
+    }
+
+    internal fun isTransientSystemUiFocus(
+        focusedPackageName: String?,
+        targetPackageName: String?
+    ): Boolean {
+        if (focusedPackageName.isNullOrBlank()) return false
+        if (focusedPackageName != "com.android.systemui") return false
+        return targetPackageName?.toString()?.trim() != "com.android.systemui"
+    }
+
+    internal data class VisualFocusStabilizationResult(
+        val stabilized: Boolean,
+        val fallbackApplied: Boolean,
+        val actualBounds: Rect?
+    )
+
+    internal fun stabilizeVisualFocusAfterMove(
+        root: AccessibilityNodeInfo,
+        target: AccessibilityNodeInfo,
+        targetBounds: Rect,
+        maxWaitMs: Long = 200L,
+        retryIntervalMs: Long = 50L,
+        maxFallbackAttempts: Int = 1
+    ): VisualFocusStabilizationResult {
+        Log.i("A11Y_HELPER", "[SMART_NEXT] Stabilizing visual focus for target=${target.text ?: target.contentDescription ?: "<no-label>"}")
+        val targetPackageName = target.packageName?.toString()
+        val maxRetries = (maxWaitMs / retryIntervalMs).toInt().coerceAtLeast(0)
+        var lastActualBounds: Rect? = null
+        var fallbackApplied = false
+        var fallbackAttempts = 0
+
+        while (true) {
+            for (retry in 0..maxRetries) {
+                val focusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+                val actualBounds = focusedNode?.let { Rect().also(it::getBoundsInScreen) }
+                val focusedPackageName = focusedNode?.packageName?.toString()
+                lastActualBounds = actualBounds
+
+                if (isTransientSystemUiFocus(focusedPackageName, targetPackageName)) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Ignoring transient system UI focus during stabilization")
+                } else {
+                    target.refresh()
+                    val targetFocused = target.isAccessibilityFocused
+                    val boundsMatched = actualBounds != null && isWithinSnapBackTolerance(targetBounds, actualBounds)
+                    if (targetFocused && boundsMatched) {
+                        Log.i("A11Y_HELPER", "[SMART_NEXT] Visual focus stabilized on intended target")
+                        return VisualFocusStabilizationResult(true, fallbackApplied, actualBounds)
+                    }
+                }
+
+                if (retry < maxRetries) {
+                    Thread.sleep(retryIntervalMs)
+                }
+            }
+
+            if (fallbackAttempts >= maxFallbackAttempts) {
+                return VisualFocusStabilizationResult(false, fallbackApplied, lastActualBounds)
+            }
+
+            fallbackAttempts += 1
+            fallbackApplied = true
+            Log.w("A11Y_HELPER", "[SMART_NEXT] Visual focus stabilization fallback applied")
+            target.refresh()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                target.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
+            }
+            target.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+            Thread.sleep(retryIntervalMs)
+        }
+    }
+
+    internal fun <T> findNextEligibleTraversalCandidate(
+        traversalList: List<T>,
+        fromIndex: Int,
+        screenTop: Int,
+        screenBottom: Int,
+        screenHeight: Int,
+        boundsOf: (T) -> Rect,
+        classNameOf: (T) -> String?,
+        viewIdOf: (T) -> String?
+    ): T? {
+        if (fromIndex !in traversalList.indices) return null
+        for (index in (fromIndex + 1)..traversalList.lastIndex) {
+            val candidate = traversalList[index]
+            val bounds = boundsOf(candidate)
+            if (isTopAppBarNode(classNameOf(candidate), viewIdOf(candidate), bounds, screenTop, screenHeight)) continue
+            if (isBottomNavigationBarNode(classNameOf(candidate), viewIdOf(candidate), bounds, screenBottom, screenHeight)) continue
+            return candidate
+        }
+        return null
     }
 
 

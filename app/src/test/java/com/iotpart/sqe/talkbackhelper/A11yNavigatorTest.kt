@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.19.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.21.0")
     }
 
     @Test
@@ -98,6 +98,63 @@ class A11yNavigatorTest {
         )
 
         assertTrue(isSnapBack)
+    }
+
+    @Test
+    fun findPartiallyVisibleNextCandidate_keepsImmediatePartiallyVisibleCandidate() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect)
+
+        val nodes = listOf(
+            Node("android.widget.TextView", "com.test:id/current", Rect(0, 200, 1000, 450)),
+            Node("android.widget.TextView", "com.test:id/next", Rect(0, 430, 1000, 1040)),
+            Node("android.widget.TextView", "com.test:id/next_next", Rect(0, 1040, 1000, 1540))
+        )
+
+        val index = A11yNavigator.findPartiallyVisibleNextCandidate(
+            traversalList = nodes,
+            currentIndex = 0,
+            screenTop = 0,
+            effectiveBottom = 1000,
+            screenBottom = 1200,
+            screenHeight = 1200,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId }
+        )
+
+        assertEquals(1, index)
+    }
+
+    @Test
+    fun wouldOvershootPastIntendedCandidate_detectsWhenTrailingCardBecomesPrimary() {
+        val overshoot = A11yNavigator.wouldOvershootPastIntendedCandidate(
+            intendedBounds = Rect(0, 0, 1000, 220),
+            trailingCandidateBounds = Rect(0, 180, 1000, 980),
+            screenTop = 0,
+            effectiveBottom = 1000
+        )
+
+        assertTrue(overshoot)
+    }
+
+    @Test
+    fun isTransientSystemUiFocus_returnsTrue_onlyForCrossPackageSystemUiFocus() {
+        val result = A11yNavigator.isTransientSystemUiFocus(
+            focusedPackageName = "com.android.systemui",
+            targetPackageName = "com.test.app"
+        )
+
+        assertTrue(result)
+    }
+
+    @Test
+    fun isTransientSystemUiFocus_returnsFalse_forTargetInsideSystemUi() {
+        val result = A11yNavigator.isTransientSystemUiFocus(
+            focusedPackageName = "com.android.systemui",
+            targetPackageName = "com.android.systemui"
+        )
+
+        assertFalse(result)
     }
 
 
