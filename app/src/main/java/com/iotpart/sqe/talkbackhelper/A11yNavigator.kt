@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.27.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.28.0"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -480,21 +480,19 @@ object A11yNavigator {
             for (index in anchorStartIndex until traversalList.size) {
                 val node = traversalList[index]
                 val bounds = Rect().also { node.getBoundsInScreen(it) }
-                val label = node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                var label = node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                     ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                     ?: "<no-label>"
                 if (isScrollAction && preScrollAnchor != null && resolvedAnchorIndex >= 0 && index <= resolvedAnchorIndex) {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping resurfaced pre-anchor item after scroll: $label")
                     continue
                 }
-                val isLastFocusedNode = (excludeDesc != null && label == excludeDesc)
-                val inHistory = visibleHistory.contains(label)
                 val currentFocusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
                     Rect().also { focusedNode.getBoundsInScreen(it) }
                 }
                 Log.i(
                     "A11Y_HELPER",
-                    "[SMART_DEBUG] Index:$index, Label:${label.replace("\n", " ")}, Y_Bottom:${bounds.bottom}, Eff_Bottom:$effectiveBottom, InHistory:$inHistory"
+                    "[SMART_DEBUG] Index:$index, Label:${label.replace("\n", " ")}, Y_Bottom:${bounds.bottom}, Eff_Bottom:$effectiveBottom, InHistory:${visibleHistory.contains(label)}"
                 )
                 if (shouldSkipDuplicateBoundsCandidate(currentFocusedBounds, bounds, isScrollAction)) {
                     val duplicateReason = if (isScrollAction) "scroll duplicate bounds" else "strict duplicate bounds precheck"
@@ -531,6 +529,29 @@ object A11yNavigator {
                     screenTop = screenTop,
                     screenHeight = screenHeight
                 )
+                val isFallbackSelectedContinuationCandidate =
+                    preScrollAnchor != null &&
+                        isScrollAction &&
+                        resolvedAnchorIndex == -1 &&
+                        fallbackBelowAnchorIndex >= 0 &&
+                        index == fallbackBelowAnchorIndex
+                val canAcceptFallbackSelectedNoLabelCandidate = shouldAcceptFallbackSelectedNoLabelContinuationCandidate(
+                    isFallbackSelectedContinuationCandidate = isFallbackSelectedContinuationCandidate,
+                    isTopBar = isTopBar,
+                    isBottomBar = isBottomBar,
+                    bounds = bounds,
+                    screenTop = screenTop,
+                    effectiveBottom = effectiveBottom
+                )
+                if (label == "<no-label>" && canAcceptFallbackSelectedNoLabelCandidate) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Accepting fallback-selected <no-label> continuation candidate")
+                    recoverDescendantLabel(node)?.let { recoveredLabel ->
+                        label = recoveredLabel
+                        Log.i("A11Y_HELPER", "[SMART_NEXT] Recovered descendant label for continuation candidate: $recoveredLabel")
+                    }
+                }
+                val isLastFocusedNode = (excludeDesc != null && label == excludeDesc)
+                val inHistory = visibleHistory.contains(label)
                 if (isScrollAction && isLastFocusedNode) {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Strictly excluding last focused node even in top area: $label")
                     continue
@@ -564,10 +585,11 @@ object A11yNavigator {
                 if (preScrollAnchor != null &&
                     isScrollAction &&
                     label == "<no-label>" &&
+                    !canAcceptFallbackSelectedNoLabelCandidate &&
                     isTopContent &&
                     bounds.top <= preScrollAnchor.bounds.bottom
                 ) {
-                    Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping top <no-label> container before post-anchor validation")
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping top <no-label> noise node")
                     continue
                 }
                 if (excludedIndex == -1 &&
@@ -2688,6 +2710,41 @@ object A11yNavigator {
     ): Boolean {
         val topAreaBoundary = screenTop + minOf(screenHeight / 5, topAreaMaxPx)
         return nodeTop < topAreaBoundary
+    }
+
+    internal fun shouldAcceptFallbackSelectedNoLabelContinuationCandidate(
+        isFallbackSelectedContinuationCandidate: Boolean,
+        isTopBar: Boolean,
+        isBottomBar: Boolean,
+        bounds: Rect,
+        screenTop: Int,
+        effectiveBottom: Int
+    ): Boolean {
+        if (!isFallbackSelectedContinuationCandidate) return false
+        if (isTopBar || isBottomBar) return false
+        return isWithinContentViewport(bounds, screenTop, effectiveBottom)
+    }
+
+    internal fun isWithinContentViewport(bounds: Rect, screenTop: Int, effectiveBottom: Int): Boolean {
+        return bounds.bottom > screenTop && bounds.top < effectiveBottom
+    }
+
+    internal fun recoverLabelFromDescendantTexts(textCandidates: List<String>): String? {
+        return textCandidates
+            .asSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .firstOrNull()
+    }
+
+    private fun recoverDescendantLabel(node: AccessibilityNodeInfo): String? {
+        val textCandidates = mutableListOf<String>()
+        collectDescendantReadableText(
+            node = node,
+            includeCurrentNode = true,
+            sink = textCandidates
+        )
+        return recoverLabelFromDescendantTexts(textCandidates)
     }
 
     fun findSwipeTarget(
