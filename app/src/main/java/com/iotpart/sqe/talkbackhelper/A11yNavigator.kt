@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.17.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.18.0"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -296,10 +296,17 @@ object A11yNavigator {
             -1
         }
 
-        var nextIndex = resolveNextTraversalIndex(
+        var nextIndex = resolveNextTraversalIndexPreservingIntermediateCandidate(
             currentIndex = currentIndex,
             fallbackIndex = fallbackIndex,
             lastRequestedIndex = lastRequestedFocusIndex,
+            traversalSize = traversalList.size,
+            onPreserveIntermediate = { preservedIndex ->
+                Log.i(
+                    "A11Y_HELPER",
+                    "[SMART_NEXT] Preserving intermediate candidate between currentIndex=$currentIndex and lastRequestedFocusIndex=$lastRequestedFocusIndex. nextIndex=$preservedIndex"
+                )
+            },
             onForcedAdvance = { forcedIndex ->
                 Log.w(
                     "A11Y_HELPER",
@@ -714,6 +721,26 @@ object A11yNavigator {
             screenBottom = screenBottom,
             screenHeight = screenHeight
         )
+        if (nextIsBottomBar) {
+            val intermediateTrailingContentIndex = findIntermediateContentCandidateBeforeBottomBar(
+                traversalList = traversalList,
+                currentIndex = currentIndex,
+                bottomBarIndex = nextIndex,
+                screenTop = screenTop,
+                screenBottom = screenBottom,
+                screenHeight = screenHeight,
+                boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+                classNameOf = { node -> node.className?.toString() },
+                viewIdOf = { node -> node.viewIdResourceName }
+            )
+            if (intermediateTrailingContentIndex != -1) {
+                Log.i(
+                    "A11Y_HELPER",
+                    "[SMART_NEXT] Found intermediate content before bottom bar at index=$intermediateTrailingContentIndex. Prioritizing it before bottom bar index=$nextIndex"
+                )
+                nextIndex = intermediateTrailingContentIndex
+            }
+        }
 
         val shouldScrollBeforeBottomBar = shouldScrollBeforeBottomBar(
             traversalList = traversalList,
@@ -851,15 +878,28 @@ object A11yNavigator {
         return true
     }
 
-    internal fun resolveNextTraversalIndex(
+    internal fun resolveNextTraversalIndexPreservingIntermediateCandidate(
         currentIndex: Int,
         fallbackIndex: Int,
         lastRequestedIndex: Int,
+        traversalSize: Int,
+        onPreserveIntermediate: ((Int) -> Unit)? = null,
         onForcedAdvance: ((Int) -> Unit)? = null
     ): Int {
         return when {
             currentIndex == -1 && fallbackIndex != -1 -> fallbackIndex
-            currentIndex != -1 && lastRequestedIndex >= 0 && currentIndex <= lastRequestedIndex -> {
+            currentIndex != -1 && lastRequestedIndex >= 0 && currentIndex < lastRequestedIndex -> {
+                val intermediateCandidate = (currentIndex + 1).takeIf { it in 0 until traversalSize && it <= lastRequestedIndex }
+                if (intermediateCandidate != null) {
+                    onPreserveIntermediate?.invoke(intermediateCandidate)
+                    intermediateCandidate
+                } else {
+                    val forcedIndex = lastRequestedIndex + 1
+                    onForcedAdvance?.invoke(forcedIndex)
+                    forcedIndex
+                }
+            }
+            currentIndex != -1 && lastRequestedIndex >= 0 && currentIndex == lastRequestedIndex -> {
                 val forcedIndex = lastRequestedIndex + 1
                 onForcedAdvance?.invoke(forcedIndex)
                 forcedIndex
@@ -867,6 +907,100 @@ object A11yNavigator {
             lastRequestedIndex >= 0 -> maxOf(currentIndex + 1, lastRequestedIndex + 1)
             else -> currentIndex + 1
         }
+    }
+
+    internal fun <T> isThinTrailingContentAboveBottomBar(
+        node: T,
+        bounds: Rect,
+        bottomBarTop: Int,
+        classNameOf: (T) -> String?,
+        viewIdOf: (T) -> String?,
+        thinBandPx: Int = 60
+    ): Boolean {
+        if (bottomBarTop <= 0) return false
+        if (bounds.height() <= 0) return false
+        if (bounds.bottom > bottomBarTop) return false
+        val gapToBottomBar = bottomBarTop - bounds.bottom
+        if (gapToBottomBar !in 0..thinBandPx) return false
+
+        val className = classNameOf(node)?.lowercase().orEmpty()
+        val viewId = viewIdOf(node)?.lowercase().orEmpty()
+        val isFixedBarLike = listOf("toolbar", "actionbar", "appbar", "bottomnavigation", "tablayout", "navigationbar")
+            .any { keyword -> className.contains(keyword) || viewId.contains(keyword) }
+        if (isFixedBarLike) return false
+
+        return true
+    }
+
+    internal fun <T> isLastContentCandidateBeforeBottomBar(
+        traversalList: List<T>,
+        candidateIndex: Int,
+        bottomBarIndex: Int,
+        screenTop: Int,
+        screenBottom: Int,
+        screenHeight: Int,
+        boundsOf: (T) -> Rect,
+        classNameOf: (T) -> String?,
+        viewIdOf: (T) -> String?
+    ): Boolean {
+        if (candidateIndex !in traversalList.indices || bottomBarIndex !in traversalList.indices) return false
+        if (candidateIndex >= bottomBarIndex) return false
+        val lastContentIndex = ((candidateIndex + 1) until bottomBarIndex)
+            .lastOrNull { index ->
+                val node = traversalList[index]
+                val bounds = boundsOf(node)
+                !isTopAppBarNode(classNameOf(node), viewIdOf(node), bounds, screenTop, screenHeight) &&
+                    !isBottomNavigationBarNode(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight)
+            } ?: candidateIndex
+        return candidateIndex >= lastContentIndex
+    }
+
+    internal fun <T> findIntermediateContentCandidateBeforeBottomBar(
+        traversalList: List<T>,
+        currentIndex: Int,
+        bottomBarIndex: Int,
+        screenTop: Int,
+        screenBottom: Int,
+        screenHeight: Int,
+        boundsOf: (T) -> Rect,
+        classNameOf: (T) -> String?,
+        viewIdOf: (T) -> String?
+    ): Int {
+        if (bottomBarIndex !in traversalList.indices) return -1
+        val bottomBarTop = boundsOf(traversalList[bottomBarIndex]).top
+        val start = (currentIndex + 1).coerceAtLeast(0)
+        if (start >= bottomBarIndex) return -1
+
+        val contentIndices = (start until bottomBarIndex).filter { index ->
+            val node = traversalList[index]
+            val bounds = boundsOf(node)
+            !isTopAppBarNode(classNameOf(node), viewIdOf(node), bounds, screenTop, screenHeight) &&
+                !isBottomNavigationBarNode(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight)
+        }
+        if (contentIndices.isEmpty()) return -1
+
+        val thinTrailingIndex = contentIndices.lastOrNull { index ->
+            val node = traversalList[index]
+            val bounds = boundsOf(node)
+            isThinTrailingContentAboveBottomBar(
+                node = node,
+                bounds = bounds,
+                bottomBarTop = bottomBarTop,
+                classNameOf = classNameOf,
+                viewIdOf = viewIdOf
+            ) && isLastContentCandidateBeforeBottomBar(
+                traversalList = traversalList,
+                candidateIndex = index,
+                bottomBarIndex = bottomBarIndex,
+                screenTop = screenTop,
+                screenBottom = screenBottom,
+                screenHeight = screenHeight,
+                boundsOf = boundsOf,
+                classNameOf = classNameOf,
+                viewIdOf = viewIdOf
+            )
+        }
+        return thinTrailingIndex ?: contentIndices.last()
     }
 
     internal fun <T> skipCoordinateDuplicateTraversalIndices(

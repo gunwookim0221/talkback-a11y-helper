@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.17.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.18.0")
     }
 
     @Test
@@ -60,36 +60,92 @@ class A11yNavigatorTest {
 
 
     @Test
-    fun resolveNextTraversalIndex_forcesAdvanceWhenCurrentIndexIsStale() {
-        val nextIndex = A11yNavigator.resolveNextTraversalIndex(
+    fun resolveNextTraversalIndexPreservingIntermediateCandidate_keepsImmediateIntermediateWhenStaleGapIsOne() {
+        val nextIndex = A11yNavigator.resolveNextTraversalIndexPreservingIntermediateCandidate(
             currentIndex = 2,
             fallbackIndex = -1,
-            lastRequestedIndex = 4
+            lastRequestedIndex = 3,
+            traversalSize = 6
+        )
+
+        assertEquals(3, nextIndex)
+    }
+
+    @Test
+    fun resolveNextTraversalIndexPreservingIntermediateCandidate_forcesAdvanceWhenNoIntermediateExists() {
+        val nextIndex = A11yNavigator.resolveNextTraversalIndexPreservingIntermediateCandidate(
+            currentIndex = 2,
+            fallbackIndex = -1,
+            lastRequestedIndex = 4,
+            traversalSize = 3
         )
 
         assertEquals(5, nextIndex)
     }
 
     @Test
-    fun resolveNextTraversalIndex_usesFallbackWhenCurrentIndexLookupFails() {
-        val nextIndex = A11yNavigator.resolveNextTraversalIndex(
+    fun resolveNextTraversalIndexPreservingIntermediateCandidate_usesFallbackWhenCurrentIndexLookupFails() {
+        val nextIndex = A11yNavigator.resolveNextTraversalIndexPreservingIntermediateCandidate(
             currentIndex = -1,
             fallbackIndex = 6,
-            lastRequestedIndex = 4
+            lastRequestedIndex = 4,
+            traversalSize = 10
         )
 
         assertEquals(6, nextIndex)
     }
 
     @Test
-    fun resolveNextTraversalIndex_returnsOverflowWhenCurrentIndexIsLast() {
-        val nextIndex = A11yNavigator.resolveNextTraversalIndex(
+    fun resolveNextTraversalIndexPreservingIntermediateCandidate_returnsOverflowWhenCurrentIndexIsLast() {
+        val nextIndex = A11yNavigator.resolveNextTraversalIndexPreservingIntermediateCandidate(
             currentIndex = 4,
             fallbackIndex = -1,
-            lastRequestedIndex = -1
+            lastRequestedIndex = -1,
+            traversalSize = 5
         )
 
         assertEquals(5, nextIndex)
+    }
+
+    @Test
+    fun findIntermediateContentCandidateBeforeBottomBar_prefersThinTrailingContent() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect)
+
+        val nodes = listOf(
+            Node("android.widget.TextView", "com.test:id/home_care", Rect(42, 1911, 1038, 2256)),
+            Node("android.widget.TextView", "com.test:id/find", Rect(42, 2298, 1038, 2316)),
+            Node("android.widget.LinearLayout", "com.test:id/bottom_nav_home", Rect(23, 2316, 217, 2496))
+        )
+
+        val candidateIndex = A11yNavigator.findIntermediateContentCandidateBeforeBottomBar(
+            traversalList = nodes,
+            currentIndex = 0,
+            bottomBarIndex = 2,
+            screenTop = 0,
+            screenBottom = 2496,
+            screenHeight = 2496,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId }
+        )
+
+        assertEquals(1, candidateIndex)
+    }
+
+    @Test
+    fun isThinTrailingContentAboveBottomBar_returnsTrueWhenNodeTouchesBottomBarBoundary() {
+        data class Node(val className: String?, val viewId: String?)
+
+        val node = Node("android.widget.TextView", "com.test:id/find")
+        val isThinTrailing = A11yNavigator.isThinTrailingContentAboveBottomBar(
+            node = node,
+            bounds = Rect(42, 2298, 1038, 2316),
+            bottomBarTop = 2316,
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId }
+        )
+
+        assertTrue(isThinTrailing)
     }
 
     @Test
