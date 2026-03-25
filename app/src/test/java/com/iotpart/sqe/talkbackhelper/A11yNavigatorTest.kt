@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.22.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.23.0")
     }
 
     @Test
@@ -1717,6 +1717,27 @@ class A11yNavigatorTest {
             screenBottom = 1920,
             screenHeight = 1920
         )
+        val menuServices = A11yNavigator.isBottomNavigationBarNode(
+            className = "android.widget.LinearLayout",
+            viewIdResourceName = "com.samsung.android.oneconnect:id/menu_services",
+            boundsInScreen = Rect(0, 290, 1080, 410),
+            screenBottom = 1920,
+            screenHeight = 1920
+        )
+        val menuAutomations = A11yNavigator.isBottomNavigationBarNode(
+            className = "android.widget.LinearLayout",
+            viewIdResourceName = "com.samsung.android.oneconnect:id/menu_automations",
+            boundsInScreen = Rect(0, 295, 1080, 415),
+            screenBottom = 1920,
+            screenHeight = 1920
+        )
+        val menuMore = A11yNavigator.isBottomNavigationBarNode(
+            className = "android.widget.LinearLayout",
+            viewIdResourceName = "com.samsung.android.oneconnect:id/menu_more",
+            boundsInScreen = Rect(0, 298, 1080, 418),
+            screenBottom = 1920,
+            screenHeight = 1920
+        )
         val menuMenu = A11yNavigator.isBottomNavigationBarNode(
             className = "android.widget.LinearLayout",
             viewIdResourceName = "com.samsung.android.oneconnect:id/menu_menu",
@@ -1730,6 +1751,9 @@ class A11yNavigatorTest {
         assertTrue(bottomNav)
         assertTrue(menuLife)
         assertTrue(menuRoutines)
+        assertTrue(menuServices)
+        assertTrue(menuAutomations)
+        assertTrue(menuMore)
         assertTrue(menuMenu)
     }
 
