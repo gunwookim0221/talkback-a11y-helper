@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.15.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.16.0")
     }
 
 
@@ -1114,7 +1114,7 @@ class A11yNavigatorTest {
 
 
     @Test
-    fun requestAccessibilityFocusWithRetry_usesSingleAttemptByDefault() {
+    fun requestAccessibilityFocusWithRetry_retriesThreeTimesByDefault() {
         var actionCalls = 0
         var refreshCalls = 0
 
@@ -1130,8 +1130,8 @@ class A11yNavigatorTest {
         )
 
         assertFalse(result)
-        assertEquals(1, actionCalls)
-        assertEquals(1, refreshCalls)
+        assertEquals(3, actionCalls)
+        assertEquals(3, refreshCalls)
     }
 
     @Test
@@ -1174,6 +1174,64 @@ class A11yNavigatorTest {
         } finally {
             field.setInt(null, originalValue)
         }
+    }
+
+    @Test
+    fun isAccessibilityFocusEffectivelyActive_returnsTrueWhenBoundsMatchEvenForStaleIndex() {
+        val field = A11yNavigator::class.java.getDeclaredField("lastRequestedFocusIndex").apply {
+            isAccessible = true
+        }
+        val originalValue = field.getInt(null)
+
+        try {
+            field.setInt(null, 11)
+            val targetBounds = Rect(0, 500, 400, 650)
+
+            val result = A11yNavigator.isAccessibilityFocusEffectivelyActive(
+                isAccessibilityFocused = true,
+                traversalIndex = 11,
+                actualFocusedBounds = Rect(targetBounds),
+                targetBounds = targetBounds
+            )
+
+            assertTrue(result)
+        } finally {
+            field.setInt(null, originalValue)
+        }
+    }
+
+    @Test
+    fun shouldScrollAtEndOfTraversal_returnsFalseWhenNextIndexOutOfBoundsEvenIfScrollableExists() {
+        val shouldScroll = A11yNavigator.shouldScrollAtEndOfTraversal(
+            currentIndex = 2,
+            nextIndex = 3,
+            traversalList = listOf("a", "b", "c"),
+            scrollableNodeExists = true
+        )
+
+        assertFalse(shouldScroll)
+    }
+
+    @Test
+    fun shouldTerminateAtLastBottomBar_returnsTrueForLastBottomTab() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect)
+        val nodes = listOf(
+            Node("android.widget.TextView", "com.test:id/content", Rect(0, 400, 1000, 600)),
+            Node("android.widget.LinearLayout", "com.test:id/bottom_nav_menu", Rect(0, 1800, 1000, 2000))
+        )
+
+        val terminate = A11yNavigator.shouldTerminateAtLastBottomBar(
+            traversalList = nodes,
+            currentIndex = 1,
+            lastIndex = 1,
+            screenBottom = 2000,
+            screenHeight = 2000,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId }
+        )
+
+        assertTrue(terminate)
     }
 
     @Test
