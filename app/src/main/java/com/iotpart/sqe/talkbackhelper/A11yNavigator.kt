@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.19.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.20.0"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -505,7 +505,9 @@ object A11yNavigator {
                         effectiveBottom = effectiveBottom,
                         status = statusName,
                         isScrollAction = isScrollAction,
-                        traversalIndex = index
+                        traversalIndex = index,
+                        traversalListSnapshot = traversalList,
+                        currentFocusIndexHint = index - 1
                     )
                     if (focusedOutcome?.success == true) {
                         focusedAny = true
@@ -557,7 +559,9 @@ object A11yNavigator {
                 effectiveBottom = effectiveBottom,
                 status = status,
                 isScrollAction = false,
-                traversalIndex = traversalIndex
+                traversalIndex = traversalIndex,
+                traversalListSnapshot = traversalList,
+                currentFocusIndexHint = currentIndex
             )
         }
 
@@ -1026,7 +1030,9 @@ object A11yNavigator {
         effectiveBottom: Int,
         status: String,
         isScrollAction: Boolean,
-        traversalIndex: Int
+        traversalIndex: Int,
+        traversalListSnapshot: List<AccessibilityNodeInfo>? = null,
+        currentFocusIndexHint: Int = -1
     ): TargetActionOutcome {
         val label = target.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
             ?: target.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
@@ -1050,6 +1056,29 @@ object A11yNavigator {
             screenHeight = rootHeight
         )
 
+        val partiallyVisibleTrailingIndex = if (
+            traversalListSnapshot != null &&
+            traversalIndex in traversalListSnapshot.indices &&
+            currentFocusIndexHint in traversalListSnapshot.indices
+        ) {
+            findPartiallyVisibleNextCandidate(
+                traversalList = traversalListSnapshot,
+                currentIndex = currentFocusIndexHint,
+                screenTop = screenTop,
+                effectiveBottom = effectiveBottom,
+                screenBottom = rootBounds.bottom,
+                screenHeight = rootHeight,
+                boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+                classNameOf = { node -> node.className?.toString() },
+                viewIdOf = { node -> node.viewIdResourceName }
+            )
+        } else {
+            -1
+        }
+        if (partiallyVisibleTrailingIndex == traversalIndex) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Detected partially visible next candidate: index=$traversalIndex label=$label")
+        }
+
         alignCandidateForReadableFocus(
             root = root,
             target = target,
@@ -1058,7 +1087,11 @@ object A11yNavigator {
             effectiveBottom = effectiveBottom,
             isTopBar = isTopBar,
             isBottomBar = isBottomBar,
-            canScrollForwardHint = findScrollableForwardAncestorCandidate(target) != null || hasScrollableDownCandidate(root)
+            canScrollForwardHint = findScrollableForwardAncestorCandidate(target) != null || hasScrollableDownCandidate(root),
+            intendedTrailingCandidate = if (
+                traversalListSnapshot != null &&
+                traversalIndex + 1 in traversalListSnapshot.indices
+            ) traversalListSnapshot[traversalIndex + 1] else null
         )
 
         val targetBounds = Rect().also { target.getBoundsInScreen(it) }
@@ -1219,6 +1252,7 @@ object A11yNavigator {
         isTopBar: Boolean,
         isBottomBar: Boolean,
         canScrollForwardHint: Boolean,
+        intendedTrailingCandidate: AccessibilityNodeInfo? = null,
         maxPreFocusAdjustments: Int = 1
     ) {
         if (isTopBar || isBottomBar) return
@@ -1228,6 +1262,18 @@ object A11yNavigator {
 
         if (isNodeBottomClipped(currentBounds, effectiveBottom)) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Candidate is bottom-clipped, attempting pre-focus alignment")
+        }
+
+        val shouldUseMinimalAdjustment = shouldUseMinimalPreFocusAdjustment(
+            intendedBounds = currentBounds,
+            trailingCandidateBounds = intendedTrailingCandidate?.let { candidate ->
+                Rect().also { candidate.getBoundsInScreen(it) }
+            },
+            screenTop = screenTop,
+            effectiveBottom = effectiveBottom
+        )
+        if (shouldUseMinimalAdjustment) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Applying minimal pre-focus adjustment for intended candidate")
         }
 
         var adjustments = 0
@@ -1241,6 +1287,7 @@ object A11yNavigator {
             }
 
             val shouldTryContainerScroll =
+                !shouldUseMinimalAdjustment &&
                 canScrollForwardHint && (isNodeBottomClipped(currentBounds, effectiveBottom) || shouldLiftTrailingContentBeforeFocus(currentBounds, effectiveBottom))
             if (shouldTryContainerScroll) {
                 val scrollableNode = findScrollableForwardAncestorCandidate(target) ?: findScrollableForwardCandidate(root)
@@ -1256,18 +1303,88 @@ object A11yNavigator {
             if (!adjusted) break
             Thread.sleep(100)
             currentBounds = Rect().also { target.getBoundsInScreen(it) }
+            val trailingBounds = intendedTrailingCandidate?.let { candidate ->
+                Rect().also { candidate.getBoundsInScreen(it) }
+            }
+            if (wouldOvershootPastIntendedCandidate(currentBounds, trailingBounds, screenTop, effectiveBottom)) {
+                Log.w("A11Y_HELPER", "[SMART_NEXT] Overshoot detected: adjustment exposed a later card as primary content")
+                break
+            }
             if (!isNodePoorlyPositionedForFocus(currentBounds, screenTop, effectiveBottom)) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Candidate fully visible after adjustment")
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Intended candidate is now fully visible")
                 return
             }
             adjustments += 1
         }
 
         if (isNodeFullyVisible(currentBounds, screenTop, effectiveBottom)) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Candidate fully visible after adjustment")
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Intended candidate is now fully visible")
         } else {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Candidate remains partially visible, proceeding with best-effort focus")
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Proceeding with best-effort focus on intended candidate")
         }
+    }
+
+    internal fun shouldUseMinimalPreFocusAdjustment(
+        intendedBounds: Rect,
+        trailingCandidateBounds: Rect?,
+        screenTop: Int,
+        effectiveBottom: Int
+    ): Boolean {
+        val intendedPartiallyVisible = isNodePartiallyVisible(intendedBounds, screenTop, effectiveBottom)
+        val trailingPartiallyVisible = trailingCandidateBounds?.let {
+            isNodePartiallyVisible(it, screenTop, effectiveBottom)
+        } ?: false
+        return intendedPartiallyVisible || trailingPartiallyVisible
+    }
+
+    internal fun isNodePartiallyVisible(bounds: Rect, screenTop: Int, effectiveBottom: Int): Boolean {
+        val visibleTop = maxOf(bounds.top, screenTop)
+        val visibleBottom = minOf(bounds.bottom, effectiveBottom)
+        val visibleHeight = (visibleBottom - visibleTop).coerceAtLeast(0)
+        val fullHeight = (bounds.bottom - bounds.top).coerceAtLeast(0)
+        return visibleHeight > 0 && visibleHeight < fullHeight
+    }
+
+    internal fun wouldOvershootPastIntendedCandidate(
+        intendedBounds: Rect,
+        trailingCandidateBounds: Rect?,
+        screenTop: Int,
+        effectiveBottom: Int
+    ): Boolean {
+        if (intendedBounds.bottom <= screenTop) return true
+        if (trailingCandidateBounds == null) return false
+        val trailingPrimary = trailingCandidateBounds.top <= (screenTop + 48) &&
+            trailingCandidateBounds.bottom > screenTop &&
+            trailingCandidateBounds.top < intendedBounds.top
+        val intendedNoLongerVisible = !isNodePartiallyVisible(intendedBounds, screenTop, effectiveBottom) &&
+            !isNodeFullyVisible(intendedBounds, screenTop, effectiveBottom)
+        return trailingPrimary && intendedNoLongerVisible
+    }
+
+    internal fun <T> findPartiallyVisibleNextCandidate(
+        traversalList: List<T>,
+        currentIndex: Int,
+        screenTop: Int,
+        effectiveBottom: Int,
+        screenBottom: Int,
+        screenHeight: Int,
+        boundsOf: (T) -> Rect,
+        classNameOf: (T) -> String?,
+        viewIdOf: (T) -> String?
+    ): Int {
+        if (currentIndex !in traversalList.indices) return -1
+        val currentBounds = boundsOf(traversalList[currentIndex])
+        for (index in (currentIndex + 1)..traversalList.lastIndex) {
+            val candidate = traversalList[index]
+            val bounds = boundsOf(candidate)
+            if (bounds.bottom <= currentBounds.bottom) continue
+            if (isTopAppBarNode(classNameOf(candidate), viewIdOf(candidate), bounds, screenTop, screenHeight)) continue
+            if (isBottomNavigationBarNode(classNameOf(candidate), viewIdOf(candidate), bounds, screenBottom, screenHeight)) continue
+            if (isNodePartiallyVisible(bounds, screenTop, effectiveBottom)) {
+                return index
+            }
+        }
+        return -1
     }
 
 
@@ -1644,7 +1761,9 @@ object A11yNavigator {
             effectiveBottom = rootRect.bottom,
             status = "moved_to_bottom_bar_after_no_progress",
             isScrollAction = false,
-            traversalIndex = bottomBarIndex
+            traversalIndex = bottomBarIndex,
+            traversalListSnapshot = traversalList,
+            currentFocusIndexHint = (bottomBarIndex - 1).coerceAtLeast(-1)
         )
         if (focused.success) {
             return TargetActionOutcome(true, "moved_to_bottom_bar_after_no_progress", bottomBarNode)
