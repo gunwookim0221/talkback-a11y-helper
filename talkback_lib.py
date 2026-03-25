@@ -35,7 +35,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.6.6"
+CLIENT_ALGORITHM_VERSION = "1.6.7"
 
 
 @dataclass
@@ -907,16 +907,104 @@ class A11yAdbClient:
         self._broadcast(dev, ACTION_GET_FOCUS, ["--es", "reqId", req_id])
 
         result = self._read_log_result(dev, "FOCUS_RESULT", req_id, wait_seconds=wait_seconds)
-        if not bool(result.get("success")):
+        focus_node: dict[str, Any] = {}
+        if bool(result.get("success")):
+            for key in ("node", "focusNode", "focusedNode", "focus"):
+                node = result.get(key)
+                if isinstance(node, dict):
+                    focus_node = node
+                    break
+
+            if not focus_node and any(
+                k in result for k in ("text", "viewIdResourceName", "contentDescription", "boundsInScreen")
+            ):
+                focus_node = dict(result)
+
+        if self._is_meaningful_focus_node(focus_node):
+            return focus_node
+
+        print("[DEBUG][get_focus] GET_FOCUS result empty, falling back to dump_tree")
+        try:
+            dump_nodes = self.dump_tree(dev=dev)
+        except Exception:
+            print("[DEBUG][get_focus] dump_tree fallback failed")
             return {}
 
-        for key in ("node", "focusNode", "focusedNode", "focus"):
-            node = result.get(key)
-            if isinstance(node, dict):
+        fallback_focus_node = self._find_focused_node_in_tree(dump_nodes)
+        if fallback_focus_node:
+            print("[DEBUG][get_focus] dump_tree fallback found focused node")
+            return fallback_focus_node
+
+        print("[DEBUG][get_focus] dump_tree fallback failed")
+        return {}
+
+    @staticmethod
+    def _is_meaningful_focus_node(node: Any) -> bool:
+        if not isinstance(node, dict) or not node:
+            return False
+
+        text_value = node.get("text")
+        if isinstance(text_value, str) and text_value.strip():
+            return True
+
+        content_desc = node.get("contentDescription")
+        if isinstance(content_desc, str) and content_desc.strip():
+            return True
+
+        view_id = node.get("viewIdResourceName")
+        if isinstance(view_id, str) and view_id.strip():
+            return True
+
+        bounds = node.get("boundsInScreen")
+        if isinstance(bounds, dict) and any(key in bounds for key in ("l", "t", "r", "b", "left", "top", "right", "bottom")):
+            return True
+
+        return False
+
+    @staticmethod
+    def _find_focused_node_in_tree(nodes: Any) -> dict[str, Any]:
+        def _walk(node: Any) -> dict[str, Any]:
+            if not isinstance(node, dict):
+                return {}
+
+            if bool(node.get("accessibilityFocused")):
                 return node
 
-        if any(k in result for k in ("text", "viewIdResourceName", "contentDescription", "boundsInScreen")):
-            return dict(result)
+            children = node.get("children")
+            if isinstance(children, list):
+                for child in children:
+                    found = _walk(child)
+                    if found:
+                        return found
+            return {}
+
+        def _walk_focused(node: Any) -> dict[str, Any]:
+            if not isinstance(node, dict):
+                return {}
+
+            if bool(node.get("focused")):
+                return node
+
+            children = node.get("children")
+            if isinstance(children, list):
+                for child in children:
+                    found = _walk_focused(child)
+                    if found:
+                        return found
+            return {}
+
+        if not isinstance(nodes, list):
+            return {}
+
+        for node in nodes:
+            found = _walk(node)
+            if found:
+                return found
+
+        for node in nodes:
+            found = _walk_focused(node)
+            if found:
+                return found
 
         return {}
 
