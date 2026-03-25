@@ -2387,4 +2387,77 @@ class A11yNavigatorTest {
         assertFalse(result)
         assertEquals(3, attempts)
     }
+
+    @Test
+    fun findPartiallyVisibleNextCandidate_prefersBottomClippedNextContent() {
+        data class Candidate(val bounds: Rect, val className: String? = null, val viewId: String? = null)
+
+        val candidates = listOf(
+            Candidate(Rect(0, 200, 1080, 420), className = "android.view.View", viewId = "current"),
+            Candidate(Rect(0, 430, 1080, 760), className = "android.view.View", viewId = "pet_care"),
+            Candidate(Rect(0, 770, 1080, 1090), className = "android.view.View", viewId = "home_care")
+        )
+
+        val index = A11yNavigator.findPartiallyVisibleNextCandidate(
+            traversalList = candidates,
+            currentIndex = 0,
+            screenTop = 0,
+            effectiveBottom = 800,
+            screenBottom = 900,
+            screenHeight = 900,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId }
+        )
+
+        assertEquals(1, index)
+    }
+
+    @Test
+    fun shouldUseMinimalPreFocusAdjustment_returnsFalseWhenIntendedAlreadyFullyVisible() {
+        val result = A11yNavigator.shouldUseMinimalPreFocusAdjustment(
+            intendedBounds = Rect(0, 300, 1080, 600),
+            trailingCandidateBounds = null,
+            screenTop = 0,
+            effectiveBottom = 900
+        )
+
+        assertFalse(result)
+    }
+
+    @Test
+    fun shouldUseMinimalPreFocusAdjustment_returnsTrueWhenIntendedIsPartiallyVisible() {
+        val result = A11yNavigator.shouldUseMinimalPreFocusAdjustment(
+            intendedBounds = Rect(0, 650, 1080, 980),
+            trailingCandidateBounds = Rect(0, 990, 1080, 1250),
+            screenTop = 0,
+            effectiveBottom = 900
+        )
+
+        assertTrue(result)
+    }
+
+    @Test
+    fun wouldOvershootPastIntendedCandidate_detectsWhenIntendedIsPushedAboveViewport() {
+        val overshoot = A11yNavigator.wouldOvershootPastIntendedCandidate(
+            intendedBounds = Rect(0, -180, 1080, -10),
+            trailingCandidateBounds = Rect(0, 0, 1080, 260),
+            screenTop = 0,
+            effectiveBottom = 900
+        )
+
+        assertTrue(overshoot)
+    }
+
+    @Test
+    fun wouldOvershootPastIntendedCandidate_returnsFalseForLastNodeBestEffortCase() {
+        val overshoot = A11yNavigator.wouldOvershootPastIntendedCandidate(
+            intendedBounds = Rect(0, 620, 1080, 930),
+            trailingCandidateBounds = null,
+            screenTop = 0,
+            effectiveBottom = 900
+        )
+
+        assertFalse(overshoot)
+    }
 }
