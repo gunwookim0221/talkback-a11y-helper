@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.26.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.26.1"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -889,13 +889,17 @@ object A11yNavigator {
         if (mustDeferBottomBar || (nextIsBottomBar && scrollableNode != null && forcePreScrollBeforeBottomBar)) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Scrollable container found for smart scroll.")
             Log.i("A11Y_HELPER", "[SMART_NEXT] Next node is bottom bar and continuation/defer condition matched -> attempting scroll first")
+            val scrollTarget = scrollableNode ?: run {
+                Log.w("A11Y_HELPER", "[SMART_NEXT] Scroll target became null unexpectedly; falling back to bottom bar move.")
+                return focusOrSkip(nextNode, "moved_to_bottom_bar_direct", nextIndex)
+            }
             val lastDesc = resolvedCurrent?.contentDescription?.toString()
             val preScrollAnchor = buildPreScrollAnchor(
                 focusNodes = focusNodes,
                 currentIndex = currentIndex,
                 resolvedCurrent = resolvedCurrent
             )
-            val scrollResult = scrollableNode.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+            val scrollResult = scrollTarget.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
             Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SCROLL_FORWARD result=$scrollResult")
             if (!scrollResult) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Scroll failed (end of list), moving to bottom bar.")
