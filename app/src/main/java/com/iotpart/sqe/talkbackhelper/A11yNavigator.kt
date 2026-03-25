@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.22.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.23.0"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -1309,7 +1309,11 @@ object A11yNavigator {
         intendedTrailingCandidate: AccessibilityNodeInfo? = null,
         maxPreFocusAdjustments: Int = 1
     ) {
-        if (isTopBar || isBottomBar) return
+        if (isTopBar) return
+        if (isBottomBar) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Detected bottom navigation target -> skipping pre-focus alignment")
+            return
+        }
         var currentBounds = Rect().also { target.getBoundsInScreen(it) }
         val poorlyPositioned = isNodePoorlyPositionedForFocus(currentBounds, screenTop, effectiveBottom)
         if (!poorlyPositioned) return
@@ -2931,6 +2935,9 @@ object A11yNavigator {
             normalizedViewId.contains("menu_favorites") ||
             normalizedViewId.contains("menu_devices") ||
             normalizedViewId.contains("menu_life") ||
+            normalizedViewId.contains("menu_services") ||
+            normalizedViewId.contains("menu_automations") ||
+            normalizedViewId.contains("menu_more") ||
             normalizedViewId.contains("menu_routines") ||
             normalizedViewId.contains("menu_menu") ||
             normalizedViewId.contains("bottom_menu") ||

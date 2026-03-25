@@ -46,7 +46,7 @@ AccessibilityService
 - `targetName`/`targetType`/`targetIndex` 기반 DFS 매칭 후, 추가 AND 필터(`className`/`clickable`/`focusable`/`targetText`/`targetId`)를 검증해 대상 노드를 찾고 액션(클릭/롱클릭/포커스)을 실행합니다.
 - 매칭 노드가 클릭 불가능하면 클릭 가능한 첫 조상으로 보정하고, `clickable` 필터도 보정된 노드 기준으로 검사합니다.
 - `targetName`은 공통 regex 패턴으로 정규화되어 `targetType=t|b|r` 모두 동일한 매칭 규칙을 사용합니다(명시적 regex 패턴이 없으면 exact regex로 처리). 매칭은 IGNORE_CASE 옵션으로 대소문자를 구분하지 않습니다.
-- 내비게이터 알고리즘 버전은 `A11yNavigator.NAVIGATOR_ALGORITHM_VERSION`(현재 `2.22.0`)으로 관리하며, `moved/scrolled/looped` 포커스는 공통 가시성-포커스 루틴에서 포커스 전 가시성 품질(fully visible, bottom clipping, trailing thin content)을 먼저 평가합니다. 하단 경계에 걸친 후보는 `ACTION_SHOW_ON_SCREEN` 및 최대 1회 pre-focus 정렬을 시도하고, 더 이상 스크롤이 어려운 마지막 컨텐츠는 fully-visible fallback으로 처리한 뒤 포커스를 진행합니다. snap-back 판정은 즉시 실패 대신 최대 250ms/50ms 간격 재확인 후, 추가로 350ms grace window를 적용해 지연 포커스를 재검증한 다음에만 최종 실패(`snap_back`)를 분류합니다.
+- 내비게이터 알고리즘 버전은 `A11yNavigator.NAVIGATOR_ALGORITHM_VERSION`(현재 `2.23.0`)으로 관리하며, `moved/scrolled/looped` 포커스는 공통 가시성-포커스 루틴에서 포커스 전 가시성 품질(fully visible, bottom clipping, trailing thin content)을 먼저 평가합니다. 하단 경계에 걸친 후보는 `ACTION_SHOW_ON_SCREEN` 및 최대 1회 pre-focus 정렬을 시도하고, 더 이상 스크롤이 어려운 마지막 컨텐츠는 fully-visible fallback으로 처리한 뒤 포커스를 진행합니다. snap-back 판정은 즉시 실패 대신 최대 250ms/50ms 간격 재확인 후, 추가로 350ms grace window를 적용해 지연 포커스를 재검증한 다음에만 최종 실패(`snap_back`)를 분류합니다.
 - `SMART_NEXT` 스크롤 폴링은 기존 스냅샷 비교 구조를 유지하되, 트리 변경 감지 시 300ms 안착 대기 후 최신 루트를 다시 읽는 3단계(변화 감지 → 추가 대기 → 최종 확인)로 보강되어 리스트 재구성 도중 중간 아이템 누락을 줄입니다.
 - 스냅샷 비교는 상단 앱바/하단 내비게이션 바로 판정되는 노드를 제외한 컨텐츠 토큰을 우선 사용하여 상태바/고정 바의 미세 갱신으로 스크롤 완료 판정이 앞당겨지는 현상을 완화합니다.
 - Bottom Bar 직전 pre-scroll은 `shouldScrollBeforeBottomBar(...)`가 현재 포커스 위치/남은 본문 후보/top chip·filter loop 위험을 함께 평가해 “숨은 본문이 더 있을 가능성”이 높을 때만 수행합니다.
@@ -56,6 +56,7 @@ AccessibilityService
 - 스크롤 후 후보가 모두 히스토리 또는 skip 규칙으로 제거되어 실제 포커스 시도 대상이 0개면 `looped` 재탐색 대신 즉시 `reached_end`를 반환합니다.
 - 포커스 성공 후 `lastRequestedFocusIndex`를 보정할 때는 좌표 일치만으로 히스토리를 전진시키지 않고, 현재 접근성 포커스 노드의 객체 ID가 traversal 후보와 직접 일치할 때만 엄격하게 반영합니다.
 - 이 공통 보정 루틴은 일반 콘텐츠에만 `ACTION_SHOW_ON_SCREEN`을 허용하며, `isTopAppBarNode`/`isBottomNavigationBarNode`로 분류된 고정 상단바·하단바에서는 보정 액션과 관련 로그를 모두 차단해 시스템 Bounce를 방지합니다.
+- SmartThings 하단 탭 리소스(`menu_services`, `menu_automations`, `menu_more` 포함)는 `isBottomNavigationBarNode`에서 bottom navigation으로 강제 분류되며, 해당 타겟은 `Detected bottom navigation target -> skipping pre-focus alignment` 로그와 함께 pre-focus alignment/readable scroll을 건너뛰고 직접 포커스만 수행합니다.
 - `findMainScrollContainer`는 화면에서 면적이 가장 큰 `isScrollable=true` 노드를 메인 스크롤 컨테이너로 선택하고, `SMART_NEXT`는 이를 기준으로 스크롤 대상과 컨텐츠/고정 UI 경계를 해석합니다.
 - `isFixedSystemUI`는 노드 또는 조상에 `Toolbar`/`ActionBar`/`BottomNavigationView` 계열 키워드가 있으면 우선 `Fixed UI`로 분류합니다. 그 외에는 `Button`/`ImageButton` 클래스만 엄격한 고정 UI 후보로 보며, `ViewGroup`/`FrameLayout` 등 일반 콘텐츠 컨테이너는 메인 스크롤 영역 근처 콘텐츠로 취급합니다.
 - 스크롤 후 히스토리 필터는 `inHistory=true`인 후보를 기본적으로 모두 스킵하며, 스크롤 직후 1차 탐색에서는 메인 스크롤 내부의 상단 후보도 예외 없이 건너뛰고 새 컨텐츠를 끝까지 우선 탐색합니다. 메인 스크롤 컨테이너 구분은 유지하되, 상단 물리 위치 증거는 `!isFixedUi` 후보에만 재포커스 허용 근거로 사용합니다. 이때 대상 노드가 이미 시스템 접근성 포커스를 보유하면 추가 `ACTION_ACCESSIBILITY_FOCUS`를 생략해 중복 공지를 줄입니다.
