@@ -165,7 +165,7 @@ if not client.check_talkback_status(dev_serial):
 ### Signature
 `dump_tree(dev: Any = None, wait_seconds: float = 5.0) -> list[dict[str, Any]]`
 
-> 응답 포맷 버전: Android Navigator `2.5.9` / Python Client `1.6.7`
+> 응답 포맷 버전: Android Navigator `2.26.0` / Python Client `1.6.7`
 
 ### 설명
 현재 화면의 접근성 노드 트리를 helper를 통해 덤프합니다.  
