@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.15.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.16.0"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -568,10 +568,32 @@ object A11yNavigator {
 
         val lastIndex = traversalList.lastIndex
         val shouldHandleLastNodeGracePeriod = nextIndex !in traversalList.indices
+        val shouldTerminateAtLastBottomBar = shouldTerminateAtLastBottomBar(
+            traversalList = traversalList,
+            currentIndex = currentIndex,
+            lastIndex = lastIndex,
+            screenBottom = screenBottom,
+            screenHeight = screenHeight,
+            boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+            classNameOf = { node -> node.className?.toString() },
+            viewIdOf = { node -> node.viewIdResourceName }
+        )
 
         if (shouldHandleLastNodeGracePeriod || currentIndex == lastIndex) {
-            if (scrollableNode != null) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Reached last node or next unavailable, but scrollable container exists -> attempting scroll first")
+            if (shouldTerminateAtLastBottomBar) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Last focused node is bottom bar and no next candidate. Terminating traversal to prevent loop.")
+                return TargetActionOutcome(false, "reached_end")
+            }
+
+            val shouldScrollAtEnd = shouldScrollAtEndOfTraversal(
+                currentIndex = currentIndex,
+                nextIndex = nextIndex,
+                traversalList = traversalList,
+                scrollableNodeExists = scrollableNode != null
+            )
+
+            if (shouldScrollAtEnd && scrollableNode != null) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] End-of-traversal scroll allowed by policy -> attempting scroll first")
                 val lastDesc = resolvedCurrent?.contentDescription?.toString()
                 val scrolled = scrollableNode.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                 Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SCROLL_FORWARD result=$scrolled")
@@ -959,7 +981,6 @@ object A11yNavigator {
 
         clearAccessibilityFocusAndRefresh(root)
         requestInputFocusBeforeAccessibilityFocus(target, label)
-        recordRequestedFocusAttempt(traversalIndex, root)
 
         val beforeFocusBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
             Rect().also { focusedNode.getBoundsInScreen(it) }
@@ -978,8 +999,21 @@ object A11yNavigator {
                 target.refresh()
                 isAccessibilityFocusEffectivelyActive(
                     isAccessibilityFocused = target.isAccessibilityFocused,
-                    traversalIndex = traversalIndex
+                    traversalIndex = traversalIndex,
+                    actualFocusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
+                        Rect().also { focusedNode.getBoundsInScreen(it) }
+                    },
+                    targetBounds = targetBounds
                 )
+            },
+            evaluateEffectiveFocus = {
+                val focusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
+                    Rect().also { focusedNode.getBoundsInScreen(it) }
+                }
+                target.refresh() &&
+                    target.isAccessibilityFocused &&
+                    focusedBounds != null &&
+                    isWithinSnapBackTolerance(targetBounds, focusedBounds)
             }
         )
 
@@ -993,8 +1027,21 @@ object A11yNavigator {
         )
 
         if (!focused) {
+            val focusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
+                Rect().also { focusedNode.getBoundsInScreen(it) }
+            }
+            val effectivelyFocused = target.refresh() &&
+                target.isAccessibilityFocused &&
+                focusedBounds != null &&
+                isWithinSnapBackTolerance(targetBounds, focusedBounds)
+            if (effectivelyFocused) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=false but actual system focus matches target bounds. Treating as success.")
+                recordRequestedFocusAttempt(traversalIndex, root)
+                requestVisibilityAdjustment(targetBounds)
+                return TargetActionOutcome(true, status, target)
+            }
             Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=false (status=$status)")
-            recordRequestedFocusAttempt(traversalIndex, root)
+            syncLastRequestedFocusIndexToCurrentFocus(root, buildTalkBackLikeFocusNodes(root).map { it.node })
             return TargetActionOutcome(false, "failed", target)
         }
 
@@ -1006,13 +1053,8 @@ object A11yNavigator {
                 "A11Y_HELPER",
                 "[SMART_NEXT] Snap-back detected after ACTION_ACCESSIBILITY_FOCUS success: target=${formatBoundsForLog(targetBounds)} actual=${formatBoundsForLog(afterFocusBounds)} traversalIndex=$traversalIndex label=$label"
             )
-            Log.w(
-                "A11Y_HELPER",
-                "[SMART_NEXT] Snap-back handled: Forcing 'moved' status to maintain client compatibility"
-            )
-            recordRequestedFocusAttempt(traversalIndex, root)
-            Thread.sleep(100)
-            return TargetActionOutcome(true, "moved", target)
+            syncLastRequestedFocusIndexToCurrentFocus(root, buildTalkBackLikeFocusNodes(root).map { it.node })
+            return TargetActionOutcome(false, "snap_back", target)
         }
 
         recordRequestedFocusAttempt(traversalIndex, root)
@@ -1110,9 +1152,14 @@ object A11yNavigator {
 
     internal fun isAccessibilityFocusEffectivelyActive(
         isAccessibilityFocused: Boolean,
-        traversalIndex: Int
+        traversalIndex: Int,
+        actualFocusedBounds: Rect? = null,
+        targetBounds: Rect? = null
     ): Boolean {
         if (!isAccessibilityFocused) return false
+        if (actualFocusedBounds != null && targetBounds != null && isWithinSnapBackTolerance(targetBounds, actualFocusedBounds)) {
+            return true
+        }
         if (traversalIndex != -1 && traversalIndex == lastRequestedFocusIndex) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Ignoring stale isAccessibilityFocused=true for repeated traversal index=$traversalIndex")
             return false
@@ -1132,6 +1179,7 @@ object A11yNavigator {
     internal fun requestAccessibilityFocusWithRetry(
         performFocusAction: () -> Boolean,
         refreshFocusState: () -> Boolean,
+        evaluateEffectiveFocus: (() -> Boolean)? = null,
         maxAttempts: Int = 3,
         retryDelayMs: Long = 100L
     ): Boolean {
@@ -1144,11 +1192,52 @@ object A11yNavigator {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS returned false but node is already focused on attempt=${attempt + 1}")
                 return true
             }
+            if (evaluateEffectiveFocus?.invoke() == true) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS returned false but effective system focus matched target on attempt=${attempt + 1}")
+                return true
+            }
             if (attempt < maxAttempts - 1) {
                 Thread.sleep(retryDelayMs)
             }
         }
         return false
+    }
+
+    internal fun <T> shouldScrollAtEndOfTraversal(
+        currentIndex: Int,
+        nextIndex: Int,
+        traversalList: List<T>,
+        scrollableNodeExists: Boolean
+    ): Boolean {
+        if (!scrollableNodeExists) return false
+        val lastIndex = traversalList.lastIndex
+        if (currentIndex !in traversalList.indices) return false
+        if (currentIndex >= lastIndex) return false
+        if (nextIndex !in traversalList.indices) return false
+        if (nextIndex <= currentIndex) return false
+        return false
+    }
+
+    internal fun <T> shouldTerminateAtLastBottomBar(
+        traversalList: List<T>,
+        currentIndex: Int,
+        lastIndex: Int,
+        screenBottom: Int,
+        screenHeight: Int,
+        boundsOf: (T) -> Rect,
+        classNameOf: (T) -> String?,
+        viewIdOf: (T) -> String?
+    ): Boolean {
+        if (currentIndex != lastIndex || currentIndex !in traversalList.indices) return false
+        val node = traversalList[currentIndex]
+        val bounds = boundsOf(node)
+        return isBottomNavigationBarNode(
+            className = classNameOf(node),
+            viewIdResourceName = viewIdOf(node),
+            boundsInScreen = bounds,
+            screenBottom = screenBottom,
+            screenHeight = screenHeight
+        )
     }
 
     internal fun shouldReuseExistingAccessibilityFocus(
