@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.24.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.24.1"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -771,16 +771,17 @@ object A11yNavigator {
             viewIdOf = { node -> node.viewIdResourceName },
             canScrollForwardHint = scrollableNode != null
         )
+        val forcePreScrollBeforeBottomBar = shouldForcePreScrollBeforeBottomBar(
+            shouldScrollBeforeBottomBar = shouldScrollBeforeBottomBar,
+            continuationContentLikelyBelowCurrentGrid = continuationContentLikelyBelowCurrentGrid
+        )
 
         if (nextIsBottomBar && continuationContentLikelyBelowCurrentGrid) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Bottom bar deferred because continuation content is likely below current grid")
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Continuation content likely -> forcing pre-scroll before bottom bar")
         }
 
-        if (nextIsBottomBar && scrollableNode != null && shouldScrollBeforeBottomBar) {
+        if (nextIsBottomBar && scrollableNode != null && forcePreScrollBeforeBottomBar) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Scrollable container found for smart scroll.")
-            if (continuationContentLikelyBelowCurrentGrid) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Pre-scrolling before bottom bar due to possible continuation content")
-            }
             Log.i("A11Y_HELPER", "[SMART_NEXT] Next node is bottom bar and hidden content is likely -> attempting scroll")
             val lastDesc = resolvedCurrent?.contentDescription?.toString()
             val scrollResult = scrollableNode.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
@@ -873,7 +874,7 @@ object A11yNavigator {
             if (outcome.success) {
                 return outcome
             }
-            Log.i("A11Y_HELPER", "[SMART_NEXT] No new content after scroll. Moving focus to bottom bar target.")
+            Log.i("A11Y_HELPER", "[SMART_NEXT] No continuation content after scroll -> allowing bottom bar")
             val bottomBarOutcome = focusOrSkip(nextNode, "moved_to_bottom_bar", nextIndex)
             return if (bottomBarOutcome.success) {
                 TargetActionOutcome(true, "moved_to_bottom_bar", nextNode)
@@ -882,7 +883,7 @@ object A11yNavigator {
             }
         }
 
-        if (nextIsBottomBar && !shouldScrollBeforeBottomBar) {
+        if (nextIsBottomBar && !forcePreScrollBeforeBottomBar) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Next node is bottom bar, but hidden-content likelihood is low. Skipping pre-scroll.")
         }
 
@@ -1907,6 +1908,13 @@ object A11yNavigator {
         }
 
         return true
+    }
+
+    internal fun shouldForcePreScrollBeforeBottomBar(
+        shouldScrollBeforeBottomBar: Boolean,
+        continuationContentLikelyBelowCurrentGrid: Boolean
+    ): Boolean {
+        return shouldScrollBeforeBottomBar || continuationContentLikelyBelowCurrentGrid
     }
 
     internal fun <T> isContinuationContentLikelyBelowCurrentNode(
