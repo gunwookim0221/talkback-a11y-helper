@@ -12,7 +12,7 @@ typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 typealias FocusedNode = A11yTraversalAnalyzer.FocusedNode
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.59.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.60.0"
 
 
     @Volatile
@@ -905,10 +905,7 @@ object A11yNavigator {
     }
 
     internal fun logVisitedHistorySkip(reason: String, label: String?, viewId: String?, bounds: Rect? = null) {
-        Log.i(
-            "A11Y_HELPER",
-            "[SMART_NEXT] visitedHistory skip: reason=$reason label=${label?.replace("\n", " ") ?: "<no-label>"} viewId=$viewId bounds=$bounds"
-        )
+        A11yHistoryManager.logVisitedHistorySkip(reason, label, viewId, bounds)
     }
 
     internal fun recordVisitedFocus(node: AccessibilityNodeInfo, label: String, reason: String) {
@@ -1072,30 +1069,15 @@ object A11yNavigator {
         boundsInScreen: Rect,
         screenTop: Int,
         screenHeight: Int
-    ): Boolean {
-        val normalizedClass = className?.lowercase().orEmpty()
-        val normalizedViewId = viewIdResourceName?.lowercase().orEmpty()
-        val normalizedLabel = label?.lowercase().orEmpty()
-        val topBoundary = screenTop + (screenHeight * 0.3f).toInt()
-        if (boundsInScreen.top > topBoundary) return false
+    ): Boolean = A11yNodeUtils.isHeaderLikeCandidate(
+        className = className,
+        viewIdResourceName = viewIdResourceName,
+        label = label,
+        boundsInScreen = boundsInScreen,
+        screenTop = screenTop,
+        screenHeight = screenHeight
+    )
 
-        val headerKeywordMatched =
-            normalizedViewId.contains("toolbar") ||
-                normalizedViewId.contains("appbar") ||
-                normalizedViewId.contains("header") ||
-                normalizedViewId.contains("title") ||
-                normalizedViewId.contains("logo") ||
-                normalizedViewId.contains("setting_button") ||
-                normalizedViewId.contains("settings")
-        val classKeywordMatched =
-            normalizedClass.contains("toolbar") ||
-                normalizedClass.contains("appbarlayout") ||
-                normalizedClass.contains("actionbar")
-        val labelKeywordMatched =
-            normalizedLabel.contains("settings") ||
-                normalizedLabel.contains("setting")
-        return headerKeywordMatched || classKeywordMatched || labelKeywordMatched
-    }
 
     internal fun isSuppressibleHeaderNoiseNode(
         node: AccessibilityNodeInfo,
@@ -1138,9 +1120,8 @@ object A11yNavigator {
         return false
     }
 
-    internal fun isNodePhysicallyOffScreen(bounds: Rect, screenTop: Int, screenBottom: Int): Boolean {
-        return bounds.bottom <= screenTop || bounds.top >= screenBottom
-    }
+    internal fun isNodePhysicallyOffScreen(bounds: Rect, screenTop: Int, screenBottom: Int): Boolean =
+        A11yNodeUtils.isNodePhysicallyOffScreen(bounds, screenTop, screenBottom)
 
     internal fun shouldTriggerLoopFallback(
         focusedAny: Boolean,
@@ -1343,10 +1324,7 @@ object A11yNavigator {
         screenTop: Int,
         screenHeight: Int,
         topAreaMaxPx: Int = 500
-    ): Boolean {
-        val topAreaBoundary = screenTop + minOf(screenHeight / 5, topAreaMaxPx)
-        return nodeTop < topAreaBoundary
-    }
+    ): Boolean = A11yNodeUtils.isWithinTopContentArea(nodeTop, screenTop, screenHeight, topAreaMaxPx)
 
     internal fun shouldAcceptFallbackSelectedNoLabelContinuationCandidate(
         isFallbackSelectedContinuationCandidate: Boolean,

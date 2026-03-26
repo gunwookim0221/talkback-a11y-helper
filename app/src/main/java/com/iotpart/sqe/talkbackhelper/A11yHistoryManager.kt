@@ -5,7 +5,7 @@ import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 
 object A11yHistoryManager {
-    const val VERSION: String = "1.2.0"
+    const val VERSION: String = "1.3.0"
     private const val RETARGET_SUPPRESSION_WINDOW_MS: Long = 400L
 
     data class VisibleHistorySignature(
@@ -61,6 +61,15 @@ object A11yHistoryManager {
         visitedHistorySignatures.toSet()
     }
 
+
+
+    fun logVisitedHistorySkip(reason: String, label: String?, viewId: String?, bounds: Rect? = null) {
+        Log.i(
+            "A11Y_HELPER",
+            "[SMART_NEXT] visitedHistory skip: reason=$reason label=${label?.replace("\n", " ") ?: "<no-label>"} viewId=$viewId bounds=$bounds"
+        )
+    }
+
     fun recordVisitedSignature(label: String, viewId: String?, bounds: Rect, nodeIdentity: String?) {
         val normalizedLabel = label.trim()
         synchronized(visitedHistoryLock) {
@@ -112,7 +121,7 @@ object A11yHistoryManager {
         val rootTop = rootBounds.top
         val rootBottom = if (rootBounds.bottom > rootBounds.top) rootBounds.bottom else candidateBounds.bottom
         val rootHeight = (rootBottom - rootTop).coerceAtLeast(1)
-        val isHeaderLike = A11yNavigator.isHeaderLikeCandidate(
+        val isHeaderLike = A11yNodeUtils.isHeaderLikeCandidate(
             className = candidate.className?.toString(),
             viewIdResourceName = candidate.viewIdResourceName,
             label = A11yNavigator.resolvePrimaryLabel(candidate) ?: A11yTraversalAnalyzer.recoverDescendantLabel(candidate),

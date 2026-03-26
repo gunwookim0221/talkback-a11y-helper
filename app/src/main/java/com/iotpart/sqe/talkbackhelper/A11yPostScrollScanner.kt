@@ -5,18 +5,13 @@ import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 
 object A11yPostScrollScanner {
-    const val VERSION: String = "1.1.0"
+    const val VERSION: String = "1.2.0"
 
     internal fun findAndFocusFirstContent(
         context: FindAndFocusPhaseContext,
         request: FindAndFocusRequest
     ): TargetActionOutcome {
         val localMainScrollContainer = A11yNodeUtils.findBestScrollableContainer(context.root)
-            ?: A11yNavigator.findMainScrollContainer(
-                nodes = context.traversalList,
-                isScrollable = { it.isScrollable },
-                boundsOf = { candidate -> Rect().also { candidate.getBoundsInScreen(it) } }
-            )
         val postScrollContext = buildPostScrollSearchContext(context, request, localMainScrollContainer)
         val loopState = FocusLoopState()
 
@@ -135,10 +130,10 @@ object A11yPostScrollScanner {
                         A11ySnapshotTracker.isInVisitedHistory(label, viewId, bounds, visitedHistory, visitedHistorySignatures)
                     },
                     logVisitedHistorySkip = { reason, label, viewId, bounds ->
-                        A11yNavigator.logVisitedHistorySkip(reason, label, viewId, bounds)
+                        A11yHistoryManager.logVisitedHistorySkip(reason, label, viewId, bounds)
                     },
                     isHeaderLikeCandidate = { className, viewId, label, bounds, top, height ->
-                        A11yNavigator.isHeaderLikeCandidate(className, viewId, label, bounds, top, height)
+                        A11yNodeUtils.isHeaderLikeCandidate(className, viewId, label, bounds, top, height)
                     },
                     hasPreScrollResolvedLabel = { currentLabel, currentDescendantLabel, rawViewId, bounds, visibleHistorySignatures ->
                         A11ySnapshotTracker.hasPreScrollResolvedLabel(currentLabel, currentDescendantLabel, rawViewId, bounds, visibleHistorySignatures)
@@ -211,11 +206,11 @@ object A11yPostScrollScanner {
         if (request.isScrollAction && request.preScrollAnchor != null && postScrollContext.resolvedAnchorIndex >= 0 && index <= postScrollContext.resolvedAnchorIndex) {
             return null
         }
-        val requestedFloorIndex = maxOf(A11yNavigator.lastRequestedFocusIndex, A11yStateStore.lastRequestedFocusIndex)
+        val requestedFloorIndex = A11yStateStore.lastRequestedFocusIndex
         if (!request.isScrollAction && requestedFloorIndex >= 0 && index <= requestedFloorIndex) {
             return null
         }
-        if (A11yNavigator.isNodePhysicallyOffScreen(bounds, context.screenTop, context.screenBottom)) return null
+        if (A11yNodeUtils.isNodePhysicallyOffScreen(bounds, context.screenTop, context.screenBottom)) return null
         val isTopBar = A11yNodeUtils.isTopAppBar(node.className?.toString(), node.viewIdResourceName, bounds, context.screenTop, context.screenHeight)
         val isBottomBar = A11yNodeUtils.isBottomNavigationBar(node.className?.toString(), node.viewIdResourceName, bounds, context.screenBottom, context.screenHeight)
         val isFixedUi = A11yNodeUtils.isFixedSystemUI(node, localMainScrollContainer)
@@ -231,7 +226,7 @@ object A11yPostScrollScanner {
             inHistory = inVisitedHistory,
             isFixedUi = isFixedUi || isTopBar || isBottomBar,
             isInsideMainScrollContainer = localMainScrollContainer?.let { container -> node == container || A11yNodeUtils.isDescendantOf(container, node) { it.parent } } ?: false,
-            isTopArea = A11yNavigator.isWithinTopContentArea(bounds.top, context.screenTop, context.screenHeight)
+            isTopArea = A11yNodeUtils.isWithinTopContentArea(bounds.top, context.screenTop, context.screenHeight)
         )
         if (shouldSkipHistory || (request.isScrollAction && inVisitedHistory)) return null
         if (postScrollContext.excludedIndex == -1 && !loopState.skippedExcludedNode && shouldSkipExcludedNodeByDescription(
