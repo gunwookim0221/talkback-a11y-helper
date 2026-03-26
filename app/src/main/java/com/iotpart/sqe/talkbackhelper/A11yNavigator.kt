@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.3"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.4"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -1578,9 +1578,11 @@ object A11yNavigator {
                 ?: focusNodeByNode[node]?.mergedLabel?.trim().takeUnless { it.isNullOrEmpty() }
                 ?: "<no-label>"
         }.take(20)
+        val joinedRawLabels = rawLabels.joinToString(" | ")
+        val joinedTraversalLabels = traversalLabels.joinToString(" | ")
         Log.i(
             "A11Y_HELPER",
-            "[SMART_NEXT] buildTraversalList() debug rawVisibleCount=${rawVisibleNodes.size} traversalCount=${traversalList.size} rawLabels=${rawLabels.joinToString(\" | \")} traversalLabels=${traversalLabels.joinToString(\" | \")}"
+            "[SMART_NEXT] buildTraversalList() debug rawVisibleCount=${rawVisibleNodes.size} traversalCount=${traversalList.size} rawLabels=$joinedRawLabels traversalLabels=$joinedTraversalLabels"
         )
 
         val traversalSignatures = traversalList.map { node ->
