@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.8"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.9"
 
     private val visitedHistoryLock = Any()
     private val visitedHistoryLabels = linkedSetOf<String>()
@@ -36,7 +36,8 @@ object A11yNavigator {
     internal data class VisibleHistorySignature(
         val label: String?,
         val viewId: String?,
-        val bounds: Rect
+        val bounds: Rect,
+        val nodeIdentity: String?
     )
 
     internal data class PostScrollContinuationPlan(
@@ -491,6 +492,14 @@ object A11yNavigator {
                         visitedHistory = visitedHistory,
                         visitedHistorySignatures = visitedHistorySignatures
                     )
+                    if (!inVisitedHistory) {
+                        logVisitedHistorySkip(
+                            reason = "candidate only / post-scroll extraction",
+                            label = label,
+                            viewId = node.viewIdResourceName,
+                            bounds = bounds
+                        )
+                    }
                     val isTopBar = isTopAppBarNode(
                         className = node.className?.toString(),
                         viewIdResourceName = node.viewIdResourceName,
@@ -607,7 +616,7 @@ object A11yNavigator {
                     }
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Continuation candidate already focused after scroll -> treating as moved")
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Bottom bar fallback blocked because continuation candidate is already focused")
-                    recordVisitedFocus(node, label)
+                    recordVisitedFocus(node, label, reason = "already_focused_continuation_target")
                     return TargetActionOutcome(true, "moved", node)
                 }
                 if (isFallbackSelectedContinuationCandidate) {
@@ -699,6 +708,7 @@ object A11yNavigator {
                 )
                 if (isScrollAction && preScrollAnchor != null && inVisibleHistory && !inVisitedHistory) {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] candidate visibleHistory=true visitedHistory=false -> accepting continuation candidate")
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] candidate not yet visited: allowing continuation target")
                 }
                 if (isScrollAction && isLastFocusedNode) {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Strictly excluding last focused node even in top area: $label")
@@ -1595,6 +1605,14 @@ object A11yNavigator {
                 visitedHistory = visitedHistory,
                 visitedHistorySignatures = visitedHistorySignatures
             )
+            if (!inVisitedHistory) {
+                logVisitedHistorySkip(
+                    reason = "anchor continuity candidate only",
+                    label = label,
+                    viewId = viewIdOf(node),
+                    bounds = bounds
+                )
+            }
             val isContentNode = isContentNodeOf(node)
             val isTopResurfacedAnchorCandidate =
                 bounds.top <= screenTop + (screenHeight / 4) &&
@@ -1762,9 +1780,24 @@ object A11yNavigator {
         visitedHistorySignatures.toSet()
     }
 
-    private fun recordVisitedFocus(node: AccessibilityNodeInfo, label: String) {
+    private fun buildNodeIdentityForHistory(node: AccessibilityNodeInfo): String {
+        val windowId = node.windowId
+        val className = node.className?.toString()?.trim().orEmpty()
+        val packageName = node.packageName?.toString()?.trim().orEmpty()
+        return "window=$windowId|class=$className|package=$packageName"
+    }
+
+    private fun logVisitedHistorySkip(reason: String, label: String?, viewId: String?, bounds: Rect? = null) {
+        Log.i(
+            "A11Y_HELPER",
+            "[SMART_NEXT] visitedHistory skip: reason=$reason label=${label?.replace("\n", " ") ?: "<no-label>"} viewId=$viewId bounds=$bounds"
+        )
+    }
+
+    private fun recordVisitedFocus(node: AccessibilityNodeInfo, label: String, reason: String) {
         val normalizedLabel = label.trim()
         val bounds = Rect().also { node.getBoundsInScreen(it) }
+        val nodeIdentity = buildNodeIdentityForHistory(node)
         synchronized(visitedHistoryLock) {
             if (normalizedLabel.isNotEmpty() && normalizedLabel != "<no-label>") {
                 visitedHistoryLabels += normalizedLabel
@@ -1772,12 +1805,17 @@ object A11yNavigator {
             visitedHistorySignatures += VisibleHistorySignature(
                 label = normalizedLabel.takeUnless { it.isBlank() || it == "<no-label>" },
                 viewId = node.viewIdResourceName,
-                bounds = Rect(bounds)
+                bounds = Rect(bounds),
+                nodeIdentity = nodeIdentity
             )
             if (visitedHistorySignatures.size > 120) {
                 visitedHistorySignatures.removeAt(0)
             }
         }
+        Log.i(
+            "A11Y_HELPER",
+            "[SMART_NEXT] visitedHistory add: reason=$reason label=${normalizedLabel.replace("\n", " ")} viewId=${node.viewIdResourceName} identity=$nodeIdentity bounds=$bounds"
+        )
     }
 
     internal fun isInVisitedHistory(
@@ -1802,7 +1840,13 @@ object A11yNavigator {
                     abs(signature.bounds.top - bounds.top) <= boundsTolerancePx &&
                     abs(signature.bounds.right - bounds.right) <= boundsTolerancePx &&
                     abs(signature.bounds.bottom - bounds.bottom) <= boundsTolerancePx
-            sameLabel || sameViewId || similarBounds
+            val hasStrongNodeIdentity = !signature.nodeIdentity.isNullOrBlank()
+            when {
+                sameLabel && sameViewId -> true
+                sameLabel && similarBounds -> true
+                sameViewId && similarBounds && hasStrongNodeIdentity -> true
+                else -> false
+            }
         }
     }
 
@@ -1860,6 +1904,12 @@ object A11yNavigator {
         }
         if (partiallyVisibleTrailingIndex == traversalIndex) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Detected partially visible next candidate: index=$traversalIndex label=$label")
+            logVisitedHistorySkip(
+                reason = "partial visibility",
+                label = label,
+                viewId = target.viewIdResourceName,
+                bounds = initialBounds
+            )
         }
 
         val intendedTrailingCandidate = if (traversalListSnapshot != null && traversalIndex in traversalListSnapshot.indices) {
@@ -1903,7 +1953,7 @@ object A11yNavigator {
         ) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping duplicate focus action because current accessibility focus bounds exactly match target: $label")
             recordRequestedFocusAttempt(traversalIndex, root)
-            recordVisitedFocus(target, label)
+            recordVisitedFocus(target, label, reason = "focus_reused_existing_target")
             return TargetActionOutcome(true, "moved", target)
         }
         if (currentSystemFocus && actualFocusedBounds != null && actualFocusedBounds != targetBounds) {
@@ -1974,7 +2024,7 @@ object A11yNavigator {
             if (effectivelyFocused) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=false but actual system focus matches target bounds. Treating as success.")
                 recordRequestedFocusAttempt(traversalIndex, root)
-                recordVisitedFocus(target, label)
+                recordVisitedFocus(target, label, reason = "focus_action_false_but_target_confirmed")
                 return TargetActionOutcome(true, status, target)
             }
             Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=false (status=$status)")
@@ -2001,7 +2051,7 @@ object A11yNavigator {
             if (focusVerification.isTargetAccessibilityFocused && focusEventConfirmed) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Focus event confirmed after ACTION_FOCUS; treating mismatch as success without rollback")
                 recordRequestedFocusAttempt(traversalIndex, root)
-                recordVisitedFocus(target, label)
+                recordVisitedFocus(target, label, reason = "focus_event_confirmed_after_stabilization")
                 return TargetActionOutcome(true, "moved", target)
             }
             Log.w(
@@ -2019,7 +2069,7 @@ object A11yNavigator {
             if (lateFocus.matchedTarget) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Late focus detected → treat as success")
                 recordRequestedFocusAttempt(traversalIndex, root)
-                recordVisitedFocus(target, label)
+                recordVisitedFocus(target, label, reason = "late_focus_detected_after_stabilization")
                 return TargetActionOutcome(true, "moved", target)
             }
             Log.w("A11Y_HELPER", "[SMART_NEXT] Confirmed real snap_back")
@@ -2036,7 +2086,7 @@ object A11yNavigator {
             if (focusVerification.isTargetAccessibilityFocused && focusEventConfirmed) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Focus event confirmed after ACTION_FOCUS; suppressing premature snap_back")
                 recordRequestedFocusAttempt(traversalIndex, root)
-                recordVisitedFocus(target, label)
+                recordVisitedFocus(target, label, reason = "focus_event_confirmed_after_retry")
                 return TargetActionOutcome(true, "moved", target)
             }
             Log.w(
@@ -2054,7 +2104,7 @@ object A11yNavigator {
             if (lateFocus.matchedTarget) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Late focus detected → treat as success")
                 recordRequestedFocusAttempt(traversalIndex, root)
-                recordVisitedFocus(target, label)
+                recordVisitedFocus(target, label, reason = "late_focus_detected_after_retry")
                 return TargetActionOutcome(true, "moved", target)
             }
             Log.w("A11Y_HELPER", "[SMART_NEXT] Confirmed real snap_back")
@@ -2066,7 +2116,7 @@ object A11yNavigator {
         Thread.sleep(100)
         val focusedBounds = Rect().also { target.getBoundsInScreen(it) }
         recordRequestedFocusAttempt(traversalIndex, root)
-        recordVisitedFocus(target, label)
+        recordVisitedFocus(target, label, reason = "focus_confirmed_final")
         Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=true (status=$status)")
         Log.i("A11Y_HELPER", "[SMART_NEXT] Focused top-most content at Y=${focusedBounds.top}")
         return TargetActionOutcome(true, "moved", target)
@@ -3219,7 +3269,8 @@ object A11yNavigator {
             VisibleHistorySignature(
                 label = labelOf(node)?.trim()?.takeUnless { it.isEmpty() },
                 viewId = viewIdOf(node)?.trim()?.takeUnless { it.isEmpty() },
-                bounds = Rect(bounds)
+                bounds = Rect(bounds),
+                nodeIdentity = null
             )
         }.toSet()
     }
