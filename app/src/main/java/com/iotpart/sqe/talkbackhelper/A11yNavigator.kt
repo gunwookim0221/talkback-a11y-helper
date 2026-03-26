@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.33.2"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.34.0"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
     private val TRAVERSAL_CONTAINER_CLASS_KEYWORDS = listOf(
@@ -64,7 +64,39 @@ object A11yNavigator {
         val skipGeneralScan: Boolean
     )
 
-    private data class BottomBarEntryDecision(
+    private data class CollectResult(
+        val focusNodes: List<FocusedNode>,
+        val traversalList: List<AccessibilityNodeInfo>,
+        val focusNodeByNode: Map<AccessibilityNodeInfo, FocusedNode>
+    )
+
+    internal data class NormalizeResult(
+        val screenRect: Rect,
+        val screenTop: Int,
+        val screenBottom: Int,
+        val screenHeight: Int,
+        val effectiveBottom: Int
+    )
+
+    internal data class SelectionDecision(
+        val currentIndex: Int,
+        val fallbackIndex: Int,
+        val nextIndex: Int
+    )
+
+    internal data class ScrollDecision(
+        val shouldPreScroll: Boolean,
+        val noProgressAfterScroll: Boolean = false,
+        val reason: String
+    )
+
+    internal data class FocusAttemptResult(
+        val outcome: TargetActionOutcome,
+        val verificationPassed: Boolean,
+        val snapBackDetected: Boolean
+    )
+
+    internal data class BottomBarEntryDecision(
         val allowBottomBarEntry: Boolean,
         val requirePreScroll: Boolean,
         val reason: String
@@ -255,6 +287,40 @@ object A11yNavigator {
         return targetTextMatch && targetIdMatch && classNameMatch && clickableMatch && focusableMatch
     }
 
+    private fun collectSmartNextInputs(root: AccessibilityNodeInfo): CollectResult {
+        val focusNodes = buildTalkBackLikeFocusNodes(root)
+        val traversalList = focusNodes.map { it.node }
+        val focusNodeByNode = focusNodes.associateBy { it.node }
+        Log.i("A11Y_HELPER", "[COLLECT] Nodes count=${traversalList.size}")
+        return CollectResult(
+            focusNodes = focusNodes,
+            traversalList = traversalList,
+            focusNodeByNode = focusNodeByNode
+        )
+    }
+
+    private fun normalizeSmartNextInputs(
+        root: AccessibilityNodeInfo,
+        traversalList: List<AccessibilityNodeInfo>
+    ): NormalizeResult {
+        val screenRect = Rect().also { root.getBoundsInScreen(it) }
+        val screenTop = screenRect.top
+        val screenBottom = screenRect.bottom
+        val screenHeight = (screenBottom - screenTop).coerceAtLeast(1)
+        val effectiveBottom = calculateEffectiveBottom(
+            nodes = traversalList,
+            screenTop = screenTop,
+            screenBottom = screenBottom,
+            boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+            labelOf = { node ->
+                node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                    ?: node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                    ?: node.viewIdResourceName
+            }
+        )
+        return NormalizeResult(screenRect, screenTop, screenBottom, screenHeight, effectiveBottom)
+    }
+
 
 
     fun performSmartNext(root: AccessibilityNodeInfo?, currentNode: AccessibilityNodeInfo?): TargetActionOutcome {
@@ -264,10 +330,10 @@ object A11yNavigator {
             return TargetActionOutcome(false, "Root node is null")
         }
 
-        val focusNodes = buildTalkBackLikeFocusNodes(root)
-        val traversalList = focusNodes.map { it.node }
-        val focusNodeByNode = focusNodes.associateBy { it.node }
-        Log.i("A11Y_HELPER", "[COLLECT] Nodes count=${traversalList.size}")
+        val collectResult = collectSmartNextInputs(root)
+        val focusNodes = collectResult.focusNodes
+        val traversalList = collectResult.traversalList
+        val focusNodeByNode = collectResult.focusNodeByNode
         focusNodes.forEachIndexed { index, focusedNode ->
             val bounds = Rect().also { focusedNode.node.getBoundsInScreen(it) }
             val label = focusedNode.text?.trim().takeUnless { it.isNullOrEmpty() }
@@ -398,7 +464,12 @@ object A11yNavigator {
                 )
             }
         }
-        Log.i("A11Y_HELPER", "[SELECT_NEXT] currentIndex=$currentIndex, fallbackIndex=$fallbackIndex, lastRequestedFocusIndex=$lastRequestedFocusIndex, nextIndex=$nextIndex")
+        val selectionDecision = SelectionDecision(
+            currentIndex = currentIndex,
+            fallbackIndex = fallbackIndex,
+            nextIndex = nextIndex
+        )
+        Log.i("A11Y_HELPER", "[SELECT_NEXT] currentIndex=${selectionDecision.currentIndex}, fallbackIndex=${selectionDecision.fallbackIndex}, lastRequestedFocusIndex=$lastRequestedFocusIndex, nextIndex=${selectionDecision.nextIndex}")
         Log.i("A11Y_HELPER", "[SMART_NEXT][GRID_TRACE] sequentialIndices current=$currentIndex next=$nextIndex total=${traversalList.size}")
 
         root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
@@ -411,21 +482,12 @@ object A11yNavigator {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Current node matching failed. Using fallback nextIndex based on vertical proximity.")
         }
 
-        val screenRect = Rect().also { root.getBoundsInScreen(it) }
-        val screenTop = screenRect.top
-        val screenBottom = screenRect.bottom
-        val screenHeight = (screenBottom - screenTop).coerceAtLeast(1)
-        val effectiveBottom = calculateEffectiveBottom(
-            nodes = traversalList,
-            screenTop = screenTop,
-            screenBottom = screenBottom,
-            boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
-            labelOf = { node ->
-                node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                    ?: node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                    ?: node.viewIdResourceName
-            }
-        )
+        val normalizeResult = normalizeSmartNextInputs(root, traversalList)
+        val screenRect = normalizeResult.screenRect
+        val screenTop = normalizeResult.screenTop
+        val screenBottom = normalizeResult.screenBottom
+        val screenHeight = normalizeResult.screenHeight
+        val effectiveBottom = normalizeResult.effectiveBottom
         Log.i("A11Y_HELPER", "[SMART_NEXT] effectiveBottom=$effectiveBottom, screenBottom=$screenBottom")
         val visitedHistory = snapshotVisitedHistoryLabels()
         val visitedHistorySignatureSnapshot = snapshotVisitedHistorySignatures()
@@ -556,7 +618,7 @@ object A11yNavigator {
                         .mapNotNull { raw -> raw.viewId?.substringAfterLast('/')?.trim() }
                         .filter { shortId -> isSettingsRowViewId(shortId) && !traversalViewIdSet.contains(shortId) }
                         .toSet()
-                    selectPostScrollContinuationCandidateIndex(
+                    selectContinuationCandidateAfterScroll(
                         traversalList = traversalList,
                         startIndex = 0,
                         visibleHistory = visibleHistory,
@@ -570,7 +632,14 @@ object A11yNavigator {
                         classNameOf = { node -> node.className?.toString() },
                         viewIdOf = { node -> node.viewIdResourceName },
                         isContentNodeOf = { node ->
-                            !isFixedSystemUI(node, localMainScrollContainer)
+                            isContentNode(
+                                node = node,
+                                bounds = Rect().also { node.getBoundsInScreen(it) },
+                                screenTop = screenTop,
+                                screenBottom = screenBottom,
+                                screenHeight = screenHeight,
+                                mainScrollContainer = localMainScrollContainer
+                            )
                         },
                         clickableOf = { node -> node.isClickable },
                         focusableOf = { node -> node.isFocusable },
@@ -1210,7 +1279,7 @@ object A11yNavigator {
             shouldScrollBeforeBottomBar = shouldScrollBeforeBottomBar,
             continuationContentLikelyBelowCurrentGrid = continuationContentLikelyBelowCurrentGrid || rowOrGridContinuationDetected
         )
-        val bottomBarEntryDecision = selectBottomBarEntryDecision(
+        val bottomBarEntryDecision = decideBottomBarEntry(
             nextIsBottomBar = nextIsBottomBar,
             scrollableNodeExists = scrollableNode != null,
             contentTraversalCompleteBeforeBottomBar = contentTraversalCompleteBeforeBottomBar,
@@ -1220,16 +1289,20 @@ object A11yNavigator {
             isCurrentNearBottom = isCurrentNearBottom,
             forcePreScrollBeforeBottomBar = forcePreScrollBeforeBottomBar
         )
+        val scrollDecision = ScrollDecision(
+            shouldPreScroll = bottomBarEntryDecision.requirePreScroll,
+            reason = bottomBarEntryDecision.reason
+        )
         Log.i(
             "A11Y_HELPER",
-            "[BOTTOM_BAR] allow=${bottomBarEntryDecision.allowBottomBarEntry} preScroll=${bottomBarEntryDecision.requirePreScroll} reason=${bottomBarEntryDecision.reason}"
+            "[BOTTOM_BAR] allow=${bottomBarEntryDecision.allowBottomBarEntry} preScroll=${scrollDecision.shouldPreScroll} reason=${scrollDecision.reason}"
         )
 
         if (nextIsBottomBar && continuationContentLikelyBelowCurrentGrid) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Continuation content likely -> forcing pre-scroll before bottom bar")
         }
 
-        if (bottomBarEntryDecision.requirePreScroll) {
+        if (scrollDecision.shouldPreScroll) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Scrollable container found for smart scroll.")
             Log.i("A11Y_HELPER", "[SMART_NEXT] Next node is bottom bar and continuation/defer condition matched -> attempting scroll first")
             val scrollTarget = scrollableNode ?: run {
@@ -1387,7 +1460,7 @@ object A11yNavigator {
                                 preScrollRawVisibleNodes.none { it.viewId?.substringAfterLast('/')?.trim() == shortId }
                         }
                         .toSet()
-                    selectPostScrollContinuationCandidateIndex(
+                    selectContinuationCandidateAfterScroll(
                         traversalList = refreshedTraversal,
                         startIndex = 0,
                         visibleHistory = visibleHistory,
@@ -1401,7 +1474,14 @@ object A11yNavigator {
                         classNameOf = { node -> node.className?.toString() },
                         viewIdOf = { node -> node.viewIdResourceName },
                         isContentNodeOf = { node ->
-                            !isFixedSystemUI(node, mainScrollContainer)
+                            isContentNode(
+                                node = node,
+                                bounds = Rect().also { node.getBoundsInScreen(it) },
+                                screenTop = Rect().also { (refreshedRoot ?: root).getBoundsInScreen(it) }.top,
+                                screenBottom = Rect().also { (refreshedRoot ?: root).getBoundsInScreen(it) }.bottom,
+                                screenHeight = (Rect().also { (refreshedRoot ?: root).getBoundsInScreen(it) }.height()).coerceAtLeast(1),
+                                mainScrollContainer = mainScrollContainer
+                            )
                         },
                         clickableOf = { node -> node.isClickable },
                         focusableOf = { node -> node.isFocusable },
@@ -1455,6 +1535,21 @@ object A11yNavigator {
                 Log.i(
                     "A11Y_HELPER",
                     "[SMART_NEXT][PROGRESS_DEBUG] fallbackReason=no_scroll_progress_after_bottom_bar_pre_scroll"
+                )
+                val noProgressBottomBarDecision = decideBottomBarEntry(
+                    nextIsBottomBar = true,
+                    scrollableNodeExists = true,
+                    contentTraversalCompleteBeforeBottomBar = false,
+                    continuationLikely = false,
+                    rowOrGridContinuationDetected = false,
+                    continuationExistsBeforeBottomBar = false,
+                    isCurrentNearBottom = false,
+                    forcePreScrollBeforeBottomBar = false,
+                    noProgressAfterScroll = true
+                )
+                Log.i(
+                    "A11Y_HELPER",
+                    "[BOTTOM_BAR] allow=${noProgressBottomBarDecision.allowBottomBarEntry} preScroll=${noProgressBottomBarDecision.requirePreScroll} reason=${noProgressBottomBarDecision.reason}"
                 )
                 Log.i("A11Y_HELPER", "[SMART_NEXT] No scroll progress detected after bottom-bar pre-scroll. Trying bottom bar fallback focus.")
                 val fallbackOutcome = focusBottomBarAfterNoProgress(
@@ -1538,6 +1633,39 @@ object A11yNavigator {
         return true
     }
 
+    private fun isContentNode(
+        node: AccessibilityNodeInfo,
+        bounds: Rect,
+        screenTop: Int,
+        screenBottom: Int,
+        screenHeight: Int,
+        mainScrollContainer: AccessibilityNodeInfo?
+    ): Boolean {
+        val isBottomNav = isBottomNavigationBarNode(
+            className = node.className?.toString(),
+            viewIdResourceName = node.viewIdResourceName,
+            boundsInScreen = bounds,
+            screenBottom = screenBottom,
+            screenHeight = screenHeight
+        )
+        if (isBottomNav) return false
+        val isTopBar = isTopAppBarNode(
+            className = node.className?.toString(),
+            viewIdResourceName = node.viewIdResourceName,
+            boundsInScreen = bounds,
+            screenTop = screenTop,
+            screenHeight = screenHeight
+        )
+        if (isTopBar) return false
+        if (isFixedSystemUI(node, mainScrollContainer)) return false
+        val hasDescendantLabel = !recoverDescendantLabel(node).isNullOrBlank()
+        val usableLabel = !node.contentDescription?.toString().isNullOrBlank() || !node.text?.toString().isNullOrBlank() || hasDescendantLabel
+        val traversable = node.isVisibleToUser && !isNodePhysicallyOffScreen(bounds, screenTop, screenBottom)
+        val interactive = node.isClickable || node.isFocusable || hasDescendantLabel
+        val isContainerOnly = node == mainScrollContainer
+        return traversable && interactive && usableLabel && !isContainerOnly
+    }
+
     internal fun resolveNextTraversalIndexPreservingIntermediateCandidate(
         currentIndex: Int,
         fallbackIndex: Int,
@@ -1587,7 +1715,7 @@ object A11yNavigator {
         )
     }
 
-    private fun selectBottomBarEntryDecision(
+    private fun decideBottomBarEntry(
         nextIsBottomBar: Boolean,
         scrollableNodeExists: Boolean,
         contentTraversalCompleteBeforeBottomBar: Boolean,
@@ -1595,7 +1723,8 @@ object A11yNavigator {
         rowOrGridContinuationDetected: Boolean,
         continuationExistsBeforeBottomBar: Boolean,
         isCurrentNearBottom: Boolean,
-        forcePreScrollBeforeBottomBar: Boolean
+        forcePreScrollBeforeBottomBar: Boolean,
+        noProgressAfterScroll: Boolean = false
     ): BottomBarEntryDecision {
         if (!nextIsBottomBar) {
             return BottomBarEntryDecision(
@@ -1609,6 +1738,13 @@ object A11yNavigator {
                 allowBottomBarEntry = true,
                 requirePreScroll = false,
                 reason = "no_scrollable_container"
+            )
+        }
+        if (noProgressAfterScroll) {
+            return BottomBarEntryDecision(
+                allowBottomBarEntry = true,
+                requirePreScroll = false,
+                reason = "no_progress_after_scroll"
             )
         }
         if (contentTraversalCompleteBeforeBottomBar) {
@@ -1632,6 +1768,26 @@ object A11yNavigator {
             reason = "no_valid_continuation_signal"
         )
     }
+
+    private fun selectBottomBarEntryDecision(
+        nextIsBottomBar: Boolean,
+        scrollableNodeExists: Boolean,
+        contentTraversalCompleteBeforeBottomBar: Boolean,
+        continuationLikely: Boolean,
+        rowOrGridContinuationDetected: Boolean,
+        continuationExistsBeforeBottomBar: Boolean,
+        isCurrentNearBottom: Boolean,
+        forcePreScrollBeforeBottomBar: Boolean
+    ): BottomBarEntryDecision = decideBottomBarEntry(
+        nextIsBottomBar = nextIsBottomBar,
+        scrollableNodeExists = scrollableNodeExists,
+        contentTraversalCompleteBeforeBottomBar = contentTraversalCompleteBeforeBottomBar,
+        continuationLikely = continuationLikely,
+        rowOrGridContinuationDetected = rowOrGridContinuationDetected,
+        continuationExistsBeforeBottomBar = continuationExistsBeforeBottomBar,
+        isCurrentNearBottom = isCurrentNearBottom,
+        forcePreScrollBeforeBottomBar = forcePreScrollBeforeBottomBar
+    )
 
     internal fun decidePostScrollContinuationPlan(
         resolvedAnchorIndex: Int,
@@ -1881,6 +2037,50 @@ object A11yNavigator {
     }
 
     internal fun <T> findAnchorContinuationCandidateIndex(
+        traversalList: List<T>,
+        startIndex: Int,
+        visibleHistory: Set<String>,
+        visibleHistorySignatures: Set<VisibleHistorySignature>,
+        visitedHistory: Set<String>,
+        visitedHistorySignatures: Set<VisibleHistorySignature>,
+        screenTop: Int,
+        screenBottom: Int,
+        screenHeight: Int,
+        boundsOf: (T) -> Rect,
+        classNameOf: (T) -> String?,
+        viewIdOf: (T) -> String?,
+        isContentNodeOf: (T) -> Boolean = { true },
+        clickableOf: ((T) -> Boolean)? = null,
+        focusableOf: ((T) -> Boolean)? = null,
+        descendantLabelOf: ((T) -> String?)? = null,
+        promotedViewIds: Set<String> = emptySet(),
+        preScrollAnchor: PreScrollAnchor? = null,
+        preScrollAnchorBottom: Int? = null,
+        labelOf: (T) -> String?
+    ): Int = selectContinuationCandidateAfterScroll(
+        traversalList = traversalList,
+        startIndex = startIndex,
+        visibleHistory = visibleHistory,
+        visibleHistorySignatures = visibleHistorySignatures,
+        visitedHistory = visitedHistory,
+        visitedHistorySignatures = visitedHistorySignatures,
+        screenTop = screenTop,
+        screenBottom = screenBottom,
+        screenHeight = screenHeight,
+        boundsOf = boundsOf,
+        classNameOf = classNameOf,
+        viewIdOf = viewIdOf,
+        isContentNodeOf = isContentNodeOf,
+        clickableOf = clickableOf,
+        focusableOf = focusableOf,
+        descendantLabelOf = descendantLabelOf,
+        promotedViewIds = promotedViewIds,
+        preScrollAnchor = preScrollAnchor,
+        preScrollAnchorBottom = preScrollAnchorBottom,
+        labelOf = labelOf
+    )
+
+    internal fun <T> selectContinuationCandidateAfterScroll(
         traversalList: List<T>,
         startIndex: Int,
         visibleHistory: Set<String>,
