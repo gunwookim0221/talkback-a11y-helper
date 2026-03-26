@@ -6,6 +6,45 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONArray
 import org.json.JSONObject
 
+
+object A11yModelVersion {
+    const val VERSION: String = "1.3.0"
+}
+
+data class SmartNextState(
+    val root: AccessibilityNodeInfo,
+    val traversalList: List<AccessibilityNodeInfo>,
+    val currentIndex: Int,
+    val nextIndex: Int,
+    val screenBounds: Rect,
+    val scrollableContainer: AccessibilityNodeInfo?
+)
+
+data class NavigationDecision(
+    val type: NavigationType,
+    val targetIndex: Int? = null,
+    val reason: String
+)
+
+enum class NavigationType {
+    REGULAR,
+    PRE_SCROLL,
+    BOTTOM_BAR,
+    END
+}
+
+data class ActionResult(
+    val success: Boolean,
+    val status: String,
+    val targetNode: AccessibilityNodeInfo? = null
+)
+
+data class TargetActionOutcome(
+    val success: Boolean,
+    val reason: String,
+    val target: AccessibilityNodeInfo? = null
+)
+
 object FocusLabelBuilder {
     private const val MERGED_LABEL_MAX_DEPTH = 5
 

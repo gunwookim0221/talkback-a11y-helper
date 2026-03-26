@@ -26,7 +26,7 @@ AccessibilityService
 - 루트 노드를 순회해 Flat JSON 배열로 트리를 덤프합니다.
 - `targetName`/`targetType`/`targetIndex` 기준 DFS 매칭과, 선택적 `className`/`clickable`/`focusable`/`targetText`/`targetId` AND 필터를 함께 적용해 `ACTION_ACCESSIBILITY_FOCUS`/`ACTION_CLICK`/`ACTION_LONG_CLICK`을 수행합니다.
 - 매칭 노드가 클릭 불가능하면 첫 번째 클릭 가능한 조상으로 타겟을 보정하는 Parent Resolution을 적용합니다.
-- 현재 접근성 포커스 노드에서 부모 방향으로 올라가며 `isScrollable=true` 노드를 찾고, 없으면 루트 트리를 BFS로 순회해 첫 번째 스크롤 가능 노드로 폴백합니다. BFS 결과도 없으면 화면 영역이 가장 큰 스크롤 가능 노드를 찾아 방향(`down/up/right/left`)에 맞는 스크롤 액션(`ACTION_SCROLL_FORWARD/BACKWARD`)을 수행합니다.
+- 현재 접근성 포커스 노드에서 부모 방향으로 올라가며 `isScrollable=true` 노드를 찾고, 없으면 루트 트리를 BFS로 순회해 첫 번째 스크롤 가능 노드로 폴백합니다. BFS 결과도 없으면 `A11yNodeUtils.findBestScrollableContainer(...)`로 화면 영역이 가장 큰 스크롤 가능 노드를 선택해 방향(`down/up/right/left`)에 맞는 스크롤 액션(`ACTION_SCROLL_FORWARD/BACKWARD`)을 수행합니다.
 - 현재 포커스 노드에 `ACTION_SET_TEXT`를 수행해 텍스트를 주입합니다.
 
 #### A11yCommandReceiver
@@ -46,7 +46,7 @@ AccessibilityService
 - `targetName`/`targetType`/`targetIndex` 기반 DFS 매칭 후, 추가 AND 필터(`className`/`clickable`/`focusable`/`targetText`/`targetId`)를 검증해 대상 노드를 찾고 액션(클릭/롱클릭/포커스)을 실행합니다.
 - 매칭 노드가 클릭 불가능하면 클릭 가능한 첫 조상으로 보정하고, `clickable` 필터도 보정된 노드 기준으로 검사합니다.
 - `targetName`은 공통 regex 패턴으로 정규화되어 `targetType=t|b|r` 모두 동일한 매칭 규칙을 사용합니다(명시적 regex 패턴이 없으면 exact regex로 처리). 매칭은 IGNORE_CASE 옵션으로 대소문자를 구분하지 않습니다.
-- 내비게이터 알고리즘 버전은 `A11yNavigator.NAVIGATOR_ALGORITHM_VERSION`(현재 `2.47.1`)으로 관리합니다. Smart Next 내부는 `collectNodes/collectFocusState/collectScrollState → normalizeNodes/buildTraversalList → decideSmartNextExecution/decideContinuationBeforeBottomBar/decideBottomBarEntry/decidePostScrollContinuation/decideFallbackStrategy → decideBoundaryConditions/handleEndOfTraversal/handleBottomBarTransition/handlePreScrollAndRefresh/handleRegularFocusMove → performScroll/performFocus/clearFocus → verifyFocus/stabilizeFocus`의 레이어로 분리되었습니다. `performSmartNext()`는 `collectSmartNextRuntimeState(...) → decideNextAction(...) → executeNextAction(...) → verifyAndFinalizeNextAction(...)` 오케스트레이션을 유지하며 외부 API(`move_focus_smart`) 동작은 그대로 유지합니다.
+- 내비게이터 알고리즘 버전은 `A11yNavigator.NAVIGATOR_ALGORITHM_VERSION`(현재 `2.48.0`)으로 관리합니다. 또한 노드 판별/검색 유틸리티는 `A11yNodeUtils`로 분리되고, Smart Next 상태/결정/결과 모델은 `A11yModels`에서 통합 관리합니다. Smart Next 내부는 `collectNodes/collectFocusState/collectScrollState → normalizeNodes/buildTraversalList → decideSmartNextExecution/decideContinuationBeforeBottomBar/decideBottomBarEntry/decidePostScrollContinuation/decideFallbackStrategy → decideBoundaryConditions/handleEndOfTraversal/handleBottomBarTransition/handlePreScrollAndRefresh/handleRegularFocusMove → performScroll/performFocus/clearFocus → verifyFocus/stabilizeFocus`의 레이어로 분리되었습니다. `performSmartNext()`는 `collectSmartNextRuntimeState(...) → decideNextAction(...) → executeNextAction(...) → verifyAndFinalizeNextAction(...)` 오케스트레이션을 유지하며 외부 API(`move_focus_smart`) 동작은 그대로 유지합니다.
 - post-scroll 후보 분류는 상단 Y 좌표 단일 신호를 `persistent header` 근거로 사용하지 않고, non-scrolling chrome(TopAppBar 또는 non-content/non-interactive + visible-history + pre-scroll anchor 이전)일 때만 header로 고정 분류합니다.
 - focus verification 단계에서는 intended/actual 불일치를 `focus_retarget_eval`, `late_success_gate_eval`, `final_focus_commit` 로그로 명시하며, 실제 포커스가 유효한 post-scroll candidate로 확인되면 intended 대신 actual candidate로 동기화해 최종 기록합니다.
 - post-scroll continuation 후보 평가는 `rewound_before_anchor`를 기본 차단으로 유지하지만, top chrome/persistent header가 아닌 content 후보가 descendant label 복구 및 successor 가능성(`logical_successor`/continuation fallback)을 만족하면 `accepted:continuation_candidate_despite_rewound_before_anchor`로 예외 수용합니다.

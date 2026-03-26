@@ -1,7 +1,6 @@
 package com.iotpart.sqe.talkbackhelper
 
 import android.accessibilityservice.AccessibilityService
-import android.graphics.Rect
 import android.os.Bundle
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
@@ -256,34 +255,6 @@ class A11yHelperService : AccessibilityService() {
         return resultJson
     }
 
-    private fun findLargestScrollableNode(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
-        if (root == null) return null
-
-        var bestNode: AccessibilityNodeInfo? = null
-        var bestArea = -1L
-        val queue = ArrayDeque<AccessibilityNodeInfo>()
-        queue.add(root)
-
-        while (queue.isNotEmpty()) {
-            val node = queue.removeFirst()
-            if (node.isScrollable) {
-                val bounds = Rect()
-                node.getBoundsInScreen(bounds)
-                val area = bounds.width().toLong() * bounds.height().toLong()
-                if (area > bestArea) {
-                    bestArea = area
-                    bestNode = node
-                }
-            }
-
-            for (index in 0 until node.childCount) {
-                node.getChild(index)?.let { queue.add(it) }
-            }
-        }
-
-        return bestNode
-    }
-
     private fun findFirstScrollableNode(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
         if (root == null) return null
 
@@ -330,7 +301,7 @@ class A11yHelperService : AccessibilityService() {
 
         val fallbackToLargestUsed = scrollNode == null
         if (scrollNode == null) {
-            scrollNode = findLargestScrollableNode(rootInActiveWindow)
+            scrollNode = A11yNodeUtils.findBestScrollableContainer(rootInActiveWindow)
         }
 
         val normalizedDirection = normalizeScrollDirection(direction, forward)

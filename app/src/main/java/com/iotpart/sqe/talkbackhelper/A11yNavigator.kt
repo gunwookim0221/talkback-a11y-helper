@@ -10,27 +10,9 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.47.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.48.0"
     private const val RETARGET_SUPPRESSION_WINDOW_MS: Long = 400L
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
-    private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
-    private val TRAVERSAL_CONTAINER_CLASS_KEYWORDS = listOf(
-        "scrollview",
-        "horizontalscrollview",
-        "nestedscrollview",
-        "recyclerview"
-    )
-    private val TRAVERSAL_CONTAINER_VIEW_ID_KEYWORDS = listOf(
-        "mainscrollview",
-        "content_container",
-        "root_container",
-        "main_content_container",
-        "feature_item_menu",
-        "section_wrapper",
-        "group_wrapper",
-        "row_container",
-        "grid_container"
-    )
 
     private val visitedHistoryLock = Any()
     private val visitedHistoryLabels = linkedSetOf<String>()
@@ -38,12 +20,6 @@ object A11yNavigator {
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
-
-    data class TargetActionOutcome(
-        val success: Boolean,
-        val reason: String,
-        val target: AccessibilityNodeInfo? = null
-    )
 
     internal data class PreScrollAnchor(
         val viewIdResourceName: String?,
@@ -5020,15 +4996,11 @@ object A11yNavigator {
     }
 
     internal fun isContainerLikeClassName(className: String?): Boolean {
-        val normalized = className?.trim()?.lowercase().orEmpty()
-        if (normalized.isEmpty()) return false
-        return TRAVERSAL_CONTAINER_CLASS_KEYWORDS.any { keyword -> normalized.contains(keyword) }
+        return A11yNodeUtils.isContainerLikeClassName(className)
     }
 
     internal fun isContainerLikeViewId(viewIdResourceName: String?): Boolean {
-        val normalized = viewIdResourceName?.substringAfterLast('/')?.trim()?.lowercase().orEmpty()
-        if (normalized.isEmpty()) return false
-        return TRAVERSAL_CONTAINER_VIEW_ID_KEYWORDS.any { keyword -> normalized.contains(keyword) }
+        return A11yNodeUtils.isContainerLikeViewId(viewIdResourceName)
     }
 
     private fun shouldExcludeContainerNodeFromTraversal(
@@ -5406,9 +5378,7 @@ object A11yNavigator {
             .joinToString(separator = " ")
             .lowercase()
         val normalizedViewId = viewId.lowercase()
-        return SETTINGS_BUTTON_KEYWORDS.any { keyword ->
-            normalizedViewId.contains(keyword) || mergedLabel.contains(keyword)
-        }
+        return A11yNodeUtils.containsSettingsKeyword(normalizedViewId) || A11yNodeUtils.containsSettingsKeyword(mergedLabel)
     }
 
     private fun logSettingsCandidateStatus(root: AccessibilityNodeInfo, traversalNodes: List<FocusedNode>) {
@@ -5836,31 +5806,13 @@ object A11yNavigator {
         screenTop: Int,
         screenHeight: Int
     ): Boolean {
-        val normalizedClass = className?.lowercase().orEmpty()
-        val normalizedViewId = viewIdResourceName?.lowercase().orEmpty()
-        if (SETTINGS_BUTTON_KEYWORDS.any { keyword -> normalizedViewId.contains(keyword) }) {
-            return false
-        }
-
-        val matchesClass = normalizedClass.contains("toolbar") ||
-            normalizedClass.contains("actionbar") ||
-            normalizedClass.contains("appbarlayout")
-        if (matchesClass) return true
-
-        val matchesViewId = normalizedViewId.contains("title_bar") ||
-            normalizedViewId.contains("header") ||
-            normalizedViewId.contains("toolbar") ||
-            normalizedViewId.contains("more_menu") ||
-            normalizedViewId.contains("action_bar") ||
-            normalizedViewId.contains("home_button") ||
-            normalizedViewId.contains("tab_title") ||
-            normalizedViewId.contains("header_bar") ||
-            normalizedViewId.contains("add_menu") ||
-            normalizedViewId.contains("add_button") ||
-            normalizedViewId.contains("menu_button")
-        if (matchesViewId) return true
-
-        return false
+        return A11yNodeUtils.isTopAppBar(
+            className = className,
+            viewIdResourceName = viewIdResourceName,
+            boundsInScreen = boundsInScreen,
+            screenTop = screenTop,
+            screenHeight = screenHeight
+        )
     }
 
     @Suppress("UNUSED_PARAMETER")
@@ -5871,34 +5823,13 @@ object A11yNavigator {
         screenBottom: Int,
         screenHeight: Int
     ): Boolean {
-        // NOTE: 좌표 기반(bottom 20% 등) 판별은 컨텐츠 카드 오검출을 유발할 수 있어 사용하지 않는다.
-        val normalizedClass = className?.lowercase().orEmpty()
-        val normalizedViewId = viewIdResourceName?.lowercase().orEmpty()
-
-        val matchesClass = normalizedClass.contains("bottomnavigation") ||
-            normalizedClass.contains("tablayout") ||
-            normalizedClass.contains("navigationbar")
-        if (matchesClass) return true
-
-        val matchesViewId = normalizedViewId.contains("bottom") ||
-            normalizedViewId.contains("footer") ||
-            normalizedViewId.contains("tab_bar") ||
-            normalizedViewId.contains("navigation") ||
-            normalizedViewId.contains("menu_bar") ||
-            normalizedViewId.contains("menu_favorites") ||
-            normalizedViewId.contains("menu_devices") ||
-            normalizedViewId.contains("menu_life") ||
-            normalizedViewId.contains("menu_services") ||
-            normalizedViewId.contains("menu_automations") ||
-            normalizedViewId.contains("menu_more") ||
-            normalizedViewId.contains("menu_routines") ||
-            normalizedViewId.contains("menu_menu") ||
-            normalizedViewId.contains("bottom_menu") ||
-            normalizedViewId.contains("bottom_tab") ||
-            normalizedViewId.contains("bottom_nav")
-        if (matchesViewId) return true
-
-        return false
+        return A11yNodeUtils.isBottomNavigationBar(
+            className = className,
+            viewIdResourceName = viewIdResourceName,
+            boundsInScreen = boundsInScreen,
+            screenBottom = screenBottom,
+            screenHeight = screenHeight
+        )
     }
 
     private fun nodeToModel(
