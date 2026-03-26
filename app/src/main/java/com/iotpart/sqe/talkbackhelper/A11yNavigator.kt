@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.31.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.31.2"
 
     private val visitedHistoryLock = Any()
     private val visitedHistoryLabels = linkedSetOf<String>()
@@ -1317,10 +1317,12 @@ object A11yNavigator {
                         boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
                         classNameOf = { node -> node.className?.toString() },
                         viewIdOf = { node -> node.viewIdResourceName },
-                        isContentNodeOf = { node -> isContentNode(node) },
+                        isContentNodeOf = { node ->
+                            !isFixedSystemUI(node, localMainScrollContainer)
+                        },
                         clickableOf = { node -> node.isClickable },
                         focusableOf = { node -> node.isFocusable },
-                        descendantLabelOf = { node -> collectDescendantReadableText(node) },
+                        descendantLabelOf = { node -> recoverDescendantLabel(node) },
                         preScrollAnchor = preScrollAnchor,
                         preScrollAnchorBottom = preScrollAnchor.bounds.bottom,
                         labelOf = { node ->
