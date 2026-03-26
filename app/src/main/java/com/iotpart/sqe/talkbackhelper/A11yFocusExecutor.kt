@@ -99,8 +99,8 @@ object A11yFocusExecutor {
         val targetBounds = Rect().also(target::getBoundsInScreen)
 
         // 1) Pre-Focus: 가시성 확보
-        val isTopBar = A11yNavigator.isTopAppBarNode(target.className?.toString(), target.viewIdResourceName, targetBounds, screenTop, rootHeight)
-        val isBottomBar = A11yNavigator.isBottomNavigationBarNode(target.className?.toString(), target.viewIdResourceName, targetBounds, rootBounds.bottom, rootHeight)
+        val isTopBar = A11yNodeUtils.isTopAppBar(target.className?.toString(), target.viewIdResourceName, targetBounds, screenTop, rootHeight)
+        val isBottomBar = A11yNodeUtils.isBottomNavigationBar(target.className?.toString(), target.viewIdResourceName, targetBounds, rootBounds.bottom, rootHeight)
         if (!isTopBar && !isBottomBar && A11yNodeUtils.isNodePoorlyPositionedForFocus(targetBounds, screenTop, effectiveBottom)) {
             alignCandidateForReadableFocus(
                 root = root,
@@ -191,7 +191,7 @@ object A11yFocusExecutor {
         val rootHeight = (rootBounds.bottom - rootBounds.top).coerceAtLeast(1)
         val actualBounds = actualFocusedNode?.let { Rect().also(it::getBoundsInScreen) }
         val actualIsInteractiveContent = actualFocusedNode != null && actualBounds != null &&
-            A11yNavigator.isContentNode(
+            A11yNodeUtils.isContentNode(
                 node = actualFocusedNode,
                 bounds = actualBounds,
                 screenTop = rootBounds.top,
@@ -410,8 +410,8 @@ object A11yFocusExecutor {
             val candidate = traversalList[index]
             val bounds = boundsOf(candidate)
             if (bounds.bottom <= currentBounds.bottom) continue
-            if (A11yNavigator.isTopAppBarNode(classNameOf(candidate), viewIdOf(candidate), bounds, screenTop, screenHeight)) continue
-            if (A11yNavigator.isBottomNavigationBarNode(classNameOf(candidate), viewIdOf(candidate), bounds, screenBottom, screenHeight)) continue
+            if (A11yNodeUtils.isTopAppBar(classNameOf(candidate), viewIdOf(candidate), bounds, screenTop, screenHeight)) continue
+            if (A11yNodeUtils.isBottomNavigationBar(classNameOf(candidate), viewIdOf(candidate), bounds, screenBottom, screenHeight)) continue
             return if (isNodePartiallyVisible(bounds, screenTop, effectiveBottom)) index else -1
         }
         return -1
@@ -437,8 +437,8 @@ object A11yFocusExecutor {
         for (index in (fromIndex + 1)..traversalList.lastIndex) {
             val candidate = traversalList[index]
             val bounds = boundsOf(candidate)
-            if (A11yNavigator.isTopAppBarNode(classNameOf(candidate), viewIdOf(candidate), bounds, screenTop, screenHeight)) continue
-            if (A11yNavigator.isBottomNavigationBarNode(classNameOf(candidate), viewIdOf(candidate), bounds, screenBottom, screenHeight)) continue
+            if (A11yNodeUtils.isTopAppBar(classNameOf(candidate), viewIdOf(candidate), bounds, screenTop, screenHeight)) continue
+            if (A11yNodeUtils.isBottomNavigationBar(classNameOf(candidate), viewIdOf(candidate), bounds, screenBottom, screenHeight)) continue
             return candidate
         }
         return null

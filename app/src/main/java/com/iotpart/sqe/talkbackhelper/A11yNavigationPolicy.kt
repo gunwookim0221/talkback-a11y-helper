@@ -2,12 +2,9 @@ package com.iotpart.sqe.talkbackhelper
 
 import android.graphics.Rect
 import android.util.Log
-import com.iotpart.sqe.talkbackhelper.A11yNavigator.isBottomNavigationBarNode
 import com.iotpart.sqe.talkbackhelper.A11yNavigator.isContainerLikeClassName
 import com.iotpart.sqe.talkbackhelper.A11yNavigator.isContainerLikeViewId
-import com.iotpart.sqe.talkbackhelper.A11yNavigator.isFixedSystemUI
 import com.iotpart.sqe.talkbackhelper.A11yNavigator.isNodePhysicallyOffScreen
-import com.iotpart.sqe.talkbackhelper.A11yNavigator.isTopAppBarNode
 import com.iotpart.sqe.talkbackhelper.A11yNavigator.isWithinTopContentArea
 
 object A11yNavigationPolicy {
@@ -42,7 +39,7 @@ object A11yNavigationPolicy {
             scrollableNodeExists = collect.scrollState.scrollableNode != null
         )
 
-        var nextIsBottomBar = nextIndex in traversalList.indices && isBottomNavigationBarNode(
+        var nextIsBottomBar = nextIndex in traversalList.indices && A11yNodeUtils.isBottomNavigationBar(
             className = traversalList[nextIndex].className?.toString(),
             viewIdResourceName = traversalList[nextIndex].viewIdResourceName,
             boundsInScreen = Rect().also { traversalList[nextIndex].getBoundsInScreen(it) },
@@ -133,7 +130,7 @@ object A11yNavigationPolicy {
             boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
             classNameOf = { node -> node.className?.toString() },
             viewIdOf = { node -> node.viewIdResourceName },
-            isFixedUiOf = { node -> isFixedSystemUI(node, collect.scrollState.mainScrollContainer) },
+            isFixedUiOf = { node -> A11yNodeUtils.isFixedSystemUI(node, collect.scrollState.mainScrollContainer) },
             canScrollForwardHint = collect.scrollState.scrollableNode != null
         )
         val navigationDecision = decideNextNavigationType(
@@ -396,8 +393,8 @@ object A11yNavigationPolicy {
             .lastOrNull { index ->
                 val node = traversalList[index]
                 val bounds = boundsOf(node)
-                !isTopAppBarNode(classNameOf(node), viewIdOf(node), bounds, screenTop, screenHeight) &&
-                    !isBottomNavigationBarNode(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight)
+                !A11yNodeUtils.isTopAppBar(classNameOf(node), viewIdOf(node), bounds, screenTop, screenHeight) &&
+                    !A11yNodeUtils.isBottomNavigationBar(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight)
             } ?: candidateIndex
         return candidateIndex >= lastContentIndex
     }
@@ -422,8 +419,8 @@ object A11yNavigationPolicy {
         val contentIndices = (start until bottomBarIndex).filter { index ->
             val node = traversalList[index]
             val bounds = boundsOf(node)
-            !isTopAppBarNode(classNameOf(node), viewIdOf(node), bounds, screenTop, screenHeight) &&
-                !isBottomNavigationBarNode(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight)
+            !A11yNodeUtils.isTopAppBar(classNameOf(node), viewIdOf(node), bounds, screenTop, screenHeight) &&
+                !A11yNodeUtils.isBottomNavigationBar(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight)
         }
         if (contentIndices.isEmpty()) return -1
 
@@ -488,7 +485,7 @@ object A11yNavigationPolicy {
         if (currentIndex != lastIndex || currentIndex !in traversalList.indices) return false
         val node = traversalList[currentIndex]
         val bounds = boundsOf(node)
-        return isBottomNavigationBarNode(
+        return A11yNodeUtils.isBottomNavigationBar(
             className = classNameOf(node),
             viewIdResourceName = viewIdOf(node),
             boundsInScreen = bounds,
@@ -526,8 +523,8 @@ object A11yNavigationPolicy {
         val contentIndicesBeforeBottomBar = (0 until nextIndex).filter { index ->
             val candidate = traversalList[index]
             val bounds = boundsOf(candidate)
-            !isTopAppBarNode(classNameOf(candidate), viewIdOf(candidate), bounds, screenTop, screenHeight) &&
-                !isBottomNavigationBarNode(classNameOf(candidate), viewIdOf(candidate), bounds, screenBottom, screenHeight)
+            !A11yNodeUtils.isTopAppBar(classNameOf(candidate), viewIdOf(candidate), bounds, screenTop, screenHeight) &&
+                !A11yNodeUtils.isBottomNavigationBar(classNameOf(candidate), viewIdOf(candidate), bounds, screenBottom, screenHeight)
         }
         if (contentIndicesBeforeBottomBar.isEmpty()) return false
 
@@ -610,8 +607,8 @@ object A11yNavigationPolicy {
         return ((currentIndex + 1) until bottomBarIndex).any { index ->
             val node = traversalList[index]
             val bounds = boundsOf(node)
-            !isTopAppBarNode(classNameOf(node), viewIdOf(node), bounds, screenTop, screenHeight) &&
-                !isBottomNavigationBarNode(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight) &&
+            !A11yNodeUtils.isTopAppBar(classNameOf(node), viewIdOf(node), bounds, screenTop, screenHeight) &&
+                !A11yNodeUtils.isBottomNavigationBar(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight) &&
                 (bounds.bottom <= bottomBarTop && (bottomBarTop - bounds.bottom) in 0..trailingBandPx)
         }
     }
@@ -634,8 +631,8 @@ object A11yNavigationPolicy {
             val node = traversalList[index]
             val bounds = boundsOf(node)
             if (isNodePhysicallyOffScreen(bounds, screenTop, screenBottom)) continue
-            if (isTopAppBarNode(classNameOf(node), viewIdOf(node), bounds, screenTop, screenHeight)) continue
-            if (isBottomNavigationBarNode(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight)) continue
+            if (A11yNodeUtils.isTopAppBar(classNameOf(node), viewIdOf(node), bounds, screenTop, screenHeight)) continue
+            if (A11yNodeUtils.isBottomNavigationBar(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight)) continue
             if (isFixedUiOf?.invoke(node) == true) continue
 
             val isWrapperOrContainer =
@@ -721,13 +718,13 @@ object A11yNavigationPolicy {
         val gridOrShortcutKeywords = listOf("grid", "shortcut", "menu", "tile", "icon", "assistant", "lab")
         val currentLooksLikeGridOrShortcut = gridOrShortcutKeywords.any { keyword ->
             currentClass.contains(keyword) || currentViewId.contains(keyword)
-        } || !isTopAppBarNode(currentClass, currentViewId, currentBounds, screenTop, screenHeight)
+        } || !A11yNodeUtils.isTopAppBar(currentClass, currentViewId, currentBounds, screenTop, screenHeight)
 
         if (!currentLooksLikeGridOrShortcut) return false
 
         val nextNode = traversalList[nextIndex]
         val nextBounds = boundsOf(nextNode)
-        val nextIsBottomBar = isBottomNavigationBarNode(
+        val nextIsBottomBar = A11yNodeUtils.isBottomNavigationBar(
             className = classNameOf(nextNode),
             viewIdResourceName = viewIdOf(nextNode),
             boundsInScreen = nextBounds,
