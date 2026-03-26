@@ -10,7 +10,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.48.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.49.0"
     private const val RETARGET_SUPPRESSION_WINDOW_MS: Long = 400L
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
@@ -1462,7 +1462,7 @@ object A11yNavigator {
                 label = recoverDescendantLabel(node) ?: label
             }
             loopState.focusAttempted = true
-            val outcome = performFocusWithVisibilityCheck(
+            val outcome = requestFocusFlow(
                 root = context.root,
                 target = node,
                 screenTop = context.screenTop,
@@ -1473,10 +1473,11 @@ object A11yNavigator {
                 traversalListSnapshot = traversalList,
                 currentFocusIndexHint = index - 1
             )
-            if (outcome.success) {
+            val mappedOutcome = TargetActionOutcome(outcome.success, outcome.status, outcome.targetNode)
+            if (mappedOutcome.success) {
                 loopState.focusedAny = true
-                loopState.focusedOutcome = outcome
-                return outcome
+                loopState.focusedOutcome = mappedOutcome
+                return mappedOutcome
             }
         }
         return null
@@ -1530,54 +1531,6 @@ object A11yNavigator {
         }
     }
 
-    private fun executeFocusMove(
-        root: AccessibilityNodeInfo,
-        target: AccessibilityNodeInfo,
-        screenTop: Int,
-        effectiveBottom: Int,
-        traversalList: List<AccessibilityNodeInfo>,
-        currentFocusIndexHint: Int,
-        status: String,
-        traversalIndex: Int
-    ): FocusExecutionResult {
-        val outcome = performFocus(
-            root = root,
-            target = target,
-            screenTop = screenTop,
-            effectiveBottom = effectiveBottom,
-            status = status,
-            isScrollAction = false,
-            traversalIndex = traversalIndex,
-            traversalListSnapshot = traversalList,
-            currentFocusIndexHint = currentFocusIndexHint
-        )
-        return stabilizeFocus(verifyFocus(outcome))
-    }
-
-    private fun performFocus(
-        root: AccessibilityNodeInfo,
-        target: AccessibilityNodeInfo,
-        screenTop: Int,
-        effectiveBottom: Int,
-        status: String,
-        isScrollAction: Boolean,
-        traversalIndex: Int,
-        traversalListSnapshot: List<AccessibilityNodeInfo>,
-        currentFocusIndexHint: Int
-    ): TargetActionOutcome {
-        return performFocusWithVisibilityCheck(
-            root = root,
-            target = target,
-            screenTop = screenTop,
-            effectiveBottom = effectiveBottom,
-            status = status,
-            isScrollAction = isScrollAction,
-            traversalIndex = traversalIndex,
-            traversalListSnapshot = traversalListSnapshot,
-            currentFocusIndexHint = currentFocusIndexHint
-        )
-    }
-
     private fun clearFocus(node: AccessibilityNodeInfo): Boolean {
         return node.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
     }
@@ -1592,13 +1545,6 @@ object A11yNavigator {
         )
     }
 
-    private fun verifyFocus(outcome: TargetActionOutcome): FocusExecutionResult {
-        val reasonCode = if (outcome.success) "accepted:focus_verified" else "rejected:focus_verify_failed"
-        return FocusExecutionResult(outcome = outcome, reasonCode = reasonCode)
-    }
-
-    private fun stabilizeFocus(result: FocusExecutionResult): FocusExecutionResult = result
-
     private fun focusOrSkip(
         root: AccessibilityNodeInfo,
         traversalList: List<AccessibilityNodeInfo>,
@@ -1609,16 +1555,18 @@ object A11yNavigator {
         status: String,
         traversalIndex: Int = -1
     ): TargetActionOutcome {
-        return executeFocusMove(
+        val result = requestFocusFlow(
             root = root,
             target = target,
             screenTop = screenTop,
             effectiveBottom = effectiveBottom,
-            traversalList = traversalList,
-            currentFocusIndexHint = currentIndex,
             status = status,
-            traversalIndex = traversalIndex
-        ).outcome
+            isScrollAction = false,
+            traversalIndex = traversalIndex,
+            traversalListSnapshot = traversalList,
+            currentFocusIndexHint = currentIndex
+        )
+        return TargetActionOutcome(result.success, result.status, result.targetNode)
     }
 
     private fun focusSequentiallyFromIndex(
@@ -2988,7 +2936,7 @@ object A11yNavigator {
         }
     }
 
-    internal fun performFocusWithVisibilityCheck(
+    internal fun requestFocusFlow(
         root: AccessibilityNodeInfo,
         target: AccessibilityNodeInfo,
         screenTop: Int,
@@ -2998,78 +2946,18 @@ object A11yNavigator {
         traversalIndex: Int,
         traversalListSnapshot: List<AccessibilityNodeInfo>? = null,
         currentFocusIndexHint: Int = -1
-    ): TargetActionOutcome {
+    ): ActionResult {
         val label = target.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
             ?: target.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
             ?: "<no-label>"
-
-        val rootBounds = Rect().also { root.getBoundsInScreen(it) }
+        val rootBounds = Rect().also(root::getBoundsInScreen)
         val rootHeight = (rootBounds.bottom - rootBounds.top).coerceAtLeast(1)
-        val initialBounds = Rect().also { target.getBoundsInScreen(it) }
-        val isTopBar = isTopAppBarNode(
-            className = target.className?.toString(),
-            viewIdResourceName = target.viewIdResourceName,
-            boundsInScreen = initialBounds,
-            screenTop = screenTop,
-            screenHeight = rootHeight
-        )
-        val isBottomBar = isBottomNavigationBarNode(
-            className = target.className?.toString(),
-            viewIdResourceName = target.viewIdResourceName,
-            boundsInScreen = initialBounds,
-            screenBottom = rootBounds.bottom,
-            screenHeight = rootHeight
-        )
+        val targetBounds = Rect().also(target::getBoundsInScreen)
 
-        val partiallyVisibleTrailingIndex = if (
-            traversalListSnapshot != null &&
-            traversalIndex in traversalListSnapshot.indices &&
-            currentFocusIndexHint in traversalListSnapshot.indices
-        ) {
-            findPartiallyVisibleNextCandidate(
-                traversalList = traversalListSnapshot,
-                currentIndex = currentFocusIndexHint,
-                screenTop = screenTop,
-                effectiveBottom = effectiveBottom,
-                screenBottom = rootBounds.bottom,
-                screenHeight = rootHeight,
-                boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
-                classNameOf = { node -> node.className?.toString() },
-                viewIdOf = { node -> node.viewIdResourceName }
-            )
-        } else {
-            -1
-        }
-        if (partiallyVisibleTrailingIndex == traversalIndex) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Detected partially visible next candidate: index=$traversalIndex label=$label")
-            logVisitedHistorySkip(
-                reason = "partial visibility",
-                label = label,
-                viewId = target.viewIdResourceName,
-                bounds = initialBounds
-            )
-        }
-
-        val intendedTrailingCandidate = if (traversalListSnapshot != null && traversalIndex in traversalListSnapshot.indices) {
-            findNextEligibleTraversalCandidate(
-                traversalList = traversalListSnapshot,
-                fromIndex = traversalIndex,
-                screenTop = screenTop,
-                screenBottom = rootBounds.bottom,
-                screenHeight = rootHeight,
-                boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
-                classNameOf = { node -> node.className?.toString() },
-                viewIdOf = { node -> node.viewIdResourceName }
-            )
-        } else {
-            null
-        }
-
-        val descendantTextCandidates = collectDescendantTextCandidates(target)
-        val isSingleSemanticCandidate =
-            !shouldExcludeContainerNodeFromTraversal(target, descendantTextCandidates) &&
-                shouldAllowRecoveredDescendantLabelForTraversal(descendantTextCandidates)
-        if (isSingleSemanticCandidate) {
+        // 1) Pre-Focus: 가시성 확보
+        val isTopBar = isTopAppBarNode(target.className?.toString(), target.viewIdResourceName, targetBounds, screenTop, rootHeight)
+        val isBottomBar = isBottomNavigationBarNode(target.className?.toString(), target.viewIdResourceName, targetBounds, rootBounds.bottom, rootHeight)
+        if (!isTopBar && !isBottomBar && A11yNodeUtils.isNodePoorlyPositionedForFocus(targetBounds, screenTop, effectiveBottom)) {
             alignCandidateForReadableFocus(
                 root = root,
                 target = target,
@@ -3079,296 +2967,66 @@ object A11yNavigator {
                 isTopBar = isTopBar,
                 isBottomBar = isBottomBar,
                 canScrollForwardHint = findScrollableForwardAncestorCandidate(target) != null || hasScrollableDownCandidate(root),
-                intendedTrailingCandidate = intendedTrailingCandidate
-            )
-        } else {
-            Log.i(
-                "A11Y_HELPER",
-                "[SMART_NEXT] Skipping pre-focus alignment for container-like candidate label=$label viewId=${target.viewIdResourceName}"
+                intendedTrailingCandidate = traversalListSnapshot?.takeIf { traversalIndex in it.indices }?.let {
+                    findNextEligibleTraversalCandidate(
+                        traversalList = it,
+                        fromIndex = traversalIndex,
+                        screenTop = screenTop,
+                        screenBottom = rootBounds.bottom,
+                        screenHeight = rootHeight,
+                        boundsOf = { node -> Rect().also(node::getBoundsInScreen) },
+                        classNameOf = { node -> node.className?.toString() },
+                        viewIdOf = { node -> node.viewIdResourceName }
+                    )
+                }
             )
         }
 
-        val targetBounds = Rect().also { target.getBoundsInScreen(it) }
-        val actualFocusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
-            Rect().also { focusedNode.getBoundsInScreen(it) }
-        }
-        val currentSystemFocus = target.refresh() && target.isAccessibilityFocused
-        if (shouldReuseExistingAccessibilityFocus(
-                label = label,
-                isScrollAction = isScrollAction,
-                currentFocusedBounds = actualFocusedBounds,
-                targetBounds = targetBounds
-            )
-        ) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping duplicate focus action because current accessibility focus bounds exactly match target: $label")
-            val commitDecision = resolveFocusRetargetDecision(
-                root = root,
-                intendedTarget = target,
-                intendedLabel = label,
-                traversalListSnapshot = traversalListSnapshot,
-                intendedIndex = traversalIndex,
-                isScrollAction = isScrollAction
-            )
+        val currentFocusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { Rect().also(it::getBoundsInScreen) }
+        if (shouldReuseExistingAccessibilityFocus(label, isScrollAction, currentFocusedBounds, targetBounds)) {
+            val commitDecision = resolveFocusRetargetDecision(root, target, label, traversalListSnapshot, traversalIndex, isScrollAction)
             recordRequestedFocusAttempt(traversalIndex, root)
             recordVisitedFocus(commitDecision.finalTarget, commitDecision.finalLabel, reason = "focus_reused_existing_target")
-            return TargetActionOutcome(true, "moved", commitDecision.finalTarget)
-        }
-        if (currentSystemFocus && actualFocusedBounds != null && actualFocusedBounds != targetBounds) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Target reports accessibilityFocused=true but actual focused bounds differ. Forcing focus action: target=$targetBounds actual=$actualFocusedBounds label=$label")
-        }
-        if (label == "<no-label>" && isScrollAction) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Bypassing scrolled_auto_focused reuse for <no-label> target to break focus lock")
-        }
-
-        if (shouldDelayBeforeFocusCommand(actualFocusedBounds, targetBounds)) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Delaying 100ms before focus to stabilize horizontal traversal: label=$label index=$traversalIndex")
-            Thread.sleep(100)
+            return ActionResult(true, "moved", commitDecision.finalTarget)
         }
 
         clearAccessibilityFocusAndRefresh(root)
         requestInputFocusBeforeAccessibilityFocus(target, label)
 
-        val beforeFocusBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
-            Rect().also { focusedNode.getBoundsInScreen(it) }
+        // 2) Action: 포커스 실행 + 최대 3회 재시도
+        var actionSucceeded = false
+        for (attempt in 0 until 3) {
+            target.refresh()
+            val focused = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+            target.refresh()
+            val focusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { Rect().also(it::getBoundsInScreen) }
+            val boundsMatched = focusedBounds != null && isWithinSnapBackTolerance(targetBounds, focusedBounds)
+            if (focused || (target.isAccessibilityFocused && boundsMatched)) {
+                actionSucceeded = true
+                break
+            }
+            if (attempt < 2) Thread.sleep(100L)
         }
-        Log.i(
-            "A11Y_HELPER",
-            "[FOCUS_VERIFY] Before Focus: System is at ${formatBoundsForLog(beforeFocusBounds)}, Target is at ${formatBoundsForLog(targetBounds)}"
-        )
-
-        val focusEventTimestampBeforeAction = A11yStateStore.lastUpdatedAt
-        val focused = requestAccessibilityFocusWithRetry(
-            performFocusAction = {
-                target.refresh()
-                target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
-            },
-            refreshFocusState = {
-                target.refresh()
-                isAccessibilityFocusEffectivelyActive(
-                    isAccessibilityFocused = target.isAccessibilityFocused,
-                    traversalIndex = traversalIndex,
-                    actualFocusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
-                        Rect().also { focusedNode.getBoundsInScreen(it) }
-                    },
-                    targetBounds = targetBounds
-                )
-            },
-            evaluateEffectiveFocus = {
-                val focusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
-                    Rect().also { focusedNode.getBoundsInScreen(it) }
-                }
-                target.refresh() &&
-                    target.isAccessibilityFocused &&
-                    focusedBounds != null &&
-                    isWithinSnapBackTolerance(targetBounds, focusedBounds)
-            }
-        )
-
-        val focusVerification = verifyFocusStabilizationAfterAction(
-            root = root,
-            target = target,
-            targetBounds = targetBounds
-        )
-        val afterFocusBounds = focusVerification.actualBounds
-        Log.i(
-            "A11Y_HELPER",
-            "[FOCUS_VERIFY] After Focus: System is at ${formatBoundsForLog(afterFocusBounds)}, Target is at ${formatBoundsForLog(targetBounds)}"
-        )
-
-        if (!focused) {
-            val effectivelyFocused = focusVerification.isTargetAccessibilityFocused ||
-                (afterFocusBounds != null && isWithinSnapBackTolerance(targetBounds, afterFocusBounds))
-            if (effectivelyFocused) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=false but actual system focus matches target bounds. Treating as success.")
-                val commitDecision = resolveFocusRetargetDecision(
-                    root = root,
-                    intendedTarget = target,
-                    intendedLabel = label,
-                    traversalListSnapshot = traversalListSnapshot,
-                    intendedIndex = traversalIndex,
-                    isScrollAction = isScrollAction
-                )
-                recordRequestedFocusAttempt(traversalIndex, root)
-                recordVisitedFocus(commitDecision.finalTarget, commitDecision.finalLabel, reason = "focus_action_false_but_target_confirmed")
-                return TargetActionOutcome(true, status, commitDecision.finalTarget)
-            }
-            Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=false (status=$status)")
+        if (!actionSucceeded) {
             syncLastRequestedFocusIndexToCurrentFocus(root, buildTalkBackLikeFocusNodes(root).map { it.node })
-            return TargetActionOutcome(false, "failed", target)
+            return ActionResult(false, "failed", target)
         }
 
-        if (focusVerification.matchedTarget && focusVerification.retryCount > 0) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Focus stabilized to target after delay")
-        }
-
-        val visualStabilization = stabilizeVisualFocusAfterMove(
-            root = root,
-            target = target,
-            targetBounds = targetBounds
-        )
-        val focusEventConfirmed = didReceiveFocusEventAfter(
-            timestampBefore = focusEventTimestampBeforeAction,
-            maxWaitMs = 250L,
-            retryIntervalMs = 50L
-        )
-
-        if (!visualStabilization.stabilized) {
-            if (focusVerification.isTargetAccessibilityFocused && focusEventConfirmed) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Focus event confirmed after ACTION_FOCUS; treating mismatch as success without rollback")
-                val commitDecision = resolveFocusRetargetDecision(
-                    root = root,
-                    intendedTarget = target,
-                    intendedLabel = label,
-                    traversalListSnapshot = traversalListSnapshot,
-                    intendedIndex = traversalIndex,
-                    isScrollAction = isScrollAction
-                )
-                recordRequestedFocusAttempt(traversalIndex, root)
-                recordVisitedFocus(commitDecision.finalTarget, commitDecision.finalLabel, reason = "focus_event_confirmed_after_stabilization")
-                return TargetActionOutcome(true, "moved", commitDecision.finalTarget)
-            }
-            Log.w(
-                "A11Y_HELPER",
-                "[SMART_NEXT] Final focus mismatch after visual stabilization → snap_back: target=${formatBoundsForLog(targetBounds)} actual=${formatBoundsForLog(visualStabilization.actualBounds)} traversalIndex=$traversalIndex label=$label"
-            )
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Delaying rollback due to pending stabilization")
-            val lateFocus = verifyFocusStabilizationAfterAction(
-                root = root,
-                target = target,
-                targetBounds = targetBounds,
-                maxWaitMs = 350L,
-                retryIntervalMs = 50L
-            )
-            val lateFocusAllowed = shouldAllowLateFocusSuccess(
-                root = root,
-                target = target,
-                targetBounds = targetBounds,
-                lateFocus = lateFocus,
-                traversalListSnapshot = traversalListSnapshot,
-                intendedIndex = traversalIndex,
-                isScrollAction = isScrollAction
-            )
-            if (lateFocusAllowed) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Late focus detected → treat as success")
-                val commitDecision = resolveFocusRetargetDecision(
-                    root = root,
-                    intendedTarget = target,
-                    intendedLabel = label,
-                    traversalListSnapshot = traversalListSnapshot,
-                    intendedIndex = traversalIndex,
-                    isScrollAction = isScrollAction
-                )
-                recordRequestedFocusAttempt(traversalIndex, root)
-                recordVisitedFocus(commitDecision.finalTarget, commitDecision.finalLabel, reason = "late_focus_detected_after_stabilization")
-                return TargetActionOutcome(true, "moved", commitDecision.finalTarget)
-            }
-            val retargetDecision = resolveFocusRetargetDecision(
-                root = root,
-                intendedTarget = target,
-                intendedLabel = label,
-                traversalListSnapshot = traversalListSnapshot,
-                intendedIndex = traversalIndex,
-                isScrollAction = isScrollAction
-            )
-            if (retargetDecision.authoritativeOverride) {
-                recordRequestedFocusAttempt(traversalIndex, root)
-                recordVisitedFocus(retargetDecision.finalTarget, retargetDecision.finalLabel, reason = "focus_retargeted_after_stabilization")
-                return TargetActionOutcome(true, "moved", retargetDecision.finalTarget)
-            }
-            Log.w("A11Y_HELPER", "[SMART_NEXT] Confirmed real snap_back")
+        // 3) Verify: 최종 focus 일치 + snap-back 체크
+        Thread.sleep(100L)
+        val actualFocusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val actualBounds = actualFocusedNode?.let { Rect().also(it::getBoundsInScreen) }
+        val snapBackDetected = actualBounds == null || !isWithinSnapBackTolerance(targetBounds, actualBounds)
+        if (snapBackDetected) {
+            Log.w("A11Y_HELPER", "[SMART_NEXT] requestFocusFlow snap_back target=${formatBoundsForLog(targetBounds)} actual=${formatBoundsForLog(actualBounds)}")
             syncLastRequestedFocusIndexToCurrentFocus(root, buildTalkBackLikeFocusNodes(root).map { it.node })
-            return TargetActionOutcome(false, "snap_back", target)
+            return ActionResult(false, "snap_back", target)
         }
 
-        if (shouldTreatAsSnapBackAfterVerification(
-                actualFocusedBounds = afterFocusBounds,
-                targetBounds = targetBounds,
-                isTargetAccessibilityFocused = focusVerification.isTargetAccessibilityFocused
-            )
-        ) {
-            if (focusVerification.isTargetAccessibilityFocused && focusEventConfirmed) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Focus event confirmed after ACTION_FOCUS; suppressing premature snap_back")
-                val commitDecision = resolveFocusRetargetDecision(
-                    root = root,
-                    intendedTarget = target,
-                    intendedLabel = label,
-                    traversalListSnapshot = traversalListSnapshot,
-                    intendedIndex = traversalIndex,
-                    isScrollAction = isScrollAction
-                )
-                recordRequestedFocusAttempt(traversalIndex, root)
-                recordVisitedFocus(commitDecision.finalTarget, commitDecision.finalLabel, reason = "focus_event_confirmed_after_retry")
-                return TargetActionOutcome(true, "moved", commitDecision.finalTarget)
-            }
-            Log.w(
-                "A11Y_HELPER",
-                "[SMART_NEXT] Final focus mismatch after retries → snap_back: target=${formatBoundsForLog(targetBounds)} actual=${formatBoundsForLog(afterFocusBounds)} traversalIndex=$traversalIndex label=$label"
-            )
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Delaying rollback due to pending stabilization")
-            val lateFocus = verifyFocusStabilizationAfterAction(
-                root = root,
-                target = target,
-                targetBounds = targetBounds,
-                maxWaitMs = 350L,
-                retryIntervalMs = 50L
-            )
-            val lateFocusAllowed = shouldAllowLateFocusSuccess(
-                root = root,
-                target = target,
-                targetBounds = targetBounds,
-                lateFocus = lateFocus,
-                traversalListSnapshot = traversalListSnapshot,
-                intendedIndex = traversalIndex,
-                isScrollAction = isScrollAction
-            )
-            if (lateFocusAllowed) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Late focus detected → treat as success")
-                val commitDecision = resolveFocusRetargetDecision(
-                    root = root,
-                    intendedTarget = target,
-                    intendedLabel = label,
-                    traversalListSnapshot = traversalListSnapshot,
-                    intendedIndex = traversalIndex,
-                    isScrollAction = isScrollAction
-                )
-                recordRequestedFocusAttempt(traversalIndex, root)
-                recordVisitedFocus(commitDecision.finalTarget, commitDecision.finalLabel, reason = "late_focus_detected_after_retry")
-                return TargetActionOutcome(true, "moved", commitDecision.finalTarget)
-            }
-            val retargetDecision = resolveFocusRetargetDecision(
-                root = root,
-                intendedTarget = target,
-                intendedLabel = label,
-                traversalListSnapshot = traversalListSnapshot,
-                intendedIndex = traversalIndex,
-                isScrollAction = isScrollAction
-            )
-            if (retargetDecision.authoritativeOverride) {
-                recordRequestedFocusAttempt(traversalIndex, root)
-                recordVisitedFocus(retargetDecision.finalTarget, retargetDecision.finalLabel, reason = "focus_retargeted_after_retry")
-                return TargetActionOutcome(true, "moved", retargetDecision.finalTarget)
-            }
-            Log.w("A11Y_HELPER", "[SMART_NEXT] Confirmed real snap_back")
-            syncLastRequestedFocusIndexToCurrentFocus(root, buildTalkBackLikeFocusNodes(root).map { it.node })
-            return TargetActionOutcome(false, "snap_back", target)
-        }
-
-        recordRequestedFocusAttempt(traversalIndex, root)
-        Thread.sleep(100)
-        val commitDecision = resolveFocusRetargetDecision(
-            root = root,
-            intendedTarget = target,
-            intendedLabel = label,
-            traversalListSnapshot = traversalListSnapshot,
-            intendedIndex = traversalIndex,
-            isScrollAction = isScrollAction
-        )
-        val focusedBounds = Rect().also { commitDecision.finalTarget.getBoundsInScreen(it) }
+        val commitDecision = resolveFocusRetargetDecision(root, target, label, traversalListSnapshot, traversalIndex, isScrollAction)
         recordRequestedFocusAttempt(traversalIndex, root)
         recordVisitedFocus(commitDecision.finalTarget, commitDecision.finalLabel, reason = "focus_confirmed_final")
-        Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=true (status=$status)")
-        Log.i("A11Y_HELPER", "[SMART_NEXT] Focused top-most content at Y=${focusedBounds.top}")
-        return TargetActionOutcome(true, "moved", commitDecision.finalTarget)
+        return ActionResult(true, status, commitDecision.finalTarget)
     }
 
     private fun resolveFocusRetargetDecision(
@@ -3476,110 +3134,6 @@ object A11yNavigator {
         )
     }
 
-    private fun shouldAllowLateFocusSuccess(
-        root: AccessibilityNodeInfo,
-        target: AccessibilityNodeInfo,
-        targetBounds: Rect,
-        lateFocus: FocusVerificationResult,
-        traversalListSnapshot: List<AccessibilityNodeInfo>?,
-        intendedIndex: Int,
-        isScrollAction: Boolean
-    ): Boolean {
-        val focusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-        val focusedBounds = focusedNode?.let { Rect().also(it::getBoundsInScreen) } ?: lateFocus.actualBounds
-        val rootBounds = Rect().also(root::getBoundsInScreen)
-        val rootTop = rootBounds.top
-        val rootBottom = rootBounds.bottom
-        val rootHeight = (rootBottom - rootTop).coerceAtLeast(1)
-        val focusedClassName = focusedNode?.className?.toString()
-        val focusedViewId = focusedNode?.viewIdResourceName
-        val isTopChromeFocus = focusedBounds != null &&
-            isTopAppBarNode(focusedClassName, focusedViewId, focusedBounds, rootTop, rootHeight)
-        val actualCandidateIndex = if (focusedNode != null && traversalListSnapshot != null) {
-            findNodeIndexByIdentity(
-                nodes = traversalListSnapshot,
-                target = focusedNode,
-                idOf = { it.viewIdResourceName },
-                textOf = { it.text?.toString() },
-                contentDescriptionOf = { it.contentDescription?.toString() },
-                boundsOf = { Rect().also(it::getBoundsInScreen) }
-            )
-        } else {
-            -1
-        }
-        val isIdentityMismatch = focusedNode != null && !isSameNode(target, focusedNode)
-        val candidateMismatch = actualCandidateIndex >= 0 && intendedIndex >= 0 && actualCandidateIndex != intendedIndex
-        val intendedIsTopHeader = isTopAppBarNode(
-            className = target.className?.toString(),
-            viewIdResourceName = target.viewIdResourceName,
-            boundsInScreen = targetBounds,
-            screenTop = rootTop,
-            screenHeight = rootHeight
-        )
-        val focusedIsInteractiveContent = focusedNode != null && focusedBounds != null &&
-            isContentNode(
-                node = focusedNode,
-                bounds = focusedBounds,
-                screenTop = rootTop,
-                screenBottom = rootBounds.bottom,
-                screenHeight = rootHeight,
-                mainScrollContainer = null
-            )
-        val identityOrBoundsMatch = lateFocus.matchedTarget ||
-            (focusedBounds != null && isWithinSnapBackTolerance(targetBounds, focusedBounds)) ||
-            target.isAccessibilityFocused
-        val allowed = identityOrBoundsMatch &&
-            !isTopChromeFocus &&
-            !(isIdentityMismatch && isScrollAction) &&
-            !candidateMismatch &&
-            !(intendedIsTopHeader && focusedIsInteractiveContent)
-        val reason = if (allowed) "target_matched_and_not_fixed_chrome" else when {
-            !identityOrBoundsMatch -> "target_mismatch"
-            isTopChromeFocus -> "focused_on_top_fixed_chrome"
-            isIdentityMismatch && isScrollAction -> "intended_actual_identity_mismatch"
-            candidateMismatch -> "actual_identified_as_different_candidate"
-            intendedIsTopHeader && focusedIsInteractiveContent -> "intended_header_actual_content_mismatch"
-            else -> "rejected"
-        }
-        Log.i(
-            "A11Y_HELPER",
-            "[FOCUS_VERIFY] late_success_gate_eval intended=${formatBoundsForLog(targetBounds)} actual=${formatBoundsForLog(focusedBounds)} allowed=$allowed reason=$reason"
-        )
-        return allowed
-    }
-
-    internal fun isNodeFullyVisible(bounds: Rect, screenTop: Int, effectiveBottom: Int): Boolean {
-        return bounds.top >= screenTop && bounds.bottom <= effectiveBottom
-    }
-
-    internal fun isNodeBottomClipped(bounds: Rect, effectiveBottom: Int, boundaryPaddingPx: Int = 16): Boolean {
-        return bounds.bottom > effectiveBottom || bounds.bottom >= (effectiveBottom - boundaryPaddingPx)
-    }
-
-    internal fun shouldLiftTrailingContentBeforeFocus(
-        bounds: Rect,
-        effectiveBottom: Int,
-        trailingEdgeThresholdPx: Int = 60,
-        thinTrailingHeightPx: Int = 96
-    ): Boolean {
-        val height = (bounds.bottom - bounds.top).coerceAtLeast(0)
-        val touchesBottomEdge = bounds.bottom >= (effectiveBottom - trailingEdgeThresholdPx)
-        return height in 1..thinTrailingHeightPx && touchesBottomEdge
-    }
-
-    internal fun isNodePoorlyPositionedForFocus(
-        bounds: Rect,
-        screenTop: Int,
-        effectiveBottom: Int,
-        readableBottomZoneRatio: Float = 0.2f
-    ): Boolean {
-        if (!isNodeFullyVisible(bounds, screenTop, effectiveBottom)) return true
-        if (isNodeBottomClipped(bounds, effectiveBottom)) return true
-        if (shouldLiftTrailingContentBeforeFocus(bounds, effectiveBottom)) return true
-        val safeBottom = effectiveBottom - ((effectiveBottom - screenTop) * readableBottomZoneRatio).toInt()
-        return bounds.bottom > safeBottom
-    }
-
     internal fun alignCandidateForReadableFocus(
         root: AccessibilityNodeInfo,
         target: AccessibilityNodeInfo,
@@ -3598,10 +3152,10 @@ object A11yNavigator {
             return
         }
         var currentBounds = Rect().also { target.getBoundsInScreen(it) }
-        val poorlyPositioned = isNodePoorlyPositionedForFocus(currentBounds, screenTop, effectiveBottom)
+        val poorlyPositioned = A11yNodeUtils.isNodePoorlyPositionedForFocus(currentBounds, screenTop, effectiveBottom)
         if (!poorlyPositioned) return
 
-        if (isNodeBottomClipped(currentBounds, effectiveBottom)) {
+        if (A11yNodeUtils.isNodeBottomClipped(currentBounds, effectiveBottom)) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Candidate is bottom-clipped, attempting pre-focus alignment")
         }
 
@@ -3629,7 +3183,7 @@ object A11yNavigator {
 
             val shouldTryContainerScroll =
                 !shouldUseMinimalAdjustment &&
-                canScrollForwardHint && (isNodeBottomClipped(currentBounds, effectiveBottom) || shouldLiftTrailingContentBeforeFocus(currentBounds, effectiveBottom))
+                canScrollForwardHint && (A11yNodeUtils.isNodeBottomClipped(currentBounds, effectiveBottom) || A11yNodeUtils.shouldLiftTrailingContentBeforeFocus(currentBounds, effectiveBottom))
             if (shouldTryContainerScroll) {
                 val scrollableNode = findScrollableForwardAncestorCandidate(target) ?: findScrollableForwardCandidate(root)
                 if (scrollableNode != null) {
@@ -3651,14 +3205,14 @@ object A11yNavigator {
                 Log.w("A11Y_HELPER", "[SMART_NEXT] Overshoot detected: adjustment exposed a later card as primary content")
                 break
             }
-            if (!isNodePoorlyPositionedForFocus(currentBounds, screenTop, effectiveBottom)) {
+            if (!A11yNodeUtils.isNodePoorlyPositionedForFocus(currentBounds, screenTop, effectiveBottom)) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Intended candidate is now fully visible")
                 return
             }
             adjustments += 1
         }
 
-        if (isNodeFullyVisible(currentBounds, screenTop, effectiveBottom)) {
+        if (A11yNodeUtils.isNodeFullyVisible(currentBounds, screenTop, effectiveBottom)) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Intended candidate is now fully visible")
         } else {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Proceeding with best-effort focus on intended candidate")
@@ -3731,77 +3285,6 @@ object A11yNavigator {
         val visibleTop = maxOf(bounds.top, screenTop)
         val visibleBottom = minOf(bounds.bottom, effectiveBottom)
         return (visibleBottom - visibleTop).coerceAtLeast(0)
-    }
-
-    internal fun isTransientSystemUiFocus(
-        focusedPackageName: String?,
-        targetPackageName: String?
-    ): Boolean {
-        if (focusedPackageName.isNullOrBlank()) return false
-        if (focusedPackageName != "com.android.systemui") return false
-        return targetPackageName?.toString()?.trim() != "com.android.systemui"
-    }
-
-    internal data class VisualFocusStabilizationResult(
-        val stabilized: Boolean,
-        val fallbackApplied: Boolean,
-        val actualBounds: Rect?
-    )
-
-    internal fun stabilizeVisualFocusAfterMove(
-        root: AccessibilityNodeInfo,
-        target: AccessibilityNodeInfo,
-        targetBounds: Rect,
-        maxWaitMs: Long = 200L,
-        retryIntervalMs: Long = 50L,
-        maxFallbackAttempts: Int = 1
-    ): VisualFocusStabilizationResult {
-        Log.i("A11Y_HELPER", "[SMART_NEXT] Stabilizing visual focus for target=${target.text ?: target.contentDescription ?: "<no-label>"}")
-        val targetPackageName = target.packageName?.toString()
-        val maxRetries = (maxWaitMs / retryIntervalMs).toInt().coerceAtLeast(0)
-        var lastActualBounds: Rect? = null
-        var fallbackApplied = false
-        var fallbackAttempts = 0
-
-        while (true) {
-            for (retry in 0..maxRetries) {
-                val focusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-                val actualBounds = focusedNode?.let { Rect().also(it::getBoundsInScreen) }
-                val focusedPackageName = focusedNode?.packageName?.toString()
-                lastActualBounds = actualBounds
-
-                if (isTransientSystemUiFocus(focusedPackageName, targetPackageName)) {
-                    Log.i("A11Y_HELPER", "[SMART_NEXT] Ignoring transient system UI focus during stabilization")
-                } else {
-                    target.refresh()
-                    val targetFocused = target.isAccessibilityFocused
-                    val boundsMatched = actualBounds != null && isWithinSnapBackTolerance(targetBounds, actualBounds)
-                    if (targetFocused && boundsMatched) {
-                        Log.i("A11Y_HELPER", "[SMART_NEXT] Visual focus stabilized on intended target")
-                        return VisualFocusStabilizationResult(true, fallbackApplied, actualBounds)
-                    }
-                }
-
-                if (retry < maxRetries) {
-                    Thread.sleep(retryIntervalMs)
-                }
-            }
-
-            if (fallbackAttempts >= maxFallbackAttempts) {
-                return VisualFocusStabilizationResult(false, fallbackApplied, lastActualBounds)
-            }
-
-            fallbackAttempts += 1
-            fallbackApplied = true
-            Log.w("A11Y_HELPER", "[SMART_NEXT] Visual focus stabilization fallback applied")
-            target.refresh()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                target.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
-            }
-            target.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-            target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
-            Thread.sleep(retryIntervalMs)
-        }
     }
 
     internal fun <T> findNextEligibleTraversalCandidate(
@@ -4044,45 +3527,6 @@ object A11yNavigator {
         Log.i("A11Y_HELPER", "[FOCUS_VERIFY] suppression_window_end endedAtMs=$endedAt reason=$reason")
     }
 
-    internal fun shouldDelayBeforeFocusCommand(currentFocusedBounds: Rect?, targetBounds: Rect?): Boolean {
-        if (currentFocusedBounds == null || targetBounds == null) return false
-        return currentFocusedBounds != targetBounds && currentFocusedBounds.top == targetBounds.top
-    }
-
-    internal fun didReceiveFocusEventAfter(
-        timestampBefore: Long,
-        maxWaitMs: Long = 250L,
-        retryIntervalMs: Long = 50L
-    ): Boolean {
-        val maxRetries = (maxWaitMs / retryIntervalMs).toInt().coerceAtLeast(0)
-        repeat(maxRetries + 1) { retry ->
-            if (A11yStateStore.lastUpdatedAt > timestampBefore) {
-                return true
-            }
-            if (retry < maxRetries) {
-                Thread.sleep(retryIntervalMs)
-            }
-        }
-        return false
-    }
-
-    internal fun isAccessibilityFocusEffectivelyActive(
-        isAccessibilityFocused: Boolean,
-        traversalIndex: Int,
-        actualFocusedBounds: Rect? = null,
-        targetBounds: Rect? = null
-    ): Boolean {
-        if (!isAccessibilityFocused) return false
-        if (actualFocusedBounds != null && targetBounds != null && isWithinSnapBackTolerance(targetBounds, actualFocusedBounds)) {
-            return true
-        }
-        if (traversalIndex != -1 && traversalIndex == lastRequestedFocusIndex) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Ignoring stale isAccessibilityFocused=true for repeated traversal index=$traversalIndex")
-            return false
-        }
-        return true
-    }
-
     internal fun applyBottomNavigationSafetyGuide(
         effectiveBottom: Int,
         screenBottom: Int,
@@ -4090,108 +3534,6 @@ object A11yNavigator {
     ): Int {
         val minGuideBottom = (screenBottom * minVisibleRatio).toInt()
         return minOf(effectiveBottom, minGuideBottom)
-    }
-
-    internal fun requestAccessibilityFocusWithRetry(
-        performFocusAction: () -> Boolean,
-        refreshFocusState: () -> Boolean,
-        evaluateEffectiveFocus: (() -> Boolean)? = null,
-        maxAttempts: Int = 3,
-        retryDelayMs: Long = 100L
-    ): Boolean {
-        repeat(maxAttempts) { attempt ->
-            if (performFocusAction()) {
-                return true
-            }
-            val alreadyFocused = refreshFocusState()
-            if (alreadyFocused) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS returned false but node is already focused on attempt=${attempt + 1}")
-                return true
-            }
-            if (evaluateEffectiveFocus?.invoke() == true) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS returned false but effective system focus matched target on attempt=${attempt + 1}")
-                return true
-            }
-            if (attempt < maxAttempts - 1) {
-                Thread.sleep(retryDelayMs)
-            }
-        }
-        return false
-    }
-
-    internal data class FocusVerificationResult(
-        val matchedTarget: Boolean,
-        val isTargetAccessibilityFocused: Boolean,
-        val actualBounds: Rect?,
-        val retryCount: Int
-    )
-
-    internal fun verifyFocusStabilizationAfterAction(
-        root: AccessibilityNodeInfo,
-        target: AccessibilityNodeInfo,
-        targetBounds: Rect,
-        maxWaitMs: Long = 250L,
-        retryIntervalMs: Long = 50L
-    ): FocusVerificationResult {
-        val maxRetries = (maxWaitMs / retryIntervalMs).toInt().coerceAtLeast(0)
-        var retryCount = 0
-        var lastActualBounds: Rect? = null
-        var lastTargetFocused = false
-
-        while (retryCount <= maxRetries) {
-            val actualBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
-                Rect().also { focusedNode.getBoundsInScreen(it) }
-            }
-            target.refresh()
-            val targetFocused = target.isAccessibilityFocused
-            Log.i(
-                "A11Y_HELPER",
-                "[SMART_NEXT] Focus verification retry i=$retryCount, actual=${formatBoundsForLog(actualBounds)}, target=${formatBoundsForLog(targetBounds)}"
-            )
-            if (isTargetFocusResolved(targetFocused, actualBounds, targetBounds)) {
-                return FocusVerificationResult(
-                    matchedTarget = true,
-                    isTargetAccessibilityFocused = targetFocused,
-                    actualBounds = actualBounds,
-                    retryCount = retryCount
-                )
-            }
-            lastActualBounds = actualBounds
-            lastTargetFocused = targetFocused
-            if (retryCount < maxRetries) {
-                Thread.sleep(retryIntervalMs)
-            }
-            retryCount += 1
-        }
-
-        return FocusVerificationResult(
-            matchedTarget = false,
-            isTargetAccessibilityFocused = lastTargetFocused,
-            actualBounds = lastActualBounds,
-            retryCount = maxRetries
-        )
-    }
-
-    internal fun isTargetFocusResolved(
-        isTargetAccessibilityFocused: Boolean,
-        actualFocusedBounds: Rect?,
-        targetBounds: Rect
-    ): Boolean {
-        if (isTargetAccessibilityFocused) return true
-        if (actualFocusedBounds == null) return false
-        return isWithinSnapBackTolerance(targetBounds, actualFocusedBounds)
-    }
-
-    internal fun shouldTreatAsSnapBackAfterVerification(
-        actualFocusedBounds: Rect?,
-        targetBounds: Rect,
-        isTargetAccessibilityFocused: Boolean
-    ): Boolean {
-        return !isTargetFocusResolved(
-            isTargetAccessibilityFocused = isTargetAccessibilityFocused,
-            actualFocusedBounds = actualFocusedBounds,
-            targetBounds = targetBounds
-        )
     }
 
     internal fun <T> shouldScrollAtEndOfTraversal(
@@ -4554,7 +3896,7 @@ object A11yNavigator {
             Log.w("A11Y_HELPER", "[SMART_NEXT] Focus jumped to top loop-prone control after no-progress scroll. Forcing bottom bar fallback.")
         }
 
-        val focused = performFocusWithVisibilityCheck(
+        val focused = requestFocusFlow(
             root = root,
             target = bottomBarNode,
             screenTop = rootRect.top,
@@ -4577,7 +3919,7 @@ object A11yNavigator {
             "A11Y_HELPER",
             "[SMART_NEXT] Bottom bar fallback focus failed after no-progress scroll. actualFocusedIndex=$actualFocusedIndex targetBounds=$bottomBarBounds focusedBounds=$focusedBounds"
         )
-        return focused
+        return TargetActionOutcome(focused.success, focused.status, focused.targetNode)
     }
 
     private fun resolveFocusedIndexInTraversal(
