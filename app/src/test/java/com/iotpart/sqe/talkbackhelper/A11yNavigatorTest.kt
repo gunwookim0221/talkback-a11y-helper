@@ -10,7 +10,20 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.30.5")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.31.7")
+    }
+
+    @Test
+    fun isContainerLikeViewId_detectsFeatureWrapper() {
+        assertTrue(A11yNavigator.isContainerLikeViewId("com.samsung.android.oneconnect:id/feature_item_menu"))
+    }
+
+    @Test
+    fun shouldAllowRecoveredDescendantLabelForTraversal_rejectsMultiItemContainerLabels() {
+        val allow = A11yNavigator.shouldAllowRecoveredDescendantLabelForTraversal(
+            listOf("Samsung AI Subscription", "Virtual Home", "Safe", "Android Auto")
+        )
+        assertFalse(allow)
     }
 
     @Test
