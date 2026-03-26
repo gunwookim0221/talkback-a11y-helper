@@ -1162,6 +1162,55 @@ class A11yNavigatorTest {
     }
 
     @Test
+    fun findAnchorContinuationCandidateIndex_acceptsContentContinuationDespiteRewoundBeforeAnchor_whenDescendantLabelResolved() {
+        data class Node(
+            val className: String?,
+            val viewId: String?,
+            val bounds: Rect,
+            val label: String?,
+            val descendantLabel: String?,
+            val focusable: Boolean,
+            val clickable: Boolean
+        )
+
+        val nodes = listOf(
+            Node("android.widget.TextView", "com.test:id/app_logo_image", Rect(0, 80, 1000, 260), "SmartThings", "", true, false),
+            Node("android.widget.FrameLayout", "com.test:id/item_labs", Rect(30, 520, 1050, 680), "", "Labs", true, true)
+        )
+
+        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+            traversalList = nodes,
+            startIndex = 0,
+            visibleHistory = setOf("SmartThings"),
+            visibleHistorySignatures = emptySet(),
+            visitedHistory = setOf("SmartThings"),
+            visitedHistorySignatures = emptySet(),
+            screenTop = 0,
+            screenBottom = 2200,
+            screenHeight = 2200,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId },
+            isContentNodeOf = { node -> node.viewId == "com.test:id/item_labs" },
+            clickableOf = { it.clickable },
+            focusableOf = { it.focusable },
+            descendantLabelOf = { it.descendantLabel },
+            preScrollAnchor = A11yNavigator.PreScrollAnchor(
+                viewIdResourceName = "com.test:id/item_voice_assistant",
+                mergedLabel = "Voice assistant",
+                talkbackLabel = "Voice assistant",
+                text = "Voice assistant",
+                contentDescription = null,
+                bounds = Rect(30, 620, 1050, 800)
+            ),
+            preScrollAnchorBottom = 800,
+            labelOf = { it.label }
+        )
+
+        assertEquals(1, index)
+    }
+
+    @Test
     fun findAnchorContinuationCandidateIndex_prioritizesPromotedRawOnlyCandidateOverLowPriorityFallback() {
         data class Node(val className: String?, val viewId: String?, val bounds: Rect, val label: String?)
 

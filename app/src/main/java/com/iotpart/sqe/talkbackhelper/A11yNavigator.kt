@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.46.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.47.0"
     private const val RETARGET_SUPPRESSION_WINDOW_MS: Long = 400L
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
@@ -170,7 +170,8 @@ object A11yNavigator {
     private data class ContinuationCandidateEvaluation(
         val priority: Int,
         val rejectionReasons: List<String>,
-        val isLogicalSuccessor: Boolean = false
+        val isLogicalSuccessor: Boolean = false,
+        val acceptedDespiteRewoundBeforeAnchor: Boolean = false
     )
 
     private data class NewlyRevealedEvaluation(
@@ -194,6 +195,22 @@ object A11yNavigator {
 
     @Volatile
     private var authoritativeFocusWindowUntilMs: Long = 0L
+    @Volatile
+    private var activeSmartNextTurnId: Long = 0L
+    @Volatile
+    private var lastFinalCommitTurnId: Long = 0L
+    @Volatile
+    private var smartNextTurnSeed: Long = 0L
+    @Volatile
+    private var authoritativeCommittedBounds: Rect? = null
+    @Volatile
+    private var authoritativeCommittedIdentity: String? = null
+    @Volatile
+    private var authoritativeCommittedLabel: String? = null
+    @Volatile
+    private var authoritativeCommittedNode: AccessibilityNodeInfo? = null
+    @Volatile
+    private var authoritativeCommittedStatus: String = "moved"
 
     internal data class PostScrollContinuationSearchResult(
         val index: Int,
@@ -652,11 +669,21 @@ object A11yNavigator {
             Log.i("A11Y_HELPER", "[SMART_NEXT] rootInActiveWindow is null.")
             return TargetActionOutcome(false, "Root node is null")
         }
-
-        val runtimeState = collectSmartNextRuntimeState(root, currentNode)
-        val nextActionDecision = decideNextAction(runtimeState)
-        val execution = executeNextAction(nextActionDecision)
-        return verifyAndFinalizeNextAction(nextActionDecision, execution)
+        val turnId = synchronized(this) {
+            smartNextTurnSeed += 1L
+            smartNextTurnSeed
+        }
+        activeSmartNextTurnId = turnId
+        return try {
+            val runtimeState = collectSmartNextRuntimeState(root, currentNode)
+            val nextActionDecision = decideNextAction(runtimeState)
+            val execution = executeNextAction(nextActionDecision)
+            verifyAndFinalizeNextAction(nextActionDecision, execution)
+        } finally {
+            if (activeSmartNextTurnId == turnId) {
+                activeSmartNextTurnId = 0L
+            }
+        }
     }
 
     private fun collectSmartNextRuntimeState(
@@ -718,11 +745,28 @@ object A11yNavigator {
         decision: NextActionDecision,
         execution: NextActionExecution
     ): TargetActionOutcome {
+        val statusLockedByFinalCommit = lastFinalCommitTurnId != 0L && lastFinalCommitTurnId == activeSmartNextTurnId
+        val finalizedOutcome = if (statusLockedByFinalCommit && !execution.outcome.success) {
+            val lockedTarget = authoritativeCommittedNode ?: execution.outcome.target
+            TargetActionOutcome(
+                success = true,
+                reason = authoritativeCommittedStatus,
+                target = lockedTarget
+            )
+        } else {
+            execution.outcome
+        }
+        if (statusLockedByFinalCommit) {
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT] status_locked_by_final_commit turnId=$activeSmartNextTurnId status=${finalizedOutcome.reason} success=${finalizedOutcome.success}"
+            )
+        }
         Log.i(
             "A11Y_HELPER",
-            "[SMART_NEXT][FINALIZE] nextIndex=${decision.initialTarget.nextIndex} success=${execution.outcome.success} reason=${execution.outcome.reason}"
+            "[SMART_NEXT][FINALIZE] nextIndex=${decision.initialTarget.nextIndex} success=${finalizedOutcome.success} reason=${finalizedOutcome.reason}"
         )
-        return execution.outcome
+        return finalizedOutcome
     }
 
     private fun decideSmartNextExecution(
@@ -2147,9 +2191,19 @@ object A11yNavigator {
         focusable: Boolean?,
         isOutOfScreen: Boolean,
         isLogicalSuccessor: Boolean,
-        rewoundNonContentCandidate: Boolean
+        rewoundNonContentCandidate: Boolean,
+        descendantLabelResolved: Boolean,
+        hasResolvedLabel: Boolean
     ): ContinuationCandidateEvaluation {
         val reasons = mutableListOf<String>()
+        val allowContinuationDespiteRewoundBeforeAnchor =
+            rewoundBeforeAnchor &&
+                !classification.isTopChrome &&
+                !classification.isPersistentHeader &&
+                classification.isContentNode &&
+                descendantLabelResolved &&
+                hasResolvedLabel &&
+                (isLogicalSuccessor || continuationFallbackCandidate || hasUnvisitedLabeledContentCandidate)
         if (classification.isTopChrome) reasons += "rejected:top_resurfaced_header"
         if (!classification.isContentNode) reasons += "rejected:not_content_node"
         if (focusable == false) reasons += "rejected:not_focusable"
@@ -2157,7 +2211,7 @@ object A11yNavigator {
         if (inVisitedHistory && !continuationFallbackCandidate) reasons += "rejected:already_visited"
         if (headerResurfacedBeforeAnchor) reasons += "rejected:header_resurfaced_before_anchor"
         if (rewoundNonContentCandidate) reasons += "rejected:rewound_before_anchor"
-        if (rewoundBeforeAnchor) {
+        if (rewoundBeforeAnchor && !allowContinuationDespiteRewoundBeforeAnchor) {
             reasons += "rejected:rewound_before_anchor"
         }
 
@@ -2171,7 +2225,8 @@ object A11yNavigator {
         return ContinuationCandidateEvaluation(
             priority = if (reasons.isEmpty()) priority else Int.MAX_VALUE,
             rejectionReasons = reasons,
-            isLogicalSuccessor = isLogicalSuccessor
+            isLogicalSuccessor = isLogicalSuccessor,
+            acceptedDespiteRewoundBeforeAnchor = allowContinuationDespiteRewoundBeforeAnchor
         )
     }
 
@@ -2595,7 +2650,9 @@ object A11yNavigator {
                 focusable = focusableOf?.invoke(node),
                 isOutOfScreen = isOutOfScreen,
                 isLogicalSuccessor = isLogicalSuccessor,
-                rewoundNonContentCandidate = rewoundNonContentCandidate
+                rewoundNonContentCandidate = rewoundNonContentCandidate,
+                descendantLabelResolved = descendantLabelResolved,
+                hasResolvedLabel = hasResolvedLabel
             )
             val reasons = candidateEvaluation.rejectionReasons.toMutableList()
             if (label.isBlank() && descendantLabelOf != null && descendantLabel.isBlank()) {
@@ -2626,13 +2683,21 @@ object A11yNavigator {
                     focusable = focusableOf?.invoke(node),
                     isOutOfScreen = isOutOfScreen,
                     isLogicalSuccessor = isLogicalSuccessor,
-                    rewoundNonContentCandidate = rewoundNonContentCandidate
+                    rewoundNonContentCandidate = rewoundNonContentCandidate,
+                    descendantLabelResolved = descendantLabelResolved,
+                    hasResolvedLabel = hasResolvedLabel
                 ).priority
             } else {
                 Int.MAX_VALUE
             }
 
             if (candidatePriority != Int.MAX_VALUE && reasons.none { it.startsWith("candidate rejected") }) {
+                if (candidateEvaluation.acceptedDespiteRewoundBeforeAnchor) {
+                    Log.i(
+                        "A11Y_HELPER",
+                        "[SMART_NEXT] accepted:continuation_candidate_despite_rewound_before_anchor index=$index label=${if (label.isBlank()) "<no-label>" else label.replace("\n", " ")} descendantLabel=${if (descendantLabel.isBlank()) "<no-label>" else descendantLabel.replace("\n", " ")} actualCandidateMatchLikely=${isLogicalSuccessor || continuationFallbackCandidate || hasUnvisitedLabeledContentCandidate}"
+                    )
+                }
                 when (candidatePriority) {
                     0 -> {
                         Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting newly available unvisited interactive continuation candidate")
@@ -3387,11 +3452,12 @@ object A11yNavigator {
                 "[FOCUS_VERIFY] suppression_window_event type=A11Y_ANNOUNCEMENT suppressed=true reason=top_resurfaced_header_during_authoritative_window label=${resolvePrimaryLabel(actualFocusedNode) ?: recoverDescendantLabel(actualFocusedNode) ?: "<no-label>"}"
             )
         }
-        if (retarget) {
-            startAuthoritativeFocusSuppressionWindow(finalTarget, finalLabel)
+        if (isScrollAction) {
+            startAuthoritativeFocusSuppressionWindow(finalTarget, finalLabel, "moved")
         } else if (!isWithinAuthoritativeFocusWindow()) {
             clearAuthoritativeFocusSuppressionWindow("window_expired_or_not_needed")
         }
+        lastFinalCommitTurnId = activeSmartNextTurnId
         Log.i(
             "A11Y_HELPER",
             "[FOCUS_VERIFY] final_focus_commit candidate=${finalLabel.replace("\n", " ")} source=$source"
@@ -3895,9 +3961,66 @@ object A11yNavigator {
         return false
     }
 
-    private fun startAuthoritativeFocusSuppressionWindow(candidate: AccessibilityNodeInfo, label: String) {
+    internal fun shouldIgnorePostCommitResurfacedHeader(
+        root: AccessibilityNodeInfo?,
+        candidate: AccessibilityNodeInfo?,
+        eventType: Int
+    ): Boolean {
+        if (candidate == null || !isWithinAuthoritativeFocusWindow()) return false
+        val committedBounds = authoritativeCommittedBounds ?: return false
+        val candidateBounds = Rect().also(candidate::getBoundsInScreen)
+        val sameBounds = candidateBounds == committedBounds
+        val committedIdentity = authoritativeCommittedIdentity
+        val candidateIdentity = nodeIdentityOf(candidate)
+        val sameIdentity = !committedIdentity.isNullOrBlank() && committedIdentity == candidateIdentity
+        if (sameBounds || sameIdentity) return false
+
+        val rootBounds = root?.let { Rect().also(it::getBoundsInScreen) } ?: Rect(0, 0, 0, candidateBounds.bottom)
+        val rootTop = rootBounds.top
+        val rootBottom = if (rootBounds.bottom > rootBounds.top) rootBounds.bottom else candidateBounds.bottom
+        val rootHeight = (rootBottom - rootTop).coerceAtLeast(1)
+        val isHeaderLike = isHeaderLikeCandidate(
+            className = candidate.className?.toString(),
+            viewIdResourceName = candidate.viewIdResourceName,
+            label = resolvePrimaryLabel(candidate) ?: recoverDescendantLabel(candidate),
+            boundsInScreen = candidateBounds,
+            screenTop = rootTop,
+            screenHeight = rootHeight
+        )
+        val isTopChrome = isTopAppBarNode(
+            className = candidate.className?.toString(),
+            viewIdResourceName = candidate.viewIdResourceName,
+            boundsInScreen = candidateBounds,
+            screenTop = rootTop,
+            screenHeight = rootHeight
+        )
+        val isPersistentHeader = candidateBounds.top <= rootTop + (rootHeight / 4) && isHeaderLike
+        val isContent = isContentNode(
+            node = candidate,
+            bounds = candidateBounds,
+            screenTop = rootTop,
+            screenBottom = rootBottom,
+            screenHeight = rootHeight,
+            mainScrollContainer = null
+        )
+        val shouldIgnore = (isTopChrome || isPersistentHeader || isHeaderLike) && !isContent
+        if (shouldIgnore) {
+            Log.i(
+                "A11Y_HELPER",
+                "[FOCUS_VERIFY] ignored_post_commit_resurfaced_header eventType=$eventType candidate=${(resolvePrimaryLabel(candidate) ?: recoverDescendantLabel(candidate) ?: "<no-label>").replace("\n", " ")} committed=${(authoritativeCommittedLabel ?: "<no-label>").replace("\n", " ")} committedBounds=${formatBoundsForLog(committedBounds)} candidateBounds=${formatBoundsForLog(candidateBounds)}"
+            )
+        }
+        return shouldIgnore
+    }
+
+    private fun startAuthoritativeFocusSuppressionWindow(candidate: AccessibilityNodeInfo, label: String, status: String) {
         val until = System.currentTimeMillis() + RETARGET_SUPPRESSION_WINDOW_MS
         authoritativeFocusWindowUntilMs = until
+        authoritativeCommittedNode = candidate
+        authoritativeCommittedLabel = label
+        authoritativeCommittedIdentity = nodeIdentityOf(candidate)
+        authoritativeCommittedBounds = Rect().also(candidate::getBoundsInScreen)
+        authoritativeCommittedStatus = status
         Log.i(
             "A11Y_HELPER",
             "[FOCUS_VERIFY] suppression_window_start untilMs=$until candidate=${label.replace("\n", " ")} bounds=${formatBoundsForLog(Rect().also(candidate::getBoundsInScreen))}"
@@ -3908,6 +4031,11 @@ object A11yNavigator {
         if (authoritativeFocusWindowUntilMs == 0L) return
         val endedAt = authoritativeFocusWindowUntilMs
         authoritativeFocusWindowUntilMs = 0L
+        authoritativeCommittedNode = null
+        authoritativeCommittedLabel = null
+        authoritativeCommittedIdentity = null
+        authoritativeCommittedBounds = null
+        authoritativeCommittedStatus = "moved"
         Log.i("A11Y_HELPER", "[FOCUS_VERIFY] suppression_window_end endedAtMs=$endedAt reason=$reason")
     }
 
