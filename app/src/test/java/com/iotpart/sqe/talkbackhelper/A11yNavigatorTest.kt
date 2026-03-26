@@ -960,12 +960,40 @@ class A11yNavigatorTest {
             screenTop = 0,
             screenBottom = 2000,
             screenHeight = 2000,
+            effectiveBottom = 1800,
             boundsOf = { it.bounds },
             classNameOf = { it.className },
-            viewIdOf = { it.viewId }
+            viewIdOf = { it.viewId },
+            canScrollForwardHint = true
         )
 
         assertTrue(complete)
+    }
+
+    @Test
+    fun isContentTraversalCompleteBeforeBottomBar_returnsFalse_whenNearBottomContinuationLikely() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect)
+
+        val nodes = listOf(
+            Node("android.widget.TextView", "com.test:id/menu_voice_assistant_tile", Rect(0, 1540, 1000, 1765)),
+            Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1800, 1000, 2000))
+        )
+
+        val complete = A11yNavigator.isContentTraversalCompleteBeforeBottomBar(
+            traversalList = nodes,
+            currentIndex = 0,
+            bottomBarIndex = 1,
+            screenTop = 0,
+            screenBottom = 2000,
+            screenHeight = 2000,
+            effectiveBottom = 1800,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId },
+            canScrollForwardHint = true
+        )
+
+        assertFalse(complete)
     }
 
     @Test
