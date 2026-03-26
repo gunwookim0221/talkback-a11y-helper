@@ -7,6 +7,8 @@ import android.view.accessibility.AccessibilityNodeInfo
  * UI 노드의 속성 판별 및 검색을 위한 유틸리티 모음
  */
 object A11yNodeUtils {
+    const val VERSION: String = "1.1.0"
+
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
 
     private val TOP_APP_BAR_CLASS_KEYWORDS = listOf("toolbar", "actionbar", "appbarlayout")
@@ -184,5 +186,104 @@ object A11yNodeUtils {
         if (shouldLiftTrailingContentBeforeFocus(bounds, effectiveBottom)) return true
         val safeBottom = effectiveBottom - ((effectiveBottom - screenTop) * readableBottomZoneRatio).toInt()
         return bounds.bottom > safeBottom
+    }
+
+    internal fun <T> isDescendantOf(
+        ancestor: T,
+        node: T,
+        parentOf: (T) -> T?
+    ): Boolean {
+        var current = parentOf(node)
+        while (current != null) {
+            if (current == ancestor) return true
+            current = parentOf(current)
+        }
+        return false
+    }
+
+    internal fun <T> isFixedSystemUI(
+        node: T,
+        mainScrollContainer: T?,
+        parentOf: (T) -> T?,
+        classNameOf: (T) -> String?,
+        viewIdOf: (T) -> String?,
+        textOf: (T) -> String?,
+        contentDescriptionOf: (T) -> String?
+    ): Boolean {
+        val toolbarKeywords = listOf("toolbar", "actionbar", "bottomnavigationview")
+        var current: T? = node
+        while (current != null) {
+            val className = classNameOf(current)?.lowercase().orEmpty()
+            val viewId = viewIdOf(current)?.lowercase().orEmpty()
+            if (toolbarKeywords.any { keyword -> className.contains(keyword) || viewId.contains(keyword) }) {
+                return true
+            }
+            current = parentOf(current)
+        }
+
+        val className = classNameOf(node)?.substringAfterLast('.')?.lowercase().orEmpty()
+        val isStrictFixedButtonClass = className == "button" || className == "imagebutton"
+        if (!isStrictFixedButtonClass) {
+            return false
+        }
+
+        val outsideMainScroll = mainScrollContainer == null || (node != mainScrollContainer && !isDescendantOf(mainScrollContainer, node, parentOf))
+        if (outsideMainScroll) {
+            return true
+        }
+
+        val normalizedLabel = listOfNotNull(textOf(node), contentDescriptionOf(node))
+            .joinToString(separator = " ")
+            .lowercase()
+        val isSystemButton = normalizedLabel.contains("add") || normalizedLabel.contains("more options")
+        return isSystemButton && outsideMainScroll
+    }
+
+    internal fun isFixedSystemUI(node: AccessibilityNodeInfo, mainScrollContainer: AccessibilityNodeInfo?): Boolean {
+        if (A11yTraversalAnalyzer.isOneConnectSettingsCandidateNode(node)) {
+            return false
+        }
+        return isFixedSystemUI(
+            node = node,
+            mainScrollContainer = mainScrollContainer,
+            parentOf = { it.parent },
+            classNameOf = { it.className?.toString() },
+            viewIdOf = { it.viewIdResourceName },
+            textOf = { it.text?.toString() },
+            contentDescriptionOf = { it.contentDescription?.toString() }
+        )
+    }
+
+    internal fun isContentNode(
+        node: AccessibilityNodeInfo,
+        bounds: Rect,
+        screenTop: Int,
+        screenBottom: Int,
+        screenHeight: Int,
+        mainScrollContainer: AccessibilityNodeInfo?
+    ): Boolean {
+        val isBottomNav = isBottomNavigationBar(
+            className = node.className?.toString(),
+            viewIdResourceName = node.viewIdResourceName,
+            boundsInScreen = bounds,
+            screenBottom = screenBottom,
+            screenHeight = screenHeight
+        )
+        if (isBottomNav) return false
+        val isTopBar = isTopAppBar(
+            className = node.className?.toString(),
+            viewIdResourceName = node.viewIdResourceName,
+            boundsInScreen = bounds,
+            screenTop = screenTop,
+            screenHeight = screenHeight
+        )
+        if (isTopBar) return false
+        if (isFixedSystemUI(node, mainScrollContainer)) return false
+        val hasDescendantLabel = !A11yTraversalAnalyzer.recoverDescendantLabel(node).isNullOrBlank()
+        val usableLabel = !node.contentDescription?.toString().isNullOrBlank() || !node.text?.toString().isNullOrBlank() || hasDescendantLabel
+        val traversable = node.isVisibleToUser && !A11yNavigator.isNodePhysicallyOffScreen(bounds, screenTop, screenBottom)
+        val interactive = node.isClickable || node.isFocusable || hasDescendantLabel
+        val isContainerOnly = node == mainScrollContainer
+        return traversable && interactive && usableLabel && !isContainerOnly
     }
 }

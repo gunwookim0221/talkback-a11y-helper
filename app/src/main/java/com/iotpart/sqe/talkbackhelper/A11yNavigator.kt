@@ -12,7 +12,7 @@ typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 typealias FocusedNode = A11yTraversalAnalyzer.FocusedNode
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.58.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.59.0"
 
 
     @Volatile
@@ -467,7 +467,7 @@ object A11yNavigator {
         if (nextIndex !in traversalList.indices) return null
         val nextNode = traversalList[nextIndex]
         val nextBounds = Rect().also { nextNode.getBoundsInScreen(it) }
-        val nextIsBottomBar = isBottomNavigationBarNode(
+        val nextIsBottomBar = A11yNodeUtils.isBottomNavigationBar(
             className = nextNode.className?.toString(),
             viewIdResourceName = nextNode.viewIdResourceName,
             boundsInScreen = nextBounds,
@@ -530,8 +530,8 @@ object A11yNavigator {
                 node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                     ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
             },
-            isTopAppBarNodeOf = { node, bounds -> isTopAppBarNode(node.className?.toString(), node.viewIdResourceName, bounds, context.screenTop, context.screenHeight) },
-            isBottomNavigationBarNodeOf = { node, bounds -> isBottomNavigationBarNode(node.className?.toString(), node.viewIdResourceName, bounds, context.screenBottom, context.screenHeight) }
+            isTopAppBarNodeOf = { node, bounds -> A11yNodeUtils.isTopAppBar(node.className?.toString(), node.viewIdResourceName, bounds, context.screenTop, context.screenHeight) },
+            isBottomNavigationBarNodeOf = { node, bounds -> A11yNodeUtils.isBottomNavigationBar(node.className?.toString(), node.viewIdResourceName, bounds, context.screenBottom, context.screenHeight) }
         )
         val visibleHistorySignatures = A11ySnapshotTracker.collectVisibleHistorySignatures(
             nodes = context.traversalList,
@@ -543,8 +543,8 @@ object A11yNavigator {
                     ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
             },
             viewIdOf = { node -> node.viewIdResourceName },
-            isTopAppBarNodeOf = { node, bounds -> isTopAppBarNode(node.className?.toString(), node.viewIdResourceName, bounds, context.screenTop, context.screenHeight) },
-            isBottomNavigationBarNodeOf = { node, bounds -> isBottomNavigationBarNode(node.className?.toString(), node.viewIdResourceName, bounds, context.screenBottom, context.screenHeight) }
+            isTopAppBarNodeOf = { node, bounds -> A11yNodeUtils.isTopAppBar(node.className?.toString(), node.viewIdResourceName, bounds, context.screenTop, context.screenHeight) },
+            isBottomNavigationBarNodeOf = { node, bounds -> A11yNodeUtils.isBottomNavigationBar(node.className?.toString(), node.viewIdResourceName, bounds, context.screenBottom, context.screenHeight) }
         )
         val oldSnapshot = A11ySnapshotTracker.buildNodeTextSnapshot(context.traversalList)
         val refreshedRoot = A11ySnapshotTracker.pollForUpdatedRoot(A11yHelperService.instance, oldSnapshot, context.root) ?: return TargetActionOutcome(false, "failed")
@@ -687,7 +687,7 @@ object A11yNavigator {
         status: String,
         traversalIndex: Int = -1
     ): TargetActionOutcome {
-        val result = requestFocusFlow(
+        val result = A11yFocusExecutor.requestFocusFlow(
             root = root,
             target = target,
             screenTop = screenTop,
@@ -756,39 +756,6 @@ object A11yNavigator {
         if (skipForFallbackSelectedContinuationCandidate) return false
         if (currentFocusedBounds == null || currentFocusedBounds != candidateBounds) return false
         return true
-    }
-
-    internal fun isContentNode(
-        node: AccessibilityNodeInfo,
-        bounds: Rect,
-        screenTop: Int,
-        screenBottom: Int,
-        screenHeight: Int,
-        mainScrollContainer: AccessibilityNodeInfo?
-    ): Boolean {
-        val isBottomNav = isBottomNavigationBarNode(
-            className = node.className?.toString(),
-            viewIdResourceName = node.viewIdResourceName,
-            boundsInScreen = bounds,
-            screenBottom = screenBottom,
-            screenHeight = screenHeight
-        )
-        if (isBottomNav) return false
-        val isTopBar = isTopAppBarNode(
-            className = node.className?.toString(),
-            viewIdResourceName = node.viewIdResourceName,
-            boundsInScreen = bounds,
-            screenTop = screenTop,
-            screenHeight = screenHeight
-        )
-        if (isTopBar) return false
-        if (isFixedSystemUI(node, mainScrollContainer)) return false
-        val hasDescendantLabel = !A11yTraversalAnalyzer.recoverDescendantLabel(node).isNullOrBlank()
-        val usableLabel = !node.contentDescription?.toString().isNullOrBlank() || !node.text?.toString().isNullOrBlank() || hasDescendantLabel
-        val traversable = node.isVisibleToUser && !isNodePhysicallyOffScreen(bounds, screenTop, screenBottom)
-        val interactive = node.isClickable || node.isFocusable || hasDescendantLabel
-        val isContainerOnly = node == mainScrollContainer
-        return traversable && interactive && usableLabel && !isContainerOnly
     }
 
     internal fun resolveNextTraversalIndexPreservingIntermediateCandidate(
@@ -976,29 +943,6 @@ object A11yNavigator {
         )
     }
 
-
-    internal fun requestFocusFlow(
-        root: AccessibilityNodeInfo,
-        target: AccessibilityNodeInfo,
-        screenTop: Int,
-        effectiveBottom: Int,
-        status: String,
-        isScrollAction: Boolean,
-        traversalIndex: Int,
-        traversalListSnapshot: List<AccessibilityNodeInfo>? = null,
-        currentFocusIndexHint: Int = -1
-    ): ActionResult = A11yFocusExecutor.requestFocusFlow(
-        root = root,
-        target = target,
-        screenTop = screenTop,
-        effectiveBottom = effectiveBottom,
-        status = status,
-        isScrollAction = isScrollAction,
-        traversalIndex = traversalIndex,
-        traversalListSnapshot = traversalListSnapshot,
-        currentFocusIndexHint = currentFocusIndexHint
-    )
-
     internal fun resolveFocusRetargetDecision(
         root: AccessibilityNodeInfo,
         intendedTarget: AccessibilityNodeInfo,
@@ -1167,7 +1111,7 @@ object A11yNavigator {
             boundsInScreen = bounds,
             screenTop = rootTop,
             screenHeight = rootHeight
-        ) || isTopAppBarNode(
+        ) || A11yNodeUtils.isTopAppBar(
             className = node.className?.toString(),
             viewIdResourceName = node.viewIdResourceName,
             boundsInScreen = bounds,
@@ -1250,7 +1194,7 @@ object A11yNavigator {
             Log.w("A11Y_HELPER", "[SMART_NEXT] Focus jumped to top loop-prone control after no-progress scroll. Forcing bottom bar fallback.")
         }
 
-        val focused = requestFocusFlow(
+        val focused = A11yFocusExecutor.requestFocusFlow(
             root = root,
             target = bottomBarNode,
             screenTop = rootRect.top,
@@ -1379,73 +1323,6 @@ object A11yNavigator {
             boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } }
         )
     }
-
-    internal fun <T> isDescendantOf(
-        ancestor: T,
-        node: T,
-        parentOf: (T) -> T?
-    ): Boolean {
-        var current = parentOf(node)
-        while (current != null) {
-            if (current == ancestor) return true
-            current = parentOf(current)
-        }
-        return false
-    }
-
-    internal fun <T> isFixedSystemUI(
-        node: T,
-        mainScrollContainer: T?,
-        parentOf: (T) -> T?,
-        classNameOf: (T) -> String?,
-        viewIdOf: (T) -> String?,
-        textOf: (T) -> String?,
-        contentDescriptionOf: (T) -> String?
-    ): Boolean {
-        val toolbarKeywords = listOf("toolbar", "actionbar", "bottomnavigationview")
-        var current: T? = node
-        while (current != null) {
-            val className = classNameOf(current)?.lowercase().orEmpty()
-            val viewId = viewIdOf(current)?.lowercase().orEmpty()
-            if (toolbarKeywords.any { keyword -> className.contains(keyword) || viewId.contains(keyword) }) {
-                return true
-            }
-            current = parentOf(current)
-        }
-
-        val className = classNameOf(node)?.substringAfterLast('.')?.lowercase().orEmpty()
-        val isStrictFixedButtonClass = className == "button" || className == "imagebutton"
-        if (!isStrictFixedButtonClass) {
-            return false
-        }
-
-        val outsideMainScroll = mainScrollContainer == null || (node != mainScrollContainer && !isDescendantOf(mainScrollContainer, node, parentOf))
-        if (outsideMainScroll) {
-            return true
-        }
-
-        val normalizedLabel = listOfNotNull(textOf(node), contentDescriptionOf(node))
-            .joinToString(separator = " ")
-            .lowercase()
-        val isSystemButton = normalizedLabel.contains("add") || normalizedLabel.contains("more options")
-        return isSystemButton && outsideMainScroll
-    }
-
-    internal fun isFixedSystemUI(node: AccessibilityNodeInfo, mainScrollContainer: AccessibilityNodeInfo?): Boolean {
-        if (A11yTraversalAnalyzer.isOneConnectSettingsCandidateNode(node)) {
-            return false
-        }
-        return isFixedSystemUI(
-            node = node,
-            mainScrollContainer = mainScrollContainer,
-            parentOf = { it.parent },
-            classNameOf = { it.className?.toString() },
-            viewIdOf = { it.viewIdResourceName },
-            textOf = { it.text?.toString() },
-            contentDescriptionOf = { it.contentDescription?.toString() }
-        )
-    }
-
 
     internal fun shouldSkipHistoryNodeAfterScroll(
         isScrollAction: Boolean,
@@ -1809,39 +1686,6 @@ object A11yNavigator {
         return sameViewId || sameText
     }
 
-    internal fun isTopAppBarNode(
-        className: String?,
-        viewIdResourceName: String?,
-        boundsInScreen: Rect,
-        screenTop: Int,
-        screenHeight: Int
-    ): Boolean {
-        return A11yNodeUtils.isTopAppBar(
-            className = className,
-            viewIdResourceName = viewIdResourceName,
-            boundsInScreen = boundsInScreen,
-            screenTop = screenTop,
-            screenHeight = screenHeight
-        )
-    }
-
-    @Suppress("UNUSED_PARAMETER")
-    internal fun isBottomNavigationBarNode(
-        className: String?,
-        viewIdResourceName: String?,
-        boundsInScreen: Rect,
-        screenBottom: Int,
-        screenHeight: Int
-    ): Boolean {
-        return A11yNodeUtils.isBottomNavigationBar(
-            className = className,
-            viewIdResourceName = viewIdResourceName,
-            boundsInScreen = boundsInScreen,
-            screenBottom = screenBottom,
-            screenHeight = screenHeight
-        )
-    }
-
     private fun nodeToModel(
         node: AccessibilityNodeInfo,
         textOverride: String? = null,
@@ -1864,14 +1708,14 @@ object A11yNavigator {
             isVisibleToUser = node.isVisibleToUser,
             focused = node.isFocused,
             accessibilityFocused = node.isAccessibilityFocused,
-            isTopAppBar = isTopAppBarNode(
+            isTopAppBar = A11yNodeUtils.isTopAppBar(
                 className = node.className?.toString(),
                 viewIdResourceName = node.viewIdResourceName,
                 boundsInScreen = rect,
                 screenTop = screenTop,
                 screenHeight = screenHeight
             ),
-            isBottomNavigationBar = isBottomNavigationBarNode(
+            isBottomNavigationBar = A11yNodeUtils.isBottomNavigationBar(
                 className = node.className?.toString(),
                 viewIdResourceName = node.viewIdResourceName,
                 boundsInScreen = rect,

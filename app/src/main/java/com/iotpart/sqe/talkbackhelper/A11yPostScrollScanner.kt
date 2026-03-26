@@ -5,7 +5,7 @@ import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 
 object A11yPostScrollScanner {
-    const val VERSION: String = "1.0.0"
+    const val VERSION: String = "1.1.0"
 
     internal fun findAndFocusFirstContent(
         context: FindAndFocusPhaseContext,
@@ -103,7 +103,7 @@ object A11yPostScrollScanner {
                     classNameOf = { node -> node.className?.toString() },
                     viewIdOf = { node -> node.viewIdResourceName },
                     isContentNodeOf = { node ->
-                        A11yNavigator.isContentNode(
+                        A11yNodeUtils.isContentNode(
                             node = node,
                             bounds = Rect().also { node.getBoundsInScreen(it) },
                             screenTop = context.screenTop,
@@ -123,10 +123,10 @@ object A11yPostScrollScanner {
                             ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                     },
                     isTopAppBarNode = { className, viewId, bounds, top, height ->
-                        A11yNavigator.isTopAppBarNode(className, viewId, bounds, top, height)
+                        A11yNodeUtils.isTopAppBar(className, viewId, bounds, top, height)
                     },
                     isBottomNavigationBarNode = { className, viewId, bounds, bottom, height ->
-                        A11yNavigator.isBottomNavigationBarNode(className, viewId, bounds, bottom, height)
+                        A11yNodeUtils.isBottomNavigationBar(className, viewId, bounds, bottom, height)
                     },
                     isInVisibleHistory = { label, viewId, bounds, visibleHistory, visibleHistorySignatures ->
                         A11ySnapshotTracker.isInVisibleHistory(label, viewId, bounds, visibleHistory, visibleHistorySignatures)
@@ -216,9 +216,9 @@ object A11yPostScrollScanner {
             return null
         }
         if (A11yNavigator.isNodePhysicallyOffScreen(bounds, context.screenTop, context.screenBottom)) return null
-        val isTopBar = A11yNavigator.isTopAppBarNode(node.className?.toString(), node.viewIdResourceName, bounds, context.screenTop, context.screenHeight)
-        val isBottomBar = A11yNavigator.isBottomNavigationBarNode(node.className?.toString(), node.viewIdResourceName, bounds, context.screenBottom, context.screenHeight)
-        val isFixedUi = A11yNavigator.isFixedSystemUI(node, localMainScrollContainer)
+        val isTopBar = A11yNodeUtils.isTopAppBar(node.className?.toString(), node.viewIdResourceName, bounds, context.screenTop, context.screenHeight)
+        val isBottomBar = A11yNodeUtils.isBottomNavigationBar(node.className?.toString(), node.viewIdResourceName, bounds, context.screenBottom, context.screenHeight)
+        val isFixedUi = A11yNodeUtils.isFixedSystemUI(node, localMainScrollContainer)
         val inVisitedHistory = A11ySnapshotTracker.isInVisitedHistory(
             label = label,
             viewId = node.viewIdResourceName,
@@ -230,7 +230,7 @@ object A11yPostScrollScanner {
             isScrollAction = request.isScrollAction,
             inHistory = inVisitedHistory,
             isFixedUi = isFixedUi || isTopBar || isBottomBar,
-            isInsideMainScrollContainer = localMainScrollContainer?.let { container -> node == container || A11yNavigator.isDescendantOf(container, node) { it.parent } } ?: false,
+            isInsideMainScrollContainer = localMainScrollContainer?.let { container -> node == container || A11yNodeUtils.isDescendantOf(container, node) { it.parent } } ?: false,
             isTopArea = A11yNavigator.isWithinTopContentArea(bounds.top, context.screenTop, context.screenHeight)
         )
         if (shouldSkipHistory || (request.isScrollAction && inVisitedHistory)) return null
@@ -249,7 +249,7 @@ object A11yPostScrollScanner {
                 label = A11yTraversalAnalyzer.recoverDescendantLabel(node) ?: label
             }
             loopState.focusAttempted = true
-            val outcome = A11yNavigator.requestFocusFlow(
+            val outcome = A11yFocusExecutor.requestFocusFlow(
                 root = context.root,
                 target = node,
                 screenTop = context.screenTop,

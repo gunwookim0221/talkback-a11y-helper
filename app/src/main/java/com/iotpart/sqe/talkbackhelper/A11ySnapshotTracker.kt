@@ -27,14 +27,14 @@ object A11ySnapshotTracker {
 
         return nodes.joinToString(separator = "") { node ->
             val bounds = Rect().also { node.getBoundsInScreen(it) }
-            val isTopBar = A11yNavigator.isTopAppBarNode(
+            val isTopBar = A11yNodeUtils.isTopAppBar(
                 className = node.className?.toString(),
                 viewIdResourceName = node.viewIdResourceName,
                 boundsInScreen = bounds,
                 screenTop = screenTop,
                 screenHeight = screenHeight
             )
-            val isBottomBar = A11yNavigator.isBottomNavigationBarNode(
+            val isBottomBar = A11yNodeUtils.isBottomNavigationBar(
                 className = node.className?.toString(),
                 viewIdResourceName = node.viewIdResourceName,
                 boundsInScreen = bounds,
@@ -66,14 +66,14 @@ object A11ySnapshotTracker {
         while (stack.isNotEmpty()) {
             val node = stack.removeLast()
             val bounds = Rect().also { node.getBoundsInScreen(it) }
-            val isTopBar = A11yNavigator.isTopAppBarNode(
+            val isTopBar = A11yNodeUtils.isTopAppBar(
                 className = node.className?.toString(),
                 viewIdResourceName = node.viewIdResourceName,
                 boundsInScreen = bounds,
                 screenTop = screenTop,
                 screenHeight = screenHeight
             )
-            val isBottomBar = A11yNavigator.isBottomNavigationBarNode(
+            val isBottomBar = A11yNodeUtils.isBottomNavigationBar(
                 className = node.className?.toString(),
                 viewIdResourceName = node.viewIdResourceName,
                 boundsInScreen = bounds,

@@ -120,7 +120,7 @@ object A11yHistoryManager {
             screenTop = rootTop,
             screenHeight = rootHeight
         )
-        val isTopChrome = A11yNavigator.isTopAppBarNode(
+        val isTopChrome = A11yNodeUtils.isTopAppBar(
             className = candidate.className?.toString(),
             viewIdResourceName = candidate.viewIdResourceName,
             boundsInScreen = candidateBounds,
@@ -128,7 +128,7 @@ object A11yHistoryManager {
             screenHeight = rootHeight
         )
         val isPersistentHeader = candidateBounds.top <= rootTop + (rootHeight / 4) && isHeaderLike
-        val isContent = A11yNavigator.isContentNode(
+        val isContent = A11yNodeUtils.isContentNode(
             node = candidate,
             bounds = candidateBounds,
             screenTop = rootTop,
