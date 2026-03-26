@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.47.1")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.50.0")
     }
 
     @Test
@@ -85,12 +85,12 @@ class A11yNavigatorTest {
             clickable = true,
             focusable = false
         )
-        val result = A11yNavigator.selectContinuationCandidateAfterScrollResult(
+        val result = A11yTraversalAnalyzer.selectPostScrollCandidate(
             traversalList = listOf(node),
             startIndex = 0,
             visibleHistory = setOf("Labs"),
             visibleHistorySignatures = setOf(
-                A11yNavigator.VisibleHistorySignature(
+                A11yHistoryManager.VisibleHistorySignature(
                     label = "",
                     viewId = "com.test:id/item_labs",
                     bounds = Rect(0, 100, 1000, 200),
@@ -109,7 +109,7 @@ class A11yNavigatorTest {
             clickableOf = { it.clickable },
             focusableOf = { it.focusable },
             descendantLabelOf = { it.descendantLabel },
-            preScrollAnchor = A11yNavigator.PreScrollAnchor(
+            preScrollAnchor = A11yHistoryManager.PreScrollAnchor(
                 viewIdResourceName = "com.test:id/anchor",
                 mergedLabel = "Anchor",
                 talkbackLabel = "Anchor",
@@ -145,12 +145,12 @@ class A11yNavigatorTest {
             focusable = true
         )
 
-        val result = A11yNavigator.selectContinuationCandidateAfterScrollResult(
+        val result = A11yTraversalAnalyzer.selectPostScrollCandidate(
             traversalList = listOf(node),
             startIndex = 0,
             visibleHistory = setOf("Continuation Card"),
             visibleHistorySignatures = setOf(
-                A11yNavigator.VisibleHistorySignature(
+                A11yHistoryManager.VisibleHistorySignature(
                     label = "Continuation Card",
                     viewId = "com.test:id/item_continuation",
                     bounds = Rect(0, 120, 1000, 260),
@@ -169,7 +169,7 @@ class A11yNavigatorTest {
             clickableOf = { it.clickable },
             focusableOf = { it.focusable },
             descendantLabelOf = { it.descendantLabel },
-            preScrollAnchor = A11yNavigator.PreScrollAnchor(
+            preScrollAnchor = A11yHistoryManager.PreScrollAnchor(
                 viewIdResourceName = "com.test:id/anchor",
                 mergedLabel = "Anchor",
                 talkbackLabel = "Anchor",
@@ -196,7 +196,7 @@ class A11yNavigatorTest {
             val focusable: Boolean
         )
 
-        val result = A11yNavigator.selectContinuationCandidateAfterScrollResult(
+        val result = A11yTraversalAnalyzer.selectPostScrollCandidate(
             traversalList = listOf(
                 Node(
                     label = "",
@@ -222,7 +222,7 @@ class A11yNavigatorTest {
             clickableOf = { it.clickable },
             focusableOf = { it.focusable },
             descendantLabelOf = { it.descendantLabel },
-            preScrollAnchor = A11yNavigator.PreScrollAnchor(
+            preScrollAnchor = A11yHistoryManager.PreScrollAnchor(
                 viewIdResourceName = "com.test:id/anchor",
                 mergedLabel = "Anchor",
                 talkbackLabel = "Anchor",
@@ -283,7 +283,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldTreatAsSnapBackAfterVerification_returnsFalse_whenTargetIsAccessibilityFocused() {
-        val isSnapBack = A11yNavigator.shouldTreatAsSnapBackAfterVerification(
+        val isSnapBack = A11yFocusExecutor.shouldTreatAsSnapBackAfterVerification(
             actualFocusedBounds = Rect(10, 10, 100, 100),
             targetBounds = Rect(0, 0, 100, 100),
             isTargetAccessibilityFocused = true
@@ -294,7 +294,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldTreatAsSnapBackAfterVerification_returnsFalse_whenBoundsAreWithinTolerance() {
-        val isSnapBack = A11yNavigator.shouldTreatAsSnapBackAfterVerification(
+        val isSnapBack = A11yFocusExecutor.shouldTreatAsSnapBackAfterVerification(
             actualFocusedBounds = Rect(3, 4, 104, 106),
             targetBounds = Rect(0, 0, 100, 100),
             isTargetAccessibilityFocused = false
@@ -305,7 +305,7 @@ class A11yNavigatorTest {
 
     @Test
     fun isTargetFocusResolved_returnsTrue_whenTargetFocusedStateArrivesLate() {
-        val resolved = A11yNavigator.isTargetFocusResolved(
+        val resolved = A11yFocusExecutor.isTargetFocusResolved(
             isTargetAccessibilityFocused = true,
             actualFocusedBounds = Rect(220, 400, 1040, 620),
             targetBounds = Rect(0, 0, 100, 100)
@@ -316,7 +316,7 @@ class A11yNavigatorTest {
 
     @Test
     fun isTargetFocusResolved_returnsTrue_whenBoundsMatchEvenIfFocusFlagIsDelayed() {
-        val resolved = A11yNavigator.isTargetFocusResolved(
+        val resolved = A11yFocusExecutor.isTargetFocusResolved(
             isTargetAccessibilityFocused = false,
             actualFocusedBounds = Rect(502, 1200, 1012, 1396),
             targetBounds = Rect(500, 1198, 1010, 1394)
@@ -327,7 +327,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldTreatAsSnapBackAfterVerification_returnsTrue_whenBoundsMismatchAndTargetNotFocused() {
-        val isSnapBack = A11yNavigator.shouldTreatAsSnapBackAfterVerification(
+        val isSnapBack = A11yFocusExecutor.shouldTreatAsSnapBackAfterVerification(
             actualFocusedBounds = Rect(60, 60, 160, 160),
             targetBounds = Rect(0, 0, 100, 100),
             isTargetAccessibilityFocused = false
@@ -338,7 +338,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldTreatAsSnapBackAfterVerification_returnsTrue_whenActualFocusIsMissing() {
-        val isSnapBack = A11yNavigator.shouldTreatAsSnapBackAfterVerification(
+        val isSnapBack = A11yFocusExecutor.shouldTreatAsSnapBackAfterVerification(
             actualFocusedBounds = null,
             targetBounds = Rect(0, 0, 100, 100),
             isTargetAccessibilityFocused = false
@@ -503,7 +503,7 @@ class A11yNavigatorTest {
             Node("id/security", "Security status of your devices", null, Rect(0, 400, 1000, 520)),
             Node("id/privacy", "Privacy notice", null, Rect(0, 560, 1000, 700))
         )
-        val anchor = A11yNavigator.PreScrollAnchor(
+        val anchor = A11yHistoryManager.PreScrollAnchor(
             viewIdResourceName = "id/security",
             mergedLabel = "Security status of your devices",
             talkbackLabel = "Security status of your devices",
@@ -532,7 +532,7 @@ class A11yNavigatorTest {
             Node("id/security_card", "Security status", null, Rect(0, 410, 1000, 540)),
             Node("id/privacy", "Privacy notice", null, Rect(0, 560, 1000, 700))
         )
-        val anchor = A11yNavigator.PreScrollAnchor(
+        val anchor = A11yHistoryManager.PreScrollAnchor(
             viewIdResourceName = "id/security",
             mergedLabel = "Security status of your devices",
             talkbackLabel = "Security status of your devices",
@@ -831,7 +831,7 @@ class A11yNavigatorTest {
             startIndex = 0,
             visibleHistory = emptySet(),
             visibleHistorySignatures = setOf(
-                A11yNavigator.VisibleHistorySignature(
+                A11yHistoryManager.VisibleHistorySignature(
                     label = "History",
                     viewId = "com.test:id/history",
                     bounds = Rect(0, 110, 1000, 310)
@@ -839,7 +839,7 @@ class A11yNavigatorTest {
             ),
             visitedHistory = emptySet(),
             visitedHistorySignatures = setOf(
-                A11yNavigator.VisibleHistorySignature(
+                A11yHistoryManager.VisibleHistorySignature(
                     label = "History",
                     viewId = "com.test:id/history",
                     bounds = Rect(0, 110, 1000, 310)
@@ -882,7 +882,7 @@ class A11yNavigatorTest {
             classNameOf = { it.className },
             viewIdOf = { it.viewId },
             isContentNodeOf = { true },
-            preScrollAnchor = A11yNavigator.PreScrollAnchor(
+            preScrollAnchor = A11yHistoryManager.PreScrollAnchor(
                 viewIdResourceName = "com.test:id/voice_assistant",
                 mergedLabel = "Voice assistant",
                 talkbackLabel = "Voice assistant",
@@ -930,7 +930,7 @@ class A11yNavigatorTest {
             isContentNodeOf = { true },
             clickableOf = { it.clickable },
             focusableOf = { it.focusable },
-            preScrollAnchor = A11yNavigator.PreScrollAnchor(
+            preScrollAnchor = A11yHistoryManager.PreScrollAnchor(
                 viewIdResourceName = "com.test:id/voice_assistant",
                 mergedLabel = "Voice assistant",
                 talkbackLabel = "Voice assistant",
@@ -977,7 +977,7 @@ class A11yNavigatorTest {
             isContentNodeOf = { true },
             clickableOf = { it.clickable },
             focusableOf = { it.focusable },
-            preScrollAnchor = A11yNavigator.PreScrollAnchor(
+            preScrollAnchor = A11yHistoryManager.PreScrollAnchor(
                 viewIdResourceName = "com.test:id/voice_assistant",
                 mergedLabel = "Voice assistant",
                 talkbackLabel = "Voice assistant",
@@ -1026,7 +1026,7 @@ class A11yNavigatorTest {
             clickableOf = { it.clickable },
             focusableOf = { it.focusable },
             descendantLabelOf = { it.descendantLabel },
-            preScrollAnchor = A11yNavigator.PreScrollAnchor(
+            preScrollAnchor = A11yHistoryManager.PreScrollAnchor(
                 viewIdResourceName = "com.test:id/voice_assistant",
                 mergedLabel = "Voice assistant",
                 talkbackLabel = "Voice assistant",
@@ -1076,7 +1076,7 @@ class A11yNavigatorTest {
             clickableOf = { it.clickable },
             focusableOf = { it.focusable },
             descendantLabelOf = { it.descendantLabel },
-            preScrollAnchor = A11yNavigator.PreScrollAnchor(
+            preScrollAnchor = A11yHistoryManager.PreScrollAnchor(
                 viewIdResourceName = "com.test:id/item_history",
                 mergedLabel = "History",
                 talkbackLabel = "History",
@@ -1146,7 +1146,7 @@ class A11yNavigatorTest {
             classNameOf = { it.className },
             viewIdOf = { it.viewId },
             isContentNodeOf = { true },
-            preScrollAnchor = A11yNavigator.PreScrollAnchor(
+            preScrollAnchor = A11yHistoryManager.PreScrollAnchor(
                 viewIdResourceName = "com.test:id/item_knox_matrix",
                 mergedLabel = "Security status of your devices",
                 talkbackLabel = "Security status of your devices",
@@ -1195,7 +1195,7 @@ class A11yNavigatorTest {
             clickableOf = { it.clickable },
             focusableOf = { it.focusable },
             descendantLabelOf = { it.descendantLabel },
-            preScrollAnchor = A11yNavigator.PreScrollAnchor(
+            preScrollAnchor = A11yHistoryManager.PreScrollAnchor(
                 viewIdResourceName = "com.test:id/item_voice_assistant",
                 mergedLabel = "Voice assistant",
                 talkbackLabel = "Voice assistant",
@@ -2346,7 +2346,7 @@ class A11yNavigatorTest {
     @Test
     fun isInVisibleHistory_returnsTrue_forRecoveredLabelOrMatchingViewId() {
         val signatures = setOf(
-            A11yNavigator.VisibleHistorySignature(
+            A11yHistoryManager.VisibleHistorySignature(
                 label = "History",
                 viewId = "com.test:id/history",
                 bounds = Rect(0, 120, 1000, 320)
