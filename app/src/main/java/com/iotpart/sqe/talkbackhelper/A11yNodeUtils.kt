@@ -153,4 +153,36 @@ object A11yNodeUtils {
         }
         return bestNode
     }
+
+    fun isNodeFullyVisible(bounds: Rect, screenTop: Int, effectiveBottom: Int): Boolean {
+        return bounds.top >= screenTop && bounds.bottom <= effectiveBottom
+    }
+
+    fun isNodeBottomClipped(bounds: Rect, effectiveBottom: Int, boundaryPaddingPx: Int = 16): Boolean {
+        return bounds.bottom > effectiveBottom || bounds.bottom >= (effectiveBottom - boundaryPaddingPx)
+    }
+
+    fun shouldLiftTrailingContentBeforeFocus(
+        bounds: Rect,
+        effectiveBottom: Int,
+        trailingEdgeThresholdPx: Int = 60,
+        thinTrailingHeightPx: Int = 96
+    ): Boolean {
+        val height = (bounds.bottom - bounds.top).coerceAtLeast(0)
+        val touchesBottomEdge = bounds.bottom >= (effectiveBottom - trailingEdgeThresholdPx)
+        return height in 1..thinTrailingHeightPx && touchesBottomEdge
+    }
+
+    fun isNodePoorlyPositionedForFocus(
+        bounds: Rect,
+        screenTop: Int,
+        effectiveBottom: Int,
+        readableBottomZoneRatio: Float = 0.2f
+    ): Boolean {
+        if (!isNodeFullyVisible(bounds, screenTop, effectiveBottom)) return true
+        if (isNodeBottomClipped(bounds, effectiveBottom)) return true
+        if (shouldLiftTrailingContentBeforeFocus(bounds, effectiveBottom)) return true
+        val safeBottom = effectiveBottom - ((effectiveBottom - screenTop) * readableBottomZoneRatio).toInt()
+        return bounds.bottom > safeBottom
+    }
 }
