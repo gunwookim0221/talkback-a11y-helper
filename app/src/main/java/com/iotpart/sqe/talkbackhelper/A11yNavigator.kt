@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.7"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.8"
 
     private val visitedHistoryLock = Any()
     private val visitedHistoryLabels = linkedSetOf<String>()
@@ -510,50 +510,52 @@ object A11yNavigator {
                         "[SMART_NEXT] POST_SCROLL_CANDIDATE index=$index label=${label.replace("\n", " ")} mergedLabel=$mergedLabel talkbackLabel=$talkbackLabel viewId=${node.viewIdResourceName} className=${node.className} clickable=${node.isClickable} focusable=${node.isFocusable} bounds=$bounds visibleHistory=$inVisibleHistory visitedHistory=$inVisitedHistory isTopAppBar=$isTopBar isBottomNav=$isBottomBar"
                     )
                 }
-                findAnchorContinuationCandidateIndex(
-                    traversalList = traversalList,
-                    startIndex = 0,
-                    visibleHistory = visibleHistory,
-                    visibleHistorySignatures = visibleHistorySignatures,
-                    visitedHistory = visitedHistory,
-                    visitedHistorySignatures = visitedHistorySignatures,
-                    screenTop = screenTop,
-                    screenBottom = screenBottom,
-                    screenHeight = screenHeight,
-                    boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
-                    classNameOf = { node -> node.className?.toString() },
-                    viewIdOf = { node -> node.viewIdResourceName },
-                    isContentNodeOf = { node ->
-                        !isFixedSystemUI(node, localMainScrollContainer)
-                    },
-                    clickableOf = { node -> node.isClickable },
-                    focusableOf = { node -> node.isFocusable },
-                    descendantLabelOf = { node -> recoverDescendantLabel(node) },
-                    preScrollAnchorBottom = preScrollAnchor.bounds.bottom,
-                    labelOf = { node ->
-                        node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                            ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                            ?: focusNodeByNode[node]?.mergedLabel?.trim().takeUnless { it.isNullOrEmpty() }
-                            ?: recoverDescendantLabel(node)?.trim().takeUnless { it.isNullOrEmpty() }
+                preScrollAnchor?.let { anchor ->
+                    findAnchorContinuationCandidateIndex(
+                        traversalList = traversalList,
+                        startIndex = 0,
+                        visibleHistory = visibleHistory,
+                        visibleHistorySignatures = visibleHistorySignatures,
+                        visitedHistory = visitedHistory,
+                        visitedHistorySignatures = visitedHistorySignatures,
+                        screenTop = screenTop,
+                        screenBottom = screenBottom,
+                        screenHeight = screenHeight,
+                        boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+                        classNameOf = { node -> node.className?.toString() },
+                        viewIdOf = { node -> node.viewIdResourceName },
+                        isContentNodeOf = { node ->
+                            !isFixedSystemUI(node, localMainScrollContainer)
+                        },
+                        clickableOf = { node -> node.isClickable },
+                        focusableOf = { node -> node.isFocusable },
+                        descendantLabelOf = { node -> recoverDescendantLabel(node) },
+                        preScrollAnchorBottom = anchor.bounds.bottom,
+                        labelOf = { node ->
+                            node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                                ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                                ?: focusNodeByNode[node]?.mergedLabel?.trim().takeUnless { it.isNullOrEmpty() }
+                                ?: recoverDescendantLabel(node)?.trim().takeUnless { it.isNullOrEmpty() }
+                        }
+                    ).also { candidateIndex ->
+                        if (candidateIndex >= 0) {
+                            val candidateNode = traversalList[candidateIndex]
+                            val candidateLabel = candidateNode.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                                ?: candidateNode.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                                ?: focusNodeByNode[candidateNode]?.mergedLabel?.trim().takeUnless { it.isNullOrEmpty() }
+                                ?: recoverDescendantLabel(candidateNode)?.trim().takeUnless { it.isNullOrEmpty() }
+                                ?: "<no-label>"
+                            Log.i(
+                                "A11Y_HELPER",
+                                "[SMART_NEXT] Selected new post-scroll content candidate index=$candidateIndex label=${candidateLabel.replace("\n", " ")}"
+                            )
+                        } else {
+                            continuationFallbackFailed = true
+                            Log.i("A11Y_HELPER", "[SMART_NEXT] Continuation fallback exhausted with no candidate")
+                            Log.i("A11Y_HELPER", "[SMART_NEXT] No new continuation content found; allowing bottom bar")
+                        }
                     }
-                ).also { candidateIndex ->
-                    if (candidateIndex >= 0) {
-                        val candidateNode = traversalList[candidateIndex]
-                        val candidateLabel = candidateNode.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                            ?: candidateNode.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                            ?: focusNodeByNode[candidateNode]?.mergedLabel?.trim().takeUnless { it.isNullOrEmpty() }
-                            ?: recoverDescendantLabel(candidateNode)?.trim().takeUnless { it.isNullOrEmpty() }
-                            ?: "<no-label>"
-                        Log.i(
-                            "A11Y_HELPER",
-                            "[SMART_NEXT] Selected new post-scroll content candidate index=$candidateIndex label=${candidateLabel.replace("\n", " ")}"
-                        )
-                    } else {
-                        continuationFallbackFailed = true
-                        Log.i("A11Y_HELPER", "[SMART_NEXT] Continuation fallback exhausted with no candidate")
-                        Log.i("A11Y_HELPER", "[SMART_NEXT] No new continuation content found; allowing bottom bar")
-                    }
-                }
+                } ?: -1
             } else {
                 -1
             }
