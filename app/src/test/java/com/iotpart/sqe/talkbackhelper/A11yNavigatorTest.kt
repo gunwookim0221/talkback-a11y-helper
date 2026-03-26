@@ -10,7 +10,35 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.29.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.30.2")
+    }
+
+    @Test
+    fun decidePostScrollContinuationPlan_skipsGeneralScan_whenContinuationFallbackFailed() {
+        val plan = A11yNavigator.decidePostScrollContinuationPlan(
+            resolvedAnchorIndex = -1,
+            fallbackBelowAnchorIndex = -1,
+            traversalStartIndex = 0,
+            traversalSize = 5,
+            continuationFallbackFailed = true
+        )
+
+        assertEquals(5, plan.anchorStartIndex)
+        assertTrue(plan.skipGeneralScan)
+    }
+
+    @Test
+    fun decidePostScrollContinuationPlan_usesFallbackCandidate_whenContinuationFallbackSucceeded() {
+        val plan = A11yNavigator.decidePostScrollContinuationPlan(
+            resolvedAnchorIndex = -1,
+            fallbackBelowAnchorIndex = 2,
+            traversalStartIndex = 0,
+            traversalSize = 6,
+            continuationFallbackFailed = false
+        )
+
+        assertEquals(2, plan.anchorStartIndex)
+        assertFalse(plan.skipGeneralScan)
     }
 
     @Test

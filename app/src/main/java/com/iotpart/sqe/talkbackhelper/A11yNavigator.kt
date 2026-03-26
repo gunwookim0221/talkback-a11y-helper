@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.2"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -33,6 +33,11 @@ object A11yNavigator {
         val label: String?,
         val viewId: String?,
         val bounds: Rect
+    )
+
+    internal data class PostScrollContinuationPlan(
+        val anchorStartIndex: Int,
+        val skipGeneralScan: Boolean
     )
 
     fun resetFocusHistory() {
@@ -441,7 +446,9 @@ object A11yNavigator {
             } else {
                 -1
             }
-            val fallbackBelowAnchorIndex = if (isScrollAction && preScrollAnchor != null && resolvedAnchorIndex == -1) {
+            val continuationFallbackAttempted = isScrollAction && preScrollAnchor != null && resolvedAnchorIndex == -1
+            var continuationFallbackFailed = false
+            val fallbackBelowAnchorIndex = if (continuationFallbackAttempted) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Anchor exact match failed; using continuation fallback")
                 findAnchorContinuationCandidateIndex(
                     traversalList = traversalList,
@@ -471,21 +478,28 @@ object A11yNavigator {
                             "[SMART_NEXT] Selected new post-scroll content candidate index=$candidateIndex label=${candidateLabel.replace("\n", " ")}"
                         )
                     } else {
+                        continuationFallbackFailed = true
+                        Log.i("A11Y_HELPER", "[SMART_NEXT] Continuation fallback exhausted with no candidate")
                         Log.i("A11Y_HELPER", "[SMART_NEXT] No new continuation content found; allowing bottom bar")
                     }
                 }
             } else {
-                traversalStartIndex
+                -1
             }
-            val anchorStartIndex = if (resolvedAnchorIndex >= 0) {
-                (resolvedAnchorIndex + 1).coerceAtLeast(traversalStartIndex)
-            } else if (fallbackBelowAnchorIndex >= 0) {
-                fallbackBelowAnchorIndex.coerceAtLeast(traversalStartIndex)
-            } else {
-                traversalStartIndex
-            }
+            val postScrollPlan = decidePostScrollContinuationPlan(
+                resolvedAnchorIndex = resolvedAnchorIndex,
+                fallbackBelowAnchorIndex = fallbackBelowAnchorIndex,
+                traversalStartIndex = traversalStartIndex,
+                traversalSize = traversalList.size,
+                continuationFallbackFailed = continuationFallbackFailed
+            )
+            val anchorStartIndex = postScrollPlan.anchorStartIndex
             if (isScrollAction && preScrollAnchor != null) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting post-anchor continuation candidate index=$anchorStartIndex")
+                if (postScrollPlan.skipGeneralScan) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping general post-scroll scan because continuation fallback failed")
+                } else {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting post-anchor continuation candidate index=$anchorStartIndex")
+                }
             }
 
             for (index in anchorStartIndex until traversalList.size) {
@@ -625,6 +639,32 @@ object A11yNavigator {
                 ) {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping top-loop-prone control during anchored continuation: $label")
                     continue
+                }
+                if (preScrollAnchor != null &&
+                    isScrollAction &&
+                    label == "<no-label>" &&
+                    !canAcceptFallbackSelectedNoLabelCandidate &&
+                    isTopContent &&
+                    bounds.top <= preScrollAnchor.bounds.bottom
+                ) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Evaluating <no-label> candidate in continuation context before treating as noise")
+                    val recoveredLabel = recoverDescendantLabel(node)
+                    if (recoveredLabel != null) {
+                        label = recoveredLabel
+                        Log.i("A11Y_HELPER", "[SMART_NEXT] Resolved descendant label for continuation target: $recoveredLabel")
+                        val recoveredInHistory = isInVisibleHistory(
+                            label = recoveredLabel,
+                            viewId = node.viewIdResourceName,
+                            bounds = bounds,
+                            visibleHistory = visibleHistory,
+                            visibleHistorySignatures = visibleHistorySignatures
+                        )
+                        if (recoveredInHistory) {
+                            Log.i("A11Y_HELPER", "[SMART_NEXT] Recovered label belongs to pre-scroll visible history -> skipping resurfaced item")
+                            Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping resurfaced pre-scroll item: $recoveredLabel")
+                            continue
+                        }
+                    }
                 }
                 if (preScrollAnchor != null &&
                     isScrollAction &&
@@ -1211,6 +1251,25 @@ object A11yNavigator {
             lastRequestedIndex >= 0 -> maxOf(currentIndex + 1, lastRequestedIndex + 1)
             else -> currentIndex + 1
         }
+    }
+
+    internal fun decidePostScrollContinuationPlan(
+        resolvedAnchorIndex: Int,
+        fallbackBelowAnchorIndex: Int,
+        traversalStartIndex: Int,
+        traversalSize: Int,
+        continuationFallbackFailed: Boolean
+    ): PostScrollContinuationPlan {
+        val anchorStartIndex = when {
+            resolvedAnchorIndex >= 0 -> (resolvedAnchorIndex + 1).coerceAtLeast(traversalStartIndex)
+            fallbackBelowAnchorIndex >= 0 -> fallbackBelowAnchorIndex.coerceAtLeast(traversalStartIndex)
+            continuationFallbackFailed -> traversalSize
+            else -> traversalStartIndex
+        }
+        return PostScrollContinuationPlan(
+            anchorStartIndex = anchorStartIndex,
+            skipGeneralScan = continuationFallbackFailed
+        )
     }
 
     internal fun <T> isThinTrailingContentAboveBottomBar(
