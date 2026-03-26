@@ -929,6 +929,56 @@ class A11yNavigatorTest {
     }
 
     @Test
+    fun findAnchorContinuationCandidateIndex_doesNotPromoteTopPersistentHeader_asNewlyRevealed() {
+        data class Node(
+            val className: String?,
+            val viewId: String?,
+            val bounds: Rect,
+            val label: String?,
+            val descendantLabel: String?,
+            val clickable: Boolean,
+            val focusable: Boolean
+        )
+
+        val nodes = listOf(
+            Node("android.widget.Toolbar", "com.test:id/title_bar", Rect(0, 0, 1080, 180), "App title", null, clickable = true, focusable = true),
+            Node("android.widget.FrameLayout", "com.test:id/feature_labs", Rect(0, 320, 1080, 620), null, "Labs", clickable = true, focusable = true),
+            Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1820, 1080, 2000), "Home", null, clickable = true, focusable = true)
+        )
+
+        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+            traversalList = nodes,
+            startIndex = 0,
+            visibleHistory = setOf("App title"),
+            visibleHistorySignatures = emptySet(),
+            visitedHistory = emptySet(),
+            visitedHistorySignatures = emptySet(),
+            screenTop = 0,
+            screenBottom = 2000,
+            screenHeight = 2000,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId },
+            isContentNodeOf = { true },
+            clickableOf = { it.clickable },
+            focusableOf = { it.focusable },
+            descendantLabelOf = { it.descendantLabel },
+            preScrollAnchor = A11yNavigator.PreScrollAnchor(
+                viewIdResourceName = "com.test:id/item_history",
+                mergedLabel = "History",
+                talkbackLabel = "History",
+                text = "History",
+                contentDescription = null,
+                bounds = Rect(0, 980, 1080, 1220)
+            ),
+            preScrollAnchorBottom = 1220,
+            labelOf = { it.label }
+        )
+
+        assertEquals(1, index)
+    }
+
+    @Test
     fun findAnchorContinuationCandidateIndex_prioritizesTrailingContinuationOverTopResurfacedItem() {
         data class Node(val className: String?, val viewId: String?, val bounds: Rect, val label: String?)
 
