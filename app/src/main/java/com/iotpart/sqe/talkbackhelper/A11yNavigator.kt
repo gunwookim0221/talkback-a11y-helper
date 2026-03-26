@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.2"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.3"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -225,6 +225,7 @@ object A11yNavigator {
 
         val focusNodes = buildTalkBackLikeFocusNodes(root)
         val traversalList = focusNodes.map { it.node }
+        val focusNodeByNode = focusNodes.associateBy { it.node }
         Log.i("A11Y_HELPER", "[SMART_NEXT] Nodes count=${traversalList.size}")
         focusNodes.forEachIndexed { index, focusedNode ->
             val bounds = Rect().also { focusedNode.node.getBoundsInScreen(it) }
@@ -450,6 +451,43 @@ object A11yNavigator {
             var continuationFallbackFailed = false
             val fallbackBelowAnchorIndex = if (continuationFallbackAttempted) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Anchor exact match failed; using continuation fallback")
+                logPostScrollRawVsTraversalSnapshot(root, traversalList, focusNodeByNode)
+                traversalList.forEachIndexed { index, node ->
+                    val bounds = Rect().also { node.getBoundsInScreen(it) }
+                    val label = node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                        ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                        ?: "<no-label>"
+                    val focusedNode = focusNodeByNode[node]
+                    val mergedLabel = focusedNode?.mergedLabel?.replace("\n", " ") ?: "<none>"
+                    val talkbackLabel = focusedNode?.contentDescription?.replace("\n", " ")
+                        ?: node.contentDescription?.toString()?.replace("\n", " ")
+                        ?: "<none>"
+                    val inHistory = isInVisibleHistory(
+                        label = label,
+                        viewId = node.viewIdResourceName,
+                        bounds = bounds,
+                        visibleHistory = visibleHistory,
+                        visibleHistorySignatures = visibleHistorySignatures
+                    )
+                    val isTopBar = isTopAppBarNode(
+                        className = node.className?.toString(),
+                        viewIdResourceName = node.viewIdResourceName,
+                        boundsInScreen = bounds,
+                        screenTop = screenTop,
+                        screenHeight = screenHeight
+                    )
+                    val isBottomBar = isBottomNavigationBarNode(
+                        className = node.className?.toString(),
+                        viewIdResourceName = node.viewIdResourceName,
+                        boundsInScreen = bounds,
+                        screenBottom = screenBottom,
+                        screenHeight = screenHeight
+                    )
+                    Log.i(
+                        "A11Y_HELPER",
+                        "[SMART_NEXT] POST_SCROLL_CANDIDATE index=$index label=${label.replace("\n", " ")} mergedLabel=$mergedLabel talkbackLabel=$talkbackLabel viewId=${node.viewIdResourceName} className=${node.className} clickable=${node.isClickable} focusable=${node.isFocusable} bounds=$bounds inHistory=$inHistory isTopAppBar=$isTopBar isBottomNav=$isBottomBar"
+                    )
+                }
                 findAnchorContinuationCandidateIndex(
                     traversalList = traversalList,
                     startIndex = 0,
@@ -464,6 +502,9 @@ object A11yNavigator {
                     isContentNodeOf = { node ->
                         !isFixedSystemUI(node, localMainScrollContainer)
                     },
+                    clickableOf = { node -> node.isClickable },
+                    focusableOf = { node -> node.isFocusable },
+                    descendantLabelOf = { node -> recoverDescendantLabel(node) },
                     labelOf = { node ->
                         node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                             ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
@@ -1465,6 +1506,9 @@ object A11yNavigator {
         classNameOf: (T) -> String?,
         viewIdOf: (T) -> String?,
         isContentNodeOf: (T) -> Boolean = { true },
+        clickableOf: ((T) -> Boolean)? = null,
+        focusableOf: ((T) -> Boolean)? = null,
+        descendantLabelOf: ((T) -> String?)? = null,
         labelOf: (T) -> String?
     ): Int {
         if (traversalList.isEmpty()) return -1
@@ -1482,16 +1526,103 @@ object A11yNavigator {
                 visibleHistorySignatures = visibleHistorySignatures
             )
             val isContentNode = isContentNodeOf(node)
+            val reasons = mutableListOf<String>()
+            if (inHistory) reasons += "candidate rejected: in visible history"
+            if (isTopBar) reasons += "candidate rejected: top app bar"
+            if (isBottomBar) reasons += "candidate rejected: bottom nav"
+            if (focusableOf?.invoke(node) == false) reasons += "candidate rejected: not focusable"
+            if (bounds.bottom <= screenTop || bounds.top >= screenBottom) reasons += "candidate rejected: outside content bounds"
+            val hasDescendantLabel = descendantLabelOf?.invoke(node)?.trim().isNullOrEmpty().not()
+            if (label.isBlank() && descendantLabelOf != null && !hasDescendantLabel) {
+                reasons += "candidate rejected: no descendant label"
+            }
             if (!isTopBar && !isBottomBar && !inHistory && isContentNode) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting truly new continuation candidate after scroll")
                 true
             } else {
+                if (!isContentNode && reasons.none { it == "candidate rejected: outside content bounds" }) {
+                    reasons += "candidate rejected: outside content bounds"
+                }
                 if (inHistory && label.isNotBlank()) {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping resurfaced pre-scroll item: $label")
+                }
+                val candidateLabel = if (label.isBlank()) "<no-label>" else label.replace("\n", " ")
+                if (reasons.isEmpty()) reasons += "candidate rejected: filtered by continuation guard"
+                reasons.forEach { reason ->
+                    Log.i(
+                        "A11Y_HELPER",
+                        "[SMART_NEXT] $reason index=$index label=$candidateLabel viewId=${viewIdOf(node)} className=${classNameOf(node)} clickable=${clickableOf?.invoke(node)} focusable=${focusableOf?.invoke(node)} bounds=$bounds"
+                    )
                 }
                 false
             }
         } ?: -1
+    }
+
+    private data class RawVisibleNode(
+        val label: String,
+        val viewId: String?,
+        val bounds: Rect
+    )
+
+    private fun logPostScrollRawVsTraversalSnapshot(
+        root: AccessibilityNodeInfo,
+        traversalList: List<AccessibilityNodeInfo>,
+        focusNodeByNode: Map<AccessibilityNodeInfo, FocusedNode>
+    ) {
+        val rawVisibleNodes = collectRawVisibleNodes(root)
+        val rawLabels = rawVisibleNodes.map { it.label }.take(20)
+        val traversalLabels = traversalList.map { node ->
+            node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: focusNodeByNode[node]?.mergedLabel?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: "<no-label>"
+        }.take(20)
+        Log.i(
+            "A11Y_HELPER",
+            "[SMART_NEXT] buildTraversalList() debug rawVisibleCount=${rawVisibleNodes.size} traversalCount=${traversalList.size} rawLabels=${rawLabels.joinToString(\" | \")} traversalLabels=${traversalLabels.joinToString(\" | \")}"
+        )
+
+        val traversalSignatures = traversalList.map { node ->
+            val bounds = Rect().also { node.getBoundsInScreen(it) }
+            val label = node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: "<no-label>"
+            "${node.viewIdResourceName}|${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}|$label"
+        }.toSet()
+        rawVisibleNodes.forEachIndexed { index, rawNode ->
+            val signature = "${rawNode.viewId}|${rawNode.bounds.left},${rawNode.bounds.top},${rawNode.bounds.right},${rawNode.bounds.bottom}|${rawNode.label}"
+            if (!traversalSignatures.contains(signature)) {
+                Log.i(
+                    "A11Y_HELPER",
+                    "[SMART_NEXT] RAW_ONLY_POST_SCROLL index=$index label=${rawNode.label.replace("\n", " ")} viewId=${rawNode.viewId} bounds=${rawNode.bounds}"
+                )
+            }
+        }
+    }
+
+    private fun collectRawVisibleNodes(root: AccessibilityNodeInfo): List<RawVisibleNode> {
+        val result = mutableListOf<RawVisibleNode>()
+        val stack = ArrayDeque<AccessibilityNodeInfo>()
+        stack += root
+        while (stack.isNotEmpty()) {
+            val node = stack.removeLast()
+            if (node.isVisibleToUser) {
+                val bounds = Rect().also { node.getBoundsInScreen(it) }
+                val label = node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                    ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                    ?: "<no-label>"
+                result += RawVisibleNode(
+                    label = label,
+                    viewId = node.viewIdResourceName,
+                    bounds = bounds
+                )
+                for (childIndex in node.childCount - 1 downTo 0) {
+                    node.getChild(childIndex)?.let(stack::add)
+                }
+            }
+        }
+        return result
     }
 
     internal fun isInVisibleHistory(
