@@ -205,7 +205,7 @@ object A11yFocusExecutor {
             (intendedIndex < 0 || actualCandidateIndex != intendedIndex) &&
             actualIsInteractiveContent
         val shouldSuppressTopNoise = isScrollAction &&
-            A11yNavigator.isWithinAuthoritativeFocusWindow() &&
+            A11yHistoryManager.isWithinAuthoritativeFocusWindow() &&
             actualFocusedNode != null &&
             actualBounds != null &&
             A11yNavigator.isSuppressibleHeaderNoiseNode(
@@ -252,11 +252,11 @@ object A11yFocusExecutor {
             )
         }
         if (isScrollAction) {
-            A11yNavigator.startAuthoritativeFocusSuppressionWindow(finalTarget, finalLabel, "moved")
-        } else if (!A11yNavigator.isWithinAuthoritativeFocusWindow()) {
-            A11yNavigator.clearAuthoritativeFocusSuppressionWindow("window_expired_or_not_needed")
+            A11yHistoryManager.startAuthoritativeFocusSuppressionWindow(finalTarget, finalLabel, "moved")
+        } else if (!A11yHistoryManager.isWithinAuthoritativeFocusWindow()) {
+            A11yHistoryManager.clearAuthoritativeFocusSuppressionWindow("window_expired_or_not_needed")
         }
-        A11yNavigator.lastFinalCommitTurnId = A11yNavigator.activeSmartNextTurnId
+        A11yHistoryManager.lastFinalCommitTurnId = A11yHistoryManager.activeSmartNextTurnId
         Log.i(
             "A11Y_HELPER",
             "[FOCUS_VERIFY] final_focus_commit candidate=${finalLabel.replace("\n", " ")} source=$source"
