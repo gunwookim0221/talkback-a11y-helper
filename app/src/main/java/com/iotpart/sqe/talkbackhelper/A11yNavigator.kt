@@ -12,7 +12,7 @@ typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 typealias FocusedNode = A11yTraversalAnalyzer.FocusedNode
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.60.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.60.1"
 
 
     @Volatile
@@ -571,7 +571,7 @@ object A11yNavigator {
                     ?: node.viewIdResourceName
             }
         )
-        val outcome = findAndFocusFirstContent(
+        val outcome = A11yPostScrollScanner.findAndFocusFirstContent(
             context = context.findAndFocusContext.copy(
                 root = refreshedRoot,
                 traversalList = refreshedTraversal,
@@ -608,7 +608,7 @@ object A11yNavigator {
         executionDecision: SmartNextExecutionDecision
     ): TargetActionOutcome {
         Log.i("A11Y_HELPER", "[EXECUTE] Performing regular next navigation")
-        return findAndFocusFirstContent(
+        return A11yPostScrollScanner.findAndFocusFirstContent(
             context = context.findAndFocusContext,
             request = FindAndFocusRequest(
                 statusName = executionDecision.expectedStatus,
@@ -657,11 +657,6 @@ object A11yNavigator {
             )
         )
     }
-
-    private fun findAndFocusFirstContent(
-        context: FindAndFocusPhaseContext,
-        request: FindAndFocusRequest
-    ): TargetActionOutcome = A11yPostScrollScanner.findAndFocusFirstContent(context, request)
 
     private fun clearFocus(node: AccessibilityNodeInfo): Boolean {
         return node.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
@@ -806,12 +801,6 @@ object A11yNavigator {
             onForcedAdvance = onForcedAdvance
         )
     }
-    private fun decideFallbackStrategy(
-        focusedAny: Boolean,
-        isScrollAction: Boolean,
-        allowLooping: Boolean,
-        excludeDesc: String?
-    ): SelectionDecisionModel = A11yPostScrollScanner.decideFallbackStrategy(focusedAny, isScrollAction, allowLooping, excludeDesc)
     internal fun <T> skipCoordinateDuplicateTraversalIndices(
         nodes: List<T>,
         currentBounds: Rect,
@@ -1123,12 +1112,6 @@ object A11yNavigator {
     internal fun isNodePhysicallyOffScreen(bounds: Rect, screenTop: Int, screenBottom: Int): Boolean =
         A11yNodeUtils.isNodePhysicallyOffScreen(bounds, screenTop, screenBottom)
 
-    internal fun shouldTriggerLoopFallback(
-        focusedAny: Boolean,
-        isScrollAction: Boolean,
-        excludeDesc: String?
-    ): Boolean = A11yPostScrollScanner.shouldTriggerLoopFallback(focusedAny, isScrollAction, excludeDesc)
-
     internal fun isBottomClippedWithPadding(boundsBottom: Int, effectiveBottom: Int, paddingPx: Int = 300): Boolean {
         return boundsBottom > (effectiveBottom - paddingPx)
     }
@@ -1304,20 +1287,6 @@ object A11yNavigator {
             boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } }
         )
     }
-
-    internal fun shouldSkipHistoryNodeAfterScroll(
-        isScrollAction: Boolean,
-        inHistory: Boolean,
-        isFixedUi: Boolean,
-        isInsideMainScrollContainer: Boolean,
-        isTopArea: Boolean
-    ): Boolean = A11yPostScrollScanner.shouldSkipHistoryNodeAfterScroll(
-        isScrollAction,
-        inHistory,
-        isFixedUi,
-        isInsideMainScrollContainer,
-        isTopArea
-    )
 
     internal fun isWithinTopContentArea(
         nodeTop: Int,
@@ -1618,26 +1587,6 @@ object A11yNavigator {
         return null
     }
 
-
-    internal fun shouldSkipExcludedNodeByDescription(
-        nodeDesc: String?,
-        excludeDesc: String?,
-        nodeBounds: Rect,
-        screenTop: Int,
-        screenHeight: Int
-    ): Boolean = A11yPostScrollScanner.shouldSkipExcludedNodeByDescription(
-        nodeDesc,
-        excludeDesc,
-        nodeBounds,
-        screenTop,
-        screenHeight
-    )
-
-    internal fun <T> findIndexByDescription(
-        nodes: List<T>,
-        descriptionOf: (T) -> String?,
-        excludeDesc: String?
-    ): Int = A11yPostScrollScanner.findIndexByDescription(nodes, descriptionOf, excludeDesc)
 
     internal fun shouldIgnoreBottomResidualFocus(
         isAccessibilityFocused: Boolean,
