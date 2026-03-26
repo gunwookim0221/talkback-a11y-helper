@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.31.7")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.32.0")
     }
 
     @Test
@@ -687,7 +687,7 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun findAnchorContinuationCandidateIndex_doesNotSelectVisibleButUnvisitedCandidateAlone() {
+    fun findAnchorContinuationCandidateIndex_selectsTopContinuationCandidate_whenVisibleButUnvisitedAfterScroll() {
         data class Node(val className: String?, val viewId: String?, val bounds: Rect, val label: String?)
 
         val nodes = listOf(
@@ -710,10 +710,19 @@ class A11yNavigatorTest {
             classNameOf = { it.className },
             viewIdOf = { it.viewId },
             isContentNodeOf = { true },
+            preScrollAnchor = A11yNavigator.PreScrollAnchor(
+                viewIdResourceName = "com.test:id/voice_assistant",
+                mergedLabel = "Voice assistant",
+                talkbackLabel = "Voice assistant",
+                text = "Voice assistant",
+                contentDescription = null,
+                bounds = Rect(0, 980, 1000, 1220)
+            ),
+            preScrollAnchorBottom = 1220,
             labelOf = { it.label }
         )
 
-        assertEquals(-1, index)
+        assertEquals(1, index)
     }
 
     @Test
