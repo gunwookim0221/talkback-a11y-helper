@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.31.6"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.31.7"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
     private val TRAVERSAL_CONTAINER_CLASS_KEYWORDS = listOf(
@@ -22,7 +22,12 @@ object A11yNavigator {
         "mainscrollview",
         "content_container",
         "root_container",
-        "main_content_container"
+        "main_content_container",
+        "feature_item_menu",
+        "section_wrapper",
+        "group_wrapper",
+        "row_container",
+        "grid_container"
     )
 
     private val visitedHistoryLock = Any()
@@ -2155,17 +2160,28 @@ object A11yNavigator {
             null
         }
 
-        alignCandidateForReadableFocus(
-            root = root,
-            target = target,
-            label = label,
-            screenTop = screenTop,
-            effectiveBottom = effectiveBottom,
-            isTopBar = isTopBar,
-            isBottomBar = isBottomBar,
-            canScrollForwardHint = findScrollableForwardAncestorCandidate(target) != null || hasScrollableDownCandidate(root),
-            intendedTrailingCandidate = intendedTrailingCandidate
-        )
+        val descendantTextCandidates = collectDescendantTextCandidates(target)
+        val isSingleSemanticCandidate =
+            !shouldExcludeContainerNodeFromTraversal(target, descendantTextCandidates) &&
+                shouldAllowRecoveredDescendantLabelForTraversal(descendantTextCandidates)
+        if (isSingleSemanticCandidate) {
+            alignCandidateForReadableFocus(
+                root = root,
+                target = target,
+                label = label,
+                screenTop = screenTop,
+                effectiveBottom = effectiveBottom,
+                isTopBar = isTopBar,
+                isBottomBar = isBottomBar,
+                canScrollForwardHint = findScrollableForwardAncestorCandidate(target) != null || hasScrollableDownCandidate(root),
+                intendedTrailingCandidate = intendedTrailingCandidate
+            )
+        } else {
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT] Skipping pre-focus alignment for container-like candidate label=$label viewId=${target.viewIdResourceName}"
+            )
+        }
 
         val targetBounds = Rect().also { target.getBoundsInScreen(it) }
         val actualFocusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
@@ -3640,6 +3656,7 @@ object A11yNavigator {
     ): Boolean {
         if (isContainerLikeClassName(node.className?.toString())) return true
         if (isContainerLikeViewId(node.viewIdResourceName)) return true
+        if (hasMultipleSiblingLevelInteractiveDescendants(node)) return true
 
         val coversMostContentArea = doesNodeCoverMostContentArea(node)
         if (!coversMostContentArea) return false
@@ -3648,6 +3665,27 @@ object A11yNavigator {
         if (clickableDescendantCount < 2) return false
 
         return !shouldAllowRecoveredDescendantLabelForTraversal(descendantTextCandidates)
+    }
+
+    private fun hasMultipleSiblingLevelInteractiveDescendants(node: AccessibilityNodeInfo): Boolean {
+        val directInteractiveChildren = countDirectInteractiveChildren(node, limit = 2)
+        if (directInteractiveChildren >= 2) return true
+        val descendantInteractiveChildren = countClickableOrFocusableDescendants(node, limit = 3)
+        return descendantInteractiveChildren >= 3 && doesNodeCoverMostContentArea(node)
+    }
+
+    private fun countDirectInteractiveChildren(node: AccessibilityNodeInfo, limit: Int): Int {
+        var count = 0
+        for (index in 0 until node.childCount) {
+            val child = node.getChild(index) ?: continue
+            if (!child.isVisibleToUser) continue
+            val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && child.isScreenReaderFocusable
+            if (child.isClickable || child.isFocusable || screenReaderFocusable) {
+                count += 1
+                if (count >= limit) break
+            }
+        }
+        return count
     }
 
     private fun doesNodeCoverMostContentArea(node: AccessibilityNodeInfo): Boolean {
