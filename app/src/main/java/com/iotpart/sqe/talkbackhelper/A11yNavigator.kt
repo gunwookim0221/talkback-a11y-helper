@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.31.3"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.31.4"
 
     private val visitedHistoryLock = Any()
     private val visitedHistoryLabels = linkedSetOf<String>()
@@ -520,6 +520,11 @@ object A11yNavigator {
                     )
                 }
                 preScrollAnchor?.let { anchor ->
+                    val traversalViewIdSet = traversalList.mapNotNull { it.viewIdResourceName?.substringAfterLast('/')?.trim() }.toSet()
+                    val promotedRawOnlyViewIds = collectRawVisibleNodes(root)
+                        .mapNotNull { raw -> raw.viewId?.substringAfterLast('/')?.trim() }
+                        .filter { shortId -> isSettingsRowViewId(shortId) && !traversalViewIdSet.contains(shortId) }
+                        .toSet()
                     findAnchorContinuationCandidateIndex(
                         traversalList = traversalList,
                         startIndex = 0,
@@ -539,6 +544,7 @@ object A11yNavigator {
                         clickableOf = { node -> node.isClickable },
                         focusableOf = { node -> node.isFocusable },
                         descendantLabelOf = { node -> recoverDescendantLabel(node) },
+                        promotedViewIds = promotedRawOnlyViewIds,
                         preScrollAnchor = anchor,
                         preScrollAnchorBottom = anchor.bounds.bottom,
                         labelOf = { node ->
@@ -1279,6 +1285,10 @@ object A11yNavigator {
                 it.viewIdResourceName?.contains("item_privacy_notice", ignoreCase = true) == true
             }
             val privacyNoticeBounds = privacyNoticeNode?.let { Rect().also(it::getBoundsInScreen) }
+            val rawPrivacyNoticeNode = postRawVisibleNodes.firstOrNull {
+                it.viewId?.contains("item_privacy_notice", ignoreCase = true) == true
+            }
+            val privacyNoticePromotionApplied = rawPrivacyNoticeNode != null && privacyNoticeNode != null
             Log.i(
                 "A11Y_HELPER",
                 "[SMART_NEXT][PROGRESS_DEBUG] postRawCount=${postRawVisibleNodes.size} postTraversalCount=${refreshedTraversal.size}"
@@ -1291,6 +1301,7 @@ object A11yNavigator {
                 "A11Y_HELPER",
                 "[SMART_NEXT][PROGRESS_DEBUG] privacyNotice found=${privacyNoticeNode != null} bounds=${formatBoundsForLog(privacyNoticeBounds)} clickable=${privacyNoticeNode?.isClickable} focusable=${privacyNoticeNode?.isFocusable} visible=${privacyNoticeNode?.isVisibleToUser}"
             )
+            Log.i("A11Y_HELPER", "[SMART_NEXT] privacy_notice_candidate_promotion applied=$privacyNoticePromotionApplied")
             if (oldSnapshot == refreshedSnapshot) {
                 val preRawSignature = preScrollRawVisibleNodes.map { raw ->
                     "${raw.viewId}|${raw.label}|${raw.bounds.left},${raw.bounds.top},${raw.bounds.right},${raw.bounds.bottom}"
@@ -1304,6 +1315,15 @@ object A11yNavigator {
                 val traversalChanged = traversalList.size != refreshedTraversal.size || oldSnapshot != refreshedSnapshot
                 val anchorShifted = preScrollAnchor != null && anchorCandidateBounds != null && preScrollAnchor.bounds != anchorCandidateBounds
                 val successorCandidateIndex = if (preScrollAnchor != null) {
+                    val preTraversalShortViewIds = traversalList.mapNotNull { it.viewIdResourceName?.substringAfterLast('/')?.trim() }.toSet()
+                    val promotedRawOnlyViewIds = postRawVisibleNodes
+                        .mapNotNull { raw -> raw.viewId?.substringAfterLast('/')?.trim() }
+                        .filter { shortId ->
+                            isSettingsRowViewId(shortId) &&
+                                !preTraversalShortViewIds.contains(shortId) &&
+                                preScrollRawVisibleNodes.none { it.viewId?.substringAfterLast('/')?.trim() == shortId }
+                        }
+                        .toSet()
                     findAnchorContinuationCandidateIndex(
                         traversalList = refreshedTraversal,
                         startIndex = 0,
@@ -1323,6 +1343,7 @@ object A11yNavigator {
                         clickableOf = { node -> node.isClickable },
                         focusableOf = { node -> node.isFocusable },
                         descendantLabelOf = { node -> recoverDescendantLabel(node) },
+                        promotedViewIds = promotedRawOnlyViewIds,
                         preScrollAnchor = preScrollAnchor,
                         preScrollAnchorBottom = preScrollAnchor.bounds.bottom,
                         labelOf = { node ->
@@ -1702,6 +1723,7 @@ object A11yNavigator {
         clickableOf: ((T) -> Boolean)? = null,
         focusableOf: ((T) -> Boolean)? = null,
         descendantLabelOf: ((T) -> String?)? = null,
+        promotedViewIds: Set<String> = emptySet(),
         preScrollAnchor: PreScrollAnchor? = null,
         preScrollAnchorBottom: Int? = null,
         labelOf: (T) -> String?
@@ -1757,6 +1779,7 @@ object A11yNavigator {
                         normalizedViewId.contains("top"))
             val isAfterPreScrollAnchor = preScrollAnchorBottom?.let { bounds.top >= it } ?: false
             val isTrailingContinuationCandidate = inVisibleHistory && isAfterPreScrollAnchor
+            val isPromotedRawOnlyCandidate = promotedViewIds.contains(shortViewId) && !inVisibleHistory && !inVisitedHistory
             val isNewlyExposedBottomContent = !inVisibleHistory && !inVisitedHistory && bounds.bottom >= (screenBottom - screenHeight / 3)
             val isOtherUnvisitedVisible = !inVisitedHistory
             val reasons = mutableListOf<String>()
@@ -1793,8 +1816,9 @@ object A11yNavigator {
             val candidatePriority = when {
                 isLogicalSuccessor -> 0
                 !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isTrailingContinuationCandidate -> 1
-                !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isNewlyExposedBottomContent -> 2
-                !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isOtherUnvisitedVisible -> 3
+                !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isPromotedRawOnlyCandidate -> 2
+                !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isNewlyExposedBottomContent -> 3
+                !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isOtherUnvisitedVisible -> 4
                 else -> Int.MAX_VALUE
             }
 
@@ -1805,8 +1829,9 @@ object A11yNavigator {
                         "[SMART_NEXT] Resolved post-scroll successor from pre-scroll anchor: anchorViewId=${preScrollAnchor?.viewIdResourceName} successorViewId=$rawViewId"
                     )
                     1 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Accepted trailing continuation candidate by continuity rule")
-                    2 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting newly exposed bottom content continuation candidate")
-                    3 -> Log.i("A11Y_HELPER", "[SMART_NEXT] candidate visibleHistory=true visitedHistory=false is not sufficient alone; accepted as low-priority continuation fallback")
+                    2 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting promoted raw-only continuation candidate")
+                    3 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting newly exposed bottom content continuation candidate")
+                    4 -> Log.i("A11Y_HELPER", "[SMART_NEXT] candidate visibleHistory=true visitedHistory=false is not sufficient alone; accepted as low-priority continuation fallback")
                 }
                 if (candidatePriority < bestPriority) {
                     bestPriority = candidatePriority
@@ -2245,7 +2270,13 @@ object A11yNavigator {
                 maxWaitMs = 350L,
                 retryIntervalMs = 50L
             )
-            if (lateFocus.matchedTarget) {
+            val lateFocusAllowed = shouldAllowLateFocusSuccess(
+                root = root,
+                target = target,
+                targetBounds = targetBounds,
+                lateFocus = lateFocus
+            )
+            if (lateFocusAllowed) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Late focus detected → treat as success")
                 recordRequestedFocusAttempt(traversalIndex, root)
                 recordVisitedFocus(target, label, reason = "late_focus_detected_after_stabilization")
@@ -2280,7 +2311,13 @@ object A11yNavigator {
                 maxWaitMs = 350L,
                 retryIntervalMs = 50L
             )
-            if (lateFocus.matchedTarget) {
+            val lateFocusAllowed = shouldAllowLateFocusSuccess(
+                root = root,
+                target = target,
+                targetBounds = targetBounds,
+                lateFocus = lateFocus
+            )
+            if (lateFocusAllowed) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Late focus detected → treat as success")
                 recordRequestedFocusAttempt(traversalIndex, root)
                 recordVisitedFocus(target, label, reason = "late_focus_detected_after_retry")
@@ -2299,6 +2336,37 @@ object A11yNavigator {
         Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=true (status=$status)")
         Log.i("A11Y_HELPER", "[SMART_NEXT] Focused top-most content at Y=${focusedBounds.top}")
         return TargetActionOutcome(true, "moved", target)
+    }
+
+    private fun shouldAllowLateFocusSuccess(
+        root: AccessibilityNodeInfo,
+        target: AccessibilityNodeInfo,
+        targetBounds: Rect,
+        lateFocus: FocusVerificationResult
+    ): Boolean {
+        val focusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val focusedBounds = focusedNode?.let { Rect().also(it::getBoundsInScreen) } ?: lateFocus.actualBounds
+        val rootBounds = Rect().also(root::getBoundsInScreen)
+        val rootTop = rootBounds.top
+        val rootBottom = rootBounds.bottom
+        val rootHeight = (rootBottom - rootTop).coerceAtLeast(1)
+        val focusedClassName = focusedNode?.className?.toString()
+        val focusedViewId = focusedNode?.viewIdResourceName
+        val isTopChromeFocus =
+            (focusedBounds != null && isTopAppBarNode(focusedClassName, focusedViewId, focusedBounds, rootTop, rootHeight)) ||
+                focusedViewId?.contains("settings", ignoreCase = true) == true ||
+                focusedViewId?.contains("toolbar", ignoreCase = true) == true
+        val identityOrBoundsMatch = lateFocus.matchedTarget ||
+            (focusedBounds != null && isWithinSnapBackTolerance(targetBounds, focusedBounds)) ||
+            target.isAccessibilityFocused
+        val allowed = identityOrBoundsMatch && !isTopChromeFocus
+        val reason = if (allowed) "target_matched_and_not_fixed_chrome" else when {
+            !identityOrBoundsMatch -> "target_mismatch"
+            isTopChromeFocus -> "focused_on_top_fixed_chrome"
+            else -> "rejected"
+        }
+        Log.i("A11Y_HELPER", "[SMART_NEXT] late_success_gate allowed=$allowed reason=$reason target=${formatBoundsForLog(targetBounds)} actual=${formatBoundsForLog(focusedBounds)}")
+        return allowed
     }
 
     internal fun isNodeFullyVisible(bounds: Rect, screenTop: Int, effectiveBottom: Int): Boolean {
@@ -3752,6 +3820,9 @@ object A11yNavigator {
 
     private fun shouldExcludeAsEmptyShell(node: FocusedNode): Boolean {
         val current = node.node
+        if (isSettingsRowViewId(current.viewIdResourceName) && current.isVisibleToUser && (current.isClickable || current.isFocusable)) {
+            return false
+        }
         return shouldExcludeAsEmptyShell(
             mergedText = node.text,
             mergedContentDescription = node.contentDescription,

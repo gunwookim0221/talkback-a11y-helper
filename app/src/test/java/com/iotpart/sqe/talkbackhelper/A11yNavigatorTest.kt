@@ -774,6 +774,37 @@ class A11yNavigatorTest {
     }
 
     @Test
+    fun findAnchorContinuationCandidateIndex_prioritizesPromotedRawOnlyCandidateOverLowPriorityFallback() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect, val label: String?)
+
+        val nodes = listOf(
+            Node("android.widget.TextView", "com.test:id/item_history", Rect(30, 1680, 1050, 1848), "History"),
+            Node("android.widget.TextView", "com.test:id/item_privacy_notice", Rect(30, 1941, 1050, 2109), "Privacy notice")
+        )
+
+        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+            traversalList = nodes,
+            startIndex = 0,
+            visibleHistory = setOf("History"),
+            visibleHistorySignatures = emptySet(),
+            visitedHistory = setOf("History"),
+            visitedHistorySignatures = emptySet(),
+            screenTop = 0,
+            screenBottom = 2400,
+            screenHeight = 2400,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId },
+            isContentNodeOf = { true },
+            promotedViewIds = setOf("item_privacy_notice"),
+            preScrollAnchorBottom = 1600,
+            labelOf = { it.label }
+        )
+
+        assertEquals(1, index)
+    }
+
+    @Test
     fun shouldAcceptFallbackSelectedNoLabelContinuationCandidate_returnsTrue_forContentViewportNode() {
         val accepted = A11yNavigator.shouldAcceptFallbackSelectedNoLabelContinuationCandidate(
             isFallbackSelectedContinuationCandidate = true,
