@@ -8,8 +8,226 @@ import org.json.JSONObject
 
 
 object A11yModelVersion {
-    const val VERSION: String = "1.5.0"
+    const val VERSION: String = "1.6.0"
 }
+
+internal data class PostScrollContinuationPlan(
+    val anchorStartIndex: Int,
+    val skipGeneralScan: Boolean
+)
+
+internal data class CollectResult(
+    val focusNodes: List<FocusedNode>,
+    val traversalList: List<AccessibilityNodeInfo>,
+    val focusNodeByNode: Map<AccessibilityNodeInfo, FocusedNode>,
+    val focusState: FocusState,
+    val scrollState: ScrollState
+)
+
+internal data class NormalizeResult(
+    val normalizedNodes: List<FocusedNode>,
+    val traversalList: List<AccessibilityNodeInfo>,
+    val screenRect: Rect,
+    val screenTop: Int,
+    val screenBottom: Int,
+    val screenHeight: Int,
+    val effectiveBottom: Int
+)
+
+internal data class FocusState(
+    val resolvedCurrent: AccessibilityNodeInfo?,
+    val currentIndex: Int,
+    val fallbackIndex: Int,
+    val nextIndex: Int
+)
+
+internal data class ScrollState(
+    val mainScrollContainer: AccessibilityNodeInfo?,
+    val scrollableNode: AccessibilityNodeInfo?
+)
+
+internal enum class SelectionType {
+    CONTINUATION,
+    SCROLL,
+    BOTTOM_BAR,
+    END,
+    REGULAR,
+    FALLBACK
+}
+
+internal data class SelectionDecisionModel(
+    val type: SelectionType,
+    val targetIndex: Int? = null,
+    val reason: String
+)
+
+internal data class SelectionDecision(
+    val currentIndex: Int,
+    val fallbackIndex: Int,
+    val nextIndex: Int
+)
+
+internal data class FocusAttemptResult(
+    val outcome: TargetActionOutcome,
+    val verificationPassed: Boolean,
+    val snapBackDetected: Boolean
+)
+
+internal data class CurrentPosition(
+    val resolvedCurrent: AccessibilityNodeInfo?,
+    val currentIndex: Int,
+    val fallbackIndex: Int,
+    val nextIndex: Int
+)
+
+internal data class PreScrollResult(
+    val attempted: Boolean,
+    val success: Boolean,
+    val anchor: A11yHistoryManager.PreScrollAnchor? = null,
+    val reason: String
+)
+
+internal data class PostScrollAnalysis(
+    val treeChanged: Boolean,
+    val anchorMaintained: Boolean,
+    val newlyExposedCandidateExists: Boolean,
+    val noProgress: Boolean,
+    val reason: String
+)
+
+internal data class FocusExecutionResult(
+    val outcome: TargetActionOutcome,
+    val reasonCode: String
+)
+
+internal data class ContinuationCandidateEvaluation(
+    val priority: Int,
+    val rejectionReasons: List<String>,
+    val isLogicalSuccessor: Boolean = false,
+    val acceptedDespiteRewoundBeforeAnchor: Boolean = false
+)
+
+internal data class NewlyRevealedEvaluation(
+    val prioritizedNewlyRevealed: Boolean,
+    val reasons: List<String>
+)
+
+internal data class CandidateClassification(
+    val isTopChrome: Boolean,
+    val isPersistentHeader: Boolean,
+    val isContentNode: Boolean
+)
+
+internal data class FocusRetargetDecision(
+    val finalTarget: AccessibilityNodeInfo,
+    val finalLabel: String,
+    val source: String,
+    val retargeted: Boolean,
+    val authoritativeOverride: Boolean
+)
+
+internal data class PostScrollContinuationSearchResult(
+    val index: Int,
+    val hasValidPostScrollCandidate: Boolean
+)
+
+internal data class SmartNextRuntimeState(
+    val root: AccessibilityNodeInfo,
+    val collect: CollectResult,
+    val normalize: NormalizeResult,
+    val currentPosition: CurrentPosition,
+    val visitedHistory: Set<String>,
+    val visitedHistorySignatures: Set<A11yHistoryManager.VisibleHistorySignature>,
+    val focusNodeByNode: Map<AccessibilityNodeInfo, FocusedNode>
+)
+
+internal data class InitialNextTargetDecision(
+    val nextIndex: Int,
+    val selectionDecision: SelectionDecision
+)
+
+internal data class SmartNextExecutionDecision(
+    val nextIndex: Int,
+    val currentIndex: Int,
+    val isOutOfBounds: Boolean,
+    val isCurrentAtLastIndex: Boolean,
+    val shouldTerminateAtLastBottomBar: Boolean,
+    val shouldScrollAtEnd: Boolean,
+    val navigationDecision: NavigationDecision,
+    val postScrollScanStartIndex: Int,
+    val allowLooping: Boolean,
+    val allowBottomBarEntry: Boolean,
+    val expectedStatus: String
+)
+
+internal data class NextActionDecision(
+    val state: SmartNextRuntimeState,
+    val smartNextState: SmartNextState,
+    val initialTarget: InitialNextTargetDecision,
+    val navigationDecision: NavigationDecision
+)
+
+internal data class NextActionExecution(
+    val outcome: TargetActionOutcome
+)
+
+internal data class FindAndFocusPhaseContext(
+    val root: AccessibilityNodeInfo,
+    val traversalList: List<AccessibilityNodeInfo>,
+    val screenTop: Int,
+    val screenBottom: Int,
+    val effectiveBottom: Int,
+    val screenHeight: Int,
+    val focusNodeByNode: Map<AccessibilityNodeInfo, FocusedNode>,
+    val visitedHistory: Set<String>,
+    val visitedHistorySignatures: Set<A11yHistoryManager.VisibleHistorySignature>
+)
+
+internal data class FindAndFocusRequest(
+    val statusName: String,
+    val isScrollAction: Boolean = false,
+    val excludeDesc: String? = null,
+    val startIndex: Int = 0,
+    val visibleHistory: Set<String> = emptySet(),
+    val visibleHistorySignatures: Set<A11yHistoryManager.VisibleHistorySignature> = emptySet(),
+    val allowLooping: Boolean = true,
+    val preScrollAnchor: A11yHistoryManager.PreScrollAnchor? = null
+)
+
+internal data class PostScrollSearchContext(
+    val excludedIndex: Int,
+    val traversalStartIndex: Int,
+    val resolvedAnchorIndex: Int,
+    val continuationFallbackAttempted: Boolean,
+    val continuationFallbackFailed: Boolean,
+    val fallbackBelowAnchorIndex: Int,
+    val anchorStartIndex: Int,
+    val skipGeneralScan: Boolean
+)
+
+internal data class FocusLoopState(
+    var skippedExcludedNode: Boolean = false,
+    var focusedAny: Boolean = false,
+    var focusAttempted: Boolean = false,
+    var focusedOutcome: TargetActionOutcome? = null
+)
+
+internal data class SmartNextExecutionContext(
+    val root: AccessibilityNodeInfo,
+    val traversalList: List<AccessibilityNodeInfo>,
+    val focusNodes: List<FocusedNode>,
+    val currentIndex: Int,
+    val fallbackIndex: Int,
+    val nextIndex: Int,
+    val resolvedCurrent: AccessibilityNodeInfo?,
+    val screenTop: Int,
+    val screenBottom: Int,
+    val screenHeight: Int,
+    val effectiveBottom: Int,
+    val scrollableNode: AccessibilityNodeInfo?,
+    val mainScrollContainer: AccessibilityNodeInfo?,
+    val findAndFocusContext: FindAndFocusPhaseContext
+)
 
 data class SmartNextState(
     val root: AccessibilityNodeInfo,
