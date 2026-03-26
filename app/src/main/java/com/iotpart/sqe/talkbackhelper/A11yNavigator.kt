@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.9"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.31.0"
 
     private val visitedHistoryLock = Any()
     private val visitedHistoryLabels = linkedSetOf<String>()
@@ -539,6 +539,7 @@ object A11yNavigator {
                         clickableOf = { node -> node.isClickable },
                         focusableOf = { node -> node.isFocusable },
                         descendantLabelOf = { node -> recoverDescendantLabel(node) },
+                        preScrollAnchor = anchor,
                         preScrollAnchorBottom = anchor.bounds.bottom,
                         labelOf = { node ->
                             node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
@@ -1577,10 +1578,17 @@ object A11yNavigator {
         clickableOf: ((T) -> Boolean)? = null,
         focusableOf: ((T) -> Boolean)? = null,
         descendantLabelOf: ((T) -> String?)? = null,
+        preScrollAnchor: PreScrollAnchor? = null,
         preScrollAnchorBottom: Int? = null,
         labelOf: (T) -> String?
     ): Int {
         if (traversalList.isEmpty()) return -1
+        val normalizedAnchorViewId = preScrollAnchor?.viewIdResourceName?.substringAfterLast('/')?.trim()
+        val expectedSuccessorViewId = normalizedAnchorViewId
+            ?.let { SETTINGS_ROW_VIEW_ID_ORDERED.indexOf(it) }
+            ?.takeIf { it >= 0 && it < SETTINGS_ROW_VIEW_ID_ORDERED.lastIndex }
+            ?.let { SETTINGS_ROW_VIEW_ID_ORDERED[it + 1] }
+        val anchorBounds = preScrollAnchor?.bounds
         var bestIndex = -1
         var bestPriority = Int.MAX_VALUE
         for (index in startIndex until traversalList.size) {
@@ -1590,10 +1598,12 @@ object A11yNavigator {
             val isBottomBar = isBottomNavigationBarNode(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight)
             val label = labelOf(node)?.trim().orEmpty()
             val normalizedLabel = label.lowercase()
-            val normalizedViewId = viewIdOf(node)?.lowercase().orEmpty()
+            val rawViewId = viewIdOf(node)
+            val normalizedViewId = rawViewId?.lowercase().orEmpty()
+            val shortViewId = rawViewId?.substringAfterLast('/')?.trim().orEmpty()
             val inVisibleHistory = isInVisibleHistory(
                 label = label,
-                viewId = viewIdOf(node),
+                viewId = rawViewId,
                 bounds = bounds,
                 visibleHistory = visibleHistory,
                 visibleHistorySignatures = visibleHistorySignatures
@@ -1639,8 +1649,25 @@ object A11yNavigator {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Rejected top resurfaced anchor candidate after scroll")
                 reasons += "candidate rejected: top resurfaced anchor"
             }
+            val withinAnchorSuccessorWindow = anchorBounds?.let { anchor ->
+                val horizontalOverlap = minOf(anchor.right, bounds.right) - maxOf(anchor.left, bounds.left)
+                bounds.top >= anchor.bottom && horizontalOverlap > 0
+            } ?: false
+            val isLogicalSuccessor = !expectedSuccessorViewId.isNullOrBlank() &&
+                shortViewId == expectedSuccessorViewId &&
+                withinAnchorSuccessorWindow &&
+                !isTopBar &&
+                !isBottomBar &&
+                isContentNode
+            if (!expectedSuccessorViewId.isNullOrBlank() && shortViewId != expectedSuccessorViewId && anchorBounds != null && bounds.top < anchorBounds.bottom) {
+                Log.i(
+                    "A11Y_HELPER",
+                    "[SMART_NEXT] Rejected candidate because it precedes anchor successor window index=$index label=${if (label.isBlank()) "<no-label>" else label.replace("\n", " ")} viewId=$rawViewId bounds=$bounds"
+                )
+            }
 
             val candidatePriority = when {
+                isLogicalSuccessor -> 0
                 !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isTrailingContinuationCandidate -> 1
                 !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isNewlyExposedBottomContent -> 2
                 !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isOtherUnvisitedVisible -> 3
@@ -1649,6 +1676,10 @@ object A11yNavigator {
 
             if (candidatePriority != Int.MAX_VALUE && reasons.none { it.startsWith("candidate rejected") }) {
                 when (candidatePriority) {
+                    0 -> Log.i(
+                        "A11Y_HELPER",
+                        "[SMART_NEXT] Resolved post-scroll successor from pre-scroll anchor: anchorViewId=${preScrollAnchor?.viewIdResourceName} successorViewId=$rawViewId"
+                    )
                     1 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Accepted trailing continuation candidate by continuity rule")
                     2 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting newly exposed bottom content continuation candidate")
                     3 -> Log.i("A11Y_HELPER", "[SMART_NEXT] candidate visibleHistory=true visitedHistory=false is not sufficient alone; accepted as low-priority continuation fallback")
@@ -1656,6 +1687,12 @@ object A11yNavigator {
                 if (candidatePriority < bestPriority) {
                     bestPriority = candidatePriority
                     bestIndex = index
+                    if (candidatePriority == 0) {
+                        Log.i(
+                            "A11Y_HELPER",
+                            "[SMART_NEXT] Selected successor candidate label=${if (label.isBlank()) "<no-label>" else label.replace("\n", " ")} viewId=$rawViewId"
+                        )
+                    }
                 }
             } else {
                 if (!isContentNode && reasons.none { it == "candidate rejected: outside content bounds" }) {
@@ -3551,7 +3588,7 @@ object A11yNavigator {
         return SETTINGS_ROW_VIEW_IDS.contains(normalized)
     }
 
-    private val SETTINGS_ROW_VIEW_IDS = setOf(
+    private val SETTINGS_ROW_VIEW_ID_ORDERED = listOf(
         "item_history",
         "item_notification",
         "item_customer_service",
@@ -3563,6 +3600,7 @@ object A11yNavigator {
         "item_knox_matrix",
         "item_privacy_notice"
     )
+    private val SETTINGS_ROW_VIEW_IDS = SETTINGS_ROW_VIEW_ID_ORDERED.toSet()
 
     private fun hasAnyText(node: AccessibilityNodeInfo): Boolean {
         val text = node.text?.toString()?.trim().orEmpty()
