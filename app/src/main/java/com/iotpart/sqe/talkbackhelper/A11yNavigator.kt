@@ -9,9 +9,21 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.31.5"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.31.6"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
+    private val TRAVERSAL_CONTAINER_CLASS_KEYWORDS = listOf(
+        "scrollview",
+        "horizontalscrollview",
+        "nestedscrollview",
+        "recyclerview"
+    )
+    private val TRAVERSAL_CONTAINER_VIEW_ID_KEYWORDS = listOf(
+        "mainscrollview",
+        "content_container",
+        "root_container",
+        "main_content_container"
+    )
 
     private val visitedHistoryLock = Any()
     private val visitedHistoryLabels = linkedSetOf<String>()
@@ -2002,6 +2014,16 @@ object A11yNavigator {
 
     private fun recordVisitedFocus(node: AccessibilityNodeInfo, label: String, reason: String) {
         val normalizedLabel = label.trim()
+        val descendantTextCandidates = collectDescendantTextCandidates(node)
+        if (shouldExcludeContainerNodeFromTraversal(node, descendantTextCandidates)) {
+            logVisitedHistorySkip(
+                reason = "container_node_excluded_from_history",
+                label = normalizedLabel,
+                viewId = node.viewIdResourceName,
+                bounds = Rect().also { node.getBoundsInScreen(it) }
+            )
+            return
+        }
         val bounds = Rect().also { node.getBoundsInScreen(it) }
         val nodeIdentity = buildNodeIdentityForHistory(node)
         synchronized(visitedHistoryLock) {
@@ -3576,13 +3598,106 @@ object A11yNavigator {
             .firstOrNull()
     }
 
-    private fun recoverDescendantLabel(node: AccessibilityNodeInfo): String? {
+    private fun collectDescendantTextCandidates(node: AccessibilityNodeInfo): List<String> {
         val textCandidates = mutableListOf<String>()
         collectDescendantReadableText(
             node = node,
             includeCurrentNode = true,
             sink = textCandidates
         )
+        return textCandidates
+    }
+
+    internal fun shouldAllowRecoveredDescendantLabelForTraversal(textCandidates: List<String>): Boolean {
+        val normalized = textCandidates
+            .asSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .toList()
+        if (normalized.isEmpty()) return false
+        if (normalized.size <= 2) return true
+
+        val mergedLength = normalized.joinToString(separator = " ").length
+        return normalized.size <= 3 && mergedLength <= 60
+    }
+
+    internal fun isContainerLikeClassName(className: String?): Boolean {
+        val normalized = className?.trim()?.lowercase().orEmpty()
+        if (normalized.isEmpty()) return false
+        return TRAVERSAL_CONTAINER_CLASS_KEYWORDS.any { keyword -> normalized.contains(keyword) }
+    }
+
+    internal fun isContainerLikeViewId(viewIdResourceName: String?): Boolean {
+        val normalized = viewIdResourceName?.substringAfterLast('/')?.trim()?.lowercase().orEmpty()
+        if (normalized.isEmpty()) return false
+        return TRAVERSAL_CONTAINER_VIEW_ID_KEYWORDS.any { keyword -> normalized.contains(keyword) }
+    }
+
+    private fun shouldExcludeContainerNodeFromTraversal(
+        node: AccessibilityNodeInfo,
+        descendantTextCandidates: List<String>
+    ): Boolean {
+        if (isContainerLikeClassName(node.className?.toString())) return true
+        if (isContainerLikeViewId(node.viewIdResourceName)) return true
+
+        val coversMostContentArea = doesNodeCoverMostContentArea(node)
+        if (!coversMostContentArea) return false
+
+        val clickableDescendantCount = countClickableOrFocusableDescendants(node, limit = 3)
+        if (clickableDescendantCount < 2) return false
+
+        return !shouldAllowRecoveredDescendantLabelForTraversal(descendantTextCandidates)
+    }
+
+    private fun doesNodeCoverMostContentArea(node: AccessibilityNodeInfo): Boolean {
+        val nodeBounds = Rect().also { node.getBoundsInScreen(it) }
+        if (nodeBounds.width() <= 0 || nodeBounds.height() <= 0) return false
+
+        val rootBounds = resolveRootBounds(node) ?: return false
+        if (rootBounds.width() <= 0 || rootBounds.height() <= 0) return false
+
+        val widthRatio = nodeBounds.width().toFloat() / rootBounds.width().toFloat()
+        val heightRatio = nodeBounds.height().toFloat() / rootBounds.height().toFloat()
+        val areaRatio = (nodeBounds.width().toLong() * nodeBounds.height().toLong()).toFloat() /
+            (rootBounds.width().toLong() * rootBounds.height().toLong()).toFloat()
+        return widthRatio >= 0.85f && heightRatio >= 0.45f && areaRatio >= 0.40f
+    }
+
+    private fun resolveRootBounds(node: AccessibilityNodeInfo): Rect? {
+        var current: AccessibilityNodeInfo? = node
+        var latest: AccessibilityNodeInfo? = node
+        while (current != null) {
+            latest = current
+            current = current.parent
+        }
+        return latest?.let {
+            Rect().also { rootBounds -> it.getBoundsInScreen(rootBounds) }
+        }
+    }
+
+    private fun countClickableOrFocusableDescendants(node: AccessibilityNodeInfo, limit: Int): Int {
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue += node
+        var count = 0
+        while (queue.isNotEmpty() && count < limit) {
+            val current = queue.removeFirst()
+            if (current !== node && current.isVisibleToUser) {
+                val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && current.isScreenReaderFocusable
+                if (current.isClickable || current.isFocusable || screenReaderFocusable) {
+                    count += 1
+                    if (count >= limit) break
+                }
+            }
+            for (index in 0 until current.childCount) {
+                current.getChild(index)?.let(queue::addLast)
+            }
+        }
+        return count
+    }
+
+    private fun recoverDescendantLabel(node: AccessibilityNodeInfo): String? {
+        val textCandidates = collectDescendantTextCandidates(node)
         return recoverLabelFromDescendantTexts(textCandidates)
     }
 
@@ -3832,8 +3947,16 @@ object A11yNavigator {
         if (isSettingsRowViewId(current.viewIdResourceName) && current.isVisibleToUser && (current.isClickable || current.isFocusable)) {
             return false
         }
-        val recoveredDescendantLabel = recoverDescendantLabel(current)
-        if (!recoveredDescendantLabel.isNullOrBlank() && (current.isClickable || current.isFocusable)) {
+        val descendantTextCandidates = collectDescendantTextCandidates(current)
+        val recoveredDescendantLabel = recoverLabelFromDescendantTexts(descendantTextCandidates)
+        if (shouldExcludeContainerNodeFromTraversal(current, descendantTextCandidates)) {
+            return true
+        }
+        if (
+            !recoveredDescendantLabel.isNullOrBlank() &&
+            (current.isClickable || current.isFocusable) &&
+            shouldAllowRecoveredDescendantLabelForTraversal(descendantTextCandidates)
+        ) {
             return false
         }
         if (isOneConnectSettingsCandidateNode(current, recoveredDescendantLabel)) {

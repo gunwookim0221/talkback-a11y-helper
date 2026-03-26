@@ -842,6 +842,44 @@ class A11yNavigatorTest {
     }
 
     @Test
+    fun shouldAllowRecoveredDescendantLabelForTraversal_returnsTrue_forSingleCardLikeLabel() {
+        val allowed = A11yNavigator.shouldAllowRecoveredDescendantLabelForTraversal(
+            listOf("Home profile", "Home profile")
+        )
+
+        assertTrue(allowed)
+    }
+
+    @Test
+    fun shouldAllowRecoveredDescendantLabelForTraversal_returnsFalse_forLargeMergedContainerText() {
+        val allowed = A11yNavigator.shouldAllowRecoveredDescendantLabelForTraversal(
+            listOf(
+                "Home profile",
+                "Explore",
+                "Supported devices",
+                "Routines",
+                "Scenes"
+            )
+        )
+
+        assertFalse(allowed)
+    }
+
+    @Test
+    fun isContainerLikeClassName_detectsScrollContainers() {
+        assertTrue(A11yNavigator.isContainerLikeClassName("androidx.core.widget.NestedScrollView"))
+        assertTrue(A11yNavigator.isContainerLikeClassName("androidx.recyclerview.widget.RecyclerView"))
+        assertFalse(A11yNavigator.isContainerLikeClassName("android.widget.TextView"))
+    }
+
+    @Test
+    fun isContainerLikeViewId_detectsMainContentWrappers() {
+        assertTrue(A11yNavigator.isContainerLikeViewId("com.test:id/mainScrollView"))
+        assertTrue(A11yNavigator.isContainerLikeViewId("com.test:id/content_container"))
+        assertFalse(A11yNavigator.isContainerLikeViewId("com.test:id/home_profile_card"))
+    }
+
+    @Test
     fun isContinuationContentLikelyBelowCurrentNode_returnsTrue_forBottomEdgeGridBeforeBottomBar() {
         data class Node(val className: String?, val viewId: String?, val bounds: Rect)
 
