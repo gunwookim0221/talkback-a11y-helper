@@ -726,7 +726,7 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun findAnchorContinuationCandidateIndex_prefersUnvisitedInteractiveCandidate_evenWhenRewoundBeforeAnchor() {
+    fun findAnchorContinuationCandidateIndex_prefersNewlyRevealedUnvisitedInteractiveCandidate_evenWhenRewoundBeforeAnchor() {
         data class Node(
             val className: String?,
             val viewId: String?,
@@ -745,7 +745,7 @@ class A11yNavigatorTest {
         val index = A11yNavigator.findAnchorContinuationCandidateIndex(
             traversalList = nodes,
             startIndex = 0,
-            visibleHistory = setOf("Voice assistant", "Labs"),
+            visibleHistory = setOf("Voice assistant"),
             visibleHistorySignatures = emptySet(),
             visitedHistory = setOf("Voice assistant"),
             visitedHistorySignatures = emptySet(),
@@ -771,6 +771,102 @@ class A11yNavigatorTest {
         )
 
         assertEquals(1, index)
+    }
+
+    @Test
+    fun findAnchorContinuationCandidateIndex_rejectsRewoundCandidate_whenAlreadyVisibleBeforeScroll() {
+        data class Node(
+            val className: String?,
+            val viewId: String?,
+            val bounds: Rect,
+            val label: String?,
+            val clickable: Boolean,
+            val focusable: Boolean
+        )
+
+        val nodes = listOf(
+            Node("android.widget.TextView", "com.test:id/labs", Rect(0, 380, 1000, 640), "Labs", clickable = true, focusable = true),
+            Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1820, 1000, 2000), "Home", clickable = true, focusable = true)
+        )
+
+        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+            traversalList = nodes,
+            startIndex = 0,
+            visibleHistory = setOf("Labs"),
+            visibleHistorySignatures = emptySet(),
+            visitedHistory = emptySet(),
+            visitedHistorySignatures = emptySet(),
+            screenTop = 0,
+            screenBottom = 2000,
+            screenHeight = 2000,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId },
+            isContentNodeOf = { true },
+            clickableOf = { it.clickable },
+            focusableOf = { it.focusable },
+            preScrollAnchor = A11yNavigator.PreScrollAnchor(
+                viewIdResourceName = "com.test:id/voice_assistant",
+                mergedLabel = "Voice assistant",
+                talkbackLabel = "Voice assistant",
+                text = "Voice assistant",
+                contentDescription = null,
+                bounds = Rect(0, 980, 1000, 1220)
+            ),
+            preScrollAnchorBottom = 1220,
+            labelOf = { it.label }
+        )
+
+        assertEquals(-1, index)
+    }
+
+    @Test
+    fun findAnchorContinuationCandidateIndex_acceptsNewlyRevealedInteractiveCandidate_withDescendantLabel() {
+        data class Node(
+            val className: String?,
+            val viewId: String?,
+            val bounds: Rect,
+            val label: String?,
+            val descendantLabel: String?,
+            val clickable: Boolean,
+            val focusable: Boolean
+        )
+
+        val nodes = listOf(
+            Node("android.widget.TextView", "com.test:id/labs", Rect(0, 380, 1000, 640), null, "Labs", clickable = true, focusable = true),
+            Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1820, 1000, 2000), "Home", null, clickable = true, focusable = true)
+        )
+
+        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+            traversalList = nodes,
+            startIndex = 0,
+            visibleHistory = emptySet(),
+            visibleHistorySignatures = emptySet(),
+            visitedHistory = emptySet(),
+            visitedHistorySignatures = emptySet(),
+            screenTop = 0,
+            screenBottom = 2000,
+            screenHeight = 2000,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId },
+            isContentNodeOf = { true },
+            clickableOf = { it.clickable },
+            focusableOf = { it.focusable },
+            descendantLabelOf = { it.descendantLabel },
+            preScrollAnchor = A11yNavigator.PreScrollAnchor(
+                viewIdResourceName = "com.test:id/voice_assistant",
+                mergedLabel = "Voice assistant",
+                talkbackLabel = "Voice assistant",
+                text = "Voice assistant",
+                contentDescription = null,
+                bounds = Rect(0, 980, 1000, 1220)
+            ),
+            preScrollAnchorBottom = 1220,
+            labelOf = { it.label }
+        )
+
+        assertEquals(0, index)
     }
 
     @Test

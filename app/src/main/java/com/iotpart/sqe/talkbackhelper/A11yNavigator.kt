@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.41.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.42.0"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
     private val TRAVERSAL_CONTAINER_CLASS_KEYWORDS = listOf(
@@ -2077,7 +2077,7 @@ object A11yNavigator {
             )
         }
         val reason = when {
-            analysis.newlyExposedCandidateExists -> "accepted:newly_exposed_after_scroll"
+            analysis.newlyExposedCandidateExists -> "accepted:newly_revealed_after_scroll"
             analysis.anchorMaintained -> "accepted:logical_successor"
             else -> "accepted:post_scroll_continuation"
         }
@@ -2101,7 +2101,7 @@ object A11yNavigator {
         isOtherUnvisitedVisible: Boolean,
         isTopResurfacedAnchorCandidate: Boolean,
         rewoundBeforeAnchor: Boolean,
-        isNewlyAvailableInteractiveCandidate: Boolean,
+        shouldPrioritizeNewlyRevealedInteractiveCandidate: Boolean,
         focusable: Boolean?,
         isOutOfScreen: Boolean,
         isLogicalSuccessor: Boolean
@@ -2114,13 +2114,13 @@ object A11yNavigator {
         if (isOutOfScreen) reasons += "rejected:outside_content_bounds"
         if (isTopResurfacedAnchorCandidate) reasons += "rejected:top_resurfaced_anchor"
         if (inVisitedHistory && !isTrailingContinuationCandidate) reasons += "rejected:already_visited"
-        if (rewoundBeforeAnchor && !isLogicalSuccessor && !isNewlyAvailableInteractiveCandidate) {
+        if (rewoundBeforeAnchor && !isLogicalSuccessor && !shouldPrioritizeNewlyRevealedInteractiveCandidate) {
             reasons += "rejected:rewound_before_anchor"
         }
 
         val priority = when {
             isLogicalSuccessor -> 0
-            !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isNewlyAvailableInteractiveCandidate -> 1
+            !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && shouldPrioritizeNewlyRevealedInteractiveCandidate -> 1
             !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isPostScrollTopContinuationCandidate -> 2
             !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isTrailingContinuationCandidate -> 3
             !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isPromotedRawOnlyCandidate -> 4
@@ -2295,12 +2295,17 @@ object A11yNavigator {
             val isPreScrollAnchorItself = preScrollAnchor?.viewIdResourceName?.equals(rawViewId, ignoreCase = true) == true
             val rewoundBeforeAnchor = anchorBounds != null && bounds.bottom <= anchorBounds.bottom
             val isInteractiveCandidate = (focusableOf?.invoke(node) == true) || (clickableOf?.invoke(node) == true)
-            val isNewlyAvailableInteractiveCandidate =
-                !inVisitedHistory &&
+            val descendantLabel = descendantLabelOf?.invoke(node)?.trim().orEmpty()
+            val hasResolvedLabel = label.isNotBlank() || descendantLabel.isNotBlank()
+            val isNewlyRevealedAfterScroll = !inVisibleHistory
+            val shouldPrioritizeNewlyRevealedInteractiveCandidate =
+                isNewlyRevealedAfterScroll &&
+                    !inVisitedHistory &&
                     !isTopBar &&
                     !isBottomBar &&
                     isContentNode &&
                     isInteractiveCandidate &&
+                    hasResolvedLabel &&
                     !isTopResurfacedAnchorCandidate &&
                     !isPreScrollAnchorItself
             val isPostScrollTopContinuationCandidate =
@@ -2329,14 +2334,13 @@ object A11yNavigator {
                 isOtherUnvisitedVisible = isOtherUnvisitedVisible,
                 isTopResurfacedAnchorCandidate = isTopResurfacedAnchorCandidate,
                 rewoundBeforeAnchor = rewoundBeforeAnchor,
-                isNewlyAvailableInteractiveCandidate = isNewlyAvailableInteractiveCandidate,
+                shouldPrioritizeNewlyRevealedInteractiveCandidate = shouldPrioritizeNewlyRevealedInteractiveCandidate,
                 focusable = focusableOf?.invoke(node),
                 isOutOfScreen = isOutOfScreen,
                 isLogicalSuccessor = false
             )
             val reasons = candidateEvaluation.rejectionReasons.toMutableList()
-            val hasDescendantLabel = descendantLabelOf?.invoke(node)?.trim().isNullOrEmpty().not()
-            if (label.isBlank() && descendantLabelOf != null && !hasDescendantLabel) {
+            if (label.isBlank() && descendantLabelOf != null && descendantLabel.isBlank()) {
                 reasons += "candidate rejected: no descendant label"
             }
             if (isTopResurfacedAnchorCandidate) {
@@ -2374,7 +2378,7 @@ object A11yNavigator {
                     isOtherUnvisitedVisible = isOtherUnvisitedVisible,
                     isTopResurfacedAnchorCandidate = isTopResurfacedAnchorCandidate,
                     rewoundBeforeAnchor = rewoundBeforeAnchor,
-                    isNewlyAvailableInteractiveCandidate = isNewlyAvailableInteractiveCandidate,
+                    shouldPrioritizeNewlyRevealedInteractiveCandidate = shouldPrioritizeNewlyRevealedInteractiveCandidate,
                     focusable = focusableOf?.invoke(node),
                     isOutOfScreen = isOutOfScreen,
                     isLogicalSuccessor = isLogicalSuccessor
@@ -2389,7 +2393,13 @@ object A11yNavigator {
                         "A11Y_HELPER",
                         "[SMART_NEXT] Resolved post-scroll successor from pre-scroll anchor: anchorViewId=${preScrollAnchor?.viewIdResourceName} successorViewId=$rawViewId"
                     )
-                    1 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting newly available unvisited interactive continuation candidate")
+                    1 -> {
+                        Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting newly available unvisited interactive continuation candidate")
+                        Log.i(
+                            "A11Y_HELPER",
+                            "[SMART_NEXT] accepted:newly_revealed_after_scroll index=$index label=${if (label.isBlank()) "<no-label>" else label.replace("\n", " ")} descendantLabel=${if (descendantLabel.isBlank()) "<no-label>" else descendantLabel.replace("\n", " ")} rewoundBeforeAnchor=$rewoundBeforeAnchor inVisibleHistory=$inVisibleHistory inVisitedHistory=$inVisitedHistory"
+                        )
+                    }
                     2 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting post-scroll top continuation candidate")
                     3 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Accepted trailing continuation candidate by continuity rule")
                     4 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting promoted raw-only continuation candidate")
@@ -2416,6 +2426,12 @@ object A11yNavigator {
                 val candidateLabel = if (label.isBlank()) "<no-label>" else label.replace("\n", " ")
                 if (reasons.isEmpty()) reasons += "Candidate rejected: unvisited but not part of downward continuation"
                 reasons.forEach { reason ->
+                    if (reason == "rejected:rewound_before_anchor") {
+                        Log.i(
+                            "A11Y_HELPER",
+                            "[SMART_NEXT] rejected:rewound_before_anchor index=$index label=$candidateLabel descendantLabel=${if (descendantLabel.isBlank()) "<no-label>" else descendantLabel.replace("\n", " ")} rewoundBeforeAnchor=$rewoundBeforeAnchor inVisibleHistory=$inVisibleHistory inVisitedHistory=$inVisitedHistory prioritizedNewlyRevealed=$shouldPrioritizeNewlyRevealedInteractiveCandidate"
+                        )
+                    }
                     Log.i(
                         "A11Y_HELPER",
                         "[SMART_NEXT] $reason index=$index label=$candidateLabel viewId=${viewIdOf(node)} className=${classNameOf(node)} clickable=${clickableOf?.invoke(node)} focusable=${focusableOf?.invoke(node)} bounds=$bounds"
