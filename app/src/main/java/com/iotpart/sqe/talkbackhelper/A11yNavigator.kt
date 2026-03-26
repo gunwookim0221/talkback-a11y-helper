@@ -10,7 +10,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.50.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.50.1"
     private const val RETARGET_SUPPRESSION_WINDOW_MS: Long = 400L
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
@@ -3761,11 +3761,9 @@ object A11yNavigator {
             if (isBottomNavigationBarNode(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight)) continue
             if (isFixedUiOf?.invoke(node) == true) continue
 
-            val normalizedClass = classNameOf(node)?.lowercase().orEmpty()
-            val normalizedViewId = viewIdOf(node)?.substringAfterLast('/')?.lowercase().orEmpty()
             val isWrapperOrContainer =
-                TRAVERSAL_CONTAINER_CLASS_KEYWORDS.any { keyword -> normalizedClass.contains(keyword) } ||
-                    TRAVERSAL_CONTAINER_VIEW_ID_KEYWORDS.any { keyword -> normalizedViewId.contains(keyword) }
+                isContainerLikeClassName(classNameOf(node)) ||
+                    isContainerLikeViewId(viewIdOf(node))
             if (isWrapperOrContainer) continue
             return index
         }
