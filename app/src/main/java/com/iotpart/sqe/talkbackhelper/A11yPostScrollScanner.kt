@@ -172,7 +172,7 @@ object A11yPostScrollScanner {
             -1
         }
         val continuationFallbackHardFailed = continuationFallbackFailed && !hasValidPostScrollCandidate
-        val postScrollDecision = A11yNavigator.decidePostScrollContinuation(
+        val postScrollDecision = A11yNavigationPolicy.decidePostScrollContinuation(
             resolvedAnchorIndex = resolvedAnchorIndex,
             fallbackBelowAnchorIndex = fallbackBelowAnchorIndex,
             traversalStartIndex = traversalStartIndex,
