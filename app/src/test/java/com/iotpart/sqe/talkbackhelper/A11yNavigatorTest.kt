@@ -10,7 +10,19 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.30.3")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.30.5")
+    }
+
+    @Test
+    fun isSettingsRowViewId_matchesKnownRows() {
+        assertTrue(A11yNavigator.isSettingsRowViewId("com.samsung.android.oneconnect:id/item_privacy_notice"))
+        assertTrue(A11yNavigator.isSettingsRowViewId("item_history"))
+    }
+
+    @Test
+    fun isSettingsRowViewId_rejectsUnknownRows() {
+        assertFalse(A11yNavigator.isSettingsRowViewId("com.samsung.android.oneconnect:id/menu_home"))
+        assertFalse(A11yNavigator.isSettingsRowViewId(null))
     }
 
     @Test

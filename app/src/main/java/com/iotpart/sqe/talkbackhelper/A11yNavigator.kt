@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.4"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.5"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -454,10 +454,12 @@ object A11yNavigator {
                 logPostScrollRawVsTraversalSnapshot(root, traversalList, focusNodeByNode)
                 traversalList.forEachIndexed { index, node ->
                     val bounds = Rect().also { node.getBoundsInScreen(it) }
+                    val focusedNode = focusNodeByNode[node]
                     val label = node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                         ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                        ?: focusedNode?.mergedLabel?.trim().takeUnless { it.isNullOrEmpty() }
+                        ?: recoverDescendantLabel(node)?.trim().takeUnless { it.isNullOrEmpty() }
                         ?: "<no-label>"
-                    val focusedNode = focusNodeByNode[node]
                     val mergedLabel = focusedNode?.mergedLabel?.replace("\n", " ") ?: "<none>"
                     val talkbackLabel = focusedNode?.contentDescription?.replace("\n", " ")
                         ?: node.contentDescription?.toString()?.replace("\n", " ")
@@ -508,11 +510,16 @@ object A11yNavigator {
                     labelOf = { node ->
                         node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                             ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                            ?: focusNodeByNode[node]?.mergedLabel?.trim().takeUnless { it.isNullOrEmpty() }
+                            ?: recoverDescendantLabel(node)?.trim().takeUnless { it.isNullOrEmpty() }
                     }
                 ).also { candidateIndex ->
                     if (candidateIndex >= 0) {
-                        val candidateLabel = traversalList[candidateIndex].text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                            ?: traversalList[candidateIndex].contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                        val candidateNode = traversalList[candidateIndex]
+                        val candidateLabel = candidateNode.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                            ?: candidateNode.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                            ?: focusNodeByNode[candidateNode]?.mergedLabel?.trim().takeUnless { it.isNullOrEmpty() }
+                            ?: recoverDescendantLabel(candidateNode)?.trim().takeUnless { it.isNullOrEmpty() }
                             ?: "<no-label>"
                         Log.i(
                             "A11Y_HELPER",
@@ -1589,6 +1596,7 @@ object A11yNavigator {
             val bounds = Rect().also { node.getBoundsInScreen(it) }
             val label = node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                 ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: focusNodeByNode[node]?.mergedLabel?.trim().takeUnless { it.isNullOrEmpty() }
                 ?: "<no-label>"
             "${node.viewIdResourceName}|${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}|$label"
         }.toSet()
@@ -3331,8 +3339,27 @@ object A11yNavigator {
 
     private fun isFocusContainer(node: AccessibilityNodeInfo): Boolean {
         val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && node.isScreenReaderFocusable
-        return node.isClickable || screenReaderFocusable
+        return node.isClickable || screenReaderFocusable || isSettingsRowViewId(node.viewIdResourceName)
     }
+
+    internal fun isSettingsRowViewId(viewIdResourceName: String?): Boolean {
+        val normalized = viewIdResourceName?.substringAfterLast('/')?.trim().orEmpty()
+        if (normalized.isEmpty()) return false
+        return SETTINGS_ROW_VIEW_IDS.contains(normalized)
+    }
+
+    private val SETTINGS_ROW_VIEW_IDS = setOf(
+        "item_history",
+        "item_notification",
+        "item_customer_service",
+        "item_repair_history",
+        "item_how_to_use",
+        "item_notices",
+        "item_contact_us",
+        "item_offline_diag",
+        "item_knox_matrix",
+        "item_privacy_notice"
+    )
 
     private fun hasAnyText(node: AccessibilityNodeInfo): Boolean {
         val text = node.text?.toString()?.trim().orEmpty()
