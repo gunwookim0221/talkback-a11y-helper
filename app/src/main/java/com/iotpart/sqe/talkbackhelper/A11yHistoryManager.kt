@@ -3,7 +3,7 @@ package com.iotpart.sqe.talkbackhelper
 import android.graphics.Rect
 
 object A11yHistoryManager {
-    const val VERSION: String = "1.0.0"
+    const val VERSION: String = "1.1.0"
 
     data class VisibleHistorySignature(
         val label: String?,

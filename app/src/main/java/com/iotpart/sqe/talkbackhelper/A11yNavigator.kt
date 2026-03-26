@@ -13,13 +13,10 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.50.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.51.0"
     private const val RETARGET_SUPPRESSION_WINDOW_MS: Long = 400L
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
-    private val visitedHistoryLock = Any()
-    private val visitedHistoryLabels = linkedSetOf<String>()
-    private val visitedHistorySignatures = mutableListOf<VisibleHistorySignature>()
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -108,11 +105,6 @@ object A11yNavigator {
         val reason: String
     )
 
-    internal data class CandidateSelectionResult(
-        val index: Int,
-        val accepted: Boolean,
-        val reasonCode: String
-    )
 
     private data class FocusExecutionResult(
         val outcome: TargetActionOutcome,
@@ -145,8 +137,6 @@ object A11yNavigator {
         val authoritativeOverride: Boolean
     )
 
-    @Volatile
-    private var authoritativeFocusWindowUntilMs: Long = 0L
     @Volatile
     private var activeSmartNextTurnId: Long = 0L
     @Volatile
@@ -1399,7 +1389,7 @@ object A11yNavigator {
         )
     }
 
-    private fun selectPostScrollCandidate(candidateIndex: Int): CandidateSelectionResult {
+    private fun selectPostScrollCandidate(candidateIndex: Int): A11yTraversalAnalyzer.CandidateSelectionResult {
         val analysis = analyzePostScrollState(
             treeChanged = true,
             anchorMaintained = true,
@@ -2075,9 +2065,9 @@ object A11yNavigator {
     private fun selectPostScrollContinuationCandidate(
         candidateIndex: Int,
         analysis: PostScrollAnalysis
-    ): CandidateSelectionResult {
+    ): A11yTraversalAnalyzer.CandidateSelectionResult {
         if (candidateIndex < 0) {
-            return CandidateSelectionResult(
+            return A11yTraversalAnalyzer.CandidateSelectionResult(
                 index = -1,
                 accepted = false,
                 reasonCode = if (analysis.noProgress) "rejected:no_progress_after_scroll" else "rejected:no_valid_continuation_candidate"
@@ -2088,7 +2078,7 @@ object A11yNavigator {
             analysis.anchorMaintained -> "accepted:logical_successor"
             else -> "accepted:post_scroll_continuation"
         }
-        return CandidateSelectionResult(
+        return A11yTraversalAnalyzer.CandidateSelectionResult(
             index = candidateIndex,
             accepted = true,
             reasonCode = reason

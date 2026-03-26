@@ -5,7 +5,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.0.0"
+    const val VERSION: String = "1.1.0"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -57,7 +57,7 @@ object A11yFocusExecutor {
         )
     }
 
-    fun shouldTreatAsSnapBackAfterVerification(
+    internal fun shouldTreatAsSnapBackAfterVerification(
         actualFocusedBounds: Rect?,
         targetBounds: Rect,
         isTargetAccessibilityFocused: Boolean
@@ -67,7 +67,7 @@ object A11yFocusExecutor {
         return !isWithinSnapBackTolerance(targetBounds, actualFocusedBounds)
     }
 
-    fun isTargetFocusResolved(
+    internal fun isTargetFocusResolved(
         isTargetAccessibilityFocused: Boolean,
         actualFocusedBounds: Rect?,
         targetBounds: Rect
