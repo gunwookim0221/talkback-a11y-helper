@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.29.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.0"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -26,6 +26,12 @@ object A11yNavigator {
         val talkbackLabel: String?,
         val text: String?,
         val contentDescription: String?,
+        val bounds: Rect
+    )
+
+    internal data class VisibleHistorySignature(
+        val label: String?,
+        val viewId: String?,
         val bounds: Rect
     )
 
@@ -386,6 +392,7 @@ object A11yNavigator {
             excludeDesc: String? = null,
             startIndex: Int = 0,
             visibleHistory: Set<String> = emptySet(),
+            visibleHistorySignatures: Set<VisibleHistorySignature> = emptySet(),
             allowLooping: Boolean = true,
             preScrollAnchor: PreScrollAnchor? = null
         ): TargetActionOutcome {
@@ -440,12 +447,16 @@ object A11yNavigator {
                     traversalList = traversalList,
                     startIndex = 0,
                     visibleHistory = visibleHistory,
+                    visibleHistorySignatures = visibleHistorySignatures,
                     screenTop = screenTop,
                     screenBottom = screenBottom,
                     screenHeight = screenHeight,
                     boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
                     classNameOf = { node -> node.className?.toString() },
                     viewIdOf = { node -> node.viewIdResourceName },
+                    isContentNodeOf = { node ->
+                        !isFixedSystemUI(node, localMainScrollContainer)
+                    },
                     labelOf = { node ->
                         node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                             ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
@@ -568,6 +579,18 @@ object A11yNavigator {
                     recoverDescendantLabel(node)?.let { recoveredLabel ->
                         label = recoveredLabel
                         Log.i("A11Y_HELPER", "[SMART_NEXT] Resolved descendant label for continuation target: $recoveredLabel")
+                        val recoveredInHistory = isInVisibleHistory(
+                            label = recoveredLabel,
+                            viewId = node.viewIdResourceName,
+                            bounds = bounds,
+                            visibleHistory = visibleHistory,
+                            visibleHistorySignatures = visibleHistorySignatures
+                        )
+                        if (recoveredInHistory) {
+                            Log.i("A11Y_HELPER", "[SMART_NEXT] Recovered label belongs to pre-scroll visible history -> skipping resurfaced item")
+                            Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping resurfaced pre-scroll item: $recoveredLabel")
+                            continue
+                        }
                     }
                 }
                 val isLastFocusedNode = (excludeDesc != null && label == excludeDesc)
@@ -692,6 +715,7 @@ object A11yNavigator {
                     excludeDesc = null,
                     startIndex = 0,
                     visibleHistory = emptySet(),
+                    visibleHistorySignatures = emptySet(),
                     preScrollAnchor = null
                 )
             }
@@ -801,6 +825,35 @@ object A11yNavigator {
                         )
                     }
                 )
+                val visibleHistorySignatures = collectVisibleHistorySignatures(
+                    nodes = traversalList,
+                    screenTop = screenTop,
+                    screenBottom = screenBottom,
+                    boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+                    labelOf = { node ->
+                        node.text?.toString()?.trim().takeUnless { text -> text.isNullOrEmpty() }
+                            ?: node.contentDescription?.toString()?.trim().takeUnless { text -> text.isNullOrEmpty() }
+                    },
+                    viewIdOf = { node -> node.viewIdResourceName },
+                    isTopAppBarNodeOf = { node, bounds ->
+                        isTopAppBarNode(
+                            node.className?.toString(),
+                            node.viewIdResourceName,
+                            bounds,
+                            screenTop,
+                            screenHeight
+                        )
+                    },
+                    isBottomNavigationBarNodeOf = { node, bounds ->
+                        isBottomNavigationBarNode(
+                            node.className?.toString(),
+                            node.viewIdResourceName,
+                            bounds,
+                            screenBottom,
+                            screenHeight
+                        )
+                    }
+                )
 
                 val service = A11yHelperService.instance
                 val oldSnapshot = buildNodeTextSnapshot(traversalList)
@@ -846,6 +899,7 @@ object A11yNavigator {
                     excludeDesc = lastDesc,
                     startIndex = 0,
                     visibleHistory = visibleHistory,
+                    visibleHistorySignatures = visibleHistorySignatures,
                     preScrollAnchor = preScrollAnchor
                 )
             }
@@ -1007,6 +1061,35 @@ object A11yNavigator {
                     )
                 }
             )
+            val visibleHistorySignatures = collectVisibleHistorySignatures(
+                nodes = traversalList,
+                screenTop = screenTop,
+                screenBottom = screenBottom,
+                boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+                labelOf = { node ->
+                    node.text?.toString()?.trim().takeUnless { text -> text.isNullOrEmpty() }
+                        ?: node.contentDescription?.toString()?.trim().takeUnless { text -> text.isNullOrEmpty() }
+                },
+                viewIdOf = { node -> node.viewIdResourceName },
+                isTopAppBarNodeOf = { node, bounds ->
+                    isTopAppBarNode(
+                        node.className?.toString(),
+                        node.viewIdResourceName,
+                        bounds,
+                        screenTop,
+                        screenHeight
+                    )
+                },
+                isBottomNavigationBarNodeOf = { node, bounds ->
+                    isBottomNavigationBarNode(
+                        node.className?.toString(),
+                        node.viewIdResourceName,
+                        bounds,
+                        screenBottom,
+                        screenHeight
+                    )
+                }
+            )
 
             val service = A11yHelperService.instance
             val oldSnapshot = buildNodeTextSnapshot(traversalList)
@@ -1057,6 +1140,7 @@ object A11yNavigator {
                 excludeDesc = lastDesc,
                 startIndex = 0,
                 visibleHistory = visibleHistory,
+                visibleHistorySignatures = visibleHistorySignatures,
                 allowLooping = false,
                 preScrollAnchor = preScrollAnchor
             )
@@ -1313,12 +1397,14 @@ object A11yNavigator {
         traversalList: List<T>,
         startIndex: Int,
         visibleHistory: Set<String>,
+        visibleHistorySignatures: Set<VisibleHistorySignature>,
         screenTop: Int,
         screenBottom: Int,
         screenHeight: Int,
         boundsOf: (T) -> Rect,
         classNameOf: (T) -> String?,
         viewIdOf: (T) -> String?,
+        isContentNodeOf: (T) -> Boolean = { true },
         labelOf: (T) -> String?
     ): Int {
         if (traversalList.isEmpty()) return -1
@@ -1328,9 +1414,50 @@ object A11yNavigator {
             val isTopBar = isTopAppBarNode(classNameOf(node), viewIdOf(node), bounds, screenTop, screenHeight)
             val isBottomBar = isBottomNavigationBarNode(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight)
             val label = labelOf(node)?.trim().orEmpty()
-            val inHistory = label.isNotEmpty() && visibleHistory.contains(label)
-            !isTopBar && !isBottomBar && !inHistory
+            val inHistory = isInVisibleHistory(
+                label = label,
+                viewId = viewIdOf(node),
+                bounds = bounds,
+                visibleHistory = visibleHistory,
+                visibleHistorySignatures = visibleHistorySignatures
+            )
+            val isContentNode = isContentNodeOf(node)
+            if (!isTopBar && !isBottomBar && !inHistory && isContentNode) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting truly new continuation candidate after scroll")
+                true
+            } else {
+                if (inHistory && label.isNotBlank()) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping resurfaced pre-scroll item: $label")
+                }
+                false
+            }
         } ?: -1
+    }
+
+    internal fun isInVisibleHistory(
+        label: String?,
+        viewId: String?,
+        bounds: Rect,
+        visibleHistory: Set<String>,
+        visibleHistorySignatures: Set<VisibleHistorySignature>,
+        boundsTolerancePx: Int = 24
+    ): Boolean {
+        val normalizedLabel = label?.trim().orEmpty()
+        if (normalizedLabel.isNotEmpty() && visibleHistory.contains(normalizedLabel)) {
+            return true
+        }
+        return visibleHistorySignatures.any { signature ->
+            val sameLabel = normalizedLabel.isNotEmpty() &&
+                signature.label.equals(normalizedLabel, ignoreCase = true)
+            val sameViewId = !viewId.isNullOrBlank() &&
+                signature.viewId.equals(viewId, ignoreCase = true)
+            val similarBounds =
+                abs(signature.bounds.left - bounds.left) <= boundsTolerancePx &&
+                    abs(signature.bounds.top - bounds.top) <= boundsTolerancePx &&
+                    abs(signature.bounds.right - bounds.right) <= boundsTolerancePx &&
+                    abs(signature.bounds.bottom - bounds.bottom) <= boundsTolerancePx
+            sameLabel || sameViewId || similarBounds
+        }
     }
 
     internal fun performFocusWithVisibilityCheck(
@@ -2715,6 +2842,32 @@ object A11yNavigator {
                 return@mapNotNull null
             }
             labelOf(node)?.trim()?.takeUnless { it.isEmpty() }
+        }.toSet()
+    }
+
+    internal fun <T> collectVisibleHistorySignatures(
+        nodes: List<T>,
+        screenTop: Int,
+        screenBottom: Int,
+        boundsOf: (T) -> Rect,
+        labelOf: (T) -> String?,
+        viewIdOf: (T) -> String?,
+        isTopAppBarNodeOf: (T, Rect) -> Boolean = { _, _ -> false },
+        isBottomNavigationBarNodeOf: (T, Rect) -> Boolean = { _, _ -> false }
+    ): Set<VisibleHistorySignature> {
+        return nodes.mapNotNull { node ->
+            val bounds = boundsOf(node)
+            if (isNodePhysicallyOffScreen(bounds, screenTop, screenBottom)) {
+                return@mapNotNull null
+            }
+            if (isTopAppBarNodeOf(node, bounds) || isBottomNavigationBarNodeOf(node, bounds)) {
+                return@mapNotNull null
+            }
+            VisibleHistorySignature(
+                label = labelOf(node)?.trim()?.takeUnless { it.isEmpty() },
+                viewId = viewIdOf(node)?.trim()?.takeUnless { it.isEmpty() },
+                bounds = Rect(bounds)
+            )
         }.toSet()
     }
 
