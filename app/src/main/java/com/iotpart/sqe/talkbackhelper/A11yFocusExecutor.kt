@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.2.1"
+    const val VERSION: String = "1.2.2"
 
     data class FocusExecutionResult(
         val success: Boolean,
