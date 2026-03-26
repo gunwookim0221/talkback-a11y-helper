@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.43.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.45.0")
     }
 
     @Test
@@ -118,6 +118,66 @@ class A11yNavigatorTest {
                 bounds = Rect(0, 400, 1000, 500)
             ),
             preScrollAnchorBottom = 500,
+            labelOf = { it.label }
+        )
+
+        assertEquals(0, result.index)
+        assertTrue(result.hasValidPostScrollCandidate)
+    }
+
+    @Test
+    fun selectContinuationCandidateAfterScrollResult_doesNotTreatInteractiveTopContentAsPersistentHeader() {
+        data class Node(
+            val label: String?,
+            val descendantLabel: String?,
+            val viewId: String?,
+            val bounds: Rect,
+            val clickable: Boolean,
+            val focusable: Boolean
+        )
+
+        val node = Node(
+            label = "",
+            descendantLabel = "Continuation Card",
+            viewId = "com.test:id/item_continuation",
+            bounds = Rect(0, 120, 1000, 260),
+            clickable = true,
+            focusable = true
+        )
+
+        val result = A11yNavigator.selectContinuationCandidateAfterScrollResult(
+            traversalList = listOf(node),
+            startIndex = 0,
+            visibleHistory = setOf("Continuation Card"),
+            visibleHistorySignatures = setOf(
+                A11yNavigator.VisibleHistorySignature(
+                    label = "Continuation Card",
+                    viewId = "com.test:id/item_continuation",
+                    bounds = Rect(0, 120, 1000, 260),
+                    nodeIdentity = "id1"
+                )
+            ),
+            visitedHistory = emptySet(),
+            visitedHistorySignatures = emptySet(),
+            screenTop = 0,
+            screenBottom = 2200,
+            screenHeight = 2200,
+            boundsOf = { it.bounds },
+            classNameOf = { "android.widget.LinearLayout" },
+            viewIdOf = { it.viewId },
+            isContentNodeOf = { true },
+            clickableOf = { it.clickable },
+            focusableOf = { it.focusable },
+            descendantLabelOf = { it.descendantLabel },
+            preScrollAnchor = A11yNavigator.PreScrollAnchor(
+                viewIdResourceName = "com.test:id/anchor",
+                mergedLabel = "Anchor",
+                talkbackLabel = "Anchor",
+                text = "Anchor",
+                contentDescription = "Anchor",
+                bounds = Rect(0, 400, 1000, 520)
+            ),
+            preScrollAnchorBottom = 520,
             labelOf = { it.label }
         )
 
