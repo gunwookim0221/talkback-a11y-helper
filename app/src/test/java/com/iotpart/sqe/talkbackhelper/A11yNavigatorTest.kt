@@ -2046,7 +2046,7 @@ class A11yNavigatorTest {
     fun collectVisibleHistory_collectsOnlyVisibleLabels() {
         data class Node(val label: String?, val rect: Rect)
 
-        val history = A11yNavigator.collectVisibleHistory(
+        val history = A11ySnapshotTracker.collectVisibleHistory(
             nodes = listOf(
                 Node("Pet Care", Rect(0, 100, 100, 200)),
                 Node("Clothing Care", Rect(0, 1900, 100, 2000)),
@@ -2068,7 +2068,7 @@ class A11yNavigatorTest {
     fun collectVisibleHistory_excludesTopAndBottomBars() {
         data class Node(val label: String?, val rect: Rect, val isTopBar: Boolean = false, val isBottomBar: Boolean = false)
 
-        val history = A11yNavigator.collectVisibleHistory(
+        val history = A11ySnapshotTracker.collectVisibleHistory(
             nodes = listOf(
                 Node("Header", Rect(0, 0, 100, 120), isTopBar = true),
                 Node("Plant Care", Rect(0, 200, 100, 320)),
@@ -2089,7 +2089,7 @@ class A11yNavigatorTest {
     fun collectVisibleHistorySignatures_collectsVisibleMetadata() {
         data class Node(val label: String?, val viewId: String?, val rect: Rect)
 
-        val signatures = A11yNavigator.collectVisibleHistorySignatures(
+        val signatures = A11ySnapshotTracker.collectVisibleHistorySignatures(
             nodes = listOf(
                 Node("History", "com.test:id/history", Rect(0, 120, 1000, 320)),
                 Node("Privacy notice", "com.test:id/privacy_notice", Rect(0, 380, 1000, 620))
@@ -2115,14 +2115,14 @@ class A11yNavigatorTest {
             )
         )
 
-        val recoveredLabelMatch = A11yNavigator.isInVisibleHistory(
+        val recoveredLabelMatch = A11ySnapshotTracker.isInVisibleHistory(
             label = "History",
             viewId = "com.test:id/unknown",
             bounds = Rect(0, 600, 1000, 820),
             visibleHistory = emptySet(),
             visibleHistorySignatures = signatures
         )
-        val viewIdMatch = A11yNavigator.isInVisibleHistory(
+        val viewIdMatch = A11ySnapshotTracker.isInVisibleHistory(
             label = "Privacy notice",
             viewId = "com.test:id/history",
             bounds = Rect(0, 600, 1000, 820),

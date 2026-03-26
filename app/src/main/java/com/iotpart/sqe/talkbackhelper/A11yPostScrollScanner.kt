@@ -85,7 +85,7 @@ object A11yPostScrollScanner {
                 continuationFallbackFailed = true
                 -1
             } else {
-                val promotedRawOnlyViewIds = A11yNavigator.collectRawVisibleNodes(context.root)
+                val promotedRawOnlyViewIds = A11ySnapshotTracker.collectRawVisibleNodes(context.root)
                     .mapNotNull { raw -> raw.viewId?.substringAfterLast('/')?.trim() }
                     .filter { shortId -> A11yTraversalAnalyzer.isSettingsRowViewId(shortId) }
                     .toSet()
@@ -129,10 +129,10 @@ object A11yPostScrollScanner {
                         A11yNavigator.isBottomNavigationBarNode(className, viewId, bounds, bottom, height)
                     },
                     isInVisibleHistory = { label, viewId, bounds, visibleHistory, visibleHistorySignatures ->
-                        A11yNavigator.isInVisibleHistory(label, viewId, bounds, visibleHistory, visibleHistorySignatures)
+                        A11ySnapshotTracker.isInVisibleHistory(label, viewId, bounds, visibleHistory, visibleHistorySignatures)
                     },
                     isInVisitedHistory = { label, viewId, bounds, visitedHistory, visitedHistorySignatures ->
-                        A11yNavigator.isInVisitedHistory(label, viewId, bounds, visitedHistory, visitedHistorySignatures)
+                        A11ySnapshotTracker.isInVisitedHistory(label, viewId, bounds, visitedHistory, visitedHistorySignatures)
                     },
                     logVisitedHistorySkip = { reason, label, viewId, bounds ->
                         A11yNavigator.logVisitedHistorySkip(reason, label, viewId, bounds)
@@ -141,7 +141,7 @@ object A11yPostScrollScanner {
                         A11yNavigator.isHeaderLikeCandidate(className, viewId, label, bounds, top, height)
                     },
                     hasPreScrollResolvedLabel = { currentLabel, currentDescendantLabel, rawViewId, bounds, visibleHistorySignatures ->
-                        A11yNavigator.hasPreScrollResolvedLabel(currentLabel, currentDescendantLabel, rawViewId, bounds, visibleHistorySignatures)
+                        A11ySnapshotTracker.hasPreScrollResolvedLabel(currentLabel, currentDescendantLabel, rawViewId, bounds, visibleHistorySignatures)
                     }
                 )
                 val candidate = continuationSearchResult.index
@@ -219,7 +219,7 @@ object A11yPostScrollScanner {
         val isTopBar = A11yNavigator.isTopAppBarNode(node.className?.toString(), node.viewIdResourceName, bounds, context.screenTop, context.screenHeight)
         val isBottomBar = A11yNavigator.isBottomNavigationBarNode(node.className?.toString(), node.viewIdResourceName, bounds, context.screenBottom, context.screenHeight)
         val isFixedUi = A11yNavigator.isFixedSystemUI(node, localMainScrollContainer)
-        val inVisitedHistory = A11yNavigator.isInVisitedHistory(
+        val inVisitedHistory = A11ySnapshotTracker.isInVisitedHistory(
             label = label,
             viewId = node.viewIdResourceName,
             bounds = bounds,
