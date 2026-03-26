@@ -65,7 +65,7 @@ object A11yPostScrollScanner {
             if (excludedIndex != -1) excludedIndex + 1 else request.startIndex.coerceAtLeast(0)
         }
         val resolvedAnchorIndex = if (request.isScrollAction && request.preScrollAnchor != null) {
-            A11yNavigator.resolveAnchorIndexInRefreshedTraversal(
+            A11yTraversalAnalyzer.resolveAnchorIndexInRefreshedTraversal(
                 traversalList = traversalList,
                 anchor = request.preScrollAnchor,
                 boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
@@ -114,7 +114,7 @@ object A11yPostScrollScanner {
                     },
                     clickableOf = { node -> node.isClickable },
                     focusableOf = { node -> node.isFocusable },
-                    descendantLabelOf = { node -> A11yNavigator.recoverDescendantLabel(node) },
+                    descendantLabelOf = { node -> A11yTraversalAnalyzer.recoverDescendantLabel(node) },
                     promotedViewIds = promotedRawOnlyViewIds,
                     preScrollAnchor = preScrollAnchor,
                     preScrollAnchorBottom = preScrollAnchor.bounds.bottom,
@@ -246,7 +246,7 @@ object A11yPostScrollScanner {
         }
         if (!isTopBar && !isBottomBar) {
             if (label == "<no-label>") {
-                label = A11yNavigator.recoverDescendantLabel(node) ?: label
+                label = A11yTraversalAnalyzer.recoverDescendantLabel(node) ?: label
             }
             loopState.focusAttempted = true
             val outcome = A11yNavigator.requestFocusFlow(

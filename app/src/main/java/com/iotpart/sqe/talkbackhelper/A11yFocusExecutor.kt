@@ -175,7 +175,7 @@ object A11yFocusExecutor {
     ): FocusRetargetDecision {
         val actualFocusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         val actualCandidateIndex = if (actualFocusedNode != null && traversalListSnapshot != null) {
-            A11yNavigator.findNodeIndexByIdentity(
+            A11yTraversalAnalyzer.findNodeIndexByIdentity(
                 nodes = traversalListSnapshot,
                 target = actualFocusedNode,
                 idOf = { it.viewIdResourceName },
@@ -234,7 +234,7 @@ object A11yFocusExecutor {
             else -> intendedTarget
         }
         val finalLabel = A11yNavigator.resolvePrimaryLabel(finalTarget)
-            ?: A11yNavigator.recoverDescendantLabel(finalTarget)
+            ?: A11yTraversalAnalyzer.recoverDescendantLabel(finalTarget)
             ?: intendedLabel
         val source = when {
             shouldSuppressTopNoise -> "suppressed_top_noise"
@@ -244,11 +244,11 @@ object A11yFocusExecutor {
         if (shouldSuppressTopNoise) {
             Log.i(
                 "A11Y_HELPER",
-                "[FOCUS_VERIFY] suppression_window_event type=FOCUS_UPDATE suppressed=true reason=top_resurfaced_header_during_authoritative_window label=${A11yNavigator.resolvePrimaryLabel(actualFocusedNode) ?: A11yNavigator.recoverDescendantLabel(actualFocusedNode) ?: "<no-label>"}"
+                "[FOCUS_VERIFY] suppression_window_event type=FOCUS_UPDATE suppressed=true reason=top_resurfaced_header_during_authoritative_window label=${A11yNavigator.resolvePrimaryLabel(actualFocusedNode) ?: A11yTraversalAnalyzer.recoverDescendantLabel(actualFocusedNode) ?: "<no-label>"}"
             )
             Log.i(
                 "A11Y_HELPER",
-                "[FOCUS_VERIFY] suppression_window_event type=A11Y_ANNOUNCEMENT suppressed=true reason=top_resurfaced_header_during_authoritative_window label=${A11yNavigator.resolvePrimaryLabel(actualFocusedNode) ?: A11yNavigator.recoverDescendantLabel(actualFocusedNode) ?: "<no-label>"}"
+                "[FOCUS_VERIFY] suppression_window_event type=A11Y_ANNOUNCEMENT suppressed=true reason=top_resurfaced_header_during_authoritative_window label=${A11yNavigator.resolvePrimaryLabel(actualFocusedNode) ?: A11yTraversalAnalyzer.recoverDescendantLabel(actualFocusedNode) ?: "<no-label>"}"
             )
         }
         if (isScrollAction) {
