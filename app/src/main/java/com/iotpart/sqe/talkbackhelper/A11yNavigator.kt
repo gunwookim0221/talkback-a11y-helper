@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.35.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.35.1"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
     private val TRAVERSAL_CONTAINER_CLASS_KEYWORDS = listOf(
@@ -70,7 +70,7 @@ object A11yNavigator {
         val focusNodeByNode: Map<AccessibilityNodeInfo, FocusedNode>
     )
 
-    internal data class NormalizeResult(
+    private data class NormalizeResult(
         val screenRect: Rect,
         val screenTop: Int,
         val screenBottom: Int,
@@ -78,52 +78,52 @@ object A11yNavigator {
         val effectiveBottom: Int
     )
 
-    internal data class SelectionDecision(
+    private data class SelectionDecision(
         val currentIndex: Int,
         val fallbackIndex: Int,
         val nextIndex: Int
     )
 
-    internal data class ScrollDecision(
+    private data class ScrollDecision(
         val shouldPreScroll: Boolean,
         val noProgressAfterScroll: Boolean = false,
         val reason: String
     )
 
-    internal data class FocusAttemptResult(
+    private data class FocusAttemptResult(
         val outcome: TargetActionOutcome,
         val verificationPassed: Boolean,
         val snapBackDetected: Boolean
     )
 
-    internal data class BottomBarEntryDecision(
+    private data class BottomBarEntryDecision(
         val allowBottomBarEntry: Boolean,
         val requirePreScroll: Boolean,
         val reason: String
     )
 
-    internal data class NavigationContext(
+    private data class NavigationContext(
         val root: AccessibilityNodeInfo,
         val collect: CollectResult,
         val normalize: NormalizeResult,
         val currentPosition: CurrentPosition
     )
 
-    internal data class CurrentPosition(
+    private data class CurrentPosition(
         val resolvedCurrent: AccessibilityNodeInfo?,
         val currentIndex: Int,
         val fallbackIndex: Int,
         val nextIndex: Int
     )
 
-    internal data class PreScrollResult(
+    private data class PreScrollResult(
         val attempted: Boolean,
         val success: Boolean,
         val anchor: PreScrollAnchor? = null,
         val reason: String
     )
 
-    internal data class PostScrollAnalysis(
+    private data class PostScrollAnalysis(
         val treeChanged: Boolean,
         val anchorMaintained: Boolean,
         val newlyExposedCandidateExists: Boolean,
@@ -131,13 +131,13 @@ object A11yNavigator {
         val reason: String
     )
 
-    internal data class CandidateSelectionResult(
+    private data class CandidateSelectionResult(
         val index: Int,
         val accepted: Boolean,
         val reasonCode: String
     )
 
-    internal data class FocusExecutionResult(
+    private data class FocusExecutionResult(
         val outcome: TargetActionOutcome,
         val reasonCode: String
     )
