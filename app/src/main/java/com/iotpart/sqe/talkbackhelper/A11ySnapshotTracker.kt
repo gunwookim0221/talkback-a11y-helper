@@ -5,13 +5,13 @@ import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
-typealias SnapshotFocusedNode = A11yTraversalAnalyzer.FocusedNode
+internal typealias FocusedNode = A11yTraversalAnalyzer.FocusedNode
 typealias SnapshotVisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11ySnapshotTracker {
-    const val SNAPSHOT_TRACKER_VERSION: String = "1.0.0"
+    const val SNAPSHOT_TRACKER_VERSION: String = "1.0.1"
 
-    private data class RawVisibleNode(
+    internal data class RawVisibleNode(
         val label: String,
         val viewId: String?,
         val bounds: Rect
@@ -145,7 +145,7 @@ object A11ySnapshotTracker {
     internal fun logPostScrollRawVsTraversalSnapshot(
         root: AccessibilityNodeInfo,
         traversalList: List<AccessibilityNodeInfo>,
-        focusNodeByNode: Map<AccessibilityNodeInfo, SnapshotFocusedNode>
+        focusNodeByNode: Map<AccessibilityNodeInfo, FocusedNode>
     ) {
         val rawVisibleNodes = collectRawVisibleNodes(root)
         val rawLabels = rawVisibleNodes.map { it.label }.take(20)

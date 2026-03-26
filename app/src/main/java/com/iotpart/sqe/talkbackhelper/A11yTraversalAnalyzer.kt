@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.4.0"
+    const val VERSION: String = "1.4.1"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
     data class CandidateSelectionResult(
@@ -467,25 +467,25 @@ object A11yTraversalAnalyzer {
             val normalizedViewId = rawViewId?.lowercase().orEmpty()
             val shortViewId = rawViewId?.substringAfterLast('/')?.trim().orEmpty()
             val inVisibleHistory = isInVisibleHistory(
-                label = label,
-                viewId = rawViewId,
-                bounds = bounds,
-                visibleHistory = visibleHistory,
-                visibleHistorySignatures = visibleHistorySignatures
+                label,
+                rawViewId,
+                bounds,
+                visibleHistory,
+                visibleHistorySignatures
             )
             val inVisitedHistory = isInVisitedHistory(
-                label = label,
-                viewId = viewIdOf(node),
-                bounds = bounds,
-                visitedHistory = visitedHistory,
-                visitedHistorySignatures = visitedHistorySignatures
+                label,
+                viewIdOf(node),
+                bounds,
+                visitedHistory,
+                visitedHistorySignatures
             )
             if (!inVisitedHistory) {
                 logVisitedHistorySkip(
-                    reason = "anchor continuity candidate only",
-                    label = label,
-                    viewId = viewIdOf(node),
-                    bounds = bounds
+                    "anchor continuity candidate only",
+                    label,
+                    viewIdOf(node),
+                    bounds
                 )
             }
             val isContentNode = isContentNodeOf(node)
@@ -499,12 +499,12 @@ object A11yTraversalAnalyzer {
             val rewoundBeforeAnchor = anchorBounds != null && bounds.bottom <= anchorBounds.bottom
             val isInteractiveCandidate = (focusableOf?.invoke(node) == true) || (clickableOf?.invoke(node) == true)
             val isHeaderLikeNode = isHeaderLikeCandidate(
-                className = classNameOf(node),
-                viewIdResourceName = rawViewId,
-                label = label,
-                boundsInScreen = bounds,
-                screenTop = screenTop,
-                screenHeight = screenHeight
+                classNameOf(node),
+                rawViewId,
+                label,
+                bounds,
+                screenTop,
+                screenHeight
             )
             val descendantLabel = descendantLabelOf?.invoke(node)?.trim().orEmpty()
             val hasResolvedLabel = label.isNotBlank() || descendantLabel.isNotBlank()
@@ -512,11 +512,11 @@ object A11yTraversalAnalyzer {
             val postScrollSeen = true
             val isPreScrollContinuationCandidate = preScrollSeen && isAfterPreScrollAnchor
             val preScrollHadResolvedLabel = preScrollSeen && hasPreScrollResolvedLabel(
-                currentLabel = label,
-                currentDescendantLabel = descendantLabel,
-                rawViewId = rawViewId,
-                bounds = bounds,
-                visibleHistorySignatures = visibleHistorySignatures
+                label,
+                descendantLabel,
+                rawViewId,
+                bounds,
+                visibleHistorySignatures
             )
             val descendantLabelResolved = descendantLabel.isNotBlank()
             val candidateClassification = classifyPostScrollCandidate(

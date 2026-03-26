@@ -9,14 +9,22 @@ import org.json.JSONObject
 
 typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
-typealias FocusedNode = A11yTraversalAnalyzer.FocusedNode
+internal typealias FocusedNode = A11yTraversalAnalyzer.FocusedNode
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.60.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.60.2"
 
 
     @Volatile
     internal var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
+
+    internal fun setLastRequestedFocusIndex(index: Int) {
+        lastRequestedFocusIndex = index
+    }
+
+    internal fun nodeObjectId(node: Any?): Int {
+        return System.identityHashCode(node)
+    }
 
 
     fun resetFocusHistory() {
@@ -860,13 +868,13 @@ object A11yNavigator {
 
     private fun buildNodeIdentityForHistory(node: AccessibilityNodeInfo): String = nodeIdentityOf(node).orEmpty()
 
-    private fun nodeIdentityOf(windowId: Int, className: String?, packageName: String?): String {
+    internal fun nodeIdentityOf(windowId: Int, className: String?, packageName: String?): String {
         val normalizedClassName = className?.trim().orEmpty()
         val normalizedPackageName = packageName?.trim().orEmpty()
         return "window=$windowId|class=$normalizedClassName|package=$normalizedPackageName"
     }
 
-    private fun nodeIdentityOf(node: AccessibilityNodeInfo?): String? {
+    internal fun nodeIdentityOf(node: AccessibilityNodeInfo?): String? {
         node ?: return null
         return nodeIdentityOf(
             windowId = node.windowId,
@@ -875,7 +883,7 @@ object A11yNavigator {
         )
     }
 
-    private fun nodeIdentityOf(node: AccessibilityNodeInfoCompat?): String? {
+    internal fun nodeIdentityOf(node: AccessibilityNodeInfoCompat?): String? {
         node ?: return null
         return nodeIdentityOf(
             windowId = node.windowId,
@@ -884,7 +892,7 @@ object A11yNavigator {
         )
     }
 
-    private fun nodeIdentityOf(snapshot: FocusSnapshot?): String? {
+    internal fun nodeIdentityOf(snapshot: FocusSnapshot?): String? {
         snapshot ?: return null
         return nodeIdentityOf(
             windowId = -1,
