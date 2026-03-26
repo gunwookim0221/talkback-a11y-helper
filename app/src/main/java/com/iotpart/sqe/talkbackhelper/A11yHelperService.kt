@@ -53,6 +53,22 @@ class A11yHelperService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         val type = event.eventType
+        if (type != AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED &&
+            type != AccessibilityEvent.TYPE_VIEW_FOCUSED &&
+            type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+            type != AccessibilityEvent.TYPE_ANNOUNCEMENT
+        ) {
+            return
+        }
+
+        val node = resolveFocusNode(event)
+        if (node == null) {
+            Log.d(TAG, "Focus node not found for eventType=$type")
+            return
+        }
+        if (A11yNavigator.shouldIgnorePostCommitResurfacedHeader(rootInActiveWindow, node, type)) {
+            return
+        }
         if (
             type == AccessibilityEvent.TYPE_ANNOUNCEMENT ||
             type == AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED ||
@@ -66,20 +82,6 @@ class A11yHelperService : AccessibilityService() {
 
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             Log.i(TAG, "SCREEN_CHANGED")
-        }
-
-        if (type != AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED &&
-            type != AccessibilityEvent.TYPE_VIEW_FOCUSED &&
-            type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
-            type != AccessibilityEvent.TYPE_ANNOUNCEMENT
-        ) {
-            return
-        }
-
-        val node = resolveFocusNode(event)
-        if (node == null) {
-            Log.d(TAG, "Focus node not found for eventType=$type")
-            return
         }
 
         runCatching {
