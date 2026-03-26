@@ -9,8 +9,11 @@ import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import org.json.JSONObject
 import kotlin.math.abs
 
+typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
+typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
+
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.50.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.50.0"
     private const val RETARGET_SUPPRESSION_WINDOW_MS: Long = 400L
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
@@ -20,22 +23,6 @@ object A11yNavigator {
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
-
-    internal data class PreScrollAnchor(
-        val viewIdResourceName: String?,
-        val mergedLabel: String?,
-        val talkbackLabel: String?,
-        val text: String?,
-        val contentDescription: String?,
-        val bounds: Rect
-    )
-
-    internal data class VisibleHistorySignature(
-        val label: String?,
-        val viewId: String?,
-        val bounds: Rect,
-        val nodeIdentity: String?
-    )
 
     internal data class PostScrollContinuationPlan(
         val anchorStartIndex: Int,
@@ -121,7 +108,7 @@ object A11yNavigator {
         val reason: String
     )
 
-    private data class CandidateSelectionResult(
+    internal data class CandidateSelectionResult(
         val index: Int,
         val accepted: Boolean,
         val reasonCode: String
@@ -283,10 +270,7 @@ object A11yNavigator {
     fun resetFocusHistory() {
         setLastRequestedFocusIndex(-1)
         A11yStateStore.updateLastRequestedFocusIndex(-1)
-        synchronized(visitedHistoryLock) {
-            visitedHistoryLabels.clear()
-            visitedHistorySignatures.clear()
-        }
+        A11yHistoryManager.clearVisitedHistory()
         Log.i("A11Y_HELPER", "Focus history has been explicitly reset by external command.")
     }
 
@@ -2241,95 +2225,7 @@ object A11yNavigator {
         preScrollAnchor: PreScrollAnchor? = null,
         preScrollAnchorBottom: Int? = null,
         labelOf: (T) -> String?
-    ): Int = selectContinuationCandidateAfterScroll(
-        traversalList = traversalList,
-        startIndex = startIndex,
-        visibleHistory = visibleHistory,
-        visibleHistorySignatures = visibleHistorySignatures,
-        visitedHistory = visitedHistory,
-        visitedHistorySignatures = visitedHistorySignatures,
-        screenTop = screenTop,
-        screenBottom = screenBottom,
-        screenHeight = screenHeight,
-        boundsOf = boundsOf,
-        classNameOf = classNameOf,
-        viewIdOf = viewIdOf,
-        isContentNodeOf = isContentNodeOf,
-        clickableOf = clickableOf,
-        focusableOf = focusableOf,
-        descendantLabelOf = descendantLabelOf,
-        promotedViewIds = promotedViewIds,
-        preScrollAnchor = preScrollAnchor,
-        preScrollAnchorBottom = preScrollAnchorBottom,
-        labelOf = labelOf
-    )
-
-    internal fun <T> selectContinuationCandidateAfterScroll(
-        traversalList: List<T>,
-        startIndex: Int,
-        visibleHistory: Set<String>,
-        visibleHistorySignatures: Set<VisibleHistorySignature>,
-        visitedHistory: Set<String>,
-        visitedHistorySignatures: Set<VisibleHistorySignature>,
-        screenTop: Int,
-        screenBottom: Int,
-        screenHeight: Int,
-        boundsOf: (T) -> Rect,
-        classNameOf: (T) -> String?,
-        viewIdOf: (T) -> String?,
-        isContentNodeOf: (T) -> Boolean = { true },
-        clickableOf: ((T) -> Boolean)? = null,
-        focusableOf: ((T) -> Boolean)? = null,
-        descendantLabelOf: ((T) -> String?)? = null,
-        promotedViewIds: Set<String> = emptySet(),
-        preScrollAnchor: PreScrollAnchor? = null,
-        preScrollAnchorBottom: Int? = null,
-        labelOf: (T) -> String?
-    ): Int = selectPostScrollContinuationCandidateResult(
-        traversalList = traversalList,
-        startIndex = startIndex,
-        visibleHistory = visibleHistory,
-        visibleHistorySignatures = visibleHistorySignatures,
-        visitedHistory = visitedHistory,
-        visitedHistorySignatures = visitedHistorySignatures,
-        screenTop = screenTop,
-        screenBottom = screenBottom,
-        screenHeight = screenHeight,
-        boundsOf = boundsOf,
-        classNameOf = classNameOf,
-        viewIdOf = viewIdOf,
-        isContentNodeOf = isContentNodeOf,
-        clickableOf = clickableOf,
-        focusableOf = focusableOf,
-        descendantLabelOf = descendantLabelOf,
-        promotedViewIds = promotedViewIds,
-        preScrollAnchor = preScrollAnchor,
-        preScrollAnchorBottom = preScrollAnchorBottom,
-        labelOf = labelOf
-    ).index
-
-    internal fun <T> selectPostScrollContinuationCandidateIndex(
-        traversalList: List<T>,
-        startIndex: Int,
-        visibleHistory: Set<String>,
-        visibleHistorySignatures: Set<VisibleHistorySignature>,
-        visitedHistory: Set<String>,
-        visitedHistorySignatures: Set<VisibleHistorySignature>,
-        screenTop: Int,
-        screenBottom: Int,
-        screenHeight: Int,
-        boundsOf: (T) -> Rect,
-        classNameOf: (T) -> String?,
-        viewIdOf: (T) -> String?,
-        isContentNodeOf: (T) -> Boolean = { true },
-        clickableOf: ((T) -> Boolean)? = null,
-        focusableOf: ((T) -> Boolean)? = null,
-        descendantLabelOf: ((T) -> String?)? = null,
-        promotedViewIds: Set<String> = emptySet(),
-        preScrollAnchor: PreScrollAnchor? = null,
-        preScrollAnchorBottom: Int? = null,
-        labelOf: (T) -> String?
-    ): Int = selectPostScrollContinuationCandidateResult(
+    ): Int = selectContinuationCandidateAfterScrollResult(
         traversalList = traversalList,
         startIndex = startIndex,
         visibleHistory = visibleHistory,
@@ -2828,13 +2724,9 @@ object A11yNavigator {
         }
     }
 
-    private fun snapshotVisitedHistoryLabels(): Set<String> = synchronized(visitedHistoryLock) {
-        visitedHistoryLabels.toSet()
-    }
+    private fun snapshotVisitedHistoryLabels(): Set<String> = A11yHistoryManager.snapshotVisitedHistoryLabels()
 
-    private fun snapshotVisitedHistorySignatures(): Set<VisibleHistorySignature> = synchronized(visitedHistoryLock) {
-        visitedHistorySignatures.toSet()
-    }
+    private fun snapshotVisitedHistorySignatures(): Set<VisibleHistorySignature> = A11yHistoryManager.snapshotVisitedHistorySignatures()
 
     private fun buildNodeIdentityForHistory(node: AccessibilityNodeInfo): String = nodeIdentityOf(node).orEmpty()
 
@@ -2892,20 +2784,12 @@ object A11yNavigator {
         }
         val bounds = Rect().also { node.getBoundsInScreen(it) }
         val nodeIdentity = buildNodeIdentityForHistory(node)
-        synchronized(visitedHistoryLock) {
-            if (normalizedLabel.isNotEmpty() && normalizedLabel != "<no-label>") {
-                visitedHistoryLabels += normalizedLabel
-            }
-            visitedHistorySignatures += VisibleHistorySignature(
-                label = normalizedLabel.takeUnless { it.isBlank() || it == "<no-label>" },
-                viewId = node.viewIdResourceName,
-                bounds = Rect(bounds),
-                nodeIdentity = nodeIdentity
-            )
-            if (visitedHistorySignatures.size > 120) {
-                visitedHistorySignatures.removeAt(0)
-            }
-        }
+        A11yHistoryManager.recordVisitedSignature(
+            label = normalizedLabel,
+            viewId = node.viewIdResourceName,
+            bounds = bounds,
+            nodeIdentity = nodeIdentity
+        )
         Log.i(
             "A11Y_HELPER",
             "[SMART_NEXT] visitedHistory add: reason=$reason label=${normalizedLabel.replace("\n", " ")} viewId=${node.viewIdResourceName} identity=$nodeIdentity bounds=$bounds"
@@ -3001,32 +2885,24 @@ object A11yNavigator {
         clearAccessibilityFocusAndRefresh(root)
         requestInputFocusBeforeAccessibilityFocus(target, label)
 
-        // 2) Action: 포커스 실행 + 최대 3회 재시도
-        var actionSucceeded = false
-        for (attempt in 0 until 3) {
-            target.refresh()
-            val focused = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
-            target.refresh()
-            val focusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { Rect().also(it::getBoundsInScreen) }
-            val boundsMatched = focusedBounds != null && isWithinSnapBackTolerance(targetBounds, focusedBounds)
-            if (focused || (target.isAccessibilityFocused && boundsMatched)) {
-                actionSucceeded = true
-                break
-            }
-            if (attempt < 2) Thread.sleep(100L)
-        }
-        if (!actionSucceeded) {
+        // 2) Action: 포커스 실행 + 재시도
+        val focusExecution = A11yFocusExecutor.requestAccessibilityFocusWithRetry(
+            target = target,
+            root = root
+        )
+        if (!focusExecution.success) {
             syncLastRequestedFocusIndexToCurrentFocus(root, buildTalkBackLikeFocusNodes(root).map { it.node })
             return ActionResult(false, "failed", target)
         }
 
         // 3) Verify: 최종 focus 일치 + snap-back 체크
-        Thread.sleep(100L)
-        val actualFocusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-        val actualBounds = actualFocusedNode?.let { Rect().also(it::getBoundsInScreen) }
-        val snapBackDetected = actualBounds == null || !isWithinSnapBackTolerance(targetBounds, actualBounds)
-        if (snapBackDetected) {
-            Log.w("A11Y_HELPER", "[SMART_NEXT] requestFocusFlow snap_back target=${formatBoundsForLog(targetBounds)} actual=${formatBoundsForLog(actualBounds)}")
+        val focusVerification = A11yFocusExecutor.verifyFocusStabilizationAfterAction(
+            root = root,
+            targetBounds = targetBounds,
+            isTargetAccessibilityFocused = target.isAccessibilityFocused
+        )
+        if (focusVerification.snapBackDetected) {
+            Log.w("A11Y_HELPER", "[SMART_NEXT] requestFocusFlow snap_back target=${formatBoundsForLog(targetBounds)} actual=${formatBoundsForLog(focusVerification.actualFocusedBounds)}")
             syncLastRequestedFocusIndexToCurrentFocus(root, buildTalkBackLikeFocusNodes(root).map { it.node })
             return ActionResult(false, "snap_back", target)
         }
@@ -3451,8 +3327,7 @@ object A11yNavigator {
     }
 
     private fun isWithinAuthoritativeFocusWindow(nowMs: Long = System.currentTimeMillis()): Boolean {
-        if (authoritativeFocusWindowUntilMs <= 0L) return false
-        if (nowMs <= authoritativeFocusWindowUntilMs) return true
+        if (A11yHistoryManager.isWithinAuthoritativeFocusWindow(nowMs)) return true
         clearAuthoritativeFocusSuppressionWindow("window_expired")
         return false
     }
@@ -3463,10 +3338,10 @@ object A11yNavigator {
         eventType: Int
     ): Boolean {
         if (candidate == null || !isWithinAuthoritativeFocusWindow()) return false
-        val committedBounds = authoritativeCommittedBounds ?: return false
+        val committedBounds = A11yHistoryManager.authoritativeCommittedBounds() ?: return false
         val candidateBounds = Rect().also(candidate::getBoundsInScreen)
         val sameBounds = candidateBounds == committedBounds
-        val committedIdentity = authoritativeCommittedIdentity
+        val committedIdentity = A11yHistoryManager.authoritativeCommittedIdentity()
         val candidateIdentity = nodeIdentityOf(candidate)
         val sameIdentity = !committedIdentity.isNullOrBlank() && committedIdentity == candidateIdentity
         if (sameBounds || sameIdentity) return false
@@ -3503,7 +3378,7 @@ object A11yNavigator {
         if (shouldIgnore) {
             Log.i(
                 "A11Y_HELPER",
-                "[FOCUS_VERIFY] ignored_post_commit_resurfaced_header eventType=$eventType candidate=${(resolvePrimaryLabel(candidate) ?: recoverDescendantLabel(candidate) ?: "<no-label>").replace("\n", " ")} committed=${(authoritativeCommittedLabel ?: "<no-label>").replace("\n", " ")} committedBounds=${formatBoundsForLog(committedBounds)} candidateBounds=${formatBoundsForLog(candidateBounds)}"
+                "[FOCUS_VERIFY] ignored_post_commit_resurfaced_header eventType=$eventType candidate=${(resolvePrimaryLabel(candidate) ?: recoverDescendantLabel(candidate) ?: "<no-label>").replace("\n", " ")} committed=${(A11yHistoryManager.authoritativeCommittedLabel() ?: "<no-label>").replace("\n", " ")} committedBounds=${formatBoundsForLog(committedBounds)} candidateBounds=${formatBoundsForLog(candidateBounds)}"
             )
         }
         return shouldIgnore
@@ -3511,12 +3386,15 @@ object A11yNavigator {
 
     private fun startAuthoritativeFocusSuppressionWindow(candidate: AccessibilityNodeInfo, label: String, status: String) {
         val until = System.currentTimeMillis() + RETARGET_SUPPRESSION_WINDOW_MS
-        authoritativeFocusWindowUntilMs = until
         authoritativeCommittedNode = candidate
-        authoritativeCommittedLabel = label
-        authoritativeCommittedIdentity = nodeIdentityOf(candidate)
-        authoritativeCommittedBounds = Rect().also(candidate::getBoundsInScreen)
         authoritativeCommittedStatus = status
+        A11yHistoryManager.startAuthoritativeFocusWindow(
+            untilMs = until,
+            label = label,
+            identity = nodeIdentityOf(candidate),
+            bounds = Rect().also(candidate::getBoundsInScreen),
+            status = status
+        )
         Log.i(
             "A11Y_HELPER",
             "[FOCUS_VERIFY] suppression_window_start untilMs=$until candidate=${label.replace("\n", " ")} bounds=${formatBoundsForLog(Rect().also(candidate::getBoundsInScreen))}"
@@ -3524,15 +3402,11 @@ object A11yNavigator {
     }
 
     private fun clearAuthoritativeFocusSuppressionWindow(reason: String) {
-        if (authoritativeFocusWindowUntilMs == 0L) return
-        val endedAt = authoritativeFocusWindowUntilMs
-        authoritativeFocusWindowUntilMs = 0L
+        if (!A11yHistoryManager.isWithinAuthoritativeFocusWindow()) return
         authoritativeCommittedNode = null
-        authoritativeCommittedLabel = null
-        authoritativeCommittedIdentity = null
-        authoritativeCommittedBounds = null
         authoritativeCommittedStatus = "moved"
-        Log.i("A11Y_HELPER", "[FOCUS_VERIFY] suppression_window_end endedAtMs=$endedAt reason=$reason")
+        A11yHistoryManager.clearAuthoritativeFocusWindow()
+        Log.i("A11Y_HELPER", "[FOCUS_VERIFY] suppression_window_end reason=$reason")
     }
 
     internal fun applyBottomNavigationSafetyGuide(

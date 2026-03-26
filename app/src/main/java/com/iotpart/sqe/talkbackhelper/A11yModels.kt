@@ -8,7 +8,7 @@ import org.json.JSONObject
 
 
 object A11yModelVersion {
-    const val VERSION: String = "1.4.0"
+    const val VERSION: String = "1.5.0"
 }
 
 data class SmartNextState(
