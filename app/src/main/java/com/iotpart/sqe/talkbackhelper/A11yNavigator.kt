@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.1"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -576,7 +576,8 @@ object A11yNavigator {
                 )
                 if (label == "<no-label>" && canAcceptFallbackSelectedNoLabelCandidate) {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Accepting fallback-selected <no-label> continuation candidate")
-                    recoverDescendantLabel(node)?.let { recoveredLabel ->
+                    val recoveredLabel = recoverDescendantLabel(node)
+                    if (recoveredLabel != null) {
                         label = recoveredLabel
                         Log.i("A11Y_HELPER", "[SMART_NEXT] Resolved descendant label for continuation target: $recoveredLabel")
                         val recoveredInHistory = isInVisibleHistory(
