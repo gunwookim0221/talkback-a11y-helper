@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.6"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.7"
 
     private val visitedHistoryLock = Any()
     private val visitedHistoryLabels = linkedSetOf<String>()
@@ -529,6 +529,7 @@ object A11yNavigator {
                     clickableOf = { node -> node.isClickable },
                     focusableOf = { node -> node.isFocusable },
                     descendantLabelOf = { node -> recoverDescendantLabel(node) },
+                    preScrollAnchorBottom = preScrollAnchor.bounds.bottom,
                     labelOf = { node ->
                         node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                             ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
@@ -1564,15 +1565,20 @@ object A11yNavigator {
         clickableOf: ((T) -> Boolean)? = null,
         focusableOf: ((T) -> Boolean)? = null,
         descendantLabelOf: ((T) -> String?)? = null,
+        preScrollAnchorBottom: Int? = null,
         labelOf: (T) -> String?
     ): Int {
         if (traversalList.isEmpty()) return -1
-        return (startIndex until traversalList.size).firstOrNull { index ->
+        var bestIndex = -1
+        var bestPriority = Int.MAX_VALUE
+        for (index in startIndex until traversalList.size) {
             val node = traversalList[index]
             val bounds = boundsOf(node)
             val isTopBar = isTopAppBarNode(classNameOf(node), viewIdOf(node), bounds, screenTop, screenHeight)
             val isBottomBar = isBottomNavigationBarNode(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight)
             val label = labelOf(node)?.trim().orEmpty()
+            val normalizedLabel = label.lowercase()
+            val normalizedViewId = viewIdOf(node)?.lowercase().orEmpty()
             val inVisibleHistory = isInVisibleHistory(
                 label = label,
                 viewId = viewIdOf(node),
@@ -1588,8 +1594,19 @@ object A11yNavigator {
                 visitedHistorySignatures = visitedHistorySignatures
             )
             val isContentNode = isContentNodeOf(node)
+            val isTopResurfacedAnchorCandidate =
+                bounds.top <= screenTop + (screenHeight / 4) &&
+                    (isTopBar ||
+                        normalizedLabel == "smartthings" ||
+                        normalizedViewId.contains("smartthings") ||
+                        normalizedViewId.contains("toolbar") ||
+                        normalizedViewId.contains("top"))
+            val isAfterPreScrollAnchor = preScrollAnchorBottom?.let { bounds.top >= it } ?: false
+            val isTrailingContinuationCandidate = inVisibleHistory && isAfterPreScrollAnchor
+            val isNewlyExposedBottomContent = !inVisibleHistory && !inVisitedHistory && bounds.bottom >= (screenBottom - screenHeight / 3)
+            val isOtherUnvisitedVisible = !inVisitedHistory
             val reasons = mutableListOf<String>()
-            if (inVisitedHistory) reasons += "candidate rejected: already visited"
+            if (inVisitedHistory && !isTrailingContinuationCandidate) reasons += "candidate rejected: already visited"
             if (isTopBar) reasons += "candidate rejected: top app bar"
             if (isBottomBar) reasons += "candidate rejected: bottom nav"
             if (focusableOf?.invoke(node) == false) reasons += "candidate rejected: not focusable"
@@ -1598,12 +1615,28 @@ object A11yNavigator {
             if (label.isBlank() && descendantLabelOf != null && !hasDescendantLabel) {
                 reasons += "candidate rejected: no descendant label"
             }
-            if (!isTopBar && !isBottomBar && !inVisitedHistory && isContentNode) {
-                if (inVisibleHistory) {
-                    Log.i("A11Y_HELPER", "[SMART_NEXT] candidate visibleHistory=true visitedHistory=false -> accepting continuation candidate")
+            if (isTopResurfacedAnchorCandidate) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Rejected top resurfaced anchor candidate after scroll")
+                reasons += "candidate rejected: top resurfaced anchor"
+            }
+
+            val candidatePriority = when {
+                !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isTrailingContinuationCandidate -> 1
+                !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isNewlyExposedBottomContent -> 2
+                !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isOtherUnvisitedVisible -> 3
+                else -> Int.MAX_VALUE
+            }
+
+            if (candidatePriority != Int.MAX_VALUE && reasons.none { it.startsWith("candidate rejected") }) {
+                when (candidatePriority) {
+                    1 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Accepted trailing continuation candidate by continuity rule")
+                    2 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting newly exposed bottom content continuation candidate")
+                    3 -> Log.i("A11Y_HELPER", "[SMART_NEXT] candidate visibleHistory=true visitedHistory=false is not sufficient alone; accepted as low-priority continuation fallback")
                 }
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting truly new continuation candidate after scroll")
-                true
+                if (candidatePriority < bestPriority) {
+                    bestPriority = candidatePriority
+                    bestIndex = index
+                }
             } else {
                 if (!isContentNode && reasons.none { it == "candidate rejected: outside content bounds" }) {
                     reasons += "candidate rejected: outside content bounds"
@@ -1612,16 +1645,16 @@ object A11yNavigator {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping resurfaced pre-scroll item: $label")
                 }
                 val candidateLabel = if (label.isBlank()) "<no-label>" else label.replace("\n", " ")
-                if (reasons.isEmpty()) reasons += "candidate rejected: filtered by continuation guard"
+                if (reasons.isEmpty()) reasons += "Candidate rejected: unvisited but not part of downward continuation"
                 reasons.forEach { reason ->
                     Log.i(
                         "A11Y_HELPER",
                         "[SMART_NEXT] $reason index=$index label=$candidateLabel viewId=${viewIdOf(node)} className=${classNameOf(node)} clickable=${clickableOf?.invoke(node)} focusable=${focusableOf?.invoke(node)} bounds=$bounds"
                     )
                 }
-                false
             }
-        } ?: -1
+        }
+        return bestIndex
     }
 
     private data class RawVisibleNode(

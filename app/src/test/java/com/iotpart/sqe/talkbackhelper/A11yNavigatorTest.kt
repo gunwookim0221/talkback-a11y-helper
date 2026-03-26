@@ -704,6 +704,37 @@ class A11yNavigatorTest {
     }
 
     @Test
+    fun findAnchorContinuationCandidateIndex_prioritizesTrailingContinuationOverTopResurfacedItem() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect, val label: String?)
+
+        val nodes = listOf(
+            Node("android.widget.TextView", "com.test:id/smartthings_top", Rect(0, 80, 1000, 260), "SmartThings"),
+            Node("android.widget.TextView", "com.test:id/labs", Rect(0, 740, 1000, 980), "Labs"),
+            Node("android.widget.TextView", "com.test:id/energy", Rect(0, 1200, 1000, 1460), "Energy")
+        )
+
+        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+            traversalList = nodes,
+            startIndex = 0,
+            visibleHistory = setOf("Voice assistant", "Labs"),
+            visibleHistorySignatures = emptySet(),
+            visitedHistory = setOf("Voice assistant", "Labs"),
+            visitedHistorySignatures = emptySet(),
+            screenTop = 0,
+            screenBottom = 2000,
+            screenHeight = 2000,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId },
+            isContentNodeOf = { true },
+            preScrollAnchorBottom = 620,
+            labelOf = { it.label }
+        )
+
+        assertEquals(1, index)
+    }
+
+    @Test
     fun shouldAcceptFallbackSelectedNoLabelContinuationCandidate_returnsTrue_forContentViewportNode() {
         val accepted = A11yNavigator.shouldAcceptFallbackSelectedNoLabelContinuationCandidate(
             isFallbackSelectedContinuationCandidate = true,
