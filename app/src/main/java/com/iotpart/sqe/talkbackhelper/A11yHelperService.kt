@@ -65,7 +65,7 @@ class A11yHelperService : AccessibilityService() {
             Log.d(TAG, "Focus node not found for eventType=$type")
             return
         }
-        if (A11yNavigator.shouldIgnorePostCommitResurfacedHeader(rootInActiveWindow, node, type)) {
+        if (A11yHistoryManager.shouldIgnorePostCommitResurfacedHeader(rootInActiveWindow, node, type)) {
             return
         }
         if (
