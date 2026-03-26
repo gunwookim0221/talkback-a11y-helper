@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.33.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.33.1"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
     private val TRAVERSAL_CONTAINER_CLASS_KEYWORDS = listOf(
@@ -1587,7 +1587,7 @@ object A11yNavigator {
         )
     }
 
-    internal fun selectBottomBarEntryDecision(
+    private fun selectBottomBarEntryDecision(
         nextIsBottomBar: Boolean,
         scrollableNodeExists: Boolean,
         contentTraversalCompleteBeforeBottomBar: Boolean,
