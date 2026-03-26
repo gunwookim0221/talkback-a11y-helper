@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.37.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.38.0"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
     private val TRAVERSAL_CONTAINER_CLASS_KEYWORDS = listOf(
@@ -156,6 +156,20 @@ object A11yNavigator {
         val visitedHistory: Set<String>,
         val visitedHistorySignatures: Set<VisibleHistorySignature>,
         val focusNodeByNode: Map<AccessibilityNodeInfo, FocusedNode>
+    )
+
+    private data class InitialNextTargetDecision(
+        val nextIndex: Int,
+        val selectionDecision: SelectionDecision
+    )
+
+    private data class NextActionDecision(
+        val state: SmartNextRuntimeState,
+        val initialTarget: InitialNextTargetDecision
+    )
+
+    private data class NextActionExecution(
+        val outcome: TargetActionOutcome
     )
 
     private data class FindAndFocusPhaseContext(
@@ -467,13 +481,10 @@ object A11yNavigator {
             return TargetActionOutcome(false, "Root node is null")
         }
 
-        // 1) 입력 수집 + 정규화
         val runtimeState = collectSmartNextRuntimeState(root, currentNode)
-        // 2) 현재 위치/다음 이동 후보 계산 (collect 단계에서 계산 완료)
-        // 3) scroll / bottom bar / continuation 정책 결정 + 실행
-        val executeResult = executeSmartNextFlow(runtimeState)
-        // 4) focus 실행 결과 반환 (verify/commit은 하위 실행 함수 내부에서 수행)
-        return executeResult
+        val nextActionDecision = decideNextAction(runtimeState)
+        val execution = executeNextAction(nextActionDecision)
+        return verifyAndFinalizeNextAction(nextActionDecision, execution)
     }
 
     private fun collectSmartNextRuntimeState(
@@ -517,11 +528,33 @@ object A11yNavigator {
         )
     }
 
-    private fun executeSmartNextFlow(state: SmartNextRuntimeState): TargetActionOutcome {
-        return performSmartNextLegacy(state)
+    private fun decideNextAction(state: SmartNextRuntimeState): NextActionDecision {
+        return NextActionDecision(
+            state = state,
+            initialTarget = decideInitialNextTarget(state)
+        )
     }
 
-    private fun performSmartNextLegacy(state: SmartNextRuntimeState): TargetActionOutcome {
+    private fun executeNextAction(decision: NextActionDecision): NextActionExecution {
+        val state = decision.state
+        return NextActionExecution(executeSmartNextPipeline(state, decision.initialTarget))
+    }
+
+    private fun verifyAndFinalizeNextAction(
+        decision: NextActionDecision,
+        execution: NextActionExecution
+    ): TargetActionOutcome {
+        Log.i(
+            "A11Y_HELPER",
+            "[SMART_NEXT][FINALIZE] nextIndex=${decision.initialTarget.nextIndex} success=${execution.outcome.success} reason=${execution.outcome.reason}"
+        )
+        return execution.outcome
+    }
+
+    private fun executeSmartNextPipeline(
+        state: SmartNextRuntimeState,
+        initialTarget: InitialNextTargetDecision
+    ): TargetActionOutcome {
         val root = state.root
         val collectResult = state.collect
         val focusNodes = collectResult.focusNodes
@@ -531,7 +564,7 @@ object A11yNavigator {
         val resolvedCurrent = currentPosition.resolvedCurrent
         val currentIndex = currentPosition.currentIndex
         val fallbackIndex = currentPosition.fallbackIndex
-        var nextIndex = currentPosition.nextIndex
+        var nextIndex = initialTarget.nextIndex
         val normalizeResult = state.normalize
         val screenRect = normalizeResult.screenRect
         val screenTop = normalizeResult.screenTop
@@ -549,32 +582,7 @@ object A11yNavigator {
             setLastRequestedFocusIndex(maxOf(lastRequestedFocusIndex, A11yStateStore.lastRequestedFocusIndex, currentIndex))
             setLastRequestedFocusIndex(maxOf(lastRequestedFocusIndex, currentIndex))
         }
-        if (currentIndex in traversalList.indices) {
-            val currentBounds = Rect().also { traversalList[currentIndex].getBoundsInScreen(it) }
-            val immediateCandidateIndex = currentIndex + 1
-            if (nextIndex == immediateCandidateIndex) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Preserving immediate candidate at index=$nextIndex without duplicate-skip compensation")
-            } else {
-                nextIndex = skipCoordinateDuplicateTraversalIndices(
-                    nodes = traversalList,
-                    currentBounds = currentBounds,
-                    startIndex = nextIndex,
-                    boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
-                    onSkip = { skippedIndex, advancedIndex ->
-                        Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping invisible duplicate at index $skippedIndex")
-                        Log.i(
-                            "A11Y_HELPER",
-                            "[SMART_NEXT] Skipping coordinate duplicate: jumping from $skippedIndex to $advancedIndex"
-                        )
-                    }
-                )
-            }
-        }
-        val selectionDecision = SelectionDecision(
-            currentIndex = currentIndex,
-            fallbackIndex = fallbackIndex,
-            nextIndex = nextIndex
-        )
+        val selectionDecision = initialTarget.selectionDecision
         Log.i("A11Y_HELPER", "[SELECT_NEXT] currentIndex=${selectionDecision.currentIndex}, fallbackIndex=${selectionDecision.fallbackIndex}, lastRequestedFocusIndex=$lastRequestedFocusIndex, nextIndex=${selectionDecision.nextIndex}")
         Log.i("A11Y_HELPER", "[SMART_NEXT][GRID_TRACE] sequentialIndices current=$currentIndex next=$nextIndex total=${traversalList.size}")
 
@@ -640,9 +648,11 @@ object A11yNavigator {
                     currentIndex = currentIndex,
                     resolvedCurrent = resolvedCurrent
                 )
-                val scrolled = scrollableNode.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
-                Log.i("A11Y_HELPER", "[PRE_SCROLL] ACTION_SCROLL_FORWARD result=$scrolled")
-                if (!scrolled) {
+                val preScrollResult = executePreScrollIfNeeded(
+                    scrollTarget = scrollableNode,
+                    reason = "end_of_traversal"
+                )
+                if (!preScrollResult.success) {
                     if (currentIndex == lastIndex && currentIndex in traversalList.indices) {
                         Log.i("A11Y_HELPER", "[SMART_NEXT] Ensuring last node focus visibility before termination")
                         val lastNode = traversalList[currentIndex]
@@ -936,9 +946,11 @@ object A11yNavigator {
                 "A11Y_HELPER",
                 "[SMART_NEXT][PROGRESS_DEBUG] preRawCount=${preScrollRawVisibleNodes.size} preTraversalCount=${traversalList.size}"
             )
-            val scrollResult = scrollTarget.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
-            Log.i("A11Y_HELPER", "[PRE_SCROLL] ACTION_SCROLL_FORWARD result=$scrollResult")
-            if (!scrollResult) {
+            val preScrollResult = executePreScrollIfNeeded(
+                scrollTarget = scrollTarget,
+                reason = "bottom_bar_guard"
+            )
+            if (!preScrollResult.success) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Scroll failed (end of list), moving to bottom bar.")
                 return focusOrSkip(root, traversalList, nextNode, screenTop, effectiveBottom, currentIndex, "moved_to_bottom_bar_direct", nextIndex)
             }
@@ -1109,7 +1121,7 @@ object A11yNavigator {
                 val preBottomMax = preScrollRawVisibleNodes.maxOfOrNull { it.bounds.bottom } ?: Int.MIN_VALUE
                 val postBottomMax = postRawVisibleNodes.maxOfOrNull { it.bounds.bottom } ?: Int.MIN_VALUE
                 val bottomAreaExpanded = postBottomMax > preBottomMax
-                val analysis = analyzePostScrollResult(
+                val analysis = analyzePostScrollState(
                     treeChanged = rawTreeChanged || traversalChanged,
                     anchorMaintained = anchorShifted || successorFound,
                     newlyExposedCandidateExists = newViewIdFound || bottomAreaExpanded
@@ -1219,6 +1231,41 @@ object A11yNavigator {
 
         Log.i("A11Y_HELPER", "[SMART_NEXT] Performing regular next navigation")
         return focusSequentiallyFromIndex(root, traversalList, nextIndex, screenTop, effectiveBottom, currentIndex, "moved")
+    }
+
+    private fun decideInitialNextTarget(state: SmartNextRuntimeState): InitialNextTargetDecision {
+        val traversalList = state.collect.traversalList
+        val currentIndex = state.currentPosition.currentIndex
+        val fallbackIndex = state.currentPosition.fallbackIndex
+        var nextIndex = state.currentPosition.nextIndex
+
+        if (currentIndex in traversalList.indices) {
+            val currentBounds = Rect().also { traversalList[currentIndex].getBoundsInScreen(it) }
+            val immediateCandidateIndex = currentIndex + 1
+            if (nextIndex == immediateCandidateIndex) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Preserving immediate candidate at index=$nextIndex without duplicate-skip compensation")
+            } else {
+                nextIndex = skipCoordinateDuplicateTraversalIndices(
+                    nodes = traversalList,
+                    currentBounds = currentBounds,
+                    startIndex = nextIndex,
+                    boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+                    onSkip = { skippedIndex, advancedIndex ->
+                        Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping invisible duplicate at index $skippedIndex")
+                        Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping coordinate duplicate: jumping from $skippedIndex to $advancedIndex")
+                    }
+                )
+            }
+        }
+
+        return InitialNextTargetDecision(
+            nextIndex = nextIndex,
+            selectionDecision = SelectionDecision(
+                currentIndex = currentIndex,
+                fallbackIndex = fallbackIndex,
+                nextIndex = nextIndex
+            )
+        )
     }
 
     private fun findAndFocusFirstContent(
@@ -1389,12 +1436,12 @@ object A11yNavigator {
                             ?: recoverDescendantLabel(node)?.trim().takeUnless { it.isNullOrEmpty() }
                     }
                 ).also { candidateIndex ->
-                    val analysis = analyzePostScrollResult(
+                    val analysis = analyzePostScrollState(
                         treeChanged = true,
                         anchorMaintained = true,
                         newlyExposedCandidateExists = candidateIndex >= 0
                     )
-                    val selection = selectContinuationCandidate(candidateIndex, analysis)
+                    val selection = selectPostScrollContinuationCandidate(candidateIndex, analysis)
                     if (selection.accepted) {
                         val candidateNode = traversalList[candidateIndex]
                         val candidateLabel = candidateNode.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
@@ -1787,6 +1834,26 @@ object A11yNavigator {
         )
     }
 
+    private fun executePreScrollIfNeeded(
+        scrollTarget: AccessibilityNodeInfo?,
+        reason: String
+    ): PreScrollResult {
+        if (scrollTarget == null) {
+            return PreScrollResult(
+                attempted = false,
+                success = false,
+                reason = "scroll_target_missing:$reason"
+            )
+        }
+        val scrolled = scrollTarget.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+        Log.i("A11Y_HELPER", "[PRE_SCROLL] ACTION_SCROLL_FORWARD result=$scrolled reason=$reason")
+        return PreScrollResult(
+            attempted = true,
+            success = scrolled,
+            reason = if (scrolled) "pre_scroll_succeeded:$reason" else "pre_scroll_failed:$reason"
+        )
+    }
+
 
 
     internal fun shouldSkipDuplicateBoundsCandidate(
@@ -2136,7 +2203,7 @@ object A11yNavigator {
         return intersection / union
     }
 
-    private fun analyzePostScrollResult(
+    private fun analyzePostScrollState(
         treeChanged: Boolean,
         anchorMaintained: Boolean,
         newlyExposedCandidateExists: Boolean
@@ -2158,7 +2225,7 @@ object A11yNavigator {
         )
     }
 
-    private fun selectContinuationCandidate(
+    private fun selectPostScrollContinuationCandidate(
         candidateIndex: Int,
         analysis: PostScrollAnalysis
     ): CandidateSelectionResult {
