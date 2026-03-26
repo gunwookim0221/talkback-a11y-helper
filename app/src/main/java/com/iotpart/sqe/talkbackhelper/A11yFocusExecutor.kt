@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.2.0"
+    const val VERSION: String = "1.2.1"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -475,5 +475,9 @@ object A11yFocusExecutor {
             abs(targetBounds.top - actualFocusedBounds.top) <= tolerancePx &&
             abs(targetBounds.right - actualFocusedBounds.right) <= tolerancePx &&
             abs(targetBounds.bottom - actualFocusedBounds.bottom) <= tolerancePx
+    }
+
+    internal fun recordRequestedFocusAttempt(node: android.view.accessibility.AccessibilityNodeInfo, label: String, reason: String) {
+        android.util.Log.i("A11Y_HELPER", "[FOCUS_ATTEMPT] reason=$reason label=$label")
     }
 }
