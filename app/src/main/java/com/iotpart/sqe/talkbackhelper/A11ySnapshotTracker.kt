@@ -9,7 +9,7 @@ internal typealias FocusedNode = A11yTraversalAnalyzer.FocusedNode
 typealias SnapshotVisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11ySnapshotTracker {
-    const val SNAPSHOT_TRACKER_VERSION: String = "1.0.1"
+    const val SNAPSHOT_TRACKER_VERSION: String = "1.0.2"
 
     internal data class RawVisibleNode(
         val label: String,

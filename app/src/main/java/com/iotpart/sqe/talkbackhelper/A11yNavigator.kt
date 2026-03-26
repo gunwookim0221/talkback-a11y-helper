@@ -12,7 +12,7 @@ typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 internal typealias FocusedNode = A11yTraversalAnalyzer.FocusedNode
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.60.2"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.60.3"
 
 
     @Volatile
