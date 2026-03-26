@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.33.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.33.2"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
     private val TRAVERSAL_CONTAINER_CLASS_KEYWORDS = listOf(
@@ -1846,6 +1846,7 @@ object A11yNavigator {
         isOtherUnvisitedVisible: Boolean,
         isTopResurfacedAnchorCandidate: Boolean,
         rewoundBeforeAnchor: Boolean,
+        isNewlyAvailableInteractiveCandidate: Boolean,
         focusable: Boolean?,
         isOutOfScreen: Boolean,
         isLogicalSuccessor: Boolean
@@ -1856,17 +1857,20 @@ object A11yNavigator {
         if (!isContentNode) reasons += "candidate rejected: not content node"
         if (focusable == false) reasons += "candidate rejected: not focusable"
         if (isOutOfScreen) reasons += "candidate rejected: outside content bounds"
-        if (rewoundBeforeAnchor) reasons += "candidate rejected: rewound before pre-scroll anchor"
         if (isTopResurfacedAnchorCandidate) reasons += "candidate rejected: top resurfaced anchor"
         if (inVisitedHistory && !isTrailingContinuationCandidate) reasons += "candidate rejected: already visited"
+        if (rewoundBeforeAnchor && !isLogicalSuccessor && !isNewlyAvailableInteractiveCandidate) {
+            reasons += "candidate deprioritized: rewound before pre-scroll anchor"
+        }
 
         val priority = when {
             isLogicalSuccessor -> 0
-            !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isPostScrollTopContinuationCandidate -> 1
-            !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isTrailingContinuationCandidate -> 2
-            !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isPromotedRawOnlyCandidate -> 3
-            !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isNewlyExposedBottomContent -> 4
-            !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isOtherUnvisitedVisible && (!inVisibleHistory || !inVisitedHistory) -> 5
+            !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isNewlyAvailableInteractiveCandidate -> 1
+            !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isPostScrollTopContinuationCandidate -> 2
+            !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isTrailingContinuationCandidate -> 3
+            !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isPromotedRawOnlyCandidate -> 4
+            !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isNewlyExposedBottomContent -> 5
+            !isTopResurfacedAnchorCandidate && !isTopBar && !isBottomBar && isContentNode && isOtherUnvisitedVisible && (!inVisibleHistory || !inVisitedHistory) -> 6
             else -> Int.MAX_VALUE
         }
         return ContinuationCandidateEvaluation(
@@ -1991,6 +1995,15 @@ object A11yNavigator {
             val isTopViewportContent = bounds.top in screenTop..(screenTop + screenHeight / 3)
             val isPreScrollAnchorItself = preScrollAnchor?.viewIdResourceName?.equals(rawViewId, ignoreCase = true) == true
             val rewoundBeforeAnchor = anchorBounds != null && bounds.bottom <= anchorBounds.bottom
+            val isInteractiveCandidate = (focusableOf?.invoke(node) == true) || (clickableOf?.invoke(node) == true)
+            val isNewlyAvailableInteractiveCandidate =
+                !inVisitedHistory &&
+                    !isTopBar &&
+                    !isBottomBar &&
+                    isContentNode &&
+                    isInteractiveCandidate &&
+                    !isTopResurfacedAnchorCandidate &&
+                    !isPreScrollAnchorItself
             val isPostScrollTopContinuationCandidate =
                 preScrollAnchor != null &&
                     isTopViewportContent &&
@@ -2017,6 +2030,7 @@ object A11yNavigator {
                 isOtherUnvisitedVisible = isOtherUnvisitedVisible,
                 isTopResurfacedAnchorCandidate = isTopResurfacedAnchorCandidate,
                 rewoundBeforeAnchor = rewoundBeforeAnchor,
+                isNewlyAvailableInteractiveCandidate = isNewlyAvailableInteractiveCandidate,
                 focusable = focusableOf?.invoke(node),
                 isOutOfScreen = isOutOfScreen,
                 isLogicalSuccessor = false
@@ -2061,6 +2075,7 @@ object A11yNavigator {
                     isOtherUnvisitedVisible = isOtherUnvisitedVisible,
                     isTopResurfacedAnchorCandidate = isTopResurfacedAnchorCandidate,
                     rewoundBeforeAnchor = rewoundBeforeAnchor,
+                    isNewlyAvailableInteractiveCandidate = isNewlyAvailableInteractiveCandidate,
                     focusable = focusableOf?.invoke(node),
                     isOutOfScreen = isOutOfScreen,
                     isLogicalSuccessor = isLogicalSuccessor
@@ -2075,11 +2090,12 @@ object A11yNavigator {
                         "A11Y_HELPER",
                         "[SMART_NEXT] Resolved post-scroll successor from pre-scroll anchor: anchorViewId=${preScrollAnchor?.viewIdResourceName} successorViewId=$rawViewId"
                     )
-                    1 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting post-scroll top continuation candidate")
-                    2 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Accepted trailing continuation candidate by continuity rule")
-                    3 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting promoted raw-only continuation candidate")
-                    4 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting newly exposed bottom content continuation candidate")
-                    5 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting low-priority unvisited continuation candidate")
+                    1 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting newly available unvisited interactive continuation candidate")
+                    2 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting post-scroll top continuation candidate")
+                    3 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Accepted trailing continuation candidate by continuity rule")
+                    4 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting promoted raw-only continuation candidate")
+                    5 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting newly exposed bottom content continuation candidate")
+                    6 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting low-priority unvisited continuation candidate")
                 }
                 if (candidatePriority < bestPriority) {
                     bestPriority = candidatePriority
