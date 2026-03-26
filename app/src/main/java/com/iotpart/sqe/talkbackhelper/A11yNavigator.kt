@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.42.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.43.0"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
     private val TRAVERSAL_CONTAINER_CLASS_KEYWORDS = listOf(
@@ -170,6 +170,11 @@ object A11yNavigator {
         val priority: Int,
         val rejectionReasons: List<String>,
         val isLogicalSuccessor: Boolean = false
+    )
+
+    internal data class PostScrollContinuationSearchResult(
+        val index: Int,
+        val hasValidPostScrollCandidate: Boolean
     )
 
     private data class SmartNextRuntimeState(
@@ -1263,6 +1268,7 @@ object A11yNavigator {
         }
         val continuationFallbackAttempted = request.isScrollAction && request.preScrollAnchor != null && resolvedAnchorIndex == -1
         var continuationFallbackFailed = false
+        var hasValidPostScrollCandidate = false
         val fallbackBelowAnchorIndex = if (continuationFallbackAttempted) {
             val preScrollAnchor = request.preScrollAnchor
             if (preScrollAnchor == null) {
@@ -1273,7 +1279,7 @@ object A11yNavigator {
                     .mapNotNull { raw -> raw.viewId?.substringAfterLast('/')?.trim() }
                     .filter { shortId -> isSettingsRowViewId(shortId) }
                     .toSet()
-                val candidate = selectContinuationCandidateAfterScroll(
+                val continuationSearchResult = selectContinuationCandidateAfterScrollResult(
                     traversalList = traversalList,
                     startIndex = 0,
                     visibleHistory = request.visibleHistory,
@@ -1307,22 +1313,39 @@ object A11yNavigator {
                             ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                     }
                 )
+                val candidate = continuationSearchResult.index
                 val selection = selectPostScrollCandidate(candidate)
                 continuationFallbackFailed = !selection.accepted
+                hasValidPostScrollCandidate = continuationSearchResult.hasValidPostScrollCandidate
                 if (!selection.accepted) -1 else candidate
+            }.also {
+                if (continuationFallbackAttempted) {
+                    Log.i(
+                        "A11Y_HELPER",
+                        "[SMART_NEXT] skipGeneral decision reason=${
+                            when {
+                                !continuationFallbackFailed -> "continuation_candidate_found"
+                                hasValidPostScrollCandidate -> "fallback_rejected_but_valid_candidate_existed"
+                                else -> "continuation_fallback_failed_no_valid_candidate"
+                            }
+                        }"
+                    )
+                }
             }
         } else {
             -1
         }
+        val continuationFallbackHardFailed = continuationFallbackFailed && !hasValidPostScrollCandidate
         val postScrollDecision = decidePostScrollContinuation(
             resolvedAnchorIndex = resolvedAnchorIndex,
             fallbackBelowAnchorIndex = fallbackBelowAnchorIndex,
             traversalStartIndex = traversalStartIndex,
             traversalSize = traversalList.size,
-            continuationFallbackFailed = continuationFallbackFailed
+            continuationFallbackFailed = continuationFallbackHardFailed
         )
         val anchorStartIndex = postScrollDecision.targetIndex ?: traversalList.size
-        Log.i("A11Y_HELPER", "[DECIDE] post_scroll_start=$anchorStartIndex skipGeneral=${postScrollDecision.type == SelectionType.END} fallbackAttempted=$continuationFallbackAttempted")
+        val skipGeneralScan = continuationFallbackAttempted && continuationFallbackHardFailed
+        Log.i("A11Y_HELPER", "[DECIDE] post_scroll_start=$anchorStartIndex skipGeneral=$skipGeneralScan fallbackAttempted=$continuationFallbackAttempted")
         return PostScrollSearchContext(
             excludedIndex = excludedIndex,
             traversalStartIndex = traversalStartIndex,
@@ -1331,7 +1354,7 @@ object A11yNavigator {
             continuationFallbackFailed = continuationFallbackFailed,
             fallbackBelowAnchorIndex = fallbackBelowAnchorIndex,
             anchorStartIndex = anchorStartIndex,
-            skipGeneralScan = postScrollDecision.type == SelectionType.END
+            skipGeneralScan = skipGeneralScan
         )
     }
 
@@ -2200,7 +2223,7 @@ object A11yNavigator {
         preScrollAnchor: PreScrollAnchor? = null,
         preScrollAnchorBottom: Int? = null,
         labelOf: (T) -> String?
-    ): Int = selectPostScrollContinuationCandidateIndex(
+    ): Int = selectPostScrollContinuationCandidateResult(
         traversalList = traversalList,
         startIndex = startIndex,
         visibleHistory = visibleHistory,
@@ -2221,7 +2244,7 @@ object A11yNavigator {
         preScrollAnchor = preScrollAnchor,
         preScrollAnchorBottom = preScrollAnchorBottom,
         labelOf = labelOf
-    )
+    ).index
 
     internal fun <T> selectPostScrollContinuationCandidateIndex(
         traversalList: List<T>,
@@ -2244,8 +2267,101 @@ object A11yNavigator {
         preScrollAnchor: PreScrollAnchor? = null,
         preScrollAnchorBottom: Int? = null,
         labelOf: (T) -> String?
-    ): Int {
-        if (traversalList.isEmpty()) return -1
+    ): Int = selectPostScrollContinuationCandidateResult(
+        traversalList = traversalList,
+        startIndex = startIndex,
+        visibleHistory = visibleHistory,
+        visibleHistorySignatures = visibleHistorySignatures,
+        visitedHistory = visitedHistory,
+        visitedHistorySignatures = visitedHistorySignatures,
+        screenTop = screenTop,
+        screenBottom = screenBottom,
+        screenHeight = screenHeight,
+        boundsOf = boundsOf,
+        classNameOf = classNameOf,
+        viewIdOf = viewIdOf,
+        isContentNodeOf = isContentNodeOf,
+        clickableOf = clickableOf,
+        focusableOf = focusableOf,
+        descendantLabelOf = descendantLabelOf,
+        promotedViewIds = promotedViewIds,
+        preScrollAnchor = preScrollAnchor,
+        preScrollAnchorBottom = preScrollAnchorBottom,
+        labelOf = labelOf
+    ).index
+
+    internal fun <T> selectContinuationCandidateAfterScrollResult(
+        traversalList: List<T>,
+        startIndex: Int,
+        visibleHistory: Set<String>,
+        visibleHistorySignatures: Set<VisibleHistorySignature>,
+        visitedHistory: Set<String>,
+        visitedHistorySignatures: Set<VisibleHistorySignature>,
+        screenTop: Int,
+        screenBottom: Int,
+        screenHeight: Int,
+        boundsOf: (T) -> Rect,
+        classNameOf: (T) -> String?,
+        viewIdOf: (T) -> String?,
+        isContentNodeOf: (T) -> Boolean = { true },
+        clickableOf: ((T) -> Boolean)? = null,
+        focusableOf: ((T) -> Boolean)? = null,
+        descendantLabelOf: ((T) -> String?)? = null,
+        promotedViewIds: Set<String> = emptySet(),
+        preScrollAnchor: PreScrollAnchor? = null,
+        preScrollAnchorBottom: Int? = null,
+        labelOf: (T) -> String?
+    ): PostScrollContinuationSearchResult = selectPostScrollContinuationCandidateResult(
+        traversalList = traversalList,
+        startIndex = startIndex,
+        visibleHistory = visibleHistory,
+        visibleHistorySignatures = visibleHistorySignatures,
+        visitedHistory = visitedHistory,
+        visitedHistorySignatures = visitedHistorySignatures,
+        screenTop = screenTop,
+        screenBottom = screenBottom,
+        screenHeight = screenHeight,
+        boundsOf = boundsOf,
+        classNameOf = classNameOf,
+        viewIdOf = viewIdOf,
+        isContentNodeOf = isContentNodeOf,
+        clickableOf = clickableOf,
+        focusableOf = focusableOf,
+        descendantLabelOf = descendantLabelOf,
+        promotedViewIds = promotedViewIds,
+        preScrollAnchor = preScrollAnchor,
+        preScrollAnchorBottom = preScrollAnchorBottom,
+        labelOf = labelOf
+    )
+
+    private fun <T> selectPostScrollContinuationCandidateResult(
+        traversalList: List<T>,
+        startIndex: Int,
+        visibleHistory: Set<String>,
+        visibleHistorySignatures: Set<VisibleHistorySignature>,
+        visitedHistory: Set<String>,
+        visitedHistorySignatures: Set<VisibleHistorySignature>,
+        screenTop: Int,
+        screenBottom: Int,
+        screenHeight: Int,
+        boundsOf: (T) -> Rect,
+        classNameOf: (T) -> String?,
+        viewIdOf: (T) -> String?,
+        isContentNodeOf: (T) -> Boolean = { true },
+        clickableOf: ((T) -> Boolean)? = null,
+        focusableOf: ((T) -> Boolean)? = null,
+        descendantLabelOf: ((T) -> String?)? = null,
+        promotedViewIds: Set<String> = emptySet(),
+        preScrollAnchor: PreScrollAnchor? = null,
+        preScrollAnchorBottom: Int? = null,
+        labelOf: (T) -> String?
+    ): PostScrollContinuationSearchResult {
+        if (traversalList.isEmpty()) {
+            return PostScrollContinuationSearchResult(
+                index = -1,
+                hasValidPostScrollCandidate = false
+            )
+        }
         val normalizedAnchorViewId = preScrollAnchor?.viewIdResourceName?.substringAfterLast('/')?.trim()
         val expectedSuccessorViewId = normalizedAnchorViewId
             ?.let { SETTINGS_ROW_VIEW_ID_ORDERED.indexOf(it) }
@@ -2254,6 +2370,7 @@ object A11yNavigator {
         val anchorBounds = preScrollAnchor?.bounds
         var bestIndex = -1
         var bestPriority = Int.MAX_VALUE
+        var hasValidPostScrollCandidate = false
         for (index in startIndex until traversalList.size) {
             val node = traversalList[index]
             val bounds = boundsOf(node)
@@ -2297,7 +2414,23 @@ object A11yNavigator {
             val isInteractiveCandidate = (focusableOf?.invoke(node) == true) || (clickableOf?.invoke(node) == true)
             val descendantLabel = descendantLabelOf?.invoke(node)?.trim().orEmpty()
             val hasResolvedLabel = label.isNotBlank() || descendantLabel.isNotBlank()
-            val isNewlyRevealedAfterScroll = !inVisibleHistory
+            val preScrollSeen = inVisibleHistory
+            val postScrollSeen = true
+            val isPreScrollContinuationCandidate = preScrollSeen && isAfterPreScrollAnchor
+            val preScrollHadResolvedLabel = preScrollSeen && hasPreScrollResolvedLabel(
+                currentLabel = label,
+                currentDescendantLabel = descendantLabel,
+                rawViewId = rawViewId,
+                bounds = bounds,
+                visibleHistorySignatures = visibleHistorySignatures
+            )
+            val descendantLabelResolved = descendantLabel.isNotBlank()
+            val newlyRevealedReasons = mutableListOf<String>()
+            if (!preScrollSeen) newlyRevealedReasons += "not_in_pre_scroll_traversal"
+            if (!isPreScrollContinuationCandidate) newlyRevealedReasons += "not_in_pre_scroll_anchor_continuation"
+            if (hasResolvedLabel && !preScrollHadResolvedLabel) newlyRevealedReasons += "resolved_label_newly_acquired_post_scroll"
+            val isNewlyRevealedAfterScroll = newlyRevealedReasons.isNotEmpty()
+            val newlyRevealedReason = if (newlyRevealedReasons.isEmpty()) "none" else newlyRevealedReasons.joinToString("|")
             val shouldPrioritizeNewlyRevealedInteractiveCandidate =
                 isNewlyRevealedAfterScroll &&
                     !inVisitedHistory &&
@@ -2308,6 +2441,9 @@ object A11yNavigator {
                     hasResolvedLabel &&
                     !isTopResurfacedAnchorCandidate &&
                     !isPreScrollAnchorItself
+            if (!isBottomBar && isInteractiveCandidate && hasResolvedLabel && isNewlyRevealedAfterScroll) {
+                hasValidPostScrollCandidate = true
+            }
             val isPostScrollTopContinuationCandidate =
                 preScrollAnchor != null &&
                     isTopViewportContent &&
@@ -2397,7 +2533,7 @@ object A11yNavigator {
                         Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting newly available unvisited interactive continuation candidate")
                         Log.i(
                             "A11Y_HELPER",
-                            "[SMART_NEXT] accepted:newly_revealed_after_scroll index=$index label=${if (label.isBlank()) "<no-label>" else label.replace("\n", " ")} descendantLabel=${if (descendantLabel.isBlank()) "<no-label>" else descendantLabel.replace("\n", " ")} rewoundBeforeAnchor=$rewoundBeforeAnchor inVisibleHistory=$inVisibleHistory inVisitedHistory=$inVisitedHistory"
+                            "[SMART_NEXT] accepted:newly_revealed_after_scroll index=$index label=${if (label.isBlank()) "<no-label>" else label.replace("\n", " ")} descendantLabel=${if (descendantLabel.isBlank()) "<no-label>" else descendantLabel.replace("\n", " ")} rewoundBeforeAnchor=$rewoundBeforeAnchor inVisibleHistory=$inVisibleHistory inVisitedHistory=$inVisitedHistory preScrollSeen=$preScrollSeen postScrollSeen=$postScrollSeen descendantLabelResolved=$descendantLabelResolved newlyRevealedReason=$newlyRevealedReason"
                         )
                     }
                     2 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting post-scroll top continuation candidate")
@@ -2429,7 +2565,7 @@ object A11yNavigator {
                     if (reason == "rejected:rewound_before_anchor") {
                         Log.i(
                             "A11Y_HELPER",
-                            "[SMART_NEXT] rejected:rewound_before_anchor index=$index label=$candidateLabel descendantLabel=${if (descendantLabel.isBlank()) "<no-label>" else descendantLabel.replace("\n", " ")} rewoundBeforeAnchor=$rewoundBeforeAnchor inVisibleHistory=$inVisibleHistory inVisitedHistory=$inVisitedHistory prioritizedNewlyRevealed=$shouldPrioritizeNewlyRevealedInteractiveCandidate"
+                            "[SMART_NEXT] rejected:rewound_before_anchor index=$index label=$candidateLabel descendantLabel=${if (descendantLabel.isBlank()) "<no-label>" else descendantLabel.replace("\n", " ")} rewoundBeforeAnchor=$rewoundBeforeAnchor inVisibleHistory=$inVisibleHistory inVisitedHistory=$inVisitedHistory prioritizedNewlyRevealed=$shouldPrioritizeNewlyRevealedInteractiveCandidate preScrollSeen=$preScrollSeen postScrollSeen=$postScrollSeen descendantLabelResolved=$descendantLabelResolved newlyRevealedReason=$newlyRevealedReason"
                         )
                     }
                     Log.i(
@@ -2439,7 +2575,10 @@ object A11yNavigator {
                 }
             }
         }
-        return bestIndex
+        return PostScrollContinuationSearchResult(
+            index = bestIndex,
+            hasValidPostScrollCandidate = bestIndex >= 0 || hasValidPostScrollCandidate
+        )
     }
 
     private data class RawVisibleNode(
@@ -2447,6 +2586,27 @@ object A11yNavigator {
         val viewId: String?,
         val bounds: Rect
     )
+
+    private fun hasPreScrollResolvedLabel(
+        currentLabel: String,
+        currentDescendantLabel: String,
+        rawViewId: String?,
+        bounds: Rect,
+        visibleHistorySignatures: Set<VisibleHistorySignature>
+    ): Boolean {
+        if (visibleHistorySignatures.isEmpty()) return false
+        val normalizedCurrentLabel = currentLabel.trim()
+        val normalizedDescendantLabel = currentDescendantLabel.trim()
+        return visibleHistorySignatures.any { signature ->
+            val sameViewId = !rawViewId.isNullOrBlank() && signature.viewId.equals(rawViewId, ignoreCase = true)
+            val sameBounds = signature.bounds == bounds
+            if (!sameViewId && !sameBounds) return@any false
+            val preScrollLabel = signature.label?.trim().orEmpty()
+            preScrollLabel.isNotBlank() &&
+                (preScrollLabel.equals(normalizedCurrentLabel, ignoreCase = true) ||
+                    preScrollLabel.equals(normalizedDescendantLabel, ignoreCase = true))
+        }
+    }
 
     private fun describePreScrollAnchor(anchor: PreScrollAnchor?): String {
         if (anchor == null) return "null"

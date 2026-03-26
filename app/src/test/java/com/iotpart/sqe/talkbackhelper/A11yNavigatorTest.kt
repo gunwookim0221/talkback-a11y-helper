@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.33.2")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.43.0")
     }
 
     @Test
@@ -64,6 +64,65 @@ class A11yNavigatorTest {
 
         assertEquals(2, plan.anchorStartIndex)
         assertFalse(plan.skipGeneralScan)
+    }
+
+    @Test
+    fun selectContinuationCandidateAfterScrollResult_prioritizesNewlyRevealedEvenIfVisibleHistoryExists() {
+        data class Node(
+            val label: String?,
+            val descendantLabel: String?,
+            val viewId: String?,
+            val bounds: Rect,
+            val clickable: Boolean,
+            val focusable: Boolean
+        )
+
+        val node = Node(
+            label = "",
+            descendantLabel = "Labs",
+            viewId = "com.test:id/item_labs",
+            bounds = Rect(0, 100, 1000, 200),
+            clickable = true,
+            focusable = false
+        )
+        val result = A11yNavigator.selectContinuationCandidateAfterScrollResult(
+            traversalList = listOf(node),
+            startIndex = 0,
+            visibleHistory = setOf("Labs"),
+            visibleHistorySignatures = setOf(
+                A11yNavigator.VisibleHistorySignature(
+                    label = "",
+                    viewId = "com.test:id/item_labs",
+                    bounds = Rect(0, 100, 1000, 200),
+                    nodeIdentity = null
+                )
+            ),
+            visitedHistory = emptySet(),
+            visitedHistorySignatures = emptySet(),
+            screenTop = 0,
+            screenBottom = 2000,
+            screenHeight = 2000,
+            boundsOf = { it.bounds },
+            classNameOf = { "android.widget.LinearLayout" },
+            viewIdOf = { it.viewId },
+            isContentNodeOf = { true },
+            clickableOf = { it.clickable },
+            focusableOf = { it.focusable },
+            descendantLabelOf = { it.descendantLabel },
+            preScrollAnchor = A11yNavigator.PreScrollAnchor(
+                viewIdResourceName = "com.test:id/anchor",
+                mergedLabel = "Anchor",
+                talkbackLabel = "Anchor",
+                text = "Anchor",
+                contentDescription = "Anchor",
+                bounds = Rect(0, 400, 1000, 500)
+            ),
+            preScrollAnchorBottom = 500,
+            labelOf = { it.label }
+        )
+
+        assertEquals(0, result.index)
+        assertTrue(result.hasValidPostScrollCandidate)
     }
 
     @Test
