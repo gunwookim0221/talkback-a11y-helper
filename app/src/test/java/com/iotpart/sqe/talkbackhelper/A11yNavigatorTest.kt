@@ -2676,9 +2676,9 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_typeT_matchesTrimmedTextWithExactRegexFallback() {
-        val query = A11yNavigator.TargetQuery(targetName = "수면환경", targetType = "t", targetIndex = 0)
+        val query = A11yTargetFinder.TargetQuery(targetName = "수면환경", targetType = "t", targetIndex = 0)
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = "  수면환경\n",
             nodeContentDescription = null,
             nodeViewId = "com.test:id/title",
@@ -2690,9 +2690,9 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_typeB_matchesContentDescriptionWithExactRegexFallback() {
-        val query = A11yNavigator.TargetQuery(targetName = "확인", targetType = "b", targetIndex = 0)
+        val query = A11yTargetFinder.TargetQuery(targetName = "확인", targetType = "b", targetIndex = 0)
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = "버튼",
             nodeContentDescription = "  확인  ",
             nodeViewId = "com.test:id/ok",
@@ -2704,9 +2704,9 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_typeT_matchesRegexPattern() {
-        val query = A11yNavigator.TargetQuery(targetName = "수면.*설정", targetType = "t", targetIndex = 0)
+        val query = A11yTargetFinder.TargetQuery(targetName = "수면.*설정", targetType = "t", targetIndex = 0)
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = "수면환경 설정",
             nodeContentDescription = null,
             nodeViewId = "com.test:id/title",
@@ -2718,9 +2718,9 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_typeB_matchesRegexPattern() {
-        val query = A11yNavigator.TargetQuery(targetName = "확인\\s+버튼", targetType = "b", targetIndex = 0)
+        val query = A11yTargetFinder.TargetQuery(targetName = "확인\\s+버튼", targetType = "b", targetIndex = 0)
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = "버튼",
             nodeContentDescription = "확인   버튼",
             nodeViewId = "com.test:id/ok",
@@ -2732,9 +2732,9 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_typeT_returnsFalseWhenRegexIsInvalid() {
-        val query = A11yNavigator.TargetQuery(targetName = "수면[환경", targetType = "t", targetIndex = 0)
+        val query = A11yTargetFinder.TargetQuery(targetName = "수면[환경", targetType = "t", targetIndex = 0)
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = "수면환경 설정",
             nodeContentDescription = null,
             nodeViewId = "com.test:id/title",
@@ -2746,9 +2746,9 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_typeB_returnsFalseWhenRegexIsInvalid() {
-        val query = A11yNavigator.TargetQuery(targetName = "확인(버튼", targetType = "b", targetIndex = 0)
+        val query = A11yTargetFinder.TargetQuery(targetName = "확인(버튼", targetType = "b", targetIndex = 0)
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = "버튼",
             nodeContentDescription = "확인 버튼",
             nodeViewId = "com.test:id/ok",
@@ -2760,9 +2760,9 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_typeR_matchesResourceIdRegex() {
-        val query = A11yNavigator.TargetQuery(targetName = "com\\.test:id/sub.*", targetType = "r", targetIndex = 0)
+        val query = A11yTargetFinder.TargetQuery(targetName = "com\\.test:id/sub.*", targetType = "r", targetIndex = 0)
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = "제출",
             nodeContentDescription = "제출 버튼",
             nodeViewId = "com.test:id/submit",
@@ -2774,9 +2774,9 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_typeR_plainStringStillMatchesExactResourceId() {
-        val query = A11yNavigator.TargetQuery(targetName = "com.test:id/submit", targetType = "r", targetIndex = 0)
+        val query = A11yTargetFinder.TargetQuery(targetName = "com.test:id/submit", targetType = "r", targetIndex = 0)
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = "제출",
             nodeContentDescription = "제출 버튼",
             nodeViewId = "com.test:id/submit",
@@ -2788,9 +2788,9 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_typeR_returnsFalseWhenRegexIsInvalid() {
-        val query = A11yNavigator.TargetQuery(targetName = "com.test:id/[submit", targetType = "r", targetIndex = 0)
+        val query = A11yTargetFinder.TargetQuery(targetName = "com.test:id/[submit", targetType = "r", targetIndex = 0)
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = "제출",
             nodeContentDescription = "제출 버튼",
             nodeViewId = "com.test:id/submit",
@@ -2802,9 +2802,9 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_typeR_returnsFalseWhenNodeViewIdIsNull() {
-        val query = A11yNavigator.TargetQuery(targetName = "com\\.test:id/sub.*", targetType = "r", targetIndex = 0)
+        val query = A11yTargetFinder.TargetQuery(targetName = "com\\.test:id/sub.*", targetType = "r", targetIndex = 0)
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = "제출",
             nodeContentDescription = "제출 버튼",
             nodeViewId = null,
@@ -2816,9 +2816,9 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_typeA_matchesAnyCondition() {
-        val query = A11yNavigator.TargetQuery(targetName = "안내", targetType = "a", targetIndex = 0)
+        val query = A11yTargetFinder.TargetQuery(targetName = "안내", targetType = "a", targetIndex = 0)
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = null,
             nodeContentDescription = "안내",
             nodeViewId = "com.test:id/other",
@@ -2830,9 +2830,9 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_returnsFalseForUnsupportedType() {
-        val query = A11yNavigator.TargetQuery(targetName = "확인", targetType = "x", targetIndex = 0)
+        val query = A11yTargetFinder.TargetQuery(targetName = "확인", targetType = "x", targetIndex = 0)
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = "확인",
             nodeContentDescription = "확인 버튼",
             nodeViewId = "com.test:id/ok",
@@ -2845,7 +2845,7 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_additionalConditions_allMustMatch() {
-        val query = A11yNavigator.TargetQuery(
+        val query = A11yTargetFinder.TargetQuery(
             targetName = "",
             targetType = "",
             targetIndex = 0,
@@ -2856,7 +2856,7 @@ class A11yNavigatorTest {
             targetId = "com\\.test:id/ok.*"
         )
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = "확인",
             nodeContentDescription = null,
             nodeViewId = "com.test:id/ok_button",
@@ -2871,7 +2871,7 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_additionalConditions_returnsFalseWhenAnyFilterFails() {
-        val query = A11yNavigator.TargetQuery(
+        val query = A11yTargetFinder.TargetQuery(
             targetName = "",
             targetType = "",
             targetIndex = 0,
@@ -2879,7 +2879,7 @@ class A11yNavigatorTest {
             targetText = "확인"
         )
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = "확인",
             nodeContentDescription = null,
             nodeViewId = "com.test:id/ok_button",
@@ -2894,9 +2894,9 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_typeT_dotInPlainText_isNotTreatedAsRegex() {
-        val query = A11yNavigator.TargetQuery(targetName = "ver.1", targetType = "t", targetIndex = 0)
+        val query = A11yTargetFinder.TargetQuery(targetName = "ver.1", targetType = "t", targetIndex = 0)
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = "verx1 안내",
             nodeContentDescription = null,
             nodeViewId = "com.test:id/title",
@@ -2908,9 +2908,9 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_typeR_dotInPlainId_isExactMatchOnly() {
-        val query = A11yNavigator.TargetQuery(targetName = "com.test:id/btn.ok", targetType = "r", targetIndex = 0)
+        val query = A11yTargetFinder.TargetQuery(targetName = "com.test:id/btn.ok", targetType = "r", targetIndex = 0)
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = "확인",
             nodeContentDescription = null,
             nodeViewId = "com.test:id/btnXok",
@@ -2922,9 +2922,9 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_typeT_plainTextNoLongerContainsMatch() {
-        val query = A11yNavigator.TargetQuery(targetName = "수면환경", targetType = "t", targetIndex = 0)
+        val query = A11yTargetFinder.TargetQuery(targetName = "수면환경", targetType = "t", targetIndex = 0)
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = "수면환경 설정",
             nodeContentDescription = null,
             nodeViewId = "com.test:id/title",
@@ -2936,9 +2936,9 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_typeB_plainTextNoLongerContainsMatch() {
-        val query = A11yNavigator.TargetQuery(targetName = "확인", targetType = "b", targetIndex = 0)
+        val query = A11yTargetFinder.TargetQuery(targetName = "확인", targetType = "b", targetIndex = 0)
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = "버튼",
             nodeContentDescription = "확인 버튼",
             nodeViewId = "com.test:id/ok",
@@ -2950,9 +2950,9 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_typeT_regexIsCaseInsensitive() {
-        val query = A11yNavigator.TargetQuery(targetName = "Pet.*", targetType = "t", targetIndex = 0)
+        val query = A11yTargetFinder.TargetQuery(targetName = "Pet.*", targetType = "t", targetIndex = 0)
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = "pets",
             nodeContentDescription = null,
             nodeViewId = "com.test:id/title",
@@ -2964,14 +2964,14 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_targetTextFilter_isCaseInsensitive() {
-        val query = A11yNavigator.TargetQuery(
+        val query = A11yTargetFinder.TargetQuery(
             targetName = "",
             targetType = "",
             targetIndex = 0,
             targetText = "Pet"
         )
 
-        val matched = A11yNavigator.matchesTarget(
+        val matched = A11yTargetFinder.matchesTarget(
             nodeText = "pets",
             nodeContentDescription = null,
             nodeViewId = "com.test:id/title",

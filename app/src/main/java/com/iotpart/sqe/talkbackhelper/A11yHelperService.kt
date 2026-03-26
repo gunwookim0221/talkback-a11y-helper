@@ -154,8 +154,8 @@ class A11yHelperService : AccessibilityService() {
         Log.i(TAG, "DUMP_TREE_END $reqId")
     }
 
-    fun performTargetAction(query: A11yNavigator.TargetQuery, action: Int, reqId: String = "none"): JSONObject {
-        val outcome = A11yNavigator.findAndPerformAction(rootInActiveWindow, query, action)
+    fun performTargetAction(query: A11yTargetFinder.TargetQuery, action: Int, reqId: String = "none"): JSONObject {
+        val outcome = A11yTargetFinder.findAndPerformAction(rootInActiveWindow, query, action)
         val resultJson = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
             put("reqId", reqId)
@@ -183,8 +183,8 @@ class A11yHelperService : AccessibilityService() {
         return resultJson
     }
 
-    fun checkTarget(query: A11yNavigator.TargetQuery, reqId: String = "none"): JSONObject {
-        val outcome = A11yNavigator.findTarget(rootInActiveWindow, query)
+    fun checkTarget(query: A11yTargetFinder.TargetQuery, reqId: String = "none"): JSONObject {
+        val outcome = A11yTargetFinder.findTarget(rootInActiveWindow, query)
         val resultJson = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
             put("reqId", reqId)

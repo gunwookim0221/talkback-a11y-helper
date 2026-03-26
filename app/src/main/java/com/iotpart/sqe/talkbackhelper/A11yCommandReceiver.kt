@@ -189,7 +189,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         return intent.getStringExtra(EXTRA_REQ_ID)?.trim().takeUnless { it.isNullOrBlank() } ?: DEFAULT_REQ_ID
     }
 
-    private fun parseQuery(intent: Intent, reqId: String): A11yNavigator.TargetQuery? {
+    private fun parseQuery(intent: Intent, reqId: String): A11yTargetFinder.TargetQuery? {
         val targetName = intent.getStringExtra(EXTRA_TARGET_NAME)?.trim().orEmpty()
         val targetType = intent.getStringExtra(EXTRA_TARGET_TYPE)?.trim().orEmpty().lowercase()
         val targetIndex = intent.getIntExtra(EXTRA_TARGET_INDEX, 0)
@@ -219,7 +219,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
             return null
         }
 
-        return A11yNavigator.TargetQuery(
+        return A11yTargetFinder.TargetQuery(
             targetName = targetName,
             targetType = targetType,
             targetIndex = targetIndex,
