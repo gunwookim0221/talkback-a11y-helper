@@ -1,13 +1,11 @@
 package com.iotpart.sqe.talkbackhelper
 
 import android.graphics.Rect
-import android.os.Build
 import android.view.accessibility.AccessibilityEvent
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import org.json.JSONObject
-import kotlin.math.abs
 
 typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
@@ -328,7 +326,7 @@ object A11yNavigator {
         } ?: -1
 
         if (currentIndex == -1 && resolvedCurrent != null) {
-            currentIndex = findNodeIndexByIdentity(
+            currentIndex = A11yTraversalAnalyzer.findNodeIndexByIdentity(
                 nodes = traversalList,
                 target = resolvedCurrent,
                 idOf = { it.viewIdResourceName },
@@ -974,7 +972,7 @@ object A11yNavigator {
         )
         if (isTopBar) return false
         if (isFixedSystemUI(node, mainScrollContainer)) return false
-        val hasDescendantLabel = !recoverDescendantLabel(node).isNullOrBlank()
+        val hasDescendantLabel = !A11yTraversalAnalyzer.recoverDescendantLabel(node).isNullOrBlank()
         val usableLabel = !node.contentDescription?.toString().isNullOrBlank() || !node.text?.toString().isNullOrBlank() || hasDescendantLabel
         val traversable = node.isVisibleToUser && !isNodePhysicallyOffScreen(bounds, screenTop, screenBottom)
         val interactive = node.isClickable || node.isFocusable || hasDescendantLabel
@@ -1067,55 +1065,6 @@ object A11yNavigator {
             contentDescription = node.contentDescription?.toString()?.trim(),
             bounds = bounds
         )
-    }
-
-    internal fun <T> resolveAnchorIndexInRefreshedTraversal(
-        traversalList: List<T>,
-        anchor: PreScrollAnchor,
-        boundsOf: (T) -> Rect,
-        viewIdOf: (T) -> String?,
-        textOf: (T) -> String?,
-        contentDescriptionOf: (T) -> String?
-    ): Int {
-        if (traversalList.isEmpty()) return -1
-        val exact = traversalList.indexOfFirst { candidate ->
-            val label = textOf(candidate)?.trim().takeUnless { it.isNullOrEmpty() }
-                ?: contentDescriptionOf(candidate)?.trim().takeUnless { it.isNullOrEmpty() }
-            val merged = listOfNotNull(textOf(candidate), contentDescriptionOf(candidate))
-                .joinToString(" ").trim().takeUnless { it.isNullOrEmpty() }
-            viewIdOf(candidate) == anchor.viewIdResourceName &&
-                (label == anchor.talkbackLabel || label == anchor.text || merged == anchor.mergedLabel)
-        }
-        if (exact >= 0) return exact
-
-        return traversalList.indices
-            .map { index ->
-                val candidate = traversalList[index]
-                val bounds = boundsOf(candidate)
-                val candidateLabel = textOf(candidate)?.trim().takeUnless { it.isNullOrEmpty() }
-                    ?: contentDescriptionOf(candidate)?.trim().takeUnless { it.isNullOrEmpty() }
-                val anchorLabel = anchor.mergedLabel ?: anchor.talkbackLabel ?: anchor.text ?: anchor.contentDescription
-                val labelSimilarity = normalizedLabelSimilarity(anchorLabel, candidateLabel)
-                val boundsDistance = abs(bounds.top - anchor.bounds.top) + abs(bounds.bottom - anchor.bounds.bottom)
-                Triple(index, labelSimilarity, boundsDistance)
-            }
-            .filter { (_, similarity, _) -> similarity >= 0.4f }
-            .minWithOrNull(compareByDescending<Triple<Int, Float, Int>> { it.second }.thenBy { it.third })
-            ?.first ?: -1
-    }
-
-    private fun normalizedLabelSimilarity(a: String?, b: String?): Float {
-        val left = a?.trim()?.lowercase().orEmpty()
-        val right = b?.trim()?.lowercase().orEmpty()
-        if (left.isBlank() || right.isBlank()) return 0f
-        if (left == right) return 1f
-        if (left.contains(right) || right.contains(left)) return 0.8f
-        val leftTokens = left.split(" ").filter { it.isNotBlank() }.toSet()
-        val rightTokens = right.split(" ").filter { it.isNotBlank() }.toSet()
-        if (leftTokens.isEmpty() || rightTokens.isEmpty()) return 0f
-        val intersection = leftTokens.intersect(rightTokens).size.toFloat()
-        val union = leftTokens.union(rightTokens).size.toFloat().coerceAtLeast(1f)
-        return intersection / union
     }
 
     private data class RawVisibleNode(
@@ -1300,8 +1249,14 @@ object A11yNavigator {
 
     internal fun recordVisitedFocus(node: AccessibilityNodeInfo, label: String, reason: String) {
         val normalizedLabel = label.trim()
-        val descendantTextCandidates = collectDescendantTextCandidates(node)
-        if (shouldExcludeContainerNodeFromTraversal(node, descendantTextCandidates)) {
+        val descendantTextCandidates = mutableListOf<String>().also { textCandidates ->
+            A11yTraversalAnalyzer.collectDescendantReadableText(
+                node = node,
+                includeCurrentNode = true,
+                sink = textCandidates
+            )
+        }
+        if (A11yTraversalAnalyzer.shouldExcludeContainerNodeFromTraversal(node, descendantTextCandidates)) {
             logVisitedHistorySkip(
                 reason = "container_node_excluded_from_history",
                 label = normalizedLabel,
@@ -1542,7 +1497,7 @@ object A11yNavigator {
         val headerLike = isHeaderLikeCandidate(
             className = node.className?.toString(),
             viewIdResourceName = node.viewIdResourceName,
-            label = resolvePrimaryLabel(node) ?: recoverDescendantLabel(node),
+            label = resolvePrimaryLabel(node) ?: A11yTraversalAnalyzer.recoverDescendantLabel(node),
             boundsInScreen = bounds,
             screenTop = rootTop,
             screenHeight = rootHeight
@@ -1583,7 +1538,7 @@ object A11yNavigator {
         val isHeaderLike = isHeaderLikeCandidate(
             className = candidate.className?.toString(),
             viewIdResourceName = candidate.viewIdResourceName,
-            label = resolvePrimaryLabel(candidate) ?: recoverDescendantLabel(candidate),
+            label = resolvePrimaryLabel(candidate) ?: A11yTraversalAnalyzer.recoverDescendantLabel(candidate),
             boundsInScreen = candidateBounds,
             screenTop = rootTop,
             screenHeight = rootHeight
@@ -1608,7 +1563,7 @@ object A11yNavigator {
         if (shouldIgnore) {
             Log.i(
                 "A11Y_HELPER",
-                "[FOCUS_VERIFY] ignored_post_commit_resurfaced_header eventType=$eventType candidate=${(resolvePrimaryLabel(candidate) ?: recoverDescendantLabel(candidate) ?: "<no-label>").replace("\n", " ")} committed=${(A11yHistoryManager.authoritativeCommittedLabel() ?: "<no-label>").replace("\n", " ")} committedBounds=${formatBoundsForLog(committedBounds)} candidateBounds=${formatBoundsForLog(candidateBounds)}"
+                "[FOCUS_VERIFY] ignored_post_commit_resurfaced_header eventType=$eventType candidate=${(resolvePrimaryLabel(candidate) ?: A11yTraversalAnalyzer.recoverDescendantLabel(candidate) ?: "<no-label>").replace("\n", " ")} committed=${(A11yHistoryManager.authoritativeCommittedLabel() ?: "<no-label>").replace("\n", " ")} committedBounds=${formatBoundsForLog(committedBounds)} candidateBounds=${formatBoundsForLog(candidateBounds)}"
             )
         }
         return shouldIgnore
@@ -1746,7 +1701,7 @@ object A11yNavigator {
         val focusedNodeObjectId = nodeObjectId(focusedNode)
         val directObjectIndex = traversalList.indexOfFirst { nodeObjectId(it) == focusedNodeObjectId }
         if (directObjectIndex != -1) return directObjectIndex
-        return findNodeIndexByIdentity(
+        return A11yTraversalAnalyzer.findNodeIndexByIdentity(
             nodes = traversalList,
             target = focusedNode,
             idOf = { it.viewIdResourceName },
@@ -2121,36 +2076,8 @@ object A11yNavigator {
         return bounds.bottom > screenTop && bounds.top < effectiveBottom
     }
 
-    internal fun recoverLabelFromDescendantTexts(textCandidates: List<String>): String? {
-        return textCandidates
-            .asSequence()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .firstOrNull()
-    }
-
-    private fun collectDescendantTextCandidates(node: AccessibilityNodeInfo): List<String> {
-        val textCandidates = mutableListOf<String>()
-        A11yTraversalAnalyzer.collectDescendantReadableText(
-            node = node,
-            includeCurrentNode = true,
-            sink = textCandidates
-        )
-        return textCandidates
-    }
-
-    internal fun shouldAllowRecoveredDescendantLabelForTraversal(textCandidates: List<String>): Boolean {
-        val normalized = textCandidates
-            .asSequence()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .distinct()
-            .toList()
-        if (normalized.isEmpty()) return false
-        if (normalized.size <= 2) return true
-
-        val mergedLength = normalized.joinToString(separator = " ").length
-        return normalized.size <= 3 && mergedLength <= 60
+    internal fun isSettingsRowViewId(viewIdResourceName: String?): Boolean {
+        return A11yTraversalAnalyzer.isSettingsRowViewId(viewIdResourceName)
     }
 
     internal fun isContainerLikeClassName(className: String?): Boolean {
@@ -2159,95 +2086,6 @@ object A11yNavigator {
 
     internal fun isContainerLikeViewId(viewIdResourceName: String?): Boolean {
         return A11yNodeUtils.isContainerLikeViewId(viewIdResourceName)
-    }
-
-    private fun shouldExcludeContainerNodeFromTraversal(
-        node: AccessibilityNodeInfo,
-        descendantTextCandidates: List<String>
-    ): Boolean {
-        if (isContainerLikeClassName(node.className?.toString())) return true
-        if (isContainerLikeViewId(node.viewIdResourceName)) return true
-        if (hasMultipleSiblingLevelInteractiveDescendants(node)) return true
-
-        val coversMostContentArea = doesNodeCoverMostContentArea(node)
-        if (!coversMostContentArea) return false
-
-        val clickableDescendantCount = countClickableOrFocusableDescendants(node, limit = 3)
-        if (clickableDescendantCount < 2) return false
-
-        return !shouldAllowRecoveredDescendantLabelForTraversal(descendantTextCandidates)
-    }
-
-    private fun hasMultipleSiblingLevelInteractiveDescendants(node: AccessibilityNodeInfo): Boolean {
-        val directInteractiveChildren = countDirectInteractiveChildren(node, limit = 2)
-        if (directInteractiveChildren >= 2) return true
-        val descendantInteractiveChildren = countClickableOrFocusableDescendants(node, limit = 3)
-        return descendantInteractiveChildren >= 3 && doesNodeCoverMostContentArea(node)
-    }
-
-    private fun countDirectInteractiveChildren(node: AccessibilityNodeInfo, limit: Int): Int {
-        var count = 0
-        for (index in 0 until node.childCount) {
-            val child = node.getChild(index) ?: continue
-            if (!child.isVisibleToUser) continue
-            val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && child.isScreenReaderFocusable
-            if (child.isClickable || child.isFocusable || screenReaderFocusable) {
-                count += 1
-                if (count >= limit) break
-            }
-        }
-        return count
-    }
-
-    private fun doesNodeCoverMostContentArea(node: AccessibilityNodeInfo): Boolean {
-        val nodeBounds = Rect().also { node.getBoundsInScreen(it) }
-        if (nodeBounds.width() <= 0 || nodeBounds.height() <= 0) return false
-
-        val rootBounds = resolveRootBounds(node) ?: return false
-        if (rootBounds.width() <= 0 || rootBounds.height() <= 0) return false
-
-        val widthRatio = nodeBounds.width().toFloat() / rootBounds.width().toFloat()
-        val heightRatio = nodeBounds.height().toFloat() / rootBounds.height().toFloat()
-        val areaRatio = (nodeBounds.width().toLong() * nodeBounds.height().toLong()).toFloat() /
-            (rootBounds.width().toLong() * rootBounds.height().toLong()).toFloat()
-        return widthRatio >= 0.85f && heightRatio >= 0.45f && areaRatio >= 0.40f
-    }
-
-    private fun resolveRootBounds(node: AccessibilityNodeInfo): Rect? {
-        var current: AccessibilityNodeInfo? = node
-        var latest: AccessibilityNodeInfo? = node
-        while (current != null) {
-            latest = current
-            current = current.parent
-        }
-        return latest?.let {
-            Rect().also { rootBounds -> it.getBoundsInScreen(rootBounds) }
-        }
-    }
-
-    private fun countClickableOrFocusableDescendants(node: AccessibilityNodeInfo, limit: Int): Int {
-        val queue = ArrayDeque<AccessibilityNodeInfo>()
-        queue += node
-        var count = 0
-        while (queue.isNotEmpty() && count < limit) {
-            val current = queue.removeFirst()
-            if (current !== node && current.isVisibleToUser) {
-                val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && current.isScreenReaderFocusable
-                if (current.isClickable || current.isFocusable || screenReaderFocusable) {
-                    count += 1
-                    if (count >= limit) break
-                }
-            }
-            for (index in 0 until current.childCount) {
-                current.getChild(index)?.let(queue::addLast)
-            }
-        }
-        return count
-    }
-
-    internal fun recoverDescendantLabel(node: AccessibilityNodeInfo): String? {
-        val textCandidates = collectDescendantTextCandidates(node)
-        return recoverLabelFromDescendantTexts(textCandidates)
     }
 
     fun findSwipeTarget(
@@ -2268,7 +2106,7 @@ object A11yNavigator {
         }
 
         val currentIndex = resolvedCurrent?.let { resolved ->
-            findNodeIndexByIdentity(
+            A11yTraversalAnalyzer.findNodeIndexByIdentity(
                 nodes = traversalList,
                 target = resolved,
                 idOf = { it.viewIdResourceName },
@@ -2367,47 +2205,6 @@ object A11yNavigator {
 
     private fun buildFocusableTraversalList(root: AccessibilityNodeInfo): List<AccessibilityNodeInfo> {
         return A11yTraversalAnalyzer.buildTalkBackLikeFocusNodes(root).map { it.node }
-    }
-
-    internal fun <T> findNodeIndexByIdentity(
-        nodes: List<T>,
-        target: T,
-        idOf: (T) -> String?,
-        textOf: (T) -> String?,
-        contentDescriptionOf: (T) -> String?,
-        boundsOf: (T) -> Rect,
-        onCoordinateMatch: ((Int) -> Unit)? = null
-    ): Int {
-        val targetId = idOf(target)
-        val targetText = textOf(target)
-        val targetContentDescription = contentDescriptionOf(target)
-        val targetBounds = boundsOf(target)
-
-        val coordinateMatchIndex = nodes.indexOfFirst { candidate ->
-            val candidateBounds = boundsOf(candidate)
-            candidateBounds == targetBounds
-        }
-
-        if (coordinateMatchIndex != -1) {
-            onCoordinateMatch?.invoke(coordinateMatchIndex)
-            return coordinateMatchIndex
-        }
-
-        return nodes.withIndex()
-            .asSequence()
-            .filter { (_, candidate) ->
-                idOf(candidate) == targetId &&
-                    textOf(candidate) == targetText &&
-                    contentDescriptionOf(candidate) == targetContentDescription
-            }
-            .minByOrNull { (_, candidate) ->
-                val candidateBounds = boundsOf(candidate)
-                val dx = ((candidateBounds.left + candidateBounds.right) / 2) - ((targetBounds.left + targetBounds.right) / 2)
-                val dy = ((candidateBounds.top + candidateBounds.bottom) / 2) - ((targetBounds.top + targetBounds.bottom) / 2)
-                (dx * dx) + (dy * dy)
-            }
-            ?.index
-            ?: -1
     }
 
     internal fun <T> findCurrentTraversalIndex(

@@ -20,7 +20,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldAllowRecoveredDescendantLabelForTraversal_rejectsMultiItemContainerLabels() {
-        val allow = A11yNavigator.shouldAllowRecoveredDescendantLabelForTraversal(
+        val allow = A11yTraversalAnalyzer.shouldAllowRecoveredDescendantLabelForTraversal(
             listOf("Samsung AI Subscription", "Virtual Home", "Safe", "Android Auto")
         )
         assertFalse(allow)
@@ -274,7 +274,7 @@ class A11yNavigatorTest {
             bounds = Rect(0, 390, 1000, 510)
         )
 
-        val index = A11yNavigator.resolveAnchorIndexInRefreshedTraversal(
+        val index = A11yTraversalAnalyzer.resolveAnchorIndexInRefreshedTraversal(
             traversalList = nodes,
             anchor = anchor,
             boundsOf = { it.bounds },
@@ -303,7 +303,7 @@ class A11yNavigatorTest {
             bounds = Rect(0, 400, 1000, 520)
         )
 
-        val index = A11yNavigator.resolveAnchorIndexInRefreshedTraversal(
+        val index = A11yTraversalAnalyzer.resolveAnchorIndexInRefreshedTraversal(
             traversalList = nodes,
             anchor = anchor,
             boundsOf = { it.bounds },
@@ -1033,7 +1033,7 @@ class A11yNavigatorTest {
 
     @Test
     fun recoverLabelFromDescendantTexts_returnsFirstNonBlankLabel() {
-        val recovered = A11yNavigator.recoverLabelFromDescendantTexts(
+        val recovered = A11yTraversalAnalyzer.recoverLabelFromDescendantTexts(
             listOf("   ", "", "Labs", "Menu")
         )
 
@@ -1042,7 +1042,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldAllowRecoveredDescendantLabelForTraversal_returnsTrue_forSingleCardLikeLabel() {
-        val allowed = A11yNavigator.shouldAllowRecoveredDescendantLabelForTraversal(
+        val allowed = A11yTraversalAnalyzer.shouldAllowRecoveredDescendantLabelForTraversal(
             listOf("Home profile", "Home profile")
         )
 
@@ -1051,7 +1051,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldAllowRecoveredDescendantLabelForTraversal_returnsFalse_forLargeMergedContainerText() {
-        val allowed = A11yNavigator.shouldAllowRecoveredDescendantLabelForTraversal(
+        val allowed = A11yTraversalAnalyzer.shouldAllowRecoveredDescendantLabelForTraversal(
             listOf(
                 "Home profile",
                 "Explore",
@@ -1337,7 +1337,7 @@ class A11yNavigatorTest {
             IdentityNode(id = "com.test:id/changed", text = "변경된 카드", desc = "변경된 포커스", bounds = Rect(0, 500, 400, 620))
         )
 
-        val index = A11yNavigator.findNodeIndexByIdentity(
+        val index = A11yTraversalAnalyzer.findNodeIndexByIdentity(
             nodes = list,
             target = target,
             idOf = { it.id },
@@ -3149,7 +3149,7 @@ class A11yNavigatorTest {
         val second = IdentityNode(id = "com.test:id/item", text = "Living Room", desc = "Card B", bounds = Rect(0, 580, 400, 700))
         val list = listOf(first, second)
 
-        val index = A11yNavigator.findNodeIndexByIdentity(
+        val index = A11yTraversalAnalyzer.findNodeIndexByIdentity(
             nodes = list,
             target = second,
             idOf = { it.id },
@@ -3170,7 +3170,7 @@ class A11yNavigatorTest {
             IdentityNode(id = "com.test:id/item", text = "Living Room", desc = "Card A", bounds = Rect(0, 400, 400, 520))
         )
 
-        val index = A11yNavigator.findNodeIndexByIdentity(
+        val index = A11yTraversalAnalyzer.findNodeIndexByIdentity(
             nodes = list,
             target = target,
             idOf = { it.id },
@@ -3193,7 +3193,7 @@ class A11yNavigatorTest {
             IdentityNode(id = "com.test:id/item", text = "Living Room", desc = "Card A", bounds = Rect(0, 900, 400, 1020))
         )
 
-        val index = A11yNavigator.findNodeIndexByIdentity(
+        val index = A11yTraversalAnalyzer.findNodeIndexByIdentity(
             nodes = list,
             target = target,
             idOf = { it.id },
@@ -3215,7 +3215,7 @@ class A11yNavigatorTest {
             IdentityNode(id = "com.test:id/item", text = "Living Room", desc = "Card A", bounds = Rect(0, 540, 400, 660))
         )
 
-        val index = A11yNavigator.findNodeIndexByIdentity(
+        val index = A11yTraversalAnalyzer.findNodeIndexByIdentity(
             nodes = list,
             target = target,
             idOf = { it.id },
@@ -3236,7 +3236,7 @@ class A11yNavigatorTest {
             IdentityNode(id = "com.test:id/changed", text = "변경됨", desc = "다른 카드", bounds = Rect(0, 500, 400, 620))
         )
 
-        val index = A11yNavigator.findNodeIndexByIdentity(
+        val index = A11yTraversalAnalyzer.findNodeIndexByIdentity(
             nodes = list,
             target = target,
             idOf = { it.id },
