@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.39.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.39.1"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
     private val TRAVERSAL_CONTAINER_CLASS_KEYWORDS = listOf(
@@ -131,13 +131,6 @@ object A11yNavigator {
         val allowBottomBarEntry: Boolean,
         val requirePreScroll: Boolean,
         val reason: String
-    )
-
-    private data class NavigationContext(
-        val root: AccessibilityNodeInfo,
-        val collect: CollectResult,
-        val normalize: NormalizeResult,
-        val currentPosition: CurrentPosition
     )
 
     private data class CurrentPosition(
