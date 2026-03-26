@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.31.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.31.1"
 
     private val visitedHistoryLock = Any()
     private val visitedHistoryLabels = linkedSetOf<String>()
@@ -1173,6 +1173,20 @@ object A11yNavigator {
                 currentIndex = currentIndex,
                 resolvedCurrent = resolvedCurrent
             )
+            val preScrollRawVisibleNodes = collectRawVisibleNodes(root)
+            val preScrollFocusedBounds = resolvedCurrent?.let { Rect().also(it::getBoundsInScreen) }
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][PROGRESS_DEBUG] preScroll anchor=${describePreScrollAnchor(preScrollAnchor)}"
+            )
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][PROGRESS_DEBUG] preScroll focused=${describeNodeForProgressLog(resolvedCurrent, preScrollFocusedBounds)}"
+            )
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][PROGRESS_DEBUG] preRawCount=${preScrollRawVisibleNodes.size} preTraversalCount=${traversalList.size}"
+            )
             val scrollResult = scrollTarget.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
             Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SCROLL_FORWARD result=$scrollResult")
             if (!scrollResult) {
@@ -1247,7 +1261,115 @@ object A11yNavigator {
             )
             val refreshedTraversal = refreshedRoot?.let { buildFocusableTraversalList(it) }.orEmpty()
             val refreshedSnapshot = buildNodeTextSnapshot(refreshedTraversal)
+            val postRawVisibleNodes = refreshedRoot?.let(::collectRawVisibleNodes).orEmpty()
+            val anchorCandidateIndex = preScrollAnchor?.let { anchor ->
+                resolveAnchorIndexInRefreshedTraversal(
+                    traversalList = refreshedTraversal,
+                    anchor = anchor,
+                    boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+                    viewIdOf = { node -> node.viewIdResourceName },
+                    textOf = { node -> node.text?.toString() },
+                    contentDescriptionOf = { node -> node.contentDescription?.toString() }
+                )
+            } ?: -1
+            val anchorCandidateNode = refreshedTraversal.getOrNull(anchorCandidateIndex)
+            val anchorCandidateBounds = anchorCandidateNode?.let { Rect().also(it::getBoundsInScreen) }
+            val anchorSimilarCandidateFound = preScrollAnchor != null && anchorCandidateIndex >= 0
+            val privacyNoticeNode = refreshedTraversal.firstOrNull {
+                it.viewIdResourceName?.contains("item_privacy_notice", ignoreCase = true) == true
+            }
+            val privacyNoticeBounds = privacyNoticeNode?.let { Rect().also(it::getBoundsInScreen) }
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][PROGRESS_DEBUG] postRawCount=${postRawVisibleNodes.size} postTraversalCount=${refreshedTraversal.size}"
+            )
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][PROGRESS_DEBUG] postAnchorCandidate found=$anchorSimilarCandidateFound index=$anchorCandidateIndex anchorShift before=${formatBoundsForLog(preScrollAnchor?.bounds)} after=${formatBoundsForLog(anchorCandidateBounds)}"
+            )
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][PROGRESS_DEBUG] privacyNotice found=${privacyNoticeNode != null} bounds=${formatBoundsForLog(privacyNoticeBounds)} clickable=${privacyNoticeNode?.isClickable} focusable=${privacyNoticeNode?.isFocusable} visible=${privacyNoticeNode?.isVisibleToUser}"
+            )
             if (oldSnapshot == refreshedSnapshot) {
+                val preRawSignature = preScrollRawVisibleNodes.map { raw ->
+                    "${raw.viewId}|${raw.label}|${raw.bounds.left},${raw.bounds.top},${raw.bounds.right},${raw.bounds.bottom}"
+                }.toSet()
+                val postRawSignature = postRawVisibleNodes.map { raw ->
+                    "${raw.viewId}|${raw.label}|${raw.bounds.left},${raw.bounds.top},${raw.bounds.right},${raw.bounds.bottom}"
+                }.toSet()
+                val preTraversalViewIds = traversalList.mapNotNull { it.viewIdResourceName }.toSet()
+                val postTraversalViewIds = refreshedTraversal.mapNotNull { it.viewIdResourceName }.toSet()
+                val rawTreeChanged = preRawSignature != postRawSignature
+                val traversalChanged = traversalList.size != refreshedTraversal.size || oldSnapshot != refreshedSnapshot
+                val anchorShifted = preScrollAnchor != null && anchorCandidateBounds != null && preScrollAnchor.bounds != anchorCandidateBounds
+                val successorCandidateIndex = if (preScrollAnchor != null) {
+                    findAnchorContinuationCandidateIndex(
+                        traversalList = refreshedTraversal,
+                        startIndex = 0,
+                        visibleHistory = visibleHistory,
+                        visibleHistorySignatures = visibleHistorySignatures,
+                        visitedHistory = visitedHistory,
+                        visitedHistorySignatures = visitedHistorySignatureSnapshot,
+                        screenTop = Rect().also { (refreshedRoot ?: root).getBoundsInScreen(it) }.top,
+                        screenBottom = Rect().also { (refreshedRoot ?: root).getBoundsInScreen(it) }.bottom,
+                        screenHeight = (Rect().also { (refreshedRoot ?: root).getBoundsInScreen(it) }.height()).coerceAtLeast(1),
+                        boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+                        classNameOf = { node -> node.className?.toString() },
+                        viewIdOf = { node -> node.viewIdResourceName },
+                        isContentNodeOf = { node -> isContentNode(node) },
+                        clickableOf = { node -> node.isClickable },
+                        focusableOf = { node -> node.isFocusable },
+                        descendantLabelOf = { node -> collectDescendantReadableText(node) },
+                        preScrollAnchor = preScrollAnchor,
+                        preScrollAnchorBottom = preScrollAnchor.bounds.bottom,
+                        labelOf = { node ->
+                            node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                                ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                        }
+                    )
+                } else {
+                    -1
+                }
+                val successorFound = successorCandidateIndex >= 0
+                val newViewIdFound = postTraversalViewIds.any { it !in preTraversalViewIds }
+                val preBottomMax = preScrollRawVisibleNodes.maxOfOrNull { it.bounds.bottom } ?: Int.MIN_VALUE
+                val postBottomMax = postRawVisibleNodes.maxOfOrNull { it.bounds.bottom } ?: Int.MIN_VALUE
+                val bottomAreaExpanded = postBottomMax > preBottomMax
+                val noProgressReason = when {
+                    !rawTreeChanged && !traversalChanged && !anchorShifted && !successorFound && !newViewIdFound && !bottomAreaExpanded ->
+                        "all_progress_signals_false"
+                    !rawTreeChanged -> "raw_tree_unchanged"
+                    !traversalChanged -> "traversal_unchanged"
+                    !anchorShifted -> "anchor_not_shifted"
+                    !successorFound -> "successor_not_found"
+                    !newViewIdFound -> "no_new_view_id"
+                    !bottomAreaExpanded -> "bottom_area_not_expanded"
+                    else -> "snapshot_equal"
+                }
+                val successorCandidatesSummary = refreshedTraversal.take(8).joinToString(separator = " | ") { node ->
+                    val bounds = Rect().also { node.getBoundsInScreen(it) }
+                    val label = node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                        ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                        ?: "<no-label>"
+                    "label=${label.replace("\n", " ")} viewId=${node.viewIdResourceName} bounds=$bounds"
+                }
+                Log.i(
+                    "A11Y_HELPER",
+                    "[SMART_NEXT][PROGRESS_DEBUG] rawTreeChanged=$rawTreeChanged traversalChanged=$traversalChanged anchorShifted=$anchorShifted successorFound=$successorFound newViewIdFound=$newViewIdFound bottomAreaExpanded=$bottomAreaExpanded"
+                )
+                Log.i(
+                    "A11Y_HELPER",
+                    "[SMART_NEXT][PROGRESS_DEBUG] noProgress=true reason=$noProgressReason"
+                )
+                Log.i(
+                    "A11Y_HELPER",
+                    "[SMART_NEXT][PROGRESS_DEBUG] fallbackBeforeBottomBar successorSearchAttempted=${preScrollAnchor != null} successorCandidates=$successorCandidatesSummary"
+                )
+                Log.i(
+                    "A11Y_HELPER",
+                    "[SMART_NEXT][PROGRESS_DEBUG] fallbackReason=no_scroll_progress_after_bottom_bar_pre_scroll"
+                )
                 Log.i("A11Y_HELPER", "[SMART_NEXT] No scroll progress detected after bottom-bar pre-scroll. Trying bottom bar fallback focus.")
                 val fallbackOutcome = focusBottomBarAfterNoProgress(
                     root = root,
@@ -1719,6 +1841,24 @@ object A11yNavigator {
         val viewId: String?,
         val bounds: Rect
     )
+
+    private fun describePreScrollAnchor(anchor: PreScrollAnchor?): String {
+        if (anchor == null) return "null"
+        val label = anchor.mergedLabel
+            ?: anchor.talkbackLabel
+            ?: anchor.text
+            ?: anchor.contentDescription
+            ?: "<no-label>"
+        return "label=${label.replace("\n", " ")} viewId=${anchor.viewIdResourceName} bounds=${formatBoundsForLog(anchor.bounds)}"
+    }
+
+    private fun describeNodeForProgressLog(node: AccessibilityNodeInfo?, bounds: Rect?): String {
+        if (node == null) return "null"
+        val label = node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+            ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+            ?: "<no-label>"
+        return "label=${label.replace("\n", " ")} viewId=${node.viewIdResourceName} bounds=${formatBoundsForLog(bounds)}"
+    }
 
     private fun logPostScrollRawVsTraversalSnapshot(
         root: AccessibilityNodeInfo,
