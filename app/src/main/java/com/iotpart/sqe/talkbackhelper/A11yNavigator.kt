@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.35.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.36.0"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
     private val TRAVERSAL_CONTAINER_CLASS_KEYWORDS = listOf(
@@ -146,6 +146,16 @@ object A11yNavigator {
         val priority: Int,
         val rejectionReasons: List<String>,
         val isLogicalSuccessor: Boolean = false
+    )
+
+    private data class SmartNextRuntimeState(
+        val root: AccessibilityNodeInfo,
+        val collect: CollectResult,
+        val normalize: NormalizeResult,
+        val currentPosition: CurrentPosition,
+        val visitedHistory: Set<String>,
+        val visitedHistorySignatures: Set<VisibleHistorySignature>,
+        val focusNodeByNode: Map<AccessibilityNodeInfo, FocusedNode>
     )
 
     fun resetFocusHistory() {
@@ -434,6 +444,19 @@ object A11yNavigator {
             return TargetActionOutcome(false, "Root node is null")
         }
 
+        // 1) 입력 수집 + 정규화
+        val runtimeState = collectSmartNextRuntimeState(root, currentNode)
+        // 2) 현재 위치/다음 이동 후보 계산 (collect 단계에서 계산 완료)
+        // 3) scroll / bottom bar / continuation 정책 결정 + 실행
+        val executeResult = executeSmartNextFlow(runtimeState)
+        // 4) focus 실행 결과 반환 (verify/commit은 하위 실행 함수 내부에서 수행)
+        return executeResult
+    }
+
+    private fun collectSmartNextRuntimeState(
+        root: AccessibilityNodeInfo,
+        currentNode: AccessibilityNodeInfo?
+    ): SmartNextRuntimeState {
         val collectResult = collectSmartNextInputs(root)
         val focusNodes = collectResult.focusNodes
         val traversalList = collectResult.traversalList
@@ -451,19 +474,53 @@ object A11yNavigator {
                 "[NORMALIZE] #$index: ${label.replace("\n", " ")} (L: ${bounds.left}, T: ${bounds.top}, R: ${bounds.right}, B: ${bounds.bottom}) (Merged Label: $mergedLabel)"
             )
         }
-        if (traversalList.isEmpty()) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Traversal list is empty, failing.")
-            return TargetActionOutcome(false, "Traversal list is empty")
-        }
 
+        val normalizeResult = normalizeSmartNextInputs(root, traversalList)
         val currentPosition = resolveCurrentAndNextIndex(
             traversalList = traversalList,
             currentNode = currentNode
         )
+        val visitedHistory = snapshotVisitedHistoryLabels()
+        val visitedHistorySignatures = snapshotVisitedHistorySignatures()
+
+        return SmartNextRuntimeState(
+            root = root,
+            collect = collectResult,
+            normalize = normalizeResult,
+            currentPosition = currentPosition,
+            visitedHistory = visitedHistory,
+            visitedHistorySignatures = visitedHistorySignatures,
+            focusNodeByNode = focusNodeByNode
+        )
+    }
+
+    private fun executeSmartNextFlow(state: SmartNextRuntimeState): TargetActionOutcome {
+        return performSmartNextLegacy(state)
+    }
+
+    private fun performSmartNextLegacy(state: SmartNextRuntimeState): TargetActionOutcome {
+        val root = state.root
+        val collectResult = state.collect
+        val focusNodes = collectResult.focusNodes
+        val traversalList = collectResult.traversalList
+        val focusNodeByNode = state.focusNodeByNode
+        val currentPosition = state.currentPosition
         val resolvedCurrent = currentPosition.resolvedCurrent
         val currentIndex = currentPosition.currentIndex
         val fallbackIndex = currentPosition.fallbackIndex
         var nextIndex = currentPosition.nextIndex
+        val normalizeResult = state.normalize
+        val screenRect = normalizeResult.screenRect
+        val screenTop = normalizeResult.screenTop
+        val screenBottom = normalizeResult.screenBottom
+        val screenHeight = normalizeResult.screenHeight
+        val effectiveBottom = normalizeResult.effectiveBottom
+        val visitedHistory = state.visitedHistory
+        val visitedHistorySignatureSnapshot = state.visitedHistorySignatures
+        if (traversalList.isEmpty()) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Traversal list is empty, failing.")
+            return TargetActionOutcome(false, "Traversal list is empty")
+        }
 
         if (currentIndex != -1) {
             setLastRequestedFocusIndex(maxOf(lastRequestedFocusIndex, A11yStateStore.lastRequestedFocusIndex, currentIndex))
@@ -508,15 +565,7 @@ object A11yNavigator {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Current node matching failed. Using fallback nextIndex based on vertical proximity.")
         }
 
-        val normalizeResult = normalizeSmartNextInputs(root, traversalList)
-        val screenRect = normalizeResult.screenRect
-        val screenTop = normalizeResult.screenTop
-        val screenBottom = normalizeResult.screenBottom
-        val screenHeight = normalizeResult.screenHeight
-        val effectiveBottom = normalizeResult.effectiveBottom
         Log.i("A11Y_HELPER", "[SMART_NEXT] effectiveBottom=$effectiveBottom, screenBottom=$screenBottom")
-        val visitedHistory = snapshotVisitedHistoryLabels()
-        val visitedHistorySignatureSnapshot = snapshotVisitedHistorySignatures()
 
         fun findAndFocusFirstContent(
             traversalList: List<AccessibilityNodeInfo>,
