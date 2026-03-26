@@ -12,7 +12,7 @@ typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 typealias FocusedNode = A11yTraversalAnalyzer.FocusedNode
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.56.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.57.0"
     private const val RETARGET_SUPPRESSION_WINDOW_MS: Long = 400L
 
 
@@ -43,17 +43,6 @@ object A11yNavigator {
         A11yHistoryManager.clearVisitedHistory()
         Log.i("A11Y_HELPER", "Focus history has been explicitly reset by external command.")
     }
-
-    data class TargetQuery(
-        val targetName: String,
-        val targetType: String,
-        val targetIndex: Int,
-        val className: String? = null,
-        val clickable: Boolean? = null,
-        val focusable: Boolean? = null,
-        val targetText: String? = null,
-        val targetId: String? = null
-    )
 
     fun dumpTreeFlat(root: AccessibilityNodeInfo?): JSONObject {
         if (root == null) {
@@ -88,130 +77,6 @@ object A11yNavigator {
         ).toJson()
     }
 
-    fun findAndPerformAction(
-        root: AccessibilityNodeInfo?,
-        query: TargetQuery,
-        action: Int
-    ): TargetActionOutcome {
-        if (root == null) {
-            return TargetActionOutcome(false, "Root node is null")
-        }
-
-        val stack = ArrayDeque<AccessibilityNodeInfo>()
-        stack.add(root)
-        var matchCount = 0
-
-        while (stack.isNotEmpty()) {
-            val node = stack.removeLast()
-            val targetNode = resolveMatchedTarget(node, query)
-            if (targetNode != null) {
-                if (matchCount != query.targetIndex) {
-                    matchCount += 1
-                } else {
-                    val success = targetNode.performAction(action)
-                    val actionName = when (action) {
-                        AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS -> "ACTION_ACCESSIBILITY_FOCUS"
-                        AccessibilityNodeInfo.ACTION_CLICK -> "ACTION_CLICK"
-                        AccessibilityNodeInfo.ACTION_LONG_CLICK -> "ACTION_LONG_CLICK"
-                        else -> "ACTION_$action"
-                    }
-                    return TargetActionOutcome(
-                        success = success,
-                        reason = if (success) "$actionName success" else "$actionName failed",
-                        target = targetNode
-                    )
-                }
-            }
-
-            for (i in node.childCount - 1 downTo 0) {
-                node.getChild(i)?.let { stack.add(it) }
-            }
-        }
-
-        return TargetActionOutcome(false, "Target node not found")
-    }
-
-    fun findTarget(root: AccessibilityNodeInfo?, query: TargetQuery): TargetActionOutcome {
-        if (root == null) {
-            return TargetActionOutcome(false, "Root node is null")
-        }
-
-        val stack = ArrayDeque<AccessibilityNodeInfo>()
-        stack.add(root)
-        var matchCount = 0
-
-        while (stack.isNotEmpty()) {
-            val node = stack.removeLast()
-            val targetNode = resolveMatchedTarget(node, query)
-            if (targetNode != null) {
-                if (matchCount == query.targetIndex) {
-                    return TargetActionOutcome(success = true, reason = "Target node found", target = targetNode)
-                }
-                matchCount += 1
-            }
-
-            for (i in node.childCount - 1 downTo 0) {
-                node.getChild(i)?.let { stack.add(it) }
-            }
-        }
-
-        return TargetActionOutcome(false, "Target node not found")
-    }
-
-    fun matchesTarget(
-        nodeText: String?,
-        nodeContentDescription: String?,
-        nodeViewId: String?,
-        nodeClassName: String? = null,
-        nodeClickable: Boolean? = null,
-        nodeFocusable: Boolean? = null,
-        query: TargetQuery
-    ): Boolean {
-        val targetName = query.targetName.trim()
-        val targetType = query.targetType.lowercase().trim()
-        val baseMatch = if (targetName.isNotBlank()) {
-            val regexPattern = buildRegexPattern(targetName)
-            val pattern = runCatching { Regex(regexPattern, setOf(RegexOption.IGNORE_CASE)) }.getOrNull()
-            val byText = nodeText?.trim()?.let { text ->
-                pattern?.containsMatchIn(text) ?: false
-            } == true
-            val byTalkback = nodeContentDescription?.trim()?.let { text ->
-                pattern?.containsMatchIn(text) ?: false
-            } == true
-            val byResourceId = nodeViewId?.let { viewId ->
-                pattern?.matches(viewId) ?: false
-            } ?: false
-            when (targetType) {
-                "t" -> byText
-                "b" -> byTalkback
-                "r" -> byResourceId
-                "a" -> byText || byTalkback || byResourceId
-                else -> false
-            }
-        } else {
-            true
-        }
-
-        if (!baseMatch) return false
-
-        val targetTextMatch = query.targetText?.let { targetText ->
-            nodeText?.contains(targetText, ignoreCase = true) == true || nodeContentDescription?.contains(targetText, ignoreCase = true) == true
-        } ?: true
-        val targetIdMatch = query.targetId?.let { targetId ->
-            isViewIdMatched(nodeViewId, targetId)
-        } ?: true
-        val classNameMatch = query.className?.let { queryClassName ->
-            nodeClassName?.contains(queryClassName, ignoreCase = true) == true
-        } ?: true
-        val clickableMatch = query.clickable?.let { expected ->
-            nodeClickable == expected
-        } ?: true
-        val focusableMatch = query.focusable?.let { expected ->
-            nodeFocusable == expected
-        } ?: true
-
-        return targetTextMatch && targetIdMatch && classNameMatch && clickableMatch && focusableMatch
-    }
 
     private fun collectNodes(root: AccessibilityNodeInfo): List<FocusedNode> = A11yTraversalAnalyzer.buildTalkBackLikeFocusNodes(root)
 
@@ -817,40 +682,6 @@ object A11yNavigator {
         context: FindAndFocusPhaseContext,
         request: FindAndFocusRequest
     ): TargetActionOutcome = A11yPostScrollScanner.findAndFocusFirstContent(context, request)
-
-    private fun buildPostScrollSearchContext(
-        context: FindAndFocusPhaseContext,
-        request: FindAndFocusRequest,
-        localMainScrollContainer: AccessibilityNodeInfo?
-    ): PostScrollSearchContext = A11yPostScrollScanner.buildPostScrollSearchContext(context, request, localMainScrollContainer)
-
-    private fun tryFocusCandidate(
-        context: FindAndFocusPhaseContext,
-        request: FindAndFocusRequest,
-        postScrollContext: PostScrollSearchContext,
-        localMainScrollContainer: AccessibilityNodeInfo?,
-        loopState: FocusLoopState,
-        index: Int
-    ): TargetActionOutcome? = A11yPostScrollScanner.tryFocusCandidate(
-        context,
-        request,
-        postScrollContext,
-        localMainScrollContainer,
-        loopState,
-        index
-    )
-
-    private fun handleNoCandidateAfterScroll(
-        request: FindAndFocusRequest,
-        postScrollContext: PostScrollSearchContext,
-        loopState: FocusLoopState
-    ): TargetActionOutcome? = A11yPostScrollScanner.handleNoCandidateAfterScroll(request, postScrollContext, loopState)
-
-    private fun handleLoopFallback(
-        context: FindAndFocusPhaseContext,
-        request: FindAndFocusRequest,
-        loopState: FocusLoopState
-    ): TargetActionOutcome = A11yPostScrollScanner.handleLoopFallback(context, request, loopState)
 
     private fun clearFocus(node: AccessibilityNodeInfo): Boolean {
         return node.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
@@ -1843,37 +1674,6 @@ object A11yNavigator {
         return results
     }
 
-    private fun matchesTarget(node: AccessibilityNodeInfo, query: TargetQuery): Boolean {
-        val text = node.text?.toString()
-        val description = node.contentDescription?.toString()
-        return matchesTarget(
-            text,
-            description,
-            node.viewIdResourceName,
-            node.className?.toString(),
-            node.isClickable,
-            node.isFocusable,
-            query
-        )
-    }
-
-    private fun resolveMatchedTarget(node: AccessibilityNodeInfo, query: TargetQuery): AccessibilityNodeInfo? {
-        val queryWithoutClickable = if (query.clickable != null) query.copy(clickable = null) else query
-        if (!matchesTarget(node, queryWithoutClickable)) return null
-
-        val resolvedNode = resolveToClickableAncestor(
-            node = node,
-            parentOf = { current -> current.parent },
-            isClickable = { current -> current.isClickable }
-        )
-
-        query.clickable?.let { expected ->
-            if (resolvedNode.isClickable != expected) return null
-        }
-        return resolvedNode
-    }
-
-
     private fun <T> hasClickableAncestor(
         node: T,
         parentOf: (T) -> T?,
@@ -1986,32 +1786,6 @@ object A11yNavigator {
 
         return nearestIndex
     }
-
-    private fun isViewIdMatched(nodeViewId: String?, target: String): Boolean {
-        val regexPattern = buildRegexPattern(target)
-        return nodeViewId?.let { viewId ->
-            runCatching { Regex(regexPattern, setOf(RegexOption.IGNORE_CASE)) }
-                .getOrNull()
-                ?.matches(viewId)
-                ?: false
-        } ?: false
-    }
-
-    private fun isRegexPattern(target: String): Boolean {
-        return target.contains(".*") ||
-            target.contains(".+") ||
-            target.contains("^") ||
-            target.contains("$")
-    }
-
-    private fun buildRegexPattern(target: String): String {
-        return if (isRegexPattern(target)) {
-            target
-        } else {
-            "^${Regex.escape(target)}$"
-        }
-    }
-
 
     internal fun <T> hasScrollableDownCandidate(
         nodesInOrder: List<T>,
