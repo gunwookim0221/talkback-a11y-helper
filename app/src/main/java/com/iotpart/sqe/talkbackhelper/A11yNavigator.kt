@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.31.8"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.31.9"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
     private val TRAVERSAL_CONTAINER_CLASS_KEYWORDS = listOf(
@@ -1146,10 +1146,12 @@ object A11yNavigator {
             screenTop = screenTop,
             screenBottom = screenBottom,
             screenHeight = screenHeight,
+            effectiveBottom = effectiveBottom,
             boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
             classNameOf = { node -> node.className?.toString() },
             viewIdOf = { node -> node.viewIdResourceName },
-            isFixedUiOf = { node -> isFixedSystemUI(node, mainScrollContainer) }
+            isFixedUiOf = { node -> isFixedSystemUI(node, mainScrollContainer) },
+            canScrollForwardHint = scrollableNode != null
         )
         if (contentTraversalCompleteBeforeBottomBar) {
             Log.i(
@@ -3168,10 +3170,14 @@ object A11yNavigator {
         screenTop: Int,
         screenBottom: Int,
         screenHeight: Int,
+        effectiveBottom: Int,
         boundsOf: (T) -> Rect,
         classNameOf: (T) -> String?,
         viewIdOf: (T) -> String?,
-        isFixedUiOf: ((T) -> Boolean)? = null
+        isFixedUiOf: ((T) -> Boolean)? = null,
+        canScrollForwardHint: Boolean = false,
+        continuationNearBottomThresholdPx: Int = 160,
+        trailingThinContentHeightPx: Int = 120
     ): Boolean {
         if (currentIndex !in traversalList.indices || bottomBarIndex !in traversalList.indices) return false
         if (bottomBarIndex <= currentIndex) return false
@@ -3186,7 +3192,20 @@ object A11yNavigator {
             viewIdOf = viewIdOf,
             isFixedUiOf = isFixedUiOf
         )
-        return currentIndex == lastContentIndex
+        if (currentIndex != lastContentIndex) return false
+        if (!canScrollForwardHint) return true
+
+        val currentNode = traversalList[currentIndex]
+        val currentBounds = boundsOf(currentNode)
+        val normalizedClass = classNameOf(currentNode)?.lowercase().orEmpty()
+        val normalizedViewId = viewIdOf(currentNode)?.lowercase().orEmpty()
+        val continuationKeywordDetected = listOf("grid", "shortcut", "menu", "tile", "icon", "card", "assistant", "lab")
+            .any { keyword -> normalizedClass.contains(keyword) || normalizedViewId.contains(keyword) }
+        val nearBottomEdge = currentBounds.bottom >= (effectiveBottom - continuationNearBottomThresholdPx)
+        val isBottomClipped = currentBounds.bottom > effectiveBottom
+        val isTrailingThinContent = currentBounds.height() <= trailingThinContentHeightPx && nearBottomEdge
+
+        return !(isBottomClipped || isTrailingThinContent || (nearBottomEdge && continuationKeywordDetected))
     }
 
     internal fun <T> isContinuationContentLikelyBelowCurrentNode(
