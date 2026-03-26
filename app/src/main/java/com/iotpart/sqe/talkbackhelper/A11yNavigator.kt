@@ -14,7 +14,7 @@ typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 typealias FocusedNode = A11yTraversalAnalyzer.FocusedNode
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.51.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.52.0"
     private const val RETARGET_SUPPRESSION_WINDOW_MS: Long = 400L
 
 
@@ -1092,7 +1092,7 @@ object A11yNavigator {
                     .mapNotNull { raw -> raw.viewId?.substringAfterLast('/')?.trim() }
                     .filter { shortId -> A11yTraversalAnalyzer.isSettingsRowViewId(shortId) }
                     .toSet()
-                val continuationSearchResult = selectContinuationCandidateAfterScrollResult(
+                val continuationSearchResult = A11yTraversalAnalyzer.selectPostScrollCandidate(
                     traversalList = traversalList,
                     startIndex = 0,
                     visibleHistory = request.visibleHistory,
@@ -1124,10 +1124,36 @@ object A11yNavigator {
                     labelOf = { node ->
                         node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                             ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                    },
+                    isTopAppBarNode = { className, viewId, bounds, top, height ->
+                        isTopAppBarNode(className, viewId, bounds, top, height)
+                    },
+                    isBottomNavigationBarNode = { className, viewId, bounds, bottom, height ->
+                        isBottomNavigationBarNode(className, viewId, bounds, bottom, height)
+                    },
+                    isInVisibleHistory = { label, viewId, bounds, visibleHistory, visibleHistorySignatures ->
+                        isInVisibleHistory(label, viewId, bounds, visibleHistory, visibleHistorySignatures)
+                    },
+                    isInVisitedHistory = { label, viewId, bounds, visitedHistory, visitedHistorySignatures ->
+                        isInVisitedHistory(label, viewId, bounds, visitedHistory, visitedHistorySignatures)
+                    },
+                    logVisitedHistorySkip = { reason, label, viewId, bounds ->
+                        logVisitedHistorySkip(reason, label, viewId, bounds)
+                    },
+                    isHeaderLikeCandidate = { className, viewId, label, bounds, top, height ->
+                        isHeaderLikeCandidate(className, viewId, label, bounds, top, height)
+                    },
+                    hasPreScrollResolvedLabel = { currentLabel, currentDescendantLabel, rawViewId, bounds, visibleHistorySignatures ->
+                        hasPreScrollResolvedLabel(currentLabel, currentDescendantLabel, rawViewId, bounds, visibleHistorySignatures)
                     }
                 )
                 val candidate = continuationSearchResult.index
-                val selection = selectPostScrollCandidate(candidate)
+                val analysis = A11yTraversalAnalyzer.analyzePostScrollState(
+                    treeChanged = true,
+                    anchorMaintained = true,
+                    newlyExposedCandidateExists = candidate >= 0
+                )
+                val selection = A11yTraversalAnalyzer.selectPostScrollContinuationCandidate(candidate, analysis)
                 continuationFallbackFailed = !selection.accepted
                 hasValidPostScrollCandidate = continuationSearchResult.hasValidPostScrollCandidate
                 if (!selection.accepted) -1 else candidate
@@ -1169,15 +1195,6 @@ object A11yNavigator {
             anchorStartIndex = anchorStartIndex,
             skipGeneralScan = skipGeneralScan
         )
-    }
-
-    private fun selectPostScrollCandidate(candidateIndex: Int): A11yTraversalAnalyzer.CandidateSelectionResult {
-        val analysis = analyzePostScrollState(
-            treeChanged = true,
-            anchorMaintained = true,
-            newlyExposedCandidateExists = candidateIndex >= 0
-        )
-        return selectPostScrollContinuationCandidate(candidateIndex, analysis)
     }
 
     private fun tryFocusCandidate(
@@ -1820,546 +1837,6 @@ object A11yNavigator {
         val intersection = leftTokens.intersect(rightTokens).size.toFloat()
         val union = leftTokens.union(rightTokens).size.toFloat().coerceAtLeast(1f)
         return intersection / union
-    }
-
-    private fun analyzePostScrollState(
-        treeChanged: Boolean,
-        anchorMaintained: Boolean,
-        newlyExposedCandidateExists: Boolean
-    ): PostScrollAnalysis {
-        val noProgress = !treeChanged && !anchorMaintained && !newlyExposedCandidateExists
-        val reason = when {
-            noProgress -> "no_progress"
-            newlyExposedCandidateExists -> "newly_exposed_after_scroll"
-            anchorMaintained -> "anchor_maintained"
-            treeChanged -> "tree_changed"
-            else -> "unknown"
-        }
-        return PostScrollAnalysis(
-            treeChanged = treeChanged,
-            anchorMaintained = anchorMaintained,
-            newlyExposedCandidateExists = newlyExposedCandidateExists,
-            noProgress = noProgress,
-            reason = reason
-        )
-    }
-
-    private fun selectPostScrollContinuationCandidate(
-        candidateIndex: Int,
-        analysis: PostScrollAnalysis
-    ): A11yTraversalAnalyzer.CandidateSelectionResult {
-        if (candidateIndex < 0) {
-            return A11yTraversalAnalyzer.CandidateSelectionResult(
-                index = -1,
-                accepted = false,
-                reasonCode = if (analysis.noProgress) "rejected:no_progress_after_scroll" else "rejected:no_valid_continuation_candidate"
-            )
-        }
-        val reason = when {
-            analysis.newlyExposedCandidateExists -> "accepted:newly_revealed_after_scroll"
-            analysis.anchorMaintained -> "accepted:logical_successor"
-            else -> "accepted:post_scroll_continuation"
-        }
-        return A11yTraversalAnalyzer.CandidateSelectionResult(
-            index = candidateIndex,
-            accepted = true,
-            reasonCode = reason
-        )
-    }
-
-    private fun evaluatePostScrollContinuationCandidate(
-        isBottomBar: Boolean,
-        classification: CandidateClassification,
-        inVisibleHistory: Boolean,
-        inVisitedHistory: Boolean,
-        hasUnvisitedLabeledContentCandidate: Boolean,
-        continuationFallbackCandidate: Boolean,
-        rewoundBeforeAnchor: Boolean,
-        headerResurfacedBeforeAnchor: Boolean,
-        prioritizedNewlyRevealed: Boolean,
-        focusable: Boolean?,
-        isOutOfScreen: Boolean,
-        isLogicalSuccessor: Boolean,
-        rewoundNonContentCandidate: Boolean,
-        descendantLabelResolved: Boolean,
-        hasResolvedLabel: Boolean
-    ): ContinuationCandidateEvaluation {
-        val reasons = mutableListOf<String>()
-        val allowContinuationDespiteRewoundBeforeAnchor =
-            rewoundBeforeAnchor &&
-                !classification.isTopChrome &&
-                !classification.isPersistentHeader &&
-                classification.isContentNode &&
-                descendantLabelResolved &&
-                hasResolvedLabel &&
-                (isLogicalSuccessor || continuationFallbackCandidate || hasUnvisitedLabeledContentCandidate)
-        if (classification.isTopChrome) reasons += "rejected:top_resurfaced_header"
-        if (!classification.isContentNode) reasons += "rejected:not_content_node"
-        if (focusable == false) reasons += "rejected:not_focusable"
-        if (isOutOfScreen) reasons += "rejected:outside_content_bounds"
-        if (inVisitedHistory && !continuationFallbackCandidate) reasons += "rejected:already_visited"
-        if (headerResurfacedBeforeAnchor) reasons += "rejected:header_resurfaced_before_anchor"
-        if (rewoundNonContentCandidate) reasons += "rejected:rewound_before_anchor"
-        if (rewoundBeforeAnchor && !allowContinuationDespiteRewoundBeforeAnchor) {
-            reasons += "rejected:rewound_before_anchor"
-        }
-
-        val priority = when {
-            prioritizedNewlyRevealed && !classification.isTopChrome && !isBottomBar && classification.isContentNode -> 0
-            hasUnvisitedLabeledContentCandidate && !classification.isTopChrome && !isBottomBar && classification.isContentNode -> 1
-            continuationFallbackCandidate && !classification.isTopChrome && !isBottomBar && classification.isContentNode -> 2
-            isBottomBar -> 3
-            else -> Int.MAX_VALUE
-        }
-        return ContinuationCandidateEvaluation(
-            priority = if (reasons.isEmpty()) priority else Int.MAX_VALUE,
-            rejectionReasons = reasons,
-            isLogicalSuccessor = isLogicalSuccessor,
-            acceptedDespiteRewoundBeforeAnchor = allowContinuationDespiteRewoundBeforeAnchor
-        )
-    }
-
-    private fun classifyPostScrollCandidate(
-        isTopBar: Boolean,
-        isContentNode: Boolean,
-        isTopResurfacedAnchorCandidate: Boolean,
-        isHeaderLikeNode: Boolean,
-        inVisibleHistory: Boolean,
-        isAfterPreScrollAnchor: Boolean,
-        isInteractiveCandidate: Boolean,
-        bounds: Rect,
-        screenTop: Int,
-        screenHeight: Int
-    ): CandidateClassification {
-        val isTopArea = bounds.top <= screenTop + (screenHeight / 4)
-        val isPersistentHeader = isTopBar || (isTopArea && isHeaderLikeNode && !isContentNode)
-        val isTopChrome = isTopResurfacedAnchorCandidate || isPersistentHeader || (isTopArea && !isContentNode && !isInteractiveCandidate)
-        return CandidateClassification(
-            isTopChrome = isTopChrome,
-            isPersistentHeader = isPersistentHeader,
-            isContentNode = isContentNode
-        )
-    }
-
-    private fun evaluateNewlyRevealedCandidate(
-        isInteractiveCandidate: Boolean,
-        inVisitedHistory: Boolean,
-        hasResolvedLabel: Boolean,
-        isBottomBar: Boolean,
-        preScrollSeen: Boolean,
-        isPreScrollContinuationCandidate: Boolean,
-        preScrollHadResolvedLabel: Boolean,
-        classification: CandidateClassification,
-        rewoundBeforeAnchor: Boolean
-    ): NewlyRevealedEvaluation {
-        val reasons = mutableListOf<String>()
-        val notInPreScrollTraversal = !preScrollSeen
-        val notInPreScrollAnchorContinuation = !isPreScrollContinuationCandidate
-        val resolvedLabelNewlyAcquiredPostScroll = hasResolvedLabel && !preScrollHadResolvedLabel
-
-        if (notInPreScrollTraversal) reasons += "not_in_pre_scroll_traversal"
-        if (notInPreScrollAnchorContinuation) reasons += "not_in_pre_scroll_anchor_continuation"
-        if (resolvedLabelNewlyAcquiredPostScroll) reasons += "resolved_label_newly_acquired_post_scroll"
-
-        val prioritized = isInteractiveCandidate &&
-            !inVisitedHistory &&
-            hasResolvedLabel &&
-            !isBottomBar &&
-            !classification.isTopChrome &&
-            !classification.isPersistentHeader &&
-            !rewoundBeforeAnchor &&
-            (notInPreScrollTraversal || notInPreScrollAnchorContinuation || resolvedLabelNewlyAcquiredPostScroll)
-
-        return NewlyRevealedEvaluation(
-            prioritizedNewlyRevealed = prioritized,
-            reasons = reasons
-        )
-    }
-
-    internal fun <T> findAnchorContinuationCandidateIndex(
-        traversalList: List<T>,
-        startIndex: Int,
-        visibleHistory: Set<String>,
-        visibleHistorySignatures: Set<VisibleHistorySignature>,
-        visitedHistory: Set<String>,
-        visitedHistorySignatures: Set<VisibleHistorySignature>,
-        screenTop: Int,
-        screenBottom: Int,
-        screenHeight: Int,
-        boundsOf: (T) -> Rect,
-        classNameOf: (T) -> String?,
-        viewIdOf: (T) -> String?,
-        isContentNodeOf: (T) -> Boolean = { true },
-        clickableOf: ((T) -> Boolean)? = null,
-        focusableOf: ((T) -> Boolean)? = null,
-        descendantLabelOf: ((T) -> String?)? = null,
-        promotedViewIds: Set<String> = emptySet(),
-        preScrollAnchor: PreScrollAnchor? = null,
-        preScrollAnchorBottom: Int? = null,
-        labelOf: (T) -> String?
-    ): Int = selectContinuationCandidateAfterScrollResult(
-        traversalList = traversalList,
-        startIndex = startIndex,
-        visibleHistory = visibleHistory,
-        visibleHistorySignatures = visibleHistorySignatures,
-        visitedHistory = visitedHistory,
-        visitedHistorySignatures = visitedHistorySignatures,
-        screenTop = screenTop,
-        screenBottom = screenBottom,
-        screenHeight = screenHeight,
-        boundsOf = boundsOf,
-        classNameOf = classNameOf,
-        viewIdOf = viewIdOf,
-        isContentNodeOf = isContentNodeOf,
-        clickableOf = clickableOf,
-        focusableOf = focusableOf,
-        descendantLabelOf = descendantLabelOf,
-        promotedViewIds = promotedViewIds,
-        preScrollAnchor = preScrollAnchor,
-        preScrollAnchorBottom = preScrollAnchorBottom,
-        labelOf = labelOf
-    ).index
-
-    internal fun <T> selectContinuationCandidateAfterScrollResult(
-        traversalList: List<T>,
-        startIndex: Int,
-        visibleHistory: Set<String>,
-        visibleHistorySignatures: Set<VisibleHistorySignature>,
-        visitedHistory: Set<String>,
-        visitedHistorySignatures: Set<VisibleHistorySignature>,
-        screenTop: Int,
-        screenBottom: Int,
-        screenHeight: Int,
-        boundsOf: (T) -> Rect,
-        classNameOf: (T) -> String?,
-        viewIdOf: (T) -> String?,
-        isContentNodeOf: (T) -> Boolean = { true },
-        clickableOf: ((T) -> Boolean)? = null,
-        focusableOf: ((T) -> Boolean)? = null,
-        descendantLabelOf: ((T) -> String?)? = null,
-        promotedViewIds: Set<String> = emptySet(),
-        preScrollAnchor: PreScrollAnchor? = null,
-        preScrollAnchorBottom: Int? = null,
-        labelOf: (T) -> String?
-    ): PostScrollContinuationSearchResult = selectPostScrollContinuationCandidateResult(
-        traversalList = traversalList,
-        startIndex = startIndex,
-        visibleHistory = visibleHistory,
-        visibleHistorySignatures = visibleHistorySignatures,
-        visitedHistory = visitedHistory,
-        visitedHistorySignatures = visitedHistorySignatures,
-        screenTop = screenTop,
-        screenBottom = screenBottom,
-        screenHeight = screenHeight,
-        boundsOf = boundsOf,
-        classNameOf = classNameOf,
-        viewIdOf = viewIdOf,
-        isContentNodeOf = isContentNodeOf,
-        clickableOf = clickableOf,
-        focusableOf = focusableOf,
-        descendantLabelOf = descendantLabelOf,
-        promotedViewIds = promotedViewIds,
-        preScrollAnchor = preScrollAnchor,
-        preScrollAnchorBottom = preScrollAnchorBottom,
-        labelOf = labelOf
-    )
-
-    private fun <T> selectPostScrollContinuationCandidateResult(
-        traversalList: List<T>,
-        startIndex: Int,
-        visibleHistory: Set<String>,
-        visibleHistorySignatures: Set<VisibleHistorySignature>,
-        visitedHistory: Set<String>,
-        visitedHistorySignatures: Set<VisibleHistorySignature>,
-        screenTop: Int,
-        screenBottom: Int,
-        screenHeight: Int,
-        boundsOf: (T) -> Rect,
-        classNameOf: (T) -> String?,
-        viewIdOf: (T) -> String?,
-        isContentNodeOf: (T) -> Boolean = { true },
-        clickableOf: ((T) -> Boolean)? = null,
-        focusableOf: ((T) -> Boolean)? = null,
-        descendantLabelOf: ((T) -> String?)? = null,
-        promotedViewIds: Set<String> = emptySet(),
-        preScrollAnchor: PreScrollAnchor? = null,
-        preScrollAnchorBottom: Int? = null,
-        labelOf: (T) -> String?
-    ): PostScrollContinuationSearchResult {
-        if (traversalList.isEmpty()) {
-            return PostScrollContinuationSearchResult(
-                index = -1,
-                hasValidPostScrollCandidate = false
-            )
-        }
-        val normalizedAnchorViewId = preScrollAnchor?.viewIdResourceName?.substringAfterLast('/')?.trim()
-        val expectedSuccessorViewId = normalizedAnchorViewId
-            ?.let { A11yTraversalAnalyzer.SETTINGS_ROW_VIEW_ID_ORDERED.indexOf(it) }
-            ?.takeIf { it >= 0 && it < A11yTraversalAnalyzer.SETTINGS_ROW_VIEW_ID_ORDERED.lastIndex }
-            ?.let { A11yTraversalAnalyzer.SETTINGS_ROW_VIEW_ID_ORDERED[it + 1] }
-        val anchorBounds = preScrollAnchor?.bounds
-        var bestIndex = -1
-        var bestPriority = Int.MAX_VALUE
-        var hasValidPostScrollCandidate = false
-        for (index in startIndex until traversalList.size) {
-            val node = traversalList[index]
-            val bounds = boundsOf(node)
-            val isTopBar = isTopAppBarNode(classNameOf(node), viewIdOf(node), bounds, screenTop, screenHeight)
-            val isBottomBar = isBottomNavigationBarNode(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight)
-            val label = labelOf(node)?.trim().orEmpty()
-            val rawViewId = viewIdOf(node)
-            val normalizedViewId = rawViewId?.lowercase().orEmpty()
-            val shortViewId = rawViewId?.substringAfterLast('/')?.trim().orEmpty()
-            val inVisibleHistory = isInVisibleHistory(
-                label = label,
-                viewId = rawViewId,
-                bounds = bounds,
-                visibleHistory = visibleHistory,
-                visibleHistorySignatures = visibleHistorySignatures
-            )
-            val inVisitedHistory = isInVisitedHistory(
-                label = label,
-                viewId = viewIdOf(node),
-                bounds = bounds,
-                visitedHistory = visitedHistory,
-                visitedHistorySignatures = visitedHistorySignatures
-            )
-            if (!inVisitedHistory) {
-                logVisitedHistorySkip(
-                    reason = "anchor continuity candidate only",
-                    label = label,
-                    viewId = viewIdOf(node),
-                    bounds = bounds
-                )
-            }
-            val isContentNode = isContentNodeOf(node)
-            val isTopResurfacedAnchorCandidate =
-                bounds.top <= screenTop + (screenHeight / 4) &&
-                    (isTopBar || normalizedViewId.contains("toolbar") || normalizedViewId.contains("appbar"))
-            val isAfterPreScrollAnchor = preScrollAnchorBottom?.let { bounds.top >= it } ?: false
-            val isTrailingContinuationCandidate = inVisibleHistory && isAfterPreScrollAnchor
-            val isTopViewportContent = bounds.top in screenTop..(screenTop + screenHeight / 3)
-            val isPreScrollAnchorItself = preScrollAnchor?.viewIdResourceName?.equals(rawViewId, ignoreCase = true) == true
-            val rewoundBeforeAnchor = anchorBounds != null && bounds.bottom <= anchorBounds.bottom
-            val isInteractiveCandidate = (focusableOf?.invoke(node) == true) || (clickableOf?.invoke(node) == true)
-            val isHeaderLikeNode = isHeaderLikeCandidate(
-                className = classNameOf(node),
-                viewIdResourceName = rawViewId,
-                label = label,
-                boundsInScreen = bounds,
-                screenTop = screenTop,
-                screenHeight = screenHeight
-            )
-            val descendantLabel = descendantLabelOf?.invoke(node)?.trim().orEmpty()
-            val hasResolvedLabel = label.isNotBlank() || descendantLabel.isNotBlank()
-            val preScrollSeen = inVisibleHistory
-            val postScrollSeen = true
-            val isPreScrollContinuationCandidate = preScrollSeen && isAfterPreScrollAnchor
-            val preScrollHadResolvedLabel = preScrollSeen && hasPreScrollResolvedLabel(
-                currentLabel = label,
-                currentDescendantLabel = descendantLabel,
-                rawViewId = rawViewId,
-                bounds = bounds,
-                visibleHistorySignatures = visibleHistorySignatures
-            )
-            val descendantLabelResolved = descendantLabel.isNotBlank()
-            val candidateClassification = classifyPostScrollCandidate(
-                isTopBar = isTopBar,
-                isContentNode = isContentNode,
-                isTopResurfacedAnchorCandidate = isTopResurfacedAnchorCandidate,
-                isHeaderLikeNode = isHeaderLikeNode,
-                inVisibleHistory = inVisibleHistory,
-                isAfterPreScrollAnchor = isAfterPreScrollAnchor,
-                isInteractiveCandidate = isInteractiveCandidate,
-                bounds = bounds,
-                screenTop = screenTop,
-                screenHeight = screenHeight
-            )
-            val headerResurfacedBeforeAnchor = anchorBounds != null &&
-                bounds.top < anchorBounds.top &&
-                (candidateClassification.isPersistentHeader || isTopResurfacedAnchorCandidate || isHeaderLikeNode)
-            val newlyRevealedEvaluation = evaluateNewlyRevealedCandidate(
-                isInteractiveCandidate = isInteractiveCandidate,
-                inVisitedHistory = inVisitedHistory,
-                hasResolvedLabel = hasResolvedLabel,
-                isBottomBar = isBottomBar,
-                preScrollSeen = preScrollSeen,
-                isPreScrollContinuationCandidate = isPreScrollContinuationCandidate,
-                preScrollHadResolvedLabel = preScrollHadResolvedLabel,
-                classification = candidateClassification,
-                rewoundBeforeAnchor = rewoundBeforeAnchor
-            )
-            val isNewlyRevealedAfterScroll = newlyRevealedEvaluation.reasons.isNotEmpty()
-            val newlyRevealedReason = if (newlyRevealedEvaluation.reasons.isEmpty()) "none" else newlyRevealedEvaluation.reasons.joinToString("|")
-            val shouldPrioritizeNewlyRevealedInteractiveCandidate =
-                newlyRevealedEvaluation.prioritizedNewlyRevealed && !isPreScrollAnchorItself
-            val rewoundNonContentCandidate = rewoundBeforeAnchor && !isContentNode
-            if (!isBottomBar && isInteractiveCandidate && hasResolvedLabel && isNewlyRevealedAfterScroll) {
-                hasValidPostScrollCandidate = true
-            }
-            val isPostScrollTopContinuationCandidate =
-                preScrollAnchor != null &&
-                    isTopViewportContent &&
-                    !isPreScrollAnchorItself &&
-                    !isTopResurfacedAnchorCandidate &&
-                    !isTopBar &&
-                    !isBottomBar &&
-                    isContentNode &&
-                    !inVisitedHistory
-            val isPromotedRawOnlyCandidate = promotedViewIds.contains(shortViewId) && !inVisibleHistory && !inVisitedHistory
-            val isNewlyExposedBottomContent = !inVisibleHistory && !inVisitedHistory && bounds.bottom >= (screenBottom - screenHeight / 3)
-            val isOtherUnvisitedVisible = !inVisitedHistory && !inVisibleHistory
-            val isOutOfScreen = bounds.bottom <= screenTop || bounds.top >= screenBottom
-            val withinAnchorSuccessorWindow = anchorBounds?.let { anchor ->
-                val horizontalOverlap = minOf(anchor.right, bounds.right) - maxOf(anchor.left, bounds.left)
-                bounds.top >= anchor.bottom && horizontalOverlap > 0
-            } ?: false
-            val isLogicalSuccessor = !expectedSuccessorViewId.isNullOrBlank() &&
-                shortViewId == expectedSuccessorViewId &&
-                withinAnchorSuccessorWindow &&
-                !isTopBar &&
-                !isBottomBar &&
-                isContentNode
-            val hasUnvisitedLabeledContentCandidate =
-                !inVisitedHistory &&
-                    hasResolvedLabel &&
-                    isContentNode &&
-                    !candidateClassification.isTopChrome &&
-                    !isBottomBar &&
-                    !isPreScrollAnchorItself
-            val continuationFallbackCandidate =
-                (isLogicalSuccessor || isPostScrollTopContinuationCandidate || isTrailingContinuationCandidate || isPromotedRawOnlyCandidate || isNewlyExposedBottomContent || isOtherUnvisitedVisible) &&
-                    !isPreScrollAnchorItself
-            Log.i(
-                "A11Y_HELPER",
-                "[SMART_NEXT] candidate_classification index=$index isTopChrome=${candidateClassification.isTopChrome} isPersistentHeader=${candidateClassification.isPersistentHeader} isContentNode=${candidateClassification.isContentNode}"
-            )
-            Log.i(
-                "A11Y_HELPER",
-                "[SMART_NEXT] newly_revealed_eval index=$index prioritized=${newlyRevealedEvaluation.prioritizedNewlyRevealed} reasons=${if (newlyRevealedEvaluation.reasons.isEmpty()) "none" else newlyRevealedEvaluation.reasons.joinToString("|")}"
-            )
-            val candidateEvaluation = evaluatePostScrollContinuationCandidate(
-                isBottomBar = isBottomBar,
-                classification = candidateClassification,
-                inVisibleHistory = inVisibleHistory,
-                inVisitedHistory = inVisitedHistory,
-                hasUnvisitedLabeledContentCandidate = hasUnvisitedLabeledContentCandidate,
-                continuationFallbackCandidate = continuationFallbackCandidate,
-                rewoundBeforeAnchor = rewoundBeforeAnchor,
-                headerResurfacedBeforeAnchor = headerResurfacedBeforeAnchor,
-                prioritizedNewlyRevealed = shouldPrioritizeNewlyRevealedInteractiveCandidate,
-                focusable = focusableOf?.invoke(node),
-                isOutOfScreen = isOutOfScreen,
-                isLogicalSuccessor = isLogicalSuccessor,
-                rewoundNonContentCandidate = rewoundNonContentCandidate,
-                descendantLabelResolved = descendantLabelResolved,
-                hasResolvedLabel = hasResolvedLabel
-            )
-            val reasons = candidateEvaluation.rejectionReasons.toMutableList()
-            if (label.isBlank() && descendantLabelOf != null && descendantLabel.isBlank()) {
-                reasons += "candidate rejected: no descendant label"
-            }
-            if (isTopResurfacedAnchorCandidate) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Rejected top resurfaced anchor candidate after scroll")
-                reasons += "rejected:top_resurfaced_header"
-            }
-            if (!expectedSuccessorViewId.isNullOrBlank() && shortViewId != expectedSuccessorViewId && anchorBounds != null && bounds.top < anchorBounds.bottom) {
-                Log.i(
-                    "A11Y_HELPER",
-                    "[SMART_NEXT] Rejected candidate because it precedes anchor successor window index=$index label=${if (label.isBlank()) "<no-label>" else label.replace("\n", " ")} viewId=$rawViewId bounds=$bounds"
-                )
-            }
-
-            val candidatePriority = if (reasons.none { it.startsWith("candidate rejected") }) {
-                evaluatePostScrollContinuationCandidate(
-                    isBottomBar = isBottomBar,
-                    classification = candidateClassification,
-                    inVisibleHistory = inVisibleHistory,
-                    inVisitedHistory = inVisitedHistory,
-                    hasUnvisitedLabeledContentCandidate = hasUnvisitedLabeledContentCandidate,
-                    continuationFallbackCandidate = continuationFallbackCandidate,
-                    rewoundBeforeAnchor = rewoundBeforeAnchor,
-                    headerResurfacedBeforeAnchor = headerResurfacedBeforeAnchor,
-                    prioritizedNewlyRevealed = shouldPrioritizeNewlyRevealedInteractiveCandidate,
-                    focusable = focusableOf?.invoke(node),
-                    isOutOfScreen = isOutOfScreen,
-                    isLogicalSuccessor = isLogicalSuccessor,
-                    rewoundNonContentCandidate = rewoundNonContentCandidate,
-                    descendantLabelResolved = descendantLabelResolved,
-                    hasResolvedLabel = hasResolvedLabel
-                ).priority
-            } else {
-                Int.MAX_VALUE
-            }
-
-            if (candidatePriority != Int.MAX_VALUE && reasons.none { it.startsWith("candidate rejected") }) {
-                if (candidateEvaluation.acceptedDespiteRewoundBeforeAnchor) {
-                    Log.i(
-                        "A11Y_HELPER",
-                        "[SMART_NEXT] accepted:continuation_candidate_despite_rewound_before_anchor index=$index label=${if (label.isBlank()) "<no-label>" else label.replace("\n", " ")} descendantLabel=${if (descendantLabel.isBlank()) "<no-label>" else descendantLabel.replace("\n", " ")} actualCandidateMatchLikely=${isLogicalSuccessor || continuationFallbackCandidate || hasUnvisitedLabeledContentCandidate}"
-                    )
-                }
-                when (candidatePriority) {
-                    0 -> {
-                        Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting newly available unvisited interactive continuation candidate")
-                        Log.i(
-                            "A11Y_HELPER",
-                            "[SMART_NEXT] accepted:newly_revealed_after_scroll index=$index label=${if (label.isBlank()) "<no-label>" else label.replace("\n", " ")} descendantLabel=${if (descendantLabel.isBlank()) "<no-label>" else descendantLabel.replace("\n", " ")} rewoundBeforeAnchor=$rewoundBeforeAnchor inVisibleHistory=$inVisibleHistory inVisitedHistory=$inVisitedHistory preScrollSeen=$preScrollSeen postScrollSeen=$postScrollSeen descendantLabelResolved=$descendantLabelResolved newlyRevealedReason=$newlyRevealedReason"
-                        )
-                    }
-                    1 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting unvisited labeled content candidate")
-                    2 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting continuation fallback candidate")
-                    3 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting bottom bar fallback candidate")
-                }
-                if (candidatePriority < bestPriority) {
-                    bestPriority = candidatePriority
-                    bestIndex = index
-                    if (candidatePriority == 0) {
-                        Log.i(
-                            "A11Y_HELPER",
-                            "[SMART_NEXT] Selected successor candidate label=${if (label.isBlank()) "<no-label>" else label.replace("\n", " ")} viewId=$rawViewId"
-                        )
-                    }
-                }
-            } else {
-                if (!isContentNode && reasons.none { it == "candidate rejected: outside content bounds" }) {
-                    reasons += "candidate rejected: outside content bounds"
-                }
-                if (inVisitedHistory && label.isNotBlank()) {
-                    Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping resurfaced pre-scroll item: $label")
-                }
-                val candidateLabel = if (label.isBlank()) "<no-label>" else label.replace("\n", " ")
-                if (reasons.isEmpty()) reasons += "Candidate rejected: unvisited but not part of downward continuation"
-                reasons.forEach { reason ->
-                    if (reason == "rejected:rewound_before_anchor") {
-                        Log.i(
-                            "A11Y_HELPER",
-                            "[SMART_NEXT] rejected:rewound_before_anchor index=$index label=$candidateLabel descendantLabel=${if (descendantLabel.isBlank()) "<no-label>" else descendantLabel.replace("\n", " ")} rewoundBeforeAnchor=$rewoundBeforeAnchor inVisibleHistory=$inVisibleHistory inVisitedHistory=$inVisitedHistory prioritizedNewlyRevealed=$shouldPrioritizeNewlyRevealedInteractiveCandidate preScrollSeen=$preScrollSeen postScrollSeen=$postScrollSeen descendantLabelResolved=$descendantLabelResolved newlyRevealedReason=$newlyRevealedReason"
-                        )
-                    }
-                    if (reason == "rejected:header_resurfaced_before_anchor") {
-                        Log.i(
-                            "A11Y_HELPER",
-                            "[SMART_NEXT] rejected:header_resurfaced_before_anchor index=$index label=$candidateLabel rewoundBeforeAnchor=$rewoundBeforeAnchor headerLike=$isHeaderLikeNode"
-                        )
-                    }
-                    Log.i(
-                        "A11Y_HELPER",
-                        "[SMART_NEXT] $reason index=$index label=$candidateLabel viewId=${viewIdOf(node)} className=${classNameOf(node)} clickable=${clickableOf?.invoke(node)} focusable=${focusableOf?.invoke(node)} bounds=$bounds"
-                    )
-                }
-            }
-            val decisionSummary = if (candidatePriority != Int.MAX_VALUE) "accepted" else "rejected"
-            val reasonsSummary = if (reasons.isEmpty()) "none" else reasons.joinToString("|")
-            Log.i(
-                "A11Y_HELPER",
-                "[SMART_NEXT] successor_candidate_eval index=$index decision=$decisionSummary rewoundBeforeAnchor=$rewoundBeforeAnchor headerResurfacedBeforeAnchor=$headerResurfacedBeforeAnchor reason=$reasonsSummary"
-            )
-        }
-        return PostScrollContinuationSearchResult(
-            index = bestIndex,
-            hasValidPostScrollCandidate = bestIndex >= 0 || hasValidPostScrollCandidate
-        )
     }
 
     private data class RawVisibleNode(
