@@ -532,12 +532,14 @@ class A11yNavigatorTest {
             traversalList = nodes,
             startIndex = 0,
             visibleHistory = setOf("Security"),
+            visibleHistorySignatures = emptySet(),
             screenTop = 0,
             screenBottom = 2000,
             screenHeight = 2000,
             boundsOf = { it.bounds },
             classNameOf = { it.className },
             viewIdOf = { it.viewId },
+            isContentNodeOf = { true },
             labelOf = { node ->
                 when (node.viewId) {
                     "com.test:id/smartthings_top" -> "SmartThings"
@@ -565,12 +567,14 @@ class A11yNavigatorTest {
             traversalList = nodes,
             startIndex = 0,
             visibleHistory = setOf("Voice assistant"),
+            visibleHistorySignatures = emptySet(),
             screenTop = 0,
             screenBottom = 2000,
             screenHeight = 2000,
             boundsOf = { it.bounds },
             classNameOf = { it.className },
             viewIdOf = { it.viewId },
+            isContentNodeOf = { true },
             labelOf = { node ->
                 when (node.viewId) {
                     "com.test:id/top_toolbar" -> "Toolbar"
@@ -582,6 +586,39 @@ class A11yNavigatorTest {
         )
 
         assertEquals(-1, index)
+    }
+
+    @Test
+    fun findAnchorContinuationCandidateIndex_skipsResurfacedNoLabelByViewIdAndSelectsNewContent() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect, val label: String?)
+
+        val nodes = listOf(
+            Node("android.widget.TextView", "com.test:id/history", Rect(0, 120, 1000, 320), null),
+            Node("android.widget.TextView", "com.test:id/privacy_notice", Rect(0, 380, 1000, 620), "Privacy notice")
+        )
+
+        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+            traversalList = nodes,
+            startIndex = 0,
+            visibleHistory = emptySet(),
+            visibleHistorySignatures = setOf(
+                A11yNavigator.VisibleHistorySignature(
+                    label = "History",
+                    viewId = "com.test:id/history",
+                    bounds = Rect(0, 110, 1000, 310)
+                )
+            ),
+            screenTop = 0,
+            screenBottom = 2000,
+            screenHeight = 2000,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId },
+            isContentNodeOf = { true },
+            labelOf = { it.label }
+        )
+
+        assertEquals(1, index)
     }
 
     @Test
@@ -1547,6 +1584,55 @@ class A11yNavigatorTest {
         )
 
         assertEquals(setOf("Plant Care"), history)
+    }
+
+    @Test
+    fun collectVisibleHistorySignatures_collectsVisibleMetadata() {
+        data class Node(val label: String?, val viewId: String?, val rect: Rect)
+
+        val signatures = A11yNavigator.collectVisibleHistorySignatures(
+            nodes = listOf(
+                Node("History", "com.test:id/history", Rect(0, 120, 1000, 320)),
+                Node("Privacy notice", "com.test:id/privacy_notice", Rect(0, 380, 1000, 620))
+            ),
+            screenTop = 0,
+            screenBottom = 1920,
+            boundsOf = { it.rect },
+            labelOf = { it.label },
+            viewIdOf = { it.viewId }
+        )
+
+        assertEquals(2, signatures.size)
+        assertTrue(signatures.any { it.label == "History" && it.viewId == "com.test:id/history" })
+    }
+
+    @Test
+    fun isInVisibleHistory_returnsTrue_forRecoveredLabelOrMatchingViewId() {
+        val signatures = setOf(
+            A11yNavigator.VisibleHistorySignature(
+                label = "History",
+                viewId = "com.test:id/history",
+                bounds = Rect(0, 120, 1000, 320)
+            )
+        )
+
+        val recoveredLabelMatch = A11yNavigator.isInVisibleHistory(
+            label = "History",
+            viewId = "com.test:id/unknown",
+            bounds = Rect(0, 600, 1000, 820),
+            visibleHistory = emptySet(),
+            visibleHistorySignatures = signatures
+        )
+        val viewIdMatch = A11yNavigator.isInVisibleHistory(
+            label = "Privacy notice",
+            viewId = "com.test:id/history",
+            bounds = Rect(0, 600, 1000, 820),
+            visibleHistory = emptySet(),
+            visibleHistorySignatures = signatures
+        )
+
+        assertTrue(recoveredLabelMatch)
+        assertTrue(viewIdMatch)
     }
 
     @Test
