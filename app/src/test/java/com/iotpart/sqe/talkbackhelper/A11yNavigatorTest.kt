@@ -2256,6 +2256,19 @@ class A11yNavigatorTest {
     }
 
     @Test
+    fun isTopAppBarNode_returnsFalseForSettingsButtonLayoutViewId() {
+        val result = A11yNavigator.isTopAppBarNode(
+            className = "android.widget.ImageButton",
+            viewIdResourceName = "com.samsung.android.oneconnect:id/setting_button_layout",
+            boundsInScreen = Rect(980, 80, 1060, 160),
+            screenTop = 0,
+            screenHeight = 1920
+        )
+
+        assertFalse(result)
+    }
+
+    @Test
     fun isBottomNavigationBarNode_returnsTrueForNewViewIdKeywords() {
         val menuPrefix = A11yNavigator.isBottomNavigationBarNode(
             className = "android.widget.LinearLayout",

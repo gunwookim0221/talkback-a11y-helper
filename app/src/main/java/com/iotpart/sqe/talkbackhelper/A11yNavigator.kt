@@ -9,7 +9,9 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.31.4"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.31.5"
+    private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
+    private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
 
     private val visitedHistoryLock = Any()
     private val visitedHistoryLabels = linkedSetOf<String>()
@@ -3463,6 +3465,9 @@ object A11yNavigator {
     }
 
     private fun isFixedSystemUI(node: AccessibilityNodeInfo, mainScrollContainer: AccessibilityNodeInfo?): Boolean {
+        if (isOneConnectSettingsCandidateNode(node)) {
+            return false
+        }
         return isFixedSystemUI(
             node = node,
             mainScrollContainer = mainScrollContainer,
@@ -3711,9 +3716,11 @@ object A11yNavigator {
         val focusNodes = mutableListOf<FocusedNode>()
         collectFocusableNodes(node = root, containerAncestor = null, sink = focusNodes)
 
-        return focusNodes
+        val filteredNodes = focusNodes
             .filterNot { shouldExcludeAsEmptyShell(it) }
             .sortedWith(spatialComparator())
+        logSettingsCandidateStatus(root, filteredNodes)
+        return filteredNodes
     }
 
     private fun collectFocusableNodes(
@@ -3776,6 +3783,8 @@ object A11yNavigator {
             if (!child.isVisibleToUser) continue
 
             if (isFocusContainer(child)) {
+                child.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let(sink::add)
+                child.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let(sink::add)
                 continue
             }
 
@@ -3789,7 +3798,7 @@ object A11yNavigator {
 
     private fun isFocusContainer(node: AccessibilityNodeInfo): Boolean {
         val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && node.isScreenReaderFocusable
-        return node.isClickable || screenReaderFocusable || isSettingsRowViewId(node.viewIdResourceName)
+        return node.isClickable || node.isFocusable || screenReaderFocusable || isSettingsRowViewId(node.viewIdResourceName)
     }
 
     internal fun isSettingsRowViewId(viewIdResourceName: String?): Boolean {
@@ -3823,12 +3832,89 @@ object A11yNavigator {
         if (isSettingsRowViewId(current.viewIdResourceName) && current.isVisibleToUser && (current.isClickable || current.isFocusable)) {
             return false
         }
+        val recoveredDescendantLabel = recoverDescendantLabel(current)
+        if (!recoveredDescendantLabel.isNullOrBlank() && (current.isClickable || current.isFocusable)) {
+            return false
+        }
+        if (isOneConnectSettingsCandidateNode(current, recoveredDescendantLabel)) {
+            return false
+        }
         return shouldExcludeAsEmptyShell(
             mergedText = node.text,
             mergedContentDescription = node.contentDescription,
             clickable = current.isClickable,
             childCount = current.childCount
         )
+    }
+
+    private fun isOneConnectSettingsCandidateNode(
+        node: AccessibilityNodeInfo,
+        recoveredLabel: String? = recoverDescendantLabel(node)
+    ): Boolean {
+        if (!node.isVisibleToUser) return false
+        val packageName = node.packageName?.toString()?.trim().orEmpty()
+        if (packageName != ONECONNECT_PACKAGE_NAME) return false
+        if (!node.isClickable && !node.isFocusable) return false
+        val bounds = Rect().also { node.getBoundsInScreen(it) }
+        if (bounds.top <= 0 || bounds.left < 0) return false
+
+        val viewId = node.viewIdResourceName?.substringAfterLast('/')?.trim().orEmpty()
+        val ownLabel = node.contentDescription?.toString()?.trim().orEmpty()
+        val mergedLabel = listOfNotNull(ownLabel.takeIf { it.isNotEmpty() }, recoveredLabel?.trim())
+            .joinToString(separator = " ")
+            .lowercase()
+        val normalizedViewId = viewId.lowercase()
+        return SETTINGS_BUTTON_KEYWORDS.any { keyword ->
+            normalizedViewId.contains(keyword) || mergedLabel.contains(keyword)
+        }
+    }
+
+    private fun logSettingsCandidateStatus(root: AccessibilityNodeInfo, traversalNodes: List<FocusedNode>) {
+        val rawSettingNode = findFirstMatchingNode(root) { node ->
+            isOneConnectSettingsCandidateNode(node, recoverDescendantLabel(node))
+        }
+        Log.i("A11Y_HELPER", "[SMART_NEXT] SETTINGS_CANDIDATE raw_found=${rawSettingNode != null}")
+
+        val traversalSettingNode = traversalNodes.firstOrNull { focused ->
+            isOneConnectSettingsCandidateNode(focused.node, focused.mergedLabel ?: recoverDescendantLabel(focused.node))
+        }
+        Log.i("A11Y_HELPER", "[SMART_NEXT] SETTINGS_CANDIDATE in_traversal=${traversalSettingNode != null}")
+
+        val smartThingsIndex = traversalNodes.indexOfFirst { node ->
+            val label = node.text?.trim()
+                ?: node.contentDescription?.trim()
+                ?: node.mergedLabel?.trim()
+                ?: recoverDescendantLabel(node.node)?.trim()
+            label.equals("SmartThings", ignoreCase = true)
+        }
+        val smartThingsNextLabel = if (smartThingsIndex >= 0 && smartThingsIndex + 1 < traversalNodes.size) {
+            traversalNodes[smartThingsIndex + 1].text?.trim()
+                ?: traversalNodes[smartThingsIndex + 1].contentDescription?.trim()
+                ?: traversalNodes[smartThingsIndex + 1].mergedLabel?.trim()
+                ?: recoverDescendantLabel(traversalNodes[smartThingsIndex + 1].node)?.trim()
+                ?: "<no-label>"
+        } else {
+            "<none>"
+        }
+        Log.i("A11Y_HELPER", "[SMART_NEXT] SETTINGS_CANDIDATE next_after_smartthings=$smartThingsNextLabel")
+    }
+
+    private fun findFirstMatchingNode(
+        root: AccessibilityNodeInfo,
+        predicate: (AccessibilityNodeInfo) -> Boolean
+    ): AccessibilityNodeInfo? {
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        while (queue.isNotEmpty()) {
+            val current = queue.removeFirst()
+            if (predicate(current)) {
+                return current
+            }
+            for (index in 0 until current.childCount) {
+                current.getChild(index)?.let(queue::add)
+            }
+        }
+        return null
     }
 
     internal fun shouldExcludeAsEmptyShell(
@@ -4210,6 +4296,9 @@ object A11yNavigator {
     ): Boolean {
         val normalizedClass = className?.lowercase().orEmpty()
         val normalizedViewId = viewIdResourceName?.lowercase().orEmpty()
+        if (SETTINGS_BUTTON_KEYWORDS.any { keyword -> normalizedViewId.contains(keyword) }) {
+            return false
+        }
 
         val matchesClass = normalizedClass.contains("toolbar") ||
             normalizedClass.contains("actionbar") ||
