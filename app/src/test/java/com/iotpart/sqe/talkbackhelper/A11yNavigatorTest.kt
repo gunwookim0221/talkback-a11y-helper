@@ -573,6 +573,8 @@ class A11yNavigatorTest {
             startIndex = 0,
             visibleHistory = setOf("Security"),
             visibleHistorySignatures = emptySet(),
+            visitedHistory = setOf("Security"),
+            visitedHistorySignatures = emptySet(),
             screenTop = 0,
             screenBottom = 2000,
             screenHeight = 2000,
@@ -608,6 +610,8 @@ class A11yNavigatorTest {
             startIndex = 0,
             visibleHistory = setOf("Voice assistant"),
             visibleHistorySignatures = emptySet(),
+            visitedHistory = setOf("Voice assistant"),
+            visitedHistorySignatures = emptySet(),
             screenTop = 0,
             screenBottom = 2000,
             screenHeight = 2000,
@@ -648,6 +652,44 @@ class A11yNavigatorTest {
                     bounds = Rect(0, 110, 1000, 310)
                 )
             ),
+            visitedHistory = emptySet(),
+            visitedHistorySignatures = setOf(
+                A11yNavigator.VisibleHistorySignature(
+                    label = "History",
+                    viewId = "com.test:id/history",
+                    bounds = Rect(0, 110, 1000, 310)
+                )
+            ),
+            screenTop = 0,
+            screenBottom = 2000,
+            screenHeight = 2000,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId },
+            isContentNodeOf = { true },
+            labelOf = { it.label }
+        )
+
+        assertEquals(1, index)
+    }
+
+    @Test
+    fun findAnchorContinuationCandidateIndex_acceptsVisibleButUnvisitedContinuationCandidate() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect, val label: String?)
+
+        val nodes = listOf(
+            Node("android.widget.TextView", "com.test:id/voice_assistant", Rect(0, 120, 1000, 360), "Voice assistant"),
+            Node("android.widget.TextView", "com.test:id/labs", Rect(0, 380, 1000, 640), "Labs"),
+            Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1820, 1000, 2000), "Home")
+        )
+
+        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+            traversalList = nodes,
+            startIndex = 0,
+            visibleHistory = setOf("Voice assistant", "Labs"),
+            visibleHistorySignatures = emptySet(),
+            visitedHistory = setOf("Voice assistant"),
+            visitedHistorySignatures = emptySet(),
             screenTop = 0,
             screenBottom = 2000,
             screenHeight = 2000,

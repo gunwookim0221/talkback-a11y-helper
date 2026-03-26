@@ -9,7 +9,11 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.5"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.30.6"
+
+    private val visitedHistoryLock = Any()
+    private val visitedHistoryLabels = linkedSetOf<String>()
+    private val visitedHistorySignatures = mutableListOf<VisibleHistorySignature>()
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -43,6 +47,10 @@ object A11yNavigator {
     fun resetFocusHistory() {
         setLastRequestedFocusIndex(-1)
         A11yStateStore.updateLastRequestedFocusIndex(-1)
+        synchronized(visitedHistoryLock) {
+            visitedHistoryLabels.clear()
+            visitedHistorySignatures.clear()
+        }
         Log.i("A11Y_HELPER", "Focus history has been explicitly reset by external command.")
     }
 
@@ -218,6 +226,7 @@ object A11yNavigator {
 
 
     fun performSmartNext(root: AccessibilityNodeInfo?, currentNode: AccessibilityNodeInfo?): TargetActionOutcome {
+        Log.i("A11Y_HELPER", "[SMART_NEXT] history policy: visited and visible histories separated")
         if (root == null) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] rootInActiveWindow is null.")
             return TargetActionOutcome(false, "Root node is null")
@@ -386,6 +395,8 @@ object A11yNavigator {
             }
         )
         Log.i("A11Y_HELPER", "[SMART_NEXT] effectiveBottom=$effectiveBottom, screenBottom=$screenBottom")
+        val visitedHistory = snapshotVisitedHistoryLabels()
+        val visitedHistorySignatureSnapshot = snapshotVisitedHistorySignatures()
 
         fun findAndFocusFirstContent(
             traversalList: List<AccessibilityNodeInfo>,
@@ -399,6 +410,8 @@ object A11yNavigator {
             startIndex: Int = 0,
             visibleHistory: Set<String> = emptySet(),
             visibleHistorySignatures: Set<VisibleHistorySignature> = emptySet(),
+            visitedHistory: Set<String> = emptySet(),
+            visitedHistorySignatures: Set<VisibleHistorySignature> = emptySet(),
             allowLooping: Boolean = true,
             preScrollAnchor: PreScrollAnchor? = null
         ): TargetActionOutcome {
@@ -464,12 +477,19 @@ object A11yNavigator {
                     val talkbackLabel = focusedNode?.contentDescription?.replace("\n", " ")
                         ?: node.contentDescription?.toString()?.replace("\n", " ")
                         ?: "<none>"
-                    val inHistory = isInVisibleHistory(
+                    val inVisibleHistory = isInVisibleHistory(
                         label = label,
                         viewId = node.viewIdResourceName,
                         bounds = bounds,
                         visibleHistory = visibleHistory,
                         visibleHistorySignatures = visibleHistorySignatures
+                    )
+                    val inVisitedHistory = isInVisitedHistory(
+                        label = label,
+                        viewId = node.viewIdResourceName,
+                        bounds = bounds,
+                        visitedHistory = visitedHistory,
+                        visitedHistorySignatures = visitedHistorySignatures
                     )
                     val isTopBar = isTopAppBarNode(
                         className = node.className?.toString(),
@@ -487,7 +507,7 @@ object A11yNavigator {
                     )
                     Log.i(
                         "A11Y_HELPER",
-                        "[SMART_NEXT] POST_SCROLL_CANDIDATE index=$index label=${label.replace("\n", " ")} mergedLabel=$mergedLabel talkbackLabel=$talkbackLabel viewId=${node.viewIdResourceName} className=${node.className} clickable=${node.isClickable} focusable=${node.isFocusable} bounds=$bounds inHistory=$inHistory isTopAppBar=$isTopBar isBottomNav=$isBottomBar"
+                        "[SMART_NEXT] POST_SCROLL_CANDIDATE index=$index label=${label.replace("\n", " ")} mergedLabel=$mergedLabel talkbackLabel=$talkbackLabel viewId=${node.viewIdResourceName} className=${node.className} clickable=${node.isClickable} focusable=${node.isFocusable} bounds=$bounds visibleHistory=$inVisibleHistory visitedHistory=$inVisitedHistory isTopAppBar=$isTopBar isBottomNav=$isBottomBar"
                     )
                 }
                 findAnchorContinuationCandidateIndex(
@@ -495,6 +515,8 @@ object A11yNavigator {
                     startIndex = 0,
                     visibleHistory = visibleHistory,
                     visibleHistorySignatures = visibleHistorySignatures,
+                    visitedHistory = visitedHistory,
+                    visitedHistorySignatures = visitedHistorySignatures,
                     screenTop = screenTop,
                     screenBottom = screenBottom,
                     screenHeight = screenHeight,
@@ -582,6 +604,7 @@ object A11yNavigator {
                     }
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Continuation candidate already focused after scroll -> treating as moved")
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Bottom bar fallback blocked because continuation candidate is already focused")
+                    recordVisitedFocus(node, label)
                     return TargetActionOutcome(true, "moved", node)
                 }
                 if (isFallbackSelectedContinuationCandidate) {
@@ -642,34 +665,51 @@ object A11yNavigator {
                     if (recoveredLabel != null) {
                         label = recoveredLabel
                         Log.i("A11Y_HELPER", "[SMART_NEXT] Resolved descendant label for continuation target: $recoveredLabel")
-                        val recoveredInHistory = isInVisibleHistory(
+                        val recoveredInHistory = isInVisitedHistory(
                             label = recoveredLabel,
                             viewId = node.viewIdResourceName,
                             bounds = bounds,
-                            visibleHistory = visibleHistory,
-                            visibleHistorySignatures = visibleHistorySignatures
+                            visitedHistory = visitedHistory,
+                            visitedHistorySignatures = visitedHistorySignatures
                         )
                         if (recoveredInHistory) {
-                            Log.i("A11Y_HELPER", "[SMART_NEXT] Recovered label belongs to pre-scroll visible history -> skipping resurfaced item")
+                            Log.i("A11Y_HELPER", "[SMART_NEXT] candidate rejected: already visited")
                             Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping resurfaced pre-scroll item: $recoveredLabel")
                             continue
                         }
                     }
                 }
                 val isLastFocusedNode = (excludeDesc != null && label == excludeDesc)
-                val inHistory = visibleHistory.contains(label)
+                val inVisibleHistory = isInVisibleHistory(
+                    label = label,
+                    viewId = node.viewIdResourceName,
+                    bounds = bounds,
+                    visibleHistory = visibleHistory,
+                    visibleHistorySignatures = visibleHistorySignatures
+                )
+                val inVisitedHistory = isInVisitedHistory(
+                    label = label,
+                    viewId = node.viewIdResourceName,
+                    bounds = bounds,
+                    visitedHistory = visitedHistory,
+                    visitedHistorySignatures = visitedHistorySignatures
+                )
+                if (isScrollAction && preScrollAnchor != null && inVisibleHistory && !inVisitedHistory) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] candidate visibleHistory=true visitedHistory=false -> accepting continuation candidate")
+                }
                 if (isScrollAction && isLastFocusedNode) {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Strictly excluding last focused node even in top area: $label")
                     continue
                 }
                 val shouldSkipHistory = shouldSkipHistoryNodeAfterScroll(
                     isScrollAction = isScrollAction,
-                    inHistory = inHistory,
+                    inHistory = inVisitedHistory,
                     isFixedUi = isFixedUi || isTopBar || isBottomBar,
                     isInsideMainScrollContainer = isInsideMainScrollContainer,
                     isTopArea = isTopContent
                 )
-                if (shouldSkipHistory || (isScrollAction && inHistory)) {
+                if (shouldSkipHistory || (isScrollAction && inVisitedHistory)) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] candidate rejected: already visited")
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping history node after scroll: $label")
                     continue
                 }
@@ -700,15 +740,15 @@ object A11yNavigator {
                     if (recoveredLabel != null) {
                         label = recoveredLabel
                         Log.i("A11Y_HELPER", "[SMART_NEXT] Resolved descendant label for continuation target: $recoveredLabel")
-                        val recoveredInHistory = isInVisibleHistory(
+                        val recoveredInHistory = isInVisitedHistory(
                             label = recoveredLabel,
                             viewId = node.viewIdResourceName,
                             bounds = bounds,
-                            visibleHistory = visibleHistory,
-                            visibleHistorySignatures = visibleHistorySignatures
+                            visitedHistory = visitedHistory,
+                            visitedHistorySignatures = visitedHistorySignatures
                         )
                         if (recoveredInHistory) {
-                            Log.i("A11Y_HELPER", "[SMART_NEXT] Recovered label belongs to pre-scroll visible history -> skipping resurfaced item")
+                            Log.i("A11Y_HELPER", "[SMART_NEXT] candidate rejected: already visited")
                             Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping resurfaced pre-scroll item: $recoveredLabel")
                             continue
                         }
@@ -805,6 +845,8 @@ object A11yNavigator {
                     startIndex = 0,
                     visibleHistory = emptySet(),
                     visibleHistorySignatures = emptySet(),
+                    visitedHistory = visitedHistory,
+                    visitedHistorySignatures = visitedHistorySignatures,
                     preScrollAnchor = null
                 )
             }
@@ -989,6 +1031,8 @@ object A11yNavigator {
                     startIndex = 0,
                     visibleHistory = visibleHistory,
                     visibleHistorySignatures = visibleHistorySignatures,
+                    visitedHistory = visitedHistory,
+                    visitedHistorySignatures = visitedHistorySignatureSnapshot,
                     preScrollAnchor = preScrollAnchor
                 )
             }
@@ -1230,6 +1274,8 @@ object A11yNavigator {
                 startIndex = 0,
                 visibleHistory = visibleHistory,
                 visibleHistorySignatures = visibleHistorySignatures,
+                visitedHistory = visitedHistory,
+                visitedHistorySignatures = visitedHistorySignatureSnapshot,
                 allowLooping = false,
                 preScrollAnchor = preScrollAnchor
             )
@@ -1506,6 +1552,8 @@ object A11yNavigator {
         startIndex: Int,
         visibleHistory: Set<String>,
         visibleHistorySignatures: Set<VisibleHistorySignature>,
+        visitedHistory: Set<String>,
+        visitedHistorySignatures: Set<VisibleHistorySignature>,
         screenTop: Int,
         screenBottom: Int,
         screenHeight: Int,
@@ -1525,16 +1573,23 @@ object A11yNavigator {
             val isTopBar = isTopAppBarNode(classNameOf(node), viewIdOf(node), bounds, screenTop, screenHeight)
             val isBottomBar = isBottomNavigationBarNode(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight)
             val label = labelOf(node)?.trim().orEmpty()
-            val inHistory = isInVisibleHistory(
+            val inVisibleHistory = isInVisibleHistory(
                 label = label,
                 viewId = viewIdOf(node),
                 bounds = bounds,
                 visibleHistory = visibleHistory,
                 visibleHistorySignatures = visibleHistorySignatures
             )
+            val inVisitedHistory = isInVisitedHistory(
+                label = label,
+                viewId = viewIdOf(node),
+                bounds = bounds,
+                visitedHistory = visitedHistory,
+                visitedHistorySignatures = visitedHistorySignatures
+            )
             val isContentNode = isContentNodeOf(node)
             val reasons = mutableListOf<String>()
-            if (inHistory) reasons += "candidate rejected: in visible history"
+            if (inVisitedHistory) reasons += "candidate rejected: already visited"
             if (isTopBar) reasons += "candidate rejected: top app bar"
             if (isBottomBar) reasons += "candidate rejected: bottom nav"
             if (focusableOf?.invoke(node) == false) reasons += "candidate rejected: not focusable"
@@ -1543,14 +1598,17 @@ object A11yNavigator {
             if (label.isBlank() && descendantLabelOf != null && !hasDescendantLabel) {
                 reasons += "candidate rejected: no descendant label"
             }
-            if (!isTopBar && !isBottomBar && !inHistory && isContentNode) {
+            if (!isTopBar && !isBottomBar && !inVisitedHistory && isContentNode) {
+                if (inVisibleHistory) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] candidate visibleHistory=true visitedHistory=false -> accepting continuation candidate")
+                }
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting truly new continuation candidate after scroll")
                 true
             } else {
                 if (!isContentNode && reasons.none { it == "candidate rejected: outside content bounds" }) {
                     reasons += "candidate rejected: outside content bounds"
                 }
-                if (inHistory && label.isNotBlank()) {
+                if (inVisitedHistory && label.isNotBlank()) {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping resurfaced pre-scroll item: $label")
                 }
                 val candidateLabel = if (label.isBlank()) "<no-label>" else label.replace("\n", " ")
@@ -1661,6 +1719,58 @@ object A11yNavigator {
         }
     }
 
+    private fun snapshotVisitedHistoryLabels(): Set<String> = synchronized(visitedHistoryLock) {
+        visitedHistoryLabels.toSet()
+    }
+
+    private fun snapshotVisitedHistorySignatures(): Set<VisibleHistorySignature> = synchronized(visitedHistoryLock) {
+        visitedHistorySignatures.toSet()
+    }
+
+    private fun recordVisitedFocus(node: AccessibilityNodeInfo, label: String) {
+        val normalizedLabel = label.trim()
+        val bounds = Rect().also { node.getBoundsInScreen(it) }
+        synchronized(visitedHistoryLock) {
+            if (normalizedLabel.isNotEmpty() && normalizedLabel != "<no-label>") {
+                visitedHistoryLabels += normalizedLabel
+            }
+            visitedHistorySignatures += VisibleHistorySignature(
+                label = normalizedLabel.takeUnless { it.isBlank() || it == "<no-label>" },
+                viewId = node.viewIdResourceName,
+                bounds = Rect(bounds)
+            )
+            if (visitedHistorySignatures.size > 120) {
+                visitedHistorySignatures.removeAt(0)
+            }
+        }
+    }
+
+    internal fun isInVisitedHistory(
+        label: String?,
+        viewId: String?,
+        bounds: Rect,
+        visitedHistory: Set<String>,
+        visitedHistorySignatures: Set<VisibleHistorySignature>,
+        boundsTolerancePx: Int = 24
+    ): Boolean {
+        val normalizedLabel = label?.trim().orEmpty()
+        if (normalizedLabel.isNotEmpty() && visitedHistory.contains(normalizedLabel)) {
+            return true
+        }
+        return visitedHistorySignatures.any { signature ->
+            val sameLabel = normalizedLabel.isNotEmpty() &&
+                signature.label.equals(normalizedLabel, ignoreCase = true)
+            val sameViewId = !viewId.isNullOrBlank() &&
+                signature.viewId.equals(viewId, ignoreCase = true)
+            val similarBounds =
+                abs(signature.bounds.left - bounds.left) <= boundsTolerancePx &&
+                    abs(signature.bounds.top - bounds.top) <= boundsTolerancePx &&
+                    abs(signature.bounds.right - bounds.right) <= boundsTolerancePx &&
+                    abs(signature.bounds.bottom - bounds.bottom) <= boundsTolerancePx
+            sameLabel || sameViewId || similarBounds
+        }
+    }
+
     internal fun performFocusWithVisibilityCheck(
         root: AccessibilityNodeInfo,
         target: AccessibilityNodeInfo,
@@ -1758,6 +1868,7 @@ object A11yNavigator {
         ) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping duplicate focus action because current accessibility focus bounds exactly match target: $label")
             recordRequestedFocusAttempt(traversalIndex, root)
+            recordVisitedFocus(target, label)
             return TargetActionOutcome(true, "moved", target)
         }
         if (currentSystemFocus && actualFocusedBounds != null && actualFocusedBounds != targetBounds) {
@@ -1828,6 +1939,7 @@ object A11yNavigator {
             if (effectivelyFocused) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=false but actual system focus matches target bounds. Treating as success.")
                 recordRequestedFocusAttempt(traversalIndex, root)
+                recordVisitedFocus(target, label)
                 return TargetActionOutcome(true, status, target)
             }
             Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=false (status=$status)")
@@ -1854,6 +1966,7 @@ object A11yNavigator {
             if (focusVerification.isTargetAccessibilityFocused && focusEventConfirmed) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Focus event confirmed after ACTION_FOCUS; treating mismatch as success without rollback")
                 recordRequestedFocusAttempt(traversalIndex, root)
+                recordVisitedFocus(target, label)
                 return TargetActionOutcome(true, "moved", target)
             }
             Log.w(
@@ -1871,6 +1984,7 @@ object A11yNavigator {
             if (lateFocus.matchedTarget) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Late focus detected → treat as success")
                 recordRequestedFocusAttempt(traversalIndex, root)
+                recordVisitedFocus(target, label)
                 return TargetActionOutcome(true, "moved", target)
             }
             Log.w("A11Y_HELPER", "[SMART_NEXT] Confirmed real snap_back")
@@ -1887,6 +2001,7 @@ object A11yNavigator {
             if (focusVerification.isTargetAccessibilityFocused && focusEventConfirmed) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Focus event confirmed after ACTION_FOCUS; suppressing premature snap_back")
                 recordRequestedFocusAttempt(traversalIndex, root)
+                recordVisitedFocus(target, label)
                 return TargetActionOutcome(true, "moved", target)
             }
             Log.w(
@@ -1904,6 +2019,7 @@ object A11yNavigator {
             if (lateFocus.matchedTarget) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Late focus detected → treat as success")
                 recordRequestedFocusAttempt(traversalIndex, root)
+                recordVisitedFocus(target, label)
                 return TargetActionOutcome(true, "moved", target)
             }
             Log.w("A11Y_HELPER", "[SMART_NEXT] Confirmed real snap_back")
@@ -1915,6 +2031,7 @@ object A11yNavigator {
         Thread.sleep(100)
         val focusedBounds = Rect().also { target.getBoundsInScreen(it) }
         recordRequestedFocusAttempt(traversalIndex, root)
+        recordVisitedFocus(target, label)
         Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_ACCESSIBILITY_FOCUS result=true (status=$status)")
         Log.i("A11Y_HELPER", "[SMART_NEXT] Focused top-most content at Y=${focusedBounds.top}")
         return TargetActionOutcome(true, "moved", target)
