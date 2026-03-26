@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.34.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.35.0"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
     private val TRAVERSAL_CONTAINER_CLASS_KEYWORDS = listOf(
@@ -100,6 +100,46 @@ object A11yNavigator {
         val allowBottomBarEntry: Boolean,
         val requirePreScroll: Boolean,
         val reason: String
+    )
+
+    internal data class NavigationContext(
+        val root: AccessibilityNodeInfo,
+        val collect: CollectResult,
+        val normalize: NormalizeResult,
+        val currentPosition: CurrentPosition
+    )
+
+    internal data class CurrentPosition(
+        val resolvedCurrent: AccessibilityNodeInfo?,
+        val currentIndex: Int,
+        val fallbackIndex: Int,
+        val nextIndex: Int
+    )
+
+    internal data class PreScrollResult(
+        val attempted: Boolean,
+        val success: Boolean,
+        val anchor: PreScrollAnchor? = null,
+        val reason: String
+    )
+
+    internal data class PostScrollAnalysis(
+        val treeChanged: Boolean,
+        val anchorMaintained: Boolean,
+        val newlyExposedCandidateExists: Boolean,
+        val noProgress: Boolean,
+        val reason: String
+    )
+
+    internal data class CandidateSelectionResult(
+        val index: Int,
+        val accepted: Boolean,
+        val reasonCode: String
+    )
+
+    internal data class FocusExecutionResult(
+        val outcome: TargetActionOutcome,
+        val reasonCode: String
     )
 
     private data class ContinuationCandidateEvaluation(
@@ -321,6 +361,70 @@ object A11yNavigator {
         return NormalizeResult(screenRect, screenTop, screenBottom, screenHeight, effectiveBottom)
     }
 
+    private fun resolveCurrentAndNextIndex(
+        traversalList: List<AccessibilityNodeInfo>,
+        currentNode: AccessibilityNodeInfo?
+    ): CurrentPosition {
+        val resolvedCurrent = currentNode?.let {
+            resolveToClickableAncestor(
+                node = it,
+                parentOf = { node -> node.parent },
+                isClickable = { node -> node.isClickable }
+            )
+        }
+        var currentIndex = resolvedCurrent?.let { resolved ->
+            findCurrentTraversalIndex(
+                traversalList = traversalList,
+                currentNode = resolved,
+                isSameNodeMatch = ::isSameNode
+            )
+        } ?: -1
+
+        if (currentIndex == -1 && resolvedCurrent != null) {
+            currentIndex = findNodeIndexByIdentity(
+                nodes = traversalList,
+                target = resolvedCurrent,
+                idOf = { it.viewIdResourceName },
+                textOf = { it.text?.toString() },
+                contentDescriptionOf = { it.contentDescription?.toString() },
+                boundsOf = { Rect().also(it::getBoundsInScreen) }
+            )
+        }
+
+        if (currentIndex != -1) {
+            val currentBounds = Rect().also { traversalList[currentIndex].getBoundsInScreen(it) }
+            val duplicateNextBounds = traversalList.getOrNull(currentIndex + 1)?.let { nextNode ->
+                Rect().also { nextNode.getBoundsInScreen(it) }
+            }
+            if (duplicateNextBounds != null && currentBounds == duplicateNextBounds) {
+                currentIndex += 1
+            }
+        }
+
+        val fallbackIndex = if (currentIndex == -1 && (currentNode ?: resolvedCurrent) != null) {
+            findClosestNodeBelowCenter(
+                nodes = traversalList,
+                reference = (currentNode ?: resolvedCurrent)!!,
+                boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } }
+            )
+        } else {
+            -1
+        }
+
+        val nextIndex = selectSequentialNextCandidateIndex(
+            currentIndex = currentIndex,
+            fallbackIndex = fallbackIndex,
+            lastRequestedIndex = lastRequestedFocusIndex,
+            traversalSize = traversalList.size
+        )
+        return CurrentPosition(
+            resolvedCurrent = resolvedCurrent,
+            currentIndex = currentIndex,
+            fallbackIndex = fallbackIndex,
+            nextIndex = nextIndex
+        )
+    }
+
 
 
     fun performSmartNext(root: AccessibilityNodeInfo?, currentNode: AccessibilityNodeInfo?): TargetActionOutcome {
@@ -352,97 +456,19 @@ object A11yNavigator {
             return TargetActionOutcome(false, "Traversal list is empty")
         }
 
-        val resolvedCurrent = currentNode?.let {
-            resolveToClickableAncestor(
-                node = it,
-                parentOf = { node -> node.parent },
-                isClickable = { node -> node.isClickable }
-            )
-        }
-
-        var currentIndex = resolvedCurrent?.let { resolved ->
-            findCurrentTraversalIndex(
-                traversalList = traversalList,
-                currentNode = resolved,
-                isSameNodeMatch = ::isSameNode
-            )
-        } ?: -1
-
-        if (currentIndex == -1 && resolvedCurrent != null) {
-            currentIndex = findNodeIndexByIdentity(
-                nodes = traversalList,
-                target = resolvedCurrent,
-                idOf = { it.viewIdResourceName },
-                textOf = { it.text?.toString() },
-                contentDescriptionOf = { it.contentDescription?.toString() },
-                boundsOf = { Rect().also(it::getBoundsInScreen) },
-                onCoordinateMatch = { matchedIndex ->
-                    Log.i("A11Y_HELPER", "[SMART_NEXT] Matched node by coordinates at index $matchedIndex")
-                }
-            )
-        }
+        val currentPosition = resolveCurrentAndNextIndex(
+            traversalList = traversalList,
+            currentNode = currentNode
+        )
+        val resolvedCurrent = currentPosition.resolvedCurrent
+        val currentIndex = currentPosition.currentIndex
+        val fallbackIndex = currentPosition.fallbackIndex
+        var nextIndex = currentPosition.nextIndex
 
         if (currentIndex != -1) {
             setLastRequestedFocusIndex(maxOf(lastRequestedFocusIndex, A11yStateStore.lastRequestedFocusIndex, currentIndex))
-
-            val currentBounds = Rect().also { traversalList[currentIndex].getBoundsInScreen(it) }
-            val duplicateNextBounds = traversalList.getOrNull(currentIndex + 1)?.let { nextNode ->
-                Rect().also { nextNode.getBoundsInScreen(it) }
-            }
-            if (duplicateNextBounds != null && currentBounds == duplicateNextBounds) {
-                val compensatedIndex = currentIndex + 1
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping invisible duplicate at index ${currentIndex + 1}")
-                Log.w(
-                    "A11Y_HELPER",
-                    "[SMART_NEXT] Duplicate bounds compensation triggered: currentIndex=$currentIndex -> compensatedIndex=$compensatedIndex bounds=$currentBounds"
-                )
-                currentIndex = compensatedIndex
-            }
-
             setLastRequestedFocusIndex(maxOf(lastRequestedFocusIndex, currentIndex))
         }
-
-        val fallbackIndex = if (currentIndex == -1) {
-            Log.w("A11Y_HELPER", "[SMART_NEXT] Current node matching failed. Dumping traversal identity candidates for diagnosis.")
-            traversalList.forEachIndexed { index, candidate ->
-                Log.w(
-                    "A11Y_HELPER",
-                    "[SMART_NEXT] [MATCH_DEBUG] #$index id=${candidate.viewIdResourceName} text=${candidate.text} desc=${candidate.contentDescription}"
-                )
-            }
-
-            val focusedNode = currentNode ?: resolvedCurrent
-            if (focusedNode == null) {
-                -1
-            } else {
-                findClosestNodeBelowCenter(
-                    nodes = traversalList,
-                    reference = focusedNode,
-                    boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } }
-                )
-            }
-        } else {
-            -1
-        }
-
-        var nextIndex = selectSequentialNextCandidateIndex(
-            currentIndex = currentIndex,
-            fallbackIndex = fallbackIndex,
-            lastRequestedIndex = lastRequestedFocusIndex,
-            traversalSize = traversalList.size,
-            onPreserveIntermediate = { preservedIndex ->
-                Log.i(
-                    "A11Y_HELPER",
-                    "[SMART_NEXT] Preserving intermediate candidate between currentIndex=$currentIndex and lastRequestedFocusIndex=$lastRequestedFocusIndex. nextIndex=$preservedIndex"
-                )
-            },
-            onForcedAdvance = { forcedIndex ->
-                Log.w(
-                    "A11Y_HELPER",
-                    "[SMART_NEXT] Detected stale currentIndex=$currentIndex behind lastRequestedFocusIndex=$lastRequestedFocusIndex. Forcing nextIndex=$forcedIndex"
-                )
-            }
-        )
         if (currentIndex in traversalList.indices) {
             val currentBounds = Rect().also { traversalList[currentIndex].getBoundsInScreen(it) }
             val immediateCandidateIndex = currentIndex + 1
@@ -654,7 +680,13 @@ object A11yNavigator {
                                 ?: recoverDescendantLabel(node)?.trim().takeUnless { it.isNullOrEmpty() }
                         }
                     ).also { candidateIndex ->
-                        if (candidateIndex >= 0) {
+                        val analysis = analyzePostScrollResult(
+                            treeChanged = true,
+                            anchorMaintained = true,
+                            newlyExposedCandidateExists = candidateIndex >= 0
+                        )
+                        val selection = selectContinuationCandidate(candidateIndex, analysis)
+                        if (selection.accepted) {
                             val candidateNode = traversalList[candidateIndex]
                             val candidateLabel = candidateNode.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                                 ?: candidateNode.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
@@ -663,11 +695,11 @@ object A11yNavigator {
                                 ?: "<no-label>"
                             Log.i(
                                 "A11Y_HELPER",
-                                "[SMART_NEXT] Selected new post-scroll content candidate index=$candidateIndex label=${candidateLabel.replace("\n", " ")}"
+                                "[SMART_NEXT] Selected new post-scroll content candidate index=$candidateIndex label=${candidateLabel.replace("\n", " ")} reason=${selection.reasonCode}"
                             )
                         } else {
                             continuationFallbackFailed = true
-                            Log.i("A11Y_HELPER", "[POST_SCROLL] Continuation fallback exhausted with no candidate")
+                            Log.i("A11Y_HELPER", "[POST_SCROLL] Continuation fallback exhausted reason=${selection.reasonCode}")
                             Log.i("A11Y_HELPER", "[SMART_NEXT] No new continuation content found; allowing bottom bar")
                         }
                     }
@@ -975,27 +1007,6 @@ object A11yNavigator {
             return TargetActionOutcome(false, "failed")
         }
 
-        fun focusOrSkip(target: AccessibilityNodeInfo, status: String, traversalIndex: Int = -1): TargetActionOutcome {
-            return performFocusWithVisibilityCheck(
-                root = root,
-                target = target,
-                screenTop = screenTop,
-                effectiveBottom = effectiveBottom,
-                status = status,
-                isScrollAction = false,
-                traversalIndex = traversalIndex,
-                traversalListSnapshot = traversalList,
-                currentFocusIndexHint = currentIndex
-            )
-        }
-
-        fun focusSequentiallyFromIndex(startIndex: Int, status: String): TargetActionOutcome {
-            if (startIndex !in traversalList.indices) {
-                return TargetActionOutcome(false, "failed_no_candidate_after_snap_back")
-            }
-            return focusOrSkip(traversalList[startIndex], status, startIndex)
-        }
-
         val mainScrollContainer = findMainScrollContainer(root)
         val scrollableNode = findScrollableForwardAncestorCandidate(resolvedCurrent)
             ?: mainScrollContainer
@@ -1161,7 +1172,7 @@ object A11yNavigator {
                 val graceIndex = currentIndex + 1
                 if (graceIndex in traversalList.indices) {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Next index overflowed after compensation; applying last-node grace focus at index $graceIndex")
-                    return focusSequentiallyFromIndex(graceIndex, "moved")
+                    return focusSequentiallyFromIndex(root, traversalList, graceIndex, screenTop, effectiveBottom, currentIndex, "moved")
                 }
             }
 
@@ -1239,7 +1250,7 @@ object A11yNavigator {
                 "A11Y_HELPER",
                 "[SMART_NEXT] Current focus is the dynamic last content item before bottom bar. Skipping continuation pre-scroll and moving to bottom bar."
             )
-            return focusOrSkip(nextNode, "moved_to_bottom_bar", nextIndex)
+            return focusOrSkip(root, traversalList, nextNode, screenTop, effectiveBottom, currentIndex, "moved_to_bottom_bar", nextIndex)
         }
         val rowOrGridContinuationDetected = hasContinuationPatternBelowCurrentNode(
             traversalList = traversalList,
@@ -1307,7 +1318,7 @@ object A11yNavigator {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Next node is bottom bar and continuation/defer condition matched -> attempting scroll first")
             val scrollTarget = scrollableNode ?: run {
                 Log.w("A11Y_HELPER", "[SMART_NEXT] Scroll target became null unexpectedly; falling back to bottom bar move.")
-                return focusOrSkip(nextNode, "moved_to_bottom_bar_direct", nextIndex)
+                return focusOrSkip(root, traversalList, nextNode, screenTop, effectiveBottom, currentIndex, "moved_to_bottom_bar_direct", nextIndex)
             }
             val lastDesc = resolvedCurrent?.contentDescription?.toString()
             val preScrollAnchor = buildPreScrollAnchor(
@@ -1333,7 +1344,7 @@ object A11yNavigator {
             Log.i("A11Y_HELPER", "[PRE_SCROLL] ACTION_SCROLL_FORWARD result=$scrollResult")
             if (!scrollResult) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Scroll failed (end of list), moving to bottom bar.")
-                return focusOrSkip(nextNode, "moved_to_bottom_bar_direct", nextIndex)
+                return focusOrSkip(root, traversalList, nextNode, screenTop, effectiveBottom, currentIndex, "moved_to_bottom_bar_direct", nextIndex)
             }
 
             val visibleHistory = collectVisibleHistory(
@@ -1502,17 +1513,12 @@ object A11yNavigator {
                 val preBottomMax = preScrollRawVisibleNodes.maxOfOrNull { it.bounds.bottom } ?: Int.MIN_VALUE
                 val postBottomMax = postRawVisibleNodes.maxOfOrNull { it.bounds.bottom } ?: Int.MIN_VALUE
                 val bottomAreaExpanded = postBottomMax > preBottomMax
-                val noProgressReason = when {
-                    !rawTreeChanged && !traversalChanged && !anchorShifted && !successorFound && !newViewIdFound && !bottomAreaExpanded ->
-                        "all_progress_signals_false"
-                    !rawTreeChanged -> "raw_tree_unchanged"
-                    !traversalChanged -> "traversal_unchanged"
-                    !anchorShifted -> "anchor_not_shifted"
-                    !successorFound -> "successor_not_found"
-                    !newViewIdFound -> "no_new_view_id"
-                    !bottomAreaExpanded -> "bottom_area_not_expanded"
-                    else -> "snapshot_equal"
-                }
+                val analysis = analyzePostScrollResult(
+                    treeChanged = rawTreeChanged || traversalChanged,
+                    anchorMaintained = anchorShifted || successorFound,
+                    newlyExposedCandidateExists = newViewIdFound || bottomAreaExpanded
+                )
+                val noProgressReason = analysis.reason
                 val successorCandidatesSummary = refreshedTraversal.take(8).joinToString(separator = " | ") { node ->
                     val bounds = Rect().also { node.getBoundsInScreen(it) }
                     val label = node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
@@ -1524,10 +1530,7 @@ object A11yNavigator {
                     "A11Y_HELPER",
                     "[SMART_NEXT][PROGRESS_DEBUG] rawTreeChanged=$rawTreeChanged traversalChanged=$traversalChanged anchorShifted=$anchorShifted successorFound=$successorFound newViewIdFound=$newViewIdFound bottomAreaExpanded=$bottomAreaExpanded"
                 )
-                Log.i(
-                    "A11Y_HELPER",
-                    "[SMART_NEXT][PROGRESS_DEBUG] noProgress=true reason=$noProgressReason"
-                )
+                Log.i("A11Y_HELPER", "[SMART_NEXT][PROGRESS_DEBUG] noProgress=${analysis.noProgress} reason=$noProgressReason")
                 Log.i(
                     "A11Y_HELPER",
                     "[SMART_NEXT][PROGRESS_DEBUG] fallbackBeforeBottomBar successorSearchAttempted=${preScrollAnchor != null} successorCandidates=$successorCandidatesSummary"
@@ -1604,7 +1607,7 @@ object A11yNavigator {
                 return TargetActionOutcome(false, "failed")
             }
             Log.i("A11Y_HELPER", "[SMART_NEXT] No continuation content after scroll -> allowing bottom bar")
-            val bottomBarOutcome = focusOrSkip(nextNode, "moved_to_bottom_bar", nextIndex)
+            val bottomBarOutcome = focusOrSkip(root, traversalList, nextNode, screenTop, effectiveBottom, currentIndex, "moved_to_bottom_bar", nextIndex)
             return if (bottomBarOutcome.success) {
                 TargetActionOutcome(true, "moved_to_bottom_bar", nextNode)
             } else {
@@ -1617,7 +1620,82 @@ object A11yNavigator {
         }
 
         Log.i("A11Y_HELPER", "[SMART_NEXT] Performing regular next navigation")
-        return focusSequentiallyFromIndex(nextIndex, "moved")
+        return focusSequentiallyFromIndex(root, traversalList, nextIndex, screenTop, effectiveBottom, currentIndex, "moved")
+    }
+
+    private fun executeFocusMove(
+        root: AccessibilityNodeInfo,
+        target: AccessibilityNodeInfo,
+        screenTop: Int,
+        effectiveBottom: Int,
+        traversalList: List<AccessibilityNodeInfo>,
+        currentFocusIndexHint: Int,
+        status: String,
+        traversalIndex: Int
+    ): FocusExecutionResult {
+        val outcome = performFocusWithVisibilityCheck(
+            root = root,
+            target = target,
+            screenTop = screenTop,
+            effectiveBottom = effectiveBottom,
+            status = status,
+            isScrollAction = false,
+            traversalIndex = traversalIndex,
+            traversalListSnapshot = traversalList,
+            currentFocusIndexHint = currentFocusIndexHint
+        )
+        return verifyAndCommitFocusResult(outcome)
+    }
+
+    private fun verifyAndCommitFocusResult(outcome: TargetActionOutcome): FocusExecutionResult {
+        val reasonCode = if (outcome.success) "accepted:focus_verified" else "rejected:focus_verify_failed"
+        return FocusExecutionResult(outcome = outcome, reasonCode = reasonCode)
+    }
+
+    private fun focusOrSkip(
+        root: AccessibilityNodeInfo,
+        traversalList: List<AccessibilityNodeInfo>,
+        target: AccessibilityNodeInfo,
+        screenTop: Int,
+        effectiveBottom: Int,
+        currentIndex: Int,
+        status: String,
+        traversalIndex: Int = -1
+    ): TargetActionOutcome {
+        return executeFocusMove(
+            root = root,
+            target = target,
+            screenTop = screenTop,
+            effectiveBottom = effectiveBottom,
+            traversalList = traversalList,
+            currentFocusIndexHint = currentIndex,
+            status = status,
+            traversalIndex = traversalIndex
+        ).outcome
+    }
+
+    private fun focusSequentiallyFromIndex(
+        root: AccessibilityNodeInfo,
+        traversalList: List<AccessibilityNodeInfo>,
+        startIndex: Int,
+        screenTop: Int,
+        effectiveBottom: Int,
+        currentIndex: Int,
+        status: String
+    ): TargetActionOutcome {
+        if (startIndex !in traversalList.indices) {
+            return TargetActionOutcome(false, "failed_no_candidate_after_snap_back")
+        }
+        return focusOrSkip(
+            root = root,
+            traversalList = traversalList,
+            target = traversalList[startIndex],
+            screenTop = screenTop,
+            effectiveBottom = effectiveBottom,
+            currentIndex = currentIndex,
+            status = status,
+            traversalIndex = startIndex
+        )
     }
 
 
@@ -1768,26 +1846,6 @@ object A11yNavigator {
             reason = "no_valid_continuation_signal"
         )
     }
-
-    private fun selectBottomBarEntryDecision(
-        nextIsBottomBar: Boolean,
-        scrollableNodeExists: Boolean,
-        contentTraversalCompleteBeforeBottomBar: Boolean,
-        continuationLikely: Boolean,
-        rowOrGridContinuationDetected: Boolean,
-        continuationExistsBeforeBottomBar: Boolean,
-        isCurrentNearBottom: Boolean,
-        forcePreScrollBeforeBottomBar: Boolean
-    ): BottomBarEntryDecision = decideBottomBarEntry(
-        nextIsBottomBar = nextIsBottomBar,
-        scrollableNodeExists = scrollableNodeExists,
-        contentTraversalCompleteBeforeBottomBar = contentTraversalCompleteBeforeBottomBar,
-        continuationLikely = continuationLikely,
-        rowOrGridContinuationDetected = rowOrGridContinuationDetected,
-        continuationExistsBeforeBottomBar = continuationExistsBeforeBottomBar,
-        isCurrentNearBottom = isCurrentNearBottom,
-        forcePreScrollBeforeBottomBar = forcePreScrollBeforeBottomBar
-    )
 
     internal fun decidePostScrollContinuationPlan(
         resolvedAnchorIndex: Int,
@@ -1989,6 +2047,51 @@ object A11yNavigator {
         return intersection / union
     }
 
+    private fun analyzePostScrollResult(
+        treeChanged: Boolean,
+        anchorMaintained: Boolean,
+        newlyExposedCandidateExists: Boolean
+    ): PostScrollAnalysis {
+        val noProgress = !treeChanged && !anchorMaintained && !newlyExposedCandidateExists
+        val reason = when {
+            noProgress -> "no_progress"
+            newlyExposedCandidateExists -> "newly_exposed_after_scroll"
+            anchorMaintained -> "anchor_maintained"
+            treeChanged -> "tree_changed"
+            else -> "unknown"
+        }
+        return PostScrollAnalysis(
+            treeChanged = treeChanged,
+            anchorMaintained = anchorMaintained,
+            newlyExposedCandidateExists = newlyExposedCandidateExists,
+            noProgress = noProgress,
+            reason = reason
+        )
+    }
+
+    private fun selectContinuationCandidate(
+        candidateIndex: Int,
+        analysis: PostScrollAnalysis
+    ): CandidateSelectionResult {
+        if (candidateIndex < 0) {
+            return CandidateSelectionResult(
+                index = -1,
+                accepted = false,
+                reasonCode = if (analysis.noProgress) "rejected:no_progress_after_scroll" else "rejected:no_valid_continuation_candidate"
+            )
+        }
+        val reason = when {
+            analysis.newlyExposedCandidateExists -> "accepted:newly_exposed_after_scroll"
+            analysis.anchorMaintained -> "accepted:logical_successor"
+            else -> "accepted:post_scroll_continuation"
+        }
+        return CandidateSelectionResult(
+            index = candidateIndex,
+            accepted = true,
+            reasonCode = reason
+        )
+    }
+
     private fun evaluatePostScrollContinuationCandidate(
         isTopBar: Boolean,
         isBottomBar: Boolean,
@@ -2008,15 +2111,15 @@ object A11yNavigator {
         isLogicalSuccessor: Boolean
     ): ContinuationCandidateEvaluation {
         val reasons = mutableListOf<String>()
-        if (isTopBar) reasons += "candidate rejected: top app bar"
-        if (isBottomBar) reasons += "candidate rejected: bottom nav"
-        if (!isContentNode) reasons += "candidate rejected: not content node"
-        if (focusable == false) reasons += "candidate rejected: not focusable"
-        if (isOutOfScreen) reasons += "candidate rejected: outside content bounds"
-        if (isTopResurfacedAnchorCandidate) reasons += "candidate rejected: top resurfaced anchor"
-        if (inVisitedHistory && !isTrailingContinuationCandidate) reasons += "candidate rejected: already visited"
+        if (isTopBar) reasons += "rejected:top_app_bar"
+        if (isBottomBar) reasons += "rejected:bottom_nav"
+        if (!isContentNode) reasons += "rejected:not_content_node"
+        if (focusable == false) reasons += "rejected:not_focusable"
+        if (isOutOfScreen) reasons += "rejected:outside_content_bounds"
+        if (isTopResurfacedAnchorCandidate) reasons += "rejected:top_resurfaced_anchor"
+        if (inVisitedHistory && !isTrailingContinuationCandidate) reasons += "rejected:already_visited"
         if (rewoundBeforeAnchor && !isLogicalSuccessor && !isNewlyAvailableInteractiveCandidate) {
-            reasons += "candidate deprioritized: rewound before pre-scroll anchor"
+            reasons += "rejected:rewound_before_anchor"
         }
 
         val priority = when {
