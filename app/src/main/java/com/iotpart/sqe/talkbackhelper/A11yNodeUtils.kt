@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
  * UI 노드의 속성 판별 및 검색을 위한 유틸리티 모음
  */
 object A11yNodeUtils {
-    const val VERSION: String = "1.1.0"
+    const val VERSION: String = "1.2.0"
 
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
 
@@ -156,6 +156,54 @@ object A11yNodeUtils {
         return bestNode
     }
 
+
+
+    fun isNodePhysicallyOffScreen(bounds: Rect, screenTop: Int, screenBottom: Int): Boolean {
+        return bounds.bottom <= screenTop || bounds.top >= screenBottom
+    }
+
+    fun isWithinTopContentArea(
+        nodeTop: Int,
+        screenTop: Int,
+        screenHeight: Int,
+        topAreaMaxPx: Int = 500
+    ): Boolean {
+        val topAreaBoundary = screenTop + minOf(screenHeight / 5, topAreaMaxPx)
+        return nodeTop < topAreaBoundary
+    }
+
+    fun isHeaderLikeCandidate(
+        className: String?,
+        viewIdResourceName: String?,
+        label: String?,
+        boundsInScreen: Rect,
+        screenTop: Int,
+        screenHeight: Int
+    ): Boolean {
+        val normalizedClass = className?.lowercase().orEmpty()
+        val normalizedViewId = viewIdResourceName?.lowercase().orEmpty()
+        val normalizedLabel = label?.lowercase().orEmpty()
+        val topBoundary = screenTop + (screenHeight * 0.3f).toInt()
+        if (boundsInScreen.top > topBoundary) return false
+
+        val headerKeywordMatched =
+            normalizedViewId.contains("toolbar") ||
+                normalizedViewId.contains("appbar") ||
+                normalizedViewId.contains("header") ||
+                normalizedViewId.contains("title") ||
+                normalizedViewId.contains("logo") ||
+                normalizedViewId.contains("setting_button") ||
+                normalizedViewId.contains("settings")
+        val classKeywordMatched =
+            normalizedClass.contains("toolbar") ||
+                normalizedClass.contains("appbarlayout") ||
+                normalizedClass.contains("actionbar")
+        val labelKeywordMatched =
+            normalizedLabel.contains("settings") ||
+                normalizedLabel.contains("setting")
+        return headerKeywordMatched || classKeywordMatched || labelKeywordMatched
+    }
+
     fun isNodeFullyVisible(bounds: Rect, screenTop: Int, effectiveBottom: Int): Boolean {
         return bounds.top >= screenTop && bounds.bottom <= effectiveBottom
     }
@@ -281,7 +329,7 @@ object A11yNodeUtils {
         if (isFixedSystemUI(node, mainScrollContainer)) return false
         val hasDescendantLabel = !A11yTraversalAnalyzer.recoverDescendantLabel(node).isNullOrBlank()
         val usableLabel = !node.contentDescription?.toString().isNullOrBlank() || !node.text?.toString().isNullOrBlank() || hasDescendantLabel
-        val traversable = node.isVisibleToUser && !A11yNavigator.isNodePhysicallyOffScreen(bounds, screenTop, screenBottom)
+        val traversable = node.isVisibleToUser && !isNodePhysicallyOffScreen(bounds, screenTop, screenBottom)
         val interactive = node.isClickable || node.isFocusable || hasDescendantLabel
         val isContainerOnly = node == mainScrollContainer
         return traversable && interactive && usableLabel && !isContainerOnly
