@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.28.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.29.0")
     }
 
     @Test
@@ -822,6 +822,18 @@ class A11yNavigatorTest {
         )
 
         assertTrue(result)
+    }
+
+    @Test
+    fun shouldSkipDuplicateBoundsCandidate_returnsFalseForFallbackSelectedContinuationCandidate() {
+        val result = A11yNavigator.shouldSkipDuplicateBoundsCandidate(
+            currentFocusedBounds = Rect(70, 310, 370, 610),
+            candidateBounds = Rect(70, 310, 370, 610),
+            isScrollAction = true,
+            skipForFallbackSelectedContinuationCandidate = true
+        )
+
+        assertFalse(result)
     }
 
     @Test

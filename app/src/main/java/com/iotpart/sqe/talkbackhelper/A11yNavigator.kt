@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.28.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.29.0"
 
     @Volatile
     private var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
@@ -494,7 +494,33 @@ object A11yNavigator {
                     "A11Y_HELPER",
                     "[SMART_DEBUG] Index:$index, Label:${label.replace("\n", " ")}, Y_Bottom:${bounds.bottom}, Eff_Bottom:$effectiveBottom, InHistory:${visibleHistory.contains(label)}"
                 )
-                if (shouldSkipDuplicateBoundsCandidate(currentFocusedBounds, bounds, isScrollAction)) {
+                val isFallbackSelectedContinuationCandidate =
+                    preScrollAnchor != null &&
+                        isScrollAction &&
+                        resolvedAnchorIndex == -1 &&
+                        fallbackBelowAnchorIndex >= 0 &&
+                        index == fallbackBelowAnchorIndex
+                if (isFallbackSelectedContinuationCandidate && currentFocusedBounds == bounds) {
+                    if (label == "<no-label>") {
+                        recoverDescendantLabel(node)?.let { recoveredLabel ->
+                            label = recoveredLabel
+                            Log.i("A11Y_HELPER", "[SMART_NEXT] Resolved descendant label for continuation target: $recoveredLabel")
+                        }
+                    }
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Continuation candidate already focused after scroll -> treating as moved")
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Bottom bar fallback blocked because continuation candidate is already focused")
+                    return TargetActionOutcome(true, "moved", node)
+                }
+                if (isFallbackSelectedContinuationCandidate) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping duplicate-bounds rule for fallback-selected continuation candidate")
+                }
+                if (shouldSkipDuplicateBoundsCandidate(
+                        currentFocusedBounds = currentFocusedBounds,
+                        candidateBounds = bounds,
+                        isScrollAction = isScrollAction,
+                        skipForFallbackSelectedContinuationCandidate = isFallbackSelectedContinuationCandidate
+                    )
+                ) {
                     val duplicateReason = if (isScrollAction) "scroll duplicate bounds" else "strict duplicate bounds precheck"
                     Log.i(
                         "A11Y_HELPER",
@@ -529,12 +555,6 @@ object A11yNavigator {
                     screenTop = screenTop,
                     screenHeight = screenHeight
                 )
-                val isFallbackSelectedContinuationCandidate =
-                    preScrollAnchor != null &&
-                        isScrollAction &&
-                        resolvedAnchorIndex == -1 &&
-                        fallbackBelowAnchorIndex >= 0 &&
-                        index == fallbackBelowAnchorIndex
                 val canAcceptFallbackSelectedNoLabelCandidate = shouldAcceptFallbackSelectedNoLabelContinuationCandidate(
                     isFallbackSelectedContinuationCandidate = isFallbackSelectedContinuationCandidate,
                     isTopBar = isTopBar,
@@ -547,7 +567,7 @@ object A11yNavigator {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Accepting fallback-selected <no-label> continuation candidate")
                     recoverDescendantLabel(node)?.let { recoveredLabel ->
                         label = recoveredLabel
-                        Log.i("A11Y_HELPER", "[SMART_NEXT] Recovered descendant label for continuation candidate: $recoveredLabel")
+                        Log.i("A11Y_HELPER", "[SMART_NEXT] Resolved descendant label for continuation target: $recoveredLabel")
                     }
                 }
                 val isLastFocusedNode = (excludeDesc != null && label == excludeDesc)
@@ -646,6 +666,10 @@ object A11yNavigator {
             }
 
             if (!focusedAny && isScrollAction && !focusAttempted) {
+                if (fallbackBelowAnchorIndex >= 0) {
+                    Log.i("A11Y_HELPER", "[SMART_NEXT] Bottom bar fallback blocked because continuation candidate is already focused")
+                    return TargetActionOutcome(false, "continuation_candidate_unresolved")
+                }
                 Log.i("A11Y_HELPER", "[SMART_NEXT] No focusable candidates remain after history/skip filtering. Treating as reached_end")
                 return TargetActionOutcome(false, "reached_end")
             }
@@ -1039,6 +1063,10 @@ object A11yNavigator {
             if (outcome.success) {
                 return outcome
             }
+            if (outcome.reason == "continuation_candidate_unresolved") {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Intended continuation candidate unresolved after scroll; bottom bar fallback is blocked")
+                return TargetActionOutcome(false, "failed")
+            }
             Log.i("A11Y_HELPER", "[SMART_NEXT] No continuation content after scroll -> allowing bottom bar")
             val bottomBarOutcome = focusOrSkip(nextNode, "moved_to_bottom_bar", nextIndex)
             return if (bottomBarOutcome.success) {
@@ -1061,8 +1089,10 @@ object A11yNavigator {
     internal fun shouldSkipDuplicateBoundsCandidate(
         currentFocusedBounds: Rect?,
         candidateBounds: Rect,
-        isScrollAction: Boolean
+        isScrollAction: Boolean,
+        skipForFallbackSelectedContinuationCandidate: Boolean = false
     ): Boolean {
+        if (skipForFallbackSelectedContinuationCandidate) return false
         if (currentFocusedBounds == null || currentFocusedBounds != candidateBounds) return false
         return true
     }
