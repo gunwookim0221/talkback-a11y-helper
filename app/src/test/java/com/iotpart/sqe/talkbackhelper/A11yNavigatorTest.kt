@@ -687,7 +687,7 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun findAnchorContinuationCandidateIndex_acceptsVisibleButUnvisitedContinuationCandidate() {
+    fun findAnchorContinuationCandidateIndex_doesNotSelectVisibleButUnvisitedCandidateAlone() {
         data class Node(val className: String?, val viewId: String?, val bounds: Rect, val label: String?)
 
         val nodes = listOf(
@@ -713,7 +713,7 @@ class A11yNavigatorTest {
             labelOf = { it.label }
         )
 
-        assertEquals(1, index)
+        assertEquals(-1, index)
     }
 
     @Test
@@ -915,6 +915,57 @@ class A11yNavigatorTest {
         )
 
         assertTrue(likely)
+    }
+
+    @Test
+    fun findLastContentCandidateIndexBeforeBottomBar_excludesTopChromeWrapperAndBottomBar() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect)
+
+        val nodes = listOf(
+            Node("android.widget.FrameLayout", "com.test:id/top_toolbar", Rect(0, 0, 1000, 180)),
+            Node("android.widget.ScrollView", "com.test:id/mainScrollView", Rect(0, 180, 1000, 1700)),
+            Node("android.widget.TextView", "com.test:id/item_history", Rect(0, 420, 1000, 640)),
+            Node("android.widget.TextView", "com.test:id/item_privacy_notice", Rect(0, 1560, 1000, 1780)),
+            Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1800, 1000, 2000))
+        )
+
+        val lastContentIndex = A11yNavigator.findLastContentCandidateIndexBeforeBottomBar(
+            traversalList = nodes,
+            bottomBarIndex = 4,
+            screenTop = 0,
+            screenBottom = 2000,
+            screenHeight = 2000,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId }
+        )
+
+        assertEquals(3, lastContentIndex)
+    }
+
+    @Test
+    fun isContentTraversalCompleteBeforeBottomBar_returnsTrue_whenCurrentIsDynamicLastContent() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect)
+
+        val nodes = listOf(
+            Node("android.widget.TextView", "com.test:id/item_history", Rect(0, 420, 1000, 640)),
+            Node("android.widget.TextView", "com.test:id/item_privacy_notice", Rect(0, 1560, 1000, 1780)),
+            Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1800, 1000, 2000))
+        )
+
+        val complete = A11yNavigator.isContentTraversalCompleteBeforeBottomBar(
+            traversalList = nodes,
+            currentIndex = 1,
+            bottomBarIndex = 2,
+            screenTop = 0,
+            screenBottom = 2000,
+            screenHeight = 2000,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId }
+        )
+
+        assertTrue(complete)
     }
 
     @Test

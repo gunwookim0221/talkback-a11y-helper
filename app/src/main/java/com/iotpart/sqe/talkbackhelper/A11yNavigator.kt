@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.31.7"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.31.8"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
     private val TRAVERSAL_CONTAINER_CLASS_KEYWORDS = listOf(
@@ -1139,6 +1139,25 @@ object A11yNavigator {
             classNameOf = { node -> node.className?.toString() },
             viewIdOf = { node -> node.viewIdResourceName }
         )
+        val contentTraversalCompleteBeforeBottomBar = nextIsBottomBar && isContentTraversalCompleteBeforeBottomBar(
+            traversalList = traversalList,
+            currentIndex = currentIndex,
+            bottomBarIndex = nextIndex,
+            screenTop = screenTop,
+            screenBottom = screenBottom,
+            screenHeight = screenHeight,
+            boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+            classNameOf = { node -> node.className?.toString() },
+            viewIdOf = { node -> node.viewIdResourceName },
+            isFixedUiOf = { node -> isFixedSystemUI(node, mainScrollContainer) }
+        )
+        if (contentTraversalCompleteBeforeBottomBar) {
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT] Current focus is the dynamic last content item before bottom bar. Skipping continuation pre-scroll and moving to bottom bar."
+            )
+            return focusOrSkip(nextNode, "moved_to_bottom_bar", nextIndex)
+        }
         val rowOrGridContinuationDetected = hasContinuationPatternBelowCurrentNode(
             traversalList = traversalList,
             currentIndex = currentIndex,
@@ -1800,7 +1819,7 @@ object A11yNavigator {
             val isTrailingContinuationCandidate = inVisibleHistory && isAfterPreScrollAnchor
             val isPromotedRawOnlyCandidate = promotedViewIds.contains(shortViewId) && !inVisibleHistory && !inVisitedHistory
             val isNewlyExposedBottomContent = !inVisibleHistory && !inVisitedHistory && bounds.bottom >= (screenBottom - screenHeight / 3)
-            val isOtherUnvisitedVisible = !inVisitedHistory
+            val isOtherUnvisitedVisible = !inVisitedHistory && !inVisibleHistory
             val reasons = mutableListOf<String>()
             if (inVisitedHistory && !isTrailingContinuationCandidate) reasons += "candidate rejected: already visited"
             if (isTopBar) reasons += "candidate rejected: top app bar"
@@ -1850,7 +1869,7 @@ object A11yNavigator {
                     1 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Accepted trailing continuation candidate by continuity rule")
                     2 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting promoted raw-only continuation candidate")
                     3 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting newly exposed bottom content continuation candidate")
-                    4 -> Log.i("A11Y_HELPER", "[SMART_NEXT] candidate visibleHistory=true visitedHistory=false is not sufficient alone; accepted as low-priority continuation fallback")
+                    4 -> Log.i("A11Y_HELPER", "[SMART_NEXT] Selecting low-priority unvisited continuation candidate")
                 }
                 if (candidatePriority < bestPriority) {
                     bestPriority = candidatePriority
@@ -3108,6 +3127,66 @@ object A11yNavigator {
                 !isBottomNavigationBarNode(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight) &&
                 (bounds.bottom <= bottomBarTop && (bottomBarTop - bounds.bottom) in 0..trailingBandPx)
         }
+    }
+
+    internal fun <T> findLastContentCandidateIndexBeforeBottomBar(
+        traversalList: List<T>,
+        bottomBarIndex: Int,
+        screenTop: Int,
+        screenBottom: Int,
+        screenHeight: Int,
+        boundsOf: (T) -> Rect,
+        classNameOf: (T) -> String?,
+        viewIdOf: (T) -> String?,
+        isFixedUiOf: ((T) -> Boolean)? = null
+    ): Int {
+        if (bottomBarIndex !in traversalList.indices) return -1
+        if (bottomBarIndex <= 0) return -1
+        for (index in bottomBarIndex - 1 downTo 0) {
+            val node = traversalList[index]
+            val bounds = boundsOf(node)
+            if (isNodePhysicallyOffScreen(bounds, screenTop, screenBottom)) continue
+            if (isTopAppBarNode(classNameOf(node), viewIdOf(node), bounds, screenTop, screenHeight)) continue
+            if (isBottomNavigationBarNode(classNameOf(node), viewIdOf(node), bounds, screenBottom, screenHeight)) continue
+            if (isFixedUiOf?.invoke(node) == true) continue
+
+            val normalizedClass = classNameOf(node)?.lowercase().orEmpty()
+            val normalizedViewId = viewIdOf(node)?.substringAfterLast('/')?.lowercase().orEmpty()
+            val isWrapperOrContainer =
+                TRAVERSAL_CONTAINER_CLASS_KEYWORDS.any { keyword -> normalizedClass.contains(keyword) } ||
+                    TRAVERSAL_CONTAINER_VIEW_ID_KEYWORDS.any { keyword -> normalizedViewId.contains(keyword) }
+            if (isWrapperOrContainer) continue
+            return index
+        }
+        return -1
+    }
+
+    internal fun <T> isContentTraversalCompleteBeforeBottomBar(
+        traversalList: List<T>,
+        currentIndex: Int,
+        bottomBarIndex: Int,
+        screenTop: Int,
+        screenBottom: Int,
+        screenHeight: Int,
+        boundsOf: (T) -> Rect,
+        classNameOf: (T) -> String?,
+        viewIdOf: (T) -> String?,
+        isFixedUiOf: ((T) -> Boolean)? = null
+    ): Boolean {
+        if (currentIndex !in traversalList.indices || bottomBarIndex !in traversalList.indices) return false
+        if (bottomBarIndex <= currentIndex) return false
+        val lastContentIndex = findLastContentCandidateIndexBeforeBottomBar(
+            traversalList = traversalList,
+            bottomBarIndex = bottomBarIndex,
+            screenTop = screenTop,
+            screenBottom = screenBottom,
+            screenHeight = screenHeight,
+            boundsOf = boundsOf,
+            classNameOf = classNameOf,
+            viewIdOf = viewIdOf,
+            isFixedUiOf = isFixedUiOf
+        )
+        return currentIndex == lastContentIndex
     }
 
     internal fun <T> isContinuationContentLikelyBelowCurrentNode(
