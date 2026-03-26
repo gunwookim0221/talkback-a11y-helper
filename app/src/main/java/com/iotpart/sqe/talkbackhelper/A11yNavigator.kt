@@ -5,11 +5,12 @@ import android.os.Build
 import android.view.accessibility.AccessibilityEvent
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.47.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.47.1"
     private const val RETARGET_SUPPRESSION_WINDOW_MS: Long = 400L
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
@@ -2903,11 +2904,39 @@ object A11yNavigator {
         visitedHistorySignatures.toSet()
     }
 
-    private fun buildNodeIdentityForHistory(node: AccessibilityNodeInfo): String {
-        val windowId = node.windowId
-        val className = node.className?.toString()?.trim().orEmpty()
-        val packageName = node.packageName?.toString()?.trim().orEmpty()
-        return "window=$windowId|class=$className|package=$packageName"
+    private fun buildNodeIdentityForHistory(node: AccessibilityNodeInfo): String = nodeIdentityOf(node).orEmpty()
+
+    private fun nodeIdentityOf(windowId: Int, className: String?, packageName: String?): String {
+        val normalizedClassName = className?.trim().orEmpty()
+        val normalizedPackageName = packageName?.trim().orEmpty()
+        return "window=$windowId|class=$normalizedClassName|package=$normalizedPackageName"
+    }
+
+    private fun nodeIdentityOf(node: AccessibilityNodeInfo?): String? {
+        node ?: return null
+        return nodeIdentityOf(
+            windowId = node.windowId,
+            className = node.className?.toString(),
+            packageName = node.packageName?.toString()
+        )
+    }
+
+    private fun nodeIdentityOf(node: AccessibilityNodeInfoCompat?): String? {
+        node ?: return null
+        return nodeIdentityOf(
+            windowId = node.windowId,
+            className = node.className?.toString(),
+            packageName = node.packageName?.toString()
+        )
+    }
+
+    private fun nodeIdentityOf(snapshot: FocusSnapshot?): String? {
+        snapshot ?: return null
+        return nodeIdentityOf(
+            windowId = -1,
+            className = snapshot.className,
+            packageName = snapshot.packageName
+        )
     }
 
     private fun logVisitedHistorySkip(reason: String, label: String?, viewId: String?, bounds: Rect? = null) {
