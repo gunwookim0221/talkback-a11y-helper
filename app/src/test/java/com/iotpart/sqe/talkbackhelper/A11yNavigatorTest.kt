@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.45.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.46.0")
     }
 
     @Test
@@ -183,6 +183,59 @@ class A11yNavigatorTest {
 
         assertEquals(0, result.index)
         assertTrue(result.hasValidPostScrollCandidate)
+    }
+
+    @Test
+    fun selectContinuationCandidateAfterScrollResult_rejectsRewoundCandidateEvenIfNewlyRevealed() {
+        data class Node(
+            val label: String?,
+            val descendantLabel: String?,
+            val viewId: String?,
+            val bounds: Rect,
+            val clickable: Boolean,
+            val focusable: Boolean
+        )
+
+        val result = A11yNavigator.selectContinuationCandidateAfterScrollResult(
+            traversalList = listOf(
+                Node(
+                    label = "",
+                    descendantLabel = "SmartThings",
+                    viewId = "com.test:id/app_logo",
+                    bounds = Rect(0, 120, 1000, 240),
+                    clickable = true,
+                    focusable = true
+                )
+            ),
+            startIndex = 0,
+            visibleHistory = emptySet(),
+            visibleHistorySignatures = emptySet(),
+            visitedHistory = emptySet(),
+            visitedHistorySignatures = emptySet(),
+            screenTop = 0,
+            screenBottom = 2200,
+            screenHeight = 2200,
+            boundsOf = { it.bounds },
+            classNameOf = { "android.widget.LinearLayout" },
+            viewIdOf = { it.viewId },
+            isContentNodeOf = { true },
+            clickableOf = { it.clickable },
+            focusableOf = { it.focusable },
+            descendantLabelOf = { it.descendantLabel },
+            preScrollAnchor = A11yNavigator.PreScrollAnchor(
+                viewIdResourceName = "com.test:id/anchor",
+                mergedLabel = "Anchor",
+                talkbackLabel = "Anchor",
+                text = "Anchor",
+                contentDescription = "Anchor",
+                bounds = Rect(0, 500, 1000, 640)
+            ),
+            preScrollAnchorBottom = 640,
+            labelOf = { it.label }
+        )
+
+        assertEquals(-1, result.index)
+        assertFalse(result.hasValidPostScrollCandidate)
     }
 
     @Test

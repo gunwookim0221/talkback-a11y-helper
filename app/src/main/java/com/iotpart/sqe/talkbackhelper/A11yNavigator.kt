@@ -9,7 +9,8 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.45.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.46.0"
+    private const val RETARGET_SUPPRESSION_WINDOW_MS: Long = 400L
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
     private val TRAVERSAL_CONTAINER_CLASS_KEYWORDS = listOf(
@@ -187,8 +188,12 @@ object A11yNavigator {
         val finalTarget: AccessibilityNodeInfo,
         val finalLabel: String,
         val source: String,
-        val retargeted: Boolean
+        val retargeted: Boolean,
+        val authoritativeOverride: Boolean
     )
+
+    @Volatile
+    private var authoritativeFocusWindowUntilMs: Long = 0L
 
     internal data class PostScrollContinuationSearchResult(
         val index: Int,
@@ -2137,6 +2142,7 @@ object A11yNavigator {
         hasUnvisitedLabeledContentCandidate: Boolean,
         continuationFallbackCandidate: Boolean,
         rewoundBeforeAnchor: Boolean,
+        headerResurfacedBeforeAnchor: Boolean,
         prioritizedNewlyRevealed: Boolean,
         focusable: Boolean?,
         isOutOfScreen: Boolean,
@@ -2149,8 +2155,9 @@ object A11yNavigator {
         if (focusable == false) reasons += "rejected:not_focusable"
         if (isOutOfScreen) reasons += "rejected:outside_content_bounds"
         if (inVisitedHistory && !continuationFallbackCandidate) reasons += "rejected:already_visited"
+        if (headerResurfacedBeforeAnchor) reasons += "rejected:header_resurfaced_before_anchor"
         if (rewoundNonContentCandidate) reasons += "rejected:rewound_before_anchor"
-        if (rewoundBeforeAnchor && !isLogicalSuccessor && !prioritizedNewlyRevealed) {
+        if (rewoundBeforeAnchor) {
             reasons += "rejected:rewound_before_anchor"
         }
 
@@ -2172,6 +2179,7 @@ object A11yNavigator {
         isTopBar: Boolean,
         isContentNode: Boolean,
         isTopResurfacedAnchorCandidate: Boolean,
+        isHeaderLikeNode: Boolean,
         inVisibleHistory: Boolean,
         isAfterPreScrollAnchor: Boolean,
         isInteractiveCandidate: Boolean,
@@ -2180,9 +2188,8 @@ object A11yNavigator {
         screenHeight: Int
     ): CandidateClassification {
         val isTopArea = bounds.top <= screenTop + (screenHeight / 4)
-        val isPersistentHeader = isTopBar ||
-            (isTopArea && inVisibleHistory && !isAfterPreScrollAnchor && !isContentNode && !isInteractiveCandidate)
-        val isTopChrome = isTopResurfacedAnchorCandidate || isPersistentHeader || (isTopArea && !isContentNode)
+        val isPersistentHeader = isTopBar || (isTopArea && isHeaderLikeNode && !isContentNode)
+        val isTopChrome = isTopResurfacedAnchorCandidate || isPersistentHeader || (isTopArea && !isContentNode && !isInteractiveCandidate)
         return CandidateClassification(
             isTopChrome = isTopChrome,
             isPersistentHeader = isPersistentHeader,
@@ -2210,14 +2217,13 @@ object A11yNavigator {
         if (notInPreScrollAnchorContinuation) reasons += "not_in_pre_scroll_anchor_continuation"
         if (resolvedLabelNewlyAcquiredPostScroll) reasons += "resolved_label_newly_acquired_post_scroll"
 
-        val rewoundNonContentCandidate = rewoundBeforeAnchor && !classification.isContentNode
         val prioritized = isInteractiveCandidate &&
             !inVisitedHistory &&
             hasResolvedLabel &&
             !isBottomBar &&
             !classification.isTopChrome &&
             !classification.isPersistentHeader &&
-            !rewoundNonContentCandidate &&
+            !rewoundBeforeAnchor &&
             (notInPreScrollTraversal || notInPreScrollAnchorContinuation || resolvedLabelNewlyAcquiredPostScroll)
 
         return NewlyRevealedEvaluation(
@@ -2480,6 +2486,14 @@ object A11yNavigator {
             val isPreScrollAnchorItself = preScrollAnchor?.viewIdResourceName?.equals(rawViewId, ignoreCase = true) == true
             val rewoundBeforeAnchor = anchorBounds != null && bounds.bottom <= anchorBounds.bottom
             val isInteractiveCandidate = (focusableOf?.invoke(node) == true) || (clickableOf?.invoke(node) == true)
+            val isHeaderLikeNode = isHeaderLikeCandidate(
+                className = classNameOf(node),
+                viewIdResourceName = rawViewId,
+                label = label,
+                boundsInScreen = bounds,
+                screenTop = screenTop,
+                screenHeight = screenHeight
+            )
             val descendantLabel = descendantLabelOf?.invoke(node)?.trim().orEmpty()
             val hasResolvedLabel = label.isNotBlank() || descendantLabel.isNotBlank()
             val preScrollSeen = inVisibleHistory
@@ -2497,6 +2511,7 @@ object A11yNavigator {
                 isTopBar = isTopBar,
                 isContentNode = isContentNode,
                 isTopResurfacedAnchorCandidate = isTopResurfacedAnchorCandidate,
+                isHeaderLikeNode = isHeaderLikeNode,
                 inVisibleHistory = inVisibleHistory,
                 isAfterPreScrollAnchor = isAfterPreScrollAnchor,
                 isInteractiveCandidate = isInteractiveCandidate,
@@ -2504,6 +2519,9 @@ object A11yNavigator {
                 screenTop = screenTop,
                 screenHeight = screenHeight
             )
+            val headerResurfacedBeforeAnchor = anchorBounds != null &&
+                bounds.top < anchorBounds.top &&
+                (candidateClassification.isPersistentHeader || isTopResurfacedAnchorCandidate || isHeaderLikeNode)
             val newlyRevealedEvaluation = evaluateNewlyRevealedCandidate(
                 isInteractiveCandidate = isInteractiveCandidate,
                 inVisitedHistory = inVisitedHistory,
@@ -2572,6 +2590,7 @@ object A11yNavigator {
                 hasUnvisitedLabeledContentCandidate = hasUnvisitedLabeledContentCandidate,
                 continuationFallbackCandidate = continuationFallbackCandidate,
                 rewoundBeforeAnchor = rewoundBeforeAnchor,
+                headerResurfacedBeforeAnchor = headerResurfacedBeforeAnchor,
                 prioritizedNewlyRevealed = shouldPrioritizeNewlyRevealedInteractiveCandidate,
                 focusable = focusableOf?.invoke(node),
                 isOutOfScreen = isOutOfScreen,
@@ -2602,6 +2621,7 @@ object A11yNavigator {
                     hasUnvisitedLabeledContentCandidate = hasUnvisitedLabeledContentCandidate,
                     continuationFallbackCandidate = continuationFallbackCandidate,
                     rewoundBeforeAnchor = rewoundBeforeAnchor,
+                    headerResurfacedBeforeAnchor = headerResurfacedBeforeAnchor,
                     prioritizedNewlyRevealed = shouldPrioritizeNewlyRevealedInteractiveCandidate,
                     focusable = focusableOf?.invoke(node),
                     isOutOfScreen = isOutOfScreen,
@@ -2651,12 +2671,24 @@ object A11yNavigator {
                             "[SMART_NEXT] rejected:rewound_before_anchor index=$index label=$candidateLabel descendantLabel=${if (descendantLabel.isBlank()) "<no-label>" else descendantLabel.replace("\n", " ")} rewoundBeforeAnchor=$rewoundBeforeAnchor inVisibleHistory=$inVisibleHistory inVisitedHistory=$inVisitedHistory prioritizedNewlyRevealed=$shouldPrioritizeNewlyRevealedInteractiveCandidate preScrollSeen=$preScrollSeen postScrollSeen=$postScrollSeen descendantLabelResolved=$descendantLabelResolved newlyRevealedReason=$newlyRevealedReason"
                         )
                     }
+                    if (reason == "rejected:header_resurfaced_before_anchor") {
+                        Log.i(
+                            "A11Y_HELPER",
+                            "[SMART_NEXT] rejected:header_resurfaced_before_anchor index=$index label=$candidateLabel rewoundBeforeAnchor=$rewoundBeforeAnchor headerLike=$isHeaderLikeNode"
+                        )
+                    }
                     Log.i(
                         "A11Y_HELPER",
                         "[SMART_NEXT] $reason index=$index label=$candidateLabel viewId=${viewIdOf(node)} className=${classNameOf(node)} clickable=${clickableOf?.invoke(node)} focusable=${focusableOf?.invoke(node)} bounds=$bounds"
                     )
                 }
             }
+            val decisionSummary = if (candidatePriority != Int.MAX_VALUE) "accepted" else "rejected"
+            val reasonsSummary = if (reasons.isEmpty()) "none" else reasons.joinToString("|")
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT] successor_candidate_eval index=$index decision=$decisionSummary rewoundBeforeAnchor=$rewoundBeforeAnchor headerResurfacedBeforeAnchor=$headerResurfacedBeforeAnchor reason=$reasonsSummary"
+            )
         }
         return PostScrollContinuationSearchResult(
             index = bestIndex,
@@ -3168,7 +3200,7 @@ object A11yNavigator {
                 intendedIndex = traversalIndex,
                 isScrollAction = isScrollAction
             )
-            if (retargetDecision.retargeted) {
+            if (retargetDecision.authoritativeOverride) {
                 recordRequestedFocusAttempt(traversalIndex, root)
                 recordVisitedFocus(retargetDecision.finalTarget, retargetDecision.finalLabel, reason = "focus_retargeted_after_stabilization")
                 return TargetActionOutcome(true, "moved", retargetDecision.finalTarget)
@@ -3241,7 +3273,7 @@ object A11yNavigator {
                 intendedIndex = traversalIndex,
                 isScrollAction = isScrollAction
             )
-            if (retargetDecision.retargeted) {
+            if (retargetDecision.authoritativeOverride) {
                 recordRequestedFocusAttempt(traversalIndex, root)
                 recordVisitedFocus(retargetDecision.finalTarget, retargetDecision.finalLabel, reason = "focus_retargeted_after_retry")
                 return TargetActionOutcome(true, "moved", retargetDecision.finalTarget)
@@ -3308,8 +3340,20 @@ object A11yNavigator {
             actualCandidateIndex >= 0 &&
             (intendedIndex < 0 || actualCandidateIndex != intendedIndex) &&
             actualIsInteractiveContent
+        val shouldSuppressTopNoise = isScrollAction &&
+            isWithinAuthoritativeFocusWindow() &&
+            actualFocusedNode != null &&
+            actualBounds != null &&
+            isSuppressibleHeaderNoiseNode(
+                node = actualFocusedNode,
+                bounds = actualBounds,
+                rootTop = rootBounds.top,
+                rootHeight = rootHeight,
+                anchorBounds = Rect().also(intendedTarget::getBoundsInScreen)
+            )
         val reason = when {
             identityMatched -> "identity_matched"
+            shouldSuppressTopNoise -> "suppressed_top_resurfaced_noise"
             !isScrollAction -> "not_scroll_action"
             actualFocusedNode == null -> "actual_focus_missing"
             actualCandidateIndex < 0 -> "actual_not_in_post_scroll_candidates"
@@ -3320,11 +3364,34 @@ object A11yNavigator {
             "A11Y_HELPER",
             "[FOCUS_VERIFY] focus_retarget_eval intended=${formatBoundsForLog(Rect().also(intendedTarget::getBoundsInScreen))} actual=${formatBoundsForLog(actualBounds)} actualCandidateIndex=$actualCandidateIndex retarget=$retarget reason=$reason"
         )
-        val finalTarget = if (retarget) actualFocusedNode!! else intendedTarget
+        val finalTarget = when {
+            shouldSuppressTopNoise -> intendedTarget
+            retarget -> actualFocusedNode!!
+            else -> intendedTarget
+        }
         val finalLabel = resolvePrimaryLabel(finalTarget)
             ?: recoverDescendantLabel(finalTarget)
             ?: intendedLabel
-        val source = if (retarget) "retargeted_actual" else "intended"
+        val source = when {
+            shouldSuppressTopNoise -> "suppressed_top_noise"
+            retarget -> "retargeted_actual"
+            else -> "intended"
+        }
+        if (shouldSuppressTopNoise) {
+            Log.i(
+                "A11Y_HELPER",
+                "[FOCUS_VERIFY] suppression_window_event type=FOCUS_UPDATE suppressed=true reason=top_resurfaced_header_during_authoritative_window label=${resolvePrimaryLabel(actualFocusedNode) ?: recoverDescendantLabel(actualFocusedNode) ?: "<no-label>"}"
+            )
+            Log.i(
+                "A11Y_HELPER",
+                "[FOCUS_VERIFY] suppression_window_event type=A11Y_ANNOUNCEMENT suppressed=true reason=top_resurfaced_header_during_authoritative_window label=${resolvePrimaryLabel(actualFocusedNode) ?: recoverDescendantLabel(actualFocusedNode) ?: "<no-label>"}"
+            )
+        }
+        if (retarget) {
+            startAuthoritativeFocusSuppressionWindow(finalTarget, finalLabel)
+        } else if (!isWithinAuthoritativeFocusWindow()) {
+            clearAuthoritativeFocusSuppressionWindow("window_expired_or_not_needed")
+        }
         Log.i(
             "A11Y_HELPER",
             "[FOCUS_VERIFY] final_focus_commit candidate=${finalLabel.replace("\n", " ")} source=$source"
@@ -3333,7 +3400,8 @@ object A11yNavigator {
             finalTarget = finalTarget,
             finalLabel = finalLabel,
             source = source,
-            retargeted = retarget
+            retargeted = retarget,
+            authoritativeOverride = retarget || shouldSuppressTopNoise
         )
     }
 
@@ -3762,6 +3830,85 @@ object A11yNavigator {
 
     private fun formatBoundsForLog(bounds: Rect?): String {
         return bounds?.let { "[${it.left},${it.top},${it.right},${it.bottom}]" } ?: "[null]"
+    }
+
+    private fun isHeaderLikeCandidate(
+        className: String?,
+        viewIdResourceName: String?,
+        label: String?,
+        boundsInScreen: Rect,
+        screenTop: Int,
+        screenHeight: Int
+    ): Boolean {
+        val normalizedClass = className?.lowercase().orEmpty()
+        val normalizedViewId = viewIdResourceName?.lowercase().orEmpty()
+        val normalizedLabel = label?.lowercase().orEmpty()
+        val topBoundary = screenTop + (screenHeight * 0.3f).toInt()
+        if (boundsInScreen.top > topBoundary) return false
+
+        val headerKeywordMatched =
+            normalizedViewId.contains("toolbar") ||
+                normalizedViewId.contains("appbar") ||
+                normalizedViewId.contains("header") ||
+                normalizedViewId.contains("title") ||
+                normalizedViewId.contains("logo") ||
+                normalizedViewId.contains("setting_button") ||
+                normalizedViewId.contains("settings")
+        val classKeywordMatched =
+            normalizedClass.contains("toolbar") ||
+                normalizedClass.contains("appbarlayout") ||
+                normalizedClass.contains("actionbar")
+        val labelKeywordMatched =
+            normalizedLabel.contains("settings") ||
+                normalizedLabel.contains("setting")
+        return headerKeywordMatched || classKeywordMatched || labelKeywordMatched
+    }
+
+    private fun isSuppressibleHeaderNoiseNode(
+        node: AccessibilityNodeInfo,
+        bounds: Rect,
+        rootTop: Int,
+        rootHeight: Int,
+        anchorBounds: Rect
+    ): Boolean {
+        val headerLike = isHeaderLikeCandidate(
+            className = node.className?.toString(),
+            viewIdResourceName = node.viewIdResourceName,
+            label = resolvePrimaryLabel(node) ?: recoverDescendantLabel(node),
+            boundsInScreen = bounds,
+            screenTop = rootTop,
+            screenHeight = rootHeight
+        ) || isTopAppBarNode(
+            className = node.className?.toString(),
+            viewIdResourceName = node.viewIdResourceName,
+            boundsInScreen = bounds,
+            screenTop = rootTop,
+            screenHeight = rootHeight
+        )
+        return headerLike && bounds.bottom <= anchorBounds.top
+    }
+
+    private fun isWithinAuthoritativeFocusWindow(nowMs: Long = System.currentTimeMillis()): Boolean {
+        if (authoritativeFocusWindowUntilMs <= 0L) return false
+        if (nowMs <= authoritativeFocusWindowUntilMs) return true
+        clearAuthoritativeFocusSuppressionWindow("window_expired")
+        return false
+    }
+
+    private fun startAuthoritativeFocusSuppressionWindow(candidate: AccessibilityNodeInfo, label: String) {
+        val until = System.currentTimeMillis() + RETARGET_SUPPRESSION_WINDOW_MS
+        authoritativeFocusWindowUntilMs = until
+        Log.i(
+            "A11Y_HELPER",
+            "[FOCUS_VERIFY] suppression_window_start untilMs=$until candidate=${label.replace("\n", " ")} bounds=${formatBoundsForLog(Rect().also(candidate::getBoundsInScreen))}"
+        )
+    }
+
+    private fun clearAuthoritativeFocusSuppressionWindow(reason: String) {
+        if (authoritativeFocusWindowUntilMs == 0L) return
+        val endedAt = authoritativeFocusWindowUntilMs
+        authoritativeFocusWindowUntilMs = 0L
+        Log.i("A11Y_HELPER", "[FOCUS_VERIFY] suppression_window_end endedAtMs=$endedAt reason=$reason")
     }
 
     internal fun shouldDelayBeforeFocusCommand(currentFocusedBounds: Rect?, targetBounds: Rect?): Boolean {
