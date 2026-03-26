@@ -9,7 +9,7 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.41.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.41.1"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
     private val TRAVERSAL_CONTAINER_CLASS_KEYWORDS = listOf(
@@ -1264,47 +1264,53 @@ object A11yNavigator {
         val continuationFallbackAttempted = request.isScrollAction && request.preScrollAnchor != null && resolvedAnchorIndex == -1
         var continuationFallbackFailed = false
         val fallbackBelowAnchorIndex = if (continuationFallbackAttempted) {
-            val promotedRawOnlyViewIds = collectRawVisibleNodes(context.root)
-                .mapNotNull { raw -> raw.viewId?.substringAfterLast('/')?.trim() }
-                .filter { shortId -> isSettingsRowViewId(shortId) }
-                .toSet()
-            val candidate = selectContinuationCandidateAfterScroll(
-                traversalList = traversalList,
-                startIndex = 0,
-                visibleHistory = request.visibleHistory,
-                visibleHistorySignatures = request.visibleHistorySignatures,
-                visitedHistory = context.visitedHistory,
-                visitedHistorySignatures = context.visitedHistorySignatures,
-                screenTop = context.screenTop,
-                screenBottom = context.screenBottom,
-                screenHeight = context.screenHeight,
-                boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
-                classNameOf = { node -> node.className?.toString() },
-                viewIdOf = { node -> node.viewIdResourceName },
-                isContentNodeOf = { node ->
-                    isContentNode(
-                        node = node,
-                        bounds = Rect().also { node.getBoundsInScreen(it) },
-                        screenTop = context.screenTop,
-                        screenBottom = context.screenBottom,
-                        screenHeight = context.screenHeight,
-                        mainScrollContainer = localMainScrollContainer
-                    )
-                },
-                clickableOf = { node -> node.isClickable },
-                focusableOf = { node -> node.isFocusable },
-                descendantLabelOf = { node -> recoverDescendantLabel(node) },
-                promotedViewIds = promotedRawOnlyViewIds,
-                preScrollAnchor = request.preScrollAnchor,
-                preScrollAnchorBottom = request.preScrollAnchor.bounds.bottom,
-                labelOf = { node ->
-                    node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                        ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                }
-            )
-            val selection = selectPostScrollCandidate(candidate)
-            continuationFallbackFailed = !selection.accepted
-            if (!selection.accepted) -1 else candidate
+            val preScrollAnchor = request.preScrollAnchor
+            if (preScrollAnchor == null) {
+                continuationFallbackFailed = true
+                -1
+            } else {
+                val promotedRawOnlyViewIds = collectRawVisibleNodes(context.root)
+                    .mapNotNull { raw -> raw.viewId?.substringAfterLast('/')?.trim() }
+                    .filter { shortId -> isSettingsRowViewId(shortId) }
+                    .toSet()
+                val candidate = selectContinuationCandidateAfterScroll(
+                    traversalList = traversalList,
+                    startIndex = 0,
+                    visibleHistory = request.visibleHistory,
+                    visibleHistorySignatures = request.visibleHistorySignatures,
+                    visitedHistory = context.visitedHistory,
+                    visitedHistorySignatures = context.visitedHistorySignatures,
+                    screenTop = context.screenTop,
+                    screenBottom = context.screenBottom,
+                    screenHeight = context.screenHeight,
+                    boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+                    classNameOf = { node -> node.className?.toString() },
+                    viewIdOf = { node -> node.viewIdResourceName },
+                    isContentNodeOf = { node ->
+                        isContentNode(
+                            node = node,
+                            bounds = Rect().also { node.getBoundsInScreen(it) },
+                            screenTop = context.screenTop,
+                            screenBottom = context.screenBottom,
+                            screenHeight = context.screenHeight,
+                            mainScrollContainer = localMainScrollContainer
+                        )
+                    },
+                    clickableOf = { node -> node.isClickable },
+                    focusableOf = { node -> node.isFocusable },
+                    descendantLabelOf = { node -> recoverDescendantLabel(node) },
+                    promotedViewIds = promotedRawOnlyViewIds,
+                    preScrollAnchor = preScrollAnchor,
+                    preScrollAnchorBottom = preScrollAnchor.bounds.bottom,
+                    labelOf = { node ->
+                        node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                            ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                    }
+                )
+                val selection = selectPostScrollCandidate(candidate)
+                continuationFallbackFailed = !selection.accepted
+                if (!selection.accepted) -1 else candidate
+            }
         } else {
             -1
         }
