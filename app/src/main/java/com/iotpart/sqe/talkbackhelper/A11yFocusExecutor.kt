@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.2.3"
+    const val VERSION: String = "1.2.4"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -129,7 +129,6 @@ object A11yFocusExecutor {
         val currentFocusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { Rect().also(it::getBoundsInScreen) }
         if (A11yNavigator.shouldReuseExistingAccessibilityFocus(label, isScrollAction, currentFocusedBounds, targetBounds)) {
             val commitDecision = resolveFocusRetargetDecision(root, target, label, traversalListSnapshot, traversalIndex, isScrollAction)
-            A11yNavigator.recordRequestedFocusAttempt(traversalIndex, root)
             A11yNavigator.recordVisitedFocus(commitDecision.finalTarget, commitDecision.finalLabel, reason = "focus_reused_existing_target")
             return ActionResult(true, "moved", commitDecision.finalTarget)
         }
@@ -160,7 +159,6 @@ object A11yFocusExecutor {
         }
 
         val commitDecision = resolveFocusRetargetDecision(root, target, label, traversalListSnapshot, traversalIndex, isScrollAction)
-        A11yNavigator.recordRequestedFocusAttempt(traversalIndex, root)
         A11yNavigator.recordVisitedFocus(commitDecision.finalTarget, commitDecision.finalLabel, reason = "focus_confirmed_final")
         return ActionResult(true, status, commitDecision.finalTarget)
     }
