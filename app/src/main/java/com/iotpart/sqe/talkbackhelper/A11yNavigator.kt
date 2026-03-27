@@ -12,7 +12,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.61.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.61.1"
 
 
     @Volatile
@@ -1295,7 +1295,7 @@ object A11yNavigator {
         }
         return findMainScrollContainer(
             nodes = nodes,
-            isScrollable = { it.isScrollable },
+            isScrollable = { isEligibleVerticalScrollNode(it) },
             boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } }
         )
     }
@@ -1556,7 +1556,7 @@ object A11yNavigator {
             val hasScrollableDown = hasScrollableDownCandidateByAction(
                 nodesInOrder = listOf(node),
                 isVisibleToUser = { it.isVisibleToUser },
-                isScrollable = { it.isScrollable },
+                isScrollable = { isEligibleVerticalScrollNode(it) },
                 hasScrollForwardAction = {
                     it.actionList.contains(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD)
                 }
@@ -1576,11 +1576,17 @@ object A11yNavigator {
         return findScrollableForwardAncestorCandidate(
             node = node,
             parentOf = { it.parent },
-            isScrollable = { it.isScrollable },
+            isScrollable = { isEligibleVerticalScrollNode(it) },
             hasScrollForwardAction = {
                 it.actionList.contains(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD)
             }
         )
+    }
+
+    internal fun isEligibleVerticalScrollNode(node: AccessibilityNodeInfo): Boolean {
+        if (!node.isScrollable) return false
+        val className = node.className?.toString()?.lowercase() ?: ""
+        return !className.contains("horizontal") && !className.contains("viewpager")
     }
 
     internal fun <T> findScrollableForwardAncestorCandidate(
