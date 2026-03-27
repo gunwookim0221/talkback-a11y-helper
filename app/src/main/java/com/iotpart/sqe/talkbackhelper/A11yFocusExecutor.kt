@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.3.5"
+    const val VERSION: String = "1.3.6"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -31,6 +31,7 @@ object A11yFocusExecutor {
         val targetBounds = Rect().also(target::getBoundsInScreen)
         var lastBounds: Rect? = null
         repeat(maxAttempts) { attempt ->
+            target.refresh()
             target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
             Thread.sleep(retryDelayMs)
             target.refresh()
