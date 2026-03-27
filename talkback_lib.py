@@ -1085,7 +1085,7 @@ class A11yAdbClient:
             return "failed"
 
         status = str(result.get("status", "failed")).strip().lower()
-        if status in {"moved", "scrolled", "looped", "failed"}:
+        if status in {"moved", "scrolled", "looped", "failed","moved_to_bottom_bar"}:
             return status
         return "failed"
 
