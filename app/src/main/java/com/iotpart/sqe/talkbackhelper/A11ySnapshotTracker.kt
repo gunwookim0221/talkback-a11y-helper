@@ -6,9 +6,10 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 typealias SnapshotVisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
+internal typealias FocusedNode = A11yTraversalAnalyzer.FocusedNode
 
 object A11ySnapshotTracker {
-    const val SNAPSHOT_TRACKER_VERSION: String = "1.0.5"
+    const val SNAPSHOT_TRACKER_VERSION: String = "1.0.6"
 
     internal data class RawVisibleNode(
         val label: String,
