@@ -5,6 +5,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
+import kotlin.jvm.JvmName
 import org.json.JSONObject
 
 typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
@@ -12,12 +13,13 @@ typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 internal typealias FocusedNode = A11yTraversalAnalyzer.FocusedNode
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.60.4"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.60.5"
 
 
     @Volatile
     internal var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
 
+    @JvmName("setLastRequestedFocusIndexExplicit")
     internal fun setLastRequestedFocusIndex(index: Int) {
         lastRequestedFocusIndex = index
     }
