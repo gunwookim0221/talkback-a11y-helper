@@ -6,9 +6,10 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONArray
 import org.json.JSONObject
 
+internal typealias FocusedNode = A11yTraversalAnalyzer.FocusedNode
 
 object A11yModelVersion {
-    const val VERSION: String = "1.6.0"
+    const val VERSION: String = "1.6.1"
 }
 
 internal data class PostScrollContinuationPlan(
