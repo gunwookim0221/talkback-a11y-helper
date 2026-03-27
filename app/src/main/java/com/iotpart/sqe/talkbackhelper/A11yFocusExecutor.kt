@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.3.8"
+    const val VERSION: String = "1.3.9"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -33,10 +33,22 @@ object A11yFocusExecutor {
 
         Log.i("A11Y_HELPER", "[FOCUS_EXEC] Start focus target=$targetBounds")
 
+        fun findFocusableDescendant(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+            if (node.isClickable || node.isFocusable) return node
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                val result = findFocusableDescendant(child)
+                if (result != null) return result
+            }
+            return null
+        }
+
         repeat(maxAttempts) { attempt ->
             target.refresh()
-            val actionResult = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
-            Log.i("A11Y_HELPER", "[FOCUS_EXEC] Attempt ${attempt + 1}: performAction=$actionResult")
+
+            val realTarget = findFocusableDescendant(target) ?: target
+            val actionResult = realTarget.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+            Log.i("A11Y_HELPER", "[FOCUS_EXEC] Attempt ${attempt + 1}: performAction=$actionResult on realTarget=${realTarget.className}")
 
             Thread.sleep(retryDelayMs)
 
@@ -47,7 +59,10 @@ object A11yFocusExecutor {
             Log.i("A11Y_HELPER", "[FOCUS_EXEC] Attempt ${attempt + 1} actual focus=$lastBounds")
 
             if (lastBounds != null && lastBounds == targetBounds) {
-                Log.i("A11Y_HELPER", "[FOCUS_EXEC] Success! Focus matched.")
+                Log.i("A11Y_HELPER", "[FOCUS_EXEC] Success! Focus matched exactly.")
+                return FocusExecutionResult(true, attempt + 1, lastBounds)
+            } else if (lastBounds != null && targetBounds.contains(lastBounds!!)) {
+                Log.i("A11Y_HELPER", "[FOCUS_EXEC] Success! Focus matched (contained within target).")
                 return FocusExecutionResult(true, attempt + 1, lastBounds)
             }
         }
