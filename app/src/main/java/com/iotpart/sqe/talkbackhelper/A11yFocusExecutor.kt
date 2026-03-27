@@ -3,11 +3,12 @@ package com.iotpart.sqe.talkbackhelper
 import android.graphics.Rect
 import android.os.Build
 import android.util.Log
+import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.3.0"
+    const val VERSION: String = "1.3.1"
 
     data class FocusExecutionResult(
         val success: Boolean,
