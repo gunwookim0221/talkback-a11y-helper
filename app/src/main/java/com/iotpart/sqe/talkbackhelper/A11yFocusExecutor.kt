@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.3.2"
+    const val VERSION: String = "1.3.3"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -501,25 +501,25 @@ object A11yFocusExecutor {
 
         while (queue.isNotEmpty()) {
             val node = queue.removeFirst()
+
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { queue.addLast(it) }
+            }
+
             if (node.isScrollable) {
+                val className = node.className?.toString()?.lowercase() ?: ""
+                if (className.contains("horizontal") || className.contains("viewpager")) {
+                    continue
+                }
+
                 val bounds = android.graphics.Rect()
                 node.getBoundsInScreen(bounds)
-                val area = bounds.width().toLong() * bounds.height().toLong()
+                val score = bounds.width().toLong() * bounds.height().toLong()
 
-                val className = node.className?.toString()?.lowercase() ?: ""
-                val isHorizontalOrPager = className.contains("horizontal") || className.contains("viewpager")
-
-                // 가로 스크롤이나 ViewPager는 메인 수직 스크롤 대상에서 우선순위를 낮춤
-                val score = if (isHorizontalOrPager) area / 2 else area
-
-                // 면적이 가장 크거나, (면적이 같으면) 더 깊이 있는 실제 스크롤 뷰(자식)를 선택
                 if (score >= maxScore && score > 0) {
                     maxScore = score
                     bestNode = node
                 }
-            }
-            for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { queue.addLast(it) }
             }
         }
         return bestNode
