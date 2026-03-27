@@ -5,7 +5,7 @@ import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 
 object A11yHistoryManager {
-    const val VERSION: String = "1.3.0"
+    const val VERSION: String = "1.4.0"
     private const val RETARGET_SUPPRESSION_WINDOW_MS: Long = 400L
 
     data class VisibleHistorySignature(
@@ -34,6 +34,8 @@ object A11yHistoryManager {
     internal var lastFinalCommitTurnId: Long = 0L
     @Volatile
     internal var smartNextTurnSeed: Long = 0L
+    @Volatile
+    private var authoritativeCommittedTurnId: Long = 0L
 
     @Volatile
     private var authoritativeFocusWindowUntilMs: Long = 0L
@@ -117,39 +119,15 @@ object A11yHistoryManager {
         val sameIdentity = !committedIdentity.isNullOrBlank() && committedIdentity == candidateIdentity
         if (sameBounds || sameIdentity) return false
 
-        val rootBounds = root?.let { Rect().also(it::getBoundsInScreen) } ?: Rect(0, 0, 0, candidateBounds.bottom)
-        val rootTop = rootBounds.top
-        val rootBottom = if (rootBounds.bottom > rootBounds.top) rootBounds.bottom else candidateBounds.bottom
-        val rootHeight = (rootBottom - rootTop).coerceAtLeast(1)
-        val isHeaderLike = A11yNodeUtils.isHeaderLikeCandidate(
-            className = candidate.className?.toString(),
-            viewIdResourceName = candidate.viewIdResourceName,
-            label = A11yNavigator.resolvePrimaryLabel(candidate) ?: A11yTraversalAnalyzer.recoverDescendantLabel(candidate),
-            boundsInScreen = candidateBounds,
-            screenTop = rootTop,
-            screenHeight = rootHeight
-        )
-        val isTopChrome = A11yNodeUtils.isTopAppBar(
-            className = candidate.className?.toString(),
-            viewIdResourceName = candidate.viewIdResourceName,
-            boundsInScreen = candidateBounds,
-            screenTop = rootTop,
-            screenHeight = rootHeight
-        )
-        val isPersistentHeader = candidateBounds.top <= rootTop + (rootHeight / 4) && isHeaderLike
-        val isContent = A11yNodeUtils.isContentNode(
-            node = candidate,
-            bounds = candidateBounds,
-            screenTop = rootTop,
-            screenBottom = rootBottom,
-            screenHeight = rootHeight,
-            mainScrollContainer = null
-        )
-        val shouldIgnore = (isTopChrome || isPersistentHeader || isHeaderLike) && !isContent
+        val isStrayEventType = eventType == android.view.accessibility.AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED ||
+            eventType == android.view.accessibility.AccessibilityEvent.TYPE_VIEW_FOCUSED ||
+            eventType == android.view.accessibility.AccessibilityEvent.TYPE_ANNOUNCEMENT ||
+            eventType == android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+        val shouldIgnore = isStrayEventType
         if (shouldIgnore) {
             Log.i(
                 "A11Y_HELPER",
-                "[FOCUS_VERIFY] ignored_post_commit_resurfaced_header eventType=$eventType candidate=${(A11yNavigator.resolvePrimaryLabel(candidate) ?: A11yTraversalAnalyzer.recoverDescendantLabel(candidate) ?: "<no-label>").replace("\n", " ")} committed=${(authoritativeCommittedLabel() ?: "<no-label>").replace("\n", " ")} committedBounds=${A11yNavigator.formatBoundsForLog(committedBounds)} candidateBounds=${A11yNavigator.formatBoundsForLog(candidateBounds)}"
+                "[FOCUS_VERIFY] final_focus_ignored_event reason=already_committed eventType=$eventType candidate=${(A11yNavigator.resolvePrimaryLabel(candidate) ?: A11yTraversalAnalyzer.recoverDescendantLabel(candidate) ?: "<no-label>").replace("\n", " ")} committed=${(authoritativeCommittedLabel() ?: "<no-label>").replace("\n", " ")} committedBounds=${A11yNavigator.formatBoundsForLog(committedBounds)} candidateBounds=${A11yNavigator.formatBoundsForLog(candidateBounds)}"
             )
         }
         return shouldIgnore
@@ -180,6 +158,15 @@ object A11yHistoryManager {
         Log.i("A11Y_HELPER", "[FOCUS_VERIFY] suppression_window_end reason=$reason")
     }
 
+    internal fun markFinalCommitTurn(turnId: Long) {
+        authoritativeCommittedTurnId = turnId
+        lastFinalCommitTurnId = turnId
+    }
+
+    internal fun hasCommittedFinalFocusForTurn(turnId: Long): Boolean {
+        return turnId != 0L && authoritativeCommittedTurnId == turnId
+    }
+
     fun startAuthoritativeFocusWindow(untilMs: Long, label: String, identity: String?, bounds: Rect, status: String) {
         authoritativeFocusWindowUntilMs = untilMs
         authoritativeCommittedLabel = label
@@ -194,6 +181,7 @@ object A11yHistoryManager {
         authoritativeCommittedIdentity = null
         authoritativeCommittedBounds = null
         authoritativeCommittedStatus = "moved"
+        authoritativeCommittedTurnId = 0L
     }
 
     fun authoritativeCommittedBounds(): Rect? = authoritativeCommittedBounds?.let(::Rect)

@@ -124,7 +124,9 @@ internal data class FocusRetargetDecision(
     val finalLabel: String,
     val source: String,
     val retargeted: Boolean,
-    val authoritativeOverride: Boolean
+    val commitStatus: String,
+    val success: Boolean,
+    val reason: String
 )
 
 internal data class PostScrollContinuationSearchResult(

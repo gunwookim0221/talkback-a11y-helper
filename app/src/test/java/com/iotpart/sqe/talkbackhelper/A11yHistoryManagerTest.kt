@@ -11,7 +11,7 @@ class A11yHistoryManagerTest {
 
     @Test
     fun version_isUpdated() {
-        assertEquals("1.1.0", A11yHistoryManager.VERSION)
+        assertEquals("1.4.0", A11yHistoryManager.VERSION)
     }
 
     @Test
@@ -38,8 +38,8 @@ class A11yHistoryManagerTest {
 
         A11yHistoryManager.startAuthoritativeFocusWindow(
             untilMs = untilMs,
-            label = "Labs",
-            identity = "labs-node",
+            label = "Committed Candidate",
+            identity = "committed-node",
             bounds = Rect(0, 300, 1000, 500),
             status = "moved"
         )

@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.4.1"
+    const val VERSION: String = "1.4.2"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
     data class CandidateSelectionResult(
@@ -30,7 +30,6 @@ object A11yTraversalAnalyzer {
         val filteredNodes = focusNodes
             .filterNot { shouldExcludeAsEmptyShell(it) }
             .sortedWith(spatialComparator())
-        logSettingsCandidateStatus(root, filteredNodes)
         return filteredNodes
     }
 
@@ -716,54 +715,6 @@ object A11yTraversalAnalyzer {
             index = bestIndex,
             hasValidPostScrollCandidate = bestIndex >= 0 || hasValidPostScrollCandidate
         )
-    }
-
-    private fun logSettingsCandidateStatus(root: AccessibilityNodeInfo, traversalNodes: List<FocusedNode>) {
-        val rawSettingNode = findFirstMatchingNode(root) { node ->
-            isOneConnectSettingsCandidateNode(node, recoverDescendantLabel(node))
-        }
-        Log.i("A11Y_HELPER", "[SMART_NEXT] SETTINGS_CANDIDATE raw_found=${rawSettingNode != null}")
-
-        val traversalSettingNode = traversalNodes.firstOrNull { focused ->
-            isOneConnectSettingsCandidateNode(focused.node, focused.mergedLabel ?: recoverDescendantLabel(focused.node))
-        }
-        Log.i("A11Y_HELPER", "[SMART_NEXT] SETTINGS_CANDIDATE in_traversal=${traversalSettingNode != null}")
-
-        val smartThingsIndex = traversalNodes.indexOfFirst { node ->
-            val label = node.text?.trim()
-                ?: node.contentDescription?.trim()
-                ?: node.mergedLabel?.trim()
-                ?: recoverDescendantLabel(node.node)?.trim()
-            label.equals("SmartThings", ignoreCase = true)
-        }
-        val smartThingsNextLabel = if (smartThingsIndex >= 0 && smartThingsIndex + 1 < traversalNodes.size) {
-            traversalNodes[smartThingsIndex + 1].text?.trim()
-                ?: traversalNodes[smartThingsIndex + 1].contentDescription?.trim()
-                ?: traversalNodes[smartThingsIndex + 1].mergedLabel?.trim()
-                ?: recoverDescendantLabel(traversalNodes[smartThingsIndex + 1].node)?.trim()
-                ?: "<no-label>"
-        } else {
-            "<none>"
-        }
-        Log.i("A11Y_HELPER", "[SMART_NEXT] SETTINGS_CANDIDATE next_after_smartthings=$smartThingsNextLabel")
-    }
-
-    private fun findFirstMatchingNode(
-        root: AccessibilityNodeInfo,
-        predicate: (AccessibilityNodeInfo) -> Boolean
-    ): AccessibilityNodeInfo? {
-        val queue = ArrayDeque<AccessibilityNodeInfo>()
-        queue.add(root)
-        while (queue.isNotEmpty()) {
-            val current = queue.removeFirst()
-            if (predicate(current)) {
-                return current
-            }
-            for (index in 0 until current.childCount) {
-                current.getChild(index)?.let(queue::add)
-            }
-        }
-        return null
     }
 
     internal fun recoverLabelFromDescendantTexts(textCandidates: List<String>): String? {
