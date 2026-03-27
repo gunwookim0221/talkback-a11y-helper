@@ -3,12 +3,11 @@ package com.iotpart.sqe.talkbackhelper
 import android.graphics.Rect
 import android.os.Build
 import android.util.Log
-import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.2.4"
+    const val VERSION: String = "1.3.0"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -128,9 +127,8 @@ object A11yFocusExecutor {
 
         val currentFocusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { Rect().also(it::getBoundsInScreen) }
         if (A11yNavigator.shouldReuseExistingAccessibilityFocus(label, isScrollAction, currentFocusedBounds, targetBounds)) {
-            val commitDecision = resolveFocusRetargetDecision(root, target, label, traversalListSnapshot, traversalIndex, isScrollAction)
-            A11yNavigator.recordVisitedFocus(commitDecision.finalTarget, commitDecision.finalLabel, reason = "focus_reused_existing_target")
-            return ActionResult(true, "moved", commitDecision.finalTarget)
+            val commitDecision = resolveFocusRetargetDecision(root, target, label, traversalListSnapshot, traversalIndex, isScrollAction, status)
+            return commitFinalFocusCandidate(commitDecision, reason = "focus_reused_existing_target")
         }
 
         clearAccessibilityFocusAndRefresh(root)
@@ -154,13 +152,13 @@ object A11yFocusExecutor {
         )
         if (focusVerification.snapBackDetected) {
             Log.w("A11Y_HELPER", "[SMART_NEXT] requestFocusFlow snap_back target=${A11yNavigator.formatBoundsForLog(targetBounds)} actual=${A11yNavigator.formatBoundsForLog(focusVerification.actualFocusedBounds)}")
-            A11yNavigator.syncLastRequestedFocusIndexToCurrentFocus(root, A11yTraversalAnalyzer.buildTalkBackLikeFocusNodes(root).map { it.node })
-            return ActionResult(false, "snap_back", target)
         }
 
-        val commitDecision = resolveFocusRetargetDecision(root, target, label, traversalListSnapshot, traversalIndex, isScrollAction)
-        A11yNavigator.recordVisitedFocus(commitDecision.finalTarget, commitDecision.finalLabel, reason = "focus_confirmed_final")
-        return ActionResult(true, status, commitDecision.finalTarget)
+        val commitDecision = resolveFocusRetargetDecision(root, target, label, traversalListSnapshot, traversalIndex, isScrollAction, status)
+        if (!commitDecision.success) {
+            A11yNavigator.syncLastRequestedFocusIndexToCurrentFocus(root, A11yTraversalAnalyzer.buildTalkBackLikeFocusNodes(root).map { it.node })
+        }
+        return commitFinalFocusCandidate(commitDecision, reason = "focus_confirmed_final")
     }
 
     internal fun resolveFocusRetargetDecision(
@@ -169,7 +167,8 @@ object A11yFocusExecutor {
         intendedLabel: String,
         traversalListSnapshot: List<AccessibilityNodeInfo>?,
         intendedIndex: Int,
-        isScrollAction: Boolean
+        isScrollAction: Boolean,
+        requestedStatus: String
     ): FocusRetargetDecision {
         val actualFocusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         val actualCandidateIndex = if (actualFocusedNode != null && traversalListSnapshot != null) {
@@ -197,11 +196,27 @@ object A11yFocusExecutor {
                 screenHeight = rootHeight,
                 mainScrollContainer = null
             )
+        val isPostScrollValidCandidate = actualFocusedNode != null && actualBounds != null &&
+            !A11yNodeUtils.isTopAppBar(
+                className = actualFocusedNode.className?.toString(),
+                viewIdResourceName = actualFocusedNode.viewIdResourceName,
+                boundsInScreen = actualBounds,
+                screenTop = rootBounds.top,
+                screenHeight = rootHeight
+            ) &&
+            !A11yNodeUtils.isBottomNavigationBar(
+                className = actualFocusedNode.className?.toString(),
+                viewIdResourceName = actualFocusedNode.viewIdResourceName,
+                boundsInScreen = actualBounds,
+                screenBottom = rootBounds.bottom,
+                screenHeight = rootHeight
+            ) &&
+            actualIsInteractiveContent
         val retarget = !identityMatched &&
             isScrollAction &&
-            actualCandidateIndex >= 0 &&
+            (actualCandidateIndex >= 0 || traversalListSnapshot.isNullOrEmpty()) &&
             (intendedIndex < 0 || actualCandidateIndex != intendedIndex) &&
-            actualIsInteractiveContent
+            isPostScrollValidCandidate
         val shouldSuppressTopNoise = isScrollAction &&
             A11yHistoryManager.isWithinAuthoritativeFocusWindow() &&
             actualFocusedNode != null &&
@@ -219,9 +234,13 @@ object A11yFocusExecutor {
             !isScrollAction -> "not_scroll_action"
             actualFocusedNode == null -> "actual_focus_missing"
             actualCandidateIndex < 0 -> "actual_not_in_post_scroll_candidates"
-            !actualIsInteractiveContent -> "actual_not_interactive_content"
+            !isPostScrollValidCandidate -> "actual_not_post_scroll_valid_candidate"
             else -> "actual_valid_post_scroll_candidate"
         }
+        Log.i(
+            "A11Y_HELPER",
+            "[FOCUS_VERIFY] candidate_classification actualCandidateIndex=$actualCandidateIndex isTopChrome=${actualFocusedNode != null && actualBounds != null && A11yNodeUtils.isTopAppBar(actualFocusedNode.className?.toString(), actualFocusedNode.viewIdResourceName, actualBounds, rootBounds.top, rootHeight)} isPersistentHeader=${actualBounds != null && actualBounds.top <= rootBounds.top + (rootHeight / 4)} isWithinContentBounds=$actualIsInteractiveContent isPostScrollValidCandidate=$isPostScrollValidCandidate"
+        )
         Log.i(
             "A11Y_HELPER",
             "[FOCUS_VERIFY] focus_retarget_eval intended=${A11yNavigator.formatBoundsForLog(Rect().also(intendedTarget::getBoundsInScreen))} actual=${A11yNavigator.formatBoundsForLog(actualBounds)} actualCandidateIndex=$actualCandidateIndex retarget=$retarget reason=$reason"
@@ -239,6 +258,12 @@ object A11yFocusExecutor {
             retarget -> "retargeted_actual"
             else -> "intended"
         }
+        if (retarget) {
+            Log.i(
+                "A11Y_HELPER",
+                "[FOCUS_VERIFY] retarget_accepted intended=${A11yNavigator.formatBoundsForLog(Rect().also(intendedTarget::getBoundsInScreen))} actual=${A11yNavigator.formatBoundsForLog(actualBounds)}"
+            )
+        }
         if (shouldSuppressTopNoise) {
             Log.i(
                 "A11Y_HELPER",
@@ -249,23 +274,48 @@ object A11yFocusExecutor {
                 "[FOCUS_VERIFY] suppression_window_event type=A11Y_ANNOUNCEMENT suppressed=true reason=top_resurfaced_header_during_authoritative_window label=${A11yNavigator.resolvePrimaryLabel(actualFocusedNode) ?: A11yTraversalAnalyzer.recoverDescendantLabel(actualFocusedNode) ?: "<no-label>"}"
             )
         }
-        if (isScrollAction) {
-            A11yHistoryManager.startAuthoritativeFocusSuppressionWindow(finalTarget, finalLabel, "moved")
-        } else if (!A11yHistoryManager.isWithinAuthoritativeFocusWindow()) {
-            A11yHistoryManager.clearAuthoritativeFocusSuppressionWindow("window_expired_or_not_needed")
+        val success = when {
+            shouldSuppressTopNoise -> true
+            retarget -> true
+            actualFocusedNode == null -> false
+            identityMatched -> true
+            !isScrollAction -> true
+            else -> false
         }
-        A11yHistoryManager.lastFinalCommitTurnId = A11yHistoryManager.activeSmartNextTurnId
-        Log.i(
-            "A11Y_HELPER",
-            "[FOCUS_VERIFY] final_focus_commit candidate=${finalLabel.replace("\n", " ")} source=$source"
-        )
+        val commitStatus = if (success) requestedStatus else "failed"
+        val finalReason = if (success) "success_basis=committed_candidate" else reason
         return FocusRetargetDecision(
             finalTarget = finalTarget,
             finalLabel = finalLabel,
             source = source,
             retargeted = retarget,
-            authoritativeOverride = retarget || shouldSuppressTopNoise
+            commitStatus = commitStatus,
+            success = success,
+            reason = finalReason
         )
+    }
+
+    private fun commitFinalFocusCandidate(
+        decision: FocusRetargetDecision,
+        reason: String
+    ): ActionResult {
+        val activeTurnId = A11yHistoryManager.activeSmartNextTurnId
+        if (A11yHistoryManager.hasCommittedFinalFocusForTurn(activeTurnId)) {
+            Log.i(
+                "A11Y_HELPER",
+                "[FOCUS_VERIFY] final_focus_ignored_event reason=already_committed candidate=${decision.finalLabel.replace("\n", " ")} source=${decision.source}"
+            )
+            val lockedNode = A11yHistoryManager.authoritativeCommittedNode ?: decision.finalTarget
+            return ActionResult(true, A11yHistoryManager.authoritativeCommittedStatus, lockedNode)
+        }
+        if (decision.success) {
+            A11yNavigator.recordVisitedFocus(decision.finalTarget, decision.finalLabel, reason = reason)
+            A11yHistoryManager.startAuthoritativeFocusSuppressionWindow(decision.finalTarget, decision.finalLabel, decision.commitStatus)
+            A11yHistoryManager.markFinalCommitTurn(activeTurnId)
+            Log.i("A11Y_HELPER", "[FOCUS_VERIFY] success_basis=committed_candidate")
+        }
+        Log.i("A11Y_HELPER", "[FOCUS_VERIFY] final_focus_commit candidate=${decision.finalLabel.replace("\n", " ")} source=${decision.source}")
+        return ActionResult(decision.success, if (decision.success) decision.commitStatus else decision.reason, decision.finalTarget)
     }
 
     internal fun alignCandidateForReadableFocus(

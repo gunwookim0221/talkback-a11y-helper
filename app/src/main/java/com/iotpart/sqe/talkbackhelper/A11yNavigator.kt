@@ -12,7 +12,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.60.8"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.61.0"
 
 
     @Volatile
@@ -234,6 +234,7 @@ object A11yNavigator {
             Log.i("A11Y_HELPER", "[SMART_NEXT] rootInActiveWindow is null.")
             return TargetActionOutcome(false, "Root node is null")
         }
+        A11yHistoryManager.clearAuthoritativeFocusSuppressionWindow("new_smart_next_command_started")
         val turnId = A11yHistoryManager.issueNextSmartNextTurnId()
         A11yHistoryManager.activeSmartNextTurnId = turnId
         return try {
@@ -944,14 +945,16 @@ object A11yNavigator {
         intendedLabel: String,
         traversalListSnapshot: List<AccessibilityNodeInfo>?,
         intendedIndex: Int,
-        isScrollAction: Boolean
+        isScrollAction: Boolean,
+        requestedStatus: String
     ): FocusRetargetDecision = A11yFocusExecutor.resolveFocusRetargetDecision(
         root = root,
         intendedTarget = intendedTarget,
         intendedLabel = intendedLabel,
         traversalListSnapshot = traversalListSnapshot,
         intendedIndex = intendedIndex,
-        isScrollAction = isScrollAction
+        isScrollAction = isScrollAction,
+        requestedStatus = requestedStatus
     )
 
     internal fun alignCandidateForReadableFocus(
