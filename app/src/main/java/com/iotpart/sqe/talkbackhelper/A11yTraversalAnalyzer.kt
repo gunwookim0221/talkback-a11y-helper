@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.5.0"
+    const val VERSION: String = "1.6.0"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
     data class CandidateSelectionResult(
@@ -27,7 +27,11 @@ object A11yTraversalAnalyzer {
         val focusNodes = mutableListOf<FocusedNode>()
         collectFocusableNodes(node = root, containerAncestor = null, sink = focusNodes)
 
-        val filteredNodes = focusNodes
+        val dedupedNodes = focusNodes
+            .distinctBy { focused ->
+                Rect().also { focused.node.getBoundsInScreen(it) }
+            }
+        val filteredNodes = dedupedNodes
             .filterNot { shouldExcludeAsEmptyShell(it) }
             .sortedWith(spatialComparator())
         return filteredNodes
@@ -65,18 +69,12 @@ object A11yTraversalAnalyzer {
             viewId.contains("recycler_view", ignoreCase = true)
         val nextContainer = if (container && !isStructural) node else containerAncestor
         for (i in 0 until node.childCount) {
-            node.getChild(i)?.let { child ->
-                val hasTextOrDescription = !child.text.isNullOrBlank() || !child.contentDescription.isNullOrBlank()
-                val childAbsorbed = nextContainer != child && hasTextOrDescription
-
-                if (!childAbsorbed) {
-                    collectFocusableNodes(
-                        node = child,
-                        containerAncestor = nextContainer,
-                        sink = sink
-                    )
-                }
-            }
+            val child = node.getChild(i) ?: continue
+            collectFocusableNodes(
+                node = child,
+                containerAncestor = nextContainer,
+                sink = sink
+            )
         }
     }
 
