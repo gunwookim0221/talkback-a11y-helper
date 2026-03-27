@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.3.3"
+    const val VERSION: String = "1.3.4"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -360,15 +360,19 @@ object A11yFocusExecutor {
         while (adjustments < maxPreFocusAdjustments) {
             var adjusted = false
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                target.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
-                adjusted = true
+                val shown = target.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
+                if (shown) {
+                    adjusted = true
+                }
             } else {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SHOW_ON_SCREEN not supported on this API level")
             }
 
             val shouldTryContainerScroll =
                 !shouldUseMinimalAdjustment &&
-                canScrollForwardHint && (A11yNodeUtils.isNodeBottomClipped(currentBounds, effectiveBottom) || A11yNodeUtils.shouldLiftTrailingContentBeforeFocus(currentBounds, effectiveBottom))
+                canScrollForwardHint &&
+                !adjusted &&
+                (A11yNodeUtils.isNodeBottomClipped(currentBounds, effectiveBottom) || A11yNodeUtils.shouldLiftTrailingContentBeforeFocus(currentBounds, effectiveBottom))
             if (shouldTryContainerScroll) {
                 val scrollableNode = A11yNavigator.findScrollableForwardAncestorCandidate(target) ?: findScrollableNode(root)
                 if (scrollableNode != null) {
@@ -376,12 +380,13 @@ object A11yFocusExecutor {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Pre-focus readable alignment scroll result=$scrolled label=$label")
                     adjusted = adjusted || scrolled
                 }
-            } else if (!canScrollForwardHint) {
+            } else if (!canScrollForwardHint && !adjusted) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Last content cannot be top-aligned, using fully-visible fallback")
             }
 
             if (!adjusted) break
-            Thread.sleep(100)
+            Thread.sleep(400)
+            target.refresh()
             currentBounds = Rect().also { target.getBoundsInScreen(it) }
             val trailingBounds = intendedTrailingCandidate?.let { candidate ->
                 Rect().also { candidate.getBoundsInScreen(it) }
