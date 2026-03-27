@@ -3,7 +3,7 @@ package com.iotpart.sqe.talkbackhelper
 import android.view.accessibility.AccessibilityNodeInfo
 
 object A11yTargetFinder {
-    const val VERSION: String = "1.0.0"
+    const val VERSION: String = "1.0.1"
 
     data class TargetQuery(
         val targetName: String,
@@ -159,8 +159,21 @@ object A11yTargetFinder {
         val queryWithoutClickable = if (query.clickable != null) query.copy(clickable = null) else query
         if (!matchesTarget(node, queryWithoutClickable)) return null
 
+        val candidate = node
+        val isCandidateInteractive = candidate.isClickable || candidate.isFocusable
+        val effectiveTarget = if (
+            candidate.childCount == 1 &&
+            candidate.text.isNullOrBlank() &&
+            candidate.contentDescription.isNullOrBlank() &&
+            !isCandidateInteractive
+        ) {
+            candidate.getChild(0) ?: candidate
+        } else {
+            candidate
+        }
+
         val resolvedNode = A11yNavigator.resolveToClickableAncestor(
-            node = node,
+            node = effectiveTarget,
             parentOf = { current -> current.parent },
             isClickable = { current -> current.isClickable }
         )
