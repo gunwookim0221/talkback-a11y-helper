@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.4.6"
+    const val VERSION: String = "1.4.7"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
     data class CandidateSelectionResult(
@@ -58,10 +58,10 @@ object A11yTraversalAnalyzer {
         // RecyclerView 등 구조적 컨테이너는 텍스트 병합 주체로 동작하지 않도록 투명 처리한다.
         val className = node.className?.toString() ?: ""
         val viewId = node.viewIdResourceName ?: ""
-        val isStructural = isContainerLikeClassName(className) ||
-            isContainerLikeViewId(viewId) ||
-            className.contains("GridView", ignoreCase = true) ||
+        val isStructural = className.contains("GridView", ignoreCase = true) ||
             className.contains("RecyclerView", ignoreCase = true) ||
+            className.contains("ScrollView", ignoreCase = true) ||
+            className.contains("ViewPager", ignoreCase = true) ||
             viewId.contains("recycler_view", ignoreCase = true)
         val nextContainer = if (container && !isStructural) node else containerAncestor
         for (i in 0 until node.childCount) {
