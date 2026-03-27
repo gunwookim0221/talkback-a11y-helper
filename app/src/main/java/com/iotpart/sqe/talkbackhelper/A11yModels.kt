@@ -9,7 +9,7 @@ import org.json.JSONObject
 internal typealias FocusedNode = A11yTraversalAnalyzer.FocusedNode
 
 object A11yModelVersion {
-    const val VERSION: String = "1.6.1"
+    const val VERSION: String = "1.6.2"
 }
 
 internal data class PostScrollContinuationPlan(
