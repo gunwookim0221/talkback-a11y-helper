@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.3.6"
+    const val VERSION: String = "1.3.7"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -25,22 +25,30 @@ object A11yFocusExecutor {
     fun requestAccessibilityFocusWithRetry(
         target: AccessibilityNodeInfo,
         root: AccessibilityNodeInfo,
-        maxAttempts: Int = 3,
-        retryDelayMs: Long = 150L
+        maxAttempts: Int = 4,
+        retryDelayMs: Long = 250L
     ): FocusExecutionResult {
         val targetBounds = Rect().also(target::getBoundsInScreen)
         var lastBounds: Rect? = null
+        Log.i("A11Y_HELPER", "[FOCUS_EXEC] Start focus target=$targetBounds")
+
         repeat(maxAttempts) { attempt ->
             target.refresh()
-            target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+            val actionResult = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+            Log.i("A11Y_HELPER", "[FOCUS_EXEC] Attempt ${attempt + 1}: performAction=$actionResult")
+
             Thread.sleep(retryDelayMs)
-            target.refresh()
-            lastBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { Rect().also(it::getBoundsInScreen) }
-            val resolved = isTargetFocusResolved(target.isAccessibilityFocused, lastBounds, targetBounds)
-            if (resolved) {
+            val freshRoot = A11yStateStore.currentRoot ?: root
+            val actualFocusNode = freshRoot.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            lastBounds = actualFocusNode?.let { Rect().also(it::getBoundsInScreen) }
+            Log.i("A11Y_HELPER", "[FOCUS_EXEC] Attempt ${attempt + 1} actual focus=$lastBounds")
+
+            if (lastBounds != null && lastBounds == targetBounds) {
+                Log.i("A11Y_HELPER", "[FOCUS_EXEC] Success! Focus matched.")
                 return FocusExecutionResult(true, attempt + 1, lastBounds)
             }
         }
+        Log.e("A11Y_HELPER", "[FOCUS_EXEC] Failed all attempts. Last actual focus: $lastBounds")
         return FocusExecutionResult(false, maxAttempts, lastBounds)
     }
 
