@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.3.1"
+    const val VERSION: String = "1.3.2"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -370,7 +370,7 @@ object A11yFocusExecutor {
                 !shouldUseMinimalAdjustment &&
                 canScrollForwardHint && (A11yNodeUtils.isNodeBottomClipped(currentBounds, effectiveBottom) || A11yNodeUtils.shouldLiftTrailingContentBeforeFocus(currentBounds, effectiveBottom))
             if (shouldTryContainerScroll) {
-                val scrollableNode = A11yNavigator.findScrollableForwardAncestorCandidate(target) ?: A11yNavigator.findScrollableForwardCandidate(root)
+                val scrollableNode = A11yNavigator.findScrollableForwardAncestorCandidate(target) ?: findScrollableNode(root)
                 if (scrollableNode != null) {
                     val scrolled = scrollableNode.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Pre-focus readable alignment scroll result=$scrolled label=$label")
@@ -491,6 +491,38 @@ object A11yFocusExecutor {
             return candidate
         }
         return null
+    }
+
+    internal fun findScrollableNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue += root
+        var bestNode: AccessibilityNodeInfo? = null
+        var maxScore = -1L
+
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            if (node.isScrollable) {
+                val bounds = android.graphics.Rect()
+                node.getBoundsInScreen(bounds)
+                val area = bounds.width().toLong() * bounds.height().toLong()
+
+                val className = node.className?.toString()?.lowercase() ?: ""
+                val isHorizontalOrPager = className.contains("horizontal") || className.contains("viewpager")
+
+                // 가로 스크롤이나 ViewPager는 메인 수직 스크롤 대상에서 우선순위를 낮춤
+                val score = if (isHorizontalOrPager) area / 2 else area
+
+                // 면적이 가장 크거나, (면적이 같으면) 더 깊이 있는 실제 스크롤 뷰(자식)를 선택
+                if (score >= maxScore && score > 0) {
+                    maxScore = score
+                    bestNode = node
+                }
+            }
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { queue.addLast(it) }
+            }
+        }
+        return bestNode
     }
 
     internal fun clearAccessibilityFocusAndRefresh(root: AccessibilityNodeInfo) {
