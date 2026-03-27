@@ -3,12 +3,11 @@ package com.iotpart.sqe.talkbackhelper
 import android.graphics.Rect
 import android.os.Build
 import android.util.Log
-import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.3.9"
+    const val VERSION: String = "1.4.0"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -25,30 +24,18 @@ object A11yFocusExecutor {
     fun requestAccessibilityFocusWithRetry(
         target: AccessibilityNodeInfo,
         root: AccessibilityNodeInfo,
-        maxAttempts: Int = 4,
-        retryDelayMs: Long = 250L
+        maxAttempts: Int = 3,
+        retryDelayMs: Long = 300L
     ): FocusExecutionResult {
         val targetBounds = Rect().also { target.getBoundsInScreen(it) }
         var lastBounds: Rect? = null
 
         Log.i("A11Y_HELPER", "[FOCUS_EXEC] Start focus target=$targetBounds")
 
-        fun findFocusableDescendant(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-            if (node.isClickable || node.isFocusable) return node
-            for (i in 0 until node.childCount) {
-                val child = node.getChild(i) ?: continue
-                val result = findFocusableDescendant(child)
-                if (result != null) return result
-            }
-            return null
-        }
-
         repeat(maxAttempts) { attempt ->
             target.refresh()
-
-            val realTarget = findFocusableDescendant(target) ?: target
-            val actionResult = realTarget.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
-            Log.i("A11Y_HELPER", "[FOCUS_EXEC] Attempt ${attempt + 1}: performAction=$actionResult on realTarget=${realTarget.className}")
+            val actionResult = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+            Log.i("A11Y_HELPER", "[FOCUS_EXEC] Attempt ${attempt + 1}: performAction=$actionResult")
 
             Thread.sleep(retryDelayMs)
 
@@ -556,23 +543,13 @@ object A11yFocusExecutor {
     }
 
     internal fun clearAccessibilityFocusAndRefresh(root: AccessibilityNodeInfo) {
-        root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
-            val cleared = focusedNode.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
-            val clearedTwice = focusedNode.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Cleared accessibility focus before request: result=$cleared secondPass=$clearedTwice")
-        }
+        val cleared = clearAccessibilityFocus(root)
+        Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping manual accessibility focus clear to prevent auto-snap: result=$cleared")
+    }
 
-        val service: android.accessibilityservice.AccessibilityService? = A11yHelperService.instance
-        if (service != null && service is A11yHelperService) {
-            root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-                ?.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
-            root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-                ?.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
-            (service as A11yHelperService).sendAccessibilityEvent(
-                AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED
-            )
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Successfully sent focus clear event with explicit casting")
-        }
+    fun clearAccessibilityFocus(root: AccessibilityNodeInfo?): Boolean {
+        // OS의 Auto-snap 버그 방지를 위해 수동 해제를 비활성화함
+        return true
     }
 
     internal fun requestInputFocusBeforeAccessibilityFocus(target: AccessibilityNodeInfo, label: String): Boolean {

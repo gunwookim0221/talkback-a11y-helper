@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.4.9"
+    const val VERSION: String = "1.5.0"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
     data class CandidateSelectionResult(
@@ -69,10 +69,7 @@ object A11yTraversalAnalyzer {
                 val hasTextOrDescription = !child.text.isNullOrBlank() || !child.contentDescription.isNullOrBlank()
                 val childAbsorbed = nextContainer != child && hasTextOrDescription
 
-                // 텍스트가 상위 컨테이너로 흡수되더라도, 상호작용 가능한 자식은 탐색에서 제외하지 않는다.
-                val isChildInteractive = child.isClickable || child.isFocusable
-
-                if (!childAbsorbed || isChildInteractive) {
+                if (!childAbsorbed) {
                     collectFocusableNodes(
                         node = child,
                         containerAncestor = nextContainer,
