@@ -5,7 +5,7 @@ import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 
 object A11yPostScrollScanner {
-    const val VERSION: String = "1.2.0"
+    const val VERSION: String = "1.2.1"
 
     internal fun findAndFocusFirstContent(
         context: FindAndFocusPhaseContext,
@@ -213,6 +213,7 @@ object A11yPostScrollScanner {
         if (A11yNodeUtils.isNodePhysicallyOffScreen(bounds, context.screenTop, context.screenBottom)) return null
         val isTopBar = A11yNodeUtils.isTopAppBar(node.className?.toString(), node.viewIdResourceName, bounds, context.screenTop, context.screenHeight)
         val isBottomBar = A11yNodeUtils.isBottomNavigationBar(node.className?.toString(), node.viewIdResourceName, bounds, context.screenBottom, context.screenHeight)
+        val shouldSkipTopBar = isTopBar && request.isScrollAction
         val isFixedUi = A11yNodeUtils.isFixedSystemUI(node, localMainScrollContainer)
         val inVisitedHistory = A11ySnapshotTracker.isInVisitedHistory(
             label = label,
@@ -239,7 +240,7 @@ object A11yPostScrollScanner {
             loopState.skippedExcludedNode = true
             return null
         }
-        if (!isTopBar && !isBottomBar) {
+        if (!shouldSkipTopBar && !isBottomBar) {
             if (label == "<no-label>") {
                 label = A11yTraversalAnalyzer.recoverDescendantLabel(node) ?: label
             }
