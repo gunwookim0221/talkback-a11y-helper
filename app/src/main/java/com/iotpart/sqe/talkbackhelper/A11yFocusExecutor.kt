@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.3.4"
+    const val VERSION: String = "1.3.5"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -26,20 +26,19 @@ object A11yFocusExecutor {
         target: AccessibilityNodeInfo,
         root: AccessibilityNodeInfo,
         maxAttempts: Int = 3,
-        retryDelayMs: Long = 100L
+        retryDelayMs: Long = 150L
     ): FocusExecutionResult {
         val targetBounds = Rect().also(target::getBoundsInScreen)
         var lastBounds: Rect? = null
         repeat(maxAttempts) { attempt ->
-            target.refresh()
-            val focused = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+            target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+            Thread.sleep(retryDelayMs)
             target.refresh()
             lastBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { Rect().also(it::getBoundsInScreen) }
-            val resolved = focused || isTargetFocusResolved(target.isAccessibilityFocused, lastBounds, targetBounds)
+            val resolved = isTargetFocusResolved(target.isAccessibilityFocused, lastBounds, targetBounds)
             if (resolved) {
                 return FocusExecutionResult(true, attempt + 1, lastBounds)
             }
-            if (attempt < maxAttempts - 1) Thread.sleep(retryDelayMs)
         }
         return FocusExecutionResult(false, maxAttempts, lastBounds)
     }
@@ -280,7 +279,6 @@ object A11yFocusExecutor {
             retarget -> true
             actualFocusedNode == null -> false
             identityMatched -> true
-            !isScrollAction -> true
             else -> false
         }
         val commitStatus = if (success) requestedStatus else "failed"

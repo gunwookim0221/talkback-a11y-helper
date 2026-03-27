@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.4.5"
+    const val VERSION: String = "1.4.6"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
     data class CandidateSelectionResult(
@@ -149,13 +149,6 @@ object A11yTraversalAnalyzer {
         val current = node.node
         if (isSettingsRowViewId(current.viewIdResourceName) && current.isVisibleToUser && (current.isClickable || current.isFocusable)) {
             return false
-        }
-
-        if (current.text.isNullOrBlank() && current.contentDescription.isNullOrBlank()) {
-            val interactiveDescendantCount = countClickableOrFocusableDescendants(current, limit = 2)
-            if (interactiveDescendantCount == 1) {
-                return true
-            }
         }
 
         val descendantTextCandidates = collectDescendantTextCandidates(current)
