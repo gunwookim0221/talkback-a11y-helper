@@ -12,7 +12,7 @@ class A11yFocusExecutorTest {
         val isSnapBack = A11yFocusExecutor.shouldTreatAsSnapBackAfterVerification(
             actualFocusedBounds = Rect(10, 10, 100, 100),
             targetBounds = Rect(0, 0, 100, 100),
-            isTargetAccessibilityFocused = true
+            actualMatch = true
         )
 
         assertFalse(isSnapBack)
@@ -23,21 +23,22 @@ class A11yFocusExecutorTest {
         val isSnapBack = A11yFocusExecutor.shouldTreatAsSnapBackAfterVerification(
             actualFocusedBounds = Rect(3, 4, 104, 106),
             targetBounds = Rect(0, 0, 100, 100),
-            isTargetAccessibilityFocused = false
+            actualMatch = false
         )
 
         assertFalse(isSnapBack)
     }
 
     @Test
-    fun isTargetFocusResolved_returnsTrue_whenTargetFocusedStateArrivesLate() {
+    fun isTargetFocusResolved_returnsFalse_whenActualFocusedNodeMissing() {
         val resolved = A11yFocusExecutor.isTargetFocusResolved(
-            isTargetAccessibilityFocused = true,
+            actualFocusedNode = null,
             actualFocusedBounds = Rect(220, 400, 1040, 620),
-            targetBounds = Rect(0, 0, 100, 100)
+            targetBounds = Rect(220, 400, 1040, 620),
+            expectedPackageName = "com.sample.app"
         )
 
-        assertTrue(resolved)
+        assertFalse(resolved)
     }
 
     @Test
@@ -45,9 +46,21 @@ class A11yFocusExecutorTest {
         val isSnapBack = A11yFocusExecutor.shouldTreatAsSnapBackAfterVerification(
             actualFocusedBounds = Rect(60, 60, 160, 160),
             targetBounds = Rect(0, 0, 100, 100),
-            isTargetAccessibilityFocused = false
+            actualMatch = false
         )
 
         assertTrue(isSnapBack)
+    }
+
+    @Test
+    fun isTargetFocusResolved_returnsFalse_whenActualBoundsMissing() {
+        val resolved = A11yFocusExecutor.isTargetFocusResolved(
+            actualFocusedNode = null,
+            actualFocusedBounds = null,
+            targetBounds = Rect(0, 0, 100, 100),
+            expectedPackageName = "com.sample.app"
+        )
+
+        assertFalse(resolved)
     }
 }
