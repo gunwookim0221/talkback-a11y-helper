@@ -9,7 +9,37 @@ class A11yTraversalAnalyzerTest {
 
     @Test
     fun version_isUpdated() {
-        assertEquals("1.8.0", A11yTraversalAnalyzer.VERSION)
+        assertEquals("1.8.1", A11yTraversalAnalyzer.VERSION)
+    }
+
+    @Test
+    fun isCompositeContentCardCandidate_acceptsLargeClickableFocusableCard() {
+        val accepted = A11yTraversalAnalyzer.isCompositeContentCardCandidate(
+            clickable = true,
+            focusable = true,
+            widthRatio = 0.93f,
+            heightRatio = 0.24f,
+            areaRatio = 0.22f,
+            hasCompactRecoveredLabel = true,
+            descendantInteractiveCount = 2
+        )
+
+        assertTrue(accepted)
+    }
+
+    @Test
+    fun isCompositeContentCardCandidate_rejectsOverlyLargeContainer() {
+        val accepted = A11yTraversalAnalyzer.isCompositeContentCardCandidate(
+            clickable = true,
+            focusable = true,
+            widthRatio = 1.0f,
+            heightRatio = 0.80f,
+            areaRatio = 0.70f,
+            hasCompactRecoveredLabel = true,
+            descendantInteractiveCount = 3
+        )
+
+        assertFalse(accepted)
     }
 
     @Test
