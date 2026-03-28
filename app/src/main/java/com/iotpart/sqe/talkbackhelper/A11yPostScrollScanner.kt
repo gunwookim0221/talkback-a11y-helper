@@ -268,7 +268,8 @@ object A11yPostScrollScanner {
                 isScrollAction = request.isScrollAction,
                 traversalIndex = index,
                 traversalListSnapshot = traversalList,
-                currentFocusIndexHint = index - 1
+                currentFocusIndexHint = index - 1,
+                aliasMembersByTraversalIndex = context.aliasMembersByRepresentativeIndex
             )
             val mappedOutcome = TargetActionOutcome(outcome.success, outcome.status, outcome.targetNode)
             if (mappedOutcome.success) {

@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.6.0"
+    const val VERSION: String = "1.7.0"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
     data class CandidateSelectionResult(
@@ -216,6 +216,126 @@ object A11yTraversalAnalyzer {
 
         return childCount == 0
     }
+
+    internal fun shouldTreatAsAliasWrapperDuplicate(
+        primaryNode: AccessibilityNodeInfo,
+        secondaryNode: AccessibilityNodeInfo,
+        primaryLabel: String?,
+        secondaryLabel: String?
+    ): Boolean {
+        val primaryBounds = Rect().also { primaryNode.getBoundsInScreen(it) }
+        val secondaryBounds = Rect().also { secondaryNode.getBoundsInScreen(it) }
+        val packageMatched = primaryNode.packageName?.toString() == secondaryNode.packageName?.toString()
+        if (!packageMatched) return false
+        if (!areSemanticallyEquivalentLabels(primaryLabel, secondaryLabel)) return false
+        if (!hasStrongOverlapOrContainment(primaryBounds, secondaryBounds)) return false
+
+        val inAncestorChain = isAncestorOf(
+            ancestor = primaryNode,
+            descendant = secondaryNode,
+            parentOf = { node -> node.parent }
+        ) || isAncestorOf(
+            ancestor = secondaryNode,
+            descendant = primaryNode,
+            parentOf = { node -> node.parent }
+        )
+        if (!inAncestorChain) return false
+
+        val primaryActionControl = isIndependentActionControlClass(primaryNode.className?.toString())
+        val secondaryActionControl = isIndependentActionControlClass(secondaryNode.className?.toString())
+        if (primaryActionControl && secondaryActionControl) return false
+
+        val primaryArea = area(primaryBounds)
+        val secondaryArea = area(secondaryBounds)
+        val largerNode = if (primaryArea >= secondaryArea) primaryNode else secondaryNode
+        val smallerNode = if (largerNode == primaryNode) secondaryNode else primaryNode
+        if (isIndependentActionControlClass(smallerNode.className?.toString()) && (smallerNode.isClickable || smallerNode.isFocusable)) {
+            return false
+        }
+        if (hasDistinctInteractiveDescendant(largerNode, counterpart = smallerNode)) {
+            return false
+        }
+        return true
+    }
+
+    private fun hasDistinctInteractiveDescendant(
+        node: AccessibilityNodeInfo,
+        counterpart: AccessibilityNodeInfo
+    ): Boolean {
+        val rootLabel = recoverDescendantLabel(node)?.trim().orEmpty()
+        val stack = ArrayDeque<AccessibilityNodeInfo>()
+        for (i in 0 until node.childCount) {
+            node.getChild(i)?.let(stack::addLast)
+        }
+        while (stack.isNotEmpty()) {
+            val current = stack.removeFirst()
+            if (!current.isVisibleToUser || current == counterpart) {
+                for (i in 0 until current.childCount) {
+                    current.getChild(i)?.let(stack::addLast)
+                }
+                continue
+            }
+            val interactive = isFocusContainer(current)
+            if (interactive) {
+                val className = current.className?.toString()
+                val descendantLabel = recoverDescendantLabel(current)?.trim().orEmpty()
+                val semanticallySameAsRoot = areSemanticallyEquivalentLabels(rootLabel, descendantLabel)
+                if (isIndependentActionControlClass(className) || !semanticallySameAsRoot) {
+                    return true
+                }
+            }
+            for (i in 0 until current.childCount) {
+                current.getChild(i)?.let(stack::addLast)
+            }
+        }
+        return false
+    }
+
+    private fun areSemanticallyEquivalentLabels(left: String?, right: String?): Boolean {
+        val normalizedLeft = normalizeSemanticLabel(left)
+        val normalizedRight = normalizeSemanticLabel(right)
+        if (normalizedLeft.isBlank() || normalizedRight.isBlank()) return false
+        if (normalizedLeft == normalizedRight) return true
+        return normalizedLeft.contains(normalizedRight) || normalizedRight.contains(normalizedLeft)
+    }
+
+    private fun normalizeSemanticLabel(label: String?): String {
+        return label
+            ?.lowercase()
+            ?.replace(Regex("[^\\p{L}\\p{N}]"), " ")
+            ?.replace(Regex("\\s+"), " ")
+            ?.trim()
+            .orEmpty()
+    }
+
+    private fun hasStrongOverlapOrContainment(left: Rect, right: Rect): Boolean {
+        val minArea = minOf(area(left), area(right)).coerceAtLeast(1)
+        val intersection = Rect(left).apply { intersect(right) }
+        val intersectionArea = area(intersection)
+        val overlapRatio = intersectionArea.toFloat() / minArea.toFloat()
+        if (overlapRatio >= 0.75f) return true
+        val containmentRatio = when {
+            left.contains(right) -> area(right).toFloat() / area(left).coerceAtLeast(1).toFloat()
+            right.contains(left) -> area(left).toFloat() / area(right).coerceAtLeast(1).toFloat()
+            else -> 0f
+        }
+        return containmentRatio >= 0.45f && overlapRatio >= 0.55f
+    }
+
+    private fun isIndependentActionControlClass(className: String?): Boolean {
+        val normalized = className?.lowercase().orEmpty()
+        if (normalized.isBlank()) return false
+        return normalized.contains("button") ||
+            normalized.contains("switch") ||
+            normalized.contains("toggle") ||
+            normalized.contains("checkbox") ||
+            normalized.contains("radiobutton") ||
+            normalized.contains("seekbar") ||
+            normalized.contains("edittext") ||
+            normalized.contains("spinner")
+    }
+
+    private fun area(rect: Rect): Int = rect.width().coerceAtLeast(0) * rect.height().coerceAtLeast(0)
 
     internal fun spatialComparator(yBucketSize: Int = 5): Comparator<FocusedNode> {
         return Comparator { left, right ->
