@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.8.1"
+    const val VERSION: String = "1.8.2"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
     data class CandidateSelectionResult(
@@ -26,11 +26,8 @@ object A11yTraversalAnalyzer {
     internal fun buildTalkBackLikeFocusNodes(root: AccessibilityNodeInfo): List<FocusedNode> {
         val focusNodes = mutableListOf<FocusedNode>()
         collectFocusableNodes(node = root, containerAncestor = null, sink = focusNodes)
-
-        val dedupedNodes = focusNodes
-            .distinctBy { focused ->
-                Rect().also { focused.node.getBoundsInScreen(it) }
-            }
+        Log.i("A11Y_HELPER", "[TRACE_DEDUPE_IN] count=${focusNodes.size}")
+        val dedupedNodes = dedupeByBoundsAndRole(focusNodes)
         val filteredNodes = dedupedNodes
             .filterNot { shouldExcludeAsEmptyShell(it) }
             .sortedWith(spatialComparator())
@@ -49,14 +46,18 @@ object A11yTraversalAnalyzer {
             val mergedContent = collectMergedTextFromContainer(node)
             val mergedText = mergedContent.firstOrNull()
             val mergedDescription = mergedContent.getOrNull(1)
-            sink += FocusedNode(node, mergedText, mergedDescription, mergedText)
+            val focusedNode = FocusedNode(node, mergedText, mergedDescription, mergedText)
+            sink += focusedNode
+            Log.i("A11Y_HELPER", "[TRACE_COLLECT_ADD] reason=container fp=${nodeFingerprint(focusedNode)}")
         } else if (containerAncestor == null && hasAnyText(node)) {
-            sink += FocusedNode(
+            val focusedNode = FocusedNode(
                 node = node,
                 text = node.text?.toString(),
                 contentDescription = node.contentDescription?.toString(),
                 mergedLabel = null
             )
+            sink += focusedNode
+            Log.i("A11Y_HELPER", "[TRACE_COLLECT_ADD] reason=top_level_text fp=${nodeFingerprint(focusedNode)}")
         }
 
         // 명시된 대형 스크롤/리스트 계열만 구조적 컨테이너로 간주한다.
@@ -155,6 +156,7 @@ object A11yTraversalAnalyzer {
     internal fun shouldExcludeAsEmptyShell(node: FocusedNode): Boolean {
         val current = node.node
         if (isSettingsRowViewId(current.viewIdResourceName) && current.isVisibleToUser && (current.isClickable || current.isFocusable)) {
+            Log.i("A11Y_HELPER", "[TRACE_EMPTY_SHELL] excluded=false reason=settings_row fp=${nodeFingerprint(node)}")
             return false
         }
 
@@ -165,26 +167,111 @@ object A11yTraversalAnalyzer {
             descendantTextCandidates = descendantTextCandidates
         )
         if (shouldExcludeContainerNodeFromTraversal(current, descendantTextCandidates) && !compositeInteractiveContainer) {
+            Log.i(
+                "A11Y_HELPER",
+                "[TRACE_EMPTY_SHELL] excluded=true reason=container_excluded recoveredLabel=${recoveredDescendantLabel.orEmpty()} fp=${nodeFingerprint(node)}"
+            )
             return true
         }
-        if (compositeInteractiveContainer && !recoveredDescendantLabel.isNullOrBlank()) return false
+        if (compositeInteractiveContainer && !recoveredDescendantLabel.isNullOrBlank()) {
+            Log.i(
+                "A11Y_HELPER",
+                "[TRACE_EMPTY_SHELL] excluded=false reason=composite_container_with_label recoveredLabel=${recoveredDescendantLabel.orEmpty()} fp=${nodeFingerprint(node)}"
+            )
+            return false
+        }
         if (
             !recoveredDescendantLabel.isNullOrBlank() &&
             (current.isClickable || current.isFocusable) &&
             shouldAllowRecoveredDescendantLabelForTraversal(descendantTextCandidates)
         ) {
+            Log.i(
+                "A11Y_HELPER",
+                "[TRACE_EMPTY_SHELL] excluded=false reason=recovered_descendant_label recoveredLabel=${recoveredDescendantLabel.orEmpty()} fp=${nodeFingerprint(node)}"
+            )
             return false
         }
         if (isOneConnectSettingsCandidateNode(current, recoveredDescendantLabel)) {
+            Log.i("A11Y_HELPER", "[TRACE_EMPTY_SHELL] excluded=false reason=oneconnect_settings_candidate fp=${nodeFingerprint(node)}")
             return false
         }
-        return shouldExcludeAsEmptyShell(
+        val excluded = shouldExcludeAsEmptyShell(
             mergedText = node.text,
             mergedContentDescription = node.contentDescription,
             clickable = current.isClickable,
             childCount = current.childCount
         )
+        val reason = when {
+            !node.text.isNullOrBlank() || !node.contentDescription.isNullOrBlank() -> "has_merged_label"
+            current.isClickable -> "no_label_clickable"
+            current.childCount == 0 -> "no_label_leaf"
+            else -> "kept_non_clickable_parent"
+        }
+        Log.i(
+            "A11Y_HELPER",
+            "[TRACE_EMPTY_SHELL] excluded=$excluded reason=$reason recoveredLabel=${recoveredDescendantLabel.orEmpty()} fp=${nodeFingerprint(node)}"
+        )
+        return excluded
     }
+
+    private fun dedupeByBoundsAndRole(focusNodes: List<FocusedNode>): List<FocusedNode> {
+        if (focusNodes.isEmpty()) return emptyList()
+        val deduped = mutableListOf<FocusedNode>()
+        val keptByKey = linkedMapOf<Pair<Rect, String>, FocusedNode>()
+        val groupsByBounds = linkedMapOf<Rect, MutableList<FocusedNode>>()
+
+        focusNodes.forEach { candidate ->
+            val bounds = Rect().also { candidate.node.getBoundsInScreen(it) }
+            groupsByBounds.getOrPut(Rect(bounds)) { mutableListOf() }.add(candidate)
+            val role = dedupeRoleBucket(candidate.node)
+            val key = Rect(bounds) to role
+            val kept = keptByKey[key]
+            if (kept == null) {
+                keptByKey[key] = candidate
+                deduped += candidate
+            } else {
+                Log.i(
+                    "A11Y_HELPER",
+                    "[TRACE_DEDUPE_DROP] sameBounds=${formatRect(bounds)} role=$role kept=${nodeFingerprint(kept)} dropped=${nodeFingerprint(candidate)}"
+                )
+            }
+        }
+
+        groupsByBounds
+            .filterValues { it.size > 1 }
+            .forEach { (bounds, grouped) ->
+                val roleSummary = grouped.joinToString(separator = ",") { dedupeRoleBucket(it.node) }
+                Log.i(
+                    "A11Y_HELPER",
+                    "[TRACE_DEDUPE_BOUNDS_GROUP] bounds=${formatRect(bounds)} size=${grouped.size} roles=$roleSummary"
+                )
+            }
+        Log.i("A11Y_HELPER", "[TRACE_DEDUPE_OUT] count=${deduped.size}")
+        return deduped
+    }
+
+    private fun dedupeRoleBucket(node: AccessibilityNodeInfo): String {
+        val className = node.className?.toString()
+        return when {
+            isIndependentActionControlClass(className) && (node.isClickable || node.isFocusable) -> "independent_action_control"
+            isFocusContainer(node) -> "focus_container"
+            else -> "text_or_other"
+        }
+    }
+
+    private fun nodeFingerprint(node: FocusedNode): String {
+        val info = node.node
+        val className = info.className?.toString().orEmpty()
+        val viewId = info.viewIdResourceName.orEmpty()
+        val bounds = Rect().also(info::getBoundsInScreen)
+        val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && info.isScreenReaderFocusable
+        val text = info.text?.toString()?.trim().orEmpty()
+        val contentDescription = info.contentDescription?.toString()?.trim().orEmpty()
+        val mergedLabel = node.mergedLabel?.trim().orEmpty()
+        return "obj=${System.identityHashCode(info)} class=$className viewId=$viewId bounds=${formatRect(bounds)} clickable=${info.isClickable} focusable=${info.isFocusable} screenReaderFocusable=$screenReaderFocusable text=$text contentDescription=$contentDescription mergedLabel=$mergedLabel"
+    }
+
+    private fun formatRect(rect: Rect): String = "(${rect.left},${rect.top},${rect.right},${rect.bottom})"
 
     internal fun isOneConnectSettingsCandidateNode(
         node: AccessibilityNodeInfo,
