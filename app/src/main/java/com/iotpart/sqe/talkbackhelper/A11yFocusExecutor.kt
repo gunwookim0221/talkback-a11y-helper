@@ -9,7 +9,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.4.2"
+    const val VERSION: String = "1.4.3"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -20,7 +20,8 @@ object A11yFocusExecutor {
     data class FocusVerificationResult(
         val resolved: Boolean,
         val snapBackDetected: Boolean,
-        val actualFocusedBounds: Rect?
+        val actualFocusedBounds: Rect?,
+        val hardFailureSignal: Boolean
     )
 
     fun requestAccessibilityFocusWithRetry(
@@ -32,11 +33,12 @@ object A11yFocusExecutor {
         retryDelayMs: Long = 120L
     ): FocusExecutionResult {
         val targetBounds = Rect().also { target.getBoundsInScreen(it) }
+        val expectedPackageName = target.packageName?.toString()
         var lastBounds: Rect? = null
 
         Log.i(
             "A11Y_HELPER",
-            "[FOCUS_EXEC] Start focus target=$targetBounds pollIntervalMs=$pollIntervalMs verificationWindowMs=$verificationWindowMs maxAttempts=$maxAttempts"
+            "[FOCUS_EXEC] Start focus target=$targetBounds expectedPackage=$expectedPackageName pollIntervalMs=$pollIntervalMs verificationWindowMs=$verificationWindowMs maxAttempts=$maxAttempts"
         )
 
         repeat(maxAttempts) { attempt ->
@@ -46,8 +48,8 @@ object A11yFocusExecutor {
 
             val verification = pollForTargetFocusWithinWindow(
                 root = root,
-                target = target,
                 targetBounds = targetBounds,
+                expectedPackageName = expectedPackageName,
                 pollIntervalMs = pollIntervalMs,
                 totalWindowMs = verificationWindowMs,
                 phaseTag = "attempt_${attempt + 1}"
@@ -60,7 +62,7 @@ object A11yFocusExecutor {
             }
 
             if (attempt < maxAttempts - 1) {
-                waitWithoutMainThreadSleep(retryDelayMs)
+                waitWithoutMainThreadSleep(retryDelayMs, "retry_delay")
             }
         }
         Log.e("A11Y_HELPER", "[FOCUS_EXEC] Failed all attempts. Last actual focus: $lastBounds")
@@ -70,44 +72,54 @@ object A11yFocusExecutor {
     fun verifyFocusStabilizationAfterAction(
         root: AccessibilityNodeInfo,
         targetBounds: Rect,
-        isTargetAccessibilityFocused: Boolean,
+        expectedPackageName: String?,
+        attemptMatched: Boolean,
         settleDelayMs: Long = 75L,
         settleWindowMs: Long = 450L
     ): FocusVerificationResult {
         val settleResult = pollForTargetFocusWithinWindow(
             root = root,
-            target = null,
             targetBounds = targetBounds,
+            expectedPackageName = expectedPackageName,
             pollIntervalMs = settleDelayMs,
             totalWindowMs = settleWindowMs,
             phaseTag = "post_action_settle"
         )
         val actualBounds = settleResult.lastFocusedBounds
-        val snapBack = shouldTreatAsSnapBackAfterVerification(actualBounds, targetBounds, isTargetAccessibilityFocused)
+        val snapBack = shouldTreatAsSnapBackAfterVerification(
+            actualFocusedBounds = actualBounds,
+            targetBounds = targetBounds,
+            actualMatch = settleResult.matched
+        )
+        val hardFailureSignal = settleResult.externalPackageObserved && !settleResult.systemUiObserved
+        val resolved = if (attemptMatched && !hardFailureSignal) true else !snapBack
         return FocusVerificationResult(
-            resolved = !snapBack,
+            resolved = resolved,
             snapBackDetected = snapBack,
-            actualFocusedBounds = actualBounds
+            actualFocusedBounds = actualBounds,
+            hardFailureSignal = hardFailureSignal
         )
     }
 
     internal fun shouldTreatAsSnapBackAfterVerification(
         actualFocusedBounds: Rect?,
         targetBounds: Rect,
-        isTargetAccessibilityFocused: Boolean
+        actualMatch: Boolean
     ): Boolean {
-        if (isTargetAccessibilityFocused) return false
+        if (actualMatch) return false
         if (actualFocusedBounds == null) return true
         return !isWithinSnapBackTolerance(targetBounds, actualFocusedBounds)
     }
 
     internal fun isTargetFocusResolved(
-        isTargetAccessibilityFocused: Boolean,
+        actualFocusedNode: AccessibilityNodeInfo?,
         actualFocusedBounds: Rect?,
-        targetBounds: Rect
+        targetBounds: Rect,
+        expectedPackageName: String?
     ): Boolean {
-        if (isTargetAccessibilityFocused) return true
-        if (actualFocusedBounds == null) return false
+        if (actualFocusedNode == null || actualFocusedBounds == null) return false
+        val actualPackageName = actualFocusedNode.packageName?.toString()
+        if (expectedPackageName != null && actualPackageName != expectedPackageName) return false
         return isWithinSnapBackTolerance(targetBounds, actualFocusedBounds)
     }
 
@@ -128,6 +140,7 @@ object A11yFocusExecutor {
         val rootBounds = Rect().also(root::getBoundsInScreen)
         val rootHeight = (rootBounds.bottom - rootBounds.top).coerceAtLeast(1)
         val targetBounds = Rect().also(target::getBoundsInScreen)
+        val expectedPackageName = target.packageName?.toString()
 
         // 1) Pre-Focus: 가시성 확보
         val isTopBar = A11yNodeUtils.isTopAppBar(target.className?.toString(), target.viewIdResourceName, targetBounds, screenTop, rootHeight)
@@ -179,13 +192,36 @@ object A11yFocusExecutor {
         val focusVerification = verifyFocusStabilizationAfterAction(
             root = root,
             targetBounds = targetBounds,
-            isTargetAccessibilityFocused = target.isAccessibilityFocused
+            expectedPackageName = expectedPackageName,
+            attemptMatched = focusExecution.success
         )
         if (focusVerification.snapBackDetected) {
             Log.w("A11Y_HELPER", "[SMART_NEXT] requestFocusFlow snap_back target=${A11yNavigator.formatBoundsForLog(targetBounds)} actual=${A11yNavigator.formatBoundsForLog(focusVerification.actualFocusedBounds)}")
         }
+        if (focusVerification.hardFailureSignal) {
+            Log.w(
+                "A11Y_HELPER",
+                "[FOCUS_VERIFY] hard_failure_signal external_package_departure targetPackage=$expectedPackageName actual=${A11yNavigator.formatBoundsForLog(focusVerification.actualFocusedBounds)}"
+            )
+            return ActionResult(false, "failed_external_focus_departure", target)
+        }
 
         val commitDecision = resolveFocusRetargetDecision(root, target, label, traversalListSnapshot, traversalIndex, isScrollAction, status)
+        if (!commitDecision.success && focusExecution.success && focusVerification.resolved) {
+            Log.i("A11Y_HELPER", "[FOCUS_VERIFY] keeping_prior_attempt_success despite settle mismatch")
+            return commitFinalFocusCandidate(
+                FocusRetargetDecision(
+                    finalTarget = target,
+                    finalLabel = label,
+                    source = "attempt_confirmed",
+                    retargeted = false,
+                    commitStatus = status,
+                    success = true,
+                    reason = "success_basis=attempt_match_persisted"
+                ),
+                reason = "focus_confirmed_from_attempt"
+            )
+        }
         if (!commitDecision.success) return ActionResult(false, "failed_focus_rejected", target)
         return commitFinalFocusCandidate(commitDecision, reason = "focus_confirmed_final")
     }
@@ -575,13 +611,15 @@ object A11yFocusExecutor {
 
     private data class FocusPollingResult(
         val matched: Boolean,
-        val lastFocusedBounds: Rect?
+        val lastFocusedBounds: Rect?,
+        val systemUiObserved: Boolean,
+        val externalPackageObserved: Boolean
     )
 
     private fun pollForTargetFocusWithinWindow(
         root: AccessibilityNodeInfo,
-        target: AccessibilityNodeInfo?,
         targetBounds: Rect,
+        expectedPackageName: String?,
         pollIntervalMs: Long,
         totalWindowMs: Long,
         phaseTag: String
@@ -590,49 +628,67 @@ object A11yFocusExecutor {
         val effectiveWindow = totalWindowMs.coerceIn(400L, 700L)
         val deadline = SystemClock.uptimeMillis() + effectiveWindow
         var lastBounds: Rect? = null
+        var systemUiObserved = false
+        var externalPackageObserved = false
+        val isMainThread = Looper.myLooper() == Looper.getMainLooper()
 
         while (true) {
             root.refresh()
             val actualFocusNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-            lastBounds = actualFocusNode?.let { Rect().also(it::getBoundsInScreen) }
-            val targetFocused = target?.run {
-                refresh()
-                isAccessibilityFocused
-            } ?: false
-            val matched = isTargetFocusResolved(targetFocused, lastBounds, targetBounds)
-            Log.i(
-                "A11Y_HELPER",
-                "[FOCUS_EXEC] Poll phase=$phaseTag targetFocused=$targetFocused actual=${A11yNavigator.formatBoundsForLog(lastBounds)} matched=$matched"
-            )
-            if (matched) {
-                return FocusPollingResult(matched = true, lastFocusedBounds = lastBounds)
+            val actualPackageName = actualFocusNode?.packageName?.toString()
+            val packageAllowed = expectedPackageName == null || actualPackageName == expectedPackageName
+            val systemUiPackage = actualPackageName == "com.android.systemui"
+            if (!packageAllowed && systemUiPackage) {
+                systemUiObserved = true
+            }
+            if (!packageAllowed && !systemUiPackage && actualFocusNode != null) {
+                externalPackageObserved = true
             }
 
+            val verificationNode = if (packageAllowed) actualFocusNode else null
+            lastBounds = verificationNode?.let { Rect().also(it::getBoundsInScreen) }
+            val matched = isTargetFocusResolved(verificationNode, lastBounds, targetBounds, expectedPackageName)
+            Log.i(
+                "A11Y_HELPER",
+                "[FOCUS_EXEC] Poll phase=$phaseTag expectedPackage=$expectedPackageName actualPackage=$actualPackageName packageAllowed=$packageAllowed actual=${A11yNavigator.formatBoundsForLog(lastBounds)} matched=$matched"
+            )
+            if (matched) {
+                return FocusPollingResult(
+                    matched = true,
+                    lastFocusedBounds = lastBounds,
+                    systemUiObserved = systemUiObserved,
+                    externalPackageObserved = externalPackageObserved
+                )
+            }
+
+            if (isMainThread) break
             val now = SystemClock.uptimeMillis()
             if (now >= deadline) break
-            waitWithoutMainThreadSleep(minOf(effectivePollInterval, deadline - now))
+            waitWithoutMainThreadSleep(minOf(effectivePollInterval, deadline - now), "poll_$phaseTag")
         }
 
         Log.w(
             "A11Y_HELPER",
             "[FOCUS_EXEC] Poll timeout phase=$phaseTag target=${A11yNavigator.formatBoundsForLog(targetBounds)} lastActual=${A11yNavigator.formatBoundsForLog(lastBounds)}"
         )
-        return FocusPollingResult(matched = false, lastFocusedBounds = lastBounds)
+        return FocusPollingResult(
+            matched = false,
+            lastFocusedBounds = lastBounds,
+            systemUiObserved = systemUiObserved,
+            externalPackageObserved = externalPackageObserved
+        )
     }
 
-    private fun waitWithoutMainThreadSleep(durationMs: Long) {
+    private fun waitWithoutMainThreadSleep(durationMs: Long, phaseTag: String): Boolean {
         val waitDuration = durationMs.coerceAtLeast(0L)
-        if (waitDuration == 0L) return
+        if (waitDuration == 0L) return true
         val isMainThread = Looper.myLooper() == Looper.getMainLooper()
         if (!isMainThread) {
             Thread.sleep(waitDuration)
-            return
+            return true
         }
-
-        val deadline = SystemClock.uptimeMillis() + waitDuration
-        while (SystemClock.uptimeMillis() < deadline) {
-            Thread.yield()
-        }
+        Log.w("A11Y_HELPER", "[FOCUS_EXEC] Skip blocking wait on main thread phase=$phaseTag durationMs=$waitDuration")
+        return false
     }
 
     private fun isWithinSnapBackTolerance(targetBounds: Rect, actualFocusedBounds: Rect, tolerancePx: Int = 10): Boolean {
