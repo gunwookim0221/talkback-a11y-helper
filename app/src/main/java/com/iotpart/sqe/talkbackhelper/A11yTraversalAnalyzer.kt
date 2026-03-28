@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.8.0"
+    const val VERSION: String = "1.8.1"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
     data class CandidateSelectionResult(
@@ -160,9 +160,14 @@ object A11yTraversalAnalyzer {
 
         val descendantTextCandidates = collectDescendantTextCandidates(current)
         val recoveredDescendantLabel = recoverLabelFromDescendantTexts(descendantTextCandidates)
-        if (shouldExcludeContainerNodeFromTraversal(current, descendantTextCandidates)) {
+        val compositeInteractiveContainer = isCompositeInteractiveContainer(
+            node = current,
+            descendantTextCandidates = descendantTextCandidates
+        )
+        if (shouldExcludeContainerNodeFromTraversal(current, descendantTextCandidates) && !compositeInteractiveContainer) {
             return true
         }
+        if (compositeInteractiveContainer && !recoveredDescendantLabel.isNullOrBlank()) return false
         if (
             !recoveredDescendantLabel.isNullOrBlank() &&
             (current.isClickable || current.isFocusable) &&
@@ -950,6 +955,7 @@ object A11yTraversalAnalyzer {
         node: AccessibilityNodeInfo,
         descendantTextCandidates: List<String>
     ): Boolean {
+        if (isCompositeInteractiveContainer(node, descendantTextCandidates)) return false
         if (isContainerLikeClassName(node.className?.toString())) return true
         if (isContainerLikeViewId(node.viewIdResourceName)) return true
         if (hasMultipleSiblingLevelInteractiveDescendants(node)) return true
@@ -961,6 +967,35 @@ object A11yTraversalAnalyzer {
         if (clickableDescendantCount < 2) return false
 
         return !shouldAllowRecoveredDescendantLabelForTraversal(descendantTextCandidates)
+    }
+
+    internal fun isCompositeInteractiveContainer(
+        node: AccessibilityNodeInfo,
+        descendantTextCandidates: List<String>
+    ): Boolean {
+        if (!node.isVisibleToUser) return false
+        if (!node.isClickable || !node.isFocusable) return false
+        if (isIndependentActionControlClass(node.className?.toString())) return false
+
+        val interactiveDescendantCount = countClickableOrFocusableDescendants(node, limit = 4)
+        val labeledDescendantCount = descendantTextCandidates
+            .asSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .take(4)
+            .count()
+        if (interactiveDescendantCount < 2 && labeledDescendantCount < 2) return false
+
+        val nodeBounds = Rect().also { node.getBoundsInScreen(it) }
+        val rootBounds = resolveRootBounds(node) ?: return false
+        if (nodeBounds.width() <= 0 || nodeBounds.height() <= 0 || rootBounds.width() <= 0 || rootBounds.height() <= 0) return false
+
+        val widthRatio = nodeBounds.width().toFloat() / rootBounds.width().toFloat()
+        val heightRatio = nodeBounds.height().toFloat() / rootBounds.height().toFloat()
+        val areaRatio = (nodeBounds.width().toLong() * nodeBounds.height().toLong()).toFloat() /
+            (rootBounds.width().toLong() * rootBounds.height().toLong()).toFloat()
+        return widthRatio >= 0.65f && heightRatio >= 0.10f && areaRatio >= 0.06f
     }
 
     internal fun hasMultipleSiblingLevelInteractiveDescendants(node: AccessibilityNodeInfo): Boolean {
