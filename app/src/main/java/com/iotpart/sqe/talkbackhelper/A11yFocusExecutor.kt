@@ -9,7 +9,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.4.3"
+    const val VERSION: String = "1.4.4"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -631,6 +631,9 @@ object A11yFocusExecutor {
         var systemUiObserved = false
         var externalPackageObserved = false
         val isMainThread = Looper.myLooper() == Looper.getMainLooper()
+        if (isMainThread) {
+            Log.w("A11Y_HELPER", "[FOCUS_EXEC] Poll on main thread phase=$phaseTag executorVersion=$VERSION")
+        }
 
         while (true) {
             root.refresh()

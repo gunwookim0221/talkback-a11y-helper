@@ -5,10 +5,13 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 class A11yCommandReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "A11Y_HELPER"
+        private const val VERSION = "1.2.0"
         private const val ACTION_GET_FOCUS = "com.iotpart.sqe.talkbackhelper.GET_FOCUS"
         private const val ACTION_FOCUS_RESULT = "com.iotpart.sqe.talkbackhelper.FOCUS_RESULT"
         private const val ACTION_DUMP_TREE = "com.iotpart.sqe.talkbackhelper.DUMP_TREE"
@@ -38,6 +41,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val EXTRA_REQ_ID = "reqId"
         private const val EXTRA_COMMAND = "command"
         private const val DEFAULT_REQ_ID = "none"
+        private val smartNextExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     }
 
     override fun onReceive(context: Context, intent: Intent?) {
@@ -165,13 +169,23 @@ class A11yCommandReceiver : BroadcastReceiver() {
             logFailure("SMART_NAV_RESULT", reqId, "Accessibility Service is null or not running")
             return
         }
-
-        val result = service.moveFocusSmart(reqId)
-        val reply = Intent("SMART_NAV_RESULT").apply {
-            setPackage(context.packageName)
-            putExtra("json", result.toString())
+        val pendingResult = goAsync()
+        smartNextExecutor.execute {
+            try {
+                Log.i(TAG, "[SMART_NEXT] async execution start reqId=$reqId receiverVersion=$VERSION")
+                val result = service.moveFocusSmart(reqId)
+                val reply = Intent("SMART_NAV_RESULT").apply {
+                    setPackage(context.packageName)
+                    putExtra("json", result.toString())
+                }
+                context.sendBroadcast(reply)
+            } catch (t: Throwable) {
+                Log.e(TAG, "[SMART_NEXT] async execution failed reqId=$reqId", t)
+                logFailure("SMART_NAV_RESULT", reqId, "Smart next async execution failed: ${t.message}")
+            } finally {
+                pendingResult.finish()
+            }
         }
-        context.sendBroadcast(reply)
     }
 
     private fun handleClickFocused(intent: Intent) {
