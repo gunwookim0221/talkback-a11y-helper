@@ -184,7 +184,7 @@ object A11yNavigationPolicy {
             scrollableNodeExists = state.collect.scrollState.scrollableNode != null
         )
         val expectedStatus = when (navigationDecision.type) {
-            NavigationType.BOTTOM_BAR -> "moved_to_bottom_bar"
+            NavigationType.BOTTOM_BAR -> "moved"
             NavigationType.PRE_SCROLL -> "scrolled"
             NavigationType.END -> "reached_end"
             NavigationType.REGULAR -> "moved"

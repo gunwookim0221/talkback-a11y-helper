@@ -1250,6 +1250,29 @@ class SmartMoveFocusTest(unittest.TestCase):
         self.assertEqual(result, "failed")
 
 
+
+    def test_move_focus_smart_maps_legacy_bottom_bar_status_to_moved(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: SMART_NAV_RESULT {"success":true,"status":"moved_to_bottom_bar_direct","reqId":"REQID705"}'
+
+        with patch.object(client, "check_helper_status", return_value=True), patch(
+            "talkback_lib.uuid.uuid4", return_value="REQID705-xxxx"
+        ):
+            result = client.move_focus_smart("SER", direction="next")
+
+        self.assertEqual(result, "moved")
+
+    def test_move_focus_smart_uses_detail_when_status_unknown(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: SMART_NAV_RESULT {"success":true,"status":"unknown","detail":"moved_aligned","reqId":"REQID706"}'
+
+        with patch.object(client, "check_helper_status", return_value=True), patch(
+            "talkback_lib.uuid.uuid4", return_value="REQID706-xxxx"
+        ):
+            result = client.move_focus_smart("SER", direction="next")
+
+        self.assertEqual(result, "moved")
+
     def test_move_focus_smart_next_does_not_clear_logcat(self):
         client = FakeA11yClient()
         client.logcat_payload = 'I/A11Y_HELPER: SMART_NAV_RESULT {"success":true,"status":"moved","reqId":"REQID704"}'
@@ -1289,7 +1312,7 @@ class SmartMoveFocusTest(unittest.TestCase):
 
 class FocusHelpersTest(unittest.TestCase):
     def test_client_algorithm_version_is_updated(self):
-        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.6.7")
+        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.6.8")
 
     def test_extract_visible_label_from_focus_prefers_text(self):
         focus_node = {"text": "  Visible Text  ", "contentDescription": "Desc"}

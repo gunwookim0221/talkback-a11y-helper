@@ -12,7 +12,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.63.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.64.0"
 
 
     @Volatile

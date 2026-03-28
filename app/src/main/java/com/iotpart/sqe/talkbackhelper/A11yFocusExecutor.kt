@@ -9,7 +9,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.4.6"
+    const val VERSION: String = "1.4.7"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -184,7 +184,9 @@ object A11yFocusExecutor {
         } else {
             PreFocusAlignmentResult()
         }
-        val effectiveStatus = if (status == "moved" && preFocusAlignment.adjusted) "moved_aligned" else status
+        if (status == "moved" && preFocusAlignment.adjusted) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] status_detail pre_focus_alignment_adjusted=true")
+        }
 
         val currentFocusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { Rect().also(it::getBoundsInScreen) }
         if (A11yNavigator.shouldReuseExistingAccessibilityFocus(label, isScrollAction, currentFocusedBounds, targetBounds)) {
@@ -223,7 +225,7 @@ object A11yFocusExecutor {
             return ActionResult(false, "failed_external_focus_departure", target)
         }
 
-        val commitDecision = resolveFocusRetargetDecision(root, target, label, traversalListSnapshot, traversalIndex, isScrollAction, effectiveStatus)
+        val commitDecision = resolveFocusRetargetDecision(root, target, label, traversalListSnapshot, traversalIndex, isScrollAction, status)
         if (!commitDecision.success && focusExecution.success && focusVerification.resolved) {
             Log.i("A11Y_HELPER", "[FOCUS_VERIFY] keeping_prior_attempt_success despite settle mismatch")
             return commitFinalFocusCandidate(

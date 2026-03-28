@@ -397,15 +397,16 @@ client.move_focus_smart(dev)
 
 ### 설명
 파이썬에서는 무거운 트리 분석(`dump_tree`, `get_focus`)을 수행하지 않고, `ACTION_SMART_NEXT` 브로드캐스트만 전송합니다.
-안드로이드 헬퍼가 Smart Next를 실행한 뒤 `SMART_NAV_RESULT` 로그를 반환하며, 클라이언트는 `_read_log_result(..., wait_seconds=3.0)`로 응답을 판독해 상태 문자열을 그대로 반환합니다.
+안드로이드 헬퍼가 Smart Next를 실행한 뒤 `SMART_NAV_RESULT` 로그를 반환하며, 클라이언트는 `_read_log_result(..., wait_seconds=3.0)`로 응답을 판독해 상태 문자열을 안정된 taxonomy로 정규화해 반환합니다.
 클래스 외부 코드에서는 `client.move_focus_smart(dev)`를 표준 호출로 사용하세요.
 또한 `move_focus_smart`는 기존 로그 분석 연속성을 위해 내부에서 `logcat -c`를 호출하지 않습니다.
+안드로이드 `SMART_NAV_RESULT`는 `detail`/`flags`를 함께 제공하지만, Python client는 `status`를 위 4종으로 정규화해 반환합니다.
 
 ### Returns
-- `"moved"`: 일반 next 이동 성공
-- `"scrolled"`: 시스템 내비게이션 바 진입 전 스크롤 후 첫 항목 포커스 성공
-- `"looped"`: 마지막 노드에서 첫 항목으로 순환 성공
-- `"failed"`: 위 과정 실패
+- `"moved"`: 일반 이동/하단바 이동/정렬 보정 이동을 포함한 정상 포커스 이동
+- `"scrolled"`: 스크롤 후 콘텐츠 포커스 성공
+- `"looped"`: 마지막 노드 이후 루프 fallback으로 첫 콘텐츠 포커스 성공
+- `"failed"`: 포커스 이동 실패 또는 종료
 
 ---
 
