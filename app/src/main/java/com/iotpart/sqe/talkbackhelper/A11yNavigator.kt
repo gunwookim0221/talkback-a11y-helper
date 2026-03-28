@@ -12,7 +12,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.61.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.62.0"
 
 
     @Volatile
@@ -561,10 +561,6 @@ object A11yNavigator {
         val refreshedTraversal = buildFocusableTraversalList(refreshedRoot)
         if (oldSnapshot == A11ySnapshotTracker.buildNodeTextSnapshot(refreshedTraversal)) {
             if (reason == "end_of_traversal") return TargetActionOutcome(false, "reached_end_no_scroll_progress")
-            val nextNode = context.traversalList.getOrNull(executionDecision.nextIndex)
-            if (nextNode != null && executionDecision.allowBottomBarEntry) {
-                return focusBottomBarAfterNoProgress(context.root, context.traversalList, nextNode, executionDecision.nextIndex)
-            }
             return TargetActionOutcome(false, "reached_end_no_scroll_progress")
         }
         val refreshedRect = Rect().also { refreshedRoot.getBoundsInScreen(it) }
@@ -603,14 +599,8 @@ object A11yNavigator {
         )
         if (outcome.success || reason == "end_of_traversal") return outcome
         if (outcome.reason == "continuation_candidate_unresolved") return TargetActionOutcome(false, "failed")
-        val nextNode = context.traversalList.getOrNull(executionDecision.nextIndex)
-        if (nextNode != null && executionDecision.allowBottomBarEntry) {
-            val bottomBarOutcome = focusOrSkip(
-                context.root, context.traversalList, nextNode, context.screenTop, context.effectiveBottom, context.currentIndex, "moved_to_bottom_bar", executionDecision.nextIndex
-            )
-            return if (bottomBarOutcome.success) TargetActionOutcome(true, "moved_to_bottom_bar", nextNode) else bottomBarOutcome
-        }
-        return outcome
+        Log.e("A11Y_HELPER", "[SMART_NEXT] Post-scroll focus failed. Aborting to prevent fallback sweep loop.")
+        return TargetActionOutcome(false, "failed_focus_rejected")
     }
 
     private fun handleRegularFocusMove(
@@ -1147,87 +1137,6 @@ object A11yNavigator {
         val needTopAlign = isScrollAction && shouldAlignToRealTop(bounds.top, screenTop)
         return needBottomLift || needTopAlign
     }
-    private fun focusBottomBarAfterNoProgress(
-        root: AccessibilityNodeInfo,
-        traversalList: List<AccessibilityNodeInfo>,
-        bottomBarNode: AccessibilityNodeInfo,
-        bottomBarIndex: Int
-    ): TargetActionOutcome {
-        val bottomBarBounds = Rect().also { bottomBarNode.getBoundsInScreen(it) }
-        val focusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-        val focusedBounds = focusedNode?.let { Rect().also(it::getBoundsInScreen) }
-        val rootRect = Rect().also { root.getBoundsInScreen(it) }
-        val screenHeight = (rootRect.bottom - rootRect.top).coerceAtLeast(1)
-        val focusIsTopLoopProne = focusedNode != null && focusedBounds != null && A11yNavigationPolicy.isTopLoopProneControlNode(
-            node = focusedNode,
-            bounds = focusedBounds,
-            screenTop = rootRect.top,
-            screenHeight = screenHeight,
-            classNameOf = { it.className?.toString() },
-            viewIdOf = { it.viewIdResourceName }
-        )
-        if (focusIsTopLoopProne) {
-            Log.w("A11Y_HELPER", "[SMART_NEXT] Focus jumped to top loop-prone control after no-progress scroll. Forcing bottom bar fallback.")
-        }
-
-        val focused = A11yFocusExecutor.requestFocusFlow(
-            root = root,
-            target = bottomBarNode,
-            screenTop = rootRect.top,
-            effectiveBottom = rootRect.bottom,
-            status = "moved_to_bottom_bar_after_no_progress",
-            isScrollAction = false,
-            traversalIndex = bottomBarIndex,
-            traversalListSnapshot = traversalList,
-            currentFocusIndexHint = (bottomBarIndex - 1).coerceAtLeast(-1)
-        )
-        if (focused.success) {
-            return TargetActionOutcome(true, "moved_to_bottom_bar_after_no_progress", bottomBarNode)
-        }
-
-        val actualFocusedIndex = resolveFocusedIndexInTraversal(root, traversalList)
-        if (actualFocusedIndex != -1) {
-            setLastRequestedFocusIndex(actualFocusedIndex)
-        }
-        Log.w(
-            "A11Y_HELPER",
-            "[SMART_NEXT] Bottom bar fallback focus failed after no-progress scroll. actualFocusedIndex=$actualFocusedIndex targetBounds=$bottomBarBounds focusedBounds=$focusedBounds"
-        )
-        return TargetActionOutcome(focused.success, focused.status, focused.targetNode)
-    }
-
-    private fun resolveFocusedIndexInTraversal(
-        root: AccessibilityNodeInfo,
-        traversalList: List<AccessibilityNodeInfo>
-    ): Int {
-        val focusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY) ?: return -1
-        val focusedNodeObjectId = nodeObjectId(focusedNode)
-        val directObjectIndex = traversalList.indexOfFirst { nodeObjectId(it) == focusedNodeObjectId }
-        if (directObjectIndex != -1) return directObjectIndex
-        return A11yTraversalAnalyzer.findNodeIndexByIdentity(
-            nodes = traversalList,
-            target = focusedNode,
-            idOf = { it.viewIdResourceName },
-            textOf = { it.text?.toString() },
-            contentDescriptionOf = { it.contentDescription?.toString() },
-            boundsOf = { Rect().also(it::getBoundsInScreen) }
-        )
-    }
-
-    internal fun syncLastRequestedFocusIndexToCurrentFocus(
-        root: AccessibilityNodeInfo,
-        traversalList: List<AccessibilityNodeInfo>
-    ) {
-        val focusedIndex = resolveFocusedIndexInTraversal(root, traversalList)
-        if (focusedIndex == -1) {
-            Log.w("A11Y_HELPER", "[SMART_NEXT] Failed to sync lastRequestedFocusIndex after no-progress scroll: focused index not found")
-            return
-        }
-        setLastRequestedFocusIndex(focusedIndex)
-        Log.i("A11Y_HELPER", "[SMART_NEXT] Synced lastRequestedFocusIndex to actual focused index=$focusedIndex after no-progress scroll")
-    }
-
-
     internal fun <T> calculateEffectiveBottom(
         nodes: List<T>,
         screenTop: Int,
