@@ -35,7 +35,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.6.7"
+CLIENT_ALGORITHM_VERSION = "1.6.8"
 
 
 @dataclass
@@ -1085,8 +1085,22 @@ class A11yAdbClient:
             return "failed"
 
         status = str(result.get("status", "failed")).strip().lower()
-        if status in {"moved", "scrolled", "looped", "failed","moved_to_bottom_bar"}:
-            return status
+        normalized = {
+            "moved": "moved",
+            "scrolled": "scrolled",
+            "looped": "looped",
+            "failed": "failed",
+            # Backward compatibility for older Android helper builds.
+            "moved_to_bottom_bar": "moved",
+            "moved_to_bottom_bar_direct": "moved",
+            "moved_aligned": "moved",
+        }.get(status)
+        if normalized is not None:
+            return normalized
+
+        detail = str(result.get("detail", "")).strip().lower()
+        if detail in {"moved_to_bottom_bar", "moved_to_bottom_bar_direct", "moved_aligned"}:
+            return "moved"
         return "failed"
 
     def scrollFind(self, dev, name, wait_=30, direction_='updown', type_='all'):

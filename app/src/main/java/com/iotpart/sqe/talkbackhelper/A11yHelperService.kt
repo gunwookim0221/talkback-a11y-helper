@@ -200,15 +200,42 @@ class A11yHelperService : AccessibilityService() {
         return resultJson
     }
 
+
+    private fun normalizeSmartNavStatus(success: Boolean, detail: String): String {
+        if (!success) return "failed"
+        return when (detail) {
+            "scrolled" -> "scrolled"
+            "looped" -> "looped"
+            else -> "moved"
+        }
+    }
+
+    private fun buildSmartNavFlags(detail: String): List<String> {
+        return buildList {
+            when (detail) {
+                "moved_to_bottom_bar", "moved_to_bottom_bar_direct" -> add("bottom_bar")
+            }
+            if (detail == "moved_to_bottom_bar_direct") add("direct")
+            if (detail == "moved_aligned") add("aligned")
+            if (detail.startsWith("failed")) add("focus_failed")
+        }
+    }
+
     fun moveFocusSmart(reqId: String = "none"): JSONObject {
         val currentNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         val outcome = A11yNavigator.performSmartNext(rootInActiveWindow, currentNode)
+
+        val detail = outcome.reason
+        val normalizedStatus = normalizeSmartNavStatus(outcome.success, detail)
+        val flags = buildSmartNavFlags(detail)
 
         val resultJson = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
             put("reqId", reqId)
             put("success", outcome.success)
-            put("status", outcome.reason)
+            put("status", normalizedStatus)
+            put("detail", detail)
+            put("flags", org.json.JSONArray(flags))
         }
 
         Log.i(TAG, "SMART_NAV_RESULT $resultJson")
