@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.1"
 
 
     @Volatile
@@ -779,7 +779,7 @@ object A11yNavigator {
         val info = node.node
         val bounds = Rect().also(info::getBoundsInScreen)
         val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && info.isScreenReaderFocusable
-        return "obj=${System.identityHashCode(info)} class=${info.className.orEmpty()} viewId=${info.viewIdResourceName.orEmpty()} bounds=(${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}) clickable=${info.isClickable} focusable=${info.isFocusable} screenReaderFocusable=$screenReaderFocusable text=${info.text?.toString()?.trim().orEmpty()} contentDescription=${info.contentDescription?.toString()?.trim().orEmpty()} mergedLabel=${resolveFocusedNodeLabel(node)}"
+        return "obj=${System.identityHashCode(info)} class=${info.className?.toString().orEmpty()} viewId=${info.viewIdResourceName.orEmpty()} bounds=(${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}) clickable=${info.isClickable} focusable=${info.isFocusable} screenReaderFocusable=$screenReaderFocusable text=${info.text?.toString()?.trim().orEmpty()} contentDescription=${info.contentDescription?.toString()?.trim().orEmpty()} mergedLabel=${resolveFocusedNodeLabel(node)}"
     }
 
     private fun clearFocus(node: AccessibilityNodeInfo): Boolean {
