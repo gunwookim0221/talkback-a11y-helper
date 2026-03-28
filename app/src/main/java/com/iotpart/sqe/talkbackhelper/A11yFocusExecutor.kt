@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.4.0"
+    const val VERSION: String = "1.4.1"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -154,7 +154,6 @@ object A11yFocusExecutor {
             root = root
         )
         if (!focusExecution.success) {
-            A11yNavigator.syncLastRequestedFocusIndexToCurrentFocus(root, A11yTraversalAnalyzer.buildTalkBackLikeFocusNodes(root).map { it.node })
             return ActionResult(false, "failed", target)
         }
 
@@ -169,9 +168,7 @@ object A11yFocusExecutor {
         }
 
         val commitDecision = resolveFocusRetargetDecision(root, target, label, traversalListSnapshot, traversalIndex, isScrollAction, status)
-        if (!commitDecision.success) {
-            A11yNavigator.syncLastRequestedFocusIndexToCurrentFocus(root, A11yTraversalAnalyzer.buildTalkBackLikeFocusNodes(root).map { it.node })
-        }
+        if (!commitDecision.success) return ActionResult(false, "failed_focus_rejected", target)
         return commitFinalFocusCandidate(commitDecision, reason = "focus_confirmed_final")
     }
 
