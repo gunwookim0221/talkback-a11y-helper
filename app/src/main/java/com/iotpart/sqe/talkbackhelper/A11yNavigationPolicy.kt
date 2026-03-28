@@ -191,7 +191,6 @@ object A11yNavigationPolicy {
         }
         return SmartNextExecutionDecision(
             nextIndex = nextIndex,
-            followUpTarget = initialTarget.followUpTarget,
             currentIndex = currentIndex,
             isOutOfBounds = isOutOfBounds,
             isCurrentAtLastIndex = isCurrentAtLastIndex,

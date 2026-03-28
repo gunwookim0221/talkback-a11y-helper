@@ -8,21 +8,16 @@ import android.view.accessibility.AccessibilityNodeInfo
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import kotlin.jvm.JvmName
 import org.json.JSONObject
-import java.util.ArrayDeque
 
 typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.69.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.1"
 
 
     @Volatile
     internal var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
-    @Volatile
-    private var lastConsumedRowFollowUpKey: String? = null
-    @Volatile
-    private var lastConsumedRowFollowUpControlKey: String? = null
 
     @JvmName("setLastRequestedFocusIndexExplicit")
     internal fun setLastRequestedFocusIndex(index: Int) {
@@ -666,20 +661,6 @@ object A11yNavigator {
         context: SmartNextExecutionContext,
         executionDecision: SmartNextExecutionDecision
     ): TargetActionOutcome {
-        val followUpTarget = executionDecision.followUpTarget
-        if (followUpTarget != null) {
-            Log.i("A11Y_HELPER", "[EXECUTE] Performing row-local follow-up target focus")
-            return focusOrSkip(
-                root = context.root,
-                traversalList = context.traversalList,
-                target = followUpTarget,
-                screenTop = context.screenTop,
-                effectiveBottom = context.effectiveBottom,
-                currentIndex = context.currentIndex,
-                status = executionDecision.expectedStatus,
-                traversalIndex = executionDecision.nextIndex
-            )
-        }
         val targetIndex = executionDecision.nextIndex.coerceAtLeast(0)
         Log.i("A11Y_HELPER", "[EXECUTE] Performing regular next navigation in single-target mode targetIndex=$targetIndex")
         val outcome = A11yPostScrollScanner.findAndFocusFirstContent(
@@ -707,7 +688,6 @@ object A11yNavigator {
         val currentIndex = state.currentPosition.currentIndex
         val fallbackIndex = state.currentPosition.fallbackIndex
         var nextIndex = state.currentPosition.nextIndex
-        var followUpTarget: AccessibilityNodeInfo? = null
 
         if (currentIndex in traversalList.indices) {
             val currentBounds = Rect().also { traversalList[currentIndex].getBoundsInScreen(it) }
@@ -727,140 +707,15 @@ object A11yNavigator {
                 )
             }
         }
-        val currentNode = traversalList.getOrNull(currentIndex)
-        val rowFollowUp = resolveRowLocalFollowUpTarget(
-            currentNode = currentNode,
-            nextIndex = nextIndex,
-            traversalSize = traversalList.size
-        )
-        if (rowFollowUp != null) {
-            followUpTarget = rowFollowUp
-        }
 
         return InitialNextTargetDecision(
             nextIndex = nextIndex,
-            followUpTarget = followUpTarget,
             selectionDecision = SelectionDecision(
                 currentIndex = currentIndex,
                 fallbackIndex = fallbackIndex,
                 nextIndex = nextIndex
             )
         )
-    }
-
-    private fun resolveRowLocalFollowUpTarget(
-        currentNode: AccessibilityNodeInfo?,
-        nextIndex: Int,
-        traversalSize: Int
-    ): AccessibilityNodeInfo? {
-        if (currentNode == null) {
-            Log.i("A11Y_HELPER", "[TRACE_ROW_FOLLOWUP_SKIP] reason=not_composite_row")
-            return null
-        }
-        if (nextIndex !in 0 until traversalSize) {
-            Log.i("A11Y_HELPER", "[TRACE_ROW_FOLLOWUP_SKIP] reason=no_trailing_control")
-            return null
-        }
-        if (isIndependentActionControl(currentNode)) {
-            Log.i("A11Y_HELPER", "[TRACE_ROW_FOLLOWUP_SKIP] reason=current_is_control")
-            return null
-        }
-        val rowBounds = Rect().also(currentNode::getBoundsInScreen)
-        if (rowBounds.width() <= 0 || rowBounds.height() <= 0 || !isCompositeMultilineRow(currentNode, rowBounds)) {
-            Log.i("A11Y_HELPER", "[TRACE_ROW_FOLLOWUP_SKIP] reason=not_composite_row")
-            return null
-        }
-        val rowKey = buildFollowUpNodeKey(currentNode, rowBounds)
-        if (!lastConsumedRowFollowUpKey.isNullOrBlank() && lastConsumedRowFollowUpKey == rowKey) {
-            Log.i("A11Y_HELPER", "[TRACE_ROW_FOLLOWUP_SKIP] reason=already_consumed")
-            return null
-        }
-        val trailingControl = findTrailingIndependentActionControl(currentNode, rowBounds)
-        if (trailingControl == null) {
-            Log.i("A11Y_HELPER", "[TRACE_ROW_FOLLOWUP_SKIP] reason=no_trailing_control")
-            return null
-        }
-        val controlBounds = Rect().also(trailingControl::getBoundsInScreen)
-        val controlKey = buildFollowUpNodeKey(trailingControl, controlBounds)
-        if (!lastConsumedRowFollowUpControlKey.isNullOrBlank() && lastConsumedRowFollowUpControlKey == controlKey) {
-            Log.i("A11Y_HELPER", "[TRACE_ROW_FOLLOWUP_SKIP] reason=already_consumed")
-            return null
-        }
-        lastConsumedRowFollowUpKey = rowKey
-        lastConsumedRowFollowUpControlKey = controlKey
-        Log.i(
-            "A11Y_HELPER",
-            "[TRACE_ROW_FOLLOWUP] current=${formatBoundsForLog(rowBounds)} followup=${formatBoundsForLog(controlBounds)} reason=row_local_trailing_control"
-        )
-        return trailingControl
-    }
-
-    private fun isCompositeMultilineRow(node: AccessibilityNodeInfo, rowBounds: Rect): Boolean {
-        val textNodes = mutableSetOf<String>()
-        collectReadableTexts(node, textNodes)
-        if (textNodes.size < 2) return false
-        if (!(node.isClickable || node.isFocusable || node.isScreenReaderFocusableCompat())) return false
-        return rowBounds.width() >= 200
-    }
-
-    private fun AccessibilityNodeInfo.isScreenReaderFocusableCompat(): Boolean {
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && isScreenReaderFocusable
-    }
-
-    private fun collectReadableTexts(node: AccessibilityNodeInfo, sink: MutableSet<String>) {
-        node.text?.toString()?.trim()?.takeUnless { it.isBlank() }?.let(sink::add)
-        node.contentDescription?.toString()?.trim()?.takeUnless { it.isBlank() }?.let(sink::add)
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            collectReadableTexts(child, sink)
-        }
-    }
-
-    private fun findTrailingIndependentActionControl(
-        rowNode: AccessibilityNodeInfo,
-        rowBounds: Rect
-    ): AccessibilityNodeInfo? {
-        var best: AccessibilityNodeInfo? = null
-        var bestScore = Int.MIN_VALUE
-        val queue = ArrayDeque<AccessibilityNodeInfo>()
-        queue += rowNode
-        while (queue.isNotEmpty()) {
-            val current = queue.removeFirst()
-            if (current !== rowNode && isIndependentActionControl(current)) {
-                val bounds = Rect().also(current::getBoundsInScreen)
-                val intersectsRow = Rect.intersects(rowBounds, bounds)
-                val trailingThreshold = rowBounds.left + (rowBounds.width() * 7 / 10)
-                val inTrailingEdge = bounds.right >= trailingThreshold && bounds.centerX() > rowBounds.centerX()
-                val verticalAligned = bounds.centerY() in rowBounds.top..rowBounds.bottom
-                if (intersectsRow && inTrailingEdge && verticalAligned) {
-                    val score = (bounds.right * 10) - kotlin.math.abs(bounds.centerY() - rowBounds.centerY())
-                    if (score > bestScore) {
-                        best = current
-                        bestScore = score
-                    }
-                }
-            }
-            for (i in 0 until current.childCount) {
-                current.getChild(i)?.let(queue::addLast)
-            }
-        }
-        return best
-    }
-
-    private fun isIndependentActionControl(node: AccessibilityNodeInfo): Boolean {
-        if (!node.isEnabled || node.isVisibleToUser.not()) return false
-        val className = node.className?.toString()?.lowercase().orEmpty()
-        val classIndicatesControl = className.contains("switch") ||
-            className.contains("toggle") ||
-            className.contains("checkbox") ||
-            className.contains("radiobutton") ||
-            className.contains("compoundbutton")
-        return node.isCheckable || classIndicatesControl
-    }
-
-    private fun buildFollowUpNodeKey(node: AccessibilityNodeInfo, bounds: Rect): String {
-        val identity = nodeIdentityOf(node).orEmpty()
-        return "$identity|${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}|${node.viewIdResourceName.orEmpty()}"
     }
 
     private fun resolveAliasRepresentativeIndex(
