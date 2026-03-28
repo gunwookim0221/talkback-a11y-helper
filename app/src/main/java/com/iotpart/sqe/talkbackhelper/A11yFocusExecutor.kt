@@ -9,7 +9,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.4.5"
+    const val VERSION: String = "1.4.6"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -299,8 +299,7 @@ object A11yFocusExecutor {
             (actualCandidateIndex >= 0 || traversalListSnapshot.isNullOrEmpty()) &&
             (intendedIndex < 0 || actualCandidateIndex != intendedIndex) &&
             isPostScrollValidCandidate
-        val shouldSuppressTopNoise = isScrollAction &&
-            A11yHistoryManager.isWithinAuthoritativeFocusWindow() &&
+        val shouldSuppressTopNoise = A11yHistoryManager.isWithinAuthoritativeFocusWindow() &&
             actualFocusedNode != null &&
             actualBounds != null &&
             A11yNavigator.isSuppressibleHeaderNoiseNode(
@@ -450,15 +449,12 @@ object A11yFocusExecutor {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_SHOW_ON_SCREEN not supported on this API level")
             }
 
-            val shouldTryContainerScroll =
-                canScrollForwardHint &&
-                (
-                    bottomClippedCandidate ||
-                        !shouldUseMinimalAdjustment ||
-                        A11yNodeUtils.isNodeBottomClipped(currentBounds, effectiveBottom) ||
-                        A11yNodeUtils.shouldLiftTrailingContentBeforeFocus(currentBounds, effectiveBottom) ||
-                        !isReasonablyAlignedForFocus(currentBounds, screenTop, effectiveBottom)
-                    )
+            val requiresReadableAlignmentScroll =
+                bottomClippedCandidate ||
+                    !A11yNodeUtils.isNodeFullyVisible(currentBounds, screenTop, effectiveBottom) ||
+                    A11yNodeUtils.isNodeBottomClipped(currentBounds, effectiveBottom) ||
+                    A11yNodeUtils.shouldLiftTrailingContentBeforeFocus(currentBounds, effectiveBottom)
+            val shouldTryContainerScroll = canScrollForwardHint && requiresReadableAlignmentScroll
             if (shouldTryContainerScroll) {
                 val scrollableNode = A11yNavigator.findScrollableForwardAncestorCandidate(target) ?: findScrollableNode(root)
                 if (scrollableNode != null) {
@@ -466,6 +462,8 @@ object A11yFocusExecutor {
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Pre-focus readable alignment scroll result=$scrolled label=$label")
                     adjusted = adjusted || scrolled
                 }
+            } else if (!requiresReadableAlignmentScroll && !bottomClippedCandidate) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping pre-focus readable alignment scroll for regular visible candidate")
             } else if (!canScrollForwardHint && !adjusted) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Last content cannot be top-aligned, using fully-visible fallback")
             }
