@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.2"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.1"
 
 
     @Volatile
@@ -181,11 +181,7 @@ object A11yNavigator {
         collectResult: CollectResult
     ): NormalizeResult {
         val (normalizedNodes, aliasMembersByIndex) = normalizeNodes(collectResult.focusNodes)
-        val (nodesWithTrailingStops, aliasMembersWithTrailingStops) = injectTrailingLogicalStopsForCompositeRows(
-            normalizedNodes = normalizedNodes,
-            aliasMembersByIndex = aliasMembersByIndex
-        )
-        val traversalList = buildTraversalList(nodesWithTrailingStops)
+        val traversalList = buildTraversalList(normalizedNodes)
         val screenRect = Rect().also { root.getBoundsInScreen(it) }
         val screenTop = screenRect.top
         val screenBottom = screenRect.bottom
@@ -197,124 +193,20 @@ object A11yNavigator {
             boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
             labelOf = { node -> resolvePrimaryLabel(node) ?: node.viewIdResourceName }
         )
-        nodesWithTrailingStops.forEachIndexed { index, node ->
+        normalizedNodes.forEachIndexed { index, node ->
             Log.i("A11Y_HELPER", "[TRACE_NORMALIZED_FINAL] idx=$index fp=${focusedNodeFingerprint(node)}")
         }
         Log.i("A11Y_HELPER", "[NORMALIZE] traversal=${traversalList.size} screen=($screenTop,$screenBottom) effectiveBottom=$effectiveBottom")
         return NormalizeResult(
-            normalizedNodes = nodesWithTrailingStops,
+            normalizedNodes = normalizedNodes,
             traversalList = traversalList,
-            aliasMembersByRepresentativeIndex = aliasMembersWithTrailingStops,
+            aliasMembersByRepresentativeIndex = aliasMembersByIndex,
             screenRect = screenRect,
             screenTop = screenTop,
             screenBottom = screenBottom,
             screenHeight = screenHeight,
             effectiveBottom = effectiveBottom
         )
-    }
-
-    private fun injectTrailingLogicalStopsForCompositeRows(
-        normalizedNodes: List<FocusedNode>,
-        aliasMembersByIndex: Map<Int, List<AccessibilityNodeInfo>>
-    ): Pair<List<FocusedNode>, Map<Int, List<AccessibilityNodeInfo>>> {
-        if (normalizedNodes.isEmpty()) return normalizedNodes to aliasMembersByIndex
-        val existingNodes = normalizedNodes.map { it.node }.toMutableSet()
-        val augmentedNodes = mutableListOf<FocusedNode>()
-        val augmentedAliasMembers = mutableMapOf<Int, List<AccessibilityNodeInfo>>()
-
-        normalizedNodes.forEachIndexed { index, focusedNode ->
-            val representativeIndex = augmentedNodes.size
-            augmentedNodes += focusedNode
-            augmentedAliasMembers[representativeIndex] = aliasMembersByIndex[index] ?: listOf(focusedNode.node)
-
-            val trailingControl = findTrailingLogicalStopNode(focusedNode.node) ?: return@forEachIndexed
-            if (existingNodes.contains(trailingControl)) return@forEachIndexed
-
-            val trailingLabel = focusedNode.mergedLabel?.trim().takeUnless { it.isNullOrEmpty() }
-                ?: focusedNode.text?.trim().takeUnless { it.isNullOrEmpty() }
-                ?: focusedNode.contentDescription?.trim().takeUnless { it.isNullOrEmpty() }
-            val supplementalNode = FocusedNode(
-                node = trailingControl,
-                text = trailingLabel,
-                contentDescription = trailingLabel,
-                mergedLabel = trailingLabel
-            )
-            val trailingIndex = augmentedNodes.size
-            augmentedNodes += supplementalNode
-            augmentedAliasMembers[trailingIndex] = listOf(trailingControl)
-            existingNodes += trailingControl
-            Log.i(
-                "A11Y_HELPER",
-                "[TRACE_TRAILING_STOP_INSERT] row=${focusedNodeFingerprint(focusedNode)} trailing=${focusedNodeFingerprint(supplementalNode)}"
-            )
-        }
-
-        return augmentedNodes to augmentedAliasMembers
-    }
-
-    private fun findTrailingLogicalStopNode(rowNode: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        if (!rowNode.isVisibleToUser) return null
-        if (!rowNode.isClickable && !rowNode.isFocusable) return null
-        val rowTextCandidates = mutableListOf<String>()
-        A11yTraversalAnalyzer.collectDescendantReadableText(
-            node = rowNode,
-            includeCurrentNode = true,
-            sink = rowTextCandidates
-        )
-        val distinctTextCount = rowTextCandidates
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .distinct()
-            .count()
-        if (distinctTextCount < 2) return null
-
-        val rowBounds = Rect().also(rowNode::getBoundsInScreen)
-        if (rowBounds.width() <= 0 || rowBounds.height() <= 0) return null
-        val rowCenterX = (rowBounds.left + rowBounds.right) / 2
-
-        val stack = ArrayDeque<AccessibilityNodeInfo>()
-        for (i in 0 until rowNode.childCount) {
-            rowNode.getChild(i)?.let(stack::addLast)
-        }
-
-        var bestNode: AccessibilityNodeInfo? = null
-        var bestBounds: Rect? = null
-        while (stack.isNotEmpty()) {
-            val candidate = stack.removeFirst()
-            if (!candidate.isVisibleToUser) continue
-            val className = candidate.className?.toString()?.lowercase().orEmpty()
-            val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && candidate.isScreenReaderFocusable
-            val isActionControl = className.contains("switch") ||
-                className.contains("toggle") ||
-                className.contains("checkbox") ||
-                className.contains("radiobutton")
-            val hasActionability = candidate.isCheckable || candidate.isClickable || candidate.isFocusable || screenReaderFocusable
-            if (isActionControl && hasActionability) {
-                val candidateBounds = Rect().also(candidate::getBoundsInScreen)
-                if (candidateBounds.width() > 0 &&
-                    candidateBounds.height() > 0 &&
-                    rowBounds.contains(candidateBounds)
-                ) {
-                    val candidateCenterX = (candidateBounds.left + candidateBounds.right) / 2
-                    val rightGap = rowBounds.right - candidateBounds.right
-                    val widthRatio = candidateBounds.width().toFloat() / rowBounds.width().toFloat()
-                    if (candidateCenterX > rowCenterX &&
-                        rightGap >= -4 &&
-                        rightGap <= (rowBounds.width() * 0.30f).toInt() &&
-                        widthRatio <= 0.35f
-                    ) {
-                        if (bestNode == null || candidateBounds.right > (bestBounds?.right ?: Int.MIN_VALUE)) {
-                            bestNode = candidate
-                            bestBounds = candidateBounds
-                        }
-                    }
-                }
-            }
-            for (i in 0 until candidate.childCount) {
-                candidate.getChild(i)?.let(stack::addLast)
-            }
-        }
-        return bestNode
     }
 
     private fun resolveCurrentAndNextIndex(
