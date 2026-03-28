@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.8.2"
+    const val VERSION: String = "1.8.3"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
     data class CandidateSelectionResult(
@@ -42,6 +42,10 @@ object A11yTraversalAnalyzer {
         if (!node.isVisibleToUser) return
 
         val container = isFocusContainer(node)
+        val supplementalTrailingControl = isTrailingIndependentActionControlInCompositeContainer(
+            node = node,
+            containerAncestor = containerAncestor
+        )
         if (container) {
             val mergedContent = collectMergedTextFromContainer(node)
             val mergedText = mergedContent.firstOrNull()
@@ -49,6 +53,16 @@ object A11yTraversalAnalyzer {
             val focusedNode = FocusedNode(node, mergedText, mergedDescription, mergedText)
             sink += focusedNode
             Log.i("A11Y_HELPER", "[TRACE_COLLECT_ADD] reason=container fp=${nodeFingerprint(focusedNode)}")
+        } else if (supplementalTrailingControl) {
+            val ancestorLabel = containerAncestor?.let(::recoverDescendantLabel)
+            val focusedNode = FocusedNode(
+                node = node,
+                text = ancestorLabel,
+                contentDescription = ancestorLabel,
+                mergedLabel = ancestorLabel
+            )
+            sink += focusedNode
+            Log.i("A11Y_HELPER", "[TRACE_COLLECT_ADD] reason=trailing_action_control fp=${nodeFingerprint(focusedNode)}")
         } else if (containerAncestor == null && hasAnyText(node)) {
             val focusedNode = FocusedNode(
                 node = node,
@@ -77,6 +91,44 @@ object A11yTraversalAnalyzer {
                 sink = sink
             )
         }
+    }
+
+    private fun isTrailingIndependentActionControlInCompositeContainer(
+        node: AccessibilityNodeInfo,
+        containerAncestor: AccessibilityNodeInfo?
+    ): Boolean {
+        val ancestor = containerAncestor ?: return false
+        if (!ancestor.isVisibleToUser) return false
+        if (isFocusContainer(node)) return false
+        if (!isIndependentActionControlClass(node.className?.toString())) return false
+
+        val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && node.isScreenReaderFocusable
+        if (!node.isCheckable && !node.isClickable && !node.isFocusable && !screenReaderFocusable) return false
+
+        val ancestorTextCount = collectDescendantTextCandidates(ancestor)
+            .asSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .take(3)
+            .count()
+        if (ancestorTextCount < 2) return false
+
+        val nodeBounds = Rect().also(node::getBoundsInScreen)
+        val ancestorBounds = Rect().also(ancestor::getBoundsInScreen)
+        if (nodeBounds.width() <= 0 || nodeBounds.height() <= 0) return false
+        if (ancestorBounds.width() <= 0 || ancestorBounds.height() <= 0) return false
+        if (!ancestorBounds.contains(nodeBounds)) return false
+
+        val nodeCenterX = (nodeBounds.left + nodeBounds.right) / 2
+        val ancestorCenterX = (ancestorBounds.left + ancestorBounds.right) / 2
+        if (nodeCenterX <= ancestorCenterX) return false
+
+        val rightGap = ancestorBounds.right - nodeBounds.right
+        if (rightGap < -4 || rightGap > (ancestorBounds.width() * 0.30f).toInt()) return false
+
+        val widthRatio = nodeBounds.width().toFloat() / ancestorBounds.width().toFloat()
+        return widthRatio <= 0.35f
     }
 
     internal fun collectMergedTextFromContainer(container: AccessibilityNodeInfo): List<String> {
