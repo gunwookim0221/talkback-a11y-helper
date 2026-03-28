@@ -217,6 +217,7 @@ class A11yHelperService : AccessibilityService() {
             }
             if (detail == "moved_to_bottom_bar_direct") add("direct")
             if (detail == "moved_aligned") add("aligned")
+            if (detail == "end_of_sequence") add("terminal")
             if (detail.startsWith("failed")) add("focus_failed")
         }
     }

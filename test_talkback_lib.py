@@ -1273,6 +1273,22 @@ class SmartMoveFocusTest(unittest.TestCase):
 
         self.assertEqual(result, "moved")
 
+    def test_move_focus_smart_marks_terminal_when_end_of_sequence_detail_returned(self):
+        client = FakeA11yClient()
+        client.logcat_payload = (
+            'I/A11Y_HELPER: SMART_NAV_RESULT '
+            '{"success":false,"status":"failed","detail":"end_of_sequence","flags":["terminal"],"reqId":"REQID707"}'
+        )
+
+        with patch.object(client, "check_helper_status", return_value=True), patch(
+            "talkback_lib.uuid.uuid4", return_value="REQID707-xxxx"
+        ):
+            result = client.move_focus_smart("SER", direction="next")
+
+        self.assertEqual(result, "failed")
+        self.assertTrue(client.last_smart_nav_terminal)
+        self.assertEqual(client.last_smart_nav_result.get("detail"), "end_of_sequence")
+
     def test_move_focus_smart_next_does_not_clear_logcat(self):
         client = FakeA11yClient()
         client.logcat_payload = 'I/A11Y_HELPER: SMART_NAV_RESULT {"success":true,"status":"moved","reqId":"REQID704"}'
@@ -1312,7 +1328,7 @@ class SmartMoveFocusTest(unittest.TestCase):
 
 class FocusHelpersTest(unittest.TestCase):
     def test_client_algorithm_version_is_updated(self):
-        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.6.8")
+        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.6.9")
 
     def test_extract_visible_label_from_focus_prefers_text(self):
         focus_node = {"text": "  Visible Text  ", "contentDescription": "Desc"}

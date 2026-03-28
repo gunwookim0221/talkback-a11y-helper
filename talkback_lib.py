@@ -35,7 +35,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.6.8"
+CLIENT_ALGORITHM_VERSION = "1.6.9"
 
 
 @dataclass
@@ -55,6 +55,8 @@ class A11yAdbClient:
         self._monitor_thread: threading.Thread | None = None
         self._last_log_marker: tuple[tuple[int, int, int, int, int, int], int] | None = None
         self.last_dump_metadata: dict[str, Any] = {}
+        self.last_smart_nav_result: dict[str, Any] = {}
+        self.last_smart_nav_terminal: bool = False
 
     def _resolve_serial(self, dev: Any) -> str | None:
         if dev is None:
@@ -1081,6 +1083,14 @@ class A11yAdbClient:
         req_id = str(uuid.uuid4())[:8]
         self._broadcast(dev, ACTION_SMART_NEXT, ["--es", "reqId", req_id])
         result = self._read_log_result(dev, "SMART_NAV_RESULT", req_id, wait_seconds=3.0)
+        self.last_smart_nav_result = result
+        detail = str(result.get("detail", "")).strip().lower()
+        flags = {
+            str(flag).strip().lower()
+            for flag in (result.get("flags") or [])
+            if str(flag).strip()
+        }
+        self.last_smart_nav_terminal = detail == "end_of_sequence" or "terminal" in flags
         if not result.get("success"):
             return "failed"
 
@@ -1098,7 +1108,6 @@ class A11yAdbClient:
         if normalized is not None:
             return normalized
 
-        detail = str(result.get("detail", "")).strip().lower()
         if detail in {"moved_to_bottom_bar", "moved_to_bottom_bar_direct", "moved_aligned"}:
             return "moved"
         return "failed"
