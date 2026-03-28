@@ -9,7 +9,7 @@ import org.json.JSONObject
 internal typealias FocusedNode = A11yTraversalAnalyzer.FocusedNode
 
 object A11yModelVersion {
-    const val VERSION: String = "1.6.3"
+    const val VERSION: String = "1.6.4"
 }
 
 internal data class PostScrollContinuationPlan(
@@ -147,11 +147,13 @@ internal data class SmartNextRuntimeState(
 
 internal data class InitialNextTargetDecision(
     val nextIndex: Int,
+    val followUpTarget: AccessibilityNodeInfo? = null,
     val selectionDecision: SelectionDecision
 )
 
 internal data class SmartNextExecutionDecision(
     val nextIndex: Int,
+    val followUpTarget: AccessibilityNodeInfo? = null,
     val currentIndex: Int,
     val isOutOfBounds: Boolean,
     val isCurrentAtLastIndex: Boolean,
