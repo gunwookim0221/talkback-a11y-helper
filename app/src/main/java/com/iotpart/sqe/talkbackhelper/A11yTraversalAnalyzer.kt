@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.8.3"
+    const val VERSION: String = "1.8.4"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
     data class CandidateSelectionResult(
@@ -384,6 +384,9 @@ object A11yTraversalAnalyzer {
             parentOf = { node -> node.parent }
         )
         if (!inAncestorChain) return false
+        if (isCompositeRowWithTrailingActionControl(primaryNode, secondaryNode, primaryBounds, secondaryBounds)) {
+            return false
+        }
 
         val primaryActionControl = isIndependentActionControlClass(primaryNode.className?.toString())
         val secondaryActionControl = isIndependentActionControlClass(secondaryNode.className?.toString())
@@ -411,6 +414,55 @@ object A11yTraversalAnalyzer {
             return false
         }
         return true
+    }
+
+    private fun isCompositeRowWithTrailingActionControl(
+        firstNode: AccessibilityNodeInfo,
+        secondNode: AccessibilityNodeInfo,
+        firstBounds: Rect,
+        secondBounds: Rect
+    ): Boolean {
+        val parentNode: AccessibilityNodeInfo
+        val childNode: AccessibilityNodeInfo
+        val parentBounds: Rect
+        val childBounds: Rect
+        if (area(firstBounds) >= area(secondBounds)) {
+            parentNode = firstNode
+            childNode = secondNode
+            parentBounds = firstBounds
+            childBounds = secondBounds
+        } else {
+            parentNode = secondNode
+            childNode = firstNode
+            parentBounds = secondBounds
+            childBounds = firstBounds
+        }
+        if (!isAncestorOf(ancestor = parentNode, descendant = childNode, parentOf = { node -> node.parent })) {
+            return false
+        }
+        if (!isIndependentActionControlClass(childNode.className?.toString())) return false
+
+        val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && childNode.isScreenReaderFocusable
+        if (!childNode.isCheckable && !childNode.isClickable && !childNode.isFocusable && !screenReaderFocusable) {
+            return false
+        }
+
+        val parentDescendantTexts = collectDescendantTextCandidates(parentNode)
+        if (!isCompositeInteractiveContainer(parentNode, parentDescendantTexts)) return false
+        if (!parentBounds.contains(childBounds)) return false
+
+        val childCenterX = (childBounds.left + childBounds.right) / 2
+        val parentCenterX = (parentBounds.left + parentBounds.right) / 2
+        if (childCenterX <= parentCenterX) return false
+
+        val rightGap = parentBounds.right - childBounds.right
+        if (rightGap < -4 || rightGap > (parentBounds.width() * 0.30f).toInt()) return false
+
+        val childWidthRatio = childBounds.width().toFloat() / parentBounds.width().coerceAtLeast(1).toFloat()
+        if (childWidthRatio > 0.40f) return false
+
+        val childHeightRatio = childBounds.height().toFloat() / parentBounds.height().coerceAtLeast(1).toFloat()
+        return childHeightRatio in 0.15f..0.95f
     }
 
     private fun canTreatAsActionControlWrapperDuplicate(
