@@ -9,7 +9,7 @@ import org.json.JSONObject
 internal typealias FocusedNode = A11yTraversalAnalyzer.FocusedNode
 
 object A11yModelVersion {
-    const val VERSION: String = "1.6.2"
+    const val VERSION: String = "1.6.3"
 }
 
 internal data class PostScrollContinuationPlan(
@@ -28,6 +28,7 @@ internal data class CollectResult(
 internal data class NormalizeResult(
     val normalizedNodes: List<FocusedNode>,
     val traversalList: List<AccessibilityNodeInfo>,
+    val aliasMembersByRepresentativeIndex: Map<Int, List<AccessibilityNodeInfo>>,
     val screenRect: Rect,
     val screenTop: Int,
     val screenBottom: Int,
@@ -182,6 +183,7 @@ internal data class FindAndFocusPhaseContext(
     val effectiveBottom: Int,
     val screenHeight: Int,
     val focusNodeByNode: Map<AccessibilityNodeInfo, FocusedNode>,
+    val aliasMembersByRepresentativeIndex: Map<Int, List<AccessibilityNodeInfo>>,
     val visitedHistory: Set<String>,
     val visitedHistorySignatures: Set<A11yHistoryManager.VisibleHistorySignature>
 )

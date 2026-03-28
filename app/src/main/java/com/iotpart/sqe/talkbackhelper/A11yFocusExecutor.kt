@@ -9,7 +9,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.4.7"
+    const val VERSION: String = "1.4.8"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -145,7 +145,8 @@ object A11yFocusExecutor {
         isScrollAction: Boolean,
         traversalIndex: Int,
         traversalListSnapshot: List<AccessibilityNodeInfo>? = null,
-        currentFocusIndexHint: Int = -1
+        currentFocusIndexHint: Int = -1,
+        aliasMembersByTraversalIndex: Map<Int, List<AccessibilityNodeInfo>> = emptyMap()
     ): ActionResult {
         val label = target.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
             ?: target.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
@@ -191,7 +192,11 @@ object A11yFocusExecutor {
         val currentFocusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { Rect().also(it::getBoundsInScreen) }
         if (A11yNavigator.shouldReuseExistingAccessibilityFocus(label, isScrollAction, currentFocusedBounds, targetBounds)) {
             val commitDecision = resolveFocusRetargetDecision(root, target, label, traversalListSnapshot, traversalIndex, isScrollAction, status)
-            return commitFinalFocusCandidate(commitDecision, reason = "focus_reused_existing_target")
+            return commitFinalFocusCandidate(
+                decision = commitDecision,
+                reason = "focus_reused_existing_target",
+                aliasGroupMembers = aliasMembersByTraversalIndex[traversalIndex].orEmpty()
+            )
         }
 
         clearAccessibilityFocusAndRefresh(root)
@@ -238,11 +243,16 @@ object A11yFocusExecutor {
                     success = true,
                     reason = "success_basis=attempt_match_persisted"
                 ),
-                reason = "focus_confirmed_from_attempt"
+                reason = "focus_confirmed_from_attempt",
+                aliasGroupMembers = aliasMembersByTraversalIndex[traversalIndex].orEmpty()
             )
         }
         if (!commitDecision.success) return ActionResult(false, "failed_focus_rejected", target)
-        return commitFinalFocusCandidate(commitDecision, reason = "focus_confirmed_final")
+        return commitFinalFocusCandidate(
+            decision = commitDecision,
+            reason = "focus_confirmed_final",
+            aliasGroupMembers = aliasMembersByTraversalIndex[traversalIndex].orEmpty()
+        )
     }
 
     internal fun resolveFocusRetargetDecision(
@@ -379,7 +389,8 @@ object A11yFocusExecutor {
 
     private fun commitFinalFocusCandidate(
         decision: FocusRetargetDecision,
-        reason: String
+        reason: String,
+        aliasGroupMembers: List<AccessibilityNodeInfo> = emptyList()
     ): ActionResult {
         val activeTurnId = A11yHistoryManager.activeSmartNextTurnId
         if (A11yHistoryManager.hasCommittedFinalFocusForTurn(activeTurnId)) {
@@ -392,6 +403,12 @@ object A11yFocusExecutor {
         }
         if (decision.success) {
             A11yNavigator.recordVisitedFocus(decision.finalTarget, decision.finalLabel, reason = reason)
+            A11yNavigator.recordVisitedAliasMembers(
+                representativeNode = decision.finalTarget,
+                representativeLabel = decision.finalLabel,
+                aliasMembers = aliasGroupMembers,
+                reason = reason
+            )
             A11yHistoryManager.startAuthoritativeFocusSuppressionWindow(decision.finalTarget, decision.finalLabel, decision.commitStatus)
             A11yHistoryManager.markFinalCommitTurn(activeTurnId)
             Log.i("A11Y_HELPER", "[FOCUS_VERIFY] success_basis=committed_candidate")

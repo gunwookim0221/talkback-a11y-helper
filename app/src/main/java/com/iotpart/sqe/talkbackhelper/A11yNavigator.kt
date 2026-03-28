@@ -1,6 +1,7 @@
 package com.iotpart.sqe.talkbackhelper
 
 import android.graphics.Rect
+import android.os.Build
 import android.view.accessibility.AccessibilityEvent
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
@@ -12,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.64.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.65.0"
 
 
     @Volatile
@@ -131,13 +132,44 @@ object A11yNavigator {
         )
     }
 
-    private fun normalizeNodes(focusNodes: List<FocusedNode>): List<FocusedNode> = focusNodes
+    private fun normalizeNodes(
+        focusNodes: List<FocusedNode>
+    ): Pair<List<FocusedNode>, Map<Int, List<AccessibilityNodeInfo>>> {
+        if (focusNodes.isEmpty()) return focusNodes to emptyMap()
+        val groups = mutableListOf<MutableList<FocusedNode>>()
+        focusNodes.forEach { candidate ->
+            val candidateLabel = resolveFocusedNodeLabel(candidate)
+            val matchingGroup = groups.firstOrNull { group ->
+                val representative = selectAliasGroupRepresentative(group)
+                A11yTraversalAnalyzer.shouldTreatAsAliasWrapperDuplicate(
+                    primaryNode = representative.node,
+                    secondaryNode = candidate.node,
+                    primaryLabel = resolveFocusedNodeLabel(representative),
+                    secondaryLabel = candidateLabel
+                )
+            }
+            if (matchingGroup != null) {
+                matchingGroup += candidate
+            } else {
+                groups += mutableListOf(candidate)
+            }
+        }
+        val normalizedNodes = mutableListOf<FocusedNode>()
+        val aliasMembersByIndex = mutableMapOf<Int, List<AccessibilityNodeInfo>>()
+        groups.forEach { group ->
+            val representative = selectAliasGroupRepresentative(group)
+            val groupIndex = normalizedNodes.size
+            normalizedNodes += representative
+            aliasMembersByIndex[groupIndex] = group.map { it.node }
+        }
+        return normalizedNodes to aliasMembersByIndex
+    }
 
     private fun normalizeSmartNextInputs(
         root: AccessibilityNodeInfo,
         collectResult: CollectResult
     ): NormalizeResult {
-        val normalizedNodes = normalizeNodes(collectResult.focusNodes)
+        val (normalizedNodes, aliasMembersByIndex) = normalizeNodes(collectResult.focusNodes)
         val traversalList = buildTraversalList(normalizedNodes)
         val screenRect = Rect().also { root.getBoundsInScreen(it) }
         val screenTop = screenRect.top
@@ -154,6 +186,7 @@ object A11yNavigator {
         return NormalizeResult(
             normalizedNodes = normalizedNodes,
             traversalList = traversalList,
+            aliasMembersByRepresentativeIndex = aliasMembersByIndex,
             screenRect = screenRect,
             screenTop = screenTop,
             screenBottom = screenBottom,
@@ -164,7 +197,8 @@ object A11yNavigator {
 
     private fun resolveCurrentAndNextIndex(
         traversalList: List<AccessibilityNodeInfo>,
-        currentNode: AccessibilityNodeInfo?
+        currentNode: AccessibilityNodeInfo?,
+        aliasMembersByRepresentativeIndex: Map<Int, List<AccessibilityNodeInfo>> = emptyMap()
     ): CurrentPosition {
         val resolvedCurrent = currentNode?.let {
             resolveToClickableAncestor(
@@ -189,6 +223,12 @@ object A11yNavigator {
                 textOf = { it.text?.toString() },
                 contentDescriptionOf = { it.contentDescription?.toString() },
                 boundsOf = { Rect().also(it::getBoundsInScreen) }
+            )
+        }
+        if (currentIndex == -1 && resolvedCurrent != null) {
+            currentIndex = resolveAliasRepresentativeIndex(
+                aliasMembersByRepresentativeIndex = aliasMembersByRepresentativeIndex,
+                target = resolvedCurrent
             )
         }
 
@@ -272,11 +312,10 @@ object A11yNavigator {
         }
 
         val normalizeResult = normalizeSmartNextInputs(root, collectResult)
-        val currentPosition = CurrentPosition(
-            resolvedCurrent = collectResult.focusState.resolvedCurrent,
-            currentIndex = collectResult.focusState.currentIndex,
-            fallbackIndex = collectResult.focusState.fallbackIndex,
-            nextIndex = collectResult.focusState.nextIndex
+        val currentPosition = resolveCurrentAndNextIndex(
+            traversalList = normalizeResult.traversalList,
+            currentNode = currentNode,
+            aliasMembersByRepresentativeIndex = normalizeResult.aliasMembersByRepresentativeIndex
         )
         val visitedHistory = snapshotVisitedHistoryLabels()
         val visitedHistorySignatures = snapshotVisitedHistorySignatures()
@@ -401,6 +440,7 @@ object A11yNavigator {
             effectiveBottom = normalize.effectiveBottom,
             screenHeight = normalize.screenHeight,
             focusNodeByNode = state.focusNodeByNode,
+            aliasMembersByRepresentativeIndex = normalize.aliasMembersByRepresentativeIndex,
             visitedHistory = state.visitedHistory,
             visitedHistorySignatures = state.visitedHistorySignatures
         )
@@ -664,6 +704,55 @@ object A11yNavigator {
         )
     }
 
+    private fun resolveAliasRepresentativeIndex(
+        aliasMembersByRepresentativeIndex: Map<Int, List<AccessibilityNodeInfo>>,
+        target: AccessibilityNodeInfo
+    ): Int {
+        if (aliasMembersByRepresentativeIndex.isEmpty()) return -1
+        return aliasMembersByRepresentativeIndex.entries.firstOrNull { (_, members) ->
+            members.any { member ->
+                isSameNode(member, target) || A11yTraversalAnalyzer.findNodeIndexByIdentity(
+                    nodes = listOf(member),
+                    target = target,
+                    idOf = { it.viewIdResourceName },
+                    textOf = { it.text?.toString() },
+                    contentDescriptionOf = { it.contentDescription?.toString() },
+                    boundsOf = { Rect().also(it::getBoundsInScreen) }
+                ) != -1
+            }
+        }?.key ?: -1
+    }
+
+    private fun resolveFocusedNodeLabel(node: FocusedNode): String {
+        return node.mergedLabel?.trim().takeUnless { it.isNullOrEmpty() }
+            ?: node.contentDescription?.trim().takeUnless { it.isNullOrEmpty() }
+            ?: node.text?.trim().takeUnless { it.isNullOrEmpty() }
+            ?: resolvePrimaryLabel(node.node)
+            ?: A11yTraversalAnalyzer.recoverDescendantLabel(node.node)
+            ?: ""
+    }
+
+    private fun selectAliasGroupRepresentative(group: List<FocusedNode>): FocusedNode {
+        return group
+            .sortedWith(
+                compareByDescending<FocusedNode> { aliasRepresentativeScore(it) }
+                    .thenBy { candidate ->
+                        Rect().also { candidate.node.getBoundsInScreen(it) }.width() *
+                            Rect().also { candidate.node.getBoundsInScreen(it) }.height()
+                    }
+            )
+            .first()
+    }
+
+    private fun aliasRepresentativeScore(candidate: FocusedNode): Int {
+        val node = candidate.node
+        var score = 0
+        if (node.isFocusable) score += 3
+        if (node.isClickable) score += 2
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && node.isScreenReaderFocusable) score += 1
+        return score
+    }
+
     private fun clearFocus(node: AccessibilityNodeInfo): Boolean {
         return node.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
     }
@@ -686,7 +775,8 @@ object A11yNavigator {
         effectiveBottom: Int,
         currentIndex: Int,
         status: String,
-        traversalIndex: Int = -1
+        traversalIndex: Int = -1,
+        aliasMembersByRepresentativeIndex: Map<Int, List<AccessibilityNodeInfo>> = emptyMap()
     ): TargetActionOutcome {
         val result = A11yFocusExecutor.requestFocusFlow(
             root = root,
@@ -697,7 +787,8 @@ object A11yNavigator {
             isScrollAction = false,
             traversalIndex = traversalIndex,
             traversalListSnapshot = traversalList,
-            currentFocusIndexHint = currentIndex
+            currentFocusIndexHint = currentIndex,
+            aliasMembersByTraversalIndex = aliasMembersByRepresentativeIndex
         )
         return TargetActionOutcome(result.success, result.status, result.targetNode)
     }
@@ -932,6 +1023,37 @@ object A11yNavigator {
         Log.i(
             "A11Y_HELPER",
             "[SMART_NEXT] visitedHistory add: reason=$reason label=${normalizedLabel.replace("\n", " ")} viewId=${node.viewIdResourceName} identity=$nodeIdentity bounds=$bounds"
+        )
+    }
+
+    internal fun recordVisitedAliasMembers(
+        representativeNode: AccessibilityNodeInfo,
+        representativeLabel: String,
+        aliasMembers: List<AccessibilityNodeInfo>,
+        reason: String
+    ) {
+        if (aliasMembers.isEmpty()) return
+        val normalizedRepresentativeLabel = representativeLabel.trim()
+        val recordedKeys = linkedSetOf<String>()
+        aliasMembers.forEach { member ->
+            val bounds = Rect().also { member.getBoundsInScreen(it) }
+            val memberIdentity = buildNodeIdentityForHistory(member)
+            val uniqueKey = "${member.viewIdResourceName}|$bounds|$memberIdentity"
+            if (!recordedKeys.add(uniqueKey)) return@forEach
+            val memberLabel = resolvePrimaryLabel(member)
+                ?: A11yTraversalAnalyzer.recoverDescendantLabel(member)
+                ?: normalizedRepresentativeLabel
+            A11yHistoryManager.recordVisitedSignature(
+                label = memberLabel,
+                viewId = member.viewIdResourceName,
+                bounds = bounds,
+                nodeIdentity = memberIdentity
+            )
+        }
+        val representativeIdentity = buildNodeIdentityForHistory(representativeNode)
+        Log.i(
+            "A11Y_HELPER",
+            "[SMART_NEXT] visitedHistory alias_group add: reason=$reason representative=${normalizedRepresentativeLabel.replace("\n", " ")} identity=$representativeIdentity aliases=${recordedKeys.size}"
         )
     }
 
