@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.65.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.66.0"
 
 
     @Volatile
@@ -747,9 +747,17 @@ object A11yNavigator {
     private fun aliasRepresentativeScore(candidate: FocusedNode): Int {
         val node = candidate.node
         var score = 0
+        val className = node.className?.toString()?.lowercase().orEmpty()
         if (node.isFocusable) score += 3
         if (node.isClickable) score += 2
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && node.isScreenReaderFocusable) score += 1
+        if (className.contains("imagebutton")) score += 4
+        if (className.contains("switch") || className.contains("toggle")) score += 4
+        if (className.contains("button")) score += 2
+        if (className.contains("framelayout") || className.contains("linearlayout") || className.contains("viewgroup")) {
+            score -= 2
+        }
+        if (A11yTraversalAnalyzer.countClickableOrFocusableDescendants(node, limit = 2) == 0) score += 1
         return score
     }
 
