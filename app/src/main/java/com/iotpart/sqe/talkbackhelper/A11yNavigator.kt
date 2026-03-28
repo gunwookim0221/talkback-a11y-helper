@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.66.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.67.0"
 
 
     @Volatile
@@ -402,15 +402,15 @@ object A11yNavigator {
             setLastRequestedFocusIndex(maxOf(lastRequestedFocusIndex, currentIndex))
         }
         Log.i("A11Y_HELPER", "[EXECUTE] navigation=${executionDecision.navigationDecision.type} expectedStatus=${executionDecision.expectedStatus} next=${executionDecision.nextIndex}")
+        val boundaryDecision = decideBoundaryConditions(executionDecision)
+        if (boundaryDecision.type == SelectionType.END) {
+            return handleEndOfTraversal(executionContext, executionDecision)
+        }
+
         executionContext.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
             val cleared = clearFocus(focusedNode)
             val focusedBounds = Rect().also { focusedNode.getBoundsInScreen(it) }
             Log.i("A11Y_HELPER", "[EXECUTE] Cleared existing accessibility focus before next move: result=$cleared bounds=$focusedBounds")
-        }
-
-        val boundaryDecision = decideBoundaryConditions(executionDecision)
-        if (boundaryDecision.type == SelectionType.END) {
-            return handleEndOfTraversal(executionContext, executionDecision)
         }
 
         val bottomBarResult = handleBottomBarTransition(executionContext, executionDecision)
@@ -478,8 +478,9 @@ object A11yNavigator {
         val currentIndex = context.currentIndex
         val lastIndex = traversalList.lastIndex
         if (executionDecision.shouldTerminateAtLastBottomBar) {
-            Log.i("A11Y_HELPER", "[EXECUTE] Last focused node is bottom bar and no next candidate. terminating.")
-            return TargetActionOutcome(false, "reached_end")
+            val terminalNode = traversalList.getOrNull(currentIndex)
+            Log.i("A11Y_HELPER", "[EXECUTE] Last focused node is bottom bar and no next candidate. terminal end_of_sequence.")
+            return TargetActionOutcome(false, "end_of_sequence", terminalNode)
         }
         if (executionDecision.shouldScrollAtEnd && context.scrollableNode != null) {
             return handlePreScrollAndRefresh(context, executionDecision, reason = "end_of_traversal")
@@ -501,8 +502,6 @@ object A11yNavigator {
         }
         if (currentIndex == lastIndex && currentIndex in traversalList.indices) {
             val lastNode = traversalList[currentIndex]
-            lastNode.refresh()
-            lastNode.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
             return TargetActionOutcome(false, "reached_end", lastNode)
         }
         return TargetActionOutcome(false, "reached_end")

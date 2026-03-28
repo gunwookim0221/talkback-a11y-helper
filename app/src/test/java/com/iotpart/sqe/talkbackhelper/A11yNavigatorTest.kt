@@ -10,7 +10,30 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.66.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.67.0")
+    }
+
+    @Test
+    fun shouldTerminateAtLastBottomBar_returnsTrue_whenCurrentIsBottomBarTail() {
+        data class Node(val className: String?, val viewId: String?, val bounds: Rect)
+
+        val nodes = listOf(
+            Node("android.widget.TextView", "com.test:id/content_card", Rect(0, 1400, 1080, 2200)),
+            Node("android.widget.Button", "com.test:id/menu_more", Rect(860, 2316, 1060, 2496))
+        )
+
+        val shouldTerminate = A11yNavigationPolicy.shouldTerminateAtLastBottomBar(
+            traversalList = nodes,
+            currentIndex = 1,
+            lastIndex = 1,
+            screenBottom = 2496,
+            screenHeight = 2496,
+            boundsOf = { it.bounds },
+            classNameOf = { it.className },
+            viewIdOf = { it.viewId }
+        )
+
+        assertTrue(shouldTerminate)
     }
 
     @Test
