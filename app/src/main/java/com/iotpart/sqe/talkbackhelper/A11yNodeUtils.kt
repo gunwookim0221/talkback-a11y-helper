@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
  * UI 노드의 속성 판별 및 검색을 위한 유틸리티 모음
  */
 object A11yNodeUtils {
-    const val VERSION: String = "1.2.0"
+    const val VERSION: String = "1.2.1"
 
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
 
@@ -128,7 +128,21 @@ object A11yNodeUtils {
     fun isContainerLikeViewId(viewIdResourceName: String?): Boolean {
         val normalized = viewIdResourceName?.substringAfterLast('/')?.trim()?.lowercase().orEmpty()
         if (normalized.isEmpty()) return false
-        return TRAVERSAL_CONTAINER_VIEW_ID_KEYWORDS.any { keyword -> normalized.contains(keyword) }
+        return TRAVERSAL_CONTAINER_VIEW_ID_KEYWORDS.any { keyword ->
+            normalized == keyword || containsKeywordWithNonAlphaNumericBoundary(normalized, keyword)
+        }
+    }
+
+    private fun containsKeywordWithNonAlphaNumericBoundary(value: String, keyword: String): Boolean {
+        var startIndex = value.indexOf(keyword)
+        while (startIndex >= 0) {
+            val endIndexExclusive = startIndex + keyword.length
+            val hasLeadingBoundary = startIndex == 0 || !value[startIndex - 1].isLetterOrDigit()
+            val hasTrailingBoundary = endIndexExclusive == value.length || !value[endIndexExclusive].isLetterOrDigit()
+            if (hasLeadingBoundary && hasTrailingBoundary) return true
+            startIndex = value.indexOf(keyword, startIndex + 1)
+        }
+        return false
     }
 
     fun findBestScrollableContainer(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {

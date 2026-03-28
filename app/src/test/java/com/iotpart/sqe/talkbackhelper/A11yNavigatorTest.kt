@@ -42,6 +42,16 @@ class A11yNavigatorTest {
     }
 
     @Test
+    fun isContainerLikeViewId_doesNotTreatCardIdsContainingRootContainerAsStructuralContainer() {
+        assertFalse(A11yNavigator.isContainerLikeViewId("com.samsung.android.oneconnect:id/sceneRoot_container"))
+    }
+
+    @Test
+    fun isContainerLikeViewId_keepsBoundaryMatchedRootContainerAsStructuralContainer() {
+        assertTrue(A11yNavigator.isContainerLikeViewId("com.samsung.android.oneconnect:id/main_root_container"))
+    }
+
+    @Test
     fun shouldAllowRecoveredDescendantLabelForTraversal_rejectsMultiItemContainerLabels() {
         val allow = A11yTraversalAnalyzer.shouldAllowRecoveredDescendantLabelForTraversal(
             listOf("Samsung AI Subscription", "Virtual Home", "Safe", "Android Auto")
