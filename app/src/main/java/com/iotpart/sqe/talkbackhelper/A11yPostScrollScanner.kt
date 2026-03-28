@@ -5,7 +5,7 @@ import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 
 object A11yPostScrollScanner {
-    const val VERSION: String = "1.2.1"
+    const val VERSION: String = "1.3.0"
 
     internal fun findAndFocusFirstContent(
         context: FindAndFocusPhaseContext,
@@ -14,8 +14,18 @@ object A11yPostScrollScanner {
         val localMainScrollContainer = A11yNodeUtils.findBestScrollableContainer(context.root)
         val postScrollContext = buildPostScrollSearchContext(context, request, localMainScrollContainer)
         val loopState = FocusLoopState()
+        val scanEndExclusive = if (request.singleTargetOnly) {
+            (postScrollContext.anchorStartIndex + 1).coerceAtMost(context.traversalList.size)
+        } else {
+            context.traversalList.size
+        }
+        val scanMode = if (request.singleTargetOnly) "regular_single_target" else if (request.isScrollAction) "post_scroll_scan" else "regular_scan"
+        Log.i(
+            "A11Y_HELPER",
+            "[SMART_NEXT] scan_mode=$scanMode start=${postScrollContext.anchorStartIndex} endExclusive=$scanEndExclusive"
+        )
 
-        for (index in postScrollContext.anchorStartIndex until context.traversalList.size) {
+        for (index in postScrollContext.anchorStartIndex until scanEndExclusive) {
             val outcome = tryFocusCandidate(
                 context = context,
                 request = request,
@@ -31,6 +41,10 @@ object A11yPostScrollScanner {
 
         if (loopState.focusedAny) {
             return loopState.focusedOutcome ?: TargetActionOutcome(false, "failed")
+        }
+        if (request.singleTargetOnly) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] single-target mode consumed intended index without success -> stop")
+            return TargetActionOutcome(false, "failed_single_target")
         }
 
         val noCandidateOutcome = handleNoCandidateAfterScroll(request, postScrollContext, loopState)
@@ -295,6 +309,7 @@ object A11yPostScrollScanner {
                 request = FindAndFocusRequest(
                     statusName = "looped",
                     isScrollAction = false,
+                    singleTargetOnly = false,
                     excludeDesc = null,
                     startIndex = 0,
                     visibleHistory = emptySet(),

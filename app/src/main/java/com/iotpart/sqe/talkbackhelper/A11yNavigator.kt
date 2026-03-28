@@ -12,7 +12,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.62.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.63.0"
 
 
     @Volatile
@@ -607,20 +607,26 @@ object A11yNavigator {
         context: SmartNextExecutionContext,
         executionDecision: SmartNextExecutionDecision
     ): TargetActionOutcome {
-        Log.i("A11Y_HELPER", "[EXECUTE] Performing regular next navigation")
-        return A11yPostScrollScanner.findAndFocusFirstContent(
+        val targetIndex = executionDecision.nextIndex.coerceAtLeast(0)
+        Log.i("A11Y_HELPER", "[EXECUTE] Performing regular next navigation in single-target mode targetIndex=$targetIndex")
+        val outcome = A11yPostScrollScanner.findAndFocusFirstContent(
             context = context.findAndFocusContext,
             request = FindAndFocusRequest(
                 statusName = executionDecision.expectedStatus,
                 isScrollAction = false,
+                singleTargetOnly = true,
                 excludeDesc = null,
-                startIndex = executionDecision.nextIndex.coerceAtLeast(0),
+                startIndex = targetIndex,
                 visibleHistory = emptySet(),
                 visibleHistorySignatures = emptySet(),
                 allowLooping = false,
                 preScrollAnchor = null
             )
         )
+        if (!outcome.success) {
+            Log.i("A11Y_HELPER", "[EXECUTE] regular single-target failed -> stop sweep targetIndex=$targetIndex reason=${outcome.reason}")
+        }
+        return outcome
     }
 
     private fun decideInitialNextTarget(state: SmartNextRuntimeState): InitialNextTargetDecision {
