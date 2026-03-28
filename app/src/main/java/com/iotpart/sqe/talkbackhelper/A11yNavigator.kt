@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.67.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.0"
 
 
     @Volatile
@@ -141,12 +141,19 @@ object A11yNavigator {
             val candidateLabel = resolveFocusedNodeLabel(candidate)
             val matchingGroup = groups.firstOrNull { group ->
                 val representative = selectAliasGroupRepresentative(group)
-                A11yTraversalAnalyzer.shouldTreatAsAliasWrapperDuplicate(
+                val grouped = A11yTraversalAnalyzer.shouldTreatAsAliasWrapperDuplicate(
                     primaryNode = representative.node,
                     secondaryNode = candidate.node,
                     primaryLabel = resolveFocusedNodeLabel(representative),
                     secondaryLabel = candidateLabel
                 )
+                if (grouped) {
+                    Log.i(
+                        "A11Y_HELPER",
+                        "[TRACE_ALIAS_GROUP] rep=${focusedNodeFingerprint(representative)} member=${focusedNodeFingerprint(candidate)}"
+                    )
+                }
+                grouped
             }
             if (matchingGroup != null) {
                 matchingGroup += candidate
@@ -161,6 +168,10 @@ object A11yNavigator {
             val groupIndex = normalizedNodes.size
             normalizedNodes += representative
             aliasMembersByIndex[groupIndex] = group.map { it.node }
+            Log.i(
+                "A11Y_HELPER",
+                "[TRACE_ALIAS_REP] index=$groupIndex size=${group.size} representative=${focusedNodeFingerprint(representative)}"
+            )
         }
         return normalizedNodes to aliasMembersByIndex
     }
@@ -182,6 +193,9 @@ object A11yNavigator {
             boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
             labelOf = { node -> resolvePrimaryLabel(node) ?: node.viewIdResourceName }
         )
+        normalizedNodes.forEachIndexed { index, node ->
+            Log.i("A11Y_HELPER", "[TRACE_NORMALIZED_FINAL] idx=$index fp=${focusedNodeFingerprint(node)}")
+        }
         Log.i("A11Y_HELPER", "[NORMALIZE] traversal=${traversalList.size} screen=($screenTop,$screenBottom) effectiveBottom=$effectiveBottom")
         return NormalizeResult(
             normalizedNodes = normalizedNodes,
@@ -759,6 +773,13 @@ object A11yNavigator {
         }
         if (A11yTraversalAnalyzer.countClickableOrFocusableDescendants(node, limit = 2) == 0) score += 1
         return score
+    }
+
+    private fun focusedNodeFingerprint(node: FocusedNode): String {
+        val info = node.node
+        val bounds = Rect().also(info::getBoundsInScreen)
+        val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && info.isScreenReaderFocusable
+        return "obj=${System.identityHashCode(info)} class=${info.className.orEmpty()} viewId=${info.viewIdResourceName.orEmpty()} bounds=(${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}) clickable=${info.isClickable} focusable=${info.isFocusable} screenReaderFocusable=$screenReaderFocusable text=${info.text?.toString()?.trim().orEmpty()} contentDescription=${info.contentDescription?.toString()?.trim().orEmpty()} mergedLabel=${resolveFocusedNodeLabel(node)}"
     }
 
     private fun clearFocus(node: AccessibilityNodeInfo): Boolean {
