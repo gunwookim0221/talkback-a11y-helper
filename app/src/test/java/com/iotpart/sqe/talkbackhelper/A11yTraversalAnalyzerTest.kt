@@ -9,7 +9,7 @@ class A11yTraversalAnalyzerTest {
 
     @Test
     fun version_isUpdated() {
-        assertEquals("1.8.1", A11yTraversalAnalyzer.VERSION)
+        assertEquals("1.8.3", A11yTraversalAnalyzer.VERSION)
     }
 
     @Test
