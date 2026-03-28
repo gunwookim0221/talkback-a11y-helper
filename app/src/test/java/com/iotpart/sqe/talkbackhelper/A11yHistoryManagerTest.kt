@@ -11,7 +11,7 @@ class A11yHistoryManagerTest {
 
     @Test
     fun version_isUpdated() {
-        assertEquals("1.4.0", A11yHistoryManager.VERSION)
+        assertEquals("1.5.0", A11yHistoryManager.VERSION)
     }
 
     @Test
@@ -51,5 +51,19 @@ class A11yHistoryManagerTest {
 
         assertFalse(A11yHistoryManager.isWithinAuthoritativeFocusWindow(untilMs - 1))
         assertEquals(null, A11yHistoryManager.authoritativeCommittedBounds())
+    }
+
+    @Test
+    fun shouldSuppressPreCommitTransientSystemUiEvent_returnsFalse_whenNotInActiveTurn() {
+        A11yHistoryManager.activeSmartNextTurnId = 0L
+        A11yHistoryManager.clearTopChromeTransientSystemUiSuppression("test_setup")
+
+        val suppressed = A11yHistoryManager.shouldSuppressPreCommitTransientSystemUiEvent(
+            eventType = android.view.accessibility.AccessibilityEvent.TYPE_ANNOUNCEMENT,
+            eventPackageName = "com.android.systemui",
+            root = null
+        )
+
+        assertFalse(suppressed)
     }
 }

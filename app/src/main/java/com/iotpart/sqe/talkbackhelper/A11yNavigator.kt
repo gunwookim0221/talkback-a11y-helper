@@ -283,6 +283,7 @@ object A11yNavigator {
             val execution = executeNextAction(nextActionDecision)
             verifyAndFinalizeNextAction(nextActionDecision, execution)
         } finally {
+            A11yHistoryManager.clearTopChromeTransientSystemUiSuppression("smart_next_turn_finished")
             if (A11yHistoryManager.activeSmartNextTurnId == turnId) {
                 A11yHistoryManager.activeSmartNextTurnId = 0L
             }
