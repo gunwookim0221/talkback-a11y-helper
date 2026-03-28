@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.8.1"
+    const val VERSION: String = "1.8.2"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
     data class CandidateSelectionResult(
@@ -178,6 +178,9 @@ object A11yTraversalAnalyzer {
         if (isOneConnectSettingsCandidateNode(current, recoveredDescendantLabel)) {
             return false
         }
+        if (shouldPreserveTrailingActionControl(current, node.text, node.contentDescription)) {
+            return false
+        }
         return shouldExcludeAsEmptyShell(
             mergedText = node.text,
             mergedContentDescription = node.contentDescription,
@@ -220,6 +223,58 @@ object A11yTraversalAnalyzer {
         }
 
         return childCount == 0
+    }
+
+    private fun shouldPreserveTrailingActionControl(
+        node: AccessibilityNodeInfo,
+        mergedText: String?,
+        mergedContentDescription: String?
+    ): Boolean {
+        val hasMergedLabel = !mergedText.isNullOrBlank() || !mergedContentDescription.isNullOrBlank()
+        if (hasMergedLabel) return false
+
+        val className = node.className?.toString()
+        if (!isIndependentActionControlClass(className)) return false
+
+        val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && node.isScreenReaderFocusable
+        val interactive = node.isClickable || node.isFocusable || screenReaderFocusable || node.isCheckable
+        if (!interactive) return false
+
+        val nodeBounds = Rect().also { node.getBoundsInScreen(it) }
+        if (nodeBounds.width() <= 0 || nodeBounds.height() <= 0) return false
+
+        var ancestor = node.parent
+        while (ancestor != null) {
+            if (!ancestor.isVisibleToUser) {
+                ancestor = ancestor.parent
+                continue
+            }
+
+            val ancestorBounds = Rect().also { ancestor.getBoundsInScreen(it) }
+            if (
+                ancestorBounds.contains(nodeBounds) &&
+                nodeBounds.centerX() >= ancestorBounds.centerX()
+            ) {
+                val ancestorTexts = collectDescendantTextCandidates(ancestor)
+                val uniqueTexts = ancestorTexts
+                    .asSequence()
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                    .distinct()
+                    .toList()
+                val ancestorHasCompositeLabel = uniqueTexts.size >= 2 &&
+                    shouldAllowRecoveredDescendantLabelForTraversal(uniqueTexts)
+                val ancestorScreenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && ancestor.isScreenReaderFocusable
+                val ancestorInteractive = ancestor.isClickable || ancestor.isFocusable || ancestorScreenReaderFocusable
+
+                if (ancestorHasCompositeLabel && ancestorInteractive && !isIndependentActionControlClass(ancestor.className?.toString())) {
+                    return true
+                }
+            }
+
+            ancestor = ancestor.parent
+        }
+        return false
     }
 
     internal fun shouldTreatAsAliasWrapperDuplicate(
