@@ -8,6 +8,7 @@ from datetime import datetime
 
 
 ADB = "adb"
+CAPTURE_UI_STATE_VERSION = "1.0.1"
 
 BASE_DIR = Path("captures")
 DEFAULT_SESSION_NAME = "manual_capture"
@@ -93,15 +94,15 @@ def capture_xml(local_path: Path) -> None:
 
 
 def capture_screenshot(local_path: Path) -> None:
-    # exec-out 사용하면 중간 파일 없이 바로 저장 가능
-    with open(local_path, "wb") as f:
-        proc = subprocess.run(
-            [ADB, "exec-out", "screencap", "-p"],
-            stdout=f,
-            stderr=subprocess.PIPE,
-            check=True
-        )
-    _ = proc
+    # 버전: CAPTURE_UI_STATE_VERSION 1.0.1
+    # 일부 환경에서 `adb exec-out screencap -p`가 빈 PNG를 만드는 이슈가 있어
+    # 기기 내 임시 파일 생성 -> pull -> 임시 파일 삭제 방식으로 캡처한다.
+    remote_png = f"/sdcard/__a11y_capture_{int(time.time() * 1000)}.png"
+    try:
+        adb_shell(f"screencap -p {remote_png}", check=True)
+        run_cmd([ADB, "pull", remote_png, str(local_path)], check=True)
+    finally:
+        adb_shell(f"rm -f {remote_png}", check=False)
 
 
 def save_meta(local_path: Path, session_name: str, tab_name: str, step: int, package_name: str) -> None:
