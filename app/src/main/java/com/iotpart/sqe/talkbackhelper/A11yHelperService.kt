@@ -59,6 +59,9 @@ class A11yHelperService : AccessibilityService() {
         ) {
             return
         }
+        if (A11yHistoryManager.shouldSuppressPreCommitTransientSystemUiEvent(type, event.packageName?.toString(), rootInActiveWindow)) {
+            return
+        }
 
         val node = resolveFocusNode(event)
         if (node == null) {

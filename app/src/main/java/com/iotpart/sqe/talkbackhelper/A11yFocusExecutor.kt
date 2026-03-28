@@ -9,7 +9,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.4.8"
+    const val VERSION: String = "1.4.9"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -189,7 +189,28 @@ object A11yFocusExecutor {
             Log.i("A11Y_HELPER", "[SMART_NEXT] status_detail pre_focus_alignment_adjusted=true")
         }
 
-        val currentFocusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { Rect().also(it::getBoundsInScreen) }
+        val currentFocusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val currentFocusedBounds = currentFocusedNode?.let { Rect().also(it::getBoundsInScreen) }
+        val currentPackageName = currentFocusedNode?.packageName?.toString()
+        val currentIsTopBar = currentFocusedNode != null &&
+            currentFocusedBounds != null &&
+            A11yNodeUtils.isTopAppBar(
+                currentFocusedNode.className?.toString(),
+                currentFocusedNode.viewIdResourceName,
+                currentFocusedBounds,
+                screenTop,
+                rootHeight
+            )
+        val shouldSuppressPreCommitSystemUi = !isScrollAction &&
+            isTopBar &&
+            currentIsTopBar &&
+            !expectedPackageName.isNullOrBlank() &&
+            currentPackageName == expectedPackageName
+        if (shouldSuppressPreCommitSystemUi) {
+            A11yHistoryManager.startTopChromeTransientSystemUiSuppression(expectedPackageName)
+        } else {
+            A11yHistoryManager.clearTopChromeTransientSystemUiSuppression("not_top_chrome_transition")
+        }
         if (A11yNavigator.shouldReuseExistingAccessibilityFocus(label, isScrollAction, currentFocusedBounds, targetBounds)) {
             val commitDecision = resolveFocusRetargetDecision(root, target, label, traversalListSnapshot, traversalIndex, isScrollAction, status)
             return commitFinalFocusCandidate(

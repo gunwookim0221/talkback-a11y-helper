@@ -5,8 +5,9 @@ import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 
 object A11yHistoryManager {
-    const val VERSION: String = "1.4.0"
+    const val VERSION: String = "1.5.0"
     private const val RETARGET_SUPPRESSION_WINDOW_MS: Long = 400L
+    private const val TOP_CHROME_SYSTEM_UI_SUPPRESSION_WINDOW_MS: Long = 300L
 
     data class VisibleHistorySignature(
         val label: String?,
@@ -36,6 +37,10 @@ object A11yHistoryManager {
     internal var smartNextTurnSeed: Long = 0L
     @Volatile
     private var authoritativeCommittedTurnId: Long = 0L
+    @Volatile
+    private var transientSystemUiSuppressionUntilMs: Long = 0L
+    @Volatile
+    private var transientSystemUiSuppressionExpectedPackage: String? = null
 
     @Volatile
     private var authoritativeFocusWindowUntilMs: Long = 0L
@@ -133,6 +138,58 @@ object A11yHistoryManager {
         return shouldIgnore
     }
 
+    internal fun startTopChromeTransientSystemUiSuppression(expectedPackageName: String?) {
+        if (activeSmartNextTurnId == 0L) return
+        if (expectedPackageName.isNullOrBlank()) return
+        transientSystemUiSuppressionExpectedPackage = expectedPackageName
+        transientSystemUiSuppressionUntilMs = System.currentTimeMillis() + TOP_CHROME_SYSTEM_UI_SUPPRESSION_WINDOW_MS
+        Log.i(
+            "A11Y_HELPER",
+            "[FOCUS_VERIFY] suppression_window_start type=pre_commit_top_chrome_system_ui expectedPackage=$expectedPackageName untilMs=$transientSystemUiSuppressionUntilMs"
+        )
+    }
+
+    internal fun clearTopChromeTransientSystemUiSuppression(reason: String) {
+        if (transientSystemUiSuppressionUntilMs <= 0L && transientSystemUiSuppressionExpectedPackage == null) return
+        transientSystemUiSuppressionUntilMs = 0L
+        transientSystemUiSuppressionExpectedPackage = null
+        Log.i("A11Y_HELPER", "[FOCUS_VERIFY] suppression_window_end type=pre_commit_top_chrome_system_ui reason=$reason")
+    }
+
+    internal fun shouldSuppressPreCommitTransientSystemUiEvent(
+        eventType: Int,
+        eventPackageName: String?,
+        root: AccessibilityNodeInfo?
+    ): Boolean {
+        if (eventPackageName != "com.android.systemui") return false
+        if (activeSmartNextTurnId == 0L) return false
+        if (hasCommittedFinalFocusForTurn(activeSmartNextTurnId)) return false
+        val expectedPackageName = transientSystemUiSuppressionExpectedPackage ?: return false
+        val untilMs = transientSystemUiSuppressionUntilMs
+        if (untilMs <= 0L) return false
+        if (System.currentTimeMillis() > untilMs) {
+            clearTopChromeTransientSystemUiSuppression("expired")
+            return false
+        }
+        val isStrayEventType = eventType == android.view.accessibility.AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED ||
+            eventType == android.view.accessibility.AccessibilityEvent.TYPE_VIEW_FOCUSED ||
+            eventType == android.view.accessibility.AccessibilityEvent.TYPE_ANNOUNCEMENT ||
+            eventType == android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+        if (!isStrayEventType) return false
+
+        val activeFocusNode = root?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val activeFocusPackage = activeFocusNode?.packageName?.toString()
+        if (activeFocusPackage != expectedPackageName) {
+            return false
+        }
+
+        Log.i(
+            "A11Y_HELPER",
+            "[FOCUS_VERIFY] suppression_window_event type=SYSTEM_UI_TRANSIENT suppressed=true reason=pre_commit_top_chrome_transition eventType=$eventType eventPackage=$eventPackageName expectedPackage=$expectedPackageName"
+        )
+        return true
+    }
+
     internal fun startAuthoritativeFocusSuppressionWindow(candidate: AccessibilityNodeInfo, label: String, status: String) {
         val until = System.currentTimeMillis() + RETARGET_SUPPRESSION_WINDOW_MS
         authoritativeCommittedNode = candidate
@@ -161,6 +218,7 @@ object A11yHistoryManager {
     internal fun markFinalCommitTurn(turnId: Long) {
         authoritativeCommittedTurnId = turnId
         lastFinalCommitTurnId = turnId
+        clearTopChromeTransientSystemUiSuppression("final_commit")
     }
 
     internal fun hasCommittedFinalFocusForTurn(turnId: Long): Boolean {
