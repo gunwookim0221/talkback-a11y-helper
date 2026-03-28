@@ -189,6 +189,7 @@ internal data class FindAndFocusPhaseContext(
 internal data class FindAndFocusRequest(
     val statusName: String,
     val isScrollAction: Boolean = false,
+    val singleTargetOnly: Boolean = false,
     val excludeDesc: String? = null,
     val startIndex: Int = 0,
     val visibleHistory: Set<String> = emptySet(),
