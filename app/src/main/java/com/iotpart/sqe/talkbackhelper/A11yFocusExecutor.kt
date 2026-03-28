@@ -9,7 +9,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.4.4"
+    const val VERSION: String = "1.4.5"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -22,6 +22,12 @@ object A11yFocusExecutor {
         val snapBackDetected: Boolean,
         val actualFocusedBounds: Rect?,
         val hardFailureSignal: Boolean
+    )
+
+    internal data class PreFocusAlignmentResult(
+        val adjusted: Boolean = false,
+        val bottomClipped: Boolean = false,
+        val reasonablyAligned: Boolean = false
     )
 
     fun requestAccessibilityFocusWithRetry(
@@ -49,6 +55,7 @@ object A11yFocusExecutor {
             val verification = pollForTargetFocusWithinWindow(
                 root = root,
                 targetBounds = targetBounds,
+                intendedTarget = target,
                 expectedPackageName = expectedPackageName,
                 pollIntervalMs = pollIntervalMs,
                 totalWindowMs = verificationWindowMs,
@@ -71,6 +78,7 @@ object A11yFocusExecutor {
 
     fun verifyFocusStabilizationAfterAction(
         root: AccessibilityNodeInfo,
+        intendedTarget: AccessibilityNodeInfo,
         targetBounds: Rect,
         expectedPackageName: String?,
         attemptMatched: Boolean,
@@ -80,6 +88,7 @@ object A11yFocusExecutor {
         val settleResult = pollForTargetFocusWithinWindow(
             root = root,
             targetBounds = targetBounds,
+            intendedTarget = intendedTarget,
             expectedPackageName = expectedPackageName,
             pollIntervalMs = settleDelayMs,
             totalWindowMs = settleWindowMs,
@@ -115,11 +124,15 @@ object A11yFocusExecutor {
         actualFocusedNode: AccessibilityNodeInfo?,
         actualFocusedBounds: Rect?,
         targetBounds: Rect,
-        expectedPackageName: String?
+        expectedPackageName: String?,
+        intendedTarget: AccessibilityNodeInfo? = null
     ): Boolean {
         if (actualFocusedNode == null || actualFocusedBounds == null) return false
         val actualPackageName = actualFocusedNode.packageName?.toString()
         if (expectedPackageName != null && actualPackageName != expectedPackageName) return false
+        if (intendedTarget != null && isLogicallySameCandidate(intendedTarget, actualFocusedNode, actualFocusedBounds)) {
+            return true
+        }
         return isWithinSnapBackTolerance(targetBounds, actualFocusedBounds)
     }
 
@@ -145,7 +158,7 @@ object A11yFocusExecutor {
         // 1) Pre-Focus: 가시성 확보
         val isTopBar = A11yNodeUtils.isTopAppBar(target.className?.toString(), target.viewIdResourceName, targetBounds, screenTop, rootHeight)
         val isBottomBar = A11yNodeUtils.isBottomNavigationBar(target.className?.toString(), target.viewIdResourceName, targetBounds, rootBounds.bottom, rootHeight)
-        if (!isTopBar && !isBottomBar && A11yNodeUtils.isNodePoorlyPositionedForFocus(targetBounds, screenTop, effectiveBottom)) {
+        val preFocusAlignment = if (!isTopBar && !isBottomBar && A11yNodeUtils.isNodePoorlyPositionedForFocus(targetBounds, screenTop, effectiveBottom)) {
             alignCandidateForReadableFocus(
                 root = root,
                 target = target,
@@ -168,7 +181,10 @@ object A11yFocusExecutor {
                     )
                 }
             )
+        } else {
+            PreFocusAlignmentResult()
         }
+        val effectiveStatus = if (status == "moved" && preFocusAlignment.adjusted) "moved_aligned" else status
 
         val currentFocusedBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { Rect().also(it::getBoundsInScreen) }
         if (A11yNavigator.shouldReuseExistingAccessibilityFocus(label, isScrollAction, currentFocusedBounds, targetBounds)) {
@@ -191,6 +207,7 @@ object A11yFocusExecutor {
         // 3) Verify: 최종 focus 일치 + snap-back 체크
         val focusVerification = verifyFocusStabilizationAfterAction(
             root = root,
+            intendedTarget = target,
             targetBounds = targetBounds,
             expectedPackageName = expectedPackageName,
             attemptMatched = focusExecution.success
@@ -206,7 +223,7 @@ object A11yFocusExecutor {
             return ActionResult(false, "failed_external_focus_departure", target)
         }
 
-        val commitDecision = resolveFocusRetargetDecision(root, target, label, traversalListSnapshot, traversalIndex, isScrollAction, status)
+        val commitDecision = resolveFocusRetargetDecision(root, target, label, traversalListSnapshot, traversalIndex, isScrollAction, effectiveStatus)
         if (!commitDecision.success && focusExecution.success && focusVerification.resolved) {
             Log.i("A11Y_HELPER", "[FOCUS_VERIFY] keeping_prior_attempt_success despite settle mismatch")
             return commitFinalFocusCandidate(
@@ -392,22 +409,23 @@ object A11yFocusExecutor {
         isBottomBar: Boolean,
         canScrollForwardHint: Boolean,
         intendedTrailingCandidate: AccessibilityNodeInfo? = null,
-        maxPreFocusAdjustments: Int = 1
-    ) {
-        if (isTopBar) return
+        maxPreFocusAdjustments: Int = 2
+    ): PreFocusAlignmentResult {
+        if (isTopBar) return PreFocusAlignmentResult()
         if (isBottomBar) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Detected bottom navigation target -> skipping pre-focus alignment")
-            return
+            return PreFocusAlignmentResult()
         }
         var currentBounds = Rect().also { target.getBoundsInScreen(it) }
         val poorlyPositioned = A11yNodeUtils.isNodePoorlyPositionedForFocus(currentBounds, screenTop, effectiveBottom)
-        if (!poorlyPositioned) return
+        if (!poorlyPositioned) return PreFocusAlignmentResult()
+        val bottomClippedCandidate = A11yNodeUtils.isNodeBottomClipped(currentBounds, effectiveBottom)
 
-        if (A11yNodeUtils.isNodeBottomClipped(currentBounds, effectiveBottom)) {
+        if (bottomClippedCandidate) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Candidate is bottom-clipped, attempting pre-focus alignment")
         }
 
-        val shouldUseMinimalAdjustment = shouldUseMinimalPreFocusAdjustment(
+        val shouldUseMinimalAdjustment = !bottomClippedCandidate && shouldUseMinimalPreFocusAdjustment(
             intendedBounds = currentBounds,
             trailingCandidateBounds = intendedTrailingCandidate?.let { candidate ->
                 Rect().also { candidate.getBoundsInScreen(it) }
@@ -420,6 +438,7 @@ object A11yFocusExecutor {
         }
 
         var adjustments = 0
+        var adjustedAny = false
         while (adjustments < maxPreFocusAdjustments) {
             var adjusted = false
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -432,10 +451,14 @@ object A11yFocusExecutor {
             }
 
             val shouldTryContainerScroll =
-                !shouldUseMinimalAdjustment &&
                 canScrollForwardHint &&
-                !adjusted &&
-                (A11yNodeUtils.isNodeBottomClipped(currentBounds, effectiveBottom) || A11yNodeUtils.shouldLiftTrailingContentBeforeFocus(currentBounds, effectiveBottom))
+                (
+                    bottomClippedCandidate ||
+                        !shouldUseMinimalAdjustment ||
+                        A11yNodeUtils.isNodeBottomClipped(currentBounds, effectiveBottom) ||
+                        A11yNodeUtils.shouldLiftTrailingContentBeforeFocus(currentBounds, effectiveBottom) ||
+                        !isReasonablyAlignedForFocus(currentBounds, screenTop, effectiveBottom)
+                    )
             if (shouldTryContainerScroll) {
                 val scrollableNode = A11yNavigator.findScrollableForwardAncestorCandidate(target) ?: findScrollableNode(root)
                 if (scrollableNode != null) {
@@ -447,6 +470,7 @@ object A11yFocusExecutor {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Last content cannot be top-aligned, using fully-visible fallback")
             }
 
+            adjustedAny = adjustedAny || adjusted
             if (!adjusted) break
             Thread.sleep(400)
             target.refresh()
@@ -458,18 +482,22 @@ object A11yFocusExecutor {
                 Log.w("A11Y_HELPER", "[SMART_NEXT] Overshoot detected: adjustment exposed a later card as primary content")
                 break
             }
-            if (!A11yNodeUtils.isNodePoorlyPositionedForFocus(currentBounds, screenTop, effectiveBottom)) {
-                Log.i("A11Y_HELPER", "[SMART_NEXT] Intended candidate is now fully visible")
-                return
+            if (isReasonablyAlignedForFocus(currentBounds, screenTop, effectiveBottom)) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT] Intended candidate reached readable alignment")
+                return PreFocusAlignmentResult(adjusted = adjustedAny, bottomClipped = bottomClippedCandidate, reasonablyAligned = true)
             }
             adjustments += 1
         }
 
-        if (A11yNodeUtils.isNodeFullyVisible(currentBounds, screenTop, effectiveBottom)) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] Intended candidate is now fully visible")
+        val reasonablyAligned = isReasonablyAlignedForFocus(currentBounds, screenTop, effectiveBottom)
+        if (reasonablyAligned) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Intended candidate reached readable alignment")
+        } else if (A11yNodeUtils.isNodeFullyVisible(currentBounds, screenTop, effectiveBottom)) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT] Intended candidate is fully visible but close to bottom edge")
         } else {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Proceeding with best-effort focus on intended candidate")
         }
+        return PreFocusAlignmentResult(adjusted = adjustedAny, bottomClipped = bottomClippedCandidate, reasonablyAligned = reasonablyAligned)
     }
 
     internal fun shouldUseMinimalPreFocusAdjustment(
@@ -619,6 +647,7 @@ object A11yFocusExecutor {
     private fun pollForTargetFocusWithinWindow(
         root: AccessibilityNodeInfo,
         targetBounds: Rect,
+        intendedTarget: AccessibilityNodeInfo?,
         expectedPackageName: String?,
         pollIntervalMs: Long,
         totalWindowMs: Long,
@@ -650,10 +679,20 @@ object A11yFocusExecutor {
 
             val verificationNode = if (packageAllowed) actualFocusNode else null
             lastBounds = verificationNode?.let { Rect().also(it::getBoundsInScreen) }
-            val matched = isTargetFocusResolved(verificationNode, lastBounds, targetBounds, expectedPackageName)
+            val latestTargetBounds = intendedTarget?.let { targetNode ->
+                targetNode.refresh()
+                Rect().also(targetNode::getBoundsInScreen)
+            } ?: targetBounds
+            val matched = isTargetFocusResolved(
+                actualFocusedNode = verificationNode,
+                actualFocusedBounds = lastBounds,
+                targetBounds = latestTargetBounds,
+                expectedPackageName = expectedPackageName,
+                intendedTarget = intendedTarget
+            )
             Log.i(
                 "A11Y_HELPER",
-                "[FOCUS_EXEC] Poll phase=$phaseTag expectedPackage=$expectedPackageName actualPackage=$actualPackageName packageAllowed=$packageAllowed actual=${A11yNavigator.formatBoundsForLog(lastBounds)} matched=$matched"
+                "[FOCUS_EXEC] Poll phase=$phaseTag expectedPackage=$expectedPackageName actualPackage=$actualPackageName packageAllowed=$packageAllowed target=${A11yNavigator.formatBoundsForLog(latestTargetBounds)} actual=${A11yNavigator.formatBoundsForLog(lastBounds)} matched=$matched"
             )
             if (matched) {
                 return FocusPollingResult(
@@ -700,6 +739,49 @@ object A11yFocusExecutor {
             abs(targetBounds.right - actualFocusedBounds.right) <= tolerancePx &&
             abs(targetBounds.bottom - actualFocusedBounds.bottom) <= tolerancePx
     }
+
+    private fun isReasonablyAlignedForFocus(bounds: Rect, screenTop: Int, effectiveBottom: Int): Boolean {
+        if (!A11yNodeUtils.isNodeFullyVisible(bounds, screenTop, effectiveBottom)) return false
+        val viewportHeight = (effectiveBottom - screenTop).coerceAtLeast(1)
+        val readableBottom = effectiveBottom - (viewportHeight * 0.12f).toInt()
+        return bounds.bottom <= readableBottom
+    }
+
+    private fun isLogicallySameCandidate(
+        intendedTarget: AccessibilityNodeInfo,
+        actualFocusedNode: AccessibilityNodeInfo,
+        actualBounds: Rect
+    ): Boolean {
+        if (A11yNavigator.isSameNode(intendedTarget, actualFocusedNode)) return true
+        val intendedBounds = Rect().also(intendedTarget::getBoundsInScreen)
+        val samePackage = intendedTarget.packageName?.toString() == actualFocusedNode.packageName?.toString()
+        val sameWindow = intendedTarget.windowId == actualFocusedNode.windowId
+        val sameClass = intendedTarget.className?.toString() == actualFocusedNode.className?.toString()
+        if (!samePackage || !sameWindow || !sameClass) return false
+
+        val intendedLabel = normalizedNodeLabel(intendedTarget)
+        val actualLabel = normalizedNodeLabel(actualFocusedNode)
+        val sameLabel = intendedLabel.isNotEmpty() && intendedLabel == actualLabel
+        val sameViewId = intendedTarget.viewIdResourceName?.takeIf { it.isNotBlank() } ==
+            actualFocusedNode.viewIdResourceName?.takeIf { it.isNotBlank() }
+        val sameText = normalizeText(intendedTarget.text?.toString()) == normalizeText(actualFocusedNode.text?.toString())
+        val sameDescription = normalizeText(intendedTarget.contentDescription?.toString()) == normalizeText(actualFocusedNode.contentDescription?.toString())
+        val sizeStable = abs(intendedBounds.width() - actualBounds.width()) <= 24 && abs(intendedBounds.height() - actualBounds.height()) <= 24
+        val horizontalStable = abs(intendedBounds.left - actualBounds.left) <= 18 && abs(intendedBounds.right - actualBounds.right) <= 18
+
+        return sizeStable && horizontalStable && (sameViewId || sameLabel || (sameText && sameDescription))
+    }
+
+    private fun normalizedNodeLabel(node: AccessibilityNodeInfo): String {
+        val label = A11yNavigator.resolvePrimaryLabel(node) ?: A11yTraversalAnalyzer.recoverDescendantLabel(node)
+        return normalizeText(label)
+    }
+
+    private fun normalizeText(value: String?): String = value
+        ?.trim()
+        ?.replace("\\s+".toRegex(), " ")
+        ?.lowercase()
+        .orEmpty()
 
     internal fun recordRequestedFocusAttempt(node: android.view.accessibility.AccessibilityNodeInfo, label: String, reason: String) {
         android.util.Log.i("A11Y_HELPER", "[FOCUS_ATTEMPT] reason=$reason label=$label")
