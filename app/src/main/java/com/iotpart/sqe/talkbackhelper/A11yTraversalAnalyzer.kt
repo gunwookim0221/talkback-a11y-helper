@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.7.0"
+    const val VERSION: String = "1.8.0"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
     data class CandidateSelectionResult(
@@ -243,19 +243,56 @@ object A11yTraversalAnalyzer {
 
         val primaryActionControl = isIndependentActionControlClass(primaryNode.className?.toString())
         val secondaryActionControl = isIndependentActionControlClass(secondaryNode.className?.toString())
-        if (primaryActionControl && secondaryActionControl) return false
 
         val primaryArea = area(primaryBounds)
         val secondaryArea = area(secondaryBounds)
         val largerNode = if (primaryArea >= secondaryArea) primaryNode else secondaryNode
         val smallerNode = if (largerNode == primaryNode) secondaryNode else primaryNode
-        if (isIndependentActionControlClass(smallerNode.className?.toString()) && (smallerNode.isClickable || smallerNode.isFocusable)) {
+        val smallerIsActionControl = isIndependentActionControlClass(smallerNode.className?.toString())
+        val largerMayWrapActionControl = canTreatAsActionControlWrapperDuplicate(
+            largerNode = largerNode,
+            smallerNode = smallerNode,
+            largerBounds = if (largerNode == primaryNode) primaryBounds else secondaryBounds,
+            smallerBounds = if (smallerNode == primaryNode) primaryBounds else secondaryBounds,
+            largerLabel = if (largerNode == primaryNode) primaryLabel else secondaryLabel,
+            smallerLabel = if (smallerNode == primaryNode) primaryLabel else secondaryLabel
+        )
+        if (primaryActionControl && secondaryActionControl && !largerMayWrapActionControl) {
+            return false
+        }
+        if (smallerIsActionControl && (smallerNode.isClickable || smallerNode.isFocusable) && !largerMayWrapActionControl) {
             return false
         }
         if (hasDistinctInteractiveDescendant(largerNode, counterpart = smallerNode)) {
             return false
         }
         return true
+    }
+
+    private fun canTreatAsActionControlWrapperDuplicate(
+        largerNode: AccessibilityNodeInfo,
+        smallerNode: AccessibilityNodeInfo,
+        largerBounds: Rect,
+        smallerBounds: Rect,
+        largerLabel: String?,
+        smallerLabel: String?
+    ): Boolean {
+        if (!isAncestorOf(ancestor = largerNode, descendant = smallerNode, parentOf = { node -> node.parent })) {
+            return false
+        }
+        if (!hasStrongOverlapOrContainment(largerBounds, smallerBounds)) return false
+        if (!areSemanticallyEquivalentLabels(largerLabel, smallerLabel)) return false
+
+        val smallerActionControl = isIndependentActionControlClass(smallerNode.className?.toString())
+        if (!smallerActionControl) return false
+        if (!isLikelyConcreteActionTarget(smallerNode)) return false
+
+        val largerArea = area(largerBounds).coerceAtLeast(1)
+        val smallerArea = area(smallerBounds).coerceAtLeast(1)
+        val areaRatio = largerArea.toFloat() / smallerArea.toFloat()
+        if (areaRatio > 3.2f) return false
+
+        return !hasDistinctInteractiveDescendant(largerNode, counterpart = smallerNode)
     }
 
     private fun hasDistinctInteractiveDescendant(
@@ -333,6 +370,22 @@ object A11yTraversalAnalyzer {
             normalized.contains("seekbar") ||
             normalized.contains("edittext") ||
             normalized.contains("spinner")
+    }
+
+    private fun isLikelyConcreteActionTarget(node: AccessibilityNodeInfo): Boolean {
+        val className = node.className?.toString()?.lowercase().orEmpty()
+        if (className.isBlank()) return false
+        if (
+            className.contains("imagebutton") ||
+            className.contains("switch") ||
+            className.contains("toggle") ||
+            className.contains("checkbox") ||
+            className.contains("radiobutton")
+        ) {
+            return true
+        }
+        val interactiveDescendantCount = countClickableOrFocusableDescendants(node, limit = 2)
+        return (node.isClickable || node.isFocusable) && interactiveDescendantCount == 0
     }
 
     private fun area(rect: Rect): Int = rect.width().coerceAtLeast(0) * rect.height().coerceAtLeast(0)
