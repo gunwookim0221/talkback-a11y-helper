@@ -2,12 +2,14 @@ package com.iotpart.sqe.talkbackhelper
 
 import android.graphics.Rect
 import android.os.Build
+import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.4.1"
+    const val VERSION: String = "1.4.2"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -25,32 +27,40 @@ object A11yFocusExecutor {
         target: AccessibilityNodeInfo,
         root: AccessibilityNodeInfo,
         maxAttempts: Int = 3,
-        retryDelayMs: Long = 300L
+        pollIntervalMs: Long = 75L,
+        verificationWindowMs: Long = 550L,
+        retryDelayMs: Long = 120L
     ): FocusExecutionResult {
         val targetBounds = Rect().also { target.getBoundsInScreen(it) }
         var lastBounds: Rect? = null
 
-        Log.i("A11Y_HELPER", "[FOCUS_EXEC] Start focus target=$targetBounds")
+        Log.i(
+            "A11Y_HELPER",
+            "[FOCUS_EXEC] Start focus target=$targetBounds pollIntervalMs=$pollIntervalMs verificationWindowMs=$verificationWindowMs maxAttempts=$maxAttempts"
+        )
 
         repeat(maxAttempts) { attempt ->
             target.refresh()
             val actionResult = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
             Log.i("A11Y_HELPER", "[FOCUS_EXEC] Attempt ${attempt + 1}: performAction=$actionResult")
 
-            Thread.sleep(retryDelayMs)
+            val verification = pollForTargetFocusWithinWindow(
+                root = root,
+                target = target,
+                targetBounds = targetBounds,
+                pollIntervalMs = pollIntervalMs,
+                totalWindowMs = verificationWindowMs,
+                phaseTag = "attempt_${attempt + 1}"
+            )
+            lastBounds = verification.lastFocusedBounds
 
-            root.refresh()
-            val actualFocusNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-            lastBounds = actualFocusNode?.let { Rect().also(it::getBoundsInScreen) }
-
-            Log.i("A11Y_HELPER", "[FOCUS_EXEC] Attempt ${attempt + 1} actual focus=$lastBounds")
-
-            if (lastBounds != null && lastBounds == targetBounds) {
-                Log.i("A11Y_HELPER", "[FOCUS_EXEC] Success! Focus matched exactly.")
+            if (verification.matched) {
+                Log.i("A11Y_HELPER", "[FOCUS_EXEC] Success! Focus reached target during polling window.")
                 return FocusExecutionResult(true, attempt + 1, lastBounds)
-            } else if (lastBounds != null && targetBounds.contains(lastBounds!!)) {
-                Log.i("A11Y_HELPER", "[FOCUS_EXEC] Success! Focus matched (contained within target).")
-                return FocusExecutionResult(true, attempt + 1, lastBounds)
+            }
+
+            if (attempt < maxAttempts - 1) {
+                waitWithoutMainThreadSleep(retryDelayMs)
             }
         }
         Log.e("A11Y_HELPER", "[FOCUS_EXEC] Failed all attempts. Last actual focus: $lastBounds")
@@ -61,10 +71,18 @@ object A11yFocusExecutor {
         root: AccessibilityNodeInfo,
         targetBounds: Rect,
         isTargetAccessibilityFocused: Boolean,
-        settleDelayMs: Long = 100L
+        settleDelayMs: Long = 75L,
+        settleWindowMs: Long = 450L
     ): FocusVerificationResult {
-        Thread.sleep(settleDelayMs)
-        val actualBounds = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { Rect().also(it::getBoundsInScreen) }
+        val settleResult = pollForTargetFocusWithinWindow(
+            root = root,
+            target = null,
+            targetBounds = targetBounds,
+            pollIntervalMs = settleDelayMs,
+            totalWindowMs = settleWindowMs,
+            phaseTag = "post_action_settle"
+        )
+        val actualBounds = settleResult.lastFocusedBounds
         val snapBack = shouldTreatAsSnapBackAfterVerification(actualBounds, targetBounds, isTargetAccessibilityFocused)
         return FocusVerificationResult(
             resolved = !snapBack,
@@ -553,6 +571,68 @@ object A11yFocusExecutor {
         val inputFocusResult = target.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
         Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_FOCUS priming result=$inputFocusResult label=$label")
         return inputFocusResult
+    }
+
+    private data class FocusPollingResult(
+        val matched: Boolean,
+        val lastFocusedBounds: Rect?
+    )
+
+    private fun pollForTargetFocusWithinWindow(
+        root: AccessibilityNodeInfo,
+        target: AccessibilityNodeInfo?,
+        targetBounds: Rect,
+        pollIntervalMs: Long,
+        totalWindowMs: Long,
+        phaseTag: String
+    ): FocusPollingResult {
+        val effectivePollInterval = pollIntervalMs.coerceIn(50L, 100L)
+        val effectiveWindow = totalWindowMs.coerceIn(400L, 700L)
+        val deadline = SystemClock.uptimeMillis() + effectiveWindow
+        var lastBounds: Rect? = null
+
+        while (true) {
+            root.refresh()
+            val actualFocusNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            lastBounds = actualFocusNode?.let { Rect().also(it::getBoundsInScreen) }
+            val targetFocused = target?.run {
+                refresh()
+                isAccessibilityFocused
+            } ?: false
+            val matched = isTargetFocusResolved(targetFocused, lastBounds, targetBounds)
+            Log.i(
+                "A11Y_HELPER",
+                "[FOCUS_EXEC] Poll phase=$phaseTag targetFocused=$targetFocused actual=${A11yNavigator.formatBoundsForLog(lastBounds)} matched=$matched"
+            )
+            if (matched) {
+                return FocusPollingResult(matched = true, lastFocusedBounds = lastBounds)
+            }
+
+            val now = SystemClock.uptimeMillis()
+            if (now >= deadline) break
+            waitWithoutMainThreadSleep(minOf(effectivePollInterval, deadline - now))
+        }
+
+        Log.w(
+            "A11Y_HELPER",
+            "[FOCUS_EXEC] Poll timeout phase=$phaseTag target=${A11yNavigator.formatBoundsForLog(targetBounds)} lastActual=${A11yNavigator.formatBoundsForLog(lastBounds)}"
+        )
+        return FocusPollingResult(matched = false, lastFocusedBounds = lastBounds)
+    }
+
+    private fun waitWithoutMainThreadSleep(durationMs: Long) {
+        val waitDuration = durationMs.coerceAtLeast(0L)
+        if (waitDuration == 0L) return
+        val isMainThread = Looper.myLooper() == Looper.getMainLooper()
+        if (!isMainThread) {
+            Thread.sleep(waitDuration)
+            return
+        }
+
+        val deadline = SystemClock.uptimeMillis() + waitDuration
+        while (SystemClock.uptimeMillis() < deadline) {
+            Thread.yield()
+        }
     }
 
     private fun isWithinSnapBackTolerance(targetBounds: Rect, actualFocusedBounds: Rect, tolerancePx: Int = 10): Boolean {
