@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.8.1"
+    const val VERSION: String = "1.8.0"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
     data class CandidateSelectionResult(
@@ -950,29 +950,6 @@ object A11yTraversalAnalyzer {
         node: AccessibilityNodeInfo,
         descendantTextCandidates: List<String>
     ): Boolean {
-        val nodeBounds = Rect().also { node.getBoundsInScreen(it) }
-        val rootBounds = resolveRootBounds(node)
-        val rootWidth = rootBounds?.width()?.takeIf { it > 0 } ?: 0
-        val rootHeight = rootBounds?.height()?.takeIf { it > 0 } ?: 0
-        val widthRatio = if (rootWidth > 0) nodeBounds.width().toFloat() / rootWidth.toFloat() else 0f
-        val heightRatio = if (rootHeight > 0) nodeBounds.height().toFloat() / rootHeight.toFloat() else 0f
-        val areaRatio = if (rootWidth > 0 && rootHeight > 0) {
-            (nodeBounds.width().toLong().coerceAtLeast(0L) * nodeBounds.height().toLong().coerceAtLeast(0L)).toFloat() /
-                (rootWidth.toLong() * rootHeight.toLong()).toFloat()
-        } else {
-            0f
-        }
-        val compositeCardCandidate = isCompositeContentCardCandidate(
-            clickable = node.isClickable,
-            focusable = node.isFocusable,
-            widthRatio = widthRatio,
-            heightRatio = heightRatio,
-            areaRatio = areaRatio,
-            hasCompactRecoveredLabel = shouldAllowRecoveredDescendantLabelForTraversal(descendantTextCandidates),
-            descendantInteractiveCount = countClickableOrFocusableDescendants(node, limit = 4)
-        )
-        if (compositeCardCandidate) return false
-
         if (isContainerLikeClassName(node.className?.toString())) return true
         if (isContainerLikeViewId(node.viewIdResourceName)) return true
         if (hasMultipleSiblingLevelInteractiveDescendants(node)) return true
@@ -984,24 +961,6 @@ object A11yTraversalAnalyzer {
         if (clickableDescendantCount < 2) return false
 
         return !shouldAllowRecoveredDescendantLabelForTraversal(descendantTextCandidates)
-    }
-
-    internal fun isCompositeContentCardCandidate(
-        clickable: Boolean,
-        focusable: Boolean,
-        widthRatio: Float,
-        heightRatio: Float,
-        areaRatio: Float,
-        hasCompactRecoveredLabel: Boolean,
-        descendantInteractiveCount: Int
-    ): Boolean {
-        if (!clickable || !focusable) return false
-        if (!hasCompactRecoveredLabel) return false
-        if (descendantInteractiveCount < 2) return false
-        if (widthRatio < 0.65f || widthRatio > 0.98f) return false
-        if (heightRatio < 0.12f || heightRatio > 0.60f) return false
-        if (areaRatio < 0.08f || areaRatio > 0.55f) return false
-        return true
     }
 
     internal fun hasMultipleSiblingLevelInteractiveDescendants(node: AccessibilityNodeInfo): Boolean {
