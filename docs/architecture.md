@@ -111,3 +111,128 @@ AccessibilityService
 - `logcat` 출력
 - JSON 파일 저장
 - broadcast 응답
+
+
+
+## Current Stable Baseline and Deferred Trailing-Control Work
+
+### 1. 현재 안정 기준 (Stable Baseline)
+
+PR #265 (commit `b603552`) 기준으로 현재 traversal 엔진은 **안정 상태**로 판단한다.
+
+- 변경 내용: Settings 화면에서 composite card(예: "Update app")가 누락되던 문제 수정
+- 결과: "Update app"과 같은 큰 parent card가 정상적으로 수집 및 읽힘
+- 이 버전을 **자동화 및 검증의 기준 baseline**으로 사용한다
+
+현재 시점의 `move_smart`는 다음을 안정적으로 제공한다:
+- 순차 포커스 이동 안정성
+- row / card / title 단위 읽기 정확성
+- loop 및 순서 붕괴 없이 예측 가능한 traversal
+
+---
+
+### 2. move_smart의 현재 사용 목적
+
+현재 baseline에서 `move_smart`의 역할은 다음과 같다:
+
+- Settings row, 카드, 제목 등의 **row-level 읽기**
+- 화면 내 요소의 **순차 이동**
+- TalkBack 결과를 **row/content 단위로 수집 및 검증**
+
+보장하지 않는 것:
+
+- row 내부 trailing control (on/off switch 등)의 별도 포커스 분리
+- composite UI 내부의 세부 control까지 포함한 정밀 traversal
+
+---
+
+### 3. 알려진 제한 사항 (Multiline Row Trailing Control)
+
+현재 multiline row에서 다음 문제가 존재한다:
+
+예시:
+- "Shared location information notifications"
+- 해당 row의 trailing switch(on/off)가 별도 포커스로 분리되지 않음
+
+원래 목표:
+- row → trailing switch → 다음 row 순서로 traversal
+
+현재 상태:
+- trailing switch는 항상 별도 stop으로 보장되지 않음
+
+---
+
+### 4. 시도했던 접근과 실패 원인 (설계 수준)
+
+다음과 같은 접근을 시도했으나 실제 디바이스 기준으로 모두 문제 발생:
+
+- collect 단계에서 trailing control 강제 포함
+- alias / wrapper 병합 로직 수정
+- normalize 이후 logical stop 삽입
+- decision 단계 row-local follow-up 추가
+
+발생한 문제:
+- row-first 순서 붕괴
+- 무한 루프 또는 반복 포커스
+- alias representative 충돌 (row vs switch)
+- 전체 traversal 안정성 저하 (상단 포커스 포함)
+
+결론:
+이 접근들은 현재 엔진의 핵심 불변식과 충돌한다:
+
+- single-step 실행 (한 번에 하나의 target)
+- no-later-sweep 정책
+- alias representative 모델
+- visited / final commit 상태 관리
+
+---
+
+### 5. 현재 설계 판단 (중요)
+
+위 문제를 기반으로 다음과 같이 결정한다:
+
+- `move_smart` 본체는 **수정하지 않는다**
+- trailing control 문제는 **의도적으로 보류한다**
+- 다음 영역은 더 이상 patch하지 않는다:
+  - collect
+  - alias
+  - normalize
+  - decision 로직
+
+향후 방향 (미구현):
+- 별도 명령 기반 접근
+- 또는 traversal 엔진 구조 재설계
+
+---
+
+### 6. Codex 작업 시 주의사항 (IMPORTANT)
+
+Traversal 로직 수정 시 반드시 지켜야 한다:
+
+하지 말 것:
+- `move_smart` 내부에서 trailing control 해결 시도
+- collect 단계에서 후보 강제 추가
+- alias representative 로직 수정
+- normalize 단계에서 stop 삽입
+- decision 단계 follow-up 로직 추가
+
+해야 할 것:
+- 현재 baseline 안정성을 최우선으로 유지
+- 코드 수정 전에 반드시 설계 검토
+- row 내부 control은 별도 경로로 접근
+
+---
+
+### 7. 현재 사용 가이드 (Practical Usage)
+
+현재 자동화/검증에서 사용 범위:
+
+사용 가능:
+- row / title / card 읽기
+- 순차 traversal 검증
+
+사용하지 않는 것:
+- trailing switch 자동 접근
+- row 내부 control 포함 전체 traversal
+
+이 제한은 현재 **안정성 유지 목적상 의도적으로 허용된 상태**이다.
