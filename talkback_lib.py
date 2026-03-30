@@ -35,7 +35,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.0"
+CLIENT_ALGORITHM_VERSION = "1.7.1"
 
 
 @dataclass
@@ -990,28 +990,84 @@ class A11yAdbClient:
         self.clear_logcat(dev=dev)
         self._broadcast(dev, ACTION_GET_FOCUS, ["--es", "reqId", req_id])
 
-        result = self._read_log_result(dev, "FOCUS_RESULT", req_id, wait_seconds=wait_seconds)
+        try:
+            result = self._read_log_result(dev, "FOCUS_RESULT", req_id, wait_seconds=wait_seconds)
+        except RuntimeError as exc:
+            self.last_get_focus_trace["response_received"] = False
+            self.last_get_focus_trace["response_success"] = False
+            self.last_get_focus_trace["empty_reason"] = "parse_error"
+            self.last_get_focus_trace["fallback_used"] = True
+            self.last_get_focus_trace["fallback_reason"] = "parse_error"
+            self.last_get_focus_trace["elapsed_before_fallback_sec"] = time.monotonic() - started
+            print(
+                f"[DEBUG][get_focus] fallback_enter serial={serial} req_id={req_id} "
+                f"reason=parse_error error={exc} "
+                f"elapsed_before_fallback={self.last_get_focus_trace['elapsed_before_fallback_sec']:.3f}s"
+            )
+            fallback_started = time.monotonic()
+            try:
+                dump_nodes = self.dump_tree(dev=dev)
+            except Exception as fallback_exc:
+                self.last_get_focus_trace["fallback_dump_elapsed_sec"] = time.monotonic() - fallback_started
+                self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
+                print(
+                    f"[DEBUG][get_focus] dump_tree fallback failed serial={serial} req_id={req_id} "
+                    f"error={fallback_exc} elapsed={self.last_get_focus_trace['fallback_dump_elapsed_sec']:.3f}s"
+                )
+                return {}
+            self.last_get_focus_trace["fallback_dump_elapsed_sec"] = time.monotonic() - fallback_started
+            self.last_get_focus_trace["fallback_dump_nodes"] = dump_nodes if isinstance(dump_nodes, list) else []
+            fallback_focus_node = self._find_focused_node_in_tree(dump_nodes)
+            if fallback_focus_node:
+                label = self.extract_visible_label_from_focus(fallback_focus_node)
+                view_id = str(fallback_focus_node.get("viewIdResourceName", "") or "")
+                bounds = self._normalize_bounds(fallback_focus_node)
+                self.last_get_focus_trace["fallback_found"] = True
+                self.last_get_focus_trace["fallback_node_label"] = label
+                self.last_get_focus_trace["fallback_node_view_id"] = view_id
+                self.last_get_focus_trace["fallback_node_bounds"] = bounds
+                self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
+                print(
+                    f"[DEBUG][get_focus] fallback_result serial={serial} req_id={req_id} found=True "
+                    f"label='{label}' view_id='{view_id}' bounds='{bounds}' "
+                    f"dump_elapsed={self.last_get_focus_trace['fallback_dump_elapsed_sec']:.3f}s "
+                    f"total_elapsed={self.last_get_focus_trace['total_elapsed_sec']:.3f}s"
+                )
+                return fallback_focus_node
+
+            self.last_get_focus_trace["fallback_found"] = False
+            self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
+            print(
+                f"[DEBUG][get_focus] fallback_result serial={serial} req_id={req_id} found=False "
+                f"dump_elapsed={self.last_get_focus_trace['fallback_dump_elapsed_sec']:.3f}s "
+                f"total_elapsed={self.last_get_focus_trace['total_elapsed_sec']:.3f}s"
+            )
+            return {}
+
         self.last_get_focus_trace["response_received"] = bool(result)
         response_success = bool(result.get("success"))
         self.last_get_focus_trace["response_success"] = response_success
         focus_node: dict[str, Any] = {}
-        if response_success:
-            for key in ("node", "focusNode", "focusedNode", "focus"):
-                node = result.get(key)
-                if isinstance(node, dict):
-                    focus_node = node
-                    break
+        payload_candidate_source = "none"
+        for key in ("node", "focusNode", "focusedNode", "focus"):
+            node = result.get(key)
+            if isinstance(node, dict):
+                focus_node = node
+                payload_candidate_source = "nested_node"
+                break
 
-            if not focus_node and any(
-                k in result for k in ("text", "viewIdResourceName", "contentDescription", "boundsInScreen")
-            ):
-                focus_node = dict(result)
+        if not focus_node and any(
+            k in result for k in ("text", "viewIdResourceName", "contentDescription", "boundsInScreen", "accessibilityFocused", "focused")
+        ):
+            focus_node = dict(result)
+            payload_candidate_source = "top_level"
 
         major_keys = ("text", "contentDescription", "viewIdResourceName", "boundsInScreen")
         key_presence = {k: bool(str(result.get(k, "") or "").strip()) for k in major_keys}
         print(
             f"[DEBUG][get_focus] response serial={serial} req_id={req_id} "
-            f"success={response_success} keys={key_presence} result_keys={len(result.keys())}"
+            f"success={response_success} keys={key_presence} result_keys={len(result.keys())} "
+            f"payload_candidate_source={payload_candidate_source}"
         )
 
         if self._is_meaningful_focus_node(focus_node):
@@ -1193,6 +1249,12 @@ class A11yAdbClient:
 
         bounds = node.get("boundsInScreen")
         if isinstance(bounds, dict) and any(key in bounds for key in ("l", "t", "r", "b", "left", "top", "right", "bottom")):
+            return True
+
+        if bool(node.get("accessibilityFocused")):
+            return True
+
+        if bool(node.get("focused")):
             return True
 
         return False
