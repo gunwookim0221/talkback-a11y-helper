@@ -1202,6 +1202,64 @@ class SmartMoveFocusTest(unittest.TestCase):
         self.assertEqual(result.get("text"), "nested target")
         self.assertEqual(result.get("contentDescription"), "Sleep environment Learn more")
 
+    def test_get_focus_accepts_top_level_payload_without_success_field(self):
+        client = FakeA11yClient()
+        client.logcat_payload = (
+            'I/A11Y_HELPER: FOCUS_RESULT '
+            '{"reqId":"REQID616","text":"Map View","contentDescription":"Map View",'
+            '"viewIdResourceName":"com.samsung.android.oneconnect:id/mapview_button",'
+            '"boundsInScreen":{"l":708,"t":142,"r":810,"b":286},"accessibilityFocused":true}'
+        )
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID616-xxxx"), patch.object(client, "dump_tree") as dump_mock:
+            result = client.get_focus("SER")
+
+        self.assertEqual(result.get("text"), "Map View")
+        self.assertTrue(result.get("accessibilityFocused"))
+        dump_mock.assert_not_called()
+
+    def test_get_focus_accepts_top_level_payload_when_success_false(self):
+        client = FakeA11yClient()
+        client.logcat_payload = (
+            'I/A11Y_HELPER: FOCUS_RESULT '
+            '{"success":false,"reqId":"REQID617","contentDescription":"Map View",'
+            '"viewIdResourceName":"com.samsung.android.oneconnect:id/mapview_button",'
+            '"boundsInScreen":{"l":708,"t":142,"r":810,"b":286}}'
+        )
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID617-xxxx"), patch.object(client, "dump_tree") as dump_mock:
+            result = client.get_focus("SER")
+
+        self.assertEqual(result.get("contentDescription"), "Map View")
+        self.assertEqual(result.get("viewIdResourceName"), "com.samsung.android.oneconnect:id/mapview_button")
+        dump_mock.assert_not_called()
+
+    def test_get_focus_flags_only_payload_is_meaningful(self):
+        client = FakeA11yClient()
+        client.logcat_payload = (
+            'I/A11Y_HELPER: FOCUS_RESULT '
+            '{"success":false,"reqId":"REQID618","focused":false,"accessibilityFocused":true}'
+        )
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID618-xxxx"), patch.object(client, "dump_tree") as dump_mock:
+            result = client.get_focus("SER")
+
+        self.assertTrue(result.get("accessibilityFocused"))
+        dump_mock.assert_not_called()
+
+    def test_get_focus_parse_error_sets_reason_and_uses_fallback(self):
+        client = FakeA11yClient()
+        dump_nodes = [{"text": "복구", "accessibilityFocused": True}]
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID619-xxxx"), patch.object(
+            client, "_read_log_result", side_effect=RuntimeError("FOCUS_RESULT JSON 파싱 실패")
+        ), patch.object(client, "dump_tree", return_value=dump_nodes):
+            result = client.get_focus("SER")
+
+        self.assertEqual(result.get("text"), "복구")
+        self.assertEqual(client.last_get_focus_trace.get("empty_reason"), "parse_error")
+        self.assertEqual(client.last_get_focus_trace.get("fallback_reason"), "parse_error")
+
     def test_reset_focus_history_broadcasts_reset_for_string_device(self):
         client = FakeA11yClient()
 
