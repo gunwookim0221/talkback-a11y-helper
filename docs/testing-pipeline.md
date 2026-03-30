@@ -53,3 +53,5 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.GET_FOCUS -p com.iotpar
   - `com.samsung.android.oneconnect:id/more_menu_button` (`More options`)
 - allowlist 외 항목은 클릭/확장을 시도하지 않습니다.
 - overlay 내부는 짧은 step 상한(`OVERLAY_MAX_STEPS`)으로만 수집하고, 수집 종료 후 `press_back_and_recover_focus(...)`로 부모 컨텍스트 복귀를 수행합니다.
+- 복귀 직후에는 entry 기준 재정렬(re-align)을 수행합니다. 현재 포커스가 entry 이전에 방문한 항목으로 판정되면 `move_smart` 기반 `next` 이동으로 entry까지 재정렬한 뒤, **entry 다음 항목부터** main 수집을 이어갑니다.
+- 재정렬 구간은 main 결과 row로 저장하지 않아, overlay 복귀 직후 `우리 집 → Map View → Add` 같은 중복 row 누적과 stop 조건 오탐을 줄입니다.
