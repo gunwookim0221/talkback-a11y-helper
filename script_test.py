@@ -15,7 +15,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.3.5"
+SCRIPT_VERSION = "1.3.6"
 
 OVERLAY_ENTRY_ALLOWLIST = [
     {
@@ -354,18 +354,71 @@ def is_overlay_entry_focus(current_step: dict[str, Any], entry_step: dict[str, A
     return bool(current_bounds and entry_bounds and current_bounds == entry_bounds)
 
 
+def collect_realign_probe(
+    client: A11yAdbClient,
+    dev: str,
+    move: bool,
+    direction: str = "next",
+    wait_seconds: float = MAIN_STEP_WAIT_SECONDS,
+) -> dict[str, Any]:
+    probe: dict[str, Any] = {
+        "move_result": None,
+        "move_elapsed_sec": 0.0,
+        "get_focus_elapsed_sec": 0.0,
+        "focus_view_id": "",
+        "focus_bounds": "",
+        "visible_label": "",
+        "normalized_visible_label": "",
+    }
+
+    if move:
+        move_started = time.monotonic()
+        try:
+            if str(direction).strip().lower() == "next":
+                probe["move_result"] = client.move_focus_smart(dev=dev, direction=direction)
+            else:
+                probe["move_result"] = "moved" if client.move_focus(dev=dev, direction=direction) else "failed"
+        except Exception as exc:  # defensive
+            probe["move_result"] = f"error: {exc}"
+        probe["move_elapsed_sec"] = round(time.monotonic() - move_started, 3)
+
+    focus_started = time.monotonic()
+    try:
+        focus_node = client.get_focus(dev=dev, wait_seconds=wait_seconds)
+    except Exception:
+        focus_node = {}
+    probe["get_focus_elapsed_sec"] = round(time.monotonic() - focus_started, 3)
+
+    safe_focus_node = focus_node if isinstance(focus_node, dict) else {}
+    probe["focus_view_id"] = str(safe_focus_node.get("viewIdResourceName", "") or "").strip()
+    probe["visible_label"] = client.extract_visible_label_from_focus(safe_focus_node)
+    probe["normalized_visible_label"] = client.normalize_for_comparison(probe["visible_label"])
+
+    normalize_bounds = getattr(client, "_normalize_bounds", None)
+    if callable(normalize_bounds):
+        probe["focus_bounds"] = str(normalize_bounds(safe_focus_node) or "").strip()
+
+    log(
+        f"[OVERLAY] realign probe move={move} "
+        f"move_elapsed={probe['move_elapsed_sec']:.3f}s "
+        f"focus_elapsed={probe['get_focus_elapsed_sec']:.3f}s "
+        f"view_id='{probe['focus_view_id']}' "
+        f"label='{probe['visible_label']}'"
+    )
+    return probe
+
+
 def realign_focus_after_overlay(
     client: A11yAdbClient,
     dev: str,
     entry_step: dict[str, Any],
     known_step_index_by_fingerprint: dict[tuple[str, str, str], int],
 ) -> dict[str, Any]:
-    current_step = client.collect_focus_step(
+    current_step = collect_realign_probe(
+        client=client,
         dev=dev,
-        step_index=int(entry_step.get("step_index", 0) or 0),
         move=False,
         wait_seconds=MAIN_STEP_WAIT_SECONDS,
-        announcement_wait_seconds=MAIN_ANNOUNCEMENT_WAIT_SECONDS,
     )
     current_fp = make_main_fingerprint(current_step)
     entry_idx = int(entry_step.get("step_index", 0) or 0)
@@ -388,13 +441,12 @@ def realign_focus_after_overlay(
         }
 
     for realign_idx in range(1, OVERLAY_REALIGN_MAX_STEPS + 1):
-        probe_step = client.collect_focus_step(
+        probe_step = collect_realign_probe(
+            client=client,
             dev=dev,
-            step_index=entry_idx,
             move=True,
             direction="next",
             wait_seconds=MAIN_STEP_WAIT_SECONDS,
-            announcement_wait_seconds=MAIN_ANNOUNCEMENT_WAIT_SECONDS,
         )
         if is_overlay_entry_focus(probe_step, entry_step):
             return {

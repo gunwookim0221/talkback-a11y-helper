@@ -65,17 +65,47 @@ class RealignDummyClient:
     def __init__(self, focus_steps):
         self.focus_steps = list(focus_steps)
         self.calls = []
+        self.collect_focus_step_calls = 0
 
     def collect_focus_step(self, **kwargs):
-        self.calls.append(kwargs)
+        self.collect_focus_step_calls += 1
+        raise AssertionError("realign probe should not call collect_focus_step")
+
+    def move_focus_smart(self, **kwargs):
+        self.calls.append({"kind": "move_focus_smart", **kwargs})
+        return "moved"
+
+    def move_focus(self, **kwargs):
+        self.calls.append({"kind": "move_focus", **kwargs})
+        return True
+
+    def get_focus(self, **kwargs):
+        self.calls.append({"kind": "get_focus", **kwargs})
         if self.focus_steps:
             return self.focus_steps.pop(0)
         return {
-            "step_index": kwargs.get("step_index", 0),
-            "normalized_visible_label": "",
-            "focus_view_id": "",
-            "focus_bounds": "",
+            "text": "",
+            "contentDescription": "",
+            "viewIdResourceName": "",
+            "boundsInScreen": "",
         }
+
+    @staticmethod
+    def extract_visible_label_from_focus(focus_node):
+        if not isinstance(focus_node, dict):
+            return ""
+        return str(focus_node.get("text", "") or focus_node.get("contentDescription", "") or "").strip()
+
+    @staticmethod
+    def normalize_for_comparison(text):
+        return str(text or "").strip().lower()
+
+    @staticmethod
+    def _normalize_bounds(focus_node):
+        if not isinstance(focus_node, dict):
+            return ""
+        bounds = focus_node.get("boundsInScreen")
+        return str(bounds or "").strip()
 
 
 def test_should_expand_overlay_matches_allowlisted_resource_id():
@@ -195,16 +225,14 @@ def test_realign_focus_after_overlay_moves_to_entry_when_focus_is_before_entry()
     client = RealignDummyClient(
         [
             {
-                "step_index": 3,
-                "normalized_visible_label": "map view",
-                "focus_view_id": "id_map",
-                "focus_bounds": "0,0,10,10",
+                "text": "Map View",
+                "viewIdResourceName": "id_map",
+                "boundsInScreen": "0,0,10,10",
             },
             {
-                "step_index": 3,
-                "normalized_visible_label": "add",
-                "focus_view_id": "com.samsung.android.oneconnect:id/add_menu_button",
-                "focus_bounds": "0,10,10,20",
+                "text": "Add",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/add_menu_button",
+                "boundsInScreen": "0,10,10,20",
             },
         ]
     )
@@ -226,19 +254,20 @@ def test_realign_focus_after_overlay_moves_to_entry_when_focus_is_before_entry()
     assert result["entry_reached"] is True
     assert result["status"] == "realign_entry_reached"
     assert result["steps_taken"] == 1
-    assert len(client.calls) == 2
-    assert client.calls[0]["move"] is False
-    assert client.calls[1]["move"] is True
+    assert len(client.calls) == 3
+    assert client.calls[0]["kind"] == "get_focus"
+    assert client.calls[1]["kind"] == "move_focus_smart"
+    assert client.calls[2]["kind"] == "get_focus"
+    assert client.collect_focus_step_calls == 0
 
 
 def test_realign_focus_after_overlay_skips_when_focus_not_known_as_prior_step():
     client = RealignDummyClient(
         [
             {
-                "step_index": 3,
-                "normalized_visible_label": "more options",
-                "focus_view_id": "id_more",
-                "focus_bounds": "0,20,10,30",
+                "text": "More options",
+                "viewIdResourceName": "id_more",
+                "boundsInScreen": "0,20,10,30",
             }
         ]
     )
@@ -260,3 +289,5 @@ def test_realign_focus_after_overlay_skips_when_focus_not_known_as_prior_step():
     assert result["status"] == "skip_realign_not_before_entry"
     assert result["steps_taken"] == 0
     assert len(client.calls) == 1
+    assert client.calls[0]["kind"] == "get_focus"
+    assert client.collect_focus_step_calls == 0
