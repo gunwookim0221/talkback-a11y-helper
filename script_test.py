@@ -14,7 +14,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.3.1"
+SCRIPT_VERSION = "1.3.2"
 
 OVERLAY_ENTRY_ALLOWLIST = [
     {
@@ -583,11 +583,14 @@ def collect_tab_rows(
             f"timing(move={row.get('move_elapsed_sec', 0):.3f}s "
             f"ann={row.get('announcement_elapsed_sec', 0):.3f}s "
             f"get_focus={row.get('get_focus_elapsed_sec', 0):.3f}s "
-            f"fallback_dump={row.get('dump_tree_elapsed_sec', 0):.3f}s "
+            f"get_focus_fallback_dump={row.get('get_focus_fallback_dump_elapsed_sec', 0):.3f}s "
+            f"step_dump={row.get('step_dump_tree_elapsed_sec', 0):.3f}s "
             f"crop={row.get('crop_elapsed_sec', 0):.3f}s total={row.get('step_total_elapsed_sec', 0):.3f}s) "
             f"focus_reason='{row.get('get_focus_empty_reason', '')}' "
             f"fallback_used={row.get('get_focus_fallback_used', False)} "
             f"fallback_found={row.get('get_focus_fallback_found', False)} "
+            f"step_dump_used={row.get('step_dump_tree_used', False)} "
+            f"step_dump_reason='{row.get('step_dump_tree_reason', '')}' "
             f"req_id='{row.get('get_focus_req_id', '')}'"
         )
 

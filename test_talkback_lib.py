@@ -1452,7 +1452,7 @@ class SmartMoveFocusTest(unittest.TestCase):
 
 class FocusHelpersTest(unittest.TestCase):
     def test_client_algorithm_version_is_updated(self):
-        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.0")
+        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.2")
 
     def test_extract_visible_label_from_focus_prefers_text(self):
         focus_node = {"text": "  Visible Text  ", "contentDescription": "Desc"}
@@ -1527,7 +1527,10 @@ class FocusHelpersTest(unittest.TestCase):
         self.assertEqual(step["focus_content_description"], "ignored")
         self.assertEqual(step["focus_view_id"], "com.example:id/hello")
         self.assertEqual(step["focus_bounds"], "1,2,3,4")
-        self.assertEqual(step["dump_tree_nodes"], [{"text": "node-1"}])
+        self.assertEqual(step["dump_tree_nodes"], [])
+        self.assertEqual(step["step_dump_tree_elapsed_sec"], 0.0)
+        self.assertFalse(step["step_dump_tree_used"])
+        self.assertEqual(step["step_dump_tree_reason"], "focus_payload_sufficient")
 
     def test_collect_focus_step_move_next_uses_move_focus_smart(self):
         client = CollectFocusStepClient()
@@ -1551,6 +1554,30 @@ class FocusHelpersTest(unittest.TestCase):
         self.assertEqual(step["last_announcements"], ["  설정  ", "버튼"])
         self.assertEqual(step["last_merged_announcement"], "설정 버튼")
         self.assertEqual(client.merged_calls, [])
+
+    def test_collect_focus_step_reuses_get_focus_fallback_nodes_without_step_dump(self):
+        client = CollectFocusStepClient()
+
+        def _focus_with_trace(dev=None, wait_seconds: float = 2.0):
+            client.last_get_focus_trace = {
+                "fallback_dump_nodes": [{"text": "fallback-node", "accessibilityFocused": True}],
+                "fallback_dump_elapsed_sec": 1.234,
+                "empty_reason": "empty_json",
+                "fallback_used": True,
+                "fallback_found": True,
+                "req_id": "REQID-TRACE",
+                "total_elapsed_sec": 2.345,
+            }
+            return {"text": "복구 포커스"}
+
+        client.get_focus = _focus_with_trace
+        step = client.collect_focus_step(dev="SERIAL", move=False, wait_seconds=0.2)
+
+        self.assertEqual(step["dump_tree_nodes"], [{"text": "fallback-node", "accessibilityFocused": True}])
+        self.assertEqual(step["get_focus_fallback_dump_elapsed_sec"], 1.234)
+        self.assertEqual(step["step_dump_tree_elapsed_sec"], 0.0)
+        self.assertFalse(step["step_dump_tree_used"])
+        self.assertEqual(step["step_dump_tree_reason"], "fallback_nodes_reused")
 
 
 if __name__ == "__main__":

@@ -35,7 +35,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.1"
+CLIENT_ALGORITHM_VERSION = "1.7.2"
 
 
 @dataclass
@@ -1713,6 +1713,10 @@ class A11yAdbClient:
             "focus_bounds": "",
             "last_announcements": [],
             "last_merged_announcement": "",
+            "get_focus_fallback_dump_elapsed_sec": 0.0,
+            "step_dump_tree_elapsed_sec": 0.0,
+            "step_dump_tree_used": False,
+            "step_dump_tree_reason": "",
         }
 
         if move:
@@ -1769,17 +1773,31 @@ class A11yAdbClient:
 
         trace = self.last_get_focus_trace if isinstance(self.last_get_focus_trace, dict) else {}
         fallback_nodes = trace.get("fallback_dump_nodes")
+        step["get_focus_fallback_dump_elapsed_sec"] = round(float(trace.get("fallback_dump_elapsed_sec", 0.0) or 0.0), 3)
         if isinstance(fallback_nodes, list) and fallback_nodes:
             step["dump_tree_nodes"] = self._json_safe_value(fallback_nodes)
-            step["dump_tree_elapsed_sec"] = round(float(trace.get("fallback_dump_elapsed_sec", 0.0) or 0.0), 3)
+            step["step_dump_tree_elapsed_sec"] = 0.0
+            step["step_dump_tree_used"] = False
+            step["step_dump_tree_reason"] = "fallback_nodes_reused"
+            step["dump_tree_elapsed_sec"] = step["step_dump_tree_elapsed_sec"]
         else:
-            dump_started = time.monotonic()
-            try:
-                dump_tree_nodes = self.dump_tree(dev=dev)
-                step["dump_tree_nodes"] = self._json_safe_value(dump_tree_nodes)
-            except Exception:
-                pass
-            step["dump_tree_elapsed_sec"] = round(time.monotonic() - dump_started, 3)
+            focus_payload_sufficient = self._is_meaningful_focus_node(safe_focus_node)
+            if focus_payload_sufficient:
+                step["step_dump_tree_elapsed_sec"] = 0.0
+                step["step_dump_tree_used"] = False
+                step["step_dump_tree_reason"] = "focus_payload_sufficient"
+                step["dump_tree_elapsed_sec"] = step["step_dump_tree_elapsed_sec"]
+            else:
+                dump_started = time.monotonic()
+                step["step_dump_tree_used"] = True
+                step["step_dump_tree_reason"] = "fallback_nodes_missing"
+                try:
+                    dump_tree_nodes = self.dump_tree(dev=dev)
+                    step["dump_tree_nodes"] = self._json_safe_value(dump_tree_nodes)
+                except Exception:
+                    pass
+                step["step_dump_tree_elapsed_sec"] = round(time.monotonic() - dump_started, 3)
+                step["dump_tree_elapsed_sec"] = step["step_dump_tree_elapsed_sec"]
 
         step["get_focus_empty_reason"] = str(trace.get("empty_reason", "") or "")
         step["get_focus_fallback_used"] = bool(trace.get("fallback_used", False))
@@ -1793,7 +1811,11 @@ class A11yAdbClient:
         print(
             f"[DEBUG][collect_focus_step] step={step_index} move={step['move_elapsed_sec']:.3f}s "
             f"ann={step['announcement_elapsed_sec']:.3f}s get_focus={step['get_focus_elapsed_sec']:.3f}s "
-            f"fallback_dump={step['dump_tree_elapsed_sec']:.3f}s reason='{step['get_focus_empty_reason']}'"
+            f"get_focus_fallback_dump={step['get_focus_fallback_dump_elapsed_sec']:.3f}s "
+            f"step_dump={step['step_dump_tree_elapsed_sec']:.3f}s "
+            f"step_dump_used={step['step_dump_tree_used']} "
+            f"step_dump_reason='{step['step_dump_tree_reason']}' "
+            f"reason='{step['get_focus_empty_reason']}'"
         )
         return step
 
