@@ -57,6 +57,13 @@ class A11yAdbClient:
         self.last_dump_metadata: dict[str, Any] = {}
         self.last_smart_nav_result: dict[str, Any] = {}
         self.last_smart_nav_terminal: bool = False
+        self._helper_status_cache: dict[str, Any] = {
+            "ts": 0.0,
+            "serial": None,
+            "result": None,
+        }
+        self.helper_status_cache_ttl_sec: float = 1.0
+        self.last_get_focus_trace: dict[str, Any] = {}
 
     def _resolve_serial(self, dev: Any) -> str | None:
         if dev is None:
@@ -92,6 +99,23 @@ class A11yAdbClient:
         return proc.stdout.strip()
 
     def check_helper_status(self, dev: Any = None) -> bool:
+        started = time.monotonic()
+        serial = self._resolve_serial(dev)
+        cache = self._helper_status_cache
+        now = time.monotonic()
+        if (
+            cache.get("result") is not None
+            and cache.get("serial") == serial
+            and (now - float(cache.get("ts", 0.0))) <= self.helper_status_cache_ttl_sec
+        ):
+            cached_result = bool(cache.get("result"))
+            elapsed = time.monotonic() - started
+            print(
+                f"[DEBUG][helper_status] serial={serial or 'default'} cached=True "
+                f"result={cached_result} elapsed={elapsed:.3f}s"
+            )
+            return cached_result
+
         enabled_services = self._run(
             ["shell", "settings", "get", "secure", "enabled_accessibility_services"],
             dev=dev,
@@ -103,6 +127,16 @@ class A11yAdbClient:
                 "'설정 > 접근성 > 설치된 앱'에서 활성화해 주세요."
                 f"{RESET_TEXT}"
             )
+            self._helper_status_cache = {
+                "ts": time.monotonic(),
+                "serial": serial,
+                "result": False,
+            }
+            elapsed = time.monotonic() - started
+            print(
+                f"[DEBUG][helper_status] serial={serial or 'default'} cached=False "
+                f"result=False reason=service_disabled elapsed={elapsed:.3f}s"
+            )
             return False
 
         if not self.ping(dev=dev, wait_=3.0):
@@ -111,8 +145,28 @@ class A11yAdbClient:
                 "서비스를 다시 시작하거나 접근성 설정을 재확인해 주세요."
                 f"{RESET_TEXT}"
             )
+            self._helper_status_cache = {
+                "ts": time.monotonic(),
+                "serial": serial,
+                "result": False,
+            }
+            elapsed = time.monotonic() - started
+            print(
+                f"[DEBUG][helper_status] serial={serial or 'default'} cached=False "
+                f"result=False reason=ping_failed elapsed={elapsed:.3f}s"
+            )
             return False
 
+        self._helper_status_cache = {
+            "ts": time.monotonic(),
+            "serial": serial,
+            "result": True,
+        }
+        elapsed = time.monotonic() - started
+        print(
+            f"[DEBUG][helper_status] serial={serial or 'default'} cached=False "
+            f"result=True elapsed={elapsed:.3f}s"
+        )
         return True
 
     def ping(self, dev: Any = None, wait_: float = 3.0) -> bool:
@@ -901,16 +955,47 @@ class A11yAdbClient:
         return False
 
     def get_focus(self, dev: Any = None, wait_seconds: float = 2.0) -> dict[str, Any]:
-        if not self.check_helper_status(dev=dev):
+        started = time.monotonic()
+        serial = self._resolve_serial(dev) or "default"
+        req_id = str(uuid.uuid4())[:8]
+        self.last_get_focus_trace = {
+            "serial": serial,
+            "req_id": req_id,
+            "started_at": time.time(),
+            "helper_status_ok": False,
+            "response_received": False,
+            "empty_reason": "",
+            "fallback_used": False,
+            "fallback_reason": "",
+            "fallback_dump_elapsed_sec": 0.0,
+            "fallback_found": False,
+            "fallback_node_label": "",
+            "fallback_node_view_id": "",
+            "fallback_node_bounds": "",
+            "fallback_dump_nodes": [],
+            "elapsed_before_fallback_sec": 0.0,
+            "total_elapsed_sec": 0.0,
+        }
+        helper_ok = self.check_helper_status(dev=dev)
+        self.last_get_focus_trace["helper_status_ok"] = helper_ok
+        print(
+            f"[DEBUG][get_focus] start serial={serial} req_id={req_id} "
+            f"wait={wait_seconds:.2f}s helper_ok={helper_ok}"
+        )
+        if not helper_ok:
+            self.last_get_focus_trace["empty_reason"] = "helper_not_ready"
+            self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
             return {}
 
         self.clear_logcat(dev=dev)
-        req_id = str(uuid.uuid4())[:8]
         self._broadcast(dev, ACTION_GET_FOCUS, ["--es", "reqId", req_id])
 
         result = self._read_log_result(dev, "FOCUS_RESULT", req_id, wait_seconds=wait_seconds)
+        self.last_get_focus_trace["response_received"] = bool(result)
+        response_success = bool(result.get("success"))
+        self.last_get_focus_trace["response_success"] = response_success
         focus_node: dict[str, Any] = {}
-        if bool(result.get("success")):
+        if response_success:
             for key in ("node", "focusNode", "focusedNode", "focus"):
                 node = result.get(key)
                 if isinstance(node, dict):
@@ -922,22 +1007,74 @@ class A11yAdbClient:
             ):
                 focus_node = dict(result)
 
+        major_keys = ("text", "contentDescription", "viewIdResourceName", "boundsInScreen")
+        key_presence = {k: bool(str(result.get(k, "") or "").strip()) for k in major_keys}
+        print(
+            f"[DEBUG][get_focus] response serial={serial} req_id={req_id} "
+            f"success={response_success} keys={key_presence} result_keys={len(result.keys())}"
+        )
+
         if self._is_meaningful_focus_node(focus_node):
+            self.last_get_focus_trace["empty_reason"] = ""
+            self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
             return focus_node
 
-        print("[DEBUG][get_focus] GET_FOCUS result empty, falling back to dump_tree")
+        empty_reason = "no_response"
+        if result:
+            reason_text = str(result.get("reason", "") or "").lower()
+            if "찾지 못했습니다" in reason_text:
+                empty_reason = "timeout"
+            elif not response_success:
+                empty_reason = "empty_json"
+            else:
+                empty_reason = "missing_required_fields"
+        self.last_get_focus_trace["empty_reason"] = empty_reason
+        self.last_get_focus_trace["fallback_used"] = True
+        self.last_get_focus_trace["fallback_reason"] = empty_reason
+        self.last_get_focus_trace["elapsed_before_fallback_sec"] = time.monotonic() - started
+        print(
+            f"[DEBUG][get_focus] fallback_enter serial={serial} req_id={req_id} "
+            f"reason={empty_reason} elapsed_before_fallback={self.last_get_focus_trace['elapsed_before_fallback_sec']:.3f}s"
+        )
+        fallback_started = time.monotonic()
         try:
             dump_nodes = self.dump_tree(dev=dev)
-        except Exception:
-            print("[DEBUG][get_focus] dump_tree fallback failed")
+        except Exception as exc:
+            self.last_get_focus_trace["fallback_dump_elapsed_sec"] = time.monotonic() - fallback_started
+            self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
+            print(
+                f"[DEBUG][get_focus] dump_tree fallback failed serial={serial} req_id={req_id} "
+                f"error={exc} elapsed={self.last_get_focus_trace['fallback_dump_elapsed_sec']:.3f}s"
+            )
             return {}
+        self.last_get_focus_trace["fallback_dump_elapsed_sec"] = time.monotonic() - fallback_started
+        self.last_get_focus_trace["fallback_dump_nodes"] = dump_nodes if isinstance(dump_nodes, list) else []
 
         fallback_focus_node = self._find_focused_node_in_tree(dump_nodes)
         if fallback_focus_node:
-            print("[DEBUG][get_focus] dump_tree fallback found focused node")
+            label = self.extract_visible_label_from_focus(fallback_focus_node)
+            view_id = str(fallback_focus_node.get("viewIdResourceName", "") or "")
+            bounds = self._normalize_bounds(fallback_focus_node)
+            self.last_get_focus_trace["fallback_found"] = True
+            self.last_get_focus_trace["fallback_node_label"] = label
+            self.last_get_focus_trace["fallback_node_view_id"] = view_id
+            self.last_get_focus_trace["fallback_node_bounds"] = bounds
+            self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
+            print(
+                f"[DEBUG][get_focus] fallback_result serial={serial} req_id={req_id} found=True "
+                f"label='{label}' view_id='{view_id}' bounds='{bounds}' "
+                f"dump_elapsed={self.last_get_focus_trace['fallback_dump_elapsed_sec']:.3f}s "
+                f"total_elapsed={self.last_get_focus_trace['total_elapsed_sec']:.3f}s"
+            )
             return fallback_focus_node
 
-        print("[DEBUG][get_focus] dump_tree fallback failed")
+        self.last_get_focus_trace["fallback_found"] = False
+        self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
+        print(
+            f"[DEBUG][get_focus] fallback_result serial={serial} req_id={req_id} found=False "
+            f"dump_elapsed={self.last_get_focus_trace['fallback_dump_elapsed_sec']:.3f}s "
+            f"total_elapsed={self.last_get_focus_trace['total_elapsed_sec']:.3f}s"
+        )
         return {}
 
     def press_back_and_recover_focus(
@@ -1495,6 +1632,7 @@ class A11yAdbClient:
         move: bool = True,
         direction: str = "next",
         wait_seconds: float = 1.5,
+        announcement_wait_seconds: float | None = None,
     ) -> dict[str, Any]:
         """포커스 1 step 이동/수집 결과를 엑셀 row 친화적인 dict로 반환합니다."""
         step: dict[str, Any] = {
@@ -1516,6 +1654,7 @@ class A11yAdbClient:
         }
 
         if move:
+            move_started = time.monotonic()
             try:
                 if str(direction).strip().lower() == "next":
                     step["move_result"] = self.move_focus_smart(dev=dev, direction=direction)
@@ -1523,16 +1662,23 @@ class A11yAdbClient:
                     step["move_result"] = self.move_focus(dev=dev, direction=direction)
             except Exception as exc:  # defensive
                 step["move_result"] = f"error: {exc}"
+            step["move_elapsed_sec"] = round(time.monotonic() - move_started, 3)
+        else:
+            step["move_elapsed_sec"] = 0.0
 
+        ann_wait = wait_seconds if announcement_wait_seconds is None else announcement_wait_seconds
+
+        ann_started = time.monotonic()
         try:
             partial_announcements = self.get_partial_announcements(
                 dev=dev,
-                wait_seconds=wait_seconds,
+                wait_seconds=ann_wait,
                 only_new=True,
             )
             step["partial_announcements"] = self._json_safe_value(partial_announcements)
         except Exception:
             partial_announcements = []
+        step["announcement_elapsed_sec"] = round(time.monotonic() - ann_started, 3)
 
         # 발화 수집 기준(step)을 단일화하기 위해 get_announcements 재호출을 제거합니다.
         merged_announcement = self._merge_announcements(partial_announcements)
@@ -1542,10 +1688,12 @@ class A11yAdbClient:
         saved_last_announcements = list(self.last_announcements)
         saved_last_merged = self.last_merged_announcement
 
+        focus_started = time.monotonic()
         try:
             focus_node = self.get_focus(dev=dev, wait_seconds=wait_seconds)
         except Exception:
             focus_node = {}
+        step["get_focus_elapsed_sec"] = round(time.monotonic() - focus_started, 3)
         safe_focus_node = self._json_safe_value(focus_node) if isinstance(focus_node, dict) else {}
         step["focus_node"] = safe_focus_node
         step["focus_text"] = safe_focus_node.get("text", "") if isinstance(safe_focus_node, dict) else ""
@@ -1557,15 +1705,34 @@ class A11yAdbClient:
         step["visible_label"] = visible_label
         step["normalized_visible_label"] = self.normalize_for_comparison(visible_label)
 
-        try:
-            dump_tree_nodes = self.dump_tree(dev=dev)
-            step["dump_tree_nodes"] = self._json_safe_value(dump_tree_nodes)
-        except Exception:
-            pass
+        trace = self.last_get_focus_trace if isinstance(self.last_get_focus_trace, dict) else {}
+        fallback_nodes = trace.get("fallback_dump_nodes")
+        if isinstance(fallback_nodes, list) and fallback_nodes:
+            step["dump_tree_nodes"] = self._json_safe_value(fallback_nodes)
+            step["dump_tree_elapsed_sec"] = round(float(trace.get("fallback_dump_elapsed_sec", 0.0) or 0.0), 3)
+        else:
+            dump_started = time.monotonic()
+            try:
+                dump_tree_nodes = self.dump_tree(dev=dev)
+                step["dump_tree_nodes"] = self._json_safe_value(dump_tree_nodes)
+            except Exception:
+                pass
+            step["dump_tree_elapsed_sec"] = round(time.monotonic() - dump_started, 3)
+
+        step["get_focus_empty_reason"] = str(trace.get("empty_reason", "") or "")
+        step["get_focus_fallback_used"] = bool(trace.get("fallback_used", False))
+        step["get_focus_fallback_found"] = bool(trace.get("fallback_found", False))
+        step["get_focus_req_id"] = str(trace.get("req_id", "") or "")
+        step["get_focus_total_elapsed_sec"] = round(float(trace.get("total_elapsed_sec", 0.0) or 0.0), 3)
 
         step["last_announcements"] = self._json_safe_value(saved_last_announcements)
         step["last_merged_announcement"] = saved_last_merged
 
+        print(
+            f"[DEBUG][collect_focus_step] step={step_index} move={step['move_elapsed_sec']:.3f}s "
+            f"ann={step['announcement_elapsed_sec']:.3f}s get_focus={step['get_focus_elapsed_sec']:.3f}s "
+            f"fallback_dump={step['dump_tree_elapsed_sec']:.3f}s reason='{step['get_focus_empty_reason']}'"
+        )
         return step
 
     def get_announcements(
