@@ -1,4 +1,5 @@
 import json
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -13,7 +14,20 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.2.0"
+SCRIPT_VERSION = "1.3.0"
+
+OVERLAY_ENTRY_ALLOWLIST = [
+    {
+        "resource_id": "com.samsung.android.oneconnect:id/add_menu_button",
+        "label": "Add",
+    },
+    {
+        "resource_id": "com.samsung.android.oneconnect:id/more_menu_button",
+        "label": "More options",
+    },
+]
+
+OVERLAY_MAX_STEPS = 12
 
 TAB_CONFIGS = [
     {
@@ -231,6 +245,10 @@ def save_excel(rows: list[dict], output_path: str) -> None:
 
     ordered_cols = [
         "tab_name",
+        "context_type",
+        "parent_step_index",
+        "overlay_entry_label",
+        "overlay_recovery_status",
         "step_index",
         "status",
         "stop_reason",
@@ -266,6 +284,132 @@ def save_excel(rows: list[dict], output_path: str) -> None:
         insert_images_to_excel(output_path, image_col_name="crop_image")
 
     log(f"[SAVE] saved excel: {output_path} rows={len(df)}")
+
+
+def should_expand_overlay(step: dict[str, Any]) -> bool:
+    focus_view_id = str(step.get("focus_view_id", "") or "").strip()
+    normalized_visible_label = str(step.get("normalized_visible_label", "") or "").strip()
+
+    for entry in OVERLAY_ENTRY_ALLOWLIST:
+        allowed_view_id = str(entry.get("resource_id", "") or "").strip()
+        if allowed_view_id and focus_view_id == allowed_view_id:
+            return True
+
+    for entry in OVERLAY_ENTRY_ALLOWLIST:
+        allowed_label = str(entry.get("label", "") or "").strip().lower()
+        if allowed_label and normalized_visible_label == allowed_label.lower():
+            return True
+
+    return False
+
+
+def make_overlay_entry_fingerprint(tab_name: str, step: dict[str, Any]) -> str:
+    focus_view_id = str(step.get("focus_view_id", "") or "").strip()
+    normalized_visible_label = str(step.get("normalized_visible_label", "") or "").strip()
+    return f"{tab_name}|{focus_view_id}|{normalized_visible_label}"
+
+
+def expand_overlay(
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict[str, Any],
+    entry_step: dict[str, Any],
+    rows: list[dict[str, Any]],
+    all_rows: list[dict[str, Any]],
+    output_path: str,
+    output_base_dir: str,
+) -> list[dict[str, Any]]:
+    overlay_rows: list[dict[str, Any]] = []
+    entry_label = str(entry_step.get("visible_label", "") or "").strip()
+    entry_view_id = str(entry_step.get("focus_view_id", "") or "").strip()
+
+    clicked = False
+    if entry_view_id:
+        clicked = client.touch(
+            dev=dev,
+            name=f"^{re.escape(entry_view_id)}$",
+            type_="r",
+            wait_=3,
+        )
+    elif entry_label:
+        clicked = client.touch(
+            dev=dev,
+            name=f"^{re.escape(entry_label)}$",
+            type_="a",
+            wait_=3,
+        )
+
+    recovery_status = "not_attempted"
+    if not clicked:
+        recovery_status = "entry_click_failed"
+        return overlay_rows
+
+    time.sleep(1.0)
+
+    parent_step_index = entry_step.get("step_index")
+    overlay_prev_visible_label = ""
+    overlay_fail_count = 0
+    overlay_same_count = 0
+    for overlay_step_idx in range(1, OVERLAY_MAX_STEPS + 1):
+        overlay_row = client.collect_focus_step(
+            dev=dev,
+            step_index=overlay_step_idx,
+            move=True,
+            direction="next",
+            wait_seconds=1.0,
+        )
+        overlay_row["tab_name"] = tab_cfg["tab_name"]
+        overlay_row["context_type"] = "overlay"
+        overlay_row["parent_step_index"] = parent_step_index
+        overlay_row["overlay_entry_label"] = entry_label
+        overlay_row["overlay_recovery_status"] = ""
+        overlay_row["status"] = "OK"
+        overlay_row["stop_reason"] = ""
+        overlay_row["crop_image"] = "IMAGE"
+        overlay_row = maybe_capture_focus_crop(client, dev, overlay_row, output_base_dir)
+
+        overlay_rows.append(overlay_row)
+        rows.append(overlay_row)
+        all_rows.append(overlay_row)
+        save_excel(all_rows, output_path)
+
+        should_end_overlay, overlay_fail_count, overlay_same_count, overlay_reason = should_stop(
+            row=overlay_row,
+            prev_visible_label=overlay_prev_visible_label,
+            fail_count=overlay_fail_count,
+            same_count=overlay_same_count,
+        )
+        overlay_visible_label = str(overlay_row.get("visible_label", "") or "").strip()
+        if overlay_visible_label:
+            overlay_prev_visible_label = overlay_visible_label
+        if should_end_overlay:
+            overlay_row["status"] = "END"
+            overlay_row["stop_reason"] = overlay_reason
+            break
+
+    recovery_anchor = str(entry_step.get("normalized_visible_label", "") or "").strip()
+    scenario_anchor = str(tab_cfg.get("anchor_name", "") or "").strip()
+    expected_anchor: str | None = recovery_anchor or scenario_anchor or None
+
+    recovery_result = client.press_back_and_recover_focus(
+        dev=dev,
+        expected_parent_anchor=expected_anchor,
+        wait_seconds=1.0,
+        retry=1,
+    )
+    recovery_status = str(recovery_result.get("status", "") or "")
+    if recovery_status != "ok" and scenario_anchor:
+        select_ok = client.select(
+            dev=dev,
+            name=scenario_anchor,
+            type_=str(tab_cfg.get("anchor_type", "a") or "a"),
+            wait_=3,
+        )
+        recovery_status = "ok_select_fallback" if select_ok else f"{recovery_status}_select_fallback_failed"
+
+    if overlay_rows:
+        overlay_rows[-1]["overlay_recovery_status"] = recovery_status
+    return overlay_rows
 
 
 def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
@@ -368,6 +512,10 @@ def collect_tab_rows(
     anchor_elapsed = time.perf_counter() - anchor_start
 
     anchor_row["tab_name"] = tab_cfg["tab_name"]
+    anchor_row["context_type"] = "main"
+    anchor_row["parent_step_index"] = ""
+    anchor_row["overlay_entry_label"] = ""
+    anchor_row["overlay_recovery_status"] = ""
     anchor_row["status"] = "ANCHOR"
     anchor_row["stop_reason"] = ""
     anchor_row["step_elapsed_sec"] = round(anchor_elapsed, 3)
@@ -381,6 +529,7 @@ def collect_tab_rows(
     prev_visible_label = str(anchor_row.get("visible_label", "") or "").strip()
     fail_count = 0
     same_count = 0
+    expanded_overlay_entries: set[str] = set()
 
     for step_idx in range(1, tab_cfg["max_steps"] + 1):
         log(f"[STEP] START tab='{tab_cfg['tab_name']}' step={step_idx}")
@@ -396,6 +545,10 @@ def collect_tab_rows(
         step_elapsed = time.perf_counter() - step_start
 
         row["tab_name"] = tab_cfg["tab_name"]
+        row["context_type"] = "main"
+        row["parent_step_index"] = ""
+        row["overlay_entry_label"] = ""
+        row["overlay_recovery_status"] = ""
         row["status"] = "OK"
         row["stop_reason"] = ""
         row["step_elapsed_sec"] = round(step_elapsed, 3)
@@ -430,6 +583,27 @@ def collect_tab_rows(
         rows.append(row)
         all_rows.append(row)
         save_excel(all_rows, output_path)
+
+        if should_expand_overlay(row):
+            fingerprint = make_overlay_entry_fingerprint(tab_cfg["tab_name"], row)
+            if fingerprint not in expanded_overlay_entries:
+                log(
+                    f"[OVERLAY] expand entry step={row.get('step_index')} "
+                    f"view_id='{row.get('focus_view_id', '')}' label='{row.get('visible_label', '')}'"
+                )
+                expand_overlay(
+                    client=client,
+                    dev=dev,
+                    tab_cfg=tab_cfg,
+                    entry_step=row,
+                    rows=rows,
+                    all_rows=all_rows,
+                    output_path=output_path,
+                    output_base_dir=output_base_dir,
+                )
+                expanded_overlay_entries.add(fingerprint)
+            else:
+                log(f"[OVERLAY] skip already expanded entry fingerprint='{fingerprint}'")
 
         if stop:
             log(f"[INFO] stop tab={tab_cfg['tab_name']} step={step_idx} reason={reason}")

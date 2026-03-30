@@ -44,3 +44,12 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.GET_FOCUS -p com.iotpar
 ```
 
 - 포커스 스냅샷 JSON(`reqId` 포함)으로 최종 상태를 검증합니다.
+
+## Step 6 – Overlay 확장 수집(Allowlist 기반)
+
+- linear `move_smart` 순회는 기본 경로로 유지하고, overlay 진입은 allowlist에 등록된 entry에서만 수행합니다.
+- 현재 allowlist:
+  - `com.samsung.android.oneconnect:id/add_menu_button` (`Add`)
+  - `com.samsung.android.oneconnect:id/more_menu_button` (`More options`)
+- allowlist 외 항목은 클릭/확장을 시도하지 않습니다.
+- overlay 내부는 짧은 step 상한(`OVERLAY_MAX_STEPS`)으로만 수집하고, 수집 종료 후 `press_back_and_recover_focus(...)`로 부모 컨텍스트 복귀를 수행합니다.
