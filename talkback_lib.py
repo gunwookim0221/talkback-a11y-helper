@@ -35,7 +35,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.6.9"
+CLIENT_ALGORITHM_VERSION = "1.7.0"
 
 
 @dataclass
@@ -939,6 +939,103 @@ class A11yAdbClient:
 
         print("[DEBUG][get_focus] dump_tree fallback failed")
         return {}
+
+    def press_back_and_recover_focus(
+        self,
+        dev: Any = None,
+        expected_parent_anchor: str | list[str] | None = None,
+        wait_seconds: float = 1.0,
+        retry: int = 1,
+        type_: str = "a",
+        index_: int = 0,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "back_sent": False,
+            "focus_found": False,
+            "focus_recovered": False,
+            "recovered_by": "",
+            "status": "failed",
+            "reason": "",
+            "current_label": "",
+        }
+
+        try:
+            self._run(["shell", "input", "keyevent", "4"], dev=dev, timeout=5.0)
+            result["back_sent"] = True
+        except Exception as exc:  # pragma: no cover - best effort guard
+            result["reason"] = f"adb_back_exception:{exc}"
+
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
+
+        try:
+            focus_node = self.get_focus(dev=dev, wait_seconds=max(1.0, wait_seconds + 1.0))
+        except Exception as exc:  # pragma: no cover - best effort guard
+            focus_node = {}
+            result["reason"] = result.get("reason") or f"get_focus_exception:{exc}"
+
+        current_label = self.extract_visible_label_from_focus(focus_node)
+        result["current_label"] = current_label
+        result["focus_found"] = bool(focus_node)
+
+        if not expected_parent_anchor:
+            result["focus_recovered"] = result["focus_found"]
+            result["recovered_by"] = "get_focus" if result["focus_found"] else ""
+            if result["back_sent"] and result["focus_found"]:
+                result["status"] = "ok"
+            elif result["back_sent"]:
+                result["status"] = "partial"
+                result["reason"] = result["reason"] or "focus_not_found_after_back"
+            else:
+                result["status"] = "failed"
+                result["reason"] = result["reason"] or "back_not_sent"
+            return result
+
+        anchors = expected_parent_anchor if isinstance(expected_parent_anchor, list) else [expected_parent_anchor]
+        normalized_label = self.normalize_for_comparison(current_label)
+        anchor_matched = any(self._safe_regex_search(str(anchor), normalized_label) for anchor in anchors)
+
+        if anchor_matched:
+            result["focus_recovered"] = True
+            result["recovered_by"] = "anchor_match"
+            result["status"] = "ok" if result["back_sent"] else "partial"
+            return result
+
+        attempts = max(1, int(retry) if retry is not None else 1)
+        for _ in range(attempts):
+            try:
+                recovered = self.select(
+                    dev,
+                    name=expected_parent_anchor,
+                    wait_=max(1, int(wait_seconds) if wait_seconds > 0 else 1),
+                    type_=type_,
+                    index_=index_,
+                )
+            except Exception as exc:  # pragma: no cover - best effort guard
+                recovered = False
+                result["reason"] = result.get("reason") or f"select_exception:{exc}"
+
+            if recovered:
+                result["focus_recovered"] = True
+                result["recovered_by"] = "select_anchor"
+                try:
+                    recovered_focus = self.get_focus(dev=dev, wait_seconds=max(1.0, wait_seconds + 1.0))
+                    result["focus_found"] = bool(recovered_focus)
+                    result["current_label"] = self.extract_visible_label_from_focus(recovered_focus)
+                except Exception:
+                    pass
+                result["status"] = "ok" if result["back_sent"] else "partial"
+                return result
+
+        result["focus_recovered"] = False
+        result["recovered_by"] = ""
+        if result["back_sent"]:
+            result["status"] = "partial"
+            result["reason"] = result["reason"] or "anchor_mismatch_and_select_failed"
+        else:
+            result["status"] = "failed"
+            result["reason"] = result["reason"] or "back_not_sent"
+        return result
 
     @staticmethod
     def _is_meaningful_focus_node(node: Any) -> bool:
