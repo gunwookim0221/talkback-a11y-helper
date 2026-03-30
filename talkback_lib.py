@@ -35,7 +35,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.2"
+CLIENT_ALGORITHM_VERSION = "1.7.3"
 
 
 @dataclass
@@ -62,7 +62,9 @@ class A11yAdbClient:
             "serial": None,
             "result": None,
         }
-        self.helper_status_cache_ttl_sec: float = 1.0
+        self._helper_status_cache_by_serial: dict[str, dict[str, Any]] = {}
+        self.helper_status_cache_ttl_sec: float = 4.0
+        self.helper_status_fail_cache_ttl_sec: float = 0.7
         self.last_get_focus_trace: dict[str, Any] = {}
 
     def _resolve_serial(self, dev: Any) -> str | None:
@@ -74,6 +76,42 @@ class A11yAdbClient:
         if serial:
             return serial
         return getattr(dev, "device_id", self.dev_serial)
+
+    @staticmethod
+    def _cache_serial_key(serial: str | None) -> str:
+        return serial or "default"
+
+    def _get_cached_helper_status(self, serial: str | None, now: float | None = None) -> tuple[bool, bool]:
+        now_mono = time.monotonic() if now is None else now
+        key = self._cache_serial_key(serial)
+        cached = self._helper_status_cache_by_serial.get(key)
+        if not isinstance(cached, dict):
+            return False, False
+
+        result = cached.get("result")
+        if result is None:
+            return False, False
+
+        age = now_mono - float(cached.get("ts", 0.0))
+        ttl = self.helper_status_cache_ttl_sec if bool(result) else self.helper_status_fail_cache_ttl_sec
+        if age <= ttl:
+            return True, bool(result)
+        return False, False
+
+    def _update_helper_status_cache(self, serial: str | None, result: bool) -> None:
+        now = time.monotonic()
+        cache_entry = {
+            "ts": now,
+            "serial": serial,
+            "result": bool(result),
+        }
+        self._helper_status_cache = cache_entry
+        self._helper_status_cache_by_serial[self._cache_serial_key(serial)] = cache_entry
+
+    def _has_recent_helper_ok(self, dev: Any = None) -> bool:
+        serial = self._resolve_serial(dev)
+        cache_hit, cache_result = self._get_cached_helper_status(serial=serial)
+        return cache_hit and cache_result
 
     def _run(self, args: list[str], dev: Any = None, timeout: float = 30.0) -> str:
         serial = self._resolve_serial(dev)
@@ -101,14 +139,8 @@ class A11yAdbClient:
     def check_helper_status(self, dev: Any = None) -> bool:
         started = time.monotonic()
         serial = self._resolve_serial(dev)
-        cache = self._helper_status_cache
-        now = time.monotonic()
-        if (
-            cache.get("result") is not None
-            and cache.get("serial") == serial
-            and (now - float(cache.get("ts", 0.0))) <= self.helper_status_cache_ttl_sec
-        ):
-            cached_result = bool(cache.get("result"))
+        cache_hit, cached_result = self._get_cached_helper_status(serial=serial)
+        if cache_hit:
             elapsed = time.monotonic() - started
             print(
                 f"[DEBUG][helper_status] serial={serial or 'default'} cached=True "
@@ -127,11 +159,7 @@ class A11yAdbClient:
                 "'설정 > 접근성 > 설치된 앱'에서 활성화해 주세요."
                 f"{RESET_TEXT}"
             )
-            self._helper_status_cache = {
-                "ts": time.monotonic(),
-                "serial": serial,
-                "result": False,
-            }
+            self._update_helper_status_cache(serial=serial, result=False)
             elapsed = time.monotonic() - started
             print(
                 f"[DEBUG][helper_status] serial={serial or 'default'} cached=False "
@@ -145,11 +173,7 @@ class A11yAdbClient:
                 "서비스를 다시 시작하거나 접근성 설정을 재확인해 주세요."
                 f"{RESET_TEXT}"
             )
-            self._helper_status_cache = {
-                "ts": time.monotonic(),
-                "serial": serial,
-                "result": False,
-            }
+            self._update_helper_status_cache(serial=serial, result=False)
             elapsed = time.monotonic() - started
             print(
                 f"[DEBUG][helper_status] serial={serial or 'default'} cached=False "
@@ -157,11 +181,7 @@ class A11yAdbClient:
             )
             return False
 
-        self._helper_status_cache = {
-            "ts": time.monotonic(),
-            "serial": serial,
-            "result": True,
-        }
+        self._update_helper_status_cache(serial=serial, result=True)
         elapsed = time.monotonic() - started
         print(
             f"[DEBUG][helper_status] serial={serial or 'default'} cached=False "
@@ -251,8 +271,16 @@ class A11yAdbClient:
             raise RuntimeError(f"{label} JSON 형식이 올바르지 않습니다.")
         return parsed
 
-    def _read_log_result(self, dev: Any, prefix: str, req_id: str, wait_seconds: float = 2.0) -> dict[str, Any]:
+    def _read_log_result(
+        self,
+        dev: Any,
+        prefix: str,
+        req_id: str,
+        wait_seconds: float = 2.0,
+        poll_interval_sec: float = 0.25,
+    ) -> dict[str, Any]:
         start = time.monotonic()
+        interval = max(0.05, poll_interval_sec)
         while time.monotonic() - start < wait_seconds:
             logs = self._run(["logcat", "-d", *LOGCAT_FILTER_SPECS], dev=dev)
             payloads = self._extract_all_payloads(logs, prefix)
@@ -260,7 +288,11 @@ class A11yAdbClient:
                 parsed = self._parse_json_payload(payload, prefix)
                 if parsed.get("reqId") == req_id:
                     return parsed
-            time.sleep(0.8)
+            elapsed = time.monotonic() - start
+            remaining = wait_seconds - elapsed
+            if remaining <= 0:
+                break
+            time.sleep(min(interval, remaining))
         return {"success": False, "reason": f"{prefix} 로그를 찾지 못했습니다."}
 
     @staticmethod
@@ -976,7 +1008,7 @@ class A11yAdbClient:
             "elapsed_before_fallback_sec": 0.0,
             "total_elapsed_sec": 0.0,
         }
-        helper_ok = self.check_helper_status(dev=dev)
+        helper_ok = self._has_recent_helper_ok(dev=dev) or self.check_helper_status(dev=dev)
         self.last_get_focus_trace["helper_status_ok"] = helper_ok
         print(
             f"[DEBUG][get_focus] start serial={serial} req_id={req_id} "
@@ -991,7 +1023,13 @@ class A11yAdbClient:
         self._broadcast(dev, ACTION_GET_FOCUS, ["--es", "reqId", req_id])
 
         try:
-            result = self._read_log_result(dev, "FOCUS_RESULT", req_id, wait_seconds=wait_seconds)
+            result = self._read_log_result(
+                dev,
+                "FOCUS_RESULT",
+                req_id,
+                wait_seconds=wait_seconds,
+                poll_interval_sec=0.2,
+            )
         except RuntimeError as exc:
             self.last_get_focus_trace["response_received"] = False
             self.last_get_focus_trace["response_success"] = False
@@ -1369,7 +1407,7 @@ class A11yAdbClient:
         if direction_token != "next":
             return "moved" if self.move_focus(dev=dev, direction=direction_token) else "failed"
 
-        if not self.check_helper_status(dev=dev):
+        if not (self._has_recent_helper_ok(dev=dev) or self.check_helper_status(dev=dev)):
             return "failed"
 
         self.last_announcements = []
@@ -1378,7 +1416,13 @@ class A11yAdbClient:
         # self.clear_logcat(dev=dev)
         req_id = str(uuid.uuid4())[:8]
         self._broadcast(dev, ACTION_SMART_NEXT, ["--es", "reqId", req_id])
-        result = self._read_log_result(dev, "SMART_NAV_RESULT", req_id, wait_seconds=3.0)
+        result = self._read_log_result(
+            dev,
+            "SMART_NAV_RESULT",
+            req_id,
+            wait_seconds=3.0,
+            poll_interval_sec=0.2,
+        )
         self.last_smart_nav_result = result
         detail = str(result.get("detail", "")).strip().lower()
         flags = {

@@ -1073,6 +1073,18 @@ class HelperStatusGuardTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual([c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]], [])
 
+    def test_check_helper_status_uses_positive_cache_for_same_serial(self):
+        client = FakeA11yClient()
+        client.enabled_services_payload = "foo:com.example.custom/.A11yService"
+
+        first = client.check_helper_status(dev="SER")
+        second = client.check_helper_status(dev="SER")
+
+        self.assertTrue(first)
+        self.assertTrue(second)
+        settings_calls = [c for c in client.calls if c[0] == ["shell", "settings", "get", "secure", "enabled_accessibility_services"]]
+        self.assertEqual(len(settings_calls), 1)
+
 class VerifySpeechTest(unittest.TestCase):
     def test_verify_speech_success_deletes_temp_snapshot(self):
         client = A11yAdbClient(start_monitor=False)
@@ -1247,6 +1259,21 @@ class SmartMoveFocusTest(unittest.TestCase):
         self.assertTrue(result.get("accessibilityFocused"))
         dump_mock.assert_not_called()
 
+    def test_get_focus_skips_helper_status_probe_when_recent_cache_is_ready(self):
+        client = FakeA11yClient()
+        client.logcat_payload = (
+            'I/A11Y_HELPER: FOCUS_RESULT '
+            '{"success":true,"reqId":"REQID620","node":{"text":"cached","viewIdResourceName":"id/cached"}}'
+        )
+        client._update_helper_status_cache(serial="SER", result=True)
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID620-xxxx"), patch.object(
+            client, "check_helper_status", side_effect=AssertionError("helper status should be cached")
+        ):
+            result = client.get_focus("SER")
+
+        self.assertEqual(result.get("text"), "cached")
+
     def test_get_focus_parse_error_sets_reason_and_uses_fallback(self):
         client = FakeA11yClient()
         dump_nodes = [{"text": "복구", "accessibilityFocused": True}]
@@ -1375,6 +1402,18 @@ class SmartMoveFocusTest(unittest.TestCase):
 
         self.assertEqual(result, "moved")
 
+    def test_move_focus_smart_uses_recent_helper_cache(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: SMART_NAV_RESULT {"success":true,"status":"moved","reqId":"REQID709"}'
+        client._update_helper_status_cache(serial="SER", result=True)
+
+        with patch.object(client, "check_helper_status", side_effect=AssertionError("helper status should be cached")), patch(
+            "talkback_lib.uuid.uuid4", return_value="REQID709-xxxx"
+        ):
+            result = client.move_focus_smart("SER", direction="next")
+
+        self.assertEqual(result, "moved")
+
 
     def test_press_back_and_recover_focus_matches_anchor_without_select(self):
         client = FakeA11yClient()
@@ -1452,7 +1491,7 @@ class SmartMoveFocusTest(unittest.TestCase):
 
 class FocusHelpersTest(unittest.TestCase):
     def test_client_algorithm_version_is_updated(self):
-        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.2")
+        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.3")
 
     def test_extract_visible_label_from_focus_prefers_text(self):
         focus_node = {"text": "  Visible Text  ", "contentDescription": "Desc"}

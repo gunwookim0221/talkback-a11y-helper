@@ -1,5 +1,6 @@
 import json
 import re
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -14,7 +15,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.3.3"
+SCRIPT_VERSION = "1.3.4"
 
 OVERLAY_ENTRY_ALLOWLIST = [
     {
@@ -111,20 +112,21 @@ def crop_image_by_bounds(
         return False
 
     l, t, r, b = bounds
-    img = Image.open(screenshot_path)
-    width, height = img.size
+    with Image.open(screenshot_path) as img:
+        width, height = img.size
 
-    l = max(0, l + shrink_px)
-    t = max(0, t + shrink_px)
-    r = min(width, r - shrink_px)
-    b = min(height, b - shrink_px)
+        l = max(0, l + shrink_px)
+        t = max(0, t + shrink_px)
+        r = min(width, r - shrink_px)
+        b = min(height, b - shrink_px)
 
-    if r <= l or b <= t:
-        return False
+        if r <= l or b <= t:
+            return False
 
-    cropped = img.crop((l, t, r, b))
-    Path(crop_path).parent.mkdir(parents=True, exist_ok=True)
-    cropped.save(crop_path)
+        cropped = img.crop((l, t, r, b))
+        Path(crop_path).parent.mkdir(parents=True, exist_ok=True)
+        cropped.save(crop_path)
+        cropped.close()
     return True
 
 
@@ -148,19 +150,23 @@ def maybe_capture_focus_crop(
     step_index = row.get("step_index", -1)
     visible_label = sanitize_filename(str(row.get("visible_label", "") or "")[:40])
 
-    screenshot_dir = Path(output_base_dir) / "screens"
     crop_dir = Path(output_base_dir) / "crops"
-    screenshot_dir.mkdir(parents=True, exist_ok=True)
     crop_dir.mkdir(parents=True, exist_ok=True)
 
-    screenshot_path = screenshot_dir / f"{tab_name}_step_{step_index}.png"
     crop_path = crop_dir / f"{tab_name}_step_{step_index}_{visible_label}.png"
 
     capture_started = time.perf_counter()
+    screenshot_path = ""
     try:
-        capture_full_screenshot(client, dev, str(screenshot_path))
+        with tempfile.NamedTemporaryFile(
+            suffix=".png",
+            prefix=f"tb_step_{step_index}_",
+            delete=False,
+        ) as temp_file:
+            screenshot_path = temp_file.name
+        capture_full_screenshot(client, dev, screenshot_path)
         ok = crop_image_by_bounds(
-            screenshot_path=str(screenshot_path),
+            screenshot_path=screenshot_path,
             bounds_str=bounds_str,
             crop_path=str(crop_path),
             shrink_px=2,
@@ -171,6 +177,11 @@ def maybe_capture_focus_crop(
     except Exception as exc:
         log(f"[IMAGE] crop failed step={step_index}: {exc}")
     finally:
+        if screenshot_path:
+            try:
+                Path(screenshot_path).unlink(missing_ok=True)
+            except Exception:
+                pass
         row["crop_elapsed_sec"] = round(time.perf_counter() - capture_started, 3)
 
     return row
