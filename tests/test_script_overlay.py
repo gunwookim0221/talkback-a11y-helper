@@ -417,3 +417,147 @@ def test_choose_best_anchor_candidate_prefers_top_left_for_tie():
     best = script_test.choose_best_anchor_candidate(matches, tie_breaker="top_left")
 
     assert best == matches[2]
+
+
+class StabilizeDummyClient:
+    def __init__(self, verify_rows):
+        self.verify_rows = list(verify_rows)
+        self.select_calls = []
+
+    def dump_tree(self, **_kwargs):
+        return [
+            {
+                "text": "Location QR code",
+                "contentDescription": "Location QR code",
+                "talkbackLabel": "Location QR code",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/location_qr",
+                "className": "android.widget.ImageView",
+                "boundsInScreen": "0,0,10,10",
+            }
+        ]
+
+    def select(self, **kwargs):
+        self.select_calls.append(kwargs)
+        return True
+
+    def collect_focus_step(self, **kwargs):
+        if self.verify_rows:
+            row = dict(self.verify_rows.pop(0))
+        else:
+            row = {}
+        row.setdefault("visible_label", "")
+        row.setdefault("merged_announcement", "")
+        row.setdefault("focus_view_id", "com.samsung.android.oneconnect:id/location_qr")
+        row.setdefault("focus_bounds", "0,0,10,10")
+        row.setdefault("focus_node", {"className": "android.widget.ImageView"})
+        return row
+
+
+def test_verify_context_selected_bottom_tab_distinguishes_home_and_devices():
+    home_step = {"visible_label": "Home", "merged_announcement": "Selected, Home, Tab 1 of 5"}
+    devices_step = {"visible_label": "Devices", "merged_announcement": "Selected, Devices, Tab 2 of 5"}
+    home_cfg = {"context_verify": {"type": "selected_bottom_tab", "announcement_regex": ".*Home.*"}}
+    devices_cfg = {"context_verify": {"type": "selected_bottom_tab", "announcement_regex": ".*Devices.*"}}
+
+    assert script_test.verify_context(home_step, home_cfg)["ok"] is True
+    assert script_test.verify_context(home_step, devices_cfg)["ok"] is False
+    assert script_test.verify_context(devices_step, devices_cfg)["ok"] is True
+
+
+def test_stabilize_anchor_fails_when_anchor_matches_but_context_fails():
+    client = StabilizeDummyClient(
+        [
+            {
+                "visible_label": "Location QR code",
+                "merged_announcement": "Selected, Home, Tab 1 of 5",
+            },
+            {
+                "visible_label": "Location QR code",
+                "merged_announcement": "Selected, Home, Tab 1 of 5",
+            },
+        ]
+    )
+    tab_cfg = {
+        "scenario_id": "devices_main",
+        "anchor_name": ".*Location QR code.*",
+        "anchor_type": "b",
+        "anchor": {
+            "text_regex": ".*Location QR code.*",
+            "announcement_regex": ".*QR code.*",
+        },
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": ".*Devices.*",
+        },
+    }
+
+    result = script_test.stabilize_anchor(client=client, dev="SERIAL", tab_cfg=tab_cfg, phase="scenario_start")
+
+    assert result["ok"] is False
+    assert result["verify"]["matched"] is True
+    assert result["context"]["ok"] is False
+
+
+def test_stabilize_anchor_succeeds_when_anchor_and_context_match():
+    client = StabilizeDummyClient(
+        [
+            {
+                "visible_label": "Location QR code",
+                "merged_announcement": "Selected, Devices, Tab 2 of 5",
+            }
+        ]
+    )
+    tab_cfg = {
+        "scenario_id": "devices_main",
+        "anchor_name": ".*Location QR code.*",
+        "anchor_type": "b",
+        "anchor": {
+            "text_regex": ".*Location QR code.*",
+            "announcement_regex": ".*QR code.*",
+        },
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": ".*Devices.*",
+        },
+    }
+
+    result = script_test.stabilize_anchor(client=client, dev="SERIAL", tab_cfg=tab_cfg, phase="scenario_start")
+
+    assert result["ok"] is True
+    assert result["verify"]["matched"] is True
+    assert result["context"]["ok"] is True
+
+
+def test_overlay_realign_anchor_match_but_wrong_tab_fails():
+    client = StabilizeDummyClient(
+        [
+            {
+                "visible_label": "Location QR code",
+                "merged_announcement": "Selected, Home, Tab 1 of 5",
+            },
+            {
+                "visible_label": "Location QR code",
+                "merged_announcement": "Selected, Home, Tab 1 of 5",
+            },
+        ]
+    )
+    tab_cfg = {
+        "scenario_id": "devices_main",
+        "anchor_name": ".*Location QR code.*",
+        "anchor_type": "b",
+        "anchor": {
+            "text_regex": ".*Location QR code.*",
+            "announcement_regex": ".*QR code.*",
+        },
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": ".*Devices.*",
+        },
+    }
+
+    result = script_test.stabilize_anchor(client=client, dev="SERIAL", tab_cfg=tab_cfg, phase="overlay_realign")
+
+    assert result["phase"] == "overlay_realign"
+    assert result["ok"] is False
+    assert result["verify"]["matched"] is True
+    assert result["context"]["ok"] is False

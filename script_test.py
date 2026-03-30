@@ -15,7 +15,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.5.0"
+SCRIPT_VERSION = "1.6.0"
 
 OVERLAY_ENTRY_CANDIDATES = [
     {
@@ -45,14 +45,15 @@ TAB_CONFIGS = [
         "tab_name": ".*Home.*",
         "tab_type": "b",
         "anchor_name": ".*Location QR code.*",
-        "anchor_type": "a",
+        "anchor_type": "b",
         "anchor": {
-            "resource_id_regex": "com.samsung.android.oneconnect:id/home_button",
             "text_regex": ".*Location QR code.*",
-            "announcement_regex": ".*Location QR code.*",
-            "class_name_regex": "android.widget.ImageButton",
+            "announcement_regex": ".*QR code.*",
             "tie_breaker": "top_left",
-            "allow_resource_id_only": True,
+        },
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": ".*(Selected|선택됨).*Home.*",
         },
         "max_steps": 5,
         "overlay_policy": {
@@ -80,6 +81,10 @@ TAB_CONFIGS = [
             "announcement_regex": ".*QR code.*",
             "tie_breaker": "top_left",
         },
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": ".*(Selected|선택됨).*Devices.*",
+        },
         "enabled": True,
         "max_steps": 5,
         "overlay_policy": {
@@ -98,6 +103,60 @@ TAB_CONFIGS = [
         },
     },
     {
+        "scenario_id": "life_main",
+        "tab_name": ".*Life.*",
+        "tab_type": "b",
+        "anchor_name": ".*Location QR code.*",
+        "anchor_type": "b",
+        "anchor": {
+            "text_regex": ".*Location QR code.*",
+            "announcement_regex": ".*QR code.*",
+            "tie_breaker": "top_left",
+        },
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": ".*(Selected|선택됨).*Life.*",
+        },
+        "enabled": True,
+        "max_steps": 5,
+    },
+    {
+        "scenario_id": "routines_main",
+        "tab_name": ".*Routines.*",
+        "tab_type": "b",
+        "anchor_name": ".*Location QR code.*",
+        "anchor_type": "b",
+        "anchor": {
+            "text_regex": ".*Location QR code.*",
+            "announcement_regex": ".*QR code.*",
+            "tie_breaker": "top_left",
+        },
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": ".*(Selected|선택됨).*Routines.*",
+        },
+        "enabled": True,
+        "max_steps": 5,
+    },
+    {
+        "scenario_id": "menu_main",
+        "tab_name": ".*Menu.*",
+        "tab_type": "b",
+        "anchor_name": ".*Location QR code.*",
+        "anchor_type": "b",
+        "anchor": {
+            "text_regex": ".*Location QR code.*",
+            "announcement_regex": ".*QR code.*",
+            "tie_breaker": "top_left",
+        },
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": ".*(Selected|선택됨).*Menu.*",
+        },
+        "enabled": True,
+        "max_steps": 5,
+    },
+    {
         "scenario_id": "settings_entry_example",
         "tab_name": ".*Menu.*",
         "tab_type": "b",
@@ -109,8 +168,31 @@ TAB_CONFIGS = [
             "tie_breaker": "top_left",
             "allow_resource_id_only": True,
         },
+        "context_verify": {
+            "type": "screen",
+            "text_regex": ".*Settings.*",
+            "announcement_regex": ".*Settings.*",
+        },
         "enabled": False,
         "max_steps": 20,
+    },
+    {
+        "scenario_id": "life_plugin_example",
+        "tab_name": ".*Life.*",
+        "tab_type": "b",
+        "anchor_name": ".*Location QR code.*",
+        "anchor_type": "b",
+        "anchor": {
+            "text_regex": ".*Location QR code.*",
+            "announcement_regex": ".*QR code.*",
+            "tie_breaker": "top_left",
+        },
+        "context_verify": {
+            "type": "plugin",
+            "text_regex": ".*SmartThings Energy.*",
+        },
+        "enabled": False,
+        "max_steps": 5,
     },
     {
         "scenario_id": "resource_id_only_example",
@@ -280,6 +362,45 @@ def choose_best_anchor_candidate(matches: list[dict[str, Any]], tie_breaker: str
             ),
         )[0]
     return sorted(matches, key=lambda item: -int(item.get("score", 0)))[0]
+
+
+def verify_context(
+    step: dict[str, Any],
+    scenario_cfg: dict[str, Any],
+) -> dict[str, Any]:
+    context_cfg = dict(scenario_cfg.get("context_verify", {}) or {})
+    context_type = str(context_cfg.get("type", "none") or "none").strip().lower()
+    if context_type in {"", "none"}:
+        return {
+            "ok": True,
+            "type": "none",
+            "expected": "",
+            "actual_text": "",
+            "actual_announcement": "",
+        }
+
+    actual_text = str(step.get("visible_label", "") or "").strip()
+    actual_announcement = str(step.get("merged_announcement", "") or "").strip()
+    text_regex = str(context_cfg.get("text_regex", "") or "").strip()
+    announcement_regex = str(context_cfg.get("announcement_regex", "") or "").strip()
+
+    text_ok = True if not text_regex else _safe_regex_search(text_regex, actual_text)
+    announcement_ok = True if not announcement_regex else _safe_regex_search(announcement_regex, actual_announcement)
+    ok = text_ok and announcement_ok
+
+    expected_parts = []
+    if text_regex:
+        expected_parts.append(f"text={text_regex}")
+    if announcement_regex:
+        expected_parts.append(f"announcement={announcement_regex}")
+
+    return {
+        "ok": ok,
+        "type": context_type,
+        "expected": " | ".join(expected_parts),
+        "actual_text": actual_text,
+        "actual_announcement": actual_announcement,
+    }
 
 
 def sanitize_filename(value: str) -> str:
@@ -855,6 +976,8 @@ def stabilize_anchor(
     anchor_cfg = _resolve_anchor_cfg(tab_cfg)
     tie_breaker = str(anchor_cfg.get("tie_breaker", "top_left") or "top_left")
     last_verify: dict[str, Any] = {}
+    last_context: dict[str, Any] = {"ok": True, "type": "none", "expected": ""}
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
 
     for attempt in range(1, max_retries + 1):
         dump_nodes = client.dump_tree(dev=dev)
@@ -884,6 +1007,7 @@ def stabilize_anchor(
             )
 
         verify_match: dict[str, Any] | None = None
+        context_result: dict[str, Any] = {"ok": True, "type": "none", "expected": ""}
         verify_rows: list[dict[str, Any]] = []
         for verify_idx in range(max(1, verify_reads)):
             verify_row = client.collect_focus_step(
@@ -896,24 +1020,43 @@ def stabilize_anchor(
             verify_rows.append(verify_row)
             verify_candidate = _extract_candidate_from_step(verify_row)
             verify_match = match_anchor(verify_candidate, anchor_cfg)
+            context_result = verify_context(verify_row, tab_cfg)
             if verify_match["matched"]:
                 break
 
         last_verify = verify_match or {}
+        last_context = context_result
         log(
             f"[ANCHOR][{phase}] attempt={attempt}/{max_retries} selected={selected} "
             f"matched={bool(last_verify.get('matched'))} "
+            f"context_ok={bool(last_context.get('ok'))} "
+            f"scenario='{scenario_id}' "
             f"fields={last_verify.get('matched_fields', [])} "
             f"score={last_verify.get('score', 0)} "
             f"resource='{(last_verify.get('candidate') or {}).get('resource_id', '')}' "
             f"bounds='{(last_verify.get('candidate') or {}).get('bounds', '')}'"
         )
-        if selected and bool(last_verify.get("matched")):
+        log(
+            f"[CONTEXT] scenario='{scenario_id}' type='{last_context.get('type', 'none')}' "
+            f"expected='{last_context.get('expected', '')}' "
+            f"actual_text='{last_context.get('actual_text', '')}' "
+            f"actual_announcement='{last_context.get('actual_announcement', '')}' "
+            f"ok={bool(last_context.get('ok'))}"
+        )
+        if not bool(last_verify.get("matched")):
+            log(f"[ANCHOR][{phase}] anchor mismatch scenario='{scenario_id}'")
+        elif not bool(last_context.get("ok")):
+            log(f"[CONTEXT] verification failed scenario='{scenario_id}'")
+        else:
+            log(f"[CONTEXT] verification passed scenario='{scenario_id}'")
+
+        if selected and bool(last_verify.get("matched")) and bool(last_context.get("ok")):
             return {
                 "ok": True,
                 "attempt": attempt,
                 "selected": selected,
                 "verify": last_verify,
+                "context": last_context,
                 "verify_rows": verify_rows,
                 "candidate_count": len(matches),
                 "phase": phase,
@@ -924,6 +1067,7 @@ def stabilize_anchor(
         "attempt": max_retries,
         "selected": False,
         "verify": last_verify,
+        "context": last_context,
         "candidate_count": 0,
         "phase": phase,
     }

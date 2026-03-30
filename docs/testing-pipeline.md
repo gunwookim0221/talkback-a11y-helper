@@ -45,12 +45,17 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.GET_FOCUS -p com.iotpar
 
 - 포커스 스냅샷 JSON(`reqId` 포함)으로 최종 상태를 검증합니다.
 
-## Step 5.5 – Anchor Stabilization (Runner, Python)
+## Step 5.5 – Anchor Stabilization + Scenario Context Verify (Runner, Python)
 
-- `script_test.py` 러너(`SCRIPT_VERSION=1.5.0`)는 탭 진입 직후 anchor를 바로 신뢰하지 않고 안정화 단계를 수행합니다.
+- `script_test.py` 러너(`SCRIPT_VERSION=1.6.0`)는 탭 진입 직후 anchor를 바로 신뢰하지 않고 안정화 단계를 수행합니다.
 - anchor는 `resource_id_regex`, `text_regex`, `announcement_regex`, `class_name_regex` 조합으로 판정합니다.
 - `allow_resource_id_only=true`면 resourceId 단독 매칭도 허용하며, 복수 후보는 `(top, left)` 오름차순(좌상단 우선)으로 tie-break 합니다.
-- 동일 stabilization 로직을 overlay 복귀 재정렬 직후에도 재사용합니다.
+- 안정화 성공 조건은 `anchor matched == True` **그리고** `context_verify == True`입니다.
+- `context_verify`는 시나리오별 optional 설정이며 미설정(또는 `type: none`) 시 기존과 동일하게 동작합니다.
+  - `selected_bottom_tab`: TalkBack announcement 기반 하단 탭 선택 문맥 검증 (`Selected|선택됨 + Home/Devices/...`)
+  - `screen`: 화면 문맥 텍스트/announcement 정규식 검증
+  - `plugin`: 플러그인 고유 레이블/announcement 정규식 검증
+- 동일 stabilization + context 검증 로직을 overlay 복귀 재정렬 직후에도 재사용합니다.
 
 ## Step 6 – Overlay 확장 수집(Candidate + Post-click Classification)
 
