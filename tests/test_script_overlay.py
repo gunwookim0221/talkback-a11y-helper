@@ -113,7 +113,9 @@ def test_should_expand_overlay_matches_allowlisted_resource_id():
         "focus_view_id": "com.samsung.android.oneconnect:id/add_menu_button",
         "normalized_visible_label": "random",
     }
-    assert script_test.should_expand_overlay(step) is True
+    matched, reason = script_test.is_overlay_candidate(step, tab_cfg={})
+    assert matched is True
+    assert reason == "matched_global_candidates"
 
 
 def test_should_expand_overlay_rejects_non_allowlisted_target():
@@ -121,7 +123,99 @@ def test_should_expand_overlay_rejects_non_allowlisted_target():
         "focus_view_id": "com.example:id/not_allowed",
         "normalized_visible_label": "not allowed",
     }
-    assert script_test.should_expand_overlay(step) is False
+    matched, reason = script_test.is_overlay_candidate(step, tab_cfg={})
+    assert matched is False
+    assert reason == "not_in_global_candidates"
+
+
+def test_is_overlay_candidate_blocked_by_scenario_policy():
+    step = {
+        "focus_view_id": "com.samsung.android.oneconnect:id/add_menu_button",
+        "normalized_visible_label": "add",
+    }
+    tab_cfg = {
+        "overlay_policy": {
+            "allow_candidates": [
+                {
+                    "resource_id": "com.samsung.android.oneconnect:id/add_menu_button",
+                    "label": "Add",
+                }
+            ],
+            "block_candidates": [
+                {
+                    "resource_id": "com.samsung.android.oneconnect:id/add_menu_button",
+                    "label": "Add",
+                }
+            ],
+        }
+    }
+    matched, reason = script_test.is_overlay_candidate(step, tab_cfg=tab_cfg)
+    assert matched is False
+    assert reason == "blocked_by_scenario_policy"
+
+
+class _ClassifyClient:
+    def __init__(self, post_step):
+        self.post_step = post_step
+
+    def collect_focus_step(self, **kwargs):
+        return self.post_step
+
+
+def test_classify_post_click_result_navigation_case():
+    pre = {
+        "step_index": 4,
+        "normalized_visible_label": "add",
+        "focus_view_id": "com.samsung.android.oneconnect:id/add_menu_button",
+        "focus_bounds": "0,10,10,20",
+        "dump_tree_nodes": [{"viewIdResourceName": "id_a", "text": "A", "contentDescription": ""}],
+    }
+    post = {
+        "normalized_visible_label": "navigate up",
+        "visible_label": "Navigate up",
+        "merged_announcement": "Navigate up",
+        "focus_view_id": "com.example:id/toolbar_back",
+        "focus_bounds": "0,0,10,10",
+        "dump_tree_nodes": [{"viewIdResourceName": "id_b", "text": "B", "contentDescription": ""}],
+    }
+    classification, _ = script_test.classify_post_click_result(
+        client=_ClassifyClient(post),
+        dev="SERIAL",
+        tab_cfg={},
+        pre_click_step=pre,
+    )
+    assert classification == "navigation"
+
+
+def test_classify_post_click_result_overlay_case():
+    pre = {
+        "step_index": 4,
+        "normalized_visible_label": "more options",
+        "focus_view_id": "com.samsung.android.oneconnect:id/more_menu_button",
+        "focus_bounds": "0,10,10,20",
+        "dump_tree_nodes": [
+            {"viewIdResourceName": "id_common", "text": "Room", "contentDescription": ""},
+            {"viewIdResourceName": "id_more", "text": "More options", "contentDescription": ""},
+        ],
+    }
+    post = {
+        "normalized_visible_label": "edit",
+        "visible_label": "Edit",
+        "merged_announcement": "Edit",
+        "focus_view_id": "com.samsung.android.oneconnect:id/menu_edit",
+        "focus_bounds": "0,30,10,40",
+        "dump_tree_nodes": [
+            {"viewIdResourceName": "id_common", "text": "Room", "contentDescription": ""},
+            {"viewIdResourceName": "id_menu_edit", "text": "Edit", "contentDescription": ""},
+        ],
+    }
+    classification, _ = script_test.classify_post_click_result(
+        client=_ClassifyClient(post),
+        dev="SERIAL",
+        tab_cfg={},
+        pre_click_step=pre,
+    )
+    assert classification == "overlay"
 
 
 def test_expand_overlay_uses_entry_label_as_primary_recovery_anchor(monkeypatch):

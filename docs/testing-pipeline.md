@@ -47,19 +47,23 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.GET_FOCUS -p com.iotpar
 
 ## Step 5.5 – Anchor Stabilization (Runner, Python)
 
-- `script_test.py` 러너(`SCRIPT_VERSION=1.4.0`)는 탭 진입 직후 anchor를 바로 신뢰하지 않고 안정화 단계를 수행합니다.
+- `script_test.py` 러너(`SCRIPT_VERSION=1.5.0`)는 탭 진입 직후 anchor를 바로 신뢰하지 않고 안정화 단계를 수행합니다.
 - anchor는 `resource_id_regex`, `text_regex`, `announcement_regex`, `class_name_regex` 조합으로 판정합니다.
 - `allow_resource_id_only=true`면 resourceId 단독 매칭도 허용하며, 복수 후보는 `(top, left)` 오름차순(좌상단 우선)으로 tie-break 합니다.
 - 동일 stabilization 로직을 overlay 복귀 재정렬 직후에도 재사용합니다.
 
-## Step 6 – Overlay 확장 수집(Allowlist 기반)
+## Step 6 – Overlay 확장 수집(Candidate + Post-click Classification)
 
-- linear `move_smart` 순회는 기본 경로로 유지하고, overlay 진입은 allowlist에 등록된 entry에서만 수행합니다.
-- 현재 allowlist:
+- linear `move_smart` 순회는 기본 경로로 유지하고, overlay entry는 전역 candidate 또는 시나리오별 `overlay_policy`에서 먼저 후보로만 판정합니다.
+- 현재 기본 candidate:
   - `com.samsung.android.oneconnect:id/add_menu_button` (`Add`)
   - `com.samsung.android.oneconnect:id/more_menu_button` (`More options`)
-- allowlist 외 항목은 클릭/확장을 시도하지 않습니다.
+- `overlay_policy.block_candidates`는 `allow_candidates`보다 우선합니다(예: Devices 탭에서 `Add` 차단).
+- candidate를 클릭한 뒤 `collect_focus_step(move=False)` probe로 결과를 분류합니다:
+  - `overlay`: overlay 루틴 진입
+  - `navigation`: 일반 화면 전이로 간주하고 overlay 루틴 미진입
+  - `unchanged`: 클릭 실패/변화 없음으로 간주하고 overlay 루틴 미진입
 - overlay 내부는 짧은 step 상한(`OVERLAY_MAX_STEPS`)으로만 수집하고, 수집 종료 후 `press_back_and_recover_focus(...)`로 부모 컨텍스트 복귀를 수행합니다.
-- 복귀 직후에는 entry 기준 재정렬(re-align)을 수행합니다. 현재 포커스가 entry 이전에 방문한 항목으로 판정되면 `move_smart` 기반 `next` 이동으로 entry까지 재정렬한 뒤, **entry 다음 항목부터** main 수집을 이어갑니다.
+- 복귀 직후 entry 기준 재정렬(re-align)은 `post_click classification='overlay'`일 때만 수행합니다.
 - 재정렬 단계는 일반 step 수집 API 대신 lightweight probe(`get_focus` + 최소 필드 매칭) 경로를 사용해, announcement/row 저장/crop 없이 entry 판정에 필요한 정보(view_id/label/bounds)만 확인합니다.
 - 재정렬 구간은 main 결과 row로 저장하지 않아, overlay 복귀 직후 `우리 집 → Map View → Add` 같은 중복 row 누적과 stop 조건 오탐을 줄입니다.
