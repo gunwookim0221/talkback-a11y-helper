@@ -18,6 +18,7 @@
   - [scroll](#scroll)
   - [move_focus](#move_focus)
   - [get_focus](#get_focus)
+  - [press_back_and_recover_focus](#press_back_and_recover_focus)
   - [reset_focus_history](#reset_focus_history)
   - [move_focus_smart](#move_focus_smart)
   - [scrollFind](#scrollfind)
@@ -359,6 +360,39 @@ client.move_focus(dev_serial, "prev")
 - `dict[str, Any]`: 포커스 노드 정보. 실패 시 빈 dict.
   - 주요 필드: `schemaVersion(1.2.0)`, `snapshotBuilderVersion(1.2.0)`, `text`, `contentDescription`, `mergedLabel`, `talkbackLabel`, `viewIdResourceName`, `className`, `boundsInScreen`, `clickable`, `focusable`, `accessibilityFocused`, `visibleToUser`, `children`.
   - `mergedLabel`은 포커스 노드의 `text/contentDescription`이 비어 있으면 자식 노드 DFS 결과(중복 제거)를 병합해 채웁니다.
+
+---
+
+## press_back_and_recover_focus
+
+### Signature
+`press_back_and_recover_focus(dev: Any = None, expected_parent_anchor: str | list[str] | None = None, wait_seconds: float = 1.0, retry: int = 1, type_: str = "a", index_: int = 0) -> dict[str, Any]`
+
+### 설명
+overlay/dialog/bottom sheet 진입 상태에서 BACK(`keyevent 4`)을 보낸 뒤 TalkBack 포커스 복구를 best-effort로 수행합니다.
+현재 포커스 수집은 이동 없이 `get_focus()`만 사용하며, 앵커 불일치 시 `select(anchor)` 재시도로 복구를 시도합니다.
+
+### Returns
+- `dict[str, Any]`
+  - `back_sent`: back keyevent 전송 여부
+  - `focus_found`: back 이후 포커스 노드 탐지 여부
+  - `focus_recovered`: 앵커 매칭 또는 select로 복구 성공 여부
+  - `recovered_by`: `anchor_match`/`select_anchor`/`get_focus`
+  - `status`: `ok`/`partial`/`failed`
+  - `reason`: 실패 또는 부분 성공 사유
+  - `current_label`: 최종 포커스 대표 label
+
+### Example
+```python
+result = client.press_back_and_recover_focus(
+    dev_serial,
+    expected_parent_anchor="^설정$",
+    wait_seconds=1.0,
+    retry=2,
+    type_="a",
+)
+print(result)
+```
 
 ---
 

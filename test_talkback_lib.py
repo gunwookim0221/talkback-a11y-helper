@@ -65,6 +65,8 @@ class FakeA11yClient(A11yAdbClient):
             return self.package_list_payload
         if args == ["shell", "settings", "get", "secure", "enabled_accessibility_services"]:
             return self.enabled_services_payload
+        if args == ["shell", "input", "keyevent", "4"]:
+            return ""
         if args[:3] == ["shell", "input", "text"]:
             return ""
         raise AssertionError(f"unexpected args: {args}")
@@ -1315,6 +1317,70 @@ class SmartMoveFocusTest(unittest.TestCase):
 
         self.assertEqual(result, "moved")
 
+
+    def test_press_back_and_recover_focus_matches_anchor_without_select(self):
+        client = FakeA11yClient()
+
+        with patch.object(client, "get_focus", return_value={"text": "설정"}) as focus_mock, patch.object(
+            client, "select", return_value=False
+        ) as select_mock:
+            result = client.press_back_and_recover_focus(
+                "SER",
+                expected_parent_anchor="설정",
+                wait_seconds=0,
+                retry=2,
+                type_="a",
+            )
+
+        self.assertTrue(result["back_sent"])
+        self.assertTrue(result["focus_found"])
+        self.assertTrue(result["focus_recovered"])
+        self.assertEqual(result["recovered_by"], "anchor_match")
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["current_label"], "설정")
+        select_mock.assert_not_called()
+        focus_mock.assert_called_once()
+
+    def test_press_back_and_recover_focus_retries_select_when_anchor_mismatch(self):
+        client = FakeA11yClient()
+
+        with patch.object(client, "get_focus", side_effect=[{"text": "다른 항목"}, {"text": "상위 목록"}]), patch.object(
+            client, "select", side_effect=[False, True]
+        ) as select_mock:
+            result = client.press_back_and_recover_focus(
+                "SER",
+                expected_parent_anchor="상위 목록",
+                wait_seconds=0,
+                retry=2,
+                type_="a",
+            )
+
+        self.assertTrue(result["back_sent"])
+        self.assertTrue(result["focus_recovered"])
+        self.assertEqual(result["recovered_by"], "select_anchor")
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["current_label"], "상위 목록")
+        self.assertEqual(select_mock.call_count, 2)
+
+    def test_press_back_and_recover_focus_returns_partial_when_select_fails(self):
+        client = FakeA11yClient()
+
+        with patch.object(client, "get_focus", return_value={"text": "다른 항목"}), patch.object(
+            client, "select", return_value=False
+        ) as select_mock:
+            result = client.press_back_and_recover_focus(
+                "SER",
+                expected_parent_anchor="상위 목록",
+                wait_seconds=0,
+                retry=1,
+            )
+
+        self.assertTrue(result["back_sent"])
+        self.assertFalse(result["focus_recovered"])
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["reason"], "anchor_mismatch_and_select_failed")
+        select_mock.assert_called_once()
+
     def test_move_focus_smart_non_next_falls_back_to_move_focus(self):
         client = FakeA11yClient()
 
@@ -1328,7 +1394,7 @@ class SmartMoveFocusTest(unittest.TestCase):
 
 class FocusHelpersTest(unittest.TestCase):
     def test_client_algorithm_version_is_updated(self):
-        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.6.9")
+        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.0")
 
     def test_extract_visible_label_from_focus_prefers_text(self):
         focus_node = {"text": "  Visible Text  ", "contentDescription": "Desc"}
