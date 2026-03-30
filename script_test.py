@@ -14,7 +14,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.3.2"
+SCRIPT_VERSION = "1.3.3"
 
 OVERLAY_ENTRY_ALLOWLIST = [
     {
@@ -356,7 +356,7 @@ def expand_overlay(
     time.sleep(1.0)
 
     parent_step_index = entry_step.get("step_index")
-    overlay_prev_visible_label = ""
+    overlay_prev_fingerprint = ("", "", "")
     overlay_fail_count = 0
     overlay_same_count = 0
     for overlay_step_idx in range(1, OVERLAY_MAX_STEPS + 1):
@@ -382,15 +382,18 @@ def expand_overlay(
         rows.append(overlay_row)
         all_rows.append(overlay_row)
 
-        should_end_overlay, overlay_fail_count, overlay_same_count, overlay_reason = should_stop(
+        (
+            should_end_overlay,
+            overlay_fail_count,
+            overlay_same_count,
+            overlay_reason,
+            overlay_prev_fingerprint,
+        ) = should_stop(
             row=overlay_row,
-            prev_visible_label=overlay_prev_visible_label,
+            prev_fingerprint=overlay_prev_fingerprint,
             fail_count=overlay_fail_count,
             same_count=overlay_same_count,
         )
-        overlay_visible_label = str(overlay_row.get("visible_label", "") or "").strip()
-        if overlay_visible_label:
-            overlay_prev_visible_label = overlay_visible_label
         if should_end_overlay:
             overlay_row["status"] = "END"
             overlay_row["stop_reason"] = overlay_reason
@@ -454,13 +457,21 @@ def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
 
 def should_stop(
     row: dict,
-    prev_visible_label: str,
+    prev_fingerprint: tuple[str, str, str],
     fail_count: int,
     same_count: int,
-) -> tuple[bool, int, int, str]:
+) -> tuple[bool, int, int, str, tuple[str, str, str]]:
     move_result = str(row.get("move_result", "") or "")
     visible_label = str(row.get("visible_label", "") or "").strip()
     merged_announcement = str(row.get("merged_announcement", "") or "").strip()
+    normalized_visible_label = str(row.get("normalized_visible_label", "") or "").strip()
+    focus_view_id = str(row.get("focus_view_id", "") or "").strip()
+    focus_bounds = str(row.get("focus_bounds", "") or "").strip()
+    current_fingerprint = (
+        normalized_visible_label,
+        focus_view_id,
+        focus_bounds,
+    )
 
     reason = ""
 
@@ -469,24 +480,24 @@ def should_stop(
     else:
         fail_count = 0
 
-    if visible_label and visible_label == prev_visible_label:
+    if all(current_fingerprint) and current_fingerprint == prev_fingerprint:
         same_count += 1
     else:
         same_count = 0
 
     if fail_count >= 2:
         reason = "move_failed_twice"
-        return True, fail_count, same_count, reason
+        return True, fail_count, same_count, reason, current_fingerprint
 
     if same_count >= 3:
-        reason = "same_visible_repeated"
-        return True, fail_count, same_count, reason
+        reason = "same_fingerprint_repeated"
+        return True, fail_count, same_count, reason, current_fingerprint
 
     if not visible_label and not merged_announcement:
         reason = "empty_visible_and_speech"
-        return True, fail_count, same_count, reason
+        return True, fail_count, same_count, reason, current_fingerprint
 
-    return False, fail_count, same_count, reason
+    return False, fail_count, same_count, reason, current_fingerprint
 
 
 def collect_tab_rows(
@@ -540,7 +551,11 @@ def collect_tab_rows(
     all_rows.append(anchor_row)
     save_excel(all_rows, output_path, with_images=False)
 
-    prev_visible_label = str(anchor_row.get("visible_label", "") or "").strip()
+    prev_fingerprint = (
+        str(anchor_row.get("normalized_visible_label", "") or "").strip(),
+        str(anchor_row.get("focus_view_id", "") or "").strip(),
+        str(anchor_row.get("focus_bounds", "") or "").strip(),
+    )
     fail_count = 0
     same_count = 0
     expanded_overlay_entries: set[str] = set()
@@ -594,15 +609,12 @@ def collect_tab_rows(
             f"req_id='{row.get('get_focus_req_id', '')}'"
         )
 
-        stop, fail_count, same_count, reason = should_stop(
+        stop, fail_count, same_count, reason, prev_fingerprint = should_stop(
             row=row,
-            prev_visible_label=prev_visible_label,
+            prev_fingerprint=prev_fingerprint,
             fail_count=fail_count,
             same_count=same_count,
         )
-
-        if visible_label:
-            prev_visible_label = visible_label
 
         if stop:
             row["status"] = "END"
