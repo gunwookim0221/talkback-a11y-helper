@@ -15,7 +15,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.3.4"
+SCRIPT_VERSION = "1.3.5"
 
 OVERLAY_ENTRY_ALLOWLIST = [
     {
@@ -35,6 +35,7 @@ OVERLAY_STEP_WAIT_SECONDS = 0.8
 OVERLAY_ANNOUNCEMENT_WAIT_SECONDS = 0.8
 BACK_RECOVERY_WAIT_SECONDS = 0.8
 CHECKPOINT_SAVE_EVERY_STEPS = 3
+OVERLAY_REALIGN_MAX_STEPS = 8
 
 TAB_CONFIGS = [
     {
@@ -329,6 +330,88 @@ def make_overlay_entry_fingerprint(tab_name: str, step: dict[str, Any]) -> str:
     return f"{tab_name}|{focus_view_id}|{normalized_visible_label}"
 
 
+def make_main_fingerprint(step: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(step.get("normalized_visible_label", "") or "").strip(),
+        str(step.get("focus_view_id", "") or "").strip(),
+        str(step.get("focus_bounds", "") or "").strip(),
+    )
+
+
+def is_overlay_entry_focus(current_step: dict[str, Any], entry_step: dict[str, Any]) -> bool:
+    current_view_id = str(current_step.get("focus_view_id", "") or "").strip()
+    entry_view_id = str(entry_step.get("focus_view_id", "") or "").strip()
+    if current_view_id and entry_view_id and current_view_id == entry_view_id:
+        return True
+
+    current_label = str(current_step.get("normalized_visible_label", "") or "").strip()
+    entry_label = str(entry_step.get("normalized_visible_label", "") or "").strip()
+    if current_label and entry_label and current_label == entry_label:
+        return True
+
+    current_bounds = str(current_step.get("focus_bounds", "") or "").strip()
+    entry_bounds = str(entry_step.get("focus_bounds", "") or "").strip()
+    return bool(current_bounds and entry_bounds and current_bounds == entry_bounds)
+
+
+def realign_focus_after_overlay(
+    client: A11yAdbClient,
+    dev: str,
+    entry_step: dict[str, Any],
+    known_step_index_by_fingerprint: dict[tuple[str, str, str], int],
+) -> dict[str, Any]:
+    current_step = client.collect_focus_step(
+        dev=dev,
+        step_index=int(entry_step.get("step_index", 0) or 0),
+        move=False,
+        wait_seconds=MAIN_STEP_WAIT_SECONDS,
+        announcement_wait_seconds=MAIN_ANNOUNCEMENT_WAIT_SECONDS,
+    )
+    current_fp = make_main_fingerprint(current_step)
+    entry_idx = int(entry_step.get("step_index", 0) or 0)
+
+    if is_overlay_entry_focus(current_step, entry_step):
+        return {
+            "status": "already_on_entry",
+            "steps_taken": 0,
+            "entry_reached": True,
+            "current_step": current_step,
+        }
+
+    seen_idx = known_step_index_by_fingerprint.get(current_fp)
+    if seen_idx is None or seen_idx >= entry_idx:
+        return {
+            "status": "skip_realign_not_before_entry",
+            "steps_taken": 0,
+            "entry_reached": False,
+            "current_step": current_step,
+        }
+
+    for realign_idx in range(1, OVERLAY_REALIGN_MAX_STEPS + 1):
+        probe_step = client.collect_focus_step(
+            dev=dev,
+            step_index=entry_idx,
+            move=True,
+            direction="next",
+            wait_seconds=MAIN_STEP_WAIT_SECONDS,
+            announcement_wait_seconds=MAIN_ANNOUNCEMENT_WAIT_SECONDS,
+        )
+        if is_overlay_entry_focus(probe_step, entry_step):
+            return {
+                "status": "realign_entry_reached",
+                "steps_taken": realign_idx,
+                "entry_reached": True,
+                "current_step": probe_step,
+            }
+
+    return {
+        "status": "realign_entry_not_found",
+        "steps_taken": OVERLAY_REALIGN_MAX_STEPS,
+        "entry_reached": False,
+        "current_step": current_step,
+    }
+
+
 def expand_overlay(
     client: A11yAdbClient,
     dev: str,
@@ -562,14 +645,13 @@ def collect_tab_rows(
     all_rows.append(anchor_row)
     save_excel(all_rows, output_path, with_images=False)
 
-    prev_fingerprint = (
-        str(anchor_row.get("normalized_visible_label", "") or "").strip(),
-        str(anchor_row.get("focus_view_id", "") or "").strip(),
-        str(anchor_row.get("focus_bounds", "") or "").strip(),
-    )
+    prev_fingerprint = make_main_fingerprint(anchor_row)
     fail_count = 0
     same_count = 0
     expanded_overlay_entries: set[str] = set()
+    main_step_index_by_fingerprint: dict[tuple[str, str, str], int] = {
+        prev_fingerprint: 0,
+    }
 
     for step_idx in range(1, tab_cfg["max_steps"] + 1):
         log(f"[STEP] START tab='{tab_cfg['tab_name']}' step={step_idx}")
@@ -633,6 +715,9 @@ def collect_tab_rows(
 
         rows.append(row)
         all_rows.append(row)
+        row_fingerprint = make_main_fingerprint(row)
+        if all(row_fingerprint):
+            main_step_index_by_fingerprint[row_fingerprint] = step_idx
         if stop or (step_idx % CHECKPOINT_SAVE_EVERY_STEPS == 0):
             save_excel(all_rows, output_path, with_images=False)
 
@@ -654,6 +739,18 @@ def collect_tab_rows(
                     output_base_dir=output_base_dir,
                 )
                 expanded_overlay_entries.add(fingerprint)
+
+                realign_result = realign_focus_after_overlay(
+                    client=client,
+                    dev=dev,
+                    entry_step=row,
+                    known_step_index_by_fingerprint=main_step_index_by_fingerprint,
+                )
+                log(
+                    f"[OVERLAY] realign status='{realign_result.get('status')}' "
+                    f"entry_reached={realign_result.get('entry_reached')} "
+                    f"steps_taken={realign_result.get('steps_taken')}"
+                )
             else:
                 log(f"[OVERLAY] skip already expanded entry fingerprint='{fingerprint}'")
 

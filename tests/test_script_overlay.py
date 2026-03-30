@@ -61,6 +61,23 @@ class DummyClient:
         return True
 
 
+class RealignDummyClient:
+    def __init__(self, focus_steps):
+        self.focus_steps = list(focus_steps)
+        self.calls = []
+
+    def collect_focus_step(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.focus_steps:
+            return self.focus_steps.pop(0)
+        return {
+            "step_index": kwargs.get("step_index", 0),
+            "normalized_visible_label": "",
+            "focus_view_id": "",
+            "focus_bounds": "",
+        }
+
+
 def test_should_expand_overlay_matches_allowlisted_resource_id():
     step = {
         "focus_view_id": "com.samsung.android.oneconnect:id/add_menu_button",
@@ -172,3 +189,74 @@ def test_should_stop_same_fingerprint_repeated_stops():
     assert stop is True
     assert same_count >= 3
     assert reason == "same_fingerprint_repeated"
+
+
+def test_realign_focus_after_overlay_moves_to_entry_when_focus_is_before_entry():
+    client = RealignDummyClient(
+        [
+            {
+                "step_index": 3,
+                "normalized_visible_label": "map view",
+                "focus_view_id": "id_map",
+                "focus_bounds": "0,0,10,10",
+            },
+            {
+                "step_index": 3,
+                "normalized_visible_label": "add",
+                "focus_view_id": "com.samsung.android.oneconnect:id/add_menu_button",
+                "focus_bounds": "0,10,10,20",
+            },
+        ]
+    )
+    entry_step = {
+        "step_index": 3,
+        "normalized_visible_label": "add",
+        "focus_view_id": "com.samsung.android.oneconnect:id/add_menu_button",
+        "focus_bounds": "0,10,10,20",
+    }
+    known = {("our home", "id_home", "0,0,10,10"): 1, ("map view", "id_map", "0,0,10,10"): 2}
+
+    result = script_test.realign_focus_after_overlay(
+        client=client,
+        dev="SERIAL",
+        entry_step=entry_step,
+        known_step_index_by_fingerprint=known,
+    )
+
+    assert result["entry_reached"] is True
+    assert result["status"] == "realign_entry_reached"
+    assert result["steps_taken"] == 1
+    assert len(client.calls) == 2
+    assert client.calls[0]["move"] is False
+    assert client.calls[1]["move"] is True
+
+
+def test_realign_focus_after_overlay_skips_when_focus_not_known_as_prior_step():
+    client = RealignDummyClient(
+        [
+            {
+                "step_index": 3,
+                "normalized_visible_label": "more options",
+                "focus_view_id": "id_more",
+                "focus_bounds": "0,20,10,30",
+            }
+        ]
+    )
+    entry_step = {
+        "step_index": 3,
+        "normalized_visible_label": "add",
+        "focus_view_id": "com.samsung.android.oneconnect:id/add_menu_button",
+        "focus_bounds": "0,10,10,20",
+    }
+
+    result = script_test.realign_focus_after_overlay(
+        client=client,
+        dev="SERIAL",
+        entry_step=entry_step,
+        known_step_index_by_fingerprint={},
+    )
+
+    assert result["entry_reached"] is False
+    assert result["status"] == "skip_realign_not_before_entry"
+    assert result["steps_taken"] == 0
+    assert len(client.calls) == 1
