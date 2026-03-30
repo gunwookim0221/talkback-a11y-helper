@@ -291,3 +291,35 @@ def test_realign_focus_after_overlay_skips_when_focus_not_known_as_prior_step():
     assert len(client.calls) == 1
     assert client.calls[0]["kind"] == "get_focus"
     assert client.collect_focus_step_calls == 0
+
+
+def test_match_anchor_allows_resource_id_only():
+    anchor_cfg = {
+        "resource_id_regex": r"com\.example:id/anchor",
+        "allow_resource_id_only": True,
+    }
+    candidate = {
+        "resource_id": "com.example:id/anchor",
+        "text": "",
+        "announcement": "",
+        "class_name": "",
+        "top": 20,
+        "left": 8,
+    }
+
+    matched = script_test.match_anchor(candidate, anchor_cfg)
+
+    assert matched["matched"] is True
+    assert "resource_id" in matched["matched_fields"]
+
+
+def test_choose_best_anchor_candidate_prefers_top_left_for_tie():
+    matches = [
+        {"score": 100, "candidate": {"top": 50, "left": 20}},
+        {"score": 100, "candidate": {"top": 10, "left": 30}},
+        {"score": 100, "candidate": {"top": 10, "left": 15}},
+    ]
+
+    best = script_test.choose_best_anchor_candidate(matches, tie_breaker="top_left")
+
+    assert best == matches[2]
