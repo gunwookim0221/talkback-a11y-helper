@@ -15,7 +15,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.6.0"
+SCRIPT_VERSION = "1.6.1"
 
 OVERLAY_ENTRY_CANDIDATES = [
     {
@@ -379,11 +379,66 @@ def verify_context(
             "actual_announcement": "",
         }
 
-    actual_text = str(step.get("visible_label", "") or "").strip()
-    actual_announcement = str(step.get("merged_announcement", "") or "").strip()
     text_regex = str(context_cfg.get("text_regex", "") or "").strip()
     announcement_regex = str(context_cfg.get("announcement_regex", "") or "").strip()
 
+    if context_type == "selected_bottom_tab":
+        nodes = step.get("dump_tree_nodes", [])
+        selected_candidates: list[str] = []
+        selected_values: list[str] = []
+        fallback_values: list[str] = []
+
+        for node in nodes if isinstance(nodes, list) else []:
+            if not isinstance(node, dict):
+                continue
+            text = str(node.get("text", "") or "").strip()
+            description = str(node.get("contentDescription", "") or "").strip()
+            view_id = str(node.get("viewIdResourceName", "") or "").strip()
+            bounds = str(node.get("boundsInScreen", "") or "").strip()
+            selected_raw = node.get("selected")
+            selected_state = bool(selected_raw) if not isinstance(selected_raw, str) else selected_raw.strip().lower() == "true"
+            combined = ", ".join(part for part in [description, text] if part).strip()
+            if not combined:
+                combined = str(node.get("talkbackLabel", "") or "").strip()
+            marker = f"text='{text}' desc='{description}' selected={selected_state} viewId='{view_id}' bounds='{bounds}'"
+            selected_candidates.append(marker)
+            if combined:
+                fallback_values.append(combined)
+            if selected_state or re.search(r"(selected|선택됨)", combined or "", flags=re.IGNORECASE):
+                selected_values.append(combined or marker)
+
+        actual_selected_text = selected_values[0] if selected_values else ""
+        actual_text = actual_selected_text
+        actual_announcement = actual_selected_text
+
+        # selected_bottom_tab은 dump 기반 selected 후보에서만 판정한다.
+        text_ok = True if not text_regex else _safe_regex_search(text_regex, actual_selected_text)
+        announcement_ok = True if not announcement_regex else _safe_regex_search(announcement_regex, actual_selected_text)
+        ok = text_ok and announcement_ok
+
+        if not actual_selected_text and fallback_values:
+            actual_selected_text = fallback_values[0]
+            actual_text = actual_selected_text
+            actual_announcement = actual_selected_text
+
+        expected_parts = []
+        if text_regex:
+            expected_parts.append(f"text={text_regex}")
+        if announcement_regex:
+            expected_parts.append(f"announcement={announcement_regex}")
+
+        return {
+            "ok": ok,
+            "type": context_type,
+            "expected": " | ".join(expected_parts),
+            "actual_text": actual_text,
+            "actual_announcement": actual_announcement,
+            "actual_selected_text": actual_selected_text,
+            "selected_candidates": selected_candidates,
+        }
+
+    actual_text = str(step.get("visible_label", "") or "").strip()
+    actual_announcement = str(step.get("merged_announcement", "") or "").strip()
     text_ok = True if not text_regex else _safe_regex_search(text_regex, actual_text)
     announcement_ok = True if not announcement_regex else _safe_regex_search(announcement_regex, actual_announcement)
     ok = text_ok and announcement_ok
@@ -1036,11 +1091,22 @@ def stabilize_anchor(
             f"resource='{(last_verify.get('candidate') or {}).get('resource_id', '')}' "
             f"bounds='{(last_verify.get('candidate') or {}).get('bounds', '')}'"
         )
+        if str(last_context.get("type", "")) == "selected_bottom_tab":
+            expected_value = (
+                str(dict(tab_cfg.get("context_verify", {}) or {}).get("announcement_regex", "") or "").strip()
+                or str(dict(tab_cfg.get("context_verify", {}) or {}).get("text_regex", "") or "").strip()
+            )
+            log(
+                f"[CONTEXT][dump] scenario='{scenario_id}' type='selected_bottom_tab' "
+                f"expected='{expected_value}'"
+            )
+            log(f"[CONTEXT][dump] selected_candidates={last_context.get('selected_candidates', [])}")
+            log(f"[CONTEXT][dump] actual_selected_text='{last_context.get('actual_selected_text', '')}'")
+            log(f"[CONTEXT][dump] ok={bool(last_context.get('ok'))}")
         log(
             f"[CONTEXT] scenario='{scenario_id}' type='{last_context.get('type', 'none')}' "
             f"expected='{last_context.get('expected', '')}' "
-            f"actual_text='{last_context.get('actual_text', '')}' "
-            f"actual_announcement='{last_context.get('actual_announcement', '')}' "
+            f"actual='{last_context.get('actual_selected_text', last_context.get('actual_announcement', last_context.get('actual_text', '')))}' "
             f"ok={bool(last_context.get('ok'))}"
         )
         if not bool(last_verify.get("matched")):
