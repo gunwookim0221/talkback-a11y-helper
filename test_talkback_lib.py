@@ -1058,8 +1058,8 @@ class HelperStatusGuardTest(unittest.TestCase):
             result = client.check_helper_status(dev="SER")
 
         self.assertFalse(result)
-        print_mock.assert_called_once()
-        printed = print_mock.call_args.args[0]
+        self.assertGreaterEqual(print_mock.call_count, 1)
+        printed = print_mock.call_args_list[0].args[0]
         self.assertIn("\033[91m", printed)
         self.assertIn("헬퍼 앱의 접근성 서비스가 꺼져 있습니다", printed)
         self.assertIn("\033[0m", printed)

@@ -14,7 +14,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.3.0"
+SCRIPT_VERSION = "1.3.1"
 
 OVERLAY_ENTRY_ALLOWLIST = [
     {
@@ -27,7 +27,13 @@ OVERLAY_ENTRY_ALLOWLIST = [
     },
 ]
 
-OVERLAY_MAX_STEPS = 12
+OVERLAY_MAX_STEPS = 10
+MAIN_STEP_WAIT_SECONDS = 1.2
+MAIN_ANNOUNCEMENT_WAIT_SECONDS = 1.2
+OVERLAY_STEP_WAIT_SECONDS = 0.8
+OVERLAY_ANNOUNCEMENT_WAIT_SECONDS = 0.8
+BACK_RECOVERY_WAIT_SECONDS = 0.8
+CHECKPOINT_SAVE_EVERY_STEPS = 3
 
 TAB_CONFIGS = [
     {
@@ -150,6 +156,7 @@ def maybe_capture_focus_crop(
     screenshot_path = screenshot_dir / f"{tab_name}_step_{step_index}.png"
     crop_path = crop_dir / f"{tab_name}_step_{step_index}_{visible_label}.png"
 
+    capture_started = time.perf_counter()
     try:
         capture_full_screenshot(client, dev, str(screenshot_path))
         ok = crop_image_by_bounds(
@@ -163,6 +170,8 @@ def maybe_capture_focus_crop(
             row["crop_image_saved"] = True
     except Exception as exc:
         log(f"[IMAGE] crop failed step={step_index}: {exc}")
+    finally:
+        row["crop_elapsed_sec"] = round(time.perf_counter() - capture_started, 3)
 
     return row
 
@@ -234,7 +243,7 @@ def insert_images_to_excel(excel_path: str, image_col_name: str = "crop_image") 
     wb.save(excel_path)
 
 
-def save_excel(rows: list[dict], output_path: str) -> None:
+def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> None:
     df = pd.DataFrame(rows)
     if df.empty:
         log("[SAVE] skip: no rows")
@@ -280,10 +289,10 @@ def save_excel(rows: list[dict], output_path: str) -> None:
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     df.to_excel(output_path, index=False)
 
-    if "crop_image" in df.columns:
+    if with_images and "crop_image" in df.columns:
         insert_images_to_excel(output_path, image_col_name="crop_image")
 
-    log(f"[SAVE] saved excel: {output_path} rows={len(df)}")
+    log(f"[SAVE] saved excel: {output_path} rows={len(df)} with_images={with_images}")
 
 
 def should_expand_overlay(step: dict[str, Any]) -> bool:
@@ -356,7 +365,8 @@ def expand_overlay(
             step_index=overlay_step_idx,
             move=True,
             direction="next",
-            wait_seconds=1.0,
+            wait_seconds=OVERLAY_STEP_WAIT_SECONDS,
+            announcement_wait_seconds=OVERLAY_ANNOUNCEMENT_WAIT_SECONDS,
         )
         overlay_row["tab_name"] = tab_cfg["tab_name"]
         overlay_row["context_type"] = "overlay"
@@ -371,7 +381,6 @@ def expand_overlay(
         overlay_rows.append(overlay_row)
         rows.append(overlay_row)
         all_rows.append(overlay_row)
-        save_excel(all_rows, output_path)
 
         should_end_overlay, overlay_fail_count, overlay_same_count, overlay_reason = should_stop(
             row=overlay_row,
@@ -385,7 +394,10 @@ def expand_overlay(
         if should_end_overlay:
             overlay_row["status"] = "END"
             overlay_row["stop_reason"] = overlay_reason
+            save_excel(all_rows, output_path, with_images=False)
             break
+        if overlay_step_idx % CHECKPOINT_SAVE_EVERY_STEPS == 0:
+            save_excel(all_rows, output_path, with_images=False)
 
     recovery_anchor = str(entry_step.get("normalized_visible_label", "") or "").strip()
     scenario_anchor = str(tab_cfg.get("anchor_name", "") or "").strip()
@@ -394,7 +406,7 @@ def expand_overlay(
     recovery_result = client.press_back_and_recover_focus(
         dev=dev,
         expected_parent_anchor=expected_anchor,
-        wait_seconds=1.0,
+        wait_seconds=BACK_RECOVERY_WAIT_SECONDS,
         retry=1,
     )
     recovery_status = str(recovery_result.get("status", "") or "")
@@ -409,6 +421,7 @@ def expand_overlay(
 
     if overlay_rows:
         overlay_rows[-1]["overlay_recovery_status"] = recovery_status
+    save_excel(all_rows, output_path, with_images=False)
     return overlay_rows
 
 
@@ -499,7 +512,7 @@ def collect_tab_rows(
         }
         rows.append(row)
         all_rows.append(row)
-        save_excel(all_rows, output_path)
+        save_excel(all_rows, output_path, with_images=False)
         return rows
 
     anchor_start = time.perf_counter()
@@ -507,7 +520,8 @@ def collect_tab_rows(
         dev=dev,
         step_index=0,
         move=False,
-        wait_seconds=1.5,
+        wait_seconds=MAIN_STEP_WAIT_SECONDS,
+        announcement_wait_seconds=MAIN_ANNOUNCEMENT_WAIT_SECONDS,
     )
     anchor_elapsed = time.perf_counter() - anchor_start
 
@@ -524,7 +538,7 @@ def collect_tab_rows(
 
     rows.append(anchor_row)
     all_rows.append(anchor_row)
-    save_excel(all_rows, output_path)
+    save_excel(all_rows, output_path, with_images=False)
 
     prev_visible_label = str(anchor_row.get("visible_label", "") or "").strip()
     fail_count = 0
@@ -540,7 +554,8 @@ def collect_tab_rows(
             step_index=step_idx,
             move=True,
             direction="next",
-            wait_seconds=1.5,
+            wait_seconds=MAIN_STEP_WAIT_SECONDS,
+            announcement_wait_seconds=MAIN_ANNOUNCEMENT_WAIT_SECONDS,
         )
         step_elapsed = time.perf_counter() - step_start
 
@@ -554,6 +569,7 @@ def collect_tab_rows(
         row["step_elapsed_sec"] = round(step_elapsed, 3)
         row["crop_image"] = "IMAGE"
         row = maybe_capture_focus_crop(client, dev, row, output_base_dir)
+        row["step_total_elapsed_sec"] = round(time.perf_counter() - step_start, 3)
 
         move_result = str(row.get("move_result", "") or "")
         visible_label = str(row.get("visible_label", "") or "").strip()
@@ -563,7 +579,16 @@ def collect_tab_rows(
             f"[STEP] END tab='{tab_cfg['tab_name']}' step={step_idx} "
             f"elapsed={step_elapsed:.2f}s move_result='{move_result}' "
             f"visible='{visible_label}' speech='{merged_announcement}' "
-            f"crop='{row.get('crop_image_path', '')}'"
+            f"crop='{row.get('crop_image_path', '')}' "
+            f"timing(move={row.get('move_elapsed_sec', 0):.3f}s "
+            f"ann={row.get('announcement_elapsed_sec', 0):.3f}s "
+            f"get_focus={row.get('get_focus_elapsed_sec', 0):.3f}s "
+            f"fallback_dump={row.get('dump_tree_elapsed_sec', 0):.3f}s "
+            f"crop={row.get('crop_elapsed_sec', 0):.3f}s total={row.get('step_total_elapsed_sec', 0):.3f}s) "
+            f"focus_reason='{row.get('get_focus_empty_reason', '')}' "
+            f"fallback_used={row.get('get_focus_fallback_used', False)} "
+            f"fallback_found={row.get('get_focus_fallback_found', False)} "
+            f"req_id='{row.get('get_focus_req_id', '')}'"
         )
 
         stop, fail_count, same_count, reason = should_stop(
@@ -582,7 +607,8 @@ def collect_tab_rows(
 
         rows.append(row)
         all_rows.append(row)
-        save_excel(all_rows, output_path)
+        if stop or (step_idx % CHECKPOINT_SAVE_EVERY_STEPS == 0):
+            save_excel(all_rows, output_path, with_images=False)
 
         if should_expand_overlay(row):
             fingerprint = make_overlay_entry_fingerprint(tab_cfg["tab_name"], row)
@@ -636,11 +662,11 @@ def main():
 
     except Exception as exc:
         log(f"[FATAL] script interrupted: {exc}")
-        save_excel(all_rows, output_path)
+        save_excel(all_rows, output_path, with_images=False)
         raise
 
     finally:
-        save_excel(all_rows, output_path)
+        save_excel(all_rows, output_path, with_images=True)
         log("[MAIN] final save complete")
 
     log("[MAIN] script end")
