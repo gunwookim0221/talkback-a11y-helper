@@ -45,6 +45,13 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.GET_FOCUS -p com.iotpar
 
 - 포커스 스냅샷 JSON(`reqId` 포함)으로 최종 상태를 검증합니다.
 
+## Step 5.5 – Anchor Stabilization (Runner, Python)
+
+- `script_test.py` 러너(`SCRIPT_VERSION=1.4.0`)는 탭 진입 직후 anchor를 바로 신뢰하지 않고 안정화 단계를 수행합니다.
+- anchor는 `resource_id_regex`, `text_regex`, `announcement_regex`, `class_name_regex` 조합으로 판정합니다.
+- `allow_resource_id_only=true`면 resourceId 단독 매칭도 허용하며, 복수 후보는 `(top, left)` 오름차순(좌상단 우선)으로 tie-break 합니다.
+- 동일 stabilization 로직을 overlay 복귀 재정렬 직후에도 재사용합니다.
+
 ## Step 6 – Overlay 확장 수집(Allowlist 기반)
 
 - linear `move_smart` 순회는 기본 경로로 유지하고, overlay 진입은 allowlist에 등록된 entry에서만 수행합니다.

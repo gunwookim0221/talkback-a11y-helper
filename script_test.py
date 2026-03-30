@@ -15,7 +15,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.3.6"
+SCRIPT_VERSION = "1.4.0"
 
 OVERLAY_ENTRY_ALLOWLIST = [
     {
@@ -39,11 +39,49 @@ OVERLAY_REALIGN_MAX_STEPS = 8
 
 TAB_CONFIGS = [
     {
+        "scenario_id": "home_main",
         "tab_name": ".*Home.*",
         "tab_type": "b",
         "anchor_name": ".*Location QR code.*",
         "anchor_type": "b",
+        "anchor": {
+            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/location_qr.*",
+            "text_regex": ".*Location QR code.*",
+            "announcement_regex": ".*Location QR code.*",
+            "class_name_regex": "android\\.widget\\..*",
+            "tie_breaker": "top_left",
+            "allow_resource_id_only": True,
+        },
         "max_steps": 30,
+    },
+    {
+        "scenario_id": "settings_entry_example",
+        "tab_name": ".*Menu.*",
+        "tab_type": "b",
+        "anchor_name": ".*Settings.*",
+        "anchor_type": "a",
+        "anchor": {
+            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/item_settings.*",
+            "text_regex": ".*Settings.*",
+            "tie_breaker": "top_left",
+            "allow_resource_id_only": True,
+        },
+        "enabled": False,
+        "max_steps": 20,
+    },
+    {
+        "scenario_id": "resource_id_only_example",
+        "tab_name": ".*Home.*",
+        "tab_type": "b",
+        "anchor_name": "com.samsung.android.oneconnect:id/add_menu_button",
+        "anchor_type": "r",
+        "anchor": {
+            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/add_menu_button",
+            "tie_breaker": "top_left",
+            "allow_resource_id_only": True,
+        },
+        "enabled": False,
+        "max_steps": 10,
     },
 ]
 
@@ -85,6 +123,120 @@ def parse_bounds_str(bounds_str: str) -> tuple[int, int, int, int] | None:
         return l, t, r, b
     except Exception:
         return None
+
+
+def _safe_regex_search(pattern: str, value: str) -> bool:
+    if not pattern:
+        return False
+    return bool(re.search(pattern, value or "", flags=re.IGNORECASE))
+
+
+def _extract_candidate_from_node(node: dict[str, Any], index: int = -1) -> dict[str, Any]:
+    text = str(node.get("text", "") or "").strip()
+    description = str(node.get("contentDescription", "") or "").strip()
+    announcement = str(node.get("talkbackLabel", "") or "").strip()
+    if not announcement:
+        announcement = f"{text} {description}".strip()
+    resource_id = str(node.get("viewIdResourceName", "") or "").strip()
+    class_name = str(node.get("className", "") or "").strip()
+    bounds = str(node.get("boundsInScreen", "") or "").strip()
+    parsed = parse_bounds_str(bounds)
+    top, left = (parsed[1], parsed[0]) if parsed else (10**9, 10**9)
+    return {
+        "source": "dump_tree",
+        "index": index,
+        "text": text,
+        "class_name": class_name,
+        "announcement": announcement,
+        "resource_id": resource_id,
+        "bounds": bounds,
+        "top": top,
+        "left": left,
+    }
+
+
+def _extract_candidate_from_step(step: dict[str, Any]) -> dict[str, Any]:
+    bounds = str(step.get("focus_bounds", "") or "").strip()
+    parsed = parse_bounds_str(bounds)
+    top, left = (parsed[1], parsed[0]) if parsed else (10**9, 10**9)
+    return {
+        "source": "focus_step",
+        "index": -1,
+        "text": str(step.get("visible_label", "") or "").strip(),
+        "class_name": str(step.get("focus_node", {}).get("className", "") or "").strip(),
+        "announcement": str(step.get("merged_announcement", "") or "").strip(),
+        "resource_id": str(step.get("focus_view_id", "") or "").strip(),
+        "bounds": bounds,
+        "top": top,
+        "left": left,
+    }
+
+
+def _resolve_anchor_cfg(tab_cfg: dict[str, Any]) -> dict[str, Any]:
+    anchor_cfg = dict(tab_cfg.get("anchor", {}) or {})
+    if "tie_breaker" not in anchor_cfg:
+        anchor_cfg["tie_breaker"] = "top_left"
+    anchor_cfg["allow_resource_id_only"] = bool(anchor_cfg.get("allow_resource_id_only", False))
+    if not anchor_cfg.get("text_regex") and tab_cfg.get("anchor_name"):
+        anchor_type = str(tab_cfg.get("anchor_type", "") or "").lower()
+        if anchor_type in {"t", "b", "a"}:
+            anchor_cfg["text_regex"] = str(tab_cfg.get("anchor_name") or "")
+        if anchor_type in {"r", "a"}:
+            anchor_cfg["resource_id_regex"] = str(tab_cfg.get("anchor_name") or "")
+    return anchor_cfg
+
+
+def match_anchor(candidate: dict[str, Any], anchor_cfg: dict[str, Any]) -> dict[str, Any]:
+    matched_fields: list[str] = []
+    score = 0
+
+    resource_id_regex = str(anchor_cfg.get("resource_id_regex", "") or "").strip()
+    text_regex = str(anchor_cfg.get("text_regex", "") or "").strip()
+    announcement_regex = str(anchor_cfg.get("announcement_regex", "") or "").strip()
+    class_name_regex = str(anchor_cfg.get("class_name_regex", "") or "").strip()
+    allow_resource_id_only = bool(anchor_cfg.get("allow_resource_id_only", False))
+
+    if resource_id_regex and _safe_regex_search(resource_id_regex, candidate.get("resource_id", "")):
+        matched_fields.append("resource_id")
+        score += 100
+    if text_regex and _safe_regex_search(text_regex, candidate.get("text", "")):
+        matched_fields.append("text")
+        score += 40
+    if announcement_regex and _safe_regex_search(announcement_regex, candidate.get("announcement", "")):
+        matched_fields.append("announcement")
+        score += 30
+    if class_name_regex and _safe_regex_search(class_name_regex, candidate.get("class_name", "")):
+        matched_fields.append("class_name")
+        score += 20
+
+    has_resource_match = "resource_id" in matched_fields
+    has_other_match = any(field in matched_fields for field in ("text", "announcement", "class_name"))
+    matched = has_resource_match and (has_other_match or allow_resource_id_only)
+    if not resource_id_regex:
+        matched = bool(matched_fields)
+
+    return {
+        "matched": matched,
+        "score": score,
+        "matched_fields": matched_fields,
+        "candidate": candidate,
+        "allow_resource_id_only": allow_resource_id_only,
+    }
+
+
+def choose_best_anchor_candidate(matches: list[dict[str, Any]], tie_breaker: str = "top_left") -> dict[str, Any] | None:
+    if not matches:
+        return None
+    if tie_breaker == "top_left":
+        return sorted(
+            matches,
+            key=lambda item: (
+                -int(item.get("score", 0)),
+                int(item["candidate"].get("top", 10**9)),
+                int(item["candidate"].get("left", 10**9)),
+            ),
+        )[0]
+    return sorted(matches, key=lambda item: -int(item.get("score", 0)))[0]
 
 
 def sanitize_filename(value: str) -> str:
@@ -574,6 +726,91 @@ def expand_overlay(
     return overlay_rows
 
 
+def stabilize_anchor(
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict[str, Any],
+    phase: str,
+    max_retries: int = 2,
+    verify_reads: int = 2,
+) -> dict[str, Any]:
+    anchor_cfg = _resolve_anchor_cfg(tab_cfg)
+    tie_breaker = str(anchor_cfg.get("tie_breaker", "top_left") or "top_left")
+    last_verify: dict[str, Any] = {}
+
+    for attempt in range(1, max_retries + 1):
+        dump_nodes = client.dump_tree(dev=dev)
+        candidates = [
+            _extract_candidate_from_node(node, index=i)
+            for i, node in enumerate(dump_nodes if isinstance(dump_nodes, list) else [])
+        ]
+        matches = [m for m in (match_anchor(c, anchor_cfg) for c in candidates) if m["matched"]]
+        best = choose_best_anchor_candidate(matches, tie_breaker=tie_breaker)
+
+        selected = False
+        if best and best["candidate"].get("resource_id"):
+            resource_pattern = f"^{re.escape(str(best['candidate']['resource_id']))}$"
+            selected = client.select(
+                dev=dev,
+                name=resource_pattern,
+                type_="r",
+                wait_=8,
+            )
+
+        if not selected:
+            selected = client.select(
+                dev=dev,
+                name=str(tab_cfg.get("anchor_name", "") or ""),
+                type_=str(tab_cfg.get("anchor_type", "a") or "a"),
+                wait_=8,
+            )
+
+        verify_match: dict[str, Any] | None = None
+        verify_rows: list[dict[str, Any]] = []
+        for verify_idx in range(max(1, verify_reads)):
+            verify_row = client.collect_focus_step(
+                dev=dev,
+                step_index=-(attempt * 10 + verify_idx),
+                move=False,
+                wait_seconds=MAIN_STEP_WAIT_SECONDS,
+                announcement_wait_seconds=MAIN_ANNOUNCEMENT_WAIT_SECONDS,
+            )
+            verify_rows.append(verify_row)
+            verify_candidate = _extract_candidate_from_step(verify_row)
+            verify_match = match_anchor(verify_candidate, anchor_cfg)
+            if verify_match["matched"]:
+                break
+
+        last_verify = verify_match or {}
+        log(
+            f"[ANCHOR][{phase}] attempt={attempt}/{max_retries} selected={selected} "
+            f"matched={bool(last_verify.get('matched'))} "
+            f"fields={last_verify.get('matched_fields', [])} "
+            f"score={last_verify.get('score', 0)} "
+            f"resource='{(last_verify.get('candidate') or {}).get('resource_id', '')}' "
+            f"bounds='{(last_verify.get('candidate') or {}).get('bounds', '')}'"
+        )
+        if selected and bool(last_verify.get("matched")):
+            return {
+                "ok": True,
+                "attempt": attempt,
+                "selected": selected,
+                "verify": last_verify,
+                "verify_rows": verify_rows,
+                "candidate_count": len(matches),
+                "phase": phase,
+            }
+
+    return {
+        "ok": False,
+        "attempt": max_retries,
+        "selected": False,
+        "verify": last_verify,
+        "candidate_count": 0,
+        "phase": phase,
+    }
+
+
 def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     ok = client.touch(
         dev=dev,
@@ -588,15 +825,17 @@ def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     client.reset_focus_history(dev)
     time.sleep(0.5)
 
-    ok = client.select(
+    stabilize_result = stabilize_anchor(
+        client=client,
         dev=dev,
-        name=tab_cfg["anchor_name"],
-        type_=tab_cfg["anchor_type"],
-        wait_=8,
+        tab_cfg=tab_cfg,
+        phase="scenario_start",
+        max_retries=2,
+        verify_reads=2,
     )
-    if not ok:
+    if not stabilize_result.get("ok"):
+        log(f"[ANCHOR][scenario_start] stabilization failed tab='{tab_cfg.get('tab_name', '')}'")
         return False
-
     time.sleep(1.0)
     return True
 
@@ -803,6 +1042,20 @@ def collect_tab_rows(
                     f"entry_reached={realign_result.get('entry_reached')} "
                     f"steps_taken={realign_result.get('steps_taken')}"
                 )
+                if realign_result.get("entry_reached"):
+                    post_overlay_stabilized = stabilize_anchor(
+                        client=client,
+                        dev=dev,
+                        tab_cfg=tab_cfg,
+                        phase="overlay_realign",
+                        max_retries=2,
+                        verify_reads=1,
+                    )
+                    if not post_overlay_stabilized.get("ok"):
+                        log(
+                            f"[ANCHOR][overlay_realign] stabilization failed "
+                            f"tab='{tab_cfg.get('tab_name', '')}'"
+                        )
             else:
                 log(f"[OVERLAY] skip already expanded entry fingerprint='{fingerprint}'")
 
@@ -826,6 +1079,12 @@ def main():
 
     try:
         for tab_cfg in TAB_CONFIGS:
+            if not bool(tab_cfg.get("enabled", True)):
+                log(
+                    f"[MAIN] skip disabled scenario_id='{tab_cfg.get('scenario_id', '')}' "
+                    f"tab='{tab_cfg.get('tab_name', '')}'"
+                )
+                continue
             collect_tab_rows(
                 client,
                 DEV_SERIAL,
