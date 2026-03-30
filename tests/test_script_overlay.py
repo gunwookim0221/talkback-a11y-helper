@@ -454,8 +454,32 @@ class StabilizeDummyClient:
 
 
 def test_verify_context_selected_bottom_tab_distinguishes_home_and_devices():
-    home_step = {"visible_label": "Home", "merged_announcement": "Selected, Home, Tab 1 of 5"}
-    devices_step = {"visible_label": "Devices", "merged_announcement": "Selected, Devices, Tab 2 of 5"}
+    home_step = {
+        "visible_label": "Location QR code",
+        "merged_announcement": "QR code",
+        "dump_tree_nodes": [
+            {
+                "text": "Home",
+                "contentDescription": "Selected, Home, Tab 1 of 5",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/bottom_home",
+                "selected": True,
+                "boundsInScreen": "0,1800,200,1910",
+            }
+        ],
+    }
+    devices_step = {
+        "visible_label": "Location QR code",
+        "merged_announcement": "QR code",
+        "dump_tree_nodes": [
+            {
+                "text": "Devices",
+                "contentDescription": "Selected, Devices, Tab 2 of 5",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/bottom_devices",
+                "selected": True,
+                "boundsInScreen": "200,1800,400,1910",
+            }
+        ],
+    }
     home_cfg = {"context_verify": {"type": "selected_bottom_tab", "announcement_regex": ".*Home.*"}}
     devices_cfg = {"context_verify": {"type": "selected_bottom_tab", "announcement_regex": ".*Devices.*"}}
 
@@ -469,11 +493,29 @@ def test_stabilize_anchor_fails_when_anchor_matches_but_context_fails():
         [
             {
                 "visible_label": "Location QR code",
-                "merged_announcement": "Selected, Home, Tab 1 of 5",
+                "merged_announcement": "QR code",
+                "dump_tree_nodes": [
+                    {
+                        "text": "Home",
+                        "contentDescription": "Selected, Home, Tab 1 of 5",
+                        "viewIdResourceName": "com.samsung.android.oneconnect:id/bottom_home",
+                        "selected": True,
+                        "boundsInScreen": "0,1800,200,1910",
+                    }
+                ],
             },
             {
                 "visible_label": "Location QR code",
-                "merged_announcement": "Selected, Home, Tab 1 of 5",
+                "merged_announcement": "QR code",
+                "dump_tree_nodes": [
+                    {
+                        "text": "Home",
+                        "contentDescription": "Selected, Home, Tab 1 of 5",
+                        "viewIdResourceName": "com.samsung.android.oneconnect:id/bottom_home",
+                        "selected": True,
+                        "boundsInScreen": "0,1800,200,1910",
+                    }
+                ],
             },
         ]
     )
@@ -503,7 +545,16 @@ def test_stabilize_anchor_succeeds_when_anchor_and_context_match():
         [
             {
                 "visible_label": "Location QR code",
-                "merged_announcement": "Selected, Devices, Tab 2 of 5",
+                "merged_announcement": "QR code",
+                "dump_tree_nodes": [
+                    {
+                        "text": "Devices",
+                        "contentDescription": "Selected, Devices, Tab 2 of 5",
+                        "viewIdResourceName": "com.samsung.android.oneconnect:id/bottom_devices",
+                        "selected": True,
+                        "boundsInScreen": "200,1800,400,1910",
+                    }
+                ],
             }
         ]
     )
@@ -533,11 +584,29 @@ def test_overlay_realign_anchor_match_but_wrong_tab_fails():
         [
             {
                 "visible_label": "Location QR code",
-                "merged_announcement": "Selected, Home, Tab 1 of 5",
+                "merged_announcement": "QR code",
+                "dump_tree_nodes": [
+                    {
+                        "text": "Home",
+                        "contentDescription": "Selected, Home, Tab 1 of 5",
+                        "viewIdResourceName": "com.samsung.android.oneconnect:id/bottom_home",
+                        "selected": True,
+                        "boundsInScreen": "0,1800,200,1910",
+                    }
+                ],
             },
             {
                 "visible_label": "Location QR code",
-                "merged_announcement": "Selected, Home, Tab 1 of 5",
+                "merged_announcement": "QR code",
+                "dump_tree_nodes": [
+                    {
+                        "text": "Home",
+                        "contentDescription": "Selected, Home, Tab 1 of 5",
+                        "viewIdResourceName": "com.samsung.android.oneconnect:id/bottom_home",
+                        "selected": True,
+                        "boundsInScreen": "0,1800,200,1910",
+                    }
+                ],
             },
         ]
     )
