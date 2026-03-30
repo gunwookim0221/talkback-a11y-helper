@@ -45,16 +45,16 @@ TAB_CONFIGS = [
         "tab_name": ".*Home.*",
         "tab_type": "b",
         "anchor_name": ".*Location QR code.*",
-        "anchor_type": "b",
+        "anchor_type": "a",
         "anchor": {
-            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/location_qr.*",
+            "resource_id_regex": "com.samsung.android.oneconnect:id/home_button",
             "text_regex": ".*Location QR code.*",
             "announcement_regex": ".*Location QR code.*",
-            "class_name_regex": "android\\.widget\\..*",
+            "class_name_regex": "android.widget.ImageButton",
             "tie_breaker": "top_left",
             "allow_resource_id_only": True,
         },
-        "max_steps": 30,
+        "max_steps": 5,
         "overlay_policy": {
             "allow_candidates": [
                 {
@@ -73,15 +73,15 @@ TAB_CONFIGS = [
         "scenario_id": "devices_main",
         "tab_name": ".*Devices.*",
         "tab_type": "b",
-        "anchor_name": ".*Map View.*",
+        "anchor_name": ".*Location QR code.*",
         "anchor_type": "b",
         "anchor": {
-            "text_regex": ".*Map View.*",
-            "announcement_regex": ".*Map View.*",
+            "text_regex": ".*Location QR code.*",
+            "announcement_regex": ".*QR code.*",
             "tie_breaker": "top_left",
         },
-        "enabled": False,
-        "max_steps": 20,
+        "enabled": True,
+        "max_steps": 5,
         "overlay_policy": {
             "allow_candidates": [
                 {
@@ -104,8 +104,8 @@ TAB_CONFIGS = [
         "anchor_name": ".*Settings.*",
         "anchor_type": "a",
         "anchor": {
-            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/item_settings.*",
-            "text_regex": ".*Settings.*",
+            "resource_id_regex": "com.samsung.android.oneconnect:id/add_menu_button",
+            "text_regex": ".*qr*",
             "tie_breaker": "top_left",
             "allow_resource_id_only": True,
         },
@@ -139,7 +139,7 @@ def now_str() -> str:
 
 def log(msg: str) -> None:
     print(f"[{now_str()}] {msg}")
-
+ 
 
 def generate_output_path() -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
