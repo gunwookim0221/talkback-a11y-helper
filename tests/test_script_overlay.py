@@ -446,6 +446,10 @@ class StabilizeDummyClient:
         self.select_calls.append(kwargs)
         return self.select_result
 
+    def touch(self, **kwargs):
+        self.select_calls.append({"touch": True, **kwargs})
+        return self.select_result
+
     def collect_focus_step(self, **kwargs):
         if self.verify_rows:
             row = dict(self.verify_rows.pop(0))
@@ -569,6 +573,106 @@ def test_stabilize_anchor_fails_when_anchor_matches_but_context_fails():
     assert result["ok"] is False
     assert result["verify"]["matched"] is True
     assert result["context"]["ok"] is False
+
+
+def test_match_tab_candidate_allows_resource_id_only():
+    tab_cfg = {
+        "resource_id_regex": r"com\.samsung\.android\.oneconnect:id/menu_devices",
+        "allow_resource_id_only": True,
+    }
+    node = {
+        "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_devices",
+        "text": "",
+        "contentDescription": "",
+        "className": "android.widget.Button",
+        "boundsInScreen": "200,1800,400,1910",
+    }
+
+    matched = script_test.match_tab_candidate(node, tab_cfg)
+
+    assert matched["matched"] is True
+    assert "resource_id" in matched["matched_fields"]
+
+
+def test_match_tab_candidate_supports_text_and_announcement_combo():
+    tab_cfg = {
+        "text_regex": r".*devices.*",
+        "announcement_regex": r".*selected.*devices.*",
+    }
+    node = {
+        "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_devices",
+        "text": "Devices",
+        "contentDescription": "Selected, Devices, Tab 2 of 5",
+        "className": "android.widget.Button",
+        "boundsInScreen": "200,1800,400,1910",
+    }
+
+    matched = script_test.match_tab_candidate(node, tab_cfg)
+
+    assert matched["matched"] is True
+    assert set(matched["matched_fields"]) >= {"text", "announcement"}
+
+
+def test_choose_best_tab_candidate_bottom_nav_left_to_right_tie_breaker():
+    matches = [
+        {"score": 100, "matched_fields": ["text"], "candidate": {"top": 1000, "left": 800}},
+        {"score": 100, "matched_fields": ["resource_id", "text"], "candidate": {"top": 1800, "left": 400}},
+        {"score": 100, "matched_fields": ["text"], "candidate": {"top": 1800, "left": 600}},
+    ]
+
+    best = script_test.choose_best_tab_candidate(matches, tie_breaker="bottom_nav_left_to_right")
+
+    assert best == matches[1]
+
+
+def test_stabilize_tab_selection_requires_selected_bottom_tab_before_anchor():
+    client = StabilizeDummyClient(
+        verify_rows=[
+            {
+                "visible_label": "Devices",
+                "merged_announcement": "Selected, Devices",
+                "dump_tree_nodes": [
+                    {
+                        "text": "Devices",
+                        "contentDescription": "Selected, Devices, Tab 2 of 5",
+                        "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_devices",
+                        "selected": True,
+                        "boundsInScreen": "200,1800,400,1910",
+                    }
+                ],
+            }
+        ],
+        dump_nodes=[
+            {
+                "text": "Devices",
+                "contentDescription": "Devices",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_devices",
+                "className": "android.widget.Button",
+                "boundsInScreen": "200,1800,400,1910",
+            }
+        ],
+    )
+    tab_cfg = {
+        "scenario_id": "devices_main",
+        "tab_name": "(?i).*devices.*",
+        "tab_type": "b",
+        "tab": {"resource_id_regex": r"com\.samsung\.android\.oneconnect:id/menu_devices", "allow_resource_id_only": True},
+        "context_verify": {"type": "selected_bottom_tab", "announcement_regex": ".*Devices.*"},
+    }
+
+    result = script_test.stabilize_tab_selection(client=client, dev="SERIAL", tab_cfg=tab_cfg)
+
+    assert result["ok"] is True
+    assert result["verify_context"]["ok"] is True
+
+
+def test_normalize_tab_config_keeps_backward_compatibility():
+    legacy = {"tab_name": "(?i).*menu.*", "tab_type": "b"}
+
+    normalized = script_test.normalize_tab_config(legacy)
+
+    assert normalized["text_regex"] == "(?i).*menu.*"
+    assert normalized["_fallback_to_legacy"] is True
 
 
 def test_stabilize_anchor_succeeds_when_anchor_and_context_match():

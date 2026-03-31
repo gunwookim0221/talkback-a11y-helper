@@ -16,7 +16,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.6.6"
+SCRIPT_VERSION = "1.7.0"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -47,6 +47,13 @@ TAB_CONFIGS = [
         "scenario_id": "home_main",
         "tab_name": "(?i).*home.*",
         "tab_type": "b",
+        "tab": {
+            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_favorites",
+            "text_regex": "(?i).*home.*",
+            "announcement_regex": "(?i).*(selected|선택됨)?.*home.*",
+            "tie_breaker": "bottom_nav_left_to_right",
+            "allow_resource_id_only": True,
+        },
         "anchor_name": "(?i).*location.*qr.*code.*",
         "anchor_type": "b",
         "anchor": {
@@ -77,6 +84,13 @@ TAB_CONFIGS = [
         "scenario_id": "devices_main",
         "tab_name": "(?i).*devices.*",
         "tab_type": "b",
+        "tab": {
+            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_devices",
+            "text_regex": "(?i).*devices.*",
+            "announcement_regex": "(?i).*(selected|선택됨)?.*devices.*",
+            "tie_breaker": "bottom_nav_left_to_right",
+            "allow_resource_id_only": True,
+        },
         "anchor_name": "(?i).*location.*qr.*code.*",
         "anchor_type": "b",
         "anchor": {
@@ -109,6 +123,13 @@ TAB_CONFIGS = [
         "scenario_id": "life_main",
         "tab_name": "(?i).*life.*",
         "tab_type": "b",
+        "tab": {
+            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_services",
+            "text_regex": "(?i).*life.*",
+            "announcement_regex": "(?i).*(selected|선택됨)?.*life.*",
+            "tie_breaker": "bottom_nav_left_to_right",
+            "allow_resource_id_only": True,
+        },
         "anchor_name": "(?i).*location.*qr.*code.*",
         "anchor_type": "b",
         "anchor": {
@@ -141,6 +162,13 @@ TAB_CONFIGS = [
         "scenario_id": "routines_main",
         "tab_name": "(?i).*routines.*",
         "tab_type": "b",
+        "tab": {
+            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_automations",
+            "text_regex": "(?i).*routines.*",
+            "announcement_regex": "(?i).*(selected|선택됨)?.*routines.*",
+            "tie_breaker": "bottom_nav_left_to_right",
+            "allow_resource_id_only": True,
+        },
         "anchor_name": "(?i).*location.*qr.*code.*",
         "anchor_type": "b",
         "anchor": {
@@ -173,6 +201,13 @@ TAB_CONFIGS = [
         "scenario_id": "menu_main",
         "tab_name": "(?i).*menu.*",
         "tab_type": "b",
+        "tab": {
+            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_more",
+            "text_regex": "(?i).*menu.*",
+            "announcement_regex": "(?i).*(selected|선택됨)?.*menu.*",
+            "tie_breaker": "bottom_nav_left_to_right",
+            "allow_resource_id_only": True,
+        },
         "anchor_name": "(?i).*smartthings.*",
         "anchor_type": "b",
         "anchor": {
@@ -303,7 +338,7 @@ def _extract_candidate_from_node(node: dict[str, Any], index: int = -1) -> dict[
     class_name = str(node.get("className", "") or "").strip()
     bounds = str(node.get("boundsInScreen", "") or "").strip()
     parsed = parse_bounds_str(bounds)
-    top, left = (parsed[1], parsed[0]) if parsed else (10**9, 10**9)
+    top, left, right, bottom = (parsed[1], parsed[0], parsed[2], parsed[3]) if parsed else (10**9, 10**9, -1, -1)
     return {
         "source": "dump_tree",
         "index": index,
@@ -314,13 +349,15 @@ def _extract_candidate_from_node(node: dict[str, Any], index: int = -1) -> dict[
         "bounds": bounds,
         "top": top,
         "left": left,
+        "right": right,
+        "bottom": bottom,
     }
 
 
 def _extract_candidate_from_step(step: dict[str, Any]) -> dict[str, Any]:
     bounds = str(step.get("focus_bounds", "") or "").strip()
     parsed = parse_bounds_str(bounds)
-    top, left = (parsed[1], parsed[0]) if parsed else (10**9, 10**9)
+    top, left, right, bottom = (parsed[1], parsed[0], parsed[2], parsed[3]) if parsed else (10**9, 10**9, -1, -1)
     return {
         "source": "focus_step",
         "index": -1,
@@ -331,6 +368,8 @@ def _extract_candidate_from_step(step: dict[str, Any]) -> dict[str, Any]:
         "bounds": bounds,
         "top": top,
         "left": left,
+        "right": right,
+        "bottom": bottom,
     }
 
 
@@ -348,15 +387,16 @@ def _resolve_anchor_cfg(tab_cfg: dict[str, Any]) -> dict[str, Any]:
     return anchor_cfg
 
 
-def match_anchor(candidate: dict[str, Any], anchor_cfg: dict[str, Any]) -> dict[str, Any]:
+def _match_composite_candidate(candidate: dict[str, Any], match_cfg: dict[str, Any]) -> dict[str, Any]:
     matched_fields: list[str] = []
     score = 0
 
-    resource_id_regex = str(anchor_cfg.get("resource_id_regex", "") or "").strip()
-    text_regex = str(anchor_cfg.get("text_regex", "") or "").strip()
-    announcement_regex = str(anchor_cfg.get("announcement_regex", "") or "").strip()
-    class_name_regex = str(anchor_cfg.get("class_name_regex", "") or "").strip()
-    allow_resource_id_only = bool(anchor_cfg.get("allow_resource_id_only", False))
+    resource_id_regex = str(match_cfg.get("resource_id_regex", "") or "").strip()
+    text_regex = str(match_cfg.get("text_regex", "") or "").strip()
+    announcement_regex = str(match_cfg.get("announcement_regex", "") or "").strip()
+    class_name_regex = str(match_cfg.get("class_name_regex", "") or "").strip()
+    bounds_regex = str(match_cfg.get("bounds_regex", "") or "").strip()
+    allow_resource_id_only = bool(match_cfg.get("allow_resource_id_only", False))
 
     if resource_id_regex and _safe_regex_search(resource_id_regex, candidate.get("resource_id", "")):
         matched_fields.append("resource_id")
@@ -370,6 +410,9 @@ def match_anchor(candidate: dict[str, Any], anchor_cfg: dict[str, Any]) -> dict[
     if class_name_regex and _safe_regex_search(class_name_regex, candidate.get("class_name", "")):
         matched_fields.append("class_name")
         score += 20
+    if bounds_regex and _safe_regex_search(bounds_regex, candidate.get("bounds", "")):
+        matched_fields.append("bounds")
+        score += 10
 
     has_resource_match = "resource_id" in matched_fields
     has_other_match = any(field in matched_fields for field in ("text", "announcement", "class_name"))
@@ -386,9 +429,60 @@ def match_anchor(candidate: dict[str, Any], anchor_cfg: dict[str, Any]) -> dict[
     }
 
 
+def match_anchor(candidate: dict[str, Any], anchor_cfg: dict[str, Any]) -> dict[str, Any]:
+    return _match_composite_candidate(candidate, anchor_cfg)
+
+
+def normalize_tab_config(tab_cfg: dict[str, Any]) -> dict[str, Any]:
+    normalized_tab_cfg = dict(tab_cfg.get("tab", {}) or {})
+    fallback_to_legacy = not bool(normalized_tab_cfg)
+    if fallback_to_legacy:
+        tab_name = str(tab_cfg.get("tab_name", "") or "").strip()
+        tab_type = str(tab_cfg.get("tab_type", "") or "").strip().lower()
+        if tab_type in {"t", "b", "a"} and tab_name:
+            normalized_tab_cfg["text_regex"] = tab_name
+        if tab_type in {"r", "a"} and tab_name:
+            normalized_tab_cfg["resource_id_regex"] = tab_name
+    if "tie_breaker" not in normalized_tab_cfg:
+        normalized_tab_cfg["tie_breaker"] = "bottom_nav_left_to_right"
+    normalized_tab_cfg["allow_resource_id_only"] = bool(normalized_tab_cfg.get("allow_resource_id_only", False))
+    normalized_tab_cfg["_fallback_to_legacy"] = fallback_to_legacy
+    return normalized_tab_cfg
+
+
+def match_tab_candidate(node: dict[str, Any], tab_cfg: dict[str, Any]) -> dict[str, Any]:
+    candidate = _extract_candidate_from_node(node)
+    return _match_composite_candidate(candidate, tab_cfg)
+
+
 def choose_best_anchor_candidate(matches: list[dict[str, Any]], tie_breaker: str = "top_left") -> dict[str, Any] | None:
     if not matches:
         return None
+    if tie_breaker == "top_left":
+        return sorted(
+            matches,
+            key=lambda item: (
+                -int(item.get("score", 0)),
+                int(item["candidate"].get("top", 10**9)),
+                int(item["candidate"].get("left", 10**9)),
+            ),
+        )[0]
+    return sorted(matches, key=lambda item: -int(item.get("score", 0)))[0]
+
+
+def choose_best_tab_candidate(matches: list[dict[str, Any]], tie_breaker: str = "first_match") -> dict[str, Any] | None:
+    if not matches:
+        return None
+    if tie_breaker == "bottom_nav_left_to_right":
+        return sorted(
+            matches,
+            key=lambda item: (
+                -int(item.get("score", 0)),
+                -int(item["candidate"].get("top", -1)),
+                int(item["candidate"].get("left", 10**9)),
+                int("resource_id" in item.get("matched_fields", [])) * -1,
+            ),
+        )[0]
     if tie_breaker == "top_left":
         return sorted(
             matches,
@@ -1351,14 +1445,96 @@ def stabilize_anchor(
     }
 
 
+def stabilize_tab_selection(
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict[str, Any],
+    max_retries: int = 2,
+) -> dict[str, Any]:
+    normalized_tab_cfg = normalize_tab_config(tab_cfg)
+    tie_breaker = str(normalized_tab_cfg.get("tie_breaker", "bottom_nav_left_to_right") or "bottom_nav_left_to_right")
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    fallback_to_legacy = bool(normalized_tab_cfg.get("_fallback_to_legacy", False))
+    if fallback_to_legacy:
+        log(f"[TAB][select] fallback_to_legacy=True scenario='{scenario_id}'")
+
+    last_context: dict[str, Any] = {"ok": True, "type": "none", "expected": ""}
+    last_best: dict[str, Any] = {}
+    for attempt in range(1, max_retries + 1):
+        dump_nodes = client.dump_tree(dev=dev)
+        node_list = dump_nodes if isinstance(dump_nodes, list) else []
+        matches = [m for m in (match_tab_candidate(node, normalized_tab_cfg) for node in node_list) if m.get("matched")]
+        best = choose_best_tab_candidate(matches, tie_breaker=tie_breaker)
+        last_best = best or {}
+        log(
+            f"[TAB][select][debug] scenario='{scenario_id}' candidates={len(matches)} tie_breaker='{tie_breaker}'",
+            level="DEBUG",
+        )
+
+        selected = False
+        if best and best.get("candidate", {}).get("resource_id"):
+            resource_pattern = f"^{re.escape(str(best['candidate']['resource_id']))}$"
+            selected = client.select(dev=dev, name=resource_pattern, type_="r", wait_=5)
+
+        if not selected:
+            selected = client.touch(
+                dev=dev,
+                name=str(tab_cfg.get("tab_name", "") or ""),
+                type_=str(tab_cfg.get("tab_type", "") or ""),
+                wait_=5,
+            )
+
+        verify_row = client.collect_focus_step(
+            dev=dev,
+            step_index=-(500 + attempt),
+            move=False,
+            wait_seconds=MAIN_STEP_WAIT_SECONDS,
+            announcement_wait_seconds=MAIN_ANNOUNCEMENT_WAIT_SECONDS,
+        )
+        last_context = verify_context(verify_row, tab_cfg, client=client, dev=dev)
+        log(
+            f"[TAB][select] scenario='{scenario_id}' selected={selected} "
+            f"matched_fields={(best or {}).get('matched_fields', [])} score={(best or {}).get('score', 0)}"
+        )
+        log(
+            f"[TAB][verify] selected_bottom_tab ok={bool(last_context.get('ok'))} "
+            f"actual='{last_context.get('actual_selected_text', '')}'"
+        )
+        if _should_log("DEBUG") and best:
+            log(
+                f"[TAB][select][debug] best_resource='{best['candidate'].get('resource_id', '')}' "
+                f"best_bounds='{best['candidate'].get('bounds', '')}'"
+            )
+        if selected and bool(last_context.get("ok")):
+            return {
+                "ok": True,
+                "attempt": attempt,
+                "selected": selected,
+                "verify_context": last_context,
+                "best": best,
+                "candidate_count": len(matches),
+            }
+        if attempt < max_retries:
+            log(f"[TAB][select] retry {attempt}/{max_retries} scenario='{scenario_id}'")
+
+    return {
+        "ok": False,
+        "attempt": max_retries,
+        "selected": False,
+        "verify_context": last_context,
+        "best": last_best,
+    }
+
+
 def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
-    ok = client.touch(
+    tab_stabilized = stabilize_tab_selection(
+        client=client,
         dev=dev,
-        name=tab_cfg["tab_name"],
-        type_=tab_cfg["tab_type"],
-        wait_=5,
+        tab_cfg=tab_cfg,
+        max_retries=2,
     )
-    if not ok:
+    if not tab_stabilized.get("ok"):
+        log(f"[TAB][select] stabilization failed scenario='{tab_cfg.get('scenario_id', '')}'")
         return False
 
     time.sleep(1.0)

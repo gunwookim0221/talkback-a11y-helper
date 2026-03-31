@@ -47,7 +47,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.GET_FOCUS -p com.iotpar
 
 ## Step 5.5 – Anchor Stabilization + Scenario Context Verify (Runner, Python)
 
-- `script_test.py` 러너(`SCRIPT_VERSION=1.6.4`)는 탭 진입 직후 anchor를 바로 신뢰하지 않고 안정화 단계를 수행합니다.
+- `script_test.py` 러너(`SCRIPT_VERSION=1.7.0`)는 탭/anchor를 분리해 안정화 단계를 순차 수행합니다.
 - anchor는 `resource_id_regex`, `text_regex`, `announcement_regex`, `class_name_regex` 조합으로 판정합니다.
 - `allow_resource_id_only=true`면 resourceId 단독 매칭도 허용하며, 복수 후보는 `(top, left)` 오름차순(좌상단 우선)으로 tie-break 합니다.
 - 안정화 성공 조건은 `anchor matched == True` **그리고** `context_verify == True`입니다.
