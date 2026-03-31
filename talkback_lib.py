@@ -35,7 +35,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.5"
+CLIENT_ALGORITHM_VERSION = "1.7.6"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -1013,8 +1013,13 @@ class A11yAdbClient:
             "elapsed_before_fallback_sec": 0.0,
             "total_elapsed_sec": 0.0,
             "focus_payload_source": "none",
+            "final_payload_source": "none",
             "response_success": False,
             "accepted_with_success_false": False,
+            "success_false_top_level_dump_attempted": False,
+            "success_false_top_level_dump_found": False,
+            "final_focus_reason": "",
+            "dump_replace_reason": "",
         }
         helper_ok = self._has_recent_helper_ok(dev=dev) or self.check_helper_status(dev=dev)
         self.last_get_focus_trace["helper_status_ok"] = helper_ok
@@ -1074,6 +1079,8 @@ class A11yAdbClient:
                 self.last_get_focus_trace["fallback_node_bounds"] = bounds
                 self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
                 self.last_get_focus_trace["focus_payload_source"] = "fallback_dump"
+                self.last_get_focus_trace["final_payload_source"] = "fallback_dump"
+                self.last_get_focus_trace["final_focus_reason"] = "parse_error_fallback_dump_found"
                 self._debug_print(
                     f"[DEBUG][get_focus] fallback_result serial={serial} req_id={req_id} found=True "
                     f"label='{label}' view_id='{view_id}' bounds='{bounds}' "
@@ -1084,6 +1091,8 @@ class A11yAdbClient:
 
             self.last_get_focus_trace["fallback_found"] = False
             self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
+            self.last_get_focus_trace["final_payload_source"] = "none"
+            self.last_get_focus_trace["final_focus_reason"] = "parse_error_fallback_dump_not_found"
             self._debug_print(
                 f"[DEBUG][get_focus] fallback_result serial={serial} req_id={req_id} found=False "
                 f"dump_elapsed={self.last_get_focus_trace['fallback_dump_elapsed_sec']:.3f}s "
@@ -1092,6 +1101,7 @@ class A11yAdbClient:
             return {}
 
         self.last_get_focus_trace["response_received"] = bool(result)
+        success_field_present = "success" in result
         response_success = bool(result.get("success"))
         self.last_get_focus_trace["response_success"] = response_success
         focus_node: dict[str, Any] = {}
@@ -1119,15 +1129,73 @@ class A11yAdbClient:
         )
 
         if self._is_meaningful_focus_node(focus_node):
-            accepted_with_success_false = (payload_candidate_source == "top_level" and not response_success)
+            accepted_with_success_false = (
+                payload_candidate_source == "top_level"
+                and success_field_present
+                and not response_success
+            )
             self.last_get_focus_trace["accepted_with_success_false"] = accepted_with_success_false
             self.last_get_focus_trace["empty_reason"] = ""
-            self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
             if accepted_with_success_false:
                 print(
-                    f"[WARN][get_focus] success=False but accepted top_level payload "
+                    f"[WARN][get_focus] success=False top_level payload accepted; trying dump fallback "
                     f"serial={serial} req_id={req_id}"
                 )
+                self.last_get_focus_trace["success_false_top_level_dump_attempted"] = True
+                fallback_started = time.monotonic()
+                try:
+                    dump_nodes = self.dump_tree(dev=dev)
+                except Exception as exc:
+                    self.last_get_focus_trace["fallback_dump_elapsed_sec"] = time.monotonic() - fallback_started
+                    self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
+                    self.last_get_focus_trace["final_payload_source"] = payload_candidate_source
+                    self.last_get_focus_trace["final_focus_reason"] = "success_false_top_level_kept_dump_error"
+                    self.last_get_focus_trace["dump_replace_reason"] = "dump_error"
+                    self._debug_print(
+                        f"[DEBUG][get_focus] dump_tree fallback failed serial={serial} req_id={req_id} "
+                        f"error={exc} elapsed={self.last_get_focus_trace['fallback_dump_elapsed_sec']:.3f}s"
+                    )
+                    print(
+                        f"[INFO][get_focus] success=False top_level payload kept; dump fallback found nothing "
+                        f"serial={serial} req_id={req_id}"
+                    )
+                    return focus_node
+                self.last_get_focus_trace["fallback_dump_elapsed_sec"] = time.monotonic() - fallback_started
+                self.last_get_focus_trace["fallback_dump_nodes"] = dump_nodes if isinstance(dump_nodes, list) else []
+                fallback_focus_node = self._find_focused_node_in_tree(dump_nodes)
+                if fallback_focus_node and self._is_meaningful_focus_node(fallback_focus_node):
+                    label = self.extract_visible_label_from_focus(fallback_focus_node)
+                    view_id = str(fallback_focus_node.get("viewIdResourceName", "") or "")
+                    bounds = self._normalize_bounds(fallback_focus_node)
+                    self.last_get_focus_trace["fallback_found"] = True
+                    self.last_get_focus_trace["success_false_top_level_dump_found"] = True
+                    self.last_get_focus_trace["fallback_node_label"] = label
+                    self.last_get_focus_trace["fallback_node_view_id"] = view_id
+                    self.last_get_focus_trace["fallback_node_bounds"] = bounds
+                    self.last_get_focus_trace["focus_payload_source"] = "fallback_dump"
+                    self.last_get_focus_trace["final_payload_source"] = "fallback_dump"
+                    self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
+                    self.last_get_focus_trace["final_focus_reason"] = "success_false_top_level_replaced_by_dump"
+                    self.last_get_focus_trace["dump_replace_reason"] = "focused_node_from_dump"
+                    print(
+                        f"[INFO][get_focus] success=False top_level payload replaced by dump focused node "
+                        f"serial={serial} req_id={req_id}"
+                    )
+                    return fallback_focus_node
+                print(
+                    f"[INFO][get_focus] success=False top_level payload kept; dump fallback found nothing "
+                    f"serial={serial} req_id={req_id}"
+                )
+                self.last_get_focus_trace["fallback_found"] = False
+                self.last_get_focus_trace["success_false_top_level_dump_found"] = False
+                self.last_get_focus_trace["final_payload_source"] = payload_candidate_source
+                self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
+                self.last_get_focus_trace["final_focus_reason"] = "success_false_top_level_kept_after_dump"
+                self.last_get_focus_trace["dump_replace_reason"] = "dump_no_focused_node"
+                return focus_node
+            self.last_get_focus_trace["final_payload_source"] = payload_candidate_source
+            self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
+            self.last_get_focus_trace["final_focus_reason"] = "accepted_meaningful_payload"
             return focus_node
 
         empty_reason = "no_response"
@@ -1172,6 +1240,8 @@ class A11yAdbClient:
             self.last_get_focus_trace["fallback_node_bounds"] = bounds
             self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
             self.last_get_focus_trace["focus_payload_source"] = "fallback_dump"
+            self.last_get_focus_trace["final_payload_source"] = "fallback_dump"
+            self.last_get_focus_trace["final_focus_reason"] = "fallback_dump_found"
             self._debug_print(
                 f"[DEBUG][get_focus] fallback_result serial={serial} req_id={req_id} found=True "
                 f"label='{label}' view_id='{view_id}' bounds='{bounds}' "
@@ -1182,6 +1252,8 @@ class A11yAdbClient:
 
         self.last_get_focus_trace["fallback_found"] = False
         self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
+        self.last_get_focus_trace["final_payload_source"] = "none"
+        self.last_get_focus_trace["final_focus_reason"] = "fallback_dump_not_found"
         print(
             f"[WARN][get_focus] empty focus result serial={serial} req_id={req_id} "
             f"reason={empty_reason} fallback_found=False"
@@ -1795,6 +1867,11 @@ class A11yAdbClient:
             "focus_payload_source": "none",
             "get_focus_response_success": False,
             "get_focus_top_level_success_false": False,
+            "get_focus_success_false_top_level_dump_attempted": False,
+            "get_focus_success_false_top_level_dump_found": False,
+            "get_focus_final_payload_source": "none",
+            "get_focus_final_focus_reason": "",
+            "get_focus_dump_replace_reason": "",
         }
 
         if move:
@@ -1903,6 +1980,15 @@ class A11yAdbClient:
         step["focus_payload_source"] = str(trace.get("focus_payload_source", "none") or "none")
         step["get_focus_response_success"] = bool(trace.get("response_success", False))
         step["get_focus_top_level_success_false"] = bool(trace.get("accepted_with_success_false", False))
+        step["get_focus_success_false_top_level_dump_attempted"] = bool(
+            trace.get("success_false_top_level_dump_attempted", False)
+        )
+        step["get_focus_success_false_top_level_dump_found"] = bool(
+            trace.get("success_false_top_level_dump_found", False)
+        )
+        step["get_focus_final_payload_source"] = str(trace.get("final_payload_source", "none") or "none")
+        step["get_focus_final_focus_reason"] = str(trace.get("final_focus_reason", "") or "")
+        step["get_focus_dump_replace_reason"] = str(trace.get("dump_replace_reason", "") or "")
         step["t_step_start"] = 0.0
 
         step["last_announcements"] = self._json_safe_value(saved_last_announcements)

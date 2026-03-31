@@ -16,7 +16,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.7.0"
+SCRIPT_VERSION = "1.7.1"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -1026,7 +1026,12 @@ def detect_step_mismatch(
         low_confidence_reasons.append("crop_low_confidence")
 
     fallback_found = bool(row.get("get_focus_fallback_found", False))
-    if focus_source == "top_level" and not fallback_found:
+    success_false_top_level_dump_found = bool(row.get("get_focus_success_false_top_level_dump_found", False))
+    if (
+        focus_source == "top_level"
+        and not fallback_found
+        and not success_false_top_level_dump_found
+    ):
         low_confidence_reasons.append("top_level_without_fallback_dump")
     if not focus_view_id and focus_bounds:
         low_confidence_reasons.append("bounds_dependent_focus")

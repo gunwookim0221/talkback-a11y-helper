@@ -1244,7 +1244,10 @@ class SmartMoveFocusTest(unittest.TestCase):
 
         self.assertEqual(result.get("contentDescription"), "Map View")
         self.assertEqual(result.get("viewIdResourceName"), "com.samsung.android.oneconnect:id/mapview_button")
-        dump_mock.assert_not_called()
+        dump_mock.assert_called_once()
+        self.assertTrue(client.last_get_focus_trace.get("success_false_top_level_dump_attempted"))
+        self.assertFalse(client.last_get_focus_trace.get("success_false_top_level_dump_found"))
+        self.assertEqual(client.last_get_focus_trace.get("final_payload_source"), "top_level")
 
     def test_get_focus_flags_only_payload_is_meaningful(self):
         client = FakeA11yClient()
@@ -1257,7 +1260,34 @@ class SmartMoveFocusTest(unittest.TestCase):
             result = client.get_focus("SER")
 
         self.assertTrue(result.get("accessibilityFocused"))
-        dump_mock.assert_not_called()
+        dump_mock.assert_called_once()
+
+    def test_get_focus_success_false_top_level_payload_replaced_by_dump_focus_node(self):
+        client = FakeA11yClient()
+        client.logcat_payload = (
+            'I/A11Y_HELPER: FOCUS_RESULT '
+            '{"success":false,"reqId":"REQID619","contentDescription":"Map View",'
+            '"viewIdResourceName":"com.samsung.android.oneconnect:id/mapview_button",'
+            '"boundsInScreen":{"l":708,"t":142,"r":810,"b":286}}'
+        )
+        dump_nodes = [
+            {"text": "general"},
+            {"text": "복구 노드", "accessibilityFocused": True, "viewIdResourceName": "id/recovered"},
+        ]
+
+        with (
+            patch("talkback_lib.uuid.uuid4", return_value="REQID619-xxxx"),
+            patch.object(client, "dump_tree", return_value=dump_nodes) as dump_mock,
+        ):
+            result = client.get_focus("SER")
+
+        self.assertEqual(result.get("text"), "복구 노드")
+        self.assertTrue(result.get("accessibilityFocused"))
+        self.assertEqual(client.last_get_focus_trace.get("focus_payload_source"), "fallback_dump")
+        self.assertEqual(client.last_get_focus_trace.get("final_payload_source"), "fallback_dump")
+        self.assertTrue(client.last_get_focus_trace.get("success_false_top_level_dump_attempted"))
+        self.assertTrue(client.last_get_focus_trace.get("success_false_top_level_dump_found"))
+        dump_mock.assert_called_once()
 
     def test_get_focus_skips_helper_status_probe_when_recent_cache_is_ready(self):
         client = FakeA11yClient()
