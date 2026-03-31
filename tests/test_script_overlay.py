@@ -734,3 +734,57 @@ def test_overlay_realign_anchor_match_but_wrong_tab_fails():
     assert result["ok"] is False
     assert result["verify"]["matched"] is True
     assert result["context"]["ok"] is False
+
+
+def test_detect_step_mismatch_promotes_top_level_low_confidence_only():
+    row = {
+        "normalized_visible_label": "map view",
+        "normalized_announcement": "map view",
+        "focus_payload_source": "top_level",
+        "get_focus_response_success": False,
+        "get_focus_top_level_success_false": True,
+        "focus_view_id": "",
+        "focus_bounds": "10,10,100,100",
+        "get_focus_fallback_found": False,
+        "crop_focus_confidence_low": True,
+        "context_type": "main",
+    }
+
+    mismatch_reasons, low_confidence_reasons = script_test.detect_step_mismatch(row=row, previous_step=None)
+
+    assert mismatch_reasons == []
+    assert "get_focus_top_level_success_false" in low_confidence_reasons
+    assert "crop_low_confidence" in low_confidence_reasons
+
+
+def test_detect_step_mismatch_accepts_speech_prefix_style_match():
+    row = {
+        "normalized_visible_label": "explore",
+        "normalized_announcement": "explore new content available details",
+        "focus_payload_source": "response",
+        "get_focus_response_success": True,
+        "focus_view_id": "com.example:id/explore",
+        "focus_bounds": "1,1,2,2",
+        "context_type": "main",
+    }
+
+    mismatch_reasons, low_confidence_reasons = script_test.detect_step_mismatch(row=row, previous_step=None)
+
+    assert mismatch_reasons == []
+    assert low_confidence_reasons == []
+
+
+def test_detect_step_mismatch_flags_explicit_label_divergence():
+    row = {
+        "normalized_visible_label": "settings",
+        "normalized_announcement": "map view",
+        "focus_payload_source": "response",
+        "get_focus_response_success": True,
+        "focus_view_id": "com.example:id/settings",
+        "focus_bounds": "1,1,2,2",
+        "context_type": "main",
+    }
+
+    mismatch_reasons, _ = script_test.detect_step_mismatch(row=row, previous_step=None)
+
+    assert "speech_visible_diverged" in mismatch_reasons

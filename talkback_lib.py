@@ -35,7 +35,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.4"
+CLIENT_ALGORITHM_VERSION = "1.7.5"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -1851,6 +1851,19 @@ class A11yAdbClient:
         step["focus_bounds"] = self._normalize_bounds(safe_focus_node) if isinstance(safe_focus_node, dict) else ""
 
         visible_label = self.extract_visible_label_from_focus(safe_focus_node)
+        if not visible_label and isinstance(safe_focus_node, dict):
+            for fallback_key in (
+                "contentDescription",
+                "content_desc",
+                "content_description",
+                "accessibilityLabel",
+                "label",
+                "talkback",
+            ):
+                fallback_value = safe_focus_node.get(fallback_key)
+                if isinstance(fallback_value, str) and fallback_value.strip():
+                    visible_label = fallback_value.strip()
+                    break
         step["visible_label"] = visible_label
         step["normalized_visible_label"] = self.normalize_for_comparison(visible_label)
 
