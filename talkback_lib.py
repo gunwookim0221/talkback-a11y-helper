@@ -35,7 +35,9 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.3"
+CLIENT_ALGORITHM_VERSION = "1.7.4"
+LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
+LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
 
 @dataclass
@@ -66,6 +68,15 @@ class A11yAdbClient:
         self.helper_status_cache_ttl_sec: float = 4.0
         self.helper_status_fail_cache_ttl_sec: float = 0.7
         self.last_get_focus_trace: dict[str, Any] = {}
+        self._prev_step_merged_announcement: str = ""
+        self.log_level = LOG_LEVEL if LOG_LEVEL in LOG_LEVEL_ORDER else "NORMAL"
+
+    def _is_debug_log_enabled(self) -> bool:
+        return LOG_LEVEL_ORDER.get(self.log_level, 1) >= LOG_LEVEL_ORDER["DEBUG"]
+
+    def _debug_print(self, message: str) -> None:
+        if self._is_debug_log_enabled():
+            print(message)
 
     def _resolve_serial(self, dev: Any) -> str | None:
         if dev is None:
@@ -142,7 +153,7 @@ class A11yAdbClient:
         cache_hit, cached_result = self._get_cached_helper_status(serial=serial)
         if cache_hit:
             elapsed = time.monotonic() - started
-            print(
+            self._debug_print(
                 f"[DEBUG][helper_status] serial={serial or 'default'} cached=True "
                 f"result={cached_result} elapsed={elapsed:.3f}s"
             )
@@ -161,10 +172,7 @@ class A11yAdbClient:
             )
             self._update_helper_status_cache(serial=serial, result=False)
             elapsed = time.monotonic() - started
-            print(
-                f"[DEBUG][helper_status] serial={serial or 'default'} cached=False "
-                f"result=False reason=service_disabled elapsed={elapsed:.3f}s"
-            )
+            print(f"[WARN][helper_status] serial={serial or 'default'} result=False reason=service_disabled elapsed={elapsed:.3f}s")
             return False
 
         if not self.ping(dev=dev, wait_=3.0):
@@ -175,15 +183,12 @@ class A11yAdbClient:
             )
             self._update_helper_status_cache(serial=serial, result=False)
             elapsed = time.monotonic() - started
-            print(
-                f"[DEBUG][helper_status] serial={serial or 'default'} cached=False "
-                f"result=False reason=ping_failed elapsed={elapsed:.3f}s"
-            )
+            print(f"[WARN][helper_status] serial={serial or 'default'} result=False reason=ping_failed elapsed={elapsed:.3f}s")
             return False
 
         self._update_helper_status_cache(serial=serial, result=True)
         elapsed = time.monotonic() - started
-        print(
+        self._debug_print(
             f"[DEBUG][helper_status] serial={serial or 'default'} cached=False "
             f"result=True elapsed={elapsed:.3f}s"
         )
@@ -1007,10 +1012,13 @@ class A11yAdbClient:
             "fallback_dump_nodes": [],
             "elapsed_before_fallback_sec": 0.0,
             "total_elapsed_sec": 0.0,
+            "focus_payload_source": "none",
+            "response_success": False,
+            "accepted_with_success_false": False,
         }
         helper_ok = self._has_recent_helper_ok(dev=dev) or self.check_helper_status(dev=dev)
         self.last_get_focus_trace["helper_status_ok"] = helper_ok
-        print(
+        self._debug_print(
             f"[DEBUG][get_focus] start serial={serial} req_id={req_id} "
             f"wait={wait_seconds:.2f}s helper_ok={helper_ok}"
         )
@@ -1037,7 +1045,7 @@ class A11yAdbClient:
             self.last_get_focus_trace["fallback_used"] = True
             self.last_get_focus_trace["fallback_reason"] = "parse_error"
             self.last_get_focus_trace["elapsed_before_fallback_sec"] = time.monotonic() - started
-            print(
+            self._debug_print(
                 f"[DEBUG][get_focus] fallback_enter serial={serial} req_id={req_id} "
                 f"reason=parse_error error={exc} "
                 f"elapsed_before_fallback={self.last_get_focus_trace['elapsed_before_fallback_sec']:.3f}s"
@@ -1048,7 +1056,7 @@ class A11yAdbClient:
             except Exception as fallback_exc:
                 self.last_get_focus_trace["fallback_dump_elapsed_sec"] = time.monotonic() - fallback_started
                 self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
-                print(
+                self._debug_print(
                     f"[DEBUG][get_focus] dump_tree fallback failed serial={serial} req_id={req_id} "
                     f"error={fallback_exc} elapsed={self.last_get_focus_trace['fallback_dump_elapsed_sec']:.3f}s"
                 )
@@ -1065,7 +1073,8 @@ class A11yAdbClient:
                 self.last_get_focus_trace["fallback_node_view_id"] = view_id
                 self.last_get_focus_trace["fallback_node_bounds"] = bounds
                 self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
-                print(
+                self.last_get_focus_trace["focus_payload_source"] = "fallback_dump"
+                self._debug_print(
                     f"[DEBUG][get_focus] fallback_result serial={serial} req_id={req_id} found=True "
                     f"label='{label}' view_id='{view_id}' bounds='{bounds}' "
                     f"dump_elapsed={self.last_get_focus_trace['fallback_dump_elapsed_sec']:.3f}s "
@@ -1075,7 +1084,7 @@ class A11yAdbClient:
 
             self.last_get_focus_trace["fallback_found"] = False
             self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
-            print(
+            self._debug_print(
                 f"[DEBUG][get_focus] fallback_result serial={serial} req_id={req_id} found=False "
                 f"dump_elapsed={self.last_get_focus_trace['fallback_dump_elapsed_sec']:.3f}s "
                 f"total_elapsed={self.last_get_focus_trace['total_elapsed_sec']:.3f}s"
@@ -1099,18 +1108,26 @@ class A11yAdbClient:
         ):
             focus_node = dict(result)
             payload_candidate_source = "top_level"
+        self.last_get_focus_trace["focus_payload_source"] = payload_candidate_source
 
         major_keys = ("text", "contentDescription", "viewIdResourceName", "boundsInScreen")
         key_presence = {k: bool(str(result.get(k, "") or "").strip()) for k in major_keys}
-        print(
+        self._debug_print(
             f"[DEBUG][get_focus] response serial={serial} req_id={req_id} "
             f"success={response_success} keys={key_presence} result_keys={len(result.keys())} "
             f"payload_candidate_source={payload_candidate_source}"
         )
 
         if self._is_meaningful_focus_node(focus_node):
+            accepted_with_success_false = (payload_candidate_source == "top_level" and not response_success)
+            self.last_get_focus_trace["accepted_with_success_false"] = accepted_with_success_false
             self.last_get_focus_trace["empty_reason"] = ""
             self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
+            if accepted_with_success_false:
+                print(
+                    f"[WARN][get_focus] success=False but accepted top_level payload "
+                    f"serial={serial} req_id={req_id}"
+                )
             return focus_node
 
         empty_reason = "no_response"
@@ -1126,7 +1143,7 @@ class A11yAdbClient:
         self.last_get_focus_trace["fallback_used"] = True
         self.last_get_focus_trace["fallback_reason"] = empty_reason
         self.last_get_focus_trace["elapsed_before_fallback_sec"] = time.monotonic() - started
-        print(
+        self._debug_print(
             f"[DEBUG][get_focus] fallback_enter serial={serial} req_id={req_id} "
             f"reason={empty_reason} elapsed_before_fallback={self.last_get_focus_trace['elapsed_before_fallback_sec']:.3f}s"
         )
@@ -1136,7 +1153,7 @@ class A11yAdbClient:
         except Exception as exc:
             self.last_get_focus_trace["fallback_dump_elapsed_sec"] = time.monotonic() - fallback_started
             self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
-            print(
+            self._debug_print(
                 f"[DEBUG][get_focus] dump_tree fallback failed serial={serial} req_id={req_id} "
                 f"error={exc} elapsed={self.last_get_focus_trace['fallback_dump_elapsed_sec']:.3f}s"
             )
@@ -1154,7 +1171,8 @@ class A11yAdbClient:
             self.last_get_focus_trace["fallback_node_view_id"] = view_id
             self.last_get_focus_trace["fallback_node_bounds"] = bounds
             self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
-            print(
+            self.last_get_focus_trace["focus_payload_source"] = "fallback_dump"
+            self._debug_print(
                 f"[DEBUG][get_focus] fallback_result serial={serial} req_id={req_id} found=True "
                 f"label='{label}' view_id='{view_id}' bounds='{bounds}' "
                 f"dump_elapsed={self.last_get_focus_trace['fallback_dump_elapsed_sec']:.3f}s "
@@ -1165,6 +1183,10 @@ class A11yAdbClient:
         self.last_get_focus_trace["fallback_found"] = False
         self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
         print(
+            f"[WARN][get_focus] empty focus result serial={serial} req_id={req_id} "
+            f"reason={empty_reason} fallback_found=False"
+        )
+        self._debug_print(
             f"[DEBUG][get_focus] fallback_result serial={serial} req_id={req_id} found=False "
             f"dump_elapsed={self.last_get_focus_trace['fallback_dump_elapsed_sec']:.3f}s "
             f"total_elapsed={self.last_get_focus_trace['total_elapsed_sec']:.3f}s"
@@ -1741,6 +1763,7 @@ class A11yAdbClient:
         announcement_wait_seconds: float | None = None,
     ) -> dict[str, Any]:
         """포커스 1 step 이동/수집 결과를 엑셀 row 친화적인 dict로 반환합니다."""
+        step_started = time.monotonic()
         step: dict[str, Any] = {
             "step_index": step_index,
             "move_result": None,
@@ -1761,6 +1784,17 @@ class A11yAdbClient:
             "step_dump_tree_elapsed_sec": 0.0,
             "step_dump_tree_used": False,
             "step_dump_tree_reason": "",
+            "t_step_start": 0.0,
+            "t_after_move": 0.0,
+            "t_after_ann": 0.0,
+            "t_after_get_focus": 0.0,
+            "announcement_count": 0,
+            "announcement_window_sec": 0.0,
+            "prev_speech_same": False,
+            "prev_speech_similar": False,
+            "focus_payload_source": "none",
+            "get_focus_response_success": False,
+            "get_focus_top_level_success_false": False,
         }
 
         if move:
@@ -1775,6 +1809,7 @@ class A11yAdbClient:
             step["move_elapsed_sec"] = round(time.monotonic() - move_started, 3)
         else:
             step["move_elapsed_sec"] = 0.0
+        step["t_after_move"] = round(time.monotonic() - step_started, 3)
 
         ann_wait = wait_seconds if announcement_wait_seconds is None else announcement_wait_seconds
 
@@ -1789,6 +1824,9 @@ class A11yAdbClient:
         except Exception:
             partial_announcements = []
         step["announcement_elapsed_sec"] = round(time.monotonic() - ann_started, 3)
+        step["announcement_count"] = len(partial_announcements)
+        step["announcement_window_sec"] = round(float(ann_wait), 3)
+        step["t_after_ann"] = round(time.monotonic() - step_started, 3)
 
         # 발화 수집 기준(step)을 단일화하기 위해 get_announcements 재호출을 제거합니다.
         merged_announcement = self._merge_announcements(partial_announcements)
@@ -1804,6 +1842,7 @@ class A11yAdbClient:
         except Exception:
             focus_node = {}
         step["get_focus_elapsed_sec"] = round(time.monotonic() - focus_started, 3)
+        step["t_after_get_focus"] = round(time.monotonic() - step_started, 3)
         safe_focus_node = self._json_safe_value(focus_node) if isinstance(focus_node, dict) else {}
         step["focus_node"] = safe_focus_node
         step["focus_text"] = safe_focus_node.get("text", "") if isinstance(safe_focus_node, dict) else ""
@@ -1848,11 +1887,24 @@ class A11yAdbClient:
         step["get_focus_fallback_found"] = bool(trace.get("fallback_found", False))
         step["get_focus_req_id"] = str(trace.get("req_id", "") or "")
         step["get_focus_total_elapsed_sec"] = round(float(trace.get("total_elapsed_sec", 0.0) or 0.0), 3)
+        step["focus_payload_source"] = str(trace.get("focus_payload_source", "none") or "none")
+        step["get_focus_response_success"] = bool(trace.get("response_success", False))
+        step["get_focus_top_level_success_false"] = bool(trace.get("accepted_with_success_false", False))
+        step["t_step_start"] = 0.0
 
         step["last_announcements"] = self._json_safe_value(saved_last_announcements)
         step["last_merged_announcement"] = saved_last_merged
+        prev_merged = str(self._prev_step_merged_announcement or "").strip()
+        curr_merged = str(merged_announcement or "").strip()
+        prev_norm = self.normalize_for_comparison(prev_merged)
+        curr_norm = self.normalize_for_comparison(curr_merged)
+        step["prev_speech_same"] = bool(prev_norm and curr_norm and prev_norm == curr_norm)
+        step["prev_speech_similar"] = bool(
+            prev_norm and curr_norm and prev_norm != curr_norm and (prev_norm in curr_norm or curr_norm in prev_norm)
+        )
+        self._prev_step_merged_announcement = curr_merged
 
-        print(
+        self._debug_print(
             f"[DEBUG][collect_focus_step] step={step_index} move={step['move_elapsed_sec']:.3f}s "
             f"ann={step['announcement_elapsed_sec']:.3f}s get_focus={step['get_focus_elapsed_sec']:.3f}s "
             f"get_focus_fallback_dump={step['get_focus_fallback_dump_elapsed_sec']:.3f}s "

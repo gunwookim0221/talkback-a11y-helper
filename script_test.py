@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import tempfile
 import time
@@ -15,7 +16,9 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.6.4"
+SCRIPT_VERSION = "1.6.5"
+LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
+LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
 OVERLAY_ENTRY_CANDIDATES = [
     {
@@ -247,8 +250,14 @@ def now_str() -> str:
     return time.strftime("%H:%M:%S")
 
 
-def log(msg: str) -> None:
-    print(f"[{now_str()}] {msg}")
+def _should_log(level: str = "NORMAL") -> bool:
+    current = LOG_LEVEL if LOG_LEVEL in LOG_LEVEL_ORDER else "NORMAL"
+    return LOG_LEVEL_ORDER.get(current, 1) >= LOG_LEVEL_ORDER.get(level, 1)
+
+
+def log(msg: str, level: str = "NORMAL") -> None:
+    if _should_log(level):
+        print(f"[{now_str()}] {msg}")
  
 
 def generate_output_path() -> str:
@@ -552,14 +561,20 @@ def maybe_capture_focus_crop(
     row: dict,
     output_base_dir: str,
 ) -> dict:
+    row["t_before_crop"] = round(time.monotonic() - float(row.get("_step_mono_start", time.monotonic())), 3) if row.get("_step_mono_start") else 0.0
     row["crop_image_path"] = ""
     row["crop_image_saved"] = False
+    row["crop_bounds"] = str(row.get("focus_bounds", "") or "").strip()
+    row["crop_source"] = "focus_bounds"
+    row["crop_focus_confidence_low"] = False
 
     if not ENABLE_IMAGE_CROP:
+        row["t_after_crop"] = row["t_before_crop"]
         return row
 
     bounds_str = str(row.get("focus_bounds", "") or "").strip()
     if not bounds_str:
+        row["t_after_crop"] = row["t_before_crop"]
         return row
 
     tab_name = sanitize_filename(str(row.get("tab_name", "unknown")))
@@ -590,6 +605,7 @@ def maybe_capture_focus_crop(
         if ok:
             row["crop_image_path"] = str(crop_path)
             row["crop_image_saved"] = True
+        row["screenshot_capture_elapsed"] = round(time.perf_counter() - capture_started, 3)
     except Exception as exc:
         log(f"[IMAGE] crop failed step={step_index}: {exc}")
     finally:
@@ -599,6 +615,17 @@ def maybe_capture_focus_crop(
             except Exception:
                 pass
         row["crop_elapsed_sec"] = round(time.perf_counter() - capture_started, 3)
+        if row.get("_step_mono_start"):
+            row["t_after_crop"] = round(time.monotonic() - float(row["_step_mono_start"]), 3)
+        else:
+            row["t_after_crop"] = row.get("t_before_crop", 0.0)
+        payload_source = str(row.get("focus_payload_source", "") or "").lower()
+        response_success = bool(row.get("get_focus_response_success", False))
+        focus_view_id = str(row.get("focus_view_id", "") or "").strip()
+        row["crop_focus_confidence_low"] = bool(
+            (payload_source == "top_level" and not response_success)
+            or (not focus_view_id and bool(row.get("crop_bounds", "")))
+        )
 
     return row
 
@@ -809,6 +836,14 @@ def classify_post_click_result(
     if looks_like_navigation or (pre_signature and post_signature and overlap_ratio < 0.30):
         return "navigation", post_click_step
 
+    if pre_signature and post_signature and 0.30 <= overlap_ratio < 0.45:
+        log(
+            f"[WARN] overlay classification low-confidence "
+            f"overlap_ratio={overlap_ratio:.2f} "
+            f"pre_label='{pre_click_step.get('visible_label', '')}' "
+            f"post_label='{post_click_step.get('visible_label', '')}'"
+        )
+
     return "overlay", post_click_step
 
 
@@ -824,6 +859,53 @@ def make_main_fingerprint(step: dict[str, Any]) -> tuple[str, str, str]:
         str(step.get("focus_view_id", "") or "").strip(),
         str(step.get("focus_bounds", "") or "").strip(),
     )
+
+
+def _bounds_changed_significantly(prev_bounds: str, curr_bounds: str) -> bool:
+    prev = parse_bounds_str(prev_bounds)
+    curr = parse_bounds_str(curr_bounds)
+    if not prev or not curr:
+        return False
+    pl, pt, pr, pb = prev
+    cl, ct, cr, cb = curr
+    center_dx = abs(((pl + pr) / 2.0) - ((cl + cr) / 2.0))
+    center_dy = abs(((pt + pb) / 2.0) - ((ct + cb) / 2.0))
+    return center_dx > 80 or center_dy > 80
+
+
+def detect_step_mismatch(
+    row: dict[str, Any],
+    previous_step: dict[str, Any] | None = None,
+) -> list[str]:
+    reasons: list[str] = []
+    visible = str(row.get("normalized_visible_label", "") or "").strip()
+    speech = str(row.get("normalized_announcement", "") or "").strip()
+    focus_source = str(row.get("focus_payload_source", "") or "").strip().lower()
+    response_success = bool(row.get("get_focus_response_success", False))
+    top_level_suspicious = bool(row.get("get_focus_top_level_success_false", False))
+    focus_view_id = str(row.get("focus_view_id", "") or "").strip()
+    focus_bounds = str(row.get("focus_bounds", "") or "").strip()
+    context_type = str(row.get("context_type", "") or "").strip().lower()
+
+    if top_level_suspicious or (focus_source == "top_level" and not response_success):
+        reasons.append("get_focus_top_level_success_false")
+
+    if visible and speech and visible != speech and visible not in speech and speech not in visible:
+        reasons.append("visible_speech_diff")
+
+    if context_type == "overlay" and not focus_view_id and focus_bounds:
+        reasons.append("overlay_bounds_only_focus")
+
+    prev = previous_step or {}
+    prev_speech = str(prev.get("normalized_announcement", "") or "").strip()
+    prev_bounds = str(prev.get("focus_bounds", "") or "").strip()
+    if prev_speech and speech and prev_speech == speech and _bounds_changed_significantly(prev_bounds, focus_bounds):
+        reasons.append("speech_stale_bounds_changed")
+
+    if bool(row.get("crop_focus_confidence_low", False)):
+        reasons.append("crop_low_confidence")
+
+    return reasons
 
 
 def is_overlay_entry_focus(current_step: dict[str, Any], entry_step: dict[str, Any]) -> bool:
@@ -842,10 +924,27 @@ def is_overlay_entry_focus(current_step: dict[str, Any], entry_step: dict[str, A
     return bool(current_bounds and entry_bounds and current_bounds == entry_bounds)
 
 
+def get_overlay_entry_match_by(current_step: dict[str, Any], entry_step: dict[str, Any]) -> str:
+    current_view_id = str(current_step.get("focus_view_id", "") or "").strip()
+    entry_view_id = str(entry_step.get("focus_view_id", "") or "").strip()
+    if current_view_id and entry_view_id and current_view_id == entry_view_id:
+        return "view_id"
+    current_label = str(current_step.get("normalized_visible_label", "") or "").strip()
+    entry_label = str(entry_step.get("normalized_visible_label", "") or "").strip()
+    if current_label and entry_label and current_label == entry_label:
+        return "label"
+    current_bounds = str(current_step.get("focus_bounds", "") or "").strip()
+    entry_bounds = str(entry_step.get("focus_bounds", "") or "").strip()
+    if current_bounds and entry_bounds and current_bounds == entry_bounds:
+        return "bounds"
+    return ""
+
+
 def collect_realign_probe(
     client: A11yAdbClient,
     dev: str,
     move: bool,
+    probe_idx: int = 0,
     direction: str = "next",
     wait_seconds: float = MAIN_STEP_WAIT_SECONDS,
 ) -> dict[str, Any]:
@@ -857,6 +956,9 @@ def collect_realign_probe(
         "focus_bounds": "",
         "visible_label": "",
         "normalized_visible_label": "",
+        "realign_probe_idx": probe_idx,
+        "realign_move_result": "",
+        "realign_focus_source": "none",
     }
 
     if move:
@@ -869,6 +971,7 @@ def collect_realign_probe(
         except Exception as exc:  # defensive
             probe["move_result"] = f"error: {exc}"
         probe["move_elapsed_sec"] = round(time.monotonic() - move_started, 3)
+    probe["realign_move_result"] = str(probe.get("move_result", "") or "")
 
     focus_started = time.monotonic()
     try:
@@ -885,13 +988,17 @@ def collect_realign_probe(
     normalize_bounds = getattr(client, "_normalize_bounds", None)
     if callable(normalize_bounds):
         probe["focus_bounds"] = str(normalize_bounds(safe_focus_node) or "").strip()
+    trace = getattr(client, "last_get_focus_trace", {})
+    if isinstance(trace, dict):
+        probe["realign_focus_source"] = str(trace.get("focus_payload_source", "none") or "none")
 
     log(
         f"[OVERLAY] realign probe move={move} "
         f"move_elapsed={probe['move_elapsed_sec']:.3f}s "
         f"focus_elapsed={probe['get_focus_elapsed_sec']:.3f}s "
         f"view_id='{probe['focus_view_id']}' "
-        f"label='{probe['visible_label']}'"
+        f"label='{probe['visible_label']}'",
+        level="DEBUG",
     )
     return probe
 
@@ -906,16 +1013,24 @@ def realign_focus_after_overlay(
         client=client,
         dev=dev,
         move=False,
+        probe_idx=0,
         wait_seconds=MAIN_STEP_WAIT_SECONDS,
     )
     current_fp = make_main_fingerprint(current_step)
     entry_idx = int(entry_step.get("step_index", 0) or 0)
 
-    if is_overlay_entry_focus(current_step, entry_step):
+    current_match_by = get_overlay_entry_match_by(current_step, entry_step)
+    if current_match_by:
+        if current_match_by == "bounds":
+            log(
+                f"[WARN] overlay realign matched by bounds only "
+                f"probe_idx=0 entry_label='{entry_step.get('visible_label', '')}'",
+            )
         return {
             "status": "already_on_entry",
             "steps_taken": 0,
             "entry_reached": True,
+            "match_by": current_match_by,
             "current_step": current_step,
         }
 
@@ -933,14 +1048,22 @@ def realign_focus_after_overlay(
             client=client,
             dev=dev,
             move=True,
+            probe_idx=realign_idx,
             direction="next",
             wait_seconds=MAIN_STEP_WAIT_SECONDS,
         )
-        if is_overlay_entry_focus(probe_step, entry_step):
+        match_by = get_overlay_entry_match_by(probe_step, entry_step)
+        if match_by:
+            if match_by == "bounds":
+                log(
+                    f"[WARN] overlay realign matched by bounds only "
+                    f"probe_idx={realign_idx} entry_label='{entry_step.get('visible_label', '')}'",
+                )
             return {
                 "status": "realign_entry_reached",
                 "steps_taken": realign_idx,
                 "entry_reached": True,
+                "match_by": match_by,
                 "current_step": probe_step,
             }
 
@@ -1012,7 +1135,9 @@ def expand_overlay(
         overlay_row["status"] = "OK"
         overlay_row["stop_reason"] = ""
         overlay_row["crop_image"] = "IMAGE"
+        overlay_row["_step_mono_start"] = time.monotonic() - float(overlay_row.get("t_step_start", 0.0) or 0.0)
         overlay_row = maybe_capture_focus_crop(client, dev, overlay_row, output_base_dir)
+        overlay_row.pop("_step_mono_start", None)
 
         overlay_rows.append(overlay_row)
         rows.append(overlay_row)
@@ -1144,7 +1269,9 @@ def stabilize_anchor(
                 f"[CONTEXT][dump] scenario='{scenario_id}' type='selected_bottom_tab' "
                 f"expected='{expected_value}'"
             )
-            log(f"[CONTEXT][dump] selected_candidates={last_context.get('selected_candidates', [])}")
+            selected_candidates = last_context.get("selected_candidates", [])
+            log(f"[CONTEXT][dump] selected_candidates_count={len(selected_candidates) if isinstance(selected_candidates, list) else 0}")
+            log(f"[CONTEXT][dump] selected_candidates={selected_candidates}", level="DEBUG")
             log(f"[CONTEXT][dump] actual_selected_text='{last_context.get('actual_selected_text', '')}'")
             log(f"[CONTEXT][dump] source='{last_context.get('dump_source', 'step_cache')}'")
             log(f"[CONTEXT][dump] lazy_dump_node_count={int(last_context.get('lazy_dump_node_count', 0) or 0)}")
@@ -1311,13 +1438,16 @@ def collect_tab_rows(
     anchor_row["stop_reason"] = ""
     anchor_row["step_elapsed_sec"] = round(anchor_elapsed, 3)
     anchor_row["crop_image"] = "IMAGE"
+    anchor_row["_step_mono_start"] = time.monotonic() - float(anchor_row.get("t_step_start", 0.0) or 0.0)
     anchor_row = maybe_capture_focus_crop(client, dev, anchor_row, output_base_dir)
+    anchor_row.pop("_step_mono_start", None)
 
     rows.append(anchor_row)
     all_rows.append(anchor_row)
     save_excel(all_rows, output_path, with_images=False)
 
     prev_fingerprint = make_main_fingerprint(anchor_row)
+    previous_step_row: dict[str, Any] | None = anchor_row
     fail_count = 0
     same_count = 0
     expanded_overlay_entries: set[str] = set()
@@ -1348,7 +1478,9 @@ def collect_tab_rows(
         row["stop_reason"] = ""
         row["step_elapsed_sec"] = round(step_elapsed, 3)
         row["crop_image"] = "IMAGE"
+        row["_step_mono_start"] = time.monotonic() - float(row.get("t_step_start", 0.0) or 0.0)
         row = maybe_capture_focus_crop(client, dev, row, output_base_dir)
+        row.pop("_step_mono_start", None)
         row["step_total_elapsed_sec"] = round(time.perf_counter() - step_start, 3)
 
         move_result = str(row.get("move_result", "") or "")
@@ -1373,6 +1505,26 @@ def collect_tab_rows(
             f"step_dump_reason='{row.get('step_dump_tree_reason', '')}' "
             f"req_id='{row.get('get_focus_req_id', '')}'"
         )
+        mismatch_reasons = detect_step_mismatch(row=row, previous_step=previous_step_row)
+        if mismatch_reasons:
+            log(
+                f"[MISMATCH] step={step_idx} tab='{tab_cfg['tab_name']}' "
+                f"reason='{','.join(mismatch_reasons)}' "
+                f"speech='{merged_announcement}' visible='{visible_label}' "
+                f"focus_bounds='{row.get('focus_bounds', '')}' source='{row.get('focus_payload_source', '')}'"
+            )
+        elif _should_log("DEBUG"):
+            log(
+                f"[DEBUG][diag] step={step_idx} speech_count={row.get('announcement_count', 0)} "
+                f"window={row.get('announcement_window_sec', 0)} "
+                f"focus_source='{row.get('focus_payload_source', '')}' "
+                f"response_success={row.get('get_focus_response_success', False)} "
+                f"t(after_move={row.get('t_after_move', 0)} "
+                f"after_ann={row.get('t_after_ann', 0)} "
+                f"after_focus={row.get('t_after_get_focus', 0)} "
+                f"before_crop={row.get('t_before_crop', 0)} after_crop={row.get('t_after_crop', 0)})",
+                level="DEBUG",
+            )
 
         stop, fail_count, same_count, reason, prev_fingerprint = should_stop(
             row=row,
@@ -1465,7 +1617,8 @@ def collect_tab_rows(
                         log(
                             f"[OVERLAY] realign status='{realign_result.get('status')}' "
                             f"entry_reached={realign_result.get('entry_reached')} "
-                            f"steps_taken={realign_result.get('steps_taken')}"
+                            f"steps_taken={realign_result.get('steps_taken')} "
+                            f"match_by='{realign_result.get('match_by', '')}'"
                         )
                         if realign_result.get("entry_reached"):
                             post_overlay_stabilized = stabilize_anchor(
@@ -1503,12 +1656,13 @@ def collect_tab_rows(
         if stop:
             log(f"[INFO] stop tab={tab_cfg['tab_name']} step={step_idx} reason={reason}")
             break
+        previous_step_row = row
 
     return rows
 
 
 def main():
-    log(f"[MAIN] script start (version={SCRIPT_VERSION})")
+    log(f"[MAIN] script start (version={SCRIPT_VERSION}, log_level={LOG_LEVEL})")
     client = A11yAdbClient(dev_serial=DEV_SERIAL)
 
     all_rows: list[dict] = []
