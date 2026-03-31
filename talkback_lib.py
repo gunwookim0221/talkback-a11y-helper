@@ -35,7 +35,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.6"
+CLIENT_ALGORITHM_VERSION = "1.7.7"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -1015,6 +1015,7 @@ class A11yAdbClient:
             "focus_payload_source": "none",
             "final_payload_source": "none",
             "response_success": False,
+            "success_field_present": False,
             "accepted_with_success_false": False,
             "success_false_top_level_dump_attempted": False,
             "success_false_top_level_dump_found": False,
@@ -1104,6 +1105,7 @@ class A11yAdbClient:
         success_field_present = "success" in result
         response_success = bool(result.get("success"))
         self.last_get_focus_trace["response_success"] = response_success
+        self.last_get_focus_trace["success_field_present"] = success_field_present
         focus_node: dict[str, Any] = {}
         payload_candidate_source = "none"
         for key in ("node", "focusNode", "focusedNode", "focus"):
@@ -1131,7 +1133,6 @@ class A11yAdbClient:
         if self._is_meaningful_focus_node(focus_node):
             accepted_with_success_false = (
                 payload_candidate_source == "top_level"
-                and success_field_present
                 and not response_success
             )
             self.last_get_focus_trace["accepted_with_success_false"] = accepted_with_success_false
