@@ -861,6 +861,28 @@ def test_detect_step_mismatch_promotes_top_level_low_confidence_only():
     assert "crop_low_confidence" in low_confidence_reasons
 
 
+def test_detect_step_mismatch_skips_top_level_without_fallback_dump_when_dump_found():
+    row = {
+        "normalized_visible_label": "map view",
+        "normalized_announcement": "map view",
+        "focus_payload_source": "top_level",
+        "get_focus_response_success": False,
+        "get_focus_top_level_success_false": True,
+        "focus_view_id": "com.example:id/map",
+        "focus_bounds": "10,10,100,100",
+        "get_focus_fallback_found": True,
+        "get_focus_success_false_top_level_dump_found": True,
+        "crop_focus_confidence_low": False,
+        "context_type": "main",
+    }
+
+    mismatch_reasons, low_confidence_reasons = script_test.detect_step_mismatch(row=row, previous_step=None)
+
+    assert mismatch_reasons == []
+    assert "get_focus_top_level_success_false" in low_confidence_reasons
+    assert "top_level_without_fallback_dump" not in low_confidence_reasons
+
+
 def test_detect_step_mismatch_accepts_speech_prefix_style_match():
     row = {
         "normalized_visible_label": "explore",
