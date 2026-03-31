@@ -15,7 +15,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.6.1"
+SCRIPT_VERSION = "1.6.2"
 
 OVERLAY_ENTRY_CANDIDATES = [
     {
@@ -367,6 +367,8 @@ def choose_best_anchor_candidate(matches: list[dict[str, Any]], tie_breaker: str
 def verify_context(
     step: dict[str, Any],
     scenario_cfg: dict[str, Any],
+    client: A11yAdbClient | None = None,
+    dev: str = "",
 ) -> dict[str, Any]:
     context_cfg = dict(scenario_cfg.get("context_verify", {}) or {})
     context_type = str(context_cfg.get("type", "none") or "none").strip().lower()
@@ -384,6 +386,18 @@ def verify_context(
 
     if context_type == "selected_bottom_tab":
         nodes = step.get("dump_tree_nodes", [])
+        dump_source = "step_cache"
+        lazy_dump_node_count = 0
+        if not isinstance(nodes, list) or not nodes:
+            if client and dev:
+                lazy_nodes = client.dump_tree(dev=dev)
+                if isinstance(lazy_nodes, list):
+                    nodes = lazy_nodes
+                    step["dump_tree_nodes"] = lazy_nodes
+                    lazy_dump_node_count = len(lazy_nodes)
+                    dump_source = "lazy_dump"
+                else:
+                    nodes = []
         selected_candidates: list[str] = []
         selected_values: list[str] = []
         fallback_values: list[str] = []
@@ -435,6 +449,8 @@ def verify_context(
             "actual_announcement": actual_announcement,
             "actual_selected_text": actual_selected_text,
             "selected_candidates": selected_candidates,
+            "dump_source": dump_source,
+            "lazy_dump_node_count": lazy_dump_node_count,
         }
 
     actual_text = str(step.get("visible_label", "") or "").strip()
@@ -1075,7 +1091,7 @@ def stabilize_anchor(
             verify_rows.append(verify_row)
             verify_candidate = _extract_candidate_from_step(verify_row)
             verify_match = match_anchor(verify_candidate, anchor_cfg)
-            context_result = verify_context(verify_row, tab_cfg)
+            context_result = verify_context(verify_row, tab_cfg, client=client, dev=dev)
             if verify_match["matched"]:
                 break
 
@@ -1102,6 +1118,8 @@ def stabilize_anchor(
             )
             log(f"[CONTEXT][dump] selected_candidates={last_context.get('selected_candidates', [])}")
             log(f"[CONTEXT][dump] actual_selected_text='{last_context.get('actual_selected_text', '')}'")
+            log(f"[CONTEXT][dump] source='{last_context.get('dump_source', 'step_cache')}'")
+            log(f"[CONTEXT][dump] lazy_dump_node_count={int(last_context.get('lazy_dump_node_count', 0) or 0)}")
             log(f"[CONTEXT][dump] ok={bool(last_context.get('ok'))}")
         log(
             f"[CONTEXT] scenario='{scenario_id}' type='{last_context.get('type', 'none')}' "
