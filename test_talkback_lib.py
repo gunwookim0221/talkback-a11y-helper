@@ -1228,7 +1228,10 @@ class SmartMoveFocusTest(unittest.TestCase):
 
         self.assertEqual(result.get("text"), "Map View")
         self.assertTrue(result.get("accessibilityFocused"))
-        dump_mock.assert_not_called()
+        dump_mock.assert_called_once()
+        self.assertFalse(client.last_get_focus_trace.get("success_field_present"))
+        self.assertTrue(client.last_get_focus_trace.get("success_false_top_level_dump_attempted"))
+        self.assertFalse(client.last_get_focus_trace.get("success_false_top_level_dump_found"))
 
     def test_get_focus_accepts_top_level_payload_when_success_false(self):
         client = FakeA11yClient()
