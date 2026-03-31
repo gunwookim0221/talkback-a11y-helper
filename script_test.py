@@ -16,7 +16,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.6.5"
+SCRIPT_VERSION = "1.6.6"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -876,8 +876,9 @@ def _bounds_changed_significantly(prev_bounds: str, curr_bounds: str) -> bool:
 def detect_step_mismatch(
     row: dict[str, Any],
     previous_step: dict[str, Any] | None = None,
-) -> list[str]:
-    reasons: list[str] = []
+) -> tuple[list[str], list[str]]:
+    mismatch_reasons: list[str] = []
+    low_confidence_reasons: list[str] = []
     visible = str(row.get("normalized_visible_label", "") or "").strip()
     speech = str(row.get("normalized_announcement", "") or "").strip()
     focus_source = str(row.get("focus_payload_source", "") or "").strip().lower()
@@ -888,24 +889,55 @@ def detect_step_mismatch(
     context_type = str(row.get("context_type", "") or "").strip().lower()
 
     if top_level_suspicious or (focus_source == "top_level" and not response_success):
-        reasons.append("get_focus_top_level_success_false")
+        low_confidence_reasons.append("get_focus_top_level_success_false")
 
-    if visible and speech and visible != speech and visible not in speech and speech not in visible:
-        reasons.append("visible_speech_diff")
+    visible_terms = [token for token in visible.split(" ") if token]
+    speech_terms = [token for token in speech.split(" ") if token]
+    speech_visible_compatible = (
+        not visible
+        or not speech
+        or visible == speech
+        or visible in speech
+        or speech in visible
+        or (
+            bool(visible_terms)
+            and bool(speech_terms)
+            and (speech_terms[0] == visible_terms[0] or visible_terms[0] in speech_terms[:2])
+        )
+    )
+    if visible and speech and not speech_visible_compatible:
+        mismatch_reasons.append("speech_visible_diverged")
 
     if context_type == "overlay" and not focus_view_id and focus_bounds:
-        reasons.append("overlay_bounds_only_focus")
+        low_confidence_reasons.append("overlay_bounds_only_focus")
 
     prev = previous_step or {}
     prev_speech = str(prev.get("normalized_announcement", "") or "").strip()
     prev_bounds = str(prev.get("focus_bounds", "") or "").strip()
     if prev_speech and speech and prev_speech == speech and _bounds_changed_significantly(prev_bounds, focus_bounds):
-        reasons.append("speech_stale_bounds_changed")
+        mismatch_reasons.append("speech_bounds_diverged")
+
+    if (
+        context_type == "main"
+        and str(row.get("overlay_recovery_status", "") or "").strip().lower().startswith("realign")
+        and not focus_view_id
+        and focus_bounds
+        and visible
+        and speech
+        and not speech_visible_compatible
+    ):
+        mismatch_reasons.append("overlay_realign_bounds_only_then_label_mismatch")
 
     if bool(row.get("crop_focus_confidence_low", False)):
-        reasons.append("crop_low_confidence")
+        low_confidence_reasons.append("crop_low_confidence")
 
-    return reasons
+    fallback_found = bool(row.get("get_focus_fallback_found", False))
+    if focus_source == "top_level" and not fallback_found:
+        low_confidence_reasons.append("top_level_without_fallback_dump")
+    if not focus_view_id and focus_bounds:
+        low_confidence_reasons.append("bounds_dependent_focus")
+
+    return mismatch_reasons, low_confidence_reasons
 
 
 def is_overlay_entry_focus(current_step: dict[str, Any], entry_step: dict[str, Any]) -> bool:
@@ -1505,11 +1537,18 @@ def collect_tab_rows(
             f"step_dump_reason='{row.get('step_dump_tree_reason', '')}' "
             f"req_id='{row.get('get_focus_req_id', '')}'"
         )
-        mismatch_reasons = detect_step_mismatch(row=row, previous_step=previous_step_row)
+        mismatch_reasons, low_confidence_reasons = detect_step_mismatch(row=row, previous_step=previous_step_row)
         if mismatch_reasons:
             log(
                 f"[MISMATCH] step={step_idx} tab='{tab_cfg['tab_name']}' "
                 f"reason='{','.join(mismatch_reasons)}' "
+                f"speech='{merged_announcement}' visible='{visible_label}' "
+                f"focus_bounds='{row.get('focus_bounds', '')}' source='{row.get('focus_payload_source', '')}'"
+            )
+        elif low_confidence_reasons:
+            log(
+                f"[LOW_CONFIDENCE] step={step_idx} tab='{tab_cfg['tab_name']}' "
+                f"reason='{','.join(low_confidence_reasons)}' "
                 f"speech='{merged_announcement}' visible='{visible_label}' "
                 f"focus_bounds='{row.get('focus_bounds', '')}' source='{row.get('focus_payload_source', '')}'"
             )

@@ -1491,7 +1491,7 @@ class SmartMoveFocusTest(unittest.TestCase):
 
 class FocusHelpersTest(unittest.TestCase):
     def test_client_algorithm_version_is_updated(self):
-        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.4")
+        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.5")
 
     def test_extract_visible_label_from_focus_prefers_text(self):
         focus_node = {"text": "  Visible Text  ", "contentDescription": "Desc"}
@@ -1593,6 +1593,20 @@ class FocusHelpersTest(unittest.TestCase):
         self.assertEqual(step["last_announcements"], ["  설정  ", "버튼"])
         self.assertEqual(step["last_merged_announcement"], "설정 버튼")
         self.assertEqual(client.merged_calls, [])
+
+    def test_collect_focus_step_visible_fallback_uses_accessibility_label_when_text_empty(self):
+        client = CollectFocusStepClient()
+        client.focus_payload = {
+            "text": " ",
+            "contentDescription": " ",
+            "accessibilityLabel": "Settings",
+            "viewIdResourceName": "com.example:id/settings",
+        }
+
+        step = client.collect_focus_step(dev="SERIAL", move=False, wait_seconds=0.2)
+
+        self.assertEqual(step["visible_label"], "Settings")
+        self.assertEqual(step["normalized_visible_label"], "settings")
 
     def test_collect_focus_step_reuses_get_focus_fallback_nodes_without_step_dump(self):
         client = CollectFocusStepClient()
