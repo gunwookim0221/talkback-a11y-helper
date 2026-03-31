@@ -47,10 +47,12 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.GET_FOCUS -p com.iotpar
 
 ## Step 5.5 – Anchor Stabilization + Scenario Context Verify (Runner, Python)
 
-- `script_test.py` 러너(`SCRIPT_VERSION=1.6.2`)는 탭 진입 직후 anchor를 바로 신뢰하지 않고 안정화 단계를 수행합니다.
+- `script_test.py` 러너(`SCRIPT_VERSION=1.6.3`)는 탭 진입 직후 anchor를 바로 신뢰하지 않고 안정화 단계를 수행합니다.
 - anchor는 `resource_id_regex`, `text_regex`, `announcement_regex`, `class_name_regex` 조합으로 판정합니다.
 - `allow_resource_id_only=true`면 resourceId 단독 매칭도 허용하며, 복수 후보는 `(top, left)` 오름차순(좌상단 우선)으로 tie-break 합니다.
 - 안정화 성공 조건은 `anchor matched == True` **그리고** `context_verify == True`입니다.
+- `selected` 값은 성공 조건이 아니라 로그/진단용 참고값으로만 사용합니다(`selected_and_verified` 또는 `verified_without_select`).
+- 기본 하단 탭은 Home/Devices/Life/Routines 공통으로 `Location QR code` anchor를 사용하고, `menu_main`만 `SmartThings` anchor를 사용합니다.
 - `context_verify`는 시나리오별 optional 설정이며 미설정(또는 `type: none`) 시 기존과 동일하게 동작합니다.
   - `selected_bottom_tab`: **현재 focus payload가 아닌 dump_tree_nodes 기반** 하단 탭 선택 문맥 검증 (`selected=true` 또는 `Selected|선택됨` + Home/Devices/...). step cache에 dump가 비어 있으면 검증 시점에 lazy dump를 1회 수행해 동일 규칙으로 판정합니다.
   - `screen`: 화면 문맥 텍스트/announcement 정규식 검증
