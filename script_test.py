@@ -15,7 +15,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.6.2"
+SCRIPT_VERSION = "1.6.3"
 
 OVERLAY_ENTRY_CANDIDATES = [
     {
@@ -142,11 +142,11 @@ TAB_CONFIGS = [
         "scenario_id": "menu_main",
         "tab_name": ".*Menu.*",
         "tab_type": "b",
-        "anchor_name": ".*Location QR code.*",
+        "anchor_name": ".*SmartThings.*",
         "anchor_type": "b",
         "anchor": {
-            "text_regex": ".*Location QR code.*",
-            "announcement_regex": ".*QR code.*",
+            "text_regex": ".*SmartThings.*",
+            "announcement_regex": ".*SmartThings.*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
@@ -1130,15 +1130,22 @@ def stabilize_anchor(
         if not bool(last_verify.get("matched")):
             log(f"[ANCHOR][{phase}] anchor mismatch scenario='{scenario_id}'")
         elif not bool(last_context.get("ok")):
+            log(f"[ANCHOR][{phase}] context mismatch scenario='{scenario_id}'")
             log(f"[CONTEXT] verification failed scenario='{scenario_id}'")
         else:
             log(f"[CONTEXT] verification passed scenario='{scenario_id}'")
 
-        if selected and bool(last_verify.get("matched")) and bool(last_context.get("ok")):
+        if bool(last_verify.get("matched")) and bool(last_context.get("ok")):
+            success_reason = "selected_and_verified" if selected else "verified_without_select"
+            log(
+                f"[ANCHOR][{phase}] success scenario='{scenario_id}' selected={selected} "
+                f"matched=True context_ok=True reason='{success_reason}'"
+            )
             return {
                 "ok": True,
                 "attempt": attempt,
                 "selected": selected,
+                "reason": success_reason,
                 "verify": last_verify,
                 "context": last_context,
                 "verify_rows": verify_rows,

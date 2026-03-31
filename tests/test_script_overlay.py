@@ -420,11 +420,12 @@ def test_choose_best_anchor_candidate_prefers_top_left_for_tie():
 
 
 class StabilizeDummyClient:
-    def __init__(self, verify_rows, dump_nodes=None):
+    def __init__(self, verify_rows, dump_nodes=None, select_result=True):
         self.verify_rows = list(verify_rows)
         self.select_calls = []
         self.dump_nodes = dump_nodes
         self.dump_tree_calls = 0
+        self.select_result = select_result
 
     def dump_tree(self, **_kwargs):
         self.dump_tree_calls += 1
@@ -443,7 +444,7 @@ class StabilizeDummyClient:
 
     def select(self, **kwargs):
         self.select_calls.append(kwargs)
-        return True
+        return self.select_result
 
     def collect_focus_step(self, **kwargs):
         if self.verify_rows:
@@ -607,6 +608,68 @@ def test_stabilize_anchor_succeeds_when_anchor_and_context_match():
     assert result["ok"] is True
     assert result["verify"]["matched"] is True
     assert result["context"]["ok"] is True
+    assert result["reason"] == "selected_and_verified"
+
+
+def test_stabilize_anchor_succeeds_without_selection_when_anchor_and_context_match():
+    client = StabilizeDummyClient(
+        [
+            {
+                "visible_label": "Location QR code",
+                "merged_announcement": "QR code",
+                "dump_tree_nodes": [
+                    {
+                        "text": "Devices",
+                        "contentDescription": "Selected, Devices, Tab 2 of 5",
+                        "viewIdResourceName": "com.samsung.android.oneconnect:id/bottom_devices",
+                        "selected": True,
+                        "boundsInScreen": "200,1800,400,1910",
+                    }
+                ],
+            }
+        ],
+        select_result=False,
+    )
+    tab_cfg = {
+        "scenario_id": "devices_main",
+        "anchor_name": ".*Location QR code.*",
+        "anchor_type": "b",
+        "anchor": {
+            "text_regex": ".*Location QR code.*",
+            "announcement_regex": ".*QR code.*",
+        },
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": ".*Devices.*",
+        },
+    }
+
+    result = script_test.stabilize_anchor(client=client, dev="SERIAL", tab_cfg=tab_cfg, phase="scenario_start")
+
+    assert result["ok"] is True
+    assert result["selected"] is False
+    assert result["verify"]["matched"] is True
+    assert result["context"]["ok"] is True
+    assert result["reason"] == "verified_without_select"
+
+
+def test_menu_main_uses_smartthings_anchor_config():
+    menu_cfg = next(cfg for cfg in script_test.TAB_CONFIGS if cfg.get("scenario_id") == "menu_main")
+
+    assert menu_cfg["anchor_name"] == ".*SmartThings.*"
+    assert menu_cfg["anchor"]["text_regex"] == ".*SmartThings.*"
+    assert menu_cfg["anchor"]["announcement_regex"] == ".*SmartThings.*"
+
+
+def test_non_menu_tabs_keep_common_qr_anchor_config():
+    target_ids = {"home_main", "devices_main", "life_main", "routines_main"}
+    target_cfgs = [cfg for cfg in script_test.TAB_CONFIGS if cfg.get("scenario_id") in target_ids]
+
+    assert len(target_cfgs) == 4
+    for cfg in target_cfgs:
+        assert cfg["anchor_name"] == ".*Location QR code.*"
+        assert cfg["anchor"]["text_regex"] == ".*Location QR code.*"
+        assert cfg["anchor"]["announcement_regex"] == ".*QR code.*"
 
 
 def test_overlay_realign_anchor_match_but_wrong_tab_fails():
