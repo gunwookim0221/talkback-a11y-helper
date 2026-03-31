@@ -16,7 +16,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.7.1"
+SCRIPT_VERSION = "1.7.2"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -916,18 +916,43 @@ def classify_post_click_result(
     if pre_signature and post_signature:
         overlap_ratio = len(pre_signature & post_signature) / float(max(len(pre_signature), 1))
 
+    entry_is_overlay_candidate, _ = is_overlay_candidate(pre_click_step, tab_cfg)
     post_label = str(post_click_step.get("visible_label", "") or "").strip().lower()
     post_announcement = str(post_click_step.get("merged_announcement", "") or "").strip().lower()
     post_view_id = str(post_click_step.get("focus_view_id", "") or "").strip().lower()
     navigation_cues = ("navigate up", "back", "up button")
     toolbar_cues = ("toolbar", "action_bar", "appbar", "title")
-    looks_like_navigation = (
+    explicit_navigation_cue = (
         any(cue in post_label for cue in navigation_cues)
         or any(cue in post_announcement for cue in navigation_cues)
-        or any(cue in post_view_id for cue in toolbar_cues)
+    )
+    toolbar_navigation_cue = any(cue in post_view_id for cue in toolbar_cues)
+    navigation_cue = bool(explicit_navigation_cue or (toolbar_navigation_cue and not entry_is_overlay_candidate))
+    overlap_navigation = bool(pre_signature and post_signature and overlap_ratio < 0.30)
+    overlap_navigation_guarded = bool(
+        overlap_navigation
+        and entry_is_overlay_candidate
+        and not explicit_navigation_cue
     )
 
-    if looks_like_navigation or (pre_signature and post_signature and overlap_ratio < 0.30):
+    if navigation_cue:
+        log(
+            f"[OVERLAY][classify] overlap_ratio={overlap_ratio:.2f} "
+            f"entry_is_overlay_candidate={entry_is_overlay_candidate} "
+            f"navigation_cue={navigation_cue} overlap_navigation_guarded={overlap_navigation_guarded} "
+            f"reason='navigation_cue' result='navigation'",
+            level="DEBUG",
+        )
+        return "navigation", post_click_step
+
+    if overlap_navigation and not overlap_navigation_guarded:
+        log(
+            f"[OVERLAY][classify] overlap_ratio={overlap_ratio:.2f} "
+            f"entry_is_overlay_candidate={entry_is_overlay_candidate} "
+            f"navigation_cue={navigation_cue} overlap_navigation_guarded={overlap_navigation_guarded} "
+            f"reason='low_signature_overlap' result='navigation'",
+            level="DEBUG",
+        )
         return "navigation", post_click_step
 
     if pre_signature and post_signature and 0.30 <= overlap_ratio < 0.45:
@@ -938,6 +963,13 @@ def classify_post_click_result(
             f"post_label='{post_click_step.get('visible_label', '')}'"
         )
 
+    log(
+        f"[OVERLAY][classify] overlap_ratio={overlap_ratio:.2f} "
+        f"entry_is_overlay_candidate={entry_is_overlay_candidate} "
+        f"navigation_cue={navigation_cue} overlap_navigation_guarded={overlap_navigation_guarded} "
+        f"reason='default_overlay' result='overlay'",
+        level="DEBUG",
+    )
     return "overlay", post_click_step
 
 

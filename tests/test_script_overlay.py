@@ -218,6 +218,64 @@ def test_classify_post_click_result_overlay_case():
     assert classification == "overlay"
 
 
+def test_classify_post_click_result_overlay_candidate_guards_overlap_navigation():
+    pre = {
+        "step_index": 4,
+        "normalized_visible_label": "add",
+        "visible_label": "Add",
+        "focus_view_id": "com.samsung.android.oneconnect:id/add_menu_button",
+        "focus_bounds": "0,10,10,20",
+        "dump_tree_nodes": [
+            {"viewIdResourceName": "id_home_only", "text": "홈", "contentDescription": ""},
+            {"viewIdResourceName": "id_add", "text": "Add", "contentDescription": ""},
+        ],
+    }
+    post = {
+        "normalized_visible_label": "add favourites",
+        "visible_label": "Add favourites",
+        "merged_announcement": "Add favourites",
+        "focus_view_id": "com.samsung.android.oneconnect:id/add_favourites_title",
+        "focus_bounds": "0,30,10,40",
+        "dump_tree_nodes": [
+            {"viewIdResourceName": "id_sheet_only", "text": "즐겨찾기 추가", "contentDescription": ""},
+            {"viewIdResourceName": "id_delete", "text": "Delete", "contentDescription": ""},
+        ],
+    }
+    classification, _ = script_test.classify_post_click_result(
+        client=_ClassifyClient(post),
+        dev="SERIAL",
+        tab_cfg={"overlay_policy": {"allow_candidates": [{"resource_id": "com.samsung.android.oneconnect:id/add_menu_button", "label": "Add"}]}},
+        pre_click_step=pre,
+    )
+    assert classification == "overlay"
+
+
+def test_classify_post_click_result_non_overlay_candidate_keeps_overlap_navigation_rule():
+    pre = {
+        "step_index": 4,
+        "normalized_visible_label": "location",
+        "visible_label": "Location",
+        "focus_view_id": "com.samsung.android.oneconnect:id/location_button",
+        "focus_bounds": "0,10,10,20",
+        "dump_tree_nodes": [{"viewIdResourceName": "id_a", "text": "A", "contentDescription": ""}],
+    }
+    post = {
+        "normalized_visible_label": "add favourites",
+        "visible_label": "Add favourites",
+        "merged_announcement": "Add favourites",
+        "focus_view_id": "com.samsung.android.oneconnect:id/add_favourites_title",
+        "focus_bounds": "0,30,10,40",
+        "dump_tree_nodes": [{"viewIdResourceName": "id_b", "text": "B", "contentDescription": ""}],
+    }
+    classification, _ = script_test.classify_post_click_result(
+        client=_ClassifyClient(post),
+        dev="SERIAL",
+        tab_cfg={"overlay_policy": {"allow_candidates": [{"resource_id": "com.samsung.android.oneconnect:id/add_menu_button", "label": "Add"}]}},
+        pre_click_step=pre,
+    )
+    assert classification == "navigation"
+
+
 def test_expand_overlay_uses_entry_label_as_primary_recovery_anchor(monkeypatch):
     monkeypatch.setattr(script_test, "save_excel", lambda *args, **kwargs: None)
     monkeypatch.setattr(script_test, "maybe_capture_focus_crop", lambda *_args, **_kwargs: _args[2])
