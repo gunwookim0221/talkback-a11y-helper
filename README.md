@@ -449,6 +449,13 @@ normalized_label = client.normalize_for_comparison(visible_label)
 - `extract_visible_label_from_focus()`와 `normalize_for_comparison()`는 device와 무관한 helper라서, 테스트/후처리 코드에서도 바로 재사용할 수 있습니다.
 - `collect_focus_step()`는 기존 공개 API와 동일하게 `client.collect_focus_step(dev=...)` 형태로 사용하면 됩니다.
 
+### Python runner 로그 레벨 (`script_test.py`)
+
+- 환경변수 `TB_LOG_LEVEL`로 runner/클라이언트 로그 상세도를 제어할 수 있습니다. (기본값: `NORMAL`)
+  - `NORMAL`: `[MAIN]`, `[STEP]`, `[OVERLAY]`, `[SAVE]`, `[WARN]`, `[MISMATCH]` 중심의 요약 로그
+  - `DEBUG`: `helper_status/get_focus/collect_focus_step`의 상세 timing·source 로그 포함
+- mismatch 의심 시(`speech-focus 불일치`, `success=False + top_level 수용`, `overlay bounds-only realign`)는 `NORMAL`에서도 `[WARN]`/`[MISMATCH]`가 출력됩니다.
+
 ## Python 클라이언트 발화 API 변경 사항
 
 ```python
