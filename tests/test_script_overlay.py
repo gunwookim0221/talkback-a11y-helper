@@ -656,9 +656,9 @@ def test_stabilize_anchor_succeeds_without_selection_when_anchor_and_context_mat
 def test_menu_main_uses_smartthings_anchor_config():
     menu_cfg = next(cfg for cfg in script_test.TAB_CONFIGS if cfg.get("scenario_id") == "menu_main")
 
-    assert menu_cfg["anchor_name"] == ".*SmartThings.*"
-    assert menu_cfg["anchor"]["text_regex"] == ".*SmartThings.*"
-    assert menu_cfg["anchor"]["announcement_regex"] == ".*SmartThings.*"
+    assert menu_cfg["anchor_name"] == "(?i).*smartthings.*"
+    assert menu_cfg["anchor"]["text_regex"] == "(?i).*smartthings.*"
+    assert menu_cfg["anchor"]["announcement_regex"] == "(?i).*smartthings.*"
 
 
 def test_non_menu_tabs_keep_common_qr_anchor_config():
@@ -667,9 +667,20 @@ def test_non_menu_tabs_keep_common_qr_anchor_config():
 
     assert len(target_cfgs) == 4
     for cfg in target_cfgs:
-        assert cfg["anchor_name"] == ".*Location QR code.*"
-        assert cfg["anchor"]["text_regex"] == ".*Location QR code.*"
-        assert cfg["anchor"]["announcement_regex"] == ".*QR code.*"
+        assert cfg["anchor_name"] == "(?i).*location.*qr.*code.*"
+        assert cfg["anchor"]["text_regex"] == "(?i).*location.*qr.*code.*"
+        assert cfg["anchor"]["announcement_regex"] == "(?i).*qr.*code.*"
+
+
+def test_life_and_routines_block_add_on_overlay_policy():
+    for scenario_id in ("life_main", "routines_main"):
+        cfg = next(cfg for cfg in script_test.TAB_CONFIGS if cfg.get("scenario_id") == scenario_id)
+        overlay_policy = cfg.get("overlay_policy", {})
+        allow_ids = {candidate.get("resource_id") for candidate in overlay_policy.get("allow_candidates", [])}
+        block_ids = {candidate.get("resource_id") for candidate in overlay_policy.get("block_candidates", [])}
+
+        assert allow_ids == {"com.samsung.android.oneconnect:id/more_menu_button"}
+        assert block_ids == {"com.samsung.android.oneconnect:id/add_menu_button"}
 
 
 def test_overlay_realign_anchor_match_but_wrong_tab_fails():

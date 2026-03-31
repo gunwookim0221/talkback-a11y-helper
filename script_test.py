@@ -15,7 +15,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.6.3"
+SCRIPT_VERSION = "1.6.4"
 
 OVERLAY_ENTRY_CANDIDATES = [
     {
@@ -42,18 +42,18 @@ OVERLAY_REALIGN_MAX_STEPS = 8
 TAB_CONFIGS = [
     {
         "scenario_id": "home_main",
-        "tab_name": ".*Home.*",
+        "tab_name": "(?i).*home.*",
         "tab_type": "b",
-        "anchor_name": ".*Location QR code.*",
+        "anchor_name": "(?i).*location.*qr.*code.*",
         "anchor_type": "b",
         "anchor": {
-            "text_regex": ".*Location QR code.*",
-            "announcement_regex": ".*QR code.*",
+            "text_regex": "(?i).*location.*qr.*code.*",
+            "announcement_regex": "(?i).*qr.*code.*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
             "type": "selected_bottom_tab",
-            "announcement_regex": ".*(Selected|선택됨).*Home.*",
+            "announcement_regex": "(?i).*(selected|선택됨).*home.*",
         },
         "max_steps": 5,
         "overlay_policy": {
@@ -72,18 +72,18 @@ TAB_CONFIGS = [
     },
     {
         "scenario_id": "devices_main",
-        "tab_name": ".*Devices.*",
+        "tab_name": "(?i).*devices.*",
         "tab_type": "b",
-        "anchor_name": ".*Location QR code.*",
+        "anchor_name": "(?i).*location.*qr.*code.*",
         "anchor_type": "b",
         "anchor": {
-            "text_regex": ".*Location QR code.*",
-            "announcement_regex": ".*QR code.*",
+            "text_regex": "(?i).*location.*qr.*code.*",
+            "announcement_regex": "(?i).*qr.*code.*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
             "type": "selected_bottom_tab",
-            "announcement_regex": ".*(Selected|선택됨).*Devices.*",
+            "announcement_regex": "(?i).*(selected|선택됨).*devices.*",
         },
         "enabled": True,
         "max_steps": 5,
@@ -104,99 +104,127 @@ TAB_CONFIGS = [
     },
     {
         "scenario_id": "life_main",
-        "tab_name": ".*Life.*",
+        "tab_name": "(?i).*life.*",
         "tab_type": "b",
-        "anchor_name": ".*Location QR code.*",
+        "anchor_name": "(?i).*location.*qr.*code.*",
         "anchor_type": "b",
         "anchor": {
-            "text_regex": ".*Location QR code.*",
-            "announcement_regex": ".*QR code.*",
+            "text_regex": "(?i).*location.*qr.*code.*",
+            "announcement_regex": "(?i).*qr.*code.*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
             "type": "selected_bottom_tab",
-            "announcement_regex": ".*(Selected|선택됨).*Life.*",
+            "announcement_regex": "(?i).*(selected|선택됨).*life.*",
         },
         "enabled": True,
         "max_steps": 5,
+        "overlay_policy": {
+            "allow_candidates": [
+                {
+                    "resource_id": "com.samsung.android.oneconnect:id/more_menu_button",
+                    "label": "More options",
+                }
+            ],
+            "block_candidates": [
+                {
+                    "resource_id": "com.samsung.android.oneconnect:id/add_menu_button",
+                    "label": "Add",
+                }
+            ],
+        },
     },
     {
         "scenario_id": "routines_main",
-        "tab_name": ".*Routines.*",
+        "tab_name": "(?i).*routines.*",
         "tab_type": "b",
-        "anchor_name": ".*Location QR code.*",
+        "anchor_name": "(?i).*location.*qr.*code.*",
         "anchor_type": "b",
         "anchor": {
-            "text_regex": ".*Location QR code.*",
-            "announcement_regex": ".*QR code.*",
+            "text_regex": "(?i).*location.*qr.*code.*",
+            "announcement_regex": "(?i).*qr.*code.*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
             "type": "selected_bottom_tab",
-            "announcement_regex": ".*(Selected|선택됨).*Routines.*",
+            "announcement_regex": "(?i).*(selected|선택됨).*routines.*",
         },
         "enabled": True,
         "max_steps": 5,
+        "overlay_policy": {
+            "allow_candidates": [
+                {
+                    "resource_id": "com.samsung.android.oneconnect:id/more_menu_button",
+                    "label": "More options",
+                }
+            ],
+            "block_candidates": [
+                {
+                    "resource_id": "com.samsung.android.oneconnect:id/add_menu_button",
+                    "label": "Add",
+                }
+            ],
+        },
     },
     {
         "scenario_id": "menu_main",
-        "tab_name": ".*Menu.*",
+        "tab_name": "(?i).*menu.*",
         "tab_type": "b",
-        "anchor_name": ".*SmartThings.*",
+        "anchor_name": "(?i).*smartthings.*",
         "anchor_type": "b",
         "anchor": {
-            "text_regex": ".*SmartThings.*",
-            "announcement_regex": ".*SmartThings.*",
+            "text_regex": "(?i).*smartthings.*",
+            "announcement_regex": "(?i).*smartthings.*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
             "type": "selected_bottom_tab",
-            "announcement_regex": ".*(Selected|선택됨).*Menu.*",
+            "announcement_regex": "(?i).*(selected|선택됨).*menu.*",
         },
         "enabled": True,
         "max_steps": 5,
     },
     {
         "scenario_id": "settings_entry_example",
-        "tab_name": ".*Menu.*",
+        "tab_name": "(?i).*menu.*",
         "tab_type": "b",
-        "anchor_name": ".*Settings.*",
+        "anchor_name": "(?i).*settings.*",
         "anchor_type": "a",
         "anchor": {
             "resource_id_regex": "com.samsung.android.oneconnect:id/add_menu_button",
-            "text_regex": ".*qr*",
+            "text_regex": "(?i).*qr.*",
             "tie_breaker": "top_left",
             "allow_resource_id_only": True,
         },
         "context_verify": {
             "type": "screen",
-            "text_regex": ".*Settings.*",
-            "announcement_regex": ".*Settings.*",
+            "text_regex": "(?i).*settings.*",
+            "announcement_regex": "(?i).*settings.*",
         },
         "enabled": False,
         "max_steps": 20,
     },
     {
         "scenario_id": "life_plugin_example",
-        "tab_name": ".*Life.*",
+        "tab_name": "(?i).*life.*",
         "tab_type": "b",
-        "anchor_name": ".*Location QR code.*",
+        "anchor_name": "(?i).*location.*qr.*code.*",
         "anchor_type": "b",
         "anchor": {
-            "text_regex": ".*Location QR code.*",
-            "announcement_regex": ".*QR code.*",
+            "text_regex": "(?i).*location.*qr.*code.*",
+            "announcement_regex": "(?i).*qr.*code.*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
             "type": "plugin",
-            "text_regex": ".*SmartThings Energy.*",
+            "text_regex": "(?i).*smartthings.*energy.*",
         },
         "enabled": False,
         "max_steps": 5,
     },
     {
         "scenario_id": "resource_id_only_example",
-        "tab_name": ".*Home.*",
+        "tab_name": "(?i).*home.*",
         "tab_type": "b",
         "anchor_name": "com.samsung.android.oneconnect:id/add_menu_button",
         "anchor_type": "r",
