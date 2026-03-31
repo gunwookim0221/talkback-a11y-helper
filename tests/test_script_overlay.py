@@ -420,11 +420,16 @@ def test_choose_best_anchor_candidate_prefers_top_left_for_tie():
 
 
 class StabilizeDummyClient:
-    def __init__(self, verify_rows):
+    def __init__(self, verify_rows, dump_nodes=None):
         self.verify_rows = list(verify_rows)
         self.select_calls = []
+        self.dump_nodes = dump_nodes
+        self.dump_tree_calls = 0
 
     def dump_tree(self, **_kwargs):
+        self.dump_tree_calls += 1
+        if isinstance(self.dump_nodes, list):
+            return self.dump_nodes
         return [
             {
                 "text": "Location QR code",
@@ -486,6 +491,31 @@ def test_verify_context_selected_bottom_tab_distinguishes_home_and_devices():
     assert script_test.verify_context(home_step, home_cfg)["ok"] is True
     assert script_test.verify_context(home_step, devices_cfg)["ok"] is False
     assert script_test.verify_context(devices_step, devices_cfg)["ok"] is True
+
+
+def test_verify_context_selected_bottom_tab_uses_lazy_dump_when_step_cache_empty():
+    step = {"visible_label": "Location QR code", "merged_announcement": "QR code", "dump_tree_nodes": []}
+    devices_cfg = {"context_verify": {"type": "selected_bottom_tab", "announcement_regex": ".*Devices.*"}}
+    client = StabilizeDummyClient(
+        verify_rows=[],
+        dump_nodes=[
+            {
+                "text": "Devices",
+                "contentDescription": "Selected, Devices, Tab 2 of 5",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/bottom_devices",
+                "selected": True,
+                "boundsInScreen": "200,1800,400,1910",
+            }
+        ],
+    )
+
+    result = script_test.verify_context(step, devices_cfg, client=client, dev="SERIAL")
+
+    assert result["ok"] is True
+    assert result["dump_source"] == "lazy_dump"
+    assert result["lazy_dump_node_count"] == 1
+    assert client.dump_tree_calls == 1
+    assert len(step["dump_tree_nodes"]) == 1
 
 
 def test_stabilize_anchor_fails_when_anchor_matches_but_context_fails():
