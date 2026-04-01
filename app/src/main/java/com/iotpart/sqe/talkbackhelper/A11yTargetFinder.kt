@@ -6,7 +6,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 
 object A11yTargetFinder {
     private const val TAG = "A11Y_HELPER"
-    const val VERSION: String = "1.0.3"
+    const val VERSION: String = "1.0.4"
 
     data class TargetQuery(
         val targetName: String,
@@ -232,6 +232,11 @@ object A11yTargetFinder {
             if (resolvedNode.isClickable != expected) return null
         }
         return resolvedNode
+    }
+
+    fun calculateBoundsCenter(bounds: Rect?): Pair<Int, Int>? {
+        if (bounds == null || bounds.isEmpty) return null
+        return bounds.centerX() to bounds.centerY()
     }
 
     private fun isViewIdMatched(nodeViewId: String?, target: String): Boolean {
