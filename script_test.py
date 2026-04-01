@@ -28,7 +28,7 @@ from tb_runner.constants import (
     OVERLAY_STEP_WAIT_SECONDS,
     SCRIPT_VERSION,
 )
-from tb_runner.logging_utils import log
+from tb_runner.logging_utils import _should_log, log
 from tb_runner.scenario_config import TAB_CONFIGS
 from tb_runner.utils import (
     _safe_regex_search,
