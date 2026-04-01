@@ -1120,13 +1120,15 @@ def test_overlay_realign_anchor_match_but_wrong_tab_fails():
     assert result["context"]["ok"] is False
 
 
-def test_detect_step_mismatch_promotes_top_level_low_confidence_only():
+def test_detect_step_mismatch_strong_top_level_policy_skip_keeps_single_reason():
     row = {
         "normalized_visible_label": "map view",
         "normalized_announcement": "map view",
         "focus_payload_source": "top_level",
         "get_focus_response_success": False,
         "get_focus_top_level_success_false": True,
+        "get_focus_success_false_top_level_dump_skipped": True,
+        "get_focus_dump_skip_reason": "strong_top_level_payload",
         "focus_view_id": "",
         "focus_bounds": "10,10,100,100",
         "get_focus_fallback_found": False,
@@ -1138,7 +1140,8 @@ def test_detect_step_mismatch_promotes_top_level_low_confidence_only():
 
     assert mismatch_reasons == []
     assert "get_focus_top_level_success_false" in low_confidence_reasons
-    assert "crop_low_confidence" in low_confidence_reasons
+    assert "top_level_without_fallback_dump" not in low_confidence_reasons
+    assert "crop_low_confidence" not in low_confidence_reasons
 
 
 def test_detect_step_mismatch_skips_top_level_without_fallback_dump_when_dump_found():
@@ -1161,6 +1164,31 @@ def test_detect_step_mismatch_skips_top_level_without_fallback_dump_when_dump_fo
     assert mismatch_reasons == []
     assert "get_focus_top_level_success_false" in low_confidence_reasons
     assert "top_level_without_fallback_dump" not in low_confidence_reasons
+
+
+def test_detect_step_mismatch_keeps_legacy_low_confidence_for_weak_top_level_without_fallback():
+    row = {
+        "normalized_visible_label": "map view",
+        "normalized_announcement": "map view",
+        "focus_payload_source": "top_level",
+        "get_focus_response_success": False,
+        "get_focus_top_level_success_false": True,
+        "get_focus_success_false_top_level_dump_skipped": False,
+        "get_focus_dump_skip_reason": "",
+        "focus_view_id": "",
+        "focus_bounds": "10,10,100,100",
+        "get_focus_fallback_found": False,
+        "get_focus_success_false_top_level_dump_found": False,
+        "crop_focus_confidence_low": True,
+        "context_type": "main",
+    }
+
+    mismatch_reasons, low_confidence_reasons = script_test.detect_step_mismatch(row=row, previous_step=None)
+
+    assert mismatch_reasons == []
+    assert "get_focus_top_level_success_false" in low_confidence_reasons
+    assert "top_level_without_fallback_dump" in low_confidence_reasons
+    assert "crop_low_confidence" in low_confidence_reasons
 
 
 def test_detect_step_mismatch_accepts_speech_prefix_style_match():

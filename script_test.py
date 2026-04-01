@@ -17,7 +17,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.7.5"
+SCRIPT_VERSION = "1.7.6"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -1104,6 +1104,9 @@ def detect_step_mismatch(
     focus_source = str(row.get("focus_payload_source", "") or "").strip().lower()
     response_success = bool(row.get("get_focus_response_success", False))
     top_level_suspicious = bool(row.get("get_focus_top_level_success_false", False))
+    dump_skipped = bool(row.get("get_focus_success_false_top_level_dump_skipped", False))
+    dump_skip_reason = str(row.get("get_focus_dump_skip_reason", "") or "").strip().lower()
+    strong_top_level_policy_skip = dump_skipped and dump_skip_reason == "strong_top_level_payload"
     focus_view_id = str(row.get("focus_view_id", "") or "").strip()
     focus_bounds = str(row.get("focus_bounds", "") or "").strip()
     context_type = str(row.get("context_type", "") or "").strip().lower()
@@ -1148,7 +1151,7 @@ def detect_step_mismatch(
     ):
         mismatch_reasons.append("overlay_realign_bounds_only_then_label_mismatch")
 
-    if bool(row.get("crop_focus_confidence_low", False)):
+    if bool(row.get("crop_focus_confidence_low", False)) and not strong_top_level_policy_skip:
         low_confidence_reasons.append("crop_low_confidence")
 
     fallback_found = bool(row.get("get_focus_fallback_found", False))
@@ -1157,6 +1160,7 @@ def detect_step_mismatch(
         focus_source == "top_level"
         and not fallback_found
         and not success_false_top_level_dump_found
+        and not strong_top_level_policy_skip
     ):
         low_confidence_reasons.append("top_level_without_fallback_dump")
     if not focus_view_id and focus_bounds:
