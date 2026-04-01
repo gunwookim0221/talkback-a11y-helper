@@ -66,18 +66,28 @@ def _run_pre_navigation_steps(client: A11yAdbClient, dev: str, tab_cfg: dict[str
 
         log(f"[SCENARIO][pre_nav] step={index} action={action} target='{target}'")
         step_ok = False
+        actual_reason = "unknown"
         for attempt in range(1, retry_count + 1):
             if action == "select":
                 step_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=8))
             else:
                 step_ok = bool(client.touch(dev=dev, name=target, type_=type_, wait_=8))
+
+            result = getattr(client, "last_target_action_result", {})
+            if isinstance(result, dict):
+                actual_reason = str(result.get("reason", "unknown") or "unknown")
+            else:
+                actual_reason = "unknown"
+
             if step_ok:
+                log(f"[SCENARIO][pre_nav] success step={index} reason='{actual_reason}'")
                 break
             if attempt < retry_count:
-                log(f"[SCENARIO][pre_nav] retry step={index} attempt={attempt}/{retry_count}")
+                log(f"[SCENARIO][pre_nav] retry step={index} attempt={attempt}/{retry_count} reason='{actual_reason}'")
 
         if not step_ok:
             log(f"[SCENARIO][pre_nav] failed reason='action_failed' step={index}")
+            log(f"[SCENARIO][pre_nav] failed reason='action_failed' detail='{actual_reason}' step={index}")
             return False
 
         client.collect_focus_step(
