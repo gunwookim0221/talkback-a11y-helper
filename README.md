@@ -288,7 +288,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.i
 
 ## `talkback_lib.py` 레거시 호환 API
 
-- Python 클라이언트 알고리즘 버전: `CLIENT_ALGORITHM_VERSION = 1.7.7`
+- Python 클라이언트 알고리즘 버전: `CLIENT_ALGORITHM_VERSION = 1.7.8`
 - 발화 조회 API
   - `get_announcements(...)` → 수집된 발화를 `strip`/빈 문자열 제거 후 공백으로 병합한 `str` 반환
   - `get_partial_announcements(...)` → raw 발화 조각 `list[str]` 반환
@@ -335,7 +335,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.i
   - `move=True`이면 `direction="next"`일 때 `move_focus_smart()`를 우선 사용하고, 그 외 방향은 `move_focus()`를 사용합니다. `move=False`이면 현재 포커스 기준으로 수집만 수행합니다.
   - 내부적으로 `get_partial_announcements()`를 **1회만 호출**해 발화 조각을 모은 뒤 `_merge_announcements()`로 즉시 병합해 step 기준 데이터를 고정합니다.
   - 이후 `get_focus()`를 호출하고, `get_focus()`는 `GET_FOCUS` 결과가 비어 있거나 실질적으로 빈 노드일 때 `dump_tree()` fallback(우선순위: `accessibilityFocused` → `focused`)으로 포커스를 복구합니다.
-  - 추가로 `success=False`이면서 top-level payload를 수용하는 경우에도 신뢰도 보강을 위해 `dump_tree()` fallback을 1회 제한적으로 시도하고, focused 노드를 찾으면 해당 노드로 대체합니다(미발견 시 기존 top-level 유지).
+  - 추가로 `success=False`(또는 success 키 누락) + top-level payload 수용 시에는 보수적 정책을 적용합니다. `viewIdResourceName` + 정규화 bounds + (`text` 또는 `contentDescription`)가 모두 갖춰진 **강한 payload**이면 dump를 생략하고 top-level을 유지하며, 조건이 약하면 기존처럼 `dump_tree()` fallback을 1회 시도해 focused 노드로 대체합니다(미발견 시 기존 top-level 유지).
   - step 레벨의 `dump_tree()`는 항상 호출되지 않습니다. `get_focus()` fallback 노드를 재사용할 수 있거나 focus payload 자체가 충분하면 step-level dump를 생략하고, 필요한 경우에만 추가 dump를 수행합니다.
   - `dump_tree()`가 `last_*` 상태를 초기화하더라도 step에는 dump 전 백업해둔 `last_announcements/last_merged_announcement`를 기록합니다.
   - `merged_announcement`/`normalized_announcement`는 동일 병합 문자열 기준으로 계산하며, `last_*` 기반 fallback 없이 일관된 값을 반환합니다.

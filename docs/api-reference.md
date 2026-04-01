@@ -355,6 +355,7 @@ client.move_focus(dev_serial, "prev")
 ### 설명
 `ACTION_GET_FOCUS` 브로드캐스트를 전송하고 `FOCUS_RESULT` 로그를 읽어 현재 TalkBack 포커스 노드 정보를 반환합니다.
 `FOCUS_RESULT`가 비어 있거나 의미 있는 필드(`text`, `contentDescription`, `viewIdResourceName`, `boundsInScreen`)가 없는 경우에는 `dump_tree()` fallback을 수행해 현재 포커스 노드를 복구합니다. fallback 탐색 우선순위는 `accessibilityFocused == True` 후 `focused == True`이며, children를 DFS(pre-order)로 재귀 탐색합니다.
+`success=False`(또는 `success` 키 누락) + top-level payload가 수용된 경우에는 `viewIdResourceName` + 정규화 bounds + (`text` 또는 `contentDescription`)가 모두 존재하면 강한 payload로 판단해 dump fallback을 생략하고 top-level을 유지합니다. 조건이 약한 경우에는 기존처럼 dump fallback을 수행합니다.
 
 ### Returns
 - `dict[str, Any]`: 포커스 노드 정보. 실패 시 빈 dict.
