@@ -174,6 +174,12 @@ class A11yHelperService : AccessibilityService() {
             put("targetName", query.targetName)
             put("targetType", query.targetType)
             put("targetIndex", query.targetIndex)
+            if (!outcome.attemptedResourceId.isNullOrBlank()) {
+                put("attemptedResourceId", outcome.attemptedResourceId)
+            }
+            if (!outcome.attemptedClassName.isNullOrBlank()) {
+                put("attemptedClassName", outcome.attemptedClassName)
+            }
             if (outcome.target != null) {
                 put("target", FocusSnapshot.fromNode(outcome.target).toJson())
             }

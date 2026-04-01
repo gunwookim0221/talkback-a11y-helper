@@ -3,7 +3,7 @@ package com.iotpart.sqe.talkbackhelper
 import android.view.accessibility.AccessibilityNodeInfo
 
 object A11yTargetFinder {
-    const val VERSION: String = "1.0.1"
+    const val VERSION: String = "1.0.2"
 
     data class TargetQuery(
         val targetName: String,
@@ -28,27 +28,16 @@ object A11yTargetFinder {
         val stack = ArrayDeque<AccessibilityNodeInfo>()
         stack.add(root)
         var matchCount = 0
+        val matchedTargets = mutableListOf<AccessibilityNodeInfo>()
 
         while (stack.isNotEmpty()) {
             val node = stack.removeLast()
             val targetNode = resolveMatchedTarget(node, query)
             if (targetNode != null) {
-                if (matchCount != query.targetIndex) {
-                    matchCount += 1
-                } else {
-                    val success = targetNode.performAction(action)
-                    val actionName = when (action) {
-                        AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS -> "ACTION_ACCESSIBILITY_FOCUS"
-                        AccessibilityNodeInfo.ACTION_CLICK -> "ACTION_CLICK"
-                        AccessibilityNodeInfo.ACTION_LONG_CLICK -> "ACTION_LONG_CLICK"
-                        else -> "ACTION_$action"
-                    }
-                    return TargetActionOutcome(
-                        success = success,
-                        reason = if (success) "$actionName success" else "$actionName failed",
-                        target = targetNode
-                    )
+                if (matchCount >= query.targetIndex) {
+                    matchedTargets += targetNode
                 }
+                matchCount += 1
             }
 
             for (i in node.childCount - 1 downTo 0) {
@@ -56,7 +45,41 @@ object A11yTargetFinder {
             }
         }
 
-        return TargetActionOutcome(false, "Target node not found")
+        if (matchedTargets.isEmpty()) {
+            return TargetActionOutcome(false, "Target node not found")
+        }
+
+        val actionName = when (action) {
+            AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS -> "ACTION_ACCESSIBILITY_FOCUS"
+            AccessibilityNodeInfo.ACTION_CLICK -> "ACTION_CLICK"
+            AccessibilityNodeInfo.ACTION_LONG_CLICK -> "ACTION_LONG_CLICK"
+            else -> "ACTION_$action"
+        }
+        var lastAttemptedNode: AccessibilityNodeInfo? = null
+        for (targetNode in matchedTargets) {
+            lastAttemptedNode = targetNode
+            val success = targetNode.performAction(action)
+            if (success) {
+                return TargetActionOutcome(
+                    success = true,
+                    reason = "$actionName success",
+                    target = targetNode,
+                    attemptedResourceId = targetNode.viewIdResourceName,
+                    attemptedClassName = targetNode.className?.toString()
+                )
+            }
+        }
+
+        val failedNode = lastAttemptedNode
+        val failedResourceId = failedNode?.viewIdResourceName
+        val failedClassName = failedNode?.className?.toString()
+        return TargetActionOutcome(
+            success = false,
+            reason = "$actionName failed (resourceId=${failedResourceId ?: "null"}, class=${failedClassName ?: "null"})",
+            target = failedNode,
+            attemptedResourceId = failedResourceId,
+            attemptedClassName = failedClassName
+        )
     }
 
     fun findTarget(root: AccessibilityNodeInfo?, query: TargetQuery): TargetActionOutcome {
