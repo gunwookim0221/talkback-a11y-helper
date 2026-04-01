@@ -22,10 +22,12 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.0.1"
-        private const val GESTURE_TAP_DURATION_MS = 50L
-        private const val GESTURE_DISPATCH_TIMEOUT_MS = 1500L
-        private const val GESTURE_STABILIZATION_DELAY_MS = 80L
+        private const val VERSION = "1.0.2"
+        private const val GESTURE_TAP_DURATION_MS = 90L
+        // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
+        // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
+        private const val GESTURE_DISPATCH_TIMEOUT_MS = 2800L
+        private const val GESTURE_STABILIZATION_DELAY_MS = 100L
     }
 
     override fun onServiceConnected() {
@@ -322,13 +324,13 @@ class A11yHelperService : AccessibilityService() {
             .addStroke(GestureDescription.StrokeDescription(path, GESTURE_STABILIZATION_DELAY_MS, GESTURE_TAP_DURATION_MS))
             .build()
         val latch = CountDownLatch(1)
-        var callbackReason = "Gesture dispatch timeout"
+        @Volatile var callbackReason = "Gesture dispatch timeout"
         val dispatched = dispatchGesture(
             gesture,
             object : GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription?) {
                     Log.d(TAG, "[DEBUG][TARGET_ACTION][gesture_callback] reqId=$reqId state=completed")
-                    callbackReason = "Center tap success"
+                    callbackReason = "Gesture completed"
                     latch.countDown()
                 }
 
@@ -341,20 +343,26 @@ class A11yHelperService : AccessibilityService() {
             Handler(Looper.getMainLooper())
         )
         Log.d(TAG, "[DEBUG][TARGET_ACTION][gesture_dispatch_result] reqId=$reqId dispatched=$dispatched")
-        if (!dispatched) {
-            return TargetActionOutcome(success = false, reason = "Gesture dispatch returned false")
+        val outcome = if (!dispatched) {
+            TargetActionOutcome(success = false, reason = "Gesture dispatch returned false")
+        } else {
+            val callbackReceived = latch.await(GESTURE_DISPATCH_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            if (!callbackReceived) {
+                Log.d(TAG, "[DEBUG][TARGET_ACTION][gesture_timeout] reqId=$reqId timeoutMs=$GESTURE_DISPATCH_TIMEOUT_MS")
+                TargetActionOutcome(success = false, reason = "Gesture dispatch timeout")
+            } else {
+                TargetActionOutcome(
+                    success = callbackReason == "Gesture completed",
+                    reason = callbackReason
+                )
+            }
         }
 
-        val callbackReceived = latch.await(GESTURE_DISPATCH_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-        if (!callbackReceived) {
-            Log.d(TAG, "[DEBUG][TARGET_ACTION][gesture_timeout] reqId=$reqId timeoutMs=$GESTURE_DISPATCH_TIMEOUT_MS")
-            return TargetActionOutcome(success = false, reason = "Gesture dispatch timeout")
-        }
-
-        return TargetActionOutcome(
-            success = callbackReason == "Center tap success",
-            reason = callbackReason
+        Log.d(
+            TAG,
+            "[DEBUG][TARGET_ACTION][gesture_final] reqId=$reqId success=${outcome.success} reason='${outcome.reason}'"
         )
+        return outcome
     }
 
 
