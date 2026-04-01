@@ -68,3 +68,11 @@ def sanitize_filename(value: str) -> str:
         else:
             keep.append("_")
     return "".join(keep).strip("_") or "item"
+
+
+def make_main_fingerprint(step: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(step.get("normalized_visible_label", "") or "").strip(),
+        str(step.get("focus_view_id", "") or "").strip(),
+        str(step.get("focus_bounds", "") or "").strip(),
+    )
