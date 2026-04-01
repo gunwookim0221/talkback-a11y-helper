@@ -17,6 +17,7 @@ def test_load_runtime_bundle_without_file_keeps_defaults(tmp_path):
     assert bundle["tab_configs"][0]["max_steps"] == 5
     assert bundle["tab_configs"][0]["enabled"] is True
     assert bundle["tab_configs"][0]["tab_select_retry_count"] == 2
+    assert bundle["tab_configs"][0]["pre_navigation_retry_count"] == 2
 
 
 def test_load_runtime_bundle_applies_partial_overrides(tmp_path):
@@ -51,12 +52,14 @@ def test_load_runtime_bundle_ignores_invalid_values(tmp_path):
                 "defaults": {
                     "tab_select_retry_count": -1,
                     "main_step_wait_seconds": "x",
+                    "pre_navigation_retry_count": 0,
                 },
                 "scenarios": {
                     "home_main": {
                         "enabled": "no",
                         "max_steps": 0,
                         "anchor_retry_count": 0,
+                        "pre_navigation_wait_seconds": -1,
                     }
                 },
             }
@@ -73,3 +76,5 @@ def test_load_runtime_bundle_ignores_invalid_values(tmp_path):
     assert home_cfg["tab_select_retry_count"] == 2
     assert home_cfg["anchor_retry_count"] == 2
     assert home_cfg["main_step_wait_seconds"] == 1.2
+    assert home_cfg["pre_navigation_retry_count"] == 2
+    assert home_cfg["pre_navigation_wait_seconds"] == 1.2

@@ -41,15 +41,59 @@ def _get_wait_seconds(tab_cfg: dict[str, Any], key: str, fallback: float) -> flo
     return fallback
 
 
-def _get_positive_int(value: Any, fallback: int) -> int:
-    if isinstance(value, bool):
-        return fallback
-    if isinstance(value, int) and value > 0:
-        return value
-    return fallback
+def _run_pre_navigation_steps(client: A11yAdbClient, dev: str, tab_cfg: dict[str, Any]) -> bool:
+    pre_navigation = tab_cfg.get("pre_navigation", [])
+    if not isinstance(pre_navigation, list) or not pre_navigation:
+        return True
+
+    retry_count = _get_retry_count(tab_cfg, "pre_navigation_retry_count", 2)
+    wait_seconds = _get_wait_seconds(tab_cfg, "pre_navigation_wait_seconds", MAIN_STEP_WAIT_SECONDS)
+
+    for index, step in enumerate(pre_navigation, start=1):
+        if not isinstance(step, dict):
+            log(f"[SCENARIO][pre_nav] failed reason='invalid_step' step={index}")
+            return False
+
+        action = str(step.get("action", "") or "").strip().lower()
+        target = str(step.get("target", "") or "").strip()
+        type_ = str(step.get("type", "a") or "a").strip()
+        if not action or not target:
+            log(f"[SCENARIO][pre_nav] failed reason='invalid_step_config' step={index}")
+            return False
+        if action not in {"select", "touch"}:
+            log(f"[SCENARIO][pre_nav] failed reason='unsupported_action' step={index} action='{action}'")
+            return False
+
+        log(f"[SCENARIO][pre_nav] step={index} action={action} target='{target}'")
+        step_ok = False
+        for attempt in range(1, retry_count + 1):
+            if action == "select":
+                step_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=8))
+            else:
+                step_ok = bool(client.touch(dev=dev, name=target, type_=type_, wait_=8))
+            if step_ok:
+                break
+            if attempt < retry_count:
+                log(f"[SCENARIO][pre_nav] retry step={index} attempt={attempt}/{retry_count}")
+
+        if not step_ok:
+            log(f"[SCENARIO][pre_nav] failed reason='action_failed' step={index}")
+            return False
+
+        client.collect_focus_step(
+            dev=dev,
+            step_index=-(700 + index),
+            move=False,
+            wait_seconds=wait_seconds,
+            announcement_wait_seconds=wait_seconds,
+        )
+        time.sleep(wait_seconds)
+
+    log("[SCENARIO][pre_nav] success")
+    return True
 
 
-def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
+def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     tab_retry_count = _get_retry_count(tab_cfg, "tab_select_retry_count", 2)
     anchor_retry_count = _get_retry_count(tab_cfg, "anchor_retry_count", 2)
     main_step_wait_seconds = _get_wait_seconds(tab_cfg, "main_step_wait_seconds", MAIN_STEP_WAIT_SECONDS)
@@ -68,6 +112,10 @@ def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     client.reset_focus_history(dev)
     time.sleep(0.5)
 
+    pre_nav_ok = _run_pre_navigation_steps(client=client, dev=dev, tab_cfg=tab_cfg)
+    if not pre_nav_ok:
+        return False
+
     stabilize_result = stabilize_anchor(
         client=client,
         dev=dev,
@@ -81,6 +129,18 @@ def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         return False
     time.sleep(main_step_wait_seconds)
     return True
+
+
+def _get_positive_int(value: Any, fallback: int) -> int:
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, int) and value > 0:
+        return value
+    return fallback
+
+
+def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
+    return open_scenario(client, dev, tab_cfg)
 
 
 def collect_tab_rows(
@@ -102,7 +162,7 @@ def collect_tab_rows(
     )
     checkpoint_every = _get_positive_int(checkpoint_save_every, CHECKPOINT_SAVE_EVERY_STEPS)
 
-    opened = open_tab_and_anchor(client, dev, tab_cfg)
+    opened = open_scenario(client, dev, tab_cfg)
     if not opened:
         row = {
             "tab_name": tab_cfg["tab_name"],

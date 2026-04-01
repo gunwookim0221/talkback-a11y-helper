@@ -182,18 +182,43 @@ TAB_CONFIGS = [
         "scenario_id": "settings_entry_example",
         "tab_name": "(?i).*menu.*",
         "tab_type": "b",
+        "pre_navigation": [
+            {
+                "action": "select",
+                "target": "(?i).*settings.*|.*설정.*",
+                "type": "a",
+            }
+        ],
         "anchor_name": "(?i).*settings.*",
         "anchor_type": "a",
         "anchor": {
-            "resource_id_regex": "com.samsung.android.oneconnect:id/add_menu_button",
-            "text_regex": "(?i).*qr.*",
+            "text_regex": "(?i).*settings.*|.*설정.*",
             "tie_breaker": "top_left",
-            "allow_resource_id_only": True,
         },
         "context_verify": {
             "type": "screen",
             "text_regex": "(?i).*settings.*",
             "announcement_regex": "(?i).*settings.*",
+        },
+        "enabled": False,
+        "max_steps": 20,
+    },
+    {
+        "scenario_id": "life_pet_care_example",
+        "tab_name": "(?i).*life.*",
+        "tab_type": "b",
+        "pre_navigation": [
+            {
+                "action": "select",
+                "target": "(?i).*pet\\s*care.*|.*펫\\s*케어.*",
+                "type": "a",
+            }
+        ],
+        "anchor_name": "(?i).*pet\\s*care.*|.*펫\\s*케어.*",
+        "anchor_type": "a",
+        "anchor": {
+            "text_regex": "(?i).*pet\\s*care.*|.*펫\\s*케어.*",
+            "tie_breaker": "top_left",
         },
         "enabled": False,
         "max_steps": 20,
