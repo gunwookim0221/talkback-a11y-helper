@@ -76,3 +76,9 @@ def make_main_fingerprint(step: dict[str, Any]) -> tuple[str, str, str]:
         str(step.get("focus_view_id", "") or "").strip(),
         str(step.get("focus_bounds", "") or "").strip(),
     )
+
+
+def make_overlay_entry_fingerprint(tab_name: str, step: dict[str, Any]) -> str:
+    focus_view_id = str(step.get("focus_view_id", "") or "").strip()
+    normalized_visible_label = str(step.get("normalized_visible_label", "") or "").strip()
+    return f"{tab_name}|{focus_view_id}|{normalized_visible_label}"
