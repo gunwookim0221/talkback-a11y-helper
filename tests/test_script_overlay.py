@@ -27,6 +27,7 @@ sys.modules.setdefault("openpyxl.drawing.image", SimpleNamespace(Image=object))
 sys.modules.setdefault("PIL", SimpleNamespace(Image=object))
 
 import script_test
+from tb_runner import overlay_logic
 
 
 class DummyClient:
@@ -277,8 +278,8 @@ def test_classify_post_click_result_non_overlay_candidate_keeps_overlap_navigati
 
 
 def test_expand_overlay_uses_entry_label_as_primary_recovery_anchor(monkeypatch):
-    monkeypatch.setattr(script_test, "save_excel", lambda *args, **kwargs: None)
-    monkeypatch.setattr(script_test, "maybe_capture_focus_crop", lambda *_args, **_kwargs: _args[2])
+    monkeypatch.setattr(overlay_logic, "save_excel", lambda *args, **kwargs: None)
+    monkeypatch.setattr(overlay_logic, "maybe_capture_focus_crop", lambda *_args, **_kwargs: _args[2])
 
     client = DummyClient()
     entry_step = {
