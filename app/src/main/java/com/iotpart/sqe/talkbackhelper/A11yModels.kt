@@ -266,7 +266,9 @@ data class ActionResult(
 data class TargetActionOutcome(
     val success: Boolean,
     val reason: String,
-    val target: AccessibilityNodeInfo? = null
+    val target: AccessibilityNodeInfo? = null,
+    val attemptedResourceId: String? = null,
+    val attemptedClassName: String? = null
 )
 
 object FocusLabelBuilder {
