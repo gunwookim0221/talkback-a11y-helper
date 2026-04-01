@@ -22,6 +22,7 @@ from tb_runner.excel_report import save_excel
 from tb_runner.logging_utils import log
 from tb_runner.perf_stats import RunPerfStats, format_perf_summary, save_excel_with_perf
 from tb_runner.scenario_config import TAB_CONFIGS
+from tb_runner.runtime_config import load_runtime_bundle
 from tb_runner.utils import generate_output_path
 
 
@@ -37,8 +38,12 @@ def main():
     log(f"[MAIN] output file: {output_path}")
     log(f"[MAIN] image dir base: {output_base_dir}")
 
+    runtime_bundle = load_runtime_bundle(TAB_CONFIGS)
+    runtime_tab_configs = runtime_bundle.get("tab_configs", TAB_CONFIGS)
+    checkpoint_save_every = int(runtime_bundle.get("checkpoint_save_every", 3) or 3)
+
     try:
-        for tab_cfg in TAB_CONFIGS:
+        for tab_cfg in runtime_tab_configs:
             if not bool(tab_cfg.get("enabled", True)):
                 log(
                     f"[MAIN] skip disabled scenario_id='{tab_cfg.get('scenario_id', '')}' "
@@ -57,6 +62,7 @@ def main():
                 output_path,
                 output_base_dir,
                 scenario_perf=scenario_perf,
+                checkpoint_save_every=checkpoint_save_every,
             )
 
     except Exception as exc:

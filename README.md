@@ -478,3 +478,16 @@ assert client.last_merged_announcement == merged
 - `get_partial_announcements()`는 디버깅/세부 검증용 raw 발화 조각 리스트를 반환합니다.
 - 발화가 없으면 `get_announcements()`는 빈 문자열(`""`)을 반환합니다.
 - 병합 규칙은 각 item에 `strip()` 적용 → 빈 문자열 제거 → `" ".join(...)` 순서로 고정됩니다.
+
+## Python 런타임 설정 분리 (Phase 2-3)
+
+- 파일: `config/runtime_config.json`
+- 로더: `tb_runner/runtime_config.py`
+- 기본 원칙: 설정 파일이 없거나 값이 비정상이면 기존 하드코딩 기본값으로 안전하게 fallback
+
+외부화된 항목(기능 정책 아님):
+- `global.checkpoint_save_every`
+- `defaults`/`scenarios` 기반 `tab_select_retry_count`, `anchor_retry_count`
+- `defaults`/`scenarios` 기반 `main_step_wait_seconds`, `main_announcement_wait_seconds`
+- `defaults`/`scenarios` 기반 `overlay_step_wait_seconds`, `overlay_announcement_wait_seconds`, `back_recovery_wait_seconds`
+- `scenarios.<scenario_id>.enabled`, `scenarios.<scenario_id>.max_steps`

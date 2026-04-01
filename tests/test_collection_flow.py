@@ -131,7 +131,15 @@ def test_collect_tab_rows_checkpoint_save_called_by_interval(monkeypatch):
     monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: save_calls.append(1))
     monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (False, "not_in_global_candidates"))
 
-    collection_flow.collect_tab_rows(client, "SERIAL", _base_tab_cfg(max_steps=2), [], "o.xlsx", "out")
+    collection_flow.collect_tab_rows(
+        client,
+        "SERIAL",
+        _base_tab_cfg(max_steps=2),
+        [],
+        "o.xlsx",
+        "out",
+        checkpoint_save_every=2,
+    )
 
     assert len(save_calls) == 2  # anchor + checkpoint at step2
 
