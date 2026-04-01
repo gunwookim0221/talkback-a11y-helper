@@ -23,19 +23,48 @@ from tb_runner.perf_stats import ScenarioPerfStats, format_perf_summary, save_ex
 from tb_runner.tab_logic import stabilize_tab_selection
 from tb_runner.utils import make_main_fingerprint, make_overlay_entry_fingerprint
 
+def _get_retry_count(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
+    value = tab_cfg.get(key, fallback)
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, int) and value > 0:
+        return value
+    return fallback
+
+
+def _get_wait_seconds(tab_cfg: dict[str, Any], key: str, fallback: float) -> float:
+    value = tab_cfg.get(key, fallback)
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, (int, float)) and float(value) > 0:
+        return float(value)
+    return fallback
+
+
+def _get_positive_int(value: Any, fallback: int) -> int:
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, int) and value > 0:
+        return value
+    return fallback
+
 
 def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
+    tab_retry_count = _get_retry_count(tab_cfg, "tab_select_retry_count", 2)
+    anchor_retry_count = _get_retry_count(tab_cfg, "anchor_retry_count", 2)
+    main_step_wait_seconds = _get_wait_seconds(tab_cfg, "main_step_wait_seconds", MAIN_STEP_WAIT_SECONDS)
+
     tab_stabilized = stabilize_tab_selection(
         client=client,
         dev=dev,
         tab_cfg=tab_cfg,
-        max_retries=2,
+        max_retries=tab_retry_count,
     )
     if not tab_stabilized.get("ok"):
         log(f"[TAB][select] stabilization failed scenario='{tab_cfg.get('scenario_id', '')}'")
         return False
 
-    time.sleep(1.0)
+    time.sleep(main_step_wait_seconds)
     client.reset_focus_history(dev)
     time.sleep(0.5)
 
@@ -44,13 +73,13 @@ def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         dev=dev,
         tab_cfg=tab_cfg,
         phase="scenario_start",
-        max_retries=2,
+        max_retries=anchor_retry_count,
         verify_reads=2,
     )
     if not stabilize_result.get("ok"):
         log(f"[ANCHOR][scenario_start] stabilization failed tab='{tab_cfg.get('tab_name', '')}'")
         return False
-    time.sleep(1.0)
+    time.sleep(main_step_wait_seconds)
     return True
 
 
@@ -62,8 +91,16 @@ def collect_tab_rows(
     output_path: str,
     output_base_dir: str,
     scenario_perf: ScenarioPerfStats | None = None,
+    checkpoint_save_every: int = CHECKPOINT_SAVE_EVERY_STEPS,
 ) -> list[dict]:
     rows: list[dict] = []
+    main_step_wait_seconds = _get_wait_seconds(tab_cfg, "main_step_wait_seconds", MAIN_STEP_WAIT_SECONDS)
+    main_announcement_wait_seconds = _get_wait_seconds(
+        tab_cfg,
+        "main_announcement_wait_seconds",
+        MAIN_ANNOUNCEMENT_WAIT_SECONDS,
+    )
+    checkpoint_every = _get_positive_int(checkpoint_save_every, CHECKPOINT_SAVE_EVERY_STEPS)
 
     opened = open_tab_and_anchor(client, dev, tab_cfg)
     if not opened:
@@ -90,8 +127,8 @@ def collect_tab_rows(
         dev=dev,
         step_index=0,
         move=False,
-        wait_seconds=MAIN_STEP_WAIT_SECONDS,
-        announcement_wait_seconds=MAIN_ANNOUNCEMENT_WAIT_SECONDS,
+        wait_seconds=main_step_wait_seconds,
+        announcement_wait_seconds=main_announcement_wait_seconds
     )
     anchor_elapsed = time.perf_counter() - anchor_start
 
@@ -132,8 +169,8 @@ def collect_tab_rows(
             step_index=step_idx,
             move=True,
             direction="next",
-            wait_seconds=MAIN_STEP_WAIT_SECONDS,
-            announcement_wait_seconds=MAIN_ANNOUNCEMENT_WAIT_SECONDS,
+            wait_seconds=main_step_wait_seconds,
+            announcement_wait_seconds=main_announcement_wait_seconds,
         )
         step_elapsed = time.perf_counter() - step_start
 
@@ -219,7 +256,7 @@ def collect_tab_rows(
         row_fingerprint = make_main_fingerprint(row)
         if all(row_fingerprint):
             main_step_index_by_fingerprint[row_fingerprint] = step_idx
-        if stop or (step_idx % CHECKPOINT_SAVE_EVERY_STEPS == 0):
+        if stop or (step_idx % checkpoint_every == 0):
             save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
 
         is_candidate, candidate_reason = is_overlay_candidate(row, tab_cfg)
@@ -299,6 +336,7 @@ def collect_tab_rows(
                             dev=dev,
                             entry_step=row,
                             known_step_index_by_fingerprint=main_step_index_by_fingerprint,
+                            tab_cfg=tab_cfg,
                         )
                         if scenario_perf is not None and bool(realign_result.get("entry_reached")):
                             scenario_perf.realign_success_count += 1
@@ -314,7 +352,7 @@ def collect_tab_rows(
                                 dev=dev,
                                 tab_cfg=tab_cfg,
                                 phase="overlay_realign",
-                                max_retries=2,
+                                max_retries=_get_retry_count(tab_cfg, "anchor_retry_count", 2),
                                 verify_reads=1,
                             )
                             if not post_overlay_stabilized.get("ok"):

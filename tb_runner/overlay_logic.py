@@ -21,6 +21,23 @@ from tb_runner.logging_utils import log
 from tb_runner.perf_stats import ScenarioPerfStats, save_excel_with_perf
 from tb_runner.utils import make_main_fingerprint
 
+def _get_positive_int(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
+    value = tab_cfg.get(key, fallback)
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, int) and value > 0:
+        return value
+    return fallback
+
+
+def _get_positive_float(tab_cfg: dict[str, Any], key: str, fallback: float) -> float:
+    value = tab_cfg.get(key, fallback)
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, (int, float)) and float(value) > 0:
+        return float(value)
+    return fallback
+
 
 def _matches_overlay_candidate(step: dict[str, Any], entry: dict[str, Any]) -> bool:
     focus_view_id = str(step.get("focus_view_id", "") or "").strip()
@@ -80,8 +97,12 @@ def classify_post_click_result(
         dev=dev,
         step_index=int(pre_click_step.get("step_index", 0) or 0),
         move=False,
-        wait_seconds=MAIN_STEP_WAIT_SECONDS,
-        announcement_wait_seconds=MAIN_ANNOUNCEMENT_WAIT_SECONDS,
+        wait_seconds=_get_positive_float(tab_cfg, "main_step_wait_seconds", MAIN_STEP_WAIT_SECONDS),
+        announcement_wait_seconds=_get_positive_float(
+            tab_cfg,
+            "main_announcement_wait_seconds",
+            MAIN_ANNOUNCEMENT_WAIT_SECONDS,
+        ),
     )
 
     pre_fp = make_main_fingerprint(pre_click_step)
@@ -252,13 +273,17 @@ def realign_focus_after_overlay(
     dev: str,
     entry_step: dict[str, Any],
     known_step_index_by_fingerprint: dict[tuple[str, str, str], int],
+    tab_cfg: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    realign_tab_cfg = tab_cfg or {}
+    main_step_wait_seconds = _get_positive_float(realign_tab_cfg, "main_step_wait_seconds", MAIN_STEP_WAIT_SECONDS)
+
     current_step = collect_realign_probe(
         client=client,
         dev=dev,
         move=False,
         probe_idx=0,
-        wait_seconds=MAIN_STEP_WAIT_SECONDS,
+        wait_seconds=main_step_wait_seconds,
     )
     current_fp = make_main_fingerprint(current_step)
     entry_idx = int(entry_step.get("step_index", 0) or 0)
@@ -294,7 +319,7 @@ def realign_focus_after_overlay(
             move=True,
             probe_idx=realign_idx,
             direction="next",
-            wait_seconds=MAIN_STEP_WAIT_SECONDS,
+            wait_seconds=main_step_wait_seconds,
         )
         match_by = get_overlay_entry_match_by(probe_step, entry_step)
         if match_by:
@@ -332,6 +357,15 @@ def expand_overlay(
     scenario_perf: ScenarioPerfStats | None = None,
 ) -> list[dict[str, Any]]:
     overlay_rows: list[dict[str, Any]] = []
+    overlay_step_wait_seconds = _get_positive_float(tab_cfg, "overlay_step_wait_seconds", OVERLAY_STEP_WAIT_SECONDS)
+    overlay_announcement_wait_seconds = _get_positive_float(
+        tab_cfg,
+        "overlay_announcement_wait_seconds",
+        OVERLAY_ANNOUNCEMENT_WAIT_SECONDS,
+    )
+    back_recovery_wait_seconds = _get_positive_float(tab_cfg, "back_recovery_wait_seconds", BACK_RECOVERY_WAIT_SECONDS)
+    checkpoint_every = _get_positive_int(tab_cfg, "checkpoint_save_every", CHECKPOINT_SAVE_EVERY_STEPS)
+
     entry_label = str(entry_step.get("visible_label", "") or "").strip()
     entry_view_id = str(entry_step.get("focus_view_id", "") or "").strip()
 
@@ -369,8 +403,8 @@ def expand_overlay(
             step_index=overlay_step_idx,
             move=True,
             direction="next",
-            wait_seconds=OVERLAY_STEP_WAIT_SECONDS,
-            announcement_wait_seconds=OVERLAY_ANNOUNCEMENT_WAIT_SECONDS,
+            wait_seconds=overlay_step_wait_seconds,
+            announcement_wait_seconds=overlay_announcement_wait_seconds,
         )
         overlay_row["tab_name"] = tab_cfg["tab_name"]
         overlay_row["context_type"] = "overlay"
@@ -405,7 +439,7 @@ def expand_overlay(
             overlay_row["stop_reason"] = overlay_reason
             save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
             break
-        if overlay_step_idx % CHECKPOINT_SAVE_EVERY_STEPS == 0:
+        if overlay_step_idx % checkpoint_every == 0:
             save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
 
     recovery_anchor = str(entry_step.get("normalized_visible_label", "") or "").strip()
@@ -415,7 +449,7 @@ def expand_overlay(
     recovery_result = client.press_back_and_recover_focus(
         dev=dev,
         expected_parent_anchor=expected_anchor,
-        wait_seconds=BACK_RECOVERY_WAIT_SECONDS,
+        wait_seconds=back_recovery_wait_seconds,
         retry=1,
     )
     recovery_status = str(recovery_result.get("status", "") or "")

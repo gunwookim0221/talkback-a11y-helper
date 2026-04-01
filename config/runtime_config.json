@@ -1,0 +1,15 @@
+{
+  "global": {
+    "checkpoint_save_every": 3
+  },
+  "defaults": {
+    "tab_select_retry_count": 2,
+    "anchor_retry_count": 2,
+    "main_step_wait_seconds": 1.2,
+    "main_announcement_wait_seconds": 1.2,
+    "overlay_step_wait_seconds": 0.8,
+    "overlay_announcement_wait_seconds": 0.8,
+    "back_recovery_wait_seconds": 0.8
+  },
+  "scenarios": {}
+}
