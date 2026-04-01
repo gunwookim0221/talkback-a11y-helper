@@ -11,7 +11,7 @@ import java.util.concurrent.Executors
 class A11yCommandReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.2.0"
+        private const val VERSION = "1.2.1"
         private const val ACTION_GET_FOCUS = "com.iotpart.sqe.talkbackhelper.GET_FOCUS"
         private const val ACTION_FOCUS_RESULT = "com.iotpart.sqe.talkbackhelper.FOCUS_RESULT"
         private const val ACTION_DUMP_TREE = "com.iotpart.sqe.talkbackhelper.DUMP_TREE"
@@ -113,6 +113,16 @@ class A11yCommandReceiver : BroadcastReceiver() {
         }
 
         val query = parseQuery(intent, reqId) ?: return
+        val actionName = when (action) {
+            AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS -> "FOCUS_TARGET"
+            AccessibilityNodeInfo.ACTION_CLICK, AccessibilityNodeInfo.ACTION_LONG_CLICK -> "CLICK_TARGET"
+            else -> "UNKNOWN"
+        }
+        val longClick = action == AccessibilityNodeInfo.ACTION_LONG_CLICK
+        Log.d(
+            TAG,
+            "[DEBUG][TARGET_ACTION][recv] reqId=$reqId action=$actionName targetName='${query.targetName}' targetType='${query.targetType}' targetIndex=${query.targetIndex} longClick=$longClick"
+        )
         service.performTargetAction(query, action, reqId)
     }
 

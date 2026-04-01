@@ -158,7 +158,17 @@ class A11yHelperService : AccessibilityService() {
     }
 
     fun performTargetAction(query: A11yTargetFinder.TargetQuery, action: Int, reqId: String = "none"): JSONObject {
-        val outcome = A11yTargetFinder.findAndPerformAction(rootInActiveWindow, query, action)
+        val actionLabel = when (action) {
+            AccessibilityNodeInfo.ACTION_CLICK -> "ACTION_CLICK"
+            AccessibilityNodeInfo.ACTION_LONG_CLICK -> "ACTION_LONG_CLICK"
+            AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS -> "ACTION_ACCESSIBILITY_FOCUS"
+            else -> "ACTION_$action"
+        }
+        Log.d(
+            TAG,
+            "[DEBUG][TARGET_ACTION][service_start] reqId=$reqId accessibilityAction=$actionLabel target='${query.targetName}' type='${query.targetType}'"
+        )
+        val outcome = A11yTargetFinder.findAndPerformAction(rootInActiveWindow, query, action, reqId)
         val resultJson = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
             put("reqId", reqId)
@@ -185,6 +195,17 @@ class A11yHelperService : AccessibilityService() {
             }
         }
 
+        val safeReason = outcome.reason.ifBlank { "" }
+        val safeResourceId = outcome.attemptedResourceId ?: ""
+        val safeClassName = outcome.attemptedClassName ?: ""
+        Log.d(
+            TAG,
+            "[DEBUG][TARGET_ACTION][service_end] reqId=$reqId success=${outcome.success} reason='$safeReason' attemptedResourceId='$safeResourceId' attemptedClassName='$safeClassName'"
+        )
+        Log.d(
+            TAG,
+            "[DEBUG][TARGET_ACTION][broadcast_result] reqId=$reqId success=${outcome.success} reason='$safeReason' attemptedResourceId='$safeResourceId' attemptedClassName='$safeClassName'"
+        )
         Log.i(TAG, "TARGET_ACTION_RESULT $resultJson")
         if (outcome.success && outcome.target != null) {
             A11yStateStore.update(FocusSnapshot.fromNode(outcome.target))

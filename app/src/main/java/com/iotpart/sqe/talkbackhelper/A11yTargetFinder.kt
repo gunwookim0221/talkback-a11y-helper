@@ -1,9 +1,12 @@
 package com.iotpart.sqe.talkbackhelper
 
+import android.graphics.Rect
+import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 
 object A11yTargetFinder {
-    const val VERSION: String = "1.0.2"
+    private const val TAG = "A11Y_HELPER"
+    const val VERSION: String = "1.0.3"
 
     data class TargetQuery(
         val targetName: String,
@@ -19,9 +22,15 @@ object A11yTargetFinder {
     fun findAndPerformAction(
         root: AccessibilityNodeInfo?,
         query: TargetQuery,
-        action: Int
+        action: Int,
+        reqId: String = "none"
     ): TargetActionOutcome {
+        Log.d(
+            TAG,
+            "[DEBUG][TARGET_ACTION][find_start] reqId=$reqId target='${query.targetName}' type='${query.targetType}' index=${query.targetIndex} rootNull=${root == null}"
+        )
         if (root == null) {
+            Log.d(TAG, "[DEBUG][TARGET_ACTION][final] reqId=$reqId success=false reason='Root node is null'")
             return TargetActionOutcome(false, "Root node is null")
         }
 
@@ -46,8 +55,11 @@ object A11yTargetFinder {
         }
 
         if (matchedTargets.isEmpty()) {
+            Log.d(TAG, "[DEBUG][TARGET_ACTION][matches] reqId=$reqId count=0")
+            Log.d(TAG, "[DEBUG][TARGET_ACTION][final] reqId=$reqId success=false reason='Target node not found'")
             return TargetActionOutcome(false, "Target node not found")
         }
+        Log.d(TAG, "[DEBUG][TARGET_ACTION][matches] reqId=$reqId count=${matchedTargets.size}")
 
         val actionName = when (action) {
             AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS -> "ACTION_ACCESSIBILITY_FOCUS"
@@ -56,10 +68,23 @@ object A11yTargetFinder {
             else -> "ACTION_$action"
         }
         var lastAttemptedNode: AccessibilityNodeInfo? = null
-        for (targetNode in matchedTargets) {
+        for ((candidateIndex, targetNode) in matchedTargets.withIndex()) {
             lastAttemptedNode = targetNode
+            val bounds = Rect().also { targetNode.getBoundsInScreen(it) }.toShortString()
+            Log.d(
+                TAG,
+                "[DEBUG][TARGET_ACTION][attempt] reqId=$reqId candidateIndex=$candidateIndex resourceId='${targetNode.viewIdResourceName.orEmpty()}' class='${targetNode.className?.toString().orEmpty()}' clickable=${targetNode.isClickable} focusable=${targetNode.isFocusable} visible=${targetNode.isVisibleToUser} bounds='$bounds'"
+            )
             val success = targetNode.performAction(action)
+            Log.d(
+                TAG,
+                "[DEBUG][TARGET_ACTION][attempt_result] reqId=$reqId candidateIndex=$candidateIndex action=$actionName success=$success"
+            )
             if (success) {
+                Log.d(
+                    TAG,
+                    "[DEBUG][TARGET_ACTION][final] reqId=$reqId success=true candidateIndex=$candidateIndex reason='matched_and_action_succeeded'"
+                )
                 return TargetActionOutcome(
                     success = true,
                     reason = "$actionName success",
@@ -73,9 +98,11 @@ object A11yTargetFinder {
         val failedNode = lastAttemptedNode
         val failedResourceId = failedNode?.viewIdResourceName
         val failedClassName = failedNode?.className?.toString()
+        val failedReason = "$actionName failed (resourceId=${failedResourceId ?: "null"}, class=${failedClassName ?: "null"})"
+        Log.d(TAG, "[DEBUG][TARGET_ACTION][final] reqId=$reqId success=false reason='$failedReason'")
         return TargetActionOutcome(
             success = false,
-            reason = "$actionName failed (resourceId=${failedResourceId ?: "null"}, class=${failedClassName ?: "null"})",
+            reason = failedReason,
             target = failedNode,
             attemptedResourceId = failedResourceId,
             attemptedClassName = failedClassName
