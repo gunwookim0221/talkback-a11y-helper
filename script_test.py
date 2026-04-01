@@ -1,10 +1,6 @@
-import json
-import os
 import re
 import tempfile
 import time
-import ast
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,341 +10,33 @@ from openpyxl.drawing.image import Image as XLImage
 from PIL import Image
 
 from talkback_lib import A11yAdbClient
-
-
-DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.7.6"
-LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
-LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
-
-OVERLAY_ENTRY_CANDIDATES = [
-    {
-        "resource_id": "com.samsung.android.oneconnect:id/add_menu_button",
-        "label": "Add",
-    },
-    {
-        "resource_id": "com.samsung.android.oneconnect:id/more_menu_button",
-        "label": "More options",
-    },
-]
-# Backward compatibility: legacy name kept as alias.
-OVERLAY_ENTRY_ALLOWLIST = OVERLAY_ENTRY_CANDIDATES
-
-OVERLAY_MAX_STEPS = 10
-MAIN_STEP_WAIT_SECONDS = 1.2
-MAIN_ANNOUNCEMENT_WAIT_SECONDS = 1.2
-OVERLAY_STEP_WAIT_SECONDS = 0.8
-OVERLAY_ANNOUNCEMENT_WAIT_SECONDS = 0.8
-BACK_RECOVERY_WAIT_SECONDS = 0.8
-CHECKPOINT_SAVE_EVERY_STEPS = 3
-OVERLAY_REALIGN_MAX_STEPS = 8
-
-TAB_CONFIGS = [
-    {
-        "scenario_id": "home_main",
-        "tab_name": "(?i).*home.*",
-        "tab_type": "b",
-        "tab": {
-            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_favorites",
-            "text_regex": "(?i).*home.*",
-            "announcement_regex": "(?i).*(selected|선택됨)?.*home.*",
-            "tie_breaker": "bottom_nav_left_to_right",
-            "allow_resource_id_only": True,
-        },
-        "anchor_name": "(?i).*location.*qr.*code.*",
-        "anchor_type": "b",
-        "anchor": {
-            "text_regex": "(?i).*location.*qr.*code.*",
-            "announcement_regex": "(?i).*qr.*code.*",
-            "tie_breaker": "top_left",
-        },
-        "context_verify": {
-            "type": "selected_bottom_tab",
-            "announcement_regex": "(?i).*(selected|선택됨).*home.*",
-        },
-        "max_steps": 5,
-        "overlay_policy": {
-            "allow_candidates": [
-                {
-                    "resource_id": "com.samsung.android.oneconnect:id/add_menu_button",
-                    "label": "Add",
-                },
-                {
-                    "resource_id": "com.samsung.android.oneconnect:id/more_menu_button",
-                    "label": "More options",
-                },
-            ],
-            "block_candidates": [],
-        },
-    },
-    {
-        "scenario_id": "devices_main",
-        "tab_name": "(?i).*devices.*",
-        "tab_type": "b",
-        "tab": {
-            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_devices",
-            "text_regex": "(?i).*devices.*",
-            "announcement_regex": "(?i).*(selected|선택됨)?.*devices.*",
-            "tie_breaker": "bottom_nav_left_to_right",
-            "allow_resource_id_only": True,
-        },
-        "anchor_name": "(?i).*location.*qr.*code.*",
-        "anchor_type": "b",
-        "anchor": {
-            "text_regex": "(?i).*location.*qr.*code.*",
-            "announcement_regex": "(?i).*qr.*code.*",
-            "tie_breaker": "top_left",
-        },
-        "context_verify": {
-            "type": "selected_bottom_tab",
-            "announcement_regex": "(?i).*(selected|선택됨).*devices.*",
-        },
-        "enabled": True,
-        "max_steps": 5,
-        "overlay_policy": {
-            "allow_candidates": [
-                {
-                    "resource_id": "com.samsung.android.oneconnect:id/more_menu_button",
-                    "label": "More options",
-                }
-            ],
-            "block_candidates": [
-                {
-                    "resource_id": "com.samsung.android.oneconnect:id/add_menu_button",
-                    "label": "Add",
-                }
-            ],
-        },
-    },
-    {
-        "scenario_id": "life_main",
-        "tab_name": "(?i).*life.*",
-        "tab_type": "b",
-        "tab": {
-            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_services",
-            "text_regex": "(?i).*life.*",
-            "announcement_regex": "(?i).*(selected|선택됨)?.*life.*",
-            "tie_breaker": "bottom_nav_left_to_right",
-            "allow_resource_id_only": True,
-        },
-        "anchor_name": "(?i).*location.*qr.*code.*",
-        "anchor_type": "b",
-        "anchor": {
-            "text_regex": "(?i).*location.*qr.*code.*",
-            "announcement_regex": "(?i).*qr.*code.*",
-            "tie_breaker": "top_left",
-        },
-        "context_verify": {
-            "type": "selected_bottom_tab",
-            "announcement_regex": "(?i).*(selected|선택됨).*life.*",
-        },
-        "enabled": True,
-        "max_steps": 5,
-        "overlay_policy": {
-            "allow_candidates": [
-                {
-                    "resource_id": "com.samsung.android.oneconnect:id/more_menu_button",
-                    "label": "More options",
-                }
-            ],
-            "block_candidates": [
-                {
-                    "resource_id": "com.samsung.android.oneconnect:id/add_menu_button",
-                    "label": "Add",
-                }
-            ],
-        },
-    },
-    {
-        "scenario_id": "routines_main",
-        "tab_name": "(?i).*routines.*",
-        "tab_type": "b",
-        "tab": {
-            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_automations",
-            "text_regex": "(?i).*routines.*",
-            "announcement_regex": "(?i).*(selected|선택됨)?.*routines.*",
-            "tie_breaker": "bottom_nav_left_to_right",
-            "allow_resource_id_only": True,
-        },
-        "anchor_name": "(?i).*location.*qr.*code.*",
-        "anchor_type": "b",
-        "anchor": {
-            "text_regex": "(?i).*location.*qr.*code.*",
-            "announcement_regex": "(?i).*qr.*code.*",
-            "tie_breaker": "top_left",
-        },
-        "context_verify": {
-            "type": "selected_bottom_tab",
-            "announcement_regex": "(?i).*(selected|선택됨).*routines.*",
-        },
-        "enabled": True,
-        "max_steps": 5,
-        "overlay_policy": {
-            "allow_candidates": [
-                {
-                    "resource_id": "com.samsung.android.oneconnect:id/more_menu_button",
-                    "label": "More options",
-                }
-            ],
-            "block_candidates": [
-                {
-                    "resource_id": "com.samsung.android.oneconnect:id/add_menu_button",
-                    "label": "Add",
-                }
-            ],
-        },
-    },
-    {
-        "scenario_id": "menu_main",
-        "tab_name": "(?i).*menu.*",
-        "tab_type": "b",
-        "tab": {
-            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_more",
-            "text_regex": "(?i).*menu.*",
-            "announcement_regex": "(?i).*(selected|선택됨)?.*menu.*",
-            "tie_breaker": "bottom_nav_left_to_right",
-            "allow_resource_id_only": True,
-        },
-        "anchor_name": "(?i).*smartthings.*",
-        "anchor_type": "b",
-        "anchor": {
-            "text_regex": "(?i).*smartthings.*",
-            "announcement_regex": "(?i).*smartthings.*",
-            "tie_breaker": "top_left",
-        },
-        "context_verify": {
-            "type": "selected_bottom_tab",
-            "announcement_regex": "(?i).*(selected|선택됨).*menu.*",
-        },
-        "enabled": True,
-        "max_steps": 5,
-    },
-    {
-        "scenario_id": "settings_entry_example",
-        "tab_name": "(?i).*menu.*",
-        "tab_type": "b",
-        "anchor_name": "(?i).*settings.*",
-        "anchor_type": "a",
-        "anchor": {
-            "resource_id_regex": "com.samsung.android.oneconnect:id/add_menu_button",
-            "text_regex": "(?i).*qr.*",
-            "tie_breaker": "top_left",
-            "allow_resource_id_only": True,
-        },
-        "context_verify": {
-            "type": "screen",
-            "text_regex": "(?i).*settings.*",
-            "announcement_regex": "(?i).*settings.*",
-        },
-        "enabled": False,
-        "max_steps": 20,
-    },
-    {
-        "scenario_id": "life_plugin_example",
-        "tab_name": "(?i).*life.*",
-        "tab_type": "b",
-        "anchor_name": "(?i).*location.*qr.*code.*",
-        "anchor_type": "b",
-        "anchor": {
-            "text_regex": "(?i).*location.*qr.*code.*",
-            "announcement_regex": "(?i).*qr.*code.*",
-            "tie_breaker": "top_left",
-        },
-        "context_verify": {
-            "type": "plugin",
-            "text_regex": "(?i).*smartthings.*energy.*",
-        },
-        "enabled": False,
-        "max_steps": 5,
-    },
-    {
-        "scenario_id": "resource_id_only_example",
-        "tab_name": "(?i).*home.*",
-        "tab_type": "b",
-        "anchor_name": "com.samsung.android.oneconnect:id/add_menu_button",
-        "anchor_type": "r",
-        "anchor": {
-            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/add_menu_button",
-            "tie_breaker": "top_left",
-            "allow_resource_id_only": True,
-        },
-        "enabled": False,
-        "max_steps": 10,
-    },
-]
-
-ENABLE_IMAGE_CROP = True
-ENABLE_IMAGE_INSERT_TO_EXCEL = True
-IMAGE_DIR = "output/crops"
-
-
-def now_str() -> str:
-    return time.strftime("%H:%M:%S")
-
-
-def _should_log(level: str = "NORMAL") -> bool:
-    current = LOG_LEVEL if LOG_LEVEL in LOG_LEVEL_ORDER else "NORMAL"
-    return LOG_LEVEL_ORDER.get(current, 1) >= LOG_LEVEL_ORDER.get(level, 1)
-
-
-def log(msg: str, level: str = "NORMAL") -> None:
-    if _should_log(level):
-        print(f"[{now_str()}] {msg}")
- 
-
-def generate_output_path() -> str:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"output/talkback_compare_{timestamp}.xlsx"
-
-
-def to_json_text(value: Any) -> str:
-    try:
-        return json.dumps(value, ensure_ascii=False)
-    except Exception:
-        return str(value)
-
-
-def parse_bounds_str(bounds_value: Any) -> tuple[int, int, int, int] | None:
-    if bounds_value is None:
-        return None
-    try:
-        parts: list[int]
-        if isinstance(bounds_value, dict):
-            l = int(bounds_value.get("l"))
-            t = int(bounds_value.get("t"))
-            r = int(bounds_value.get("r"))
-            b = int(bounds_value.get("b"))
-            parts = [l, t, r, b]
-        else:
-            bounds_str = str(bounds_value).strip()
-            if not bounds_str:
-                return None
-            if bounds_str.startswith("{") and bounds_str.endswith("}"):
-                parsed_dict = ast.literal_eval(bounds_str)
-                if isinstance(parsed_dict, dict):
-                    l = int(parsed_dict.get("l"))
-                    t = int(parsed_dict.get("t"))
-                    r = int(parsed_dict.get("r"))
-                    b = int(parsed_dict.get("b"))
-                    parts = [l, t, r, b]
-                else:
-                    return None
-            else:
-                parts = [int(x.strip()) for x in bounds_str.split(",")]
-                if len(parts) != 4:
-                    return None
-        l, t, r, b = parts
-        if r <= l or b <= t:
-            return None
-        return l, t, r, b
-    except Exception:
-        return None
-
-
-def _safe_regex_search(pattern: str, value: str) -> bool:
-    if not pattern:
-        return False
-    return bool(re.search(pattern, value or "", flags=re.IGNORECASE))
+from tb_runner.constants import (
+    BACK_RECOVERY_WAIT_SECONDS,
+    CHECKPOINT_SAVE_EVERY_STEPS,
+    DEV_SERIAL,
+    ENABLE_IMAGE_CROP,
+    ENABLE_IMAGE_INSERT_TO_EXCEL,
+    IMAGE_DIR,
+    LOG_LEVEL,
+    MAIN_ANNOUNCEMENT_WAIT_SECONDS,
+    MAIN_STEP_WAIT_SECONDS,
+    OVERLAY_ANNOUNCEMENT_WAIT_SECONDS,
+    OVERLAY_ENTRY_ALLOWLIST,
+    OVERLAY_ENTRY_CANDIDATES,
+    OVERLAY_MAX_STEPS,
+    OVERLAY_REALIGN_MAX_STEPS,
+    OVERLAY_STEP_WAIT_SECONDS,
+    SCRIPT_VERSION,
+)
+from tb_runner.logging_utils import log
+from tb_runner.scenario_config import TAB_CONFIGS
+from tb_runner.utils import (
+    _safe_regex_search,
+    generate_output_path,
+    parse_bounds_str,
+    sanitize_filename,
+    to_json_text,
+)
 
 
 def _extract_candidate_from_node(node: dict[str, Any], index: int = -1) -> dict[str, Any]:
@@ -697,16 +385,6 @@ def verify_context(
         "actual_text": actual_text,
         "actual_announcement": actual_announcement,
     }
-
-
-def sanitize_filename(value: str) -> str:
-    keep = []
-    for ch in value:
-        if ch.isalnum() or ch in ("_", "-", "."):
-            keep.append(ch)
-        else:
-            keep.append("_")
-    return "".join(keep).strip("_") or "item"
 
 
 def capture_full_screenshot(client: A11yAdbClient, dev: str, save_path: str) -> None:
