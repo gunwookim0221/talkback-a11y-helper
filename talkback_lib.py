@@ -35,7 +35,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.7"
+CLIENT_ALGORITHM_VERSION = "1.7.8"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -1031,6 +1031,9 @@ class A11yAdbClient:
             "accepted_with_success_false": False,
             "success_false_top_level_dump_attempted": False,
             "success_false_top_level_dump_found": False,
+            "success_false_top_level_dump_skipped": False,
+            "dump_skip_reason": "",
+            "top_level_signature": "",
             "final_focus_reason": "",
             "dump_replace_reason": "",
         }
@@ -1150,6 +1153,32 @@ class A11yAdbClient:
             self.last_get_focus_trace["accepted_with_success_false"] = accepted_with_success_false
             self.last_get_focus_trace["empty_reason"] = ""
             if accepted_with_success_false:
+                normalized_bounds = self._normalize_bounds(focus_node)
+                view_id = str(focus_node.get("viewIdResourceName", "") or "").strip()
+                text_value = str(focus_node.get("text", "") or "").strip()
+                content_desc = str(focus_node.get("contentDescription", "") or "").strip()
+                label = self.extract_visible_label_from_focus(focus_node)
+                has_focus_flag = bool(focus_node.get("accessibilityFocused")) or bool(focus_node.get("focused"))
+                has_bounds = bool(normalized_bounds)
+                has_label = bool(text_value or content_desc)
+                top_level_signature = f"view_id='{view_id}' bounds='{normalized_bounds}' label='{label}'"
+                self.last_get_focus_trace["top_level_signature"] = top_level_signature
+                strong_top_level_payload = bool(view_id and has_bounds and has_label)
+                self._debug_print(
+                    f"[DEBUG][get_focus] dump_skip_candidate={strong_top_level_payload} "
+                    f"{top_level_signature} has_focus_flag={has_focus_flag}"
+                )
+                if strong_top_level_payload:
+                    self.last_get_focus_trace["success_false_top_level_dump_skipped"] = True
+                    self.last_get_focus_trace["dump_skip_reason"] = "strong_top_level_payload"
+                    self.last_get_focus_trace["final_payload_source"] = payload_candidate_source
+                    self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
+                    self.last_get_focus_trace["final_focus_reason"] = "success_false_top_level_policy_skip_dump"
+                    print(
+                        f"[INFO][get_focus] success=False top_level payload kept without dump fallback "
+                        f"serial={serial} req_id={req_id} reason='strong_top_level_payload'"
+                    )
+                    return focus_node
                 print(
                     f"[WARN][get_focus] success=False top_level payload accepted; trying dump fallback "
                     f"serial={serial} req_id={req_id}"
@@ -1882,6 +1911,9 @@ class A11yAdbClient:
             "get_focus_top_level_success_false": False,
             "get_focus_success_false_top_level_dump_attempted": False,
             "get_focus_success_false_top_level_dump_found": False,
+            "get_focus_success_false_top_level_dump_skipped": False,
+            "get_focus_dump_skip_reason": "",
+            "get_focus_top_level_signature": "",
             "get_focus_final_payload_source": "none",
             "get_focus_final_focus_reason": "",
             "get_focus_dump_replace_reason": "",
@@ -1999,6 +2031,11 @@ class A11yAdbClient:
         step["get_focus_success_false_top_level_dump_found"] = bool(
             trace.get("success_false_top_level_dump_found", False)
         )
+        step["get_focus_success_false_top_level_dump_skipped"] = bool(
+            trace.get("success_false_top_level_dump_skipped", False)
+        )
+        step["get_focus_dump_skip_reason"] = str(trace.get("dump_skip_reason", "") or "")
+        step["get_focus_top_level_signature"] = str(trace.get("top_level_signature", "") or "")
         step["get_focus_final_payload_source"] = str(trace.get("final_payload_source", "none") or "none")
         step["get_focus_final_focus_reason"] = str(trace.get("final_focus_reason", "") or "")
         step["get_focus_dump_replace_reason"] = str(trace.get("dump_replace_reason", "") or "")

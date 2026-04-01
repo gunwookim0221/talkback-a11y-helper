@@ -1228,10 +1228,12 @@ class SmartMoveFocusTest(unittest.TestCase):
 
         self.assertEqual(result.get("text"), "Map View")
         self.assertTrue(result.get("accessibilityFocused"))
-        dump_mock.assert_called_once()
+        dump_mock.assert_not_called()
         self.assertFalse(client.last_get_focus_trace.get("success_field_present"))
-        self.assertTrue(client.last_get_focus_trace.get("success_false_top_level_dump_attempted"))
+        self.assertFalse(client.last_get_focus_trace.get("success_false_top_level_dump_attempted"))
         self.assertFalse(client.last_get_focus_trace.get("success_false_top_level_dump_found"))
+        self.assertTrue(client.last_get_focus_trace.get("success_false_top_level_dump_skipped"))
+        self.assertEqual(client.last_get_focus_trace.get("dump_skip_reason"), "strong_top_level_payload")
 
     def test_get_focus_accepts_top_level_payload_when_success_false(self):
         client = FakeA11yClient()
@@ -1247,10 +1249,28 @@ class SmartMoveFocusTest(unittest.TestCase):
 
         self.assertEqual(result.get("contentDescription"), "Map View")
         self.assertEqual(result.get("viewIdResourceName"), "com.samsung.android.oneconnect:id/mapview_button")
-        dump_mock.assert_called_once()
-        self.assertTrue(client.last_get_focus_trace.get("success_false_top_level_dump_attempted"))
+        dump_mock.assert_not_called()
+        self.assertFalse(client.last_get_focus_trace.get("success_false_top_level_dump_attempted"))
         self.assertFalse(client.last_get_focus_trace.get("success_false_top_level_dump_found"))
+        self.assertTrue(client.last_get_focus_trace.get("success_false_top_level_dump_skipped"))
         self.assertEqual(client.last_get_focus_trace.get("final_payload_source"), "top_level")
+        self.assertEqual(client.last_get_focus_trace.get("final_focus_reason"), "success_false_top_level_policy_skip_dump")
+
+    def test_get_focus_success_false_weak_top_level_payload_keeps_dump_fallback(self):
+        client = FakeA11yClient()
+        client.logcat_payload = (
+            'I/A11Y_HELPER: FOCUS_RESULT '
+            '{"success":false,"reqId":"REQID617A","focused":true}'
+        )
+        dump_nodes = [{"text": "복구 노드", "accessibilityFocused": True, "viewIdResourceName": "id/recovered"}]
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID617A-xxxx"), patch.object(client, "dump_tree", return_value=dump_nodes) as dump_mock:
+            result = client.get_focus("SER")
+
+        self.assertEqual(result.get("text"), "복구 노드")
+        dump_mock.assert_called_once()
+        self.assertFalse(client.last_get_focus_trace.get("success_false_top_level_dump_skipped"))
+        self.assertEqual(client.last_get_focus_trace.get("dump_skip_reason"), "")
 
     def test_get_focus_flags_only_payload_is_meaningful(self):
         client = FakeA11yClient()
@@ -1269,9 +1289,7 @@ class SmartMoveFocusTest(unittest.TestCase):
         client = FakeA11yClient()
         client.logcat_payload = (
             'I/A11Y_HELPER: FOCUS_RESULT '
-            '{"success":false,"reqId":"REQID619","contentDescription":"Map View",'
-            '"viewIdResourceName":"com.samsung.android.oneconnect:id/mapview_button",'
-            '"boundsInScreen":{"l":708,"t":142,"r":810,"b":286}}'
+            '{"success":false,"reqId":"REQID619","contentDescription":"Map View"}'
         )
         dump_nodes = [
             {"text": "general"},
@@ -1524,7 +1542,7 @@ class SmartMoveFocusTest(unittest.TestCase):
 
 class FocusHelpersTest(unittest.TestCase):
     def test_client_algorithm_version_is_updated(self):
-        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.5")
+        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.8")
 
     def test_extract_visible_label_from_focus_prefers_text(self):
         focus_node = {"text": "  Visible Text  ", "contentDescription": "Desc"}
