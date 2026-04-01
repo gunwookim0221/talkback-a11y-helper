@@ -1,21 +1,13 @@
 import re
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
-
-import pandas as pd
-from openpyxl import load_workbook
-from openpyxl.drawing.image import Image as XLImage
-from PIL import Image
 
 from talkback_lib import A11yAdbClient
 from tb_runner.constants import (
     BACK_RECOVERY_WAIT_SECONDS,
     CHECKPOINT_SAVE_EVERY_STEPS,
     DEV_SERIAL,
-    ENABLE_IMAGE_CROP,
-    ENABLE_IMAGE_INSERT_TO_EXCEL,
     IMAGE_DIR,
     LOG_LEVEL,
     MAIN_ANNOUNCEMENT_WAIT_SECONDS,
@@ -28,14 +20,14 @@ from tb_runner.constants import (
     OVERLAY_STEP_WAIT_SECONDS,
     SCRIPT_VERSION,
 )
+from tb_runner.excel_report import save_excel
+from tb_runner.image_utils import maybe_capture_focus_crop
 from tb_runner.logging_utils import _should_log, log
 from tb_runner.scenario_config import TAB_CONFIGS
 from tb_runner.utils import (
     _safe_regex_search,
     generate_output_path,
     parse_bounds_str,
-    sanitize_filename,
-    to_json_text,
 )
 
 
@@ -385,234 +377,6 @@ def verify_context(
         "actual_text": actual_text,
         "actual_announcement": actual_announcement,
     }
-
-
-def capture_full_screenshot(client: A11yAdbClient, dev: str, save_path: str) -> None:
-    # talkback_lib 내부 private helper 재사용
-    client._take_snapshot(dev, save_path)
-
-
-def crop_image_by_bounds(
-    screenshot_path: str,
-    bounds_str: str,
-    crop_path: str,
-    shrink_px: int = 0,
-) -> bool:
-    bounds = parse_bounds_str(bounds_str)
-    if not bounds:
-        return False
-
-    l, t, r, b = bounds
-    with Image.open(screenshot_path) as img:
-        width, height = img.size
-
-        l = max(0, l + shrink_px)
-        t = max(0, t + shrink_px)
-        r = min(width, r - shrink_px)
-        b = min(height, b - shrink_px)
-
-        if r <= l or b <= t:
-            return False
-
-        cropped = img.crop((l, t, r, b))
-        Path(crop_path).parent.mkdir(parents=True, exist_ok=True)
-        cropped.save(crop_path)
-        cropped.close()
-    return True
-
-
-def maybe_capture_focus_crop(
-    client: A11yAdbClient,
-    dev: str,
-    row: dict,
-    output_base_dir: str,
-) -> dict:
-    row["t_before_crop"] = round(time.monotonic() - float(row.get("_step_mono_start", time.monotonic())), 3) if row.get("_step_mono_start") else 0.0
-    row["crop_image_path"] = ""
-    row["crop_image_saved"] = False
-    row["crop_bounds"] = str(row.get("focus_bounds", "") or "").strip()
-    row["crop_source"] = "focus_bounds"
-    row["crop_focus_confidence_low"] = False
-
-    if not ENABLE_IMAGE_CROP:
-        row["t_after_crop"] = row["t_before_crop"]
-        return row
-
-    bounds_str = str(row.get("focus_bounds", "") or "").strip()
-    if not bounds_str:
-        row["t_after_crop"] = row["t_before_crop"]
-        return row
-
-    tab_name = sanitize_filename(str(row.get("tab_name", "unknown")))
-    step_index = row.get("step_index", -1)
-    visible_label = sanitize_filename(str(row.get("visible_label", "") or "")[:40])
-
-    crop_dir = Path(output_base_dir) / "crops"
-    crop_dir.mkdir(parents=True, exist_ok=True)
-
-    crop_path = crop_dir / f"{tab_name}_step_{step_index}_{visible_label}.png"
-
-    capture_started = time.perf_counter()
-    screenshot_path = ""
-    try:
-        with tempfile.NamedTemporaryFile(
-            suffix=".png",
-            prefix=f"tb_step_{step_index}_",
-            delete=False,
-        ) as temp_file:
-            screenshot_path = temp_file.name
-        capture_full_screenshot(client, dev, screenshot_path)
-        ok = crop_image_by_bounds(
-            screenshot_path=screenshot_path,
-            bounds_str=bounds_str,
-            crop_path=str(crop_path),
-            shrink_px=2,
-        )
-        if ok:
-            row["crop_image_path"] = str(crop_path)
-            row["crop_image_saved"] = True
-        row["screenshot_capture_elapsed"] = round(time.perf_counter() - capture_started, 3)
-    except Exception as exc:
-        log(f"[IMAGE] crop failed step={step_index}: {exc}")
-    finally:
-        if screenshot_path:
-            try:
-                Path(screenshot_path).unlink(missing_ok=True)
-            except Exception:
-                pass
-        row["crop_elapsed_sec"] = round(time.perf_counter() - capture_started, 3)
-        if row.get("_step_mono_start"):
-            row["t_after_crop"] = round(time.monotonic() - float(row["_step_mono_start"]), 3)
-        else:
-            row["t_after_crop"] = row.get("t_before_crop", 0.0)
-        payload_source = str(row.get("focus_payload_source", "") or "").lower()
-        response_success = bool(row.get("get_focus_response_success", False))
-        focus_view_id = str(row.get("focus_view_id", "") or "").strip()
-        row["crop_focus_confidence_low"] = bool(
-            (payload_source == "top_level" and not response_success)
-            or (not focus_view_id and bool(row.get("crop_bounds", "")))
-        )
-
-    return row
-
-
-def add_rule_compare(df: pd.DataFrame) -> pd.DataFrame:
-    def compare_row(row) -> str:
-        visible = str(row.get("normalized_visible_label", "") or "").strip()
-        speech = str(row.get("normalized_announcement", "") or "").strip()
-
-        if row.get("status") == "ANCHOR":
-            return "SKIP"
-
-        if not visible and not speech:
-            return "EMPTY"
-        if visible == speech:
-            return "EXACT"
-        if visible and speech and (visible in speech or speech in visible):
-            return "PARTIAL"
-        return "DIFF"
-
-    df["rule_compare"] = df.apply(compare_row, axis=1)
-    return df
-
-
-def stringify_complex_columns(df: pd.DataFrame) -> pd.DataFrame:
-    for col in df.columns:
-        df[col] = df[col].apply(
-            lambda x: to_json_text(x) if isinstance(x, (list, dict)) else x
-        )
-    return df
-
-
-def insert_images_to_excel(excel_path: str, image_col_name: str = "crop_image") -> None:
-    if not ENABLE_IMAGE_INSERT_TO_EXCEL:
-        return
-
-    wb = load_workbook(excel_path)
-    ws = wb.active
-
-    headers = [cell.value for cell in ws[1]]
-    if image_col_name not in headers or "crop_image_path" not in headers:
-        wb.save(excel_path)
-        return
-
-    image_col_idx = headers.index(image_col_name) + 1
-    path_col_idx = headers.index("crop_image_path") + 1
-
-    col_letter = ws.cell(row=1, column=image_col_idx).column_letter
-
-    for row_idx in range(2, ws.max_row + 1):
-        path_value = ws.cell(row=row_idx, column=path_col_idx).value
-        if not path_value:
-            continue
-
-        img_path = Path(str(path_value))
-        if not img_path.exists():
-            continue
-
-        try:
-            img = XLImage(str(img_path))
-            img.width = 90
-            img.height = 90
-            ws.add_image(img, f"{col_letter}{row_idx}")
-            ws.row_dimensions[row_idx].height = 72
-        except Exception as exc:
-            log(f"[EXCEL] image insert failed row={row_idx}: {exc}")
-
-    ws.column_dimensions[col_letter].width = 16
-    wb.save(excel_path)
-
-
-def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> None:
-    df = pd.DataFrame(rows)
-    if df.empty:
-        log("[SAVE] skip: no rows")
-        return
-
-    df = add_rule_compare(df)
-    df = stringify_complex_columns(df)
-
-    ordered_cols = [
-        "tab_name",
-        "context_type",
-        "parent_step_index",
-        "overlay_entry_label",
-        "overlay_recovery_status",
-        "step_index",
-        "status",
-        "stop_reason",
-        "step_elapsed_sec",
-        "move_result",
-        "visible_label",
-        "normalized_visible_label",
-        "merged_announcement",
-        "normalized_announcement",
-        "rule_compare",
-        "focus_text",
-        "focus_content_description",
-        "focus_view_id",
-        "focus_bounds",
-        "crop_image",
-        "crop_image_path",
-        "crop_image_saved",
-        "partial_announcements",
-        "last_announcements",
-        "last_merged_announcement",
-        "focus_node",
-        "dump_tree_nodes",
-    ]
-
-    existing_cols = [c for c in ordered_cols if c in df.columns]
-    remaining_cols = [c for c in df.columns if c not in existing_cols]
-    df = df[existing_cols + remaining_cols]
-
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    df.to_excel(output_path, index=False)
-
-    if with_images and "crop_image" in df.columns:
-        insert_images_to_excel(output_path, image_col_name="crop_image")
-
-    log(f"[SAVE] saved excel: {output_path} rows={len(df)} with_images={with_images}")
 
 
 def _matches_overlay_candidate(step: dict[str, Any], entry: dict[str, Any]) -> bool:
