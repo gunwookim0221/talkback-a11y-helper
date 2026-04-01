@@ -18,6 +18,7 @@ from tb_runner.diagnostics import should_stop
 from tb_runner.excel_report import save_excel
 from tb_runner.image_utils import maybe_capture_focus_crop
 from tb_runner.logging_utils import log
+from tb_runner.perf_stats import ScenarioPerfStats, save_excel_with_perf
 from tb_runner.utils import make_main_fingerprint
 
 
@@ -328,6 +329,7 @@ def expand_overlay(
     output_path: str,
     output_base_dir: str,
     skip_entry_click: bool = False,
+    scenario_perf: ScenarioPerfStats | None = None,
 ) -> list[dict[str, Any]]:
     overlay_rows: list[dict[str, Any]] = []
     entry_label = str(entry_step.get("visible_label", "") or "").strip()
@@ -401,10 +403,10 @@ def expand_overlay(
         if should_end_overlay:
             overlay_row["status"] = "END"
             overlay_row["stop_reason"] = overlay_reason
-            save_excel(all_rows, output_path, with_images=False)
+            save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
             break
         if overlay_step_idx % CHECKPOINT_SAVE_EVERY_STEPS == 0:
-            save_excel(all_rows, output_path, with_images=False)
+            save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
 
     recovery_anchor = str(entry_step.get("normalized_visible_label", "") or "").strip()
     scenario_anchor = str(tab_cfg.get("anchor_name", "") or "").strip()
@@ -428,5 +430,5 @@ def expand_overlay(
 
     if overlay_rows:
         overlay_rows[-1]["overlay_recovery_status"] = recovery_status
-    save_excel(all_rows, output_path, with_images=False)
+    save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
     return overlay_rows

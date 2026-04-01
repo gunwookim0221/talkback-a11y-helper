@@ -20,6 +20,7 @@ from tb_runner.tab_logic import (
 from tb_runner.constants import DEV_SERIAL, LOG_LEVEL, SCRIPT_VERSION
 from tb_runner.excel_report import save_excel
 from tb_runner.logging_utils import log
+from tb_runner.perf_stats import RunPerfStats, format_perf_summary, save_excel_with_perf
 from tb_runner.scenario_config import TAB_CONFIGS
 from tb_runner.utils import generate_output_path
 
@@ -27,6 +28,7 @@ from tb_runner.utils import generate_output_path
 def main():
     log(f"[MAIN] script start (version={SCRIPT_VERSION}, log_level={LOG_LEVEL})")
     client = A11yAdbClient(dev_serial=DEV_SERIAL)
+    run_perf = RunPerfStats()
 
     all_rows: list[dict] = []
     output_path = generate_output_path()
@@ -43,6 +45,10 @@ def main():
                     f"tab='{tab_cfg.get('tab_name', '')}'"
                 )
                 continue
+            scenario_perf = run_perf.start_scenario(
+                scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+                tab_name=str(tab_cfg.get("tab_name", "") or ""),
+            )
             collect_tab_rows(
                 client,
                 DEV_SERIAL,
@@ -50,16 +56,20 @@ def main():
                 all_rows,
                 output_path,
                 output_base_dir,
+                scenario_perf=scenario_perf,
             )
 
     except Exception as exc:
         log(f"[FATAL] script interrupted: {exc}")
-        save_excel(all_rows, output_path, with_images=False)
+        run_perf.record_save_excel()
+        save_excel_with_perf(save_excel, all_rows, output_path, with_images=False)
         raise
 
     finally:
-        save_excel(all_rows, output_path, with_images=True)
+        run_perf.record_save_excel()
+        save_excel_with_perf(save_excel, all_rows, output_path, with_images=True)
         log("[MAIN] final save complete")
+        log(format_perf_summary("run_summary", run_perf.summary_dict()))
 
     log("[MAIN] script end")
 

@@ -19,6 +19,7 @@ from tb_runner.overlay_logic import (
     is_overlay_candidate,
     realign_focus_after_overlay,
 )
+from tb_runner.perf_stats import ScenarioPerfStats, format_perf_summary, save_excel_with_perf
 from tb_runner.tab_logic import stabilize_tab_selection
 from tb_runner.utils import make_main_fingerprint, make_overlay_entry_fingerprint
 
@@ -60,6 +61,7 @@ def collect_tab_rows(
     all_rows: list[dict],
     output_path: str,
     output_base_dir: str,
+    scenario_perf: ScenarioPerfStats | None = None,
 ) -> list[dict]:
     rows: list[dict] = []
 
@@ -76,7 +78,11 @@ def collect_tab_rows(
         }
         rows.append(row)
         all_rows.append(row)
-        save_excel(all_rows, output_path, with_images=False)
+        if scenario_perf is not None:
+            scenario_perf.record_row(row)
+            scenario_perf.finalize()
+            log(format_perf_summary("scenario_summary", scenario_perf.summary_dict()))
+        save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
         return rows
 
     anchor_start = time.perf_counter()
@@ -104,7 +110,9 @@ def collect_tab_rows(
 
     rows.append(anchor_row)
     all_rows.append(anchor_row)
-    save_excel(all_rows, output_path, with_images=False)
+    if scenario_perf is not None:
+        scenario_perf.record_row(anchor_row)
+    save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
 
     prev_fingerprint = make_main_fingerprint(anchor_row)
     previous_step_row: dict[str, Any] | None = anchor_row
@@ -206,11 +214,13 @@ def collect_tab_rows(
 
         rows.append(row)
         all_rows.append(row)
+        if scenario_perf is not None:
+            scenario_perf.record_row(row)
         row_fingerprint = make_main_fingerprint(row)
         if all(row_fingerprint):
             main_step_index_by_fingerprint[row_fingerprint] = step_idx
         if stop or (step_idx % CHECKPOINT_SAVE_EVERY_STEPS == 0):
-            save_excel(all_rows, output_path, with_images=False)
+            save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
 
         is_candidate, candidate_reason = is_overlay_candidate(row, tab_cfg)
         if is_candidate:
@@ -262,6 +272,9 @@ def collect_tab_rows(
                     )
 
                     if classification == "overlay":
+                        if scenario_perf is not None:
+                            scenario_perf.overlay_count += 1
+                        before_overlay_len = len(rows)
                         expand_overlay(
                             client=client,
                             dev=dev,
@@ -272,15 +285,23 @@ def collect_tab_rows(
                             output_path=output_path,
                             output_base_dir=output_base_dir,
                             skip_entry_click=True,
+                            scenario_perf=scenario_perf,
                         )
+                        if scenario_perf is not None:
+                            for overlay_row in rows[before_overlay_len:]:
+                                scenario_perf.record_row(overlay_row)
                         expanded_overlay_entries.add(fingerprint)
 
+                        if scenario_perf is not None:
+                            scenario_perf.realign_attempt_count += 1
                         realign_result = realign_focus_after_overlay(
                             client=client,
                             dev=dev,
                             entry_step=row,
                             known_step_index_by_fingerprint=main_step_index_by_fingerprint,
                         )
+                        if scenario_perf is not None and bool(realign_result.get("entry_reached")):
+                            scenario_perf.realign_success_count += 1
                         log(
                             f"[OVERLAY] realign status='{realign_result.get('status')}' "
                             f"entry_reached={realign_result.get('entry_reached')} "
@@ -324,5 +345,9 @@ def collect_tab_rows(
             log(f"[INFO] stop tab={tab_cfg['tab_name']} step={step_idx} reason={reason}")
             break
         previous_step_row = row
+
+    if scenario_perf is not None:
+        scenario_perf.finalize()
+        log(format_perf_summary("scenario_summary", scenario_perf.summary_dict()))
 
     return rows
