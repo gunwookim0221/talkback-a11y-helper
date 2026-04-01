@@ -774,6 +774,50 @@ def test_stabilize_tab_selection_prefers_touch_point_when_best_bounds_exist():
     assert all("type_" not in call for call in client.touch_point_calls)
 
 
+def test_stabilize_tab_selection_prefers_touch_point_when_best_bounds_is_dict():
+    client = StabilizeDummyClient(
+        verify_rows=[
+            {
+                "visible_label": "Devices",
+                "merged_announcement": "Selected, Devices",
+                "dump_tree_nodes": [
+                    {
+                        "text": "Devices",
+                        "contentDescription": "Selected, Devices, Tab 2 of 5",
+                        "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_devices",
+                        "selected": True,
+                        "boundsInScreen": "200,1800,400,1910",
+                    }
+                ],
+            }
+        ],
+        dump_nodes=[
+            {
+                "text": "Devices",
+                "contentDescription": "Devices",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_devices",
+                "className": "android.widget.Button",
+                "boundsInScreen": {"l": 200, "t": 1800, "r": 400, "b": 1910},
+            }
+        ],
+    )
+    tab_cfg = {
+        "scenario_id": "devices_main",
+        "tab_name": "(?i).*devices.*",
+        "tab_type": "b",
+        "tab": {"resource_id_regex": r"com\.samsung\.android\.oneconnect:id/menu_devices", "allow_resource_id_only": True},
+        "context_verify": {"type": "selected_bottom_tab", "announcement_regex": ".*Devices.*"},
+    }
+
+    result = script_test.stabilize_tab_selection(client=client, dev="SERIAL", tab_cfg=tab_cfg)
+
+    assert result["ok"] is True
+    assert client.touch_point_calls
+    assert client.touch_point_calls[0]["x"] == 300
+    assert client.touch_point_calls[0]["y"] == 1855
+    assert not any(call.get("type_") == "r" for call in client.select_calls if isinstance(call, dict))
+
+
 def test_stabilize_tab_selection_fallbacks_to_select_when_bounds_missing():
     client = StabilizeDummyClient(
         verify_rows=[
@@ -798,6 +842,48 @@ def test_stabilize_tab_selection_fallbacks_to_select_when_bounds_missing():
                 "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_devices",
                 "className": "android.widget.Button",
                 "boundsInScreen": "",
+            }
+        ],
+    )
+    tab_cfg = {
+        "scenario_id": "devices_main",
+        "tab_name": "(?i).*devices.*",
+        "tab_type": "b",
+        "tab": {"resource_id_regex": r"com\.samsung\.android\.oneconnect:id/menu_devices", "allow_resource_id_only": True},
+        "context_verify": {"type": "selected_bottom_tab", "announcement_regex": ".*Devices.*"},
+    }
+
+    result = script_test.stabilize_tab_selection(client=client, dev="SERIAL", tab_cfg=tab_cfg)
+
+    assert result["ok"] is True
+    assert client.touch_point_calls == []
+    assert any(call.get("type_") == "r" for call in client.select_calls if isinstance(call, dict))
+
+
+def test_stabilize_tab_selection_fallbacks_to_select_when_bounds_parse_fails():
+    client = StabilizeDummyClient(
+        verify_rows=[
+            {
+                "visible_label": "Devices",
+                "merged_announcement": "Selected, Devices",
+                "dump_tree_nodes": [
+                    {
+                        "text": "Devices",
+                        "contentDescription": "Selected, Devices, Tab 2 of 5",
+                        "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_devices",
+                        "selected": True,
+                        "boundsInScreen": "200,1800,400,1910",
+                    }
+                ],
+            }
+        ],
+        dump_nodes=[
+            {
+                "text": "Devices",
+                "contentDescription": "Devices",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_devices",
+                "className": "android.widget.Button",
+                "boundsInScreen": "{bad}",
             }
         ],
     )

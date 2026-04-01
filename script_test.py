@@ -3,6 +3,7 @@ import os
 import re
 import tempfile
 import time
+import ast
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.7.4"
+SCRIPT_VERSION = "1.7.5"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -307,13 +308,35 @@ def to_json_text(value: Any) -> str:
         return str(value)
 
 
-def parse_bounds_str(bounds_str: str) -> tuple[int, int, int, int] | None:
-    if not bounds_str:
+def parse_bounds_str(bounds_value: Any) -> tuple[int, int, int, int] | None:
+    if bounds_value is None:
         return None
     try:
-        parts = [int(x.strip()) for x in bounds_str.split(",")]
-        if len(parts) != 4:
-            return None
+        parts: list[int]
+        if isinstance(bounds_value, dict):
+            l = int(bounds_value.get("l"))
+            t = int(bounds_value.get("t"))
+            r = int(bounds_value.get("r"))
+            b = int(bounds_value.get("b"))
+            parts = [l, t, r, b]
+        else:
+            bounds_str = str(bounds_value).strip()
+            if not bounds_str:
+                return None
+            if bounds_str.startswith("{") and bounds_str.endswith("}"):
+                parsed_dict = ast.literal_eval(bounds_str)
+                if isinstance(parsed_dict, dict):
+                    l = int(parsed_dict.get("l"))
+                    t = int(parsed_dict.get("t"))
+                    r = int(parsed_dict.get("r"))
+                    b = int(parsed_dict.get("b"))
+                    parts = [l, t, r, b]
+                else:
+                    return None
+            else:
+                parts = [int(x.strip()) for x in bounds_str.split(",")]
+                if len(parts) != 4:
+                    return None
         l, t, r, b = parts
         if r <= l or b <= t:
             return None
@@ -1585,8 +1608,13 @@ def stabilize_tab_selection(
         if best and best.get("candidate", {}).get("resource_id"):
             candidate = best.get("candidate", {}) or {}
             best_resource = str(candidate.get("resource_id", "") or "")
-            best_bounds = str(candidate.get("bounds", "") or "")
-            parsed_bounds = parse_bounds_str(best_bounds)
+            raw_bounds = candidate.get("bounds", "")
+            best_bounds = str(raw_bounds or "")
+            parsed_bounds = parse_bounds_str(raw_bounds)
+            center_x: int | None = None
+            center_y: int | None = None
+            touch_eligible = bool(parsed_bounds)
+            debug_reason = ""
             if parsed_bounds:
                 l, t, r, b = parsed_bounds
                 center_x = int((l + r) / 2)
@@ -1600,6 +1628,7 @@ def stabilize_tab_selection(
                 if not selected:
                     tab_action_mode = "select_fallback"
                     tab_action_reason = "touch_failed"
+                    debug_reason = tab_action_reason
                     resource_pattern = f"^{re.escape(best_resource)}$"
                     selected = client.select(dev=dev, name=resource_pattern, type_="r", wait_=5)
                     log(
@@ -1609,12 +1638,23 @@ def stabilize_tab_selection(
             else:
                 tab_action_mode = "select_fallback"
                 tab_action_reason = "missing_bounds"
+                debug_reason = "bounds_parse_failed"
                 resource_pattern = f"^{re.escape(best_resource)}$"
                 selected = client.select(dev=dev, name=resource_pattern, type_="r", wait_=5)
                 log(
                     f"[TAB][action] scenario='{scenario_id}' mode='select_fallback' "
                     f"reason='{tab_action_reason}' resource='{best_resource}' bounds='{best_bounds}'"
                 )
+            parsed_bounds_text = (
+                f"{parsed_bounds[0]},{parsed_bounds[1]},{parsed_bounds[2]},{parsed_bounds[3]}" if parsed_bounds else ""
+            )
+            center_text = f"{center_x},{center_y}" if center_x is not None and center_y is not None else ""
+            debug_reason_text = f" reason='{debug_reason}'" if debug_reason else ""
+            log(
+                f"[TAB][action][debug] raw_bounds='{raw_bounds}' parsed_bounds='{parsed_bounds_text}' "
+                f"center='{center_text}' touch_eligible={touch_eligible}{debug_reason_text}",
+                level="DEBUG",
+            )
 
         if not selected:
             selected = client.touch(
