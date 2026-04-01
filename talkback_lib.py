@@ -35,7 +35,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.8"
+CLIENT_ALGORITHM_VERSION = "1.7.10"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -59,6 +59,7 @@ class A11yAdbClient:
         self.last_dump_metadata: dict[str, Any] = {}
         self.last_smart_nav_result: dict[str, Any] = {}
         self.last_smart_nav_terminal: bool = False
+        self.last_target_action_result: dict[str, Any] = {}
         self._helper_status_cache: dict[str, Any] = {
             "ts": 0.0,
             "serial": None,
@@ -855,6 +856,7 @@ class A11yAdbClient:
         focusable: bool = None,
     ) -> bool:
         if not self.check_helper_status(dev=dev):
+            self.last_target_action_result = {"success": False, "reason": "helper_unavailable"}
             return False
         self.last_announcements = []
         self.last_merged_announcement = ""
@@ -882,10 +884,12 @@ class A11yAdbClient:
                 extras,
             )
             result = self._read_log_result(dev, "TARGET_ACTION_RESULT", req_id)
+            self.last_target_action_result = result if isinstance(result, dict) else {"success": False, "reason": "unknown"}
             if bool(result.get("success")):
                 self._wait_for_speech_if_needed(dev)
                 return True
             time.sleep(0.5)
+        self.last_target_action_result = {"success": False, "reason": "timeout"}
         return False
 
     def touch_point(self, dev, x: int, y: int) -> bool:
@@ -939,9 +943,11 @@ class A11yAdbClient:
                 extras,
             )
             result = self._read_log_result(dev, "TARGET_ACTION_RESULT", req_id)
+            self.last_target_action_result = result if isinstance(result, dict) else {"success": False, "reason": "unknown"}
             if bool(result.get("success")):
                 return True
             time.sleep(0.5)
+        self.last_target_action_result = {"success": False, "reason": "timeout"}
         return False
 
     def scroll(self, dev, direction, step_=50, time_=1000, bounds_=None) -> bool:

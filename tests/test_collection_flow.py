@@ -301,3 +301,59 @@ def test_open_scenario_pre_navigation_retry_then_success(monkeypatch):
 
     assert ok is True
     assert attempts["count"] == 2
+
+
+def test_open_scenario_pre_navigation_logs_reason_on_retry_and_failure(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+
+    client = DummyClient([])
+
+    def _select(**kwargs):
+        client.last_target_action_result = {"reason": "ACTION_CLICK failed (resourceId=id.settings)"}
+        return False
+
+    client.select = _select
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "select", "target": ".*Settings.*", "type": "a"}],
+        "pre_navigation_retry_count": 2,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is False
+    assert any("retry step=1 attempt=1/2 reason='ACTION_CLICK failed (resourceId=id.settings)'" in line for line in logs)
+    assert any("failed reason='action_failed' detail='ACTION_CLICK failed (resourceId=id.settings)' step=1" in line for line in logs)
+
+
+def test_open_scenario_pre_navigation_logs_reason_on_success(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+
+    client = DummyClient([_anchor_row()])
+
+    def _select(**kwargs):
+        client.last_target_action_result = {"reason": "moved_to_target"}
+        return True
+
+    client.select = _select
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "select", "target": ".*Settings.*", "type": "a"}],
+        "pre_navigation_retry_count": 2,
+        "pre_navigation_wait_seconds": 0.1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert any("success step=1 reason='moved_to_target'" in line for line in logs)
