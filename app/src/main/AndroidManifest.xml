@@ -41,6 +41,7 @@
                 <action android:name="com.iotpart.sqe.talkbackhelper.DUMP_TREE" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.FOCUS_TARGET" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.CLICK_TARGET" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.TOUCH_BOUNDS_CENTER_TARGET" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.CHECK_TARGET" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.NEXT" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.PREV" />
