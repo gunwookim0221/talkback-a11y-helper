@@ -405,7 +405,7 @@ class A11yAdbClient:
             )
         except Exception:
             return False
-    
+
         return "talkback" in enabled_services.lower()
 
     def dump_tree(self, dev: Any = None, wait_seconds: float = 5.0) -> list[dict[str, Any]]:
@@ -460,7 +460,7 @@ class A11yAdbClient:
             return parsed
 
         raise RuntimeError("DUMP_TREE JSON 형식이 올바르지 않습니다.")
-        
+
 
     @staticmethod
     def _split_and_conditions(name: Any, type_: str) -> tuple[str, str, str | None, str | None]:
