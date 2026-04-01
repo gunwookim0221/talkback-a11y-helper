@@ -16,7 +16,7 @@ from talkback_lib import A11yAdbClient
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.7.3"
+SCRIPT_VERSION = "1.7.4"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -1580,9 +1580,41 @@ def stabilize_tab_selection(
         )
 
         selected = False
+        tab_action_mode = "legacy_touch"
+        tab_action_reason = ""
         if best and best.get("candidate", {}).get("resource_id"):
-            resource_pattern = f"^{re.escape(str(best['candidate']['resource_id']))}$"
-            selected = client.select(dev=dev, name=resource_pattern, type_="r", wait_=5)
+            candidate = best.get("candidate", {}) or {}
+            best_resource = str(candidate.get("resource_id", "") or "")
+            best_bounds = str(candidate.get("bounds", "") or "")
+            parsed_bounds = parse_bounds_str(best_bounds)
+            if parsed_bounds:
+                l, t, r, b = parsed_bounds
+                center_x = int((l + r) / 2)
+                center_y = int((t + b) / 2)
+                tab_action_mode = "touch"
+                log(
+                    f"[TAB][action] scenario='{scenario_id}' mode='touch' "
+                    f"resource='{best_resource}' bounds='{best_bounds}' center='{center_x},{center_y}'"
+                )
+                selected = client.touch_point(dev=dev, x=center_x, y=center_y)
+                if not selected:
+                    tab_action_mode = "select_fallback"
+                    tab_action_reason = "touch_failed"
+                    resource_pattern = f"^{re.escape(best_resource)}$"
+                    selected = client.select(dev=dev, name=resource_pattern, type_="r", wait_=5)
+                    log(
+                        f"[TAB][action] scenario='{scenario_id}' mode='select_fallback' "
+                        f"reason='{tab_action_reason}' resource='{best_resource}'"
+                    )
+            else:
+                tab_action_mode = "select_fallback"
+                tab_action_reason = "missing_bounds"
+                resource_pattern = f"^{re.escape(best_resource)}$"
+                selected = client.select(dev=dev, name=resource_pattern, type_="r", wait_=5)
+                log(
+                    f"[TAB][action] scenario='{scenario_id}' mode='select_fallback' "
+                    f"reason='{tab_action_reason}' resource='{best_resource}' bounds='{best_bounds}'"
+                )
 
         if not selected:
             selected = client.touch(
@@ -1591,6 +1623,16 @@ def stabilize_tab_selection(
                 type_=str(tab_cfg.get("tab_type", "") or ""),
                 wait_=5,
             )
+            if tab_action_mode == "legacy_touch":
+                log(
+                    f"[TAB][action] scenario='{scenario_id}' mode='legacy_touch' "
+                    f"reason='no_best_candidate_or_resource'"
+                )
+            else:
+                log(
+                    f"[TAB][action] scenario='{scenario_id}' mode='legacy_touch' "
+                    f"reason='fallback_after_{tab_action_mode}'"
+                )
 
         verify_row = client.collect_focus_step(
             dev=dev,

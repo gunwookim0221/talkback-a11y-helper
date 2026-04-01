@@ -478,12 +478,14 @@ def test_choose_best_anchor_candidate_prefers_top_left_for_tie():
 
 
 class StabilizeDummyClient:
-    def __init__(self, verify_rows, dump_nodes=None, select_result=True):
+    def __init__(self, verify_rows, dump_nodes=None, select_result=True, touch_point_result=True):
         self.verify_rows = list(verify_rows)
         self.select_calls = []
         self.dump_nodes = dump_nodes
         self.dump_tree_calls = 0
         self.select_result = select_result
+        self.touch_point_result = touch_point_result
+        self.touch_point_calls = []
 
     def dump_tree(self, **_kwargs):
         self.dump_tree_calls += 1
@@ -507,6 +509,10 @@ class StabilizeDummyClient:
     def touch(self, **kwargs):
         self.select_calls.append({"touch": True, **kwargs})
         return self.select_result
+
+    def touch_point(self, **kwargs):
+        self.touch_point_calls.append(kwargs)
+        return self.touch_point_result
 
     def collect_focus_step(self, **kwargs):
         if self.verify_rows:
@@ -722,6 +728,136 @@ def test_stabilize_tab_selection_requires_selected_bottom_tab_before_anchor():
 
     assert result["ok"] is True
     assert result["verify_context"]["ok"] is True
+
+
+def test_stabilize_tab_selection_prefers_touch_point_when_best_bounds_exist():
+    client = StabilizeDummyClient(
+        verify_rows=[
+            {
+                "visible_label": "Devices",
+                "merged_announcement": "Selected, Devices",
+                "dump_tree_nodes": [
+                    {
+                        "text": "Devices",
+                        "contentDescription": "Selected, Devices, Tab 2 of 5",
+                        "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_devices",
+                        "selected": True,
+                        "boundsInScreen": "200,1800,400,1910",
+                    }
+                ],
+            }
+        ],
+        dump_nodes=[
+            {
+                "text": "Devices",
+                "contentDescription": "Devices",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_devices",
+                "className": "android.widget.Button",
+                "boundsInScreen": "200,1800,400,1910",
+            }
+        ],
+    )
+    tab_cfg = {
+        "scenario_id": "devices_main",
+        "tab_name": "(?i).*devices.*",
+        "tab_type": "b",
+        "tab": {"resource_id_regex": r"com\.samsung\.android\.oneconnect:id/menu_devices", "allow_resource_id_only": True},
+        "context_verify": {"type": "selected_bottom_tab", "announcement_regex": ".*Devices.*"},
+    }
+
+    result = script_test.stabilize_tab_selection(client=client, dev="SERIAL", tab_cfg=tab_cfg)
+
+    assert result["ok"] is True
+    assert client.touch_point_calls
+    assert client.touch_point_calls[0]["x"] == 300
+    assert client.touch_point_calls[0]["y"] == 1855
+    assert all("type_" not in call for call in client.touch_point_calls)
+
+
+def test_stabilize_tab_selection_fallbacks_to_select_when_bounds_missing():
+    client = StabilizeDummyClient(
+        verify_rows=[
+            {
+                "visible_label": "Devices",
+                "merged_announcement": "Selected, Devices",
+                "dump_tree_nodes": [
+                    {
+                        "text": "Devices",
+                        "contentDescription": "Selected, Devices, Tab 2 of 5",
+                        "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_devices",
+                        "selected": True,
+                        "boundsInScreen": "200,1800,400,1910",
+                    }
+                ],
+            }
+        ],
+        dump_nodes=[
+            {
+                "text": "Devices",
+                "contentDescription": "Devices",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_devices",
+                "className": "android.widget.Button",
+                "boundsInScreen": "",
+            }
+        ],
+    )
+    tab_cfg = {
+        "scenario_id": "devices_main",
+        "tab_name": "(?i).*devices.*",
+        "tab_type": "b",
+        "tab": {"resource_id_regex": r"com\.samsung\.android\.oneconnect:id/menu_devices", "allow_resource_id_only": True},
+        "context_verify": {"type": "selected_bottom_tab", "announcement_regex": ".*Devices.*"},
+    }
+
+    result = script_test.stabilize_tab_selection(client=client, dev="SERIAL", tab_cfg=tab_cfg)
+
+    assert result["ok"] is True
+    assert client.touch_point_calls == []
+    assert any(call.get("type_") == "r" for call in client.select_calls if isinstance(call, dict))
+
+
+def test_stabilize_tab_selection_fallbacks_to_select_when_touch_point_fails():
+    client = StabilizeDummyClient(
+        verify_rows=[
+            {
+                "visible_label": "Devices",
+                "merged_announcement": "Selected, Devices",
+                "dump_tree_nodes": [
+                    {
+                        "text": "Devices",
+                        "contentDescription": "Selected, Devices, Tab 2 of 5",
+                        "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_devices",
+                        "selected": True,
+                        "boundsInScreen": "200,1800,400,1910",
+                    }
+                ],
+            }
+        ],
+        dump_nodes=[
+            {
+                "text": "Devices",
+                "contentDescription": "Devices",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_devices",
+                "className": "android.widget.Button",
+                "boundsInScreen": "200,1800,400,1910",
+            }
+        ],
+        touch_point_result=False,
+        select_result=True,
+    )
+    tab_cfg = {
+        "scenario_id": "devices_main",
+        "tab_name": "(?i).*devices.*",
+        "tab_type": "b",
+        "tab": {"resource_id_regex": r"com\.samsung\.android\.oneconnect:id/menu_devices", "allow_resource_id_only": True},
+        "context_verify": {"type": "selected_bottom_tab", "announcement_regex": ".*Devices.*"},
+    }
+
+    result = script_test.stabilize_tab_selection(client=client, dev="SERIAL", tab_cfg=tab_cfg)
+
+    assert result["ok"] is True
+    assert client.touch_point_calls
+    assert any(call.get("type_") == "r" for call in client.select_calls if isinstance(call, dict))
 
 
 def test_normalize_tab_config_keeps_backward_compatibility():

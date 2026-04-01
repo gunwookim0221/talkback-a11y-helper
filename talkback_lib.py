@@ -888,6 +888,18 @@ class A11yAdbClient:
             time.sleep(0.5)
         return False
 
+    def touch_point(self, dev, x: int, y: int) -> bool:
+        if not self.check_helper_status(dev=dev):
+            return False
+        try:
+            self.last_announcements = []
+            self.last_merged_announcement = ""
+            self._run(["shell", "input", "tap", str(int(x)), str(int(y))], dev=dev)
+            self._wait_for_speech_if_needed(dev)
+            return True
+        except Exception:
+            return False
+
     def select(
         self,
         dev,
