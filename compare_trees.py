@@ -33,7 +33,7 @@ def get_default_device():
         )
         lines = result.stdout.strip().split('\n')[1:]
         devices = [line.split('\t')[0] for line in lines if '\tdevice' in line]
-        
+
         if devices:
             print(f"[*] 연결된 단말기 자동 감지: {devices[0]}")
             return devices[0]
@@ -47,14 +47,14 @@ def get_default_device():
 def get_legacy_tree(serial, local_path):
     print("\n[*] 1. 일반 트리를 추출합니다... (UI Automator 2 방식)")
     print("    (단말기에 앱 화면을 '일반 모드'로 띄워주세요)")
-    
+
     try:
         d = u2.connect(serial)
         xml_content = d.dump_hierarchy()
-        
+
         with open(local_path, "w", encoding="utf-8") as f:
             f.write(xml_content)
-            
+
         print(f"  -> [+] '{os.path.basename(local_path)}' 다운로드 완료 (UI Automator 2 적용)")
         return True
     except Exception as e:
@@ -70,11 +70,11 @@ def get_a11y_tree(serial, local_path):
                 return False
 
         # 헬퍼 앱이 병합 및 정렬(Spatial Sorting)을 완료한 완벽한 리스트를 반환합니다.
-        a11y_data = client.dump_tree(serial) 
-        
+        a11y_data = client.dump_tree(serial)
+
         with open(local_path, "w", encoding="utf-8") as f:
             json.dump(a11y_data, f, ensure_ascii=False, indent=2)
-            
+
         print(f"  -> [+] '{os.path.basename(local_path)}' 다운로드 완료")
         return True
     except Exception as e:
@@ -107,7 +107,7 @@ def compare_and_summarize(xml_path, json_path):
         with open(json_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
             json_nodes = len(data) if isinstance(data, list) else 1
-            
+
             if isinstance(data, list):
                 for item in data:
                     if item.get('clickable') is True or item.get('isClickable') is True:
@@ -124,7 +124,7 @@ def compare_and_summarize(xml_path, json_path):
     print(f"  - 기존 UI 덤프 (XML) : {xml_nodes}개")
     print(f"  - 헬퍼 접근성 (JSON) : {json_nodes}개 (TalkBack 스와이프 횟수와 동일)")
     print(f"  💡 분석: TalkBack에 불필요한 껍데기 노드 {filtered_count}개(약 {compression_rate:.1f}%)가 필터링/병합되었습니다.")
-    
+
     print(f"\n👆 [클릭 가능(Clickable - 파란색) 노드 비교]")
     print(f"  - 기존 UI 덤프 (XML) : {xml_clickable}개")
     print(f"  - 헬퍼 접근성 (JSON) : {json_clickable}개")
@@ -136,7 +136,7 @@ def compare_and_summarize(xml_path, json_path):
 def extract_valid_bounds(bounds, pattern):
     x_start, y_start, x_end, y_end = 0, 0, 0, 0
     valid = False
-    
+
     if isinstance(bounds, dict):
         x_start, y_start = bounds.get('l', 0), bounds.get('t', 0)
         x_end, y_end = bounds.get('r', 0), bounds.get('b', 0)
@@ -146,7 +146,7 @@ def extract_valid_bounds(bounds, pattern):
         if match:
             x_start, y_start, x_end, y_end = map(int, match.groups())
             valid = True
-            
+
     if valid:
         x1, x2 = min(x_start, x_end), max(x_start, x_end)
         y1, y2 = min(y_start, y_end), max(y_start, y_end)
@@ -156,10 +156,10 @@ def extract_valid_bounds(bounds, pattern):
 
 def visualize_trees(serial, output_dir, timestamp, xml_file, json_file, json_clickable_file, json_focusable_file):
     print("\n[*] 3. 시각화 자료(이미지)를 생성합니다... (반투명 오버레이 적용)")
-    
+
     screenshot_path = os.path.join(output_dir, f"{timestamp}_raw_screenshot.png")
     remote_screenshot = "/sdcard/raw_screenshot.png"
-    
+
     subprocess.run(f"adb -s {serial} shell screencap -p {remote_screenshot}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run(f"adb -s {serial} pull {remote_screenshot} {screenshot_path}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run(f"adb -s {serial} shell rm {remote_screenshot}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -169,7 +169,7 @@ def visualize_trees(serial, output_dir, timestamp, xml_file, json_file, json_cli
         return
 
     bounds_pattern = re.compile(r'\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]')
-    
+
     try:
         tree = ET.parse(xml_file)
     except Exception as e:
@@ -249,14 +249,14 @@ def visualize_trees(serial, output_dir, timestamp, xml_file, json_file, json_cli
             a11y_data = json.load(f)
         nodes = a11y_data if isinstance(a11y_data, list) else a11y_data.get('nodes', [])
         count = 0
-        
+
         # 순서 확인을 위해 번호표도 같이 그려줍니다. (선택사항)
         try:
             from PIL import ImageFont
             font = ImageFont.load_default()
         except:
             font = None
-            
+
         for i, node in enumerate(nodes):
             bounds = node.get('boundsInScreen') or node.get('bounds')
             box = extract_valid_bounds(bounds, bounds_pattern)
@@ -265,7 +265,7 @@ def visualize_trees(serial, output_dir, timestamp, xml_file, json_file, json_cli
                 if font:
                     draw.text((box[0] + 5, box[1] + 5), str(i+1), fill=(0, 255, 0, 255), font=font)
                 count += 1
-                
+
         img_a11y = Image.alpha_composite(img_a11y, overlay)
         out_path = os.path.join(output_dir, f"{timestamp}_a11y_view.png")
         img_a11y.save(out_path)
@@ -314,12 +314,12 @@ def visualize_trees(serial, output_dir, timestamp, xml_file, json_file, json_cli
         print(f"  -> [+] '{os.path.basename(out_path)}' 생성 완료 (마젠타색 박스: {count}개)")
     except Exception as e:
         print(f"  [-] JSON Focusable 이미지 생성 실패: {e}")
-        
+
     print(f"\n🎉 모든 작업이 완료되었습니다! '{output_dir}' 폴더를 확인해 보세요.")
 
 def main():
     print("🚀 앱 화면 구조 자동 추출 및 비교 도구 시작")
-    
+
     dev_serial = get_default_device()
     if not dev_serial:
         return
@@ -335,38 +335,38 @@ def main():
 
     # UI Automator 2 덤프
     get_legacy_tree(dev_serial, xml_file)
-    
+
     print("\n" + "#" * 50)
     print("  ⏳ [대기 중] 단말기에서 'TalkBack'을 켜주세요.")
     print("     (화면 상태가 바뀐 것을 확인한 후 아래에서 엔터를 치세요)")
     print("#" * 50)
     input("  >> 준비가 완료되면 [Enter] 키를 누르세요...")
-    
+
     # 헬퍼 앱 덤프 (이미 그룹핑 및 정렬이 완료된 상태!)
     success = get_a11y_tree(dev_serial, json_file)
-    
+
     if success and os.path.exists(xml_file) and os.path.exists(json_file):
         compare_and_summarize(xml_file, json_file)
-        
+
         try:
             with open(json_file, 'r', encoding='utf-8') as f:
                 a11y_data = json.load(f)
             nodes = a11y_data if isinstance(a11y_data, list) else a11y_data.get('nodes', [])
-            
+
             # 헬퍼가 걸러준 노드는 100% TalkBack이 읽는 노드입니다.
             # 이 중 클릭 가능한 것(Actionable)은 파란색 파일로 분류
             clickable_nodes = [n for n in nodes if n.get('clickable') is True or n.get('isClickable') is True]
             with open(json_clickable_file, 'w', encoding='utf-8') as f:
                 json.dump(clickable_nodes, f, ensure_ascii=False, indent=2)
-                
+
             # 클릭 불가능한 나머지 모든 객체(읽기 전용 텍스트 덩어리 등)는 마젠타색 파일로 분류
             focusable_nodes = [n for n in nodes if not (n.get('clickable') is True or n.get('isClickable') is True)]
             with open(json_focusable_file, 'w', encoding='utf-8') as f:
                 json.dump(focusable_nodes, f, ensure_ascii=False, indent=2)
-                
+
         except Exception as e:
             print(f"[-] 데이터 분류 중 오류: {e}")
-        
+
         # 7장의 시각화 실행 (초록색 뷰에 정렬 순서 번호 추가 포함)
         visualize_trees(dev_serial, output_dir, timestamp, xml_file, json_file, json_clickable_file, json_focusable_file)
     else:

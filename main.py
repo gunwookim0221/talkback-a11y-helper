@@ -6,7 +6,7 @@ from talkback_lib import A11yAdbClient
 
 def main() -> None:
     client = A11yAdbClient()
-    
+
     # 1. 연결된 모든 장치 리스트 가져오기
     try:
         devices = client._run(["devices"]).strip().split('\n')[1:]
@@ -32,7 +32,7 @@ def main() -> None:
         sys.exit(1)
 
     print(f"=== TalkBack 발화 검증 테스트 시작 (Target: {target_name}) ===")
-    
+
     # 스크롤 탐색 시작
     found = client.scrollFind(dev_serial, target_name, direction_="down")
     if not found:

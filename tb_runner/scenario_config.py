@@ -1,485 +1,485 @@
 TAB_CONFIGS = [
 
-    {
+    {
 
-        "scenario_id": "home_main",
+        "scenario_id": "home_main",
 
-        "tab_name": "(?i).*home.*",
+        "tab_name": "(?i).*home.*",
 
-        "tab_type": "b",
+        "tab_type": "b",
 
-        "tab": {
+        "tab": {
 
-            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_favorites",
+            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_favorites",
 
-            "text_regex": "(?i).*home.*",
+            "text_regex": "(?i).*home.*",
 
-            "announcement_regex": "(?i).*(selected|선택됨)?.*home.*",
+            "announcement_regex": "(?i).*(selected|선택됨)?.*home.*",
 
-            "tie_breaker": "bottom_nav_left_to_right",
+            "tie_breaker": "bottom_nav_left_to_right",
 
-            "allow_resource_id_only": True,
+            "allow_resource_id_only": True,
 
-        },
+        },
 
-        "anchor_name": "(?i).*location.*qr.*code.*",
+        "anchor_name": "(?i).*location.*qr.*code.*",
 
-        "anchor_type": "b",
+        "anchor_type": "b",
 
-        "anchor": {
+        "anchor": {
 
-            "text_regex": "(?i).*location.*qr.*code.*",
+            "text_regex": "(?i).*location.*qr.*code.*",
 
-            "announcement_regex": "(?i).*qr.*code.*",
+            "announcement_regex": "(?i).*qr.*code.*",
 
-            "tie_breaker": "top_left",
+            "tie_breaker": "top_left",
 
-        },
+        },
 
-        "context_verify": {
+        "context_verify": {
 
-            "type": "selected_bottom_tab",
+            "type": "selected_bottom_tab",
 
-            "announcement_regex": "(?i).*(selected|선택됨).*home.*",
+            "announcement_regex": "(?i).*(selected|선택됨).*home.*",
 
-        },
+        },
 
-        "max_steps": 5,
+        "max_steps": 5,
 
-        "enabled": False,
+        "enabled": False,
 
-        "overlay_policy": {
+        "overlay_policy": {
 
-            "allow_candidates": [
+            "allow_candidates": [
 
-                {
+                {
 
-                    "resource_id": "com.samsung.android.oneconnect:id/add_menu_button",
+                    "resource_id": "com.samsung.android.oneconnect:id/add_menu_button",
 
-                    "label": "Add",
+                    "label": "Add",
 
-                },
+                },
 
-                {
+                {
 
-                    "resource_id": "com.samsung.android.oneconnect:id/more_menu_button",
+                    "resource_id": "com.samsung.android.oneconnect:id/more_menu_button",
 
-                    "label": "More options",
+                    "label": "More options",
 
-                },
+                },
 
-            ],
+            ],
 
-            "block_candidates": [],
+            "block_candidates": [],
 
-        },
+        },
 
-    },
+    },
 
-    {
+    {
 
-        "scenario_id": "devices_main",
+        "scenario_id": "devices_main",
 
-        "tab_name": "(?i).*devices.*",
+        "tab_name": "(?i).*devices.*",
 
-        "tab_type": "b",
+        "tab_type": "b",
 
-        "tab": {
+        "tab": {
 
-            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_devices",
+            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_devices",
 
-            "text_regex": "(?i).*devices.*",
+            "text_regex": "(?i).*devices.*",
 
-            "announcement_regex": "(?i).*(selected|선택됨)?.*devices.*",
+            "announcement_regex": "(?i).*(selected|선택됨)?.*devices.*",
 
-            "tie_breaker": "bottom_nav_left_to_right",
+            "tie_breaker": "bottom_nav_left_to_right",
 
-            "allow_resource_id_only": True,
+            "allow_resource_id_only": True,
 
-        },
+        },
 
-        "anchor_name": "(?i).*location.*qr.*code.*",
+        "anchor_name": "(?i).*location.*qr.*code.*",
 
-        "anchor_type": "b",
+        "anchor_type": "b",
 
-        "anchor": {
+        "anchor": {
 
-            "text_regex": "(?i).*location.*qr.*code.*",
+            "text_regex": "(?i).*location.*qr.*code.*",
 
-            "announcement_regex": "(?i).*qr.*code.*",
+            "announcement_regex": "(?i).*qr.*code.*",
 
-            "tie_breaker": "top_left",
+            "tie_breaker": "top_left",
 
-        },
+        },
 
-        "context_verify": {
+        "context_verify": {
 
-            "type": "selected_bottom_tab",
+            "type": "selected_bottom_tab",
 
-            "announcement_regex": "(?i).*(selected|선택됨).*devices.*",
+            "announcement_regex": "(?i).*(selected|선택됨).*devices.*",
 
-        },
+        },
 
-        "enabled": False,
+        "enabled": False,
 
-        "max_steps": 5,
+        "max_steps": 5,
 
-        "overlay_policy": {
+        "overlay_policy": {
 
-            "allow_candidates": [
+            "allow_candidates": [
 
-                {
+                {
 
-                    "resource_id": "com.samsung.android.oneconnect:id/more_menu_button",
+                    "resource_id": "com.samsung.android.oneconnect:id/more_menu_button",
 
-                    "label": "More options",
+                    "label": "More options",
 
-                }
+                }
 
-            ],
+            ],
 
-            "block_candidates": [
+            "block_candidates": [
 
-                {
+                {
 
-                    "resource_id": "com.samsung.android.oneconnect:id/add_menu_button",
+                    "resource_id": "com.samsung.android.oneconnect:id/add_menu_button",
 
-                    "label": "Add",
+                    "label": "Add",
 
-                }
+                }
 
-            ],
+            ],
 
-        },
+        },
 
-    },
+    },
 
-    {
+    {
 
-        "scenario_id": "life_main",
+        "scenario_id": "life_main",
 
-        "tab_name": "(?i).*life.*",
+        "tab_name": "(?i).*life.*",
 
-        "tab_type": "b",
+        "tab_type": "b",
 
-        "tab": {
+        "tab": {
 
-            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_services",
+            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_services",
 
-            "text_regex": "(?i).*life.*",
+            "text_regex": "(?i).*life.*",
 
-            "announcement_regex": "(?i).*(selected|선택됨)?.*life.*",
+            "announcement_regex": "(?i).*(selected|선택됨)?.*life.*",
 
-            "tie_breaker": "bottom_nav_left_to_right",
+            "tie_breaker": "bottom_nav_left_to_right",
 
-            "allow_resource_id_only": True,
+            "allow_resource_id_only": True,
 
-        },
+        },
 
-        "anchor_name": "(?i).*location.*qr.*code.*",
+        "anchor_name": "(?i).*location.*qr.*code.*",
 
-        "anchor_type": "b",
+        "anchor_type": "b",
 
-        "anchor": {
+        "anchor": {
 
-            "text_regex": "(?i).*location.*qr.*code.*",
+            "text_regex": "(?i).*location.*qr.*code.*",
 
-            "announcement_regex": "(?i).*qr.*code.*",
+            "announcement_regex": "(?i).*qr.*code.*",
 
-            "tie_breaker": "top_left",
+            "tie_breaker": "top_left",
 
-        },
+        },
 
-        "context_verify": {
+        "context_verify": {
 
-            "type": "selected_bottom_tab",
+            "type": "selected_bottom_tab",
 
-            "announcement_regex": "(?i).*(selected|선택됨).*life.*",
+            "announcement_regex": "(?i).*(selected|선택됨).*life.*",
 
-        },
+        },
 
-        "enabled": False,
+        "enabled": False,
 
-        "max_steps": 5,
+        "max_steps": 5,
 
-        "overlay_policy": {
+        "overlay_policy": {
 
-            "allow_candidates": [
+            "allow_candidates": [
 
-                {
+                {
 
-                    "resource_id": "com.samsung.android.oneconnect:id/more_menu_button",
+                    "resource_id": "com.samsung.android.oneconnect:id/more_menu_button",
 
-                    "label": "More options",
+                    "label": "More options",
 
-                }
+                }
 
-            ],
+            ],
 
-            "block_candidates": [
+            "block_candidates": [
 
-                {
+                {
 
-                    "resource_id": "com.samsung.android.oneconnect:id/add_menu_button",
+                    "resource_id": "com.samsung.android.oneconnect:id/add_menu_button",
 
-                    "label": "Add",
+                    "label": "Add",
 
-                }
+                }
 
-            ],
+            ],
 
-        },
+        },
 
-    },
+    },
 
-    {
+    {
 
-        "scenario_id": "routines_main",
+        "scenario_id": "routines_main",
 
-        "tab_name": "(?i).*routines.*",
+        "tab_name": "(?i).*routines.*",
 
-        "tab_type": "b",
+        "tab_type": "b",
 
-        "tab": {
+        "tab": {
 
-            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_automations",
+            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_automations",
 
-            "text_regex": "(?i).*routines.*",
+            "text_regex": "(?i).*routines.*",
 
-            "announcement_regex": "(?i).*(selected|선택됨)?.*routines.*",
+            "announcement_regex": "(?i).*(selected|선택됨)?.*routines.*",
 
-            "tie_breaker": "bottom_nav_left_to_right",
+            "tie_breaker": "bottom_nav_left_to_right",
 
-            "allow_resource_id_only": True,
+            "allow_resource_id_only": True,
 
-        },
+        },
 
-        "anchor_name": "(?i).*location.*qr.*code.*",
+        "anchor_name": "(?i).*location.*qr.*code.*",
 
-        "anchor_type": "b",
+        "anchor_type": "b",
 
-        "anchor": {
+        "anchor": {
 
-            "text_regex": "(?i).*location.*qr.*code.*",
+            "text_regex": "(?i).*location.*qr.*code.*",
 
-            "announcement_regex": "(?i).*qr.*code.*",
+            "announcement_regex": "(?i).*qr.*code.*",
 
-            "tie_breaker": "top_left",
+            "tie_breaker": "top_left",
 
-        },
+        },
 
-        "context_verify": {
+        "context_verify": {
 
-            "type": "selected_bottom_tab",
+            "type": "selected_bottom_tab",
 
-            "announcement_regex": "(?i).*(selected|선택됨).*routines.*",
+            "announcement_regex": "(?i).*(selected|선택됨).*routines.*",
 
-        },
+        },
 
-        "enabled": False,
+        "enabled": False,
 
-        "max_steps": 5,
+        "max_steps": 5,
 
-        "overlay_policy": {
+        "overlay_policy": {
 
-            "allow_candidates": [
+            "allow_candidates": [
 
-                {
+                {
 
-                    "resource_id": "com.samsung.android.oneconnect:id/more_menu_button",
+                    "resource_id": "com.samsung.android.oneconnect:id/more_menu_button",
 
-                    "label": "More options",
+                    "label": "More options",
 
-                }
+                }
 
-            ],
+            ],
 
-            "block_candidates": [
+            "block_candidates": [
 
-                {
+                {
 
-                    "resource_id": "com.samsung.android.oneconnect:id/add_menu_button",
+                    "resource_id": "com.samsung.android.oneconnect:id/add_menu_button",
 
-                    "label": "Add",
+                    "label": "Add",
 
-                }
+                }
 
-            ],
+            ],
 
-        },
+        },
 
-    },
+    },
 
-    {
+    {
 
-        "scenario_id": "settings_entry_example",
+        "scenario_id": "settings_entry_example",
 
-        "tab_name": "(?i).*menu.*",
+        "tab_name": "(?i).*menu.*",
 
-        "tab_type": "b",
+        "tab_type": "b",
 
-        "tab": {
+        "tab": {
 
-            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_more",
+            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_more",
 
-            "text_regex": "(?i).*menu.*",
+            "text_regex": "(?i).*menu.*",
 
-            "announcement_regex": "(?i).*(selected|선택됨)?.*menu.*",
+            "announcement_regex": "(?i).*(selected|선택됨)?.*menu.*",
 
-            "tie_breaker": "bottom_nav_left_to_right",
+            "tie_breaker": "bottom_nav_left_to_right",
 
-            "allow_resource_id_only": True,
+            "allow_resource_id_only": True,
 
-        },
+        },
 
-        "pre_navigation": [
+        "pre_navigation": [
 
-            {
+            {
 
-                "action": "select",
+                "action": "select",
 
-                "target": "com.samsung.android.oneconnect:id/settings_image",
+                "target": "com.samsung.android.oneconnect:id/settings_image",
 
-                "type": "r",
+                "type": "r",
 
-            }
+            }
 
-        ],
+        ],
 
-        "anchor_name": "(?i).*navigate up.*",
+        "anchor_name": "(?i).*navigate up.*",
 
-        "anchor_type": "a",
+        "anchor_type": "a",
 
-        "anchor": {
+        "anchor": {
 
-            "announcement_regex": "(?i).*navigate up.*",
+            "announcement_regex": "(?i).*navigate up.*",
 
-            "tie_breaker": "top_left",
+            "tie_breaker": "top_left",
 
-        },
+        },
 
-        "context_verify": {
+        "context_verify": {
 
-            "type": "selected_bottom_tab",
+            "type": "selected_bottom_tab",
 
-            "announcement_regex": "(?i).*(selected|선택됨).*menu.*",
+            "announcement_regex": "(?i).*(selected|선택됨).*menu.*",
 
-        },
+        },
 
-        "enabled": True,
+        "enabled": True,
 
-        "max_steps": 20,
+        "max_steps": 20,
 
-    }
+    }
 
-    
 
-    ,
 
+    ,
 
-    {
 
-        "scenario_id": "life_pet_care_example",
+    {
 
-        "tab_name": "(?i).*life.*",
+        "scenario_id": "life_pet_care_example",
 
-        "tab_type": "b",
+        "tab_name": "(?i).*life.*",
 
-        "pre_navigation": [
+        "tab_type": "b",
 
-            {
+        "pre_navigation": [
 
-                "action": "select",
+            {
 
-                "target": "(?i).*pet\\s*care.*|.*펫\\s*케어.*",
+                "action": "select",
 
-                "type": "a",
+                "target": "(?i).*pet\\s*care.*|.*펫\\s*케어.*",
 
-            }
+                "type": "a",
 
-        ],
+            }
 
-        "anchor_name": "(?i).*pet\\s*care.*|.*펫\\s*케어.*",
+        ],
 
-        "anchor_type": "a",
+        "anchor_name": "(?i).*pet\\s*care.*|.*펫\\s*케어.*",
 
-        "anchor": {
+        "anchor_type": "a",
 
-            "text_regex": "(?i).*pet\\s*care.*|.*펫\\s*케어.*",
+        "anchor": {
 
-            "tie_breaker": "top_left",
+            "text_regex": "(?i).*pet\\s*care.*|.*펫\\s*케어.*",
 
-        },
+            "tie_breaker": "top_left",
 
-        "enabled": False,
+        },
 
-        "max_steps": 20,
+        "enabled": False,
 
-    },
+        "max_steps": 20,
 
-    {
+    },
 
-        "scenario_id": "life_plugin_example",
+    {
 
-        "tab_name": "(?i).*life.*",
+        "scenario_id": "life_plugin_example",
 
-        "tab_type": "b",
+        "tab_name": "(?i).*life.*",
 
-        "anchor_name": "(?i).*location.*qr.*code.*",
+        "tab_type": "b",
 
-        "anchor_type": "b",
+        "anchor_name": "(?i).*location.*qr.*code.*",
 
-        "anchor": {
+        "anchor_type": "b",
 
-            "text_regex": "(?i).*location.*qr.*code.*",
+        "anchor": {
 
-            "announcement_regex": "(?i).*qr.*code.*",
+            "text_regex": "(?i).*location.*qr.*code.*",
 
-            "tie_breaker": "top_left",
+            "announcement_regex": "(?i).*qr.*code.*",
 
-        },
+            "tie_breaker": "top_left",
 
-        "context_verify": {
+        },
 
-            "type": "plugin",
+        "context_verify": {
 
-            "text_regex": "(?i).*smartthings.*energy.*",
+            "type": "plugin",
 
-        },
+            "text_regex": "(?i).*smartthings.*energy.*",
 
-        "enabled": False,
+        },
 
-        "max_steps": 5,
+        "enabled": False,
 
-    },
+        "max_steps": 5,
 
-    {
+    },
 
-        "scenario_id": "resource_id_only_example",
+    {
 
-        "tab_name": "(?i).*home.*",
+        "scenario_id": "resource_id_only_example",
 
-        "tab_type": "b",
+        "tab_name": "(?i).*home.*",
 
-        "anchor_name": "com.samsung.android.oneconnect:id/add_menu_button",
+        "tab_type": "b",
 
-        "anchor_type": "r",
+        "anchor_name": "com.samsung.android.oneconnect:id/add_menu_button",
 
-        "anchor": {
+        "anchor_type": "r",
 
-            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/add_menu_button",
+        "anchor": {
 
-            "tie_breaker": "top_left",
+            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/add_menu_button",
 
-            "allow_resource_id_only": True,
+            "tie_breaker": "top_left",
 
-        },
+            "allow_resource_id_only": True,
 
-        "enabled": False,
+        },
 
-        "max_steps": 10,
+        "enabled": False,
 
-    },
+        "max_steps": 10,
+
+    },
 
 ]
 
