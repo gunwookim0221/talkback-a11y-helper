@@ -13,6 +13,7 @@ class DummyClient:
         self.steps = list(steps)
         self.reset_focus_history_calls = 0
         self.touch_calls = []
+        self.select_calls = []
 
     def reset_focus_history(self, _dev):
         self.reset_focus_history_calls += 1
@@ -22,6 +23,10 @@ class DummyClient:
 
     def touch(self, **kwargs):
         self.touch_calls.append(kwargs)
+        return True
+
+    def select(self, **kwargs):
+        self.select_calls.append(kwargs)
         return True
 
 
@@ -87,7 +92,7 @@ def test_open_tab_and_anchor_returns_true_when_both_succeed(monkeypatch):
 
 def test_collect_tab_rows_adds_tab_open_failed_and_saves(monkeypatch):
     save_calls = []
-    monkeypatch.setattr(collection_flow, "open_tab_and_anchor", lambda *a, **k: False)
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: False)
     monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: save_calls.append((a, k)))
 
     rows = collection_flow.collect_tab_rows(
@@ -105,7 +110,7 @@ def test_collect_tab_rows_adds_tab_open_failed_and_saves(monkeypatch):
 
 def test_collect_tab_rows_sets_end_status_when_should_stop(monkeypatch):
     client = DummyClient([_anchor_row(), _main_row(1)])
-    monkeypatch.setattr(collection_flow, "open_tab_and_anchor", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
     monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
     monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
     monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (True, 0, 0, "empty_visible_and_speech", ("", "", "")))
@@ -124,7 +129,7 @@ def test_collect_tab_rows_checkpoint_save_called_by_interval(monkeypatch):
     save_calls = []
 
     monkeypatch.setattr(collection_flow, "CHECKPOINT_SAVE_EVERY_STEPS", 2)
-    monkeypatch.setattr(collection_flow, "open_tab_and_anchor", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
     monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
     monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
     monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (False, 0, 0, "", ("fp", "id", "b")))
@@ -148,7 +153,7 @@ def test_collect_tab_rows_overlay_branch_calls_expand_and_realign(monkeypatch):
     client = DummyClient([_anchor_row(), _main_row(1)])
     called = {"classify": 0, "expand": 0, "realign": 0}
 
-    monkeypatch.setattr(collection_flow, "open_tab_and_anchor", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
     monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
     monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
     monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (False, 0, 0, "", ("f", "id", "b")))
@@ -178,7 +183,7 @@ def test_collect_tab_rows_navigation_classification_skips_overlay_routine(monkey
     client = DummyClient([_anchor_row(), _main_row(1)])
     called = {"expand": 0, "realign": 0}
 
-    monkeypatch.setattr(collection_flow, "open_tab_and_anchor", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
     monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
     monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
     monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (False, 0, 0, "", ("f", "id", "b")))
@@ -198,7 +203,7 @@ def test_collect_tab_rows_unchanged_classification_skips_overlay_routine(monkeyp
     client = DummyClient([_anchor_row(), _main_row(1)])
     called = {"expand": 0, "realign": 0}
 
-    monkeypatch.setattr(collection_flow, "open_tab_and_anchor", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
     monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
     monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
     monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (False, 0, 0, "", ("f", "id", "b")))
@@ -218,7 +223,7 @@ def test_collect_tab_rows_previous_step_not_updated_after_stop_break(monkeypatch
     client = DummyClient([_anchor_row(), _main_row(1), _main_row(2)])
     previous_steps = []
 
-    monkeypatch.setattr(collection_flow, "open_tab_and_anchor", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
     monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
 
     def _detect(**kwargs):
@@ -233,3 +238,66 @@ def test_collect_tab_rows_previous_step_not_updated_after_stop_break(monkeypatch
     collection_flow.collect_tab_rows(client, "SERIAL", _base_tab_cfg(max_steps=2), [], "o.xlsx", "out")
 
     assert previous_steps == [0]
+
+
+def test_open_scenario_pre_navigation_success(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "select", "target": ".*Settings.*", "type": "a"}],
+        "pre_navigation_retry_count": 2,
+        "pre_navigation_wait_seconds": 0.1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert client.reset_focus_history_calls == 1
+    assert len(client.select_calls) == 1
+
+
+def test_open_scenario_pre_navigation_failure(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    client = DummyClient([])
+    client.select = lambda **kwargs: False
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "select", "target": ".*Settings.*", "type": "a"}],
+        "pre_navigation_retry_count": 2,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is False
+
+
+def test_open_scenario_pre_navigation_retry_then_success(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    client = DummyClient([_anchor_row()])
+    attempts = {"count": 0}
+
+    def _select(**kwargs):
+        attempts["count"] += 1
+        return attempts["count"] == 2
+
+    client.select = _select
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "select", "target": ".*Settings.*", "type": "a"}],
+        "pre_navigation_retry_count": 2,
+        "pre_navigation_wait_seconds": 0.1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert attempts["count"] == 2

@@ -9,7 +9,9 @@
     "main_announcement_wait_seconds": 1.2,
     "overlay_step_wait_seconds": 0.8,
     "overlay_announcement_wait_seconds": 0.8,
-    "back_recovery_wait_seconds": 0.8
+    "back_recovery_wait_seconds": 0.8,
+    "pre_navigation_retry_count": 2,
+    "pre_navigation_wait_seconds": 1.2
   },
   "scenarios": {}
 }

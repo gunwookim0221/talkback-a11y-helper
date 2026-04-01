@@ -490,4 +490,5 @@ assert client.last_merged_announcement == merged
 - `defaults`/`scenarios` 기반 `tab_select_retry_count`, `anchor_retry_count`
 - `defaults`/`scenarios` 기반 `main_step_wait_seconds`, `main_announcement_wait_seconds`
 - `defaults`/`scenarios` 기반 `overlay_step_wait_seconds`, `overlay_announcement_wait_seconds`, `back_recovery_wait_seconds`
+- `defaults`/`scenarios` 기반 `pre_navigation_retry_count`, `pre_navigation_wait_seconds`
 - `scenarios.<scenario_id>.enabled`, `scenarios.<scenario_id>.max_steps`

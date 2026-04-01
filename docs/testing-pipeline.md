@@ -59,6 +59,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.GET_FOCUS -p com.iotpar
   - `screen`: 화면 문맥 텍스트/announcement 정규식 검증
   - `plugin`: 플러그인 고유 레이블/announcement 정규식 검증
 - 동일 stabilization + context 검증 로직을 overlay 복귀 재정렬 직후에도 재사용합니다.
+- nested scenario는 `pre_navigation` 배열을 통해 `tab stabilize -> pre-navigation(select/touch) -> anchor stabilize` 순서로 진입할 수 있습니다.
 
 ## Step 6 – Overlay 확장 수집(Candidate + Post-click Classification)
 

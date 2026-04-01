@@ -13,7 +13,7 @@ from tb_runner.constants import (
 )
 from tb_runner.logging_utils import log
 
-RUNTIME_CONFIG_VERSION = "1.0.0"
+RUNTIME_CONFIG_VERSION = "1.7.9"
 DEFAULT_RUNTIME_CONFIG_PATH = Path("config/runtime_config.json")
 
 
@@ -25,6 +25,8 @@ _DEFAULTS = {
     "overlay_step_wait_seconds": OVERLAY_STEP_WAIT_SECONDS,
     "overlay_announcement_wait_seconds": OVERLAY_ANNOUNCEMENT_WAIT_SECONDS,
     "back_recovery_wait_seconds": BACK_RECOVERY_WAIT_SECONDS,
+    "pre_navigation_retry_count": 2,
+    "pre_navigation_wait_seconds": MAIN_STEP_WAIT_SECONDS,
 }
 
 
@@ -92,6 +94,14 @@ def _build_runtime_defaults(raw_defaults: dict[str, Any]) -> dict[str, Any]:
         "back_recovery_wait_seconds": _to_positive_float(
             raw_defaults.get("back_recovery_wait_seconds"),
             _DEFAULTS["back_recovery_wait_seconds"],
+        ),
+        "pre_navigation_retry_count": _to_positive_int(
+            raw_defaults.get("pre_navigation_retry_count"),
+            _DEFAULTS["pre_navigation_retry_count"],
+        ),
+        "pre_navigation_wait_seconds": _to_positive_float(
+            raw_defaults.get("pre_navigation_wait_seconds"),
+            _DEFAULTS["pre_navigation_wait_seconds"],
         ),
     }
 
