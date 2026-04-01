@@ -31,9 +31,18 @@ class ScenarioPerfStats:
     realign_success_count: int = 0
 
     _sum_get_focus_sec: float = 0.0
+    _sum_get_focus_main_sec: float = 0.0
+    _sum_get_focus_overlay_sec: float = 0.0
     _sum_move_sec: float = 0.0
     _sum_crop_sec: float = 0.0
     _sum_step_total_sec: float = 0.0
+
+    _get_focus_main_count: int = 0
+    _get_focus_overlay_count: int = 0
+    _step_total_sample_count: int = 0
+
+    success_false_top_level_dump_attempt_count: int = 0
+    success_false_top_level_dump_found_count: int = 0
 
     def record_row(self, row: dict[str, Any]) -> None:
         self.total_steps += 1
@@ -43,13 +52,32 @@ class ScenarioPerfStats:
         else:
             self.main_step_count += 1
 
-        self._sum_get_focus_sec += _safe_float(row.get("get_focus_elapsed_sec", 0.0))
+        get_focus_elapsed_sec = _safe_float(row.get("get_focus_elapsed_sec", 0.0))
+        self._sum_get_focus_sec += get_focus_elapsed_sec
+        if context_type == "overlay":
+            self._sum_get_focus_overlay_sec += get_focus_elapsed_sec
+            self._get_focus_overlay_count += 1
+        else:
+            self._sum_get_focus_main_sec += get_focus_elapsed_sec
+            self._get_focus_main_count += 1
+
         self._sum_move_sec += _safe_float(row.get("move_elapsed_sec", 0.0))
         self._sum_crop_sec += _safe_float(row.get("crop_elapsed_sec", 0.0))
-        self._sum_step_total_sec += _safe_float(row.get("step_total_elapsed_sec", row.get("step_elapsed_sec", 0.0)))
+
+        step_total_value = row.get("step_total_elapsed_sec")
+        if step_total_value is None:
+            step_total_value = row.get("step_elapsed_sec")
+        step_total_elapsed_sec = _safe_float(step_total_value)
+        if step_total_elapsed_sec > 0.0:
+            self._sum_step_total_sec += step_total_elapsed_sec
+            self._step_total_sample_count += 1
 
         if bool(row.get("get_focus_fallback_used", False)):
             self.fallback_dump_count += 1
+        if bool(row.get("get_focus_success_false_top_level_dump_attempted", False)):
+            self.success_false_top_level_dump_attempt_count += 1
+        if bool(row.get("get_focus_success_false_top_level_dump_found", False)):
+            self.success_false_top_level_dump_found_count += 1
         if bool(row.get("get_focus_success_false_top_level_dump_skipped", False)):
             self.strong_skip_count += 1
         if bool(row.get("step_dump_tree_used", False)):
@@ -61,6 +89,9 @@ class ScenarioPerfStats:
     def summary_dict(self) -> dict[str, Any]:
         total_steps = max(self.total_steps, 1)
         realign_attempt_count = max(self.realign_attempt_count, 1)
+        step_total_sample_count = max(self._step_total_sample_count, 1)
+        get_focus_main_count = max(self._get_focus_main_count, 1)
+        get_focus_overlay_count = max(self._get_focus_overlay_count, 1)
         return {
             "scenario": self.scenario_id,
             "tab": self.tab_name,
@@ -72,8 +103,13 @@ class ScenarioPerfStats:
             "avg_get_focus": round(self._sum_get_focus_sec / total_steps, 3),
             "avg_move": round(self._sum_move_sec / total_steps, 3),
             "avg_crop": round(self._sum_crop_sec / total_steps, 3),
-            "avg_step_total": round(self._sum_step_total_sec / total_steps, 3),
+            "avg_step_total": round(self._sum_step_total_sec / step_total_sample_count, 3),
+            "step_total_sample_count": self._step_total_sample_count,
+            "avg_get_focus_main": round(self._sum_get_focus_main_sec / get_focus_main_count, 3),
+            "avg_get_focus_overlay": round(self._sum_get_focus_overlay_sec / get_focus_overlay_count, 3),
             "fallback_dump_count": self.fallback_dump_count,
+            "success_false_top_level_dump_attempt_count": self.success_false_top_level_dump_attempt_count,
+            "success_false_top_level_dump_found_count": self.success_false_top_level_dump_found_count,
             "fallback_dump_rate": round((self.fallback_dump_count / total_steps) * 100.0, 1),
             "get_focus_strong_skip_count": self.strong_skip_count,
             "get_focus_strong_skip_rate": round((self.strong_skip_count / total_steps) * 100.0, 1),
@@ -103,6 +139,12 @@ class RunPerfStats:
         sum_move = sum(s._sum_move_sec for s in self.scenarios)
         total_overlay_count = sum(s.overlay_count for s in self.scenarios)
         fallback_dump_count = sum(s.fallback_dump_count for s in self.scenarios)
+        success_false_top_level_dump_attempt_count = sum(
+            s.success_false_top_level_dump_attempt_count for s in self.scenarios
+        )
+        success_false_top_level_dump_found_count = sum(
+            s.success_false_top_level_dump_found_count for s in self.scenarios
+        )
         strong_skip_count = sum(s.strong_skip_count for s in self.scenarios)
         realign_attempt_count = sum(s.realign_attempt_count for s in self.scenarios)
         realign_success_count = sum(s.realign_success_count for s in self.scenarios)
@@ -118,6 +160,8 @@ class RunPerfStats:
             "avg_get_focus": round(sum_get_focus / denominator_steps, 3),
             "avg_move": round(sum_move / denominator_steps, 3),
             "fallback_dump_count": fallback_dump_count,
+            "success_false_top_level_dump_attempt_count": success_false_top_level_dump_attempt_count,
+            "success_false_top_level_dump_found_count": success_false_top_level_dump_found_count,
             "fallback_dump_rate": round((fallback_dump_count / denominator_steps) * 100.0, 1),
             "get_focus_strong_skip_rate": round((strong_skip_count / denominator_steps) * 100.0, 1),
             "realign_success_rate": round((realign_success_count / denominator_realign) * 100.0, 1),
