@@ -21,6 +21,7 @@ ACTION_DUMP_TREE = "com.iotpart.sqe.talkbackhelper.DUMP_TREE"
 ACTION_GET_FOCUS = "com.iotpart.sqe.talkbackhelper.GET_FOCUS"
 ACTION_FOCUS_TARGET = "com.iotpart.sqe.talkbackhelper.FOCUS_TARGET"
 ACTION_CLICK_TARGET = "com.iotpart.sqe.talkbackhelper.CLICK_TARGET"
+ACTION_TOUCH_BOUNDS_CENTER_TARGET = "com.iotpart.sqe.talkbackhelper.TOUCH_BOUNDS_CENTER_TARGET"
 ACTION_CHECK_TARGET = "com.iotpart.sqe.talkbackhelper.CHECK_TARGET"
 ACTION_NEXT = "com.iotpart.sqe.talkbackhelper.NEXT"
 ACTION_PREV = "com.iotpart.sqe.talkbackhelper.PREV"
@@ -35,7 +36,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.10"
+CLIENT_ALGORITHM_VERSION = "1.7.11"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -903,6 +904,49 @@ class A11yAdbClient:
             return True
         except Exception:
             return False
+
+    def touch_bounds_center(
+        self,
+        dev,
+        name: str | list[str],
+        wait_: int = 5,
+        type_: str = "a",
+        index_: int = 0,
+        class_name: str = None,
+        clickable: bool = None,
+        focusable: bool = None,
+    ) -> bool:
+        if not self.check_helper_status(dev=dev):
+            self.last_target_action_result = {"success": False, "reason": "helper_unavailable"}
+            return False
+        self.last_announcements = []
+        self.last_merged_announcement = ""
+        deadline = time.monotonic() + wait_
+        while time.monotonic() <= deadline:
+            self._refresh_tree_if_needed(dev)
+            self.clear_logcat(dev=dev)
+            req_id = str(uuid.uuid4())[:8]
+            parsed_name, parsed_type, target_text, target_id = self._split_and_conditions(name, type_)
+            extras = self._build_target_extras(
+                name=parsed_name,
+                type_=parsed_type,
+                index_=index_,
+                class_name=class_name,
+                clickable=clickable,
+                focusable=focusable,
+                target_text=target_text,
+                target_id=target_id,
+            )
+            extras += ["--es", "reqId", req_id]
+            self._broadcast(dev, ACTION_TOUCH_BOUNDS_CENTER_TARGET, extras)
+            result = self._read_log_result(dev, "TARGET_ACTION_RESULT", req_id)
+            self.last_target_action_result = result if isinstance(result, dict) else {"success": False, "reason": "unknown"}
+            if bool(result.get("success")):
+                self._wait_for_speech_if_needed(dev)
+                return True
+            time.sleep(0.5)
+        self.last_target_action_result = {"success": False, "reason": "timeout"}
+        return False
 
     def select(
         self,

@@ -11,12 +11,13 @@ import java.util.concurrent.Executors
 class A11yCommandReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.2.1"
+        private const val VERSION = "1.2.2"
         private const val ACTION_GET_FOCUS = "com.iotpart.sqe.talkbackhelper.GET_FOCUS"
         private const val ACTION_FOCUS_RESULT = "com.iotpart.sqe.talkbackhelper.FOCUS_RESULT"
         private const val ACTION_DUMP_TREE = "com.iotpart.sqe.talkbackhelper.DUMP_TREE"
         private const val ACTION_FOCUS_TARGET = "com.iotpart.sqe.talkbackhelper.FOCUS_TARGET"
         private const val ACTION_CLICK_TARGET = "com.iotpart.sqe.talkbackhelper.CLICK_TARGET"
+        private const val ACTION_TOUCH_BOUNDS_CENTER_TARGET = "com.iotpart.sqe.talkbackhelper.TOUCH_BOUNDS_CENTER_TARGET"
         private const val ACTION_CHECK_TARGET = "com.iotpart.sqe.talkbackhelper.CHECK_TARGET"
         private const val ACTION_NEXT = "com.iotpart.sqe.talkbackhelper.NEXT"
         private const val ACTION_PREV = "com.iotpart.sqe.talkbackhelper.PREV"
@@ -59,6 +60,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
                 handleTargetAction(intent, actionType)
             }
             ACTION_CHECK_TARGET -> handleCheckTarget(intent)
+            ACTION_TOUCH_BOUNDS_CENTER_TARGET -> handleTargetBoundsCenterTap(intent)
             ACTION_NEXT -> handleMoveFocus(intent, true)
             ACTION_PREV -> handleMoveFocus(intent, false)
             ACTION_SMART_NEXT -> handleSmartNext(context, intent)
@@ -136,6 +138,22 @@ class A11yCommandReceiver : BroadcastReceiver() {
 
         val query = parseQuery(intent, reqId) ?: return
         service.checkTarget(query, reqId)
+    }
+
+    private fun handleTargetBoundsCenterTap(intent: Intent) {
+        val reqId = parseReqId(intent)
+        val service = A11yHelperService.instance
+        if (service == null) {
+            logFailure("TARGET_ACTION_RESULT", reqId, "Accessibility Service is null or not running")
+            return
+        }
+
+        val query = parseQuery(intent, reqId) ?: return
+        Log.d(
+            TAG,
+            "[DEBUG][TARGET_ACTION][recv] reqId=$reqId action=TOUCH_BOUNDS_CENTER_TARGET targetName='${query.targetName}' targetType='${query.targetType}' targetIndex=${query.targetIndex}"
+        )
+        service.performTargetBoundsCenterTap(query, reqId)
     }
 
 

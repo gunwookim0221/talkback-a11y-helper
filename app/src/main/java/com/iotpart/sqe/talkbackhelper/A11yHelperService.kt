@@ -1,12 +1,17 @@
 package com.iotpart.sqe.talkbackhelper
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
+import android.graphics.Path
+import android.graphics.Rect
 import android.os.Bundle
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class A11yHelperService : AccessibilityService() {
     companion object {
@@ -228,6 +233,103 @@ class A11yHelperService : AccessibilityService() {
 
         Log.i(TAG, "CHECK_TARGET_RESULT $resultJson")
         return resultJson
+    }
+
+    fun performTargetBoundsCenterTap(query: A11yTargetFinder.TargetQuery, reqId: String = "none"): JSONObject {
+        Log.d(
+            TAG,
+            "[DEBUG][TARGET_ACTION][service_start] reqId=$reqId accessibilityAction=TOUCH_BOUNDS_CENTER target='${query.targetName}' type='${query.targetType}'"
+        )
+        val targetOutcome = A11yTargetFinder.findTarget(rootInActiveWindow, query)
+        val targetNode = targetOutcome.target
+        val actionOutcome = when {
+            !targetOutcome.success || targetNode == null -> TargetActionOutcome(
+                success = false,
+                reason = targetOutcome.reason.ifBlank { "Target node not found" }
+            )
+            else -> {
+                val bounds = Rect().also { targetNode.getBoundsInScreen(it) }
+                val center = A11yTargetFinder.calculateBoundsCenter(bounds)
+                if (center == null) {
+                    TargetActionOutcome(
+                        success = false,
+                        reason = "Bounds unavailable",
+                        target = targetNode,
+                        attemptedResourceId = targetNode.viewIdResourceName,
+                        attemptedClassName = targetNode.className?.toString()
+                    )
+                } else {
+                    val (x, y) = center
+                    val tapSuccess = runCatching { dispatchCenterTap(x, y) }.getOrDefault(false)
+                    if (!tapSuccess) {
+                        TargetActionOutcome(
+                            success = false,
+                            reason = "Gesture dispatch failed",
+                            target = targetNode,
+                            attemptedResourceId = targetNode.viewIdResourceName,
+                            attemptedClassName = targetNode.className?.toString()
+                        )
+                    } else {
+                        TargetActionOutcome(
+                            success = true,
+                            reason = "Center tap success",
+                            target = targetNode,
+                            attemptedResourceId = targetNode.viewIdResourceName,
+                            attemptedClassName = targetNode.className?.toString()
+                        )
+                    }
+                }
+            }
+        }
+
+        val resultJson = JSONObject().apply {
+            put("timestamp", System.currentTimeMillis())
+            put("reqId", reqId)
+            put("success", actionOutcome.success)
+            put("reason", actionOutcome.reason)
+            put("action", "TOUCH_BOUNDS_CENTER")
+            put("targetName", query.targetName)
+            put("targetType", query.targetType)
+            put("targetIndex", query.targetIndex)
+            if (!actionOutcome.attemptedResourceId.isNullOrBlank()) {
+                put("attemptedResourceId", actionOutcome.attemptedResourceId)
+            }
+            if (!actionOutcome.attemptedClassName.isNullOrBlank()) {
+                put("attemptedClassName", actionOutcome.attemptedClassName)
+            }
+            if (actionOutcome.target != null) {
+                put("target", FocusSnapshot.fromNode(actionOutcome.target).toJson())
+            }
+        }
+        Log.i(TAG, "TARGET_ACTION_RESULT $resultJson")
+        return resultJson
+    }
+
+    private fun dispatchCenterTap(x: Int, y: Int): Boolean {
+        val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0L, 1L))
+            .build()
+        val latch = CountDownLatch(1)
+        var success = false
+        val dispatched = dispatchGesture(
+            gesture,
+            object : GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    success = true
+                    latch.countDown()
+                }
+
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    success = false
+                    latch.countDown()
+                }
+            },
+            null
+        )
+        if (!dispatched) return false
+        latch.await(1200, TimeUnit.MILLISECONDS)
+        return success
     }
 
 
