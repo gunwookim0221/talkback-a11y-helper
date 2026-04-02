@@ -336,9 +336,9 @@ TAB_CONFIGS = [
 
             {
 
-                "action": "select",
+                "action": "tap_bounds_center_adb",
 
-                "target": "com.samsung.android.oneconnect:id/settings_image",
+                "target": "com.samsung.android.oneconnect:id/setting_button_layout",
 
                 "type": "r",
 
