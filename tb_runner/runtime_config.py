@@ -13,7 +13,7 @@ from tb_runner.constants import (
 )
 from tb_runner.logging_utils import log
 
-RUNTIME_CONFIG_VERSION = "1.7.15"
+RUNTIME_CONFIG_VERSION = "1.7.16"
 DEFAULT_RUNTIME_CONFIG_PATH = Path("config/runtime_config.json")
 
 
@@ -27,6 +27,8 @@ _DEFAULTS = {
     "back_recovery_wait_seconds": BACK_RECOVERY_WAIT_SECONDS,
     "pre_navigation_retry_count": 2,
     "pre_navigation_wait_seconds": MAIN_STEP_WAIT_SECONDS,
+    "screen_context_mode": "bottom_tab",
+    "stabilization_mode": "anchor_then_context",
 }
 
 
@@ -62,6 +64,14 @@ def _to_positive_float(value: Any, fallback: float) -> float:
         return fallback
     if isinstance(value, (int, float)) and float(value) > 0:
         return float(value)
+    return fallback
+
+
+def _to_enum_value(value: Any, allowed: set[str], fallback: str) -> str:
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in allowed:
+            return normalized
     return fallback
 
 
@@ -102,6 +112,16 @@ def _build_runtime_defaults(raw_defaults: dict[str, Any]) -> dict[str, Any]:
         "pre_navigation_wait_seconds": _to_positive_float(
             raw_defaults.get("pre_navigation_wait_seconds"),
             _DEFAULTS["pre_navigation_wait_seconds"],
+        ),
+        "screen_context_mode": _to_enum_value(
+            raw_defaults.get("screen_context_mode"),
+            {"bottom_tab", "new_screen"},
+            _DEFAULTS["screen_context_mode"],
+        ),
+        "stabilization_mode": _to_enum_value(
+            raw_defaults.get("stabilization_mode"),
+            {"tab_context", "anchor_only", "anchor_then_context"},
+            _DEFAULTS["stabilization_mode"],
         ),
     }
 
@@ -155,6 +175,13 @@ def load_runtime_bundle(base_tab_configs: list[dict[str, Any]], config_path: str
                     base_value = runtime_defaults[key]
                     if isinstance(base_value, int):
                         merged_cfg[key] = _to_positive_int(scenario_override.get(key), base_value)
+                    elif isinstance(base_value, str):
+                        allowed_values = {"bottom_tab", "new_screen"} if key == "screen_context_mode" else {
+                            "tab_context",
+                            "anchor_only",
+                            "anchor_then_context",
+                        }
+                        merged_cfg[key] = _to_enum_value(scenario_override.get(key), allowed_values, base_value)
                     else:
                         merged_cfg[key] = _to_positive_float(scenario_override.get(key), float(base_value))
 

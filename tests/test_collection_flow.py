@@ -651,3 +651,69 @@ def test_open_scenario_pre_navigation_select_and_tap_bounds_center_adb_uses_tap_
     assert len(client.select_calls) == 1
     assert len(client.tap_bounds_center_adb_calls) == 1
     assert client.tap_bounds_center_adb_calls[0]["name"] == "com.test:id/settings_image"
+
+
+def test_open_scenario_new_screen_anchor_only_skips_tab_context(monkeypatch):
+    captured = {}
+    def _tab_stabilize(**kwargs):
+        captured["tab_cfg"] = kwargs["tab_cfg"]
+        return {"ok": True}
+
+    def _anchor_stabilize(**kwargs):
+        captured["anchor_cfg"] = kwargs["tab_cfg"]
+        return {"ok": True}
+
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", _tab_stabilize)
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", _anchor_stabilize)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "context_verify": {"type": "selected_bottom_tab", "announcement_regex": ".*menu.*"},
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert captured["tab_cfg"]["context_verify"]["type"] == "none"
+    assert captured["anchor_cfg"]["stabilization_mode"] == "anchor_only"
+
+
+def test_open_scenario_new_screen_defaults_to_anchor_only(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    def _anchor_stabilize(**kwargs):
+        captured["mode"] = kwargs["tab_cfg"]["stabilization_mode"]
+        return {"ok": True}
+
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", _anchor_stabilize)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row()])
+
+    ok = collection_flow.open_scenario(client, "SERIAL", {**_base_tab_cfg(), "screen_context_mode": "new_screen"})
+
+    assert ok is True
+    assert captured["mode"] == "anchor_only"
+
+
+def test_open_scenario_invalid_modes_fallback_to_legacy(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    def _anchor_stabilize(**kwargs):
+        captured["mode"] = kwargs["tab_cfg"]["stabilization_mode"]
+        return {"ok": True}
+
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", _anchor_stabilize)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row()])
+
+    ok = collection_flow.open_scenario(
+        client,
+        "SERIAL",
+        {**_base_tab_cfg(), "screen_context_mode": "unexpected", "stabilization_mode": "unexpected"},
+    )
+
+    assert ok is True
+    assert captured["mode"] == "anchor_then_context"

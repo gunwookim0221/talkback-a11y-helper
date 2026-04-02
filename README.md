@@ -289,7 +289,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.i
 
 ## `talkback_lib.py` 레거시 호환 API
 
-- Python 클라이언트 알고리즘 버전: `CLIENT_ALGORITHM_VERSION = 1.7.14`
+- Python 클라이언트 알고리즘 버전: `CLIENT_ALGORITHM_VERSION = 1.7.16`
 - 발화 조회 API
   - `get_announcements(...)` → 수집된 발화를 `strip`/빈 문자열 제거 후 공백으로 병합한 `str` 반환
   - `get_partial_announcements(...)` → raw 발화 조각 `list[str]` 반환
@@ -492,7 +492,60 @@ assert client.last_merged_announcement == merged
 - `defaults`/`scenarios` 기반 `main_step_wait_seconds`, `main_announcement_wait_seconds`
 - `defaults`/`scenarios` 기반 `overlay_step_wait_seconds`, `overlay_announcement_wait_seconds`, `back_recovery_wait_seconds`
 - `defaults`/`scenarios` 기반 `pre_navigation_retry_count`, `pre_navigation_wait_seconds`
+- `defaults`/`scenarios` 기반 `screen_context_mode`, `stabilization_mode`
 - `scenarios.<scenario_id>.enabled`, `scenarios.<scenario_id>.max_steps`
+
+### scenario stabilization/context 모드 일반화
+
+- `screen_context_mode`
+  - `bottom_tab` (기본값): 기존처럼 하단 탭 문맥 유지형 시나리오.
+  - `new_screen`: pre_navigation 이후 완전히 새 화면(toolbar/back/title 중심)으로 전환되는 시나리오.
+- `stabilization_mode`
+  - `anchor_then_context` (기본값): anchor 매칭 + `context_verify` 둘 다 성공해야 통과(기존 동작).
+  - `anchor_only`: anchor 매칭만 성공하면 통과(`context_verify`는 skip).
+  - `tab_context`: `context_verify`만 성공하면 통과.
+
+`screen_context_mode=new_screen`이면서 `stabilization_mode`를 생략하면 기본적으로 `anchor_only`가 적용됩니다.
+이때 탭 선택 단계의 `selected_bottom_tab` 강제 검증은 자동으로 skip되어, Settings/plugin/detail 같은 화면 전환 시나리오를 config만으로 표현할 수 있습니다.
+
+#### 예시 1) 기존 메인 탭 유지형(bottom_tab)
+
+```json
+{
+  "scenario_id": "devices_main",
+  "screen_context_mode": "bottom_tab",
+  "stabilization_mode": "anchor_then_context",
+  "context_verify": {
+    "type": "selected_bottom_tab",
+    "announcement_regex": "(?i).*(selected|선택됨).*devices.*"
+  }
+}
+```
+
+#### 예시 2) Settings/new screen 전환형(new_screen)
+
+```json
+{
+  "scenario_id": "menu_settings",
+  "screen_context_mode": "new_screen",
+  "stabilization_mode": "anchor_only",
+  "pre_navigation": [
+    {
+      "action": "tap_bounds_center_adb",
+      "target": "com.example:id/settings_button",
+      "type": "r"
+    }
+  ],
+  "anchor": {
+    "text_regex": "(?i).*navigate up.*",
+    "announcement_regex": "(?i).*navigate up.*"
+  },
+  "context_verify": {
+    "type": "screen_text",
+    "text_regex": "(?i).*settings.*"
+  }
+}
+```
 
 ### pre_navigation action 예시 (Settings focusable 대응)
 

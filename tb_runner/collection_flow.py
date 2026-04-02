@@ -23,6 +23,35 @@ from tb_runner.perf_stats import ScenarioPerfStats, format_perf_summary, save_ex
 from tb_runner.tab_logic import stabilize_tab_selection
 from tb_runner.utils import make_main_fingerprint, make_overlay_entry_fingerprint
 
+_VALID_SCREEN_CONTEXT_MODES = {"bottom_tab", "new_screen"}
+_VALID_STABILIZATION_MODES = {"tab_context", "anchor_only", "anchor_then_context"}
+
+
+def _resolve_screen_context_mode(tab_cfg: dict[str, Any]) -> str:
+    raw_mode = str(tab_cfg.get("screen_context_mode", "bottom_tab") or "bottom_tab").strip().lower()
+    if raw_mode in _VALID_SCREEN_CONTEXT_MODES:
+        return raw_mode
+    log(
+        f"[SCENARIO][stabilization] invalid screen_context_mode='{raw_mode}' "
+        f"scenario='{tab_cfg.get('scenario_id', '')}' fallback='bottom_tab'"
+    )
+    return "bottom_tab"
+
+
+def _resolve_stabilization_mode(tab_cfg: dict[str, Any], screen_context_mode: str) -> str:
+    raw_mode = str(tab_cfg.get("stabilization_mode", "") or "").strip().lower()
+    if raw_mode in _VALID_STABILIZATION_MODES:
+        return raw_mode
+    if raw_mode:
+        default_mode = "anchor_only" if screen_context_mode == "new_screen" else "anchor_then_context"
+        log(
+            f"[SCENARIO][stabilization] invalid stabilization_mode='{raw_mode}' "
+            f"scenario='{tab_cfg.get('scenario_id', '')}' fallback='{default_mode}'"
+        )
+    if screen_context_mode == "new_screen":
+        return "anchor_only"
+    return "anchor_then_context"
+
 def _get_retry_count(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
     value = tab_cfg.get(key, fallback)
     if isinstance(value, bool):
@@ -178,11 +207,23 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     tab_retry_count = _get_retry_count(tab_cfg, "tab_select_retry_count", 2)
     anchor_retry_count = _get_retry_count(tab_cfg, "anchor_retry_count", 2)
     main_step_wait_seconds = _get_wait_seconds(tab_cfg, "main_step_wait_seconds", MAIN_STEP_WAIT_SECONDS)
+    screen_context_mode = _resolve_screen_context_mode(tab_cfg)
+    stabilization_mode = _resolve_stabilization_mode(tab_cfg, screen_context_mode)
+    log(
+        f"[SCENARIO][stabilization] scenario='{tab_cfg.get('scenario_id', '')}' "
+        f"screen_context_mode='{screen_context_mode}' stabilization_mode='{stabilization_mode}'"
+    )
+
+    tab_stabilize_cfg = tab_cfg
+    if screen_context_mode == "new_screen":
+        tab_stabilize_cfg = dict(tab_cfg)
+        tab_stabilize_cfg["context_verify"] = {"type": "none"}
+        log("[CONTEXT] skipped reason='new_screen_mode' phase='tab_select'")
 
     tab_stabilized = stabilize_tab_selection(
         client=client,
         dev=dev,
-        tab_cfg=tab_cfg,
+        tab_cfg=tab_stabilize_cfg,
         max_retries=tab_retry_count,
     )
     if not tab_stabilized.get("ok"):
@@ -197,10 +238,14 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     if not pre_nav_ok:
         return False
 
+    anchor_stabilize_cfg = dict(tab_cfg)
+    anchor_stabilize_cfg["screen_context_mode"] = screen_context_mode
+    anchor_stabilize_cfg["stabilization_mode"] = stabilization_mode
+
     stabilize_result = stabilize_anchor(
         client=client,
         dev=dev,
-        tab_cfg=tab_cfg,
+        tab_cfg=anchor_stabilize_cfg,
         phase="scenario_start",
         max_retries=anchor_retry_count,
         verify_reads=2,

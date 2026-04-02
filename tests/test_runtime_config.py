@@ -78,3 +78,48 @@ def test_load_runtime_bundle_ignores_invalid_values(tmp_path):
     assert home_cfg["main_step_wait_seconds"] == 1.2
     assert home_cfg["pre_navigation_retry_count"] == 2
     assert home_cfg["pre_navigation_wait_seconds"] == 1.2
+
+
+def test_load_runtime_bundle_applies_screen_context_overrides(tmp_path):
+    path = tmp_path / "runtime_modes.json"
+    path.write_text(
+        json.dumps(
+            {
+                "defaults": {"screen_context_mode": "new_screen", "stabilization_mode": "anchor_only"},
+                "scenarios": {
+                    "device_detail": {"screen_context_mode": "bottom_tab", "stabilization_mode": "tab_context"}
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    bundle = load_runtime_bundle(_base_tabs(), config_path=path)
+
+    home_cfg = bundle["tab_configs"][0]
+    detail_cfg = bundle["tab_configs"][1]
+    assert home_cfg["screen_context_mode"] == "new_screen"
+    assert home_cfg["stabilization_mode"] == "anchor_only"
+    assert detail_cfg["screen_context_mode"] == "bottom_tab"
+    assert detail_cfg["stabilization_mode"] == "tab_context"
+
+
+def test_load_runtime_bundle_invalid_screen_context_values_fallback(tmp_path):
+    path = tmp_path / "runtime_invalid_modes.json"
+    path.write_text(
+        json.dumps(
+            {
+                "defaults": {"screen_context_mode": "wrong", "stabilization_mode": "wrong"},
+                "scenarios": {
+                    "home_main": {"screen_context_mode": "also_wrong", "stabilization_mode": "also_wrong"}
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    bundle = load_runtime_bundle(_base_tabs(), config_path=path)
+
+    home_cfg = bundle["tab_configs"][0]
+    assert home_cfg["screen_context_mode"] == "bottom_tab"
+    assert home_cfg["stabilization_mode"] == "anchor_then_context"

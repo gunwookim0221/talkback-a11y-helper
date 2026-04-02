@@ -7,6 +7,8 @@ from tb_runner.constants import MAIN_ANNOUNCEMENT_WAIT_SECONDS, MAIN_STEP_WAIT_S
 from tb_runner.logging_utils import log
 from tb_runner.utils import _safe_regex_search, parse_bounds_str
 
+_VALID_STABILIZATION_MODES = {"tab_context", "anchor_only", "anchor_then_context"}
+
 
 def _extract_candidate_from_node(node: dict[str, Any], index: int = -1) -> dict[str, Any]:
     text = str(node.get("text", "") or "").strip()
@@ -132,6 +134,9 @@ def stabilize_anchor(
 ) -> dict[str, Any]:
     anchor_cfg = _resolve_anchor_cfg(tab_cfg)
     tie_breaker = str(anchor_cfg.get("tie_breaker", "top_left") or "top_left")
+    stabilization_mode = str(tab_cfg.get("stabilization_mode", "anchor_then_context") or "anchor_then_context").strip().lower()
+    if stabilization_mode not in _VALID_STABILIZATION_MODES:
+        stabilization_mode = "anchor_then_context"
     last_verify: dict[str, Any] = {}
     last_context: dict[str, Any] = {"ok": True, "type": "none", "expected": ""}
     scenario_id = str(tab_cfg.get("scenario_id", "") or "")
@@ -177,7 +182,18 @@ def stabilize_anchor(
             verify_rows.append(verify_row)
             verify_candidate = _extract_candidate_from_step(verify_row)
             verify_match = match_anchor(verify_candidate, anchor_cfg)
-            context_result = verify_context(verify_row, tab_cfg, client=client, dev=dev)
+            if stabilization_mode == "anchor_only":
+                context_result = {
+                    "ok": True,
+                    "type": "skipped",
+                    "expected": "",
+                    "actual_text": "",
+                    "actual_announcement": "",
+                    "reason": "anchor_only_mode",
+                }
+                log("[CONTEXT] skipped reason='anchor_only_mode'")
+            else:
+                context_result = verify_context(verify_row, tab_cfg, client=client, dev=dev)
             if verify_match["matched"]:
                 break
 
@@ -185,6 +201,7 @@ def stabilize_anchor(
         last_context = context_result
         log(
             f"[ANCHOR][{phase}] attempt={attempt}/{max_retries} selected={selected} "
+            f"mode='{stabilization_mode}' "
             f"matched={bool(last_verify.get('matched'))} "
             f"context_ok={bool(last_context.get('ok'))} "
             f"scenario='{scenario_id}' "
@@ -215,19 +232,28 @@ def stabilize_anchor(
             f"actual='{last_context.get('actual_selected_text', last_context.get('actual_announcement', last_context.get('actual_text', '')))}' "
             f"ok={bool(last_context.get('ok'))}"
         )
-        if not bool(last_verify.get("matched")):
+        verify_matched = bool(last_verify.get("matched"))
+        context_ok = bool(last_context.get("ok"))
+        if stabilization_mode == "anchor_only":
+            success = verify_matched
+        elif stabilization_mode == "tab_context":
+            success = context_ok
+        else:
+            success = verify_matched and context_ok
+
+        if not verify_matched:
             log(f"[ANCHOR][{phase}] anchor mismatch scenario='{scenario_id}'")
-        elif not bool(last_context.get("ok")):
+        elif not context_ok:
             log(f"[ANCHOR][{phase}] context mismatch scenario='{scenario_id}'")
             log(f"[CONTEXT] verification failed scenario='{scenario_id}'")
         else:
             log(f"[CONTEXT] verification passed scenario='{scenario_id}'")
 
-        if bool(last_verify.get("matched")) and bool(last_context.get("ok")):
+        if success:
             success_reason = "selected_and_verified" if selected else "verified_without_select"
             log(
                 f"[ANCHOR][{phase}] success scenario='{scenario_id}' selected={selected} "
-                f"matched=True context_ok=True reason='{success_reason}'"
+                f"matched={verify_matched} context_ok={context_ok} reason='{success_reason}'"
             )
             return {
                 "ok": True,
