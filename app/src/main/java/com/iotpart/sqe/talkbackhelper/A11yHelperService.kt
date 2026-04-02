@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.4.7"
+        private const val VERSION = "1.4.8"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -1040,9 +1040,33 @@ class A11yHelperService : AccessibilityService() {
         var giantClassFilteredCount = 0
         var giantAreaFilteredCount = 0
 
-        fun enqueueChildren(source: T, targetQueue: ArrayDeque<T>) {
-            for (index in 0 until childCountOf(source)) {
-                childAt(source, index)?.let(targetQueue::add)
+        fun enqueueChildren(
+            source: T,
+            targetQueue: ArrayDeque<T>,
+            expansionTag: String? = null
+        ) {
+            val parentResourceId = resourceIdOf(source).orEmpty()
+            val parentClassName = classNameOf(source).orEmpty()
+            val childCount = childCountOf(source)
+            if (expansionTag != null) {
+                log?.invoke(
+                    "[$expansionTag] parentResourceId='${parentResourceId}' class='${parentClassName}' childCount=$childCount"
+                )
+            }
+            for (index in 0 until childCount) {
+                val firstChild = childAt(source, index)
+                val resolvedChild = firstChild ?: childAt(source, index)
+                val childResourceId = resourceIdOf(resolvedChild).orEmpty()
+                val childClassName = classNameOf(resolvedChild).orEmpty()
+                val enqueued = resolvedChild != null
+                if (enqueued) {
+                    targetQueue.add(resolvedChild!!)
+                }
+                if (expansionTag != null) {
+                    log?.invoke(
+                        "[click_focused_local_raw_child] parentResourceId='${parentResourceId}' index=$index childResourceId='${childResourceId}' childClass='${childClassName}' childNull=${resolvedChild == null} enqueued=$enqueued"
+                    )
+                }
             }
         }
 
@@ -1173,6 +1197,9 @@ class A11yHelperService : AccessibilityService() {
             )
             val localQueue = ArrayDeque<T>()
             localQueue += rootNode
+            var seenSettingWrapper = false
+            var seenSettingsImage = false
+            var seenSettingsBadge = false
             val nearFocusedBounds = Rect(
                 focusedBounds.left - maxOf(120, focusedBounds.width() * 2),
                 focusedBounds.top - maxOf(120, focusedBounds.height() * 2),
@@ -1181,13 +1208,29 @@ class A11yHelperService : AccessibilityService() {
             )
             while (localQueue.isNotEmpty()) {
                 val node = localQueue.removeFirst()
-                enqueueChildren(node, localQueue)
+                enqueueChildren(node, localQueue, expansionTag = "click_focused_local_raw_expand")
                 if (node == focusedNode) continue
                 val bounds = boundsOf(node)
-                if (bounds.isEmpty) continue
                 val clickableNode = isClickable(node)
                 val visibleNode = isVisible(node)
                 val enabledNode = isEnabled(node)
+                val nodeClassName = classNameOf(node).orEmpty()
+                val nodeResourceId = resourceIdOf(node).orEmpty()
+                if (nodeResourceId.endsWith(":id/setting_button_layout")) {
+                    seenSettingWrapper = true
+                }
+                if (nodeResourceId.endsWith(":id/settings_image")) {
+                    seenSettingsImage = true
+                }
+                if (nodeResourceId.endsWith(":id/settings_new_badge")) {
+                    seenSettingsBadge = true
+                }
+                if (bounds.isEmpty) {
+                    log?.invoke(
+                        "[click_focused_local_raw_candidate_skip] reason='invalid_bounds' resourceId='${nodeResourceId}' class='${nodeClassName}' source='local_raw_search'"
+                    )
+                    continue
+                }
                 val candidateCenterX = bounds.centerX()
                 val candidateCenterY = bounds.centerY()
                 val dxAbs = kotlin.math.abs(focusedCenterX - candidateCenterX)
@@ -1199,14 +1242,40 @@ class A11yHelperService : AccessibilityService() {
                 val nearFocused = Rect.intersects(nearFocusedBounds, bounds)
                 val inLocalBand = Rect.intersects(localSearchBounds, bounds) || localSearchBounds.contains(candidateCenterX, candidateCenterY)
                 val inTopRegionBand = bounds.top <= topRegionBottom && candidateCenterY <= topRegionBottom
-                val nodeClassName = classNameOf(node).orEmpty()
                 log?.invoke(
                     "[click_focused_local_raw_scan_node] resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode enabled=$enabledNode visible=$visibleNode bounds='${bounds.toShortString()}' center='${candidateCenterX},${candidateCenterY}' dx=$dxAbs dy=$dyAbs inLocalBounds=$inLocalBand topRegionBand=$inTopRegionBand source='local_raw_search'"
                 )
-                if (!clickableNode || !visibleNode || !enabledNode) continue
-                if (focusedTopRegion && !inTopRegionBand && !insideFocused && !overlapFocused) continue
+                if (!clickableNode) {
+                    log?.invoke(
+                        "[click_focused_local_raw_candidate_skip] reason='not_clickable' resourceId='${nodeResourceId}' class='${nodeClassName}' bounds='${bounds.toShortString()}' source='local_raw_search'"
+                    )
+                    continue
+                }
+                if (!visibleNode) {
+                    log?.invoke(
+                        "[click_focused_local_raw_candidate_skip] reason='not_visible' resourceId='${nodeResourceId}' class='${nodeClassName}' bounds='${bounds.toShortString()}' source='local_raw_search'"
+                    )
+                    continue
+                }
+                if (!enabledNode) {
+                    log?.invoke(
+                        "[click_focused_local_raw_candidate_skip] reason='not_enabled' resourceId='${nodeResourceId}' class='${nodeClassName}' bounds='${bounds.toShortString()}' source='local_raw_search'"
+                    )
+                    continue
+                }
+                if (focusedTopRegion && !inTopRegionBand && !insideFocused && !overlapFocused) {
+                    log?.invoke(
+                        "[click_focused_local_raw_candidate_skip] reason='top_region_mismatch' resourceId='${nodeResourceId}' class='${nodeClassName}' bounds='${bounds.toShortString()}' source='local_raw_search'"
+                    )
+                    continue
+                }
                 val nodeArea = maxOf(1, bounds.width() * bounds.height())
-                if (nodeArea > focusedArea * 8) continue
+                if (nodeArea > focusedArea * 8) {
+                    log?.invoke(
+                        "[click_focused_local_raw_candidate_skip] reason='oversized_local' resourceId='${nodeResourceId}' class='${nodeClassName}' bounds='${bounds.toShortString()}' source='local_raw_search'"
+                    )
+                    continue
+                }
                 val nodeClassNameLower = nodeClassName.lowercase()
                 val preferredClass = nodeClassNameLower.endsWith("imagebutton") ||
                     nodeClassNameLower.endsWith("button") ||
@@ -1218,13 +1287,21 @@ class A11yHelperService : AccessibilityService() {
                 } else {
                     insideFocused || overlapFocused || nearCenter
                 }
-                if (!classGatePass) continue
+                if (!classGatePass) {
+                    log?.invoke(
+                        "[click_focused_local_raw_candidate_skip] reason='class_gate_miss' resourceId='${nodeResourceId}' class='${nodeClassName}' bounds='${bounds.toShortString()}' source='local_raw_search'"
+                    )
+                    continue
+                }
                 collectCandidate(
                     node = node,
                     logPrefix = "click_focused_local_raw_candidate_seen",
                     source = "local_raw_search"
                 )
             }
+            log?.invoke(
+                "[click_focused_local_raw_toolbar_summary] seenSettingWrapper=$seenSettingWrapper seenSettingsImage=$seenSettingsImage seenSettingsBadge=$seenSettingsBadge"
+            )
         }
 
         if (rootNode != null) {
