@@ -121,6 +121,46 @@ class A11yHelperServiceClickTest {
     }
 
     @Test
+    fun executeClickFromFocusedNode_descendantMetadataRetarget_afterDescendantClickFail() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_parent",
+            resourceId = "com.example:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val subtreeClickableButActionFail = TestNode(
+            id = "focused_child",
+            resourceId = "com.example:id/settings_image",
+            className = "android.widget.ImageButton",
+            contentDesc = "Settings",
+            clickable = true,
+            clickResult = false,
+            bounds = Rect(940, 170, 1020, 250)
+        )
+        val rootMirrorClickableChild = TestNode(
+            id = "root_settings_image",
+            resourceId = "com.example:id/settings_image",
+            className = "android.widget.ImageButton",
+            contentDesc = "Settings",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(950, 180, 1010, 240)
+        )
+        root.addChild(focused)
+        focused.addChild(subtreeClickableButActionFail)
+        root.addChild(rootMirrorClickableChild)
+
+        val result = runExecute(focused, root)
+
+        assertTrue(result.success)
+        assertEquals("Clickable descendant metadata retarget clicked", result.reason)
+        assertEquals(A11yHelperService.ClickPath.DESCENDANT, result.path)
+        assertEquals(rootMirrorClickableChild, result.clickedNode)
+    }
+
+    @Test
     fun executeClickFromFocusedNode_rootRetarget_prefersInsideCandidateOverDistantLargeCard() {
         val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
         val focused = TestNode(
@@ -185,7 +225,7 @@ class A11yHelperServiceClickTest {
     }
 
     @Test
-    fun executeClickFromFocusedNode_rootRetarget_usesLocalBandWhenInsideAndOverlapMissing() {
+    fun executeClickFromFocusedNode_rootRetarget_failsForTopLocalTargetWhenInsideAndOverlapMissing() {
         val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
         val focused = TestNode(
             id = "focused_parent",
@@ -211,9 +251,33 @@ class A11yHelperServiceClickTest {
 
         val result = runExecute(focused, root)
 
-        assertTrue(result.success)
-        assertEquals(A11yHelperService.ClickPath.ROOT_RETARGET, result.path)
-        assertEquals(localBandClickable, result.clickedNode)
+        assertFalse(result.success)
+        assertEquals(A11yHelperService.ClickPath.NONE, result.path)
+        assertEquals(focused, result.attemptedNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_rootRetarget_doesNotPickGiantCardWhenOnlyLocalOrGlobalRemain() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_parent",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val giantCard = TestNode(
+            id = "my_profile_card_view",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(40, 420, 1040, 2100)
+        )
+        root.addChild(focused)
+        root.addChild(giantCard)
+
+        val result = runExecute(focused, root)
+
+        assertFalse(result.success)
+        assertEquals(A11yHelperService.ClickPath.NONE, result.path)
+        assertEquals(focused, result.attemptedNode)
     }
 
     @Test

@@ -9,7 +9,7 @@ class A11yTraversalAnalyzerTest {
 
     @Test
     fun version_isUpdated() {
-        assertEquals("1.9.0", A11yTraversalAnalyzer.VERSION)
+        assertEquals("1.10.0", A11yTraversalAnalyzer.VERSION)
     }
 
     @Test
@@ -57,6 +57,66 @@ class A11yTraversalAnalyzerTest {
         assertTrue(metadata.hasClickableDescendant)
         assertTrue(metadata.hasFocusableDescendant)
         assertEquals("com.samsung.android.oneconnect:id/settings_image", metadata.actionableDescendantResourceId)
+        assertEquals("android.widget.ImageButton", metadata.actionableDescendantClassName)
+        assertEquals("Settings", metadata.actionableDescendantContentDescription)
+    }
+
+    @Test
+    fun collectActionableDescendantMetadata_prefersLabeledButtonLikeClickableChild() {
+        data class Node(
+            val resourceId: String?,
+            val className: String?,
+            val contentDescription: String?,
+            val text: String?,
+            val clickable: Boolean,
+            val focusable: Boolean,
+            val enabled: Boolean = true,
+            val visible: Boolean = true,
+            val children: MutableList<Node> = mutableListOf()
+        )
+
+        val plainClickable = Node(
+            resourceId = "com.example:id/plain_clickable",
+            className = "android.view.View",
+            contentDescription = null,
+            text = null,
+            clickable = true,
+            focusable = true
+        )
+        val imageButton = Node(
+            resourceId = "com.example:id/settings_image",
+            className = "android.widget.ImageButton",
+            contentDescription = "Settings",
+            text = null,
+            clickable = true,
+            focusable = true
+        )
+        val parent = Node(
+            resourceId = "com.example:id/container",
+            className = "android.widget.RelativeLayout",
+            contentDescription = null,
+            text = null,
+            clickable = false,
+            focusable = true,
+            children = mutableListOf(plainClickable, imageButton)
+        )
+
+        val metadata = A11yTraversalAnalyzer.collectActionableDescendantMetadata(
+            container = parent,
+            childCountOf = { it.children.size },
+            childAt = { node, index -> node.children.getOrNull(index) },
+            isVisible = { it.visible },
+            isClickable = { it.clickable },
+            isFocusable = { it.focusable },
+            isEnabled = { it.enabled },
+            resourceIdOf = { it.resourceId },
+            classNameOf = { it.className },
+            contentDescriptionOf = { it.contentDescription },
+            textOf = { it.text }
+        )
+
+        assertTrue(metadata.hasClickableDescendant)
+        assertEquals("com.example:id/settings_image", metadata.actionableDescendantResourceId)
         assertEquals("android.widget.ImageButton", metadata.actionableDescendantClassName)
         assertEquals("Settings", metadata.actionableDescendantContentDescription)
     }

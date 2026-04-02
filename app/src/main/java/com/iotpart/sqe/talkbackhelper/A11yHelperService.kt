@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.2.1"
+        private const val VERSION = "1.3.0"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -585,6 +585,47 @@ class A11yHelperService : AccessibilityService() {
             )
         }
 
+        val descendantHint = buildDescendantHint(
+            focusedNode = focusedNode,
+            childCountOf = childCountOf,
+            childAt = childAt,
+            isVisible = isVisible,
+            isClickable = isClickable,
+            isEnabled = isEnabled,
+            resourceIdOf = resourceIdOf,
+            classNameOf = classNameOf,
+            contentDescOf = contentDescOf,
+            textOf = textOf,
+            boundsOf = boundsOf
+        )
+        log?.invoke(
+            "click_focused_descendant_hint hasClickableDescendant=${descendantHint != null} actionableDescendantResourceId='${descendantHint?.resourceId.orEmpty()}' actionableDescendantClassName='${descendantHint?.className.orEmpty()}' actionableDescendantContentDescription='${descendantHint?.contentDescription.orEmpty()}'"
+        )
+        val descendantRetarget = findMatchingClickableFromRootByDescendantHint(
+            rootNode = rootNode,
+            focusedBounds = focusedBounds,
+            hint = descendantHint,
+            childCountOf = childCountOf,
+            childAt = childAt,
+            isClickable = isClickable,
+            isVisible = isVisible,
+            isEnabled = isEnabled,
+            boundsOf = boundsOf,
+            resourceIdOf = resourceIdOf,
+            classNameOf = classNameOf,
+            contentDescOf = contentDescOf,
+            textOf = textOf
+        )
+        if (descendantRetarget != null && performClick(descendantRetarget)) {
+            return ClickExecutionResult(
+                success = true,
+                reason = "Clickable descendant metadata retarget clicked",
+                path = ClickPath.DESCENDANT,
+                clickedNode = descendantRetarget,
+                attemptedNode = descendantRetarget
+            )
+        }
+
         val ancestor = findFirstClickableAncestor(
             node = focusedNode,
             parentOf = parentOf,
@@ -659,6 +700,13 @@ class A11yHelperService : AccessibilityService() {
         val selectedScore: Int
     )
 
+    private data class DescendantHint(
+        val resourceId: String?,
+        val className: String?,
+        val contentDescription: String?,
+        val text: String?
+    )
+
     private fun <T> findBestClickableFromRoot(
         focusedNode: T,
         rootNode: T?,
@@ -689,6 +737,11 @@ class A11yHelperService : AccessibilityService() {
         val bandMargin = maxOf(focusedBounds.height() * 2, 80)
         val localBandTop = focusedBounds.top - bandMargin
         val localBandBottom = focusedBounds.bottom + bandMargin
+        val rootBounds = boundsOf(rootNode)
+        val rootHeight = maxOf(1, rootBounds.height())
+        val rootArea = maxOf(1, rootBounds.width() * rootBounds.height())
+        val focusedTopLocalTarget = focusedBounds.centerY() <= rootBounds.top + (rootHeight / 4) &&
+            focusedArea <= (rootArea / 30)
 
         data class ScoredCandidate<T>(
             val node: T,
@@ -767,10 +820,18 @@ class A11yHelperService : AccessibilityService() {
         val insideCandidates = allCandidates.filter { it.inside }
         val overlapCandidates = allCandidates.filter { !it.inside && it.overlap }
         val localBandCandidates = allCandidates.filter { !it.inside && !it.overlap && it.localBand }
+        val strictLocalBandCandidates = localBandCandidates.filter {
+            isSafeLocalBandFallbackCandidate(
+                focusedBounds = focusedBounds,
+                focusedArea = focusedArea,
+                candidateBounds = boundsOf(it.node)
+            )
+        }
         val (pool, reason) = when {
             insideCandidates.isNotEmpty() -> insideCandidates to "inside_bounds"
             overlapCandidates.isNotEmpty() -> overlapCandidates to "overlap_bounds"
-            localBandCandidates.isNotEmpty() -> localBandCandidates to "local_band"
+            strictLocalBandCandidates.isNotEmpty() && !focusedTopLocalTarget -> strictLocalBandCandidates to "local_band"
+            focusedTopLocalTarget -> emptyList<ScoredCandidate<T>>() to "none"
             else -> allCandidates to "global_fallback"
         }
         val picked = pool.maxWithOrNull { a, b ->
@@ -787,11 +848,109 @@ class A11yHelperService : AccessibilityService() {
             candidateCount = allCandidates.size,
             insideCount = insideCandidates.size,
             overlapCount = overlapCandidates.size,
-            localBandCount = localBandCandidates.size,
+            localBandCount = strictLocalBandCandidates.size,
             globalCount = allCandidates.size,
             selectedReason = reason,
             selectedScore = picked?.score ?: Int.MIN_VALUE
         )
+    }
+
+    private fun isSafeLocalBandFallbackCandidate(
+        focusedBounds: Rect,
+        focusedArea: Int,
+        candidateBounds: Rect
+    ): Boolean {
+        val dx = kotlin.math.abs(focusedBounds.centerX() - candidateBounds.centerX())
+        val dy = kotlin.math.abs(focusedBounds.centerY() - candidateBounds.centerY())
+        val maxDx = maxOf(180, focusedBounds.width() * 2)
+        val maxDy = maxOf(180, focusedBounds.height() * 2)
+        if (dx > maxDx || dy > maxDy) return false
+        val candidateArea = maxOf(1, candidateBounds.width() * candidateBounds.height())
+        if (candidateArea > focusedArea * 6) return false
+        return true
+    }
+
+    private fun <T> buildDescendantHint(
+        focusedNode: T,
+        childCountOf: (T) -> Int,
+        childAt: (T, Int) -> T?,
+        isVisible: (T) -> Boolean,
+        isClickable: (T) -> Boolean,
+        isEnabled: (T) -> Boolean,
+        resourceIdOf: (T) -> String?,
+        classNameOf: (T) -> String?,
+        contentDescOf: (T) -> String?,
+        textOf: (T) -> String?,
+        boundsOf: (T) -> Rect
+    ): DescendantHint? {
+        val metadata = A11yTraversalAnalyzer.collectActionableDescendantMetadata(
+            container = focusedNode,
+            childCountOf = childCountOf,
+            childAt = childAt,
+            isVisible = isVisible,
+            isClickable = isClickable,
+            isFocusable = { false },
+            isEnabled = isEnabled,
+            resourceIdOf = resourceIdOf,
+            classNameOf = classNameOf,
+            contentDescriptionOf = contentDescOf,
+            textOf = textOf,
+            boundsOf = boundsOf
+        )
+        if (!metadata.hasClickableDescendant) return null
+        return DescendantHint(
+            resourceId = metadata.actionableDescendantResourceId,
+            className = metadata.actionableDescendantClassName,
+            contentDescription = metadata.actionableDescendantContentDescription,
+            text = textOf(focusedNode)
+        )
+    }
+
+    private fun <T> findMatchingClickableFromRootByDescendantHint(
+        rootNode: T?,
+        focusedBounds: Rect,
+        hint: DescendantHint?,
+        childCountOf: (T) -> Int,
+        childAt: (T, Int) -> T?,
+        isClickable: (T) -> Boolean,
+        isVisible: (T) -> Boolean,
+        isEnabled: (T) -> Boolean,
+        boundsOf: (T) -> Rect,
+        resourceIdOf: (T) -> String?,
+        classNameOf: (T) -> String?,
+        contentDescOf: (T) -> String?,
+        textOf: (T) -> String?
+    ): T? {
+        if (rootNode == null || hint == null) return null
+        data class Ranked<T>(val node: T, val score: Int, val distance: Long)
+        val queue = ArrayDeque<T>()
+        queue += rootNode
+        var best: Ranked<T>? = null
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            for (index in 0 until childCountOf(node)) {
+                childAt(node, index)?.let(queue::add)
+            }
+            if (!isNodeClickableCandidate(node, isClickable, isVisible, isEnabled, boundsOf)) continue
+            var score = 0
+            if (!hint.resourceId.isNullOrBlank() && hint.resourceId == resourceIdOf(node)) score += 240
+            if (!hint.className.isNullOrBlank() && hint.className == classNameOf(node)) score += 120
+            if (!hint.contentDescription.isNullOrBlank() && hint.contentDescription == contentDescOf(node)) score += 120
+            if (!hint.text.isNullOrBlank() && hint.text == textOf(node)) score += 60
+            if (score < 120) continue
+            val bounds = boundsOf(node)
+            val dx = (focusedBounds.centerX() - bounds.centerX()).toLong()
+            val dy = (focusedBounds.centerY() - bounds.centerY()).toLong()
+            val distance = (dx * dx) + (dy * dy)
+            val ranked = Ranked(node, score, distance)
+            if (best == null ||
+                ranked.score > best!!.score ||
+                (ranked.score == best!!.score && ranked.distance < best!!.distance)
+            ) {
+                best = ranked
+            }
+        }
+        return best?.node
     }
 
     internal fun <T> findFirstClickableDescendant(
