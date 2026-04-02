@@ -496,7 +496,7 @@ assert client.last_merged_announcement == merged
 
 ### pre_navigation action 예시 (Settings focusable 대응)
 
-`pre_navigation`에는 기존 `select`/`touch`/`touch_bounds_center` 외에 `select_and_click_focused`를 사용할 수 있습니다.
+`pre_navigation`에는 기존 `select`/`touch`/`touch_bounds_center` 외에 `select_and_click_focused`, `tap_bounds_center_adb`, `select_and_tap_bounds_center_adb`를 사용할 수 있습니다.
 
 ```python
 "pre_navigation": [
@@ -504,8 +504,14 @@ assert client.last_merged_announcement == merged
         "action": "select_and_click_focused",
         "target": "com.samsung.android.oneconnect:id/setting_button_layout",
         "type": "r",
+    },
+    {
+        "action": "tap_bounds_center_adb",
+        "target": "com.samsung.android.oneconnect:id/settings_image",
+        "type": "r",
     }
 ]
 ```
 
 이 액션은 내부적으로 `select(target)` 성공 후 `click_focused()`를 연속 수행합니다.
+`tap_bounds_center_adb` 계열은 현재 화면 dump에서 selector로 찾은 bounds 중심 좌표를 계산해 `adb shell input tap x y`를 1회 전송합니다(없으면 lazy dump 1회 재시도 후 실패 처리).

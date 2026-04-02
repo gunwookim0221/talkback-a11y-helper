@@ -60,7 +60,14 @@ def _run_pre_navigation_steps(client: A11yAdbClient, dev: str, tab_cfg: dict[str
         if not action or not target:
             log(f"[SCENARIO][pre_nav] failed reason='invalid_step_config' step={index}")
             return False
-        if action not in {"select", "touch", "touch_bounds_center", "select_and_click_focused"}:
+        if action not in {
+            "select",
+            "touch",
+            "touch_bounds_center",
+            "select_and_click_focused",
+            "tap_bounds_center_adb",
+            "select_and_tap_bounds_center_adb",
+        }:
             log(f"[SCENARIO][pre_nav] failed reason='unsupported_action' step={index} action='{action}'")
             return False
 
@@ -74,6 +81,47 @@ def _run_pre_navigation_steps(client: A11yAdbClient, dev: str, tab_cfg: dict[str
                 step_ok = bool(client.touch(dev=dev, name=target, type_=type_, wait_=8))
             elif action == "touch_bounds_center":
                 step_ok = bool(client.touch_bounds_center(dev=dev, name=target, type_=type_, wait_=8))
+            elif action == "tap_bounds_center_adb":
+                dump_nodes = step.get("dump_tree_nodes", [])
+                step_ok = bool(client.tap_bounds_center_adb(dev=dev, name=target, type_=type_, dump_nodes=dump_nodes))
+                tap_result = getattr(client, "last_target_action_result", {}) if hasattr(client, "last_target_action_result") else {}
+                if isinstance(tap_result, dict):
+                    tap_target = tap_result.get("target", {})
+                    bounds = str(tap_target.get("bounds", "") or "")
+                    center = tap_target.get("center", {}) if isinstance(tap_target, dict) else {}
+                    center_repr = ""
+                    if isinstance(center, dict) and "x" in center and "y" in center:
+                        center_repr = f"{center.get('x')},{center.get('y')}"
+                    lazy_dump_used = bool(tap_target.get("lazy_dump_used")) if isinstance(tap_target, dict) else False
+                    log(
+                        f"[SCENARIO][pre_nav] action=tap_bounds_center_adb selector='{target}' type='{type_}' "
+                        f"bounds='{bounds}' center='{center_repr}' lazy_dump_used={str(lazy_dump_used).lower()}"
+                    )
+            elif action == "select_and_tap_bounds_center_adb":
+                tap_target = str(step.get("tap_target", target) or target).strip()
+                tap_type = str(step.get("tap_type", type_) or type_).strip()
+                select_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=8))
+                if not select_ok:
+                    step_ok = False
+                else:
+                    dump_nodes = step.get("dump_tree_nodes", [])
+                    step_ok = bool(client.tap_bounds_center_adb(dev=dev, name=tap_target, type_=tap_type, dump_nodes=dump_nodes))
+                    tap_result = getattr(client, "last_target_action_result", {}) if hasattr(client, "last_target_action_result") else {}
+                    if isinstance(tap_result, dict):
+                        tap_result_target = tap_result.get("target", {})
+                        bounds = str(tap_result_target.get("bounds", "") or "")
+                        center = tap_result_target.get("center", {}) if isinstance(tap_result_target, dict) else {}
+                        center_repr = ""
+                        if isinstance(center, dict) and "x" in center and "y" in center:
+                            center_repr = f"{center.get('x')},{center.get('y')}"
+                        lazy_dump_used = (
+                            bool(tap_result_target.get("lazy_dump_used")) if isinstance(tap_result_target, dict) else False
+                        )
+                        log(
+                            f"[SCENARIO][pre_nav] action=select_and_tap_bounds_center_adb select_target='{target}' select_type='{type_}' "
+                            f"tap_target='{tap_target}' tap_type='{tap_type}' bounds='{bounds}' center='{center_repr}' "
+                            f"lazy_dump_used={str(lazy_dump_used).lower()}"
+                        )
             else:
                 select_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=8))
                 focus_confirmed = False

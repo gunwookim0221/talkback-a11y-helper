@@ -36,7 +36,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.14"
+CLIENT_ALGORITHM_VERSION = "1.7.15"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -604,18 +604,7 @@ class A11yAdbClient:
 
     @staticmethod
     def _collect_matching_values(nodes: list[dict[str, Any]], type_: str) -> list[str]:
-        normalized = str(type_).strip().lower()
-        key_map = {
-            "a": ("text", "contentDescription", "talkback", "content_desc", "label", "viewIdResourceName", "resourceId"),
-            "all": ("text", "contentDescription", "talkback", "content_desc", "label", "viewIdResourceName", "resourceId"),
-            "t": ("text", "contentDescription"),
-            "text": ("text", "contentDescription"),
-            "b": ("talkback", "contentDescription", "content_desc", "label"),
-            "talkback": ("talkback", "contentDescription", "content_desc", "label"),
-            "r": ("viewIdResourceName", "resourceId"),
-            "resourceid": ("viewIdResourceName", "resourceId"),
-        }
-        target_keys = key_map.get(normalized, key_map["a"])
+        target_keys = A11yAdbClient._selector_key_candidates(type_)
         values: list[str] = []
 
         def visit(node: Any) -> None:
@@ -810,6 +799,166 @@ class A11yAdbClient:
             return bool(re.search(pattern, value, re.IGNORECASE))
         except re.error:
             return bool(re.search(re.escape(pattern), value, re.IGNORECASE))
+
+    @staticmethod
+    def _selector_key_candidates(type_: str) -> tuple[str, ...]:
+        normalized = str(type_).strip().lower()
+        key_map = {
+            "a": ("text", "contentDescription", "talkback", "content_desc", "label", "viewIdResourceName", "resourceId"),
+            "all": ("text", "contentDescription", "talkback", "content_desc", "label", "viewIdResourceName", "resourceId"),
+            "t": ("text", "contentDescription"),
+            "text": ("text", "contentDescription"),
+            "b": ("talkback", "contentDescription", "content_desc", "label"),
+            "talkback": ("talkback", "contentDescription", "content_desc", "label"),
+            "r": ("viewIdResourceName", "resourceId"),
+            "resourceid": ("viewIdResourceName", "resourceId"),
+        }
+        return key_map.get(normalized, key_map["a"])
+
+    def _find_bounds_for_selector(self, nodes: list[dict[str, Any]], name: str | list[str], type_: str) -> str:
+        if not isinstance(nodes, list) or not nodes:
+            return ""
+
+        parsed_name, parsed_type, target_text, target_id = self._split_and_conditions(name, type_)
+        selector_name = parsed_name
+        selector_type = parsed_type or type_
+        keys = self._selector_key_candidates(selector_type)
+        patterns = selector_name if isinstance(selector_name, list) else [selector_name]
+
+        def is_match(node: dict[str, Any]) -> bool:
+            if isinstance(name, list) and str(type_).strip().lower() == "and":
+                text_ok = True if not target_text else any(
+                    self._safe_regex_search(target_text, text) for text in self._collect_matching_values([node], "t")
+                )
+                id_ok = True if not target_id else any(
+                    self._safe_regex_search(target_id, text) for text in self._collect_matching_values([node], "r")
+                )
+                return text_ok and id_ok
+
+            for key in keys:
+                value = node.get(key)
+                if not isinstance(value, str):
+                    continue
+                stripped = value.strip()
+                if not stripped:
+                    continue
+                if any(self._safe_regex_search(str(pattern), stripped) for pattern in patterns):
+                    return True
+            return False
+
+        def walk(node: Any, parent_bounds: str) -> str:
+            if not isinstance(node, dict):
+                return ""
+            current_bounds = self._normalize_bounds(node)
+            effective_parent_bounds = current_bounds or parent_bounds
+
+            if is_match(node):
+                return current_bounds or parent_bounds
+
+            children = node.get("children")
+            if isinstance(children, list):
+                for child in children:
+                    found = walk(child, effective_parent_bounds)
+                    if found:
+                        return found
+            return ""
+
+        for root in nodes:
+            found = walk(root, "")
+            if found:
+                return found
+        return ""
+
+    def tap_xy_adb(self, dev: Any, x: int, y: int, timeout: float = 10.0) -> bool:
+        serial = self._resolve_serial(dev)
+        cmd = [self.adb_path]
+        if serial:
+            cmd += ["-s", serial]
+        cmd += ["shell", "input", "tap", str(int(x)), str(int(y))]
+        try:
+            proc = subprocess.run(
+                cmd,
+                check=False,
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+                encoding="utf-8",
+                errors="ignore",
+            )
+        except Exception as exc:
+            print(f"[WARN][adb_tap] failed reason='exception' serial='{serial or 'default'}' error='{exc}'")
+            return False
+        if proc.returncode != 0:
+            stderr = (proc.stderr or "").strip()
+            print(
+                f"[WARN][adb_tap] failed reason='nonzero_return' serial='{serial or 'default'}' "
+                f"returncode={proc.returncode} stderr='{stderr}'"
+            )
+            return False
+        return True
+
+    def tap_bounds_center_adb(
+        self,
+        dev: Any,
+        name: str | list[str],
+        type_: str = "a",
+        dump_nodes: list[dict[str, Any]] | None = None,
+    ) -> bool:
+        normalized_type = str(type_).strip().lower()
+        selector_name = name if normalized_type in {"r", "resourceid"} else self._normalize_case_insensitive_pattern(name)
+        nodes = dump_nodes if isinstance(dump_nodes, list) else []
+
+        lazy_dump_used = False
+        bounds = self._find_bounds_for_selector(nodes, selector_name, type_) if nodes else ""
+        if not bounds:
+            try:
+                lazy_dump_used = True
+                nodes = self.dump_tree(dev=dev)
+                bounds = self._find_bounds_for_selector(nodes, selector_name, type_)
+            except Exception:
+                bounds = ""
+
+        if not bounds:
+            self.last_target_action_result = {
+                "success": False,
+                "reason": "bounds_not_found",
+                "target": {
+                    "selector": {"name": self._json_safe_value(name), "type": str(type_)},
+                    "lazy_dump_used": lazy_dump_used,
+                },
+            }
+            return False
+
+        parsed = self._parse_bounds_tuple(bounds)
+        if not parsed:
+            self.last_target_action_result = {
+                "success": False,
+                "reason": "invalid_bounds",
+                "target": {
+                    "selector": {"name": self._json_safe_value(name), "type": str(type_)},
+                    "bounds": bounds,
+                    "lazy_dump_used": lazy_dump_used,
+                },
+            }
+            return False
+
+        left, top, right, bottom = parsed
+        center_x = (left + right) // 2
+        center_y = (top + bottom) // 2
+        tap_sent = self.tap_xy_adb(dev=dev, x=center_x, y=center_y)
+        self.last_target_action_result = {
+            "success": bool(tap_sent),
+            "reason": "adb_input_tap_sent" if tap_sent else "adb_input_tap_failed",
+            "target": {
+                "selector": {"name": self._json_safe_value(name), "type": str(type_)},
+                "bounds": bounds,
+                "center": {"x": center_x, "y": center_y},
+                "lazy_dump_used": lazy_dump_used,
+            },
+        }
+        if tap_sent:
+            self._wait_for_speech_if_needed(dev)
+        return bool(tap_sent)
 
     def _match_target_in_tree(self, nodes: list[dict[str, Any]], name: str | list[str], type_: str) -> bool:
         if isinstance(name, list) and str(type_).strip().lower() == "and":

@@ -2,6 +2,7 @@ import subprocess
 from pathlib import Path
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from talkback_lib import (
     ACTION_CHECK_TARGET,
@@ -67,6 +68,8 @@ class FakeA11yClient(A11yAdbClient):
         if args == ["shell", "settings", "get", "secure", "enabled_accessibility_services"]:
             return self.enabled_services_payload
         if args == ["shell", "input", "keyevent", "4"]:
+            return ""
+        if args[:3] == ["shell", "input", "tap"]:
             return ""
         if args[:3] == ["shell", "input", "text"]:
             return ""
@@ -511,6 +514,66 @@ class TouchIsinTest(unittest.TestCase):
         self.assertIn("'(?i)로그인'", broadcast)
         self.assertIn("targetId", broadcast)
         self.assertIn("'(?i).*id/btn_login'", broadcast)
+
+    def test_tap_bounds_center_adb_computes_center_and_sends_adb_tap(self):
+        client = FakeA11yClient()
+        with patch.object(client, "tap_xy_adb", return_value=True) as tap_mock, patch.object(client, "_wait_for_speech_if_needed"):
+            ok = client.tap_bounds_center_adb(
+                dev="SER",
+                name="com.test:id/settings_image",
+                type_="r",
+                dump_nodes=[
+                    {
+                        "viewIdResourceName": "com.test:id/settings_image",
+                        "boundsInScreen": {"l": 100, "t": 200, "r": 300, "b": 500},
+                    }
+                ],
+            )
+
+        self.assertTrue(ok)
+        tap_mock.assert_called_once_with(dev="SER", x=200, y=350)
+        self.assertEqual(client.last_target_action_result.get("reason"), "adb_input_tap_sent")
+        self.assertEqual(client.last_target_action_result.get("target", {}).get("bounds"), "100,200,300,500")
+
+    def test_tap_bounds_center_adb_returns_false_when_bounds_not_found(self):
+        client = FakeA11yClient()
+        with patch.object(client, "dump_tree", return_value=[]):
+            ok = client.tap_bounds_center_adb(dev="SER", name="missing", type_="t", dump_nodes=[])
+
+        self.assertFalse(ok)
+        self.assertEqual(client.last_target_action_result.get("reason"), "bounds_not_found")
+
+    def test_tap_bounds_center_adb_lazy_dump_retry_finds_bounds(self):
+        client = FakeA11yClient()
+        with patch.object(client, "dump_tree", return_value=[{"text": "Settings", "boundsInScreen": "[10,20][30,40]"}]), patch.object(
+            client, "tap_xy_adb", return_value=True
+        ) as tap_mock, patch.object(client, "_wait_for_speech_if_needed"):
+            ok = client.tap_bounds_center_adb(dev="SER", name="Settings", type_="text", dump_nodes=[])
+
+        self.assertTrue(ok)
+        tap_mock.assert_called_once_with(dev="SER", x=20, y=30)
+        self.assertTrue(client.last_target_action_result.get("target", {}).get("lazy_dump_used"))
+
+    def test_tap_bounds_center_adb_falls_back_to_wrapper_bounds_when_child_missing_bounds(self):
+        client = FakeA11yClient()
+        nodes = [
+            {
+                "viewIdResourceName": "com.test:id/setting_button_layout",
+                "boundsInScreen": {"l": 2, "t": 4, "r": 102, "b": 204},
+                "children": [{"viewIdResourceName": "com.test:id/settings_image"}],
+            }
+        ]
+        with patch.object(client, "tap_xy_adb", return_value=True) as tap_mock, patch.object(client, "_wait_for_speech_if_needed"):
+            ok = client.tap_bounds_center_adb(dev="SER", name="com.test:id/settings_image", type_="r", dump_nodes=nodes)
+
+        self.assertTrue(ok)
+        tap_mock.assert_called_once_with(dev="SER", x=52, y=104)
+
+    def test_tap_xy_adb_returns_false_on_subprocess_failure(self):
+        client = FakeA11yClient()
+        with patch("talkback_lib.subprocess.run", return_value=SimpleNamespace(returncode=1, stderr="boom")):
+            ok = client.tap_xy_adb(dev="SER", x=1, y=2)
+        self.assertFalse(ok)
 
 
 
@@ -1629,7 +1692,7 @@ class SmartMoveFocusTest(unittest.TestCase):
 
 class FocusHelpersTest(unittest.TestCase):
     def test_client_algorithm_version_is_updated(self):
-        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.13")
+        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.15")
 
     def test_extract_visible_label_from_focus_prefers_text(self):
         focus_node = {"text": "  Visible Text  ", "contentDescription": "Desc"}

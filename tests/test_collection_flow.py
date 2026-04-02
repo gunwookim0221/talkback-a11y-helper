@@ -14,8 +14,10 @@ class DummyClient:
         self.reset_focus_history_calls = 0
         self.touch_calls = []
         self.touch_bounds_center_calls = []
+        self.tap_bounds_center_adb_calls = []
         self.select_calls = []
         self.click_focused_calls = []
+        self.last_target_action_result = {}
 
     def reset_focus_history(self, _dev):
         self.reset_focus_history_calls += 1
@@ -29,6 +31,14 @@ class DummyClient:
 
     def touch_bounds_center(self, **kwargs):
         self.touch_bounds_center_calls.append(kwargs)
+        return True
+
+    def tap_bounds_center_adb(self, **kwargs):
+        self.tap_bounds_center_adb_calls.append(kwargs)
+        self.last_target_action_result = {
+            "reason": "adb_input_tap_sent",
+            "target": {"bounds": "[100,200][300,500]", "center": {"x": 200, "y": 350}, "lazy_dump_used": False},
+        }
         return True
 
     def select(self, **kwargs):
@@ -71,7 +81,7 @@ def _main_row(idx=1):
 def test_open_tab_and_anchor_returns_false_when_tab_stabilization_fails(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": False})
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
-    client = DummyClient([])
+    client = DummyClient([_anchor_row()])
 
     ok = collection_flow.open_tab_and_anchor(client, "SERIAL", _base_tab_cfg())
 
@@ -82,7 +92,7 @@ def test_open_tab_and_anchor_returns_false_when_anchor_stabilization_fails(monke
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": False})
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
-    client = DummyClient([])
+    client = DummyClient([_anchor_row()])
 
     ok = collection_flow.open_tab_and_anchor(client, "SERIAL", _base_tab_cfg())
 
@@ -93,7 +103,7 @@ def test_open_tab_and_anchor_returns_true_when_both_succeed(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
-    client = DummyClient([])
+    client = DummyClient([_anchor_row()])
 
     ok = collection_flow.open_tab_and_anchor(client, "SERIAL", _base_tab_cfg())
 
@@ -412,6 +422,60 @@ def test_open_scenario_pre_navigation_touch_bounds_center_bounds_unavailable_fai
     assert any("failed reason='action_failed' detail='Bounds unavailable' step=1" in line for line in logs)
 
 
+def test_open_scenario_pre_navigation_tap_bounds_center_adb_success(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "tap_bounds_center_adb", "target": "com.test:id/settings_image", "type": "r"}],
+        "pre_navigation_retry_count": 1,
+        "pre_navigation_wait_seconds": 0.1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert len(client.tap_bounds_center_adb_calls) == 1
+    assert any("action=tap_bounds_center_adb" in line for line in logs)
+    assert any("bounds='[100,200][300,500]'" in line for line in logs)
+
+
+def test_open_scenario_pre_navigation_tap_bounds_center_adb_retry_on_bounds_not_found(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+
+    client = DummyClient([_anchor_row()])
+    attempts = {"count": 0}
+
+    def _tap_bounds_center_adb(**kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            client.last_target_action_result = {"reason": "bounds_not_found", "target": {"lazy_dump_used": True}}
+            return False
+        client.last_target_action_result = {"reason": "adb_input_tap_sent", "target": {"bounds": "[1,1][11,21]"}}
+        return True
+
+    client.tap_bounds_center_adb = _tap_bounds_center_adb
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "tap_bounds_center_adb", "target": "com.test:id/settings_image", "type": "r"}],
+        "pre_navigation_retry_count": 2,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert attempts["count"] == 2
+    assert any("retry step=1 attempt=1/2 reason='bounds_not_found'" in line for line in logs)
+
+
 def test_open_scenario_pre_navigation_select_and_click_focused_success(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
@@ -559,3 +623,31 @@ def test_open_scenario_pre_navigation_select_and_click_focused_click_failure(mon
 
     assert ok is False
     assert any("failed reason='action_failed' detail='focused_click_failed' step=1" in line for line in logs)
+
+
+def test_open_scenario_pre_navigation_select_and_tap_bounds_center_adb_uses_tap_target(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [
+            {
+                "action": "select_and_tap_bounds_center_adb",
+                "target": "com.test:id/setting_button_layout",
+                "type": "r",
+                "tap_target": "com.test:id/settings_image",
+                "tap_type": "r",
+            }
+        ],
+        "pre_navigation_retry_count": 1,
+        "pre_navigation_wait_seconds": 0.1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert len(client.select_calls) == 1
+    assert len(client.tap_bounds_center_adb_calls) == 1
+    assert client.tap_bounds_center_adb_calls[0]["name"] == "com.test:id/settings_image"
