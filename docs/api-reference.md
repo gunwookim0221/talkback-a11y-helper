@@ -3,6 +3,8 @@
 `talkback_lib.py`의 `A11yAdbClient`에서 외부 호출을 위해 제공하는 퍼블릭 메서드만 정리한 문서입니다.  
 (내부 헬퍼 메서드: `_run`, `_broadcast`, `_extract_*` 등 `_` 접두사 메서드는 제외)
 
+> 참고: scenario-level 실행/안정화 정책(`screen_context_mode`, `stabilization_mode`, context 분기)은 `docs/scenario-config.md`를 확인하세요.
+
 ## Table of Contents
 
 - [A11yAdbClient API Reference](#a11yadbclient-api-reference)
