@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.9.0"
+    const val VERSION: String = "1.10.0"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
     data class CandidateSelectionResult(
@@ -164,7 +164,9 @@ object A11yTraversalAnalyzer {
             isEnabled = { it.isEnabled },
             resourceIdOf = { it.viewIdResourceName },
             classNameOf = { it.className?.toString() },
-            contentDescriptionOf = { it.contentDescription?.toString() }
+            contentDescriptionOf = { it.contentDescription?.toString() },
+            textOf = { it.text?.toString() },
+            boundsOf = { Rect().also { rect -> it.getBoundsInScreen(rect) } }
         )
     }
 
@@ -178,11 +180,15 @@ object A11yTraversalAnalyzer {
         isEnabled: (T) -> Boolean,
         resourceIdOf: (T) -> String?,
         classNameOf: (T) -> String?,
-        contentDescriptionOf: (T) -> String?
+        contentDescriptionOf: (T) -> String?,
+        textOf: ((T) -> String?)? = null,
+        boundsOf: ((T) -> Rect)? = null
     ): ActionableDescendantMetadata {
         var hasClickableDescendant = false
         var hasFocusableDescendant = false
-        var actionableNode: T? = null
+        val containerBounds = boundsOf?.invoke(container)
+        data class ActionableCandidate<T>(val node: T, val depth: Int, val score: Int)
+        var actionableCandidate: ActionableCandidate<T>? = null
 
         val queue = ArrayDeque<Pair<T, Int>>()
         queue += container to 0
@@ -191,11 +197,34 @@ object A11yTraversalAnalyzer {
             val (current, depth) = queue.removeFirst()
             if (depth > 0 && isVisible(current)) {
                 if (isFocusable(current)) hasFocusableDescendant = true
-                if (actionableNode == null && isClickable(current) && isEnabled(current)) {
+                val currentBounds = boundsOf?.invoke(current)
+                val hasValidBounds = currentBounds == null || !currentBounds.isEmpty
+                if (isClickable(current)) {
                     hasClickableDescendant = true
-                    actionableNode = current
-                } else if (isClickable(current)) {
-                    hasClickableDescendant = true
+                }
+                if (isClickable(current) && isEnabled(current) && hasValidBounds) {
+                    var score = 100
+                    if (!contentDescriptionOf(current).isNullOrBlank() || !textOf?.invoke(current).isNullOrBlank()) score += 35
+                    val currentClassName = classNameOf(current)
+                    if (!currentClassName.isNullOrBlank() &&
+                        BUTTON_LIKE_CLASS_HINTS.any { hint -> currentClassName.contains(hint, ignoreCase = true) }
+                    ) {
+                        score += 30
+                    }
+                    if (containerBounds != null && currentBounds != null &&
+                        (containerBounds.contains(currentBounds) ||
+                            containerBounds.contains(currentBounds.centerX(), currentBounds.centerY()))
+                    ) {
+                        score += 20
+                    }
+                    score -= minOf(25, depth)
+                    val candidate = ActionableCandidate(current, depth, score)
+                    if (actionableCandidate == null ||
+                        candidate.score > actionableCandidate!!.score ||
+                        (candidate.score == actionableCandidate!!.score && candidate.depth < actionableCandidate!!.depth)
+                    ) {
+                        actionableCandidate = candidate
+                    }
                 }
             }
             for (index in 0 until childCountOf(current)) {
@@ -207,11 +236,13 @@ object A11yTraversalAnalyzer {
         return ActionableDescendantMetadata(
             hasClickableDescendant = hasClickableDescendant,
             hasFocusableDescendant = hasFocusableDescendant,
-            actionableDescendantResourceId = actionableNode?.let(resourceIdOf),
-            actionableDescendantClassName = actionableNode?.let(classNameOf),
-            actionableDescendantContentDescription = actionableNode?.let(contentDescriptionOf)
+            actionableDescendantResourceId = actionableCandidate?.node?.let(resourceIdOf),
+            actionableDescendantClassName = actionableCandidate?.node?.let(classNameOf),
+            actionableDescendantContentDescription = actionableCandidate?.node?.let(contentDescriptionOf)
         )
     }
+
+    private val BUTTON_LIKE_CLASS_HINTS = setOf("button", "imagebutton", "floatingactionbutton")
 
     internal fun isFocusContainer(node: AccessibilityNodeInfo): Boolean {
         val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && node.isScreenReaderFocusable
