@@ -461,6 +461,107 @@ class A11yHelperServiceClickTest {
     }
 
     @Test
+    fun executeClickFromFocusedNode_mirrorResolve_rejectsFarBodyText_forTopRightFocusedTarget() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_parent",
+            resourceId = "com.example:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val farBodyText = TestNode(
+            id = "my_profile_desc",
+            resourceId = "com.example:id/my_profile_desc",
+            className = "android.widget.TextView",
+            clickable = false,
+            text = "내 프로필",
+            bounds = Rect(84, 477, 642, 599)
+        )
+
+        root.addChild(focused)
+        root.addChild(farBodyText)
+
+        val result = runExecute(focused, root)
+
+        assertFalse(result.success)
+        assertEquals(A11yHelperService.ClickPath.NONE, result.path)
+        assertEquals(focused, result.attemptedNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_mirrorResolve_rejectsBodyRegionCandidate_whenFocusedIsSmallTopTarget() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_parent",
+            resourceId = "com.example:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val bodyCandidate = TestNode(
+            id = "body_text",
+            className = "android.widget.TextView",
+            clickable = false,
+            text = "Body",
+            bounds = Rect(920, 520, 1028, 604)
+        )
+
+        root.addChild(focused)
+        root.addChild(bodyCandidate)
+
+        val result = runExecute(focused, root)
+
+        assertFalse(result.success)
+        assertEquals(A11yHelperService.ClickPath.NONE, result.path)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_mirrorResolve_prefersNearToolbarMirror_whenFarLeafTextAlsoExists() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_parent",
+            resourceId = "com.example:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val toolbarMirror = TestNode(
+            id = "toolbar_mirror",
+            resourceId = "com.example:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(928, 158, 1034, 270)
+        )
+        val toolbarChild = TestNode(
+            id = "toolbar_mirror_child",
+            className = "android.widget.ImageButton",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(946, 176, 1016, 246)
+        )
+        val farLeafText = TestNode(
+            id = "content_desc",
+            className = "android.widget.TextView",
+            clickable = false,
+            text = "far body",
+            bounds = Rect(120, 480, 660, 620)
+        )
+
+        toolbarMirror.addChild(toolbarChild)
+        root.addChild(focused)
+        root.addChild(toolbarMirror)
+        root.addChild(farLeafText)
+
+        val result = runExecute(focused, root)
+
+        assertTrue(result.success)
+        assertEquals(A11yHelperService.ClickPath.MIRROR_DESCENDANT, result.path)
+        assertEquals(toolbarMirror, result.mirrorNode)
+        assertEquals(toolbarChild, result.clickedNode)
+    }
+
+    @Test
     fun executeClickFromFocusedNode_mirrorResolve_failsSafely_whenOnlyGiantContainerCandidatesExist() {
         val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
         val focused = TestNode(

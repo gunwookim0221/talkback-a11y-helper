@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.4.1"
+        private const val VERSION = "1.4.2"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -624,12 +624,14 @@ class A11yHelperService : AccessibilityService() {
                 rootNode = rootNode,
                 childCountOf = childCountOf,
                 childAt = childAt,
+                isClickable = isClickable,
                 isVisible = isVisible,
                 boundsOf = boundsOf,
                 resourceIdOf = resourceIdOf,
                 classNameOf = classNameOf,
                 contentDescOf = contentDescOf,
-                textOf = textOf
+                textOf = textOf,
+                log = log
             )
             resolvedMirrorNode = mirrorResolve.node
             log?.invoke(
@@ -841,12 +843,14 @@ class A11yHelperService : AccessibilityService() {
         rootNode: T?,
         childCountOf: (T) -> Int,
         childAt: (T, Int) -> T?,
+        isClickable: (T) -> Boolean,
         isVisible: (T) -> Boolean,
         boundsOf: (T) -> Rect,
         resourceIdOf: (T) -> String?,
         classNameOf: (T) -> String?,
         contentDescOf: (T) -> String?,
-        textOf: (T) -> String?
+        textOf: (T) -> String?,
+        log: ((String) -> Unit)? = null
     ): MirrorResolveResult<T> {
         if (rootNode == null) return MirrorResolveResult(null, 0, 0, 0, 0, "no_root", Int.MIN_VALUE, "no_root")
         val focusedBounds = boundsOf(focusedNode)
@@ -860,19 +864,36 @@ class A11yHelperService : AccessibilityService() {
         val focusedArea = maxOf(1, focusedBounds.width() * focusedBounds.height())
         val rootBounds = boundsOf(rootNode)
         val rootArea = maxOf(1, rootBounds.width() * rootBounds.height())
-        val localMarginX = maxOf(160, focusedBounds.width() * 3)
-        val localMarginY = maxOf(160, focusedBounds.height() * 3)
+        val rootHeight = maxOf(1, rootBounds.height())
+        val rootWidth = maxOf(1, rootBounds.width())
+        val localMaxDx = minOf(maxOf(120, focusedBounds.width() * 3), maxOf(220, rootWidth / 2))
+        val localMaxDyBase = minOf(maxOf(120, focusedBounds.height() * 3), maxOf(220, rootHeight / 2))
+        val focusedTopRegion = focusedCenterY <= rootBounds.top + (rootHeight / 3)
+        val focusedSmallTopTarget = focusedTopRegion && focusedArea <= (rootArea / 28)
+        val localMaxDy = if (focusedSmallTopTarget) {
+            minOf(localMaxDyBase, maxOf(140, focusedBounds.height() * 2))
+        } else {
+            localMaxDyBase
+        }
+        val localMarginX = localMaxDx
+        val localMarginY = localMaxDy
         val localBandRect = Rect(
             focusedBounds.left - localMarginX,
             focusedBounds.top - localMarginY,
             focusedBounds.right + localMarginX,
             focusedBounds.bottom + localMarginY
         )
-        val focusedTopRegion = focusedCenterY <= rootBounds.top + (maxOf(1, rootBounds.height()) / 3)
+        val topRegionBottom = minOf(
+            rootBounds.bottom,
+            maxOf(rootBounds.top + (rootHeight / 6), focusedBounds.bottom + maxOf(180, focusedBounds.height() * 2))
+        )
         if (focusedTopRegion) {
             localBandRect.top = rootBounds.top
-            localBandRect.bottom = focusedBounds.bottom + maxOf(220, focusedBounds.height() * 4)
+            localBandRect.bottom = minOf(localBandRect.bottom, topRegionBottom)
         }
+        log?.invoke(
+            "click_focused_mirror_locality focusedCenter='$focusedCenterX,$focusedCenterY' maxDx=$localMaxDx maxDy=$localMaxDy topRegion=$focusedTopRegion smallTopTarget=$focusedSmallTopTarget localBand='${localBandRect.toShortString()}' topRegionBottom=$topRegionBottom"
+        )
 
         data class ScoredMirror<T>(
             val node: T,
@@ -885,7 +906,6 @@ class A11yHelperService : AccessibilityService() {
         val queue = ArrayDeque<T>()
         queue += rootNode
         val localCandidates = mutableListOf<ScoredMirror<T>>()
-        val globalCandidates = mutableListOf<ScoredMirror<T>>()
         var giantFilteredCount = 0
         var giantClassFilteredCount = 0
         var giantAreaFilteredCount = 0
@@ -903,8 +923,12 @@ class A11yHelperService : AccessibilityService() {
 
             val overlap = Rect.intersects(focusedBounds, bounds)
             val contains = focusedBounds.contains(bounds) || bounds.contains(focusedBounds)
+            val candidateCenterX = bounds.centerX()
+            val candidateCenterY = bounds.centerY()
+            val dxAbs = kotlin.math.abs(focusedCenterX - candidateCenterX)
+            val dyAbs = kotlin.math.abs(focusedCenterY - candidateCenterY)
             val centerInBounds = bounds.contains(focusedCenterX, focusedCenterY) ||
-                focusedBounds.contains(bounds.centerX(), bounds.centerY())
+                focusedBounds.contains(candidateCenterX, candidateCenterY)
             val nodeArea = maxOf(1, bounds.width() * bounds.height())
             val areaRatio = nodeArea.toDouble() / focusedArea.toDouble()
             val nodeClassName = classNameOf(node).orEmpty()
@@ -928,7 +952,39 @@ class A11yHelperService : AccessibilityService() {
                 continue
             }
             val localBand = Rect.intersects(localBandRect, bounds) ||
-                localBandRect.contains(bounds.centerX(), bounds.centerY())
+                localBandRect.contains(candidateCenterX, candidateCenterY)
+            val local2d = dxAbs <= localMaxDx && dyAbs <= localMaxDy
+            if (!local2d) {
+                val rejectReason = if (dxAbs > localMaxDx) "locality_dx_exceeded" else "locality_dy_exceeded"
+                log?.invoke(
+                    "click_focused_mirror_reject resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' bounds='${bounds.toShortString()}' candidateCenter='$candidateCenterX,$candidateCenterY' dx=$dxAbs dy=$dyAbs reason='$rejectReason'"
+                )
+                continue
+            }
+            if (!localBand) {
+                log?.invoke(
+                    "click_focused_mirror_reject resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' bounds='${bounds.toShortString()}' candidateCenter='$candidateCenterX,$candidateCenterY' dx=$dxAbs dy=$dyAbs reason='locality_band_mismatch'"
+                )
+                continue
+            }
+            val candidateInTopRegion = bounds.top <= topRegionBottom && candidateCenterY <= topRegionBottom
+            if (focusedSmallTopTarget && !candidateInTopRegion) {
+                log?.invoke(
+                    "click_focused_mirror_reject resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' bounds='${bounds.toShortString()}' candidateCenter='$candidateCenterX,$candidateCenterY' dx=$dxAbs dy=$dyAbs reason='top_region_mismatch'"
+                )
+                continue
+            }
+            val isLeaf = childCountOf(node) == 0
+            val simpleLeaf = classLower.endsWith("textview") || classLower.endsWith("imageview")
+            val nonClickableLeaf = isLeaf && simpleLeaf && !isClickable(node)
+            val strictLeafDx = maxOf(72, focusedBounds.width())
+            val strictLeafDy = maxOf(72, focusedBounds.height())
+            if (nonClickableLeaf && (dxAbs > strictLeafDx || dyAbs > strictLeafDy)) {
+                log?.invoke(
+                    "click_focused_mirror_reject resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' bounds='${bounds.toShortString()}' candidateCenter='$candidateCenterX,$candidateCenterY' dx=$dxAbs dy=$dyAbs reason='far_leaf_text'"
+                )
+                continue
+            }
 
             var score = 0
             val reasonTokens = mutableListOf<String>()
@@ -981,10 +1037,18 @@ class A11yHelperService : AccessibilityService() {
                 score += minOf(40, childCount * 4)
                 reasonTokens += "has_children"
             }
+            if (focusedSmallTopTarget && candidateInTopRegion) {
+                score += 120
+                reasonTokens += "same_top_region"
+            }
+            if (nonClickableLeaf) {
+                score -= 260
+                reasonTokens += "leaf_penalty"
+            }
             if (looksLikeHeavyContainer) score -= 420
 
-            val dx = (focusedCenterX - bounds.centerX()).toLong()
-            val dy = (focusedCenterY - bounds.centerY()).toLong()
+            val dx = (focusedCenterX - candidateCenterX).toLong()
+            val dy = (focusedCenterY - candidateCenterY).toLong()
             val distance = (dx * dx) + (dy * dy)
             score -= minOf(320, (distance / 5000L).toInt())
             if (score < 240) continue
@@ -996,10 +1060,10 @@ class A11yHelperService : AccessibilityService() {
                 localBand = localBand,
                 reason = reasonTokens.joinToString(separator = "+").ifBlank { "score_only" }
             )
-            if (localBand) localCandidates += scoredMirror else globalCandidates += scoredMirror
+            localCandidates += scoredMirror
         }
 
-        val preferredPool = if (localCandidates.isNotEmpty()) localCandidates else globalCandidates
+        val preferredPool = localCandidates
         val best = preferredPool.maxWithOrNull { a, b ->
             when {
                 a.score != b.score -> a.score - b.score
@@ -1008,20 +1072,19 @@ class A11yHelperService : AccessibilityService() {
                 else -> 0
             }
         }
-        val totalCandidates = localCandidates.size + globalCandidates.size
+        val totalCandidates = localCandidates.size
         val rejectSummary = "giant_class=$giantClassFilteredCount giant_area=$giantAreaFilteredCount"
         val reason = when {
             best == null && giantFilteredCount > 0 && totalCandidates == 0 -> "giant_only_rejected"
             best == null -> "no_candidate"
-            best.localBand -> "local_${best.reason}"
-            else -> "global_${best.reason}"
+            else -> "local_${best.reason}"
         }
 
         return MirrorResolveResult(
             node = best?.node,
             candidateCount = totalCandidates,
             localCandidateCount = localCandidates.size,
-            globalCandidateCount = globalCandidates.size,
+            globalCandidateCount = 0,
             giantFilteredCount = giantFilteredCount,
             reason = reason,
             score = best?.score ?: Int.MIN_VALUE,
