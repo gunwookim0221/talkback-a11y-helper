@@ -460,6 +460,38 @@ def test_open_scenario_pre_navigation_select_and_click_focused_select_failure(mo
     assert any("failed reason='action_failed' detail='target_not_found' step=1" in line for line in logs)
 
 
+def test_open_scenario_pre_navigation_select_and_click_focused_select_false_with_focused_target(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+
+    client = DummyClient([_anchor_row()])
+
+    def _select(**kwargs):
+        client.last_target_action_result = {
+            "reason": "ACTION_ACCESSIBILITY_FOCUS failed",
+            "target": {"accessibilityFocused": True},
+        }
+        return False
+
+    client.select = _select
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "select_and_click_focused", "target": "com.test:id/settings_button", "type": "r"}],
+        "pre_navigation_retry_count": 1,
+        "pre_navigation_wait_seconds": 0.1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert len(client.click_focused_calls) == 1
+    assert any("select returned false but accessibilityFocused=true; continuing with click_focused" in line for line in logs)
+
+
 def test_open_scenario_pre_navigation_select_and_click_focused_click_failure(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})

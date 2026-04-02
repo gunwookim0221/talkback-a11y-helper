@@ -77,7 +77,17 @@ def _run_pre_navigation_steps(client: A11yAdbClient, dev: str, tab_cfg: dict[str
             else:
                 select_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=8))
                 if not select_ok:
-                    step_ok = False
+                    last_result = getattr(client, "last_target_action_result", {})
+                    target_snapshot = last_result.get("target", {}) if isinstance(last_result, dict) else {}
+                    focus_confirmed = bool(target_snapshot.get("accessibilityFocused")) if isinstance(target_snapshot, dict) else False
+                    if focus_confirmed:
+                        log(
+                            "[SCENARIO][pre_nav] select returned false but accessibilityFocused=true; "
+                            "continuing with click_focused"
+                        )
+                        step_ok = bool(client.click_focused(dev=dev, wait_=8))
+                    else:
+                        step_ok = False
                 else:
                     step_ok = bool(client.click_focused(dev=dev, wait_=8))
 
