@@ -1263,6 +1263,118 @@ class A11yHelperServiceClickTest {
     }
 
     @Test
+    fun executeClickFromFocusedNode_semanticMirrorResolvesWrapperLeaf_whenMirrorAndRootRetargetMiss() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_wrapper_leaf",
+            resourceId = "com.example:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val semanticTarget = TestNode(
+            id = "semantic_target",
+            resourceId = "com.example:id/settings_image",
+            className = "android.widget.ImageButton",
+            contentDesc = "Settings",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(1070, 190, 1120, 240)
+        )
+        root.addChild(focused)
+        root.addChild(semanticTarget)
+
+        val result = runExecute(focused, root)
+
+        assertTrue(result.success)
+        assertEquals(A11yHelperService.ClickPath.SEMANTIC_MIRROR, result.path)
+        assertEquals(semanticTarget, result.clickedNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_semanticMirrorMatchesLayoutVsImageAliasTokens() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_alias_wrapper",
+            resourceId = "com.example:id/profile_button_layout",
+            className = "android.widget.FrameLayout",
+            clickable = false,
+            bounds = Rect(900, 140, 1010, 250)
+        )
+        val aliasTarget = TestNode(
+            id = "alias_target",
+            resourceId = "com.example:id/profile_icon_image",
+            className = "android.widget.ImageButton",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(1035, 170, 1090, 225)
+        )
+        root.addChild(focused)
+        root.addChild(aliasTarget)
+
+        val result = runExecute(focused, root)
+
+        assertTrue(result.success)
+        assertEquals(A11yHelperService.ClickPath.SEMANTIC_MIRROR, result.path)
+        assertEquals(aliasTarget, result.clickedNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_semanticMirrorRejectsLargeBodyCard_forTopRightSmallWrapper() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_top_right_wrapper",
+            resourceId = "com.example:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val largeBodyCard = TestNode(
+            id = "my_profile_card_view",
+            resourceId = "com.example:id/my_profile_card_view",
+            className = "android.widget.FrameLayout",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(40, 420, 1040, 2100)
+        )
+        root.addChild(focused)
+        root.addChild(largeBodyCard)
+
+        val result = runExecute(focused, root)
+
+        assertFalse(result.success)
+        assertEquals(A11yHelperService.ClickPath.NONE, result.path)
+        assertNotEquals(largeBodyCard, result.attemptedNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_semanticMirrorFailsWhenNoCandidatePassesThreshold() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_wrapper",
+            resourceId = "com.example:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val weakCandidate = TestNode(
+            id = "weak_candidate",
+            resourceId = "com.example:id/random_action",
+            className = "android.widget.Button",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(600, 180, 740, 320)
+        )
+        root.addChild(focused)
+        root.addChild(weakCandidate)
+
+        val result = runExecute(focused, root)
+
+        assertFalse(result.success)
+        assertEquals(A11yHelperService.ClickPath.NONE, result.path)
+    }
+
+    @Test
     fun executeClickFromFocusedNode_nullFocusedFailsImmediately() {
         val result = runExecute(null)
 
