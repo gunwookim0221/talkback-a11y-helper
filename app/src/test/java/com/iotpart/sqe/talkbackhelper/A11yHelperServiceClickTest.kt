@@ -3,7 +3,9 @@ package com.iotpart.sqe.talkbackhelper
 import android.graphics.Rect
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -766,6 +768,7 @@ class A11yHelperServiceClickTest {
         assertEquals(topRightSettingsImage, result.clickedNode)
         assertNotNull(logs.find { it.contains("[click_focused_descendant_scan_start]") && it.contains("childCount=0") && it.contains("source='resolved_raw_focus'") })
         assertNotNull(logs.find { it.contains("[click_focused_local_raw_search_start]") })
+        assertNotNull(logs.find { it.contains("[click_focused_local_raw_scan_node]") && it.contains("source='local_raw_search'") })
         assertNotNull(
             logs.find {
                 it.contains("[click_focused_local_raw_candidate_seen]") &&
@@ -780,6 +783,14 @@ class A11yHelperServiceClickTest {
                     it.contains("com.samsung.android.oneconnect:id/settings_image")
             }
         )
+        assertNull(
+            logs.find {
+                it.contains("[click_focused_candidate_seen]") &&
+                    it.contains("com.samsung.android.oneconnect:id/settings_image") &&
+                    it.contains("source='root_tree'")
+            }
+        )
+        assertNotEquals(giantBodyCard, result.clickedNode)
     }
 
     @Test
@@ -834,7 +845,83 @@ class A11yHelperServiceClickTest {
         assertEquals(A11yHelperService.ClickPath.NONE, result.path)
         assertNotNull(logs.find { it.contains("[click_focused_descendant_scan_start]") && it.contains("childCount=0") })
         assertNotNull(logs.find { it.contains("[click_focused_local_raw_search_start]") })
+        assertNotNull(logs.find { it.contains("[click_focused_local_raw_scan_node]") && it.contains("source='local_raw_search'") })
         assertEquals(0, logs.count { it.contains("[click_focused_local_raw_candidate_seen]") })
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_localRawSearch_fullTraversalFindsNestedSmallChild_whenTopLevelDoesNotContainCandidate() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focusedSnapshot = TestNode(
+            id = "focused_snapshot_only",
+            resourceId = "com.samsung.android.oneconnect:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val rawResolvedWrapper = TestNode(
+            id = "raw_resolved_wrapper",
+            resourceId = "com.samsung.android.oneconnect:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val toolbarContainer = TestNode(
+            id = "toolbar_container",
+            className = "android.widget.FrameLayout",
+            clickable = false,
+            bounds = Rect(880, 120, 1060, 320)
+        )
+        val nestedSettingsImage = TestNode(
+            id = "nested_settings_image",
+            resourceId = "com.samsung.android.oneconnect:id/settings_image",
+            className = "android.widget.ImageButton",
+            contentDesc = "Settings",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(945, 178, 1017, 250)
+        )
+        val giantBodyCard = TestNode(
+            id = "my_profile_card_view",
+            className = "android.widget.ScrollView",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(0, 300, 1080, 2280)
+        )
+        val logs = mutableListOf<String>()
+
+        toolbarContainer.addChild(nestedSettingsImage)
+        root.addChild(rawResolvedWrapper)
+        root.addChild(toolbarContainer)
+        root.addChild(giantBodyCard)
+
+        val result = runExecute(
+            focusedNode = focusedSnapshot,
+            rootNode = root,
+            logs = logs,
+            reResolveFocusedNodeFromRoot = { _, _, logger ->
+                logger?.invoke(
+                    "[click_focused_raw_focus_resolve] resolved=true resourceId='${focusedSnapshot.resourceId}' className='${focusedSnapshot.className}' bounds='${focusedSnapshot.bounds.toShortString()}' reason='test_resolved_raw_focus_empty_children_nested_target'"
+                )
+                rawResolvedWrapper
+            }
+        )
+
+        assertTrue(result.success)
+        assertEquals(A11yHelperService.ClickPath.MIRROR_DESCENDANT, result.path)
+        assertEquals(nestedSettingsImage, result.clickedNode)
+        assertNotNull(logs.find { it.contains("[click_focused_descendant_scan_start]") && it.contains("childCount=0") })
+        assertNotNull(logs.find { it.contains("[click_focused_local_raw_scan_node]") && it.contains("resourceId='com.samsung.android.oneconnect:id/settings_image'") })
+        assertNotNull(logs.find { it.contains("[click_focused_local_raw_candidate_seen]") && it.contains("resourceId='com.samsung.android.oneconnect:id/settings_image'") })
+        assertNotNull(logs.find { it.contains("[click_focused_candidate_pass_stage]") && it.contains("stage='local_raw_collected'") && it.contains("com.samsung.android.oneconnect:id/settings_image") })
+        assertNull(
+            logs.find {
+                it.contains("[click_focused_candidate_seen]") &&
+                    it.contains("resourceId='com.samsung.android.oneconnect:id/settings_image'") &&
+                    it.contains("source='root_tree'")
+            }
+        )
+        assertNotEquals(giantBodyCard, result.clickedNode)
     }
 
     @Test

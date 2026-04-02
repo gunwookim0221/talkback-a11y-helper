@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.4.6"
+        private const val VERSION = "1.4.7"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -1183,9 +1183,11 @@ class A11yHelperService : AccessibilityService() {
                 val node = localQueue.removeFirst()
                 enqueueChildren(node, localQueue)
                 if (node == focusedNode) continue
-                if (!isClickable(node) || !isVisible(node) || !isEnabled(node)) continue
                 val bounds = boundsOf(node)
                 if (bounds.isEmpty) continue
+                val clickableNode = isClickable(node)
+                val visibleNode = isVisible(node)
+                val enabledNode = isEnabled(node)
                 val candidateCenterX = bounds.centerX()
                 val candidateCenterY = bounds.centerY()
                 val dxAbs = kotlin.math.abs(focusedCenterX - candidateCenterX)
@@ -1197,10 +1199,15 @@ class A11yHelperService : AccessibilityService() {
                 val nearFocused = Rect.intersects(nearFocusedBounds, bounds)
                 val inLocalBand = Rect.intersects(localSearchBounds, bounds) || localSearchBounds.contains(candidateCenterX, candidateCenterY)
                 val inTopRegionBand = bounds.top <= topRegionBottom && candidateCenterY <= topRegionBottom
+                val nodeClassName = classNameOf(node).orEmpty()
+                log?.invoke(
+                    "[click_focused_local_raw_scan_node] resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode enabled=$enabledNode visible=$visibleNode bounds='${bounds.toShortString()}' center='${candidateCenterX},${candidateCenterY}' dx=$dxAbs dy=$dyAbs inLocalBounds=$inLocalBand topRegionBand=$inTopRegionBand source='local_raw_search'"
+                )
+                if (!clickableNode || !visibleNode || !enabledNode) continue
                 if (focusedTopRegion && !inTopRegionBand && !insideFocused && !overlapFocused) continue
                 val nodeArea = maxOf(1, bounds.width() * bounds.height())
                 if (nodeArea > focusedArea * 8) continue
-                val nodeClassNameLower = classNameOf(node).orEmpty().lowercase()
+                val nodeClassNameLower = nodeClassName.lowercase()
                 val preferredClass = nodeClassNameLower.endsWith("imagebutton") ||
                     nodeClassNameLower.endsWith("button") ||
                     nodeClassNameLower.endsWith("imageview") ||
