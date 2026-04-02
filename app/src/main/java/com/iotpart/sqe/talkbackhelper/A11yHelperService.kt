@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.4.5"
+        private const val VERSION = "1.4.6"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -725,6 +725,7 @@ class A11yHelperService : AccessibilityService() {
                 childAt = childAt,
                 isClickable = isClickable,
                 isVisible = isVisible,
+                isEnabled = isEnabled,
                 boundsOf = boundsOf,
                 resourceIdOf = resourceIdOf,
                 classNameOf = classNameOf,
@@ -744,6 +745,16 @@ class A11yHelperService : AccessibilityService() {
                 log?.invoke(
                     "click_focused_mirror_pick resourceId='${resourceIdOf(resolvedMirrorNode).orEmpty()}' class='${classNameOf(resolvedMirrorNode).orEmpty()}' bounds='${mirrorBounds.toShortString()}' reason='${mirrorResolve.reason}' score=${mirrorResolve.score}"
                 )
+                if (isNodeClickableCandidate(resolvedMirrorNode, isClickable, isVisible, isEnabled, boundsOf) && performClick(resolvedMirrorNode)) {
+                    return ClickExecutionResult(
+                        success = true,
+                        reason = "Mirror clickable node clicked",
+                        path = ClickPath.MIRROR_DESCENDANT,
+                        clickedNode = resolvedMirrorNode,
+                        attemptedNode = resolvedMirrorNode,
+                        mirrorNode = resolvedMirrorNode
+                    )
+                }
                 val mirrorDescendantHint = buildDescendantHint(
                     focusedNode = resolvedMirrorNode,
                     childCountOf = childCountOf,
@@ -944,6 +955,7 @@ class A11yHelperService : AccessibilityService() {
         childAt: (T, Int) -> T?,
         isClickable: (T) -> Boolean,
         isVisible: (T) -> Boolean,
+        isEnabled: (T) -> Boolean,
         boundsOf: (T) -> Rect,
         resourceIdOf: (T) -> String?,
         classNameOf: (T) -> String?,
@@ -1105,6 +1117,11 @@ class A11yHelperService : AccessibilityService() {
                     "[click_focused_candidate_pass_stage] stage='raw_descendant_collected' resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
                 )
             }
+            if (source == "local_raw_search") {
+                log?.invoke(
+                    "[click_focused_candidate_pass_stage] stage='local_raw_collected' resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
+                )
+            }
             log?.invoke(
                 "[click_focused_candidate_pass_stage] stage='collected' resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
             )
@@ -1129,7 +1146,11 @@ class A11yHelperService : AccessibilityService() {
             )
         }
 
+        var rawDescendantCollectedCount = 0
         if (!isClickable(focusedNode)) {
+            log?.invoke(
+                "[click_focused_descendant_scan_start] nodeResourceId='${focusedResourceId}' childCount=${childCountOf(focusedNode)} source='resolved_raw_focus'"
+            )
             val focusedQueue = ArrayDeque<T>()
             enqueueChildren(focusedNode, focusedQueue)
             while (focusedQueue.isNotEmpty()) {
@@ -1140,6 +1161,62 @@ class A11yHelperService : AccessibilityService() {
                 if (bounds.isEmpty) continue
                 if (!shouldCollectFocusedDescendantCandidate(node, bounds, nodeClassName)) continue
                 collectCandidate(node, logPrefix = "click_focused_descendant_candidate_seen", source = "raw_descendant")
+                rawDescendantCollectedCount += 1
+            }
+        }
+
+        if (!isClickable(focusedNode) && rawDescendantCollectedCount == 0 && rootNode != null) {
+            val localSearchBounds = Rect(localBandRect)
+            val focusedCenter = "${focusedCenterX},${focusedCenterY}"
+            log?.invoke(
+                "[click_focused_local_raw_search_start] focusedBounds='${focusedBounds.toShortString()}' focusedCenter='$focusedCenter' topRegion=$focusedTopRegion localSearchBounds='${localSearchBounds.toShortString()}'"
+            )
+            val localQueue = ArrayDeque<T>()
+            localQueue += rootNode
+            val nearFocusedBounds = Rect(
+                focusedBounds.left - maxOf(120, focusedBounds.width() * 2),
+                focusedBounds.top - maxOf(120, focusedBounds.height() * 2),
+                focusedBounds.right + maxOf(120, focusedBounds.width() * 2),
+                focusedBounds.bottom + maxOf(120, focusedBounds.height() * 2)
+            )
+            while (localQueue.isNotEmpty()) {
+                val node = localQueue.removeFirst()
+                enqueueChildren(node, localQueue)
+                if (node == focusedNode) continue
+                if (!isClickable(node) || !isVisible(node) || !isEnabled(node)) continue
+                val bounds = boundsOf(node)
+                if (bounds.isEmpty) continue
+                val candidateCenterX = bounds.centerX()
+                val candidateCenterY = bounds.centerY()
+                val dxAbs = kotlin.math.abs(focusedCenterX - candidateCenterX)
+                val dyAbs = kotlin.math.abs(focusedCenterY - candidateCenterY)
+                val insideFocused = focusedBounds.contains(bounds) || focusedBounds.contains(candidateCenterX, candidateCenterY)
+                val overlapFocused = Rect.intersects(focusedBounds, bounds)
+                val nearCenter = dxAbs <= maxOf(72, focusedBounds.width()) && dyAbs <= maxOf(72, focusedBounds.height())
+                val wrapperContainment = bounds.contains(focusedBounds) || focusedBounds.contains(bounds)
+                val nearFocused = Rect.intersects(nearFocusedBounds, bounds)
+                val inLocalBand = Rect.intersects(localSearchBounds, bounds) || localSearchBounds.contains(candidateCenterX, candidateCenterY)
+                val inTopRegionBand = bounds.top <= topRegionBottom && candidateCenterY <= topRegionBottom
+                if (focusedTopRegion && !inTopRegionBand && !insideFocused && !overlapFocused) continue
+                val nodeArea = maxOf(1, bounds.width() * bounds.height())
+                if (nodeArea > focusedArea * 8) continue
+                val nodeClassNameLower = classNameOf(node).orEmpty().lowercase()
+                val preferredClass = nodeClassNameLower.endsWith("imagebutton") ||
+                    nodeClassNameLower.endsWith("button") ||
+                    nodeClassNameLower.endsWith("imageview") ||
+                    nodeClassNameLower.endsWith("viewgroup")
+                val localGeometryMatch = insideFocused || overlapFocused || nearCenter || wrapperContainment || nearFocused || inLocalBand
+                val classGatePass = if (preferredClass) {
+                    localGeometryMatch
+                } else {
+                    insideFocused || overlapFocused || nearCenter
+                }
+                if (!classGatePass) continue
+                collectCandidate(
+                    node = node,
+                    logPrefix = "click_focused_local_raw_candidate_seen",
+                    source = "local_raw_search"
+                )
             }
         }
 
