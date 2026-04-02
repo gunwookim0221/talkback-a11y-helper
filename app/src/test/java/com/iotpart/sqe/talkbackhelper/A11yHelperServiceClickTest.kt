@@ -121,6 +121,134 @@ class A11yHelperServiceClickTest {
     }
 
     @Test
+    fun executeClickFromFocusedNode_rootRetarget_prefersInsideCandidateOverDistantLargeCard() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_parent",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val insideClickable = TestNode(
+            id = "settings_image",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(945, 178, 1017, 250)
+        )
+        val distantLargeCard = TestNode(
+            id = "explore_card",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(60, 650, 1020, 1450)
+        )
+
+        root.addChild(focused)
+        root.addChild(insideClickable)
+        root.addChild(distantLargeCard)
+
+        val result = runExecute(focused, root)
+
+        assertTrue(result.success)
+        assertEquals(A11yHelperService.ClickPath.ROOT_RETARGET, result.path)
+        assertEquals(insideClickable, result.clickedNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_rootRetarget_usesOverlapWhenInsideMissing() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_parent",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val overlapClickable = TestNode(
+            id = "toolbar_overlap",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(900, 130, 1000, 230)
+        )
+        val globalFar = TestNode(
+            id = "global_far",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(80, 1500, 1000, 2100)
+        )
+
+        root.addChild(focused)
+        root.addChild(overlapClickable)
+        root.addChild(globalFar)
+
+        val result = runExecute(focused, root)
+
+        assertTrue(result.success)
+        assertEquals(A11yHelperService.ClickPath.ROOT_RETARGET, result.path)
+        assertEquals(overlapClickable, result.clickedNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_rootRetarget_usesLocalBandWhenInsideAndOverlapMissing() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_parent",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val localBandClickable = TestNode(
+            id = "toolbar_neighbor",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(760, 120, 900, 240)
+        )
+        val farGlobalClickable = TestNode(
+            id = "content_card",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(60, 1200, 1020, 2000)
+        )
+
+        root.addChild(focused)
+        root.addChild(localBandClickable)
+        root.addChild(farGlobalClickable)
+
+        val result = runExecute(focused, root)
+
+        assertTrue(result.success)
+        assertEquals(A11yHelperService.ClickPath.ROOT_RETARGET, result.path)
+        assertEquals(localBandClickable, result.clickedNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_rootRetarget_doesNotPickLargeDistantCardWhenOverlapExists() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_parent",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val overlapClickable = TestNode(
+            id = "near_overlap",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(920, 150, 1060, 290)
+        )
+        val hugeDistantCard = TestNode(
+            id = "huge_card",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(0, 500, 1080, 2200)
+        )
+
+        root.addChild(focused)
+        root.addChild(overlapClickable)
+        root.addChild(hugeDistantCard)
+
+        val result = runExecute(focused, root)
+
+        assertTrue(result.success)
+        assertEquals(A11yHelperService.ClickPath.ROOT_RETARGET, result.path)
+        assertEquals(overlapClickable, result.clickedNode)
+    }
+
+    @Test
     fun executeClickFromFocusedNode_nullFocusedFailsImmediately() {
         val result = runExecute(null)
 

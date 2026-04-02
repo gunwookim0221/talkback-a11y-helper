@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.2.0"
+        private const val VERSION = "1.2.1"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -509,6 +509,12 @@ class A11yHelperService : AccessibilityService() {
             if (clickedNode != null) {
                 put("target", FocusSnapshot.fromNode(clickedNode).toJson())
             }
+            if (outcome.path == ClickPath.ROOT_RETARGET && clickedNode != null) {
+                val retargetedBounds = Rect().also { clickedNode.getBoundsInScreen(it) }
+                put("retargetedResourceId", clickedNode.viewIdResourceName ?: JSONObject.NULL)
+                put("retargetedClassName", clickedNode.className?.toString() ?: JSONObject.NULL)
+                put("retargetedBounds", retargetedBounds.toShortString())
+            }
         }
 
         Log.i(TAG, "TARGET_ACTION_RESULT $resultJson")
@@ -614,10 +620,13 @@ class A11yHelperService : AccessibilityService() {
         log?.invoke(
             "click_focused_root_retarget candidates=${rootRetarget.candidateCount} focusedResourceId='$focusedResourceId' focusedClass='$focusedClassName' focusedBounds='${focusedBounds.toShortString()}'"
         )
+        log?.invoke(
+            "click_focused_root_candidates inside=${rootRetarget.insideCount} overlap=${rootRetarget.overlapCount} local=${rootRetarget.localBandCount} global=${rootRetarget.globalCount} focusedBounds='${focusedBounds.toShortString()}'"
+        )
         if (rootRetarget.node != null) {
             val candidateBounds = boundsOf(rootRetarget.node)
             log?.invoke(
-                "click_focused_root_pick resourceId='${resourceIdOf(rootRetarget.node).orEmpty()}' class='${classNameOf(rootRetarget.node).orEmpty()}' bounds='${candidateBounds.toShortString()}'"
+                "click_focused_root_pick resourceId='${resourceIdOf(rootRetarget.node).orEmpty()}' class='${classNameOf(rootRetarget.node).orEmpty()}' bounds='${candidateBounds.toShortString()}' reason='${rootRetarget.selectedReason}' score=${rootRetarget.selectedScore}"
             )
             if (performClick(rootRetarget.node)) {
                 return ClickExecutionResult(
@@ -641,7 +650,13 @@ class A11yHelperService : AccessibilityService() {
 
     private data class RootRetargetPick<T>(
         val node: T?,
-        val candidateCount: Int
+        val candidateCount: Int,
+        val insideCount: Int,
+        val overlapCount: Int,
+        val localBandCount: Int,
+        val globalCount: Int,
+        val selectedReason: String,
+        val selectedScore: Int
     )
 
     private fun <T> findBestClickableFromRoot(
@@ -658,21 +673,35 @@ class A11yHelperService : AccessibilityService() {
         contentDescOf: (T) -> String?,
         textOf: (T) -> String?
     ): RootRetargetPick<T> {
-        if (rootNode == null) return RootRetargetPick(node = null, candidateCount = 0)
+        if (rootNode == null) {
+            return RootRetargetPick(null, 0, 0, 0, 0, 0, "none", Int.MIN_VALUE)
+        }
         val focusedBounds = boundsOf(focusedNode)
-        if (focusedBounds.isEmpty) return RootRetargetPick(node = null, candidateCount = 0)
+        if (focusedBounds.isEmpty) {
+            return RootRetargetPick(null, 0, 0, 0, 0, 0, "none", Int.MIN_VALUE)
+        }
         val focusedCenter = A11yTargetFinder.calculateBoundsCenter(focusedBounds)
+        val focusedArea = maxOf(1, focusedBounds.width() * focusedBounds.height())
         val focusedResourceId = resourceIdOf(focusedNode)
         val focusedClassName = classNameOf(focusedNode)
         val focusedContentDesc = contentDescOf(focusedNode)
         val focusedText = textOf(focusedNode)
+        val bandMargin = maxOf(focusedBounds.height() * 2, 80)
+        val localBandTop = focusedBounds.top - bandMargin
+        val localBandBottom = focusedBounds.bottom + bandMargin
+
+        data class ScoredCandidate<T>(
+            val node: T,
+            val inside: Boolean,
+            val overlap: Boolean,
+            val localBand: Boolean,
+            val distance: Long,
+            val score: Int
+        )
 
         val queue = ArrayDeque<T>()
         queue += rootNode
-        var bestNode: T? = null
-        var bestScore = Int.MIN_VALUE
-        var bestDistance = Long.MAX_VALUE
-        var candidates = 0
+        val allCandidates = mutableListOf<ScoredCandidate<T>>()
 
         while (queue.isNotEmpty()) {
             val node = queue.removeFirst()
@@ -684,9 +713,10 @@ class A11yHelperService : AccessibilityService() {
             if (!isNodeClickableCandidate(node, isClickable, isVisible, isEnabled, boundsOf)) continue
 
             val candidateBounds = boundsOf(node)
-            val overlap = Rect.intersects(focusedBounds, candidateBounds)
-            val containsCenter = focusedCenter?.let { (x, y) -> candidateBounds.contains(x, y) } == true
-            val overlapArea = if (overlap) {
+            val candidateCenterX = candidateBounds.centerX()
+            val candidateCenterY = candidateBounds.centerY()
+            val inside = focusedBounds.contains(candidateBounds) || focusedBounds.contains(candidateCenterX, candidateCenterY)
+            val overlapArea = if (Rect.intersects(focusedBounds, candidateBounds)) {
                 val left = maxOf(focusedBounds.left, candidateBounds.left)
                 val top = maxOf(focusedBounds.top, candidateBounds.top)
                 val right = minOf(focusedBounds.right, candidateBounds.right)
@@ -695,32 +725,73 @@ class A11yHelperService : AccessibilityService() {
             } else {
                 0
             }
+            val candidateArea = maxOf(1, candidateBounds.width() * candidateBounds.height())
+            val overlapByFocused = overlapArea.toDouble() / focusedArea.toDouble()
+            val overlapByCandidate = overlapArea.toDouble() / candidateArea.toDouble()
+            val overlap = overlapArea > 0 && (overlapByFocused >= 0.2 || overlapByCandidate >= 0.1)
+            val localBand = candidateCenterY in localBandTop..localBandBottom ||
+                (candidateBounds.bottom >= localBandTop && candidateBounds.top <= localBandBottom)
             val distance = focusedCenter?.let { (fx, fy) ->
-                val cx = candidateBounds.centerX()
-                val cy = candidateBounds.centerY()
-                val dx = (fx - cx).toLong()
-                val dy = (fy - cy).toLong()
+                val dx = (fx - candidateCenterX).toLong()
+                val dy = (fy - candidateCenterY).toLong()
                 (dx * dx) + (dy * dy)
             } ?: Long.MAX_VALUE
 
             var score = 0
-            if (containsCenter) score += 1000
-            if (overlap) score += 700
-            if (overlapArea > 0) score += minOf(overlapArea / 100, 300)
+            if (inside) score += 2200
+            if (overlap) score += 1500
+            if (localBand) score += 350
+            if (overlapArea > 0) score += minOf(overlapArea / 80, 350)
             if (!focusedResourceId.isNullOrBlank() && focusedResourceId == resourceIdOf(node)) score += 200
             if (!focusedClassName.isNullOrBlank() && focusedClassName == classNameOf(node)) score += 80
             if (!focusedContentDesc.isNullOrBlank() && focusedContentDesc == contentDescOf(node)) score += 80
             if (!focusedText.isNullOrBlank() && focusedText == textOf(node)) score += 80
+            if (candidateArea > focusedArea * 4) {
+                val areaRatio = candidateArea.toDouble() / focusedArea.toDouble()
+                score -= minOf(900, (areaRatio * 70.0).toInt())
+            }
+            if (candidateBounds.top > focusedBounds.bottom + bandMargin) score -= 700
+            if (!localBand) score -= 250
+            score -= minOf(700, (distance / 4000L).toInt())
 
-            candidates += 1
-            if (score > bestScore || (score == bestScore && distance < bestDistance)) {
-                bestScore = score
-                bestDistance = distance
-                bestNode = node
+            allCandidates += ScoredCandidate(
+                node = node,
+                inside = inside,
+                overlap = overlap,
+                localBand = localBand,
+                distance = distance,
+                score = score
+            )
+        }
+
+        val insideCandidates = allCandidates.filter { it.inside }
+        val overlapCandidates = allCandidates.filter { !it.inside && it.overlap }
+        val localBandCandidates = allCandidates.filter { !it.inside && !it.overlap && it.localBand }
+        val (pool, reason) = when {
+            insideCandidates.isNotEmpty() -> insideCandidates to "inside_bounds"
+            overlapCandidates.isNotEmpty() -> overlapCandidates to "overlap_bounds"
+            localBandCandidates.isNotEmpty() -> localBandCandidates to "local_band"
+            else -> allCandidates to "global_fallback"
+        }
+        val picked = pool.maxWithOrNull { a, b ->
+            when {
+                a.score != b.score -> a.score - b.score
+                a.distance < b.distance -> 1
+                a.distance > b.distance -> -1
+                else -> 0
             }
         }
 
-        return RootRetargetPick(node = bestNode, candidateCount = candidates)
+        return RootRetargetPick(
+            node = picked?.node,
+            candidateCount = allCandidates.size,
+            insideCount = insideCandidates.size,
+            overlapCount = overlapCandidates.size,
+            localBandCount = localBandCandidates.size,
+            globalCount = allCandidates.size,
+            selectedReason = reason,
+            selectedScore = picked?.score ?: Int.MIN_VALUE
+        )
     }
 
     internal fun <T> findFirstClickableDescendant(
