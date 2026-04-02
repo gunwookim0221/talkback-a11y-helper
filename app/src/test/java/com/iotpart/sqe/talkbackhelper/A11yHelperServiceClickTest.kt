@@ -18,6 +18,8 @@ class A11yHelperServiceClickTest {
         val contentDesc: String? = null,
         val text: String? = null,
         var clickable: Boolean = false,
+        var accessibilityFocused: Boolean = false,
+        var focusable: Boolean = false,
         var visible: Boolean = true,
         var enabled: Boolean = true,
         var bounds: Rect = Rect(0, 0, 100, 100),
@@ -34,7 +36,7 @@ class A11yHelperServiceClickTest {
 
     @Test
     fun executeClickFromFocusedNode_directSuccess_keepsRegression() {
-        val focused = TestNode(id = "focused", clickable = true, clickResult = true)
+        val focused = TestNode(id = "focused", clickable = true, clickResult = true, accessibilityFocused = true, focusable = true)
 
         val result = runExecute(focused)
 
@@ -42,6 +44,133 @@ class A11yHelperServiceClickTest {
         assertEquals("Focused node clicked", result.reason)
         assertEquals(A11yHelperService.ClickPath.DIRECT, result.path)
         assertEquals(focused, result.clickedNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_wrapperRecovery_picksInsideClickable_whenFocusedWrapperIsTopSmallAndEmpty() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focusedWrapper = TestNode(
+            id = "focused_wrapper",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            accessibilityFocused = true,
+            focusable = true,
+            bounds = Rect(930, 160, 1030, 260)
+        )
+        val insideClickable = TestNode(
+            id = "inside_clickable",
+            className = "android.widget.ImageButton",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(944, 176, 1016, 248)
+        )
+        val farBodyClickable = TestNode(
+            id = "far_body_clickable",
+            className = "android.widget.Button",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(120, 1300, 960, 1880)
+        )
+        root.addChild(focusedWrapper)
+        root.addChild(insideClickable)
+        root.addChild(farBodyClickable)
+
+        val result = runExecute(focusedWrapper, root)
+
+        assertTrue(result.success)
+        assertEquals(A11yHelperService.ClickPath.WRAPPER_RECOVERY, result.path)
+        assertEquals(insideClickable, result.clickedNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_wrapperRecovery_topSmallTarget_doesNotTapBodyCandidate() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focusedWrapper = TestNode(
+            id = "focused_wrapper",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            accessibilityFocused = true,
+            focusable = true,
+            bounds = Rect(930, 160, 1030, 260)
+        )
+        val bodyClickable = TestNode(
+            id = "body_clickable",
+            className = "android.widget.Button",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(920, 700, 1040, 820)
+        )
+        root.addChild(focusedWrapper)
+        root.addChild(bodyClickable)
+
+        val result = runExecute(focusedWrapper, root)
+
+        assertFalse(result.success)
+        assertEquals(A11yHelperService.ClickPath.NONE, result.path)
+        assertEquals(focusedWrapper, result.attemptedNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_wrapperRecovery_rejectsGiantAndFarCandidates() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focusedWrapper = TestNode(
+            id = "focused_wrapper",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            accessibilityFocused = true,
+            focusable = true,
+            bounds = Rect(930, 160, 1030, 260)
+        )
+        val giantContainer = TestNode(
+            id = "mainScrollView",
+            className = "android.widget.ScrollView",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(0, 120, 1080, 2320)
+        )
+        val farTopTiny = TestNode(
+            id = "far_top_tiny",
+            className = "android.widget.ImageButton",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(20, 20, 90, 90)
+        )
+        root.addChild(focusedWrapper)
+        root.addChild(giantContainer)
+        root.addChild(farTopTiny)
+
+        val result = runExecute(focusedWrapper, root)
+
+        assertFalse(result.success)
+        assertEquals(A11yHelperService.ClickPath.NONE, result.path)
+        assertEquals(focusedWrapper, result.attemptedNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_wrapperRecovery_notTriggered_whenAccessibilityFocusedFlagMissing() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focusedWrapper = TestNode(
+            id = "focused_wrapper",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            accessibilityFocused = false,
+            focusable = true,
+            bounds = Rect(930, 160, 1030, 260)
+        )
+        val insideClickable = TestNode(
+            id = "inside_clickable",
+            className = "android.widget.ImageButton",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(944, 176, 1016, 248)
+        )
+        root.addChild(focusedWrapper)
+        root.addChild(insideClickable)
+
+        val result = runExecute(focusedWrapper, root)
+
+        assertFalse(result.success)
+        assertNotEquals(A11yHelperService.ClickPath.WRAPPER_RECOVERY, result.path)
     }
 
     @Test
@@ -1155,6 +1284,8 @@ class A11yHelperServiceClickTest {
             childCountOf = { it.children.size },
             childAt = { node, index -> node.children.getOrNull(index) },
             parentOf = { it.parent },
+            isAccessibilityFocused = { it.accessibilityFocused },
+            isFocusable = { it.focusable },
             isClickable = { it.clickable },
             isVisible = { it.visible },
             isEnabled = { it.enabled },
