@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.1.0"
+        private const val VERSION = "1.2.0"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -36,6 +36,7 @@ class A11yHelperService : AccessibilityService() {
         DIRECT("direct"),
         DESCENDANT("descendant"),
         ANCESTOR("ancestor"),
+        ROOT_RETARGET("root_retarget"),
         NONE("none")
     }
 
@@ -459,9 +460,16 @@ class A11yHelperService : AccessibilityService() {
 
     fun clickFocusedNode(reqId: String = "none"): JSONObject {
         val focusedNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val rootNode = rootInActiveWindow
         val focusedSnapshot = FocusSnapshot.fromNodeOrNull(focusedNode)
+        val focusedBounds = focusedNode?.let { Rect().also { rect -> it.getBoundsInScreen(rect) } }
+        Log.d(
+            TAG,
+            "[DEBUG][TARGET_ACTION][click_focused_focus_snapshot] reqId=$reqId resourceId='${focusedNode?.viewIdResourceName.orEmpty()}' class='${focusedNode?.className?.toString().orEmpty()}' text='${focusedNode?.text?.toString().orEmpty()}' contentDesc='${focusedNode?.contentDescription?.toString().orEmpty()}' bounds='${focusedBounds?.toShortString().orEmpty()}'"
+        )
         val outcome = executeClickFromFocusedNode(
             focusedNode = focusedNode,
+            rootNode = rootNode,
             childCountOf = { it.childCount },
             childAt = { node, index -> node.getChild(index) },
             parentOf = { it.parent },
@@ -469,7 +477,14 @@ class A11yHelperService : AccessibilityService() {
             isVisible = { it.isVisibleToUser },
             isEnabled = { it.isEnabled },
             boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
-            performClick = { it.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
+            resourceIdOf = { it.viewIdResourceName },
+            classNameOf = { it.className?.toString() },
+            contentDescOf = { it.contentDescription?.toString() },
+            textOf = { it.text?.toString() },
+            performClick = { it.performAction(AccessibilityNodeInfo.ACTION_CLICK) },
+            log = { message ->
+                Log.d(TAG, "[DEBUG][TARGET_ACTION][$message] reqId=$reqId")
+            }
         )
         val attemptedNode = outcome.attemptedNode ?: focusedNode
         val clickedNode = outcome.clickedNode
@@ -505,6 +520,7 @@ class A11yHelperService : AccessibilityService() {
 
     internal fun <T> executeClickFromFocusedNode(
         focusedNode: T?,
+        rootNode: T?,
         childCountOf: (T) -> Int,
         childAt: (T, Int) -> T?,
         parentOf: (T) -> T?,
@@ -512,7 +528,12 @@ class A11yHelperService : AccessibilityService() {
         isVisible: (T) -> Boolean,
         isEnabled: (T) -> Boolean,
         boundsOf: (T) -> Rect,
-        performClick: (T) -> Boolean
+        resourceIdOf: (T) -> String?,
+        classNameOf: (T) -> String?,
+        contentDescOf: (T) -> String?,
+        textOf: (T) -> String?,
+        performClick: (T) -> Boolean,
+        log: ((String) -> Unit)? = null
     ): ClickExecutionResult<T> {
         if (focusedNode == null) {
             return ClickExecutionResult(
@@ -523,6 +544,10 @@ class A11yHelperService : AccessibilityService() {
                 attemptedNode = null
             )
         }
+
+        val focusedBounds = boundsOf(focusedNode)
+        val focusedResourceId = resourceIdOf(focusedNode).orEmpty()
+        val focusedClassName = classNameOf(focusedNode).orEmpty()
 
         if (isNodeClickableCandidate(focusedNode, isClickable, isVisible, isEnabled, boundsOf) && performClick(focusedNode)) {
             return ClickExecutionResult(
@@ -572,13 +597,130 @@ class A11yHelperService : AccessibilityService() {
             )
         }
 
+        val rootRetarget = findBestClickableFromRoot(
+            focusedNode = focusedNode,
+            rootNode = rootNode,
+            childCountOf = childCountOf,
+            childAt = childAt,
+            isClickable = isClickable,
+            isVisible = isVisible,
+            isEnabled = isEnabled,
+            boundsOf = boundsOf,
+            resourceIdOf = resourceIdOf,
+            classNameOf = classNameOf,
+            contentDescOf = contentDescOf,
+            textOf = textOf
+        )
+        log?.invoke(
+            "click_focused_root_retarget candidates=${rootRetarget.candidateCount} focusedResourceId='$focusedResourceId' focusedClass='$focusedClassName' focusedBounds='${focusedBounds.toShortString()}'"
+        )
+        if (rootRetarget.node != null) {
+            val candidateBounds = boundsOf(rootRetarget.node)
+            log?.invoke(
+                "click_focused_root_pick resourceId='${resourceIdOf(rootRetarget.node).orEmpty()}' class='${classNameOf(rootRetarget.node).orEmpty()}' bounds='${candidateBounds.toShortString()}'"
+            )
+            if (performClick(rootRetarget.node)) {
+                return ClickExecutionResult(
+                    success = true,
+                    reason = "Retargeted clickable node clicked from root tree",
+                    path = ClickPath.ROOT_RETARGET,
+                    clickedNode = rootRetarget.node,
+                    attemptedNode = rootRetarget.node
+                )
+            }
+        }
+
         return ClickExecutionResult(
             success = false,
-            reason = "No clickable node found from focused node subtree",
+            reason = "No clickable node found from focused node subtree or root tree",
             path = ClickPath.NONE,
             clickedNode = null,
-            attemptedNode = ancestor ?: descendant ?: focusedNode
+            attemptedNode = rootRetarget.node ?: ancestor ?: descendant ?: focusedNode
         )
+    }
+
+    private data class RootRetargetPick<T>(
+        val node: T?,
+        val candidateCount: Int
+    )
+
+    private fun <T> findBestClickableFromRoot(
+        focusedNode: T,
+        rootNode: T?,
+        childCountOf: (T) -> Int,
+        childAt: (T, Int) -> T?,
+        isClickable: (T) -> Boolean,
+        isVisible: (T) -> Boolean,
+        isEnabled: (T) -> Boolean,
+        boundsOf: (T) -> Rect,
+        resourceIdOf: (T) -> String?,
+        classNameOf: (T) -> String?,
+        contentDescOf: (T) -> String?,
+        textOf: (T) -> String?
+    ): RootRetargetPick<T> {
+        if (rootNode == null) return RootRetargetPick(node = null, candidateCount = 0)
+        val focusedBounds = boundsOf(focusedNode)
+        if (focusedBounds.isEmpty) return RootRetargetPick(node = null, candidateCount = 0)
+        val focusedCenter = A11yTargetFinder.calculateBoundsCenter(focusedBounds)
+        val focusedResourceId = resourceIdOf(focusedNode)
+        val focusedClassName = classNameOf(focusedNode)
+        val focusedContentDesc = contentDescOf(focusedNode)
+        val focusedText = textOf(focusedNode)
+
+        val queue = ArrayDeque<T>()
+        queue += rootNode
+        var bestNode: T? = null
+        var bestScore = Int.MIN_VALUE
+        var bestDistance = Long.MAX_VALUE
+        var candidates = 0
+
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            for (index in 0 until childCountOf(node)) {
+                val child = childAt(node, index) ?: continue
+                queue += child
+            }
+            if (node == focusedNode) continue
+            if (!isNodeClickableCandidate(node, isClickable, isVisible, isEnabled, boundsOf)) continue
+
+            val candidateBounds = boundsOf(node)
+            val overlap = Rect.intersects(focusedBounds, candidateBounds)
+            val containsCenter = focusedCenter?.let { (x, y) -> candidateBounds.contains(x, y) } == true
+            val overlapArea = if (overlap) {
+                val left = maxOf(focusedBounds.left, candidateBounds.left)
+                val top = maxOf(focusedBounds.top, candidateBounds.top)
+                val right = minOf(focusedBounds.right, candidateBounds.right)
+                val bottom = minOf(focusedBounds.bottom, candidateBounds.bottom)
+                maxOf(0, right - left) * maxOf(0, bottom - top)
+            } else {
+                0
+            }
+            val distance = focusedCenter?.let { (fx, fy) ->
+                val cx = candidateBounds.centerX()
+                val cy = candidateBounds.centerY()
+                val dx = (fx - cx).toLong()
+                val dy = (fy - cy).toLong()
+                (dx * dx) + (dy * dy)
+            } ?: Long.MAX_VALUE
+
+            var score = 0
+            if (containsCenter) score += 1000
+            if (overlap) score += 700
+            if (overlapArea > 0) score += minOf(overlapArea / 100, 300)
+            if (!focusedResourceId.isNullOrBlank() && focusedResourceId == resourceIdOf(node)) score += 200
+            if (!focusedClassName.isNullOrBlank() && focusedClassName == classNameOf(node)) score += 80
+            if (!focusedContentDesc.isNullOrBlank() && focusedContentDesc == contentDescOf(node)) score += 80
+            if (!focusedText.isNullOrBlank() && focusedText == textOf(node)) score += 80
+
+            candidates += 1
+            if (score > bestScore || (score == bestScore && distance < bestDistance)) {
+                bestScore = score
+                bestDistance = distance
+                bestNode = node
+            }
+        }
+
+        return RootRetargetPick(node = bestNode, candidateCount = candidates)
     }
 
     internal fun <T> findFirstClickableDescendant(
