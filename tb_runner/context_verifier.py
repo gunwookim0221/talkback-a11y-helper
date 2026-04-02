@@ -13,6 +13,16 @@ def verify_context(
     dev: str = "",
 ) -> dict[str, Any]:
     context_cfg = dict(scenario_cfg.get("context_verify", {}) or {})
+    if not context_cfg and str(scenario_cfg.get("screen_context_mode", "") or "").strip().lower() == "new_screen":
+        return {
+            "ok": True,
+            "type": "none",
+            "expected": "",
+            "actual_text": "",
+            "actual_announcement": "",
+            "skipped": True,
+            "reason": "new_screen_without_context_verify",
+        }
     context_type = str(context_cfg.get("type", "none") or "none").strip().lower()
     if context_type in {"", "none"}:
         return {
@@ -168,8 +178,37 @@ def verify_context(
 
     actual_text = str(step.get("visible_label", "") or "").strip()
     actual_announcement = str(step.get("merged_announcement", "") or "").strip()
-    text_ok = True if not text_regex else _safe_regex_search(text_regex, actual_text)
-    announcement_ok = True if not announcement_regex else _safe_regex_search(announcement_regex, actual_announcement)
+    if context_type == "screen_text":
+        text_ok = True if not text_regex else _safe_regex_search(text_regex, actual_text)
+        announcement_ok = True
+    elif context_type == "screen_announcement":
+        text_ok = True
+        announcement_ok = True if not announcement_regex else _safe_regex_search(announcement_regex, actual_announcement)
+    elif context_type == "focused_anchor":
+        focus_view_id = str(step.get("focus_view_id", "") or "").strip()
+        view_id_regex = str(context_cfg.get("view_id_regex", "") or "").strip()
+        text_ok = True if not text_regex else _safe_regex_search(text_regex, actual_text)
+        announcement_ok = True if not announcement_regex else _safe_regex_search(announcement_regex, actual_announcement)
+        view_id_ok = True if not view_id_regex else _safe_regex_search(view_id_regex, focus_view_id)
+        ok = text_ok and announcement_ok and view_id_ok
+        expected_parts = []
+        if text_regex:
+            expected_parts.append(f"text={text_regex}")
+        if announcement_regex:
+            expected_parts.append(f"announcement={announcement_regex}")
+        if view_id_regex:
+            expected_parts.append(f"view_id={view_id_regex}")
+        return {
+            "ok": ok,
+            "type": context_type,
+            "expected": " | ".join(expected_parts),
+            "actual_text": actual_text,
+            "actual_announcement": actual_announcement,
+            "actual_view_id": focus_view_id,
+        }
+    else:
+        text_ok = True if not text_regex else _safe_regex_search(text_regex, actual_text)
+        announcement_ok = True if not announcement_regex else _safe_regex_search(announcement_regex, actual_announcement)
     ok = text_ok and announcement_ok
 
     expected_parts = []

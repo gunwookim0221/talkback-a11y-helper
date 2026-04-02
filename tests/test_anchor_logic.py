@@ -107,3 +107,30 @@ def test_stabilize_anchor_verified_without_select_reason(monkeypatch):
     assert result["ok"] is True
     assert result["selected"] is False
     assert result["reason"] == "verified_without_select"
+
+
+def test_stabilize_anchor_anchor_only_ignores_context_failure(monkeypatch):
+    client = FakeAnchorClient()
+    client.dump_tree.return_value = [_node()]
+    client.select.return_value = True
+    client.collect_focus_step.return_value = _verify_step()
+    monkeypatch.setattr(anchor_logic, "verify_context", lambda *a, **k: {"ok": False})
+    tab_cfg = {**_tab_cfg(), "stabilization_mode": "anchor_only"}
+
+    result = anchor_logic.stabilize_anchor(client, "SERIAL", tab_cfg, phase="scenario_start", max_retries=1)
+
+    assert result["ok"] is True
+    assert result["context"]["type"] == "skipped"
+
+
+def test_stabilize_anchor_tab_context_ignores_anchor_mismatch(monkeypatch):
+    client = FakeAnchorClient()
+    client.dump_tree.return_value = [_node()]
+    client.select.return_value = True
+    client.collect_focus_step.return_value = _verify_step(view_id="different", label="different")
+    monkeypatch.setattr(anchor_logic, "verify_context", lambda *a, **k: {"ok": True})
+    tab_cfg = {**_tab_cfg(), "stabilization_mode": "tab_context"}
+
+    result = anchor_logic.stabilize_anchor(client, "SERIAL", tab_cfg, phase="scenario_start", max_retries=1)
+
+    assert result["ok"] is True
