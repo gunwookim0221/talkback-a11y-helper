@@ -1,0 +1,104 @@
+package com.iotpart.sqe.talkbackhelper
+
+import android.graphics.Rect
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class A11yHelperServiceClickTest {
+
+    private data class TestNode(
+        val id: String,
+        var clickable: Boolean = false,
+        var visible: Boolean = true,
+        var enabled: Boolean = true,
+        var bounds: Rect = Rect(0, 0, 100, 100),
+        var parent: TestNode? = null,
+        val children: MutableList<TestNode> = mutableListOf(),
+        var clickResult: Boolean = false
+    ) {
+        fun addChild(child: TestNode): TestNode {
+            child.parent = this
+            children += child
+            return this
+        }
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_directSuccess_keepsRegression() {
+        val focused = TestNode(id = "focused", clickable = true, clickResult = true)
+
+        val result = runExecute(focused)
+
+        assertTrue(result.success)
+        assertEquals("Focused node clicked", result.reason)
+        assertEquals(A11yHelperService.ClickPath.DIRECT, result.path)
+        assertEquals(focused, result.clickedNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_descendantAfterDirectFail() {
+        val focused = TestNode(id = "focused", clickable = true, clickResult = false)
+        val child = TestNode(id = "child", clickable = true, clickResult = true)
+        focused.addChild(child)
+
+        val result = runExecute(focused)
+
+        assertTrue(result.success)
+        assertEquals("Clickable descendant clicked", result.reason)
+        assertEquals(A11yHelperService.ClickPath.DESCENDANT, result.path)
+        assertEquals(child, result.clickedNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_ancestorAfterDescendantFail() {
+        val ancestor = TestNode(id = "ancestor", clickable = true, clickResult = true)
+        val focused = TestNode(id = "focused", clickable = false, clickResult = false)
+        ancestor.addChild(focused)
+
+        val result = runExecute(focused)
+
+        assertTrue(result.success)
+        assertEquals("Clickable ancestor clicked", result.reason)
+        assertEquals(A11yHelperService.ClickPath.ANCESTOR, result.path)
+        assertEquals(ancestor, result.clickedNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_allFail_keepsReasonAndAttempted() {
+        val focused = TestNode(id = "focused", clickable = false, clickResult = false)
+        val descendant = TestNode(id = "desc", clickable = true, clickResult = false)
+        focused.addChild(descendant)
+
+        val result = runExecute(focused)
+
+        assertFalse(result.success)
+        assertEquals("No clickable node found from focused node subtree", result.reason)
+        assertEquals(A11yHelperService.ClickPath.NONE, result.path)
+        assertEquals(descendant, result.attemptedNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_nullFocusedFailsImmediately() {
+        val result = runExecute(null)
+
+        assertFalse(result.success)
+        assertEquals("Focused node not found", result.reason)
+        assertEquals(A11yHelperService.ClickPath.NONE, result.path)
+    }
+
+    private fun runExecute(focusedNode: TestNode?): A11yHelperService.ClickExecutionResult<TestNode> {
+        return A11yHelperService().executeClickFromFocusedNode(
+            focusedNode = focusedNode,
+            childCountOf = { it.children.size },
+            childAt = { node, index -> node.children.getOrNull(index) },
+            parentOf = { it.parent },
+            isClickable = { it.clickable },
+            isVisible = { it.visible },
+            isEnabled = { it.enabled },
+            boundsOf = { it.bounds },
+            performClick = { it.clickResult }
+        )
+    }
+}

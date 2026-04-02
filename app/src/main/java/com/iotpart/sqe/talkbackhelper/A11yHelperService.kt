@@ -23,13 +23,29 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.0.4"
+        private const val VERSION = "1.1.0"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
         private const val GESTURE_DISPATCH_TIMEOUT_MS = 2800L
         private const val GESTURE_STABILIZATION_DELAY_MS = 100L
+        private const val CLICK_DESCENDANT_MAX_DEPTH = 4
     }
+
+    internal enum class ClickPath(val value: String) {
+        DIRECT("direct"),
+        DESCENDANT("descendant"),
+        ANCESTOR("ancestor"),
+        NONE("none")
+    }
+
+    internal data class ClickExecutionResult<T>(
+        val success: Boolean,
+        val reason: String,
+        val path: ClickPath,
+        val clickedNode: T?,
+        val attemptedNode: T?
+    )
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -443,94 +459,182 @@ class A11yHelperService : AccessibilityService() {
 
     fun clickFocusedNode(reqId: String = "none"): JSONObject {
         val focusedNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-        var success = false
-        var reason = "No clickable node found from focused node (direct/child/ancestor)"
-        var clickedNode: AccessibilityNodeInfo? = null
-
-        if (focusedNode == null) {
-            reason = "Focused node is null"
-        } else {
-            Log.d(
-                TAG,
-                "[DEBUG][TARGET_ACTION][click_focused_direct] reqId=$reqId clickable=${focusedNode.isClickable} resourceId='${focusedNode.viewIdResourceName.orEmpty()}' class='${focusedNode.className?.toString().orEmpty()}'"
-            )
-            if (focusedNode.isClickable) {
-                success = focusedNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                if (success) {
-                    clickedNode = focusedNode
-                    reason = "direct_click_success"
-                }
-            }
-
-            if (!success) {
-                val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
-                queue.add(focusedNode to 0)
-                var clickableChild: AccessibilityNodeInfo? = null
-                while (queue.isNotEmpty()) {
-                    val (node, depth) = queue.removeFirst()
-                    if (depth >= 2) continue
-                    for (i in 0 until node.childCount) {
-                        val child = node.getChild(i) ?: continue
-                        if (child.isClickable) {
-                            clickableChild = child
-                            break
-                        }
-                        queue.add(child to (depth + 1))
-                    }
-                    if (clickableChild != null) break
-                }
-
-                if (clickableChild != null) {
-                    Log.d(
-                        TAG,
-                        "[DEBUG][TARGET_ACTION][click_focused_child] reqId=$reqId resourceId='${clickableChild.viewIdResourceName.orEmpty()}' class='${clickableChild.className?.toString().orEmpty()}'"
-                    )
-                    success = clickableChild.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                    if (success) {
-                        clickedNode = clickableChild
-                        reason = "child_click_success"
-                    }
-                }
-            }
-
-            if (!success) {
-                var parent = focusedNode.parent
-                while (parent != null) {
-                    Log.d(
-                        TAG,
-                        "[DEBUG][TARGET_ACTION][click_focused_ancestor] reqId=$reqId clickable=${parent.isClickable} resourceId='${parent.viewIdResourceName.orEmpty()}' class='${parent.className?.toString().orEmpty()}'"
-                    )
-                    if (parent.isClickable) {
-                        success = parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                        if (success) {
-                            clickedNode = parent
-                            reason = "ancestor_click_success"
-                            break
-                        }
-                    }
-                    parent = parent.parent
-                }
-            }
-        }
+        val focusedSnapshot = FocusSnapshot.fromNodeOrNull(focusedNode)
+        val outcome = executeClickFromFocusedNode(
+            focusedNode = focusedNode,
+            childCountOf = { it.childCount },
+            childAt = { node, index -> node.getChild(index) },
+            parentOf = { it.parent },
+            isClickable = { it.isClickable },
+            isVisible = { it.isVisibleToUser },
+            isEnabled = { it.isEnabled },
+            boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
+            performClick = { it.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
+        )
+        val attemptedNode = outcome.attemptedNode ?: focusedNode
+        val clickedNode = outcome.clickedNode
 
         Log.d(
             TAG,
-            "[DEBUG][TARGET_ACTION][click_focused_final] reqId=$reqId success=$success reason='$reason'"
+            "[DEBUG][TARGET_ACTION][click_focused_final] reqId=$reqId success=${outcome.success} path=${outcome.path.value} reason='${outcome.reason}' attemptedResourceId='${attemptedNode?.viewIdResourceName.orEmpty()}' attemptedClassName='${attemptedNode?.className?.toString().orEmpty()}'"
         )
 
         val resultJson = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
             put("reqId", reqId)
-            put("success", success)
+            put("success", outcome.success)
             put("action", "CLICK_FOCUSED")
-            put("reason", reason)
+            put("reason", outcome.reason)
+            put("path", outcome.path.value)
+            put("attemptedResourceId", attemptedNode?.viewIdResourceName ?: JSONObject.NULL)
+            put("attemptedClassName", attemptedNode?.className?.toString() ?: JSONObject.NULL)
+            if (focusedSnapshot != null) {
+                put("focused", focusedSnapshot.toJson())
+            }
+            if (clickedNode != null) {
+                put("target", FocusSnapshot.fromNode(clickedNode).toJson())
+            }
         }
 
         Log.i(TAG, "TARGET_ACTION_RESULT $resultJson")
-        if (success && clickedNode != null) {
+        if (outcome.success && clickedNode != null) {
             A11yStateStore.update(FocusSnapshot.fromNode(clickedNode))
         }
         return resultJson
+    }
+
+    internal fun <T> executeClickFromFocusedNode(
+        focusedNode: T?,
+        childCountOf: (T) -> Int,
+        childAt: (T, Int) -> T?,
+        parentOf: (T) -> T?,
+        isClickable: (T) -> Boolean,
+        isVisible: (T) -> Boolean,
+        isEnabled: (T) -> Boolean,
+        boundsOf: (T) -> Rect,
+        performClick: (T) -> Boolean
+    ): ClickExecutionResult<T> {
+        if (focusedNode == null) {
+            return ClickExecutionResult(
+                success = false,
+                reason = "Focused node not found",
+                path = ClickPath.NONE,
+                clickedNode = null,
+                attemptedNode = null
+            )
+        }
+
+        if (isNodeClickableCandidate(focusedNode, isClickable, isVisible, isEnabled, boundsOf) && performClick(focusedNode)) {
+            return ClickExecutionResult(
+                success = true,
+                reason = "Focused node clicked",
+                path = ClickPath.DIRECT,
+                clickedNode = focusedNode,
+                attemptedNode = focusedNode
+            )
+        }
+
+        val descendant = findFirstClickableDescendant(
+            root = focusedNode,
+            maxDepth = CLICK_DESCENDANT_MAX_DEPTH,
+            childCountOf = childCountOf,
+            childAt = childAt,
+            isClickable = isClickable,
+            isVisible = isVisible,
+            isEnabled = isEnabled,
+            boundsOf = boundsOf
+        )
+        if (descendant != null && performClick(descendant)) {
+            return ClickExecutionResult(
+                success = true,
+                reason = "Clickable descendant clicked",
+                path = ClickPath.DESCENDANT,
+                clickedNode = descendant,
+                attemptedNode = descendant
+            )
+        }
+
+        val ancestor = findFirstClickableAncestor(
+            node = focusedNode,
+            parentOf = parentOf,
+            isClickable = isClickable,
+            isVisible = isVisible,
+            isEnabled = isEnabled,
+            boundsOf = boundsOf
+        )
+        if (ancestor != null && performClick(ancestor)) {
+            return ClickExecutionResult(
+                success = true,
+                reason = "Clickable ancestor clicked",
+                path = ClickPath.ANCESTOR,
+                clickedNode = ancestor,
+                attemptedNode = ancestor
+            )
+        }
+
+        return ClickExecutionResult(
+            success = false,
+            reason = "No clickable node found from focused node subtree",
+            path = ClickPath.NONE,
+            clickedNode = null,
+            attemptedNode = ancestor ?: descendant ?: focusedNode
+        )
+    }
+
+    internal fun <T> findFirstClickableDescendant(
+        root: T,
+        maxDepth: Int,
+        childCountOf: (T) -> Int,
+        childAt: (T, Int) -> T?,
+        isClickable: (T) -> Boolean,
+        isVisible: (T) -> Boolean,
+        isEnabled: (T) -> Boolean,
+        boundsOf: (T) -> Rect
+    ): T? {
+        val queue = ArrayDeque<Pair<T, Int>>()
+        queue += root to 0
+        while (queue.isNotEmpty()) {
+            val (current, depth) = queue.removeFirst()
+            if (depth > 0 && isNodeClickableCandidate(current, isClickable, isVisible, isEnabled, boundsOf)) {
+                return current
+            }
+            if (depth >= maxDepth) continue
+            for (index in 0 until childCountOf(current)) {
+                val child = childAt(current, index) ?: continue
+                queue += child to (depth + 1)
+            }
+        }
+        return null
+    }
+
+    internal fun <T> findFirstClickableAncestor(
+        node: T,
+        parentOf: (T) -> T?,
+        isClickable: (T) -> Boolean,
+        isVisible: (T) -> Boolean,
+        isEnabled: (T) -> Boolean,
+        boundsOf: (T) -> Rect
+    ): T? {
+        var parent = parentOf(node)
+        while (parent != null) {
+            if (isNodeClickableCandidate(parent, isClickable, isVisible, isEnabled, boundsOf)) {
+                return parent
+            }
+            parent = parentOf(parent)
+        }
+        return null
+    }
+
+    private fun <T> isNodeClickableCandidate(
+        node: T,
+        isClickable: (T) -> Boolean,
+        isVisible: (T) -> Boolean,
+        isEnabled: (T) -> Boolean,
+        boundsOf: (T) -> Rect
+    ): Boolean {
+        if (!isClickable(node) || !isVisible(node) || !isEnabled(node)) return false
+        val bounds = boundsOf(node)
+        return !bounds.isEmpty
     }
 
     private fun findFirstScrollableNode(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {

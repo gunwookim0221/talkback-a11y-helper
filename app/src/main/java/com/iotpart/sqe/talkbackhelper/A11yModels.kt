@@ -9,7 +9,7 @@ import org.json.JSONObject
 internal typealias FocusedNode = A11yTraversalAnalyzer.FocusedNode
 
 object A11yModelVersion {
-    const val VERSION: String = "1.6.3"
+    const val VERSION: String = "1.6.4"
 }
 
 internal data class PostScrollContinuationPlan(
@@ -403,7 +403,13 @@ data class A11yNodeInfo(
     val focused: Boolean,
     val accessibilityFocused: Boolean,
     val isTopAppBar: Boolean,
-    val isBottomNavigationBar: Boolean
+    val isBottomNavigationBar: Boolean,
+    val hasClickableDescendant: Boolean = false,
+    val hasFocusableDescendant: Boolean = false,
+    val effectiveClickable: Boolean = false,
+    val actionableDescendantResourceId: String? = null,
+    val actionableDescendantClassName: String? = null,
+    val actionableDescendantContentDescription: String? = null
 ) {
     fun toJson(): JSONObject {
         return JSONObject().apply {
@@ -426,6 +432,12 @@ data class A11yNodeInfo(
             put("accessibilityFocused", accessibilityFocused)
             put("isTopAppBar", isTopAppBar)
             put("isBottomNavigationBar", isBottomNavigationBar)
+            put("hasClickableDescendant", hasClickableDescendant)
+            put("hasFocusableDescendant", hasFocusableDescendant)
+            put("effectiveClickable", effectiveClickable)
+            put("actionableDescendantResourceId", actionableDescendantResourceId ?: JSONObject.NULL)
+            put("actionableDescendantClassName", actionableDescendantClassName ?: JSONObject.NULL)
+            put("actionableDescendantContentDescription", actionableDescendantContentDescription ?: JSONObject.NULL)
         }
     }
 }
