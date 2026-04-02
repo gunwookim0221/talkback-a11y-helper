@@ -457,6 +457,7 @@ def test_open_scenario_pre_navigation_select_and_click_focused_select_failure(mo
 
     assert ok is False
     assert len(client.click_focused_calls) == 0
+    assert any("select returned false and accessibilityFocused not confirmed" in line for line in logs)
     assert any("failed reason='action_failed' detail='target_not_found' step=1" in line for line in logs)
 
 
@@ -475,6 +476,46 @@ def test_open_scenario_pre_navigation_select_and_click_focused_select_false_with
             "reason": "ACTION_ACCESSIBILITY_FOCUS failed",
             "target": {"accessibilityFocused": True},
         }
+        return False
+
+    client.select = _select
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "select_and_click_focused", "target": "com.test:id/settings_button", "type": "r"}],
+        "pre_navigation_retry_count": 1,
+        "pre_navigation_wait_seconds": 0.1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert len(client.click_focused_calls) == 1
+    assert any("select returned false but accessibilityFocused=true; continuing with click_focused" in line for line in logs)
+
+
+def test_open_scenario_pre_navigation_select_and_click_focused_select_false_then_delayed_focus_payload(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+
+    client = DummyClient([_anchor_row()])
+    state = {"pending_focus_result": False}
+
+    def _sleep(seconds):
+        if state["pending_focus_result"] and abs(seconds - 0.12) < 1e-6:
+            client.last_target_action_result = {
+                "reason": "ACTION_ACCESSIBILITY_FOCUS failed",
+                "target": {"accessibilityFocused": True},
+            }
+            state["pending_focus_result"] = False
+
+    monkeypatch.setattr(collection_flow.time, "sleep", _sleep)
+
+    def _select(**kwargs):
+        client.last_target_action_result = {"reason": "ACTION_ACCESSIBILITY_FOCUS failed"}
+        state["pending_focus_result"] = True
         return False
 
     client.select = _select

@@ -76,20 +76,25 @@ def _run_pre_navigation_steps(client: A11yAdbClient, dev: str, tab_cfg: dict[str
                 step_ok = bool(client.touch_bounds_center(dev=dev, name=target, type_=type_, wait_=8))
             else:
                 select_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=8))
+                focus_confirmed = False
                 if not select_ok:
-                    last_result = getattr(client, "last_target_action_result", {})
-                    target_snapshot = last_result.get("target", {}) if isinstance(last_result, dict) else {}
-                    focus_confirmed = bool(target_snapshot.get("accessibilityFocused")) if isinstance(target_snapshot, dict) else False
+                    for poll_idx in range(3):
+                        last_result = getattr(client, "last_target_action_result", None) or {}
+                        target_snapshot = last_result.get("target", {}) if isinstance(last_result, dict) else {}
+                        focus_confirmed = bool(target_snapshot.get("accessibilityFocused")) if isinstance(target_snapshot, dict) else False
+                        if focus_confirmed:
+                            break
+                        if poll_idx < 2:
+                            time.sleep(0.12)
                     if focus_confirmed:
-                        log(
-                            "[SCENARIO][pre_nav] select returned false but accessibilityFocused=true; "
-                            "continuing with click_focused"
-                        )
-                        step_ok = bool(client.click_focused(dev=dev, wait_=8))
+                        log("[SCENARIO][pre_nav] select returned false but accessibilityFocused=true; continuing with click_focused")
                     else:
-                        step_ok = False
-                else:
+                        log("[SCENARIO][pre_nav] select returned false and accessibilityFocused not confirmed")
+
+                if select_ok or focus_confirmed:
                     step_ok = bool(client.click_focused(dev=dev, wait_=8))
+                else:
+                    step_ok = False
 
             result = getattr(client, "last_target_action_result", {})
             if isinstance(result, dict):
