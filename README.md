@@ -289,7 +289,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.i
 
 ## `talkback_lib.py` 레거시 호환 API
 
-- Python 클라이언트 알고리즘 버전: `CLIENT_ALGORITHM_VERSION = 1.7.11`
+- Python 클라이언트 알고리즘 버전: `CLIENT_ALGORITHM_VERSION = 1.7.12`
 - 발화 조회 API
   - `get_announcements(...)` → 수집된 발화를 `strip`/빈 문자열 제거 후 공백으로 병합한 `str` 반환
   - `get_partial_announcements(...)` → raw 발화 조각 `list[str]` 반환
@@ -493,3 +493,19 @@ assert client.last_merged_announcement == merged
 - `defaults`/`scenarios` 기반 `overlay_step_wait_seconds`, `overlay_announcement_wait_seconds`, `back_recovery_wait_seconds`
 - `defaults`/`scenarios` 기반 `pre_navigation_retry_count`, `pre_navigation_wait_seconds`
 - `scenarios.<scenario_id>.enabled`, `scenarios.<scenario_id>.max_steps`
+
+### pre_navigation action 예시 (Settings focusable 대응)
+
+`pre_navigation`에는 기존 `select`/`touch`/`touch_bounds_center` 외에 `select_and_click_focused`를 사용할 수 있습니다.
+
+```python
+"pre_navigation": [
+    {
+        "action": "select_and_click_focused",
+        "target": "com.samsung.android.oneconnect:id/setting_button_layout",
+        "type": "r",
+    }
+]
+```
+
+이 액션은 내부적으로 `select(target)` 성공 후 `click_focused()`를 연속 수행합니다.

@@ -60,7 +60,7 @@ def _run_pre_navigation_steps(client: A11yAdbClient, dev: str, tab_cfg: dict[str
         if not action or not target:
             log(f"[SCENARIO][pre_nav] failed reason='invalid_step_config' step={index}")
             return False
-        if action not in {"select", "touch", "touch_bounds_center"}:
+        if action not in {"select", "touch", "touch_bounds_center", "select_and_click_focused"}:
             log(f"[SCENARIO][pre_nav] failed reason='unsupported_action' step={index} action='{action}'")
             return False
 
@@ -72,8 +72,14 @@ def _run_pre_navigation_steps(client: A11yAdbClient, dev: str, tab_cfg: dict[str
                 step_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=8))
             elif action == "touch":
                 step_ok = bool(client.touch(dev=dev, name=target, type_=type_, wait_=8))
-            else:
+            elif action == "touch_bounds_center":
                 step_ok = bool(client.touch_bounds_center(dev=dev, name=target, type_=type_, wait_=8))
+            else:
+                select_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=8))
+                if not select_ok:
+                    step_ok = False
+                else:
+                    step_ok = bool(client.click_focused(dev=dev, wait_=8))
 
             result = getattr(client, "last_target_action_result", {})
             if isinstance(result, dict):
