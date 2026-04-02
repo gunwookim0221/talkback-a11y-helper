@@ -3,6 +3,7 @@ package com.iotpart.sqe.talkbackhelper
 import android.graphics.Rect
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -598,6 +599,61 @@ class A11yHelperServiceClickTest {
     }
 
     @Test
+    fun executeClickFromFocusedNode_mirrorResolve_collectsFocusedDescendantCandidatesWithDedicatedLog() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_parent",
+            resourceId = "com.samsung.android.oneconnect:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val focusedChild = TestNode(
+            id = "focused_child_settings_image",
+            resourceId = "com.samsung.android.oneconnect:id/settings_image",
+            className = "android.widget.ImageButton",
+            contentDesc = "Settings",
+            clickable = true,
+            clickResult = false,
+            bounds = Rect(940, 172, 1022, 252)
+        )
+        val mirrorParent = TestNode(
+            id = "mirror_parent",
+            resourceId = "com.samsung.android.oneconnect:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(928, 160, 1034, 268)
+        )
+        val mirrorChild = TestNode(
+            id = "mirror_settings_image",
+            resourceId = "com.samsung.android.oneconnect:id/settings_image",
+            className = "android.widget.ImageButton",
+            contentDesc = "Settings",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(944, 176, 1018, 252)
+        )
+        val logs = mutableListOf<String>()
+
+        focused.addChild(focusedChild)
+        mirrorParent.addChild(mirrorChild)
+        root.addChild(focused)
+        root.addChild(mirrorParent)
+
+        val result = runExecute(focused, root, logs)
+
+        assertTrue(result.success)
+        assertEquals(A11yHelperService.ClickPath.MIRROR_DESCENDANT, result.path)
+        assertEquals(mirrorChild, result.clickedNode)
+        assertNotNull(
+            logs.find {
+                it.contains("[click_focused_descendant_candidate_seen]") &&
+                    it.contains("com.samsung.android.oneconnect:id/settings_image")
+            }
+        )
+    }
+
+    @Test
     fun executeClickFromFocusedNode_mirrorResolve_failsSafely_whenOnlyGiantContainerCandidatesExist() {
         val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
         val focused = TestNode(
@@ -676,7 +732,8 @@ class A11yHelperServiceClickTest {
 
     private fun runExecute(
         focusedNode: TestNode?,
-        rootNode: TestNode? = focusedNode
+        rootNode: TestNode? = focusedNode,
+        logs: MutableList<String>? = null
     ): A11yHelperService.ClickExecutionResult<TestNode> {
         return A11yHelperService().executeClickFromFocusedNode(
             focusedNode = focusedNode,
@@ -692,7 +749,8 @@ class A11yHelperServiceClickTest {
             classNameOf = { it.className },
             contentDescOf = { it.contentDesc },
             textOf = { it.text },
-            performClick = { it.clickResult }
+            performClick = { it.clickResult },
+            log = logs?.let { sink -> { line -> sink += line } }
         )
     }
 }
