@@ -412,6 +412,21 @@ class TouchIsinTest(unittest.TestCase):
             ],
         )
 
+    def test_select_resource_id_does_not_add_case_insensitive_prefix(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"reqId":"REQID003"}'
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID003R-xxxx"):
+            ok = client.select("SER", name="com.example.app:id/setting_button_layout", wait_=1, type_="r", index_=0)
+
+        self.assertTrue(ok)
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0][0]
+        self.assertEqual(
+            broadcast[broadcast.index("targetName") + 1],
+            "'com.example.app:id/setting_button_layout'",
+        )
+        self.assertEqual(broadcast[broadcast.index("targetType") + 1], "r")
+
 
     def test_touch_supports_additional_filters(self):
         client = FakeA11yClient()
@@ -1580,7 +1595,7 @@ class SmartMoveFocusTest(unittest.TestCase):
 
 class FocusHelpersTest(unittest.TestCase):
     def test_client_algorithm_version_is_updated(self):
-        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.12")
+        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.13")
 
     def test_extract_visible_label_from_focus_prefers_text(self):
         focus_node = {"text": "  Visible Text  ", "contentDescription": "Desc"}

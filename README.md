@@ -289,7 +289,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.i
 
 ## `talkback_lib.py` 레거시 호환 API
 
-- Python 클라이언트 알고리즘 버전: `CLIENT_ALGORITHM_VERSION = 1.7.12`
+- Python 클라이언트 알고리즘 버전: `CLIENT_ALGORITHM_VERSION = 1.7.13`
 - 발화 조회 API
   - `get_announcements(...)` → 수집된 발화를 `strip`/빈 문자열 제거 후 공백으로 병합한 `str` 반환
   - `get_partial_announcements(...)` → raw 발화 조각 `list[str]` 반환
@@ -315,7 +315,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.i
   - 매칭 실패 시 현재 화면에서 수집한 텍스트 노드 전체를 `"현재 화면 텍스트: [...]"` 형태로 디버그 출력합니다.
 - `select(dev, name, wait_=5, type_='a', index_=0, class_name=None, clickable=None, focusable=None)`
   - `touch()`와 동일한 폴링 루틴을 사용하지만 클릭 대신 `FOCUS_TARGET` 액션으로 접근성 포커스만 이동합니다.
-  - `targetName`은 `isin()`과 동일하게 대소문자 구분 없는 정규식 매칭(`(?i)`)으로 처리합니다.
+  - `type_='r'`(resource id)에서는 `targetName` 원문을 그대로 사용합니다(클라이언트 측 `(?i)` prefix 미삽입). 그 외 타입(`a`/`t`/`b`)은 기존처럼 `(?i)` 기반 정규식 전처리를 유지합니다.
   - 성공 시 `True`, 타임아웃 시 `False`를 반환합니다.
 - `press_back_and_recover_focus(dev=None, expected_parent_anchor=None, wait_seconds=1.0, retry=1, type_="a", index_=0)`
   - overlay/dialog/bottom sheet 종료를 위해 `adb shell input keyevent 4`를 수행한 뒤, 현재 포커스를 수집하고(이동 없음) 복구 결과를 dict로 반환합니다.

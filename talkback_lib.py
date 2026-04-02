@@ -36,7 +36,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.12"
+CLIENT_ALGORITHM_VERSION = "1.7.13"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -964,7 +964,8 @@ class A11yAdbClient:
         self.last_announcements = []
         self.last_merged_announcement = ""
         deadline = time.monotonic() + wait_
-        ci_name = self._normalize_case_insensitive_pattern(name)
+        normalized_type = str(type_).strip().lower()
+        ci_name = name if normalized_type in {"r", "resourceid"} else self._normalize_case_insensitive_pattern(name)
         while time.monotonic() <= deadline:
             self._refresh_tree_if_needed(dev)
             self.clear_logcat(dev=dev)
