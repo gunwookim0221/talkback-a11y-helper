@@ -36,7 +36,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.13"
+CLIENT_ALGORITHM_VERSION = "1.7.14"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -988,9 +988,10 @@ class A11yAdbClient:
                 extras,
             )
             result = self._read_log_result(dev, "TARGET_ACTION_RESULT", req_id)
-            self.last_target_action_result = result if isinstance(result, dict) else {"success": False, "reason": "unknown"}
-            if bool(result.get("success")):
-                return True
+            if isinstance(result, dict) and result.get("reqId") == req_id:
+                # success=false인 경우에도 helper의 원본 payload를 보존한다.
+                self.last_target_action_result = result
+                return bool(result.get("success"))
             time.sleep(0.5)
         self.last_target_action_result = {"success": False, "reason": "timeout"}
         return False

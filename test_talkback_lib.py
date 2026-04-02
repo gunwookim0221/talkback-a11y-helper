@@ -398,6 +398,7 @@ class TouchIsinTest(unittest.TestCase):
             ok = client.select("SER", name="다음", wait_=1, type_="t", index_=3)
 
         self.assertTrue(ok)
+        self.assertEqual(client.last_target_action_result.get("reqId"), "REQID003")
         broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0]
         self.assertEqual(
             broadcast[0],
@@ -426,6 +427,39 @@ class TouchIsinTest(unittest.TestCase):
             "'com.example.app:id/setting_button_layout'",
         )
         self.assertEqual(broadcast[broadcast.index("targetType") + 1], "r")
+
+    def test_select_preserves_failed_target_action_payload(self):
+        client = FakeA11yClient()
+        client.logcat_payload = (
+            'I/A11Y_HELPER: TARGET_ACTION_RESULT '
+            '{"success":false,"reason":"ACTION_ACCESSIBILITY_FOCUS failed","reqId":"REQFAIL0",'
+            '"target":{"accessibilityFocused":true,"text":"확인"}}'
+        )
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQFAIL0-xxxx"):
+            ok = client.select("SER", name="확인", wait_=1, type_="t")
+
+        self.assertFalse(ok)
+        self.assertEqual(client.last_target_action_result.get("reqId"), "REQFAIL0")
+        self.assertFalse(client.last_target_action_result.get("success"))
+        self.assertEqual(client.last_target_action_result.get("target", {}).get("accessibilityFocused"), True)
+
+    def test_select_uses_timeout_fallback_only_when_result_payload_missing(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":false,"reason":"other","reqId":"OTHER001"}'
+        clock = {"t": 0.0}
+
+        def fake_monotonic():
+            return clock["t"]
+
+        def fake_sleep(sec: float):
+            clock["t"] += sec
+
+        with patch("talkback_lib.time.monotonic", side_effect=fake_monotonic), patch("talkback_lib.time.sleep", side_effect=fake_sleep):
+            ok = client.select("SER", name="확인", wait_=1, type_="t")
+
+        self.assertFalse(ok)
+        self.assertEqual(client.last_target_action_result, {"success": False, "reason": "timeout"})
 
 
     def test_touch_supports_additional_filters(self):
