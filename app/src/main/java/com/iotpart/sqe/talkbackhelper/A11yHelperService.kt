@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.0.3"
+        private const val VERSION = "1.0.4"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -443,18 +443,92 @@ class A11yHelperService : AccessibilityService() {
 
     fun clickFocusedNode(reqId: String = "none"): JSONObject {
         val focusedNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-        val success = focusedNode?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+        var success = false
+        var reason = "No clickable node found from focused node (direct/child/ancestor)"
+        var clickedNode: AccessibilityNodeInfo? = null
+
+        if (focusedNode == null) {
+            reason = "Focused node is null"
+        } else {
+            Log.d(
+                TAG,
+                "[DEBUG][TARGET_ACTION][click_focused_direct] reqId=$reqId clickable=${focusedNode.isClickable} resourceId='${focusedNode.viewIdResourceName.orEmpty()}' class='${focusedNode.className?.toString().orEmpty()}'"
+            )
+            if (focusedNode.isClickable) {
+                success = focusedNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                if (success) {
+                    clickedNode = focusedNode
+                    reason = "direct_click_success"
+                }
+            }
+
+            if (!success) {
+                val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
+                queue.add(focusedNode to 0)
+                var clickableChild: AccessibilityNodeInfo? = null
+                while (queue.isNotEmpty()) {
+                    val (node, depth) = queue.removeFirst()
+                    if (depth >= 2) continue
+                    for (i in 0 until node.childCount) {
+                        val child = node.getChild(i) ?: continue
+                        if (child.isClickable) {
+                            clickableChild = child
+                            break
+                        }
+                        queue.add(child to (depth + 1))
+                    }
+                    if (clickableChild != null) break
+                }
+
+                if (clickableChild != null) {
+                    Log.d(
+                        TAG,
+                        "[DEBUG][TARGET_ACTION][click_focused_child] reqId=$reqId resourceId='${clickableChild.viewIdResourceName.orEmpty()}' class='${clickableChild.className?.toString().orEmpty()}'"
+                    )
+                    success = clickableChild.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    if (success) {
+                        clickedNode = clickableChild
+                        reason = "child_click_success"
+                    }
+                }
+            }
+
+            if (!success) {
+                var parent = focusedNode.parent
+                while (parent != null) {
+                    Log.d(
+                        TAG,
+                        "[DEBUG][TARGET_ACTION][click_focused_ancestor] reqId=$reqId clickable=${parent.isClickable} resourceId='${parent.viewIdResourceName.orEmpty()}' class='${parent.className?.toString().orEmpty()}'"
+                    )
+                    if (parent.isClickable) {
+                        success = parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                        if (success) {
+                            clickedNode = parent
+                            reason = "ancestor_click_success"
+                            break
+                        }
+                    }
+                    parent = parent.parent
+                }
+            }
+        }
+
+        Log.d(
+            TAG,
+            "[DEBUG][TARGET_ACTION][click_focused_final] reqId=$reqId success=$success reason='$reason'"
+        )
 
         val resultJson = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
             put("reqId", reqId)
             put("success", success)
             put("action", "CLICK_FOCUSED")
+            put("reason", reason)
         }
 
         Log.i(TAG, "TARGET_ACTION_RESULT $resultJson")
-        if (success && focusedNode != null) {
-            A11yStateStore.update(FocusSnapshot.fromNode(focusedNode))
+        if (success && clickedNode != null) {
+            A11yStateStore.update(FocusSnapshot.fromNode(clickedNode))
         }
         return resultJson
     }
