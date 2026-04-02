@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.4.8"
+        private const val VERSION = "1.4.9"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -1056,12 +1056,10 @@ class A11yHelperService : AccessibilityService() {
             for (index in 0 until childCount) {
                 val firstChild = childAt(source, index)
                 val resolvedChild = firstChild ?: childAt(source, index)
-                val childResourceId = resourceIdOf(resolvedChild).orEmpty()
-                val childClassName = classNameOf(resolvedChild).orEmpty()
+                val childResourceId = resolvedChild?.let { resourceIdOf(it).orEmpty() }.orEmpty()
+                val childClassName = resolvedChild?.let { classNameOf(it).orEmpty() }.orEmpty()
                 val enqueued = resolvedChild != null
-                if (enqueued) {
-                    targetQueue.add(resolvedChild!!)
-                }
+                resolvedChild?.let(targetQueue::add)
                 if (expansionTag != null) {
                     log?.invoke(
                         "[click_focused_local_raw_child] parentResourceId='${parentResourceId}' index=$index childResourceId='${childResourceId}' childClass='${childClassName}' childNull=${resolvedChild == null} enqueued=$enqueued"
