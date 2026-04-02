@@ -360,6 +360,141 @@ class A11yHelperServiceClickTest {
     }
 
     @Test
+    fun executeClickFromFocusedNode_mirrorResolve_prefersLocalSmallToolbarNode_overGiantScrollContainer() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_parent",
+            resourceId = "com.example:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val toolbarMirror = TestNode(
+            id = "toolbar_mirror",
+            resourceId = "com.example:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(926, 156, 1038, 272)
+        )
+        val toolbarMirrorChild = TestNode(
+            id = "toolbar_mirror_child",
+            className = "android.widget.ImageButton",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(948, 178, 1018, 248)
+        )
+        val giantScrollContainer = TestNode(
+            id = "more_layout",
+            className = "android.widget.ScrollView",
+            clickable = false,
+            bounds = Rect(0, 94, 1080, 2316)
+        )
+        val giantChild = TestNode(
+            id = "my_profile_card_view",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(48, 420, 1032, 1120)
+        )
+
+        toolbarMirror.addChild(toolbarMirrorChild)
+        giantScrollContainer.addChild(giantChild)
+        root.addChild(focused)
+        root.addChild(giantScrollContainer)
+        root.addChild(toolbarMirror)
+
+        val result = runExecute(focused, root)
+
+        assertTrue(result.success)
+        assertEquals(A11yHelperService.ClickPath.MIRROR_DESCENDANT, result.path)
+        assertEquals(toolbarMirrorChild, result.clickedNode)
+        assertEquals(toolbarMirror, result.mirrorNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_mirrorResolve_rejectsGiantRecyclerAndFrameContainers_whenLocalCandidateExists() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_parent",
+            resourceId = "com.example:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val localMirror = TestNode(
+            id = "local_mirror",
+            resourceId = "com.example:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(920, 150, 1036, 278)
+        )
+        val localMirrorChild = TestNode(
+            id = "local_mirror_child",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(946, 176, 1016, 246)
+        )
+        val recyclerContainer = TestNode(
+            id = "giant_recycler",
+            className = "androidx.recyclerview.widget.RecyclerView",
+            clickable = false,
+            bounds = Rect(0, 260, 1080, 2330)
+        )
+        val frameContainer = TestNode(
+            id = "giant_frame",
+            className = "android.widget.FrameLayout",
+            clickable = false,
+            bounds = Rect(0, 0, 1080, 2200)
+        )
+
+        localMirror.addChild(localMirrorChild)
+        root.addChild(focused)
+        root.addChild(recyclerContainer)
+        root.addChild(frameContainer)
+        root.addChild(localMirror)
+
+        val result = runExecute(focused, root)
+
+        assertTrue(result.success)
+        assertEquals(A11yHelperService.ClickPath.MIRROR_DESCENDANT, result.path)
+        assertEquals(localMirror, result.mirrorNode)
+        assertEquals(localMirrorChild, result.clickedNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_mirrorResolve_failsSafely_whenOnlyGiantContainerCandidatesExist() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_parent",
+            resourceId = "com.example:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val giantScrollContainer = TestNode(
+            id = "only_scroll_container",
+            className = "android.widget.ScrollView",
+            clickable = false,
+            bounds = Rect(0, 94, 1080, 2316)
+        )
+        val giantFrameContainer = TestNode(
+            id = "only_frame_container",
+            className = "android.widget.FrameLayout",
+            clickable = false,
+            bounds = Rect(0, 0, 1080, 2200)
+        )
+
+        root.addChild(focused)
+        root.addChild(giantScrollContainer)
+        root.addChild(giantFrameContainer)
+
+        val result = runExecute(focused, root)
+
+        assertFalse(result.success)
+        assertEquals(A11yHelperService.ClickPath.NONE, result.path)
+        assertEquals(focused, result.attemptedNode)
+    }
+
+    @Test
     fun executeClickFromFocusedNode_mirrorResolveMiss_keepsStrictFailurePolicy() {
         val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
         val focused = TestNode(

@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.4.0"
+        private const val VERSION = "1.4.1"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -633,12 +633,15 @@ class A11yHelperService : AccessibilityService() {
             )
             resolvedMirrorNode = mirrorResolve.node
             log?.invoke(
+                "click_focused_mirror_candidates local=${mirrorResolve.localCandidateCount} global=${mirrorResolve.globalCandidateCount} giantFiltered=${mirrorResolve.giantFilteredCount} total=${mirrorResolve.candidateCount} rejectSummary='${mirrorResolve.rejectSummary}'"
+            )
+            log?.invoke(
                 "click_focused_mirror_resolve attempted=true candidates=${mirrorResolve.candidateCount} reason='${mirrorResolve.reason}' score=${mirrorResolve.score}"
             )
             if (resolvedMirrorNode != null) {
                 val mirrorBounds = boundsOf(resolvedMirrorNode)
                 log?.invoke(
-                    "click_focused_mirror_pick resourceId='${resourceIdOf(resolvedMirrorNode).orEmpty()}' class='${classNameOf(resolvedMirrorNode).orEmpty()}' bounds='${mirrorBounds.toShortString()}'"
+                    "click_focused_mirror_pick resourceId='${resourceIdOf(resolvedMirrorNode).orEmpty()}' class='${classNameOf(resolvedMirrorNode).orEmpty()}' bounds='${mirrorBounds.toShortString()}' reason='${mirrorResolve.reason}' score=${mirrorResolve.score}"
                 )
                 val mirrorDescendantHint = buildDescendantHint(
                     focusedNode = resolvedMirrorNode,
@@ -703,6 +706,10 @@ class A11yHelperService : AccessibilityService() {
                         mirrorNode = resolvedMirrorNode
                     )
                 }
+            } else if (mirrorResolve.giantFilteredCount > 0) {
+                log?.invoke(
+                    "click_focused_mirror_reject reason='${mirrorResolve.reason}' rejectSummary='${mirrorResolve.rejectSummary}'"
+                )
             }
         } else {
             log?.invoke("click_focused_mirror_resolve attempted=false")
@@ -821,8 +828,12 @@ class A11yHelperService : AccessibilityService() {
     private data class MirrorResolveResult<T>(
         val node: T?,
         val candidateCount: Int,
+        val localCandidateCount: Int,
+        val globalCandidateCount: Int,
+        val giantFilteredCount: Int,
         val reason: String,
-        val score: Int
+        val score: Int,
+        val rejectSummary: String
     )
 
     private fun <T> resolveMirrorNodeFromRoot(
@@ -837,9 +848,9 @@ class A11yHelperService : AccessibilityService() {
         contentDescOf: (T) -> String?,
         textOf: (T) -> String?
     ): MirrorResolveResult<T> {
-        if (rootNode == null) return MirrorResolveResult(null, 0, "no_root", Int.MIN_VALUE)
+        if (rootNode == null) return MirrorResolveResult(null, 0, 0, 0, 0, "no_root", Int.MIN_VALUE, "no_root")
         val focusedBounds = boundsOf(focusedNode)
-        if (focusedBounds.isEmpty) return MirrorResolveResult(null, 0, "invalid_focused_bounds", Int.MIN_VALUE)
+        if (focusedBounds.isEmpty) return MirrorResolveResult(null, 0, 0, 0, 0, "invalid_focused_bounds", Int.MIN_VALUE, "invalid_focused_bounds")
         val focusedResourceId = resourceIdOf(focusedNode).orEmpty()
         val focusedClassName = classNameOf(focusedNode).orEmpty()
         val focusedContentDesc = contentDescOf(focusedNode).orEmpty()
@@ -847,18 +858,37 @@ class A11yHelperService : AccessibilityService() {
         val focusedCenterX = focusedBounds.centerX()
         val focusedCenterY = focusedBounds.centerY()
         val focusedArea = maxOf(1, focusedBounds.width() * focusedBounds.height())
+        val rootBounds = boundsOf(rootNode)
+        val rootArea = maxOf(1, rootBounds.width() * rootBounds.height())
+        val localMarginX = maxOf(160, focusedBounds.width() * 3)
+        val localMarginY = maxOf(160, focusedBounds.height() * 3)
+        val localBandRect = Rect(
+            focusedBounds.left - localMarginX,
+            focusedBounds.top - localMarginY,
+            focusedBounds.right + localMarginX,
+            focusedBounds.bottom + localMarginY
+        )
+        val focusedTopRegion = focusedCenterY <= rootBounds.top + (maxOf(1, rootBounds.height()) / 3)
+        if (focusedTopRegion) {
+            localBandRect.top = rootBounds.top
+            localBandRect.bottom = focusedBounds.bottom + maxOf(220, focusedBounds.height() * 4)
+        }
 
         data class ScoredMirror<T>(
             val node: T,
             val score: Int,
             val distance: Long,
+            val localBand: Boolean,
             val reason: String
         )
 
         val queue = ArrayDeque<T>()
         queue += rootNode
-        var candidates = 0
-        var best: ScoredMirror<T>? = null
+        val localCandidates = mutableListOf<ScoredMirror<T>>()
+        val globalCandidates = mutableListOf<ScoredMirror<T>>()
+        var giantFilteredCount = 0
+        var giantClassFilteredCount = 0
+        var giantAreaFilteredCount = 0
 
         while (queue.isNotEmpty()) {
             val node = queue.removeFirst()
@@ -876,9 +906,45 @@ class A11yHelperService : AccessibilityService() {
             val centerInBounds = bounds.contains(focusedCenterX, focusedCenterY) ||
                 focusedBounds.contains(bounds.centerX(), bounds.centerY())
             val nodeArea = maxOf(1, bounds.width() * bounds.height())
+            val areaRatio = nodeArea.toDouble() / focusedArea.toDouble()
+            val nodeClassName = classNameOf(node).orEmpty()
+            val classLower = nodeClassName.lowercase()
+            val looksLikeHeavyContainer = classLower.endsWith("scrollview") ||
+                classLower.endsWith("recyclerview") ||
+                classLower.endsWith("listview") ||
+                classLower.endsWith("nestedscrollview")
+            val rootContainmentRatio = if (rootArea > 0) nodeArea.toDouble() / rootArea.toDouble() else 0.0
+            val almostFullScreenContainer = rootContainmentRatio >= 0.62 &&
+                bounds.width() >= (rootBounds.width() * 0.88).toInt() &&
+                bounds.height() >= (rootBounds.height() * 0.58).toInt()
+            if (looksLikeHeavyContainer && almostFullScreenContainer) {
+                giantFilteredCount += 1
+                giantClassFilteredCount += 1
+                continue
+            }
+            if (areaRatio >= 28.0 || (almostFullScreenContainer && areaRatio >= 10.0)) {
+                giantFilteredCount += 1
+                giantAreaFilteredCount += 1
+                continue
+            }
+            val localBand = Rect.intersects(localBandRect, bounds) ||
+                localBandRect.contains(bounds.centerX(), bounds.centerY())
 
             var score = 0
             val reasonTokens = mutableListOf<String>()
+            if (localBand) {
+                score += 540
+                reasonTokens += "local_band"
+            } else {
+                score -= 260
+            }
+            score += when {
+                areaRatio <= 2.2 -> 300
+                areaRatio <= 4.0 -> 170
+                areaRatio <= 8.0 -> 20
+                else -> -200
+            }
+            if (areaRatio > 12.0) score -= minOf(520, (areaRatio * 18.0).toInt())
             val nodeResourceId = resourceIdOf(node).orEmpty()
             if (focusedResourceId.isNotEmpty() && focusedResourceId == nodeResourceId) {
                 score += 500
@@ -896,7 +962,6 @@ class A11yHelperService : AccessibilityService() {
                 score += 200
                 reasonTokens += "center_match"
             }
-            val nodeClassName = classNameOf(node).orEmpty()
             if (focusedClassName.isNotEmpty() && focusedClassName == nodeClassName) {
                 score += 120
                 reasonTokens += "same_class"
@@ -913,39 +978,54 @@ class A11yHelperService : AccessibilityService() {
             }
             val childCount = childCountOf(node)
             if (childCount > 0) {
-                score += minOf(90, childCount * 20)
+                score += minOf(40, childCount * 4)
                 reasonTokens += "has_children"
             }
-            if (nodeArea > focusedArea * 8) {
-                score -= 220
-            }
+            if (looksLikeHeavyContainer) score -= 420
 
             val dx = (focusedCenterX - bounds.centerX()).toLong()
             val dy = (focusedCenterY - bounds.centerY()).toLong()
             val distance = (dx * dx) + (dy * dy)
-            score -= minOf(300, (distance / 4500L).toInt())
-            if (score < 220) continue
+            score -= minOf(320, (distance / 5000L).toInt())
+            if (score < 240) continue
 
-            candidates += 1
             val scoredMirror = ScoredMirror(
                 node = node,
                 score = score,
                 distance = distance,
+                localBand = localBand,
                 reason = reasonTokens.joinToString(separator = "+").ifBlank { "score_only" }
             )
-            if (best == null ||
-                scoredMirror.score > best!!.score ||
-                (scoredMirror.score == best!!.score && scoredMirror.distance < best!!.distance)
-            ) {
-                best = scoredMirror
+            if (localBand) localCandidates += scoredMirror else globalCandidates += scoredMirror
+        }
+
+        val preferredPool = if (localCandidates.isNotEmpty()) localCandidates else globalCandidates
+        val best = preferredPool.maxWithOrNull { a, b ->
+            when {
+                a.score != b.score -> a.score - b.score
+                a.distance < b.distance -> 1
+                a.distance > b.distance -> -1
+                else -> 0
             }
+        }
+        val totalCandidates = localCandidates.size + globalCandidates.size
+        val rejectSummary = "giant_class=$giantClassFilteredCount giant_area=$giantAreaFilteredCount"
+        val reason = when {
+            best == null && giantFilteredCount > 0 && totalCandidates == 0 -> "giant_only_rejected"
+            best == null -> "no_candidate"
+            best.localBand -> "local_${best.reason}"
+            else -> "global_${best.reason}"
         }
 
         return MirrorResolveResult(
             node = best?.node,
-            candidateCount = candidates,
-            reason = best?.reason ?: "no_candidate",
-            score = best?.score ?: Int.MIN_VALUE
+            candidateCount = totalCandidates,
+            localCandidateCount = localCandidates.size,
+            globalCandidateCount = globalCandidates.size,
+            giantFilteredCount = giantFilteredCount,
+            reason = reason,
+            score = best?.score ?: Int.MIN_VALUE,
+            rejectSummary = rejectSummary
         )
     }
 
