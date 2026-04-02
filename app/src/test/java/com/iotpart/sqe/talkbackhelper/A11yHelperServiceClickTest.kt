@@ -562,6 +562,42 @@ class A11yHelperServiceClickTest {
     }
 
     @Test
+    fun executeClickFromFocusedNode_mirrorResolve_keepsTopClickableCandidate_whenTopSmallTargetHasDyGap() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_parent",
+            resourceId = "com.example:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val topClickable = TestNode(
+            id = "top_clickable",
+            className = "android.widget.ImageButton",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(760, 280, 860, 380)
+        )
+        val bodyText = TestNode(
+            id = "body_text",
+            className = "android.widget.TextView",
+            clickable = false,
+            text = "body",
+            bounds = Rect(120, 700, 760, 840)
+        )
+
+        root.addChild(focused)
+        root.addChild(topClickable)
+        root.addChild(bodyText)
+
+        val result = runExecute(focused, root)
+
+        assertTrue(result.success)
+        assertEquals(A11yHelperService.ClickPath.MIRROR_DESCENDANT, result.path)
+        assertEquals(topClickable, result.clickedNode)
+    }
+
+    @Test
     fun executeClickFromFocusedNode_mirrorResolve_failsSafely_whenOnlyGiantContainerCandidatesExist() {
         val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
         val focused = TestNode(
