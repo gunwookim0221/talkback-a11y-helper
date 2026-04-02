@@ -10,6 +10,10 @@ class A11yHelperServiceClickTest {
 
     private data class TestNode(
         val id: String,
+        val resourceId: String? = null,
+        val className: String? = null,
+        val contentDesc: String? = null,
+        val text: String? = null,
         var clickable: Boolean = false,
         var visible: Boolean = true,
         var enabled: Boolean = true,
@@ -74,9 +78,46 @@ class A11yHelperServiceClickTest {
         val result = runExecute(focused)
 
         assertFalse(result.success)
-        assertEquals("No clickable node found from focused node subtree", result.reason)
+        assertEquals("No clickable node found from focused node subtree or root tree", result.reason)
         assertEquals(A11yHelperService.ClickPath.NONE, result.path)
         assertEquals(descendant, result.attemptedNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_rootRetargetSuccess_whenRawDescendantInvisibleInFocusedTree() {
+        val root = TestNode(id = "root", clickable = false, clickResult = false, bounds = Rect(0, 0, 1000, 1000))
+        val branchA = TestNode(id = "branchA", clickable = false, clickResult = false, bounds = Rect(0, 0, 500, 500))
+        val focused = TestNode(
+            id = "focused_parent",
+            resourceId = "com.example:id/setting_button_layout",
+            className = "android.widget.FrameLayout",
+            contentDesc = "Settings",
+            clickable = false,
+            clickResult = false,
+            bounds = Rect(100, 100, 260, 260)
+        )
+        val branchB = TestNode(id = "branchB", clickable = false, clickResult = false, bounds = Rect(0, 0, 1000, 1000))
+        val actualClickableChild = TestNode(
+            id = "settings_image",
+            resourceId = "com.example:id/settings_image",
+            className = "android.widget.ImageButton",
+            contentDesc = "Settings",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(120, 120, 240, 240)
+        )
+
+        root.addChild(branchA)
+        branchA.addChild(focused)
+        root.addChild(branchB)
+        branchB.addChild(actualClickableChild)
+
+        val result = runExecute(focused, root)
+
+        assertTrue(result.success)
+        assertEquals("Retargeted clickable node clicked from root tree", result.reason)
+        assertEquals(A11yHelperService.ClickPath.ROOT_RETARGET, result.path)
+        assertEquals(actualClickableChild, result.clickedNode)
     }
 
     @Test
@@ -88,9 +129,13 @@ class A11yHelperServiceClickTest {
         assertEquals(A11yHelperService.ClickPath.NONE, result.path)
     }
 
-    private fun runExecute(focusedNode: TestNode?): A11yHelperService.ClickExecutionResult<TestNode> {
+    private fun runExecute(
+        focusedNode: TestNode?,
+        rootNode: TestNode? = focusedNode
+    ): A11yHelperService.ClickExecutionResult<TestNode> {
         return A11yHelperService().executeClickFromFocusedNode(
             focusedNode = focusedNode,
+            rootNode = rootNode,
             childCountOf = { it.children.size },
             childAt = { node, index -> node.children.getOrNull(index) },
             parentOf = { it.parent },
@@ -98,6 +143,10 @@ class A11yHelperServiceClickTest {
             isVisible = { it.visible },
             isEnabled = { it.enabled },
             boundsOf = { it.bounds },
+            resourceIdOf = { it.resourceId },
+            classNameOf = { it.className },
+            contentDescOf = { it.contentDesc },
+            textOf = { it.text },
             performClick = { it.clickResult }
         )
     }
