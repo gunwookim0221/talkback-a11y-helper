@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.8.1"
+    const val VERSION: String = "1.9.0"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
     data class CandidateSelectionResult(
@@ -20,7 +20,21 @@ object A11yTraversalAnalyzer {
         val node: AccessibilityNodeInfo,
         val text: String?,
         val contentDescription: String?,
-        val mergedLabel: String?
+        val mergedLabel: String?,
+        val hasClickableDescendant: Boolean,
+        val hasFocusableDescendant: Boolean,
+        val effectiveClickable: Boolean,
+        val actionableDescendantResourceId: String?,
+        val actionableDescendantClassName: String?,
+        val actionableDescendantContentDescription: String?
+    )
+
+    internal data class ActionableDescendantMetadata(
+        val hasClickableDescendant: Boolean,
+        val hasFocusableDescendant: Boolean,
+        val actionableDescendantResourceId: String?,
+        val actionableDescendantClassName: String?,
+        val actionableDescendantContentDescription: String?
     )
 
     internal fun buildTalkBackLikeFocusNodes(root: AccessibilityNodeInfo): List<FocusedNode> {
@@ -45,17 +59,35 @@ object A11yTraversalAnalyzer {
         if (!node.isVisibleToUser) return
 
         val container = isFocusContainer(node)
+        val descendantMetadata = collectActionableDescendantMetadata(node)
         if (container) {
             val mergedContent = collectMergedTextFromContainer(node)
             val mergedText = mergedContent.firstOrNull()
             val mergedDescription = mergedContent.getOrNull(1)
-            sink += FocusedNode(node, mergedText, mergedDescription, mergedText)
+            sink += FocusedNode(
+                node = node,
+                text = mergedText,
+                contentDescription = mergedDescription,
+                mergedLabel = mergedText,
+                hasClickableDescendant = descendantMetadata.hasClickableDescendant,
+                hasFocusableDescendant = descendantMetadata.hasFocusableDescendant,
+                effectiveClickable = node.isClickable || descendantMetadata.hasClickableDescendant,
+                actionableDescendantResourceId = descendantMetadata.actionableDescendantResourceId,
+                actionableDescendantClassName = descendantMetadata.actionableDescendantClassName,
+                actionableDescendantContentDescription = descendantMetadata.actionableDescendantContentDescription
+            )
         } else if (containerAncestor == null && hasAnyText(node)) {
             sink += FocusedNode(
                 node = node,
                 text = node.text?.toString(),
                 contentDescription = node.contentDescription?.toString(),
-                mergedLabel = null
+                mergedLabel = null,
+                hasClickableDescendant = descendantMetadata.hasClickableDescendant,
+                hasFocusableDescendant = descendantMetadata.hasFocusableDescendant,
+                effectiveClickable = node.isClickable || descendantMetadata.hasClickableDescendant,
+                actionableDescendantResourceId = descendantMetadata.actionableDescendantResourceId,
+                actionableDescendantClassName = descendantMetadata.actionableDescendantClassName,
+                actionableDescendantContentDescription = descendantMetadata.actionableDescendantContentDescription
             )
         }
 
@@ -119,6 +151,66 @@ object A11yTraversalAnalyzer {
                 sink = sink
             )
         }
+    }
+
+    internal fun collectActionableDescendantMetadata(container: AccessibilityNodeInfo): ActionableDescendantMetadata {
+        return collectActionableDescendantMetadata(
+            container = container,
+            childCountOf = { it.childCount },
+            childAt = { node, index -> node.getChild(index) },
+            isVisible = { it.isVisibleToUser },
+            isClickable = { it.isClickable },
+            isFocusable = { it.isFocusable },
+            isEnabled = { it.isEnabled },
+            resourceIdOf = { it.viewIdResourceName },
+            classNameOf = { it.className?.toString() },
+            contentDescriptionOf = { it.contentDescription?.toString() }
+        )
+    }
+
+    internal fun <T> collectActionableDescendantMetadata(
+        container: T,
+        childCountOf: (T) -> Int,
+        childAt: (T, Int) -> T?,
+        isVisible: (T) -> Boolean,
+        isClickable: (T) -> Boolean,
+        isFocusable: (T) -> Boolean,
+        isEnabled: (T) -> Boolean,
+        resourceIdOf: (T) -> String?,
+        classNameOf: (T) -> String?,
+        contentDescriptionOf: (T) -> String?
+    ): ActionableDescendantMetadata {
+        var hasClickableDescendant = false
+        var hasFocusableDescendant = false
+        var actionableNode: T? = null
+
+        val queue = ArrayDeque<Pair<T, Int>>()
+        queue += container to 0
+
+        while (queue.isNotEmpty()) {
+            val (current, depth) = queue.removeFirst()
+            if (depth > 0 && isVisible(current)) {
+                if (isFocusable(current)) hasFocusableDescendant = true
+                if (actionableNode == null && isClickable(current) && isEnabled(current)) {
+                    hasClickableDescendant = true
+                    actionableNode = current
+                } else if (isClickable(current)) {
+                    hasClickableDescendant = true
+                }
+            }
+            for (index in 0 until childCountOf(current)) {
+                val child = childAt(current, index) ?: continue
+                queue += child to (depth + 1)
+            }
+        }
+
+        return ActionableDescendantMetadata(
+            hasClickableDescendant = hasClickableDescendant,
+            hasFocusableDescendant = hasFocusableDescendant,
+            actionableDescendantResourceId = actionableNode?.let(resourceIdOf),
+            actionableDescendantClassName = actionableNode?.let(classNameOf),
+            actionableDescendantContentDescription = actionableNode?.let(contentDescriptionOf)
+        )
     }
 
     internal fun isFocusContainer(node: AccessibilityNodeInfo): Boolean {

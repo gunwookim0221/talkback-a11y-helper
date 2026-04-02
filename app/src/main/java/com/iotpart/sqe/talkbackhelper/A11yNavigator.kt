@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.67.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.0"
 
 
     @Volatile
@@ -56,6 +56,12 @@ object A11yNavigator {
                 node = focusedNode.node,
                 textOverride = focusedNode.text,
                 contentDescriptionOverride = focusedNode.contentDescription,
+                hasClickableDescendant = focusedNode.hasClickableDescendant,
+                hasFocusableDescendant = focusedNode.hasFocusableDescendant,
+                effectiveClickable = focusedNode.effectiveClickable,
+                actionableDescendantResourceId = focusedNode.actionableDescendantResourceId,
+                actionableDescendantClassName = focusedNode.actionableDescendantClassName,
+                actionableDescendantContentDescription = focusedNode.actionableDescendantContentDescription,
                 screenTop = screenTop,
                 screenBottom = screenBottom,
                 screenHeight = screenHeight
@@ -1680,6 +1686,12 @@ object A11yNavigator {
         node: AccessibilityNodeInfo,
         textOverride: String? = null,
         contentDescriptionOverride: String? = null,
+        hasClickableDescendant: Boolean = false,
+        hasFocusableDescendant: Boolean = false,
+        effectiveClickable: Boolean = false,
+        actionableDescendantResourceId: String? = null,
+        actionableDescendantClassName: String? = null,
+        actionableDescendantContentDescription: String? = null,
         screenTop: Int,
         screenBottom: Int,
         screenHeight: Int
@@ -1711,7 +1723,13 @@ object A11yNavigator {
                 boundsInScreen = rect,
                 screenBottom = screenBottom,
                 screenHeight = screenHeight
-            )
+            ),
+            hasClickableDescendant = hasClickableDescendant,
+            hasFocusableDescendant = hasFocusableDescendant,
+            effectiveClickable = effectiveClickable,
+            actionableDescendantResourceId = actionableDescendantResourceId,
+            actionableDescendantClassName = actionableDescendantClassName,
+            actionableDescendantContentDescription = actionableDescendantContentDescription
         )
     }
 }
