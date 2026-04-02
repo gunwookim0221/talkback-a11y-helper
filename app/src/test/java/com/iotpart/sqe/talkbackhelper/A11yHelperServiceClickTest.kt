@@ -925,6 +925,147 @@ class A11yHelperServiceClickTest {
     }
 
     @Test
+    fun executeClickFromFocusedNode_localRawSearch_logsToolbarBranchExpansion_andFindsWrapperAndImageChild() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focusedSnapshot = TestNode(
+            id = "focused_snapshot",
+            resourceId = "com.samsung.android.oneconnect:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val rawResolvedWrapper = TestNode(
+            id = "raw_resolved_wrapper",
+            resourceId = "com.samsung.android.oneconnect:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val appBarLayout = TestNode(
+            id = "app_bar_layout",
+            resourceId = "com.samsung.android.oneconnect:id/app_bar_layout",
+            className = "android.widget.FrameLayout",
+            clickable = false,
+            bounds = Rect(0, 0, 1080, 360)
+        )
+        val settingButtonLayout = TestNode(
+            id = "setting_button_layout",
+            resourceId = "com.samsung.android.oneconnect:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val settingsImage = TestNode(
+            id = "settings_image",
+            resourceId = "com.samsung.android.oneconnect:id/settings_image",
+            className = "android.widget.ImageButton",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(945, 178, 1017, 250)
+        )
+        val logs = mutableListOf<String>()
+
+        settingButtonLayout.addChild(settingsImage)
+        appBarLayout.addChild(settingButtonLayout)
+        root.addChild(rawResolvedWrapper)
+        root.addChild(appBarLayout)
+
+        val result = runExecute(
+            focusedNode = focusedSnapshot,
+            rootNode = root,
+            logs = logs,
+            reResolveFocusedNodeFromRoot = { _, _, _ -> rawResolvedWrapper }
+        )
+
+        assertTrue(result.success)
+        assertEquals(A11yHelperService.ClickPath.MIRROR_DESCENDANT, result.path)
+        assertEquals(settingsImage, result.clickedNode)
+        assertNotNull(logs.find { it.contains("[click_focused_local_raw_expand]") && it.contains("app_bar_layout") })
+        assertNotNull(
+            logs.find {
+                it.contains("[click_focused_local_raw_child]") &&
+                    it.contains("parentResourceId='com.samsung.android.oneconnect:id/setting_button_layout'") &&
+                    it.contains("childResourceId='com.samsung.android.oneconnect:id/settings_image'") &&
+                    it.contains("enqueued=true")
+            }
+        )
+        assertNotNull(logs.find { it.contains("[click_focused_local_raw_scan_node]") && it.contains("com.samsung.android.oneconnect:id/settings_image") })
+        assertNotNull(logs.find { it.contains("[click_focused_local_raw_toolbar_summary]") && it.contains("seenSettingWrapper=true") && it.contains("seenSettingsImage=true") })
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_localRawSearch_doesNotPruneNonClickableParent_beforeClickableNestedChild() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focusedSnapshot = TestNode(
+            id = "focused_snapshot",
+            resourceId = "com.samsung.android.oneconnect:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val rawResolvedWrapper = TestNode(
+            id = "raw_resolved_wrapper",
+            resourceId = "com.samsung.android.oneconnect:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val nonClickableParent = TestNode(
+            id = "non_clickable_parent",
+            resourceId = "com.example:id/non_clickable_parent",
+            className = "android.widget.FrameLayout",
+            clickable = false,
+            bounds = Rect(900, 130, 1040, 320)
+        )
+        val clickableNested = TestNode(
+            id = "clickable_nested",
+            resourceId = "com.example:id/settings_image",
+            className = "android.widget.ImageButton",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(944, 176, 1018, 252)
+        )
+        val giantBodyCard = TestNode(
+            id = "giant_body_card",
+            className = "android.widget.ScrollView",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(0, 360, 1080, 2280)
+        )
+        val logs = mutableListOf<String>()
+
+        nonClickableParent.addChild(clickableNested)
+        root.addChild(rawResolvedWrapper)
+        root.addChild(nonClickableParent)
+        root.addChild(giantBodyCard)
+
+        val result = runExecute(
+            focusedNode = focusedSnapshot,
+            rootNode = root,
+            logs = logs,
+            reResolveFocusedNodeFromRoot = { _, _, _ -> rawResolvedWrapper }
+        )
+
+        assertTrue(result.success)
+        assertEquals(A11yHelperService.ClickPath.MIRROR_DESCENDANT, result.path)
+        assertEquals(clickableNested, result.clickedNode)
+        assertNotEquals(giantBodyCard, result.clickedNode)
+        assertNotNull(
+            logs.find {
+                it.contains("[click_focused_local_raw_candidate_skip]") &&
+                    it.contains("reason='not_clickable'") &&
+                    it.contains("com.example:id/non_clickable_parent")
+            }
+        )
+        assertNotNull(
+            logs.find {
+                it.contains("[click_focused_local_raw_candidate_seen]") &&
+                    it.contains("com.example:id/settings_image")
+            }
+        )
+    }
+
+    @Test
     fun executeClickFromFocusedNode_mirrorResolve_failsSafely_whenOnlyGiantContainerCandidatesExist() {
         val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
         val focused = TestNode(
