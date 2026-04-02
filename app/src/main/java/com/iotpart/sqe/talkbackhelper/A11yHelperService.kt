@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.4.3"
+        private const val VERSION = "1.4.4"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -612,9 +612,9 @@ class A11yHelperService : AccessibilityService() {
         )
         val focusedSubtreeChildCount = childCountOf(focusedNode)
         val focusedSubtreeEmpty = focusedSubtreeChildCount == 0
-        val shouldTryMirrorResolve = focusedSubtreeEmpty && descendantHint == null
+        val shouldTryMirrorResolve = !isClickable(focusedNode)
         log?.invoke(
-            "click_focused_subtree_state empty=$focusedSubtreeEmpty mirrorResolvePlanned=$shouldTryMirrorResolve focusedChildCount=$focusedSubtreeChildCount"
+            "click_focused_subtree_state empty=$focusedSubtreeEmpty mirrorResolvePlanned=$shouldTryMirrorResolve focusedClickable=${isClickable(focusedNode)} focusedChildCount=$focusedSubtreeChildCount"
         )
 
         var resolvedMirrorNode: T? = null
@@ -852,7 +852,6 @@ class A11yHelperService : AccessibilityService() {
         textOf: (T) -> String?,
         log: ((String) -> Unit)? = null
     ): MirrorResolveResult<T> {
-        if (rootNode == null) return MirrorResolveResult(null, 0, 0, 0, 0, "no_root", Int.MIN_VALUE, "no_root")
         val focusedBounds = boundsOf(focusedNode)
         if (focusedBounds.isEmpty) return MirrorResolveResult(null, 0, 0, 0, 0, "invalid_focused_bounds", Int.MIN_VALUE, "invalid_focused_bounds")
         val focusedResourceId = resourceIdOf(focusedNode).orEmpty()
@@ -862,7 +861,7 @@ class A11yHelperService : AccessibilityService() {
         val focusedCenterX = focusedBounds.centerX()
         val focusedCenterY = focusedBounds.centerY()
         val focusedArea = maxOf(1, focusedBounds.width() * focusedBounds.height())
-        val rootBounds = boundsOf(rootNode)
+        val rootBounds = boundsOf(rootNode ?: focusedNode)
         val rootArea = maxOf(1, rootBounds.width() * rootBounds.height())
         val rootHeight = maxOf(1, rootBounds.height())
         val rootWidth = maxOf(1, rootBounds.width())
@@ -923,25 +922,58 @@ class A11yHelperService : AccessibilityService() {
         )
 
         val queue = ArrayDeque<T>()
-        queue += rootNode
         val allCandidates = mutableListOf<MirrorCandidate<T>>()
+        val seenCandidateKeys = mutableSetOf<String>()
         val localCandidates = mutableListOf<ScoredMirror<T>>()
         var giantFilteredCount = 0
         var giantClassFilteredCount = 0
         var giantAreaFilteredCount = 0
 
-        while (queue.isNotEmpty()) {
-            val node = queue.removeFirst()
-            for (index in 0 until childCountOf(node)) {
-                childAt(node, index)?.let(queue::add)
+        fun enqueueChildren(source: T, targetQueue: ArrayDeque<T>) {
+            for (index in 0 until childCountOf(source)) {
+                childAt(source, index)?.let(targetQueue::add)
             }
-            if (node == focusedNode) continue
-            if (!isVisible(node)) continue
+        }
 
+        fun shouldCollectFocusedDescendantCandidate(
+            candidate: T,
+            bounds: Rect,
+            nodeClassName: String
+        ): Boolean {
+            if (!isClickable(candidate)) return false
+            val classLower = nodeClassName.lowercase()
+            val classEligible = classLower.endsWith("imagebutton") ||
+                classLower.endsWith("button") ||
+                classLower.endsWith("viewgroup")
+            if (!classEligible) return false
+            val nearMarginX = maxOf(96, focusedBounds.width())
+            val nearMarginY = maxOf(96, focusedBounds.height())
+            val expandedFocusedBounds = Rect(
+                focusedBounds.left - nearMarginX,
+                focusedBounds.top - nearMarginY,
+                focusedBounds.right + nearMarginX,
+                focusedBounds.bottom + nearMarginY
+            )
+            return focusedBounds.contains(bounds) ||
+                bounds.contains(focusedBounds) ||
+                Rect.intersects(focusedBounds, bounds) ||
+                Rect.intersects(expandedFocusedBounds, bounds)
+        }
+
+        fun collectCandidate(
+            node: T,
+            logPrefix: String = "click_focused_candidate_seen"
+        ) {
+            if (node == focusedNode) return
+            if (!isVisible(node)) return
             val bounds = boundsOf(node)
-            if (bounds.isEmpty) continue
+            if (bounds.isEmpty) return
 
             val nodeClassName = classNameOf(node).orEmpty()
+            val clickableNode = isClickable(node)
+            val candidateKey = "${resourceIdOf(node).orEmpty()}|$nodeClassName|${bounds.toShortString()}|$clickableNode"
+            if (!seenCandidateKeys.add(candidateKey)) return
+
             val candidateCenterX = bounds.centerX()
             val candidateCenterY = bounds.centerY()
             val dxAbs = kotlin.math.abs(focusedCenterX - candidateCenterX)
@@ -961,13 +993,12 @@ class A11yHelperService : AccessibilityService() {
             val almostFullScreenContainer = rootContainmentRatio >= 0.62 &&
                 bounds.width() >= (rootBounds.width() * 0.88).toInt() &&
                 bounds.height() >= (rootBounds.height() * 0.58).toInt()
-            val clickableNode = isClickable(node)
             val isLeaf = childCountOf(node) == 0
             val simpleLeaf = classLower.endsWith("textview") || classLower.endsWith("imageview")
             val nonClickableLeaf = isLeaf && simpleLeaf && !clickableNode
 
             log?.invoke(
-                "[click_focused_candidate_seen] resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
+                "[$logPrefix] resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
             )
             log?.invoke(
                 "[click_focused_candidate_pass_stage] stage='collected' resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
@@ -991,6 +1022,29 @@ class A11yHelperService : AccessibilityService() {
                 looksLikeHeavyContainer = looksLikeHeavyContainer,
                 almostFullScreenContainer = almostFullScreenContainer
             )
+        }
+
+        if (!isClickable(focusedNode)) {
+            val focusedQueue = ArrayDeque<T>()
+            enqueueChildren(focusedNode, focusedQueue)
+            while (focusedQueue.isNotEmpty()) {
+                val node = focusedQueue.removeFirst()
+                enqueueChildren(node, focusedQueue)
+                val bounds = boundsOf(node)
+                val nodeClassName = classNameOf(node).orEmpty()
+                if (bounds.isEmpty) continue
+                if (!shouldCollectFocusedDescendantCandidate(node, bounds, nodeClassName)) continue
+                collectCandidate(node, logPrefix = "click_focused_descendant_candidate_seen")
+            }
+        }
+
+        if (rootNode != null) {
+            queue += rootNode
+        }
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            enqueueChildren(node, queue)
+            collectCandidate(node)
         }
 
         for (candidate in allCandidates) {
