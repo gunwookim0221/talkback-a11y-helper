@@ -648,9 +648,66 @@ class A11yHelperServiceClickTest {
         assertNotNull(
             logs.find {
                 it.contains("[click_focused_descendant_candidate_seen]") &&
+                    it.contains("com.samsung.android.oneconnect:id/settings_image") &&
+                    it.contains("source='raw_descendant'")
+            }
+        )
+        assertNotNull(
+            logs.find {
+                it.contains("[click_focused_candidate_pass_stage]") &&
+                    it.contains("stage='raw_descendant_collected'") &&
                     it.contains("com.samsung.android.oneconnect:id/settings_image")
             }
         )
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_snapshotChildrenEmpty_reResolvesRawFocusedNodeAndCollectsDescendant() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focusedSnapshot = TestNode(
+            id = "focused_snapshot_only",
+            resourceId = "com.samsung.android.oneconnect:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val rawFocusedWrapper = TestNode(
+            id = "raw_focused_wrapper",
+            resourceId = "com.samsung.android.oneconnect:id/setting_button_layout",
+            className = "android.widget.RelativeLayout",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val rawChildTarget = TestNode(
+            id = "raw_child_settings_image",
+            resourceId = "com.samsung.android.oneconnect:id/settings_image",
+            className = "android.widget.ImageButton",
+            contentDesc = "Settings",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(944, 176, 1018, 252)
+        )
+        val logs = mutableListOf<String>()
+        rawFocusedWrapper.addChild(rawChildTarget)
+        root.addChild(rawFocusedWrapper)
+
+        val result = runExecute(
+            focusedNode = focusedSnapshot,
+            rootNode = root,
+            logs = logs,
+            reResolveFocusedNodeFromRoot = { snapshot, treeRoot, logger ->
+                logger?.invoke(
+                    "[click_focused_raw_focus_resolve] resolved=true resourceId='${snapshot.resourceId}' className='${snapshot.className}' bounds='${snapshot.bounds.toShortString()}' reason='test_resolved_by_resource_class_bounds'"
+                )
+                treeRoot?.children?.firstOrNull { it.resourceId == snapshot.resourceId && it.className == snapshot.className }
+            }
+        )
+
+        assertTrue(result.success)
+        assertEquals(A11yHelperService.ClickPath.DESCENDANT, result.path)
+        assertEquals(rawChildTarget, result.clickedNode)
+        assertNotNull(logs.find { it.contains("[click_focused_raw_focus_resolve]") && it.contains("resolved=true") })
+        assertNotNull(logs.find { it.contains("[click_focused_descendant_candidate_seen]") && it.contains("com.samsung.android.oneconnect:id/settings_image") })
     }
 
     @Test
@@ -733,11 +790,13 @@ class A11yHelperServiceClickTest {
     private fun runExecute(
         focusedNode: TestNode?,
         rootNode: TestNode? = focusedNode,
-        logs: MutableList<String>? = null
+        logs: MutableList<String>? = null,
+        reResolveFocusedNodeFromRoot: ((focusedNode: TestNode, rootNode: TestNode?, log: ((String) -> Unit)?) -> TestNode?)? = null
     ): A11yHelperService.ClickExecutionResult<TestNode> {
         return A11yHelperService().executeClickFromFocusedNode(
             focusedNode = focusedNode,
             rootNode = rootNode,
+            reResolveFocusedNodeFromRoot = reResolveFocusedNodeFromRoot,
             childCountOf = { it.children.size },
             childAt = { node, index -> node.children.getOrNull(index) },
             parentOf = { it.parent },

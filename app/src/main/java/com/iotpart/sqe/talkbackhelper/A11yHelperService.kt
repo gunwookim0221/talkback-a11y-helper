@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.4.4"
+        private const val VERSION = "1.4.5"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -472,6 +472,9 @@ class A11yHelperService : AccessibilityService() {
         val outcome = executeClickFromFocusedNode(
             focusedNode = focusedNode,
             rootNode = rootNode,
+            reResolveFocusedNodeFromRoot = { snapshotFocusedNode, currentRootNode, log ->
+                resolveRawFocusedNodeFromRoot(snapshotFocusedNode, currentRootNode, log)
+            },
             childCountOf = { it.childCount },
             childAt = { node, index -> node.getChild(index) },
             parentOf = { it.parent },
@@ -533,9 +536,99 @@ class A11yHelperService : AccessibilityService() {
         return resultJson
     }
 
+    private fun resolveRawFocusedNodeFromRoot(
+        focusedNode: AccessibilityNodeInfo?,
+        rootNode: AccessibilityNodeInfo?,
+        log: ((String) -> Unit)? = null
+    ): AccessibilityNodeInfo? {
+        if (focusedNode == null || rootNode == null) {
+            log?.invoke(
+                "[click_focused_raw_focus_resolve] resolved=false resourceId='${focusedNode?.viewIdResourceName.orEmpty()}' className='${focusedNode?.className?.toString().orEmpty()}' bounds='' reason='missing_focused_or_root'"
+            )
+            return null
+        }
+        val focusedBounds = Rect().also { focusedNode.getBoundsInScreen(it) }
+        val focusedResourceId = focusedNode.viewIdResourceName.orEmpty()
+        val focusedClassName = focusedNode.className?.toString().orEmpty()
+        val focusedPackage = focusedNode.packageName?.toString().orEmpty()
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue += rootNode
+        var bestNode: AccessibilityNodeInfo? = null
+        var bestScore = Int.MIN_VALUE
+        var bestReason = "not_found"
+
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            for (index in 0 until node.childCount) {
+                node.getChild(index)?.let(queue::add)
+            }
+            val nodeBounds = Rect().also { node.getBoundsInScreen(it) }
+            if (nodeBounds.isEmpty) continue
+            val nodeResourceId = node.viewIdResourceName.orEmpty()
+            val nodeClassName = node.className?.toString().orEmpty()
+            val nodePackage = node.packageName?.toString().orEmpty()
+            var score = 0
+            val reasonTokens = mutableListOf<String>()
+            if (node === focusedNode) {
+                score += 1400
+                reasonTokens += "same_instance"
+            }
+            if (focusedResourceId.isNotEmpty() && focusedResourceId == nodeResourceId) {
+                score += 520
+                reasonTokens += "same_resource"
+            }
+            if (focusedClassName.isNotEmpty() && focusedClassName == nodeClassName) {
+                score += 260
+                reasonTokens += "same_class"
+            }
+            if (focusedPackage.isNotEmpty() && focusedPackage == nodePackage) {
+                score += 90
+                reasonTokens += "same_package"
+            }
+            if (focusedBounds == nodeBounds) {
+                score += 520
+                reasonTokens += "same_bounds"
+            }
+            if (Rect.intersects(focusedBounds, nodeBounds)) {
+                score += 180
+                reasonTokens += "bounds_intersect"
+            }
+            val delta = kotlin.math.abs(focusedBounds.centerX() - nodeBounds.centerX()) +
+                kotlin.math.abs(focusedBounds.centerY() - nodeBounds.centerY())
+            if (delta <= 24) {
+                score += 220
+                reasonTokens += "center_near"
+            } else if (delta <= 96) {
+                score += 80
+                reasonTokens += "center_close"
+            }
+            if (node.isAccessibilityFocused) {
+                score += 180
+                reasonTokens += "a11y_focused"
+            }
+            if (node.isFocused) {
+                score += 120
+                reasonTokens += "input_focused"
+            }
+            if (score > bestScore) {
+                bestScore = score
+                bestNode = node
+                bestReason = if (reasonTokens.isEmpty()) "weak_match" else reasonTokens.joinToString("+")
+            }
+        }
+
+        val resolved = bestNode != null && bestScore >= 420
+        val resolvedBounds = if (resolved) Rect().also { bestNode?.getBoundsInScreen(it) } else null
+        log?.invoke(
+            "[click_focused_raw_focus_resolve] resolved=$resolved resourceId='${bestNode?.viewIdResourceName.orEmpty()}' className='${bestNode?.className?.toString().orEmpty()}' bounds='${resolvedBounds?.toShortString().orEmpty()}' reason='${if (resolved) bestReason else "score_too_low:$bestScore"}'"
+        )
+        return if (resolved) bestNode else null
+    }
+
     internal fun <T> executeClickFromFocusedNode(
         focusedNode: T?,
         rootNode: T?,
+        reResolveFocusedNodeFromRoot: ((focusedNode: T, rootNode: T?, log: ((String) -> Unit)?) -> T?)? = null,
         childCountOf: (T) -> Int,
         childAt: (T, Int) -> T?,
         parentOf: (T) -> T?,
@@ -560,22 +653,28 @@ class A11yHelperService : AccessibilityService() {
             )
         }
 
-        val focusedBounds = boundsOf(focusedNode)
-        val focusedResourceId = resourceIdOf(focusedNode).orEmpty()
-        val focusedClassName = classNameOf(focusedNode).orEmpty()
+        val rawResolvedFocusedNode = if (!isClickable(focusedNode) && reResolveFocusedNodeFromRoot != null) {
+            reResolveFocusedNodeFromRoot(focusedNode, rootNode, log)
+        } else {
+            null
+        }
+        val effectiveFocusedNode = rawResolvedFocusedNode ?: focusedNode
+        val focusedBounds = boundsOf(effectiveFocusedNode)
+        val focusedResourceId = resourceIdOf(effectiveFocusedNode).orEmpty()
+        val focusedClassName = classNameOf(effectiveFocusedNode).orEmpty()
 
-        if (isNodeClickableCandidate(focusedNode, isClickable, isVisible, isEnabled, boundsOf) && performClick(focusedNode)) {
+        if (isNodeClickableCandidate(effectiveFocusedNode, isClickable, isVisible, isEnabled, boundsOf) && performClick(effectiveFocusedNode)) {
             return ClickExecutionResult(
                 success = true,
                 reason = "Focused node clicked",
                 path = ClickPath.DIRECT,
-                clickedNode = focusedNode,
-                attemptedNode = focusedNode
+                clickedNode = effectiveFocusedNode,
+                attemptedNode = effectiveFocusedNode
             )
         }
 
         val descendant = findFirstClickableDescendant(
-            root = focusedNode,
+            root = effectiveFocusedNode,
             maxDepth = CLICK_DESCENDANT_MAX_DEPTH,
             childCountOf = childCountOf,
             childAt = childAt,
@@ -595,7 +694,7 @@ class A11yHelperService : AccessibilityService() {
         }
 
         val descendantHint = buildDescendantHint(
-            focusedNode = focusedNode,
+            focusedNode = effectiveFocusedNode,
             childCountOf = childCountOf,
             childAt = childAt,
             isVisible = isVisible,
@@ -610,17 +709,17 @@ class A11yHelperService : AccessibilityService() {
         log?.invoke(
             "click_focused_descendant_hint hasClickableDescendant=${descendantHint != null} actionableDescendantResourceId='${descendantHint?.resourceId.orEmpty()}' actionableDescendantClassName='${descendantHint?.className.orEmpty()}' actionableDescendantContentDescription='${descendantHint?.contentDescription.orEmpty()}'"
         )
-        val focusedSubtreeChildCount = childCountOf(focusedNode)
+        val focusedSubtreeChildCount = childCountOf(effectiveFocusedNode)
         val focusedSubtreeEmpty = focusedSubtreeChildCount == 0
-        val shouldTryMirrorResolve = !isClickable(focusedNode)
+        val shouldTryMirrorResolve = !isClickable(effectiveFocusedNode)
         log?.invoke(
-            "click_focused_subtree_state empty=$focusedSubtreeEmpty mirrorResolvePlanned=$shouldTryMirrorResolve focusedClickable=${isClickable(focusedNode)} focusedChildCount=$focusedSubtreeChildCount"
+            "click_focused_subtree_state empty=$focusedSubtreeEmpty mirrorResolvePlanned=$shouldTryMirrorResolve focusedClickable=${isClickable(effectiveFocusedNode)} focusedChildCount=$focusedSubtreeChildCount"
         )
 
         var resolvedMirrorNode: T? = null
         if (shouldTryMirrorResolve) {
             val mirrorResolve = resolveMirrorNodeFromRoot(
-                focusedNode = focusedNode,
+                focusedNode = effectiveFocusedNode,
                 rootNode = rootNode,
                 childCountOf = childCountOf,
                 childAt = childAt,
@@ -744,7 +843,7 @@ class A11yHelperService : AccessibilityService() {
         }
 
         val ancestor = findFirstClickableAncestor(
-            node = focusedNode,
+            node = effectiveFocusedNode,
             parentOf = parentOf,
             isClickable = isClickable,
             isVisible = isVisible,
@@ -763,7 +862,7 @@ class A11yHelperService : AccessibilityService() {
         }
 
         val rootRetarget = findBestClickableFromRoot(
-            focusedNode = focusedNode,
+            focusedNode = effectiveFocusedNode,
             rootNode = rootNode,
             childCountOf = childCountOf,
             childAt = childAt,
@@ -804,7 +903,7 @@ class A11yHelperService : AccessibilityService() {
             reason = "No clickable node found from focused node subtree or root tree",
             path = ClickPath.NONE,
             clickedNode = null,
-            attemptedNode = rootRetarget.node ?: ancestor ?: descendant ?: focusedNode,
+            attemptedNode = rootRetarget.node ?: ancestor ?: descendant ?: effectiveFocusedNode,
             mirrorNode = resolvedMirrorNode
         )
     }
@@ -962,7 +1061,8 @@ class A11yHelperService : AccessibilityService() {
 
         fun collectCandidate(
             node: T,
-            logPrefix: String = "click_focused_candidate_seen"
+            logPrefix: String = "click_focused_candidate_seen",
+            source: String = "root_tree"
         ) {
             if (node == focusedNode) return
             if (!isVisible(node)) return
@@ -998,8 +1098,13 @@ class A11yHelperService : AccessibilityService() {
             val nonClickableLeaf = isLeaf && simpleLeaf && !clickableNode
 
             log?.invoke(
-                "[$logPrefix] resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
+                "[$logPrefix] resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}' source='$source'"
             )
+            if (source == "raw_descendant") {
+                log?.invoke(
+                    "[click_focused_candidate_pass_stage] stage='raw_descendant_collected' resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
+                )
+            }
             log?.invoke(
                 "[click_focused_candidate_pass_stage] stage='collected' resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
             )
@@ -1034,7 +1139,7 @@ class A11yHelperService : AccessibilityService() {
                 val nodeClassName = classNameOf(node).orEmpty()
                 if (bounds.isEmpty) continue
                 if (!shouldCollectFocusedDescendantCandidate(node, bounds, nodeClassName)) continue
-                collectCandidate(node, logPrefix = "click_focused_descendant_candidate_seen")
+                collectCandidate(node, logPrefix = "click_focused_descendant_candidate_seen", source = "raw_descendant")
             }
         }
 
