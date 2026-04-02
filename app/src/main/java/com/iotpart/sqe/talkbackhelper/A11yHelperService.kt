@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.4.9"
+        private const val VERSION = "1.5.0"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -36,6 +36,7 @@ class A11yHelperService : AccessibilityService() {
         DIRECT("direct"),
         DESCENDANT("descendant"),
         MIRROR_DESCENDANT("mirror_descendant"),
+        WRAPPER_RECOVERY("wrapper_recovery"),
         ANCESTOR("ancestor"),
         ROOT_RETARGET("root_retarget"),
         NONE("none")
@@ -478,6 +479,8 @@ class A11yHelperService : AccessibilityService() {
             childCountOf = { it.childCount },
             childAt = { node, index -> node.getChild(index) },
             parentOf = { it.parent },
+            isAccessibilityFocused = { it.isAccessibilityFocused },
+            isFocusable = { it.isFocusable },
             isClickable = { it.isClickable },
             isVisible = { it.isVisibleToUser },
             isEnabled = { it.isEnabled },
@@ -632,6 +635,8 @@ class A11yHelperService : AccessibilityService() {
         childCountOf: (T) -> Int,
         childAt: (T, Int) -> T?,
         parentOf: (T) -> T?,
+        isAccessibilityFocused: (T) -> Boolean = { false },
+        isFocusable: (T) -> Boolean = { false },
         isClickable: (T) -> Boolean,
         isVisible: (T) -> Boolean,
         isEnabled: (T) -> Boolean,
@@ -712,8 +717,23 @@ class A11yHelperService : AccessibilityService() {
         val focusedSubtreeChildCount = childCountOf(effectiveFocusedNode)
         val focusedSubtreeEmpty = focusedSubtreeChildCount == 0
         val shouldTryMirrorResolve = !isClickable(effectiveFocusedNode)
+        val focusedAccessibleFocused = isAccessibilityFocused(effectiveFocusedNode)
+        val focusedFocusable = isFocusable(effectiveFocusedNode)
         log?.invoke(
             "click_focused_subtree_state empty=$focusedSubtreeEmpty mirrorResolvePlanned=$shouldTryMirrorResolve focusedClickable=${isClickable(effectiveFocusedNode)} focusedChildCount=$focusedSubtreeChildCount"
+        )
+
+        val rootBounds = boundsOf(rootNode ?: effectiveFocusedNode)
+        val rootArea = maxOf(1, rootBounds.width() * rootBounds.height())
+        val focusedArea = maxOf(1, focusedBounds.width() * focusedBounds.height())
+        val rootHeight = maxOf(1, rootBounds.height())
+        val focusedCenterX = focusedBounds.centerX()
+        val focusedCenterY = focusedBounds.centerY()
+        val focusedTopRegion = focusedCenterY <= rootBounds.top + (rootHeight / 3)
+        val focusedSmallTopTarget = focusedTopRegion && focusedArea <= (rootArea / 28)
+        val topRegionBottom = minOf(
+            rootBounds.bottom,
+            maxOf(rootBounds.top + (rootHeight / 6), focusedBounds.bottom + maxOf(180, focusedBounds.height() * 2))
         )
 
         var resolvedMirrorNode: T? = null
@@ -825,6 +845,143 @@ class A11yHelperService : AccessibilityService() {
             }
         } else {
             log?.invoke("click_focused_mirror_resolve attempted=false")
+        }
+
+        val shouldTryWrapperRecovery =
+            focusedAccessibleFocused &&
+                focusedFocusable &&
+                !isClickable(effectiveFocusedNode) &&
+                focusedSubtreeEmpty &&
+                focusedSmallTopTarget &&
+                rootNode != null
+        if (shouldTryWrapperRecovery) {
+            log?.invoke(
+                "[click_focused_wrapper_recovery_start] focusedResourceId='$focusedResourceId' focusedClass='$focusedClassName' focusedBounds='${focusedBounds.toShortString()}' topRegionBottom=$topRegionBottom"
+            )
+            data class WrapperCandidate<T>(
+                val node: T,
+                val bounds: Rect,
+                val reason: String,
+                val priority: Int,
+                val score: Int,
+                val distance: Long
+            )
+            val candidatePicks = mutableListOf<WrapperCandidate<T>>()
+            val queue = ArrayDeque<T>()
+            queue += rootNode
+            while (queue.isNotEmpty()) {
+                val node = queue.removeFirst()
+                val childCount = childCountOf(node)
+                for (index in 0 until childCount) {
+                    childAt(node, index)?.let(queue::add)
+                }
+                if (node == effectiveFocusedNode) continue
+                val nodeResourceId = resourceIdOf(node).orEmpty()
+                val nodeClassName = classNameOf(node).orEmpty()
+                val bounds = boundsOf(node)
+                if (bounds.isEmpty) {
+                    log?.invoke("[click_focused_wrapper_recovery_reject] reason='invalid_bounds' resourceId='$nodeResourceId' class='$nodeClassName'")
+                    continue
+                }
+                val clickableNode = isClickable(node)
+                val enabledNode = isEnabled(node)
+                val visibleNode = isVisible(node)
+                if (!clickableNode || !enabledNode || !visibleNode) {
+                    log?.invoke(
+                        "[click_focused_wrapper_recovery_reject] reason='state_mismatch' resourceId='$nodeResourceId' class='$nodeClassName' clickable=$clickableNode enabled=$enabledNode visible=$visibleNode bounds='${bounds.toShortString()}'"
+                    )
+                    continue
+                }
+                val candidateCenterX = bounds.centerX()
+                val candidateCenterY = bounds.centerY()
+                val inTopBand = bounds.top <= topRegionBottom && candidateCenterY <= topRegionBottom
+                if (!inTopBand) {
+                    log?.invoke(
+                        "[click_focused_wrapper_recovery_reject] reason='top_band_mismatch' resourceId='$nodeResourceId' class='$nodeClassName' bounds='${bounds.toShortString()}'"
+                    )
+                    continue
+                }
+                val nodeArea = maxOf(1, bounds.width() * bounds.height())
+                val areaRatio = nodeArea.toDouble() / focusedArea.toDouble()
+                val rootContainmentRatio = nodeArea.toDouble() / rootArea.toDouble()
+                val classLower = nodeClassName.lowercase()
+                val giantContainer = areaRatio >= 28.0 ||
+                    (rootContainmentRatio >= 0.62 &&
+                        bounds.width() >= (rootBounds.width() * 0.88).toInt() &&
+                        bounds.height() >= (rootBounds.height() * 0.58).toInt()) ||
+                    ((classLower.endsWith("scrollview") ||
+                        classLower.endsWith("recyclerview") ||
+                        classLower.endsWith("listview") ||
+                        classLower.endsWith("nestedscrollview")) && rootContainmentRatio >= 0.62)
+                if (giantContainer) {
+                    log?.invoke(
+                        "[click_focused_wrapper_recovery_reject] reason='giant_container' resourceId='$nodeResourceId' class='$nodeClassName' bounds='${bounds.toShortString()}'"
+                    )
+                    continue
+                }
+                val insideFocused = focusedBounds.contains(bounds)
+                val overlapRect = Rect(bounds)
+                val overlapExists = overlapRect.intersect(focusedBounds)
+                val overlapArea = if (overlapExists) overlapRect.width() * overlapRect.height() else 0
+                val overlapRatio = if (overlapExists) overlapArea.toDouble() / minOf(nodeArea, focusedArea).toDouble() else 0.0
+                val dx = (focusedCenterX - candidateCenterX).toLong()
+                val dy = (focusedCenterY - candidateCenterY).toLong()
+                val distance = (dx * dx) + (dy * dy)
+                val nearCenter = distance <= (maxOf(72, focusedBounds.width()) * maxOf(72, focusedBounds.width())).toLong()
+                val priority = when {
+                    insideFocused -> 3
+                    overlapRatio >= 0.35 -> 2
+                    nearCenter -> 1
+                    else -> 0
+                }
+                if (priority == 0) {
+                    log?.invoke(
+                        "[click_focused_wrapper_recovery_reject] reason='weak_geometry' resourceId='$nodeResourceId' class='$nodeClassName' bounds='${bounds.toShortString()}' overlapRatio=$overlapRatio distance=$distance"
+                    )
+                    continue
+                }
+                val score = (priority * 1000) - minOf(900, distance.toInt() / 12) - minOf(240, (areaRatio * 16.0).toInt())
+                val reason = when (priority) {
+                    3 -> "inside_focused_bounds"
+                    2 -> "strong_overlap"
+                    else -> "near_center"
+                }
+                log?.invoke(
+                    "[click_focused_wrapper_recovery_candidate] resourceId='$nodeResourceId' class='$nodeClassName' bounds='${bounds.toShortString()}' reason='$reason' priority=$priority overlapRatio=$overlapRatio distance=$distance score=$score"
+                )
+                candidatePicks += WrapperCandidate(
+                    node = node,
+                    bounds = bounds,
+                    reason = reason,
+                    priority = priority,
+                    score = score,
+                    distance = distance
+                )
+            }
+
+            val wrapperPick = candidatePicks.maxWithOrNull(
+                compareBy<WrapperCandidate<T>> { it.priority }
+                    .thenBy { it.score }
+                    .thenByDescending { it.distance }
+            )
+            if (wrapperPick != null) {
+                log?.invoke(
+                    "[click_focused_wrapper_recovery_pick] resourceId='${resourceIdOf(wrapperPick.node).orEmpty()}' class='${classNameOf(wrapperPick.node).orEmpty()}' bounds='${wrapperPick.bounds.toShortString()}' reason='${wrapperPick.reason}' priority=${wrapperPick.priority} score=${wrapperPick.score}"
+                )
+                if (performClick(wrapperPick.node)) {
+                    return ClickExecutionResult(
+                        success = true,
+                        reason = "Wrapper recovery clickable node clicked",
+                        path = ClickPath.WRAPPER_RECOVERY,
+                        clickedNode = wrapperPick.node,
+                        attemptedNode = wrapperPick.node,
+                        mirrorNode = resolvedMirrorNode
+                    )
+                }
+                log?.invoke(
+                    "[click_focused_wrapper_recovery_reject] reason='perform_click_failed' resourceId='${resourceIdOf(wrapperPick.node).orEmpty()}' class='${classNameOf(wrapperPick.node).orEmpty()}' bounds='${wrapperPick.bounds.toShortString()}'"
+                )
+            }
         }
 
         val descendantRetarget = findMatchingClickableFromRootByDescendantHint(
