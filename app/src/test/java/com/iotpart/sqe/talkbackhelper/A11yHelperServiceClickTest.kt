@@ -313,6 +313,87 @@ class A11yHelperServiceClickTest {
     }
 
     @Test
+    fun executeClickFromFocusedNode_mirrorDescendantSuccess_whenFocusedSubtreeIsEmpty() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_parent",
+            resourceId = "com.example:id/setting_button_layout",
+            className = "android.widget.FrameLayout",
+            contentDesc = "Settings",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val mirrorParent = TestNode(
+            id = "mirror_parent",
+            resourceId = "com.example:id/setting_button_layout",
+            className = "android.widget.FrameLayout",
+            contentDesc = "Settings",
+            clickable = false,
+            bounds = Rect(928, 160, 1034, 268)
+        )
+        val mirrorChild = TestNode(
+            id = "mirror_child",
+            resourceId = "com.example:id/settings_image",
+            className = "android.widget.ImageButton",
+            contentDesc = "Settings",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(944, 176, 1018, 252)
+        )
+        val giantCard = TestNode(
+            id = "giant_card",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(0, 500, 1080, 2200)
+        )
+        mirrorParent.addChild(mirrorChild)
+        root.addChild(focused)
+        root.addChild(mirrorParent)
+        root.addChild(giantCard)
+
+        val result = runExecute(focused, root)
+
+        assertTrue(result.success)
+        assertEquals(A11yHelperService.ClickPath.MIRROR_DESCENDANT, result.path)
+        assertEquals(mirrorChild, result.clickedNode)
+        assertEquals(mirrorParent, result.mirrorNode)
+    }
+
+    @Test
+    fun executeClickFromFocusedNode_mirrorResolveMiss_keepsStrictFailurePolicy() {
+        val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
+        val focused = TestNode(
+            id = "focused_parent",
+            resourceId = "com.example:id/setting_button_layout",
+            className = "android.widget.FrameLayout",
+            contentDesc = "Settings",
+            clickable = false,
+            bounds = Rect(930, 163, 1032, 265)
+        )
+        val localBandClickable = TestNode(
+            id = "toolbar_neighbor",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(760, 120, 900, 240)
+        )
+        val farGlobalClickable = TestNode(
+            id = "content_card",
+            clickable = true,
+            clickResult = true,
+            bounds = Rect(60, 1200, 1020, 2000)
+        )
+        root.addChild(focused)
+        root.addChild(localBandClickable)
+        root.addChild(farGlobalClickable)
+
+        val result = runExecute(focused, root)
+
+        assertFalse(result.success)
+        assertEquals(A11yHelperService.ClickPath.NONE, result.path)
+        assertEquals(focused, result.attemptedNode)
+    }
+
+    @Test
     fun executeClickFromFocusedNode_nullFocusedFailsImmediately() {
         val result = runExecute(null)
 

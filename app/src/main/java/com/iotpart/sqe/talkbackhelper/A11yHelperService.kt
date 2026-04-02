@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.3.0"
+        private const val VERSION = "1.4.0"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -35,6 +35,7 @@ class A11yHelperService : AccessibilityService() {
     internal enum class ClickPath(val value: String) {
         DIRECT("direct"),
         DESCENDANT("descendant"),
+        MIRROR_DESCENDANT("mirror_descendant"),
         ANCESTOR("ancestor"),
         ROOT_RETARGET("root_retarget"),
         NONE("none")
@@ -45,7 +46,8 @@ class A11yHelperService : AccessibilityService() {
         val reason: String,
         val path: ClickPath,
         val clickedNode: T?,
-        val attemptedNode: T?
+        val attemptedNode: T?,
+        val mirrorNode: T? = null
     )
 
     override fun onServiceConnected() {
@@ -488,6 +490,7 @@ class A11yHelperService : AccessibilityService() {
         )
         val attemptedNode = outcome.attemptedNode ?: focusedNode
         val clickedNode = outcome.clickedNode
+        val mirrorNode = outcome.mirrorNode
 
         Log.d(
             TAG,
@@ -503,6 +506,12 @@ class A11yHelperService : AccessibilityService() {
             put("path", outcome.path.value)
             put("attemptedResourceId", attemptedNode?.viewIdResourceName ?: JSONObject.NULL)
             put("attemptedClassName", attemptedNode?.className?.toString() ?: JSONObject.NULL)
+            if (mirrorNode != null) {
+                val mirrorBounds = Rect().also { mirrorNode.getBoundsInScreen(it) }
+                put("mirrorResourceId", mirrorNode.viewIdResourceName ?: JSONObject.NULL)
+                put("mirrorClassName", mirrorNode.className?.toString() ?: JSONObject.NULL)
+                put("mirrorBounds", mirrorBounds.toShortString())
+            }
             if (focusedSnapshot != null) {
                 put("focused", focusedSnapshot.toJson())
             }
@@ -601,6 +610,104 @@ class A11yHelperService : AccessibilityService() {
         log?.invoke(
             "click_focused_descendant_hint hasClickableDescendant=${descendantHint != null} actionableDescendantResourceId='${descendantHint?.resourceId.orEmpty()}' actionableDescendantClassName='${descendantHint?.className.orEmpty()}' actionableDescendantContentDescription='${descendantHint?.contentDescription.orEmpty()}'"
         )
+        val focusedSubtreeChildCount = childCountOf(focusedNode)
+        val focusedSubtreeEmpty = focusedSubtreeChildCount == 0
+        val shouldTryMirrorResolve = focusedSubtreeEmpty && descendantHint == null
+        log?.invoke(
+            "click_focused_subtree_state empty=$focusedSubtreeEmpty mirrorResolvePlanned=$shouldTryMirrorResolve focusedChildCount=$focusedSubtreeChildCount"
+        )
+
+        var resolvedMirrorNode: T? = null
+        if (shouldTryMirrorResolve) {
+            val mirrorResolve = resolveMirrorNodeFromRoot(
+                focusedNode = focusedNode,
+                rootNode = rootNode,
+                childCountOf = childCountOf,
+                childAt = childAt,
+                isVisible = isVisible,
+                boundsOf = boundsOf,
+                resourceIdOf = resourceIdOf,
+                classNameOf = classNameOf,
+                contentDescOf = contentDescOf,
+                textOf = textOf
+            )
+            resolvedMirrorNode = mirrorResolve.node
+            log?.invoke(
+                "click_focused_mirror_resolve attempted=true candidates=${mirrorResolve.candidateCount} reason='${mirrorResolve.reason}' score=${mirrorResolve.score}"
+            )
+            if (resolvedMirrorNode != null) {
+                val mirrorBounds = boundsOf(resolvedMirrorNode)
+                log?.invoke(
+                    "click_focused_mirror_pick resourceId='${resourceIdOf(resolvedMirrorNode).orEmpty()}' class='${classNameOf(resolvedMirrorNode).orEmpty()}' bounds='${mirrorBounds.toShortString()}'"
+                )
+                val mirrorDescendantHint = buildDescendantHint(
+                    focusedNode = resolvedMirrorNode,
+                    childCountOf = childCountOf,
+                    childAt = childAt,
+                    isVisible = isVisible,
+                    isClickable = isClickable,
+                    isEnabled = isEnabled,
+                    resourceIdOf = resourceIdOf,
+                    classNameOf = classNameOf,
+                    contentDescOf = contentDescOf,
+                    textOf = textOf,
+                    boundsOf = boundsOf
+                )
+                log?.invoke(
+                    "click_focused_mirror_descendant_hint hasClickableDescendant=${mirrorDescendantHint != null} actionableDescendantResourceId='${mirrorDescendantHint?.resourceId.orEmpty()}' actionableDescendantClassName='${mirrorDescendantHint?.className.orEmpty()}' actionableDescendantContentDescription='${mirrorDescendantHint?.contentDescription.orEmpty()}'"
+                )
+
+                val mirrorDescendant = findFirstClickableDescendant(
+                    root = resolvedMirrorNode,
+                    maxDepth = CLICK_DESCENDANT_MAX_DEPTH,
+                    childCountOf = childCountOf,
+                    childAt = childAt,
+                    isClickable = isClickable,
+                    isVisible = isVisible,
+                    isEnabled = isEnabled,
+                    boundsOf = boundsOf
+                )
+                if (mirrorDescendant != null && performClick(mirrorDescendant)) {
+                    return ClickExecutionResult(
+                        success = true,
+                        reason = "Mirror clickable descendant clicked",
+                        path = ClickPath.MIRROR_DESCENDANT,
+                        clickedNode = mirrorDescendant,
+                        attemptedNode = mirrorDescendant,
+                        mirrorNode = resolvedMirrorNode
+                    )
+                }
+
+                val mirrorDescendantRetarget = findMatchingClickableFromRootByDescendantHint(
+                    rootNode = rootNode,
+                    focusedBounds = mirrorBounds,
+                    hint = mirrorDescendantHint,
+                    childCountOf = childCountOf,
+                    childAt = childAt,
+                    isClickable = isClickable,
+                    isVisible = isVisible,
+                    isEnabled = isEnabled,
+                    boundsOf = boundsOf,
+                    resourceIdOf = resourceIdOf,
+                    classNameOf = classNameOf,
+                    contentDescOf = contentDescOf,
+                    textOf = textOf
+                )
+                if (mirrorDescendantRetarget != null && performClick(mirrorDescendantRetarget)) {
+                    return ClickExecutionResult(
+                        success = true,
+                        reason = "Mirror descendant metadata retarget clicked",
+                        path = ClickPath.MIRROR_DESCENDANT,
+                        clickedNode = mirrorDescendantRetarget,
+                        attemptedNode = mirrorDescendantRetarget,
+                        mirrorNode = resolvedMirrorNode
+                    )
+                }
+            }
+        } else {
+            log?.invoke("click_focused_mirror_resolve attempted=false")
+        }
+
         val descendantRetarget = findMatchingClickableFromRootByDescendantHint(
             rootNode = rootNode,
             focusedBounds = focusedBounds,
@@ -622,7 +729,8 @@ class A11yHelperService : AccessibilityService() {
                 reason = "Clickable descendant metadata retarget clicked",
                 path = ClickPath.DESCENDANT,
                 clickedNode = descendantRetarget,
-                attemptedNode = descendantRetarget
+                attemptedNode = descendantRetarget,
+                mirrorNode = resolvedMirrorNode
             )
         }
 
@@ -640,7 +748,8 @@ class A11yHelperService : AccessibilityService() {
                 reason = "Clickable ancestor clicked",
                 path = ClickPath.ANCESTOR,
                 clickedNode = ancestor,
-                attemptedNode = ancestor
+                attemptedNode = ancestor,
+                mirrorNode = resolvedMirrorNode
             )
         }
 
@@ -675,7 +784,8 @@ class A11yHelperService : AccessibilityService() {
                     reason = "Retargeted clickable node clicked from root tree",
                     path = ClickPath.ROOT_RETARGET,
                     clickedNode = rootRetarget.node,
-                    attemptedNode = rootRetarget.node
+                    attemptedNode = rootRetarget.node,
+                    mirrorNode = resolvedMirrorNode
                 )
             }
         }
@@ -685,7 +795,8 @@ class A11yHelperService : AccessibilityService() {
             reason = "No clickable node found from focused node subtree or root tree",
             path = ClickPath.NONE,
             clickedNode = null,
-            attemptedNode = rootRetarget.node ?: ancestor ?: descendant ?: focusedNode
+            attemptedNode = rootRetarget.node ?: ancestor ?: descendant ?: focusedNode,
+            mirrorNode = resolvedMirrorNode
         )
     }
 
@@ -706,6 +817,137 @@ class A11yHelperService : AccessibilityService() {
         val contentDescription: String?,
         val text: String?
     )
+
+    private data class MirrorResolveResult<T>(
+        val node: T?,
+        val candidateCount: Int,
+        val reason: String,
+        val score: Int
+    )
+
+    private fun <T> resolveMirrorNodeFromRoot(
+        focusedNode: T,
+        rootNode: T?,
+        childCountOf: (T) -> Int,
+        childAt: (T, Int) -> T?,
+        isVisible: (T) -> Boolean,
+        boundsOf: (T) -> Rect,
+        resourceIdOf: (T) -> String?,
+        classNameOf: (T) -> String?,
+        contentDescOf: (T) -> String?,
+        textOf: (T) -> String?
+    ): MirrorResolveResult<T> {
+        if (rootNode == null) return MirrorResolveResult(null, 0, "no_root", Int.MIN_VALUE)
+        val focusedBounds = boundsOf(focusedNode)
+        if (focusedBounds.isEmpty) return MirrorResolveResult(null, 0, "invalid_focused_bounds", Int.MIN_VALUE)
+        val focusedResourceId = resourceIdOf(focusedNode).orEmpty()
+        val focusedClassName = classNameOf(focusedNode).orEmpty()
+        val focusedContentDesc = contentDescOf(focusedNode).orEmpty()
+        val focusedText = textOf(focusedNode).orEmpty()
+        val focusedCenterX = focusedBounds.centerX()
+        val focusedCenterY = focusedBounds.centerY()
+        val focusedArea = maxOf(1, focusedBounds.width() * focusedBounds.height())
+
+        data class ScoredMirror<T>(
+            val node: T,
+            val score: Int,
+            val distance: Long,
+            val reason: String
+        )
+
+        val queue = ArrayDeque<T>()
+        queue += rootNode
+        var candidates = 0
+        var best: ScoredMirror<T>? = null
+
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            for (index in 0 until childCountOf(node)) {
+                childAt(node, index)?.let(queue::add)
+            }
+            if (node == focusedNode) continue
+            if (!isVisible(node)) continue
+
+            val bounds = boundsOf(node)
+            if (bounds.isEmpty) continue
+
+            val overlap = Rect.intersects(focusedBounds, bounds)
+            val contains = focusedBounds.contains(bounds) || bounds.contains(focusedBounds)
+            val centerInBounds = bounds.contains(focusedCenterX, focusedCenterY) ||
+                focusedBounds.contains(bounds.centerX(), bounds.centerY())
+            val nodeArea = maxOf(1, bounds.width() * bounds.height())
+
+            var score = 0
+            val reasonTokens = mutableListOf<String>()
+            val nodeResourceId = resourceIdOf(node).orEmpty()
+            if (focusedResourceId.isNotEmpty() && focusedResourceId == nodeResourceId) {
+                score += 500
+                reasonTokens += "same_resource"
+            }
+            if (contains) {
+                score += 320
+                reasonTokens += "contains"
+            }
+            if (overlap) {
+                score += 240
+                reasonTokens += "overlap"
+            }
+            if (centerInBounds) {
+                score += 200
+                reasonTokens += "center_match"
+            }
+            val nodeClassName = classNameOf(node).orEmpty()
+            if (focusedClassName.isNotEmpty() && focusedClassName == nodeClassName) {
+                score += 120
+                reasonTokens += "same_class"
+            }
+            val nodeContentDesc = contentDescOf(node).orEmpty()
+            if (focusedContentDesc.isNotEmpty() && focusedContentDesc == nodeContentDesc) {
+                score += 90
+                reasonTokens += "same_content_desc"
+            }
+            val nodeText = textOf(node).orEmpty()
+            if (focusedText.isNotEmpty() && focusedText == nodeText) {
+                score += 90
+                reasonTokens += "same_text"
+            }
+            val childCount = childCountOf(node)
+            if (childCount > 0) {
+                score += minOf(90, childCount * 20)
+                reasonTokens += "has_children"
+            }
+            if (nodeArea > focusedArea * 8) {
+                score -= 220
+            }
+
+            val dx = (focusedCenterX - bounds.centerX()).toLong()
+            val dy = (focusedCenterY - bounds.centerY()).toLong()
+            val distance = (dx * dx) + (dy * dy)
+            score -= minOf(300, (distance / 4500L).toInt())
+            if (score < 220) continue
+
+            candidates += 1
+            val scoredMirror = ScoredMirror(
+                node = node,
+                score = score,
+                distance = distance,
+                reason = reasonTokens.joinToString(separator = "+").ifBlank { "score_only" }
+            )
+            if (best == null ||
+                scoredMirror.score > best!!.score ||
+                (scoredMirror.score == best!!.score && scoredMirror.distance < best!!.distance)
+            ) {
+                best = scoredMirror
+            }
+        }
+
+        return MirrorResolveResult(
+            node = best?.node,
+            candidateCount = candidates,
+            reason = best?.reason ?: "no_candidate",
+            score = best?.score ?: Int.MIN_VALUE
+        )
+    }
 
     private fun <T> findBestClickableFromRoot(
         focusedNode: T,
