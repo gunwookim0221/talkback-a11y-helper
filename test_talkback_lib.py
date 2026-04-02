@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from talkback_lib import (
     ACTION_CHECK_TARGET,
+    ACTION_CLICK_FOCUSED,
     ACTION_CLICK_TARGET,
     ACTION_FOCUS_TARGET,
     ACTION_GET_FOCUS,
@@ -173,6 +174,43 @@ class TouchIsinTest(unittest.TestCase):
         self.assertFalse(ok)
         broadcast_count = len([c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]])
         self.assertGreaterEqual(broadcast_count, 1)
+
+    def test_click_focused_success(self):
+        client = FakeA11yClient()
+        dev = Dev("SER123")
+        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"reason":"ok","reqId":"REQCF001"}'
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQCF001-xxxx"), patch.object(client, "_wait_for_speech_if_needed") as wait_mock:
+            ok = client.click_focused(dev, wait_=1)
+
+        self.assertTrue(ok)
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0]
+        self.assertEqual(
+            broadcast[0],
+            [
+                "shell", "am", "broadcast", "-a", ACTION_CLICK_FOCUSED,
+                "-p", "com.example.custom",
+                "--es", "reqId", "REQCF001",
+            ],
+        )
+        wait_mock.assert_called_once_with(dev)
+
+    def test_click_focused_timeout_sets_reason(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":false,"reason":"no_focused_node"}'
+        clock = {"t": 0.0}
+
+        def fake_monotonic():
+            return clock["t"]
+
+        def fake_sleep(sec: float):
+            clock["t"] += sec
+
+        with patch("talkback_lib.time.monotonic", side_effect=fake_monotonic), patch("talkback_lib.time.sleep", side_effect=fake_sleep):
+            ok = client.click_focused("SERIAL", wait_=1)
+
+        self.assertFalse(ok)
+        self.assertEqual(client.last_target_action_result.get("reason"), "timeout")
 
     def test_isin_uses_check_target_and_returns_true(self):
         client = FakeA11yClient()
@@ -1542,7 +1580,7 @@ class SmartMoveFocusTest(unittest.TestCase):
 
 class FocusHelpersTest(unittest.TestCase):
     def test_client_algorithm_version_is_updated(self):
-        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.10")
+        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.12")
 
     def test_extract_visible_label_from_focus_prefers_text(self):
         focus_node = {"text": "  Visible Text  ", "contentDescription": "Desc"}

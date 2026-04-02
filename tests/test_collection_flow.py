@@ -15,6 +15,7 @@ class DummyClient:
         self.touch_calls = []
         self.touch_bounds_center_calls = []
         self.select_calls = []
+        self.click_focused_calls = []
 
     def reset_focus_history(self, _dev):
         self.reset_focus_history_calls += 1
@@ -32,6 +33,10 @@ class DummyClient:
 
     def select(self, **kwargs):
         self.select_calls.append(kwargs)
+        return True
+
+    def click_focused(self, **kwargs):
+        self.click_focused_calls.append(kwargs)
         return True
 
 
@@ -405,3 +410,79 @@ def test_open_scenario_pre_navigation_touch_bounds_center_bounds_unavailable_fai
     ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
     assert ok is False
     assert any("failed reason='action_failed' detail='Bounds unavailable' step=1" in line for line in logs)
+
+
+def test_open_scenario_pre_navigation_select_and_click_focused_success(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "select_and_click_focused", "target": "com.test:id/settings_button", "type": "r"}],
+        "pre_navigation_retry_count": 1,
+        "pre_navigation_wait_seconds": 0.1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert len(client.select_calls) == 1
+    assert len(client.click_focused_calls) == 1
+    assert client.select_calls[0]["type_"] == "r"
+
+
+def test_open_scenario_pre_navigation_select_and_click_focused_select_failure(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+
+    client = DummyClient([])
+
+    def _select(**kwargs):
+        client.last_target_action_result = {"reason": "target_not_found"}
+        return False
+
+    client.select = _select
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "select_and_click_focused", "target": "com.test:id/settings_button", "type": "r"}],
+        "pre_navigation_retry_count": 1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is False
+    assert len(client.click_focused_calls) == 0
+    assert any("failed reason='action_failed' detail='target_not_found' step=1" in line for line in logs)
+
+
+def test_open_scenario_pre_navigation_select_and_click_focused_click_failure(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+
+    client = DummyClient([])
+    client.select = lambda **kwargs: True
+
+    def _click_focused(**kwargs):
+        client.last_target_action_result = {"reason": "focused_click_failed"}
+        return False
+
+    client.click_focused = _click_focused
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "select_and_click_focused", "target": "com.test:id/settings_button", "type": "r"}],
+        "pre_navigation_retry_count": 1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is False
+    assert any("failed reason='action_failed' detail='focused_click_failed' step=1" in line for line in logs)
