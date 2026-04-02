@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.5.1"
+        private const val VERSION = "1.5.2"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -39,6 +39,7 @@ class A11yHelperService : AccessibilityService() {
         WRAPPER_RECOVERY("wrapper_recovery"),
         ANCESTOR("ancestor"),
         ROOT_RETARGET("root_retarget"),
+        SEMANTIC_MIRROR("semantic_mirror"),
         NONE("none")
     }
 
@@ -1066,6 +1067,32 @@ class A11yHelperService : AccessibilityService() {
             }
         }
 
+        val semanticMirror = resolveSemanticMirrorFromRoot(
+            focusedNode = effectiveFocusedNode,
+            rootNode = rootNode,
+            childCountOf = childCountOf,
+            childAt = childAt,
+            isClickable = isClickable,
+            isVisible = isVisible,
+            isEnabled = isEnabled,
+            boundsOf = boundsOf,
+            resourceIdOf = resourceIdOf,
+            classNameOf = classNameOf,
+            contentDescOf = contentDescOf,
+            textOf = textOf,
+            log = log
+        )
+        if (semanticMirror.node != null && performClick(semanticMirror.node)) {
+            return ClickExecutionResult(
+                success = true,
+                reason = "Semantic mirror clickable node clicked",
+                path = ClickPath.SEMANTIC_MIRROR,
+                clickedNode = semanticMirror.node,
+                attemptedNode = semanticMirror.node,
+                mirrorNode = resolvedMirrorNode
+            )
+        }
+
         return ClickExecutionResult(
             success = false,
             reason = "No clickable node found from focused node subtree or root tree",
@@ -1104,6 +1131,46 @@ class A11yHelperService : AccessibilityService() {
         val score: Int,
         val rejectSummary: String
     )
+
+    private data class SemanticMirrorResult<T>(
+        val node: T?,
+        val score: Int,
+        val candidates: Int,
+        val reason: String
+    )
+
+    private fun semanticTokens(vararg rawValues: String?): Set<String> {
+        val rawTokens = rawValues.flatMap { raw ->
+            raw
+                .orEmpty()
+                .lowercase()
+                .replace(Regex("[^a-z0-9]+"), "_")
+                .split("_")
+                .filter { it.isNotBlank() }
+        }
+        if (rawTokens.isEmpty()) return emptySet()
+        val normalized = mutableSetOf<String>()
+        for (token in rawTokens) {
+            val normalizedToken = when {
+                token.endsWith("ies") && token.length > 4 -> token.dropLast(3) + "y"
+                token.endsWith("s") && token.length > 4 -> token.dropLast(1)
+                else -> token
+            }
+            if (normalizedToken.isBlank()) continue
+            normalized += normalizedToken
+            when (normalizedToken) {
+                "btn" -> normalized += "button"
+                "img" -> normalized += "image"
+                "icon" -> normalized += "image"
+            }
+        }
+        return normalized
+    }
+
+    private fun wrapperCoreTokens(tokens: Set<String>): Set<String> {
+        val wrapperLikeTokens = setOf("layout", "container", "wrapper", "view", "group", "frame", "relative")
+        return tokens.filterTo(mutableSetOf()) { it !in wrapperLikeTokens }
+    }
 
     private fun <T> resolveMirrorNodeFromRoot(
         focusedNode: T,
@@ -1669,6 +1736,195 @@ class A11yHelperService : AccessibilityService() {
             score = best?.score ?: Int.MIN_VALUE,
             rejectSummary = rejectSummary
         )
+    }
+
+    private fun <T> resolveSemanticMirrorFromRoot(
+        focusedNode: T,
+        rootNode: T?,
+        childCountOf: (T) -> Int,
+        childAt: (T, Int) -> T?,
+        isClickable: (T) -> Boolean,
+        isVisible: (T) -> Boolean,
+        isEnabled: (T) -> Boolean,
+        boundsOf: (T) -> Rect,
+        resourceIdOf: (T) -> String?,
+        classNameOf: (T) -> String?,
+        contentDescOf: (T) -> String?,
+        textOf: (T) -> String?,
+        log: ((String) -> Unit)? = null
+    ): SemanticMirrorResult<T> {
+        if (rootNode == null) {
+            log?.invoke("[click_focused_semantic_resolve] attempted=false candidates=0 selected='' score=${Int.MIN_VALUE} reason='root_null'")
+            return SemanticMirrorResult(node = null, score = Int.MIN_VALUE, candidates = 0, reason = "root_null")
+        }
+        val focusedBounds = boundsOf(focusedNode)
+        if (focusedBounds.isEmpty) {
+            log?.invoke("[click_focused_semantic_resolve] attempted=false candidates=0 selected='' score=${Int.MIN_VALUE} reason='invalid_focused_bounds'")
+            return SemanticMirrorResult(node = null, score = Int.MIN_VALUE, candidates = 0, reason = "invalid_focused_bounds")
+        }
+        val rootBounds = boundsOf(rootNode)
+        val rootArea = maxOf(1, rootBounds.width() * rootBounds.height())
+        val focusedArea = maxOf(1, focusedBounds.width() * focusedBounds.height())
+        val focusedCenterX = focusedBounds.centerX()
+        val focusedCenterY = focusedBounds.centerY()
+        val rootHeight = maxOf(1, rootBounds.height())
+        val rootWidth = maxOf(1, rootBounds.width())
+        val focusedResourceId = resourceIdOf(focusedNode).orEmpty()
+        val focusedClassName = classNameOf(focusedNode).orEmpty()
+        val focusedTokens = semanticTokens(focusedResourceId, focusedClassName, contentDescOf(focusedNode), textOf(focusedNode))
+        val focusedCoreTokens = wrapperCoreTokens(focusedTokens)
+        val focusedTopRegion = focusedCenterY <= rootBounds.top + (rootHeight / 3)
+        val focusedSmallTarget = focusedTopRegion && focusedArea <= (rootArea / 28)
+        val topRegionBottom = minOf(
+            rootBounds.bottom,
+            maxOf(rootBounds.top + (rootHeight / 6), focusedBounds.bottom + maxOf(180, focusedBounds.height() * 2))
+        )
+        val focusedRightRegion = focusedCenterX >= rootBounds.left + ((rootWidth * 2) / 3)
+
+        log?.invoke(
+            "[click_focused_semantic_search_start] focusedResourceId='$focusedResourceId' focusedClass='$focusedClassName' focusedBounds='${focusedBounds.toShortString()}' normalizedTokens='${focusedCoreTokens.sorted().joinToString(",")}' topRegion=$focusedTopRegion smallTarget=$focusedSmallTarget"
+        )
+
+        data class SemanticCandidate<T>(
+            val node: T,
+            val score: Int,
+            val resourceId: String,
+            val className: String,
+            val bounds: Rect
+        )
+
+        var candidates = 0
+        var best: SemanticCandidate<T>? = null
+        val queue = ArrayDeque<T>()
+        queue += rootNode
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            val childCount = childCountOf(node)
+            for (index in 0 until childCount) {
+                childAt(node, index)?.let(queue::add)
+            }
+            if (node == focusedNode) continue
+
+            val clickable = isClickable(node)
+            val visible = isVisible(node)
+            val enabled = isEnabled(node)
+            if (!clickable || !visible || !enabled) continue
+
+            val bounds = boundsOf(node)
+            if (bounds.isEmpty) continue
+            val resourceId = resourceIdOf(node).orEmpty()
+            val className = classNameOf(node).orEmpty()
+            val classLower = className.lowercase()
+            val nodeArea = maxOf(1, bounds.width() * bounds.height())
+            val areaRatio = nodeArea.toDouble() / focusedArea.toDouble()
+            val rootRatio = nodeArea.toDouble() / rootArea.toDouble()
+            val candidateCenterX = bounds.centerX()
+            val candidateCenterY = bounds.centerY()
+            val inTopRegion = bounds.top <= topRegionBottom && candidateCenterY <= topRegionBottom
+            val inRightRegion = candidateCenterX >= rootBounds.left + ((rootWidth * 2) / 3)
+            val centerDistance = kotlin.math.abs(focusedCenterX - candidateCenterX) + kotlin.math.abs(focusedCenterY - candidateCenterY)
+            val overlap = Rect.intersects(focusedBounds, bounds)
+            val contains = focusedBounds.contains(bounds) || bounds.contains(focusedBounds)
+
+            val giantContainer = areaRatio >= 28.0 ||
+                (rootRatio >= 0.62 &&
+                    bounds.width() >= (rootBounds.width() * 0.88).toInt() &&
+                    bounds.height() >= (rootBounds.height() * 0.58).toInt()) ||
+                ((classLower.endsWith("scrollview") ||
+                    classLower.endsWith("recyclerview") ||
+                    classLower.endsWith("listview") ||
+                    classLower.endsWith("nestedscrollview")) && rootRatio >= 0.62)
+            if (giantContainer) {
+                log?.invoke(
+                    "[click_focused_semantic_candidate_reject] reason='giant_container' resourceId='$resourceId' class='$className' bounds='${bounds.toShortString()}'"
+                )
+                continue
+            }
+            if (areaRatio > 12.0 && !contains) {
+                log?.invoke(
+                    "[click_focused_semantic_candidate_reject] reason='oversized' resourceId='$resourceId' class='$className' bounds='${bounds.toShortString()}'"
+                )
+                continue
+            }
+
+            val candidateTokens = semanticTokens(resourceId, className, contentDescOf(node), textOf(node))
+            val candidateCoreTokens = wrapperCoreTokens(candidateTokens)
+            val tokenOverlap = focusedCoreTokens.intersect(candidateCoreTokens).size
+            var tokenScore = tokenOverlap * 120
+            if (focusedCoreTokens.isNotEmpty() && focusedCoreTokens.any { token ->
+                    candidateCoreTokens.any { candidateToken ->
+                        candidateToken.startsWith(token) || token.startsWith(candidateToken)
+                    }
+                }
+            ) {
+                tokenScore += 80
+            }
+            if (focusedResourceId.isNotBlank() && resourceId.isNotBlank()) {
+                val focusedPackage = focusedResourceId.substringBefore("/").ifBlank { focusedResourceId.substringBefore(":id/") }
+                val candidatePackage = resourceId.substringBefore("/").ifBlank { resourceId.substringBefore(":id/") }
+                if (focusedPackage.isNotBlank() && focusedPackage == candidatePackage) tokenScore += 40
+            }
+
+            var classScore = 0
+            if (classLower.endsWith("imagebutton") || classLower.endsWith("button")) classScore += 90
+            if (classLower.endsWith("imageview")) classScore += 50
+            if (classLower.endsWith("framelayout") || classLower.endsWith("relativelayout")) classScore += 20
+            if (focusedClassName.isNotBlank() && focusedClassName == className) classScore += 40
+
+            var spatialScore = 0
+            if (overlap) spatialScore += 180
+            if (contains) spatialScore += 220
+            spatialScore += when {
+                centerDistance <= 40 -> 200
+                centerDistance <= 120 -> 140
+                centerDistance <= 260 -> 80
+                centerDistance <= 420 -> 20
+                else -> -120
+            }
+            if (focusedSmallTarget && inTopRegion) spatialScore += 90
+            if (focusedSmallTarget && focusedRightRegion && inRightRegion) spatialScore += 70
+
+            val semanticScore = tokenScore + classScore
+            val totalScore = semanticScore + spatialScore
+            candidates += 1
+
+            log?.invoke(
+                "[click_focused_semantic_candidate_seen] resourceId='$resourceId' class='$className' clickable=$clickable bounds='${bounds.toShortString()}' tokenScore=$tokenScore spatialScore=$spatialScore semanticScore=$semanticScore totalScore=$totalScore"
+            )
+
+            val rejectReason = when {
+                focusedSmallTarget && !inTopRegion && !overlap && !contains -> "top_region_mismatch"
+                spatialScore < 40 -> "spatially_unrelated"
+                tokenScore <= 0 && semanticScore < 90 -> "token_miss"
+                totalScore < 280 -> "semantic_score_low"
+                else -> null
+            }
+            if (rejectReason != null) {
+                log?.invoke(
+                    "[click_focused_semantic_candidate_reject] reason='$rejectReason' resourceId='$resourceId' class='$className' bounds='${bounds.toShortString()}'"
+                )
+                continue
+            }
+            if (best == null || totalScore > best.score) {
+                best = SemanticCandidate(node = node, score = totalScore, resourceId = resourceId, className = className, bounds = bounds)
+            }
+        }
+
+        if (best == null) {
+            log?.invoke("[click_focused_semantic_resolve] attempted=true candidates=$candidates selected='' score=${Int.MIN_VALUE} reason='no_semantic_match'")
+            return SemanticMirrorResult(node = null, score = Int.MIN_VALUE, candidates = candidates, reason = "no_semantic_match")
+        }
+        val bestCandidate = best ?: return SemanticMirrorResult(
+            node = null,
+            score = Int.MIN_VALUE,
+            candidates = candidates,
+            reason = "no_semantic_match"
+        )
+
+        log?.invoke(
+            "[click_focused_semantic_resolve] attempted=true candidates=$candidates selected='${bestCandidate.resourceId}/${bestCandidate.className}/${bestCandidate.bounds.toShortString()}' score=${bestCandidate.score} reason='semantic_match'"
+        )
+        return SemanticMirrorResult(node = bestCandidate.node, score = bestCandidate.score, candidates = candidates, reason = "semantic_match")
     }
 
     private fun <T> findBestClickableFromRoot(
