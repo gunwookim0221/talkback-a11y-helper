@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.4.2"
+        private const val VERSION = "1.4.3"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -903,8 +903,28 @@ class A11yHelperService : AccessibilityService() {
             val reason: String
         )
 
+        data class MirrorCandidate<T>(
+            val node: T,
+            val bounds: Rect,
+            val nodeClassName: String,
+            val clickable: Boolean,
+            val candidateCenterX: Int,
+            val candidateCenterY: Int,
+            val dxAbs: Int,
+            val dyAbs: Int,
+            val areaRatio: Double,
+            val overlap: Boolean,
+            val contains: Boolean,
+            val centerInBounds: Boolean,
+            val isLeaf: Boolean,
+            val nonClickableLeaf: Boolean,
+            val looksLikeHeavyContainer: Boolean,
+            val almostFullScreenContainer: Boolean
+        )
+
         val queue = ArrayDeque<T>()
         queue += rootNode
+        val allCandidates = mutableListOf<MirrorCandidate<T>>()
         val localCandidates = mutableListOf<ScoredMirror<T>>()
         var giantFilteredCount = 0
         var giantClassFilteredCount = 0
@@ -921,17 +941,17 @@ class A11yHelperService : AccessibilityService() {
             val bounds = boundsOf(node)
             if (bounds.isEmpty) continue
 
-            val overlap = Rect.intersects(focusedBounds, bounds)
-            val contains = focusedBounds.contains(bounds) || bounds.contains(focusedBounds)
+            val nodeClassName = classNameOf(node).orEmpty()
             val candidateCenterX = bounds.centerX()
             val candidateCenterY = bounds.centerY()
             val dxAbs = kotlin.math.abs(focusedCenterX - candidateCenterX)
             val dyAbs = kotlin.math.abs(focusedCenterY - candidateCenterY)
+            val overlap = Rect.intersects(focusedBounds, bounds)
+            val contains = focusedBounds.contains(bounds) || bounds.contains(focusedBounds)
             val centerInBounds = bounds.contains(focusedCenterX, focusedCenterY) ||
                 focusedBounds.contains(candidateCenterX, candidateCenterY)
             val nodeArea = maxOf(1, bounds.width() * bounds.height())
             val areaRatio = nodeArea.toDouble() / focusedArea.toDouble()
-            val nodeClassName = classNameOf(node).orEmpty()
             val classLower = nodeClassName.lowercase()
             val looksLikeHeavyContainer = classLower.endsWith("scrollview") ||
                 classLower.endsWith("recyclerview") ||
@@ -941,54 +961,134 @@ class A11yHelperService : AccessibilityService() {
             val almostFullScreenContainer = rootContainmentRatio >= 0.62 &&
                 bounds.width() >= (rootBounds.width() * 0.88).toInt() &&
                 bounds.height() >= (rootBounds.height() * 0.58).toInt()
+            val clickableNode = isClickable(node)
+            val isLeaf = childCountOf(node) == 0
+            val simpleLeaf = classLower.endsWith("textview") || classLower.endsWith("imageview")
+            val nonClickableLeaf = isLeaf && simpleLeaf && !clickableNode
+
+            log?.invoke(
+                "[click_focused_candidate_seen] resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
+            )
+            log?.invoke(
+                "[click_focused_candidate_pass_stage] stage='collected' resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
+            )
+
+            allCandidates += MirrorCandidate(
+                node = node,
+                bounds = bounds,
+                nodeClassName = nodeClassName,
+                clickable = clickableNode,
+                candidateCenterX = candidateCenterX,
+                candidateCenterY = candidateCenterY,
+                dxAbs = dxAbs,
+                dyAbs = dyAbs,
+                areaRatio = areaRatio,
+                overlap = overlap,
+                contains = contains,
+                centerInBounds = centerInBounds,
+                isLeaf = isLeaf,
+                nonClickableLeaf = nonClickableLeaf,
+                looksLikeHeavyContainer = looksLikeHeavyContainer,
+                almostFullScreenContainer = almostFullScreenContainer
+            )
+        }
+
+        for (candidate in allCandidates) {
+            val node = candidate.node
+            val bounds = candidate.bounds
+            val nodeClassName = candidate.nodeClassName
+            val candidateCenterX = candidate.candidateCenterX
+            val candidateCenterY = candidate.candidateCenterY
+            val dxAbs = candidate.dxAbs
+            val dyAbs = candidate.dyAbs
+            val areaRatio = candidate.areaRatio
+            val overlap = candidate.overlap
+            val contains = candidate.contains
+            val centerInBounds = candidate.centerInBounds
+            val clickableNode = candidate.clickable
+            val looksLikeHeavyContainer = candidate.looksLikeHeavyContainer
+            val almostFullScreenContainer = candidate.almostFullScreenContainer
+            val nonClickableLeaf = candidate.nonClickableLeaf
+
             if (looksLikeHeavyContainer && almostFullScreenContainer) {
                 giantFilteredCount += 1
                 giantClassFilteredCount += 1
+                log?.invoke(
+                    "[click_focused_candidate_reject] reason='giant_container' resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
+                )
                 continue
             }
             if (areaRatio >= 28.0 || (almostFullScreenContainer && areaRatio >= 10.0)) {
                 giantFilteredCount += 1
                 giantAreaFilteredCount += 1
+                log?.invoke(
+                    "[click_focused_candidate_reject] reason='giant_container' resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
+                )
                 continue
             }
+            log?.invoke(
+                "[click_focused_candidate_pass_stage] stage='giant_pass' resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
+            )
+
             val localBand = Rect.intersects(localBandRect, bounds) ||
                 localBandRect.contains(candidateCenterX, candidateCenterY)
-            val local2d = dxAbs <= localMaxDx && dyAbs <= localMaxDy
-            if (!local2d) {
-                val rejectReason = if (dxAbs > localMaxDx) "locality_dx_exceeded" else "locality_dy_exceeded"
-                log?.invoke(
-                    "click_focused_mirror_reject resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' bounds='${bounds.toShortString()}' candidateCenter='$candidateCenterX,$candidateCenterY' dx=$dxAbs dy=$dyAbs reason='$rejectReason'"
-                )
-                continue
-            }
-            if (!localBand) {
-                log?.invoke(
-                    "click_focused_mirror_reject resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' bounds='${bounds.toShortString()}' candidateCenter='$candidateCenterX,$candidateCenterY' dx=$dxAbs dy=$dyAbs reason='locality_band_mismatch'"
-                )
-                continue
-            }
             val candidateInTopRegion = bounds.top <= topRegionBottom && candidateCenterY <= topRegionBottom
             if (focusedSmallTopTarget && !candidateInTopRegion) {
                 log?.invoke(
-                    "click_focused_mirror_reject resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' bounds='${bounds.toShortString()}' candidateCenter='$candidateCenterX,$candidateCenterY' dx=$dxAbs dy=$dyAbs reason='top_region_mismatch'"
+                    "[click_focused_candidate_reject] reason='top_region_mismatch' resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
                 )
                 continue
             }
-            val isLeaf = childCountOf(node) == 0
-            val simpleLeaf = classLower.endsWith("textview") || classLower.endsWith("imageview")
-            val nonClickableLeaf = isLeaf && simpleLeaf && !isClickable(node)
-            val strictLeafDx = maxOf(72, focusedBounds.width())
-            val strictLeafDy = maxOf(72, focusedBounds.height())
-            if (nonClickableLeaf && (dxAbs > strictLeafDx || dyAbs > strictLeafDy)) {
+            if (!focusedSmallTopTarget && !localBand) {
                 log?.invoke(
-                    "click_focused_mirror_reject resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' bounds='${bounds.toShortString()}' candidateCenter='$candidateCenterX,$candidateCenterY' dx=$dxAbs dy=$dyAbs reason='far_leaf_text'"
+                    "[click_focused_candidate_reject] reason='top_region_mismatch' resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
+                )
+                continue
+            }
+            log?.invoke(
+                "[click_focused_candidate_pass_stage] stage='top_region_pass' resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
+            )
+
+            val relaxedDx = localMaxDx + maxOf(80, focusedBounds.width() * 2)
+            val relaxedDy = localMaxDy + maxOf(120, focusedBounds.height() * 2)
+            val localityPass = if (clickableNode) {
+                if (focusedSmallTopTarget && candidateInTopRegion) {
+                    (dxAbs <= relaxedDx && dyAbs <= localMaxDy) ||
+                        (dxAbs <= localMaxDx && dyAbs <= relaxedDy) ||
+                        (dxAbs <= localMaxDx && dyAbs <= localMaxDy)
+                } else {
+                    dxAbs <= localMaxDx && dyAbs <= localMaxDy
+                }
+            } else {
+                dxAbs <= localMaxDx && dyAbs <= localMaxDy
+            }
+            if (!localityPass) {
+                val rejectReason = when {
+                    dxAbs > localMaxDx && dyAbs > localMaxDy -> "dx_exceeded"
+                    dxAbs > localMaxDx -> "dx_exceeded"
+                    else -> "dy_exceeded"
+                }
+                log?.invoke(
+                    "[click_focused_candidate_reject] reason='${rejectReason}' resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
                 )
                 continue
             }
 
+            val strictLeafDx = maxOf(72, focusedBounds.width())
+            val strictLeafDy = maxOf(72, focusedBounds.height())
+            if (nonClickableLeaf && (dxAbs > strictLeafDx || dyAbs > strictLeafDy)) {
+                log?.invoke(
+                    "[click_focused_candidate_reject] reason='far_leaf' resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
+                )
+                continue
+            }
+            log?.invoke(
+                "[click_focused_candidate_pass_stage] stage='locality_pass' resourceId='${resourceIdOf(node).orEmpty()}' class='${nodeClassName}' clickable=$clickableNode bounds='${bounds.toShortString()}'"
+            )
+
             var score = 0
             val reasonTokens = mutableListOf<String>()
-            if (localBand) {
+            if (localBand || (focusedSmallTopTarget && candidateInTopRegion)) {
                 score += 540
                 reasonTokens += "local_band"
             } else {
@@ -1046,6 +1146,10 @@ class A11yHelperService : AccessibilityService() {
                 reasonTokens += "leaf_penalty"
             }
             if (looksLikeHeavyContainer) score -= 420
+            if (clickableNode) {
+                score += 120
+                reasonTokens += "clickable"
+            }
 
             val dx = (focusedCenterX - candidateCenterX).toLong()
             val dy = (focusedCenterY - candidateCenterY).toLong()
