@@ -1,5 +1,6 @@
 import re
 import time
+from collections import deque
 from typing import Any
 
 from talkback_lib import A11yAdbClient
@@ -37,6 +38,7 @@ _TRANSITION_FAST_ANNOUNCEMENT_WAIT_SECONDS = 0.2
 _TRANSITION_FAST_FOCUS_WAIT_SECONDS = 0.8
 _TRANSITION_FAST_ACTION_WAIT_SECONDS = 2
 _PRE_NAV_CONFIRM_POLL_SLEEP_SECONDS = 0.12
+_RECENT_DUPLICATE_WINDOW = 5
 
 
 def _make_dump_signature(nodes: Any) -> str:
@@ -618,18 +620,42 @@ def _annotate_row_quality(
     *,
     last_fingerprint: str,
     fingerprint_repeat_count: int,
+    recent_fingerprint_history: deque[tuple[int, str]],
 ) -> tuple[str, int]:
     fingerprint = build_row_fingerprint(row)
     if fingerprint == last_fingerprint:
         fingerprint_repeat_count += 1
     else:
         fingerprint_repeat_count = 0
+
+    raw_step_index = row.get("step_index", -1)
+    if isinstance(raw_step_index, bool):
+        step_index = -1
+    else:
+        try:
+            step_index = int(raw_step_index)
+        except (TypeError, ValueError):
+            step_index = -1
+    is_recent_duplicate_step = False
+    recent_duplicate_distance = 0
+    recent_duplicate_of_step = -1
+    for prev_step_index, prev_fingerprint in reversed(recent_fingerprint_history):
+        if prev_fingerprint == fingerprint:
+            is_recent_duplicate_step = True
+            recent_duplicate_distance = max(step_index - prev_step_index, 0)
+            recent_duplicate_of_step = prev_step_index
+            break
+
     is_noise_step, noise_reason = is_noise_row(row)
     row["fingerprint"] = fingerprint
     row["fingerprint_repeat_count"] = fingerprint_repeat_count
     row["is_duplicate_step"] = fingerprint_repeat_count > 0
+    row["is_recent_duplicate_step"] = is_recent_duplicate_step
+    row["recent_duplicate_distance"] = recent_duplicate_distance
+    row["recent_duplicate_of_step"] = recent_duplicate_of_step
     row["is_noise_step"] = is_noise_step
     row["noise_reason"] = noise_reason
+    recent_fingerprint_history.append((step_index, fingerprint))
     return fingerprint, fingerprint_repeat_count
 
 
@@ -670,6 +696,9 @@ def collect_tab_rows(
         row["fingerprint"] = build_row_fingerprint(row)
         row["fingerprint_repeat_count"] = 0
         row["is_duplicate_step"] = False
+        row["is_recent_duplicate_step"] = False
+        row["recent_duplicate_distance"] = 0
+        row["recent_duplicate_of_step"] = -1
         row["is_noise_step"] = False
         row["noise_reason"] = ""
         rows.append(row)
@@ -703,14 +732,19 @@ def collect_tab_rows(
     anchor_row["_step_mono_start"] = time.monotonic() - float(anchor_row.get("t_step_start", 0.0) or 0.0)
     anchor_row = maybe_capture_focus_crop(client, dev, anchor_row, output_base_dir)
     anchor_row.pop("_step_mono_start", None)
+    recent_fingerprint_history: deque[tuple[int, str]] = deque(maxlen=_RECENT_DUPLICATE_WINDOW)
+
     anchor_fingerprint, anchor_repeat_count = _annotate_row_quality(
         anchor_row,
         last_fingerprint="",
         fingerprint_repeat_count=0,
+        recent_fingerprint_history=recent_fingerprint_history,
     )
     log(
         f"[ROW] fingerprint='{anchor_row.get('fingerprint', '')}' "
         f"duplicate={str(bool(anchor_row.get('is_duplicate_step', False))).lower()} "
+        f"recent_duplicate={str(bool(anchor_row.get('is_recent_duplicate_step', False))).lower()} "
+        f"distance={int(anchor_row.get('recent_duplicate_distance', 0) or 0)} "
         f"noise={str(bool(anchor_row.get('is_noise_step', False))).lower()}"
     )
 
@@ -768,10 +802,13 @@ def collect_tab_rows(
             row,
             last_fingerprint=last_fingerprint,
             fingerprint_repeat_count=fingerprint_repeat_count,
+            recent_fingerprint_history=recent_fingerprint_history,
         )
         log(
             f"[ROW] fingerprint='{row.get('fingerprint', '')}' "
             f"duplicate={str(bool(row.get('is_duplicate_step', False))).lower()} "
+            f"recent_duplicate={str(bool(row.get('is_recent_duplicate_step', False))).lower()} "
+            f"distance={int(row.get('recent_duplicate_distance', 0) or 0)} "
             f"noise={str(bool(row.get('is_noise_step', False))).lower()}"
         )
 

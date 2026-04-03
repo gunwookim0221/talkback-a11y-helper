@@ -81,4 +81,4 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.GET_FOCUS -p com.iotpar
 - 복귀 직후 entry 기준 재정렬(re-align)은 `post_click classification='overlay'`일 때만 수행합니다.
 - 재정렬 단계는 일반 step 수집 API 대신 lightweight probe(`get_focus` + 최소 필드 매칭) 경로를 사용해, announcement/row 저장/crop 없이 entry 판정에 필요한 정보(view_id/label/bounds)만 확인합니다.
 - 재정렬 구간은 main 결과 row로 저장하지 않아, overlay 복귀 직후 `우리 집 → Map View → Add` 같은 중복 row 누적과 stop 조건 오탐을 줄입니다.
-- main step row에는 분석 품질 향상을 위해 `fingerprint`, `is_duplicate_step`, `is_noise_step`, `noise_reason` 메타데이터가 추가 저장됩니다.
+- main step row에는 분석 품질 향상을 위해 `fingerprint`, `is_duplicate_step`, `is_recent_duplicate_step`, `recent_duplicate_distance`, `recent_duplicate_of_step`, `is_noise_step`, `noise_reason` 메타데이터가 추가 저장됩니다.
