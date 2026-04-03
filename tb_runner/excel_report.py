@@ -52,8 +52,10 @@ def _extract_status_tokens(text: object) -> tuple[str, list[str]]:
             continue
         is_status = (
             "new content available" in part
+            or "새 콘텐츠 사용 가능" in part
             or part in {"selected", "선택됨"}
             or ("tab " in part and " of " in part)
+            or ("탭" in part and "중" in part and "번째" in part)
             or "expanded" in part
             or "collapsed" in part
             or "battery" in part
@@ -67,11 +69,21 @@ def _extract_status_tokens(text: object) -> tuple[str, list[str]]:
 
 
 def add_status_columns(df: pd.DataFrame) -> pd.DataFrame:
-    speech_source_col = "normalized_announcement" if "normalized_announcement" in df.columns else "merged_announcement"
-    visible_source_col = "normalized_visible_label" if "normalized_visible_label" in df.columns else "visible_label"
+    def _resolve_source_series(priorities: list[str]) -> pd.Series:
+        for col in priorities:
+            if col in df.columns:
+                return df[col]
+        return pd.Series([""] * len(df), index=df.index, dtype=object)
 
-    speech_split = df[speech_source_col].apply(_extract_status_tokens)
-    visible_split = df[visible_source_col].apply(_extract_status_tokens)
+    speech_series = _resolve_source_series(
+        ["merged_announcement", "speech", "announcement", "normalized_announcement"]
+    )
+    visible_series = _resolve_source_series(
+        ["visible_label", "normalized_visible_label", "text"]
+    )
+
+    speech_split = speech_series.apply(_extract_status_tokens)
+    visible_split = visible_series.apply(_extract_status_tokens)
 
     df["speech_main"] = speech_split.apply(lambda item: item[0])
     df["speech_status_tokens"] = speech_split.apply(lambda item: item[1])

@@ -6,6 +6,31 @@ from tb_runner.logging_utils import _should_log, log
 from tb_runner.utils import _safe_regex_search
 
 
+_TAB_ALIAS_TO_CANONICAL = {
+    "홈": "home",
+    "기기": "devices",
+    "라이프": "life",
+    "자동화": "routines",
+    "메뉴": "menu",
+    "선택됨": "selected",
+    "새 콘텐츠 사용 가능": "new content available",
+}
+
+
+def _expand_bottom_tab_aliases(value: str) -> str:
+    text = str(value or "")
+    if not text:
+        return text
+    lowered = text.lower()
+    normalized_additions: list[str] = []
+    for alias, canonical in _TAB_ALIAS_TO_CANONICAL.items():
+        if alias in text and canonical not in lowered:
+            normalized_additions.append(canonical)
+    if not normalized_additions:
+        return text
+    return f"{text}, {', '.join(normalized_additions)}"
+
+
 def verify_context(
     step: dict[str, Any],
     scenario_cfg: dict[str, Any],
@@ -104,21 +129,32 @@ def verify_context(
         actual_selected_text = selected_values[0] if selected_values else ""
         if actual_selected_text:
             actual_source = "selected_candidate"
+        actual_selected_text_for_match = _expand_bottom_tab_aliases(actual_selected_text)
         actual_text = actual_selected_text
         actual_announcement = actual_selected_text
 
         # selected_bottom_tab은 dump 기반 selected 후보에서만 판정한다.
-        text_ok = True if not text_regex else _safe_regex_search(text_regex, actual_selected_text)
-        announcement_ok = True if not announcement_regex else _safe_regex_search(announcement_regex, actual_selected_text)
+        text_ok = True if not text_regex else _safe_regex_search(text_regex, actual_selected_text_for_match)
+        announcement_ok = (
+            True if not announcement_regex else _safe_regex_search(announcement_regex, actual_selected_text_for_match)
+        )
         ok = text_ok and announcement_ok
 
         if not actual_selected_text and fallback_values:
             actual_selected_text = fallback_values[0]
             actual_text = actual_selected_text
             actual_announcement = actual_selected_text
+            actual_selected_text_for_match = _expand_bottom_tab_aliases(actual_selected_text)
             actual_source = "global_fallback"
             if tab_like_fallback_values and fallback_values[0] == tab_like_fallback_values[0]:
                 actual_source = "tab_like_candidate"
+            text_ok = True if not text_regex else _safe_regex_search(text_regex, actual_selected_text_for_match)
+            announcement_ok = (
+                True
+                if not announcement_regex
+                else _safe_regex_search(announcement_regex, actual_selected_text_for_match)
+            )
+            ok = text_ok and announcement_ok
 
         dump_node_count = len(nodes) if isinstance(nodes, list) else 0
         tab_like_count = len(tab_like_candidate_debug_rows)
