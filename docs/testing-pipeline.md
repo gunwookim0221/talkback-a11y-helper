@@ -2,88 +2,183 @@
 
 [System Overview 보기](system-overview.md) | [Architecture 보기](architecture.md)
 
-## Overview
+## 문서 목적
 
-이 문서는 헬퍼 앱의 트리 덤프/타겟 제어 기능을 활용한 접근성 자동화 검증 파이프라인을 설명합니다.
+이 문서는 현재 저장소의 **실제 collector 실행 흐름**을 기준으로 작성되었습니다.
 
-## Step 1 – TalkBack 및 헬퍼 서비스 활성화
+중요: 현재 단계는 DFS/full-depth 탐색이 아니라, 시나리오 기반 **linear collector 안정화 + 데이터 정제** 단계입니다.
 
-- 테스트 단말에서 TalkBack과 `TalkBack A11y Helper` 접근성 서비스를 활성화합니다.
+---
 
-## Step 2 – 화면 전환 감지
+## 1) Runner 진입
 
-- 앱 화면을 이동한 뒤 logcat에서 `A11Y_HELPER: SCREEN_CHANGED` 로그를 확인합니다.
+- 진입점: `script_test.py`
+- 주요 흐름
+  1. `load_runtime_bundle(TAB_CONFIGS)`로 runtime defaults/override 병합
+  2. `enabled=true` 시나리오만 순차 실행
+  3. 시나리오마다 `collect_tab_rows(...)` 수행
+  4. 중간 checkpoint 저장 + 종료 시 final 저장
 
-## Step 3 – 전체 접근성 트리 덤프
+---
 
-```bash
-adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.DUMP_TREE -p com.iotpart.sqe.talkbackhelper --es reqId "dump-001"
-```
+## 2) Scenario 시작 안정화
 
-- 로그에서 `DUMP_TREE_PART <reqId> ...` 조각 중 요청 `reqId`와 일치하는 항목만 순서대로 합쳐 JSON으로 파싱합니다.
-- 조각 로그가 없으면 `DUMP_TREE_RESULT <reqId> [...]` 단일 로그를 fallback으로 파싱합니다.
+`collect_tab_rows(...)`는 먼저 `open_scenario(...)`를 호출해 아래 순서로 진입 안정화를 수행합니다.
 
-## Step 4 – 타겟 노드 직접 제어
+1. tab stabilize (`stabilize_tab_selection`)
+2. optional pre_navigation
+3. anchor stabilize (`stabilize_anchor`)
 
-포커스 이동:
+### Anchor stabilization 핵심
 
-```bash
-adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.FOCUS_TARGET -p com.iotpart.sqe.talkbackhelper --es targetName "확인" --es targetType "t" --ei targetIndex 0
-```
+- select 후 즉시 성공으로 끝내지 않고, **settle 포함 2회 검증**(`stabilize_anchor_focus`)을 통과해야 stable로 판정
+- 기본 재시도 경로 존재(`anchor_retry_count`)
+- 목표: 시작 포커스 흔들림/일시적 mismatch를 줄여 step loop 시작 품질을 높임
 
-클릭 실행:
+`stabilization_mode`별 성공 판정:
+- `anchor_only`: anchor double-verify 기준
+- `tab_context`: context verify 기준
+- `anchor_then_context`: anchor double-verify + context verify
 
-```bash
-adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.CLICK_TARGET -p com.iotpart.sqe.talkbackhelper --es targetName "com.example.app:id/btn_ok" --es targetType "r" --ei targetIndex 0 --ez isLongClick false
-```
+---
 
-## Step 5 – 현재 포커스 스냅샷 확인
+## 3) Main step loop (collect_focus_step + SMART_NEXT)
 
-```bash
-adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.GET_FOCUS -p com.iotpart.sqe.talkbackhelper --es reqId "focus-001"
-```
+시나리오가 열리면 anchor row(step 0)를 먼저 저장하고, 이후 step 1..N 반복:
 
-- 포커스 스냅샷 JSON(`reqId` 포함)으로 최종 상태를 검증합니다.
+- `collect_focus_step(move=True, direction="next")`
+- move 결과 + announcement + get_focus + dump/crop + 품질 메타데이터를 row로 누적
+- `StopEvaluator`로 종료 여부 판정
 
-## Step 5.5 – Anchor Stabilization + Scenario Context Verify (Runner, Python)
+### Announcement 안정화 대기
 
-- `script_test.py` 러너(`SCRIPT_VERSION=1.7.29`)는 탭/anchor를 분리해 안정화 단계를 순차 수행합니다.
-- anchor는 `resource_id_regex`, `text_regex`, `announcement_regex`, `class_name_regex` 조합으로 판정합니다.
-- `allow_resource_id_only=true`면 resourceId 단독 매칭도 허용하며, 복수 후보는 `(top, left)` 오름차순(좌상단 우선)으로 tie-break 합니다.
-- anchor 시작 안정화는 짧은 settle wait을 포함해 2회 연속 검증이 통과되어야 성공으로 처리합니다(실패 시 재시도 1회, 총 최대 2회).
-- 매 검증의 anchor 통과 기준은 `matched == True` 또는 `score >= threshold`입니다.
-- 안정화 성공 조건은 `anchor double-verified == True` **그리고** `context_verify == True`입니다(단, `stabilization_mode=tab_context`는 기존 context 중심 판정을 유지).
-- `selected` 값은 성공 조건이 아니라 로그/진단용 참고값으로만 사용하며, `verified_without_select`도 2회 연속 검증 성공 시에만 허용됩니다.
-- 기본 하단 탭은 Home/Devices/Life/Routines 공통으로 `Location QR code` anchor를 사용하고, `menu_main`만 `SmartThings` anchor를 사용합니다. 정규식은 `(?i)` 기반 대소문자 무시 + 핵심 키워드 포함 매칭(예: `(?i).*(selected|선택됨).*home.*`)을 사용합니다.
-- `context_verify`는 시나리오별 optional 설정이며 미설정(또는 `type: none`) 시 기존과 동일하게 동작합니다.
-  - `selected_bottom_tab`: **현재 focus payload가 아닌 dump_tree_nodes 기반** 하단 탭 선택 문맥 검증 (`selected=true` 또는 `Selected|선택됨` + Home/Devices/...). step cache에 dump가 비어 있으면 검증 시점에 lazy dump를 1회 수행해 동일 규칙으로 판정합니다.
-    - 진단 로그: `NORMAL`에서는 dump/후보 요약 + actual source 요약을, `DEBUG`에서는 selected 후보/탭 유사 후보 상세(`text/announcement/resource_id/bounds`)를 출력합니다.
-  - `screen`: 화면 문맥 텍스트/announcement 정규식 검증
-  - `plugin`: 플러그인 고유 레이블/announcement 정규식 검증
-- 동일 stabilization + context 검증 로직을 overlay 복귀 재정렬 직후에도 재사용합니다.
-- nested scenario는 `pre_navigation` 배열을 통해 `tab stabilize -> pre-navigation(select/touch) -> anchor stabilize` 순서로 진입할 수 있습니다.
-- main linear collector의 stop 판정은 `StopEvaluator`로 수행하며, 기존 신호(smart-nav terminal + repeated same-like + no-progress)와 함께 scenario 경계 기반 stop(`global_nav_entry`/`global_nav_exit`)을 optional 정책으로 지원합니다.
-- `content`에서는 overlay realign 직후 반복 흐름이 실제로 확인된 경우(`after_realign + recent_repeat + no_progress`)만 보수적으로 stop 후보를 강화합니다.
-- `global_nav`에서는 마지막 nav 항목에서 `move failed + same_like 반복 + no_progress`가 누적되면 `global_nav_end` reason으로 종료를 해석할 수 있습니다.
+main loop에서 다음 키를 사용합니다.
+- `main_announcement_wait_seconds`
+- `main_announcement_idle_wait_seconds`
+- `main_announcement_max_extra_wait_seconds`
 
-## Step 6 – Overlay 확장 수집(Candidate + Post-click Classification)
+동작:
+- 고정 대기 후 partial announcements 수집
+- idle polling(짧은 주기)으로 발화 변화가 멈출 때까지 추가 대기
+- 최대 extra wait을 넘기면 강제 종료
+- 결과 row에 `announcement_extra_wait_sec`, `announcement_window_sec` 기록
 
-- linear `move_smart` 순회는 기본 경로로 유지하고, overlay entry는 전역 candidate 또는 시나리오별 `overlay_policy`에서 먼저 후보로만 판정합니다.
-- 현재 기본 candidate:
-  - `com.samsung.android.oneconnect:id/add_menu_button` (`Add`)
-  - `com.samsung.android.oneconnect:id/more_menu_button` (`More options`)
-- `overlay_policy.block_candidates`는 `allow_candidates`보다 우선합니다(예: Devices/Life/Routines 탭에서 `Add` 차단).
-- candidate를 클릭한 뒤 `collect_focus_step(move=False)` probe로 결과를 분류합니다:
-  - `overlay`: overlay 루틴 진입
-  - `navigation`: 일반 화면 전이로 간주하고 overlay 루틴 미진입
-  - `unchanged`: 클릭 실패/변화 없음으로 간주하고 overlay 루틴 미진입
-- overlay 내부는 짧은 step 상한(`OVERLAY_MAX_STEPS`)으로만 수집하고, 수집 종료 후 `press_back_and_recover_focus(...)`로 부모 컨텍스트 복귀를 수행합니다.
-- 복귀 직후 entry 기준 재정렬(re-align)은 `post_click classification='overlay'`일 때만 수행합니다.
-- 재정렬 단계는 일반 step 수집 API 대신 lightweight probe(`get_focus` + 최소 필드 매칭) 경로를 사용해, announcement/row 저장/crop 없이 entry 판정에 필요한 정보(view_id/label/bounds)만 확인합니다.
-- 재정렬 구간은 main 결과 row로 저장하지 않아, overlay 복귀 직후 `우리 집 → Map View → Add` 같은 중복 row 누적과 stop 조건 오탐을 줄입니다.
-- main step row에는 분석 품질 향상을 위해 `fingerprint`, `is_duplicate_step`, `is_recent_duplicate_step`, `recent_duplicate_distance`, `recent_duplicate_of_step`, `is_noise_step`, `noise_reason` 메타데이터가 추가 저장됩니다.
-- Excel 결과는 단일 파일 내 `raw` / `filtered` / `summary` 3개 시트로 저장됩니다.
-  - `raw`: 수집 row 전체 + 파생 컬럼(`speech_main`, `speech_status_tokens`, `visible_main`, `visible_status_tokens`)
-  - `filtered`: `is_noise_step`, `is_duplicate_step`, `is_recent_duplicate_step` 중 하나라도 `True`인 row 제외(그 외 mismatch row는 유지)
-  - `summary`: `total_rows`, `raw_rows`, `filtered_rows`, `noise_count`, `duplicate_count`, `recent_duplicate_count`, `mismatch_count` 집계(+ `scenario_id`가 있으면 시나리오별 row 수 추가)
-- 상태 토큰 분리는 수집 로직을 바꾸지 않고 저장 직전 후처리에서 수행합니다. 예: `"Devices, Tab 2 of 5, New content available"` → `main="devices"`, `status_tokens=["tab 2 of 5", "new content available"]`.
+---
+
+## 4) get_focus 해석 및 fallback 최적화
+
+`get_focus`는 `success=true`만 절대 기준으로 쓰지 않습니다.
+
+핵심 동작:
+- nested `node/focusNode/...` 우선 사용
+- 필요 시 top-level payload(`text/viewIdResourceName/boundsInScreen/...`)도 후보로 수용
+- `success=false + top-level`이어도 payload가 충분하면(강한 bounds/label/identity 신호) dump fallback을 생략하고 사용
+- 불충분하면 dump fallback 시도 후 focused node가 더 신뢰 가능할 때 교체
+- fast path에서는 정책상 dump를 건너뛸 수 있음
+
+row 진단 필드 예:
+- `focus_payload_source`
+- `get_focus_response_success`
+- `get_focus_top_level_success_false`
+- `get_focus_top_level_payload_sufficient`
+- `get_focus_success_false_top_level_dump_attempted`
+- `get_focus_success_false_top_level_dump_found`
+- `get_focus_success_false_top_level_dump_skipped`
+- `get_focus_dump_skip_reason`
+- `get_focus_final_payload_source`
+
+---
+
+## 5) Overlay 진입/복귀
+
+main row가 overlay entry candidate면:
+
+1. entry click 시도
+2. post-click probe(`collect_focus_step(move=False)`)로 분류
+   - `overlay`
+   - `navigation`
+   - `unchanged`
+3. `overlay`인 경우에만 `expand_overlay(...)` 실행
+4. overlay 종료 후 back recovery
+5. 필요 시 entry 기준 realign + anchor/context 재안정화
+
+overlay 수집에서도 별도 announcement 안정화 키 사용:
+- `overlay_announcement_wait_seconds`
+- `overlay_announcement_idle_wait_seconds`
+- `overlay_announcement_max_extra_wait_seconds`
+
+---
+
+## 6) StopEvaluator / stop policy
+
+`should_stop(...)`는 strong + weak 신호를 함께 봅니다.
+
+- strong 계열: terminal signal, global nav 경계 진입/이탈
+- weak 계열: repeat(same_like), no progress, move failure, empty row
+- 최근 반복/overlay realign 직후 반복(no progress) 조건을 보수적으로 조합
+
+`stop_policy` 지원 키:
+- `stop_on_global_nav_entry`
+- `stop_on_global_nav_exit`
+- `stop_on_terminal`
+- `stop_on_repeat_no_progress`
+
+주요 reason:
+- `global_nav_entry`
+- `global_nav_exit`
+- `global_nav_end`
+- `smart_nav_terminal`
+- `move_terminal`
+- `repeat_no_progress`
+
+---
+
+## 7) content vs global_nav
+
+`scenario_type`은 `content` / `global_nav`를 지원합니다.
+
+- `content`: 본문 수집 중심
+- `global_nav`: 하단 탭/좌측 rail 같은 전역 내비게이션 수집 중심
+
+global nav 판별은 `is_global_nav_row(...)`에서 아래 신호를 점수화합니다.
+- resource id
+- label/announcement
+- selected pattern + selected state
+- region hint(`bottom_tabs`/`left_rail`)
+
+운영 가이드:
+- content/global_nav를 같은 시나리오에서 과도하게 섞기보다 분리 실행이 더 안전함
+
+---
+
+## 8) Row 품질 메타데이터와 리포트
+
+main row에는 후처리 품질 메타데이터가 기록됩니다.
+
+- `fingerprint`
+- `fingerprint_repeat_count`
+- `is_duplicate_step`
+- `is_recent_duplicate_step`
+- `recent_duplicate_distance`
+- `recent_duplicate_of_step`
+- `is_noise_step`
+- `noise_reason`
+
+엑셀 저장(`save_excel`)은 3개 시트로 구성됩니다.
+- `raw`: 전체 row + 파생 컬럼
+- `filtered`: noise/duplicate/recent_duplicate 제외
+- `summary`: overall/scenario 집계
+
+상태 토큰 분리 컬럼:
+- `speech_main`, `speech_status_tokens`
+- `visible_main`, `visible_status_tokens`
+
+의도: badge/상태성 토큰(예: selected, tab x of y, new content available)을 main label과 분리해 검증 정확도를 높임.
+
+---
+
+## 9) 저장 타이밍
+
+- partial save: checkpoint 주기(`checkpoint_save_every`) 또는 stop 시점
+- final save: run 종료 `finally` 블록에서 이미지 포함 저장
+- 예외 발생 시에도 중간 결과를 우선 저장

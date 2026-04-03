@@ -15,6 +15,12 @@
 
 즉 본 시스템은 전면 교체 솔루션이 아니라, 접근성 환경 전용의 보완 계층으로서 자동화 신뢰도를 높이는 것을 목표로 합니다.
 
+현재 저장소의 runner 단계는 **DFS/full-depth 탐색 확장 전 단계**로, 한 화면의 선형(`SMART_NEXT`) 수집 안정화와 결과 정제에 집중합니다.
+
+- collector: deterministic 수집(재현 가능한 step-by-step 결과) 우선
+- 품질판단(노이즈/중복/의미 해석): 결과 row 후처리 및 analyzer 단계에서 분리 처리
+- full-depth/그래프 탐색: 장기 확장 과제로 분리
+
 ## End-to-End Flow
 
 ```text

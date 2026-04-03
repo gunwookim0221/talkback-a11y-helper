@@ -2,110 +2,161 @@
 
 ## 문서 목적
 
-이 문서는 `runtime_config.json`이 시나리오 실행을 어떻게 제어하는지, 그리고 `TAB_CONFIGS`와 어떤 우선순위로 결합되는지 설명합니다.
+이 문서는 `config/runtime_config.json`이 현재 runner에서 실제로 지원하는 키와 merge 우선순위를 설명합니다.
+
+기준 코드:
+- `tb_runner/runtime_config.py`
+- `tb_runner/scenario_config.py`
+- `script_test.py`
 
 ---
 
-## 1) `runtime_config.json`의 역할
+## 1) 로딩/병합 구조
 
-`runtime_config.json`은 **실행 시점 제어 레이어**입니다.
+`load_runtime_bundle(base_tab_configs)`는 아래 순서로 병합합니다.
 
-- 배포된 기본 시나리오 정의(`TAB_CONFIGS`)를 코드 수정 없이 환경별로 조정
-- 특정 시나리오의 활성/비활성, step 상한, 정책값을 운영 중에 빠르게 변경
-- A/B 검증, 장애 우회, 임시 운영 정책 반영에 적합
+1. 코드 기본값(`_DEFAULTS`)
+2. runtime `defaults`
+3. 각 scenario base(`TAB_CONFIGS`)
+4. runtime `scenarios[scenario_id]` override
 
-즉, `TAB_CONFIGS`가 “기본 설계도”라면 `runtime_config.json`은 “실행 스위치”입니다.
+추가로 `global.checkpoint_save_every`를 전 시나리오 공통으로 주입합니다.
 
----
-
-## 2) `TAB_CONFIGS`와의 관계
-
-- `TAB_CONFIGS`: 시나리오 기본 정의(정적 baseline)
-- `runtime_config.json`: 실행 시 override(동적 제어)
-
-운영 원칙:
-- 기본값/공통 의도는 `TAB_CONFIGS`에 둠
-- 실행 환경별 on/off 및 미세 조정은 `runtime_config.json`에서 처리
+핵심 우선순위:
+- 공통 정책: `_DEFAULTS` < `runtime.defaults`
+- 시나리오 최종값: `base scenario` + 누락키 채움(defaults) + `runtime.scenarios[scenario_id]`
 
 ---
 
-## 3) 우선순위
-
-동일 키가 동시에 존재하면 다음 우선순위를 따릅니다.
-
-1. `runtime_config.json`
-2. `TAB_CONFIGS`
-
-요약: **runtime_config > TAB_CONFIGS**
-
----
-
-## 4) 충돌 예시
-
-예를 들어, 같은 `scenario_id`에 대해 다음과 같이 값이 다르면 runtime 값이 최종 적용됩니다.
+## 2) runtime_config.json 루트 스키마(현재 구현)
 
 ```json
-// TAB_CONFIGS
 {
-  "scenario_id": "devices_main",
-  "enabled": true
-}
-```
-
-```json
-// runtime_config.json
-{
-  "scenario_overrides": {
+  "global": {
+    "checkpoint_save_every": 3
+  },
+  "defaults": {
+    "tab_select_retry_count": 2,
+    "anchor_retry_count": 2,
+    "main_step_wait_seconds": 1.2,
+    "main_announcement_wait_seconds": 1.2,
+    "main_announcement_idle_wait_seconds": 0.5,
+    "main_announcement_max_extra_wait_seconds": 1.5,
+    "overlay_step_wait_seconds": 0.8,
+    "overlay_announcement_wait_seconds": 0.8,
+    "overlay_announcement_idle_wait_seconds": 0.4,
+    "overlay_announcement_max_extra_wait_seconds": 1.0,
+    "back_recovery_wait_seconds": 0.8,
+    "pre_navigation_retry_count": 2,
+    "pre_navigation_wait_seconds": 1.2,
+    "screen_context_mode": "bottom_tab",
+    "stabilization_mode": "anchor_then_context",
+    "scenario_type": "content",
+    "stop_policy": {
+      "stop_on_global_nav_entry": false,
+      "stop_on_global_nav_exit": false,
+      "stop_on_terminal": true,
+      "stop_on_repeat_no_progress": true
+    },
+    "global_nav": {
+      "labels": [],
+      "resource_ids": [],
+      "selected_pattern": "",
+      "region_hint": "auto"
+    }
+  },
+  "scenarios": {
     "devices_main": {
-      "enabled": false
+      "enabled": true,
+      "max_steps": 30
     }
   }
 }
 ```
 
-실제 실행 결과:
-- `devices_main.enabled = false` (비실행)
+> 숫자는 예시이며, 실제 기본값은 `constants.py` 및 `runtime_config.py` 상수를 따릅니다.
 
 ---
 
-## 5) 로그에서 확인하는 방법
+## 3) 지원 키 상세
 
-실행 로그의 `[CONFIG] scenario override applied`는 다음 의미입니다.
+### 3.1 `global`
 
-- 해당 `scenario_id`에 runtime override가 매칭됨
-- override 항목이 기본 시나리오 정의 위에 적용됨
-- 최종 실행값은 override 반영 후 값으로 판단해야 함
+- `checkpoint_save_every` (positive int)
+  - partial save 주기
 
-운영 시에는 이 로그가 보였는지 먼저 확인하면, “왜 기본값과 다르게 돌았는지”를 빠르게 좁힐 수 있습니다.
+### 3.2 `defaults`
+
+#### wait/retry
+- `tab_select_retry_count`
+- `anchor_retry_count`
+- `pre_navigation_retry_count`
+- `main_step_wait_seconds`
+- `main_announcement_wait_seconds`
+- `main_announcement_idle_wait_seconds`
+- `main_announcement_max_extra_wait_seconds`
+- `overlay_step_wait_seconds`
+- `overlay_announcement_wait_seconds`
+- `overlay_announcement_idle_wait_seconds`
+- `overlay_announcement_max_extra_wait_seconds`
+- `back_recovery_wait_seconds`
+- `pre_navigation_wait_seconds`
+
+#### mode/type
+- `screen_context_mode`: `bottom_tab | new_screen`
+- `stabilization_mode`: `tab_context | anchor_only | anchor_then_context`
+- `scenario_type`: `content | global_nav`
+
+#### stop policy
+- `stop_policy.stop_on_global_nav_entry`
+- `stop_policy.stop_on_global_nav_exit`
+- `stop_policy.stop_on_terminal`
+- `stop_policy.stop_on_repeat_no_progress`
+
+#### global nav hints
+- `global_nav.labels` (string list)
+- `global_nav.resource_ids` (string list)
+- `global_nav.selected_pattern` (string regex)
+- `global_nav.region_hint` (`bottom_tabs | left_rail | auto`)
+
+### 3.3 `scenarios.<scenario_id>`
+
+- `enabled` (bool)
+- `max_steps` (positive int)
+- 위 `defaults`의 키 대부분을 scenario 단위로 override 가능
+- 추가 nested override 지원:
+  - `stop_policy.*`
+  - `global_nav.*`
+  - `scenario_type`
 
 ---
 
-## 6) 디버깅 가이드 (예상과 다르게 실행/비실행될 때)
+## 4) 타입 정규화/검증 규칙
 
-아래 순서로 확인하면 원인 추적이 빠릅니다.
-
-1. `runtime_config.json` 확인
-   - 해당 `scenario_id` override 존재 여부
-   - `enabled`, `max_steps`, 정책 키 변경 여부
-2. `TAB_CONFIGS` 기본값 확인
-   - 원래 baseline이 무엇인지 확인
-3. 실행 로그 확인
-   - `[CONFIG] scenario override applied` 출력 여부
-   - 최종 적용값으로 실행됐는지 확인
+- int/float는 양수만 허용(그 외 fallback)
+- enum은 허용 집합 외 값이면 fallback
+- `stop_policy`/`global_nav`는 dict만 반영
+- `labels`, `resource_ids`는 문자열 리스트만 유지
 
 ---
 
-## 7) 실무 팁
+## 5) enabled / max_steps / override 운영 포인트
 
-- 기본값은 `TAB_CONFIGS`에 유지하세요.
-  - 팀 공통 기준/문서화/리뷰가 쉬워집니다.
-- 실행 제어는 `runtime_config.json`에서 하세요.
-  - 코드 변경 없이 운영 대응이 가능합니다.
-- 운영 이슈 시 “runtime 먼저, baseline 나중” 순서로 확인하세요.
-  - 실제 동작과의 차이를 가장 빨리 발견할 수 있습니다.
+- `script_test.py`는 merged 결과에서 `enabled=false`면 시나리오를 skip
+- step loop 상한은 `max_steps`
+- 시나리오별 임시 우회는 `runtime.scenarios[scenario_id]`에서 관리
+
+---
+
+## 6) 자주 헷갈리는 점
+
+- `runtime.defaults`는 base scenario를 “덮어쓰기”가 아니라 **누락 키 채움 + 공통 baseline 제공**에 가깝습니다.
+- 최종 강제값은 `runtime.scenarios[scenario_id]`가 담당합니다.
+- 지원하지 않는 키를 runtime에 넣어도 loader가 사용하지 않습니다.
 
 ---
 
 ## 함께 보면 좋은 문서
 
-- scenario 정적 정의/실행 흐름: `docs/scenario-config.md`
+- 실제 수집 실행 순서: `docs/testing-pipeline.md`
+- 시나리오 필드 해석: `docs/scenario-config.md`
