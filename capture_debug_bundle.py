@@ -17,7 +17,7 @@ from typing import Any
 #   을 한 번에 저장해서 smart move / anchor / candidate 분석에 활용
 # ============================================================
 
-SCRIPT_VERSION = "1.0.0"
+SCRIPT_VERSION = "1.0.1"
 OUTPUT_BASE = Path("capture_bundles")
 REMOTE_XML_PATH = "/sdcard/window_dump.xml"
 
@@ -90,12 +90,20 @@ def build_adb_base(serial: str | None) -> list[str]:
 
 def run_adb(serial: str | None, args: list[str], timeout: float = 20.0, check: bool = True) -> subprocess.CompletedProcess:
     cmd = build_adb_base(serial) + args
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=check)
+    return subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        check=check,
+    )
 
 
 def get_connected_devices() -> list[str]:
     try:
-        result = subprocess.run(["adb", "devices"], capture_output=True, text=True, timeout=10, check=True)
+        result = subprocess.run(["adb", "devices"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10, check=True)
     except Exception:
         return []
 
