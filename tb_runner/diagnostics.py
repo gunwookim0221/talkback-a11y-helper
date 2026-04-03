@@ -251,6 +251,9 @@ class StopEvaluator:
         weak_repeat = same_count >= 2
         weak_move_failure = fail_count >= 2 or move_terminal
         weak_empty = not str(row.get("visible_label", "") or "").strip() and not str(row.get("merged_announcement", "") or "").strip()
+        overlay_recovery_status = str(row.get("overlay_recovery_status", "") or "").strip().lower()
+        after_realign = overlay_recovery_status.startswith("after_realign") or overlay_recovery_status.startswith("realign")
+        recent_repeat = same_like and weak_repeat
 
         effective_stop_policy = dict(
             {
@@ -260,9 +263,16 @@ class StopEvaluator:
                 "stop_on_repeat_no_progress": True,
             }
         )
+        normalized_scenario_type = str(scenario_type or "content").strip().lower()
         if isinstance(stop_policy, dict):
             effective_stop_policy.update(stop_policy)
-        normalized_scenario_type = str(scenario_type or "content").strip().lower()
+        realign_repeat_no_progress = (
+            normalized_scenario_type == "content"
+            and after_realign
+            and recent_repeat
+            and no_progress
+            and (move_failed or move_terminal or fail_count >= 2)
+        )
         is_curr_global_nav, nav_reason = is_global_nav_row(row, scenario_cfg=scenario_cfg)
         is_prev_global_nav, _ = is_global_nav_row(previous_row or {}, scenario_cfg=scenario_cfg)
 
@@ -281,9 +291,23 @@ class StopEvaluator:
         if not stop and terminal_signal and bool(effective_stop_policy.get("stop_on_terminal", True)):
             stop = True
             reason = "smart_nav_terminal"
+        elif (
+            not stop
+            and normalized_scenario_type == "global_nav"
+            and bool(effective_stop_policy.get("stop_on_repeat_no_progress", True))
+            and is_curr_global_nav
+            and move_failed
+            and no_progress
+            and recent_repeat
+        ):
+            stop = True
+            reason = "global_nav_end"
         elif not stop and move_terminal and same_like and bool(effective_stop_policy.get("stop_on_terminal", True)):
             stop = True
             reason = "move_terminal"
+        elif not stop and realign_repeat_no_progress and bool(effective_stop_policy.get("stop_on_repeat_no_progress", True)):
+            stop = True
+            reason = "repeat_no_progress"
         elif not stop and bool(effective_stop_policy.get("stop_on_repeat_no_progress", True)):
             weak_signals = sum([1 if weak_repeat else 0, 1 if no_progress else 0, 1 if weak_move_failure else 0, 1 if weak_empty else 0])
             if weak_signals >= 2 and (same_like or weak_repeat):
@@ -298,6 +322,8 @@ class StopEvaluator:
             "scenario_type": normalized_scenario_type,
             "is_global_nav": is_curr_global_nav,
             "global_nav_reason": nav_reason,
+            "after_realign": after_realign,
+            "recent_repeat": recent_repeat,
         }
         return stop, fail_count, same_count, reason, current_fingerprint, details
 

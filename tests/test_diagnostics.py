@@ -228,3 +228,118 @@ def test_should_stop_global_nav_exit():
     assert stop is True
     assert reason == "global_nav_exit"
     assert details["is_global_nav"] is False
+
+
+def test_should_stop_global_nav_end_when_failed_repeat_no_progress():
+    previous = {
+        "visible_label": "Menu",
+        "normalized_visible_label": "menu",
+        "normalized_announcement": "menu selected",
+        "focus_view_id": "com.samsung.android.oneconnect:id/menu_more",
+        "focus_bounds": "0,0,10,10",
+        "selected": True,
+    }
+    row = {
+        "move_result": "failed",
+        "last_smart_nav_result": "failed",
+        "visible_label": "Menu",
+        "normalized_visible_label": "menu",
+        "normalized_announcement": "menu selected",
+        "merged_announcement": "menu selected",
+        "focus_view_id": "com.samsung.android.oneconnect:id/menu_more",
+        "focus_bounds": "0,0,10,10",
+        "selected": True,
+    }
+
+    stop, fail_count, same_count, reason, _, details = should_stop(
+        row=row,
+        prev_fingerprint=("menu", "com.samsung.android.oneconnect:id/menu_more", "0,0,10,10"),
+        fail_count=1,
+        same_count=1,
+        previous_row=previous,
+        scenario_type="global_nav",
+        stop_policy={"stop_on_repeat_no_progress": True},
+        scenario_cfg={
+            "global_nav": {
+                "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+                "resource_ids": ["com.samsung.android.oneconnect:id/menu_more"],
+                "selected_pattern": "(?i).*selected.*",
+                "region_hint": "auto",
+            }
+        },
+    )
+
+    assert stop is True
+    assert fail_count == 2
+    assert same_count == 2
+    assert reason == "global_nav_end"
+    assert details["no_progress"] is True
+    assert details["recent_repeat"] is True
+
+
+def test_should_stop_realign_repeat_no_progress_in_content():
+    previous = {
+        "normalized_visible_label": "more options",
+        "normalized_announcement": "more options",
+        "focus_view_id": "id/more",
+        "focus_bounds": "0,0,1,1",
+    }
+    row = {
+        "move_result": "failed",
+        "last_smart_nav_result": "failed",
+        "visible_label": "More options",
+        "merged_announcement": "More options",
+        "normalized_visible_label": "more options",
+        "normalized_announcement": "more options",
+        "focus_view_id": "id/more",
+        "focus_bounds": "0,0,1,1",
+        "overlay_recovery_status": "after_realign",
+    }
+
+    stop, _, _, reason, _, details = should_stop(
+        row=row,
+        prev_fingerprint=("more options", "id/more", "0,0,1,1"),
+        fail_count=1,
+        same_count=1,
+        previous_row=previous,
+        scenario_type="content",
+        stop_policy={"stop_on_repeat_no_progress": True},
+    )
+
+    assert stop is True
+    assert reason == "repeat_no_progress"
+    assert details["after_realign"] is True
+    assert details["recent_repeat"] is True
+
+
+def test_should_not_stop_only_because_after_realign_marker():
+    previous = {
+        "normalized_visible_label": "our home",
+        "normalized_announcement": "our home",
+        "focus_view_id": "id/home",
+        "focus_bounds": "0,0,1,1",
+    }
+    row = {
+        "move_result": "moved",
+        "last_smart_nav_result": "moved",
+        "visible_label": "Add",
+        "merged_announcement": "Add",
+        "normalized_visible_label": "add",
+        "normalized_announcement": "add",
+        "focus_view_id": "id/add",
+        "focus_bounds": "0,0,2,2",
+        "overlay_recovery_status": "after_realign",
+    }
+
+    stop, _, _, reason, _, details = should_stop(
+        row=row,
+        prev_fingerprint=("our home", "id/home", "0,0,1,1"),
+        fail_count=0,
+        same_count=0,
+        previous_row=previous,
+        scenario_type="content",
+    )
+
+    assert stop is False
+    assert reason == ""
+    assert details["after_realign"] is True

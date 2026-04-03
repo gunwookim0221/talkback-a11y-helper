@@ -47,7 +47,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.GET_FOCUS -p com.iotpar
 
 ## Step 5.5 – Anchor Stabilization + Scenario Context Verify (Runner, Python)
 
-- `script_test.py` 러너(`SCRIPT_VERSION=1.7.25`)는 탭/anchor를 분리해 안정화 단계를 순차 수행합니다.
+- `script_test.py` 러너(`SCRIPT_VERSION=1.7.26`)는 탭/anchor를 분리해 안정화 단계를 순차 수행합니다.
 - anchor는 `resource_id_regex`, `text_regex`, `announcement_regex`, `class_name_regex` 조합으로 판정합니다.
 - `allow_resource_id_only=true`면 resourceId 단독 매칭도 허용하며, 복수 후보는 `(top, left)` 오름차순(좌상단 우선)으로 tie-break 합니다.
 - anchor 시작 안정화는 짧은 settle wait을 포함해 2회 연속 검증이 통과되어야 성공으로 처리합니다(실패 시 재시도 1회, 총 최대 2회).
@@ -63,6 +63,8 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.GET_FOCUS -p com.iotpar
 - 동일 stabilization + context 검증 로직을 overlay 복귀 재정렬 직후에도 재사용합니다.
 - nested scenario는 `pre_navigation` 배열을 통해 `tab stabilize -> pre-navigation(select/touch) -> anchor stabilize` 순서로 진입할 수 있습니다.
 - main linear collector의 stop 판정은 `StopEvaluator`로 수행하며, 기존 신호(smart-nav terminal + repeated same-like + no-progress)와 함께 scenario 경계 기반 stop(`global_nav_entry`/`global_nav_exit`)을 optional 정책으로 지원합니다.
+- `content`에서는 overlay realign 직후 반복 흐름이 실제로 확인된 경우(`after_realign + recent_repeat + no_progress`)만 보수적으로 stop 후보를 강화합니다.
+- `global_nav`에서는 마지막 nav 항목에서 `move failed + same_like 반복 + no_progress`가 누적되면 `global_nav_end` reason으로 종료를 해석할 수 있습니다.
 
 ## Step 6 – Overlay 확장 수집(Candidate + Post-click Classification)
 

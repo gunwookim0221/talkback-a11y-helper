@@ -294,7 +294,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.i
 
 ## `talkback_lib.py` 레거시 호환 API
 
-- Python 클라이언트 알고리즘 버전: `CLIENT_ALGORITHM_VERSION = 1.7.25`
+- Python 클라이언트 알고리즘 버전: `CLIENT_ALGORITHM_VERSION = 1.7.26`
 - 발화 조회 API
   - `get_announcements(...)` → 수집된 발화를 `strip`/빈 문자열 제거 후 공백으로 병합한 `str` 반환
   - `get_partial_announcements(...)` → raw 발화 조각 `list[str]` 반환
@@ -593,6 +593,9 @@ assert client.last_merged_announcement == merged
 - `content` 시나리오는 본문 수집을 우선하고, 전역 네비게이션(하단 탭/좌측 rail) 진입 시 stop 후보를 줄 수 있습니다.
 - `global_nav` 시나리오는 앱 전역 네비게이션 영역만 수집하며, 본문으로 빠져나가는 시점을 stop 후보로 사용합니다.
 - region 힌트는 보조 신호이며, 우선순위는 resource id/label/selected 패턴입니다.
+- stop evaluator는 단일 약신호(예: same-like만 감지)로 즉시 종료하지 않고, `repeat + no_progress + move failure/terminal` 조합이 확인될 때 보수적으로 종료합니다.
+- `content`에서는 `global_nav_entry`를 유지하면서도, overlay realign 직후 동일 흐름 반복(`after_realign + recent_repeat + no_progress`)이 확인될 때만 `repeat_no_progress` 후보로 조기 종료할 수 있습니다.
+- `global_nav`에서는 마지막 항목에서 `move_result=failed + same_like 반복 + no_progress` 패턴이 누적되면 `global_nav_end` reason으로 더 명확하게 종료를 기록합니다(기존 `repeat_no_progress` 계열과 호환).
 
 ### pre_navigation action 예시 (Settings focusable 대응)
 

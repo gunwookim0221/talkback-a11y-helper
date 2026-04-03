@@ -684,6 +684,7 @@ def collect_tab_rows(
     fail_count = 0
     same_count = 0
     expanded_overlay_entries: set[str] = set()
+    post_realign_pending_steps = 0
     main_step_index_by_fingerprint: dict[tuple[str, str, str], int] = {
         prev_fingerprint: 0,
     }
@@ -710,7 +711,7 @@ def collect_tab_rows(
         row["context_type"] = "main"
         row["parent_step_index"] = ""
         row["overlay_entry_label"] = ""
-        row["overlay_recovery_status"] = ""
+        row["overlay_recovery_status"] = "after_realign" if post_realign_pending_steps > 0 else ""
         row["status"] = "OK"
         row["stop_reason"] = ""
         row["scenario_type"] = str(tab_cfg.get("scenario_type", "content") or "content")
@@ -785,6 +786,8 @@ def collect_tab_rows(
         same_like_count = int(stop_details.get("same_like_count", 0) or 0)
         no_progress = bool(stop_details.get("no_progress", False))
         is_global_nav = bool(stop_details.get("is_global_nav", False))
+        after_realign = bool(stop_details.get("after_realign", False))
+        recent_repeat = bool(stop_details.get("recent_repeat", False))
         scenario_type = str(stop_details.get("scenario_type", tab_cfg.get("scenario_type", "content")) or "content")
         decision = "stop" if stop else "continue"
         eval_reason = str(stop_details.get("reason", "") or "none")
@@ -793,7 +796,8 @@ def collect_tab_rows(
             f"[STOP][eval] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
             f"terminal={str(terminal_signal).lower()} same_like_count={same_like_count} "
             f"no_progress={str(no_progress).lower()} scenario_type='{scenario_type}' "
-            f"is_global_nav={str(is_global_nav).lower()} decision='{decision}' reason='{eval_reason}'"
+            f"is_global_nav={str(is_global_nav).lower()} after_realign={str(after_realign).lower()} "
+            f"recent_repeat={str(recent_repeat).lower()} decision='{decision}' reason='{eval_reason}'"
         )
 
         if stop:
@@ -903,6 +907,7 @@ def collect_tab_rows(
                             f"match_by='{realign_result.get('match_by', '')}'"
                         )
                         if realign_result.get("entry_reached"):
+                            post_realign_pending_steps = max(post_realign_pending_steps, 2)
                             post_overlay_stabilized = stabilize_anchor(
                                 client=client,
                                 dev=dev,
@@ -934,6 +939,9 @@ def collect_tab_rows(
                 f"tab='{tab_cfg.get('tab_name', '')}' step={row.get('step_index')} "
                 f"view_id='{row.get('focus_view_id', '')}' label='{row.get('visible_label', '')}'"
             )
+
+        if post_realign_pending_steps > 0:
+            post_realign_pending_steps -= 1
 
         if stop:
             log(
