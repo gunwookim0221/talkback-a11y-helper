@@ -13,7 +13,7 @@ from tb_runner.constants import (
 )
 from tb_runner.logging_utils import log
 
-RUNTIME_CONFIG_VERSION = "1.7.24"
+RUNTIME_CONFIG_VERSION = "1.7.25"
 DEFAULT_RUNTIME_CONFIG_PATH = Path("config/runtime_config.json")
 
 
@@ -29,10 +29,35 @@ _DEFAULTS = {
     "pre_navigation_wait_seconds": MAIN_STEP_WAIT_SECONDS,
     "screen_context_mode": "bottom_tab",
     "stabilization_mode": "anchor_then_context",
+    "scenario_type": "content",
+    "stop_policy": {
+        "stop_on_global_nav_entry": False,
+        "stop_on_global_nav_exit": False,
+        "stop_on_terminal": True,
+        "stop_on_repeat_no_progress": True,
+    },
+    "global_nav": {
+        "labels": [],
+        "resource_ids": [],
+        "selected_pattern": "",
+        "region_hint": "auto",
+    },
 }
 
 
-_OVERRIDE_KEYS = set(_DEFAULTS.keys())
+_OVERRIDE_KEYS = {
+    "tab_select_retry_count",
+    "anchor_retry_count",
+    "main_step_wait_seconds",
+    "main_announcement_wait_seconds",
+    "overlay_step_wait_seconds",
+    "overlay_announcement_wait_seconds",
+    "back_recovery_wait_seconds",
+    "pre_navigation_retry_count",
+    "pre_navigation_wait_seconds",
+    "screen_context_mode",
+    "stabilization_mode",
+}
 
 
 def _load_json_file(config_path: Path) -> dict[str, Any]:
@@ -76,6 +101,12 @@ def _to_enum_value(value: Any, allowed: set[str], fallback: str) -> str:
 
 
 def _build_runtime_defaults(raw_defaults: dict[str, Any]) -> dict[str, Any]:
+    raw_stop_policy = raw_defaults.get("stop_policy", {})
+    if not isinstance(raw_stop_policy, dict):
+        raw_stop_policy = {}
+    raw_global_nav = raw_defaults.get("global_nav", {})
+    if not isinstance(raw_global_nav, dict):
+        raw_global_nav = {}
     return {
         "tab_select_retry_count": _to_positive_int(
             raw_defaults.get("tab_select_retry_count"),
@@ -123,6 +154,27 @@ def _build_runtime_defaults(raw_defaults: dict[str, Any]) -> dict[str, Any]:
             {"tab_context", "anchor_only", "anchor_then_context"},
             _DEFAULTS["stabilization_mode"],
         ),
+        "scenario_type": _to_enum_value(
+            raw_defaults.get("scenario_type"),
+            {"content", "global_nav"},
+            _DEFAULTS["scenario_type"],
+        ),
+        "stop_policy": {
+            "stop_on_global_nav_entry": bool(raw_stop_policy.get("stop_on_global_nav_entry", False)),
+            "stop_on_global_nav_exit": bool(raw_stop_policy.get("stop_on_global_nav_exit", False)),
+            "stop_on_terminal": bool(raw_stop_policy.get("stop_on_terminal", True)),
+            "stop_on_repeat_no_progress": bool(raw_stop_policy.get("stop_on_repeat_no_progress", True)),
+        },
+        "global_nav": {
+            "labels": [str(item) for item in raw_global_nav.get("labels", []) if isinstance(item, str)],
+            "resource_ids": [str(item) for item in raw_global_nav.get("resource_ids", []) if isinstance(item, str)],
+            "selected_pattern": str(raw_global_nav.get("selected_pattern", "") or ""),
+            "region_hint": _to_enum_value(
+                raw_global_nav.get("region_hint"),
+                {"bottom_tabs", "left_rail", "auto"},
+                "auto",
+            ),
+        },
     }
 
 
@@ -194,6 +246,60 @@ def load_runtime_bundle(base_tab_configs: list[dict[str, Any]], config_path: str
                         merged_cfg[key] = _to_enum_value(scenario_override.get(key), allowed_values, base_value)
                     else:
                         merged_cfg[key] = _to_positive_float(scenario_override.get(key), float(base_value))
+
+            if "scenario_type" in scenario_override:
+                merged_cfg["scenario_type"] = _to_enum_value(
+                    scenario_override.get("scenario_type"),
+                    {"content", "global_nav"},
+                    str(merged_cfg.get("scenario_type", "content") or "content"),
+                )
+
+            if "stop_policy" in scenario_override and isinstance(scenario_override.get("stop_policy"), dict):
+                merged_policy = dict(merged_cfg.get("stop_policy", {}) or {})
+                override_policy = scenario_override.get("stop_policy", {})
+                merged_policy["stop_on_global_nav_entry"] = bool(
+                    override_policy.get(
+                        "stop_on_global_nav_entry",
+                        merged_policy.get("stop_on_global_nav_entry", False),
+                    )
+                )
+                merged_policy["stop_on_global_nav_exit"] = bool(
+                    override_policy.get(
+                        "stop_on_global_nav_exit",
+                        merged_policy.get("stop_on_global_nav_exit", False),
+                    )
+                )
+                merged_policy["stop_on_terminal"] = bool(
+                    override_policy.get("stop_on_terminal", merged_policy.get("stop_on_terminal", True))
+                )
+                merged_policy["stop_on_repeat_no_progress"] = bool(
+                    override_policy.get(
+                        "stop_on_repeat_no_progress",
+                        merged_policy.get("stop_on_repeat_no_progress", True),
+                    )
+                )
+                merged_cfg["stop_policy"] = merged_policy
+
+            if "global_nav" in scenario_override and isinstance(scenario_override.get("global_nav"), dict):
+                merged_global_nav = dict(merged_cfg.get("global_nav", {}) or {})
+                override_global_nav = scenario_override.get("global_nav", {})
+                if isinstance(override_global_nav.get("labels"), list):
+                    merged_global_nav["labels"] = [
+                        str(item) for item in override_global_nav.get("labels", []) if isinstance(item, str)
+                    ]
+                if isinstance(override_global_nav.get("resource_ids"), list):
+                    merged_global_nav["resource_ids"] = [
+                        str(item) for item in override_global_nav.get("resource_ids", []) if isinstance(item, str)
+                    ]
+                if "selected_pattern" in override_global_nav:
+                    merged_global_nav["selected_pattern"] = str(override_global_nav.get("selected_pattern", "") or "")
+                if "region_hint" in override_global_nav:
+                    merged_global_nav["region_hint"] = _to_enum_value(
+                        override_global_nav.get("region_hint"),
+                        {"bottom_tabs", "left_rail", "auto"},
+                        str(merged_global_nav.get("region_hint", "auto") or "auto"),
+                    )
+                merged_cfg["global_nav"] = merged_global_nav
 
             if scenario_override:
                 log(

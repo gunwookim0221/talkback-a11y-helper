@@ -41,6 +41,7 @@ TAB_CONFIGS = [
     },
     {
         "scenario_id": "devices_main",
+        "scenario_type": "content",
         "tab_name": "(?i).*devices.*",
         "tab_type": "b",
         "tab": {
@@ -65,6 +66,21 @@ TAB_CONFIGS = [
         },
         "enabled": False,
         "max_steps": 5,
+        "stop_policy": {
+            "stop_on_global_nav_entry": True,
+        },
+        "global_nav": {
+            "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+            "resource_ids": [
+                "com.samsung.android.oneconnect:id/menu_favorites",
+                "com.samsung.android.oneconnect:id/menu_devices",
+                "com.samsung.android.oneconnect:id/menu_services",
+                "com.samsung.android.oneconnect:id/menu_automations",
+                "com.samsung.android.oneconnect:id/menu_more",
+            ],
+            "selected_pattern": "(?i).*(selected|선택됨).*",
+            "region_hint": "bottom_tabs",
+        },
         "overlay_policy": {
             "allow_candidates": [
                 {
@@ -161,6 +177,41 @@ TAB_CONFIGS = [
                 }
             ],
         },
+    },
+    {
+        "scenario_id": "global_nav_main",
+        "scenario_type": "global_nav",
+        "tab_name": "(?i).*(home|devices|life|routines|menu).*",
+        "tab_type": "a",
+        "screen_context_mode": "bottom_tab",
+        "stabilization_mode": "tab_context",
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": "(?i).*(selected|선택됨).*(home|devices|life|routines|menu).*",
+        },
+        "anchor_name": "(?i).*(home|devices|life|routines|menu).*",
+        "anchor_type": "a",
+        "anchor": {
+            "announcement_regex": "(?i).*(selected|선택됨).*(home|devices|life|routines|menu).*",
+            "tie_breaker": "bottom_nav_left_to_right",
+        },
+        "stop_policy": {
+            "stop_on_global_nav_exit": True,
+        },
+        "global_nav": {
+            "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+            "resource_ids": [
+                "com.samsung.android.oneconnect:id/menu_favorites",
+                "com.samsung.android.oneconnect:id/menu_devices",
+                "com.samsung.android.oneconnect:id/menu_services",
+                "com.samsung.android.oneconnect:id/menu_automations",
+                "com.samsung.android.oneconnect:id/menu_more",
+            ],
+            "selected_pattern": "(?i).*(selected|선택됨).*",
+            "region_hint": "auto",
+        },
+        "enabled": False,
+        "max_steps": 10,
     },
     {
         "scenario_id": "settings_entry_example",

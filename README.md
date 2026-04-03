@@ -294,7 +294,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.i
 
 ## `talkback_lib.py` 레거시 호환 API
 
-- Python 클라이언트 알고리즘 버전: `CLIENT_ALGORITHM_VERSION = 1.7.24`
+- Python 클라이언트 알고리즘 버전: `CLIENT_ALGORITHM_VERSION = 1.7.25`
 - 발화 조회 API
   - `get_announcements(...)` → 수집된 발화를 `strip`/빈 문자열 제거 후 공백으로 병합한 `str` 반환
   - `get_partial_announcements(...)` → raw 발화 조각 `list[str]` 반환
@@ -499,6 +499,14 @@ assert client.last_merged_announcement == merged
 - `defaults`/`scenarios` 기반 `overlay_step_wait_seconds`, `overlay_announcement_wait_seconds`, `back_recovery_wait_seconds`
 - `defaults`/`scenarios` 기반 `pre_navigation_retry_count`, `pre_navigation_wait_seconds`
 - `defaults`/`scenarios` 기반 `screen_context_mode`, `stabilization_mode`
+- `defaults`/`scenarios` 기반 `scenario_type` (`content` | `global_nav`)
+- `defaults`/`scenarios` 기반 `stop_policy`
+  - `stop_on_global_nav_entry`
+  - `stop_on_global_nav_exit`
+  - `stop_on_terminal`
+  - `stop_on_repeat_no_progress`
+- `defaults`/`scenarios` 기반 `global_nav`
+  - `labels`, `resource_ids`, `selected_pattern`, `region_hint(bottom_tabs|left_rail|auto)`
 - `scenarios.<scenario_id>.enabled`, `scenarios.<scenario_id>.max_steps`
 
 ### scenario stabilization/context 모드 일반화
@@ -553,6 +561,38 @@ assert client.last_merged_announcement == merged
   }
 }
 ```
+
+#### 예시 3) content/global_nav 분리
+
+```json
+{
+  "scenario_id": "devices_main",
+  "scenario_type": "content",
+  "stop_policy": {
+    "stop_on_global_nav_entry": true
+  }
+}
+```
+
+```json
+{
+  "scenario_id": "global_nav_main",
+  "scenario_type": "global_nav",
+  "stop_policy": {
+    "stop_on_global_nav_exit": true
+  },
+  "global_nav": {
+    "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+    "resource_ids": ["com.samsung.android.oneconnect:id/menu_devices"],
+    "selected_pattern": "(?i).*(selected|선택됨).*",
+    "region_hint": "auto"
+  }
+}
+```
+
+- `content` 시나리오는 본문 수집을 우선하고, 전역 네비게이션(하단 탭/좌측 rail) 진입 시 stop 후보를 줄 수 있습니다.
+- `global_nav` 시나리오는 앱 전역 네비게이션 영역만 수집하며, 본문으로 빠져나가는 시점을 stop 후보로 사용합니다.
+- region 힌트는 보조 신호이며, 우선순위는 resource id/label/selected 패턴입니다.
 
 ### pre_navigation action 예시 (Settings focusable 대응)
 
