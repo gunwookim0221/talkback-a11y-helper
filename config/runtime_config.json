@@ -46,7 +46,7 @@
       }
     },
     "global_nav_main": {
-      "enabled": false,
+      "enabled": true,
       "scenario_type": "global_nav",
       "max_steps": 10,
       "stop_policy": {
