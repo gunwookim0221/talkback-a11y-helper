@@ -53,6 +53,85 @@ def choose_best_tab_candidate(matches: list[dict[str, Any]], tie_breaker: str = 
         )[0]
     return sorted(matches, key=lambda item: -int(item.get("score", 0)))[0]
 
+
+def _resolve_focus_align_retry_count(tab_cfg: dict[str, Any], fallback: int = 2) -> int:
+    value = tab_cfg.get("tab_focus_align_retry_count", fallback)
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, int) and value > 0:
+        return value
+    return fallback
+
+
+def _attempt_tab_focus_alignment(
+    client: A11yAdbClient,
+    dev: str,
+    scenario_id: str,
+    normalized_tab_cfg: dict[str, Any],
+    best: dict[str, Any] | None,
+    max_retries: int,
+) -> dict[str, Any]:
+    selectors: list[tuple[str, str, str]] = []
+    best_candidate = (best or {}).get("candidate", {}) if isinstance(best, dict) else {}
+    best_resource = str(best_candidate.get("resource_id", "") or "").strip()
+    if best_resource:
+        selectors.append(("r", f"^{re.escape(best_resource)}$", "best_resource_exact"))
+
+    tab_resource_regex = str(normalized_tab_cfg.get("resource_id_regex", "") or "").strip()
+    if tab_resource_regex:
+        selectors.append(("r", tab_resource_regex, "tab_resource_regex"))
+    tab_text_regex = str(normalized_tab_cfg.get("text_regex", "") or "").strip()
+    if tab_text_regex:
+        selectors.append(("t", tab_text_regex, "tab_text_regex"))
+    tab_announcement_regex = str(normalized_tab_cfg.get("announcement_regex", "") or "").strip()
+    if tab_announcement_regex:
+        selectors.append(("a", tab_announcement_regex, "tab_announcement_regex"))
+
+    deduped_selectors: list[tuple[str, str, str]] = []
+    visited: set[tuple[str, str]] = set()
+    for type_, pattern, source in selectors:
+        key = (type_, pattern)
+        if key in visited:
+            continue
+        visited.add(key)
+        deduped_selectors.append((type_, pattern, source))
+
+    if not deduped_selectors:
+        log(f"[TAB][focus_align] skipped scenario='{scenario_id}' reason='no_selector'")
+        return {"attempted": False, "ok": False, "reason": "no_selector"}
+
+    for attempt in range(1, max_retries + 1):
+        type_, pattern, source = deduped_selectors[(attempt - 1) % len(deduped_selectors)]
+        log(
+            f"[TAB][focus_align] attempt={attempt}/{max_retries} scenario='{scenario_id}' "
+            f"type='{type_}' source='{source}'"
+        )
+        aligned = bool(client.select(dev=dev, name=pattern, type_=type_, wait_=5))
+        if aligned:
+            log(
+                f"[TAB][focus_align] success scenario='{scenario_id}' attempt={attempt}/{max_retries} "
+                f"type='{type_}' source='{source}'"
+            )
+            return {"attempted": True, "ok": True, "attempt": attempt, "type": type_, "source": source}
+
+    last_result = getattr(client, "last_target_action_result", {})
+    target = last_result.get("target", {}) if isinstance(last_result, dict) else {}
+    focus_label = str(target.get("text", "") or target.get("contentDescription", "") or "").strip()
+    focus_resource = str(target.get("viewIdResourceName", "") or target.get("resourceId", "") or "").strip()
+    log(
+        f"[TAB][focus_align] failed scenario='{scenario_id}' attempt={max_retries}/{max_retries} "
+        f"focus_label='{focus_label}' focus_resource='{focus_resource}'"
+    )
+    return {
+        "attempted": True,
+        "ok": False,
+        "attempt": max_retries,
+        "reason": "selector_not_focused",
+        "focus_label": focus_label,
+        "focus_resource": focus_resource,
+    }
+
+
 def stabilize_tab_selection(
     client: A11yAdbClient,
     dev: str,
@@ -62,6 +141,7 @@ def stabilize_tab_selection(
     normalized_tab_cfg = normalize_tab_config(tab_cfg)
     tie_breaker = str(normalized_tab_cfg.get("tie_breaker", "bottom_nav_left_to_right") or "bottom_nav_left_to_right")
     scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    focus_align_retries = _resolve_focus_align_retry_count(tab_cfg, fallback=2)
     fallback_to_legacy = bool(normalized_tab_cfg.get("_fallback_to_legacy", False))
     if fallback_to_legacy:
         log(f"[TAB][select] fallback_to_legacy=True scenario='{scenario_id}'")
@@ -69,6 +149,7 @@ def stabilize_tab_selection(
     last_context: dict[str, Any] = {"ok": True, "type": "none", "expected": ""}
     last_best: dict[str, Any] = {}
     last_selected = False
+    focus_align_result: dict[str, Any] = {"attempted": False, "ok": False, "reason": "not_attempted"}
     for attempt in range(1, max_retries + 1):
         dump_nodes = client.dump_tree(dev=dev)
         node_list = dump_nodes if isinstance(dump_nodes, list) else []
@@ -152,6 +233,19 @@ def stabilize_tab_selection(
                     f"reason='fallback_after_{tab_action_mode}'"
                 )
 
+        focus_align_result = {"attempted": False, "ok": False, "reason": "not_selected"}
+        if selected:
+            focus_align_result = _attempt_tab_focus_alignment(
+                client=client,
+                dev=dev,
+                scenario_id=scenario_id,
+                normalized_tab_cfg=normalized_tab_cfg,
+                best=best,
+                max_retries=focus_align_retries,
+            )
+        else:
+            log(f"[TAB][focus_align] skipped scenario='{scenario_id}' reason='tab_select_failed'")
+
         verify_row = client.collect_focus_step(
             dev=dev,
             step_index=-(500 + attempt),
@@ -178,6 +272,7 @@ def stabilize_tab_selection(
                 "ok": True,
                 "attempt": attempt,
                 "selected": selected,
+                "focus_align": focus_align_result,
                 "verify_context": last_context,
                 "best": best,
                 "candidate_count": len(matches),
@@ -190,6 +285,7 @@ def stabilize_tab_selection(
         "ok": False,
         "attempt": max_retries,
         "selected": last_selected,
+        "focus_align": focus_align_result,
         "verify_context": last_context,
         "best": last_best,
     }
