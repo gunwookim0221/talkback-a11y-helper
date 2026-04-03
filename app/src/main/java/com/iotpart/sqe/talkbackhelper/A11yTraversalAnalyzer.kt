@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.10.1"
+    const val VERSION: String = "1.10.2"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
     data class CandidateSelectionResult(
@@ -1080,9 +1080,24 @@ object A11yTraversalAnalyzer {
     ): Boolean {
         if (isCompositeInteractiveContainer(node, descendantTextCandidates)) return false
         if (isOneConnectHeroSummaryContainer(node, descendantTextCandidates)) return false
-        if (isContainerLikeClassName(node.className?.toString())) return true
-        if (isContainerLikeViewId(node.viewIdResourceName)) return true
-        if (hasMultipleSiblingLevelInteractiveDescendants(node)) return true
+        if (isContainerLikeClassName(node.className?.toString())) {
+            if (node.packageName?.toString()?.trim().orEmpty() == ONECONNECT_PACKAGE_NAME) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT][hero] rejected reason='container_like_class' class=${node.className}")
+            }
+            return true
+        }
+        if (isContainerLikeViewId(node.viewIdResourceName)) {
+            if (node.packageName?.toString()?.trim().orEmpty() == ONECONNECT_PACKAGE_NAME) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT][hero] rejected reason='container_like_view_id' viewId=${node.viewIdResourceName}")
+            }
+            return true
+        }
+        if (hasMultipleSiblingLevelInteractiveDescendants(node)) {
+            if (node.packageName?.toString()?.trim().orEmpty() == ONECONNECT_PACKAGE_NAME) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT][hero] rejected reason='multiple_interactive_descendants'")
+            }
+            return true
+        }
 
         val coversMostContentArea = doesNodeCoverMostContentArea(node)
         if (!coversMostContentArea) return false
@@ -1090,37 +1105,97 @@ object A11yTraversalAnalyzer {
         val clickableDescendantCount = countClickableOrFocusableDescendants(node, limit = 3)
         if (clickableDescendantCount < 2) return false
 
-        return !shouldAllowRecoveredDescendantLabelForTraversal(descendantTextCandidates)
+        val rejected = !shouldAllowRecoveredDescendantLabelForTraversal(descendantTextCandidates)
+        if (rejected && node.packageName?.toString()?.trim().orEmpty() == ONECONNECT_PACKAGE_NAME) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT][hero] rejected reason='recovered_label_disallowed' descendantCount=${descendantTextCandidates.distinct().size}")
+        }
+        return rejected
     }
 
-    private fun isOneConnectHeroSummaryContainer(
+    internal fun isOneConnectHeroSummaryContainer(
         node: AccessibilityNodeInfo,
         descendantTextCandidates: List<String>
     ): Boolean {
         if (!node.isVisibleToUser || node.isClickable || !node.isFocusable) return false
         val packageName = node.packageName?.toString()?.trim().orEmpty()
         if (packageName != ONECONNECT_PACKAGE_NAME) return false
-        val recoveredLabel = recoverLabelFromDescendantTexts(descendantTextCandidates)
-        if (recoveredLabel.isNullOrBlank() || !shouldAllowRecoveredDescendantLabelForTraversal(descendantTextCandidates)) return false
+        val normalizedLabels = descendantTextCandidates
+            .asSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .toList()
+        val recoveredLabel = recoverLabelFromDescendantTexts(normalizedLabels)
+        val allowRecoveredByGeneralRule = shouldAllowRecoveredDescendantLabelForTraversal(normalizedLabels)
+        val mergedLength = normalizedLabels.joinToString(separator = " ").length
+        val hasRecipeActionLabel = normalizedLabels.any {
+            val lowered = it.lowercase()
+            lowered.contains("meal planner") || lowered.contains("saved recipes")
+        }
+        val hasRecipeMetaLabel = normalizedLabels.any {
+            val lowered = it.lowercase()
+            lowered.contains("kcal") || lowered.contains("cal") || lowered.contains("min") || lowered.contains("serving")
+        }
+        val hasTabStripOnlySignal = normalizedLabels.all {
+            val lowered = it.lowercase()
+            lowered.contains("ingredients") || lowered.contains("instructions") || lowered.contains("reviews")
+        }
+        val allowRecoveredByRecipeDetailRule =
+            normalizedLabels.size in 3..12 &&
+                mergedLength in 20..220 &&
+                hasRecipeActionLabel &&
+                hasRecipeMetaLabel &&
+                !hasTabStripOnlySignal
+        if (recoveredLabel.isNullOrBlank() || (!allowRecoveredByGeneralRule && !allowRecoveredByRecipeDetailRule)) {
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][hero] rejected reason='recovered_label_disallowed' descendantCount=${normalizedLabels.size} mergedLength=$mergedLength hasAction=$hasRecipeActionLabel hasMeta=$hasRecipeMetaLabel tabStripOnly=$hasTabStripOnlySignal"
+            )
+            return false
+        }
 
         val rootBounds = resolveRootBounds(node) ?: return false
         if (rootBounds.width() <= 0 || rootBounds.height() <= 0) return false
         val nodeBounds = Rect().also { node.getBoundsInScreen(it) }
         if (nodeBounds.width() <= 0 || nodeBounds.height() <= 0) return false
-        if (A11yNodeUtils.isTopAppBar(node, rootBounds.top, rootBounds.height())) return false
-        if (A11yNodeUtils.isBottomNavigationBar(node, rootBounds.bottom, rootBounds.height())) return false
-        if (nodeBounds.top <= rootBounds.top) return false
+        if (A11yNodeUtils.isTopAppBar(node, rootBounds.top, rootBounds.height())) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT][hero] rejected reason='top_app_bar'")
+            return false
+        }
+        if (A11yNodeUtils.isBottomNavigationBar(node, rootBounds.bottom, rootBounds.height())) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT][hero] rejected reason='bottom_nav'")
+            return false
+        }
+        if (nodeBounds.top <= rootBounds.top) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT][hero] rejected reason='invalid_top'")
+            return false
+        }
 
         val topGap = nodeBounds.top - rootBounds.top
         val maxTopGap = (rootBounds.height() * 0.72f).toInt()
         val minHeight = (rootBounds.height() * 0.08f).toInt()
         val maxHeight = (rootBounds.height() * 0.42f).toInt()
         val nodeHeight = nodeBounds.height()
-        if (topGap > maxTopGap) return false
-        if (nodeHeight !in minHeight..maxHeight) return false
+        if (topGap > maxTopGap) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT][hero] rejected reason='top_gap' topGap=$topGap maxTopGap=$maxTopGap")
+            return false
+        }
+        if (nodeHeight !in minHeight..maxHeight) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT][hero] rejected reason='height' nodeHeight=$nodeHeight range=$minHeight..$maxHeight")
+            return false
+        }
 
         val interactiveDescendants = countClickableOrFocusableDescendants(node, limit = 5)
-        return interactiveDescendants in 1..4
+        val accepted = interactiveDescendants in 1..4
+        if (!accepted) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT][hero] rejected reason='interactive_descendants' count=$interactiveDescendants")
+            return false
+        }
+        Log.i(
+            "A11Y_HELPER",
+            "[SMART_NEXT][hero] accepted label='${recoveredLabel.replace("\n", " ")}' descendantCount=${normalizedLabels.size} mergedLength=$mergedLength"
+        )
+        return true
     }
 
     internal fun isCompositeInteractiveContainer(
