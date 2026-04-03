@@ -88,6 +88,7 @@ class CollectFocusStepClient(FakeA11yClient):
         self.move_focus_smart_calls = []
         self.dump_tree_calls = []
         self.partial_payload = ["  Hello  ", "버튼"]
+        self.partial_payload_sequence = []
         self.merged_payload = "Hello Button"
         self.focus_payload = {
             "text": "  Hello  ",
@@ -99,9 +100,13 @@ class CollectFocusStepClient(FakeA11yClient):
 
     def get_partial_announcements(self, dev=None, wait_seconds: float = 2.0, only_new: bool = True):
         self.partial_calls.append((dev, wait_seconds, only_new))
-        self.last_announcements = list(self.partial_payload)
-        self.last_merged_announcement = " ".join(item.strip() for item in self.partial_payload if item.strip())
-        return list(self.partial_payload)
+        if self.partial_payload_sequence:
+            payload = list(self.partial_payload_sequence.pop(0))
+        else:
+            payload = list(self.partial_payload)
+        self.last_announcements = list(payload)
+        self.last_merged_announcement = " ".join(item.strip() for item in payload if item.strip())
+        return payload
 
     def get_announcements(self, dev=None, wait_seconds: float = 2.0, only_new: bool = True):
         self.merged_calls.append((dev, wait_seconds, only_new))
@@ -1744,7 +1749,7 @@ class SmartMoveFocusTest(unittest.TestCase):
 
 class FocusHelpersTest(unittest.TestCase):
     def test_client_algorithm_version_is_updated(self):
-        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.22")
+        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.33")
 
     def test_extract_visible_label_from_focus_prefers_text(self):
         focus_node = {"text": "  Visible Text  ", "contentDescription": "Desc"}
@@ -1976,6 +1981,78 @@ class FocusHelpersTest(unittest.TestCase):
 
         self.assertEqual(step["merged_announcement"], "기존 안내")
         self.assertEqual(step["normalized_announcement"], "기존 안내")
+
+    def test_collect_focus_step_waits_extra_until_idle_timeout(self):
+        client = CollectFocusStepClient()
+        responses = [["안내 1"], ["안내 2"], []]
+        clock = {"value": 0.0}
+
+        def fake_monotonic():
+            return clock["value"]
+
+        def fake_sleep(seconds):
+            clock["value"] += seconds
+
+        def fake_get_partial_announcements(dev=None, wait_seconds: float = 2.0, only_new: bool = True):
+            del dev, only_new
+            clock["value"] += wait_seconds
+            payload = responses.pop(0) if responses else []
+            client.last_announcements = list(payload)
+            client.last_merged_announcement = " ".join(item.strip() for item in payload if item.strip())
+            return list(payload)
+
+        with patch.object(client, "get_partial_announcements", side_effect=fake_get_partial_announcements), patch(
+            "talkback_lib.time.monotonic", side_effect=fake_monotonic
+        ), patch(
+            "talkback_lib.time.sleep", side_effect=fake_sleep
+        ):
+            step = client.collect_focus_step(
+                dev="SERIAL",
+                move=False,
+                wait_seconds=0.2,
+                announcement_wait_seconds=0.2,
+                announcement_idle_wait_seconds=0.3,
+                announcement_max_extra_wait_seconds=1.0,
+            )
+
+        self.assertEqual(step["partial_announcements"], ["안내 1", "안내 2"])
+        self.assertGreaterEqual(step["announcement_extra_wait_sec"], 0.3)
+
+    def test_collect_focus_step_stability_wait_stops_at_max_extra_wait(self):
+        client = CollectFocusStepClient()
+        responses = [["안내 1"], ["안내 2"], ["안내 3"], ["안내 4"], ["안내 5"], ["안내 6"]]
+        clock = {"value": 0.0}
+
+        def fake_monotonic():
+            return clock["value"]
+
+        def fake_sleep(seconds):
+            clock["value"] += seconds
+
+        def fake_get_partial_announcements(dev=None, wait_seconds: float = 2.0, only_new: bool = True):
+            del dev, only_new
+            clock["value"] += wait_seconds
+            payload = responses.pop(0) if responses else []
+            client.last_announcements = list(payload)
+            client.last_merged_announcement = " ".join(item.strip() for item in payload if item.strip())
+            return list(payload)
+
+        with patch.object(client, "get_partial_announcements", side_effect=fake_get_partial_announcements), patch(
+            "talkback_lib.time.monotonic", side_effect=fake_monotonic
+        ), patch(
+            "talkback_lib.time.sleep", side_effect=fake_sleep
+        ):
+            step = client.collect_focus_step(
+                dev="SERIAL",
+                move=False,
+                wait_seconds=0.2,
+                announcement_wait_seconds=0.2,
+                announcement_idle_wait_seconds=0.5,
+                announcement_max_extra_wait_seconds=0.35,
+            )
+
+        self.assertEqual(step["partial_announcements"], ["안내 1", "안내 2", "안내 3", "안내 4"])
+        self.assertGreaterEqual(step["announcement_extra_wait_sec"], 0.35)
 
 
 if __name__ == "__main__":
