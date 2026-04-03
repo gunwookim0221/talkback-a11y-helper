@@ -17,12 +17,14 @@ class DummyClient:
         self.tap_bounds_center_adb_calls = []
         self.select_calls = []
         self.click_focused_calls = []
+        self.collect_focus_step_calls = []
         self.last_target_action_result = {}
 
     def reset_focus_history(self, _dev):
         self.reset_focus_history_calls += 1
 
     def collect_focus_step(self, **kwargs):
+        self.collect_focus_step_calls.append(kwargs)
         return dict(self.steps.pop(0))
 
     def touch(self, **kwargs):
@@ -653,6 +655,29 @@ def test_open_scenario_pre_navigation_select_and_tap_bounds_center_adb_uses_tap_
     assert client.tap_bounds_center_adb_calls[0]["name"] == "com.test:id/settings_image"
 
 
+def test_run_pre_navigation_steps_transition_fast_path_uses_bounded_waits(monkeypatch):
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "select", "target": ".*Settings.*", "type": "a"}],
+        "pre_navigation_wait_seconds": 1.0,
+    }
+
+    ok = collection_flow._run_pre_navigation_steps(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        transition_fast_path=True,
+    )
+
+    assert ok is True
+    assert client.select_calls[0]["wait_"] == 2
+    assert client.collect_focus_step_calls[0]["wait_seconds"] == 0.25
+    assert client.collect_focus_step_calls[0]["announcement_wait_seconds"] == 0.2
+    assert client.collect_focus_step_calls[0]["allow_get_focus_fallback_dump"] is False
+
+
 def test_open_scenario_new_screen_anchor_only_skips_tab_context(monkeypatch):
     captured = {}
     def _tab_stabilize(**kwargs):
@@ -834,7 +859,59 @@ def test_open_scenario_transition_fast_path_uses_short_waits(monkeypatch):
     assert ok is True
     assert 0.25 in sleep_calls
     assert 0.1 in sleep_calls
-    assert 1.2 in sleep_calls  # anchor stabilization wait remains unchanged
+    assert sleep_calls.count(0.25) >= 2  # tab settle + scenario_start post anchor are both fast-bounded
+
+
+def test_open_scenario_transition_fast_path_passes_fast_flags_to_pre_nav(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    def _pre_nav(**kwargs):
+        captured["transition_fast_path"] = kwargs.get("transition_fast_path")
+        return True
+
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", _pre_nav)
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "settings_entry_example",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "pre_navigation": [{"action": "select", "target": ".*Settings.*", "type": "a"}],
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert captured["transition_fast_path"] is True
+
+
+def test_open_scenario_main_tab_does_not_use_transition_fast_path(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    def _pre_nav(**kwargs):
+        captured["transition_fast_path"] = kwargs.get("transition_fast_path")
+        return True
+
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", _pre_nav)
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "home_main",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "pre_navigation": [{"action": "select", "target": ".*Settings.*", "type": "a"}],
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert captured["transition_fast_path"] is False
 
 
 def test_open_scenario_transition_fast_focus_align_failure_logs_and_proceeds(monkeypatch):

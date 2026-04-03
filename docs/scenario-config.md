@@ -173,6 +173,9 @@ stabilization/traversal 이전에 수행할 선행 이동 절차를 정의합니
 - 의도:
   - 화면 전환 직후 UI 상태 반영 시간을 아주 짧게 보장
   - focus align을 지연시키지 않으면서도 실패율을 줄이는 best-effort 균형값
+  - fast path(`new_screen + pre_navigation + anchor_only`)에서는 tab align/pre_navigation/scenario_start 초기 단계에서
+    announcement wait/get_focus wait를 짧게 사용하고, `get_focus` dump fallback·step dump는 필요 시점 전까지 생략해
+    초기 진입 체감 지연을 줄입니다.
 
 ### `expected_bottom_tab` 등 기존 context 설정
 

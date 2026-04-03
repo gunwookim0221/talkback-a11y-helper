@@ -36,7 +36,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.17"
+CLIENT_ALGORITHM_VERSION = "1.7.19"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -1230,7 +1230,12 @@ class A11yAdbClient:
         print(f"[ERROR] move_focus 실패(direction={direction_token}): {result.get('reason', 'unknown')}")
         return False
 
-    def get_focus(self, dev: Any = None, wait_seconds: float = 2.0) -> dict[str, Any]:
+    def get_focus(
+        self,
+        dev: Any = None,
+        wait_seconds: float = 2.0,
+        allow_fallback_dump: bool = True,
+    ) -> dict[str, Any]:
         started = time.monotonic()
         serial = self._resolve_serial(dev) or "default"
         req_id = str(uuid.uuid4())[:8]
@@ -1290,9 +1295,14 @@ class A11yAdbClient:
             self.last_get_focus_trace["response_received"] = False
             self.last_get_focus_trace["response_success"] = False
             self.last_get_focus_trace["empty_reason"] = "parse_error"
-            self.last_get_focus_trace["fallback_used"] = True
+            self.last_get_focus_trace["fallback_used"] = bool(allow_fallback_dump)
             self.last_get_focus_trace["fallback_reason"] = "parse_error"
             self.last_get_focus_trace["elapsed_before_fallback_sec"] = time.monotonic() - started
+            if not allow_fallback_dump:
+                self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
+                self.last_get_focus_trace["final_payload_source"] = "none"
+                self.last_get_focus_trace["final_focus_reason"] = "parse_error_fast_path_skip_dump"
+                return {}
             self._debug_print(
                 f"[DEBUG][get_focus] fallback_enter serial={serial} req_id={req_id} "
                 f"reason=parse_error error={exc} "
@@ -1410,6 +1420,13 @@ class A11yAdbClient:
                     f"[WARN][get_focus] success=False top_level payload accepted; trying dump fallback "
                     f"serial={serial} req_id={req_id}"
                 )
+                if not allow_fallback_dump:
+                    self.last_get_focus_trace["success_false_top_level_dump_skipped"] = True
+                    self.last_get_focus_trace["dump_skip_reason"] = "fast_path_skip_dump"
+                    self.last_get_focus_trace["final_payload_source"] = payload_candidate_source
+                    self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
+                    self.last_get_focus_trace["final_focus_reason"] = "success_false_top_level_fast_path_skip_dump"
+                    return focus_node
                 self.last_get_focus_trace["success_false_top_level_dump_attempted"] = True
                 fallback_started = time.monotonic()
                 try:
@@ -1477,9 +1494,14 @@ class A11yAdbClient:
             else:
                 empty_reason = "missing_required_fields"
         self.last_get_focus_trace["empty_reason"] = empty_reason
-        self.last_get_focus_trace["fallback_used"] = True
+        self.last_get_focus_trace["fallback_used"] = bool(allow_fallback_dump)
         self.last_get_focus_trace["fallback_reason"] = empty_reason
         self.last_get_focus_trace["elapsed_before_fallback_sec"] = time.monotonic() - started
+        if not allow_fallback_dump:
+            self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
+            self.last_get_focus_trace["final_payload_source"] = "none"
+            self.last_get_focus_trace["final_focus_reason"] = "fast_path_skip_dump"
+            return {}
         self._debug_print(
             f"[DEBUG][get_focus] fallback_enter serial={serial} req_id={req_id} "
             f"reason={empty_reason} elapsed_before_fallback={self.last_get_focus_trace['elapsed_before_fallback_sec']:.3f}s"
@@ -2102,6 +2124,9 @@ class A11yAdbClient:
         direction: str = "next",
         wait_seconds: float = 1.5,
         announcement_wait_seconds: float | None = None,
+        focus_wait_seconds: float | None = None,
+        allow_get_focus_fallback_dump: bool = True,
+        allow_step_dump: bool = True,
     ) -> dict[str, Any]:
         """포커스 1 step 이동/수집 결과를 엑셀 row 친화적인 dict로 반환합니다."""
         step_started = time.monotonic()
@@ -2185,9 +2210,14 @@ class A11yAdbClient:
         saved_last_announcements = list(self.last_announcements)
         saved_last_merged = self.last_merged_announcement
 
+        focus_wait = wait_seconds if focus_wait_seconds is None else focus_wait_seconds
         focus_started = time.monotonic()
         try:
-            focus_node = self.get_focus(dev=dev, wait_seconds=wait_seconds)
+            focus_node = self.get_focus(
+                dev=dev,
+                wait_seconds=focus_wait,
+                allow_fallback_dump=allow_get_focus_fallback_dump,
+            )
         except Exception:
             focus_node = {}
         step["get_focus_elapsed_sec"] = round(time.monotonic() - focus_started, 3)
@@ -2231,6 +2261,11 @@ class A11yAdbClient:
                 step["step_dump_tree_elapsed_sec"] = 0.0
                 step["step_dump_tree_used"] = False
                 step["step_dump_tree_reason"] = "focus_payload_sufficient"
+                step["dump_tree_elapsed_sec"] = step["step_dump_tree_elapsed_sec"]
+            elif not allow_step_dump:
+                step["step_dump_tree_elapsed_sec"] = 0.0
+                step["step_dump_tree_used"] = False
+                step["step_dump_tree_reason"] = "fast_path_skip_step_dump"
                 step["dump_tree_elapsed_sec"] = step["step_dump_tree_elapsed_sec"]
             else:
                 dump_started = time.monotonic()

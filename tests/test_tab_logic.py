@@ -156,6 +156,7 @@ def test_stabilize_tab_selection_transition_uses_fast_focus_align(monkeypatch):
     assert any("[TAB][focus_align_fast] path='touch_immediate'" in line for line in logs)
     assert any("[TAB][focus_align_fast] attempt=1/2" in line for line in logs)
     assert client.select.call_args.kwargs["wait_"] == 1
+    assert client.collect_focus_step.call_count == 0
 
 
 def test_stabilize_tab_selection_transition_fast_focus_align_is_bounded(monkeypatch):
@@ -183,3 +184,17 @@ def test_stabilize_tab_selection_transition_fast_focus_align_is_bounded(monkeypa
     assert result["focus_align"]["fast_mode"] is True
     assert result["focus_align"]["attempt"] == 2
     assert client.select.call_count == 2
+
+
+def test_stabilize_tab_selection_main_tab_keeps_verify_step(monkeypatch):
+    client = FakeTabClient()
+    client.dump_tree.return_value = [{"viewIdResourceName": "tab_id", "boundsInScreen": "0,0,10,10", "text": "홈"}]
+    client.touch_point.return_value = True
+    client.select.return_value = True
+    client.collect_focus_step.return_value = {"visible_label": "ok"}
+    monkeypatch.setattr(tab_logic, "verify_context", lambda *a, **k: {"ok": True})
+
+    result = tab_logic.stabilize_tab_selection(client, "SERIAL", _tab_cfg(), max_retries=1)
+
+    assert result["ok"] is True
+    assert client.collect_focus_step.call_count == 1
