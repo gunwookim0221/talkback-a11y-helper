@@ -91,52 +91,64 @@ def test_detect_step_mismatch_relaxes_low_confidence_when_top_level_payload_suff
     assert "bounds_dependent_focus" not in low
 
 
-def test_should_stop_when_move_failed_twice():
-    prev_fp = ("", "", "")
-    stop, fail_count, same_count, reason, _ = should_stop(
-        row={"move_result": "failed", "visible_label": "a", "merged_announcement": "a"},
-        prev_fingerprint=prev_fp,
-        fail_count=1,
-        same_count=0,
-    )
-
-    assert stop is True
-    assert fail_count == 2
-    assert same_count == 0
-    assert reason == "move_failed_twice"
-
-
-def test_should_stop_when_same_fingerprint_repeated():
-    row = {
-        "move_result": "moved",
-        "visible_label": "a",
-        "merged_announcement": "a",
-        "normalized_visible_label": "label",
-        "focus_view_id": "id",
-        "focus_bounds": "0,0,1,1",
-    }
-    fp = ("label", "id", "0,0,1,1")
-
-    stop, fail_count, same_count, reason, _ = should_stop(
-        row=row,
-        prev_fingerprint=fp,
+def test_should_stop_when_smart_nav_terminal():
+    stop, fail_count, same_count, reason, _, details = should_stop(
+        row={"last_smart_nav_terminal": True, "visible_label": "a", "merged_announcement": "a"},
+        prev_fingerprint=("", "", ""),
         fail_count=0,
-        same_count=2,
+        same_count=0,
+        previous_row=None,
     )
 
     assert stop is True
     assert fail_count == 0
-    assert same_count == 3
-    assert reason == "same_fingerprint_repeated"
+    assert same_count == 0
+    assert reason == "smart_nav_terminal"
+    assert details["terminal"] is True
 
 
-def test_should_stop_when_visible_and_speech_are_empty():
-    stop, _, _, reason, _ = should_stop(
+def test_should_stop_when_repeat_and_no_progress():
+    previous = {
+        "normalized_visible_label": "label",
+        "normalized_announcement": "label",
+        "focus_view_id": "id",
+        "focus_bounds": "0,0,1,1",
+    }
+    row = {
+        "move_result": "failed",
+        "last_smart_nav_result": "failed",
+        "visible_label": "a",
+        "merged_announcement": "a",
+        "normalized_visible_label": "label",
+        "normalized_announcement": "label",
+        "focus_view_id": "id",
+        "focus_bounds": "0,0,1,1",
+    }
+
+    stop, fail_count, same_count, reason, _, details = should_stop(
+        row=row,
+        prev_fingerprint=("label", "id", "0,0,1,1"),
+        fail_count=1,
+        same_count=1,
+        previous_row=previous,
+    )
+
+    assert stop is True
+    assert fail_count == 2
+    assert same_count == 2
+    assert reason == "repeat_no_progress"
+    assert details["no_progress"] is True
+
+
+def test_should_stop_empty_only_is_not_immediate_stop():
+    stop, _, _, reason, _, details = should_stop(
         row={"move_result": "moved", "visible_label": "", "merged_announcement": ""},
         prev_fingerprint=("", "", ""),
         fail_count=0,
         same_count=0,
+        previous_row=None,
     )
 
-    assert stop is True
-    assert reason == "empty_visible_and_speech"
+    assert stop is False
+    assert reason == ""
+    assert details["reason"] == ""
