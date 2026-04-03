@@ -25,6 +25,7 @@ from tb_runner.utils import make_main_fingerprint, make_overlay_entry_fingerprin
 
 _VALID_SCREEN_CONTEXT_MODES = {"bottom_tab", "new_screen"}
 _VALID_STABILIZATION_MODES = {"tab_context", "anchor_only", "anchor_then_context"}
+_STRICT_MAIN_TAB_SCENARIOS = {"home_main", "devices_main", "life_main", "routines_main"}
 
 
 def _resolve_screen_context_mode(tab_cfg: dict[str, Any]) -> str:
@@ -209,8 +210,15 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     main_step_wait_seconds = _get_wait_seconds(tab_cfg, "main_step_wait_seconds", MAIN_STEP_WAIT_SECONDS)
     screen_context_mode = _resolve_screen_context_mode(tab_cfg)
     stabilization_mode = _resolve_stabilization_mode(tab_cfg, screen_context_mode)
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    pre_navigation = tab_cfg.get("pre_navigation", [])
+    has_pre_navigation = isinstance(pre_navigation, list) and bool(pre_navigation)
+    is_transition_scenario = has_pre_navigation and (
+        screen_context_mode == "new_screen" or stabilization_mode == "anchor_only"
+    )
+    is_strict_main_tab_scenario = scenario_id in _STRICT_MAIN_TAB_SCENARIOS
     log(
-        f"[SCENARIO][stabilization] scenario='{tab_cfg.get('scenario_id', '')}' "
+        f"[SCENARIO][stabilization] scenario='{scenario_id}' "
         f"screen_context_mode='{screen_context_mode}' stabilization_mode='{stabilization_mode}'"
     )
 
@@ -227,8 +235,24 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         max_retries=tab_retry_count,
     )
     if not tab_stabilized.get("ok"):
-        log(f"[TAB][select] stabilization failed scenario='{tab_cfg.get('scenario_id', '')}'")
-        return False
+        best = tab_stabilized.get("best", {}) if isinstance(tab_stabilized, dict) else {}
+        best_score = int(best.get("score", 0) or 0) if isinstance(best, dict) else 0
+        selected = bool(tab_stabilized.get("selected"))
+        transition_fallback_ok = (
+            is_transition_scenario
+            and not is_strict_main_tab_scenario
+            and selected
+            and best_score > 0
+        )
+        if transition_fallback_ok:
+            log(
+                f"[TAB][select][warn] scenario='{scenario_id}' "
+                "verify_failed_but_continue='transition_scenario' "
+                f"selected={selected} score={best_score}"
+            )
+        else:
+            log(f"[TAB][select] stabilization failed scenario='{scenario_id}'")
+            return False
 
     time.sleep(main_step_wait_seconds)
     client.reset_focus_history(dev)

@@ -13,7 +13,7 @@ from tb_runner.constants import (
 )
 from tb_runner.logging_utils import log
 
-RUNTIME_CONFIG_VERSION = "1.7.16"
+RUNTIME_CONFIG_VERSION = "1.7.17"
 DEFAULT_RUNTIME_CONFIG_PATH = Path("config/runtime_config.json")
 
 
@@ -126,6 +126,16 @@ def _build_runtime_defaults(raw_defaults: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _fill_missing_values(target: dict[str, Any], defaults: dict[str, Any]) -> None:
+    for key, default_value in defaults.items():
+        if key not in target:
+            target[key] = copy.deepcopy(default_value)
+            continue
+        existing_value = target.get(key)
+        if isinstance(existing_value, dict) and isinstance(default_value, dict):
+            _fill_missing_values(existing_value, default_value)
+
+
 def load_runtime_bundle(base_tab_configs: list[dict[str, Any]], config_path: str | Path | None = None) -> dict[str, Any]:
     resolved_path = Path(config_path) if config_path else DEFAULT_RUNTIME_CONFIG_PATH
     raw_config = _load_json_file(resolved_path)
@@ -155,7 +165,7 @@ def load_runtime_bundle(base_tab_configs: list[dict[str, Any]], config_path: str
     merged_tab_configs: list[dict[str, Any]] = []
     for base_cfg in base_tab_configs:
         merged_cfg = copy.deepcopy(base_cfg)
-        merged_cfg.update(runtime_defaults)
+        _fill_missing_values(merged_cfg, runtime_defaults)
 
         merged_cfg["checkpoint_save_every"] = checkpoint_save_every
 
@@ -172,7 +182,7 @@ def load_runtime_bundle(base_tab_configs: list[dict[str, Any]], config_path: str
 
             for key in _OVERRIDE_KEYS:
                 if key in scenario_override:
-                    base_value = runtime_defaults[key]
+                    base_value = merged_cfg.get(key, runtime_defaults[key])
                     if isinstance(base_value, int):
                         merged_cfg[key] = _to_positive_int(scenario_override.get(key), base_value)
                     elif isinstance(base_value, str):

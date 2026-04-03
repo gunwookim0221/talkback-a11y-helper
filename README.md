@@ -490,6 +490,7 @@ assert client.last_merged_announcement == merged
 - 파일: `config/runtime_config.json`
 - 로더: `tb_runner/runtime_config.py`
 - 기본 원칙: 설정 파일이 없거나 값이 비정상이면 기존 하드코딩 기본값으로 안전하게 fallback
+- merge 우선순위: **base scenario 명시값 유지** → **runtime defaults는 누락 키만 보충** → **scenario override 최종 적용**
 
 외부화된 항목(기능 정책 아님):
 - `global.checkpoint_save_every`
@@ -512,6 +513,7 @@ assert client.last_merged_announcement == merged
 
 `screen_context_mode=new_screen`이면서 `stabilization_mode`를 생략하면 기본적으로 `anchor_only`가 적용됩니다.
 이때 탭 선택 단계의 `selected_bottom_tab` 강제 검증은 자동으로 skip되어, Settings/plugin/detail 같은 화면 전환 시나리오를 config만으로 표현할 수 있습니다.
+또한 transition 시나리오(`pre_navigation` 존재 + `new_screen`/`anchor_only` 의도)에서는 tab candidate 선택은 성공했지만 `selected_bottom_tab` 검증이 실패한 경우 warning 로그를 남기고 pre_navigation을 계속 진행합니다. 단, `home_main`/`devices_main`/`life_main`/`routines_main`은 기존 strict 동작을 유지합니다.
 
 #### 예시 1) 기존 메인 탭 유지형(bottom_tab)
 

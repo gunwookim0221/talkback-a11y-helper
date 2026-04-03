@@ -68,6 +68,7 @@ def stabilize_tab_selection(
 
     last_context: dict[str, Any] = {"ok": True, "type": "none", "expected": ""}
     last_best: dict[str, Any] = {}
+    last_selected = False
     for attempt in range(1, max_retries + 1):
         dump_nodes = client.dump_tree(dev=dev)
         node_list = dump_nodes if isinstance(dump_nodes, list) else []
@@ -181,13 +182,14 @@ def stabilize_tab_selection(
                 "best": best,
                 "candidate_count": len(matches),
             }
+        last_selected = bool(selected)
         if attempt < max_retries:
             log(f"[TAB][select] retry {attempt}/{max_retries} scenario='{scenario_id}'")
 
     return {
         "ok": False,
         "attempt": max_retries,
-        "selected": False,
+        "selected": last_selected,
         "verify_context": last_context,
         "best": last_best,
     }
