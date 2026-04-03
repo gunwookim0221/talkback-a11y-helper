@@ -717,3 +717,57 @@ def test_open_scenario_invalid_modes_fallback_to_legacy(monkeypatch):
 
     assert ok is True
     assert captured["mode"] == "anchor_then_context"
+
+
+def test_open_scenario_transition_allows_tab_verify_failure_and_runs_pre_navigation(monkeypatch):
+    logs = []
+    called = {"pre_nav": 0}
+
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_tab_selection",
+        lambda **kwargs: {"ok": False, "selected": True, "best": {"score": 2}},
+    )
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+
+    def _pre_nav(**kwargs):
+        called["pre_nav"] += 1
+        return True
+
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", _pre_nav)
+
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "settings_entry_example",
+        "screen_context_mode": "new_screen",
+        "pre_navigation": [{"action": "select", "target": ".*Settings.*", "type": "a"}],
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert called["pre_nav"] == 1
+    assert any("[TAB][select][warn]" in line for line in logs)
+
+
+def test_open_scenario_main_tab_keeps_strict_when_tab_verify_fails(monkeypatch):
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_tab_selection",
+        lambda **kwargs: {"ok": False, "selected": True, "best": {"score": 2}},
+    )
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "home_main",
+        "screen_context_mode": "new_screen",
+        "pre_navigation": [{"action": "select", "target": ".*Settings.*", "type": "a"}],
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is False

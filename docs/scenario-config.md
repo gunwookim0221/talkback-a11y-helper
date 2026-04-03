@@ -207,6 +207,8 @@ stabilization/traversal 이전에 수행할 선행 이동 절차를 정의합니
 - 기존 시나리오가 기본값만으로 계속 동작해야 함
 - 기본값은 `bottom_tab + anchor_then_context` 조합으로 해석
 - 기존 `selected_bottom_tab` 경로는 제거가 아니라 보존
+- runtime merge 시 base scenario에 이미 있는 값은 유지하고, runtime defaults는 누락 키만 채운 뒤 scenario override를 마지막에 적용
+- transition 시나리오(`pre_navigation` + `new_screen`/`anchor_only` 의도)에서 tab candidate 선택 성공 후 `selected_bottom_tab` 검증만 실패한 경우 warning 후 진행 가능(단, 메인 탭 시나리오는 strict 유지)
 
 실무 해석:
 - 신규 키 미지정 시 레거시 동작(기존 tab 중심 해석)을 기본 유지
