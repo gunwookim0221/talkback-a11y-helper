@@ -1406,6 +1406,22 @@ class SmartMoveFocusTest(unittest.TestCase):
         self.assertEqual(client.last_get_focus_trace.get("final_payload_source"), "top_level")
         self.assertEqual(client.last_get_focus_trace.get("final_focus_reason"), "success_false_top_level_policy_skip_dump")
 
+    def test_get_focus_accepts_success_false_payload_with_merged_label_and_class(self):
+        client = FakeA11yClient()
+        client.logcat_payload = (
+            'I/A11Y_HELPER: FOCUS_RESULT '
+            '{"success":false,"reqId":"REQID617","mergedLabel":"Map View","className":"android.widget.Button",'
+            '"boundsInScreen":{"l":708,"t":142,"r":810,"b":286}}'
+        )
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID617-xxxx"), patch.object(client, "dump_tree") as dump_mock:
+            result = client.get_focus("SER")
+
+        self.assertEqual(result.get("mergedLabel"), "Map View")
+        self.assertEqual(result.get("className"), "android.widget.Button")
+        self.assertTrue(client.last_get_focus_trace.get("top_level_payload_sufficient"))
+        dump_mock.assert_not_called()
+
     def test_get_focus_success_false_weak_top_level_payload_keeps_dump_fallback(self):
         client = FakeA11yClient()
         client.logcat_payload = (
@@ -1421,6 +1437,42 @@ class SmartMoveFocusTest(unittest.TestCase):
         dump_mock.assert_called_once()
         self.assertFalse(client.last_get_focus_trace.get("success_false_top_level_dump_skipped"))
         self.assertEqual(client.last_get_focus_trace.get("dump_skip_reason"), "")
+
+    def test_get_focus_fast_mode_keeps_bounds_only_top_level_without_dump(self):
+        client = FakeA11yClient()
+        client.logcat_payload = (
+            'I/A11Y_HELPER: FOCUS_RESULT '
+            '{"success":false,"reqId":"REQID617","boundsInScreen":{"l":10,"t":20,"r":40,"b":80}}'
+        )
+        dump_nodes = [{"text": "복구 노드", "accessibilityFocused": True}]
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID617-xxxx"), patch.object(
+            client, "dump_tree", return_value=dump_nodes
+        ) as dump_mock:
+            result = client.get_focus("SER", mode="fast")
+
+        self.assertEqual(result.get("boundsInScreen"), {"l": 10, "t": 20, "r": 40, "b": 80})
+        self.assertTrue(client.last_get_focus_trace.get("success_false_top_level_dump_skipped"))
+        self.assertEqual(client.last_get_focus_trace.get("mode"), "fast")
+        dump_mock.assert_not_called()
+
+    def test_get_focus_normal_mode_uses_dump_for_bounds_only_top_level(self):
+        client = FakeA11yClient()
+        client.logcat_payload = (
+            'I/A11Y_HELPER: FOCUS_RESULT '
+            '{"success":false,"reqId":"REQID617","boundsInScreen":{"l":10,"t":20,"r":40,"b":80}}'
+        )
+        dump_nodes = [{"text": "복구 노드", "accessibilityFocused": True, "viewIdResourceName": "id/recovered"}]
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID617-xxxx"), patch.object(
+            client, "dump_tree", return_value=dump_nodes
+        ) as dump_mock:
+            result = client.get_focus("SER", mode="normal")
+
+        self.assertEqual(result.get("text"), "복구 노드")
+        self.assertEqual(client.last_get_focus_trace.get("mode"), "normal")
+        self.assertTrue(client.last_get_focus_trace.get("success_false_top_level_dump_attempted"))
+        dump_mock.assert_called_once()
 
     def test_get_focus_flags_only_payload_is_meaningful(self):
         client = FakeA11yClient()
@@ -1692,7 +1744,7 @@ class SmartMoveFocusTest(unittest.TestCase):
 
 class FocusHelpersTest(unittest.TestCase):
     def test_client_algorithm_version_is_updated(self):
-        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.20")
+        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.22")
 
     def test_extract_visible_label_from_focus_prefers_text(self):
         focus_node = {"text": "  Visible Text  ", "contentDescription": "Desc"}

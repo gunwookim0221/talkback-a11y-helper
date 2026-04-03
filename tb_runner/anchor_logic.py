@@ -192,6 +192,7 @@ def stabilize_anchor(
                 focus_wait_seconds=0.8 if transition_fast_path else None,
                 allow_get_focus_fallback_dump=not transition_fast_path,
                 allow_step_dump=not transition_fast_path,
+                get_focus_mode="fast" if transition_fast_path else "normal",
             )
             verify_rows.append(verify_row)
             verify_candidate = _extract_candidate_from_step(verify_row)

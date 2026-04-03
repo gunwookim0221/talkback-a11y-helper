@@ -924,6 +924,7 @@ def test_run_pre_navigation_steps_transition_fast_path_uses_bounded_waits(monkey
     assert client.collect_focus_step_calls[0]["wait_seconds"] == 0.25
     assert client.collect_focus_step_calls[0]["announcement_wait_seconds"] == 0.2
     assert client.collect_focus_step_calls[0]["allow_get_focus_fallback_dump"] is False
+    assert client.collect_focus_step_calls[0]["get_focus_mode"] == "fast"
 
 
 def test_open_scenario_new_screen_anchor_only_skips_tab_context(monkeypatch):
