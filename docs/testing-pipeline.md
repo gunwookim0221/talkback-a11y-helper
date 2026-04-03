@@ -47,11 +47,13 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.GET_FOCUS -p com.iotpar
 
 ## Step 5.5 – Anchor Stabilization + Scenario Context Verify (Runner, Python)
 
-- `script_test.py` 러너(`SCRIPT_VERSION=1.7.6`)는 탭/anchor를 분리해 안정화 단계를 순차 수행합니다.
+- `script_test.py` 러너(`SCRIPT_VERSION=1.7.23`)는 탭/anchor를 분리해 안정화 단계를 순차 수행합니다.
 - anchor는 `resource_id_regex`, `text_regex`, `announcement_regex`, `class_name_regex` 조합으로 판정합니다.
 - `allow_resource_id_only=true`면 resourceId 단독 매칭도 허용하며, 복수 후보는 `(top, left)` 오름차순(좌상단 우선)으로 tie-break 합니다.
-- 안정화 성공 조건은 `anchor matched == True` **그리고** `context_verify == True`입니다.
-- `selected` 값은 성공 조건이 아니라 로그/진단용 참고값으로만 사용합니다(`selected_and_verified` 또는 `verified_without_select`).
+- anchor 시작 안정화는 짧은 settle wait을 포함해 2회 연속 검증이 통과되어야 성공으로 처리합니다(실패 시 재시도 1회, 총 최대 2회).
+- 매 검증의 anchor 통과 기준은 `matched == True` 또는 `score >= threshold`입니다.
+- 안정화 성공 조건은 `anchor double-verified == True` **그리고** `context_verify == True`입니다(단, `stabilization_mode=tab_context`는 기존 context 중심 판정을 유지).
+- `selected` 값은 성공 조건이 아니라 로그/진단용 참고값으로만 사용하며, `verified_without_select`도 2회 연속 검증 성공 시에만 허용됩니다.
 - 기본 하단 탭은 Home/Devices/Life/Routines 공통으로 `Location QR code` anchor를 사용하고, `menu_main`만 `SmartThings` anchor를 사용합니다. 정규식은 `(?i)` 기반 대소문자 무시 + 핵심 키워드 포함 매칭(예: `(?i).*(selected|선택됨).*home.*`)을 사용합니다.
 - `context_verify`는 시나리오별 optional 설정이며 미설정(또는 `type: none`) 시 기존과 동일하게 동작합니다.
   - `selected_bottom_tab`: **현재 focus payload가 아닌 dump_tree_nodes 기반** 하단 탭 선택 문맥 검증 (`selected=true` 또는 `Selected|선택됨` + Home/Devices/...). step cache에 dump가 비어 있으면 검증 시점에 lazy dump를 1회 수행해 동일 규칙으로 판정합니다.

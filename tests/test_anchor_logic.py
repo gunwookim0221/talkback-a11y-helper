@@ -40,7 +40,7 @@ def test_stabilize_anchor_selects_best_candidate_resource_id(monkeypatch):
     assert result["selected"] is True
     assert client.dump_tree.call_count == 1
     assert client.select.call_count == 1
-    client.collect_focus_step.assert_called_once()
+    assert client.collect_focus_step.call_count == 2
 
 
 def test_stabilize_anchor_fallback_select_when_best_select_fails(monkeypatch):
@@ -67,7 +67,7 @@ def test_stabilize_anchor_ok_when_verify_match_and_context_ok(monkeypatch):
     result = anchor_logic.stabilize_anchor(client, "SERIAL", _tab_cfg(), phase="scenario_start", max_retries=1)
 
     assert result["ok"] is True
-    verify_context.assert_called_once()
+    assert verify_context.call_count == 2
 
 
 def test_stabilize_anchor_fails_when_match_but_context_fail(monkeypatch):
@@ -107,6 +107,19 @@ def test_stabilize_anchor_verified_without_select_reason(monkeypatch):
     assert result["ok"] is True
     assert result["selected"] is False
     assert result["reason"] == "verified_without_select"
+
+
+def test_stabilize_anchor_fails_when_not_double_verified(monkeypatch):
+    client = FakeAnchorClient()
+    client.dump_tree.return_value = []
+    client.select.return_value = False
+    client.collect_focus_step.side_effect = [_verify_step(), _verify_step(view_id="different", label="different")]
+    monkeypatch.setattr(anchor_logic, "verify_context", lambda *a, **k: {"ok": True})
+
+    result = anchor_logic.stabilize_anchor(client, "SERIAL", _tab_cfg(), phase="scenario_start", max_retries=1)
+
+    assert result["ok"] is False
+    assert result["reason"] == "low_confidence_anchor_start"
 
 
 def test_stabilize_anchor_anchor_only_ignores_context_failure(monkeypatch):

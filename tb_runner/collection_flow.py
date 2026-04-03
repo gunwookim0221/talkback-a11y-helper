@@ -586,7 +586,11 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         verify_reads=1 if is_transition_entry_fast_path and not is_strict_main_tab_scenario else 2,
     )
     if not stabilize_result.get("ok"):
-        log(f"[ANCHOR][scenario_start] stabilization failed tab='{tab_cfg.get('tab_name', '')}'")
+        log(
+            f"[ANCHOR][scenario_start] stabilization failed tab='{tab_cfg.get('tab_name', '')}' "
+            f"scenario='{tab_cfg.get('scenario_id', '')}' "
+            f"low_confidence=true reason='{stabilize_result.get('reason', 'not_stable')}'"
+        )
         return False
     if is_transition_entry_fast_path and not is_strict_main_tab_scenario:
         time.sleep(min(main_step_wait_seconds, _TRANSITION_FAST_STEP_WAIT_SECONDS))

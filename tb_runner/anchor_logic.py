@@ -1,4 +1,5 @@
 import re
+import time
 from typing import Any
 
 from talkback_lib import A11yAdbClient
@@ -8,6 +9,8 @@ from tb_runner.logging_utils import log
 from tb_runner.utils import _safe_regex_search, parse_bounds_str
 
 _VALID_STABILIZATION_MODES = {"tab_context", "anchor_only", "anchor_then_context"}
+_ANCHOR_VERIFY_SETTLE_SECONDS = 0.12
+_ANCHOR_VERIFY_SCORE_THRESHOLD = 100
 
 
 def _extract_candidate_from_node(node: dict[str, Any], index: int = -1) -> dict[str, Any]:
@@ -124,6 +127,58 @@ def choose_best_anchor_candidate(matches: list[dict[str, Any]], tie_breaker: str
         )[0]
     return sorted(matches, key=lambda item: -int(item.get("score", 0)))[0]
 
+
+def _is_anchor_verify_match(verify_match: dict[str, Any], anchor_cfg: dict[str, Any]) -> bool:
+    score_threshold = int(anchor_cfg.get("score_threshold", _ANCHOR_VERIFY_SCORE_THRESHOLD) or _ANCHOR_VERIFY_SCORE_THRESHOLD)
+    return bool(verify_match.get("matched")) or int(verify_match.get("score", 0) or 0) >= score_threshold
+
+
+def stabilize_anchor_focus(
+    client: A11yAdbClient,
+    dev: str,
+    anchor_cfg: dict[str, Any],
+    *,
+    attempt: int,
+    max_retries: int,
+    transition_fast_path: bool,
+) -> dict[str, Any]:
+    verify_rows: list[dict[str, Any]] = []
+    verify_matches: list[dict[str, Any]] = []
+    verify_flags: list[bool] = []
+    for verify_idx in range(2):
+        if verify_idx > 0:
+            time.sleep(_ANCHOR_VERIFY_SETTLE_SECONDS)
+        verify_row = client.collect_focus_step(
+            dev=dev,
+            step_index=-(attempt * 10 + verify_idx),
+            move=False,
+            wait_seconds=min(MAIN_STEP_WAIT_SECONDS, 0.25) if transition_fast_path else MAIN_STEP_WAIT_SECONDS,
+            announcement_wait_seconds=min(MAIN_ANNOUNCEMENT_WAIT_SECONDS, 0.2)
+            if transition_fast_path
+            else MAIN_ANNOUNCEMENT_WAIT_SECONDS,
+            focus_wait_seconds=0.8 if transition_fast_path else None,
+            allow_get_focus_fallback_dump=not transition_fast_path,
+            allow_step_dump=not transition_fast_path,
+            get_focus_mode="fast" if transition_fast_path else "normal",
+        )
+        verify_rows.append(verify_row)
+        verify_match = match_anchor(_extract_candidate_from_step(verify_row), anchor_cfg)
+        verify_matches.append(verify_match)
+        verify_flags.append(_is_anchor_verify_match(verify_match, anchor_cfg))
+
+    verify1_matched = bool(verify_flags[0]) if verify_flags else False
+    verify2_matched = bool(verify_flags[1]) if len(verify_flags) > 1 else False
+    stable = verify1_matched and verify2_matched
+    reason = "double_verified" if stable and attempt == 1 else "retry_success" if stable else "not_stable"
+    return {
+        "stable": stable,
+        "reason": reason,
+        "verify_rows": verify_rows,
+        "verify_matches": verify_matches,
+        "verify1_matched": verify1_matched,
+        "verify2_matched": verify2_matched,
+    }
+
 def stabilize_anchor(
     client: A11yAdbClient,
     dev: str,
@@ -132,6 +187,7 @@ def stabilize_anchor(
     max_retries: int = 2,
     verify_reads: int = 2,
 ) -> dict[str, Any]:
+    _ = verify_reads  # backward-compatible signature; anchor stabilization uses fixed double verification.
     anchor_cfg = _resolve_anchor_cfg(tab_cfg)
     tie_breaker = str(anchor_cfg.get("tie_breaker", "top_left") or "top_left")
     stabilization_mode = str(tab_cfg.get("stabilization_mode", "anchor_then_context") or "anchor_then_context").strip().lower()
@@ -151,6 +207,7 @@ def stabilize_anchor(
     )
 
     for attempt in range(1, max_retries + 1):
+        log(f"[ANCHOR][stabilize] attempt={attempt}/{max_retries} scenario='{scenario_id}'")
         dump_nodes = client.dump_tree(dev=dev)
         candidates = [
             _extract_candidate_from_node(node, index=i)
@@ -160,8 +217,10 @@ def stabilize_anchor(
         best = choose_best_anchor_candidate(matches, tie_breaker=tie_breaker)
 
         selected = False
+        select_attempted = False
         if best and best["candidate"].get("resource_id"):
             resource_pattern = f"^{re.escape(str(best['candidate']['resource_id']))}$"
+            select_attempted = True
             selected = client.select(
                 dev=dev,
                 name=resource_pattern,
@@ -170,6 +229,7 @@ def stabilize_anchor(
             )
 
         if not selected:
+            select_attempted = True
             selected = client.select(
                 dev=dev,
                 name=str(tab_cfg.get("anchor_name", "") or ""),
@@ -180,23 +240,19 @@ def stabilize_anchor(
         verify_match: dict[str, Any] | None = None
         context_result: dict[str, Any] = {"ok": True, "type": "none", "expected": ""}
         verify_rows: list[dict[str, Any]] = []
-        for verify_idx in range(max(1, verify_reads)):
-            verify_row = client.collect_focus_step(
-                dev=dev,
-                step_index=-(attempt * 10 + verify_idx),
-                move=False,
-                wait_seconds=min(MAIN_STEP_WAIT_SECONDS, 0.25) if transition_fast_path else MAIN_STEP_WAIT_SECONDS,
-                announcement_wait_seconds=min(MAIN_ANNOUNCEMENT_WAIT_SECONDS, 0.2)
-                if transition_fast_path
-                else MAIN_ANNOUNCEMENT_WAIT_SECONDS,
-                focus_wait_seconds=0.8 if transition_fast_path else None,
-                allow_get_focus_fallback_dump=not transition_fast_path,
-                allow_step_dump=not transition_fast_path,
-                get_focus_mode="fast" if transition_fast_path else "normal",
-            )
-            verify_rows.append(verify_row)
-            verify_candidate = _extract_candidate_from_step(verify_row)
-            verify_match = match_anchor(verify_candidate, anchor_cfg)
+        verify_results = stabilize_anchor_focus(
+            client=client,
+            dev=dev,
+            anchor_cfg=anchor_cfg,
+            attempt=attempt,
+            max_retries=max_retries,
+            transition_fast_path=transition_fast_path,
+        )
+        verify_rows = list(verify_results.get("verify_rows", []))
+        verify_matches = list(verify_results.get("verify_matches", []))
+        if verify_matches:
+            verify_match = verify_matches[-1]
+        for verify_row in verify_rows:
             if stabilization_mode == "anchor_only":
                 context_result = {
                     "ok": True,
@@ -209,7 +265,7 @@ def stabilize_anchor(
                 log("[CONTEXT] skipped reason='anchor_only_mode'")
             else:
                 context_result = verify_context(verify_row, tab_cfg, client=client, dev=dev)
-            if verify_match["matched"]:
+            if not context_result.get("ok"):
                 break
 
         last_verify = verify_match or {}
@@ -248,16 +304,35 @@ def stabilize_anchor(
             f"ok={bool(last_context.get('ok'))}"
         )
         verify_matched = bool(last_verify.get("matched"))
+        verify_stable = bool(verify_results.get("stable"))
+        verify1_matched = bool(verify_results.get("verify1_matched"))
+        verify2_matched = bool(verify_results.get("verify2_matched"))
         context_ok = bool(last_context.get("ok"))
         if stabilization_mode == "anchor_only":
-            success = verify_matched
+            success = verify_stable
         elif stabilization_mode == "tab_context":
             success = context_ok
         else:
-            success = verify_matched and context_ok
+            success = verify_stable and context_ok
+
+        if select_attempted and not selected and not verify_stable:
+            stabilize_reason = "select_failed"
+        else:
+            stabilize_reason = str(verify_results.get("reason", "not_stable") or "not_stable")
+        log(
+            f"[ANCHOR][stabilize] attempt={attempt}/{max_retries} "
+            f"scenario='{scenario_id}' "
+            f"select_attempted={str(select_attempted).lower()} "
+            f"verify1_matched={str(verify1_matched).lower()} "
+            f"verify2_matched={str(verify2_matched).lower()} "
+            f"stable={str(verify_stable).lower()} "
+            f"reason='{stabilize_reason}'"
+        )
 
         if not verify_matched:
             log(f"[ANCHOR][{phase}] anchor mismatch scenario='{scenario_id}'")
+        if not verify_stable and stabilization_mode != "tab_context":
+            log(f"[ANCHOR][{phase}] anchor not stable scenario='{scenario_id}'")
         elif not context_ok:
             log(f"[ANCHOR][{phase}] context mismatch scenario='{scenario_id}'")
             log(f"[CONTEXT] verification failed scenario='{scenario_id}'")
@@ -265,10 +340,15 @@ def stabilize_anchor(
             log(f"[CONTEXT] verification passed scenario='{scenario_id}'")
 
         if success:
-            success_reason = "selected_and_verified" if selected else "verified_without_select"
+            if stabilization_mode == "tab_context":
+                success_reason = "context_verified"
+            elif selected:
+                success_reason = "selected_and_verified"
+            else:
+                success_reason = "verified_without_select"
             log(
                 f"[ANCHOR][{phase}] success scenario='{scenario_id}' selected={selected} "
-                f"matched={verify_matched} context_ok={context_ok} reason='{success_reason}'"
+                f"matched={verify_matched} stable={verify_stable} context_ok={context_ok} reason='{success_reason}'"
             )
             return {
                 "ok": True,
@@ -286,6 +366,7 @@ def stabilize_anchor(
         "ok": False,
         "attempt": max_retries,
         "selected": False,
+        "reason": "low_confidence_anchor_start",
         "verify": last_verify,
         "context": last_context,
         "candidate_count": 0,
