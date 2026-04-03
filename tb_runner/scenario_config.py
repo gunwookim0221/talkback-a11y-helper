@@ -177,7 +177,7 @@ TAB_CONFIGS = [
         "stabilization_mode": "anchor_only",
         "pre_navigation": [
             {
-                "action": "tap_bounds_center_adb",
+                "action": "select_and_click_focused_or_tap_bounds_center_adb",
                 "target": "com.samsung.android.oneconnect:id/setting_button_layout",
                 "type": "r",
             }

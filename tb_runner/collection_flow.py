@@ -83,6 +83,65 @@ def _is_transition_entry_fast_path(tab_cfg: dict[str, Any]) -> bool:
     return has_pre_navigation and screen_context_mode == "new_screen" and stabilization_mode == "anchor_only"
 
 
+def _is_focus_target_match(focus_node: Any, target: str, type_: str) -> bool:
+    if not isinstance(focus_node, dict):
+        return False
+
+    value_by_type = {
+        "r": str(focus_node.get("viewIdResourceName", "") or focus_node.get("resourceId", "") or "").strip(),
+        "t": str(focus_node.get("text", "") or "").strip(),
+        "b": str(focus_node.get("contentDescription", "") or "").strip(),
+        "a": " ".join(
+            [
+                str(focus_node.get("viewIdResourceName", "") or focus_node.get("resourceId", "") or "").strip(),
+                str(focus_node.get("text", "") or "").strip(),
+                str(focus_node.get("contentDescription", "") or "").strip(),
+            ]
+        ).strip(),
+    }
+    check_type = str(type_ or "a").strip().lower()
+    match_value = value_by_type.get(check_type, value_by_type["a"])
+    if not match_value:
+        return False
+
+    try:
+        return re.search(target, match_value, re.IGNORECASE) is not None
+    except re.error:
+        return target in match_value
+
+
+def _confirm_focus_target(
+    client: A11yAdbClient,
+    dev: str,
+    target: str,
+    type_: str,
+    *,
+    transition_fast_path: bool,
+) -> tuple[bool, str]:
+    max_poll_count = 2 if transition_fast_path else 3
+    poll_sleep_seconds = 0.1
+    focus_wait_seconds = 0.35 if transition_fast_path else 0.6
+    for poll_idx in range(max_poll_count):
+        last_result = getattr(client, "last_target_action_result", None) or {}
+        target_snapshot = last_result.get("target", {}) if isinstance(last_result, dict) else {}
+        if isinstance(target_snapshot, dict):
+            focused_flag = bool(target_snapshot.get("accessibilityFocused")) or bool(target_snapshot.get("focused"))
+            if focused_flag and _is_focus_target_match(target_snapshot, target=target, type_=type_):
+                return True, "last_target_action_result"
+        get_focus_fn = getattr(client, "get_focus", None)
+        if callable(get_focus_fn):
+            focus_node = get_focus_fn(
+                dev=dev,
+                wait_seconds=focus_wait_seconds,
+                allow_fallback_dump=not transition_fast_path,
+            )
+            if _is_focus_target_match(focus_node, target=target, type_=type_):
+                return True, "get_focus"
+        if poll_idx < max_poll_count - 1:
+            time.sleep(poll_sleep_seconds)
+    return False, "unmatched"
+
+
 def _run_pre_navigation_steps(
     client: A11yAdbClient,
     dev: str,
@@ -120,6 +179,7 @@ def _run_pre_navigation_steps(
             "select_and_click_focused",
             "tap_bounds_center_adb",
             "select_and_tap_bounds_center_adb",
+            "select_and_click_focused_or_tap_bounds_center_adb",
         }:
             log(f"[SCENARIO][pre_nav] failed reason='unsupported_action' step={index} action='{action}'")
             return False
@@ -175,6 +235,34 @@ def _run_pre_navigation_steps(
                             f"tap_target='{tap_target}' tap_type='{tap_type}' bounds='{bounds}' center='{center_repr}' "
                             f"lazy_dump_used={str(lazy_dump_used).lower()}"
                         )
+            elif action == "select_and_click_focused_or_tap_bounds_center_adb":
+                tap_target = str(step.get("tap_target", target) or target).strip()
+                tap_type = str(step.get("tap_type", type_) or type_).strip()
+                select_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
+                focus_ok, focus_source = _confirm_focus_target(
+                    client=client,
+                    dev=dev,
+                    target=target,
+                    type_=type_,
+                    transition_fast_path=transition_fast_path,
+                )
+                log(
+                    f"[SCENARIO][pre_nav][focus_check] step={index} target='{target}' type='{type_}' "
+                    f"select_ok={str(select_ok).lower()} matched={str(focus_ok).lower()} source='{focus_source}'"
+                )
+                if select_ok and focus_ok:
+                    step_ok = bool(client.click_focused(dev=dev, wait_=action_wait_seconds))
+                    log(
+                        f"[SCENARIO][pre_nav] enter_by='click_focused' step={index} "
+                        f"target='{target}' type='{type_}'"
+                    )
+                else:
+                    log(
+                        f"[SCENARIO][pre_nav] focus_first_failed fallback='tap_bounds_center_adb' step={index} "
+                        f"target='{target}' tap_target='{tap_target}'"
+                    )
+                    dump_nodes = step.get("dump_tree_nodes", [])
+                    step_ok = bool(client.tap_bounds_center_adb(dev=dev, name=tap_target, type_=tap_type, dump_nodes=dump_nodes))
             else:
                 select_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
                 focus_confirmed = False

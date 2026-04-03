@@ -18,6 +18,7 @@ class DummyClient:
         self.select_calls = []
         self.click_focused_calls = []
         self.collect_focus_step_calls = []
+        self.get_focus_calls = []
         self.last_target_action_result = {}
 
     def reset_focus_history(self, _dev):
@@ -50,6 +51,10 @@ class DummyClient:
     def click_focused(self, **kwargs):
         self.click_focused_calls.append(kwargs)
         return True
+
+    def get_focus(self, **kwargs):
+        self.get_focus_calls.append(kwargs)
+        return {}
 
 
 def _base_tab_cfg(max_steps=1):
@@ -653,6 +658,119 @@ def test_open_scenario_pre_navigation_select_and_tap_bounds_center_adb_uses_tap_
     assert len(client.select_calls) == 1
     assert len(client.tap_bounds_center_adb_calls) == 1
     assert client.tap_bounds_center_adb_calls[0]["name"] == "com.test:id/settings_image"
+
+
+def test_open_scenario_pre_navigation_focus_first_action_enters_by_click_focused(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+
+    client = DummyClient([_anchor_row()])
+
+    def _select(**kwargs):
+        client.last_target_action_result = {
+            "reason": "moved_to_target",
+            "target": {
+                "accessibilityFocused": True,
+                "viewIdResourceName": "com.test:id/setting_button_layout",
+            },
+        }
+        return True
+
+    client.select = _select
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [
+            {
+                "action": "select_and_click_focused_or_tap_bounds_center_adb",
+                "target": "com.test:id/setting_button_layout",
+                "type": "r",
+                "tap_target": "com.test:id/settings_image",
+                "tap_type": "r",
+            }
+        ],
+        "pre_navigation_retry_count": 1,
+        "pre_navigation_wait_seconds": 0.1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert len(client.click_focused_calls) == 1
+    assert len(client.tap_bounds_center_adb_calls) == 0
+    assert any("[SCENARIO][pre_nav][focus_check]" in line and "matched=true" in line for line in logs)
+    assert any("enter_by='click_focused'" in line for line in logs)
+
+
+def test_open_scenario_pre_navigation_focus_first_action_fallbacks_to_tap(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+
+    client = DummyClient([_anchor_row()])
+
+    def _select(**kwargs):
+        client.last_target_action_result = {"reason": "target_not_found", "target": {"accessibilityFocused": False}}
+        return False
+
+    client.select = _select
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [
+            {
+                "action": "select_and_click_focused_or_tap_bounds_center_adb",
+                "target": "com.test:id/setting_button_layout",
+                "type": "r",
+                "tap_target": "com.test:id/settings_image",
+                "tap_type": "r",
+            }
+        ],
+        "pre_navigation_retry_count": 1,
+        "pre_navigation_wait_seconds": 0.1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert len(client.click_focused_calls) == 0
+    assert len(client.tap_bounds_center_adb_calls) == 1
+    assert any("focus_first_failed fallback='tap_bounds_center_adb'" in line for line in logs)
+
+
+def test_open_scenario_pre_navigation_focus_first_action_uses_get_focus_match(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+
+    client = DummyClient([_anchor_row()])
+    client.select = lambda **kwargs: True
+    client.get_focus = lambda **kwargs: {
+        "viewIdResourceName": "com.test:id/setting_button_layout",
+        "accessibilityFocused": True,
+    }
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [
+            {
+                "action": "select_and_click_focused_or_tap_bounds_center_adb",
+                "target": "com.test:id/setting_button_layout",
+                "type": "r",
+            }
+        ],
+        "pre_navigation_retry_count": 1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert len(client.click_focused_calls) == 1
+    assert any("source='get_focus'" in line for line in logs)
 
 
 def test_run_pre_navigation_steps_transition_fast_path_uses_bounded_waits(monkeypatch):
