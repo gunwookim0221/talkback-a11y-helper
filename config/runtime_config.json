@@ -28,6 +28,8 @@
   },
   "scenarios": {
     "devices_main": {
+      "enabled": true,
+      "max_steps": 10,
       "scenario_type": "content",
       "stop_policy": {
         "stop_on_global_nav_entry": true
@@ -46,7 +48,7 @@
       }
     },
     "global_nav_main": {
-      "enabled": true,
+      "enabled": false,
       "scenario_type": "global_nav",
       "max_steps": 10,
       "stop_policy": {
