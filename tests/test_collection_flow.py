@@ -19,6 +19,8 @@ class DummyClient:
         self.click_focused_calls = []
         self.collect_focus_step_calls = []
         self.get_focus_calls = []
+        self.dump_tree_calls = []
+        self.dump_tree_sequence = []
         self.last_target_action_result = {}
 
     def reset_focus_history(self, _dev):
@@ -55,6 +57,12 @@ class DummyClient:
     def get_focus(self, **kwargs):
         self.get_focus_calls.append(kwargs)
         return {}
+
+    def dump_tree(self, **kwargs):
+        self.dump_tree_calls.append(kwargs)
+        if self.dump_tree_sequence:
+            return self.dump_tree_sequence.pop(0)
+        return []
 
 
 def _base_tab_cfg(max_steps=1):
@@ -771,6 +779,128 @@ def test_open_scenario_pre_navigation_focus_first_action_uses_get_focus_match(mo
     assert ok is True
     assert len(client.click_focused_calls) == 1
     assert any("source='get_focus'" in line for line in logs)
+
+
+def test_open_scenario_pre_navigation_focus_first_confirms_by_anchor_match(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+
+    client = DummyClient([_anchor_row()])
+    client.select = lambda **kwargs: True
+    client.get_focus = lambda **kwargs: {"viewIdResourceName": "com.test:id/setting_button_layout", "accessibilityFocused": True}
+    client.dump_tree_sequence = [
+        [{"text": "Settings button", "viewIdResourceName": "com.test:id/setting_button_layout"}],
+        [{"text": "Navigate up", "contentDescription": "Navigate up"}],
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "anchor_name": "(?i).*navigate up.*",
+        "anchor_type": "a",
+        "pre_navigation": [{"action": "select_and_click_focused_or_tap_bounds_center_adb", "target": "com.test:id/setting_button_layout", "type": "r"}],
+        "pre_navigation_retry_count": 1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert len(client.click_focused_calls) == 1
+    assert len(client.tap_bounds_center_adb_calls) == 0
+    assert any("signal='anchor_match' success=true" in line for line in logs)
+
+
+def test_open_scenario_pre_navigation_focus_first_confirms_by_screen_text(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+
+    client = DummyClient([_anchor_row()])
+    client.select = lambda **kwargs: True
+    client.get_focus = lambda **kwargs: {"viewIdResourceName": "com.test:id/setting_button_layout", "accessibilityFocused": True}
+    client.dump_tree_sequence = [
+        [{"text": "Settings button", "viewIdResourceName": "com.test:id/setting_button_layout"}],
+        [{"text": "SmartThings settings", "contentDescription": ""}],
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "context_verify": {"type": "screen_text", "text_regex": "(?i).*smartthings settings.*"},
+        "pre_navigation": [{"action": "select_and_click_focused_or_tap_bounds_center_adb", "target": "com.test:id/setting_button_layout", "type": "r"}],
+        "pre_navigation_retry_count": 1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert len(client.click_focused_calls) == 1
+    assert len(client.tap_bounds_center_adb_calls) == 0
+    assert any("signal='screen_text' success=true" in line for line in logs)
+
+
+def test_open_scenario_pre_navigation_focus_first_fallbacks_only_when_no_confirm_signal(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+
+    client = DummyClient([_anchor_row()])
+    client.select = lambda **kwargs: True
+    client.get_focus = lambda **kwargs: {"viewIdResourceName": "com.test:id/setting_button_layout", "accessibilityFocused": True}
+    client.dump_tree_sequence = [
+        [{"text": "Settings button", "viewIdResourceName": "com.test:id/setting_button_layout"}],
+        [{"text": "Settings button", "viewIdResourceName": "com.test:id/setting_button_layout"}],
+        [{"text": "Settings button", "viewIdResourceName": "com.test:id/setting_button_layout"}],
+        [{"text": "Settings button", "viewIdResourceName": "com.test:id/setting_button_layout"}],
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "anchor_name": "(?i).*navigate up.*",
+        "anchor_type": "a",
+        "context_verify": {"type": "screen_text", "text_regex": "(?i).*smartthings settings.*"},
+        "pre_navigation": [{"action": "select_and_click_focused_or_tap_bounds_center_adb", "target": "com.test:id/setting_button_layout", "type": "r"}],
+        "pre_navigation_retry_count": 1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert len(client.click_focused_calls) == 1
+    assert len(client.tap_bounds_center_adb_calls) == 1
+    assert any("signal='none' success=false" in line for line in logs)
+    assert any("reason='transition_not_confirmed:none'" in line for line in logs)
+
+
+def test_open_scenario_pre_navigation_focus_first_confirm_reuses_scenario_metadata(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+
+    client = DummyClient([_anchor_row()])
+    client.select = lambda **kwargs: True
+    client.get_focus = lambda **kwargs: {"viewIdResourceName": "com.test:id/setting_button_layout", "accessibilityFocused": True}
+    client.dump_tree_sequence = [
+        [{"text": "Settings button", "viewIdResourceName": "com.test:id/setting_button_layout"}],
+        [{"text": "Back", "viewIdResourceName": "com.test:id/nav_up_button"}],
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "anchor": {"resource_id_regex": "com\\.test:id/nav_up_button"},
+        "context_verify": {"type": "screen_text", "text_regex": "(?i).*smartthings settings.*"},
+        "pre_navigation": [{"action": "select_and_click_focused_or_tap_bounds_center_adb", "target": "com.test:id/setting_button_layout", "type": "r"}],
+        "pre_navigation_retry_count": 1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert len(client.tap_bounds_center_adb_calls) == 0
+    assert any("signal='anchor_match' success=true" in line for line in logs)
 
 
 def test_run_pre_navigation_steps_transition_fast_path_uses_bounded_waits(monkeypatch):

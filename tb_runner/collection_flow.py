@@ -21,7 +21,7 @@ from tb_runner.overlay_logic import (
 )
 from tb_runner.perf_stats import ScenarioPerfStats, format_perf_summary, save_excel_with_perf
 from tb_runner.tab_logic import stabilize_tab_selection
-from tb_runner.utils import make_main_fingerprint, make_overlay_entry_fingerprint
+from tb_runner.utils import _safe_regex_search, make_main_fingerprint, make_overlay_entry_fingerprint
 
 _VALID_SCREEN_CONTEXT_MODES = {"bottom_tab", "new_screen"}
 _VALID_STABILIZATION_MODES = {"tab_context", "anchor_only", "anchor_then_context"}
@@ -30,6 +30,145 @@ _TRANSITION_FAST_STEP_WAIT_SECONDS = 0.25
 _TRANSITION_FAST_ANNOUNCEMENT_WAIT_SECONDS = 0.2
 _TRANSITION_FAST_FOCUS_WAIT_SECONDS = 0.8
 _TRANSITION_FAST_ACTION_WAIT_SECONDS = 2
+_PRE_NAV_CONFIRM_POLL_SLEEP_SECONDS = 0.12
+
+
+def _make_dump_signature(nodes: Any) -> str:
+    if not isinstance(nodes, list):
+        return ""
+    signature_parts: list[str] = []
+    for node in nodes[:10]:
+        if not isinstance(node, dict):
+            continue
+        signature_parts.append(
+            "|".join(
+                [
+                    str(node.get("viewIdResourceName", "") or "").strip(),
+                    str(node.get("text", "") or "").strip(),
+                    str(node.get("contentDescription", "") or "").strip(),
+                ]
+            )
+        )
+    return "||".join(signature_parts)
+
+
+def _extract_window_focus_line(client: A11yAdbClient, dev: str) -> str:
+    run_fn = getattr(client, "_run", None)
+    if not callable(run_fn):
+        return ""
+    try:
+        output = run_fn(["shell", "dumpsys", "window", "windows"], dev=dev)
+    except Exception:
+        return ""
+    for line in str(output or "").splitlines():
+        if "mCurrentFocus" in line or "mFocusedApp" in line:
+            return line.strip()
+    return ""
+
+
+def _build_transition_patterns(tab_cfg: dict[str, Any]) -> dict[str, str]:
+    anchor_cfg = dict(tab_cfg.get("anchor", {}) or {})
+    context_cfg = dict(tab_cfg.get("context_verify", {}) or {})
+    anchor_text_pattern = str(anchor_cfg.get("text_regex", "") or "").strip()
+    anchor_resource_pattern = str(anchor_cfg.get("resource_id_regex", "") or "").strip()
+    if not anchor_text_pattern and not anchor_resource_pattern:
+        anchor_name = str(tab_cfg.get("anchor_name", "") or "").strip()
+        anchor_type = str(tab_cfg.get("anchor_type", "a") or "a").strip().lower()
+        if anchor_name and anchor_type in {"t", "b", "a"}:
+            anchor_text_pattern = anchor_name
+        if anchor_name and anchor_type in {"r", "a"}:
+            anchor_resource_pattern = anchor_name
+    return {
+        "anchor_text": anchor_text_pattern,
+        "anchor_resource": anchor_resource_pattern,
+        "context_text": str(context_cfg.get("text_regex", "") or "").strip(),
+    }
+
+
+def _node_matches_transition_pattern(node: Any, patterns: dict[str, str]) -> tuple[bool, str]:
+    if not isinstance(node, dict):
+        return False, ""
+    text_blob = " ".join(
+        [
+            str(node.get("text", "") or "").strip(),
+            str(node.get("contentDescription", "") or "").strip(),
+            str(node.get("talkbackLabel", "") or "").strip(),
+        ]
+    ).strip()
+    resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
+    if patterns.get("anchor_text") and _safe_regex_search(patterns["anchor_text"], text_blob):
+        return True, "anchor_match"
+    if patterns.get("anchor_resource") and _safe_regex_search(patterns["anchor_resource"], resource_id):
+        return True, "anchor_match"
+    if patterns.get("context_text") and _safe_regex_search(patterns["context_text"], text_blob):
+        return True, "screen_text"
+    return False, ""
+
+
+def _confirm_click_focused_transition(
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict[str, Any],
+    *,
+    transition_fast_path: bool,
+) -> tuple[bool, str]:
+    max_poll_count = 2 if transition_fast_path else 3
+    focus_wait_seconds = 0.28 if transition_fast_path else 0.45
+    patterns = _build_transition_patterns(tab_cfg)
+    has_expected_signal = any(bool(patterns.get(key)) for key in ("anchor_text", "anchor_resource", "context_text"))
+    if not has_expected_signal:
+        return True, "no_expected_signal_configured"
+    baseline_nodes: list[dict[str, Any]] = []
+    dump_tree_fn = getattr(client, "dump_tree", None)
+    if callable(dump_tree_fn):
+        try:
+            baseline_nodes = dump_tree_fn(dev=dev)
+        except Exception:
+            baseline_nodes = []
+    baseline_signature = _make_dump_signature(baseline_nodes)
+    baseline_window_focus = _extract_window_focus_line(client, dev)
+    saw_dump_change = False
+    saw_focus_change = False
+
+    for poll_idx in range(max_poll_count):
+        current_nodes: list[dict[str, Any]] = []
+        if callable(dump_tree_fn):
+            try:
+                current_nodes = dump_tree_fn(dev=dev)
+            except Exception:
+                current_nodes = []
+        for node in current_nodes:
+            matched, signal = _node_matches_transition_pattern(node, patterns)
+            if matched:
+                return True, signal
+
+        current_signature = _make_dump_signature(current_nodes)
+        if current_signature and baseline_signature and current_signature != baseline_signature:
+            saw_dump_change = True
+
+        get_focus_fn = getattr(client, "get_focus", None)
+        if callable(get_focus_fn):
+            focus_node = get_focus_fn(
+                dev=dev,
+                wait_seconds=focus_wait_seconds,
+                allow_fallback_dump=not transition_fast_path,
+            )
+            focus_matched, _ = _node_matches_transition_pattern(focus_node, patterns)
+            if focus_matched:
+                return True, "focus_shift"
+
+        current_window_focus = _extract_window_focus_line(client, dev)
+        if current_window_focus and baseline_window_focus and current_window_focus != baseline_window_focus:
+            saw_focus_change = True
+
+        if poll_idx < max_poll_count - 1:
+            time.sleep(_PRE_NAV_CONFIRM_POLL_SLEEP_SECONDS)
+
+    if saw_dump_change:
+        return True, "dump_signature_changed"
+    if saw_focus_change:
+        return True, "window_focus_changed"
+    return False, "none"
 
 
 def _resolve_screen_context_mode(tab_cfg: dict[str, Any]) -> str:
@@ -251,11 +390,36 @@ def _run_pre_navigation_steps(
                     f"select_ok={str(select_ok).lower()} matched={str(focus_ok).lower()} source='{focus_source}'"
                 )
                 if select_ok and focus_ok:
-                    step_ok = bool(client.click_focused(dev=dev, wait_=action_wait_seconds))
+                    click_ok = bool(client.click_focused(dev=dev, wait_=action_wait_seconds))
                     log(
                         f"[SCENARIO][pre_nav] enter_by='click_focused' step={index} "
                         f"target='{target}' type='{type_}'"
                     )
+                    if click_ok:
+                        confirm_ok, confirm_signal = _confirm_click_focused_transition(
+                            client=client,
+                            dev=dev,
+                            tab_cfg=tab_cfg,
+                            transition_fast_path=transition_fast_path,
+                        )
+                        log(
+                            f"[SCENARIO][pre_nav][confirm] method='click_focused' signal='{confirm_signal}' "
+                            f"success={str(confirm_ok).lower()} step={index}"
+                        )
+                        step_ok = confirm_ok
+                    else:
+                        confirm_signal = "click_focused_failed"
+                        step_ok = False
+                    if not step_ok:
+                        log(
+                            "[SCENARIO][pre_nav] fallback='tap_bounds_center_adb' "
+                            f"reason='transition_not_confirmed:{confirm_signal}' "
+                            f"step={index} target='{target}' tap_target='{tap_target}'"
+                        )
+                        dump_nodes = step.get("dump_tree_nodes", [])
+                        step_ok = bool(
+                            client.tap_bounds_center_adb(dev=dev, name=tap_target, type_=tap_type, dump_nodes=dump_nodes)
+                        )
                 else:
                     log(
                         f"[SCENARIO][pre_nav] focus_first_failed fallback='tap_bounds_center_adb' step={index} "
