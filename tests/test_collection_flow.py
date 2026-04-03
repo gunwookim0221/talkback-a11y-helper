@@ -813,6 +813,56 @@ def test_open_scenario_transition_focus_align_failure_soft_proceeds(monkeypatch)
     assert called["pre_nav"] == 1
 
 
+def test_open_scenario_transition_fast_path_uses_short_waits(monkeypatch):
+    sleep_calls = []
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "settings_entry_example",
+        "screen_context_mode": "new_screen",
+        "pre_navigation": [{"action": "select", "target": ".*Settings.*", "type": "a"}],
+        "main_step_wait_seconds": 1.2,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert 0.25 in sleep_calls
+    assert 0.1 in sleep_calls
+    assert 1.2 in sleep_calls  # anchor stabilization wait remains unchanged
+
+
+def test_open_scenario_transition_fast_focus_align_failure_logs_and_proceeds(monkeypatch):
+    logs = []
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_tab_selection",
+        lambda **kwargs: {"ok": True, "focus_align": {"attempted": True, "ok": False, "fast_mode": True}},
+    )
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "settings_entry_example",
+        "screen_context_mode": "new_screen",
+        "pre_navigation": [{"action": "select", "target": ".*Settings.*", "type": "a"}],
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert any("[TAB][focus_align_fast]" in line and "failed but proceeding" in line for line in logs)
+
+
 def test_open_scenario_main_tab_focus_align_failure_is_strict(monkeypatch):
     monkeypatch.setattr(
         collection_flow,

@@ -131,3 +131,55 @@ def test_stabilize_tab_selection_focus_align_failure_is_reported(monkeypatch):
     assert result["ok"] is True
     assert result["focus_align"]["attempted"] is True
     assert result["focus_align"]["ok"] is False
+
+
+def test_stabilize_tab_selection_transition_uses_fast_focus_align(monkeypatch):
+    client = FakeTabClient()
+    logs = []
+    client.dump_tree.return_value = [{"viewIdResourceName": "tab_id", "boundsInScreen": "0,0,10,10", "text": "홈"}]
+    client.touch_point.return_value = True
+    client.select.return_value = True
+    client.collect_focus_step.return_value = {"visible_label": "ok"}
+    monkeypatch.setattr(tab_logic, "verify_context", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(tab_logic, "log", lambda message, level="NORMAL": logs.append(message))
+    monkeypatch.setattr(tab_logic.time, "sleep", lambda *_: None)
+
+    result = tab_logic.stabilize_tab_selection(
+        client,
+        "SERIAL",
+        {**_tab_cfg(), "screen_context_mode": "new_screen", "pre_navigation": [{"action": "select", "target": "x"}]},
+        max_retries=1,
+    )
+
+    assert result["ok"] is True
+    assert result["focus_align"]["fast_mode"] is True
+    assert any("[TAB][focus_align_fast] path='touch_immediate'" in line for line in logs)
+    assert any("[TAB][focus_align_fast] attempt=1/2" in line for line in logs)
+    assert client.select.call_args.kwargs["wait_"] == 1
+
+
+def test_stabilize_tab_selection_transition_fast_focus_align_is_bounded(monkeypatch):
+    client = FakeTabClient()
+    client.dump_tree.return_value = [{"viewIdResourceName": "tab_id", "boundsInScreen": "0,0,10,10", "text": "홈"}]
+    client.touch_point.return_value = True
+    client.select.return_value = False
+    client.collect_focus_step.return_value = {"visible_label": "ok"}
+    monkeypatch.setattr(tab_logic, "verify_context", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(tab_logic.time, "sleep", lambda *_: None)
+
+    result = tab_logic.stabilize_tab_selection(
+        client,
+        "SERIAL",
+        {
+            **_tab_cfg(),
+            "screen_context_mode": "new_screen",
+            "pre_navigation": [{"action": "select", "target": "x"}],
+            "tab_focus_align_retry_count": 8,
+        },
+        max_retries=1,
+    )
+
+    assert result["ok"] is True
+    assert result["focus_align"]["fast_mode"] is True
+    assert result["focus_align"]["attempt"] == 2
+    assert client.select.call_count == 2
