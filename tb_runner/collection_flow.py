@@ -688,6 +688,10 @@ def collect_tab_rows(
         prev_fingerprint: 0,
     }
 
+    stop_triggered = False
+    stop_reason = ""
+    stop_step = -1
+
     for step_idx in range(1, tab_cfg["max_steps"] + 1):
         log(f"[STEP] START tab='{tab_cfg['tab_name']}' step={step_idx}")
         step_start = time.perf_counter()
@@ -766,16 +770,32 @@ def collect_tab_rows(
                 level="DEBUG",
             )
 
-        stop, fail_count, same_count, reason, prev_fingerprint = should_stop(
+        stop, fail_count, same_count, reason, prev_fingerprint, stop_details = should_stop(
             row=row,
             prev_fingerprint=prev_fingerprint,
             fail_count=fail_count,
             same_count=same_count,
+            previous_row=previous_step_row,
+        )
+        terminal_signal = bool(stop_details.get("terminal", False))
+        same_like_count = int(stop_details.get("same_like_count", 0) or 0)
+        no_progress = bool(stop_details.get("no_progress", False))
+        decision = "stop" if stop else "continue"
+        eval_reason = str(stop_details.get("reason", "") or "none")
+        log(
+            f"[STOP][eval] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
+            f"terminal={str(terminal_signal).lower()} same_like_count={same_like_count} "
+            f"no_progress={str(no_progress).lower()} decision='{decision}' reason='{eval_reason}'"
         )
 
         if stop:
+            stop_triggered = True
+            stop_reason = reason
+            stop_step = step_idx
             row["status"] = "END"
             row["stop_reason"] = reason
+            row["stop_triggered"] = True
+            row["stop_step"] = step_idx
 
         rows.append(row)
         all_rows.append(row)
@@ -908,9 +928,22 @@ def collect_tab_rows(
             )
 
         if stop:
-            log(f"[INFO] stop tab={tab_cfg['tab_name']} step={step_idx} reason={reason}")
+            log(
+                f"[STOP][triggered] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
+                f"decision='stop' reason='{reason}'"
+            )
             break
         previous_step_row = row
+
+    if not stop_triggered and rows:
+        stop_step = int(rows[-1].get("step_index", -1) or -1)
+        stop_reason = "safety_limit"
+        rows[-1]["stop_triggered"] = False
+        rows[-1]["stop_step"] = stop_step
+    log(
+        f"[STOP][summary] scenario='{tab_cfg.get('scenario_id', '')}' "
+        f"stop_triggered={str(stop_triggered).lower()} stop_step={stop_step} reason='{stop_reason or 'none'}'"
+    )
 
     if scenario_perf is not None:
         scenario_perf.finalize()

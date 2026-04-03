@@ -148,14 +148,14 @@ def test_collect_tab_rows_sets_end_status_when_should_stop(monkeypatch):
     monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
     monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
     monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
-    monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (True, 0, 0, "empty_visible_and_speech", ("", "", "")))
+    monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (True, 0, 0, "repeat_no_progress", ("", "", ""), {"terminal": False, "same_like_count": 2, "no_progress": True, "reason": "repeat_no_progress"}))
     monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
     monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (False, "not_in_global_candidates"))
 
     rows = collection_flow.collect_tab_rows(client, "SERIAL", _base_tab_cfg(max_steps=2), [], "o.xlsx", "out")
 
     assert rows[-1]["status"] == "END"
-    assert rows[-1]["stop_reason"] == "empty_visible_and_speech"
+    assert rows[-1]["stop_reason"] == "repeat_no_progress"
 
 
 def test_collect_tab_rows_checkpoint_save_called_by_interval(monkeypatch):
@@ -167,7 +167,7 @@ def test_collect_tab_rows_checkpoint_save_called_by_interval(monkeypatch):
     monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
     monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
     monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
-    monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (False, 0, 0, "", ("fp", "id", "b")))
+    monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (False, 0, 0, "", ("fp", "id", "b"), {"terminal": False, "same_like_count": 0, "no_progress": False, "reason": ""}))
     monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: save_calls.append(1))
     monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (False, "not_in_global_candidates"))
 
@@ -191,7 +191,7 @@ def test_collect_tab_rows_overlay_branch_calls_expand_and_realign(monkeypatch):
     monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
     monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
     monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
-    monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (False, 0, 0, "", ("f", "id", "b")))
+    monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (False, 0, 0, "", ("f", "id", "b"), {"terminal": False, "same_like_count": 0, "no_progress": False, "reason": ""}))
     monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
     monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (True, "matched_global_candidates"))
 
@@ -221,7 +221,7 @@ def test_collect_tab_rows_navigation_classification_skips_overlay_routine(monkey
     monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
     monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
     monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
-    monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (False, 0, 0, "", ("f", "id", "b")))
+    monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (False, 0, 0, "", ("f", "id", "b"), {"terminal": False, "same_like_count": 0, "no_progress": False, "reason": ""}))
     monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
     monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (True, "matched_global_candidates"))
     monkeypatch.setattr(collection_flow, "classify_post_click_result", lambda **k: ("navigation", {}))
@@ -241,7 +241,7 @@ def test_collect_tab_rows_unchanged_classification_skips_overlay_routine(monkeyp
     monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
     monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
     monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
-    monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (False, 0, 0, "", ("f", "id", "b")))
+    monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (False, 0, 0, "", ("f", "id", "b"), {"terminal": False, "same_like_count": 0, "no_progress": False, "reason": ""}))
     monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
     monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (True, "matched_global_candidates"))
     monkeypatch.setattr(collection_flow, "classify_post_click_result", lambda **k: ("unchanged", {}))
@@ -266,7 +266,7 @@ def test_collect_tab_rows_previous_step_not_updated_after_stop_break(monkeypatch
         return [], []
 
     monkeypatch.setattr(collection_flow, "detect_step_mismatch", _detect)
-    monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (True, 0, 0, "move_failed_twice", ("", "", "")))
+    monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (True, 0, 0, "repeat_no_progress", ("", "", ""), {"terminal": False, "same_like_count": 2, "no_progress": True, "reason": "repeat_no_progress"}))
     monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
     monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (False, "not_in_global_candidates"))
 

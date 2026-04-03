@@ -395,6 +395,7 @@ def expand_overlay(
 
     parent_step_index = entry_step.get("step_index")
     overlay_prev_fingerprint = ("", "", "")
+    overlay_previous_row: dict[str, Any] | None = None
     overlay_fail_count = 0
     overlay_same_count = 0
     for overlay_step_idx in range(1, OVERLAY_MAX_STEPS + 1):
@@ -428,11 +429,13 @@ def expand_overlay(
             overlay_same_count,
             overlay_reason,
             overlay_prev_fingerprint,
+            _,
         ) = should_stop(
             row=overlay_row,
             prev_fingerprint=overlay_prev_fingerprint,
             fail_count=overlay_fail_count,
             same_count=overlay_same_count,
+            previous_row=overlay_previous_row,
         )
         if should_end_overlay:
             overlay_row["status"] = "END"
@@ -441,6 +444,7 @@ def expand_overlay(
             break
         if overlay_step_idx % checkpoint_every == 0:
             save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
+        overlay_previous_row = overlay_row
 
     recovery_anchor = str(entry_step.get("normalized_visible_label", "") or "").strip()
     scenario_anchor = str(tab_cfg.get("anchor_name", "") or "").strip()
