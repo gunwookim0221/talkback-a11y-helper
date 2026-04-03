@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.2"
 
 
     @Volatile
@@ -681,6 +681,14 @@ object A11yNavigator {
         val fallbackIndex = state.currentPosition.fallbackIndex
         var nextIndex = state.currentPosition.nextIndex
 
+        if (currentIndex == -1) {
+            val initialHeroIndex = findInitialHeroSummaryCandidateIndex(traversalList)
+            if (initialHeroIndex >= 0 && initialHeroIndex != nextIndex) {
+                Log.i("A11Y_HELPER", "[DECIDE] initial hero summary override -> index=$initialHeroIndex")
+                nextIndex = initialHeroIndex
+            }
+        }
+
         if (currentIndex in traversalList.indices) {
             val currentBounds = Rect().also { traversalList[currentIndex].getBoundsInScreen(it) }
             val immediateCandidateIndex = currentIndex + 1
@@ -708,6 +716,29 @@ object A11yNavigator {
                 nextIndex = nextIndex
             )
         )
+    }
+
+    private fun findInitialHeroSummaryCandidateIndex(
+        traversalList: List<AccessibilityNodeInfo>
+    ): Int {
+        return traversalList.indexOfFirst { node ->
+            if (!node.isVisibleToUser || node.isClickable || !node.isFocusable) return@indexOfFirst false
+            val packageName = node.packageName?.toString()?.trim().orEmpty()
+            if (packageName != "com.samsung.android.oneconnect") return@indexOfFirst false
+            val bounds = Rect().also { node.getBoundsInScreen(it) }
+            if (bounds.width() <= 0 || bounds.height() <= 0) return@indexOfFirst false
+            val rootBounds = A11yTraversalAnalyzer.resolveRootBounds(node) ?: return@indexOfFirst false
+            if (A11yNodeUtils.isTopAppBar(node, rootBounds.top, rootBounds.height())) return@indexOfFirst false
+            if (A11yNodeUtils.isBottomNavigationBar(node, rootBounds.bottom, rootBounds.height())) return@indexOfFirst false
+            if (bounds.top <= rootBounds.top) return@indexOfFirst false
+            val topGap = bounds.top - rootBounds.top
+            val maxTopGap = (rootBounds.height() * 0.72f).toInt()
+            val minHeight = (rootBounds.height() * 0.08f).toInt()
+            val maxHeight = (rootBounds.height() * 0.42f).toInt()
+            if (topGap > maxTopGap || bounds.height() !in minHeight..maxHeight) return@indexOfFirst false
+            val label = resolvePrimaryLabel(node) ?: A11yTraversalAnalyzer.recoverDescendantLabel(node)
+            !label.isNullOrBlank()
+        }
     }
 
     private fun resolveAliasRepresentativeIndex(

@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.10.0"
+    const val VERSION: String = "1.10.1"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
     data class CandidateSelectionResult(
@@ -1079,6 +1079,7 @@ object A11yTraversalAnalyzer {
         descendantTextCandidates: List<String>
     ): Boolean {
         if (isCompositeInteractiveContainer(node, descendantTextCandidates)) return false
+        if (isOneConnectHeroSummaryContainer(node, descendantTextCandidates)) return false
         if (isContainerLikeClassName(node.className?.toString())) return true
         if (isContainerLikeViewId(node.viewIdResourceName)) return true
         if (hasMultipleSiblingLevelInteractiveDescendants(node)) return true
@@ -1090,6 +1091,36 @@ object A11yTraversalAnalyzer {
         if (clickableDescendantCount < 2) return false
 
         return !shouldAllowRecoveredDescendantLabelForTraversal(descendantTextCandidates)
+    }
+
+    private fun isOneConnectHeroSummaryContainer(
+        node: AccessibilityNodeInfo,
+        descendantTextCandidates: List<String>
+    ): Boolean {
+        if (!node.isVisibleToUser || node.isClickable || !node.isFocusable) return false
+        val packageName = node.packageName?.toString()?.trim().orEmpty()
+        if (packageName != ONECONNECT_PACKAGE_NAME) return false
+        val recoveredLabel = recoverLabelFromDescendantTexts(descendantTextCandidates)
+        if (recoveredLabel.isNullOrBlank() || !shouldAllowRecoveredDescendantLabelForTraversal(descendantTextCandidates)) return false
+
+        val rootBounds = resolveRootBounds(node) ?: return false
+        if (rootBounds.width() <= 0 || rootBounds.height() <= 0) return false
+        val nodeBounds = Rect().also { node.getBoundsInScreen(it) }
+        if (nodeBounds.width() <= 0 || nodeBounds.height() <= 0) return false
+        if (A11yNodeUtils.isTopAppBar(node, rootBounds.top, rootBounds.height())) return false
+        if (A11yNodeUtils.isBottomNavigationBar(node, rootBounds.bottom, rootBounds.height())) return false
+        if (nodeBounds.top <= rootBounds.top) return false
+
+        val topGap = nodeBounds.top - rootBounds.top
+        val maxTopGap = (rootBounds.height() * 0.72f).toInt()
+        val minHeight = (rootBounds.height() * 0.08f).toInt()
+        val maxHeight = (rootBounds.height() * 0.42f).toInt()
+        val nodeHeight = nodeBounds.height()
+        if (topGap > maxTopGap) return false
+        if (nodeHeight !in minHeight..maxHeight) return false
+
+        val interactiveDescendants = countClickableOrFocusableDescendants(node, limit = 5)
+        return interactiveDescendants in 1..4
     }
 
     internal fun isCompositeInteractiveContainer(
