@@ -11,6 +11,7 @@ from tb_runner.constants import (
     MAIN_STEP_WAIT_SECONDS,
 )
 from tb_runner.diagnostics import detect_step_mismatch, should_stop
+from tb_runner.diagnostics import is_global_nav_row
 from tb_runner.excel_report import save_excel
 from tb_runner.image_utils import maybe_capture_focus_crop
 from tb_runner.logging_utils import _should_log, log
@@ -876,12 +877,17 @@ def collect_tab_rows(
         same_like_count = int(stop_details.get("same_like_count", 0) or 0)
         no_progress = bool(stop_details.get("no_progress", False))
         is_global_nav = bool(stop_details.get("is_global_nav", False))
+        global_nav_reason = str(stop_details.get("global_nav_reason", "") or "")
         after_realign = bool(stop_details.get("after_realign", False))
         recent_repeat = bool(stop_details.get("recent_repeat", False))
         scenario_type = str(stop_details.get("scenario_type", tab_cfg.get("scenario_type", "content")) or "content")
+        is_global_nav_only_scenario = scenario_type == "global_nav"
+        if is_global_nav_only_scenario:
+            is_global_nav, global_nav_reason = is_global_nav_row(row, scenario_cfg=tab_cfg)
         decision = "stop" if stop else "continue"
         eval_reason = str(stop_details.get("reason", "") or "none")
         row["is_global_nav"] = is_global_nav
+        row["global_nav_reason"] = global_nav_reason
         log(
             f"[STOP][eval] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
             f"terminal={str(terminal_signal).lower()} same_like_count={same_like_count} "
@@ -889,6 +895,19 @@ def collect_tab_rows(
             f"is_global_nav={str(is_global_nav).lower()} after_realign={str(after_realign).lower()} "
             f"recent_repeat={str(recent_repeat).lower()} decision='{decision}' reason='{eval_reason}'"
         )
+
+        if is_global_nav_only_scenario and not is_global_nav:
+            log(
+                f"[GLOBAL_NAV][skip] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
+                f"label='{row.get('visible_label', '')}' view_id='{row.get('focus_view_id', '')}' "
+                f"nav_reason='{global_nav_reason or 'none'}'"
+            )
+            if stop and reason in {"global_nav_exit", "global_nav_end"}:
+                stop = False
+                stop_reason = ""
+            if post_realign_pending_steps > 0:
+                post_realign_pending_steps -= 1
+            continue
 
         if stop:
             stop_triggered = True
@@ -909,7 +928,9 @@ def collect_tab_rows(
         if stop or (step_idx % checkpoint_every == 0):
             save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
 
-        is_candidate, candidate_reason = is_overlay_candidate(row, tab_cfg)
+        is_candidate, candidate_reason = (False, "blocked_by_global_nav_only")
+        if not is_global_nav_only_scenario:
+            is_candidate, candidate_reason = is_overlay_candidate(row, tab_cfg)
         if is_candidate:
             fingerprint = make_overlay_entry_fingerprint(tab_cfg["tab_name"], row)
             if fingerprint not in expanded_overlay_entries:

@@ -275,6 +275,58 @@ def test_collect_tab_rows_previous_step_not_updated_after_stop_break(monkeypatch
     assert previous_steps == [0]
 
 
+def test_collect_tab_rows_global_nav_only_skips_non_global_nav_rows(monkeypatch):
+    client = DummyClient([_anchor_row(), _main_row(1), _main_row(2)])
+    tab_cfg = {
+        **_base_tab_cfg(max_steps=2),
+        "scenario_type": "global_nav",
+        "global_nav": {
+            "resource_ids": ["id.2"],
+            "labels": ["item2"],
+            "selected_pattern": "",
+            "region_hint": "auto",
+        },
+    }
+
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
+    monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (False, 0, 0, "", ("f", "id", "b"), {"terminal": False, "same_like_count": 0, "no_progress": False, "reason": ""}))
+    monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (True, "matched_global_candidates"))
+
+    rows = collection_flow.collect_tab_rows(client, "SERIAL", tab_cfg, [], "o.xlsx", "out")
+
+    assert [row["step_index"] for row in rows] == [0, 2]
+    assert rows[1]["is_global_nav"] is True
+
+
+def test_collect_tab_rows_global_nav_only_disables_overlay(monkeypatch):
+    client = DummyClient([_anchor_row(), _main_row(1)])
+    called = {"is_overlay_candidate": 0}
+    tab_cfg = {
+        **_base_tab_cfg(max_steps=1),
+        "scenario_type": "global_nav",
+        "global_nav": {"resource_ids": ["id.1"], "labels": ["item1"]},
+    }
+
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
+    monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (False, 0, 0, "", ("f", "id", "b"), {"terminal": False, "same_like_count": 0, "no_progress": False, "reason": ""}))
+    monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
+
+    def _overlay_candidate(*args, **kwargs):
+        called["is_overlay_candidate"] += 1
+        return True, "matched_global_candidates"
+
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", _overlay_candidate)
+
+    collection_flow.collect_tab_rows(client, "SERIAL", tab_cfg, [], "o.xlsx", "out")
+
+    assert called["is_overlay_candidate"] == 0
+
+
 def test_open_scenario_pre_navigation_success(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
