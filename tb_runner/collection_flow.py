@@ -26,6 +26,10 @@ from tb_runner.utils import make_main_fingerprint, make_overlay_entry_fingerprin
 _VALID_SCREEN_CONTEXT_MODES = {"bottom_tab", "new_screen"}
 _VALID_STABILIZATION_MODES = {"tab_context", "anchor_only", "anchor_then_context"}
 _STRICT_MAIN_TAB_SCENARIOS = {"home_main", "devices_main", "life_main", "routines_main"}
+_TRANSITION_FAST_STEP_WAIT_SECONDS = 0.25
+_TRANSITION_FAST_ANNOUNCEMENT_WAIT_SECONDS = 0.2
+_TRANSITION_FAST_FOCUS_WAIT_SECONDS = 0.8
+_TRANSITION_FAST_ACTION_WAIT_SECONDS = 2
 
 
 def _resolve_screen_context_mode(tab_cfg: dict[str, Any]) -> str:
@@ -71,13 +75,32 @@ def _get_wait_seconds(tab_cfg: dict[str, Any], key: str, fallback: float) -> flo
     return fallback
 
 
-def _run_pre_navigation_steps(client: A11yAdbClient, dev: str, tab_cfg: dict[str, Any]) -> bool:
+def _is_transition_entry_fast_path(tab_cfg: dict[str, Any]) -> bool:
+    screen_context_mode = _resolve_screen_context_mode(tab_cfg)
+    stabilization_mode = _resolve_stabilization_mode(tab_cfg, screen_context_mode)
+    pre_navigation = tab_cfg.get("pre_navigation", [])
+    has_pre_navigation = isinstance(pre_navigation, list) and bool(pre_navigation)
+    return has_pre_navigation and screen_context_mode == "new_screen" and stabilization_mode == "anchor_only"
+
+
+def _run_pre_navigation_steps(
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict[str, Any],
+    *,
+    transition_fast_path: bool = False,
+) -> bool:
     pre_navigation = tab_cfg.get("pre_navigation", [])
     if not isinstance(pre_navigation, list) or not pre_navigation:
         return True
 
     retry_count = _get_retry_count(tab_cfg, "pre_navigation_retry_count", 2)
     wait_seconds = _get_wait_seconds(tab_cfg, "pre_navigation_wait_seconds", MAIN_STEP_WAIT_SECONDS)
+    action_wait_seconds = _TRANSITION_FAST_ACTION_WAIT_SECONDS if transition_fast_path else 8
+    step_wait_seconds = min(wait_seconds, _TRANSITION_FAST_STEP_WAIT_SECONDS) if transition_fast_path else wait_seconds
+    step_announcement_wait_seconds = (
+        min(wait_seconds, _TRANSITION_FAST_ANNOUNCEMENT_WAIT_SECONDS) if transition_fast_path else wait_seconds
+    )
 
     for index, step in enumerate(pre_navigation, start=1):
         if not isinstance(step, dict):
@@ -106,11 +129,11 @@ def _run_pre_navigation_steps(client: A11yAdbClient, dev: str, tab_cfg: dict[str
         actual_reason = "unknown"
         for attempt in range(1, retry_count + 1):
             if action == "select":
-                step_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=8))
+                step_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
             elif action == "touch":
-                step_ok = bool(client.touch(dev=dev, name=target, type_=type_, wait_=8))
+                step_ok = bool(client.touch(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
             elif action == "touch_bounds_center":
-                step_ok = bool(client.touch_bounds_center(dev=dev, name=target, type_=type_, wait_=8))
+                step_ok = bool(client.touch_bounds_center(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
             elif action == "tap_bounds_center_adb":
                 dump_nodes = step.get("dump_tree_nodes", [])
                 step_ok = bool(client.tap_bounds_center_adb(dev=dev, name=target, type_=type_, dump_nodes=dump_nodes))
@@ -130,7 +153,7 @@ def _run_pre_navigation_steps(client: A11yAdbClient, dev: str, tab_cfg: dict[str
             elif action == "select_and_tap_bounds_center_adb":
                 tap_target = str(step.get("tap_target", target) or target).strip()
                 tap_type = str(step.get("tap_type", type_) or type_).strip()
-                select_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=8))
+                select_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
                 if not select_ok:
                     step_ok = False
                 else:
@@ -153,7 +176,7 @@ def _run_pre_navigation_steps(client: A11yAdbClient, dev: str, tab_cfg: dict[str
                             f"lazy_dump_used={str(lazy_dump_used).lower()}"
                         )
             else:
-                select_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=8))
+                select_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
                 focus_confirmed = False
                 if not select_ok:
                     for poll_idx in range(3):
@@ -170,7 +193,7 @@ def _run_pre_navigation_steps(client: A11yAdbClient, dev: str, tab_cfg: dict[str
                         log("[SCENARIO][pre_nav] select returned false and accessibilityFocused not confirmed")
 
                 if select_ok or focus_confirmed:
-                    step_ok = bool(client.click_focused(dev=dev, wait_=8))
+                    step_ok = bool(client.click_focused(dev=dev, wait_=action_wait_seconds))
                 else:
                     step_ok = False
 
@@ -195,10 +218,13 @@ def _run_pre_navigation_steps(client: A11yAdbClient, dev: str, tab_cfg: dict[str
             dev=dev,
             step_index=-(700 + index),
             move=False,
-            wait_seconds=wait_seconds,
-            announcement_wait_seconds=wait_seconds,
+            wait_seconds=step_wait_seconds,
+            announcement_wait_seconds=step_announcement_wait_seconds,
+            focus_wait_seconds=_TRANSITION_FAST_FOCUS_WAIT_SECONDS if transition_fast_path else None,
+            allow_get_focus_fallback_dump=not transition_fast_path,
+            allow_step_dump=not transition_fast_path,
         )
-        time.sleep(wait_seconds)
+        time.sleep(step_wait_seconds)
 
     log("[SCENARIO][pre_nav] success")
     return True
@@ -216,6 +242,7 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     is_transition_scenario = has_pre_navigation and (
         screen_context_mode == "new_screen" or stabilization_mode == "anchor_only"
     )
+    is_transition_entry_fast_path = _is_transition_entry_fast_path(tab_cfg)
     is_strict_main_tab_scenario = scenario_id in _STRICT_MAIN_TAB_SCENARIOS
     log(
         f"[SCENARIO][stabilization] scenario='{scenario_id}' "
@@ -273,18 +300,23 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             log(f"[TAB][select] stabilization failed scenario='{scenario_id}'")
             return False
 
-    if is_transition_scenario and not is_strict_main_tab_scenario:
-        transition_wait = min(main_step_wait_seconds, 0.25)
+    if is_transition_entry_fast_path and not is_strict_main_tab_scenario:
+        transition_wait = min(main_step_wait_seconds, _TRANSITION_FAST_STEP_WAIT_SECONDS)
         time.sleep(transition_wait)
     else:
         time.sleep(main_step_wait_seconds)
     client.reset_focus_history(dev)
-    if is_transition_scenario and not is_strict_main_tab_scenario:
+    if is_transition_entry_fast_path and not is_strict_main_tab_scenario:
         time.sleep(0.1)
     else:
         time.sleep(0.5)
 
-    pre_nav_ok = _run_pre_navigation_steps(client=client, dev=dev, tab_cfg=tab_cfg)
+    pre_nav_ok = _run_pre_navigation_steps(
+        client=client,
+        dev=dev,
+        tab_cfg=tab_cfg,
+        transition_fast_path=is_transition_entry_fast_path and not is_strict_main_tab_scenario,
+    )
     if not pre_nav_ok:
         return False
 
@@ -298,12 +330,15 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         tab_cfg=anchor_stabilize_cfg,
         phase="scenario_start",
         max_retries=anchor_retry_count,
-        verify_reads=2,
+        verify_reads=1 if is_transition_entry_fast_path and not is_strict_main_tab_scenario else 2,
     )
     if not stabilize_result.get("ok"):
         log(f"[ANCHOR][scenario_start] stabilization failed tab='{tab_cfg.get('tab_name', '')}'")
         return False
-    time.sleep(main_step_wait_seconds)
+    if is_transition_entry_fast_path and not is_strict_main_tab_scenario:
+        time.sleep(min(main_step_wait_seconds, _TRANSITION_FAST_STEP_WAIT_SECONDS))
+    else:
+        time.sleep(main_step_wait_seconds)
     return True
 
 

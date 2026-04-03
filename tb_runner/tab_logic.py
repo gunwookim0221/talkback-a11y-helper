@@ -79,6 +79,16 @@ def _is_transition_fast_align(tab_cfg: dict[str, Any]) -> bool:
     return screen_context_mode == "new_screen" and has_pre_navigation
 
 
+def _is_transition_fast_verify_path(tab_cfg: dict[str, Any], fast_focus_align: bool) -> bool:
+    if not fast_focus_align:
+        return False
+    context_cfg = tab_cfg.get("context_verify", {})
+    if not isinstance(context_cfg, dict):
+        return True
+    context_type = str(context_cfg.get("type", "none") or "none").strip().lower()
+    return context_type in {"", "none"}
+
+
 def _attempt_tab_focus_alignment(
     client: A11yAdbClient,
     dev: str,
@@ -163,6 +173,7 @@ def stabilize_tab_selection(
     scenario_id = str(tab_cfg.get("scenario_id", "") or "")
     focus_align_retries = _resolve_focus_align_retry_count(tab_cfg, fallback=2)
     fast_focus_align = _is_transition_fast_align(tab_cfg)
+    fast_verify_path = _is_transition_fast_verify_path(tab_cfg, fast_focus_align)
     if fast_focus_align:
         focus_align_retries = min(focus_align_retries, 2)
         if focus_align_retries < 1:
@@ -284,12 +295,29 @@ def stabilize_tab_selection(
         else:
             log(f"[TAB][focus_align] skipped scenario='{scenario_id}' reason='tab_select_failed'")
 
+        if selected and focus_align_result.get("ok") and fast_verify_path:
+            log(f"[TAB][focus_align_fast] verify_shortcut scenario='{scenario_id}' reason='context_none'")
+            return {
+                "ok": True,
+                "attempt": attempt,
+                "selected": selected,
+                "focus_align": focus_align_result,
+                "verify_context": {"ok": True, "type": "none", "expected": "", "reason": "fast_verify_shortcut"},
+                "best": best,
+                "candidate_count": len(matches),
+            }
+
         verify_row = client.collect_focus_step(
             dev=dev,
             step_index=-(500 + attempt),
             move=False,
-            wait_seconds=MAIN_STEP_WAIT_SECONDS,
-            announcement_wait_seconds=MAIN_ANNOUNCEMENT_WAIT_SECONDS,
+            wait_seconds=min(MAIN_STEP_WAIT_SECONDS, 0.25) if fast_focus_align else MAIN_STEP_WAIT_SECONDS,
+            announcement_wait_seconds=min(MAIN_ANNOUNCEMENT_WAIT_SECONDS, 0.2)
+            if fast_focus_align
+            else MAIN_ANNOUNCEMENT_WAIT_SECONDS,
+            focus_wait_seconds=0.8 if fast_focus_align else None,
+            allow_get_focus_fallback_dump=not fast_focus_align,
+            allow_step_dump=not fast_focus_align,
         )
         last_context = verify_context(verify_row, tab_cfg, client=client, dev=dev)
         log(

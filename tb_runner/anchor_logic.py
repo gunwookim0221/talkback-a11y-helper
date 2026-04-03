@@ -140,6 +140,15 @@ def stabilize_anchor(
     last_verify: dict[str, Any] = {}
     last_context: dict[str, Any] = {"ok": True, "type": "none", "expected": ""}
     scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    pre_navigation = tab_cfg.get("pre_navigation", [])
+    has_pre_navigation = isinstance(pre_navigation, list) and bool(pre_navigation)
+    screen_context_mode = str(tab_cfg.get("screen_context_mode", "") or "").strip().lower()
+    transition_fast_path = (
+        phase == "scenario_start"
+        and has_pre_navigation
+        and screen_context_mode == "new_screen"
+        and stabilization_mode == "anchor_only"
+    )
 
     for attempt in range(1, max_retries + 1):
         dump_nodes = client.dump_tree(dev=dev)
@@ -176,8 +185,13 @@ def stabilize_anchor(
                 dev=dev,
                 step_index=-(attempt * 10 + verify_idx),
                 move=False,
-                wait_seconds=MAIN_STEP_WAIT_SECONDS,
-                announcement_wait_seconds=MAIN_ANNOUNCEMENT_WAIT_SECONDS,
+                wait_seconds=min(MAIN_STEP_WAIT_SECONDS, 0.25) if transition_fast_path else MAIN_STEP_WAIT_SECONDS,
+                announcement_wait_seconds=min(MAIN_ANNOUNCEMENT_WAIT_SECONDS, 0.2)
+                if transition_fast_path
+                else MAIN_ANNOUNCEMENT_WAIT_SECONDS,
+                focus_wait_seconds=0.8 if transition_fast_path else None,
+                allow_get_focus_fallback_dump=not transition_fast_path,
+                allow_step_dump=not transition_fast_path,
             )
             verify_rows.append(verify_row)
             verify_candidate = _extract_candidate_from_step(verify_row)
