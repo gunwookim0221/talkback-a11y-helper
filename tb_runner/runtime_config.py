@@ -13,7 +13,7 @@ from tb_runner.constants import (
 )
 from tb_runner.logging_utils import log
 
-RUNTIME_CONFIG_VERSION = "1.7.25"
+RUNTIME_CONFIG_VERSION = "1.7.26"
 DEFAULT_RUNTIME_CONFIG_PATH = Path("config/runtime_config.json")
 
 
@@ -22,8 +22,12 @@ _DEFAULTS = {
     "anchor_retry_count": 2,
     "main_step_wait_seconds": MAIN_STEP_WAIT_SECONDS,
     "main_announcement_wait_seconds": MAIN_ANNOUNCEMENT_WAIT_SECONDS,
+    "main_announcement_idle_wait_seconds": 0.5,
+    "main_announcement_max_extra_wait_seconds": 1.5,
     "overlay_step_wait_seconds": OVERLAY_STEP_WAIT_SECONDS,
     "overlay_announcement_wait_seconds": OVERLAY_ANNOUNCEMENT_WAIT_SECONDS,
+    "overlay_announcement_idle_wait_seconds": 0.4,
+    "overlay_announcement_max_extra_wait_seconds": 1.0,
     "back_recovery_wait_seconds": BACK_RECOVERY_WAIT_SECONDS,
     "pre_navigation_retry_count": 2,
     "pre_navigation_wait_seconds": MAIN_STEP_WAIT_SECONDS,
@@ -50,8 +54,12 @@ _OVERRIDE_KEYS = {
     "anchor_retry_count",
     "main_step_wait_seconds",
     "main_announcement_wait_seconds",
+    "main_announcement_idle_wait_seconds",
+    "main_announcement_max_extra_wait_seconds",
     "overlay_step_wait_seconds",
     "overlay_announcement_wait_seconds",
+    "overlay_announcement_idle_wait_seconds",
+    "overlay_announcement_max_extra_wait_seconds",
     "back_recovery_wait_seconds",
     "pre_navigation_retry_count",
     "pre_navigation_wait_seconds",
@@ -124,6 +132,14 @@ def _build_runtime_defaults(raw_defaults: dict[str, Any]) -> dict[str, Any]:
             raw_defaults.get("main_announcement_wait_seconds"),
             _DEFAULTS["main_announcement_wait_seconds"],
         ),
+        "main_announcement_idle_wait_seconds": _to_positive_float(
+            raw_defaults.get("main_announcement_idle_wait_seconds"),
+            _DEFAULTS["main_announcement_idle_wait_seconds"],
+        ),
+        "main_announcement_max_extra_wait_seconds": _to_positive_float(
+            raw_defaults.get("main_announcement_max_extra_wait_seconds"),
+            _DEFAULTS["main_announcement_max_extra_wait_seconds"],
+        ),
         "overlay_step_wait_seconds": _to_positive_float(
             raw_defaults.get("overlay_step_wait_seconds"),
             _DEFAULTS["overlay_step_wait_seconds"],
@@ -131,6 +147,14 @@ def _build_runtime_defaults(raw_defaults: dict[str, Any]) -> dict[str, Any]:
         "overlay_announcement_wait_seconds": _to_positive_float(
             raw_defaults.get("overlay_announcement_wait_seconds"),
             _DEFAULTS["overlay_announcement_wait_seconds"],
+        ),
+        "overlay_announcement_idle_wait_seconds": _to_positive_float(
+            raw_defaults.get("overlay_announcement_idle_wait_seconds"),
+            _DEFAULTS["overlay_announcement_idle_wait_seconds"],
+        ),
+        "overlay_announcement_max_extra_wait_seconds": _to_positive_float(
+            raw_defaults.get("overlay_announcement_max_extra_wait_seconds"),
+            _DEFAULTS["overlay_announcement_max_extra_wait_seconds"],
         ),
         "back_recovery_wait_seconds": _to_positive_float(
             raw_defaults.get("back_recovery_wait_seconds"),

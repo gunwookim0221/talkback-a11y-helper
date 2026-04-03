@@ -18,6 +18,10 @@ def test_load_runtime_bundle_without_file_keeps_defaults(tmp_path):
     assert bundle["tab_configs"][0]["enabled"] is True
     assert bundle["tab_configs"][0]["tab_select_retry_count"] == 2
     assert bundle["tab_configs"][0]["pre_navigation_retry_count"] == 2
+    assert bundle["tab_configs"][0]["main_announcement_idle_wait_seconds"] == 0.5
+    assert bundle["tab_configs"][0]["main_announcement_max_extra_wait_seconds"] == 1.5
+    assert bundle["tab_configs"][0]["overlay_announcement_idle_wait_seconds"] == 0.4
+    assert bundle["tab_configs"][0]["overlay_announcement_max_extra_wait_seconds"] == 1.0
 
 
 def test_load_runtime_bundle_applies_partial_overrides(tmp_path):
@@ -139,8 +143,12 @@ def test_load_runtime_bundle_preserves_base_explicit_values(tmp_path):
                     "anchor_retry_count": 5,
                     "main_step_wait_seconds": 5.5,
                     "main_announcement_wait_seconds": 5.5,
+                    "main_announcement_idle_wait_seconds": 1.1,
+                    "main_announcement_max_extra_wait_seconds": 2.2,
                     "overlay_step_wait_seconds": 4.4,
                     "overlay_announcement_wait_seconds": 4.4,
+                    "overlay_announcement_idle_wait_seconds": 1.3,
+                    "overlay_announcement_max_extra_wait_seconds": 2.1,
                     "back_recovery_wait_seconds": 3.3,
                 }
             }
@@ -161,8 +169,12 @@ def test_load_runtime_bundle_preserves_base_explicit_values(tmp_path):
             "anchor_retry_count": 2,
             "main_step_wait_seconds": 1.2,
             "main_announcement_wait_seconds": 1.2,
+            "main_announcement_idle_wait_seconds": 0.5,
+            "main_announcement_max_extra_wait_seconds": 1.5,
             "overlay_step_wait_seconds": 0.8,
             "overlay_announcement_wait_seconds": 0.8,
+            "overlay_announcement_idle_wait_seconds": 0.4,
+            "overlay_announcement_max_extra_wait_seconds": 1.0,
             "back_recovery_wait_seconds": 0.8,
         }
     ]
@@ -177,8 +189,12 @@ def test_load_runtime_bundle_preserves_base_explicit_values(tmp_path):
     assert cfg["anchor_retry_count"] == 2
     assert cfg["main_step_wait_seconds"] == 1.2
     assert cfg["main_announcement_wait_seconds"] == 1.2
+    assert cfg["main_announcement_idle_wait_seconds"] == 0.5
+    assert cfg["main_announcement_max_extra_wait_seconds"] == 1.5
     assert cfg["overlay_step_wait_seconds"] == 0.8
     assert cfg["overlay_announcement_wait_seconds"] == 0.8
+    assert cfg["overlay_announcement_idle_wait_seconds"] == 0.4
+    assert cfg["overlay_announcement_max_extra_wait_seconds"] == 1.0
     assert cfg["back_recovery_wait_seconds"] == 0.8
 
 

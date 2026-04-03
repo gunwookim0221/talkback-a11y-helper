@@ -363,6 +363,16 @@ def expand_overlay(
         "overlay_announcement_wait_seconds",
         OVERLAY_ANNOUNCEMENT_WAIT_SECONDS,
     )
+    overlay_announcement_idle_wait_seconds = _get_positive_float(
+        tab_cfg,
+        "overlay_announcement_idle_wait_seconds",
+        0.4,
+    )
+    overlay_announcement_max_extra_wait_seconds = _get_positive_float(
+        tab_cfg,
+        "overlay_announcement_max_extra_wait_seconds",
+        1.0,
+    )
     back_recovery_wait_seconds = _get_positive_float(tab_cfg, "back_recovery_wait_seconds", BACK_RECOVERY_WAIT_SECONDS)
     checkpoint_every = _get_positive_int(tab_cfg, "checkpoint_save_every", CHECKPOINT_SAVE_EVERY_STEPS)
 
@@ -406,6 +416,8 @@ def expand_overlay(
             direction="next",
             wait_seconds=overlay_step_wait_seconds,
             announcement_wait_seconds=overlay_announcement_wait_seconds,
+            announcement_idle_wait_seconds=overlay_announcement_idle_wait_seconds,
+            announcement_max_extra_wait_seconds=overlay_announcement_max_extra_wait_seconds,
         )
         overlay_row["tab_name"] = tab_cfg["tab_name"]
         overlay_row["context_type"] = "overlay"

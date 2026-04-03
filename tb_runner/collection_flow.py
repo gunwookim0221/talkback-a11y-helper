@@ -681,6 +681,16 @@ def collect_tab_rows(
         "main_announcement_wait_seconds",
         MAIN_ANNOUNCEMENT_WAIT_SECONDS,
     )
+    main_announcement_idle_wait_seconds = _get_wait_seconds(
+        tab_cfg,
+        "main_announcement_idle_wait_seconds",
+        0.5,
+    )
+    main_announcement_max_extra_wait_seconds = _get_wait_seconds(
+        tab_cfg,
+        "main_announcement_max_extra_wait_seconds",
+        1.5,
+    )
     checkpoint_every = _get_positive_int(checkpoint_save_every, CHECKPOINT_SAVE_EVERY_STEPS)
 
     opened = open_scenario(client, dev, tab_cfg)
@@ -717,7 +727,9 @@ def collect_tab_rows(
         step_index=0,
         move=False,
         wait_seconds=main_step_wait_seconds,
-        announcement_wait_seconds=main_announcement_wait_seconds
+        announcement_wait_seconds=main_announcement_wait_seconds,
+        announcement_idle_wait_seconds=main_announcement_idle_wait_seconds,
+        announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
     )
     anchor_elapsed = time.perf_counter() - anchor_start
 
@@ -782,6 +794,8 @@ def collect_tab_rows(
             direction="next",
             wait_seconds=main_step_wait_seconds,
             announcement_wait_seconds=main_announcement_wait_seconds,
+            announcement_idle_wait_seconds=main_announcement_idle_wait_seconds,
+            announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
         )
         step_elapsed = time.perf_counter() - step_start
 
