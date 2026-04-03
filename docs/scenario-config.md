@@ -29,6 +29,12 @@
 
 따라서 scenario config로 화면 문맥 처리 정책을 분기해야 합니다.
 
+추가로 폰/태블릿 동시 대응을 위해, runner는 bottom tab 하드코딩 대신 **global navigation(전역 네비게이션)** 상위 개념을 지원합니다.
+- 폰: 하단 탭바(bottom tabs)
+- 태블릿: 좌측 navigation rail/sidebar
+
+즉, `content` 시나리오는 본문 수집, `global_nav` 시나리오는 전역 네비게이션 수집으로 책임을 분리합니다.
+
 ---
 
 ## Scenario config가 제어하는 기본 실행 흐름
@@ -124,6 +130,39 @@
 해석 가이드(권장 조합):
 - 탭 유지 화면: `screen_context_mode=bottom_tab` + `stabilization_mode=anchor_then_context` 또는 `tab_context`
 - 전환 화면: `screen_context_mode=new_screen` + `stabilization_mode=anchor_only` 또는 `anchor_then_context`
+
+### `scenario_type`
+
+시나리오의 수집 대상 자체를 구분합니다.
+
+- `content` (기본값): 본문 중심 수집
+- `global_nav`: 앱 전역 네비게이션 영역 중심 수집
+
+권장:
+- 메인 화면/리스트/상세는 `content`
+- 하단 탭/좌측 rail 검증 전용은 `global_nav`
+
+### `stop_policy` (확장)
+
+기본 stop evaluator에 시나리오 경계 인식을 추가합니다.
+
+- `stop_on_global_nav_entry`
+  - `content` 시나리오에서 현재 row가 global nav로 판별되면 stop 후보
+- `stop_on_global_nav_exit`
+  - `global_nav` 시나리오에서 global nav를 벗어나 본문으로 진입하면 stop 후보
+- `stop_on_terminal` (기본 `true`)
+- `stop_on_repeat_no_progress` (기본 `true`)
+
+### `global_nav` 블록 (optional)
+
+global navigation 판별 힌트를 제공합니다.
+
+- `labels`: 전역 네비게이션 label 목록
+- `resource_ids`: 전역 네비게이션 resource id 목록
+- `selected_pattern`: selected 발화/텍스트 패턴
+- `region_hint`: `bottom_tabs` | `left_rail` | `auto`
+
+판별 우선순위는 `resource_id → text/announcement → selected → region_hint`이며, region은 보조 신호로만 사용합니다.
 
 ### anchor 관련 설정
 
@@ -258,6 +297,43 @@ stabilization/traversal 이전에 수행할 선행 이동 절차를 정의합니
   },
   "anchor": {
     "text_regex": "(?i).*location.*qr.*code.*"
+  }
+}
+```
+
+### Example: global navigation 분리
+
+```json
+{
+  "scenario_id": "devices_main",
+  "scenario_type": "content",
+  "stop_policy": {
+    "stop_on_global_nav_entry": true
+  },
+  "global_nav": {
+    "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+    "resource_ids": [
+      "com.samsung.android.oneconnect:id/menu_favorites",
+      "com.samsung.android.oneconnect:id/menu_devices"
+    ],
+    "selected_pattern": "(?i).*(selected|선택됨).*",
+    "region_hint": "bottom_tabs"
+  }
+}
+```
+
+```json
+{
+  "scenario_id": "global_nav_main",
+  "scenario_type": "global_nav",
+  "stop_policy": {
+    "stop_on_global_nav_exit": true
+  },
+  "global_nav": {
+    "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+    "resource_ids": ["com.samsung.android.oneconnect:id/menu_devices"],
+    "selected_pattern": "(?i).*(selected|선택됨).*",
+    "region_hint": "auto"
   }
 }
 ```

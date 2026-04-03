@@ -213,3 +213,58 @@ def test_load_runtime_bundle_fills_missing_then_applies_override(tmp_path):
     assert detail_cfg["screen_context_mode"] == "new_screen"
     assert detail_cfg["stabilization_mode"] == "anchor_only"
     assert detail_cfg["pre_navigation_retry_count"] == 4
+
+
+def test_load_runtime_bundle_supports_global_nav_defaults(tmp_path):
+    path = tmp_path / "runtime_global_nav_defaults.json"
+    path.write_text(
+        json.dumps(
+            {
+                "defaults": {
+                    "scenario_type": "global_nav",
+                    "stop_policy": {"stop_on_global_nav_exit": True},
+                    "global_nav": {
+                        "labels": ["Home", "Devices"],
+                        "resource_ids": ["id/menu_home"],
+                        "selected_pattern": "selected",
+                        "region_hint": "left_rail",
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    bundle = load_runtime_bundle(_base_tabs(), config_path=path)
+    home_cfg = bundle["tab_configs"][0]
+    assert home_cfg["scenario_type"] == "global_nav"
+    assert home_cfg["stop_policy"]["stop_on_global_nav_exit"] is True
+    assert home_cfg["stop_policy"]["stop_on_terminal"] is True
+    assert home_cfg["global_nav"]["labels"] == ["Home", "Devices"]
+    assert home_cfg["global_nav"]["resource_ids"] == ["id/menu_home"]
+    assert home_cfg["global_nav"]["region_hint"] == "left_rail"
+
+
+def test_load_runtime_bundle_supports_global_nav_scenario_override(tmp_path):
+    path = tmp_path / "runtime_global_nav_override.json"
+    path.write_text(
+        json.dumps(
+            {
+                "scenarios": {
+                    "home_main": {
+                        "scenario_type": "global_nav",
+                        "stop_policy": {"stop_on_global_nav_exit": True, "stop_on_repeat_no_progress": False},
+                        "global_nav": {"labels": ["Menu"], "resource_ids": ["id/menu"], "region_hint": "auto"},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    bundle = load_runtime_bundle(_base_tabs(), config_path=path)
+    home_cfg = bundle["tab_configs"][0]
+    assert home_cfg["scenario_type"] == "global_nav"
+    assert home_cfg["stop_policy"]["stop_on_global_nav_exit"] is True
+    assert home_cfg["stop_policy"]["stop_on_repeat_no_progress"] is False
+    assert home_cfg["global_nav"]["labels"] == ["Menu"]
+    assert home_cfg["global_nav"]["resource_ids"] == ["id/menu"]

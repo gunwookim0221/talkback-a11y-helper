@@ -152,3 +152,79 @@ def test_should_stop_empty_only_is_not_immediate_stop():
     assert stop is False
     assert reason == ""
     assert details["reason"] == ""
+
+
+def test_should_stop_content_global_nav_entry():
+    previous = {
+        "visible_label": "Device card",
+        "normalized_visible_label": "device card",
+        "merged_announcement": "device card",
+        "focus_view_id": "id/device_card",
+    }
+    row = {
+        "visible_label": "Devices",
+        "normalized_visible_label": "devices",
+        "merged_announcement": "selected devices",
+        "focus_view_id": "com.samsung.android.oneconnect:id/menu_devices",
+        "selected": True,
+    }
+
+    stop, _, _, reason, _, details = should_stop(
+        row=row,
+        prev_fingerprint=("device card", "id/device_card", "0,0,10,10"),
+        fail_count=0,
+        same_count=0,
+        previous_row=previous,
+        scenario_type="content",
+        stop_policy={"stop_on_global_nav_entry": True},
+        scenario_cfg={
+            "global_nav": {
+                "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+                "resource_ids": ["com.samsung.android.oneconnect:id/menu_devices"],
+                "selected_pattern": "(?i).*selected.*",
+                "region_hint": "auto",
+            }
+        },
+    )
+
+    assert stop is True
+    assert reason == "global_nav_entry"
+    assert details["is_global_nav"] is True
+
+
+def test_should_stop_global_nav_exit():
+    previous = {
+        "visible_label": "Devices",
+        "normalized_visible_label": "devices",
+        "merged_announcement": "selected devices",
+        "focus_view_id": "com.samsung.android.oneconnect:id/menu_devices",
+        "selected": True,
+    }
+    row = {
+        "visible_label": "Air conditioner",
+        "normalized_visible_label": "air conditioner",
+        "merged_announcement": "air conditioner",
+        "focus_view_id": "id/device_card",
+    }
+
+    stop, _, _, reason, _, details = should_stop(
+        row=row,
+        prev_fingerprint=("devices", "com.samsung.android.oneconnect:id/menu_devices", "0,0,10,10"),
+        fail_count=0,
+        same_count=0,
+        previous_row=previous,
+        scenario_type="global_nav",
+        stop_policy={"stop_on_global_nav_exit": True},
+        scenario_cfg={
+            "global_nav": {
+                "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+                "resource_ids": ["com.samsung.android.oneconnect:id/menu_devices"],
+                "selected_pattern": "(?i).*selected.*",
+                "region_hint": "auto",
+            }
+        },
+    )
+
+    assert stop is True
+    assert reason == "global_nav_exit"
+    assert details["is_global_nav"] is False

@@ -713,6 +713,7 @@ def collect_tab_rows(
         row["overlay_recovery_status"] = ""
         row["status"] = "OK"
         row["stop_reason"] = ""
+        row["scenario_type"] = str(tab_cfg.get("scenario_type", "content") or "content")
         row["step_elapsed_sec"] = round(step_elapsed, 3)
         row["crop_image"] = "IMAGE"
         row["_step_mono_start"] = time.monotonic() - float(row.get("t_step_start", 0.0) or 0.0)
@@ -776,16 +777,23 @@ def collect_tab_rows(
             fail_count=fail_count,
             same_count=same_count,
             previous_row=previous_step_row,
+            scenario_type=str(tab_cfg.get("scenario_type", "content") or "content"),
+            stop_policy=tab_cfg.get("stop_policy", {}),
+            scenario_cfg=tab_cfg,
         )
         terminal_signal = bool(stop_details.get("terminal", False))
         same_like_count = int(stop_details.get("same_like_count", 0) or 0)
         no_progress = bool(stop_details.get("no_progress", False))
+        is_global_nav = bool(stop_details.get("is_global_nav", False))
+        scenario_type = str(stop_details.get("scenario_type", tab_cfg.get("scenario_type", "content")) or "content")
         decision = "stop" if stop else "continue"
         eval_reason = str(stop_details.get("reason", "") or "none")
+        row["is_global_nav"] = is_global_nav
         log(
             f"[STOP][eval] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
             f"terminal={str(terminal_signal).lower()} same_like_count={same_like_count} "
-            f"no_progress={str(no_progress).lower()} decision='{decision}' reason='{eval_reason}'"
+            f"no_progress={str(no_progress).lower()} scenario_type='{scenario_type}' "
+            f"is_global_nav={str(is_global_nav).lower()} decision='{decision}' reason='{eval_reason}'"
         )
 
         if stop:

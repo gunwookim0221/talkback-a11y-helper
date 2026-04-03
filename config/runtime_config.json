@@ -11,7 +11,59 @@
     "overlay_announcement_wait_seconds": 0.8,
     "back_recovery_wait_seconds": 0.8,
     "pre_navigation_retry_count": 2,
-    "pre_navigation_wait_seconds": 1.2
+    "pre_navigation_wait_seconds": 1.2,
+    "scenario_type": "content",
+    "stop_policy": {
+      "stop_on_global_nav_entry": false,
+      "stop_on_global_nav_exit": false,
+      "stop_on_terminal": true,
+      "stop_on_repeat_no_progress": true
+    },
+    "global_nav": {
+      "labels": [],
+      "resource_ids": [],
+      "selected_pattern": "",
+      "region_hint": "auto"
+    }
   },
-  "scenarios": {}
+  "scenarios": {
+    "devices_main": {
+      "scenario_type": "content",
+      "stop_policy": {
+        "stop_on_global_nav_entry": true
+      },
+      "global_nav": {
+        "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+        "resource_ids": [
+          "com.samsung.android.oneconnect:id/menu_favorites",
+          "com.samsung.android.oneconnect:id/menu_devices",
+          "com.samsung.android.oneconnect:id/menu_services",
+          "com.samsung.android.oneconnect:id/menu_automations",
+          "com.samsung.android.oneconnect:id/menu_more"
+        ],
+        "selected_pattern": "(?i).*(selected|선택됨).*",
+        "region_hint": "bottom_tabs"
+      }
+    },
+    "global_nav_main": {
+      "enabled": false,
+      "scenario_type": "global_nav",
+      "max_steps": 10,
+      "stop_policy": {
+        "stop_on_global_nav_exit": true
+      },
+      "global_nav": {
+        "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+        "resource_ids": [
+          "com.samsung.android.oneconnect:id/menu_favorites",
+          "com.samsung.android.oneconnect:id/menu_devices",
+          "com.samsung.android.oneconnect:id/menu_services",
+          "com.samsung.android.oneconnect:id/menu_automations",
+          "com.samsung.android.oneconnect:id/menu_more"
+        ],
+        "selected_pattern": "(?i).*(selected|선택됨).*",
+        "region_hint": "auto"
+      }
+    }
+  }
 }

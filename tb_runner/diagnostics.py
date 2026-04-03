@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 from tb_runner.utils import parse_bounds_str
@@ -95,6 +96,98 @@ def detect_step_mismatch(
     return mismatch_reasons, low_confidence_reasons
 
 
+_GLOBAL_NAV_HINT_TOKENS = ("home", "devices", "life", "routines", "menu", "favorites", "automations", "services")
+
+
+def _normalize_text(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _extract_screen_size(row: dict[str, Any]) -> tuple[int, int]:
+    width_candidates = ("screen_width", "display_width", "window_width")
+    height_candidates = ("screen_height", "display_height", "window_height")
+    width = next((int(row.get(key, 0) or 0) for key in width_candidates if isinstance(row.get(key), (int, float))), 0)
+    height = next((int(row.get(key, 0) or 0) for key in height_candidates if isinstance(row.get(key), (int, float))), 0)
+    return width, height
+
+
+def _match_region_hint(row: dict[str, Any], region_hint: str) -> bool:
+    bounds = parse_bounds_str(str(row.get("focus_bounds", "") or ""))
+    if not bounds:
+        return False
+    width, height = _extract_screen_size(row)
+    if width <= 0 or height <= 0:
+        return False
+    left, top, _, _ = bounds
+    if region_hint == "bottom_tabs":
+        return top >= int(height * 0.72)
+    if region_hint == "left_rail":
+        return left <= int(width * 0.28)
+    return False
+
+
+def is_global_nav_row(
+    row: dict[str, Any],
+    scenario_cfg: dict[str, Any] | None = None,
+) -> tuple[bool, str]:
+    cfg = scenario_cfg or {}
+    global_nav_cfg = cfg.get("global_nav", {})
+    if not isinstance(global_nav_cfg, dict):
+        global_nav_cfg = {}
+
+    focus_id = _normalize_text(row.get("focus_view_id", "") or row.get("resource_id", ""))
+    focus_label = _normalize_text(row.get("visible_label", ""))
+    normalized_label = _normalize_text(row.get("normalized_visible_label", ""))
+    merged_announcement = _normalize_text(row.get("merged_announcement", "") or row.get("normalized_announcement", ""))
+    context_text = " ".join([focus_label, normalized_label, merged_announcement]).strip()
+    selected_state = bool(row.get("focus_selected", False) or row.get("selected", False))
+
+    score = 0
+    reasons: list[str] = []
+    strong_signal = False
+
+    resource_ids = [str(item).strip().lower() for item in global_nav_cfg.get("resource_ids", []) if isinstance(item, str)]
+    if focus_id and resource_ids and any(resource in focus_id for resource in resource_ids):
+        score += 3
+        strong_signal = True
+        reasons.append("resource_id")
+    elif focus_id and any(token in focus_id for token in _GLOBAL_NAV_HINT_TOKENS):
+        score += 1
+        reasons.append("resource_hint")
+
+    labels = [str(item).strip().lower() for item in global_nav_cfg.get("labels", []) if isinstance(item, str)]
+    if context_text and labels and any(label and label in context_text for label in labels):
+        score += 2
+        strong_signal = True
+        reasons.append("label")
+    elif context_text and any(token in context_text for token in _GLOBAL_NAV_HINT_TOKENS):
+        score += 1
+        reasons.append("label_hint")
+
+    selected_pattern = str(global_nav_cfg.get("selected_pattern", "") or "").strip()
+    if selected_pattern and context_text:
+        try:
+            if re.search(selected_pattern, context_text, flags=re.IGNORECASE):
+                score += 2
+                strong_signal = True
+                reasons.append("selected_pattern")
+        except re.error:
+            pass
+
+    if selected_state:
+        score += 1
+        reasons.append("selected_state")
+
+    region_hint = str(global_nav_cfg.get("region_hint", "auto") or "auto").strip().lower()
+    if region_hint in {"bottom_tabs", "left_rail"} and _match_region_hint(row, region_hint):
+        score += 1
+        reasons.append("region_hint")
+
+    if strong_signal and score >= 3:
+        return True, ",".join(reasons)
+    return False, ",".join(reasons) if reasons else "none"
+
+
 class StopEvaluator:
     _MOVE_FAILURE_RESULTS = {"failed"}
     _MOVE_TERMINAL_RESULTS = {"terminal", "end", "no_next", "no_focus", "cannot_move"}
@@ -126,6 +219,9 @@ class StopEvaluator:
         fail_count: int,
         same_count: int,
         previous_row: dict[str, Any] | None = None,
+        scenario_type: str = "content",
+        stop_policy: dict[str, Any] | None = None,
+        scenario_cfg: dict[str, Any] | None = None,
     ) -> tuple[bool, int, int, str, tuple[str, str, str], dict[str, Any]]:
         move_result = str(row.get("move_result", "") or "").strip().lower()
         smart_nav_result = str(row.get("last_smart_nav_result", "") or "").strip().lower()
@@ -156,16 +252,39 @@ class StopEvaluator:
         weak_move_failure = fail_count >= 2 or move_terminal
         weak_empty = not str(row.get("visible_label", "") or "").strip() and not str(row.get("merged_announcement", "") or "").strip()
 
+        effective_stop_policy = dict(
+            {
+                "stop_on_global_nav_entry": False,
+                "stop_on_global_nav_exit": False,
+                "stop_on_terminal": True,
+                "stop_on_repeat_no_progress": True,
+            }
+        )
+        if isinstance(stop_policy, dict):
+            effective_stop_policy.update(stop_policy)
+        normalized_scenario_type = str(scenario_type or "content").strip().lower()
+        is_curr_global_nav, nav_reason = is_global_nav_row(row, scenario_cfg=scenario_cfg)
+        is_prev_global_nav, _ = is_global_nav_row(previous_row or {}, scenario_cfg=scenario_cfg)
+
         reason = ""
         stop = False
 
-        if terminal_signal:
+        if normalized_scenario_type == "content" and bool(effective_stop_policy.get("stop_on_global_nav_entry", False)):
+            if bool(previous_row) and is_curr_global_nav and not is_prev_global_nav:
+                stop = True
+                reason = "global_nav_entry"
+        elif normalized_scenario_type == "global_nav" and bool(effective_stop_policy.get("stop_on_global_nav_exit", False)):
+            if bool(previous_row) and is_prev_global_nav and not is_curr_global_nav:
+                stop = True
+                reason = "global_nav_exit"
+
+        if not stop and terminal_signal and bool(effective_stop_policy.get("stop_on_terminal", True)):
             stop = True
             reason = "smart_nav_terminal"
-        elif move_terminal and same_like:
+        elif not stop and move_terminal and same_like and bool(effective_stop_policy.get("stop_on_terminal", True)):
             stop = True
             reason = "move_terminal"
-        else:
+        elif not stop and bool(effective_stop_policy.get("stop_on_repeat_no_progress", True)):
             weak_signals = sum([1 if weak_repeat else 0, 1 if no_progress else 0, 1 if weak_move_failure else 0, 1 if weak_empty else 0])
             if weak_signals >= 2 and (same_like or weak_repeat):
                 stop = True
@@ -176,6 +295,9 @@ class StopEvaluator:
             "same_like_count": same_count,
             "no_progress": no_progress,
             "reason": reason,
+            "scenario_type": normalized_scenario_type,
+            "is_global_nav": is_curr_global_nav,
+            "global_nav_reason": nav_reason,
         }
         return stop, fail_count, same_count, reason, current_fingerprint, details
 
@@ -186,6 +308,9 @@ def should_stop(
     fail_count: int,
     same_count: int,
     previous_row: dict[str, Any] | None = None,
+    scenario_type: str = "content",
+    stop_policy: dict[str, Any] | None = None,
+    scenario_cfg: dict[str, Any] | None = None,
 ) -> tuple[bool, int, int, str, tuple[str, str, str], dict[str, Any]]:
     evaluator = StopEvaluator()
     return evaluator.evaluate(
@@ -194,4 +319,7 @@ def should_stop(
         fail_count=fail_count,
         same_count=same_count,
         previous_row=previous_row,
+        scenario_type=scenario_type,
+        stop_policy=stop_policy,
+        scenario_cfg=scenario_cfg,
     )
