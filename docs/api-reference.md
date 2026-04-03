@@ -3,7 +3,10 @@
 `talkback_lib.py`의 `A11yAdbClient`에서 외부 호출을 위해 제공하는 퍼블릭 메서드만 정리한 문서입니다.  
 (내부 헬퍼 메서드: `_run`, `_broadcast`, `_extract_*` 등 `_` 접두사 메서드는 제외)
 
-> 참고: scenario-level 실행/안정화 정책(`screen_context_mode`, `stabilization_mode`, context 분기)은 `docs/scenario-config.md`를 확인하세요.
+> 참고:
+> - 본 문서는 helper/client API 기준서입니다.
+> - collector 시나리오 흐름(anchor stabilization, overlay, stop policy, raw/filtered/summary)은 `docs/testing-pipeline.md`, `docs/system-overview.md`를 확인하세요.
+> - scenario-level 실행 정책(`screen_context_mode`, `stabilization_mode`, context 분기)은 `docs/scenario-config.md`를 확인하세요.
 
 ## Table of Contents
 
@@ -168,7 +171,7 @@ if not client.check_talkback_status(dev_serial):
 ### Signature
 `dump_tree(dev: Any = None, wait_seconds: float = 5.0) -> list[dict[str, Any]]`
 
-> 응답 포맷 버전: Android Navigator `2.30.6` / Python Client `1.6.7`
+> 응답 포맷은 helper/클라이언트 구현 업데이트에 따라 변경될 수 있습니다. 고정 버전 문자열 대신 최신 `talkback_lib.py` 구현을 기준으로 확인하세요.
 
 ### 설명
 현재 화면의 접근성 노드 트리를 helper를 통해 덤프합니다.  
