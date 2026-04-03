@@ -153,6 +153,11 @@
 - `stop_on_terminal` (기본 `true`)
 - `stop_on_repeat_no_progress` (기본 `true`)
 
+stop reason 해석(collector 로그 기준):
+- `global_nav_entry`: `content` 시나리오에서 본문→global nav 진입 경계 감지
+- `global_nav_end`: `global_nav` 시나리오에서 nav 말단의 failed/repeat/no_progress 누적 종료
+- `repeat_no_progress`: 일반 반복/no-progress 조합 종료(overlay realign 직후에는 반복이 실제 확인된 경우에만 보수적으로 활용)
+
 ### `global_nav` 블록 (optional)
 
 global navigation 판별 힌트를 제공합니다.
