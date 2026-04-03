@@ -25,15 +25,17 @@ def test_stabilize_tab_selection_touch_point_success(monkeypatch):
     client = FakeTabClient()
     client.dump_tree.return_value = [{"viewIdResourceName": "tab_id", "boundsInScreen": "0,0,10,10", "text": "홈"}]
     client.touch_point.return_value = True
+    client.select.return_value = True
     client.collect_focus_step.return_value = {"visible_label": "ok"}
     monkeypatch.setattr(tab_logic, "verify_context", lambda *a, **k: {"ok": True})
 
     result = tab_logic.stabilize_tab_selection(client, "SERIAL", _tab_cfg(), max_retries=1)
 
     assert result["ok"] is True
+    assert result["focus_align"]["ok"] is True
     client.dump_tree.assert_called_once()
     client.touch_point.assert_called_once()
-    client.select.assert_not_called()
+    client.select.assert_called_once()
     client.touch.assert_not_called()
     client.collect_focus_step.assert_called_once()
 
@@ -49,7 +51,7 @@ def test_stabilize_tab_selection_select_fallback_when_bounds_missing(monkeypatch
 
     assert result["ok"] is True
     client.touch_point.assert_not_called()
-    client.select.assert_called_once()
+    assert client.select.call_count == 2
     client.touch.assert_not_called()
 
 
@@ -65,7 +67,7 @@ def test_stabilize_tab_selection_select_fallback_when_touch_point_fails(monkeypa
 
     assert result["ok"] is True
     client.touch_point.assert_called_once()
-    client.select.assert_called_once()
+    assert client.select.call_count == 2
     client.touch.assert_not_called()
 
 
@@ -73,14 +75,16 @@ def test_stabilize_tab_selection_legacy_touch_when_no_best_candidate(monkeypatch
     client = FakeTabClient()
     client.dump_tree.return_value = [{"viewIdResourceName": "other", "text": "다른 탭", "boundsInScreen": "0,0,10,10"}]
     client.touch.return_value = True
+    client.select.return_value = True
     client.collect_focus_step.return_value = {"visible_label": "ok"}
     monkeypatch.setattr(tab_logic, "verify_context", lambda *a, **k: {"ok": True})
 
     result = tab_logic.stabilize_tab_selection(client, "SERIAL", _tab_cfg(), max_retries=1)
 
     assert result["ok"] is True
+    assert result["focus_align"]["ok"] is True
     client.touch.assert_called_once()
-    client.select.assert_not_called()
+    client.select.assert_called_once()
     client.touch_point.assert_not_called()
 
 
@@ -112,3 +116,18 @@ def test_stabilize_tab_selection_retries_and_can_fail_when_context_not_ok(monkey
     assert client.dump_tree.call_count == 2
     assert client.collect_focus_step.call_count == 2
     assert verify_context.call_count == 2
+
+
+def test_stabilize_tab_selection_focus_align_failure_is_reported(monkeypatch):
+    client = FakeTabClient()
+    client.dump_tree.return_value = [{"viewIdResourceName": "tab_id", "boundsInScreen": "0,0,10,10", "text": "홈"}]
+    client.touch_point.return_value = True
+    client.select.return_value = False
+    client.collect_focus_step.return_value = {"visible_label": "ok"}
+    monkeypatch.setattr(tab_logic, "verify_context", lambda *a, **k: {"ok": True})
+
+    result = tab_logic.stabilize_tab_selection(client, "SERIAL", _tab_cfg(), max_retries=1)
+
+    assert result["ok"] is True
+    assert result["focus_align"]["attempted"] is True
+    assert result["focus_align"]["ok"] is False

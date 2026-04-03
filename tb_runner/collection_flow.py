@@ -234,6 +234,23 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         tab_cfg=tab_stabilize_cfg,
         max_retries=tab_retry_count,
     )
+    focus_align_result = tab_stabilized.get("focus_align", {}) if isinstance(tab_stabilized, dict) else {}
+    focus_align_attempted = bool(focus_align_result.get("attempted"))
+    focus_align_ok = bool(focus_align_result.get("ok"))
+    if focus_align_attempted and not focus_align_ok:
+        log(
+            f"[TAB][focus_align] scenario='{scenario_id}' main_tab={str(is_strict_main_tab_scenario).lower()} "
+            f"transition_scenario={str(is_transition_scenario).lower()} result='failed'"
+        )
+        if is_transition_scenario and not is_strict_main_tab_scenario:
+            log(
+                f"[TAB][focus_align] failed but proceeding (transition scenario) "
+                f"scenario='{scenario_id}'"
+            )
+        elif is_strict_main_tab_scenario:
+            log(f"[TAB][focus_align] strict failure scenario='{scenario_id}'")
+            return False
+
     if not tab_stabilized.get("ok"):
         best = tab_stabilized.get("best", {}) if isinstance(tab_stabilized, dict) else {}
         best_score = int(best.get("score", 0) or 0) if isinstance(best, dict) else 0

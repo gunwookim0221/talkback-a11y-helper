@@ -726,7 +726,12 @@ def test_open_scenario_transition_allows_tab_verify_failure_and_runs_pre_navigat
     monkeypatch.setattr(
         collection_flow,
         "stabilize_tab_selection",
-        lambda **kwargs: {"ok": False, "selected": True, "best": {"score": 2}},
+        lambda **kwargs: {
+            "ok": False,
+            "selected": True,
+            "best": {"score": 2},
+            "focus_align": {"attempted": True, "ok": False},
+        },
     )
     monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
@@ -757,7 +762,12 @@ def test_open_scenario_main_tab_keeps_strict_when_tab_verify_fails(monkeypatch):
     monkeypatch.setattr(
         collection_flow,
         "stabilize_tab_selection",
-        lambda **kwargs: {"ok": False, "selected": True, "best": {"score": 2}},
+        lambda **kwargs: {
+            "ok": False,
+            "selected": True,
+            "best": {"score": 2},
+            "focus_align": {"attempted": True, "ok": False},
+        },
     )
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
     client = DummyClient([_anchor_row()])
@@ -767,6 +777,51 @@ def test_open_scenario_main_tab_keeps_strict_when_tab_verify_fails(monkeypatch):
         "screen_context_mode": "new_screen",
         "pre_navigation": [{"action": "select", "target": ".*Settings.*", "type": "a"}],
     }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is False
+
+
+def test_open_scenario_transition_focus_align_failure_soft_proceeds(monkeypatch):
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_tab_selection",
+        lambda **kwargs: {"ok": True, "focus_align": {"attempted": True, "ok": False}},
+    )
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    called = {"pre_nav": 0}
+
+    def _pre_nav(**kwargs):
+        called["pre_nav"] += 1
+        return True
+
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", _pre_nav)
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "settings_entry_example",
+        "screen_context_mode": "new_screen",
+        "pre_navigation": [{"action": "select", "target": ".*Settings.*", "type": "a"}],
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert called["pre_nav"] == 1
+
+
+def test_open_scenario_main_tab_focus_align_failure_is_strict(monkeypatch):
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_tab_selection",
+        lambda **kwargs: {"ok": True, "focus_align": {"attempted": True, "ok": False}},
+    )
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {**_base_tab_cfg(), "scenario_id": "home_main"}
 
     ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
 

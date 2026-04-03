@@ -37,6 +37,7 @@
 
 1. **tab selection**
    - 필요한 경우 진입 기준 탭/문맥으로 이동
+   - 탭 터치/선택 직후, 동일 탭 selector로 TalkBack focus 정렬(`focus align`)을 bounded retry로 시도
 2. **context verification**
    - 현재 화면이 기대 문맥인지 확인
 3. **pre_navigation**
@@ -148,6 +149,18 @@ stabilization/traversal 이전에 수행할 선행 이동 절차를 정의합니
 권장:
 - pre_navigation은 명시적이고 bounded하게 유지
 - 전환 화면에서 불필요한 탭 상태 검증과 과결합하지 않기
+
+### `tab_focus_align_retry_count`
+
+탭 전환 직후 TalkBack focus를 동일 탭으로 맞추는 정렬 시도의 retry 횟수입니다.
+
+- 기본값: `2`
+- 의미:
+  - 탭 touch/select 이후 `tab.resource_id_regex` / `tab.text_regex` / `tab.announcement_regex`를 재사용해 `select` 기반 정렬 시도
+  - 성공하면 다음 단계로 진행
+  - 실패 시:
+    - 메인 탭 시나리오(`home_main`, `devices_main`, `life_main`, `routines_main`)는 strict 실패로 간주 가능
+    - transition 시나리오(`pre_navigation` + `new_screen` 또는 `anchor_only`)는 warning 후 계속 진행
 
 ### `expected_bottom_tab` 등 기존 context 설정
 
