@@ -72,6 +72,10 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
         "last_merged_announcement",
         "focus_node",
         "dump_tree_nodes",
+        "fingerprint",
+        "is_duplicate_step",
+        "is_noise_step",
+        "noise_reason",
     ]
 
     existing_cols = [c for c in ordered_cols if c in df.columns]

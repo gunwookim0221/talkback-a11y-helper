@@ -1202,3 +1202,88 @@ def test_open_scenario_main_tab_focus_align_failure_is_strict(monkeypatch):
     ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
 
     assert ok is False
+
+
+def test_build_row_fingerprint_prefers_resource_id():
+    row = {
+        "focus_view_id": "com.example:id/title",
+        "visible_label": "Visible Label",
+        "merged_announcement": "Speech Value",
+        "focus_bounds": "10,20,30,40",
+    }
+
+    fingerprint = collection_flow.build_row_fingerprint(row)
+
+    assert fingerprint.startswith("com.example:id/title|visible label|speech value|20,30")
+
+
+def test_collect_tab_rows_sets_duplicate_flag_for_repeated_fingerprint(monkeypatch):
+    repeated_row = {
+        "step_index": 1,
+        "move_result": "moved",
+        "visible_label": "same",
+        "normalized_visible_label": "same",
+        "merged_announcement": "same",
+        "focus_view_id": "id.same",
+        "focus_bounds": "0,10,10,20",
+    }
+    client = DummyClient([_anchor_row(), repeated_row, {**repeated_row, "step_index": 2}])
+
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
+    monkeypatch.setattr(
+        collection_flow,
+        "should_stop",
+        lambda **k: (
+            False,
+            0,
+            0,
+            "",
+            ("same", "id.same", "0,10,10,20"),
+            {"terminal": False, "same_like_count": 0, "no_progress": False, "reason": ""},
+        ),
+    )
+    monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (False, "not_in_global_candidates"))
+
+    rows = collection_flow.collect_tab_rows(client, "SERIAL", _base_tab_cfg(max_steps=2), [], "o.xlsx", "out")
+
+    assert rows[2]["fingerprint_repeat_count"] == 1
+    assert rows[2]["is_duplicate_step"] is True
+
+
+def test_collect_tab_rows_marks_noise_when_speech_is_empty(monkeypatch):
+    noise_row = {
+        "step_index": 1,
+        "move_result": "moved",
+        "visible_label": "Wi-Fi",
+        "normalized_visible_label": "wi-fi",
+        "merged_announcement": "",
+        "focus_view_id": "id.wifi",
+        "focus_bounds": "0,10,10,20",
+    }
+    client = DummyClient([_anchor_row(), noise_row])
+
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
+    monkeypatch.setattr(
+        collection_flow,
+        "should_stop",
+        lambda **k: (
+            True,
+            0,
+            0,
+            "repeat_no_progress",
+            ("wi-fi", "id.wifi", "0,10,10,20"),
+            {"terminal": False, "same_like_count": 0, "no_progress": False, "reason": "repeat_no_progress"},
+        ),
+    )
+    monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (False, "not_in_global_candidates"))
+
+    rows = collection_flow.collect_tab_rows(client, "SERIAL", _base_tab_cfg(max_steps=1), [], "o.xlsx", "out")
+
+    assert rows[1]["is_noise_step"] is True
+    assert rows[1]["noise_reason"] == "speech_empty"

@@ -82,3 +82,49 @@ def make_overlay_entry_fingerprint(tab_name: str, step: dict[str, Any]) -> str:
     focus_view_id = str(step.get("focus_view_id", "") or "").strip()
     normalized_visible_label = str(step.get("normalized_visible_label", "") or "").strip()
     return f"{tab_name}|{focus_view_id}|{normalized_visible_label}"
+
+
+def _normalize_fingerprint_text(value: Any, max_len: int = 80) -> str:
+    normalized = str(value or "").strip().lower()
+    if len(normalized) > max_len:
+        return normalized[:max_len]
+    return normalized
+
+
+def _extract_bounds_center(bounds_value: Any) -> tuple[int, int]:
+    parsed_bounds = parse_bounds_str(bounds_value)
+    if parsed_bounds is None:
+        return 0, 0
+    left, top, right, bottom = parsed_bounds
+    center_x = (left + right) // 2
+    center_y = (top + bottom) // 2
+    return center_x, center_y
+
+
+def build_row_fingerprint(row: dict[str, Any]) -> str:
+    resource_id = _normalize_fingerprint_text(
+        row.get("focus_view_id", "") or row.get("resource_id", "") or row.get("resourceId", "")
+    )
+    normalized_visible = _normalize_fingerprint_text(
+        row.get("normalized_visible_label", "") or row.get("visible_label", "")
+    )
+    normalized_speech = _normalize_fingerprint_text(
+        row.get("normalized_announcement", "") or row.get("merged_announcement", "")
+    )
+    center_x, center_y = _extract_bounds_center(row.get("focus_bounds", "") or row.get("bounds", ""))
+    return f"{resource_id}|{normalized_visible}|{normalized_speech}|{center_x},{center_y}"
+
+
+def is_noise_row(row: dict[str, Any]) -> tuple[bool, str]:
+    visible = _normalize_fingerprint_text(row.get("visible_label", "") or row.get("normalized_visible_label", ""))
+    speech = _normalize_fingerprint_text(
+        row.get("merged_announcement", "") or row.get("normalized_announcement", "")
+    )
+
+    if visible and not speech:
+        return True, "speech_empty"
+    if "battery" in speech or "percent" in speech:
+        return True, "system_announcement"
+    if speech and not visible:
+        return True, "label_mismatch"
+    return False, ""

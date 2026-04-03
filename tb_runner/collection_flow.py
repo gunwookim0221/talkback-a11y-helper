@@ -21,7 +21,13 @@ from tb_runner.overlay_logic import (
 )
 from tb_runner.perf_stats import ScenarioPerfStats, format_perf_summary, save_excel_with_perf
 from tb_runner.tab_logic import stabilize_tab_selection
-from tb_runner.utils import _safe_regex_search, make_main_fingerprint, make_overlay_entry_fingerprint
+from tb_runner.utils import (
+    _safe_regex_search,
+    build_row_fingerprint,
+    is_noise_row,
+    make_main_fingerprint,
+    make_overlay_entry_fingerprint,
+)
 
 _VALID_SCREEN_CONTEXT_MODES = {"bottom_tab", "new_screen"}
 _VALID_STABILIZATION_MODES = {"tab_context", "anchor_only", "anchor_then_context"}
@@ -607,6 +613,26 @@ def _get_positive_int(value: Any, fallback: int) -> int:
     return fallback
 
 
+def _annotate_row_quality(
+    row: dict[str, Any],
+    *,
+    last_fingerprint: str,
+    fingerprint_repeat_count: int,
+) -> tuple[str, int]:
+    fingerprint = build_row_fingerprint(row)
+    if fingerprint == last_fingerprint:
+        fingerprint_repeat_count += 1
+    else:
+        fingerprint_repeat_count = 0
+    is_noise_step, noise_reason = is_noise_row(row)
+    row["fingerprint"] = fingerprint
+    row["fingerprint_repeat_count"] = fingerprint_repeat_count
+    row["is_duplicate_step"] = fingerprint_repeat_count > 0
+    row["is_noise_step"] = is_noise_step
+    row["noise_reason"] = noise_reason
+    return fingerprint, fingerprint_repeat_count
+
+
 def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     return open_scenario(client, dev, tab_cfg)
 
@@ -641,6 +667,11 @@ def collect_tab_rows(
             "crop_image_path": "",
             "crop_image_saved": False,
         }
+        row["fingerprint"] = build_row_fingerprint(row)
+        row["fingerprint_repeat_count"] = 0
+        row["is_duplicate_step"] = False
+        row["is_noise_step"] = False
+        row["noise_reason"] = ""
         rows.append(row)
         all_rows.append(row)
         if scenario_perf is not None:
@@ -672,6 +703,16 @@ def collect_tab_rows(
     anchor_row["_step_mono_start"] = time.monotonic() - float(anchor_row.get("t_step_start", 0.0) or 0.0)
     anchor_row = maybe_capture_focus_crop(client, dev, anchor_row, output_base_dir)
     anchor_row.pop("_step_mono_start", None)
+    anchor_fingerprint, anchor_repeat_count = _annotate_row_quality(
+        anchor_row,
+        last_fingerprint="",
+        fingerprint_repeat_count=0,
+    )
+    log(
+        f"[ROW] fingerprint='{anchor_row.get('fingerprint', '')}' "
+        f"duplicate={str(bool(anchor_row.get('is_duplicate_step', False))).lower()} "
+        f"noise={str(bool(anchor_row.get('is_noise_step', False))).lower()}"
+    )
 
     rows.append(anchor_row)
     all_rows.append(anchor_row)
@@ -680,6 +721,8 @@ def collect_tab_rows(
     save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
 
     prev_fingerprint = make_main_fingerprint(anchor_row)
+    last_fingerprint = anchor_fingerprint
+    fingerprint_repeat_count = anchor_repeat_count
     previous_step_row: dict[str, Any] | None = anchor_row
     fail_count = 0
     same_count = 0
@@ -721,6 +764,16 @@ def collect_tab_rows(
         row = maybe_capture_focus_crop(client, dev, row, output_base_dir)
         row.pop("_step_mono_start", None)
         row["step_total_elapsed_sec"] = round(time.perf_counter() - step_start, 3)
+        last_fingerprint, fingerprint_repeat_count = _annotate_row_quality(
+            row,
+            last_fingerprint=last_fingerprint,
+            fingerprint_repeat_count=fingerprint_repeat_count,
+        )
+        log(
+            f"[ROW] fingerprint='{row.get('fingerprint', '')}' "
+            f"duplicate={str(bool(row.get('is_duplicate_step', False))).lower()} "
+            f"noise={str(bool(row.get('is_noise_step', False))).lower()}"
+        )
 
         move_result = str(row.get("move_result", "") or "")
         visible_label = str(row.get("visible_label", "") or "").strip()
