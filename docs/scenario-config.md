@@ -55,11 +55,64 @@
 
 중요한 점은, 위 단계 자체는 같아도 각 단계의 **판정 기준**은 scenario config에 따라 달라질 수 있다는 것입니다.
 
+### 실행 흐름 요약(실무 체크용)
+
+1. **tab 선택**
+   - `tab`/진입 규칙으로 시작 지점을 맞춤
+2. **anchor 안정화**
+   - `anchor` + (`context_verify` 조건)로 목표 화면 안착 여부 판단
+3. **step loop**
+   - `SMART_NEXT` 기반 순회/수집 반복
+4. **stop 판단**
+   - `stop_policy` + `max_steps` 기준으로 종료 결정
+
 아래 두 축을 분리해서 이해하면 혼동을 줄일 수 있습니다.
 - **First axis: screen context classification**
   - 이 화면이 어떤 문맥 타입인지(`screen_context_mode`)
 - **Second axis: stabilization success policy**
   - 안정화 성공을 어떤 규칙으로 판정할지(`stabilization_mode`)
+
+---
+
+## TAB_CONFIGS의 역할과 runtime override 관계
+
+`TAB_CONFIGS`는 각 시나리오의 **정적 정의(static baseline)** 입니다.
+
+- 시나리오 식별자, 타입, 진입 탭, anchor, stop 정책 등 “기본 실행 의도”를 코드/기본 설정으로 표현
+- 별도 override가 없으면 runner는 `TAB_CONFIGS` 기준으로 실행
+
+실행 시점에는 `runtime_config.json`이 추가로 적용될 수 있습니다.
+
+- 관계 요약: `TAB_CONFIGS`(기본 정의) + `runtime_config.json`(실행 시 override)
+- 우선순위: runtime override가 동일 키를 덮어씀
+- 상세 규칙/운영 팁은 `docs/runtime-config.md` 참고
+
+---
+
+## TAB_CONFIGS 주요 필드 빠른 참조
+
+> 아래는 실무에서 자주 확인하는 핵심 필드 요약입니다. 세부 예시는 문서 하단 예시 JSON을 함께 참고하세요.
+
+- `scenario_id`
+  - 시나리오 고유 식별자. 로그/리포트/override 타겟 지정의 기준 키
+- `scenario_type` (`content` | `global_nav`)
+  - 수집/순회 대상 타입을 지정
+- `tab`
+  - 시작 문맥(탭/전역 네비게이션 엔트리) 선택 정보
+- `anchor`
+  - 목적 화면/섹션 도달 및 안정화 판정 신호
+- `context_verify`
+  - 현재 포커스/화면이 기대 문맥인지 확인하는 규칙
+- `stop_policy`
+  - step loop 종료 조건(terminal, 반복/no-progress, 시나리오 경계 등)
+- `overlay_policy`
+  - overlay/팝업 개입 시 정렬·복구 정책
+- `global_nav`
+  - 전역 네비게이션 판별 힌트(label/resource_id/selected/region)
+- `enabled`
+  - 시나리오 활성/비활성 토글
+- `max_steps`
+  - step loop 최대 반복 횟수 상한
 
 ---
 
@@ -141,6 +194,15 @@
 권장:
 - 메인 화면/리스트/상세는 `content`
 - 하단 탭/좌측 rail 검증 전용은 `global_nav`
+
+#### `content` vs `global_nav` 차이 요약
+
+- `content`
+  - 본문 영역을 순회/수집하는 기본 시나리오
+  - 필요 시 `stop_on_global_nav_entry`로 본문→전역 네비게이션 경계에서 종료
+- `global_nav`
+  - 하단 탭/좌측 rail 같은 전역 네비게이션 자체를 순회/검증
+  - 필요 시 `stop_on_global_nav_exit`로 전역 네비게이션→본문 경계에서 종료
 
 ### `stop_policy` (확장)
 
