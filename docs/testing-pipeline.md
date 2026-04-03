@@ -47,7 +47,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.GET_FOCUS -p com.iotpar
 
 ## Step 5.5 – Anchor Stabilization + Scenario Context Verify (Runner, Python)
 
-- `script_test.py` 러너(`SCRIPT_VERSION=1.7.27`)는 탭/anchor를 분리해 안정화 단계를 순차 수행합니다.
+- `script_test.py` 러너(`SCRIPT_VERSION=1.7.29`)는 탭/anchor를 분리해 안정화 단계를 순차 수행합니다.
 - anchor는 `resource_id_regex`, `text_regex`, `announcement_regex`, `class_name_regex` 조합으로 판정합니다.
 - `allow_resource_id_only=true`면 resourceId 단독 매칭도 허용하며, 복수 후보는 `(top, left)` 오름차순(좌상단 우선)으로 tie-break 합니다.
 - anchor 시작 안정화는 짧은 settle wait을 포함해 2회 연속 검증이 통과되어야 성공으로 처리합니다(실패 시 재시도 1회, 총 최대 2회).
@@ -82,3 +82,8 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.GET_FOCUS -p com.iotpar
 - 재정렬 단계는 일반 step 수집 API 대신 lightweight probe(`get_focus` + 최소 필드 매칭) 경로를 사용해, announcement/row 저장/crop 없이 entry 판정에 필요한 정보(view_id/label/bounds)만 확인합니다.
 - 재정렬 구간은 main 결과 row로 저장하지 않아, overlay 복귀 직후 `우리 집 → Map View → Add` 같은 중복 row 누적과 stop 조건 오탐을 줄입니다.
 - main step row에는 분석 품질 향상을 위해 `fingerprint`, `is_duplicate_step`, `is_recent_duplicate_step`, `recent_duplicate_distance`, `recent_duplicate_of_step`, `is_noise_step`, `noise_reason` 메타데이터가 추가 저장됩니다.
+- Excel 결과는 단일 파일 내 `raw` / `filtered` / `summary` 3개 시트로 저장됩니다.
+  - `raw`: 수집 row 전체 + 파생 컬럼(`speech_main`, `speech_status_tokens`, `visible_main`, `visible_status_tokens`)
+  - `filtered`: `is_noise_step`, `is_duplicate_step`, `is_recent_duplicate_step` 중 하나라도 `True`인 row 제외(그 외 mismatch row는 유지)
+  - `summary`: `total_rows`, `raw_rows`, `filtered_rows`, `noise_count`, `duplicate_count`, `recent_duplicate_count`, `mismatch_count` 집계(+ `scenario_id`가 있으면 시나리오별 row 수 추가)
+- 상태 토큰 분리는 수집 로직을 바꾸지 않고 저장 직전 후처리에서 수행합니다. 예: `"Devices, Tab 2 of 5, New content available"` → `main="devices"`, `status_tokens=["tab 2 of 5", "new content available"]`.
