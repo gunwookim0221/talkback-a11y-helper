@@ -66,6 +66,8 @@
 
 anchor 안정 자체는 공통적으로 2회 연속 검증(짧은 settle 포함)을 사용합니다.
 
+추가로 anchor 미지정이거나 explicit anchor 매칭이 실패하면, runner는 dump 기준 `content` 영역 후보에서 상단 행의 대표 fallback anchor를 자동 선택합니다. 우선순위는 `top-left → top-center → top-right`이며, 상/하단 chrome 후보(toolbar/bottom nav/system UI)는 제외하려고 시도합니다.
+
 ---
 
 ## 5) `context_verify` 타입 (현재 코드에 있는 범위)

@@ -23,6 +23,10 @@ def _extract_candidate_from_node(node: dict[str, Any], index: int = -1) -> dict[
     class_name = str(node.get("className", "") or "").strip()
     bounds = str(node.get("boundsInScreen", "") or "").strip()
     parsed = parse_bounds_str(bounds)
+    if not parsed:
+        nums = [int(v) for v in re.findall(r"-?\d+", bounds)]
+        if len(nums) >= 4:
+            parsed = (nums[0], nums[1], nums[2], nums[3])
     top, left, right, bottom = (parsed[1], parsed[0], parsed[2], parsed[3]) if parsed else (10**9, 10**9, -1, -1)
     return {
         "source": "dump_tree",
@@ -36,11 +40,18 @@ def _extract_candidate_from_node(node: dict[str, Any], index: int = -1) -> dict[
         "left": left,
         "right": right,
         "bottom": bottom,
+        "focusable": bool(node.get("focusable", False)),
+        "clickable": bool(node.get("clickable", False)),
+        "visible_to_user": bool(node.get("visibleToUser", True)),
     }
 
 def _extract_candidate_from_step(step: dict[str, Any]) -> dict[str, Any]:
     bounds = str(step.get("focus_bounds", "") or "").strip()
     parsed = parse_bounds_str(bounds)
+    if not parsed:
+        nums = [int(v) for v in re.findall(r"-?\d+", bounds)]
+        if len(nums) >= 4:
+            parsed = (nums[0], nums[1], nums[2], nums[3])
     top, left, right, bottom = (parsed[1], parsed[0], parsed[2], parsed[3]) if parsed else (10**9, 10**9, -1, -1)
     return {
         "source": "focus_step",
@@ -128,6 +139,143 @@ def choose_best_anchor_candidate(matches: list[dict[str, Any]], tie_breaker: str
     return sorted(matches, key=lambda item: -int(item.get("score", 0)))[0]
 
 
+def _has_explicit_anchor(tab_cfg: dict[str, Any], anchor_cfg: dict[str, Any]) -> bool:
+    if str(tab_cfg.get("anchor_name", "") or "").strip():
+        return True
+    for key in ("resource_id_regex", "text_regex", "announcement_regex", "class_name_regex", "bounds_regex"):
+        if str(anchor_cfg.get(key, "") or "").strip():
+            return True
+    return False
+
+
+def _is_fallback_chrome_candidate(candidate: dict[str, Any], screen_width: int, screen_height: int) -> bool:
+    top = int(candidate.get("top", 10**9))
+    bottom = int(candidate.get("bottom", -1))
+    left = int(candidate.get("left", 10**9))
+    right = int(candidate.get("right", -1))
+    class_name = str(candidate.get("class_name", "") or "").lower()
+    resource_id = str(candidate.get("resource_id", "") or "").lower()
+    label_blob = " ".join(
+        [
+            str(candidate.get("text", "") or "").lower(),
+            str(candidate.get("announcement", "") or "").lower(),
+        ]
+    ).strip()
+
+    if screen_height > 0 and top <= int(screen_height * 0.1):
+        if any(token in f"{resource_id} {class_name} {label_blob}" for token in ("toolbar", "actionbar", "search", "뒤로", "back")):
+            return True
+    if screen_height > 0 and top >= int(screen_height * 0.78):
+        if any(token in f"{resource_id} {class_name} {label_blob}" for token in ("bottom", "navigation", "tab", "menu_")):
+            return True
+    if any(token in f"{resource_id} {class_name} {label_blob}" for token in ("statusbar", "systemui", "more", "location")):
+        return True
+    if screen_width > 0 and (right <= 0 or left >= screen_width):
+        return True
+    if screen_height > 0 and (bottom <= 0 or top >= screen_height):
+        return True
+    return False
+
+
+def _pick_top_content_fallback_candidate(candidates: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, str]:
+    if not candidates:
+        return None, ""
+    screen_width = max((int(c.get("right", 0) or 0) for c in candidates), default=0)
+    screen_height = max((int(c.get("bottom", 0) or 0) for c in candidates), default=0)
+    content_candidates = [
+        c
+        for c in candidates
+        if bool(c.get("visible_to_user", True))
+        and (bool(c.get("focusable", False)) or bool(c.get("clickable", False)))
+        and int(c.get("top", 10**9)) >= 0
+        and int(c.get("left", 10**9)) >= 0
+        and not _is_fallback_chrome_candidate(c, screen_width, screen_height)
+    ]
+    if not content_candidates:
+        return None, ""
+    top_y = min(int(c.get("top", 10**9)) for c in content_candidates)
+    top_row_tolerance = max(24, int(screen_height * 0.02)) if screen_height > 0 else 24
+    top_row_candidates = [c for c in content_candidates if int(c.get("top", 10**9)) <= top_y + top_row_tolerance]
+    if not top_row_candidates:
+        return None, ""
+
+    identity_candidates = [
+        c
+        for c in top_row_candidates
+        if str(c.get("announcement", "") or "").strip()
+        or str(c.get("text", "") or "").strip()
+        or str(c.get("resource_id", "") or "").strip()
+    ]
+    if not identity_candidates:
+        return None, ""
+    if screen_width > 0:
+        def _center_x(item: dict[str, Any]) -> int:
+            return (int(item.get("left", 0)) + int(item.get("right", 0))) // 2
+
+        left_bucket = [c for c in identity_candidates if _center_x(c) <= int(screen_width * 0.34)]
+        if left_bucket:
+            return sorted(left_bucket, key=lambda c: (int(c.get("left", 10**9)), int(c.get("top", 10**9))))[0], "top_left"
+
+        center_bucket = [
+            c for c in identity_candidates if int(screen_width * 0.34) < _center_x(c) < int(screen_width * 0.66)
+        ]
+        if center_bucket:
+            center_x = screen_width // 2
+            return sorted(
+                center_bucket,
+                key=lambda c: (
+                    abs(_center_x(c) - center_x),
+                    int(c.get("left", 10**9)),
+                ),
+            )[0], "top_center"
+
+        right_bucket = [c for c in identity_candidates if _center_x(c) >= int(screen_width * 0.66)]
+        if right_bucket:
+            return sorted(right_bucket, key=lambda c: (-int(c.get("right", -1)), int(c.get("top", 10**9))))[0], "top_right"
+
+    return sorted(identity_candidates, key=lambda c: (int(c.get("left", 10**9)), int(c.get("top", 10**9))))[0], "top_left"
+
+
+def _build_verify_cfg_for_fallback(candidate: dict[str, Any]) -> dict[str, Any]:
+    resource_id = str(candidate.get("resource_id", "") or "").strip()
+    text = str(candidate.get("text", "") or "").strip()
+    announcement = str(candidate.get("announcement", "") or "").strip()
+    verify_cfg: dict[str, Any] = {"allow_resource_id_only": True, "tie_breaker": "top_left"}
+    if resource_id:
+        verify_cfg["resource_id_regex"] = f"^{re.escape(resource_id)}$"
+    if text:
+        verify_cfg["text_regex"] = f"^{re.escape(text)}$"
+    elif announcement:
+        verify_cfg["announcement_regex"] = f"^{re.escape(announcement)}$"
+    return verify_cfg
+
+
+def _select_anchor_candidate(client: A11yAdbClient, dev: str, candidate: dict[str, Any]) -> tuple[bool, bool]:
+    select_attempted = False
+    selected = False
+    resource_id = str(candidate.get("resource_id", "") or "").strip()
+    if resource_id:
+        select_attempted = True
+        selected = client.select(
+            dev=dev,
+            name=f"^{re.escape(resource_id)}$",
+            type_="r",
+            wait_=8,
+        )
+    if selected:
+        return True, True
+    announcement = str(candidate.get("announcement", "") or "").strip()
+    if announcement:
+        select_attempted = True
+        selected = client.select(
+            dev=dev,
+            name=f"^{re.escape(announcement)}$",
+            type_="a",
+            wait_=8,
+        )
+    return selected, select_attempted
+
+
 def _is_anchor_verify_match(verify_match: dict[str, Any], anchor_cfg: dict[str, Any]) -> bool:
     score_threshold = int(anchor_cfg.get("score_threshold", _ANCHOR_VERIFY_SCORE_THRESHOLD) or _ANCHOR_VERIFY_SCORE_THRESHOLD)
     return bool(verify_match.get("matched")) or int(verify_match.get("score", 0) or 0) >= score_threshold
@@ -189,6 +337,7 @@ def stabilize_anchor(
 ) -> dict[str, Any]:
     _ = verify_reads  # backward-compatible signature; anchor stabilization uses fixed double verification.
     anchor_cfg = _resolve_anchor_cfg(tab_cfg)
+    explicit_anchor_configured = _has_explicit_anchor(tab_cfg, anchor_cfg)
     tie_breaker = str(anchor_cfg.get("tie_breaker", "top_left") or "top_left")
     stabilization_mode = str(tab_cfg.get("stabilization_mode", "anchor_then_context") or "anchor_then_context").strip().lower()
     if stabilization_mode not in _VALID_STABILIZATION_MODES:
@@ -213,22 +362,37 @@ def stabilize_anchor(
             _extract_candidate_from_node(node, index=i)
             for i, node in enumerate(dump_nodes if isinstance(dump_nodes, list) else [])
         ]
-        matches = [m for m in (match_anchor(c, anchor_cfg) for c in candidates) if m["matched"]]
-        best = choose_best_anchor_candidate(matches, tie_breaker=tie_breaker)
+        matches: list[dict[str, Any]] = []
+        best: dict[str, Any] | None = None
+        fallback_position = ""
+        active_anchor_cfg = dict(anchor_cfg)
+        if explicit_anchor_configured:
+            matches = [m for m in (match_anchor(c, anchor_cfg) for c in candidates) if m["matched"]]
+            best = choose_best_anchor_candidate(matches, tie_breaker=tie_breaker)
+        elif attempt == 1:
+            log("[ANCHOR][fallback] no explicit anchor configured")
+
+        fallback_candidate: dict[str, Any] | None = None
+        if best is None:
+            if explicit_anchor_configured:
+                log("[ANCHOR][fallback] explicit anchor not matched, trying top content fallback")
+            fallback_candidate, fallback_position = _pick_top_content_fallback_candidate(candidates)
+            if fallback_candidate:
+                active_anchor_cfg = _build_verify_cfg_for_fallback(fallback_candidate)
+                best = {"candidate": fallback_candidate, "score": 0, "matched": True, "matched_fields": ["fallback"]}
+                log(
+                    f"[ANCHOR][fallback] selected candidate label='{fallback_candidate.get('announcement', '')}' "
+                    f"position='{fallback_position}'"
+                )
+            else:
+                log("[ANCHOR][fallback] no usable fallback candidate")
 
         selected = False
         select_attempted = False
-        if best and best["candidate"].get("resource_id"):
-            resource_pattern = f"^{re.escape(str(best['candidate']['resource_id']))}$"
-            select_attempted = True
-            selected = client.select(
-                dev=dev,
-                name=resource_pattern,
-                type_="r",
-                wait_=8,
-            )
+        if best:
+            selected, select_attempted = _select_anchor_candidate(client, dev, best["candidate"])
 
-        if not selected:
+        if not selected and fallback_candidate is None:
             select_attempted = True
             selected = client.select(
                 dev=dev,
@@ -243,7 +407,7 @@ def stabilize_anchor(
         verify_results = stabilize_anchor_focus(
             client=client,
             dev=dev,
-            anchor_cfg=anchor_cfg,
+            anchor_cfg=active_anchor_cfg,
             attempt=attempt,
             max_retries=max_retries,
             transition_fast_path=transition_fast_path,
