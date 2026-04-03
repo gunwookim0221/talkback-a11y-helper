@@ -47,7 +47,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.GET_FOCUS -p com.iotpar
 
 ## Step 5.5 – Anchor Stabilization + Scenario Context Verify (Runner, Python)
 
-- `script_test.py` 러너(`SCRIPT_VERSION=1.7.26`)는 탭/anchor를 분리해 안정화 단계를 순차 수행합니다.
+- `script_test.py` 러너(`SCRIPT_VERSION=1.7.27`)는 탭/anchor를 분리해 안정화 단계를 순차 수행합니다.
 - anchor는 `resource_id_regex`, `text_regex`, `announcement_regex`, `class_name_regex` 조합으로 판정합니다.
 - `allow_resource_id_only=true`면 resourceId 단독 매칭도 허용하며, 복수 후보는 `(top, left)` 오름차순(좌상단 우선)으로 tie-break 합니다.
 - anchor 시작 안정화는 짧은 settle wait을 포함해 2회 연속 검증이 통과되어야 성공으로 처리합니다(실패 시 재시도 1회, 총 최대 2회).
@@ -81,3 +81,4 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.GET_FOCUS -p com.iotpar
 - 복귀 직후 entry 기준 재정렬(re-align)은 `post_click classification='overlay'`일 때만 수행합니다.
 - 재정렬 단계는 일반 step 수집 API 대신 lightweight probe(`get_focus` + 최소 필드 매칭) 경로를 사용해, announcement/row 저장/crop 없이 entry 판정에 필요한 정보(view_id/label/bounds)만 확인합니다.
 - 재정렬 구간은 main 결과 row로 저장하지 않아, overlay 복귀 직후 `우리 집 → Map View → Add` 같은 중복 row 누적과 stop 조건 오탐을 줄입니다.
+- main step row에는 분석 품질 향상을 위해 `fingerprint`, `is_duplicate_step`, `is_noise_step`, `noise_reason` 메타데이터가 추가 저장됩니다.
