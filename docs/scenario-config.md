@@ -157,10 +157,22 @@ stabilization/traversal 이전에 수행할 선행 이동 절차를 정의합니
 - 기본값: `2`
 - 의미:
   - 탭 touch/select 이후 `tab.resource_id_regex` / `tab.text_regex` / `tab.announcement_regex`를 재사용해 `select` 기반 정렬 시도
+  - `new_screen + pre_navigation` 전환 시나리오에서는 fast path로 동작하며 최대 `2`회로 상한 적용(기본 1~2회의 짧은 bounded 시도)
   - 성공하면 다음 단계로 진행
   - 실패 시:
     - 메인 탭 시나리오(`home_main`, `devices_main`, `life_main`, `routines_main`)는 strict 실패로 간주 가능
     - transition 시나리오(`pre_navigation` + `new_screen` 또는 `anchor_only`)는 warning 후 계속 진행
+
+### `tab_focus_align_settle_wait_seconds`
+
+탭 touch 직후 fast focus align 시작 전에 두는 짧은 settle wait입니다.
+
+- 기본값: `0.12`
+- 적용 범위: `new_screen + pre_navigation` fast path
+- 상한: `0.2`초
+- 의도:
+  - 화면 전환 직후 UI 상태 반영 시간을 아주 짧게 보장
+  - focus align을 지연시키지 않으면서도 실패율을 줄이는 best-effort 균형값
 
 ### `expected_bottom_tab` 등 기존 context 설정
 

@@ -1,4 +1,5 @@
 import re
+import time
 from typing import Any
 
 from talkback_lib import A11yAdbClient
@@ -63,6 +64,21 @@ def _resolve_focus_align_retry_count(tab_cfg: dict[str, Any], fallback: int = 2)
     return fallback
 
 
+def _resolve_positive_float(value: Any, fallback: float) -> float:
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, (int, float)) and float(value) > 0:
+        return float(value)
+    return fallback
+
+
+def _is_transition_fast_align(tab_cfg: dict[str, Any]) -> bool:
+    screen_context_mode = str(tab_cfg.get("screen_context_mode", "") or "").strip().lower()
+    pre_navigation = tab_cfg.get("pre_navigation", [])
+    has_pre_navigation = isinstance(pre_navigation, list) and bool(pre_navigation)
+    return screen_context_mode == "new_screen" and has_pre_navigation
+
+
 def _attempt_tab_focus_alignment(
     client: A11yAdbClient,
     dev: str,
@@ -70,7 +86,11 @@ def _attempt_tab_focus_alignment(
     normalized_tab_cfg: dict[str, Any],
     best: dict[str, Any] | None,
     max_retries: int,
+    *,
+    fast_mode: bool = False,
+    select_wait_seconds: int = 5,
 ) -> dict[str, Any]:
+    log_tag = "[TAB][focus_align_fast]" if fast_mode else "[TAB][focus_align]"
     selectors: list[tuple[str, str, str]] = []
     best_candidate = (best or {}).get("candidate", {}) if isinstance(best, dict) else {}
     best_resource = str(best_candidate.get("resource_id", "") or "").strip()
@@ -97,19 +117,19 @@ def _attempt_tab_focus_alignment(
         deduped_selectors.append((type_, pattern, source))
 
     if not deduped_selectors:
-        log(f"[TAB][focus_align] skipped scenario='{scenario_id}' reason='no_selector'")
+        log(f"{log_tag} skipped scenario='{scenario_id}' reason='no_selector'")
         return {"attempted": False, "ok": False, "reason": "no_selector"}
 
     for attempt in range(1, max_retries + 1):
         type_, pattern, source = deduped_selectors[(attempt - 1) % len(deduped_selectors)]
         log(
-            f"[TAB][focus_align] attempt={attempt}/{max_retries} scenario='{scenario_id}' "
+            f"{log_tag} attempt={attempt}/{max_retries} scenario='{scenario_id}' "
             f"type='{type_}' source='{source}'"
         )
-        aligned = bool(client.select(dev=dev, name=pattern, type_=type_, wait_=5))
+        aligned = bool(client.select(dev=dev, name=pattern, type_=type_, wait_=select_wait_seconds))
         if aligned:
             log(
-                f"[TAB][focus_align] success scenario='{scenario_id}' attempt={attempt}/{max_retries} "
+                f"{log_tag} success scenario='{scenario_id}' attempt={attempt}/{max_retries} "
                 f"type='{type_}' source='{source}'"
             )
             return {"attempted": True, "ok": True, "attempt": attempt, "type": type_, "source": source}
@@ -119,7 +139,7 @@ def _attempt_tab_focus_alignment(
     focus_label = str(target.get("text", "") or target.get("contentDescription", "") or "").strip()
     focus_resource = str(target.get("viewIdResourceName", "") or target.get("resourceId", "") or "").strip()
     log(
-        f"[TAB][focus_align] failed scenario='{scenario_id}' attempt={max_retries}/{max_retries} "
+        f"{log_tag} failed scenario='{scenario_id}' attempt={max_retries}/{max_retries} "
         f"focus_label='{focus_label}' focus_resource='{focus_resource}'"
     )
     return {
@@ -142,6 +162,11 @@ def stabilize_tab_selection(
     tie_breaker = str(normalized_tab_cfg.get("tie_breaker", "bottom_nav_left_to_right") or "bottom_nav_left_to_right")
     scenario_id = str(tab_cfg.get("scenario_id", "") or "")
     focus_align_retries = _resolve_focus_align_retry_count(tab_cfg, fallback=2)
+    fast_focus_align = _is_transition_fast_align(tab_cfg)
+    if fast_focus_align:
+        focus_align_retries = min(focus_align_retries, 2)
+        if focus_align_retries < 1:
+            focus_align_retries = 1
     fallback_to_legacy = bool(normalized_tab_cfg.get("_fallback_to_legacy", False))
     if fallback_to_legacy:
         log(f"[TAB][select] fallback_to_legacy=True scenario='{scenario_id}'")
@@ -235,6 +260,16 @@ def stabilize_tab_selection(
 
         focus_align_result = {"attempted": False, "ok": False, "reason": "not_selected"}
         if selected:
+            if fast_focus_align:
+                settle_wait_seconds = min(
+                    _resolve_positive_float(tab_cfg.get("tab_focus_align_settle_wait_seconds"), 0.12),
+                    0.2,
+                )
+                log(
+                    f"[TAB][focus_align_fast] path='touch_immediate' scenario='{scenario_id}' "
+                    f"transition=true settle_wait_seconds={settle_wait_seconds:.2f} max_attempts={focus_align_retries}"
+                )
+                time.sleep(settle_wait_seconds)
             focus_align_result = _attempt_tab_focus_alignment(
                 client=client,
                 dev=dev,
@@ -242,7 +277,10 @@ def stabilize_tab_selection(
                 normalized_tab_cfg=normalized_tab_cfg,
                 best=best,
                 max_retries=focus_align_retries,
+                fast_mode=fast_focus_align,
+                select_wait_seconds=1 if fast_focus_align else 5,
             )
+            focus_align_result["fast_mode"] = fast_focus_align
         else:
             log(f"[TAB][focus_align] skipped scenario='{scenario_id}' reason='tab_select_failed'")
 

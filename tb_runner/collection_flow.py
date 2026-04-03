@@ -237,18 +237,20 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     focus_align_result = tab_stabilized.get("focus_align", {}) if isinstance(tab_stabilized, dict) else {}
     focus_align_attempted = bool(focus_align_result.get("attempted"))
     focus_align_ok = bool(focus_align_result.get("ok"))
+    focus_align_fast = bool(focus_align_result.get("fast_mode"))
     if focus_align_attempted and not focus_align_ok:
+        focus_log_tag = "[TAB][focus_align_fast]" if focus_align_fast else "[TAB][focus_align]"
         log(
-            f"[TAB][focus_align] scenario='{scenario_id}' main_tab={str(is_strict_main_tab_scenario).lower()} "
+            f"{focus_log_tag} scenario='{scenario_id}' main_tab={str(is_strict_main_tab_scenario).lower()} "
             f"transition_scenario={str(is_transition_scenario).lower()} result='failed'"
         )
         if is_transition_scenario and not is_strict_main_tab_scenario:
             log(
-                f"[TAB][focus_align] failed but proceeding (transition scenario) "
+                f"{focus_log_tag} failed but proceeding (transition scenario) "
                 f"scenario='{scenario_id}'"
             )
         elif is_strict_main_tab_scenario:
-            log(f"[TAB][focus_align] strict failure scenario='{scenario_id}'")
+            log(f"{focus_log_tag} strict failure scenario='{scenario_id}'")
             return False
 
     if not tab_stabilized.get("ok"):
@@ -271,9 +273,16 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             log(f"[TAB][select] stabilization failed scenario='{scenario_id}'")
             return False
 
-    time.sleep(main_step_wait_seconds)
+    if is_transition_scenario and not is_strict_main_tab_scenario:
+        transition_wait = min(main_step_wait_seconds, 0.25)
+        time.sleep(transition_wait)
+    else:
+        time.sleep(main_step_wait_seconds)
     client.reset_focus_history(dev)
-    time.sleep(0.5)
+    if is_transition_scenario and not is_strict_main_tab_scenario:
+        time.sleep(0.1)
+    else:
+        time.sleep(0.5)
 
     pre_nav_ok = _run_pre_navigation_steps(client=client, dev=dev, tab_cfg=tab_cfg)
     if not pre_nav_ok:
