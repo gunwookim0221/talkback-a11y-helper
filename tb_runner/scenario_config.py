@@ -1,6 +1,7 @@
 TAB_CONFIGS = [
     {
         "scenario_id": "home_main",
+        "scenario_type": "content",
         "tab_name": "(?i).*home.*",
         "tab_type": "b",
         "tab": {
@@ -23,7 +24,22 @@ TAB_CONFIGS = [
             "type": "selected_bottom_tab",
             "announcement_regex": "(?i).*(selected|선택됨).*home.*",
         },
-        "max_steps": 5,
+        "stop_policy": {
+            "stop_on_global_nav_entry": True,
+        },
+        "global_nav": {
+            "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+            "resource_ids": [
+                "com.samsung.android.oneconnect:id/menu_favorites",
+                "com.samsung.android.oneconnect:id/menu_devices",
+                "com.samsung.android.oneconnect:id/menu_services",
+                "com.samsung.android.oneconnect:id/menu_automations",
+                "com.samsung.android.oneconnect:id/menu_more",
+            ],
+            "selected_pattern": "(?i).*(selected|선택됨).*",
+            "region_hint": "bottom_tabs",
+        },
+        "max_steps": 30,
         "enabled": False,
         "overlay_policy": {
             "allow_candidates": [
@@ -64,8 +80,6 @@ TAB_CONFIGS = [
             "type": "selected_bottom_tab",
             "announcement_regex": "(?i).*(selected|선택됨).*devices.*",
         },
-        "enabled": False,
-        "max_steps": 5,
         "stop_policy": {
             "stop_on_global_nav_entry": True,
         },
@@ -81,6 +95,8 @@ TAB_CONFIGS = [
             "selected_pattern": "(?i).*(selected|선택됨).*",
             "region_hint": "bottom_tabs",
         },
+        "enabled": True,
+        "max_steps": 30,
         "overlay_policy": {
             "allow_candidates": [
                 {
@@ -98,6 +114,7 @@ TAB_CONFIGS = [
     },
     {
         "scenario_id": "life_main",
+        "scenario_type": "content",
         "tab_name": "(?i).*life.*",
         "tab_type": "b",
         "tab": {
@@ -120,8 +137,23 @@ TAB_CONFIGS = [
             "type": "selected_bottom_tab",
             "announcement_regex": "(?i).*(selected|선택됨).*life.*",
         },
+        "stop_policy": {
+            "stop_on_global_nav_entry": True,
+        },
+        "global_nav": {
+            "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+            "resource_ids": [
+                "com.samsung.android.oneconnect:id/menu_favorites",
+                "com.samsung.android.oneconnect:id/menu_devices",
+                "com.samsung.android.oneconnect:id/menu_services",
+                "com.samsung.android.oneconnect:id/menu_automations",
+                "com.samsung.android.oneconnect:id/menu_more",
+            ],
+            "selected_pattern": "(?i).*(selected|선택됨).*",
+            "region_hint": "bottom_tabs",
+        },
         "enabled": False,
-        "max_steps": 5,
+        "max_steps": 30,
         "overlay_policy": {
             "allow_candidates": [
                 {
@@ -139,6 +171,7 @@ TAB_CONFIGS = [
     },
     {
         "scenario_id": "routines_main",
+        "scenario_type": "content",
         "tab_name": "(?i).*routines.*",
         "tab_type": "b",
         "tab": {
@@ -161,8 +194,23 @@ TAB_CONFIGS = [
             "type": "selected_bottom_tab",
             "announcement_regex": "(?i).*(selected|선택됨).*routines.*",
         },
+        "stop_policy": {
+            "stop_on_global_nav_entry": True,
+        },
+        "global_nav": {
+            "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+            "resource_ids": [
+                "com.samsung.android.oneconnect:id/menu_favorites",
+                "com.samsung.android.oneconnect:id/menu_devices",
+                "com.samsung.android.oneconnect:id/menu_services",
+                "com.samsung.android.oneconnect:id/menu_automations",
+                "com.samsung.android.oneconnect:id/menu_more",
+            ],
+            "selected_pattern": "(?i).*(selected|선택됨).*",
+            "region_hint": "bottom_tabs",
+        },
         "enabled": False,
-        "max_steps": 5,
+        "max_steps": 30,
         "overlay_policy": {
             "allow_candidates": [
                 {
@@ -176,6 +224,53 @@ TAB_CONFIGS = [
                     "label": "Add",
                 }
             ],
+        },
+    },
+    {
+        "scenario_id": "menu_main",
+        "scenario_type": "content",
+        "tab_name": "(?i).*(menu|more).*",
+        "tab_type": "b",
+        "tab": {
+            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_more",
+            "text_regex": "(?i).*(menu|more).*",
+            "announcement_regex": "(?i).*(selected|선택됨)?.*(menu|more).*",
+            "tie_breaker": "bottom_nav_left_to_right",
+            "allow_resource_id_only": True,
+        },
+        "screen_context_mode": "bottom_tab",
+        "stabilization_mode": "anchor_then_context",
+        "anchor_name": "(?i).*smartthings settings.*|(?i).*settings.*",
+        "anchor_type": "a",
+        "anchor": {
+            "text_regex": "(?i).*smartthings settings.*|(?i).*settings.*",
+            "announcement_regex": "(?i).*smartthings settings.*|(?i).*settings.*",
+            "tie_breaker": "top_left",
+        },
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": "(?i).*(selected|선택됨).*(menu|more).*",
+        },
+        "stop_policy": {
+            "stop_on_global_nav_entry": True,
+        },
+        "global_nav": {
+            "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+            "resource_ids": [
+                "com.samsung.android.oneconnect:id/menu_favorites",
+                "com.samsung.android.oneconnect:id/menu_devices",
+                "com.samsung.android.oneconnect:id/menu_services",
+                "com.samsung.android.oneconnect:id/menu_automations",
+                "com.samsung.android.oneconnect:id/menu_more",
+            ],
+            "selected_pattern": "(?i).*(selected|선택됨).*",
+            "region_hint": "bottom_tabs",
+        },
+        "enabled": False,
+        "max_steps": 30,
+        "overlay_policy": {
+            "allow_candidates": [],
+            "block_candidates": [],
         },
     },
     {
@@ -215,6 +310,7 @@ TAB_CONFIGS = [
     },
     {
         "scenario_id": "settings_entry_example",
+        "scenario_type": "content",
         "tab_name": "(?i).*menu.*",
         "tab_type": "b",
         "tab": {
@@ -245,10 +341,11 @@ TAB_CONFIGS = [
             "text_regex": "(?i).*smartthings settings.*|.*settings.*",
         },
         "enabled": False,
-        "max_steps": 20,
+        "max_steps": 30,
     },
     {
         "scenario_id": "life_pet_care_example",
+        "scenario_type": "content",
         "tab_name": "(?i).*life.*",
         "tab_type": "b",
         "screen_context_mode": "new_screen",
@@ -277,6 +374,7 @@ TAB_CONFIGS = [
     },
     {
         "scenario_id": "life_plugin_example",
+        "scenario_type": "content",
         "tab_name": "(?i).*life.*",
         "tab_type": "b",
         "screen_context_mode": "new_screen",
@@ -297,6 +395,7 @@ TAB_CONFIGS = [
     },
     {
         "scenario_id": "resource_id_only_example",
+        "scenario_type": "content",
         "tab_name": "(?i).*home.*",
         "tab_type": "b",
         "screen_context_mode": "bottom_tab",
@@ -311,6 +410,21 @@ TAB_CONFIGS = [
         "context_verify": {
             "type": "selected_bottom_tab",
             "announcement_regex": "(?i).*(selected|선택됨).*home.*",
+        },
+        "stop_policy": {
+            "stop_on_global_nav_entry": True,
+        },
+        "global_nav": {
+            "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+            "resource_ids": [
+                "com.samsung.android.oneconnect:id/menu_favorites",
+                "com.samsung.android.oneconnect:id/menu_devices",
+                "com.samsung.android.oneconnect:id/menu_services",
+                "com.samsung.android.oneconnect:id/menu_automations",
+                "com.samsung.android.oneconnect:id/menu_more",
+            ],
+            "selected_pattern": "(?i).*(selected|선택됨).*",
+            "region_hint": "bottom_tabs",
         },
         "enabled": False,
         "max_steps": 10,
