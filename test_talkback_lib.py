@@ -1885,6 +1885,98 @@ class FocusHelpersTest(unittest.TestCase):
         self.assertFalse(step["step_dump_tree_used"])
         self.assertEqual(step["step_dump_tree_reason"], "fallback_nodes_reused")
 
+    def test_collect_focus_step_falls_back_to_top_level_talkback_label_when_speech_empty(self):
+        client = CollectFocusStepClient()
+        client.partial_payload = []
+        client.focus_payload = {
+            "text": "",
+            "contentDescription": "",
+            "talkbackLabel": "우리 집",
+            "viewIdResourceName": "com.example:id/location",
+            "boundsInScreen": {"l": 1, "t": 2, "r": 3, "b": 4},
+        }
+
+        def _focus_with_trace(dev=None, wait_seconds: float = 2.0):
+            client.last_get_focus_trace = {
+                "top_level_payload_sufficient": True,
+                "final_payload_source": "top_level",
+            }
+            return dict(client.focus_payload)
+
+        client.get_focus = _focus_with_trace
+        step = client.collect_focus_step(dev="SERIAL", move=False, wait_seconds=0.2)
+
+        self.assertEqual(step["merged_announcement"], "우리 집")
+        self.assertEqual(step["normalized_announcement"], "우리 집")
+
+    def test_collect_focus_step_falls_back_to_top_level_merged_label_when_speech_empty(self):
+        client = CollectFocusStepClient()
+        client.partial_payload = []
+        client.focus_payload = {
+            "text": "",
+            "contentDescription": "",
+            "mergedLabel": "QR code",
+            "viewIdResourceName": "com.example:id/qr",
+            "boundsInScreen": {"l": 1, "t": 2, "r": 3, "b": 4},
+        }
+
+        def _focus_with_trace(dev=None, wait_seconds: float = 2.0):
+            client.last_get_focus_trace = {
+                "top_level_payload_sufficient": True,
+                "final_payload_source": "top_level",
+            }
+            return dict(client.focus_payload)
+
+        client.get_focus = _focus_with_trace
+        step = client.collect_focus_step(dev="SERIAL", move=False, wait_seconds=0.2)
+
+        self.assertEqual(step["merged_announcement"], "QR code")
+        self.assertEqual(step["normalized_announcement"], "qr code")
+
+    def test_collect_focus_step_does_not_force_fallback_when_top_level_payload_not_sufficient(self):
+        client = CollectFocusStepClient()
+        client.partial_payload = []
+        client.focus_payload = {
+            "talkbackLabel": "우리 집",
+            "viewIdResourceName": "com.example:id/location",
+            "boundsInScreen": {"l": 1, "t": 2, "r": 3, "b": 4},
+        }
+
+        def _focus_with_trace(dev=None, wait_seconds: float = 2.0):
+            client.last_get_focus_trace = {
+                "top_level_payload_sufficient": False,
+                "final_payload_source": "top_level",
+            }
+            return dict(client.focus_payload)
+
+        client.get_focus = _focus_with_trace
+        step = client.collect_focus_step(dev="SERIAL", move=False, wait_seconds=0.2)
+
+        self.assertEqual(step["merged_announcement"], "")
+        self.assertEqual(step["normalized_announcement"], "")
+
+    def test_collect_focus_step_does_not_override_existing_announcement_with_top_level_fallback(self):
+        client = CollectFocusStepClient()
+        client.partial_payload = ["기존 안내"]
+        client.focus_payload = {
+            "talkbackLabel": "대체 안내",
+            "viewIdResourceName": "com.example:id/location",
+            "boundsInScreen": {"l": 1, "t": 2, "r": 3, "b": 4},
+        }
+
+        def _focus_with_trace(dev=None, wait_seconds: float = 2.0):
+            client.last_get_focus_trace = {
+                "top_level_payload_sufficient": True,
+                "final_payload_source": "top_level",
+            }
+            return dict(client.focus_payload)
+
+        client.get_focus = _focus_with_trace
+        step = client.collect_focus_step(dev="SERIAL", move=False, wait_seconds=0.2)
+
+        self.assertEqual(step["merged_announcement"], "기존 안내")
+        self.assertEqual(step["normalized_announcement"], "기존 안내")
+
 
 if __name__ == "__main__":
     unittest.main()

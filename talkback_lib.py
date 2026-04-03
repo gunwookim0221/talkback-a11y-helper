@@ -36,7 +36,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.30"
+CLIENT_ALGORITHM_VERSION = "1.7.32"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -2337,10 +2337,42 @@ class A11yAdbClient:
         step["get_focus_dump_replace_reason"] = str(trace.get("dump_replace_reason", "") or "")
         step["t_step_start"] = 0.0
 
+        merged_announcement = str(step.get("merged_announcement", "") or "").strip()
+        if not merged_announcement:
+            top_level_payload_sufficient = bool(step.get("get_focus_top_level_payload_sufficient", False))
+            final_payload_source = str(step.get("get_focus_final_payload_source", "") or "").strip().lower()
+            if top_level_payload_sufficient and final_payload_source == "top_level":
+                fallback_announcement = ""
+                fallback_source = ""
+
+                if isinstance(partial_announcements, list):
+                    fallback_announcement = self._merge_announcements(partial_announcements).strip()
+                    if fallback_announcement:
+                        fallback_source = "partial_announcements"
+
+                if not fallback_announcement:
+                    fallback_announcement = str(saved_last_merged or "").strip()
+                    if fallback_announcement:
+                        fallback_source = "last_merged_announcement"
+
+                if not fallback_announcement and isinstance(safe_focus_node, dict):
+                    for source_key in ("talkbackLabel", "mergedLabel", "contentDescription", "text"):
+                        candidate = str(safe_focus_node.get(source_key, "") or "").strip()
+                        if candidate:
+                            fallback_announcement = candidate
+                            fallback_source = source_key
+                            break
+
+                if fallback_announcement:
+                    step["merged_announcement"] = fallback_announcement
+                    step["normalized_announcement"] = self.normalize_for_comparison(fallback_announcement)
+                    if fallback_source in {"talkbackLabel", "mergedLabel"}:
+                        print(f"[ANN][fallback] source='{fallback_source}'")
+
         step["last_announcements"] = self._json_safe_value(saved_last_announcements)
         step["last_merged_announcement"] = saved_last_merged
         prev_merged = str(self._prev_step_merged_announcement or "").strip()
-        curr_merged = str(merged_announcement or "").strip()
+        curr_merged = str(step.get("merged_announcement", "") or "").strip()
         prev_norm = self.normalize_for_comparison(prev_merged)
         curr_norm = self.normalize_for_comparison(curr_merged)
         step["prev_speech_same"] = bool(prev_norm and curr_norm and prev_norm == curr_norm)
