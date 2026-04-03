@@ -318,6 +318,7 @@ def stabilize_tab_selection(
             focus_wait_seconds=0.8 if fast_focus_align else None,
             allow_get_focus_fallback_dump=not fast_focus_align,
             allow_step_dump=not fast_focus_align,
+            get_focus_mode="fast" if fast_focus_align else "normal",
         )
         last_context = verify_context(verify_row, tab_cfg, client=client, dev=dev)
         log(

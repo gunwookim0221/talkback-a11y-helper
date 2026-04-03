@@ -475,6 +475,7 @@ def _run_pre_navigation_steps(
             focus_wait_seconds=_TRANSITION_FAST_FOCUS_WAIT_SECONDS if transition_fast_path else None,
             allow_get_focus_fallback_dump=not transition_fast_path,
             allow_step_dump=not transition_fast_path,
+            get_focus_mode="fast" if transition_fast_path else "normal",
         )
         time.sleep(step_wait_seconds)
 

@@ -44,7 +44,7 @@ def test_detect_step_mismatch_skips_low_confidence_under_strong_top_level_policy
 
     assert "crop_low_confidence" not in low
     assert "top_level_without_fallback_dump" not in low
-    assert "get_focus_top_level_success_false" in low
+    assert "get_focus_top_level_success_false" not in low
 
 
 def test_detect_step_mismatch_returns_overlay_bounds_only_focus_low_confidence():
@@ -68,6 +68,27 @@ def test_detect_step_mismatch_returns_bounds_dependent_focus_low_confidence():
     _, low = detect_step_mismatch(row)
 
     assert "bounds_dependent_focus" in low
+
+
+def test_detect_step_mismatch_relaxes_low_confidence_when_top_level_payload_sufficient():
+    row = {
+        "focus_payload_source": "top_level",
+        "get_focus_response_success": False,
+        "get_focus_top_level_success_false": True,
+        "get_focus_top_level_payload_sufficient": True,
+        "focus_node": {"className": "android.widget.Button"},
+        "normalized_visible_label": "map view",
+        "focus_view_id": "",
+        "focus_bounds": "10,10,100,100",
+        "get_focus_fallback_found": False,
+        "get_focus_success_false_top_level_dump_found": False,
+    }
+
+    _, low = detect_step_mismatch(row)
+
+    assert "get_focus_top_level_success_false" not in low
+    assert "top_level_without_fallback_dump" not in low
+    assert "bounds_dependent_focus" not in low
 
 
 def test_should_stop_when_move_failed_twice():

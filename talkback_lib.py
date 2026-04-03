@@ -36,7 +36,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.21"
+CLIENT_ALGORITHM_VERSION = "1.7.22"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -494,7 +494,7 @@ class A11yAdbClient:
         if not isinstance(node, dict):
             return ""
 
-        for key in ("text", "contentDescription", "talkback", "content_desc", "label"):
+        for key in ("text", "contentDescription", "mergedLabel", "talkback", "content_desc", "label"):
             value = node.get(key)
             if isinstance(value, str):
                 stripped = value.strip()
@@ -1235,6 +1235,7 @@ class A11yAdbClient:
         dev: Any = None,
         wait_seconds: float = 2.0,
         allow_fallback_dump: bool = True,
+        mode: str = "normal",
     ) -> dict[str, Any]:
         started = time.monotonic()
         serial = self._resolve_serial(dev) or "default"
@@ -1268,12 +1269,15 @@ class A11yAdbClient:
             "top_level_signature": "",
             "final_focus_reason": "",
             "dump_replace_reason": "",
+            "mode": "fast" if str(mode).strip().lower() == "fast" else "normal",
+            "top_level_payload_sufficient": False,
         }
+        fast_mode = self.last_get_focus_trace["mode"] == "fast"
         helper_ok = self._has_recent_helper_ok(dev=dev) or self.check_helper_status(dev=dev)
         self.last_get_focus_trace["helper_status_ok"] = helper_ok
         self._debug_print(
             f"[DEBUG][get_focus] start serial={serial} req_id={req_id} "
-            f"wait={wait_seconds:.2f}s helper_ok={helper_ok}"
+            f"wait={wait_seconds:.2f}s helper_ok={helper_ok} mode={self.last_get_focus_trace['mode']}"
         )
         if not helper_ok:
             self.last_get_focus_trace["empty_reason"] = "helper_not_ready"
@@ -1391,16 +1395,29 @@ class A11yAdbClient:
             self.last_get_focus_trace["empty_reason"] = ""
             if accepted_with_success_false:
                 normalized_bounds = self._normalize_bounds(focus_node)
+                parsed_bounds = self._parse_bounds_tuple(normalized_bounds)
                 view_id = str(focus_node.get("viewIdResourceName", "") or "").strip()
                 text_value = str(focus_node.get("text", "") or "").strip()
                 content_desc = str(focus_node.get("contentDescription", "") or "").strip()
+                merged_label = str(focus_node.get("mergedLabel", "") or "").strip()
+                class_name = str(focus_node.get("className", "") or "").strip()
                 label = self.extract_visible_label_from_focus(focus_node)
                 has_focus_flag = bool(focus_node.get("accessibilityFocused")) or bool(focus_node.get("focused"))
-                has_bounds = bool(normalized_bounds)
-                has_label = bool(text_value or content_desc)
+                has_valid_bounds = bool(parsed_bounds)
+                has_text_like_label = bool(text_value or content_desc or merged_label or label)
+                has_identity = bool(view_id or class_name)
                 top_level_signature = f"view_id='{view_id}' bounds='{normalized_bounds}' label='{label}'"
                 self.last_get_focus_trace["top_level_signature"] = top_level_signature
-                strong_top_level_payload = bool(view_id and has_bounds and has_label)
+                strong_top_level_payload = bool(
+                    has_valid_bounds and (
+                        has_text_like_label
+                        or (has_focus_flag and has_identity)
+                        or (view_id and class_name)
+                    )
+                )
+                if not strong_top_level_payload and fast_mode:
+                    strong_top_level_payload = has_valid_bounds
+                self.last_get_focus_trace["top_level_payload_sufficient"] = strong_top_level_payload
                 self._debug_print(
                     f"[DEBUG][get_focus] dump_skip_candidate={strong_top_level_payload} "
                     f"{top_level_signature} has_focus_flag={has_focus_flag}"
@@ -1416,10 +1433,6 @@ class A11yAdbClient:
                         f"serial={serial} req_id={req_id} reason='strong_top_level_payload'"
                     )
                     return focus_node
-                print(
-                    f"[WARN][get_focus] success=False top_level payload accepted; trying dump fallback "
-                    f"serial={serial} req_id={req_id}"
-                )
                 if not allow_fallback_dump:
                     self.last_get_focus_trace["success_false_top_level_dump_skipped"] = True
                     self.last_get_focus_trace["dump_skip_reason"] = "fast_path_skip_dump"
@@ -1427,6 +1440,10 @@ class A11yAdbClient:
                     self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
                     self.last_get_focus_trace["final_focus_reason"] = "success_false_top_level_fast_path_skip_dump"
                     return focus_node
+                print(
+                    f"[WARN][get_focus] success=False top_level payload accepted; trying dump fallback "
+                    f"serial={serial} req_id={req_id}"
+                )
                 self.last_get_focus_trace["success_false_top_level_dump_attempted"] = True
                 fallback_started = time.monotonic()
                 try:
@@ -2127,6 +2144,7 @@ class A11yAdbClient:
         focus_wait_seconds: float | None = None,
         allow_get_focus_fallback_dump: bool = True,
         allow_step_dump: bool = True,
+        get_focus_mode: str = "normal",
     ) -> dict[str, Any]:
         """포커스 1 step 이동/수집 결과를 엑셀 row 친화적인 dict로 반환합니다."""
         step_started = time.monotonic()
@@ -2166,6 +2184,7 @@ class A11yAdbClient:
             "get_focus_success_false_top_level_dump_skipped": False,
             "get_focus_dump_skip_reason": "",
             "get_focus_top_level_signature": "",
+            "get_focus_top_level_payload_sufficient": False,
             "get_focus_final_payload_source": "none",
             "get_focus_final_focus_reason": "",
             "get_focus_dump_replace_reason": "",
@@ -2213,11 +2232,25 @@ class A11yAdbClient:
         focus_wait = wait_seconds if focus_wait_seconds is None else focus_wait_seconds
         focus_started = time.monotonic()
         try:
-            focus_node = self.get_focus(
-                dev=dev,
-                wait_seconds=focus_wait,
-                allow_fallback_dump=allow_get_focus_fallback_dump,
-            )
+            try:
+                focus_node = self.get_focus(
+                    dev=dev,
+                    wait_seconds=focus_wait,
+                    allow_fallback_dump=allow_get_focus_fallback_dump,
+                    mode=get_focus_mode,
+                )
+            except TypeError:
+                try:
+                    focus_node = self.get_focus(
+                        dev=dev,
+                        wait_seconds=focus_wait,
+                        allow_fallback_dump=allow_get_focus_fallback_dump,
+                    )
+                except TypeError:
+                    focus_node = self.get_focus(
+                        dev=dev,
+                        wait_seconds=focus_wait,
+                    )
         except Exception:
             focus_node = {}
         step["get_focus_elapsed_sec"] = round(time.monotonic() - focus_started, 3)
@@ -2298,6 +2331,7 @@ class A11yAdbClient:
         )
         step["get_focus_dump_skip_reason"] = str(trace.get("dump_skip_reason", "") or "")
         step["get_focus_top_level_signature"] = str(trace.get("top_level_signature", "") or "")
+        step["get_focus_top_level_payload_sufficient"] = bool(trace.get("top_level_payload_sufficient", False))
         step["get_focus_final_payload_source"] = str(trace.get("final_payload_source", "none") or "none")
         step["get_focus_final_focus_reason"] = str(trace.get("final_focus_reason", "") or "")
         step["get_focus_dump_replace_reason"] = str(trace.get("dump_replace_reason", "") or "")

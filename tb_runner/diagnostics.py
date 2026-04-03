@@ -29,11 +29,15 @@ def detect_step_mismatch(
     dump_skipped = bool(row.get("get_focus_success_false_top_level_dump_skipped", False))
     dump_skip_reason = str(row.get("get_focus_dump_skip_reason", "") or "").strip().lower()
     strong_top_level_policy_skip = dump_skipped and dump_skip_reason == "strong_top_level_payload"
+    top_level_payload_sufficient = bool(row.get("get_focus_top_level_payload_sufficient", False))
     focus_view_id = str(row.get("focus_view_id", "") or "").strip()
     focus_bounds = str(row.get("focus_bounds", "") or "").strip()
+    focus_class_name = str(row.get("focus_node", {}).get("className", "") or "").strip() if isinstance(row.get("focus_node"), dict) else ""
+    normalized_visible_label = str(row.get("normalized_visible_label", "") or "").strip()
     context_type = str(row.get("context_type", "") or "").strip().lower()
 
-    if top_level_suspicious or (focus_source == "top_level" and not response_success):
+    top_level_usable = strong_top_level_policy_skip or top_level_payload_sufficient
+    if (top_level_suspicious or (focus_source == "top_level" and not response_success)) and not top_level_usable:
         low_confidence_reasons.append("get_focus_top_level_success_false")
 
     visible_terms = [token for token in visible.split(" ") if token]
@@ -82,10 +86,10 @@ def detect_step_mismatch(
         focus_source == "top_level"
         and not fallback_found
         and not success_false_top_level_dump_found
-        and not strong_top_level_policy_skip
+        and not top_level_usable
     ):
         low_confidence_reasons.append("top_level_without_fallback_dump")
-    if not focus_view_id and focus_bounds:
+    if not focus_view_id and focus_bounds and not (top_level_usable and (focus_class_name or normalized_visible_label)):
         low_confidence_reasons.append("bounds_dependent_focus")
 
     return mismatch_reasons, low_confidence_reasons
