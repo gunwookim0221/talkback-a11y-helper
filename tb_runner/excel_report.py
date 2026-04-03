@@ -74,6 +74,9 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
         "dump_tree_nodes",
         "fingerprint",
         "is_duplicate_step",
+        "is_recent_duplicate_step",
+        "recent_duplicate_distance",
+        "recent_duplicate_of_step",
         "is_noise_step",
         "noise_reason",
     ]

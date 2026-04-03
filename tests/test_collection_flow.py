@@ -1251,6 +1251,96 @@ def test_collect_tab_rows_sets_duplicate_flag_for_repeated_fingerprint(monkeypat
 
     assert rows[2]["fingerprint_repeat_count"] == 1
     assert rows[2]["is_duplicate_step"] is True
+    assert rows[2]["is_recent_duplicate_step"] is True
+    assert rows[2]["recent_duplicate_distance"] == 1
+    assert rows[2]["recent_duplicate_of_step"] == 1
+
+
+def test_collect_tab_rows_marks_non_consecutive_recent_duplicate(monkeypatch):
+    row_b = {
+        "step_index": 1,
+        "move_result": "moved",
+        "visible_label": "b",
+        "normalized_visible_label": "b",
+        "merged_announcement": "b",
+        "focus_view_id": "id.b",
+        "focus_bounds": "0,10,10,20",
+    }
+    row_c = {**row_b, "step_index": 2, "visible_label": "c", "normalized_visible_label": "c", "merged_announcement": "c", "focus_view_id": "id.c"}
+    row_a_again = {
+        "step_index": 3,
+        "move_result": "moved",
+        "visible_label": "anchor",
+        "normalized_visible_label": "anchor",
+        "merged_announcement": "anchor",
+        "focus_view_id": "id.anchor",
+        "focus_bounds": "0,0,10,10",
+    }
+    client = DummyClient([_anchor_row(), row_b, row_c, row_a_again])
+
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
+    monkeypatch.setattr(
+        collection_flow,
+        "should_stop",
+        lambda **k: (
+            False,
+            0,
+            0,
+            "",
+            ("anchor", "id.anchor", "0,0,10,10"),
+            {"terminal": False, "same_like_count": 0, "no_progress": False, "reason": ""},
+        ),
+    )
+    monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (False, "not_in_global_candidates"))
+
+    rows = collection_flow.collect_tab_rows(client, "SERIAL", _base_tab_cfg(max_steps=3), [], "o.xlsx", "out")
+
+    assert rows[3]["is_duplicate_step"] is False
+    assert rows[3]["is_recent_duplicate_step"] is True
+    assert rows[3]["recent_duplicate_distance"] == 3
+    assert rows[3]["recent_duplicate_of_step"] == 0
+
+
+def test_collect_tab_rows_marks_recent_duplicate_false_when_no_match(monkeypatch):
+    row_b = {
+        "step_index": 1,
+        "move_result": "moved",
+        "visible_label": "b",
+        "normalized_visible_label": "b",
+        "merged_announcement": "b",
+        "focus_view_id": "id.b",
+        "focus_bounds": "0,10,10,20",
+    }
+    row_c = {**row_b, "step_index": 2, "visible_label": "c", "normalized_visible_label": "c", "merged_announcement": "c", "focus_view_id": "id.c"}
+    row_d = {**row_b, "step_index": 3, "visible_label": "d", "normalized_visible_label": "d", "merged_announcement": "d", "focus_view_id": "id.d"}
+    client = DummyClient([_anchor_row(), row_b, row_c, row_d])
+
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
+    monkeypatch.setattr(
+        collection_flow,
+        "should_stop",
+        lambda **k: (
+            False,
+            0,
+            0,
+            "",
+            ("d", "id.d", "0,10,10,20"),
+            {"terminal": False, "same_like_count": 0, "no_progress": False, "reason": ""},
+        ),
+    )
+    monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (False, "not_in_global_candidates"))
+
+    rows = collection_flow.collect_tab_rows(client, "SERIAL", _base_tab_cfg(max_steps=3), [], "o.xlsx", "out")
+
+    assert rows[3]["is_recent_duplicate_step"] is False
+    assert rows[3]["recent_duplicate_distance"] == 0
+    assert rows[3]["recent_duplicate_of_step"] == -1
 
 
 def test_collect_tab_rows_marks_noise_when_speech_is_empty(monkeypatch):
