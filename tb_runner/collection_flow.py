@@ -169,14 +169,30 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
             log("[RECOVER] selecting target")
             if not _select_recovery_target(client, dev, policy):
                 continue
-            time.sleep(wait_seconds)
-            try:
-                verify_nodes = dump_tree_fn(dev=dev)
-            except Exception:
-                verify_nodes = []
-            verified, _ = _is_recovery_target_detected(verify_nodes if isinstance(verify_nodes, list) else [], policy)
+            log("[RECOVER] verify after select")
+            verify_sleeps = [wait_seconds, min(wait_seconds, 0.4)]
+            verified = False
+            verified_needs_select = True
+            for sleep_seconds in verify_sleeps:
+                time.sleep(sleep_seconds)
+                try:
+                    verify_nodes = dump_tree_fn(dev=dev)
+                except Exception:
+                    verify_nodes = []
+                verified, verified_needs_select = _is_recovery_target_detected(
+                    verify_nodes if isinstance(verify_nodes, list) else [],
+                    policy,
+                )
+                if verified and not verified_needs_select:
+                    break
+
             if not verified:
                 continue
+            if verified_needs_select and str(policy.get("target_type", "bottom_tab") or "bottom_tab") == "bottom_tab":
+                log("[RECOVER] verify soft-success reason='target_present_after_select'")
+            elif verified_needs_select:
+                continue
+            log("[RECOVER] success after select verify")
 
         log("[RECOVER] success")
         return True

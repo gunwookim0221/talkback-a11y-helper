@@ -314,6 +314,41 @@ def test_recover_to_start_state_performs_back_then_select(monkeypatch):
     assert len(client.select_calls) == 1
 
 
+def test_recover_to_start_state_bottom_tab_soft_success_after_select(monkeypatch):
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([])
+    client.dump_tree_sequence = [
+        [],
+        [
+            {
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_favorites",
+                "contentDescription": "Home",
+                "selected": False,
+            }
+        ],
+        [
+            {
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_favorites",
+                "contentDescription": "Home",
+                "selected": False,
+            }
+        ],
+        [
+            {
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_favorites",
+                "contentDescription": "Home",
+                "selected": False,
+            }
+        ],
+    ]
+
+    ok = collection_flow.recover_to_start_state(client, "SERIAL", {"recovery": {"max_back_count": 3}})
+
+    assert ok is True
+    assert client.back_calls == 1
+    assert len(client.select_calls) == 1
+
+
 def test_recover_to_start_state_failure_returns_false(monkeypatch):
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
     client = DummyClient([])
