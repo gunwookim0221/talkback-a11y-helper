@@ -110,7 +110,18 @@ def _select_recovery_target(client: A11yAdbClient, dev: str, policy: dict[str, A
     target_pattern = str(policy.get("target", "") or "").strip()
     target_type = str(policy.get("target_type", "bottom_tab") or "bottom_tab")
     if resource_id:
-        return bool(client.select(dev=dev, name=resource_id, type_="r", wait_=3))
+        if bool(client.select(dev=dev, name=resource_id, type_="r", wait_=3)):
+            return True
+        if target_pattern:
+            log("[RECOVER] resource select failed, trying label fallback")
+            fallback_type = "a"
+            if target_type == "resource_id":
+                fallback_type = "r"
+            if bool(client.select(dev=dev, name=target_pattern, type_=fallback_type, wait_=3)):
+                log("[RECOVER] select fallback succeeded")
+                return True
+            log("[RECOVER] select fallback failed")
+        return False
     if target_pattern:
         select_type = "a"
         if target_type == "resource_id":

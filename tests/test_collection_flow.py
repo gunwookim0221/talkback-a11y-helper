@@ -349,6 +349,42 @@ def test_recover_to_start_state_bottom_tab_soft_success_after_select(monkeypatch
     assert len(client.select_calls) == 1
 
 
+def test_recover_to_start_state_fallback_select_after_resource_failure(monkeypatch):
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([])
+    client.dump_tree_sequence = [
+        [],
+        [
+            {
+                "viewIdResourceName": "other:id/not_favorites",
+                "contentDescription": "Home",
+                "selected": False,
+            }
+        ],
+        [
+            {
+                "viewIdResourceName": "other:id/not_favorites",
+                "contentDescription": "Home selected",
+                "selected": True,
+            }
+        ],
+    ]
+
+    def _select(**kwargs):
+        client.select_calls.append(kwargs)
+        return kwargs.get("type_") == "a"
+
+    client.select = _select
+
+    ok = collection_flow.recover_to_start_state(client, "SERIAL", {"recovery": {"max_back_count": 3}})
+
+    assert ok is True
+    assert client.back_calls == 1
+    assert len(client.select_calls) == 2
+    assert client.select_calls[0]["type_"] == "r"
+    assert client.select_calls[1]["type_"] == "a"
+
+
 def test_recover_to_start_state_failure_returns_false(monkeypatch):
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
     client = DummyClient([])
