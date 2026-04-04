@@ -32,7 +32,7 @@
   },
   "scenarios": {
     "devices_main": {
-      "enabled": true,
+      "enabled": false,
       "max_steps": 10,
       "scenario_type": "content",
       "stop_policy": {
@@ -69,7 +69,19 @@
         ],
         "selected_pattern": "(?i).*(selected|선택됨).*",
         "region_hint": "auto"
+      },
+
+      "life_food_plugin": {
+        "enabled": true,
+        "max_steps": 20,
+        "main_step_wait_seconds": 1.5,
+        "main_announcement_wait_seconds": 2.0,
+        "main_announcement_idle_wait_seconds": 0.7,
+        "main_announcement_max_extra_wait_seconds": 1.8,
+        "pre_navigation_wait_seconds": 1.5
       }
+
+      
     }
   }
 }
