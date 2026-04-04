@@ -91,6 +91,16 @@ def _normalize_fingerprint_text(value: Any, max_len: int = 80) -> str:
     return normalized
 
 
+def normalize_semantic_text(value: Any, max_len: int = 120) -> str:
+    normalized = str(value or "").strip().lower()
+    normalized = re.sub(r"smartthings[-_\s]*air[-_\s]*plugin", " ", normalized)
+    normalized = re.sub(r"[^0-9a-z가-힣]+", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if len(normalized) > max_len:
+        return normalized[:max_len]
+    return normalized
+
+
 def _extract_bounds_center(bounds_value: Any) -> tuple[int, int]:
     parsed_bounds = parse_bounds_str(bounds_value)
     if parsed_bounds is None:
@@ -113,6 +123,19 @@ def build_row_fingerprint(row: dict[str, Any]) -> str:
     )
     center_x, center_y = _extract_bounds_center(row.get("focus_bounds", "") or row.get("bounds", ""))
     return f"{resource_id}|{normalized_visible}|{normalized_speech}|{center_x},{center_y}"
+
+
+def build_row_semantic_fingerprint(row: dict[str, Any]) -> str:
+    resource_id = normalize_semantic_text(
+        row.get("focus_view_id", "") or row.get("resource_id", "") or row.get("resourceId", "")
+    )
+    normalized_visible = normalize_semantic_text(
+        row.get("normalized_visible_label", "") or row.get("visible_label", "")
+    )
+    normalized_speech = normalize_semantic_text(
+        row.get("normalized_announcement", "") or row.get("merged_announcement", "")
+    )
+    return f"{resource_id}|{normalized_visible}|{normalized_speech}"
 
 
 def is_noise_row(row: dict[str, Any]) -> tuple[bool, str]:

@@ -1,7 +1,7 @@
 import re
 from typing import Any
 
-from tb_runner.utils import parse_bounds_str
+from tb_runner.utils import normalize_semantic_text, parse_bounds_str
 
 
 def _bounds_changed_significantly(prev_bounds: str, curr_bounds: str) -> bool:
@@ -200,6 +200,13 @@ class StopEvaluator:
         view_id = str(row.get("focus_node", {}).get("viewIdResourceName", "") or "").strip() if isinstance(row.get("focus_node"), dict) else ""
         return normalized_visible, normalized_speech, focus_bounds, resource_id, view_id
 
+    def _semantic_signature(self, row: dict[str, Any]) -> tuple[str, str, str]:
+        return (
+            normalize_semantic_text(row.get("normalized_visible_label", "") or row.get("visible_label", "")),
+            normalize_semantic_text(row.get("normalized_announcement", "") or row.get("merged_announcement", "")),
+            normalize_semantic_text(row.get("focus_view_id", "") or row.get("resource_id", "")),
+        )
+
     def _is_same_like(self, previous_signature: tuple[str, ...], current_signature: tuple[str, ...]) -> bool:
         if not any(current_signature):
             return False
@@ -234,8 +241,13 @@ class StopEvaluator:
         )
         current_signature = self._signature(row)
         previous_signature = self._signature(previous_row or {})
+        current_semantic_signature = self._semantic_signature(row)
+        previous_semantic_signature = self._semantic_signature(previous_row or {})
         same_like = self._is_same_like(previous_signature, current_signature)
         if not same_like and all(current_fingerprint) and current_fingerprint == prev_fingerprint:
+            same_like = True
+        semantic_same_like = bool(any(current_semantic_signature)) and current_semantic_signature == previous_semantic_signature
+        if semantic_same_like:
             same_like = True
         same_count = same_count + 1 if same_like else 0
 
@@ -247,13 +259,27 @@ class StopEvaluator:
 
         move_terminal = smart_nav_result in self._MOVE_TERMINAL_RESULTS or move_result in self._MOVE_TERMINAL_RESULTS
 
-        no_progress = bool(previous_row) and same_like and (move_failed or move_terminal or smart_nav_result in {"failed", "unchanged"})
+        recent_duplicate = bool(row.get("is_recent_duplicate_step", False))
+        recent_duplicate_distance = int(row.get("recent_duplicate_distance", 0) or 0)
+        recent_semantic_duplicate = bool(row.get("is_recent_semantic_duplicate_step", False))
+        recent_semantic_duplicate_distance = int(row.get("recent_semantic_duplicate_distance", 0) or 0)
+        recent_semantic_unique_count = int(row.get("recent_semantic_unique_count", 0) or 0)
+        bounded_two_card_loop = (
+            bool(previous_row)
+            and recent_semantic_duplicate
+            and 2 <= recent_semantic_duplicate_distance <= 4
+            and 0 < recent_semantic_unique_count <= 2
+        )
+        no_progress = bool(previous_row) and (
+            (same_like and (move_failed or move_terminal or smart_nav_result in {"failed", "unchanged"}))
+            or bounded_two_card_loop
+        )
         weak_repeat = same_count >= 2
         weak_move_failure = fail_count >= 2 or move_terminal
         weak_empty = not str(row.get("visible_label", "") or "").strip() and not str(row.get("merged_announcement", "") or "").strip()
         overlay_recovery_status = str(row.get("overlay_recovery_status", "") or "").strip().lower()
         after_realign = overlay_recovery_status.startswith("after_realign") or overlay_recovery_status.startswith("realign")
-        recent_repeat = same_like and weak_repeat
+        recent_repeat = (same_like and weak_repeat) or bounded_two_card_loop
 
         effective_stop_policy = dict(
             {
@@ -313,6 +339,9 @@ class StopEvaluator:
             if weak_signals >= 2 and (same_like or weak_repeat):
                 stop = True
                 reason = "repeat_no_progress"
+            elif bounded_two_card_loop:
+                stop = True
+                reason = "bounded_two_card_loop"
 
         details = {
             "terminal": terminal_signal,
@@ -324,6 +353,15 @@ class StopEvaluator:
             "global_nav_reason": nav_reason,
             "after_realign": after_realign,
             "recent_repeat": recent_repeat,
+            "bounded_two_card_loop": bounded_two_card_loop,
+            "recent_duplicate": recent_duplicate,
+            "recent_duplicate_distance": recent_duplicate_distance,
+            "recent_semantic_duplicate": recent_semantic_duplicate,
+            "recent_semantic_duplicate_distance": recent_semantic_duplicate_distance,
+            "recent_semantic_unique_count": recent_semantic_unique_count,
+            "semantic_same_like": semantic_same_like,
+            "raw_fingerprint": current_fingerprint,
+            "semantic_signature": current_semantic_signature,
         }
         return stop, fail_count, same_count, reason, current_fingerprint, details
 
