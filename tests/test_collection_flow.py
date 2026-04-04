@@ -22,6 +22,7 @@ class DummyClient:
         self.get_focus_calls = []
         self.dump_tree_calls = []
         self.dump_tree_sequence = []
+        self.back_calls = 0
         self.last_target_action_result = {}
 
     def reset_focus_history(self, _dev):
@@ -69,6 +70,12 @@ class DummyClient:
         if self.dump_tree_sequence:
             return self.dump_tree_sequence.pop(0)
         return []
+
+    def _run(self, args, **kwargs):
+        if args == ["shell", "input", "keyevent", "4"]:
+            self.back_calls += 1
+            return ""
+        return ""
 
 
 def _base_tab_cfg(max_steps=1):
@@ -258,6 +265,64 @@ def test_collect_tab_rows_unchanged_classification_skips_overlay_routine(monkeyp
     collection_flow.collect_tab_rows(client, "SERIAL", _base_tab_cfg(max_steps=1), [], "o.xlsx", "out")
 
     assert called == {"expand": 0, "realign": 0}
+
+
+def test_recover_to_start_state_skips_when_already_target(monkeypatch):
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([])
+    client.dump_tree_sequence = [
+        [
+            {
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_favorites",
+                "contentDescription": "Home selected",
+                "selected": True,
+            }
+        ]
+    ]
+
+    ok = collection_flow.recover_to_start_state(client, "SERIAL", {"recovery": {"max_back_count": 2}})
+
+    assert ok is True
+    assert client.back_calls == 0
+
+
+def test_recover_to_start_state_performs_back_then_select(monkeypatch):
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([])
+    client.dump_tree_sequence = [
+        [],
+        [
+            {
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_favorites",
+                "contentDescription": "Home",
+                "selected": False,
+            }
+        ],
+        [
+            {
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_favorites",
+                "contentDescription": "Home selected",
+                "selected": True,
+            }
+        ],
+    ]
+
+    ok = collection_flow.recover_to_start_state(client, "SERIAL", {"recovery": {"max_back_count": 2}})
+
+    assert ok is True
+    assert client.back_calls == 1
+    assert len(client.select_calls) == 1
+
+
+def test_recover_to_start_state_failure_returns_false(monkeypatch):
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([])
+    client.dump_tree_sequence = [[], [], []]
+
+    ok = collection_flow.recover_to_start_state(client, "SERIAL", {"recovery": {"max_back_count": 2}})
+
+    assert ok is False
+    assert client.back_calls == 2
 
 
 def test_collect_tab_rows_previous_step_not_updated_after_stop_break(monkeypatch):

@@ -42,6 +42,149 @@ _PRE_NAV_CONFIRM_POLL_SLEEP_SECONDS = 0.12
 _RECENT_DUPLICATE_WINDOW = 5
 
 
+def _resolve_recovery_policy(tab_cfg: dict[str, Any]) -> dict[str, Any]:
+    fallback_policy = {
+        "enabled": True,
+        "target_type": "bottom_tab",
+        "target": "(?i).*home.*",
+        "resource_id": "com.samsung.android.oneconnect:id/menu_favorites",
+        "max_back_count": 5,
+    }
+    raw_policy = tab_cfg.get("recovery", {})
+    if not isinstance(raw_policy, dict):
+        raw_policy = {}
+    policy = dict(fallback_policy)
+    policy.update(raw_policy)
+    policy["enabled"] = bool(policy.get("enabled", True))
+    policy["target_type"] = str(policy.get("target_type", "bottom_tab") or "bottom_tab").strip().lower()
+    if policy["target_type"] not in {"bottom_tab", "anchor", "resource_id"}:
+        policy["target_type"] = "bottom_tab"
+    policy["target"] = str(policy.get("target", "") or "")
+    policy["resource_id"] = str(policy.get("resource_id", "") or "")
+    max_back_count = policy.get("max_back_count", 5)
+    if isinstance(max_back_count, bool) or not isinstance(max_back_count, int) or max_back_count <= 0:
+        max_back_count = 5
+    policy["max_back_count"] = max_back_count
+    return policy
+
+
+def _node_text_blob(node: dict[str, Any]) -> str:
+    return " ".join(
+        [
+            str(node.get("text", "") or "").strip(),
+            str(node.get("contentDescription", "") or "").strip(),
+            str(node.get("talkbackLabel", "") or "").strip(),
+        ]
+    ).strip()
+
+
+def _is_recovery_target_detected(nodes: list[dict[str, Any]], policy: dict[str, Any]) -> tuple[bool, bool]:
+    target_type = str(policy.get("target_type", "bottom_tab") or "bottom_tab")
+    target_pattern = str(policy.get("target", "") or "")
+    resource_id = str(policy.get("resource_id", "") or "")
+
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
+        text_blob = _node_text_blob(node)
+        resource_match = bool(resource_id) and _safe_regex_search(resource_id, node_resource_id)
+        label_match = bool(target_pattern) and _safe_regex_search(target_pattern, text_blob)
+        selected_match = _safe_regex_search(r"(selected|선택됨)", text_blob) or bool(node.get("selected"))
+
+        if target_type == "resource_id":
+            if resource_match:
+                return True, False
+            continue
+        if target_type == "anchor":
+            if label_match or resource_match:
+                return True, False
+            continue
+        if resource_match or label_match:
+            return True, not selected_match
+    return False, False
+
+
+def _select_recovery_target(client: A11yAdbClient, dev: str, policy: dict[str, Any]) -> bool:
+    resource_id = str(policy.get("resource_id", "") or "").strip()
+    target_pattern = str(policy.get("target", "") or "").strip()
+    target_type = str(policy.get("target_type", "bottom_tab") or "bottom_tab")
+    if resource_id:
+        return bool(client.select(dev=dev, name=resource_id, type_="r", wait_=3))
+    if target_pattern:
+        select_type = "a"
+        if target_type == "resource_id":
+            select_type = "r"
+        return bool(client.select(dev=dev, name=target_pattern, type_=select_type, wait_=3))
+    return False
+
+
+def _send_back(client: A11yAdbClient, dev: str) -> bool:
+    run_fn = getattr(client, "_run", None)
+    if callable(run_fn):
+        try:
+            run_fn(["shell", "input", "keyevent", "4"], dev=dev, timeout=5.0)
+            return True
+        except Exception:
+            return False
+    return False
+
+
+def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, Any]) -> bool:
+    policy = _resolve_recovery_policy(tab_cfg)
+    if not policy.get("enabled", True):
+        log("[RECOVER] skipped reason='disabled'")
+        return True
+
+    wait_seconds = _get_wait_seconds(tab_cfg, "back_recovery_wait_seconds", MAIN_STEP_WAIT_SECONDS)
+    max_back_count = int(policy.get("max_back_count", 5) or 5)
+    log("[RECOVER] start")
+
+    dump_tree_fn = getattr(client, "dump_tree", None)
+    if not callable(dump_tree_fn):
+        log("[RECOVER] failed reason='dump_tree_unavailable'")
+        return False
+
+    for attempt in range(0, max_back_count + 1):
+        if attempt > 0:
+            log(f"[RECOVER] back attempt={attempt}/{max_back_count}")
+            back_ok = _send_back(client, dev)
+            if not back_ok:
+                log("[RECOVER] failed reason='back_failed'")
+                return False
+            time.sleep(wait_seconds)
+
+        try:
+            nodes = dump_tree_fn(dev=dev)
+        except Exception as exc:
+            log(f"[RECOVER] failed reason='dump_tree_failed:{exc}'")
+            return False
+
+        detected, needs_select = _is_recovery_target_detected(nodes if isinstance(nodes, list) else [], policy)
+        if not detected:
+            continue
+
+        log(f"[RECOVER] target detected type={policy.get('target_type', 'bottom_tab')}")
+        if needs_select:
+            log("[RECOVER] selecting target")
+            if not _select_recovery_target(client, dev, policy):
+                continue
+            time.sleep(wait_seconds)
+            try:
+                verify_nodes = dump_tree_fn(dev=dev)
+            except Exception:
+                verify_nodes = []
+            verified, _ = _is_recovery_target_detected(verify_nodes if isinstance(verify_nodes, list) else [], policy)
+            if not verified:
+                continue
+
+        log("[RECOVER] success")
+        return True
+
+    log("[RECOVER] failed reason='target_not_reached'")
+    return False
+
+
 def _make_dump_signature(nodes: Any) -> str:
     if not isinstance(nodes, list):
         return ""

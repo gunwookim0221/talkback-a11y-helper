@@ -63,6 +63,13 @@
       "resource_ids": [],
       "selected_pattern": "",
       "region_hint": "auto"
+    },
+    "recovery": {
+      "enabled": true,
+      "target_type": "bottom_tab",
+      "target": "(?i).*home.*",
+      "resource_id": "com.samsung.android.oneconnect:id/menu_favorites",
+      "max_back_count": 5
     }
   },
   "scenarios": {
@@ -118,6 +125,13 @@
 - `global_nav.resource_ids` (string list)
 - `global_nav.selected_pattern` (string regex)
 - `global_nav.region_hint` (`bottom_tabs | left_rail | auto`)
+
+#### scenario 간 start state recovery
+- `recovery.enabled` (bool): scenario 시작 전 recovery 실행 여부
+- `recovery.target_type` (`bottom_tab | anchor | resource_id`)
+- `recovery.target` (string regex): 라벨/announcement/text 매칭용
+- `recovery.resource_id` (string): resource-id 매칭 및 select 우선 키
+- `recovery.max_back_count` (positive int): BACK 최대 반복 횟수
 
 ### 3.3 `scenarios.<scenario_id>`
 

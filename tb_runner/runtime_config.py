@@ -13,7 +13,7 @@ from tb_runner.constants import (
 )
 from tb_runner.logging_utils import log
 
-RUNTIME_CONFIG_VERSION = "1.7.26"
+RUNTIME_CONFIG_VERSION = "1.7.27"
 DEFAULT_RUNTIME_CONFIG_PATH = Path("config/runtime_config.json")
 
 
@@ -46,6 +46,13 @@ _DEFAULTS = {
         "selected_pattern": "",
         "region_hint": "auto",
     },
+    "recovery": {
+        "enabled": True,
+        "target_type": "bottom_tab",
+        "target": "(?i).*home.*",
+        "resource_id": "com.samsung.android.oneconnect:id/menu_favorites",
+        "max_back_count": 5,
+    },
 }
 
 
@@ -66,6 +73,31 @@ _OVERRIDE_KEYS = {
     "screen_context_mode",
     "stabilization_mode",
 }
+
+
+def _normalize_recovery_config(raw_recovery: Any, fallback: dict[str, Any]) -> dict[str, Any]:
+    base = dict(fallback or {})
+    if not isinstance(raw_recovery, dict):
+        return base
+
+    if "enabled" in raw_recovery:
+        base["enabled"] = bool(raw_recovery.get("enabled"))
+    if "target_type" in raw_recovery:
+        base["target_type"] = _to_enum_value(
+            raw_recovery.get("target_type"),
+            {"bottom_tab", "anchor", "resource_id"},
+            str(base.get("target_type", "bottom_tab") or "bottom_tab"),
+        )
+    if "target" in raw_recovery:
+        base["target"] = str(raw_recovery.get("target", "") or "")
+    if "resource_id" in raw_recovery:
+        base["resource_id"] = str(raw_recovery.get("resource_id", "") or "")
+    if "max_back_count" in raw_recovery:
+        base["max_back_count"] = _to_positive_int(
+            raw_recovery.get("max_back_count"),
+            int(base.get("max_back_count", 5) or 5),
+        )
+    return base
 
 
 def _load_json_file(config_path: Path) -> dict[str, Any]:
@@ -199,6 +231,10 @@ def _build_runtime_defaults(raw_defaults: dict[str, Any]) -> dict[str, Any]:
                 "auto",
             ),
         },
+        "recovery": _normalize_recovery_config(
+            raw_defaults.get("recovery"),
+            _DEFAULTS["recovery"],
+        ),
     }
 
 
@@ -324,6 +360,12 @@ def load_runtime_bundle(base_tab_configs: list[dict[str, Any]], config_path: str
                         str(merged_global_nav.get("region_hint", "auto") or "auto"),
                     )
                 merged_cfg["global_nav"] = merged_global_nav
+
+            if "recovery" in scenario_override:
+                merged_cfg["recovery"] = _normalize_recovery_config(
+                    scenario_override.get("recovery"),
+                    dict(merged_cfg.get("recovery", runtime_defaults["recovery"]) or runtime_defaults["recovery"]),
+                )
 
             if scenario_override:
                 log(

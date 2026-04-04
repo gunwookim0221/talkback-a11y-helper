@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from talkback_lib import A11yAdbClient
-from tb_runner.collection_flow import collect_tab_rows
+from tb_runner.collection_flow import collect_tab_rows, recover_to_start_state
 from tb_runner.anchor_logic import choose_best_anchor_candidate, match_anchor, stabilize_anchor
 from tb_runner.context_verifier import verify_context
 from tb_runner.diagnostics import detect_step_mismatch, should_stop
@@ -42,6 +42,7 @@ def main():
     runtime_tab_configs = runtime_bundle.get("tab_configs", TAB_CONFIGS)
     checkpoint_save_every = int(runtime_bundle.get("checkpoint_save_every", 3) or 3)
 
+    has_run_scenario = False
     try:
         for tab_cfg in runtime_tab_configs:
             if not bool(tab_cfg.get("enabled", True)):
@@ -50,6 +51,13 @@ def main():
                     f"tab='{tab_cfg.get('tab_name', '')}'"
                 )
                 continue
+            if has_run_scenario:
+                recovered = recover_to_start_state(client, DEV_SERIAL, tab_cfg)
+                if not recovered:
+                    log(
+                        f"[MAIN] recovery failed but continuing scenario_id='{tab_cfg.get('scenario_id', '')}' "
+                        f"tab='{tab_cfg.get('tab_name', '')}'"
+                    )
             scenario_perf = run_perf.start_scenario(
                 scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
                 tab_name=str(tab_cfg.get("tab_name", "") or ""),
@@ -64,6 +72,7 @@ def main():
                 scenario_perf=scenario_perf,
                 checkpoint_save_every=checkpoint_save_every,
             )
+            has_run_scenario = True
 
     except Exception as exc:
         log(f"[FATAL] script interrupted: {exc}")

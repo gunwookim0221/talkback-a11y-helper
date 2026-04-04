@@ -22,6 +22,9 @@ def test_load_runtime_bundle_without_file_keeps_defaults(tmp_path):
     assert bundle["tab_configs"][0]["main_announcement_max_extra_wait_seconds"] == 1.5
     assert bundle["tab_configs"][0]["overlay_announcement_idle_wait_seconds"] == 0.4
     assert bundle["tab_configs"][0]["overlay_announcement_max_extra_wait_seconds"] == 1.0
+    assert bundle["tab_configs"][0]["recovery"]["enabled"] is True
+    assert bundle["tab_configs"][0]["recovery"]["target_type"] == "bottom_tab"
+    assert bundle["tab_configs"][0]["recovery"]["max_back_count"] == 5
 
 
 def test_load_runtime_bundle_applies_partial_overrides(tmp_path):
@@ -284,3 +287,42 @@ def test_load_runtime_bundle_supports_global_nav_scenario_override(tmp_path):
     assert home_cfg["stop_policy"]["stop_on_repeat_no_progress"] is False
     assert home_cfg["global_nav"]["labels"] == ["Menu"]
     assert home_cfg["global_nav"]["resource_ids"] == ["id/menu"]
+
+
+def test_load_runtime_bundle_supports_recovery_override(tmp_path):
+    path = tmp_path / "runtime_recovery.json"
+    path.write_text(
+        json.dumps(
+            {
+                "defaults": {
+                    "recovery": {
+                        "enabled": True,
+                        "target_type": "anchor",
+                        "target": "(?i).*dashboard.*",
+                        "resource_id": "id/default",
+                        "max_back_count": 7,
+                    }
+                },
+                "scenarios": {
+                    "home_main": {
+                        "recovery": {
+                            "enabled": False,
+                            "target_type": "resource_id",
+                            "resource_id": "id/override",
+                            "max_back_count": 3,
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    bundle = load_runtime_bundle(_base_tabs(), config_path=path)
+    home_cfg = bundle["tab_configs"][0]
+    detail_cfg = bundle["tab_configs"][1]
+    assert home_cfg["recovery"]["enabled"] is False
+    assert home_cfg["recovery"]["target_type"] == "resource_id"
+    assert home_cfg["recovery"]["resource_id"] == "id/override"
+    assert home_cfg["recovery"]["max_back_count"] == 3
+    assert detail_cfg["recovery"]["target_type"] == "anchor"
+    assert detail_cfg["recovery"]["target"] == "(?i).*dashboard.*"
