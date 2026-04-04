@@ -84,7 +84,7 @@ TAB_CONFIGS = [
         },
         "enabled": True,
         "max_steps": 20,
-    }
+    },
         
     {
         "scenario_id": "devices_main",
