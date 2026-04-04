@@ -26,6 +26,7 @@ from tb_runner.tab_logic import stabilize_tab_selection
 from tb_runner.utils import (
     _safe_regex_search,
     build_row_fingerprint,
+    build_row_semantic_fingerprint,
     is_noise_row,
     make_main_fingerprint,
     make_overlay_entry_fingerprint,
@@ -797,8 +798,10 @@ def _annotate_row_quality(
     last_fingerprint: str,
     fingerprint_repeat_count: int,
     recent_fingerprint_history: deque[tuple[int, str]],
+    recent_semantic_fingerprint_history: deque[tuple[int, str]],
 ) -> tuple[str, int]:
     fingerprint = build_row_fingerprint(row)
+    normalized_fingerprint = build_row_semantic_fingerprint(row)
     if fingerprint == last_fingerprint:
         fingerprint_repeat_count += 1
     else:
@@ -821,17 +824,39 @@ def _annotate_row_quality(
             recent_duplicate_distance = max(step_index - prev_step_index, 0)
             recent_duplicate_of_step = prev_step_index
             break
+    is_recent_semantic_duplicate_step = False
+    recent_semantic_duplicate_distance = 0
+    recent_semantic_duplicate_of_step = -1
+    recent_semantic_unique_count = 1 if normalized_fingerprint else 0
+    recent_window_keys: list[str] = []
+    if normalized_fingerprint:
+        recent_window_keys.append(normalized_fingerprint)
+    for prev_step_index, prev_semantic_fingerprint in reversed(recent_semantic_fingerprint_history):
+        if prev_semantic_fingerprint:
+            recent_window_keys.append(prev_semantic_fingerprint)
+        if not is_recent_semantic_duplicate_step and prev_semantic_fingerprint == normalized_fingerprint and normalized_fingerprint:
+            is_recent_semantic_duplicate_step = True
+            recent_semantic_duplicate_distance = max(step_index - prev_step_index, 0)
+            recent_semantic_duplicate_of_step = prev_step_index
+    if recent_window_keys:
+        recent_semantic_unique_count = len(set(recent_window_keys))
 
     is_noise_step, noise_reason = is_noise_row(row)
     row["fingerprint"] = fingerprint
+    row["normalized_fingerprint"] = normalized_fingerprint
     row["fingerprint_repeat_count"] = fingerprint_repeat_count
     row["is_duplicate_step"] = fingerprint_repeat_count > 0
     row["is_recent_duplicate_step"] = is_recent_duplicate_step
     row["recent_duplicate_distance"] = recent_duplicate_distance
     row["recent_duplicate_of_step"] = recent_duplicate_of_step
+    row["is_recent_semantic_duplicate_step"] = is_recent_semantic_duplicate_step
+    row["recent_semantic_duplicate_distance"] = recent_semantic_duplicate_distance
+    row["recent_semantic_duplicate_of_step"] = recent_semantic_duplicate_of_step
+    row["recent_semantic_unique_count"] = recent_semantic_unique_count
     row["is_noise_step"] = is_noise_step
     row["noise_reason"] = noise_reason
     recent_fingerprint_history.append((step_index, fingerprint))
+    recent_semantic_fingerprint_history.append((step_index, normalized_fingerprint))
     return fingerprint, fingerprint_repeat_count
 
 
@@ -885,6 +910,11 @@ def collect_tab_rows(
         row["is_recent_duplicate_step"] = False
         row["recent_duplicate_distance"] = 0
         row["recent_duplicate_of_step"] = -1
+        row["normalized_fingerprint"] = ""
+        row["is_recent_semantic_duplicate_step"] = False
+        row["recent_semantic_duplicate_distance"] = 0
+        row["recent_semantic_duplicate_of_step"] = -1
+        row["recent_semantic_unique_count"] = 0
         row["is_noise_step"] = False
         row["noise_reason"] = ""
         rows.append(row)
@@ -921,18 +951,24 @@ def collect_tab_rows(
     anchor_row = maybe_capture_focus_crop(client, dev, anchor_row, output_base_dir)
     anchor_row.pop("_step_mono_start", None)
     recent_fingerprint_history: deque[tuple[int, str]] = deque(maxlen=_RECENT_DUPLICATE_WINDOW)
+    recent_semantic_fingerprint_history: deque[tuple[int, str]] = deque(maxlen=_RECENT_DUPLICATE_WINDOW)
 
     anchor_fingerprint, anchor_repeat_count = _annotate_row_quality(
         anchor_row,
         last_fingerprint="",
         fingerprint_repeat_count=0,
         recent_fingerprint_history=recent_fingerprint_history,
+        recent_semantic_fingerprint_history=recent_semantic_fingerprint_history,
     )
     log(
         f"[ROW] fingerprint='{anchor_row.get('fingerprint', '')}' "
+        f"normalized_fingerprint='{anchor_row.get('normalized_fingerprint', '')}' "
         f"duplicate={str(bool(anchor_row.get('is_duplicate_step', False))).lower()} "
         f"recent_duplicate={str(bool(anchor_row.get('is_recent_duplicate_step', False))).lower()} "
         f"distance={int(anchor_row.get('recent_duplicate_distance', 0) or 0)} "
+        f"recent_semantic_duplicate={str(bool(anchor_row.get('is_recent_semantic_duplicate_step', False))).lower()} "
+        f"semantic_distance={int(anchor_row.get('recent_semantic_duplicate_distance', 0) or 0)} "
+        f"semantic_window_unique={int(anchor_row.get('recent_semantic_unique_count', 0) or 0)} "
         f"noise={str(bool(anchor_row.get('is_noise_step', False))).lower()}"
     )
 
@@ -993,12 +1029,17 @@ def collect_tab_rows(
             last_fingerprint=last_fingerprint,
             fingerprint_repeat_count=fingerprint_repeat_count,
             recent_fingerprint_history=recent_fingerprint_history,
+            recent_semantic_fingerprint_history=recent_semantic_fingerprint_history,
         )
         log(
             f"[ROW] fingerprint='{row.get('fingerprint', '')}' "
+            f"normalized_fingerprint='{row.get('normalized_fingerprint', '')}' "
             f"duplicate={str(bool(row.get('is_duplicate_step', False))).lower()} "
             f"recent_duplicate={str(bool(row.get('is_recent_duplicate_step', False))).lower()} "
             f"distance={int(row.get('recent_duplicate_distance', 0) or 0)} "
+            f"recent_semantic_duplicate={str(bool(row.get('is_recent_semantic_duplicate_step', False))).lower()} "
+            f"semantic_distance={int(row.get('recent_semantic_duplicate_distance', 0) or 0)} "
+            f"semantic_window_unique={int(row.get('recent_semantic_unique_count', 0) or 0)} "
             f"noise={str(bool(row.get('is_noise_step', False))).lower()}"
         )
 
@@ -1069,6 +1110,13 @@ def collect_tab_rows(
         global_nav_reason = str(stop_details.get("global_nav_reason", "") or "")
         after_realign = bool(stop_details.get("after_realign", False))
         recent_repeat = bool(stop_details.get("recent_repeat", False))
+        bounded_two_card_loop = bool(stop_details.get("bounded_two_card_loop", False))
+        semantic_same_like = bool(stop_details.get("semantic_same_like", False))
+        recent_duplicate = bool(stop_details.get("recent_duplicate", False))
+        recent_duplicate_distance = int(stop_details.get("recent_duplicate_distance", 0) or 0)
+        recent_semantic_duplicate = bool(stop_details.get("recent_semantic_duplicate", False))
+        recent_semantic_duplicate_distance = int(stop_details.get("recent_semantic_duplicate_distance", 0) or 0)
+        recent_semantic_unique_count = int(stop_details.get("recent_semantic_unique_count", 0) or 0)
         scenario_type = str(stop_details.get("scenario_type", tab_cfg.get("scenario_type", "content")) or "content")
         is_global_nav_only_scenario = scenario_type == "global_nav"
         if is_global_nav_only_scenario:
@@ -1082,7 +1130,13 @@ def collect_tab_rows(
             f"terminal={str(terminal_signal).lower()} same_like_count={same_like_count} "
             f"no_progress={str(no_progress).lower()} scenario_type='{scenario_type}' "
             f"is_global_nav={str(is_global_nav).lower()} after_realign={str(after_realign).lower()} "
-            f"recent_repeat={str(recent_repeat).lower()} decision='{decision}' reason='{eval_reason}'"
+            f"recent_repeat={str(recent_repeat).lower()} bounded_two_card_loop={str(bounded_two_card_loop).lower()} "
+            f"semantic_same_like={str(semantic_same_like).lower()} recent_duplicate={str(recent_duplicate).lower()} "
+            f"recent_duplicate_distance={recent_duplicate_distance} "
+            f"recent_semantic_duplicate={str(recent_semantic_duplicate).lower()} "
+            f"recent_semantic_duplicate_distance={recent_semantic_duplicate_distance} "
+            f"recent_semantic_unique_count={recent_semantic_unique_count} "
+            f"decision='{decision}' reason='{eval_reason}'"
         )
 
         if is_global_nav_only_scenario and not is_global_nav:

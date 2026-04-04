@@ -343,3 +343,77 @@ def test_should_not_stop_only_because_after_realign_marker():
     assert stop is False
     assert reason == ""
     assert details["after_realign"] is True
+
+
+def test_should_stop_bounded_two_card_loop_from_recent_semantic_duplicate():
+    previous = {
+        "normalized_visible_label": "is your family sensitive to air quality",
+        "normalized_announcement": "is your family sensitive to air quality",
+        "focus_view_id": "id/card_prompt",
+        "focus_bounds": "0,1000,1080,1200",
+    }
+    row = {
+        "move_result": "moved",
+        "last_smart_nav_result": "moved",
+        "visible_label": "Set the perfect temperature and humidity",
+        "merged_announcement": "Set the perfect temperature and humidity",
+        "normalized_visible_label": "set the perfect temperature and humidity",
+        "normalized_announcement": "set the perfect temperature and humidity",
+        "focus_view_id": "id/card_prompt",
+        "focus_bounds": "0,1200,1080,1400",
+        "is_recent_semantic_duplicate_step": True,
+        "recent_semantic_duplicate_distance": 2,
+        "recent_semantic_unique_count": 2,
+    }
+
+    stop, _, _, reason, _, details = should_stop(
+        row=row,
+        prev_fingerprint=("is your family sensitive to air quality", "id/card_prompt", "0,1000,1080,1200"),
+        fail_count=0,
+        same_count=0,
+        previous_row=previous,
+        scenario_type="content",
+        stop_policy={"stop_on_repeat_no_progress": True},
+    )
+
+    assert stop is True
+    assert reason == "bounded_two_card_loop"
+    assert details["recent_repeat"] is True
+    assert details["bounded_two_card_loop"] is True
+    assert details["no_progress"] is True
+
+
+def test_should_not_stop_when_semantic_duplicate_window_is_wide():
+    previous = {
+        "normalized_visible_label": "card a",
+        "normalized_announcement": "card a",
+        "focus_view_id": "id/card_a",
+        "focus_bounds": "0,100,100,200",
+    }
+    row = {
+        "move_result": "moved",
+        "last_smart_nav_result": "moved",
+        "visible_label": "Card D",
+        "merged_announcement": "Card D",
+        "normalized_visible_label": "card d",
+        "normalized_announcement": "card d",
+        "focus_view_id": "id/card_d",
+        "focus_bounds": "0,400,100,500",
+        "is_recent_semantic_duplicate_step": True,
+        "recent_semantic_duplicate_distance": 2,
+        "recent_semantic_unique_count": 4,
+    }
+
+    stop, _, _, reason, _, details = should_stop(
+        row=row,
+        prev_fingerprint=("card a", "id/card_a", "0,100,100,200"),
+        fail_count=0,
+        same_count=0,
+        previous_row=previous,
+        scenario_type="content",
+        stop_policy={"stop_on_repeat_no_progress": True},
+    )
+
+    assert stop is False
+    assert reason == ""
+    assert details["bounded_two_card_loop"] is False
