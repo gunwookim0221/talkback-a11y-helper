@@ -66,7 +66,7 @@ TAB_CONFIGS = [
         "stabilization_mode": "anchor_only",
         "pre_navigation": [
             {
-                "action": "touch",
+                "action": "scrolltouch",
                 "target": "(?i).*food.*|.*cooking.*|.*smart\\s*things\\s*cooking.*",
                 "type": "a",
             }
@@ -83,7 +83,41 @@ TAB_CONFIGS = [
             "text_regex": "(?i).*smart\\s*things\\s*cooking.*|.*ingredients.*|.*모닝빵양배추샌드위치.*",
         },
         "enabled": True,
-        "max_steps": 20,
+        "max_steps": 100,
+    },
+
+        # Life 플러그인 Air Care
+    {
+        "scenario_id": "life_air_care_plugin",
+        "scenario_type": "content",
+        "tab_name": "(?i).*life.*",
+        "tab_type": "b",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+
+        "pre_navigation": [
+            {
+                "action": "scrolltouch",
+                "target": "(?i).*air\\s*care.*|.*aircare.*|.*에어\\s*케어.*",
+                "type": "a",
+            }
+        ],
+
+        "anchor_name": "(?i).*navigate\\s*up.*",
+        "anchor_type": "a",
+        "anchor": {
+            "text_regex": "(?i).*navigate\\s*up.*",
+            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "tie_breaker": "top_left",
+        },
+
+        "context_verify": {
+            "type": "screen_text",
+            "text_regex": "(?i).*air\\s*care.*|.*aircare.*|.*공기.*|.*미세먼지.*",
+        },
+
+        "enabled": True,
+        "max_steps": 100,
     },
         
     {
