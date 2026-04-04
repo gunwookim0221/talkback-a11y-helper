@@ -599,7 +599,7 @@ assert client.last_merged_announcement == merged
 
 ### pre_navigation action 예시 (Settings focusable 대응)
 
-`pre_navigation`에는 기존 `select`/`touch`/`touch_bounds_center` 외에 `select_and_click_focused`, `tap_bounds_center_adb`, `select_and_tap_bounds_center_adb`, `select_and_click_focused_or_tap_bounds_center_adb`를 사용할 수 있습니다.
+`pre_navigation`에는 기존 `select`/`touch`/`scrollTouch`/`touch_bounds_center` 외에 `select_and_click_focused`, `tap_bounds_center_adb`, `select_and_tap_bounds_center_adb`, `select_and_click_focused_or_tap_bounds_center_adb`를 사용할 수 있습니다.
 
 ```python
 "pre_navigation": [
