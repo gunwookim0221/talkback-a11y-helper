@@ -13,6 +13,7 @@ class DummyClient:
         self.steps = list(steps)
         self.reset_focus_history_calls = 0
         self.touch_calls = []
+        self.scroll_touch_calls = []
         self.touch_bounds_center_calls = []
         self.tap_bounds_center_adb_calls = []
         self.select_calls = []
@@ -36,6 +37,11 @@ class DummyClient:
 
     def touch_bounds_center(self, **kwargs):
         self.touch_bounds_center_calls.append(kwargs)
+        return True
+
+    def scrollTouch(self, **kwargs):
+        self.scroll_touch_calls.append(kwargs)
+        self.last_target_action_result = {"reason": "touch_success"}
         return True
 
     def tap_bounds_center_adb(self, **kwargs):
@@ -463,6 +469,86 @@ def test_open_scenario_pre_navigation_touch_bounds_center_success(monkeypatch):
     assert ok is True
     assert len(client.touch_bounds_center_calls) == 1
     assert client.touch_bounds_center_calls[0]["type_"] == "r"
+
+
+def test_open_scenario_pre_navigation_scroll_touch_success(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "scrollTouch", "target": "(?i).*food.*", "type": "a"}],
+        "pre_navigation_retry_count": 1,
+        "pre_navigation_wait_seconds": 0.1,
+        "anchor": {"target": "anchor", "type": "t"},
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert len(client.scroll_touch_calls) == 1
+    assert client.scroll_touch_calls[0]["name"] == "(?i).*food.*"
+    assert client.scroll_touch_calls[0]["type_"] == "a"
+
+
+def test_open_scenario_pre_navigation_scroll_touch_failure(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row()])
+
+    def _scroll_touch(**kwargs):
+        client.scroll_touch_calls.append(kwargs)
+        client.last_target_action_result = {"reason": "target_not_found"}
+        return False
+
+    client.scrollTouch = _scroll_touch
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "scrollTouch", "target": "(?i).*pet care.*", "type": "a"}],
+        "pre_navigation_retry_count": 1,
+        "anchor": {"target": "anchor", "type": "t"},
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is False
+    assert len(client.scroll_touch_calls) == 1
+
+
+def test_run_pre_navigation_steps_accepts_scrolltouch_action_case_insensitive(monkeypatch):
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row()])
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+
+    ok = collection_flow._run_pre_navigation_steps(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"pre_navigation": [{"action": "scrollTouch", "target": "(?i).*food.*", "type": "a"}]},
+    )
+
+    assert ok is True
+    assert len(client.scroll_touch_calls) == 1
+    assert not any("unsupported_action" in line for line in logs)
+
+
+def test_run_pre_navigation_steps_accepts_scroll_touch_alias(monkeypatch):
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row()])
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+
+    ok = collection_flow._run_pre_navigation_steps(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"pre_navigation": [{"action": "scroll_touch", "target": "(?i).*food.*", "type": "a"}]},
+    )
+
+    assert ok is True
+    assert len(client.scroll_touch_calls) == 1
+    assert not any("unsupported_action" in line for line in logs)
 
 
 def test_open_scenario_pre_navigation_touch_bounds_center_bounds_unavailable_failure(monkeypatch):

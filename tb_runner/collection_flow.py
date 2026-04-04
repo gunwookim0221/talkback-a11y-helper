@@ -314,7 +314,10 @@ def _run_pre_navigation_steps(
             log(f"[SCENARIO][pre_nav] failed reason='invalid_step' step={index}")
             return False
 
-        action = str(step.get("action", "") or "").strip().lower()
+        action_raw = str(step.get("action", "") or "").strip()
+        action = action_raw.casefold()
+        if action == "scroll_touch":
+            action = "scrolltouch"
         target = str(step.get("target", "") or "").strip()
         type_ = str(step.get("type", "a") or "a").strip()
         if not action or not target:
@@ -323,6 +326,7 @@ def _run_pre_navigation_steps(
         if action not in {
             "select",
             "touch",
+            "scrolltouch",
             "touch_bounds_center",
             "select_and_click_focused",
             "tap_bounds_center_adb",
@@ -340,6 +344,8 @@ def _run_pre_navigation_steps(
                 step_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
             elif action == "touch":
                 step_ok = bool(client.touch(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
+            elif action == "scrolltouch":
+                step_ok = bool(client.scrollTouch(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
             elif action == "touch_bounds_center":
                 step_ok = bool(client.touch_bounds_center(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
             elif action == "tap_bounds_center_adb":
