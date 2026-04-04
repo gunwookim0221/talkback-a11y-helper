@@ -492,6 +492,26 @@ def test_open_scenario_pre_navigation_scroll_touch_success(monkeypatch):
     assert client.scroll_touch_calls[0]["type_"] == "a"
 
 
+def test_open_scenario_pre_navigation_scroll_touch_lowercase_success(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "scrolltouch", "target": "(?i).*cooking.*", "type": "a"}],
+        "pre_navigation_retry_count": 1,
+        "pre_navigation_wait_seconds": 0.1,
+        "anchor": {"target": "anchor", "type": "t"},
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert len(client.scroll_touch_calls) == 1
+    assert client.scroll_touch_calls[0]["name"] == "(?i).*cooking.*"
+
+
 def test_open_scenario_pre_navigation_scroll_touch_failure(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
