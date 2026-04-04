@@ -323,6 +323,7 @@ def _run_pre_navigation_steps(
         if action not in {
             "select",
             "touch",
+            "scrolltouch",
             "touch_bounds_center",
             "select_and_click_focused",
             "tap_bounds_center_adb",
@@ -340,6 +341,8 @@ def _run_pre_navigation_steps(
                 step_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
             elif action == "touch":
                 step_ok = bool(client.touch(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
+            elif action == "scrolltouch":
+                step_ok = bool(client.scrollTouch(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
             elif action == "touch_bounds_center":
                 step_ok = bool(client.touch_bounds_center(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
             elif action == "tap_bounds_center_adb":

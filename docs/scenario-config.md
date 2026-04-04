@@ -40,7 +40,7 @@
 - `max_steps`: main step 상한
 - `scenario_type`: `content | global_nav`
 - `tab`: tab 선택 후보 규칙(resource/text/announcement/tie_breaker)
-- `pre_navigation`: anchor 전에 수행할 bounded 이동(select/touch)
+- `pre_navigation`: anchor 전에 수행할 bounded 이동(select/touch/scrollTouch)
 - `anchor`: 안정화 대상 규칙(resource/text/announcement/class/bounds/tie_breaker)
 - `context_verify`: 문맥 검증 규칙
 - `screen_context_mode`: `bottom_tab | new_screen`
