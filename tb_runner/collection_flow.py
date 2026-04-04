@@ -315,6 +315,8 @@ def _run_pre_navigation_steps(
             return False
 
         action = str(step.get("action", "") or "").strip().lower()
+        if action in {"scroll_touch", "scroll-touch"}:
+            action = "scrolltouch"
         target = str(step.get("target", "") or "").strip()
         type_ = str(step.get("type", "a") or "a").strip()
         if not action or not target:
