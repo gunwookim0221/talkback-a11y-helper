@@ -66,7 +66,7 @@ TAB_CONFIGS = [
         "stabilization_mode": "anchor_only",
         "pre_navigation": [
             {
-                "action": "select",
+                "action": "touch",
                 "target": "(?i).*food.*|.*cooking.*|.*smart\\s*things\\s*cooking.*",
                 "type": "a",
             }
