@@ -1,5 +1,6 @@
 package com.iotpart.sqe.talkbackhelper
 
+import android.graphics.Rect
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -9,7 +10,49 @@ class A11yTraversalAnalyzerTest {
 
     @Test
     fun version_isUpdated() {
-        assertEquals("1.10.2", A11yTraversalAnalyzer.VERSION)
+        assertEquals("1.10.3", A11yTraversalAnalyzer.VERSION)
+    }
+
+    @Test
+    fun shouldPromoteOneConnectStaticTextCandidate_acceptsReadableTextBlock() {
+        val decision = A11yTraversalAnalyzer.shouldPromoteOneConnectStaticTextCandidate(
+            packageName = "com.samsung.android.oneconnect",
+            ancestorPackageName = "com.samsung.android.oneconnect",
+            className = "android.widget.TextView",
+            readableText = "Preheat the oven and mix the ingredients.",
+            clickable = false,
+            focusable = false,
+            screenReaderFocusable = false,
+            enabled = true,
+            interactiveDescendantExists = false,
+            bounds = Rect(80, 980, 960, 1120),
+            ancestorBounds = Rect(0, 300, 1080, 2200),
+            rootBounds = Rect(0, 0, 1080, 2400)
+        )
+
+        assertTrue(decision.accepted)
+        assertEquals("oneconnect_readable_static_text", decision.reasonCode)
+    }
+
+    @Test
+    fun shouldPromoteOneConnectStaticTextCandidate_rejectsInteractiveText() {
+        val decision = A11yTraversalAnalyzer.shouldPromoteOneConnectStaticTextCandidate(
+            packageName = "com.samsung.android.oneconnect",
+            ancestorPackageName = "com.samsung.android.oneconnect",
+            className = "android.widget.TextView",
+            readableText = "Step 1",
+            clickable = false,
+            focusable = true,
+            screenReaderFocusable = false,
+            enabled = true,
+            interactiveDescendantExists = false,
+            bounds = Rect(80, 980, 960, 1080),
+            ancestorBounds = Rect(0, 300, 1080, 2200),
+            rootBounds = Rect(0, 0, 1080, 2400)
+        )
+
+        assertFalse(decision.accepted)
+        assertEquals("interactive_text", decision.reasonCode)
     }
 
     @Test
