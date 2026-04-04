@@ -7,13 +7,19 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.10.2"
+    const val VERSION: String = "1.10.3"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
 
     data class CandidateSelectionResult(
         val index: Int,
         val accepted: Boolean,
         val reasonCode: String
+    )
+
+    internal data class StaticTextPromotionDecision(
+        val accepted: Boolean,
+        val reasonCode: String,
+        val shouldLog: Boolean
     )
 
     internal data class FocusedNode(
@@ -89,6 +95,33 @@ object A11yTraversalAnalyzer {
                 actionableDescendantClassName = descendantMetadata.actionableDescendantClassName,
                 actionableDescendantContentDescription = descendantMetadata.actionableDescendantContentDescription
             )
+        } else {
+            val staticTextDecision = evaluateOneConnectStaticTextPromotion(node, containerAncestor)
+            if (staticTextDecision.shouldLog) {
+                val nodeBounds = Rect().also { node.getBoundsInScreen(it) }
+                val staticLabel = node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                    ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                    ?: "<no-label>"
+                val tag = if (staticTextDecision.accepted) "static_text_included" else "static_text_rejected"
+                Log.i(
+                    "A11Y_HELPER",
+                    "[SMART_NEXT][$tag] reason=${staticTextDecision.reasonCode} class=${node.className} viewId=${node.viewIdResourceName} bounds=$nodeBounds label=${staticLabel.replace("\n", " ")}"
+                )
+            }
+            if (staticTextDecision.accepted) {
+                sink += FocusedNode(
+                    node = node,
+                    text = node.text?.toString(),
+                    contentDescription = node.contentDescription?.toString(),
+                    mergedLabel = null,
+                    hasClickableDescendant = descendantMetadata.hasClickableDescendant,
+                    hasFocusableDescendant = descendantMetadata.hasFocusableDescendant,
+                    effectiveClickable = node.isClickable || descendantMetadata.hasClickableDescendant,
+                    actionableDescendantResourceId = descendantMetadata.actionableDescendantResourceId,
+                    actionableDescendantClassName = descendantMetadata.actionableDescendantClassName,
+                    actionableDescendantContentDescription = descendantMetadata.actionableDescendantContentDescription
+                )
+            }
         }
 
         // 명시된 대형 스크롤/리스트 계열만 구조적 컨테이너로 간주한다.
@@ -247,6 +280,83 @@ object A11yTraversalAnalyzer {
     internal fun isFocusContainer(node: AccessibilityNodeInfo): Boolean {
         val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && node.isScreenReaderFocusable
         return node.isClickable || node.isFocusable || screenReaderFocusable || isSettingsRowViewId(node.viewIdResourceName)
+    }
+
+    internal fun evaluateOneConnectStaticTextPromotion(
+        node: AccessibilityNodeInfo,
+        containerAncestor: AccessibilityNodeInfo?
+    ): StaticTextPromotionDecision {
+        if (containerAncestor == null) return StaticTextPromotionDecision(false, "no_container_ancestor", false)
+
+        val packageName = node.packageName?.toString()?.trim().orEmpty()
+        val ancestorPackageName = containerAncestor.packageName?.toString()?.trim().orEmpty()
+        val nodeBounds = Rect().also { node.getBoundsInScreen(it) }
+        val ancestorBounds = Rect().also { containerAncestor.getBoundsInScreen(it) }
+        val rootBounds = resolveRootBounds(node)
+        val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && node.isScreenReaderFocusable
+        val className = node.className?.toString()
+        val readableText = node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+            ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+        val interactiveDescendantExists = countClickableOrFocusableDescendants(node, limit = 1) > 0
+
+        return shouldPromoteOneConnectStaticTextCandidate(
+            packageName = packageName,
+            ancestorPackageName = ancestorPackageName,
+            className = className,
+            readableText = readableText,
+            clickable = node.isClickable,
+            focusable = node.isFocusable,
+            screenReaderFocusable = screenReaderFocusable,
+            enabled = node.isEnabled,
+            interactiveDescendantExists = interactiveDescendantExists,
+            bounds = nodeBounds,
+            ancestorBounds = ancestorBounds,
+            rootBounds = rootBounds
+        )
+    }
+
+    internal fun shouldPromoteOneConnectStaticTextCandidate(
+        packageName: String,
+        ancestorPackageName: String,
+        className: String?,
+        readableText: String?,
+        clickable: Boolean,
+        focusable: Boolean,
+        screenReaderFocusable: Boolean,
+        enabled: Boolean,
+        interactiveDescendantExists: Boolean,
+        bounds: Rect,
+        ancestorBounds: Rect,
+        rootBounds: Rect?
+    ): StaticTextPromotionDecision {
+        val inOneConnect = packageName == ONECONNECT_PACKAGE_NAME && ancestorPackageName == ONECONNECT_PACKAGE_NAME
+        if (!inOneConnect) return StaticTextPromotionDecision(false, "non_oneconnect_package", false)
+        if (readableText.isNullOrBlank()) return StaticTextPromotionDecision(false, "no_readable_text", false)
+
+        val normalizedClass = className?.lowercase().orEmpty()
+        if (!normalizedClass.contains("textview")) return StaticTextPromotionDecision(false, "not_text_view", true)
+        if (clickable || focusable || screenReaderFocusable) return StaticTextPromotionDecision(false, "interactive_text", true)
+        if (!enabled) return StaticTextPromotionDecision(false, "disabled", true)
+        if (interactiveDescendantExists) return StaticTextPromotionDecision(false, "interactive_descendant_exists", true)
+        if (bounds.width() <= 0 || bounds.height() <= 0) return StaticTextPromotionDecision(false, "invalid_bounds", true)
+        if (ancestorBounds.width() <= 0 || ancestorBounds.height() <= 0) return StaticTextPromotionDecision(false, "invalid_ancestor_bounds", true)
+        if (bounds.bottom < ancestorBounds.top || bounds.top > ancestorBounds.bottom) {
+            return StaticTextPromotionDecision(false, "outside_ancestor_section", true)
+        }
+
+        val textLength = readableText.length
+        if (bounds.height() < 16 && textLength < 4) return StaticTextPromotionDecision(false, "too_small_short_text", true)
+        if (textLength > 260) return StaticTextPromotionDecision(false, "too_long_block_text", true)
+
+        if (rootBounds != null) {
+            if (A11yNodeUtils.isTopAppBar(className, null, bounds, rootBounds.top, rootBounds.height())) {
+                return StaticTextPromotionDecision(false, "top_app_bar_region", true)
+            }
+            if (A11yNodeUtils.isBottomNavigationBar(className, null, bounds, rootBounds.bottom, rootBounds.height())) {
+                return StaticTextPromotionDecision(false, "bottom_nav_region", true)
+            }
+        }
+        return StaticTextPromotionDecision(true, "oneconnect_readable_static_text", true)
     }
 
     internal fun isSettingsRowViewId(viewIdResourceName: String?): Boolean {
