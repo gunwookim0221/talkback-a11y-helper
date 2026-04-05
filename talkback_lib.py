@@ -36,7 +36,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.38"
+CLIENT_ALGORITHM_VERSION = "1.7.39"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -184,6 +184,22 @@ class A11yAdbClient:
         )
         if not (sanity_get_focus_success and sanity_meaningful_focus):
             print("[PREFLIGHT] sanity failed but proceeding reason='no_initial_focus'")
+            print("[PREFLIGHT] sanity failed, running readiness probe")
+            self.move_focus(dev=dev, direction="next")
+            probe_focus_node = self.get_focus(
+                dev=dev,
+                wait_seconds=1.0,
+                allow_fallback_dump=False,
+                mode="fast",
+            )
+            probe_success = bool(probe_focus_node)
+            probe_meaningful = self._is_meaningful_focus_node(probe_focus_node)
+            print(f"[PREFLIGHT][probe] success={probe_success} meaningful={probe_meaningful}")
+            if not (probe_success and probe_meaningful):
+                print("[PREFLIGHT] probe failed -> false_positive_enabled")
+                print("[PREFLIGHT] final_status=enabled_but_not_ready final_reason=false_positive_enabled")
+                return {"status": "enabled_but_not_ready", "reason": "false_positive_enabled"}
+            print("[PREFLIGHT] probe passed -> enabled")
         print("[PREFLIGHT] final_status=enabled final_reason=ok")
         return {"status": "enabled", "reason": "ok"}
 
