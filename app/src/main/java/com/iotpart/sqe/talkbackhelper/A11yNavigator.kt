@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.69.3"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.70.0"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
     private const val ONECONNECT_UPDATE_APP_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_title"
@@ -22,8 +22,10 @@ object A11yNavigator {
     private const val ONECONNECT_UPDATE_BUTTON_VIEW_ID = "com.samsung.android.oneconnect:id/update_button"
     private const val ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/noti_title"
     private const val ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID = "com.samsung.android.oneconnect:id/notification_item_switch"
-    private const val MAX_NOTIFICATIONS_ROW_ANCESTOR_DISTANCE = 3
+    private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
+    private const val MIN_ONECONNECT_SETTINGS_ROW_HEIGHT_PX = 80
     private const val ANDROID_TITLE_VIEW_ID = "android:id/title"
+    private const val ANDROID_SUMMARY_VIEW_ID = "android:id/summary"
 
 
     @Volatile
@@ -157,6 +159,10 @@ object A11yNavigator {
             val candidateLabel = resolveFocusedNodeLabel(candidate)
             val matchingGroup = groups.firstOrNull { group ->
                 val representative = selectAliasGroupRepresentative(group)
+                shouldTreatAsOneConnectSettingsRowAliasGroup(
+                    group = group,
+                    candidate = candidate
+                ) ||
                 shouldTreatAsOneConnectNotificationsAliasGroup(
                     group = group,
                     candidate = candidate
@@ -182,11 +188,14 @@ object A11yNavigator {
             normalizedNodes += representative
             aliasMembersByIndex[groupIndex] = group.map { it.node }
             val groupViewIds = group.mapNotNull { it.node.viewIdResourceName }
-            val hasNotificationsRowGroup = group.any { findOneConnectNotificationsRowContainer(it.node) != null }
-            if (hasNotificationsRowGroup) {
+            val oneConnectRowRepresentative = findOneConnectSettingsRowContainer(representative.node)
+            if (oneConnectRowRepresentative != null) {
+                val memberSummary = group.joinToString(separator = ",") { member ->
+                    member.node.viewIdResourceName ?: resolvePrimaryLabel(member.node).orEmpty()
+                }
                 Log.d(
                     "A11Y_HELPER",
-                    "[DEBUG][NORMALIZE] notifications settings row group formed representative=${representative.node.viewIdResourceName} members=${groupViewIds.joinToString()}"
+                    "[DEBUG][ROW_GROUP] formed rep=${oneConnectRowRepresentative.viewIdResourceName} members=[$memberSummary]"
                 )
             }
             val hasNotificationsTitle = groupViewIds.contains(ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID)
@@ -856,6 +865,7 @@ object A11yNavigator {
                 }
             }
         }
+        nextIndex = preventOneConnectSettingsSameRowReselection(state, nextIndex)
         nextIndex = preventOneConnectNotificationsSameRowReselection(state, nextIndex)
         if (debugAroundDecision) {
             Log.d("A11Y_HELPER", "[DEBUG][DECIDE] final_next=${summarizeTraversalCandidate(traversalList, nextIndex, state)}")
@@ -921,6 +931,13 @@ object A11yNavigator {
     }
 
     private fun selectAliasGroupRepresentative(group: List<FocusedNode>): FocusedNode {
+        selectOneConnectSettingsRowRepresentative(group)?.let { settingsRow ->
+            Log.d(
+                "A11Y_HELPER",
+                "[DEBUG][ROW_GROUP] representative chosen=${settingsRow.node.viewIdResourceName}"
+            )
+            return settingsRow
+        }
         selectOneConnectNotificationsRepresentative(group)?.let { notificationsRow ->
             Log.d(
                 "A11Y_HELPER",
@@ -980,6 +997,26 @@ object A11yNavigator {
             viewId == ONECONNECT_UPDATE_BUTTON_VIEW_ID
     }
 
+    private fun shouldTreatAsOneConnectSettingsRowAliasGroup(
+        group: List<FocusedNode>,
+        candidate: FocusedNode
+    ): Boolean {
+        val candidateRowContainer = findOneConnectSettingsRowContainer(candidate.node) ?: return false
+        return group.any { member ->
+            val memberRowContainer = findOneConnectSettingsRowContainer(member.node) ?: return@any false
+            if (!isSameNode(memberRowContainer, candidateRowContainer)) return@any false
+            val isCandidateInRow = isNodeInsideAncestor(candidate.node, candidateRowContainer)
+            val isMemberInRow = isNodeInsideAncestor(member.node, memberRowContainer)
+            val candidateBounds = Rect().also { candidate.node.getBoundsInScreen(it) }
+            val memberBounds = Rect().also { member.node.getBoundsInScreen(it) }
+            val rowBounds = Rect().also { candidateRowContainer.getBoundsInScreen(it) }
+            if (!isCandidateInRow || !isMemberInRow || !rowBounds.contains(candidateBounds) || !rowBounds.contains(memberBounds)) {
+                return@any false
+            }
+            true
+        }
+    }
+
     private fun shouldTreatAsOneConnectNotificationsAliasGroup(
         group: List<FocusedNode>,
         candidate: FocusedNode
@@ -1010,6 +1047,27 @@ object A11yNavigator {
             }
             true
         }
+    }
+
+    private fun selectOneConnectSettingsRowRepresentative(group: List<FocusedNode>): FocusedNode? {
+        val rowNode = group.mapNotNull { findOneConnectSettingsRowContainer(it.node) }
+            .firstOrNull()
+            ?: return null
+        group.firstOrNull { isSameNode(it.node, rowNode) }?.let { return it }
+        val metadata = A11yTraversalAnalyzer.collectActionableDescendantMetadata(rowNode)
+        val rowLabel = resolvePrimaryLabel(rowNode) ?: A11yTraversalAnalyzer.recoverDescendantLabel(rowNode)
+        return FocusedNode(
+            node = rowNode,
+            text = rowLabel,
+            contentDescription = rowNode.contentDescription?.toString(),
+            mergedLabel = rowLabel,
+            hasClickableDescendant = metadata.hasClickableDescendant,
+            hasFocusableDescendant = metadata.hasFocusableDescendant,
+            effectiveClickable = rowNode.isClickable,
+            actionableDescendantResourceId = metadata.actionableDescendantResourceId,
+            actionableDescendantClassName = metadata.actionableDescendantClassName,
+            actionableDescendantContentDescription = metadata.actionableDescendantContentDescription
+        )
     }
 
     private fun selectOneConnectNotificationsRepresentative(group: List<FocusedNode>): FocusedNode? {
@@ -1053,6 +1111,83 @@ object A11yNavigator {
         )
     }
 
+    private fun findOneConnectSettingsRowContainer(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        var current = node ?: return null
+        while (true) {
+            val packageName = current.packageName?.toString()?.trim().orEmpty()
+            if (packageName == ONECONNECT_PACKAGE_NAME && (current.isClickable || current.isFocusable)) {
+                if (isOneConnectSettingsRowContainer(current)) {
+                    return current
+                }
+            }
+            current = current.parent ?: break
+        }
+        return null
+    }
+
+    private fun isOneConnectSettingsRowContainer(node: AccessibilityNodeInfo): Boolean {
+        if (isOneConnectUpdateAppMemberViewId(node.viewIdResourceName) || node.viewIdResourceName == ONECONNECT_UPDATE_APP_CARD_VIEW_ID) {
+            return false
+        }
+        val viewId = node.viewIdResourceName?.lowercase().orEmpty()
+        if (viewId.contains("wrapperlayout") || viewId.contains("scrollview") || viewId.contains("recycler")) {
+            Log.d("A11Y_HELPER", "[DEBUG][ROW_GROUP] rejected ancestor too high=${node.viewIdResourceName}")
+            return false
+        }
+        if (A11yNodeUtils.isContainerLikeClassName(node.className?.toString()) && !isSettingsRowViewId(node.viewIdResourceName)) {
+            Log.d("A11Y_HELPER", "[DEBUG][ROW_GROUP] rejected ancestor too high=${node.viewIdResourceName}")
+            return false
+        }
+        val rowBounds = Rect().also { node.getBoundsInScreen(it) }
+        val rowHeight = rowBounds.height()
+        val rowWidth = rowBounds.width()
+        if (rowHeight < MIN_ONECONNECT_SETTINGS_ROW_HEIGHT_PX || rowWidth <= 0) return false
+        if (rowHeight > (rowWidth * 0.6f).toInt()) {
+            Log.d("A11Y_HELPER", "[DEBUG][ROW_GROUP] rejected ancestor too high=${node.viewIdResourceName}")
+            return false
+        }
+        val titleNode = findDescendantByPredicate(
+            node = node,
+            maxDepth = MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE
+        ) { child ->
+            child.viewIdResourceName == ANDROID_TITLE_VIEW_ID ||
+                (!child.text.isNullOrBlank() && !A11yNodeUtils.isContainerLikeClassName(child.className?.toString()))
+        } ?: return false
+        val hasSettingsTitle = titleNode.viewIdResourceName == ANDROID_TITLE_VIEW_ID
+        val hasSettingsRowViewId = isSettingsRowViewId(node.viewIdResourceName)
+        if (!hasSettingsTitle && !hasSettingsRowViewId) return false
+        val titleDepth = ancestorDistance(ancestor = node, descendant = titleNode)
+        if (titleDepth > MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE) {
+            Log.d("A11Y_HELPER", "[DEBUG][ROW_GROUP] rejected ancestor too high=${node.viewIdResourceName}")
+            return false
+        }
+        val titleBounds = Rect().also { titleNode.getBoundsInScreen(it) }
+        if (!rowBounds.contains(titleBounds)) return false
+        val switchNode = findDescendantByPredicate(
+            node = node,
+            maxDepth = MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE
+        ) { child ->
+            val className = child.className?.toString()?.lowercase().orEmpty()
+            className.contains("switch") || child.isCheckable
+        }
+        val summaryNode = findDescendantByViewId(node, ANDROID_SUMMARY_VIEW_ID)
+        if (summaryNode != null) {
+            val summaryBounds = Rect().also { summaryNode.getBoundsInScreen(it) }
+            if (!rowBounds.contains(summaryBounds)) return false
+        }
+        val anchorNode = switchNode ?: titleNode
+        val nearestClickableCommonAncestor = findNearestClickableCommonAncestor(
+            first = titleNode,
+            second = anchorNode,
+            boundary = node
+        )
+        if (nearestClickableCommonAncestor != null && !isSameNode(nearestClickableCommonAncestor, node)) {
+            Log.d("A11Y_HELPER", "[DEBUG][ROW_GROUP] rejected ancestor too high=${node.viewIdResourceName}")
+            return false
+        }
+        return true
+    }
+
     private fun findOneConnectNotificationsRowContainer(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
         var current = node ?: return null
         while (true) {
@@ -1072,8 +1207,8 @@ object A11yNavigator {
                         boundary = current
                     )
                     val hasCloserRowAncestor = nearestClickableCommonAncestor != null && !isSameNode(nearestClickableCommonAncestor, current)
-                    val tooHighByDepth = titleDepth > MAX_NOTIFICATIONS_ROW_ANCESTOR_DISTANCE ||
-                        switchDepth > MAX_NOTIFICATIONS_ROW_ANCESTOR_DISTANCE
+                    val tooHighByDepth = titleDepth > MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE ||
+                        switchDepth > MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE
                     if (hasCloserRowAncestor || tooHighByDepth) {
                         Log.d(
                             "A11Y_HELPER",
@@ -1085,6 +1220,28 @@ object A11yNavigator {
                 }
             }
             current = current.parent ?: break
+        }
+        return null
+    }
+
+    private fun findDescendantByPredicate(
+        node: AccessibilityNodeInfo,
+        maxDepth: Int,
+        predicate: (AccessibilityNodeInfo) -> Boolean
+    ): AccessibilityNodeInfo? {
+        val pending = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
+        pending.add(node to 0)
+        while (pending.isNotEmpty()) {
+            val (current, depth) = pending.removeFirst()
+            if (depth > maxDepth) continue
+            if (!(depth == 0 && isSameNode(current, node)) && predicate(current)) {
+                return current
+            }
+            if (depth == maxDepth) continue
+            for (i in 0 until current.childCount) {
+                val child = current.getChild(i) ?: continue
+                pending.add(child to depth + 1)
+            }
         }
         return null
     }
@@ -1153,6 +1310,37 @@ object A11yNavigator {
             current = current.parent
         }
         return false
+    }
+
+    private fun preventOneConnectSettingsSameRowReselection(
+        state: SmartNextRuntimeState,
+        nextIndex: Int
+    ): Int {
+        val normalizedTraversal = state.normalize.traversalList
+        if (nextIndex !in normalizedTraversal.indices) return nextIndex
+        val currentNode = state.currentPosition.resolvedCurrent ?: normalizedTraversal.getOrNull(state.currentPosition.currentIndex)
+            ?: return nextIndex
+        val currentRowContainer = findOneConnectSettingsRowContainer(currentNode) ?: return nextIndex
+        val nextCandidate = normalizedTraversal[nextIndex]
+        val nextCandidateRow = findOneConnectSettingsRowContainer(nextCandidate) ?: return nextIndex
+        if (!isSameNode(nextCandidateRow, currentRowContainer)) return nextIndex
+        Log.d(
+            "A11Y_HELPER",
+            "[DEBUG][ROW_GROUP] skip same-row=${nextCandidate.viewIdResourceName}"
+        )
+        for (index in (nextIndex + 1) until normalizedTraversal.size) {
+            val candidate = normalizedTraversal[index]
+            val candidateRow = findOneConnectSettingsRowContainer(candidate)
+            if (candidateRow != null && isSameNode(candidateRow, currentRowContainer)) {
+                Log.d(
+                    "A11Y_HELPER",
+                    "[DEBUG][ROW_GROUP] skip same-row=${candidate.viewIdResourceName}"
+                )
+                continue
+            }
+            return index
+        }
+        return nextIndex
     }
 
     private fun preventOneConnectNotificationsSameRowReselection(
