@@ -36,7 +36,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.33"
+CLIENT_ALGORITHM_VERSION = "1.7.34"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -1203,6 +1203,70 @@ class A11yAdbClient:
         time.sleep(1.5)
         result = self._read_log_result(dev, "SCROLL_RESULT", req_id)
         return bool(result.get("success"))
+
+    @staticmethod
+    def _top_visible_fingerprint(nodes: list[dict[str, Any]], max_samples: int = 6) -> str:
+        pairs = A11yAdbClient._collect_text_nodes_with_bounds(nodes)
+        top_candidates: list[tuple[int, int, str, str]] = []
+        for text, bounds in pairs:
+            parsed = A11yAdbClient._parse_bounds_tuple(bounds)
+            if not parsed:
+                continue
+            left, top, _, _ = parsed
+            normalized_text = text.strip().lower()
+            if not normalized_text:
+                continue
+            top_candidates.append((top, left, normalized_text, bounds))
+
+        if top_candidates:
+            top_candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+            return "|".join(f"{text}@{bounds}" for _, _, text, bounds in top_candidates[:max_samples])
+
+        node_hashes = A11yAdbClient._tree_node_hashes(nodes)
+        return "|".join(node_hashes[:max_samples])
+
+    def scroll_to_top(self, dev: Any, max_swipes: int = 5, pause: float = 0.6) -> dict[str, Any]:
+        attempts = max(1, int(max_swipes))
+        print(f"[SCROLL_TOP] start max_swipes={attempts}")
+        try:
+            before_nodes = self.dump_tree(dev=dev)
+        except Exception as exc:
+            print(f"[SCROLL_TOP] skipped reason='screen_not_scrollable' detail='dump_tree_failed:{exc}'")
+            return {"ok": False, "reached_top": False, "attempts": 0, "reason": "dump_tree_failed"}
+
+        if not isinstance(before_nodes, list) or not before_nodes:
+            print("[SCROLL_TOP] skipped reason='screen_not_scrollable' detail='empty_dump'")
+            return {"ok": True, "reached_top": False, "attempts": 0, "reason": "empty_dump"}
+
+        before_fp = self._top_visible_fingerprint(before_nodes)
+        if not before_fp:
+            print("[SCROLL_TOP] skipped reason='screen_not_scrollable' detail='missing_fingerprint'")
+            return {"ok": True, "reached_top": False, "attempts": 0, "reason": "missing_fingerprint"}
+
+        for attempt in range(1, attempts + 1):
+            print(f"[SCROLL_TOP] swipe attempt={attempt}/{attempts}")
+            scrolled = self.scroll(dev, "up")
+            if not scrolled:
+                print("[SCROLL_TOP] reached_top=true reason='scroll_failed'")
+                return {"ok": True, "reached_top": True, "attempts": attempt, "reason": "scroll_failed"}
+
+            time.sleep(max(0.0, pause))
+            try:
+                after_nodes = self.dump_tree(dev=dev)
+                after_fp = self._top_visible_fingerprint(after_nodes) if isinstance(after_nodes, list) else ""
+            except Exception as exc:
+                print(f"[SCROLL_TOP] reached_top=false reason='dump_tree_failed' detail='{exc}'")
+                return {"ok": False, "reached_top": False, "attempts": attempt, "reason": "dump_tree_failed"}
+
+            changed = bool(after_fp and after_fp != before_fp)
+            print(f"[SCROLL_TOP] changed={'true' if changed else 'false'}")
+            if not changed:
+                print("[SCROLL_TOP] reached_top=true reason='no_visible_change'")
+                return {"ok": True, "reached_top": True, "attempts": attempt, "reason": "no_visible_change"}
+            before_fp = after_fp
+
+        print("[SCROLL_TOP] fallback_stop reason='max_swipes'")
+        return {"ok": True, "reached_top": False, "attempts": attempts, "reason": "max_swipes"}
 
     def move_focus(self, dev: Any = None, direction: str = "next") -> bool:
         if not self.check_helper_status(dev=dev):
