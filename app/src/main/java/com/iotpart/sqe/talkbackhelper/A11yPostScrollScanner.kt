@@ -5,7 +5,11 @@ import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 
 object A11yPostScrollScanner {
-    const val VERSION: String = "1.3.0"
+    const val VERSION: String = "1.3.1"
+    private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
+    private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
+    private const val ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/noti_title"
+    private const val ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID = "com.samsung.android.oneconnect:id/notification_item_switch"
 
     internal fun findAndFocusFirstContent(
         context: FindAndFocusPhaseContext,
@@ -259,6 +263,13 @@ object A11yPostScrollScanner {
                 label = A11yTraversalAnalyzer.recoverDescendantLabel(node) ?: label
             }
             loopState.focusAttempted = true
+            val debugEnabled = shouldEmitOneConnectSettingsRegularDebug(node, label)
+            if (debugEnabled && request.singleTargetOnly) {
+                Log.d(
+                    "A11Y_HELPER",
+                    "[DEBUG][REGULAR] intended_target=idx=$index id=${node.viewIdResourceName} bounds=${formatBounds(bounds)} label=${label.replace("\n", " ")}"
+                )
+            }
             val outcome = A11yFocusExecutor.requestFocusFlow(
                 root = context.root,
                 target = node,
@@ -272,13 +283,50 @@ object A11yPostScrollScanner {
                 aliasMembersByTraversalIndex = context.aliasMembersByRepresentativeIndex
             )
             val mappedOutcome = TargetActionOutcome(outcome.success, outcome.status, outcome.targetNode)
+            if (debugEnabled && request.singleTargetOnly) {
+                Log.d("A11Y_HELPER", "[DEBUG][REGULAR] action_result=${mappedOutcome.success}")
+            }
             if (mappedOutcome.success) {
                 loopState.focusedAny = true
                 loopState.focusedOutcome = mappedOutcome
                 return mappedOutcome
             }
+            if (debugEnabled && request.singleTargetOnly) {
+                val focusedNode = context.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+                val focusedBounds = focusedNode?.let { Rect().also(it::getBoundsInScreen) }
+                Log.d(
+                    "A11Y_HELPER",
+                    "[DEBUG][REGULAR] after_failure_focus=${summarizeNode(focusedNode, focusedBounds)}"
+                )
+                Log.d("A11Y_HELPER", "[DEBUG][REGULAR] no_fallback_single_target=true")
+            }
         }
         return null
+    }
+
+    private fun shouldEmitOneConnectSettingsRegularDebug(node: AccessibilityNodeInfo, resolvedLabel: String): Boolean {
+        if (node.packageName?.toString()?.trim() != ONECONNECT_PACKAGE_NAME) return false
+        val viewId = node.viewIdResourceName
+        if (viewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID ||
+            viewId == ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID ||
+            viewId == ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID
+        ) return true
+        val label = resolvedLabel.lowercase()
+        return label.contains("update app") || label.contains("samsung account") || label.contains("notifications")
+    }
+
+    private fun summarizeNode(node: AccessibilityNodeInfo?, bounds: Rect?): String {
+        if (node == null) return "null"
+        val label = node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+            ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+            ?: A11yTraversalAnalyzer.recoverDescendantLabel(node)
+            ?: "<no-label>"
+        return "id=${node.viewIdResourceName} bounds=${formatBounds(bounds)} label=${label.replace("\n", " ")}"
+    }
+
+    private fun formatBounds(bounds: Rect?): String {
+        if (bounds == null) return "null"
+        return "[${bounds.left},${bounds.top}][${bounds.right},${bounds.bottom}]"
     }
 
     internal fun handleNoCandidateAfterScroll(
