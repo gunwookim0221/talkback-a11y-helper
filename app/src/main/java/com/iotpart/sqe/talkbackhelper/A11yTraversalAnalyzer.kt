@@ -7,13 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.10.6"
-    private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
-    private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
-    private const val ONECONNECT_UPDATE_APP_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_title"
-    private const val ONECONNECT_UPDATE_APP_TEXT_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_text"
-    private const val ONECONNECT_UPDATE_APP_CLOSE_BUTTON_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card_close_btn"
-    private const val ONECONNECT_UPDATE_BUTTON_VIEW_ID = "com.samsung.android.oneconnect:id/update_button"
+    const val VERSION: String = "1.11.0"
 
     data class CandidateSelectionResult(
         val index: Int,
@@ -334,34 +328,25 @@ object A11yTraversalAnalyzer {
         ancestorBounds: Rect,
         rootBounds: Rect?
     ): StaticTextPromotionDecision {
-        val inOneConnect = packageName == ONECONNECT_PACKAGE_NAME && ancestorPackageName == ONECONNECT_PACKAGE_NAME
-        if (!inOneConnect) return StaticTextPromotionDecision(false, "non_oneconnect_package", false)
-        if (readableText.isNullOrBlank()) return StaticTextPromotionDecision(false, "no_readable_text", false)
-
-        val normalizedClass = className?.lowercase().orEmpty()
-        if (!normalizedClass.contains("textview")) return StaticTextPromotionDecision(false, "not_text_view", true)
-        if (clickable || focusable || screenReaderFocusable) return StaticTextPromotionDecision(false, "interactive_text", true)
-        if (!enabled) return StaticTextPromotionDecision(false, "disabled", true)
-        if (interactiveDescendantExists) return StaticTextPromotionDecision(false, "interactive_descendant_exists", true)
-        if (bounds.width() <= 0 || bounds.height() <= 0) return StaticTextPromotionDecision(false, "invalid_bounds", true)
-        if (ancestorBounds.width() <= 0 || ancestorBounds.height() <= 0) return StaticTextPromotionDecision(false, "invalid_ancestor_bounds", true)
-        if (bounds.bottom < ancestorBounds.top || bounds.top > ancestorBounds.bottom) {
-            return StaticTextPromotionDecision(false, "outside_ancestor_section", true)
-        }
-
-        val textLength = readableText.length
-        if (bounds.height() < 16 && textLength < 4) return StaticTextPromotionDecision(false, "too_small_short_text", true)
-        if (textLength > 260) return StaticTextPromotionDecision(false, "too_long_block_text", true)
-
-        if (rootBounds != null) {
-            if (A11yNodeUtils.isTopAppBar(className, null, bounds, rootBounds.top, rootBounds.height())) {
-                return StaticTextPromotionDecision(false, "top_app_bar_region", true)
-            }
-            if (A11yNodeUtils.isBottomNavigationBar(className, null, bounds, rootBounds.bottom, rootBounds.height())) {
-                return StaticTextPromotionDecision(false, "bottom_nav_region", true)
-            }
-        }
-        return StaticTextPromotionDecision(true, "oneconnect_readable_static_text", true)
+        val decision = OneConnectTraversalPolicy.evaluateStaticTextPromotion(
+            packageName = packageName,
+            ancestorPackageName = ancestorPackageName,
+            className = className,
+            readableText = readableText,
+            clickable = clickable,
+            focusable = focusable,
+            screenReaderFocusable = screenReaderFocusable,
+            enabled = enabled,
+            interactiveDescendantExists = interactiveDescendantExists,
+            bounds = bounds,
+            ancestorBounds = ancestorBounds,
+            rootBounds = rootBounds
+        )
+        return StaticTextPromotionDecision(
+            accepted = decision.accepted,
+            reasonCode = decision.reasonCode,
+            shouldLog = decision.shouldLog
+        )
     }
 
     internal fun isSettingsRowViewId(viewIdResourceName: String?): Boolean {
@@ -430,7 +415,7 @@ object A11yTraversalAnalyzer {
     ): Boolean {
         if (!node.isVisibleToUser) return false
         val packageName = node.packageName?.toString()?.trim().orEmpty()
-        if (packageName != ONECONNECT_PACKAGE_NAME) return false
+        if (!OneConnectTraversalPolicy.isOneConnectPackageName(packageName)) return false
         if (!node.isClickable && !node.isFocusable) return false
         val bounds = Rect().also { node.getBoundsInScreen(it) }
         if (bounds.top <= 0 || bounds.left < 0) return false
@@ -528,41 +513,29 @@ object A11yTraversalAnalyzer {
         primaryBounds: Rect,
         secondaryBounds: Rect
     ): Boolean {
-        val primaryPackage = primaryNode.packageName?.toString()?.trim().orEmpty()
-        val secondaryPackage = secondaryNode.packageName?.toString()?.trim().orEmpty()
-        if (primaryPackage != ONECONNECT_PACKAGE_NAME || secondaryPackage != ONECONNECT_PACKAGE_NAME) return false
-        val primaryViewId = primaryNode.viewIdResourceName?.trim().orEmpty()
-        val secondaryViewId = secondaryNode.viewIdResourceName?.trim().orEmpty()
-        val updateAppMemberViewIds = setOf(
-            ONECONNECT_UPDATE_APP_TITLE_VIEW_ID,
-            ONECONNECT_UPDATE_APP_TEXT_VIEW_ID,
-            ONECONNECT_UPDATE_APP_CLOSE_BUTTON_VIEW_ID,
-            ONECONNECT_UPDATE_BUTTON_VIEW_ID
+        val linked = OneConnectTraversalPolicy.isUpdateAppAliasPair(
+            primaryNode = primaryNode,
+            secondaryNode = secondaryNode,
+            primaryBounds = primaryBounds,
+            secondaryBounds = secondaryBounds,
+            isAncestorOf = { ancestor, descendant ->
+                isAncestorOf(
+                    ancestor = ancestor,
+                    descendant = descendant,
+                    parentOf = { node -> node.parent }
+                )
+            }
         )
-        val cardAndMember = when {
-            primaryViewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID && secondaryViewId in updateAppMemberViewIds ->
-                Triple(primaryNode, secondaryNode, secondaryViewId)
-            secondaryViewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID && primaryViewId in updateAppMemberViewIds ->
-                Triple(secondaryNode, primaryNode, primaryViewId)
-            else -> null
-        } ?: return false
-        val cardNode = cardAndMember.first
-        val memberNode = cardAndMember.second
-        val memberViewId = cardAndMember.third
-        val cardBounds = if (cardNode === primaryNode) primaryBounds else secondaryBounds
-        val memberBounds = if (memberNode === primaryNode) primaryBounds else secondaryBounds
-        val inAncestorChain = isAncestorOf(
-            ancestor = cardNode,
-            descendant = memberNode,
-            parentOf = { node -> node.parent }
-        )
-        if (!inAncestorChain) return false
-        if (!cardBounds.contains(memberBounds)) return false
-        Log.d(
-            "A11Y_HELPER",
-            "[DEBUG][NORMALIZE] update_app group member linked: ${memberViewId.substringAfterLast('/')} -> update_app_card"
-        )
-        return true
+        if (linked) {
+            val memberViewId = listOf(primaryNode.viewIdResourceName, secondaryNode.viewIdResourceName)
+                .firstOrNull { OneConnectTraversalPolicy.isUpdateAppMemberViewId(it) }
+                .orEmpty()
+            Log.d(
+                "A11Y_HELPER",
+                "[DEBUG][ONECONNECT] update_app group member linked: ${memberViewId.substringAfterLast('/')} -> update_app_card"
+            )
+        }
+        return linked
     }
 
     private fun canTreatAsActionControlWrapperDuplicate(
@@ -1249,19 +1222,19 @@ object A11yTraversalAnalyzer {
         if (isCompositeInteractiveContainer(node, descendantTextCandidates)) return false
         if (isOneConnectHeroSummaryContainer(node, descendantTextCandidates)) return false
         if (isContainerLikeClassName(node.className?.toString())) {
-            if (node.packageName?.toString()?.trim().orEmpty() == ONECONNECT_PACKAGE_NAME) {
+            if (OneConnectTraversalPolicy.isOneConnectPackageName(node.packageName?.toString())) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT][hero] rejected reason='container_like_class' class=${node.className}")
             }
             return true
         }
         if (isContainerLikeViewId(node.viewIdResourceName)) {
-            if (node.packageName?.toString()?.trim().orEmpty() == ONECONNECT_PACKAGE_NAME) {
+            if (OneConnectTraversalPolicy.isOneConnectPackageName(node.packageName?.toString())) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT][hero] rejected reason='container_like_view_id' viewId=${node.viewIdResourceName}")
             }
             return true
         }
         if (hasMultipleSiblingLevelInteractiveDescendants(node)) {
-            if (node.packageName?.toString()?.trim().orEmpty() == ONECONNECT_PACKAGE_NAME) {
+            if (OneConnectTraversalPolicy.isOneConnectPackageName(node.packageName?.toString())) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT][hero] rejected reason='multiple_interactive_descendants'")
             }
             return true
@@ -1274,7 +1247,7 @@ object A11yTraversalAnalyzer {
         if (clickableDescendantCount < 2) return false
 
         val rejected = !shouldAllowRecoveredDescendantLabelForTraversal(descendantTextCandidates)
-        if (rejected && node.packageName?.toString()?.trim().orEmpty() == ONECONNECT_PACKAGE_NAME) {
+        if (rejected && OneConnectTraversalPolicy.isOneConnectPackageName(node.packageName?.toString())) {
             Log.i("A11Y_HELPER", "[SMART_NEXT][hero] rejected reason='recovered_label_disallowed' descendantCount=${descendantTextCandidates.distinct().size}")
         }
         return rejected
@@ -1286,7 +1259,7 @@ object A11yTraversalAnalyzer {
     ): Boolean {
         if (!node.isVisibleToUser || node.isClickable || !node.isFocusable) return false
         val packageName = node.packageName?.toString()?.trim().orEmpty()
-        if (packageName != ONECONNECT_PACKAGE_NAME) return false
+        if (!OneConnectTraversalPolicy.isOneConnectPackageName(packageName)) return false
         val normalizedLabels = descendantTextCandidates
             .asSequence()
             .map { it.trim() }
