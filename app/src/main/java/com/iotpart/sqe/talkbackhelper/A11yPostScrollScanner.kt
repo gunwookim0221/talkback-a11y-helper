@@ -265,6 +265,7 @@ object A11yPostScrollScanner {
             loopState.focusAttempted = true
             val debugEnabled = shouldEmitOneConnectSettingsRegularDebug(node, label)
             if (debugEnabled && request.singleTargetOnly) {
+                Log.d("A11Y_HELPER", "[DEBUG][REGULAR] enter")
                 Log.d(
                     "A11Y_HELPER",
                     "[DEBUG][REGULAR] intended_target=idx=$index id=${node.viewIdResourceName} bounds=${formatBounds(bounds)} label=${label.replace("\n", " ")}"
@@ -305,7 +306,7 @@ object A11yPostScrollScanner {
     }
 
     private fun shouldEmitOneConnectSettingsRegularDebug(node: AccessibilityNodeInfo, resolvedLabel: String): Boolean {
-        if (node.packageName?.toString()?.trim() != ONECONNECT_PACKAGE_NAME) return false
+        if (node.packageName?.toString()?.trim() == ONECONNECT_PACKAGE_NAME) return true
         val viewId = node.viewIdResourceName
         if (viewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID ||
             viewId == ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID ||
