@@ -36,7 +36,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.35"
+CLIENT_ALGORITHM_VERSION = "1.7.37"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -147,11 +147,58 @@ class A11yAdbClient:
         return any(token in services_lower for token in talkback_service_tokens)
 
     def check_talkback_ready(self, dev: Any = None) -> dict[str, str]:
-        if not self.is_talkback_enabled(dev=dev):
-            return {"status": "disabled", "reason": "talkback_off"}
-        if not self.check_helper_status(dev=dev):
-            return {"status": "enabled_but_not_ready", "reason": "helper_not_ready"}
-        return {"status": "enabled", "reason": "ok"}
+        configured_service_found = self.is_talkback_enabled(dev=dev)
+        helper_ready = False
+        sanity_get_focus_success = False
+        sanity_meaningful_focus = False
+        final_status = "disabled"
+        final_reason = "talkback_off"
+
+        if not configured_service_found:
+            print(
+                "[PREFLIGHT][check_talkback_ready] "
+                "configured_service_found=False helper_ready=False "
+                "sanity_get_focus_success=False sanity_meaningful_focus=False "
+                f"final_status='{final_status}' final_reason='{final_reason}'"
+            )
+            return {"status": final_status, "reason": final_reason}
+
+        helper_ready = self.check_helper_status(dev=dev)
+        if not helper_ready:
+            final_status = "enabled_but_not_ready"
+            final_reason = "talkback_not_ready"
+            print(
+                "[PREFLIGHT][check_talkback_ready] "
+                f"configured_service_found={configured_service_found} helper_ready={helper_ready} "
+                "sanity_get_focus_success=False sanity_meaningful_focus=False "
+                f"final_status='{final_status}' final_reason='{final_reason}'"
+            )
+            return {"status": final_status, "reason": final_reason}
+
+        focus_node = self.get_focus(
+            dev=dev,
+            wait_seconds=1.2,
+            allow_fallback_dump=False,
+            mode="fast",
+        )
+        sanity_get_focus_success = bool(self.last_get_focus_trace.get("response_success"))
+        sanity_meaningful_focus = self._is_meaningful_focus_node(focus_node)
+
+        if sanity_get_focus_success and sanity_meaningful_focus:
+            final_status = "enabled"
+            final_reason = "ok"
+        else:
+            final_status = "enabled_but_not_ready"
+            final_reason = "false_positive_enabled"
+
+        print(
+            "[PREFLIGHT][check_talkback_ready] "
+            f"configured_service_found={configured_service_found} helper_ready={helper_ready} "
+            f"sanity_get_focus_success={sanity_get_focus_success} "
+            f"sanity_meaningful_focus={sanity_meaningful_focus} "
+            f"final_status='{final_status}' final_reason='{final_reason}'"
+        )
+        return {"status": final_status, "reason": final_reason}
 
     def _run(self, args: list[str], dev: Any = None, timeout: float = 30.0) -> str:
         serial = self._resolve_serial(dev)

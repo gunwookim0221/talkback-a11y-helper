@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from talkback_lib import A11yAdbClient
+from talkback_lib import A11yAdbClient, CLIENT_ALGORITHM_VERSION
 from tb_runner.collection_flow import collect_tab_rows, recover_to_start_state
 from tb_runner.anchor_logic import choose_best_anchor_candidate, match_anchor, stabilize_anchor
 from tb_runner.context_verifier import verify_context
@@ -27,18 +27,26 @@ from tb_runner.utils import generate_output_path
 
 
 def main():
-    log(f"[MAIN] script start (version={SCRIPT_VERSION}, log_level={LOG_LEVEL})")
+    log(
+        "[MAIN] script start "
+        f"(version={SCRIPT_VERSION}, client_version={CLIENT_ALGORITHM_VERSION}, log_level={LOG_LEVEL})"
+    )
     client = A11yAdbClient(dev_serial=DEV_SERIAL)
     preflight = client.check_talkback_ready(dev=DEV_SERIAL)
     talkback_status = preflight.get("status", "disabled")
+    talkback_reason = preflight.get("reason", "")
     log(f"[PREFLIGHT] talkback status='{talkback_status}'")
     if talkback_status == "disabled":
         log("[PREFLIGHT] abort run reason='talkback_off'")
         log("TalkBack is OFF. Enable TalkBack and retry.")
         return
     if talkback_status == "enabled_but_not_ready":
-        log("[PREFLIGHT] abort run reason='talkback_not_ready'")
-        log("TalkBack is ON but not ready. Wait a moment and retry.")
+        if talkback_reason == "false_positive_enabled":
+            log("[PREFLIGHT] abort run reason='false_positive_enabled'")
+            log("TalkBack service is configured, but 실제 응답이 없어 실행을 중단합니다.")
+        else:
+            log("[PREFLIGHT] abort run reason='talkback_not_ready'")
+            log("TalkBack is ON but not ready. Wait a moment and retry.")
         return
 
     run_perf = RunPerfStats()
