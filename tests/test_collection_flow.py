@@ -14,6 +14,7 @@ class DummyClient:
         self.reset_focus_history_calls = 0
         self.touch_calls = []
         self.scroll_touch_calls = []
+        self.scroll_to_top_calls = []
         self.touch_bounds_center_calls = []
         self.tap_bounds_center_adb_calls = []
         self.select_calls = []
@@ -44,6 +45,10 @@ class DummyClient:
         self.scroll_touch_calls.append(kwargs)
         self.last_target_action_result = {"reason": "touch_success"}
         return True
+
+    def scroll_to_top(self, **kwargs):
+        self.scroll_to_top_calls.append(kwargs)
+        return {"ok": True, "reached_top": True, "attempts": 1, "reason": "no_visible_change"}
 
     def tap_bounds_center_adb(self, **kwargs):
         self.tap_bounds_center_adb_calls.append(kwargs)
@@ -646,6 +651,53 @@ def test_open_scenario_pre_navigation_scroll_touch_lowercase_success(monkeypatch
     assert ok is True
     assert len(client.scroll_touch_calls) == 1
     assert client.scroll_touch_calls[0]["name"] == "(?i).*cooking.*"
+
+
+def test_open_scenario_pre_navigation_scroll_touch_invokes_scroll_to_top(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "scrollTouch", "target": "(?i).*food.*", "type": "a"}],
+        "pre_navigation_retry_count": 1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert len(client.scroll_to_top_calls) == 1
+    assert len(client.scroll_touch_calls) == 1
+    assert any("before scrolltouch, scroll_to_top invoked" in line for line in logs)
+    assert any("scroll_to_top result=" in line for line in logs)
+
+
+def test_open_scenario_pre_navigation_scroll_touch_continues_when_scroll_to_top_fails(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+    client = DummyClient([_anchor_row()])
+
+    def _broken_scroll_to_top(**kwargs):
+        raise RuntimeError("boom")
+
+    client.scroll_to_top = _broken_scroll_to_top
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "scrollTouch", "target": "(?i).*food.*", "type": "a"}],
+        "pre_navigation_retry_count": 1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert len(client.scroll_touch_calls) == 1
+    assert any("scroll_to_top failed reason='boom'" in line for line in logs)
 
 
 def test_open_scenario_pre_navigation_scroll_touch_failure(monkeypatch):

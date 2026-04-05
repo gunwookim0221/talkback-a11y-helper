@@ -515,6 +515,16 @@ def _run_pre_navigation_steps(
             elif action == "touch":
                 step_ok = bool(client.touch(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
             elif action == "scrolltouch":
+                log("[SCENARIO][pre_nav] before scrolltouch, scroll_to_top invoked")
+                scroll_to_top_fn = getattr(client, "scroll_to_top", None)
+                if callable(scroll_to_top_fn):
+                    try:
+                        scroll_top_result = scroll_to_top_fn(dev=dev, max_swipes=5, pause=0.6)
+                        log(f"[SCENARIO][pre_nav] scroll_to_top result={scroll_top_result}")
+                    except Exception as exc:
+                        log(f"[SCENARIO][pre_nav] scroll_to_top failed reason='{exc}'")
+                else:
+                    log("[SCENARIO][pre_nav] scroll_to_top skipped reason='method_not_supported'")
                 step_ok = bool(client.scrollTouch(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
             elif action == "touch_bounds_center":
                 step_ok = bool(client.touch_bounds_center(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))

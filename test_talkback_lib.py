@@ -848,6 +848,43 @@ class TouchIsinTest(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual([call.args[1] for call in scroll_mock.call_args_list], ["up", "down"])
 
+    def test_scroll_to_top_stops_when_no_visible_change(self):
+        client = FakeA11yClient()
+        dumps = [
+            [{"text": "a", "boundsInScreen": {"l": 0, "t": 0, "r": 100, "b": 100}}],
+            [{"text": "a", "boundsInScreen": {"l": 0, "t": 0, "r": 100, "b": 100}}],
+        ]
+
+        with patch.object(client, "dump_tree", side_effect=dumps), patch.object(client, "scroll", return_value=True) as scroll_mock, patch(
+            "talkback_lib.time.sleep",
+            return_value=None,
+        ):
+            result = client.scroll_to_top("SER", max_swipes=5, pause=0.0)
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["reached_top"])
+        self.assertEqual(result["reason"], "no_visible_change")
+        self.assertEqual(scroll_mock.call_count, 1)
+
+    def test_scroll_to_top_falls_back_to_max_swipes(self):
+        client = FakeA11yClient()
+        dumps = [
+            [{"text": "a", "boundsInScreen": {"l": 0, "t": 0, "r": 100, "b": 100}}],
+            [{"text": "b", "boundsInScreen": {"l": 0, "t": 20, "r": 100, "b": 120}}],
+            [{"text": "c", "boundsInScreen": {"l": 0, "t": 40, "r": 100, "b": 140}}],
+        ]
+
+        with patch.object(client, "dump_tree", side_effect=dumps), patch.object(client, "scroll", return_value=True) as scroll_mock, patch(
+            "talkback_lib.time.sleep",
+            return_value=None,
+        ):
+            result = client.scroll_to_top("SER", max_swipes=2, pause=0.0)
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["reached_top"])
+        self.assertEqual(result["reason"], "max_swipes")
+        self.assertEqual(scroll_mock.call_count, 2)
+
 
     def test_scrollfind_marks_tree_dirty_only_when_scrolled(self):
         client = FakeA11yClient()
@@ -1749,7 +1786,7 @@ class SmartMoveFocusTest(unittest.TestCase):
 
 class FocusHelpersTest(unittest.TestCase):
     def test_client_algorithm_version_is_updated(self):
-        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.33")
+        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.34")
 
     def test_extract_visible_label_from_focus_prefers_text(self):
         focus_node = {"text": "  Visible Text  ", "contentDescription": "Desc"}
