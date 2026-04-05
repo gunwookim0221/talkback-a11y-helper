@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.9"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.69.0"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
     private const val ONECONNECT_UPDATE_APP_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_title"
@@ -22,6 +22,7 @@ object A11yNavigator {
     private const val ONECONNECT_UPDATE_BUTTON_VIEW_ID = "com.samsung.android.oneconnect:id/update_button"
     private const val ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/noti_title"
     private const val ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID = "com.samsung.android.oneconnect:id/notification_item_switch"
+    private const val ANDROID_TITLE_VIEW_ID = "android:id/title"
 
 
     @Volatile
@@ -761,10 +762,24 @@ object A11yNavigator {
         val currentIndex = state.currentPosition.currentIndex
         val fallbackIndex = state.currentPosition.fallbackIndex
         var nextIndex = state.currentPosition.nextIndex
-        Log.d(
-            "A11Y_HELPER",
-            "[DEBUG][SMART_NEXT] decideInitialNextTarget using normalized traversal list size=${traversalList.size} currentIndex=$currentIndex nextIndex=$nextIndex"
+        val collectCurrentIndex = state.collect.focusState.currentIndex
+        val collectNextIndex = state.collect.focusState.nextIndex
+        val collectTraversalSize = state.collect.traversalList.size
+        val debugAroundDecision = shouldEmitOneConnectSettingsDebugLogs(
+            current = traversalList.getOrNull(currentIndex),
+            next = traversalList.getOrNull(nextIndex),
+            fallback = traversalList.getOrNull(fallbackIndex),
+            contextNodes = traversalList
         )
+        if (debugAroundDecision) {
+            Log.d(
+                "A11Y_HELPER",
+                "[DEBUG][DECIDE] source=normalize currentIndex=$currentIndex nextIndex=$nextIndex size=${traversalList.size} collectCurrentIndex=$collectCurrentIndex collectNextIndex=$collectNextIndex collectSize=$collectTraversalSize"
+            )
+            Log.d("A11Y_HELPER", "[DEBUG][DECIDE] current=${summarizeTraversalCandidate(traversalList, currentIndex, state)}")
+            Log.d("A11Y_HELPER", "[DEBUG][DECIDE] initial_next=${summarizeTraversalCandidate(traversalList, nextIndex, state)}")
+            dumpDecisionWindow(state, currentIndex, source = "normalize")
+        }
 
         if (currentIndex == -1) {
             val initialHeroIndex = findInitialHeroSummaryCandidateIndex(traversalList)
@@ -802,19 +817,34 @@ object A11yNavigator {
                     Log.d("A11Y_HELPER", "[DEBUG][SMART_NEXT] samsung account candidate preserved between update_app and notifications index=$immediateCandidateIndex")
                 }
             } else {
+                val skipRecords = mutableListOf<String>()
+                val beforeSkipIndex = nextIndex
                 nextIndex = skipCoordinateDuplicateTraversalIndices(
                     nodes = traversalList,
                     currentBounds = currentBounds,
                     startIndex = nextIndex,
                     boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
                     onSkip = { skippedIndex, advancedIndex ->
+                        if (debugAroundDecision) {
+                            skipRecords += "idx=$skippedIndex(${summarizeTraversalCandidate(traversalList, skippedIndex, state)})"
+                        }
                         Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping invisible duplicate at index $skippedIndex")
                         Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping coordinate duplicate: jumping from $skippedIndex to $advancedIndex")
                     }
                 )
+                if (debugAroundDecision && skipRecords.isNotEmpty()) {
+                    Log.d(
+                        "A11Y_HELPER",
+                        "[DEBUG][DECIDE][SKIP] reason=coordinate_duplicate before=${summarizeTraversalCandidate(traversalList, beforeSkipIndex, state)} after=${summarizeTraversalCandidate(traversalList, nextIndex, state)}"
+                    )
+                    Log.d("A11Y_HELPER", "[DEBUG][DECIDE][SKIP] skipped_candidates=${skipRecords.joinToString(" | ")}")
+                }
             }
         }
         nextIndex = preventOneConnectNotificationsSameRowReselection(state, nextIndex)
+        if (debugAroundDecision) {
+            Log.d("A11Y_HELPER", "[DEBUG][DECIDE] final_next=${summarizeTraversalCandidate(traversalList, nextIndex, state)}")
+        }
 
         return InitialNextTargetDecision(
             nextIndex = nextIndex,
@@ -1033,6 +1063,11 @@ object A11yNavigator {
         if (nextIndex !in normalizedTraversal.indices) return nextIndex
         val currentNode = state.currentPosition.resolvedCurrent ?: normalizedTraversal.getOrNull(state.currentPosition.currentIndex)
             ?: return nextIndex
+        val debugEnabled = shouldEmitOneConnectSettingsDebugLogs(
+            current = currentNode,
+            next = normalizedTraversal.getOrNull(nextIndex),
+            contextNodes = normalizedTraversal
+        )
         val currentRowContainer = findOneConnectNotificationsRowContainer(currentNode) ?: return nextIndex
         val representativeIndex = normalizedTraversal.indexOfFirst { candidate ->
             val candidateRow = findOneConnectNotificationsRowContainer(candidate) ?: return@indexOfFirst false
@@ -1043,7 +1078,23 @@ object A11yNavigator {
         val representativeVisited = isNodeVisitedBySignature(representativeNode, state.visitedHistorySignatures)
         val nextCandidate = normalizedTraversal[nextIndex]
         val nextCandidateRow = findOneConnectNotificationsRowContainer(nextCandidate)
-        if (nextCandidateRow == null || !isSameNode(nextCandidateRow, currentRowContainer)) return nextIndex
+        val sameRow = nextCandidateRow != null && isSameNode(nextCandidateRow, currentRowContainer)
+        if (debugEnabled) {
+            Log.d(
+                "A11Y_HELPER",
+                "[DEBUG][NOTI] enter current=${summarizeTraversalCandidate(normalizedTraversal, state.currentPosition.currentIndex, state)} next=${summarizeTraversalCandidate(normalizedTraversal, nextIndex, state)} rep=${summarizeTraversalCandidate(normalizedTraversal, representativeIndex, state)}"
+            )
+            Log.d(
+                "A11Y_HELPER",
+                "[DEBUG][NOTI] repVisited=$representativeVisited sameRow=$sameRow nextIndex=$nextIndex representativeIndex=$representativeIndex"
+            )
+        }
+        if (!sameRow) {
+            if (debugEnabled) {
+                Log.d("A11Y_HELPER", "[DEBUG][NOTI] prevented=false reason=next_candidate_not_same_row")
+            }
+            return nextIndex
+        }
         Log.d(
             "A11Y_HELPER",
             "[DEBUG][SMART_NEXT] notifications same-row reselection prevented index=$nextIndex representativeIndex=$representativeIndex representativeVisited=$representativeVisited"
@@ -1061,7 +1112,16 @@ object A11yNavigator {
                 "A11Y_HELPER",
                 "[DEBUG][SMART_NEXT] notifications advanced to next external candidate index=$index"
             )
+            if (debugEnabled) {
+                Log.d(
+                    "A11Y_HELPER",
+                    "[DEBUG][NOTI] prevented=true replacement=${summarizeTraversalCandidate(normalizedTraversal, index, state)}"
+                )
+            }
             return index
+        }
+        if (debugEnabled) {
+            Log.d("A11Y_HELPER", "[DEBUG][NOTI] prevented=false reason=no_external_candidate")
         }
         return nextIndex
     }
@@ -1353,6 +1413,12 @@ object A11yNavigator {
             "A11Y_HELPER",
             "[SMART_NEXT] visitedHistory add: reason=$reason label=${normalizedLabel.replace("\n", " ")} viewId=${node.viewIdResourceName} identity=$nodeIdentity bounds=$bounds"
         )
+        if (shouldEmitOneConnectSettingsDebugLogs(current = node)) {
+            Log.d(
+                "A11Y_HELPER",
+                "[DEBUG][VISITED][NOTI] representative=${summarizeNodeCompact(node)} signature=viewId=${node.viewIdResourceName} bounds=${formatBoundsForLog(bounds)} identity=$nodeIdentity"
+            )
+        }
     }
 
     internal fun recordVisitedAliasMembers(
@@ -1425,6 +1491,99 @@ object A11yNavigator {
             "A11Y_HELPER",
             "[SMART_NEXT] visitedHistory alias_group add: reason=$reason representative=${normalizedRepresentativeLabel.replace("\n", " ")} identity=$representativeIdentity aliases=${recordedKeys.size}"
         )
+        if (shouldEmitOneConnectSettingsDebugLogs(current = representativeNode)) {
+            val memberKinds = mergedAliasMembers.mapNotNull { member ->
+                when (member.viewIdResourceName) {
+                    ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID -> "title"
+                    ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID -> "switch"
+                    else -> if (isSameNode(member, representativeNode)) "row" else null
+                }
+            }.distinct()
+            Log.d(
+                "A11Y_HELPER",
+                "[DEBUG][VISITED][NOTI] representative=${summarizeNodeCompact(representativeNode)} members=${memberKinds.ifEmpty { listOf("row") }} signature=viewId=${representativeNode.viewIdResourceName} identity=$representativeIdentity"
+            )
+        }
+    }
+
+    private fun shouldEmitOneConnectSettingsDebugLogs(
+        current: AccessibilityNodeInfo? = null,
+        next: AccessibilityNodeInfo? = null,
+        fallback: AccessibilityNodeInfo? = null,
+        contextNodes: List<AccessibilityNodeInfo> = emptyList()
+    ): Boolean {
+        val scopedNodes = buildList {
+            current?.let(::add)
+            next?.let(::add)
+            fallback?.let(::add)
+            if (contextNodes.isNotEmpty()) {
+                add(contextNodes.first())
+                add(contextNodes.last())
+            }
+        }
+        if (scopedNodes.none { it.packageName?.toString()?.trim() == ONECONNECT_PACKAGE_NAME }) return false
+        return scopedNodes.any(::isOneConnectSettingsDebugTargetNode) ||
+            contextNodes.any(::isOneConnectSettingsDebugTargetNode)
+    }
+
+    private fun isOneConnectSettingsDebugTargetNode(node: AccessibilityNodeInfo): Boolean {
+        if (node.packageName?.toString()?.trim() != ONECONNECT_PACKAGE_NAME) return false
+        val viewId = node.viewIdResourceName
+        if (viewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID ||
+            viewId == ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID ||
+            viewId == ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID
+        ) return true
+        if (viewId == ANDROID_TITLE_VIEW_ID) {
+            val label = (resolvePrimaryLabel(node) ?: A11yTraversalAnalyzer.recoverDescendantLabel(node)).orEmpty().lowercase()
+            if (label.contains("samsung account") || label.contains("notifications")) return true
+        }
+        val label = (resolvePrimaryLabel(node) ?: A11yTraversalAnalyzer.recoverDescendantLabel(node)).orEmpty().lowercase()
+        return label.contains("update app") || label.contains("samsung account") || label.contains("notifications")
+    }
+
+    private fun summarizeTraversalCandidate(
+        traversal: List<AccessibilityNodeInfo>,
+        index: Int,
+        state: SmartNextRuntimeState
+    ): String {
+        if (index !in traversal.indices) return "idx=$index(out_of_bounds)"
+        val node = traversal[index]
+        val label = state.focusNodeByNode[node]?.mergedLabel?.trim().takeUnless { it.isNullOrEmpty() }
+            ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+            ?: node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+            ?: A11yTraversalAnalyzer.recoverDescendantLabel(node)
+            ?: "<no-label>"
+        val bounds = Rect().also { node.getBoundsInScreen(it) }
+        val representative = state.normalize.aliasMembersByRepresentativeIndex[index]?.any { member -> isSameNode(member, node) } == true
+        return "idx=$index id=${node.viewIdResourceName} class=${node.className} bounds=${formatBoundsForLog(bounds)} label=${label.replace("\n", " ")} clickable=${node.isClickable} focusable=${node.isFocusable} representative=$representative source=normalize"
+    }
+
+    private fun summarizeNodeCompact(node: AccessibilityNodeInfo): String {
+        val bounds = Rect().also { node.getBoundsInScreen(it) }
+        val label = resolvePrimaryLabel(node) ?: A11yTraversalAnalyzer.recoverDescendantLabel(node) ?: "<no-label>"
+        return "id=${node.viewIdResourceName} bounds=${formatBoundsForLog(bounds)} label=${label.replace("\n", " ")}"
+    }
+
+    private fun dumpDecisionWindow(state: SmartNextRuntimeState, centerIndex: Int, source: String, radius: Int = 4) {
+        val traversal = state.normalize.traversalList
+        if (traversal.isEmpty()) return
+        val safeCenter = centerIndex.coerceIn(0, traversal.lastIndex)
+        val start = (safeCenter - radius).coerceAtLeast(0)
+        val end = (safeCenter + radius).coerceAtMost(traversal.lastIndex)
+        for (index in start..end) {
+            val node = traversal[index]
+            if (!isOneConnectSettingsDebugTargetNode(node) && index != safeCenter) continue
+            val bounds = Rect().also { node.getBoundsInScreen(it) }
+            val label = state.focusNodeByNode[node]?.mergedLabel?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: resolvePrimaryLabel(node)
+                ?: A11yTraversalAnalyzer.recoverDescendantLabel(node)
+                ?: "<no-label>"
+            val representative = state.normalize.aliasMembersByRepresentativeIndex[index]?.any { member -> isSameNode(member, node) } == true
+            Log.d(
+                "A11Y_HELPER",
+                "[DEBUG][DECIDE][WINDOW] idx=$index id=${node.viewIdResourceName} top=${bounds.top} left=${bounds.left} label=${label.replace("\n", " ")} representative=$representative source=$source"
+            )
+        }
     }
 
     internal fun resolveFocusRetargetDecision(
