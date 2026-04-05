@@ -635,13 +635,26 @@ class TouchIsinTest(unittest.TestCase):
         with patch.object(client, "check_helper_status", return_value=False):
             result = client.check_talkback_ready("SER")
 
-        self.assertEqual(result, {"status": "enabled_but_not_ready", "reason": "helper_not_ready"})
+        self.assertEqual(result, {"status": "enabled_but_not_ready", "reason": "talkback_not_ready"})
+
+    def test_check_talkback_ready_returns_enabled_but_not_ready_when_focus_sanity_fails(self):
+        client = FakeA11yClient()
+        client.enabled_services_payload = "foo:com.google.android.marvin.talkback/.TalkBackService"
+
+        with patch.object(client, "check_helper_status", return_value=True), patch.object(client, "get_focus", return_value={}):
+            result = client.check_talkback_ready("SER")
+
+        self.assertEqual(result, {"status": "enabled_but_not_ready", "reason": "false_positive_enabled"})
 
     def test_check_talkback_ready_returns_enabled_when_talkback_and_helper_ready(self):
         client = FakeA11yClient()
         client.enabled_services_payload = "foo:com.samsung.android.accessibility.talkback/.TalkBackService"
 
-        with patch.object(client, "check_helper_status", return_value=True):
+        with patch.object(client, "check_helper_status", return_value=True), patch.object(
+            client,
+            "get_focus",
+            return_value={"text": "Wi-Fi", "boundsInScreen": {"l": 0, "t": 0, "r": 10, "b": 10}},
+        ):
             result = client.check_talkback_ready("SER")
 
         self.assertEqual(result, {"status": "enabled", "reason": "ok"})

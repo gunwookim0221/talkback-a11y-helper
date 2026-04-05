@@ -15,6 +15,7 @@
   - [check_helper_status](#check_helper_status)
   - [ping](#ping)
   - [clear_logcat](#clear_logcat)
+  - [check_talkback_ready](#check_talkback_ready)
   - [check_talkback_status](#check_talkback_status)
   - [dump_tree](#dump_tree)
   - [isin](#isin)
@@ -137,6 +138,40 @@ print("helper ready:", ready)
 ### Example
 ```python
 client.clear_logcat(dev_serial)
+```
+
+---
+
+## check_talkback_ready
+
+### Signature
+`check_talkback_ready(dev: Any = None) -> dict[str, str]`
+
+### 설명
+2단계 preflight를 수행해 TalkBack이 **설정상 활성화(configured/bound)** 되어 있는지와
+**실제 자동화에서 응답 가능한지(actually usable)** 를 구분합니다.
+
+1) `settings secure accessibility_enabled` + `enabled_accessibility_services`로 TalkBack service 존재 확인  
+2) helper 준비 상태 확인 후 `get_focus(..., allow_fallback_dump=False, mode="fast")` sanity check 수행
+
+### Parameters
+
+| 이름 | 타입 | 기본값 | 설명 |
+|---|---|---|---|
+| `dev` | `Any` | `None` | 대상 디바이스 |
+
+### Returns
+- `dict[str, str]`
+  - `{"status": "disabled", "reason": "talkback_off"}`
+  - `{"status": "enabled_but_not_ready", "reason": "talkback_not_ready"}`
+  - `{"status": "enabled_but_not_ready", "reason": "false_positive_enabled"}`
+  - `{"status": "enabled", "reason": "ok"}`
+
+### Example
+```python
+preflight = client.check_talkback_ready(dev_serial)
+if preflight["status"] != "enabled":
+    print("run 중단:", preflight)
 ```
 
 ---

@@ -36,7 +36,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.35"
+CLIENT_ALGORITHM_VERSION = "1.7.36"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -150,7 +150,15 @@ class A11yAdbClient:
         if not self.is_talkback_enabled(dev=dev):
             return {"status": "disabled", "reason": "talkback_off"}
         if not self.check_helper_status(dev=dev):
-            return {"status": "enabled_but_not_ready", "reason": "helper_not_ready"}
+            return {"status": "enabled_but_not_ready", "reason": "talkback_not_ready"}
+        focus_node = self.get_focus(
+            dev=dev,
+            wait_seconds=1.2,
+            allow_fallback_dump=False,
+            mode="fast",
+        )
+        if not self._is_meaningful_focus_node(focus_node):
+            return {"status": "enabled_but_not_ready", "reason": "false_positive_enabled"}
         return {"status": "enabled", "reason": "ok"}
 
     def _run(self, args: list[str], dev: Any = None, timeout: float = 30.0) -> str:
