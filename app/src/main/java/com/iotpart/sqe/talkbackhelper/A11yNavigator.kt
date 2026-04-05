@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.70.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.70.1"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
     private const val ONECONNECT_UPDATE_APP_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_title"
@@ -22,6 +22,7 @@ object A11yNavigator {
     private const val ONECONNECT_UPDATE_BUTTON_VIEW_ID = "com.samsung.android.oneconnect:id/update_button"
     private const val ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/noti_title"
     private const val ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID = "com.samsung.android.oneconnect:id/notification_item_switch"
+    private const val ONECONNECT_PREF_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/pref_title"
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
     private const val MIN_ONECONNECT_SETTINGS_ROW_HEIGHT_PX = 80
     private const val ANDROID_TITLE_VIEW_ID = "android:id/title"
@@ -1151,9 +1152,17 @@ object A11yNavigator {
             maxDepth = MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE
         ) { child ->
             child.viewIdResourceName == ANDROID_TITLE_VIEW_ID ||
+                isOneConnectPrefTitleNode(child) ||
                 (!child.text.isNullOrBlank() && !A11yNodeUtils.isContainerLikeClassName(child.className?.toString()))
         } ?: return false
-        val hasSettingsTitle = titleNode.viewIdResourceName == ANDROID_TITLE_VIEW_ID
+        val hasSettingsTitle = titleNode.viewIdResourceName == ANDROID_TITLE_VIEW_ID ||
+            isOneConnectPrefTitleNode(titleNode)
+        if (titleNode.viewIdResourceName == ONECONNECT_PREF_TITLE_VIEW_ID) {
+            Log.d(
+                "A11Y_HELPER",
+                "[DEBUG][ROW_GROUP] title accepted resource=pref_title row=${node.viewIdResourceName}"
+            )
+        }
         val hasSettingsRowViewId = isSettingsRowViewId(node.viewIdResourceName)
         if (!hasSettingsTitle && !hasSettingsRowViewId) return false
         val titleDepth = ancestorDistance(ancestor = node, descendant = titleNode)
@@ -1186,6 +1195,12 @@ object A11yNavigator {
             return false
         }
         return true
+    }
+
+    private fun isOneConnectPrefTitleNode(node: AccessibilityNodeInfo): Boolean {
+        val packageName = node.packageName?.toString()?.trim().orEmpty()
+        return packageName == ONECONNECT_PACKAGE_NAME &&
+            node.viewIdResourceName == ONECONNECT_PREF_TITLE_VIEW_ID
     }
 
     private fun findOneConnectNotificationsRowContainer(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
@@ -1324,9 +1339,15 @@ object A11yNavigator {
         val nextCandidate = normalizedTraversal[nextIndex]
         val nextCandidateRow = findOneConnectSettingsRowContainer(nextCandidate) ?: return nextIndex
         if (!isSameNode(nextCandidateRow, currentRowContainer)) return nextIndex
+        if (nextCandidate.viewIdResourceName == ONECONNECT_PREF_TITLE_VIEW_ID) {
+            Log.d(
+                "A11Y_HELPER",
+                "[DEBUG][ROW_GROUP] representative already consumed for pref_title row"
+            )
+        }
         Log.d(
             "A11Y_HELPER",
-            "[DEBUG][ROW_GROUP] skip same-row=${nextCandidate.viewIdResourceName}"
+            "[DEBUG][ROW_GROUP] skip same-row candidate resource=${nextCandidate.viewIdResourceName}"
         )
         for (index in (nextIndex + 1) until normalizedTraversal.size) {
             val candidate = normalizedTraversal[index]
@@ -1334,7 +1355,7 @@ object A11yNavigator {
             if (candidateRow != null && isSameNode(candidateRow, currentRowContainer)) {
                 Log.d(
                     "A11Y_HELPER",
-                    "[DEBUG][ROW_GROUP] skip same-row=${candidate.viewIdResourceName}"
+                    "[DEBUG][ROW_GROUP] skip same-row candidate resource=${candidate.viewIdResourceName}"
                 )
                 continue
             }
