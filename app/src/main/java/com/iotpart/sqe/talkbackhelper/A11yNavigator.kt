@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.7"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.8"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
     private const val ONECONNECT_UPDATE_APP_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_title"
@@ -180,6 +180,13 @@ object A11yNavigator {
             normalizedNodes += representative
             aliasMembersByIndex[groupIndex] = group.map { it.node }
             val groupViewIds = group.mapNotNull { it.node.viewIdResourceName }
+            val hasNotificationsRowGroup = group.any { findOneConnectNotificationsRowContainer(it.node) != null }
+            if (hasNotificationsRowGroup) {
+                Log.d(
+                    "A11Y_HELPER",
+                    "[DEBUG][NORMALIZE] notifications settings row group formed representative=${representative.node.viewIdResourceName} members=${groupViewIds.joinToString()}"
+                )
+            }
             val hasNotificationsTitle = groupViewIds.contains(ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID)
             val hasNotificationsSwitch = groupViewIds.contains(ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID)
             if (hasNotificationsTitle && hasNotificationsSwitch) {
@@ -761,6 +768,7 @@ object A11yNavigator {
                 )
             }
         }
+        nextIndex = preventOneConnectNotificationsSameRowReselection(state, nextIndex)
 
         return InitialNextTargetDecision(
             nextIndex = nextIndex,
@@ -893,7 +901,6 @@ object A11yNavigator {
     }
 
     private fun selectOneConnectNotificationsRepresentative(group: List<FocusedNode>): FocusedNode? {
-        if (group.none { isOneConnectNotificationsMemberViewId(it.node.viewIdResourceName) }) return null
         val rowNode = group.mapNotNull { findOneConnectNotificationsRowContainer(it.node) }
             .firstOrNull()
             ?: return null
@@ -914,12 +921,24 @@ object A11yNavigator {
             }
             return rowCandidate
         }
-        return null
-    }
-
-    private fun isOneConnectNotificationsMemberViewId(viewId: String?): Boolean {
-        return viewId == ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID ||
-            viewId == ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID
+        Log.d(
+            "A11Y_HELPER",
+            "[DEBUG][NORMALIZE] notifications representative chosen as row container via promoted child"
+        )
+        val metadata = A11yTraversalAnalyzer.collectActionableDescendantMetadata(rowNode)
+        val rowLabel = resolvePrimaryLabel(rowNode) ?: A11yTraversalAnalyzer.recoverDescendantLabel(rowNode)
+        return FocusedNode(
+            node = rowNode,
+            text = rowLabel,
+            contentDescription = rowNode.contentDescription?.toString(),
+            mergedLabel = rowLabel,
+            hasClickableDescendant = metadata.hasClickableDescendant,
+            hasFocusableDescendant = metadata.hasFocusableDescendant,
+            effectiveClickable = rowNode.isClickable,
+            actionableDescendantResourceId = metadata.actionableDescendantResourceId,
+            actionableDescendantClassName = metadata.actionableDescendantClassName,
+            actionableDescendantContentDescription = metadata.actionableDescendantContentDescription
+        )
     }
 
     private fun findOneConnectNotificationsRowContainer(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
@@ -958,6 +977,63 @@ object A11yNavigator {
             }
         }
         return null
+    }
+
+    private fun preventOneConnectNotificationsSameRowReselection(
+        state: SmartNextRuntimeState,
+        nextIndex: Int
+    ): Int {
+        val normalizedTraversal = state.normalize.traversalList
+        if (nextIndex !in normalizedTraversal.indices) return nextIndex
+        val currentNode = state.currentPosition.resolvedCurrent ?: normalizedTraversal.getOrNull(state.currentPosition.currentIndex)
+            ?: return nextIndex
+        val currentRowContainer = findOneConnectNotificationsRowContainer(currentNode) ?: return nextIndex
+        val representativeIndex = normalizedTraversal.indexOfFirst { candidate ->
+            val candidateRow = findOneConnectNotificationsRowContainer(candidate) ?: return@indexOfFirst false
+            isSameNode(candidateRow, currentRowContainer)
+        }
+        if (representativeIndex !in normalizedTraversal.indices) return nextIndex
+        val representativeNode = normalizedTraversal[representativeIndex]
+        if (!isNodeVisitedBySignature(representativeNode, state.visitedHistorySignatures)) return nextIndex
+        val nextCandidate = normalizedTraversal[nextIndex]
+        val nextCandidateRow = findOneConnectNotificationsRowContainer(nextCandidate)
+        if (nextCandidateRow == null || !isSameNode(nextCandidateRow, currentRowContainer)) return nextIndex
+        Log.d(
+            "A11Y_HELPER",
+            "[DEBUG][SMART_NEXT] notifications same-row reselection prevented index=$nextIndex representativeIndex=$representativeIndex"
+        )
+        for (index in (nextIndex + 1) until normalizedTraversal.size) {
+            val candidateRow = findOneConnectNotificationsRowContainer(normalizedTraversal[index])
+            if (candidateRow != null && isSameNode(candidateRow, currentRowContainer)) {
+                Log.d(
+                    "A11Y_HELPER",
+                    "[DEBUG][SMART_NEXT] notifications group skipped because representative already consumed"
+                )
+                continue
+            }
+            Log.d(
+                "A11Y_HELPER",
+                "[DEBUG][SMART_NEXT] notifications advanced to next external candidate index=$index"
+            )
+            return index
+        }
+        return nextIndex
+    }
+
+    private fun isNodeVisitedBySignature(
+        node: AccessibilityNodeInfo,
+        visitedSignatures: Set<VisibleHistorySignature>
+    ): Boolean {
+        if (visitedSignatures.isEmpty()) return false
+        val bounds = Rect().also(node::getBoundsInScreen)
+        val viewId = node.viewIdResourceName
+        val identity = buildNodeIdentityForHistory(node)
+        return visitedSignatures.any { signature ->
+            val sameBounds = signature.bounds == bounds
+            val sameViewId = !viewId.isNullOrBlank() && viewId == signature.viewId
+            val sameIdentity = !identity.isNullOrBlank() && identity == signature.nodeIdentity
+            sameBounds && (sameViewId || sameIdentity)
+        }
     }
 
     private fun clearFocus(node: AccessibilityNodeInfo): Boolean {
