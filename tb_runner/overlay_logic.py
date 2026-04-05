@@ -19,7 +19,7 @@ from tb_runner.excel_report import save_excel
 from tb_runner.image_utils import maybe_capture_focus_crop
 from tb_runner.logging_utils import log
 from tb_runner.perf_stats import ScenarioPerfStats, save_excel_with_perf
-from tb_runner.utils import make_main_fingerprint
+from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 
 def _get_positive_int(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
     value = tab_cfg.get(key, fallback)
@@ -427,6 +427,54 @@ def expand_overlay(
         overlay_row["status"] = "OK"
         overlay_row["stop_reason"] = ""
         overlay_row["crop_image"] = "IMAGE"
+
+        previous_overlay_fingerprint = build_row_fingerprint(overlay_previous_row or {})
+        current_overlay_fingerprint = build_row_fingerprint(overlay_row)
+        previous_focus_fingerprint = make_main_fingerprint(overlay_previous_row or {})
+        current_focus_fingerprint = make_main_fingerprint(overlay_row)
+        same_overlay_fingerprint = bool(overlay_previous_row) and bool(current_overlay_fingerprint) and (
+            current_overlay_fingerprint == previous_overlay_fingerprint
+        )
+        same_focus_triplet = bool(overlay_previous_row) and all(current_focus_fingerprint) and (
+            current_focus_fingerprint == previous_focus_fingerprint
+        )
+        previous_visible = str((overlay_previous_row or {}).get("visible_label", "") or "").strip().lower()
+        current_visible = str(overlay_row.get("visible_label", "") or "").strip().lower()
+        previous_announcement = str((overlay_previous_row or {}).get("merged_announcement", "") or "").strip().lower()
+        current_announcement = str(overlay_row.get("merged_announcement", "") or "").strip().lower()
+        repeated_label_or_announcement = bool(overlay_previous_row) and (
+            (previous_visible and previous_visible == current_visible)
+            or (previous_announcement and previous_announcement == current_announcement)
+        )
+        same_focus_detected = same_focus_triplet or repeated_label_or_announcement
+        move_result = str(overlay_row.get("move_result", "") or "").strip().lower()
+        move_failed_without_focus_change = move_result in {"failed", "no_progress"} and (
+            same_focus_triplet or same_overlay_fingerprint
+        )
+
+        if same_focus_detected:
+            log(
+                f"[OVERLAY][repeat] same_focus_detected=true step={overlay_step_idx} "
+                f"view_id='{overlay_row.get('focus_view_id', '')}' bounds='{overlay_row.get('focus_bounds', '')}' "
+                f"normalized_visible_label='{overlay_row.get('normalized_visible_label', '')}' move_result='{move_result}'"
+            )
+
+        forced_overlay_break_reason = ""
+        if move_failed_without_focus_change:
+            forced_overlay_break_reason = "move_failed_without_focus_change"
+        elif same_overlay_fingerprint:
+            forced_overlay_break_reason = "same_overlay_fingerprint"
+        elif same_focus_detected:
+            forced_overlay_break_reason = "same_overlay_focus"
+
+        if forced_overlay_break_reason:
+            log(f"[OVERLAY][break] reason='{forced_overlay_break_reason}' step={overlay_step_idx}")
+            if overlay_previous_row:
+                overlay_previous_row["status"] = "END"
+                overlay_previous_row["stop_reason"] = forced_overlay_break_reason
+            save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
+            break
+
         overlay_row["_step_mono_start"] = time.monotonic() - float(overlay_row.get("t_step_start", 0.0) or 0.0)
         overlay_row = maybe_capture_focus_crop(client, dev, overlay_row, output_base_dir)
         overlay_row.pop("_step_mono_start", None)
