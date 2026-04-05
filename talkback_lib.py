@@ -36,7 +36,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.37"
+CLIENT_ALGORITHM_VERSION = "1.7.38"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -183,8 +183,7 @@ class A11yAdbClient:
             f"meaningful={sanity_meaningful_focus}"
         )
         if not (sanity_get_focus_success and sanity_meaningful_focus):
-            print("[PREFLIGHT] final_status=enabled_but_not_ready final_reason=false_positive_enabled")
-            return {"status": "enabled_but_not_ready", "reason": "false_positive_enabled"}
+            print("[PREFLIGHT] sanity failed but proceeding reason='no_initial_focus'")
         print("[PREFLIGHT] final_status=enabled final_reason=ok")
         return {"status": "enabled", "reason": "ok"}
 
