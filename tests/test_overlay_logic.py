@@ -16,6 +16,22 @@ class _Client:
         return self.post_step
 
 
+class _OverlayClient:
+    def __init__(self, steps):
+        self.steps = list(steps)
+        self._index = 0
+
+    def collect_focus_step(self, **kwargs):
+        if self._index < len(self.steps):
+            step = self.steps[self._index]
+            self._index += 1
+            return step.copy()
+        return self.steps[-1].copy()
+
+    def press_back_and_recover_focus(self, **kwargs):
+        return {"status": "ok"}
+
+
 def _step(step_index=1, label="add", view_id="id.add", bounds="0,0,10,10", nodes=None):
     return {
         "step_index": step_index,
@@ -150,3 +166,70 @@ def test_realign_focus_after_overlay_entry_not_found(monkeypatch):
     )
 
     assert result["status"] == "realign_entry_not_found"
+
+
+def test_expand_overlay_breaks_on_same_overlay_fingerprint(monkeypatch):
+    first = _step(
+        step_index=1,
+        label="Add device",
+        view_id="com.samsung.android.oneconnect:id/title",
+        bounds="582,356,824,422",
+    )
+    second = first.copy()
+    second["step_index"] = 2
+    second["move_result"] = "ok"
+
+    client = _OverlayClient([first, second])
+    tab_cfg = {"tab_name": "Home"}
+    entry_step = _step(step_index=3, label="Add", view_id="com.samsung.android.oneconnect:id/add_menu_button")
+    rows: list[dict[str, str]] = []
+    all_rows: list[dict[str, str]] = []
+
+    monkeypatch.setattr(overlay_logic, "maybe_capture_focus_crop", lambda *_args, **_kwargs: _args[2])
+    monkeypatch.setattr(overlay_logic, "save_excel_with_perf", lambda *args, **kwargs: None)
+    monkeypatch.setattr(overlay_logic, "OVERLAY_MAX_STEPS", 5)
+
+    overlay_rows = overlay_logic.expand_overlay(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        entry_step=entry_step,
+        rows=rows,
+        all_rows=all_rows,
+        output_path="out.xlsx",
+        output_base_dir="output",
+        skip_entry_click=True,
+    )
+
+    assert len(overlay_rows) == 1
+    assert overlay_rows[0]["stop_reason"] == "same_overlay_fingerprint"
+
+
+def test_expand_overlay_keeps_collecting_when_focus_changes(monkeypatch):
+    first = _step(step_index=1, label="Add device", view_id="id/title", bounds="10,10,40,40")
+    second = _step(step_index=2, label="Kitchen", view_id="id/item", bounds="10,50,40,80")
+
+    client = _OverlayClient([first, second])
+    tab_cfg = {"tab_name": "Home"}
+    entry_step = _step(step_index=3, label="Add", view_id="id/add")
+    rows: list[dict[str, str]] = []
+    all_rows: list[dict[str, str]] = []
+
+    monkeypatch.setattr(overlay_logic, "maybe_capture_focus_crop", lambda *_args, **_kwargs: _args[2])
+    monkeypatch.setattr(overlay_logic, "save_excel_with_perf", lambda *args, **kwargs: None)
+    monkeypatch.setattr(overlay_logic, "OVERLAY_MAX_STEPS", 2)
+
+    overlay_rows = overlay_logic.expand_overlay(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        entry_step=entry_step,
+        rows=rows,
+        all_rows=all_rows,
+        output_path="out.xlsx",
+        output_base_dir="output",
+        skip_entry_click=True,
+    )
+
+    assert len(overlay_rows) == 2
+    assert overlay_rows[0]["focus_view_id"] != overlay_rows[1]["focus_view_id"]
