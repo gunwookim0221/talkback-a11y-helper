@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.69.2"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.69.3"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
     private const val ONECONNECT_UPDATE_APP_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_title"
@@ -1134,12 +1134,13 @@ object A11yNavigator {
         }
         var secondCurrent: AccessibilityNodeInfo? = second
         while (secondCurrent != null) {
-            val matched = firstAncestors.firstOrNull { candidate -> isSameNode(candidate, secondCurrent) }
+            val secondCurrentNode = secondCurrent
+            val matched = firstAncestors.firstOrNull { candidate -> isSameNode(candidate, secondCurrentNode) }
             if (matched != null && (matched.isClickable || matched.isFocusable)) {
                 return matched
             }
-            if (isSameNode(secondCurrent, boundary)) break
-            secondCurrent = secondCurrent.parent
+            if (isSameNode(secondCurrentNode, boundary)) break
+            secondCurrent = secondCurrentNode.parent
         }
         return null
     }
