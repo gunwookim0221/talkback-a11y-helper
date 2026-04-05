@@ -7,10 +7,13 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.10.5"
+    const val VERSION: String = "1.10.6"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
     private const val ONECONNECT_UPDATE_APP_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_title"
+    private const val ONECONNECT_UPDATE_APP_TEXT_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_text"
+    private const val ONECONNECT_UPDATE_APP_CLOSE_BUTTON_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card_close_btn"
+    private const val ONECONNECT_UPDATE_BUTTON_VIEW_ID = "com.samsung.android.oneconnect:id/update_button"
 
     data class CandidateSelectionResult(
         val index: Int,
@@ -474,7 +477,7 @@ object A11yTraversalAnalyzer {
             secondaryBounds = secondaryBounds
         )
         if (oneConnectUpdateAppPair) {
-            Log.d("A11Y_HELPER", "[DEBUG][NORMALIZE] update_app alias group formed via strict card-title pairing")
+            Log.d("A11Y_HELPER", "[DEBUG][NORMALIZE] update_app alias group member linked to card via strict viewId+bounds+ancestor")
             return true
         }
         if (!hasStrongOverlapOrContainment(primaryBounds, secondaryBounds)) return false
@@ -530,27 +533,36 @@ object A11yTraversalAnalyzer {
         if (primaryPackage != ONECONNECT_PACKAGE_NAME || secondaryPackage != ONECONNECT_PACKAGE_NAME) return false
         val primaryViewId = primaryNode.viewIdResourceName?.trim().orEmpty()
         val secondaryViewId = secondaryNode.viewIdResourceName?.trim().orEmpty()
-        val hasUpdateAppCardAndTitle = (
-            primaryViewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID &&
-                secondaryViewId == ONECONNECT_UPDATE_APP_TITLE_VIEW_ID
-            ) || (
-            primaryViewId == ONECONNECT_UPDATE_APP_TITLE_VIEW_ID &&
-                secondaryViewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID
-            )
-        if (!hasUpdateAppCardAndTitle) return false
+        val updateAppMemberViewIds = setOf(
+            ONECONNECT_UPDATE_APP_TITLE_VIEW_ID,
+            ONECONNECT_UPDATE_APP_TEXT_VIEW_ID,
+            ONECONNECT_UPDATE_APP_CLOSE_BUTTON_VIEW_ID,
+            ONECONNECT_UPDATE_BUTTON_VIEW_ID
+        )
+        val cardAndMember = when {
+            primaryViewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID && secondaryViewId in updateAppMemberViewIds ->
+                Triple(primaryNode, secondaryNode, secondaryViewId)
+            secondaryViewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID && primaryViewId in updateAppMemberViewIds ->
+                Triple(secondaryNode, primaryNode, primaryViewId)
+            else -> null
+        } ?: return false
+        val cardNode = cardAndMember.first
+        val memberNode = cardAndMember.second
+        val memberViewId = cardAndMember.third
+        val cardBounds = if (cardNode === primaryNode) primaryBounds else secondaryBounds
+        val memberBounds = if (memberNode === primaryNode) primaryBounds else secondaryBounds
         val inAncestorChain = isAncestorOf(
-            ancestor = primaryNode,
-            descendant = secondaryNode,
-            parentOf = { node -> node.parent }
-        ) || isAncestorOf(
-            ancestor = secondaryNode,
-            descendant = primaryNode,
+            ancestor = cardNode,
+            descendant = memberNode,
             parentOf = { node -> node.parent }
         )
         if (!inAncestorChain) return false
-        return primaryBounds.contains(secondaryBounds) ||
-            secondaryBounds.contains(primaryBounds) ||
-            hasStrongOverlapOrContainment(primaryBounds, secondaryBounds)
+        if (!cardBounds.contains(memberBounds)) return false
+        Log.d(
+            "A11Y_HELPER",
+            "[DEBUG][NORMALIZE] update_app group member linked: ${memberViewId.substringAfterLast('/')} -> update_app_card"
+        )
+        return true
     }
 
     private fun canTreatAsActionControlWrapperDuplicate(

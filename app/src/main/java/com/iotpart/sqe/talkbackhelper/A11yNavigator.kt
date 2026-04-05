@@ -13,9 +13,13 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.5"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.6"
+    private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
     private const val ONECONNECT_UPDATE_APP_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_title"
+    private const val ONECONNECT_UPDATE_APP_TEXT_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_text"
+    private const val ONECONNECT_UPDATE_APP_CLOSE_BUTTON_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card_close_btn"
+    private const val ONECONNECT_UPDATE_BUTTON_VIEW_ID = "com.samsung.android.oneconnect:id/update_button"
 
 
     @Volatile
@@ -170,9 +174,9 @@ object A11yNavigator {
             normalizedNodes += representative
             aliasMembersByIndex[groupIndex] = group.map { it.node }
             val groupViewIds = group.mapNotNull { it.node.viewIdResourceName }
-            val containsUpdateAppPair = groupViewIds.any { it.endsWith("/update_app_card") } &&
-                groupViewIds.any { it.endsWith("/update_app_title") }
-            if (containsUpdateAppPair) {
+            val hasUpdateAppCard = groupViewIds.contains(ONECONNECT_UPDATE_APP_CARD_VIEW_ID)
+            val hasUpdateAppMember = groupViewIds.any { isOneConnectUpdateAppMemberViewId(it) }
+            if (hasUpdateAppCard && hasUpdateAppMember) {
                 Log.i(
                     "A11Y_HELPER",
                     "[NORMALIZE][update_app_alias_group] representative=${representative.node.viewIdResourceName} members=${groupViewIds.joinToString()}"
@@ -804,13 +808,19 @@ object A11yNavigator {
     }
 
     private fun selectAliasGroupRepresentative(group: List<FocusedNode>): FocusedNode {
-        val containsUpdateAppCard = group.any { it.node.viewIdResourceName == ONECONNECT_UPDATE_APP_CARD_VIEW_ID }
-        val containsUpdateAppTitle = group.any { it.node.viewIdResourceName == ONECONNECT_UPDATE_APP_TITLE_VIEW_ID }
-        if (containsUpdateAppCard && containsUpdateAppTitle) {
+        val containsUpdateAppCard = group.any {
+            it.node.packageName?.toString()?.trim() == ONECONNECT_PACKAGE_NAME &&
+                it.node.viewIdResourceName == ONECONNECT_UPDATE_APP_CARD_VIEW_ID
+        }
+        val containsUpdateAppMember = group.any {
+            it.node.packageName?.toString()?.trim() == ONECONNECT_PACKAGE_NAME &&
+                isOneConnectUpdateAppMemberViewId(it.node.viewIdResourceName)
+        }
+        if (containsUpdateAppCard && containsUpdateAppMember) {
             group.firstOrNull { it.node.viewIdResourceName == ONECONNECT_UPDATE_APP_CARD_VIEW_ID }?.let { updateAppCard ->
                 Log.d(
                     "A11Y_HELPER",
-                    "[DEBUG][NORMALIZE] representative chosen as update_app_card for strict update_app alias group"
+                    "[DEBUG][NORMALIZE] update_app representative chosen: update_app_card"
                 )
                 return updateAppCard
             }
@@ -841,6 +851,13 @@ object A11yNavigator {
         }
         if (A11yTraversalAnalyzer.countClickableOrFocusableDescendants(node, limit = 2) == 0) score += 1
         return score
+    }
+
+    private fun isOneConnectUpdateAppMemberViewId(viewId: String?): Boolean {
+        return viewId == ONECONNECT_UPDATE_APP_TITLE_VIEW_ID ||
+            viewId == ONECONNECT_UPDATE_APP_TEXT_VIEW_ID ||
+            viewId == ONECONNECT_UPDATE_APP_CLOSE_BUTTON_VIEW_ID ||
+            viewId == ONECONNECT_UPDATE_BUTTON_VIEW_ID
     }
 
     private fun clearFocus(node: AccessibilityNodeInfo): Boolean {
