@@ -36,7 +36,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.34"
+CLIENT_ALGORITHM_VERSION = "1.7.35"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -125,6 +125,33 @@ class A11yAdbClient:
         serial = self._resolve_serial(dev)
         cache_hit, cache_result = self._get_cached_helper_status(serial=serial)
         return cache_hit and cache_result
+
+    def is_talkback_enabled(self, dev: Any = None) -> bool:
+        accessibility_enabled = self._run(
+            ["shell", "settings", "get", "secure", "accessibility_enabled"],
+            dev=dev,
+        ).strip()
+        if accessibility_enabled != "1":
+            return False
+
+        enabled_services = self._run(
+            ["shell", "settings", "get", "secure", "enabled_accessibility_services"],
+            dev=dev,
+        )
+        services_lower = enabled_services.lower()
+        talkback_service_tokens = (
+            "talkback",
+            "com.google.android.marvin.talkback",
+            "com.samsung.android.accessibility.talkback",
+        )
+        return any(token in services_lower for token in talkback_service_tokens)
+
+    def check_talkback_ready(self, dev: Any = None) -> dict[str, str]:
+        if not self.is_talkback_enabled(dev=dev):
+            return {"status": "disabled", "reason": "talkback_off"}
+        if not self.check_helper_status(dev=dev):
+            return {"status": "enabled_but_not_ready", "reason": "helper_not_ready"}
+        return {"status": "enabled", "reason": "ok"}
 
     def _run(self, args: list[str], dev: Any = None, timeout: float = 30.0) -> str:
         serial = self._resolve_serial(dev)

@@ -29,6 +29,18 @@ from tb_runner.utils import generate_output_path
 def main():
     log(f"[MAIN] script start (version={SCRIPT_VERSION}, log_level={LOG_LEVEL})")
     client = A11yAdbClient(dev_serial=DEV_SERIAL)
+    preflight = client.check_talkback_ready(dev=DEV_SERIAL)
+    talkback_status = preflight.get("status", "disabled")
+    log(f"[PREFLIGHT] talkback status='{talkback_status}'")
+    if talkback_status == "disabled":
+        log("[PREFLIGHT] abort run reason='talkback_off'")
+        log("TalkBack is OFF. Enable TalkBack and retry.")
+        return
+    if talkback_status == "enabled_but_not_ready":
+        log("[PREFLIGHT] abort run reason='talkback_not_ready'")
+        log("TalkBack is ON but not ready. Wait a moment and retry.")
+        return
+
     run_perf = RunPerfStats()
 
     all_rows: list[dict] = []
