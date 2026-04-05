@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.8"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.9"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
     private const val ONECONNECT_UPDATE_APP_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_title"
@@ -714,15 +714,57 @@ object A11yNavigator {
         )
         if (!outcome.success) {
             Log.i("A11Y_HELPER", "[EXECUTE] regular single-target failed -> stop sweep targetIndex=$targetIndex reason=${outcome.reason}")
+            val currentNode = context.resolvedCurrent
+                ?: context.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            val currentNotificationsRow = findOneConnectNotificationsRowContainer(currentNode)
+            if (currentNotificationsRow != null) {
+                val intendedNode = context.traversalList.getOrNull(targetIndex)
+                val intendedRow = findOneConnectNotificationsRowContainer(intendedNode)
+                val actualFocusedNode = context.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+                val actualFocusedRow = findOneConnectNotificationsRowContainer(actualFocusedNode)
+                val failedWithinSameNotificationsGroup = (intendedRow != null && isSameNode(intendedRow, currentNotificationsRow)) ||
+                    (actualFocusedRow != null && isSameNode(actualFocusedRow, currentNotificationsRow))
+                if (failedWithinSameNotificationsGroup) {
+                    val externalIndex = ((targetIndex + 1).coerceAtLeast(context.currentIndex + 1) until context.traversalList.size)
+                        .firstOrNull { candidateIndex ->
+                            val candidateRow = findOneConnectNotificationsRowContainer(context.traversalList[candidateIndex])
+                            candidateRow == null || !isSameNode(candidateRow, currentNotificationsRow)
+                        }
+                    if (externalIndex != null) {
+                        Log.d(
+                            "A11Y_HELPER",
+                            "[DEBUG][SMART_NEXT] notifications fallback advanced to next external candidate failedIndex=$targetIndex nextExternalIndex=$externalIndex"
+                        )
+                        return A11yPostScrollScanner.findAndFocusFirstContent(
+                            context = context.findAndFocusContext,
+                            request = FindAndFocusRequest(
+                                statusName = executionDecision.expectedStatus,
+                                isScrollAction = false,
+                                singleTargetOnly = true,
+                                excludeDesc = null,
+                                startIndex = externalIndex,
+                                visibleHistory = emptySet(),
+                                visibleHistorySignatures = emptySet(),
+                                allowLooping = false,
+                                preScrollAnchor = null
+                            )
+                        )
+                    }
+                }
+            }
         }
         return outcome
     }
 
     private fun decideInitialNextTarget(state: SmartNextRuntimeState): InitialNextTargetDecision {
-        val traversalList = state.collect.traversalList
+        val traversalList = state.normalize.traversalList
         val currentIndex = state.currentPosition.currentIndex
         val fallbackIndex = state.currentPosition.fallbackIndex
         var nextIndex = state.currentPosition.nextIndex
+        Log.d(
+            "A11Y_HELPER",
+            "[DEBUG][SMART_NEXT] decideInitialNextTarget using normalized traversal list size=${traversalList.size} currentIndex=$currentIndex nextIndex=$nextIndex"
+        )
 
         if (currentIndex == -1) {
             val initialHeroIndex = findInitialHeroSummaryCandidateIndex(traversalList)
@@ -755,6 +797,10 @@ object A11yNavigator {
             val immediateCandidateIndex = currentIndex + 1
             if (nextIndex == immediateCandidateIndex) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Preserving immediate candidate at index=$nextIndex without duplicate-skip compensation")
+                val immediateNode = traversalList.getOrNull(immediateCandidateIndex)
+                if (immediateNode?.viewIdResourceName?.substringAfterLast('/') == "item_history") {
+                    Log.d("A11Y_HELPER", "[DEBUG][SMART_NEXT] samsung account candidate preserved between update_app and notifications index=$immediateCandidateIndex")
+                }
             } else {
                 nextIndex = skipCoordinateDuplicateTraversalIndices(
                     nodes = traversalList,
@@ -994,13 +1040,13 @@ object A11yNavigator {
         }
         if (representativeIndex !in normalizedTraversal.indices) return nextIndex
         val representativeNode = normalizedTraversal[representativeIndex]
-        if (!isNodeVisitedBySignature(representativeNode, state.visitedHistorySignatures)) return nextIndex
+        val representativeVisited = isNodeVisitedBySignature(representativeNode, state.visitedHistorySignatures)
         val nextCandidate = normalizedTraversal[nextIndex]
         val nextCandidateRow = findOneConnectNotificationsRowContainer(nextCandidate)
         if (nextCandidateRow == null || !isSameNode(nextCandidateRow, currentRowContainer)) return nextIndex
         Log.d(
             "A11Y_HELPER",
-            "[DEBUG][SMART_NEXT] notifications same-row reselection prevented index=$nextIndex representativeIndex=$representativeIndex"
+            "[DEBUG][SMART_NEXT] notifications same-row reselection prevented index=$nextIndex representativeIndex=$representativeIndex representativeVisited=$representativeVisited"
         )
         for (index in (nextIndex + 1) until normalizedTraversal.size) {
             val candidateRow = findOneConnectNotificationsRowContainer(normalizedTraversal[index])
