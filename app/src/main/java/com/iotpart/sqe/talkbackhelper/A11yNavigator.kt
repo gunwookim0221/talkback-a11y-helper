@@ -13,13 +13,15 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.6"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.7"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
     private const val ONECONNECT_UPDATE_APP_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_title"
     private const val ONECONNECT_UPDATE_APP_TEXT_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_text"
     private const val ONECONNECT_UPDATE_APP_CLOSE_BUTTON_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card_close_btn"
     private const val ONECONNECT_UPDATE_BUTTON_VIEW_ID = "com.samsung.android.oneconnect:id/update_button"
+    private const val ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/noti_title"
+    private const val ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID = "com.samsung.android.oneconnect:id/notification_item_switch"
 
 
     @Volatile
@@ -153,6 +155,10 @@ object A11yNavigator {
             val candidateLabel = resolveFocusedNodeLabel(candidate)
             val matchingGroup = groups.firstOrNull { group ->
                 val representative = selectAliasGroupRepresentative(group)
+                shouldTreatAsOneConnectNotificationsAliasGroup(
+                    group = group,
+                    candidate = candidate
+                ) ||
                 A11yTraversalAnalyzer.shouldTreatAsAliasWrapperDuplicate(
                     primaryNode = representative.node,
                     secondaryNode = candidate.node,
@@ -174,6 +180,14 @@ object A11yNavigator {
             normalizedNodes += representative
             aliasMembersByIndex[groupIndex] = group.map { it.node }
             val groupViewIds = group.mapNotNull { it.node.viewIdResourceName }
+            val hasNotificationsTitle = groupViewIds.contains(ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID)
+            val hasNotificationsSwitch = groupViewIds.contains(ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID)
+            if (hasNotificationsTitle && hasNotificationsSwitch) {
+                Log.d(
+                    "A11Y_HELPER",
+                    "[DEBUG][NORMALIZE] notifications settings row group formed representative=${representative.node.viewIdResourceName} members=${groupViewIds.joinToString()}"
+                )
+            }
             val hasUpdateAppCard = groupViewIds.contains(ONECONNECT_UPDATE_APP_CARD_VIEW_ID)
             val hasUpdateAppMember = groupViewIds.any { isOneConnectUpdateAppMemberViewId(it) }
             if (hasUpdateAppCard && hasUpdateAppMember) {
@@ -808,6 +822,13 @@ object A11yNavigator {
     }
 
     private fun selectAliasGroupRepresentative(group: List<FocusedNode>): FocusedNode {
+        selectOneConnectNotificationsRepresentative(group)?.let { notificationsRow ->
+            Log.d(
+                "A11Y_HELPER",
+                "[DEBUG][NORMALIZE] notifications representative chosen as row container"
+            )
+            return notificationsRow
+        }
         val containsUpdateAppCard = group.any {
             it.node.packageName?.toString()?.trim() == ONECONNECT_PACKAGE_NAME &&
                 it.node.viewIdResourceName == ONECONNECT_UPDATE_APP_CARD_VIEW_ID
@@ -858,6 +879,85 @@ object A11yNavigator {
             viewId == ONECONNECT_UPDATE_APP_TEXT_VIEW_ID ||
             viewId == ONECONNECT_UPDATE_APP_CLOSE_BUTTON_VIEW_ID ||
             viewId == ONECONNECT_UPDATE_BUTTON_VIEW_ID
+    }
+
+    private fun shouldTreatAsOneConnectNotificationsAliasGroup(
+        group: List<FocusedNode>,
+        candidate: FocusedNode
+    ): Boolean {
+        val candidateRowContainer = findOneConnectNotificationsRowContainer(candidate.node) ?: return false
+        return group.any { member ->
+            val memberRowContainer = findOneConnectNotificationsRowContainer(member.node) ?: return@any false
+            isSameNode(memberRowContainer, candidateRowContainer)
+        }
+    }
+
+    private fun selectOneConnectNotificationsRepresentative(group: List<FocusedNode>): FocusedNode? {
+        if (group.none { isOneConnectNotificationsMemberViewId(it.node.viewIdResourceName) }) return null
+        val rowNode = group.mapNotNull { findOneConnectNotificationsRowContainer(it.node) }
+            .firstOrNull()
+            ?: return null
+        group.firstOrNull { isSameNode(it.node, rowNode) }?.let { rowCandidate ->
+            val titleMember = group.firstOrNull { it.node.viewIdResourceName == ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID }
+            if (titleMember != null) {
+                Log.d(
+                    "A11Y_HELPER",
+                    "[DEBUG][NORMALIZE] notifications title linked to row representative"
+                )
+            }
+            val switchMember = group.firstOrNull { it.node.viewIdResourceName == ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID }
+            if (switchMember != null) {
+                Log.d(
+                    "A11Y_HELPER",
+                    "[DEBUG][NORMALIZE] notifications switch linked to row representative"
+                )
+            }
+            return rowCandidate
+        }
+        return null
+    }
+
+    private fun isOneConnectNotificationsMemberViewId(viewId: String?): Boolean {
+        return viewId == ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID ||
+            viewId == ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID
+    }
+
+    private fun findOneConnectNotificationsRowContainer(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        var current = node ?: return null
+        while (true) {
+            val packageName = current.packageName?.toString()?.trim().orEmpty()
+            if (packageName == ONECONNECT_PACKAGE_NAME && (current.isClickable || current.isFocusable)) {
+                val titleNode = findDescendantByViewId(current, ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID)
+                val switchNode = findDescendantByViewId(current, ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID)
+                if (titleNode != null && switchNode != null) {
+                    val rowBounds = Rect().also { current.getBoundsInScreen(it) }
+                    val titleBounds = Rect().also { titleNode.getBoundsInScreen(it) }
+                    val switchBounds = Rect().also { switchNode.getBoundsInScreen(it) }
+                    if (rowBounds.contains(titleBounds) && rowBounds.contains(switchBounds)) {
+                        return current
+                    }
+                }
+            }
+            current = current.parent ?: break
+        }
+        return null
+    }
+
+    private fun findDescendantByViewId(node: AccessibilityNodeInfo, viewId: String): AccessibilityNodeInfo? {
+        if (node.viewIdResourceName == viewId) return node
+        val pending = ArrayDeque<AccessibilityNodeInfo>()
+        pending.add(node)
+        while (pending.isNotEmpty()) {
+            val current = pending.removeFirst()
+            for (i in 0 until current.childCount) {
+                val child = current.getChild(i) ?: continue
+                if (child.viewIdResourceName == viewId) {
+                    return child
+                }
+                pending.add(child)
+            }
+        }
+        return null
     }
 
     private fun clearFocus(node: AccessibilityNodeInfo): Boolean {
@@ -1163,6 +1263,20 @@ object A11yNavigator {
                         break
                     }
                     parent = parent.parent
+                }
+            } else {
+                val notificationsRowContainer = findOneConnectNotificationsRowContainer(representativeNode)
+                if (notificationsRowContainer != null && isSameNode(representativeNode, notificationsRowContainer)) {
+                    findDescendantByViewId(notificationsRowContainer, ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID)?.let {
+                        Log.d(
+                            "A11Y_HELPER",
+                            "[DEBUG][SMART_NEXT] notifications title skipped because row representative already consumed"
+                        )
+                        add(it)
+                    }
+                    findDescendantByViewId(notificationsRowContainer, ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID)?.let {
+                        add(it)
+                    }
                 }
             }
         }
