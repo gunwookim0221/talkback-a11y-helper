@@ -40,6 +40,7 @@ class FakeA11yClient(A11yAdbClient):
         self.logcat_payload = ""
         self.needs_update = False
         self.package_list_payload = "package:com.example.custom"
+        self.accessibility_enabled_payload = "1"
         self.enabled_services_payload = "foo:com.example.custom/.A11yService"
         self._dump_counter = 0
         self.ping_ready = True
@@ -65,6 +66,8 @@ class FakeA11yClient(A11yAdbClient):
             return self.logcat_payload
         if args == ["shell", "pm", "list", "packages"]:
             return self.package_list_payload
+        if args == ["shell", "settings", "get", "secure", "accessibility_enabled"]:
+            return self.accessibility_enabled_payload
         if args == ["shell", "settings", "get", "secure", "enabled_accessibility_services"]:
             return self.enabled_services_payload
         if args == ["shell", "input", "keyevent", "4"]:
@@ -615,6 +618,33 @@ class TouchIsinTest(unittest.TestCase):
         ok = client.check_helper_status("SER")
 
         self.assertTrue(ok)
+
+    def test_check_talkback_ready_returns_disabled_when_talkback_off(self):
+        client = FakeA11yClient()
+        client.accessibility_enabled_payload = "0"
+        client.enabled_services_payload = ""
+
+        result = client.check_talkback_ready("SER")
+
+        self.assertEqual(result, {"status": "disabled", "reason": "talkback_off"})
+
+    def test_check_talkback_ready_returns_enabled_but_not_ready_when_helper_not_ready(self):
+        client = FakeA11yClient()
+        client.enabled_services_payload = "foo:com.google.android.marvin.talkback/.TalkBackService"
+
+        with patch.object(client, "check_helper_status", return_value=False):
+            result = client.check_talkback_ready("SER")
+
+        self.assertEqual(result, {"status": "enabled_but_not_ready", "reason": "helper_not_ready"})
+
+    def test_check_talkback_ready_returns_enabled_when_talkback_and_helper_ready(self):
+        client = FakeA11yClient()
+        client.enabled_services_payload = "foo:com.samsung.android.accessibility.talkback/.TalkBackService"
+
+        with patch.object(client, "check_helper_status", return_value=True):
+            result = client.check_talkback_ready("SER")
+
+        self.assertEqual(result, {"status": "enabled", "reason": "ok"})
 
     def test_scroll_parses_direction_and_returns_success(self):
         client = FakeA11yClient()
