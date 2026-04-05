@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.70.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.70.2"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
     private const val ONECONNECT_UPDATE_APP_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_title"
@@ -164,10 +164,6 @@ object A11yNavigator {
                     group = group,
                     candidate = candidate
                 ) ||
-                shouldTreatAsOneConnectNotificationsAliasGroup(
-                    group = group,
-                    candidate = candidate
-                ) ||
                 A11yTraversalAnalyzer.shouldTreatAsAliasWrapperDuplicate(
                     primaryNode = representative.node,
                     secondaryNode = candidate.node,
@@ -197,14 +193,6 @@ object A11yNavigator {
                 Log.d(
                     "A11Y_HELPER",
                     "[DEBUG][ROW_GROUP] formed rep=${oneConnectRowRepresentative.viewIdResourceName} members=[$memberSummary]"
-                )
-            }
-            val hasNotificationsTitle = groupViewIds.contains(ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID)
-            val hasNotificationsSwitch = groupViewIds.contains(ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID)
-            if (hasNotificationsTitle && hasNotificationsSwitch) {
-                Log.d(
-                    "A11Y_HELPER",
-                    "[DEBUG][NORMALIZE] notifications settings row group formed representative=${representative.node.viewIdResourceName} members=${groupViewIds.joinToString()}"
                 )
             }
             val hasUpdateAppCard = groupViewIds.contains(ONECONNECT_UPDATE_APP_CARD_VIEW_ID)
@@ -866,8 +854,13 @@ object A11yNavigator {
                 }
             }
         }
+        val beforeSameRowPrevention = nextIndex
         nextIndex = preventOneConnectSettingsSameRowReselection(state, nextIndex)
-        nextIndex = preventOneConnectNotificationsSameRowReselection(state, nextIndex)
+        nextIndex = preventOneConnectNotificationsSameRowReselection(
+            state = state,
+            nextIndex = nextIndex,
+            genericPreventionApplied = nextIndex != beforeSameRowPrevention
+        )
         if (debugAroundDecision) {
             Log.d("A11Y_HELPER", "[DEBUG][DECIDE] final_next=${summarizeTraversalCandidate(traversalList, nextIndex, state)}")
         }
@@ -938,13 +931,6 @@ object A11yNavigator {
                 "[DEBUG][ROW_GROUP] representative chosen=${settingsRow.node.viewIdResourceName}"
             )
             return settingsRow
-        }
-        selectOneConnectNotificationsRepresentative(group)?.let { notificationsRow ->
-            Log.d(
-                "A11Y_HELPER",
-                "[DEBUG][NORMALIZE] notifications representative chosen as row container"
-            )
-            return notificationsRow
         }
         val containsUpdateAppCard = group.any {
             it.node.packageName?.toString()?.trim() == ONECONNECT_PACKAGE_NAME &&
@@ -1018,84 +1004,11 @@ object A11yNavigator {
         }
     }
 
-    private fun shouldTreatAsOneConnectNotificationsAliasGroup(
-        group: List<FocusedNode>,
-        candidate: FocusedNode
-    ): Boolean {
-        val candidateRowContainer = findOneConnectNotificationsRowContainer(candidate.node) ?: run {
-            if (candidate.node.packageName?.toString()?.trim() == ONECONNECT_PACKAGE_NAME) {
-                Log.d(
-                    "A11Y_HELPER",
-                    "[DEBUG][NORMALIZE] notifications group member rejected because outside row bounds/row ancestor viewId=${candidate.node.viewIdResourceName}"
-                )
-            }
-            return false
-        }
-        return group.any { member ->
-            val memberRowContainer = findOneConnectNotificationsRowContainer(member.node) ?: return@any false
-            if (!isSameNode(memberRowContainer, candidateRowContainer)) return@any false
-            val isCandidateInRow = isNodeInsideAncestor(candidate.node, candidateRowContainer)
-            val isMemberInRow = isNodeInsideAncestor(member.node, memberRowContainer)
-            val candidateBounds = Rect().also { candidate.node.getBoundsInScreen(it) }
-            val memberBounds = Rect().also { member.node.getBoundsInScreen(it) }
-            val rowBounds = Rect().also { candidateRowContainer.getBoundsInScreen(it) }
-            if (!isCandidateInRow || !isMemberInRow || !rowBounds.contains(candidateBounds) || !rowBounds.contains(memberBounds)) {
-                Log.d(
-                    "A11Y_HELPER",
-                    "[DEBUG][NORMALIZE] notifications group member rejected because outside row bounds/row ancestor candidateViewId=${candidate.node.viewIdResourceName} memberViewId=${member.node.viewIdResourceName}"
-                )
-                return@any false
-            }
-            true
-        }
-    }
-
     private fun selectOneConnectSettingsRowRepresentative(group: List<FocusedNode>): FocusedNode? {
         val rowNode = group.mapNotNull { findOneConnectSettingsRowContainer(it.node) }
             .firstOrNull()
             ?: return null
         group.firstOrNull { isSameNode(it.node, rowNode) }?.let { return it }
-        val metadata = A11yTraversalAnalyzer.collectActionableDescendantMetadata(rowNode)
-        val rowLabel = resolvePrimaryLabel(rowNode) ?: A11yTraversalAnalyzer.recoverDescendantLabel(rowNode)
-        return FocusedNode(
-            node = rowNode,
-            text = rowLabel,
-            contentDescription = rowNode.contentDescription?.toString(),
-            mergedLabel = rowLabel,
-            hasClickableDescendant = metadata.hasClickableDescendant,
-            hasFocusableDescendant = metadata.hasFocusableDescendant,
-            effectiveClickable = rowNode.isClickable,
-            actionableDescendantResourceId = metadata.actionableDescendantResourceId,
-            actionableDescendantClassName = metadata.actionableDescendantClassName,
-            actionableDescendantContentDescription = metadata.actionableDescendantContentDescription
-        )
-    }
-
-    private fun selectOneConnectNotificationsRepresentative(group: List<FocusedNode>): FocusedNode? {
-        val rowNode = group.mapNotNull { findOneConnectNotificationsRowContainer(it.node) }
-            .firstOrNull()
-            ?: return null
-        group.firstOrNull { isSameNode(it.node, rowNode) }?.let { rowCandidate ->
-            val titleMember = group.firstOrNull { it.node.viewIdResourceName == ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID }
-            if (titleMember != null) {
-                Log.d(
-                    "A11Y_HELPER",
-                    "[DEBUG][NORMALIZE] notifications title linked to row representative"
-                )
-            }
-            val switchMember = group.firstOrNull { it.node.viewIdResourceName == ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID }
-            if (switchMember != null) {
-                Log.d(
-                    "A11Y_HELPER",
-                    "[DEBUG][NORMALIZE] notifications switch linked to row representative"
-                )
-            }
-            return rowCandidate
-        }
-        Log.d(
-            "A11Y_HELPER",
-            "[DEBUG][NORMALIZE] notifications representative chosen as row container via promoted child"
-        )
         val metadata = A11yTraversalAnalyzer.collectActionableDescendantMetadata(rowNode)
         val rowLabel = resolvePrimaryLabel(rowNode) ?: A11yTraversalAnalyzer.recoverDescendantLabel(rowNode)
         return FocusedNode(
@@ -1366,8 +1279,10 @@ object A11yNavigator {
 
     private fun preventOneConnectNotificationsSameRowReselection(
         state: SmartNextRuntimeState,
-        nextIndex: Int
+        nextIndex: Int,
+        genericPreventionApplied: Boolean
     ): Int {
+        if (genericPreventionApplied) return nextIndex
         val normalizedTraversal = state.normalize.traversalList
         val debugEnabled = shouldEmitOneConnectSettingsDebugLogs(
             current = state.currentPosition.resolvedCurrent ?: normalizedTraversal.getOrNull(state.currentPosition.currentIndex),
@@ -1375,7 +1290,7 @@ object A11yNavigator {
             contextNodes = normalizedTraversal
         )
         if (debugEnabled) {
-            Log.d("A11Y_HELPER", "[DEBUG][NOTI] enter")
+            Log.d("A11Y_HELPER", "[DEBUG][NOTI_FALLBACK] enter")
         }
         if (nextIndex !in normalizedTraversal.indices) return nextIndex
         val currentNode = state.currentPosition.resolvedCurrent ?: normalizedTraversal.getOrNull(state.currentPosition.currentIndex)
@@ -1394,46 +1309,46 @@ object A11yNavigator {
         if (debugEnabled) {
             Log.d(
                 "A11Y_HELPER",
-                "[DEBUG][NOTI] enter current=${summarizeTraversalCandidate(normalizedTraversal, state.currentPosition.currentIndex, state)} next=${summarizeTraversalCandidate(normalizedTraversal, nextIndex, state)} rep=${summarizeTraversalCandidate(normalizedTraversal, representativeIndex, state)}"
+                "[DEBUG][NOTI_FALLBACK] enter current=${summarizeTraversalCandidate(normalizedTraversal, state.currentPosition.currentIndex, state)} next=${summarizeTraversalCandidate(normalizedTraversal, nextIndex, state)} rep=${summarizeTraversalCandidate(normalizedTraversal, representativeIndex, state)}"
             )
             Log.d(
                 "A11Y_HELPER",
-                "[DEBUG][NOTI] repVisited=$representativeVisited sameRow=$sameRow nextIndex=$nextIndex representativeIndex=$representativeIndex"
+                "[DEBUG][NOTI_FALLBACK] repVisited=$representativeVisited sameRow=$sameRow nextIndex=$nextIndex representativeIndex=$representativeIndex"
             )
         }
         if (!sameRow) {
             if (debugEnabled) {
-                Log.d("A11Y_HELPER", "[DEBUG][NOTI] prevented=false reason=next_candidate_not_same_row")
+                Log.d("A11Y_HELPER", "[DEBUG][NOTI_FALLBACK] prevented=false reason=next_candidate_not_same_row")
             }
             return nextIndex
         }
         Log.d(
             "A11Y_HELPER",
-            "[DEBUG][SMART_NEXT] notifications same-row reselection prevented index=$nextIndex representativeIndex=$representativeIndex representativeVisited=$representativeVisited"
+            "[DEBUG][NOTI_FALLBACK] notifications same-row reselection prevented index=$nextIndex representativeIndex=$representativeIndex representativeVisited=$representativeVisited"
         )
         for (index in (nextIndex + 1) until normalizedTraversal.size) {
             val candidateRow = findOneConnectNotificationsRowContainer(normalizedTraversal[index])
             if (candidateRow != null && isSameNode(candidateRow, currentRowContainer)) {
                 Log.d(
                     "A11Y_HELPER",
-                    "[DEBUG][SMART_NEXT] notifications group skipped because representative already consumed"
+                    "[DEBUG][NOTI_FALLBACK] notifications group skipped because representative already consumed"
                 )
                 continue
             }
             Log.d(
                 "A11Y_HELPER",
-                "[DEBUG][SMART_NEXT] notifications advanced to next external candidate index=$index"
+                "[DEBUG][NOTI_FALLBACK] notifications advanced to next external candidate index=$index"
             )
             if (debugEnabled) {
                 Log.d(
                     "A11Y_HELPER",
-                    "[DEBUG][NOTI] prevented=true replacement=${summarizeTraversalCandidate(normalizedTraversal, index, state)}"
+                    "[DEBUG][NOTI_FALLBACK] prevented=true replacement=${summarizeTraversalCandidate(normalizedTraversal, index, state)}"
                 )
             }
             return index
         }
         if (debugEnabled) {
-            Log.d("A11Y_HELPER", "[DEBUG][NOTI] prevented=false reason=no_external_candidate")
+            Log.d("A11Y_HELPER", "[DEBUG][NOTI_FALLBACK] prevented=false reason=no_external_candidate")
         }
         return nextIndex
     }
@@ -1731,7 +1646,7 @@ object A11yNavigator {
         if (shouldEmitOneConnectSettingsDebugLogs(current = node)) {
             Log.d(
                 "A11Y_HELPER",
-                "[DEBUG][VISITED][NOTI] representative=${summarizeNodeCompact(node)} signature=viewId=${node.viewIdResourceName} bounds=${formatBoundsForLog(bounds)} identity=$nodeIdentity"
+                "[DEBUG][ROW_GROUP][VISITED] representative=${summarizeNodeCompact(node)} signature=viewId=${node.viewIdResourceName} bounds=${formatBoundsForLog(bounds)} identity=$nodeIdentity"
             )
         }
     }
@@ -1767,20 +1682,6 @@ object A11yNavigator {
                     }
                     parent = parent.parent
                 }
-            } else {
-                val notificationsRowContainer = findOneConnectNotificationsRowContainer(representativeNode)
-                if (notificationsRowContainer != null && isSameNode(representativeNode, notificationsRowContainer)) {
-                    findDescendantByViewId(notificationsRowContainer, ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID)?.let {
-                        Log.d(
-                            "A11Y_HELPER",
-                            "[DEBUG][SMART_NEXT] notifications title skipped because row representative already consumed"
-                        )
-                        add(it)
-                    }
-                    findDescendantByViewId(notificationsRowContainer, ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID)?.let {
-                        add(it)
-                    }
-                }
             }
         }
         if (mergedAliasMembers.isEmpty()) return
@@ -1807,16 +1708,9 @@ object A11yNavigator {
             "[SMART_NEXT] visitedHistory alias_group add: reason=$reason representative=${normalizedRepresentativeLabel.replace("\n", " ")} identity=$representativeIdentity aliases=${recordedKeys.size}"
         )
         if (shouldEmitOneConnectSettingsDebugLogs(current = representativeNode)) {
-            val memberKinds = mergedAliasMembers.mapNotNull { member ->
-                when (member.viewIdResourceName) {
-                    ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID -> "title"
-                    ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID -> "switch"
-                    else -> if (isSameNode(member, representativeNode)) "row" else null
-                }
-            }.distinct()
             Log.d(
                 "A11Y_HELPER",
-                "[DEBUG][VISITED][NOTI] representative=${summarizeNodeCompact(representativeNode)} members=${memberKinds.ifEmpty { listOf("row") }} signature=viewId=${representativeNode.viewIdResourceName} identity=$representativeIdentity"
+                "[DEBUG][ROW_GROUP][VISITED] representative=${summarizeNodeCompact(representativeNode)} aliases=${recordedKeys.size} signature=viewId=${representativeNode.viewIdResourceName} identity=$representativeIdentity"
             )
         }
     }
