@@ -7,8 +7,10 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.10.3"
+    const val VERSION: String = "1.10.4"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
+    private const val ONECONNECT_UPDATE_APP_CARD_ID_SUFFIX = "update_app_card"
+    private const val ONECONNECT_UPDATE_APP_TITLE_ID_SUFFIX = "update_app_title"
 
     data class CandidateSelectionResult(
         val index: Int,
@@ -465,7 +467,6 @@ object A11yTraversalAnalyzer {
         val secondaryBounds = Rect().also { secondaryNode.getBoundsInScreen(it) }
         val packageMatched = primaryNode.packageName?.toString() == secondaryNode.packageName?.toString()
         if (!packageMatched) return false
-        if (!areSemanticallyEquivalentLabels(primaryLabel, secondaryLabel)) return false
         if (!hasStrongOverlapOrContainment(primaryBounds, secondaryBounds)) return false
 
         val inAncestorChain = isAncestorOf(
@@ -478,6 +479,8 @@ object A11yTraversalAnalyzer {
             parentOf = { node -> node.parent }
         )
         if (!inAncestorChain) return false
+        val oneConnectUpdateAppPair = isOneConnectUpdateAppAliasPair(primaryNode, secondaryNode)
+        if (!oneConnectUpdateAppPair && !areSemanticallyEquivalentLabels(primaryLabel, secondaryLabel)) return false
 
         val primaryActionControl = isIndependentActionControlClass(primaryNode.className?.toString())
         val secondaryActionControl = isIndependentActionControlClass(secondaryNode.className?.toString())
@@ -505,6 +508,34 @@ object A11yTraversalAnalyzer {
             return false
         }
         return true
+    }
+
+    private fun isOneConnectUpdateAppAliasPair(
+        primaryNode: AccessibilityNodeInfo,
+        secondaryNode: AccessibilityNodeInfo
+    ): Boolean {
+        val primaryPackage = primaryNode.packageName?.toString()?.trim().orEmpty()
+        val secondaryPackage = secondaryNode.packageName?.toString()?.trim().orEmpty()
+        if (primaryPackage != ONECONNECT_PACKAGE_NAME || secondaryPackage != ONECONNECT_PACKAGE_NAME) return false
+        val primaryViewId = primaryNode.viewIdResourceName?.substringAfterLast('/')?.trim().orEmpty()
+        val secondaryViewId = secondaryNode.viewIdResourceName?.substringAfterLast('/')?.trim().orEmpty()
+        val hasUpdateAppCardAndTitle = (
+            primaryViewId == ONECONNECT_UPDATE_APP_CARD_ID_SUFFIX &&
+                secondaryViewId == ONECONNECT_UPDATE_APP_TITLE_ID_SUFFIX
+            ) || (
+            primaryViewId == ONECONNECT_UPDATE_APP_TITLE_ID_SUFFIX &&
+                secondaryViewId == ONECONNECT_UPDATE_APP_CARD_ID_SUFFIX
+            )
+        if (!hasUpdateAppCardAndTitle) return false
+        return isAncestorOf(
+            ancestor = primaryNode,
+            descendant = secondaryNode,
+            parentOf = { node -> node.parent }
+        ) || isAncestorOf(
+            ancestor = secondaryNode,
+            descendant = primaryNode,
+            parentOf = { node -> node.parent }
+        )
     }
 
     private fun canTreatAsActionControlWrapperDuplicate(

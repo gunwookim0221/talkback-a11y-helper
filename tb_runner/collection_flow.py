@@ -1127,6 +1127,7 @@ def collect_tab_rows(
         recent_semantic_duplicate = bool(stop_details.get("recent_semantic_duplicate", False))
         recent_semantic_duplicate_distance = int(stop_details.get("recent_semantic_duplicate_distance", 0) or 0)
         recent_semantic_unique_count = int(stop_details.get("recent_semantic_unique_count", 0) or 0)
+        repeat_stop_hit = bool(stop_details.get("repeat_stop_hit", False))
         scenario_type = str(stop_details.get("scenario_type", tab_cfg.get("scenario_type", "content")) or "content")
         is_global_nav_only_scenario = scenario_type == "global_nav"
         if is_global_nav_only_scenario:
@@ -1146,6 +1147,7 @@ def collect_tab_rows(
             f"recent_semantic_duplicate={str(recent_semantic_duplicate).lower()} "
             f"recent_semantic_duplicate_distance={recent_semantic_duplicate_distance} "
             f"recent_semantic_unique_count={recent_semantic_unique_count} "
+            f"repeat_stop_hit={str(repeat_stop_hit).lower()} "
             f"decision='{decision}' reason='{eval_reason}'"
         )
 

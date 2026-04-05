@@ -154,6 +154,46 @@ def test_should_stop_empty_only_is_not_immediate_stop():
     assert details["reason"] == ""
 
 
+def test_should_stop_repeat_semantic_stall_when_moved_but_same_semantic_target_repeats():
+    previous = {
+        "normalized_visible_label": "update app",
+        "normalized_announcement": "update app",
+        "focus_view_id": "com.samsung.android.oneconnect:id/update_app_title",
+        "focus_bounds": "507,441",
+    }
+    row = {
+        "move_result": "moved",
+        "last_smart_nav_result": "moved",
+        "visible_label": "Update app",
+        "merged_announcement": "Update app",
+        "normalized_visible_label": "update app",
+        "normalized_announcement": "update app",
+        "focus_view_id": "com.samsung.android.oneconnect:id/update_app_title",
+        "focus_bounds": "507,441",
+        "is_recent_duplicate_step": True,
+        "is_recent_semantic_duplicate_step": True,
+        "recent_semantic_unique_count": 1,
+    }
+
+    stop, fail_count, same_count, reason, _, details = should_stop(
+        row=row,
+        prev_fingerprint=(
+            "update app",
+            "com.samsung.android.oneconnect:id/update_app_title",
+            "507,441",
+        ),
+        fail_count=0,
+        same_count=7,
+        previous_row=previous,
+    )
+
+    assert stop is True
+    assert fail_count == 0
+    assert same_count == 8
+    assert reason == "repeat_semantic_stall"
+    assert details["repeat_stop_hit"] is True
+
+
 def test_should_stop_content_global_nav_entry():
     previous = {
         "visible_label": "Device card",
