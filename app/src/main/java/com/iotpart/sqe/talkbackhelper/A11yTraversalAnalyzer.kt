@@ -7,10 +7,10 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.10.4"
+    const val VERSION: String = "1.10.5"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
-    private const val ONECONNECT_UPDATE_APP_CARD_ID_SUFFIX = "update_app_card"
-    private const val ONECONNECT_UPDATE_APP_TITLE_ID_SUFFIX = "update_app_title"
+    private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
+    private const val ONECONNECT_UPDATE_APP_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_title"
 
     data class CandidateSelectionResult(
         val index: Int,
@@ -467,6 +467,16 @@ object A11yTraversalAnalyzer {
         val secondaryBounds = Rect().also { secondaryNode.getBoundsInScreen(it) }
         val packageMatched = primaryNode.packageName?.toString() == secondaryNode.packageName?.toString()
         if (!packageMatched) return false
+        val oneConnectUpdateAppPair = isOneConnectUpdateAppAliasPair(
+            primaryNode = primaryNode,
+            secondaryNode = secondaryNode,
+            primaryBounds = primaryBounds,
+            secondaryBounds = secondaryBounds
+        )
+        if (oneConnectUpdateAppPair) {
+            Log.d("A11Y_HELPER", "[DEBUG][NORMALIZE] update_app alias group formed via strict card-title pairing")
+            return true
+        }
         if (!hasStrongOverlapOrContainment(primaryBounds, secondaryBounds)) return false
 
         val inAncestorChain = isAncestorOf(
@@ -479,7 +489,6 @@ object A11yTraversalAnalyzer {
             parentOf = { node -> node.parent }
         )
         if (!inAncestorChain) return false
-        val oneConnectUpdateAppPair = isOneConnectUpdateAppAliasPair(primaryNode, secondaryNode)
         if (!oneConnectUpdateAppPair && !areSemanticallyEquivalentLabels(primaryLabel, secondaryLabel)) return false
 
         val primaryActionControl = isIndependentActionControlClass(primaryNode.className?.toString())
@@ -512,22 +521,24 @@ object A11yTraversalAnalyzer {
 
     private fun isOneConnectUpdateAppAliasPair(
         primaryNode: AccessibilityNodeInfo,
-        secondaryNode: AccessibilityNodeInfo
+        secondaryNode: AccessibilityNodeInfo,
+        primaryBounds: Rect,
+        secondaryBounds: Rect
     ): Boolean {
         val primaryPackage = primaryNode.packageName?.toString()?.trim().orEmpty()
         val secondaryPackage = secondaryNode.packageName?.toString()?.trim().orEmpty()
         if (primaryPackage != ONECONNECT_PACKAGE_NAME || secondaryPackage != ONECONNECT_PACKAGE_NAME) return false
-        val primaryViewId = primaryNode.viewIdResourceName?.substringAfterLast('/')?.trim().orEmpty()
-        val secondaryViewId = secondaryNode.viewIdResourceName?.substringAfterLast('/')?.trim().orEmpty()
+        val primaryViewId = primaryNode.viewIdResourceName?.trim().orEmpty()
+        val secondaryViewId = secondaryNode.viewIdResourceName?.trim().orEmpty()
         val hasUpdateAppCardAndTitle = (
-            primaryViewId == ONECONNECT_UPDATE_APP_CARD_ID_SUFFIX &&
-                secondaryViewId == ONECONNECT_UPDATE_APP_TITLE_ID_SUFFIX
+            primaryViewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID &&
+                secondaryViewId == ONECONNECT_UPDATE_APP_TITLE_VIEW_ID
             ) || (
-            primaryViewId == ONECONNECT_UPDATE_APP_TITLE_ID_SUFFIX &&
-                secondaryViewId == ONECONNECT_UPDATE_APP_CARD_ID_SUFFIX
+            primaryViewId == ONECONNECT_UPDATE_APP_TITLE_VIEW_ID &&
+                secondaryViewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID
             )
         if (!hasUpdateAppCardAndTitle) return false
-        return isAncestorOf(
+        val inAncestorChain = isAncestorOf(
             ancestor = primaryNode,
             descendant = secondaryNode,
             parentOf = { node -> node.parent }
@@ -536,6 +547,10 @@ object A11yTraversalAnalyzer {
             descendant = primaryNode,
             parentOf = { node -> node.parent }
         )
+        if (!inAncestorChain) return false
+        return primaryBounds.contains(secondaryBounds) ||
+            secondaryBounds.contains(primaryBounds) ||
+            hasStrongOverlapOrContainment(primaryBounds, secondaryBounds)
     }
 
     private fun canTreatAsActionControlWrapperDuplicate(

@@ -4,11 +4,15 @@ import android.graphics.Rect
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 typealias SnapshotVisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11ySnapshotTracker {
-    const val SNAPSHOT_TRACKER_VERSION: String = "1.0.7"
+    const val SNAPSHOT_TRACKER_VERSION: String = "1.0.8"
+    private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
+    private const val ONECONNECT_UPDATE_APP_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_title"
 
     internal data class RawVisibleNode(
         val label: String,
@@ -253,13 +257,51 @@ object A11ySnapshotTracker {
                     abs(signature.bounds.right - bounds.right) <= boundsTolerancePx &&
                     abs(signature.bounds.bottom - bounds.bottom) <= boundsTolerancePx
             val hasStrongNodeIdentity = !signature.nodeIdentity.isNullOrBlank()
+            val strictOneConnectUpdateAppAliasVisited = isStrictOneConnectUpdateAppAliasVisited(
+                visitedViewId = signature.viewId,
+                currentViewId = viewId,
+                visitedBounds = signature.bounds,
+                currentBounds = bounds
+            )
             when {
                 sameLabel && sameViewId -> true
                 sameLabel && similarBounds -> true
                 sameViewId && similarBounds && hasStrongNodeIdentity -> true
+                strictOneConnectUpdateAppAliasVisited -> {
+                    Log.d(
+                        "A11Y_HELPER",
+                        "[DEBUG][VISITED] alias member skipped because representative already consumed (update_app card/title pair)"
+                    )
+                    true
+                }
                 else -> false
             }
         }
+    }
+
+    private fun isStrictOneConnectUpdateAppAliasVisited(
+        visitedViewId: String?,
+        currentViewId: String?,
+        visitedBounds: Rect,
+        currentBounds: Rect
+    ): Boolean {
+        val isCardAndTitlePair = (
+            visitedViewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID &&
+                currentViewId == ONECONNECT_UPDATE_APP_TITLE_VIEW_ID
+            ) || (
+            visitedViewId == ONECONNECT_UPDATE_APP_TITLE_VIEW_ID &&
+                currentViewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID
+            )
+        if (!isCardAndTitlePair) return false
+        if (visitedBounds.contains(currentBounds) || currentBounds.contains(visitedBounds)) return true
+        val intersection = Rect()
+        if (!intersection.setIntersect(visitedBounds, currentBounds)) return false
+        val minArea = min(
+            (visitedBounds.width() * visitedBounds.height()).coerceAtLeast(1),
+            (currentBounds.width() * currentBounds.height()).coerceAtLeast(1)
+        )
+        val overlapRatio = intersection.width().toFloat() * intersection.height().toFloat() / max(1, minArea).toFloat()
+        return overlapRatio >= 0.7f
     }
 
     internal fun <T> collectVisibleHistory(

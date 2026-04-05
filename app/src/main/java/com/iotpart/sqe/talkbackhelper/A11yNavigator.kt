@@ -13,7 +13,9 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.4"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.5"
+    private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
+    private const val ONECONNECT_UPDATE_APP_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_title"
 
 
     @Volatile
@@ -802,6 +804,17 @@ object A11yNavigator {
     }
 
     private fun selectAliasGroupRepresentative(group: List<FocusedNode>): FocusedNode {
+        val containsUpdateAppCard = group.any { it.node.viewIdResourceName == ONECONNECT_UPDATE_APP_CARD_VIEW_ID }
+        val containsUpdateAppTitle = group.any { it.node.viewIdResourceName == ONECONNECT_UPDATE_APP_TITLE_VIEW_ID }
+        if (containsUpdateAppCard && containsUpdateAppTitle) {
+            group.firstOrNull { it.node.viewIdResourceName == ONECONNECT_UPDATE_APP_CARD_VIEW_ID }?.let { updateAppCard ->
+                Log.d(
+                    "A11Y_HELPER",
+                    "[DEBUG][NORMALIZE] representative chosen as update_app_card for strict update_app alias group"
+                )
+                return updateAppCard
+            }
+        }
         return group
             .sortedWith(
                 compareByDescending<FocusedNode> { aliasRepresentativeScore(it) }
@@ -1109,10 +1122,37 @@ object A11yNavigator {
         aliasMembers: List<AccessibilityNodeInfo>,
         reason: String
     ) {
-        if (aliasMembers.isEmpty()) return
+        val mergedAliasMembers = LinkedHashSet<AccessibilityNodeInfo>().apply {
+            addAll(aliasMembers)
+            val representativeViewId = representativeNode.viewIdResourceName
+            if (representativeViewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID) {
+                val pending = ArrayDeque<AccessibilityNodeInfo>()
+                pending.add(representativeNode)
+                while (pending.isNotEmpty()) {
+                    val current = pending.removeFirst()
+                    for (i in 0 until current.childCount) {
+                        val child = current.getChild(i) ?: continue
+                        if (child.viewIdResourceName == ONECONNECT_UPDATE_APP_TITLE_VIEW_ID) {
+                            add(child)
+                        }
+                        pending.add(child)
+                    }
+                }
+            } else if (representativeViewId == ONECONNECT_UPDATE_APP_TITLE_VIEW_ID) {
+                var parent = representativeNode.parent
+                while (parent != null) {
+                    if (parent.viewIdResourceName == ONECONNECT_UPDATE_APP_CARD_VIEW_ID) {
+                        add(parent)
+                        break
+                    }
+                    parent = parent.parent
+                }
+            }
+        }
+        if (mergedAliasMembers.isEmpty()) return
         val normalizedRepresentativeLabel = representativeLabel.trim()
         val recordedKeys = linkedSetOf<String>()
-        aliasMembers.forEach { member ->
+        mergedAliasMembers.forEach { member ->
             val bounds = Rect().also { member.getBoundsInScreen(it) }
             val memberIdentity = buildNodeIdentityForHistory(member)
             val uniqueKey = "${member.viewIdResourceName}|$bounds|$memberIdentity"
