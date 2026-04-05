@@ -637,14 +637,16 @@ class TouchIsinTest(unittest.TestCase):
 
         self.assertEqual(result, {"status": "enabled_but_not_ready", "reason": "talkback_not_ready"})
 
-    def test_check_talkback_ready_proceeds_when_focus_sanity_fails(self):
+    def test_check_talkback_ready_returns_false_positive_when_sanity_and_probe_fail(self):
         client = FakeA11yClient()
         client.enabled_services_payload = "foo:com.google.android.marvin.talkback/.TalkBackService"
 
-        with patch.object(client, "check_helper_status", return_value=True), patch.object(client, "get_focus", return_value={}):
+        with patch.object(client, "check_helper_status", return_value=True), patch.object(
+            client, "get_focus", return_value={}
+        ), patch.object(client, "move_focus", return_value=False):
             result = client.check_talkback_ready("SER")
 
-        self.assertEqual(result, {"status": "enabled", "reason": "ok"})
+        self.assertEqual(result, {"status": "enabled_but_not_ready", "reason": "false_positive_enabled"})
 
     def test_check_talkback_ready_returns_enabled_when_sanity_retry_succeeds(self):
         client = FakeA11yClient()
@@ -665,20 +667,23 @@ class TouchIsinTest(unittest.TestCase):
         self.assertEqual(get_focus_mock.call_count, 2)
         sleep_mock.assert_called_once_with(0.4)
 
-    def test_check_talkback_ready_retries_sanity_then_proceeds_without_initial_focus(self):
+    def test_check_talkback_ready_retries_sanity_then_probe_passes(self):
         client = FakeA11yClient()
         client.enabled_services_payload = "foo:com.google.android.marvin.talkback/.TalkBackService"
 
         with patch.object(client, "check_helper_status", return_value=True), patch.object(
             client,
             "get_focus",
-            return_value={},
-        ) as get_focus_mock, patch("talkback_lib.time.sleep") as sleep_mock:
+            side_effect=[{}, {}, {}, {"text": "Wi-Fi", "boundsInScreen": {"l": 0, "t": 0, "r": 10, "b": 10}}],
+        ) as get_focus_mock, patch("talkback_lib.time.sleep") as sleep_mock, patch.object(
+            client, "move_focus", return_value=True
+        ) as move_focus_mock:
             result = client.check_talkback_ready("SER")
 
         self.assertEqual(result, {"status": "enabled", "reason": "ok"})
-        self.assertEqual(get_focus_mock.call_count, 3)
+        self.assertEqual(get_focus_mock.call_count, 4)
         self.assertEqual(sleep_mock.call_count, 2)
+        move_focus_mock.assert_called_once_with(dev="SER", direction="next")
 
     def test_check_talkback_ready_returns_enabled_when_talkback_and_helper_ready(self):
         client = FakeA11yClient()

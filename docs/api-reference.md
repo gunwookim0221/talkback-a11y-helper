@@ -153,7 +153,9 @@ client.clear_logcat(dev_serial)
 
 1) `settings secure accessibility_enabled` + `enabled_accessibility_services`로 TalkBack service 존재 확인  
 2) helper 준비 상태 확인 후 `get_focus(..., allow_fallback_dump=False, mode="fast")` sanity check 수행(최대 3회 시도/0.4초 간격 retry)  
-   - sanity에서 초기 focus를 찾지 못해도 helper가 준비된 상태면 abort하지 않고 warning 로그 후 진행
+3) sanity 실패 시, `move_focus(direction="next")` 1회 + `get_focus(..., mode="fast")` readiness probe 수행  
+   - probe 성공(meaningful focus 획득) 시 진행  
+   - probe 실패 시 `enabled_but_not_ready/false_positive_enabled`로 중단
 
 ### Parameters
 
@@ -165,6 +167,7 @@ client.clear_logcat(dev_serial)
 - `dict[str, str]`
   - `{"status": "disabled", "reason": "talkback_off"}`
   - `{"status": "enabled_but_not_ready", "reason": "talkback_not_ready"}`
+  - `{"status": "enabled_but_not_ready", "reason": "false_positive_enabled"}`
   - `{"status": "enabled", "reason": "ok"}`
 
 ### Example
