@@ -36,7 +36,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.36"
+CLIENT_ALGORITHM_VERSION = "1.7.37"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -147,18 +147,45 @@ class A11yAdbClient:
         return any(token in services_lower for token in talkback_service_tokens)
 
     def check_talkback_ready(self, dev: Any = None) -> dict[str, str]:
-        if not self.is_talkback_enabled(dev=dev):
+        configured_service_found = self.is_talkback_enabled(dev=dev)
+        print(f"[PREFLIGHT] configured_service_found={configured_service_found}")
+        if not configured_service_found:
+            print("[PREFLIGHT] final_status=disabled final_reason=talkback_off")
             return {"status": "disabled", "reason": "talkback_off"}
-        if not self.check_helper_status(dev=dev):
+        helper_ready = self.check_helper_status(dev=dev)
+        print(f"[PREFLIGHT] helper_ready={helper_ready}")
+        if not helper_ready:
+            print("[PREFLIGHT] final_status=enabled_but_not_ready final_reason=talkback_not_ready")
             return {"status": "enabled_but_not_ready", "reason": "talkback_not_ready"}
-        focus_node = self.get_focus(
-            dev=dev,
-            wait_seconds=1.2,
-            allow_fallback_dump=False,
-            mode="fast",
+        sanity_retry_count = 2
+        sanity_get_focus_success = False
+        sanity_meaningful_focus = False
+        for attempt in range(1, sanity_retry_count + 2):
+            focus_node = self.get_focus(
+                dev=dev,
+                wait_seconds=1.2,
+                allow_fallback_dump=False,
+                mode="fast",
+            )
+            sanity_get_focus_success = bool(focus_node)
+            sanity_meaningful_focus = self._is_meaningful_focus_node(focus_node)
+            print(
+                f"[PREFLIGHT][sanity] attempt={attempt} "
+                f"success={sanity_get_focus_success} meaningful={sanity_meaningful_focus}"
+            )
+            if sanity_get_focus_success and sanity_meaningful_focus:
+                break
+            if attempt <= sanity_retry_count:
+                print(f"[PREFLIGHT][sanity] retry={attempt}/{sanity_retry_count}")
+                time.sleep(0.4)
+        print(
+            f"[PREFLIGHT][sanity] final success={sanity_get_focus_success} "
+            f"meaningful={sanity_meaningful_focus}"
         )
-        if not self._is_meaningful_focus_node(focus_node):
+        if not (sanity_get_focus_success and sanity_meaningful_focus):
+            print("[PREFLIGHT] final_status=enabled_but_not_ready final_reason=false_positive_enabled")
             return {"status": "enabled_but_not_ready", "reason": "false_positive_enabled"}
+        print("[PREFLIGHT] final_status=enabled final_reason=ok")
         return {"status": "enabled", "reason": "ok"}
 
     def _run(self, args: list[str], dev: Any = None, timeout: float = 30.0) -> str:

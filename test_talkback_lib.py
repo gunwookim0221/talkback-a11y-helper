@@ -646,6 +646,40 @@ class TouchIsinTest(unittest.TestCase):
 
         self.assertEqual(result, {"status": "enabled_but_not_ready", "reason": "false_positive_enabled"})
 
+    def test_check_talkback_ready_returns_enabled_when_sanity_retry_succeeds(self):
+        client = FakeA11yClient()
+        client.enabled_services_payload = "foo:com.google.android.marvin.talkback/.TalkBackService"
+        focus_nodes = [
+            {},
+            {"text": "Wi-Fi", "boundsInScreen": {"l": 0, "t": 0, "r": 10, "b": 10}},
+        ]
+
+        with patch.object(client, "check_helper_status", return_value=True), patch.object(
+            client,
+            "get_focus",
+            side_effect=focus_nodes,
+        ) as get_focus_mock, patch("talkback_lib.time.sleep") as sleep_mock:
+            result = client.check_talkback_ready("SER")
+
+        self.assertEqual(result, {"status": "enabled", "reason": "ok"})
+        self.assertEqual(get_focus_mock.call_count, 2)
+        sleep_mock.assert_called_once_with(0.4)
+
+    def test_check_talkback_ready_retries_sanity_then_returns_false_positive_enabled(self):
+        client = FakeA11yClient()
+        client.enabled_services_payload = "foo:com.google.android.marvin.talkback/.TalkBackService"
+
+        with patch.object(client, "check_helper_status", return_value=True), patch.object(
+            client,
+            "get_focus",
+            return_value={},
+        ) as get_focus_mock, patch("talkback_lib.time.sleep") as sleep_mock:
+            result = client.check_talkback_ready("SER")
+
+        self.assertEqual(result, {"status": "enabled_but_not_ready", "reason": "false_positive_enabled"})
+        self.assertEqual(get_focus_mock.call_count, 3)
+        self.assertEqual(sleep_mock.call_count, 2)
+
     def test_check_talkback_ready_returns_enabled_when_talkback_and_helper_ready(self):
         client = FakeA11yClient()
         client.enabled_services_payload = "foo:com.samsung.android.accessibility.talkback/.TalkBackService"
@@ -1829,7 +1863,7 @@ class SmartMoveFocusTest(unittest.TestCase):
 
 class FocusHelpersTest(unittest.TestCase):
     def test_client_algorithm_version_is_updated(self):
-        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.34")
+        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.37")
 
     def test_extract_visible_label_from_focus_prefers_text(self):
         focus_node = {"text": "  Visible Text  ", "contentDescription": "Desc"}
