@@ -13,20 +13,9 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.70.2"
-    private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
-    private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
-    private const val ONECONNECT_UPDATE_APP_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_title"
-    private const val ONECONNECT_UPDATE_APP_TEXT_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_text"
-    private const val ONECONNECT_UPDATE_APP_CLOSE_BUTTON_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card_close_btn"
-    private const val ONECONNECT_UPDATE_BUTTON_VIEW_ID = "com.samsung.android.oneconnect:id/update_button"
-    private const val ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/noti_title"
-    private const val ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID = "com.samsung.android.oneconnect:id/notification_item_switch"
-    private const val ONECONNECT_PREF_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/pref_title"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.71.0"
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
     private const val MIN_ONECONNECT_SETTINGS_ROW_HEIGHT_PX = 80
-    private const val ANDROID_TITLE_VIEW_ID = "android:id/title"
-    private const val ANDROID_SUMMARY_VIEW_ID = "android:id/summary"
 
 
     @Volatile
@@ -195,7 +184,7 @@ object A11yNavigator {
                     "[DEBUG][ROW_GROUP] formed rep=${oneConnectRowRepresentative.viewIdResourceName} members=[$memberSummary]"
                 )
             }
-            val hasUpdateAppCard = groupViewIds.contains(ONECONNECT_UPDATE_APP_CARD_VIEW_ID)
+            val hasUpdateAppCard = groupViewIds.contains(OneConnectTraversalPolicy.UPDATE_APP_CARD_VIEW_ID)
             val hasUpdateAppMember = groupViewIds.any { isOneConnectUpdateAppMemberViewId(it) }
             if (hasUpdateAppCard && hasUpdateAppMember) {
                 Log.i(
@@ -802,7 +791,7 @@ object A11yNavigator {
             } else if (initialHeroIndex == -1) {
                 val navigateUpIndex = traversalList.indexOfFirst { node ->
                     val packageName = node.packageName?.toString()?.trim().orEmpty()
-                    if (packageName != "com.samsung.android.oneconnect") return@indexOfFirst false
+                    if (!OneConnectTraversalPolicy.isOneConnectPackageName(packageName)) return@indexOfFirst false
                     val label = (
                         resolvePrimaryLabel(node)
                             ?: A11yTraversalAnalyzer.recoverDescendantLabel(node)
@@ -881,7 +870,7 @@ object A11yNavigator {
         return traversalList.indexOfFirst { node ->
             if (!node.isVisibleToUser || node.isClickable || !node.isFocusable) return@indexOfFirst false
             val packageName = node.packageName?.toString()?.trim().orEmpty()
-            if (packageName != "com.samsung.android.oneconnect") return@indexOfFirst false
+            if (!OneConnectTraversalPolicy.isOneConnectPackageName(packageName)) return@indexOfFirst false
             val descendantTextCandidates = mutableListOf<String>()
             A11yTraversalAnalyzer.collectDescendantReadableText(
                 node = node,
@@ -933,15 +922,15 @@ object A11yNavigator {
             return settingsRow
         }
         val containsUpdateAppCard = group.any {
-            it.node.packageName?.toString()?.trim() == ONECONNECT_PACKAGE_NAME &&
-                it.node.viewIdResourceName == ONECONNECT_UPDATE_APP_CARD_VIEW_ID
+            it.node.packageName?.toString()?.trim() == OneConnectTraversalPolicy.PACKAGE_NAME &&
+                it.node.viewIdResourceName == OneConnectTraversalPolicy.UPDATE_APP_CARD_VIEW_ID
         }
         val containsUpdateAppMember = group.any {
-            it.node.packageName?.toString()?.trim() == ONECONNECT_PACKAGE_NAME &&
+            it.node.packageName?.toString()?.trim() == OneConnectTraversalPolicy.PACKAGE_NAME &&
                 isOneConnectUpdateAppMemberViewId(it.node.viewIdResourceName)
         }
         if (containsUpdateAppCard && containsUpdateAppMember) {
-            group.firstOrNull { it.node.viewIdResourceName == ONECONNECT_UPDATE_APP_CARD_VIEW_ID }?.let { updateAppCard ->
+            group.firstOrNull { it.node.viewIdResourceName == OneConnectTraversalPolicy.UPDATE_APP_CARD_VIEW_ID }?.let { updateAppCard ->
                 Log.d(
                     "A11Y_HELPER",
                     "[DEBUG][NORMALIZE] update_app representative chosen: update_app_card"
@@ -978,10 +967,7 @@ object A11yNavigator {
     }
 
     private fun isOneConnectUpdateAppMemberViewId(viewId: String?): Boolean {
-        return viewId == ONECONNECT_UPDATE_APP_TITLE_VIEW_ID ||
-            viewId == ONECONNECT_UPDATE_APP_TEXT_VIEW_ID ||
-            viewId == ONECONNECT_UPDATE_APP_CLOSE_BUTTON_VIEW_ID ||
-            viewId == ONECONNECT_UPDATE_BUTTON_VIEW_ID
+        return OneConnectTraversalPolicy.isUpdateAppMemberViewId(viewId)
     }
 
     private fun shouldTreatAsOneConnectSettingsRowAliasGroup(
@@ -1029,7 +1015,7 @@ object A11yNavigator {
         var current = node ?: return null
         while (true) {
             val packageName = current.packageName?.toString()?.trim().orEmpty()
-            if (packageName == ONECONNECT_PACKAGE_NAME && (current.isClickable || current.isFocusable)) {
+            if (packageName == OneConnectTraversalPolicy.PACKAGE_NAME && (current.isClickable || current.isFocusable)) {
                 if (isOneConnectSettingsRowContainer(current)) {
                     return current
                 }
@@ -1040,15 +1026,7 @@ object A11yNavigator {
     }
 
     private fun isOneConnectSettingsRowContainer(node: AccessibilityNodeInfo): Boolean {
-        if (isOneConnectUpdateAppMemberViewId(node.viewIdResourceName) || node.viewIdResourceName == ONECONNECT_UPDATE_APP_CARD_VIEW_ID) {
-            return false
-        }
-        val viewId = node.viewIdResourceName?.lowercase().orEmpty()
-        if (viewId.contains("wrapperlayout") || viewId.contains("scrollview") || viewId.contains("recycler")) {
-            Log.d("A11Y_HELPER", "[DEBUG][ROW_GROUP] rejected ancestor too high=${node.viewIdResourceName}")
-            return false
-        }
-        if (A11yNodeUtils.isContainerLikeClassName(node.className?.toString()) && !isSettingsRowViewId(node.viewIdResourceName)) {
+        if (OneConnectTraversalPolicy.shouldRejectSettingsRowContainerEarly(node, ::isSettingsRowViewId)) {
             Log.d("A11Y_HELPER", "[DEBUG][ROW_GROUP] rejected ancestor too high=${node.viewIdResourceName}")
             return false
         }
@@ -1063,14 +1041,10 @@ object A11yNavigator {
         val titleNode = findDescendantByPredicate(
             node = node,
             maxDepth = MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE
-        ) { child ->
-            child.viewIdResourceName == ANDROID_TITLE_VIEW_ID ||
-                isOneConnectPrefTitleNode(child) ||
-                (!child.text.isNullOrBlank() && !A11yNodeUtils.isContainerLikeClassName(child.className?.toString()))
-        } ?: return false
-        val hasSettingsTitle = titleNode.viewIdResourceName == ANDROID_TITLE_VIEW_ID ||
-            isOneConnectPrefTitleNode(titleNode)
-        if (titleNode.viewIdResourceName == ONECONNECT_PREF_TITLE_VIEW_ID) {
+        ) { child -> OneConnectTraversalPolicy.isSettingsTitleNodeCandidate(child) } ?: return false
+        val hasSettingsTitle = titleNode.viewIdResourceName == OneConnectTraversalPolicy.ANDROID_TITLE_VIEW_ID ||
+            OneConnectTraversalPolicy.isOneConnectPrefTitleNode(titleNode)
+        if (titleNode.viewIdResourceName == OneConnectTraversalPolicy.PREF_TITLE_VIEW_ID) {
             Log.d(
                 "A11Y_HELPER",
                 "[DEBUG][ROW_GROUP] title accepted resource=pref_title row=${node.viewIdResourceName}"
@@ -1092,7 +1066,7 @@ object A11yNavigator {
             val className = child.className?.toString()?.lowercase().orEmpty()
             className.contains("switch") || child.isCheckable
         }
-        val summaryNode = findDescendantByViewId(node, ANDROID_SUMMARY_VIEW_ID)
+        val summaryNode = findDescendantByViewId(node, OneConnectTraversalPolicy.ANDROID_SUMMARY_VIEW_ID)
         if (summaryNode != null) {
             val summaryBounds = Rect().also { summaryNode.getBoundsInScreen(it) }
             if (!rowBounds.contains(summaryBounds)) return false
@@ -1110,19 +1084,13 @@ object A11yNavigator {
         return true
     }
 
-    private fun isOneConnectPrefTitleNode(node: AccessibilityNodeInfo): Boolean {
-        val packageName = node.packageName?.toString()?.trim().orEmpty()
-        return packageName == ONECONNECT_PACKAGE_NAME &&
-            node.viewIdResourceName == ONECONNECT_PREF_TITLE_VIEW_ID
-    }
-
     private fun findOneConnectNotificationsRowContainer(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
         var current = node ?: return null
         while (true) {
             val packageName = current.packageName?.toString()?.trim().orEmpty()
-            if (packageName == ONECONNECT_PACKAGE_NAME && (current.isClickable || current.isFocusable)) {
-                val titleNode = findDescendantByViewId(current, ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID)
-                val switchNode = findDescendantByViewId(current, ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID)
+            if (packageName == OneConnectTraversalPolicy.PACKAGE_NAME && (current.isClickable || current.isFocusable)) {
+                val titleNode = findDescendantByViewId(current, OneConnectTraversalPolicy.NOTIFICATIONS_TITLE_VIEW_ID)
+                val switchNode = findDescendantByViewId(current, OneConnectTraversalPolicy.NOTIFICATIONS_SWITCH_VIEW_ID)
                 if (titleNode != null && switchNode != null) {
                     val rowBounds = Rect().also { current.getBoundsInScreen(it) }
                     val titleBounds = Rect().also { titleNode.getBoundsInScreen(it) }
@@ -1252,7 +1220,7 @@ object A11yNavigator {
         val nextCandidate = normalizedTraversal[nextIndex]
         val nextCandidateRow = findOneConnectSettingsRowContainer(nextCandidate) ?: return nextIndex
         if (!isSameNode(nextCandidateRow, currentRowContainer)) return nextIndex
-        if (nextCandidate.viewIdResourceName == ONECONNECT_PREF_TITLE_VIEW_ID) {
+        if (nextCandidate.viewIdResourceName == OneConnectTraversalPolicy.PREF_TITLE_VIEW_ID) {
             Log.d(
                 "A11Y_HELPER",
                 "[DEBUG][ROW_GROUP] representative already consumed for pref_title row"
@@ -1290,7 +1258,7 @@ object A11yNavigator {
             contextNodes = normalizedTraversal
         )
         if (debugEnabled) {
-            Log.d("A11Y_HELPER", "[DEBUG][NOTI_FALLBACK] enter")
+            Log.d("A11Y_HELPER", "[DEBUG][ONECONNECT][NOTI_FALLBACK] enter")
         }
         if (nextIndex !in normalizedTraversal.indices) return nextIndex
         val currentNode = state.currentPosition.resolvedCurrent ?: normalizedTraversal.getOrNull(state.currentPosition.currentIndex)
@@ -1309,46 +1277,46 @@ object A11yNavigator {
         if (debugEnabled) {
             Log.d(
                 "A11Y_HELPER",
-                "[DEBUG][NOTI_FALLBACK] enter current=${summarizeTraversalCandidate(normalizedTraversal, state.currentPosition.currentIndex, state)} next=${summarizeTraversalCandidate(normalizedTraversal, nextIndex, state)} rep=${summarizeTraversalCandidate(normalizedTraversal, representativeIndex, state)}"
+                "[DEBUG][ONECONNECT][NOTI_FALLBACK] enter current=${summarizeTraversalCandidate(normalizedTraversal, state.currentPosition.currentIndex, state)} next=${summarizeTraversalCandidate(normalizedTraversal, nextIndex, state)} rep=${summarizeTraversalCandidate(normalizedTraversal, representativeIndex, state)}"
             )
             Log.d(
                 "A11Y_HELPER",
-                "[DEBUG][NOTI_FALLBACK] repVisited=$representativeVisited sameRow=$sameRow nextIndex=$nextIndex representativeIndex=$representativeIndex"
+                "[DEBUG][ONECONNECT][NOTI_FALLBACK] repVisited=$representativeVisited sameRow=$sameRow nextIndex=$nextIndex representativeIndex=$representativeIndex"
             )
         }
         if (!sameRow) {
             if (debugEnabled) {
-                Log.d("A11Y_HELPER", "[DEBUG][NOTI_FALLBACK] prevented=false reason=next_candidate_not_same_row")
+                Log.d("A11Y_HELPER", "[DEBUG][ONECONNECT][NOTI_FALLBACK] prevented=false reason=next_candidate_not_same_row")
             }
             return nextIndex
         }
         Log.d(
             "A11Y_HELPER",
-            "[DEBUG][NOTI_FALLBACK] notifications same-row reselection prevented index=$nextIndex representativeIndex=$representativeIndex representativeVisited=$representativeVisited"
+            "[DEBUG][ONECONNECT][NOTI_FALLBACK] notifications same-row reselection prevented index=$nextIndex representativeIndex=$representativeIndex representativeVisited=$representativeVisited"
         )
         for (index in (nextIndex + 1) until normalizedTraversal.size) {
             val candidateRow = findOneConnectNotificationsRowContainer(normalizedTraversal[index])
             if (candidateRow != null && isSameNode(candidateRow, currentRowContainer)) {
                 Log.d(
                     "A11Y_HELPER",
-                    "[DEBUG][NOTI_FALLBACK] notifications group skipped because representative already consumed"
+                    "[DEBUG][ONECONNECT][NOTI_FALLBACK] notifications group skipped because representative already consumed"
                 )
                 continue
             }
             Log.d(
                 "A11Y_HELPER",
-                "[DEBUG][NOTI_FALLBACK] notifications advanced to next external candidate index=$index"
+                "[DEBUG][ONECONNECT][NOTI_FALLBACK] notifications advanced to next external candidate index=$index"
             )
             if (debugEnabled) {
                 Log.d(
                     "A11Y_HELPER",
-                    "[DEBUG][NOTI_FALLBACK] prevented=true replacement=${summarizeTraversalCandidate(normalizedTraversal, index, state)}"
+                    "[DEBUG][ONECONNECT][NOTI_FALLBACK] prevented=true replacement=${summarizeTraversalCandidate(normalizedTraversal, index, state)}"
                 )
             }
             return index
         }
         if (debugEnabled) {
-            Log.d("A11Y_HELPER", "[DEBUG][NOTI_FALLBACK] prevented=false reason=no_external_candidate")
+            Log.d("A11Y_HELPER", "[DEBUG][ONECONNECT][NOTI_FALLBACK] prevented=false reason=no_external_candidate")
         }
         return nextIndex
     }
@@ -1657,33 +1625,10 @@ object A11yNavigator {
         aliasMembers: List<AccessibilityNodeInfo>,
         reason: String
     ) {
-        val mergedAliasMembers = LinkedHashSet<AccessibilityNodeInfo>().apply {
-            addAll(aliasMembers)
-            val representativeViewId = representativeNode.viewIdResourceName
-            if (representativeViewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID) {
-                val pending = ArrayDeque<AccessibilityNodeInfo>()
-                pending.add(representativeNode)
-                while (pending.isNotEmpty()) {
-                    val current = pending.removeFirst()
-                    for (i in 0 until current.childCount) {
-                        val child = current.getChild(i) ?: continue
-                        if (child.viewIdResourceName == ONECONNECT_UPDATE_APP_TITLE_VIEW_ID) {
-                            add(child)
-                        }
-                        pending.add(child)
-                    }
-                }
-            } else if (representativeViewId == ONECONNECT_UPDATE_APP_TITLE_VIEW_ID) {
-                var parent = representativeNode.parent
-                while (parent != null) {
-                    if (parent.viewIdResourceName == ONECONNECT_UPDATE_APP_CARD_VIEW_ID) {
-                        add(parent)
-                        break
-                    }
-                    parent = parent.parent
-                }
-            }
-        }
+        val mergedAliasMembers = OneConnectTraversalPolicy.extendUpdateAppAliasMembers(
+            representativeNode = representativeNode,
+            aliasMembers = aliasMembers
+        )
         if (mergedAliasMembers.isEmpty()) return
         val normalizedRepresentativeLabel = representativeLabel.trim()
         val recordedKeys = linkedSetOf<String>()
@@ -1735,18 +1680,8 @@ object A11yNavigator {
     }
 
     private fun isOneConnectSettingsDebugTargetNode(node: AccessibilityNodeInfo): Boolean {
-        if (node.packageName?.toString()?.trim() == ONECONNECT_PACKAGE_NAME) return true
-        val viewId = node.viewIdResourceName
-        if (viewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID ||
-            viewId == ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID ||
-            viewId == ONECONNECT_NOTIFICATIONS_SWITCH_VIEW_ID
-        ) return true
-        if (viewId == ANDROID_TITLE_VIEW_ID) {
-            val label = (resolvePrimaryLabel(node) ?: A11yTraversalAnalyzer.recoverDescendantLabel(node)).orEmpty().lowercase()
-            if (label.contains("samsung account") || label.contains("notifications")) return true
-        }
         val label = (resolvePrimaryLabel(node) ?: A11yTraversalAnalyzer.recoverDescendantLabel(node)).orEmpty().lowercase()
-        return label.contains("update app") || label.contains("samsung account") || label.contains("notifications")
+        return OneConnectTraversalPolicy.isSettingsDebugTargetNode(node, label)
     }
 
     private fun summarizeTraversalCandidate(
