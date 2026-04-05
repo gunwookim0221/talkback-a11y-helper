@@ -152,7 +152,7 @@ client.clear_logcat(dev_serial)
 **실제 자동화에서 응답 가능한지(actually usable)** 를 구분합니다.
 
 1) `settings secure accessibility_enabled` + `enabled_accessibility_services`로 TalkBack service 존재 확인  
-2) helper 준비 상태 확인 후 `get_focus(..., allow_fallback_dump=False, mode="fast")` sanity check 수행
+2) helper 준비 상태 확인 후 `get_focus(..., allow_fallback_dump=False, mode="fast")` sanity check 수행(최대 3회 시도/0.4초 간격 retry)
 
 ### Parameters
 
