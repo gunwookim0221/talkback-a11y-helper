@@ -1041,9 +1041,9 @@ def test_stabilize_anchor_succeeds_without_selection_when_anchor_and_context_mat
 def test_menu_main_uses_smartthings_anchor_config():
     menu_cfg = next(cfg for cfg in script_test.TAB_CONFIGS if cfg.get("scenario_id") == "menu_main")
 
-    assert menu_cfg["anchor_name"] == "(?i).*smartthings.*"
-    assert menu_cfg["anchor"]["text_regex"] == "(?i).*smartthings.*"
-    assert menu_cfg["anchor"]["announcement_regex"] == "(?i).*smartthings.*"
+    assert menu_cfg["anchor_name"] == "(?i).*smartthings settings.*|.*settings.*"
+    assert menu_cfg["anchor"]["text_regex"] == "(?i).*smartthings settings.*|.*settings.*"
+    assert menu_cfg["anchor"]["announcement_regex"] == "(?i).*smartthings settings.*|.*settings.*"
 
 
 def test_non_menu_tabs_keep_common_qr_anchor_config():

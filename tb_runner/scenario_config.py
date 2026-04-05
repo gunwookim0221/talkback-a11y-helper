@@ -305,11 +305,11 @@ TAB_CONFIGS = [
         },
         "screen_context_mode": "bottom_tab",
         "stabilization_mode": "anchor_then_context",
-        "anchor_name": "(?i).*smartthings settings.*|(?i).*settings.*",
+        "anchor_name": "(?i).*smartthings settings.*|.*settings.*",
         "anchor_type": "a",
         "anchor": {
-            "text_regex": "(?i).*smartthings settings.*|(?i).*settings.*",
-            "announcement_regex": "(?i).*smartthings settings.*|(?i).*settings.*",
+            "text_regex": "(?i).*smartthings settings.*|.*settings.*",
+            "announcement_regex": "(?i).*smartthings settings.*|.*settings.*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
