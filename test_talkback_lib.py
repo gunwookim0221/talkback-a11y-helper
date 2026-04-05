@@ -637,14 +637,14 @@ class TouchIsinTest(unittest.TestCase):
 
         self.assertEqual(result, {"status": "enabled_but_not_ready", "reason": "talkback_not_ready"})
 
-    def test_check_talkback_ready_returns_enabled_but_not_ready_when_focus_sanity_fails(self):
+    def test_check_talkback_ready_proceeds_when_focus_sanity_fails(self):
         client = FakeA11yClient()
         client.enabled_services_payload = "foo:com.google.android.marvin.talkback/.TalkBackService"
 
         with patch.object(client, "check_helper_status", return_value=True), patch.object(client, "get_focus", return_value={}):
             result = client.check_talkback_ready("SER")
 
-        self.assertEqual(result, {"status": "enabled_but_not_ready", "reason": "false_positive_enabled"})
+        self.assertEqual(result, {"status": "enabled", "reason": "ok"})
 
     def test_check_talkback_ready_returns_enabled_when_sanity_retry_succeeds(self):
         client = FakeA11yClient()
@@ -665,7 +665,7 @@ class TouchIsinTest(unittest.TestCase):
         self.assertEqual(get_focus_mock.call_count, 2)
         sleep_mock.assert_called_once_with(0.4)
 
-    def test_check_talkback_ready_retries_sanity_then_returns_false_positive_enabled(self):
+    def test_check_talkback_ready_retries_sanity_then_proceeds_without_initial_focus(self):
         client = FakeA11yClient()
         client.enabled_services_payload = "foo:com.google.android.marvin.talkback/.TalkBackService"
 
@@ -676,7 +676,7 @@ class TouchIsinTest(unittest.TestCase):
         ) as get_focus_mock, patch("talkback_lib.time.sleep") as sleep_mock:
             result = client.check_talkback_ready("SER")
 
-        self.assertEqual(result, {"status": "enabled_but_not_ready", "reason": "false_positive_enabled"})
+        self.assertEqual(result, {"status": "enabled", "reason": "ok"})
         self.assertEqual(get_focus_mock.call_count, 3)
         self.assertEqual(sleep_mock.call_count, 2)
 
