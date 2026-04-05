@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.3"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.68.4"
 
 
     @Volatile
@@ -167,6 +167,15 @@ object A11yNavigator {
             val groupIndex = normalizedNodes.size
             normalizedNodes += representative
             aliasMembersByIndex[groupIndex] = group.map { it.node }
+            val groupViewIds = group.mapNotNull { it.node.viewIdResourceName }
+            val containsUpdateAppPair = groupViewIds.any { it.endsWith("/update_app_card") } &&
+                groupViewIds.any { it.endsWith("/update_app_title") }
+            if (containsUpdateAppPair) {
+                Log.i(
+                    "A11Y_HELPER",
+                    "[NORMALIZE][update_app_alias_group] representative=${representative.node.viewIdResourceName} members=${groupViewIds.joinToString()}"
+                )
+            }
         }
         return normalizedNodes to aliasMembersByIndex
     }
@@ -439,6 +448,13 @@ object A11yNavigator {
         val selectionDecision = initialTarget.selectionDecision
         Log.i("A11Y_HELPER", "[DECIDE] select_next currentIndex=${selectionDecision.currentIndex}, fallbackIndex=${selectionDecision.fallbackIndex}, nextIndex=${selectionDecision.nextIndex}")
         Log.i("A11Y_HELPER", "[DECIDE] fallbackIndex=${state.currentPosition.fallbackIndex}")
+        val selectedCandidate = normalize.traversalList.getOrNull(executionDecision.nextIndex)
+        if (selectedCandidate != null) {
+            Log.i(
+                "A11Y_HELPER",
+                "[DECIDE] selected_candidate index=${executionDecision.nextIndex} viewId=${selectedCandidate.viewIdResourceName} label=${(resolvePrimaryLabel(selectedCandidate) ?: A11yTraversalAnalyzer.recoverDescendantLabel(selectedCandidate) ?: "<no-label>").replace("\n", " ")}"
+            )
+        }
         val findAndFocusContext = FindAndFocusPhaseContext(
             root = state.root,
             traversalList = normalize.traversalList,

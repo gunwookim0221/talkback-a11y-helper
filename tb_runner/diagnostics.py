@@ -342,6 +342,15 @@ class StopEvaluator:
             elif bounded_two_card_loop:
                 stop = True
                 reason = "bounded_two_card_loop"
+            elif (
+                same_count >= 8
+                and recent_duplicate
+                and recent_semantic_duplicate
+                and recent_semantic_unique_count <= 1
+                and semantic_same_like
+            ):
+                stop = True
+                reason = "repeat_semantic_stall"
 
         details = {
             "terminal": terminal_signal,
@@ -360,6 +369,7 @@ class StopEvaluator:
             "recent_semantic_duplicate_distance": recent_semantic_duplicate_distance,
             "recent_semantic_unique_count": recent_semantic_unique_count,
             "semantic_same_like": semantic_same_like,
+            "repeat_stop_hit": reason in {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall"},
             "raw_fingerprint": current_fingerprint,
             "semantic_signature": current_semantic_signature,
         }

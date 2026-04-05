@@ -9,7 +9,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.4.9"
+    const val VERSION: String = "1.5.0"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -434,7 +434,10 @@ object A11yFocusExecutor {
             A11yHistoryManager.markFinalCommitTurn(activeTurnId)
             Log.i("A11Y_HELPER", "[FOCUS_VERIFY] success_basis=committed_candidate")
         }
-        Log.i("A11Y_HELPER", "[FOCUS_VERIFY] final_focus_commit candidate=${decision.finalLabel.replace("\n", " ")} source=${decision.source}")
+        Log.i(
+            "A11Y_HELPER",
+            "[FOCUS_VERIFY] final_focus_commit candidate=${decision.finalLabel.replace("\n", " ")} source=${decision.source} viewId=${decision.finalTarget.viewIdResourceName}"
+        )
         return ActionResult(decision.success, if (decision.success) decision.commitStatus else decision.reason, decision.finalTarget)
     }
 
