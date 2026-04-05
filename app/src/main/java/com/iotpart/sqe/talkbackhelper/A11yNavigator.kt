@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.69.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.69.1"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
     private const val ONECONNECT_UPDATE_APP_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_title"
@@ -698,6 +698,10 @@ object A11yNavigator {
         executionDecision: SmartNextExecutionDecision
     ): TargetActionOutcome {
         val targetIndex = executionDecision.nextIndex.coerceAtLeast(0)
+        val targetNode = context.traversalList.getOrNull(targetIndex)
+        if (shouldEmitOneConnectSettingsDebugLogs(current = targetNode, contextNodes = context.traversalList)) {
+            Log.d("A11Y_HELPER", "[DEBUG][REGULAR] enter")
+        }
         Log.i("A11Y_HELPER", "[EXECUTE] Performing regular next navigation in single-target mode targetIndex=$targetIndex")
         val outcome = A11yPostScrollScanner.findAndFocusFirstContent(
             context = context.findAndFocusContext,
@@ -771,6 +775,9 @@ object A11yNavigator {
             fallback = traversalList.getOrNull(fallbackIndex),
             contextNodes = traversalList
         )
+        if (debugAroundDecision) {
+            Log.d("A11Y_HELPER", "[DEBUG][DECIDE] enter")
+        }
         if (debugAroundDecision) {
             Log.d(
                 "A11Y_HELPER",
@@ -1060,14 +1067,17 @@ object A11yNavigator {
         nextIndex: Int
     ): Int {
         val normalizedTraversal = state.normalize.traversalList
-        if (nextIndex !in normalizedTraversal.indices) return nextIndex
-        val currentNode = state.currentPosition.resolvedCurrent ?: normalizedTraversal.getOrNull(state.currentPosition.currentIndex)
-            ?: return nextIndex
         val debugEnabled = shouldEmitOneConnectSettingsDebugLogs(
-            current = currentNode,
+            current = state.currentPosition.resolvedCurrent ?: normalizedTraversal.getOrNull(state.currentPosition.currentIndex),
             next = normalizedTraversal.getOrNull(nextIndex),
             contextNodes = normalizedTraversal
         )
+        if (debugEnabled) {
+            Log.d("A11Y_HELPER", "[DEBUG][NOTI] enter")
+        }
+        if (nextIndex !in normalizedTraversal.indices) return nextIndex
+        val currentNode = state.currentPosition.resolvedCurrent ?: normalizedTraversal.getOrNull(state.currentPosition.currentIndex)
+            ?: return nextIndex
         val currentRowContainer = findOneConnectNotificationsRowContainer(currentNode) ?: return nextIndex
         val representativeIndex = normalizedTraversal.indexOfFirst { candidate ->
             val candidateRow = findOneConnectNotificationsRowContainer(candidate) ?: return@indexOfFirst false
@@ -1385,6 +1395,9 @@ object A11yNavigator {
 
     internal fun recordVisitedFocus(node: AccessibilityNodeInfo, label: String, reason: String) {
         val normalizedLabel = label.trim()
+        if (shouldEmitOneConnectSettingsDebugLogs(current = node)) {
+            Log.d("A11Y_HELPER", "[DEBUG][VISITED] enter")
+        }
         val descendantTextCandidates = mutableListOf<String>().also { textCandidates ->
             A11yTraversalAnalyzer.collectDescendantReadableText(
                 node = node,
@@ -1521,13 +1534,12 @@ object A11yNavigator {
                 add(contextNodes.last())
             }
         }
-        if (scopedNodes.none { it.packageName?.toString()?.trim() == ONECONNECT_PACKAGE_NAME }) return false
         return scopedNodes.any(::isOneConnectSettingsDebugTargetNode) ||
             contextNodes.any(::isOneConnectSettingsDebugTargetNode)
     }
 
     private fun isOneConnectSettingsDebugTargetNode(node: AccessibilityNodeInfo): Boolean {
-        if (node.packageName?.toString()?.trim() != ONECONNECT_PACKAGE_NAME) return false
+        if (node.packageName?.toString()?.trim() == ONECONNECT_PACKAGE_NAME) return true
         val viewId = node.viewIdResourceName
         if (viewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID ||
             viewId == ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID ||
