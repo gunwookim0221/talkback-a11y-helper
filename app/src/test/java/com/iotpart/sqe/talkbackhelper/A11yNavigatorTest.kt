@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.68.5")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.68.6")
     }
 
     @Test
@@ -2165,6 +2165,48 @@ class A11yNavigatorTest {
 
         assertTrue(recoveredLabelMatch)
         assertTrue(viewIdMatch)
+    }
+
+    @Test
+    fun isInVisitedHistory_returnsTrue_whenUpdateAppCardAlreadyVisitedAndTextAppears() {
+        val signatures = setOf(
+            A11yHistoryManager.VisibleHistorySignature(
+                label = "Update app",
+                viewId = "com.samsung.android.oneconnect:id/update_app_card",
+                bounds = Rect(0, 400, 1080, 920)
+            )
+        )
+
+        val aliasVisited = A11ySnapshotTracker.isInVisitedHistory(
+            label = "Please update to continue using features",
+            viewId = "com.samsung.android.oneconnect:id/update_app_text",
+            bounds = Rect(40, 560, 1040, 820),
+            visitedHistory = emptySet(),
+            visitedHistorySignatures = signatures
+        )
+
+        assertTrue(aliasVisited)
+    }
+
+    @Test
+    fun isInVisitedHistory_returnsFalse_forNonUpdateAppIdsEvenWithSimilarBounds() {
+        val signatures = setOf(
+            A11yHistoryManager.VisibleHistorySignature(
+                label = "Card",
+                viewId = "com.samsung.android.oneconnect:id/update_app_card",
+                bounds = Rect(0, 400, 1080, 920)
+            )
+        )
+
+        val aliasVisited = A11ySnapshotTracker.isInVisitedHistory(
+            label = "Other text",
+            viewId = "com.samsung.android.oneconnect:id/other_text",
+            bounds = Rect(40, 560, 1040, 820),
+            visitedHistory = emptySet(),
+            visitedHistorySignatures = signatures
+        )
+
+        assertFalse(aliasVisited)
     }
 
     @Test

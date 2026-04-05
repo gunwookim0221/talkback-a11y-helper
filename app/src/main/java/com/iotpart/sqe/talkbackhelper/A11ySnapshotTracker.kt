@@ -10,9 +10,12 @@ import kotlin.math.min
 typealias SnapshotVisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11ySnapshotTracker {
-    const val SNAPSHOT_TRACKER_VERSION: String = "1.0.8"
+    const val SNAPSHOT_TRACKER_VERSION: String = "1.0.9"
     private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
     private const val ONECONNECT_UPDATE_APP_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_title"
+    private const val ONECONNECT_UPDATE_APP_TEXT_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_text"
+    private const val ONECONNECT_UPDATE_APP_CLOSE_BUTTON_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card_close_btn"
+    private const val ONECONNECT_UPDATE_BUTTON_VIEW_ID = "com.samsung.android.oneconnect:id/update_button"
 
     internal data class RawVisibleNode(
         val label: String,
@@ -270,7 +273,7 @@ object A11ySnapshotTracker {
                 strictOneConnectUpdateAppAliasVisited -> {
                     Log.d(
                         "A11Y_HELPER",
-                        "[DEBUG][VISITED] alias member skipped because representative already consumed (update_app card/title pair)"
+                        "[DEBUG][VISITED] update_app child skipped because representative already consumed"
                     )
                     true
                 }
@@ -285,14 +288,20 @@ object A11ySnapshotTracker {
         visitedBounds: Rect,
         currentBounds: Rect
     ): Boolean {
-        val isCardAndTitlePair = (
+        val updateAppMemberViewIds = setOf(
+            ONECONNECT_UPDATE_APP_TITLE_VIEW_ID,
+            ONECONNECT_UPDATE_APP_TEXT_VIEW_ID,
+            ONECONNECT_UPDATE_APP_CLOSE_BUTTON_VIEW_ID,
+            ONECONNECT_UPDATE_BUTTON_VIEW_ID
+        )
+        val isCardAndMemberPair = (
             visitedViewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID &&
-                currentViewId == ONECONNECT_UPDATE_APP_TITLE_VIEW_ID
+                currentViewId in updateAppMemberViewIds
             ) || (
-            visitedViewId == ONECONNECT_UPDATE_APP_TITLE_VIEW_ID &&
-                currentViewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID
+            currentViewId == ONECONNECT_UPDATE_APP_CARD_VIEW_ID &&
+                visitedViewId in updateAppMemberViewIds
             )
-        if (!isCardAndTitlePair) return false
+        if (!isCardAndMemberPair) return false
         if (visitedBounds.contains(currentBounds) || currentBounds.contains(visitedBounds)) return true
         val intersection = Rect()
         if (!intersection.setIntersect(visitedBounds, currentBounds)) return false
