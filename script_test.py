@@ -19,7 +19,7 @@ from tb_runner.tab_logic import (
 )
 from tb_runner.constants import DEV_SERIAL, LOG_LEVEL, SCRIPT_VERSION
 from tb_runner.excel_report import save_excel
-from tb_runner.logging_utils import log
+from tb_runner.logging_utils import close_log_files, configure_log_files, log
 from tb_runner.perf_stats import RunPerfStats, format_perf_summary, save_excel_with_perf
 from tb_runner.scenario_config import TAB_CONFIGS
 from tb_runner.runtime_config import load_runtime_bundle
@@ -27,6 +27,10 @@ from tb_runner.utils import generate_output_path
 
 
 def main():
+    output_path = generate_output_path()
+    output_base_dir = str(Path(output_path).with_suffix(""))
+    configure_log_files(output_path)
+
     log(f"[MAIN] script start (version={SCRIPT_VERSION}, log_level={LOG_LEVEL})")
     client = A11yAdbClient(dev_serial=DEV_SERIAL)
     preflight = client.check_talkback_ready(dev=DEV_SERIAL)
@@ -36,6 +40,7 @@ def main():
     if talkback_status == "disabled":
         log("[PREFLIGHT] abort run reason='talkback_off'")
         log("TalkBack is OFF. Enable TalkBack and retry.")
+        close_log_files()
         return
     if talkback_status == "enabled_but_not_ready":
         if talkback_reason == "false_positive_enabled":
@@ -44,13 +49,12 @@ def main():
         else:
             log("[PREFLIGHT] abort run reason='talkback_not_ready'")
             log("TalkBack is ON but not ready. Wait a moment and retry.")
+        close_log_files()
         return
 
     run_perf = RunPerfStats()
 
     all_rows: list[dict] = []
-    output_path = generate_output_path()
-    output_base_dir = str(Path(output_path).with_suffix(""))
 
     log(f"[MAIN] output file: {output_path}")
     log(f"[MAIN] image dir base: {output_base_dir}")
@@ -102,6 +106,7 @@ def main():
         save_excel_with_perf(save_excel, all_rows, output_path, with_images=True)
         log("[MAIN] final save complete")
         log(format_perf_summary("run_summary", run_perf.summary_dict()))
+        close_log_files()
 
     log("[MAIN] script end")
 

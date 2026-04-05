@@ -459,6 +459,12 @@ normalized_label = client.normalize_for_comparison(visible_label)
 ### Python runner 로그 레벨 (`script_test.py`)
 
 - 환경변수 `TB_LOG_LEVEL`로 runner/클라이언트 로그 상세도를 제어할 수 있습니다. (기본값: `NORMAL`)
+- 로그는 기존처럼 콘솔(stdout)에 출력되며, 실행 시 생성되는 Excel 파일 prefix를 기준으로 `output/*.log`에도 함께 저장됩니다.
+  - 예: `output/talkback_compare_YYYYMMDD_HHMMSS.xlsx` 실행 시
+    - `output/talkback_compare_YYYYMMDD_HHMMSS.normal.log`
+    - `output/talkback_compare_YYYYMMDD_HHMMSS.debug.log`
+  - `TB_LOG_LEVEL=NORMAL`: `.normal.log`만 생성되며 NORMAL 이상 로그를 저장합니다.
+  - `TB_LOG_LEVEL=DEBUG`: `.debug.log`(전체 로그) + `.normal.log`(NORMAL 이상 로그) 두 파일을 모두 저장합니다.
   - `NORMAL` (사건 요약): 시작/종료/실패/저장/최종 판정 같은 운영 신호를 빠르게 확인하는 레벨
     - 핵심 태그: `[MAIN]`, `[PREFLIGHT]`, `[SCENARIO]`, `[TAB]`, `[ANCHOR]`, `[STEP]`, `[STOP]`, `[RECOVER]`, `[SAVE]`, `[PERF]`
   - `DEBUG` (원인 분석): 후보 카운트, dump source, fallback source, attempt 내부 상태 같은 진단 로그 포함
