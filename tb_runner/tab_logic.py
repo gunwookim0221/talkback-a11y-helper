@@ -127,20 +127,22 @@ def _attempt_tab_focus_alignment(
         deduped_selectors.append((type_, pattern, source))
 
     if not deduped_selectors:
-        log(f"{log_tag} skipped scenario='{scenario_id}' reason='no_selector'")
+        log(f"{log_tag} skipped scenario='{scenario_id}' reason='no_selector'", level="DEBUG")
         return {"attempted": False, "ok": False, "reason": "no_selector"}
 
     for attempt in range(1, max_retries + 1):
         type_, pattern, source = deduped_selectors[(attempt - 1) % len(deduped_selectors)]
         log(
             f"{log_tag} attempt={attempt}/{max_retries} scenario='{scenario_id}' "
-            f"type='{type_}' source='{source}'"
+            f"type='{type_}' source='{source}'",
+            level="DEBUG",
         )
         aligned = bool(client.select(dev=dev, name=pattern, type_=type_, wait_=select_wait_seconds))
         if aligned:
             log(
                 f"{log_tag} success scenario='{scenario_id}' attempt={attempt}/{max_retries} "
-                f"type='{type_}' source='{source}'"
+                f"type='{type_}' source='{source}'",
+                level="DEBUG",
             )
             return {"attempted": True, "ok": True, "attempt": attempt, "type": type_, "source": source}
 
@@ -217,7 +219,8 @@ def stabilize_tab_selection(
                 tab_action_mode = "touch"
                 log(
                     f"[TAB][action] scenario='{scenario_id}' mode='touch' "
-                    f"resource='{best_resource}' bounds='{best_bounds}' center='{center_x},{center_y}'"
+                    f"resource='{best_resource}' bounds='{best_bounds}' center='{center_x},{center_y}'",
+                    level="DEBUG",
                 )
                 selected = client.touch_point(dev=dev, x=center_x, y=center_y)
                 if not selected:
@@ -228,7 +231,8 @@ def stabilize_tab_selection(
                     selected = client.select(dev=dev, name=resource_pattern, type_="r", wait_=5)
                     log(
                         f"[TAB][action] scenario='{scenario_id}' mode='select_fallback' "
-                        f"reason='{tab_action_reason}' resource='{best_resource}'"
+                        f"reason='{tab_action_reason}' resource='{best_resource}'",
+                        level="DEBUG",
                     )
             else:
                 tab_action_mode = "select_fallback"
@@ -238,7 +242,8 @@ def stabilize_tab_selection(
                 selected = client.select(dev=dev, name=resource_pattern, type_="r", wait_=5)
                 log(
                     f"[TAB][action] scenario='{scenario_id}' mode='select_fallback' "
-                    f"reason='{tab_action_reason}' resource='{best_resource}' bounds='{best_bounds}'"
+                    f"reason='{tab_action_reason}' resource='{best_resource}' bounds='{best_bounds}'",
+                    level="DEBUG",
                 )
             parsed_bounds_text = (
                 f"{parsed_bounds[0]},{parsed_bounds[1]},{parsed_bounds[2]},{parsed_bounds[3]}" if parsed_bounds else ""
@@ -261,12 +266,14 @@ def stabilize_tab_selection(
             if tab_action_mode == "legacy_touch":
                 log(
                     f"[TAB][action] scenario='{scenario_id}' mode='legacy_touch' "
-                    f"reason='no_best_candidate_or_resource'"
+                    f"reason='no_best_candidate_or_resource'",
+                    level="DEBUG",
                 )
             else:
                 log(
                     f"[TAB][action] scenario='{scenario_id}' mode='legacy_touch' "
-                    f"reason='fallback_after_{tab_action_mode}'"
+                    f"reason='fallback_after_{tab_action_mode}'",
+                    level="DEBUG",
                 )
 
         focus_align_result = {"attempted": False, "ok": False, "reason": "not_selected"}
@@ -278,7 +285,8 @@ def stabilize_tab_selection(
                 )
                 log(
                     f"[TAB][focus_align_fast] path='touch_immediate' scenario='{scenario_id}' "
-                    f"transition=true settle_wait_seconds={settle_wait_seconds:.2f} max_attempts={focus_align_retries}"
+                    f"transition=true settle_wait_seconds={settle_wait_seconds:.2f} max_attempts={focus_align_retries}",
+                    level="DEBUG",
                 )
                 time.sleep(settle_wait_seconds)
             focus_align_result = _attempt_tab_focus_alignment(
@@ -293,10 +301,10 @@ def stabilize_tab_selection(
             )
             focus_align_result["fast_mode"] = fast_focus_align
         else:
-            log(f"[TAB][focus_align] skipped scenario='{scenario_id}' reason='tab_select_failed'")
+            log(f"[TAB][focus_align] skipped scenario='{scenario_id}' reason='tab_select_failed'", level="DEBUG")
 
         if selected and focus_align_result.get("ok") and fast_verify_path:
-            log(f"[TAB][focus_align_fast] verify_shortcut scenario='{scenario_id}' reason='context_none'")
+            log(f"[TAB][focus_align_fast] verify_shortcut scenario='{scenario_id}' reason='context_none'", level="DEBUG")
             return {
                 "ok": True,
                 "attempt": attempt,
@@ -346,7 +354,7 @@ def stabilize_tab_selection(
             }
         last_selected = bool(selected)
         if attempt < max_retries:
-            log(f"[TAB][select] retry {attempt}/{max_retries} scenario='{scenario_id}'")
+            log(f"[TAB][select] retry {attempt}/{max_retries} scenario='{scenario_id}'", level="DEBUG")
 
     return {
         "ok": False,

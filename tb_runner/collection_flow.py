@@ -159,7 +159,7 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
 
     for attempt in range(0, max_back_count + 1):
         if attempt > 0:
-            log(f"[RECOVER] back attempt={attempt}/{max_back_count}")
+            log(f"[RECOVER] back attempt={attempt}/{max_back_count}", level="DEBUG")
             back_ok = _send_back(client, dev)
             if not back_ok:
                 log("[RECOVER] failed reason='back_failed'")
@@ -176,12 +176,12 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
         if not detected:
             continue
 
-        log(f"[RECOVER] target detected type={policy.get('target_type', 'bottom_tab')}")
+        log(f"[RECOVER] target detected type={policy.get('target_type', 'bottom_tab')}", level="DEBUG")
         if needs_select:
-            log("[RECOVER] selecting target")
+            log("[RECOVER] selecting target", level="DEBUG")
             if not _select_recovery_target(client, dev, policy):
                 continue
-            log("[RECOVER] verify after select")
+            log("[RECOVER] verify after select", level="DEBUG")
             verify_sleeps = [wait_seconds, min(wait_seconds, 0.4)]
             verified = False
             verified_needs_select = True
@@ -201,10 +201,10 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
             if not verified:
                 continue
             if verified_needs_select and str(policy.get("target_type", "bottom_tab") or "bottom_tab") == "bottom_tab":
-                log("[RECOVER] verify soft-success reason='target_present_after_select'")
+                log("[RECOVER] verify soft-success reason='target_present_after_select'", level="DEBUG")
             elif verified_needs_select:
                 continue
-            log("[RECOVER] success after select verify")
+            log("[RECOVER] success after select verify", level="DEBUG")
 
         log("[RECOVER] success")
         return True

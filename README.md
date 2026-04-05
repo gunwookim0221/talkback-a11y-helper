@@ -294,7 +294,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.i
 
 ## `talkback_lib.py` 레거시 호환 API
 
-- Python 클라이언트 알고리즘 버전: `CLIENT_ALGORITHM_VERSION = 1.7.42`
+- Python 클라이언트 알고리즘 버전: `CLIENT_ALGORITHM_VERSION = 1.7.45`
 - 발화 조회 API
   - `get_announcements(...)` → 수집된 발화를 `strip`/빈 문자열 제거 후 공백으로 병합한 `str` 반환
   - `get_partial_announcements(...)` → raw 발화 조각 `list[str]` 반환
@@ -459,9 +459,21 @@ normalized_label = client.normalize_for_comparison(visible_label)
 ### Python runner 로그 레벨 (`script_test.py`)
 
 - 환경변수 `TB_LOG_LEVEL`로 runner/클라이언트 로그 상세도를 제어할 수 있습니다. (기본값: `NORMAL`)
-  - `NORMAL`: `[MAIN]`, `[STEP]`, `[OVERLAY]`, `[SAVE]`, `[WARN]`, `[MISMATCH]` 중심의 요약 로그
-  - `DEBUG`: `helper_status/get_focus/collect_focus_step`의 상세 timing·source 로그 포함
+  - `NORMAL` (사건 요약): 시작/종료/실패/저장/최종 판정 같은 운영 신호를 빠르게 확인하는 레벨
+    - 핵심 태그: `[MAIN]`, `[PREFLIGHT]`, `[SCENARIO]`, `[TAB]`, `[ANCHOR]`, `[STEP]`, `[STOP]`, `[RECOVER]`, `[SAVE]`, `[PERF]`
+  - `DEBUG` (원인 분석): 후보 카운트, dump source, fallback source, attempt 내부 상태 같은 진단 로그 포함
+    - 예: `[CONTEXT][debug]`, `[FOCUS][debug]`, `[CONTEXT][dump]`, `[TAB][action][debug]`, `[TAB][focus_align] attempt=...`, `[ANCHOR][stabilize] attempt=...`, `[RECOVER] back attempt=...`
 - mismatch 의심 시(`speech-focus 불일치`, `success=False + top_level 수용`, `overlay bounds-only realign`)는 `NORMAL`에서도 `[WARN]`/`[MISMATCH]`가 출력됩니다.
+
+- 실행 예시
+  - NORMAL:
+    ```bash
+    TB_LOG_LEVEL=NORMAL python script_test.py --config config/runtime_config.json
+    ```
+  - DEBUG:
+    ```bash
+    TB_LOG_LEVEL=DEBUG python script_test.py --config config/runtime_config.json
+    ```
 
 ## Python 클라이언트 발화 API 변경 사항
 
