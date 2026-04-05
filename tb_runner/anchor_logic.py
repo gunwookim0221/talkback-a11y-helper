@@ -356,7 +356,7 @@ def stabilize_anchor(
     )
 
     for attempt in range(1, max_retries + 1):
-        log(f"[ANCHOR][stabilize] attempt={attempt}/{max_retries} scenario='{scenario_id}'")
+        log(f"[ANCHOR][stabilize] attempt={attempt}/{max_retries} scenario='{scenario_id}'", level="DEBUG")
         dump_nodes = client.dump_tree(dev=dev)
         candidates = [
             _extract_candidate_from_node(node, index=i)
@@ -443,7 +443,8 @@ def stabilize_anchor(
             f"fields={last_verify.get('matched_fields', [])} "
             f"score={last_verify.get('score', 0)} "
             f"resource='{(last_verify.get('candidate') or {}).get('resource_id', '')}' "
-            f"bounds='{(last_verify.get('candidate') or {}).get('bounds', '')}'"
+            f"bounds='{(last_verify.get('candidate') or {}).get('bounds', '')}'",
+            level="DEBUG",
         )
         if str(last_context.get("type", "")) == "selected_bottom_tab":
             expected_value = (
@@ -452,15 +453,19 @@ def stabilize_anchor(
             )
             log(
                 f"[CONTEXT][dump] scenario='{scenario_id}' type='selected_bottom_tab' "
-                f"expected='{expected_value}'"
+                f"expected='{expected_value}'",
+                level="DEBUG",
             )
             selected_candidates = last_context.get("selected_candidates", [])
-            log(f"[CONTEXT][dump] selected_candidates_count={len(selected_candidates) if isinstance(selected_candidates, list) else 0}")
+            log(
+                f"[CONTEXT][dump] selected_candidates_count={len(selected_candidates) if isinstance(selected_candidates, list) else 0}",
+                level="DEBUG",
+            )
             log(f"[CONTEXT][dump] selected_candidates={selected_candidates}", level="DEBUG")
-            log(f"[CONTEXT][dump] actual_selected_text='{last_context.get('actual_selected_text', '')}'")
-            log(f"[CONTEXT][dump] source='{last_context.get('dump_source', 'step_cache')}'")
-            log(f"[CONTEXT][dump] lazy_dump_node_count={int(last_context.get('lazy_dump_node_count', 0) or 0)}")
-            log(f"[CONTEXT][dump] ok={bool(last_context.get('ok'))}")
+            log(f"[CONTEXT][dump] actual_selected_text='{last_context.get('actual_selected_text', '')}'", level="DEBUG")
+            log(f"[CONTEXT][dump] source='{last_context.get('dump_source', 'step_cache')}'", level="DEBUG")
+            log(f"[CONTEXT][dump] lazy_dump_node_count={int(last_context.get('lazy_dump_node_count', 0) or 0)}", level="DEBUG")
+            log(f"[CONTEXT][dump] ok={bool(last_context.get('ok'))}", level="DEBUG")
         log(
             f"[CONTEXT] scenario='{scenario_id}' type='{last_context.get('type', 'none')}' "
             f"expected='{last_context.get('expected', '')}' "
@@ -490,7 +495,8 @@ def stabilize_anchor(
             f"verify1_matched={str(verify1_matched).lower()} "
             f"verify2_matched={str(verify2_matched).lower()} "
             f"stable={str(verify_stable).lower()} "
-            f"reason='{stabilize_reason}'"
+            f"reason='{stabilize_reason}'",
+            level="DEBUG",
         )
 
         if not verify_matched:

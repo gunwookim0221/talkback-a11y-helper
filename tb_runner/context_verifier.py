@@ -161,7 +161,8 @@ def verify_context(
         selected_count = len(selected_candidate_debug_rows)
         log(
             f"[CONTEXT][debug] dump_nodes={dump_node_count} tab_like_candidates={tab_like_count} "
-            f"selected_candidates={selected_count} source='{dump_source}' lazy_dump_nodes={lazy_dump_node_count}"
+            f"selected_candidates={selected_count} source='{dump_source}' lazy_dump_nodes={lazy_dump_node_count}",
+            level="DEBUG",
         )
         log(
             f"[CONTEXT][debug] actual_source='{actual_source}' actual='{actual_selected_text}'",
@@ -172,7 +173,8 @@ def verify_context(
             f"fallback_nodes_reused={str(step.get('step_dump_tree_reason', '') == 'fallback_nodes_reused')} "
             f"get_focus_success_false_top_level_dump_attempted={bool(step.get('get_focus_success_false_top_level_dump_attempted', False))} "
             f"get_focus_success_false_top_level_dump_found={bool(step.get('get_focus_success_false_top_level_dump_found', False))} "
-            f"final_payload_source='{step.get('get_focus_final_payload_source', 'none')}'"
+            f"final_payload_source='{step.get('get_focus_final_payload_source', 'none')}'",
+            level="DEBUG",
         )
         if _should_log("DEBUG"):
             for idx, candidate in enumerate(selected_candidate_debug_rows):
