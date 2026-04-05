@@ -1,8 +1,11 @@
 import ast
 import json
+import logging
 import re
 from datetime import datetime
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def generate_output_path() -> str:
@@ -57,7 +60,11 @@ def parse_bounds_str(bounds_value: Any) -> tuple[int, int, int, int] | None:
 def _safe_regex_search(pattern: str, value: str) -> bool:
     if not pattern:
         return False
-    return bool(re.search(pattern, value or "", flags=re.IGNORECASE))
+    try:
+        return bool(re.search(pattern, value or "", flags=re.IGNORECASE))
+    except re.error as exc:
+        logger.warning("Invalid regex pattern ignored: %r (%s)", pattern, exc)
+        return False
 
 
 def sanitize_filename(value: str) -> str:
