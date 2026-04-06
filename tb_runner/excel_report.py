@@ -6,10 +6,133 @@ import re
 import pandas as pd
 
 from tb_runner.image_utils import create_excel_thumbnail, insert_images_to_excel
-from tb_runner.logging_utils import log
+from tb_runner.logging_utils import get_recent_logs, log
 from tb_runner.utils import to_json_text
 
-EXCEL_REPORT_VERSION = "1.2.1"
+EXCEL_REPORT_VERSION = "1.3.0"
+
+_DEBUG_LOG_KEYWORDS = (
+    "[STEP]",
+    "[ROW]",
+    "[STOP]",
+    "[MISMATCH]",
+    "[LOW_CONFIDENCE]",
+    "get_focus",
+    "announcement",
+    "mismatch",
+    "req_id",
+    "fingerprint",
+)
+_DEBUG_LOG_FAILURE_REASONS = {
+    "repeat_no_progress",
+    "terminal_not_handled",
+    "move_failed",
+    "speech_visible_diverged",
+}
+
+
+def _sanitize_filename_part(value: object, default: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return default
+    return re.sub(r"[^0-9a-zA-Z._-]+", "_", text)[:80] or default
+
+
+def _is_debug_log_target(row) -> bool:
+    final_result = str(getattr(row, "final_result", "") or "").strip().upper()
+    failure_reason = str(getattr(row, "failure_reason", "") or "").strip().lower()
+    mismatch_reason = "speech_visible_diverged" in failure_reason
+    if final_result in {"WARN", "FAIL"}:
+        return True
+    if mismatch_reason:
+        return True
+    if any(reason in failure_reason for reason in _DEBUG_LOG_FAILURE_REASONS):
+        return True
+    focus_confidence = str(getattr(row, "focus_confidence", "") or "").strip().upper()
+    return final_result == "WARN" and focus_confidence == "LOW"
+
+
+def _build_debug_log_snippet(step_value: object, req_id: str) -> str:
+    recent_logs = get_recent_logs(limit=260)
+    if not recent_logs:
+        return ""
+
+    step_str = str(step_value or "").strip()
+    step_token = f"step={step_str}" if step_str else ""
+    req_token = f"req_id='{req_id}'" if req_id else ""
+
+    filtered_lines: list[str] = []
+    for line in recent_logs:
+        if req_token and req_token in line:
+            filtered_lines.append(line)
+            continue
+        if step_token and step_token in line and any(token in line for token in _DEBUG_LOG_KEYWORDS):
+            filtered_lines.append(line)
+            continue
+        if req_id and req_id in line and any(token in line for token in _DEBUG_LOG_KEYWORDS):
+            filtered_lines.append(line)
+            continue
+
+    if not filtered_lines and step_token:
+        filtered_lines = [
+            line for line in recent_logs if step_token in line and any(token in line for token in _DEBUG_LOG_KEYWORDS)
+        ]
+    if not filtered_lines:
+        filtered_lines = [
+            line for line in recent_logs if any(token in line for token in _DEBUG_LOG_KEYWORDS)
+        ]
+    return "\n".join(filtered_lines[-80:]).strip()
+
+
+def _populate_result_debug_logs(result_df: pd.DataFrame, output_path: str) -> pd.DataFrame:
+    result_df["debug_log_path"] = ""
+    result_df["debug_log_name"] = ""
+    if result_df.empty:
+        return result_df
+
+    debug_dir = Path(output_path).with_suffix("").parent / "debug_logs"
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    write_failures = 0
+    write_fail_reason = ""
+
+    for row in result_df.itertuples(index=True):
+        if not _is_debug_log_target(row):
+            continue
+        req_id = str(getattr(row, "req_id", "") or "").strip()
+        scenario_id = _sanitize_filename_part(getattr(row, "scenario_id", ""), "scenario")
+        step_part = _sanitize_filename_part(getattr(row, "step", ""), "na")
+        req_part = _sanitize_filename_part(req_id, "no_req")
+        file_name = f"{scenario_id}_step_{step_part}_req_{req_part}.log"
+        file_path = debug_dir / file_name
+        snippet_text = _build_debug_log_snippet(getattr(row, "step", ""), req_id)
+        if not snippet_text:
+            continue
+        row_context = (
+            "[ROW_CONTEXT]\n"
+            f"scenario={getattr(row, 'scenario_id', '')}\n"
+            f"tab={getattr(row, 'tab', '')}\n"
+            f"step={getattr(row, 'step', '')}\n"
+            f"req_id={req_id}\n"
+            f"visible={getattr(row, 'visible', '')}\n"
+            f"speech={getattr(row, 'speech', '')}\n"
+            f"final_result={getattr(row, 'final_result', '')}\n"
+            f"failure_reason={getattr(row, 'failure_reason', '')}\n\n"
+            "[LOG_SNIPPET]\n"
+        )
+        try:
+            file_path.write_text(f"{row_context}{snippet_text}\n", encoding="utf-8")
+            result_df.at[row.Index, "debug_log_path"] = str(file_path)
+            result_df.at[row.Index, "debug_log_name"] = file_name
+        except Exception as exc:
+            write_failures += 1
+            if not write_fail_reason:
+                write_fail_reason = str(exc) or exc.__class__.__name__
+
+    if write_failures:
+        log(
+            f"[WARN][debug_log] snippet extraction skipped count={write_failures} reason='{write_fail_reason}'"
+        )
+    return result_df
 
 
 def _excel_col_to_name(col_idx: int) -> str:
@@ -211,6 +334,8 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
                 "final_result",
                 "failure_reason",
                 "review_note",
+                "debug_log_path",
+                "debug_log_name",
                 "crop_image_path",
                 "result_crop_thumbnail",
             ]
@@ -376,6 +501,8 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
         else ("speech_visible_diverged" if row["speech_match_result"] == "FAIL_MISMATCH" else ("fallback_dependent" if row["focus_confidence"] == "LOW" and row["final_result"] != "FAIL" else "")),
         axis=1,
     )
+    result["debug_log_path"] = ""
+    result["debug_log_name"] = ""
     result["result_crop_thumbnail"] = ""
 
     return result[
@@ -401,6 +528,8 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
             "final_result",
             "failure_reason",
             "review_note",
+            "debug_log_path",
+            "debug_log_name",
             "crop_image_path",
             "result_crop_thumbnail",
         ]
@@ -482,6 +611,56 @@ def _apply_result_crop_hyperlinks(writer: pd.ExcelWriter, result_df: pd.DataFram
         )
         log(
             f"[WARN][excel] result crop hyperlink skipped for {skipped_total} rows reasons='{reason_summary}'"
+        )
+
+
+def _apply_result_debug_log_hyperlinks(writer: pd.ExcelWriter, result_df: pd.DataFrame) -> None:
+    if "result" not in writer.sheets or "debug_log_path" not in result_df.columns:
+        return
+
+    ws = writer.sheets["result"]
+    debug_col_idx = result_df.columns.get_loc("debug_log_path")
+    name_col_idx = result_df.columns.get_loc("debug_log_name") if "debug_log_name" in result_df.columns else -1
+    is_openpyxl_sheet = hasattr(ws, "cell")
+    is_xlsxwriter_sheet = hasattr(ws, "write_url")
+    skipped_reasons: dict[str, int] = {}
+
+    for row_idx, debug_path in enumerate(result_df["debug_log_path"].tolist(), start=2):
+        path_text = str(debug_path or "").strip()
+        if not path_text:
+            continue
+        display_name = str(result_df.iloc[row_idx - 2]["debug_log_name"] if name_col_idx >= 0 else "").strip()
+        display_text = display_name or Path(path_text).name or path_text
+        abs_path = os.path.abspath(os.path.normpath(path_text))
+        target = abs_path
+        if is_xlsxwriter_sheet:
+            safe_path = abs_path.replace("\\", "/")
+            target = f"external:{safe_path}"
+        try:
+            if is_openpyxl_sheet:
+                cell = ws.cell(row=row_idx, column=debug_col_idx + 1)
+                cell.value = display_text
+                cell.hyperlink = target
+                cell.style = "Hyperlink"
+            elif is_xlsxwriter_sheet:
+                ws.write_url(row_idx - 1, debug_col_idx, target, string=display_text)
+            elif hasattr(ws, "write"):
+                ws.write(row_idx - 1, debug_col_idx, display_text)
+        except Exception as exc:
+            skipped_reasons[str(exc)] = skipped_reasons.get(str(exc), 0) + 1
+            try:
+                if is_openpyxl_sheet:
+                    ws.cell(row=row_idx, column=debug_col_idx + 1).value = display_text
+                elif hasattr(ws, "write"):
+                    ws.write(row_idx - 1, debug_col_idx, display_text)
+            except Exception:
+                continue
+
+    skipped_total = sum(skipped_reasons.values())
+    if skipped_total:
+        top_reason = max(skipped_reasons.items(), key=lambda item: item[1])[0]
+        log(
+            f"[WARN][excel] debug log hyperlink skipped count={skipped_total} reason='{top_reason}'"
         )
 
 
@@ -640,6 +819,7 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
     filtered_df = make_filtered_df(raw_df)
     summary_df = make_summary_df(raw_df, filtered_df)
     result_df = make_result_df(filtered_df)
+    result_df = _populate_result_debug_logs(result_df, output_path)
 
     log("[SAVE] writing sheets raw/filtered/summary/result")
     log(f"[SAVE] filtered rows={len(filtered_df)}, raw rows={len(raw_df)}")
@@ -710,6 +890,7 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
         summary_df.to_excel(writer, sheet_name="summary", index=False)
         result_df.to_excel(writer, sheet_name="result", index=False)
         _apply_result_crop_hyperlinks(writer, result_df)
+        _apply_result_debug_log_hyperlinks(writer, result_df)
         _apply_result_visual_enhancements(writer, result_df, with_images=with_images)
 
     if with_images and "crop_image" in raw_df.columns:

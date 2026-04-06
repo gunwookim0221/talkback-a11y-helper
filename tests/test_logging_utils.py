@@ -54,3 +54,15 @@ def test_debug_level_writes_normal_and_debug_files(tmp_path, monkeypatch, capsys
     assert "debug line" not in normal_text
     assert "normal line" in debug_text
     assert "debug line" in debug_text
+
+
+def test_get_recent_logs_returns_latest_lines(monkeypatch):
+    module = _reload_logging_utils(monkeypatch, "DEBUG")
+    for idx in range(5):
+        module.log(f"line-{idx}")
+
+    recent = module.get_recent_logs(limit=3)
+
+    assert len(recent) == 3
+    assert "line-2" in recent[0]
+    assert "line-4" in recent[-1]
