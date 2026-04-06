@@ -18,17 +18,19 @@
 1. 코드 기본값(`_DEFAULTS`)
 2. runtime `defaults`
 3. 각 scenario base(`TAB_CONFIGS`)
-4. runtime `scenarios[scenario_id]` override
+4. `scenario_groups[scenarios.<id>.group]`
+5. shared ref(`use_shared_navigation` / `anchor_ref` / `pre_navigation_ref`)
+6. runtime `scenarios[scenario_id]` 직접 override
 
 추가로 `global.checkpoint_save_every`를 전 시나리오 공통으로 주입합니다.
 
 핵심 우선순위:
 - 공통 정책: `_DEFAULTS` < `runtime.defaults`
-- 시나리오 최종값: `base scenario` + 누락키 채움(defaults) + `runtime.scenarios[scenario_id]`
+- 시나리오 최종값: `base scenario` + 누락키 채움(defaults) + `group` + `shared ref` + `scenario 직접값`
 
 ---
 
-## 2) runtime_config.json 루트 스키마(현재 구현)
+## 2) runtime_config.json 루트 스키마(권장 구조)
 
 ```json
 {
@@ -57,25 +59,16 @@
       "stop_on_global_nav_exit": false,
       "stop_on_terminal": true,
       "stop_on_repeat_no_progress": true
-    },
-    "global_nav": {
-      "labels": [],
-      "resource_ids": [],
-      "selected_pattern": "",
-      "region_hint": "auto"
-    },
-    "recovery": {
-      "enabled": true,
-      "target_type": "bottom_tab",
-      "target": "(?i).*home.*",
-      "resource_id": "com.samsung.android.oneconnect:id/menu_favorites",
-      "max_back_count": 5
     }
   },
+  "shared_navigation": {},
+  "shared_anchors": {},
+  "shared_pre_navigation": {},
+  "scenario_groups": {},
   "scenarios": {
     "devices_main": {
-      "enabled": true,
-      "max_steps": 30
+      "group": "main_tabs",
+      "enabled": true
     }
   }
 }
@@ -120,12 +113,6 @@
 - `stop_policy.stop_on_terminal`
 - `stop_policy.stop_on_repeat_no_progress`
 
-#### global nav hints
-- `global_nav.labels` (string list)
-- `global_nav.resource_ids` (string list)
-- `global_nav.selected_pattern` (string regex)
-- `global_nav.region_hint` (`bottom_tabs | left_rail | auto`)
-
 #### scenario 간 start state recovery
 - `recovery.enabled` (bool): scenario 시작 전 recovery 실행 여부
 - `recovery.target_type` (`bottom_tab | anchor | resource_id`)
@@ -137,11 +124,38 @@
 
 - `enabled` (bool)
 - `max_steps` (positive int)
+- `group` (string): `scenario_groups` 키 참조
+- `anchor_ref` (string): `shared_anchors` 키 참조
+- `pre_navigation_ref` (string): `shared_pre_navigation` 키 참조
+- `use_shared_navigation` (string): `shared_navigation` 키 참조
 - 위 `defaults`의 키 대부분을 scenario 단위로 override 가능
 - 추가 nested override 지원:
   - `stop_policy.*`
   - `global_nav.*`
   - `scenario_type`
+
+### 3.4 `shared_navigation`
+
+- 재사용 가능한 `global_nav` 프리셋 모음
+- 각 항목은 아래 키 지원
+  - `labels` (string list)
+  - `resource_ids` (string list)
+  - `selected_pattern` (string regex)
+  - `region_hint` (`bottom_tabs | left_rail | auto`)
+
+### 3.5 `shared_anchors`
+
+- 재사용 가능한 anchor 정의 모음
+- 항목은 `anchor` dict 형태 또는 anchor 필드(`text_regex`, `announcement_regex`, `resource_id_regex`, ...) 직접 선언 둘 다 허용
+
+### 3.6 `shared_pre_navigation`
+
+- 재사용 가능한 `pre_navigation` 액션 리스트 모음
+
+### 3.7 `scenario_groups`
+
+- 유사 화면군 공통 설정 모음
+- 일반적으로 `screen_context_mode`, `stabilization_mode`, `use_shared_navigation`를 배치
 
 ---
 
@@ -162,7 +176,16 @@
 
 ---
 
-## 6) 자주 헷갈리는 점
+## 6) backward compatibility
+
+- 새 구조(`shared_navigation`/`scenario_groups`/`*_ref`)를 우선 해석합니다.
+- 하지만 기존 구조도 계속 지원합니다.
+  - `defaults.global_nav` 사용 가능
+  - `scenarios.<id>.global_nav` 직접 override 가능
+  - `scenarios.<id>.pre_navigation` 직접 override 가능
+  - `scenarios.<id>.anchor` 직접 override 가능
+
+## 7) 자주 헷갈리는 점
 
 - `runtime.defaults`는 base scenario를 “덮어쓰기”가 아니라 **누락 키 채움 + 공통 baseline 제공**에 가깝습니다.
 - 최종 강제값은 `runtime.scenarios[scenario_id]`가 담당합니다.
