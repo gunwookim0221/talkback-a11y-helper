@@ -366,6 +366,77 @@ def test_save_excel_writes_debug_log_only_for_warn_fail_rows(tmp_path, monkeypat
     assert fail_debug_cell.hyperlink.target == str(debug_files[0].resolve())
 
 
+def _build_debug_target_rows() -> list[dict]:
+    return [
+        {
+            "scenario_id": "scenario_menu",
+            "tab_name": "menu",
+            "step_index": 8,
+            "context_type": "main",
+            "visible_label": "Special suggestions",
+            "merged_announcement": "Navigate up Special suggestions Get helpful offers Off",
+            "move_result": "moved",
+            "focus_view_id": "id/menu8",
+            "focus_bounds": "[0,10][10,20]",
+            "fallback_used": False,
+            "step_dump_used": False,
+            "req_id": "menu_req_8",
+            "step_elapsed_sec": 0.2,
+        }
+    ]
+
+
+def _render_debug_log_content(tmp_path, monkeypatch) -> str:
+    monkeypatch.setattr(
+        "tb_runner.excel_report.get_recent_logs",
+        lambda limit=260: [
+            "[12:00:00] [STEP] START scenario='scenario_life' tab='life' step=8 req_id='life_req_8'",
+            "[12:00:01] [STEP] END scenario='scenario_life' tab='life' step=8 req_id='life_req_8' move_result='moved'",
+            "[12:00:02] [STEP] START scenario='scenario_menu' tab='menu' step=8 req_id='menu_req_8'",
+            "[12:00:03] [ANN][poll] req_id=menu_req_8 candidate='Navigate up Special suggestions Get helpful offers Off'",
+            "[12:00:04] [STEP] END scenario='scenario_menu' tab='menu' step=8 req_id='menu_req_8' move_result='moved'",
+            "[12:00:05] [STOP][eval] scenario='scenario_menu' tab='menu' step=8 reason='speech_visible_diverged' req_id='menu_req_8'",
+        ],
+    )
+    output_path = tmp_path / "report_debug_scope.xlsx"
+    save_excel(_build_debug_target_rows(), str(output_path), with_images=False)
+    debug_file = next((tmp_path / "debug_logs").glob("*.log"))
+    return debug_file.read_text(encoding="utf-8")
+
+
+def test_debug_log_filters_out_other_tab_same_step(tmp_path, monkeypatch):
+    content = _render_debug_log_content(tmp_path, monkeypatch)
+
+    assert "req_id='life_req_8'" not in content
+    assert "tab='life'" not in content
+    assert "req_id='menu_req_8'" in content
+
+
+def test_debug_log_records_baseline_empty_reason(tmp_path, monkeypatch):
+    content = _render_debug_log_content(tmp_path, monkeypatch)
+    assert "[ANN][baseline]" in content
+    assert "empty_reason='no_prev_step_row'" in content
+
+
+def test_debug_log_always_includes_trim_trace(tmp_path, monkeypatch):
+    content = _render_debug_log_content(tmp_path, monkeypatch)
+    assert "[ANN][trim]" in content
+    assert "considered=false" in content
+
+
+def test_debug_log_snapshot_select_reason_is_recorded(tmp_path, monkeypatch):
+    content = _render_debug_log_content(tmp_path, monkeypatch)
+    assert "[ANN][select]" in content
+    assert "used_snapshot=true" in content
+    assert "snapshot_reason='no_better_recent_poll_candidate'" in content
+
+
+def test_debug_log_focus_missing_reason_when_no_get_focus_trace(tmp_path, monkeypatch):
+    content = _render_debug_log_content(tmp_path, monkeypatch)
+    assert "[FOCUS]" in content
+    assert "missing_reason='no_direct_get_focus_trace_found'" in content
+
+
 def test_save_excel_handles_windows_style_crop_path_without_row_warn_spam(tmp_path, monkeypatch):
     logs: list[str] = []
     monkeypatch.setattr("tb_runner.excel_report.log", lambda msg, level="NORMAL": logs.append(msg))
