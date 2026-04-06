@@ -214,7 +214,7 @@ def test_save_excel_summarizes_skipped_crop_hyperlink_warning(tmp_path, monkeypa
     assert "2 rows" in warn_logs[0]
 
 
-def test_save_excel_adds_result_thumbnail_and_status_color_only_for_warn_fail(tmp_path):
+def test_save_excel_with_images_false_skips_result_thumbnail_and_keeps_status_color(tmp_path):
     pass_crop = tmp_path / "crops" / "pass.png"
     warn_crop = tmp_path / "crops" / "warn.png"
     fail_crop = tmp_path / "crops" / "fail.png"
@@ -285,14 +285,108 @@ def test_save_excel_adds_result_thumbnail_and_status_color_only_for_warn_fail(tm
     final_results = [ws.cell(row=i, column=final_col_idx).value for i in range(2, 5)]
     assert final_results == ["PASS", "WARN", "FAIL"]
     assert ws.cell(row=2, column=thumb_col_idx).value == ""
-    assert ws.cell(row=3, column=thumb_col_idx).value == "warn.png"
-    assert ws.cell(row=4, column=thumb_col_idx).value == "fail.png"
-
-    image_anchors = sorted(img.anchor._from.row + 1 for img in ws._images)
-    assert image_anchors == [3, 4]
+    assert ws.cell(row=3, column=thumb_col_idx).value == ""
+    assert ws.cell(row=4, column=thumb_col_idx).value == ""
+    assert len(ws._images) == 0
 
     fill_colors = [ws.cell(row=i, column=1).fill.start_color.rgb for i in range(2, 5)]
     assert fill_colors == ["00C6EFCE", "00FFEB9C", "00FFC7CE"]
+
+
+def test_save_excel_with_images_true_adds_result_thumbnail(tmp_path):
+    warn_crop = tmp_path / "crops" / "warn.png"
+    fail_crop = tmp_path / "crops" / "fail.png"
+    warn_crop.parent.mkdir(parents=True, exist_ok=True)
+    for path in [warn_crop, fail_crop]:
+        Image.new("RGB", (300, 100), color="white").save(path)
+
+    rows = [
+        {
+            "scenario_id": "s1",
+            "tab_name": "home",
+            "step_index": 1,
+            "context_type": "main",
+            "visible_label": "Step 2",
+            "merged_announcement": "Smart Things Cooking Step 2",
+            "move_result": "moved",
+            "focus_view_id": "id/step2",
+            "focus_bounds": "[0,10][10,20]",
+            "fallback_used": False,
+            "step_dump_used": False,
+            "req_id": "r2",
+            "step_elapsed_sec": 0.2,
+            "crop_image_path": str(warn_crop),
+        },
+        {
+            "scenario_id": "s2",
+            "tab_name": "main",
+            "step_index": 1,
+            "context_type": "main",
+            "visible_label": "블루베리핫케이크 만드는 법",
+            "merged_announcement": "Smart Things Cooking",
+            "move_result": "failed",
+            "focus_view_id": "id/fail",
+            "focus_bounds": "[0,20][10,30]",
+            "fallback_used": True,
+            "step_dump_used": True,
+            "req_id": "repeat_no_progress",
+            "step_elapsed_sec": 0.3,
+            "crop_image_path": str(fail_crop),
+        },
+    ]
+    output_path = tmp_path / "report_thumbnail_with_images.xlsx"
+
+    save_excel(rows, str(output_path), with_images=True)
+
+    wb = openpyxl.load_workbook(output_path)
+    ws = wb["result"]
+    headers = [cell.value for cell in ws[1]]
+    thumb_col_idx = headers.index("result_crop_thumbnail") + 1
+
+    assert ws.cell(row=2, column=thumb_col_idx).value == "warn.png"
+    assert ws.cell(row=3, column=thumb_col_idx).value == "fail.png"
+    image_anchors = sorted(img.anchor._from.row + 1 for img in ws._images)
+    assert image_anchors == [2, 3]
+
+
+def test_save_excel_xlsxwriter_thumbnail_insert_does_not_raise_file_not_found(tmp_path, monkeypatch):
+    pytest.importorskip("xlsxwriter")
+    original_excel_writer = pd.ExcelWriter
+
+    def _xlsxwriter_excel_writer(*args, **kwargs):
+        kwargs.setdefault("engine", "xlsxwriter")
+        return original_excel_writer(*args, **kwargs)
+
+    monkeypatch.setattr("tb_runner.excel_report.pd.ExcelWriter", _xlsxwriter_excel_writer)
+
+    fail_crop = tmp_path / "crops" / "fail.png"
+    fail_crop.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (300, 100), color="white").save(fail_crop)
+
+    rows = [
+        {
+            "scenario_id": "s2",
+            "tab_name": "main",
+            "step_index": 1,
+            "context_type": "main",
+            "visible_label": "블루베리핫케이크 만드는 법",
+            "merged_announcement": "Smart Things Cooking",
+            "move_result": "failed",
+            "focus_view_id": "id/fail",
+            "focus_bounds": "[0,20][10,30]",
+            "fallback_used": True,
+            "step_dump_used": True,
+            "req_id": "repeat_no_progress",
+            "step_elapsed_sec": 0.3,
+            "crop_image_path": str(fail_crop),
+            "crop_image": "thumbnail",
+        },
+    ]
+    output_path = tmp_path / "report_xlsxwriter.xlsx"
+
+    save_excel(rows, str(output_path), with_images=True)
+
+    assert output_path.exists()
 
 
 def test_save_excel_raw_sheet_uses_resized_thumbnail_and_rightmost_image_column(tmp_path):
