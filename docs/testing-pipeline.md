@@ -58,9 +58,11 @@ main loop에서 다음 키를 사용합니다.
 - `main_announcement_max_extra_wait_seconds`
 
 동작:
-- 고정 대기 후 partial announcements 수집
-- idle polling(짧은 주기)으로 발화 변화가 멈출 때까지 추가 대기
+- step 시작 시 직전 merged announcement를 baseline으로 기록
+- 고정 대기 후 partial announcements 수집, baseline 대비 변경(candidate change) 여부를 우선 판단
+- idle polling(짧은 주기)으로 "새 candidate" 변화가 멈출 때까지 추가 대기
 - 최대 extra wait을 넘기면 강제 종료
+- baseline prefix가 현재 발화 앞에 붙는 오염 패턴은 일반 규칙으로 trim해 최종 speech를 선택
 - 결과 row에 `announcement_extra_wait_sec`, `announcement_window_sec` 기록
 
 ---

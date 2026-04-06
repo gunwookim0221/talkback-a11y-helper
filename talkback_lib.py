@@ -36,7 +36,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.39"
+CLIENT_ALGORITHM_VERSION = "1.7.40"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -2291,6 +2291,12 @@ class A11yAdbClient:
     ) -> dict[str, Any]:
         """포커스 1 step 이동/수집 결과를 엑셀 row 친화적인 dict로 반환합니다."""
         step_started = time.monotonic()
+        baseline_announcement = str(self.last_merged_announcement or "").strip()
+        baseline_announcement_ts = round(step_started, 3)
+        baseline_norm = self.normalize_for_comparison(baseline_announcement)
+        self._debug_print(
+            f"[ANN][baseline] text='{baseline_announcement}' ts={baseline_announcement_ts:.3f}"
+        )
         step: dict[str, Any] = {
             "step_index": step_index,
             "move_result": None,
@@ -2358,11 +2364,19 @@ class A11yAdbClient:
         ann_wait = wait_seconds if announcement_wait_seconds is None else announcement_wait_seconds
 
         ann_started = time.monotonic()
+        selected_merged_announcement = ""
         try:
             partial_announcements = self.get_partial_announcements(
                 dev=dev,
                 wait_seconds=ann_wait,
                 only_new=True,
+            )
+            stable_announcements = list(partial_announcements)
+            stable_merged = self._merge_announcements(stable_announcements)
+            stable_norm = self.normalize_for_comparison(stable_merged)
+            newest_changed = bool(stable_norm and stable_norm != baseline_norm)
+            self._debug_print(
+                f"[ANN][poll] candidate='{stable_merged}' changed={newest_changed}"
             )
             stability_extra_wait = 0.0
             idle_wait = float(announcement_idle_wait_seconds or 0.0)
@@ -2372,10 +2386,9 @@ class A11yAdbClient:
                     f"[ANN][stability] mode='step' idle_wait={idle_wait:.2f} max_extra={max_extra_wait:.2f}"
                 )
                 stability_started = time.monotonic()
-                stable_announcements = list(partial_announcements)
                 stable_seen = {msg for msg in stable_announcements if isinstance(msg, str) and msg.strip()}
-                stable_last_change_at = stability_started
-                reason = "idle_timeout"
+                stable_last_change_at = stability_started if newest_changed else 0.0
+                reason = "max_extra_wait"
                 while True:
                     elapsed_extra = time.monotonic() - stability_started
                     if elapsed_extra >= max_extra_wait:
@@ -2404,27 +2417,53 @@ class A11yAdbClient:
                             changed = True
                     now = time.monotonic()
                     if changed:
-                        stable_last_change_at = now
-                        self._debug_print(f"[ANN][stability] changed=true elapsed={elapsed_extra:.2f}")
-                    if now - stable_last_change_at >= idle_wait:
-                        reason = "idle_timeout"
+                        stable_merged = self._merge_announcements(stable_announcements)
+                        stable_norm = self.normalize_for_comparison(stable_merged)
+                        newest_changed = bool(stable_norm and stable_norm != baseline_norm)
+                        if newest_changed:
+                            stable_last_change_at = now
+                        self._debug_print(
+                            f"[ANN][poll] candidate='{stable_merged}' changed={newest_changed}"
+                        )
+                    if newest_changed and stable_last_change_at > 0 and (now - stable_last_change_at >= idle_wait):
+                        reason = "idle_stable"
                         break
                 stability_extra_wait = round(time.monotonic() - stability_started, 3)
                 partial_announcements = stable_announcements
                 self.last_announcements = list(stable_announcements)
                 self.last_merged_announcement = self._merge_announcements(stable_announcements)
-                self._debug_print(f"[ANN][stability] stop reason='{reason}' elapsed={stability_extra_wait:.2f}")
+                self._debug_print(
+                    f"[ANN][stable] selected='{self.last_merged_announcement}' reason='{reason}' elapsed={stability_extra_wait:.2f}"
+                )
+            selected_merged_announcement = self._merge_announcements(partial_announcements)
+            selected_norm = self.normalize_for_comparison(selected_merged_announcement)
+            if (
+                baseline_announcement
+                and baseline_norm
+                and selected_norm
+                and selected_norm != baseline_norm
+                and len(baseline_norm) >= 8
+                and selected_norm.startswith(baseline_norm)
+            ):
+                trimmed_merged = selected_merged_announcement[len(baseline_announcement) :].lstrip(" \t,.;:-")
+                trimmed_norm = self.normalize_for_comparison(trimmed_merged)
+                if trimmed_norm:
+                    selected_merged_announcement = trimmed_merged
+            self._debug_print(
+                f"[ANN][select] previous='{baseline_announcement}' current='{self._merge_announcements(partial_announcements)}' final='{selected_merged_announcement}'"
+            )
             step["partial_announcements"] = self._json_safe_value(partial_announcements)
             step["announcement_extra_wait_sec"] = stability_extra_wait
         except Exception:
             partial_announcements = []
+            selected_merged_announcement = ""
         step["announcement_elapsed_sec"] = round(time.monotonic() - ann_started, 3)
         step["announcement_count"] = len(partial_announcements)
         step["announcement_window_sec"] = round(float(ann_wait) + float(step.get("announcement_extra_wait_sec", 0.0) or 0.0), 3)
         step["t_after_ann"] = round(time.monotonic() - step_started, 3)
 
         # 발화 수집 기준(step)을 단일화하기 위해 get_announcements 재호출을 제거합니다.
-        merged_announcement = self._merge_announcements(partial_announcements)
+        merged_announcement = str(selected_merged_announcement or self._merge_announcements(partial_announcements))
         step["merged_announcement"] = merged_announcement
         step["normalized_announcement"] = self.normalize_for_comparison(merged_announcement)
 
