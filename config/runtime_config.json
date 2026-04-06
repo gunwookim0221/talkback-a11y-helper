@@ -118,6 +118,15 @@
         "stop_on_global_nav_exit": true
       }
     },
+    "life_main": {
+      "group": "main_tabs"
+    },
+    "routines_main": {
+      "group": "main_tabs"
+    },
+    "menu_main": {
+      "group": "main_tabs"
+    },
     "life_food_plugin": {
       "group": "plugin_screen",
       "pre_navigation_ref": "enter_food_plugin",
@@ -135,6 +144,9 @@
       "anchor_ref": "settings_button_anchor",
       "enabled": true,
       "max_steps": 40
+    },
+    "resource_id_only_example": {
+      "group": "main_tabs"
     }
   }
 }
