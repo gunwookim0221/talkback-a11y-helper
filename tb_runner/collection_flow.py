@@ -41,6 +41,8 @@ _TRANSITION_FAST_FOCUS_WAIT_SECONDS = 0.8
 _TRANSITION_FAST_ACTION_WAIT_SECONDS = 2
 _PRE_NAV_CONFIRM_POLL_SLEEP_SECONDS = 0.12
 _RECENT_DUPLICATE_WINDOW = 5
+_STALL_ESCAPE_SAME_LIKE_THRESHOLD = 6
+_STALL_ESCAPE_SEMANTIC_UNIQUE_MAX = 2
 
 
 def _is_meaningful_text(value: Any) -> bool:
@@ -49,6 +51,87 @@ def _is_meaningful_text(value: Any) -> bool:
         return False
     compact = re.sub(r"[\W_]+", "", text, flags=re.UNICODE)
     return len(compact) >= 2
+
+
+def should_attempt_stall_escape(
+    tab_cfg: dict[str, Any],
+    row: dict[str, Any],
+    stop_details: dict[str, Any],
+    *,
+    stop_reason: str,
+    escape_attempted: bool,
+) -> tuple[bool, str]:
+    if stop_reason != "repeat_semantic_stall":
+        return False, "not_repeat_semantic_stall"
+    if escape_attempted:
+        return False, "already_attempted"
+
+    scenario_type = str(stop_details.get("scenario_type", tab_cfg.get("scenario_type", "content")) or "content").strip().lower()
+    if scenario_type != "content":
+        return False, "scenario_type_not_content"
+
+    screen_context_mode = str(tab_cfg.get("screen_context_mode", "") or "").strip().lower()
+    scenario_group = str(tab_cfg.get("group", "") or "").strip().lower()
+    is_plugin_screen = screen_context_mode == "new_screen" or (scenario_group and scenario_group != "main_tabs")
+    if not is_plugin_screen:
+        return False, "not_plugin_screen"
+
+    recent_duplicate = bool(stop_details.get("recent_duplicate", False))
+    recent_semantic_duplicate = bool(stop_details.get("recent_semantic_duplicate", False))
+    same_like_count = int(stop_details.get("same_like_count", 0) or 0)
+    semantic_window_unique_count = int(stop_details.get("recent_semantic_unique_count", 0) or 0)
+    semantic_same_like = bool(stop_details.get("semantic_same_like", False))
+    move_result = str(row.get("move_result", "") or "").strip().lower()
+    moved_like = move_result in {"moved", "scrolled", "edge_realign_then_moved"}
+    if not moved_like:
+        return False, "move_not_moved_like"
+    if not recent_duplicate or not recent_semantic_duplicate:
+        return False, "duplicate_signal_weak"
+    if same_like_count < _STALL_ESCAPE_SAME_LIKE_THRESHOLD:
+        return False, "same_like_below_threshold"
+    if semantic_window_unique_count > _STALL_ESCAPE_SEMANTIC_UNIQUE_MAX:
+        return False, "semantic_window_too_diverse"
+    if not semantic_same_like:
+        return False, "semantic_not_same_like"
+    return True, "eligible"
+
+
+def attempt_stall_escape(
+    client: A11yAdbClient,
+    dev: str,
+    row: dict[str, Any],
+    *,
+    step_idx: int,
+    announcement_wait_seconds: float,
+    announcement_idle_wait_seconds: float,
+    announcement_max_extra_wait_seconds: float,
+) -> dict[str, Any]:
+    baseline_semantic_fingerprint = build_row_semantic_fingerprint(row)
+    baseline_fingerprint = build_row_fingerprint(row)
+    baseline_bounds = str(row.get("focus_bounds", "") or "").strip()
+    moved_prev = bool(client.move_focus(dev=dev, direction="prev"))
+    if not moved_prev:
+        return {"success": False, "reason": "move_prev_failed", "method": "refocus_or_realign"}
+
+    probe_row = client.collect_focus_step(
+        dev=dev,
+        step_index=step_idx,
+        move=False,
+        wait_seconds=announcement_wait_seconds,
+        announcement_wait_seconds=announcement_wait_seconds,
+        announcement_idle_wait_seconds=announcement_idle_wait_seconds,
+        announcement_max_extra_wait_seconds=announcement_max_extra_wait_seconds,
+    )
+    probe_semantic_fingerprint = build_row_semantic_fingerprint(probe_row)
+    probe_fingerprint = build_row_fingerprint(probe_row)
+    probe_bounds = str(probe_row.get("focus_bounds", "") or "").strip()
+    semantic_changed = bool(probe_semantic_fingerprint) and probe_semantic_fingerprint != baseline_semantic_fingerprint
+    fingerprint_changed = bool(probe_fingerprint) and probe_fingerprint != baseline_fingerprint
+    bounds_changed = bool(probe_bounds) and probe_bounds != baseline_bounds
+    success = semantic_changed or (fingerprint_changed and bounds_changed)
+    if success:
+        return {"success": True, "reason": "semantic_changed", "method": "refocus_or_realign"}
+    return {"success": False, "reason": "same_semantic_object_after_escape", "method": "refocus_or_realign"}
 
 
 def _is_new_screen_low_confidence_allowed(
@@ -1080,6 +1163,7 @@ def collect_tab_rows(
     stop_triggered = False
     stop_reason = ""
     stop_step = -1
+    stall_escape_attempted = False
 
     for step_idx in range(1, tab_cfg["max_steps"] + 1):
         log(f"[STEP] START tab='{tab_cfg['tab_name']}' step={step_idx}")
@@ -1228,6 +1312,58 @@ def collect_tab_rows(
             f"decision='{decision}' reason='{eval_reason}'"
         )
 
+        if stop and reason == "repeat_semantic_stall":
+            should_escape, escape_gate_reason = should_attempt_stall_escape(
+                tab_cfg=tab_cfg,
+                row=row,
+                stop_details=stop_details,
+                stop_reason=reason,
+                escape_attempted=stall_escape_attempted,
+            )
+            if should_escape:
+                log(
+                    f"[STALL] detected scenario='{tab_cfg.get('scenario_id', '')}' step={step_idx} "
+                    f"same_like_count={same_like_count} semantic_window_unique_count={recent_semantic_unique_count}"
+                )
+                stall_escape_attempted = True
+                log(
+                    f"[STALL] attempting escape scenario='{tab_cfg.get('scenario_id', '')}' "
+                    f"method='refocus_or_realign'"
+                )
+                escape_result = attempt_stall_escape(
+                    client=client,
+                    dev=dev,
+                    row=row,
+                    step_idx=step_idx,
+                    announcement_wait_seconds=main_announcement_wait_seconds,
+                    announcement_idle_wait_seconds=main_announcement_idle_wait_seconds,
+                    announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
+                )
+                escape_success = bool(escape_result.get("success", False))
+                escape_result_reason = str(escape_result.get("reason", "") or "")
+                log(f"[STALL] escape result success={str(escape_success).lower()} reason='{escape_result_reason}'")
+                row["stall_escape_attempted"] = True
+                row["stall_escape_result"] = "success" if escape_success else "failed"
+                row["stall_escape_reason"] = escape_result_reason
+                if escape_success:
+                    stop = False
+                    reason = ""
+                    log(
+                        f"[STOP][eval] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
+                        f"repeat_stop_hit={str(repeat_stop_hit).lower()} but escape_attempted=true"
+                    )
+                else:
+                    reason = "repeat_semantic_stall_after_escape"
+                    stop = True
+            else:
+                if stall_escape_attempted or escape_gate_reason == "already_attempted":
+                    reason = "repeat_semantic_stall_after_escape"
+                log(
+                    f"[STOP][eval] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
+                    f"repeat_stop_hit={str(repeat_stop_hit).lower()} but escape_attempted={str(stall_escape_attempted).lower()} "
+                    f"escape_gate_reason='{escape_gate_reason}'"
+                )
+
         if is_global_nav_only_scenario and not is_global_nav:
             log(
                 f"[GLOBAL_NAV][skip] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
@@ -1245,6 +1381,11 @@ def collect_tab_rows(
             stop_triggered = True
             stop_reason = reason
             stop_step = step_idx
+            if reason == "repeat_semantic_stall_after_escape":
+                log(
+                    f"[STOP][triggered] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
+                    "reason='repeat_semantic_stall_after_escape'"
+                )
             row["status"] = "END"
             row["stop_reason"] = reason
             row["stop_triggered"] = True

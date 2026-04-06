@@ -1814,3 +1814,196 @@ def test_collect_tab_rows_marks_noise_when_speech_is_empty(monkeypatch):
 
     assert rows[1]["is_noise_step"] is True
     assert rows[1]["noise_reason"] == "speech_empty"
+
+
+def test_collect_tab_rows_attempts_stall_escape_once_before_stop(monkeypatch):
+    client = DummyClient([_anchor_row(), _main_row(1), _main_row(2)])
+    stop_sequence = iter(
+        [
+            (
+                True,
+                0,
+                8,
+                "repeat_semantic_stall",
+                ("item1", "id.1", "0,10,10,20"),
+                {
+                    "terminal": False,
+                    "same_like_count": 8,
+                    "no_progress": True,
+                    "reason": "repeat_semantic_stall",
+                    "repeat_stop_hit": True,
+                    "scenario_type": "content",
+                    "recent_duplicate": True,
+                    "recent_semantic_duplicate": True,
+                    "recent_semantic_unique_count": 1,
+                    "semantic_same_like": True,
+                },
+            ),
+            (
+                True,
+                0,
+                8,
+                "repeat_no_progress",
+                ("item2", "id.2", "0,10,10,20"),
+                {"terminal": False, "same_like_count": 8, "no_progress": True, "reason": "repeat_no_progress"},
+            ),
+        ]
+    )
+    calls = {"escape": 0}
+
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
+    monkeypatch.setattr(collection_flow, "should_stop", lambda **k: next(stop_sequence))
+    monkeypatch.setattr(collection_flow, "attempt_stall_escape", lambda **k: calls.__setitem__("escape", calls["escape"] + 1) or {"success": True, "reason": "semantic_changed"})
+    monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (False, "not_in_global_candidates"))
+
+    tab_cfg = {**_base_tab_cfg(max_steps=2), "group": "plugin_screen", "screen_context_mode": "new_screen", "scenario_type": "content"}
+    rows = collection_flow.collect_tab_rows(client, "SERIAL", tab_cfg, [], "o.xlsx", "out")
+
+    assert calls["escape"] == 1
+    assert rows[1]["status"] == "OK"
+    assert rows[1]["stall_escape_result"] == "success"
+    assert rows[2]["status"] == "END"
+
+
+def test_collect_tab_rows_stops_with_after_escape_reason_when_escape_fails(monkeypatch):
+    client = DummyClient([_anchor_row(), _main_row(1)])
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
+    monkeypatch.setattr(
+        collection_flow,
+        "should_stop",
+        lambda **k: (
+            True,
+            0,
+            8,
+            "repeat_semantic_stall",
+            ("item1", "id.1", "0,10,10,20"),
+            {
+                "terminal": False,
+                "same_like_count": 8,
+                "no_progress": True,
+                "reason": "repeat_semantic_stall",
+                "repeat_stop_hit": True,
+                "scenario_type": "content",
+                "recent_duplicate": True,
+                "recent_semantic_duplicate": True,
+                "recent_semantic_unique_count": 1,
+                "semantic_same_like": True,
+            },
+        ),
+    )
+    monkeypatch.setattr(collection_flow, "attempt_stall_escape", lambda **k: {"success": False, "reason": "same_semantic_object_after_escape"})
+    monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (False, "not_in_global_candidates"))
+    tab_cfg = {**_base_tab_cfg(max_steps=1), "group": "plugin_screen", "screen_context_mode": "new_screen", "scenario_type": "content"}
+
+    rows = collection_flow.collect_tab_rows(client, "SERIAL", tab_cfg, [], "o.xlsx", "out")
+
+    assert rows[1]["status"] == "END"
+    assert rows[1]["stop_reason"] == "repeat_semantic_stall_after_escape"
+
+
+def test_collect_tab_rows_stall_escape_is_only_attempted_once_per_scenario(monkeypatch):
+    client = DummyClient([_anchor_row(), _main_row(1), _main_row(2)])
+    stop_sequence = iter(
+        [
+            (
+                True,
+                0,
+                8,
+                "repeat_semantic_stall",
+                ("item1", "id.1", "0,10,10,20"),
+                {
+                    "terminal": False,
+                    "same_like_count": 8,
+                    "no_progress": True,
+                    "reason": "repeat_semantic_stall",
+                    "repeat_stop_hit": True,
+                    "scenario_type": "content",
+                    "recent_duplicate": True,
+                    "recent_semantic_duplicate": True,
+                    "recent_semantic_unique_count": 1,
+                    "semantic_same_like": True,
+                },
+            ),
+            (
+                True,
+                0,
+                9,
+                "repeat_semantic_stall",
+                ("item2", "id.2", "0,10,10,20"),
+                {
+                    "terminal": False,
+                    "same_like_count": 9,
+                    "no_progress": True,
+                    "reason": "repeat_semantic_stall",
+                    "repeat_stop_hit": True,
+                    "scenario_type": "content",
+                    "recent_duplicate": True,
+                    "recent_semantic_duplicate": True,
+                    "recent_semantic_unique_count": 1,
+                    "semantic_same_like": True,
+                },
+            ),
+        ]
+    )
+    calls = {"escape": 0}
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
+    monkeypatch.setattr(collection_flow, "should_stop", lambda **k: next(stop_sequence))
+    monkeypatch.setattr(collection_flow, "attempt_stall_escape", lambda **k: calls.__setitem__("escape", calls["escape"] + 1) or {"success": True, "reason": "semantic_changed"})
+    monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (False, "not_in_global_candidates"))
+    tab_cfg = {**_base_tab_cfg(max_steps=2), "group": "plugin_screen", "screen_context_mode": "new_screen", "scenario_type": "content"}
+
+    rows = collection_flow.collect_tab_rows(client, "SERIAL", tab_cfg, [], "o.xlsx", "out")
+
+    assert calls["escape"] == 1
+    assert rows[2]["status"] == "END"
+    assert rows[2]["stop_reason"] == "repeat_semantic_stall_after_escape"
+
+
+def test_collect_tab_rows_main_tabs_do_not_apply_stall_escape(monkeypatch):
+    client = DummyClient([_anchor_row(), _main_row(1)])
+    calls = {"escape": 0}
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
+    monkeypatch.setattr(
+        collection_flow,
+        "should_stop",
+        lambda **k: (
+            True,
+            0,
+            8,
+            "repeat_semantic_stall",
+            ("item1", "id.1", "0,10,10,20"),
+            {
+                "terminal": False,
+                "same_like_count": 8,
+                "no_progress": True,
+                "reason": "repeat_semantic_stall",
+                "repeat_stop_hit": True,
+                "scenario_type": "content",
+                "recent_duplicate": True,
+                "recent_semantic_duplicate": True,
+                "recent_semantic_unique_count": 1,
+                "semantic_same_like": True,
+            },
+        ),
+    )
+    monkeypatch.setattr(collection_flow, "attempt_stall_escape", lambda **k: calls.__setitem__("escape", calls["escape"] + 1) or {"success": True, "reason": "semantic_changed"})
+    monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (False, "not_in_global_candidates"))
+    tab_cfg = {**_base_tab_cfg(max_steps=1), "group": "main_tabs", "screen_context_mode": "bottom_tab", "scenario_type": "content"}
+
+    rows = collection_flow.collect_tab_rows(client, "SERIAL", tab_cfg, [], "o.xlsx", "out")
+
+    assert calls["escape"] == 0
+    assert rows[1]["status"] == "END"
+    assert rows[1]["stop_reason"] == "repeat_semantic_stall"
