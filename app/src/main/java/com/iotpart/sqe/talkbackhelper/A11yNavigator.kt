@@ -13,13 +13,15 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.72.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.73.0"
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
     private const val MIN_ONECONNECT_SETTINGS_ROW_HEIGHT_PX = 80
 
 
     @Volatile
     internal var lastRequestedFocusIndex: Int = A11yStateStore.lastRequestedFocusIndex
+    @Volatile
+    private var lastContainerLikeCurrentSignature: String? = null
 
     @JvmName("setLastRequestedFocusIndexExplicit")
     internal fun setLastRequestedFocusIndex(index: Int) {
@@ -280,10 +282,58 @@ object A11yNavigator {
             }
         }
 
-        val fallbackIndex = if (currentIndex == -1 && (currentNode ?: resolvedCurrent) != null) {
+        val rawOrResolvedCurrent = currentNode ?: resolvedCurrent
+        val containerLikeCurrent = rawOrResolvedCurrent?.takeIf { node ->
+            val className = node.className?.toString()
+            className?.contains("WebView", ignoreCase = true) == true ||
+                (node.childCount > 0 && (isContainerLikeClassName(className) || isContainerLikeViewId(node.viewIdResourceName)))
+        }
+        val containerSignature = containerLikeCurrent?.let { node ->
+            val bounds = Rect().also(node::getBoundsInScreen)
+            val label = (resolvePrimaryLabel(node) ?: A11yTraversalAnalyzer.recoverDescendantLabel(node) ?: "<no-label>")
+                .trim()
+                .lowercase()
+            "${node.className}|${node.viewIdResourceName}|${formatBoundsForLog(bounds)}|$label"
+        }
+        val repeatLikeContainerCurrent = !containerSignature.isNullOrEmpty() && containerSignature == lastContainerLikeCurrentSignature
+        if (!containerSignature.isNullOrEmpty()) {
+            lastContainerLikeCurrentSignature = containerSignature
+        } else {
+            lastContainerLikeCurrentSignature = null
+        }
+        val originalCurrentIndex = currentIndex
+        if (currentIndex == -1 && containerLikeCurrent != null && traversalList.size >= 2 && repeatLikeContainerCurrent) {
+            val recentFocusCandidateIndex = lastRequestedFocusIndex.takeIf { it in traversalList.indices }
+            val closestByBoundsIndex = findClosestNodeBelowCenter(
+                nodes = traversalList,
+                reference = containerLikeCurrent,
+                boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } }
+            )
+            val correctedIndex = recentFocusCandidateIndex ?: closestByBoundsIndex
+            val correctedBounds = traversalList.getOrNull(correctedIndex)?.let { node ->
+                Rect().also { node.getBoundsInScreen(it) }
+            }
+            val correctedLabel = traversalList.getOrNull(correctedIndex)?.let { node ->
+                resolvePrimaryLabel(node) ?: A11yTraversalAnalyzer.recoverDescendantLabel(node) ?: "<no-label>"
+            } ?: "<none>"
+            Log.i(
+                "A11Y_HELPER",
+                "[DECIDE][WEBVIEW_FIX] triggered=true originalCurrentIndex=$originalCurrentIndex correctedIndex=$correctedIndex fallbackCurrentCandidate=index:$correctedIndex bounds=${formatBoundsForLog(correctedBounds)} label=${correctedLabel.replace("\n", " ")} recentFocusCandidateIndex=${recentFocusCandidateIndex ?: -1} closestByBoundsIndex=$closestByBoundsIndex"
+            )
+            if (correctedIndex in traversalList.indices) {
+                currentIndex = correctedIndex
+            }
+        } else {
+            Log.d(
+                "A11Y_HELPER",
+                "[DECIDE][WEBVIEW_FIX] triggered=false originalCurrentIndex=$originalCurrentIndex containerLike=${containerLikeCurrent != null} repeatLike=$repeatLikeContainerCurrent size=${traversalList.size}"
+            )
+        }
+
+        val fallbackIndex = if (currentIndex == -1 && rawOrResolvedCurrent != null) {
             findClosestNodeBelowCenter(
                 nodes = traversalList,
-                reference = (currentNode ?: resolvedCurrent)!!,
+                reference = rawOrResolvedCurrent,
                 boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } }
             )
         } else {
@@ -299,6 +349,10 @@ object A11yNavigator {
         Log.i(
             "A11Y_HELPER",
             "[DECIDE][CURRENT] raw=${summarizeNodeForDecision(currentNode)} resolved=${summarizeNodeForDecision(resolvedCurrent)} currentIndex=$currentIndex fallbackIndex=$fallbackIndex nextIndex=$nextIndex size=${traversalList.size}"
+        )
+        Log.i(
+            "A11Y_HELPER",
+            "[DECIDE][WEBVIEW_FIX] originalCurrentIndex=$originalCurrentIndex correctedIndex=$currentIndex nextCandidateIndex=$nextIndex"
         )
         return CurrentPosition(
             resolvedCurrent = resolvedCurrent,
