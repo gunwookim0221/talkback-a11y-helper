@@ -1,7 +1,7 @@
 import sys
 from types import SimpleNamespace
 
-sys.modules.setdefault("pandas", SimpleNamespace(DataFrame=object))
+sys.modules.setdefault("pandas", SimpleNamespace(DataFrame=object, ExcelWriter=object))
 sys.modules.setdefault("openpyxl", SimpleNamespace(load_workbook=lambda *_args, **_kwargs: None))
 sys.modules.setdefault("openpyxl.drawing.image", SimpleNamespace(Image=object))
 
@@ -1514,6 +1514,131 @@ def test_open_scenario_main_tab_focus_align_failure_is_strict(monkeypatch):
     ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
 
     assert ok is False
+
+
+def test_open_scenario_new_screen_allows_low_confidence_fallback_start(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {
+            "ok": False,
+            "reason": "low_confidence_anchor_start",
+            "fallback_candidate_used": True,
+            "fallback_candidate_label": "Life 홈케어",
+            "start_candidate_source": "fallback_top_content",
+            "verify_row": {
+                "visible_label": "Life 홈케어",
+                "merged_announcement": "홈케어",
+                "get_focus_top_level_payload_sufficient": True,
+            },
+        },
+    )
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_home_care_plugin",
+        "screen_context_mode": "new_screen",
+        "pre_navigation": [{"action": "select", "target": ".*홈케어.*", "type": "a"}],
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert tab_cfg["_scenario_start_mode"] == "low_confidence_fallback"
+    assert tab_cfg["_scenario_anchor_stable"] is False
+    assert any("proceeding with low-confidence fallback start" in line for line in logs)
+    assert any("mode='low_confidence_fallback'" in line for line in logs)
+
+
+def test_open_scenario_new_screen_anchor_fail_without_evidence_aborts(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {
+            "ok": False,
+            "reason": "low_confidence_anchor_start",
+            "fallback_candidate_used": False,
+            "verify_row": {},
+        },
+    )
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_home_care_plugin",
+        "screen_context_mode": "new_screen",
+        "pre_navigation": [{"action": "select", "target": ".*홈케어.*", "type": "a"}],
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is False
+
+
+def test_collect_tab_rows_marks_low_confidence_start_metadata(monkeypatch):
+    client = DummyClient([_anchor_row(), _main_row(1)])
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
+    monkeypatch.setattr(
+        collection_flow,
+        "should_stop",
+        lambda **k: (
+            True,
+            0,
+            0,
+            "repeat_no_progress",
+            ("fp", "id", "b"),
+            {"terminal": False, "same_like_count": 2, "no_progress": True, "reason": "repeat_no_progress"},
+        ),
+    )
+    monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (False, "not_in_global_candidates"))
+
+    def _open(*_args, **_kwargs):
+        tab_cfg["__scenario_opened"] = True
+        tab_cfg["_scenario_start_mode"] = "low_confidence_fallback"
+        tab_cfg["_scenario_start_source"] = "fallback_top_content"
+        tab_cfg["_scenario_anchor_stable"] = False
+        tab_cfg["_scenario_start_note"] = "scenario start anchor unstable; proceeded with low-confidence fallback start"
+        return True
+
+    monkeypatch.setattr(collection_flow, "open_scenario", _open)
+    tab_cfg = _base_tab_cfg(max_steps=1)
+    rows = collection_flow.collect_tab_rows(client, "SERIAL", tab_cfg, [], "o.xlsx", "out")
+
+    assert rows[0]["scenario_start_mode"] == "low_confidence_fallback"
+    assert rows[0]["anchor_stable"] is False
+    assert "low-confidence fallback start" in rows[0]["review_note"]
+
+
+def test_open_scenario_anchor_stable_keeps_existing_mode(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_home_care_plugin",
+        "screen_context_mode": "new_screen",
+        "pre_navigation": [{"action": "select", "target": ".*홈케어.*", "type": "a"}],
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert tab_cfg["_scenario_start_mode"] == "anchor_stable"
+    assert tab_cfg["_scenario_anchor_stable"] is True
 
 
 def test_build_row_fingerprint_prefers_resource_id():

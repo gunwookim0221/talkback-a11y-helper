@@ -68,6 +68,13 @@ anchor 안정 자체는 공통적으로 2회 연속 검증(짧은 settle 포함)
 
 추가로 anchor 미지정이거나 explicit anchor 매칭이 실패하면, runner는 dump 기준 `content` 영역 후보에서 상단 행의 대표 fallback anchor를 자동 선택합니다. 우선순위는 `top-left → top-center → top-right`이며, 상/하단 chrome 후보(toolbar/bottom nav/system UI)는 제외하려고 시도합니다.
 
+`screen_context_mode=new_screen` 시나리오에서는 `scenario_start` anchor stabilization이 실패해도, 아래 신호가 동시에 충분하면 abort 대신 low-confidence fallback start로 main traversal을 진행합니다.
+- pre_navigation 성공
+- fallback candidate 존재(상단 content 후보)
+- fallback label/resource + get_focus/top-level payload 중 의미 있는 진입 신호 확인
+
+이 경우 anchor row에는 `scenario_start_mode=low_confidence_fallback`, `anchor_stable=false`, `review_note`가 함께 기록됩니다.
+
 ---
 
 ## 5) `context_verify` 타입 (현재 코드에 있는 범위)

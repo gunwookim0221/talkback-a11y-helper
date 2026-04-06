@@ -354,6 +354,11 @@ def stabilize_anchor(
         and screen_context_mode == "new_screen"
         and stabilization_mode == "anchor_only"
     )
+    start_candidate_source = "explicit_anchor"
+    fallback_candidate_used = False
+    fallback_candidate_label = ""
+    fallback_candidate_resource_id = ""
+    last_verify_row: dict[str, Any] = {}
 
     for attempt in range(1, max_retries + 1):
         log(f"[ANCHOR][stabilize] attempt={attempt}/{max_retries} scenario='{scenario_id}'", level="DEBUG")
@@ -380,6 +385,10 @@ def stabilize_anchor(
             if fallback_candidate:
                 active_anchor_cfg = _build_verify_cfg_for_fallback(fallback_candidate)
                 best = {"candidate": fallback_candidate, "score": 0, "matched": True, "matched_fields": ["fallback"]}
+                start_candidate_source = f"fallback_{fallback_position}" if fallback_position else "fallback_top_content"
+                fallback_candidate_used = True
+                fallback_candidate_label = str(fallback_candidate.get("announcement", "") or fallback_candidate.get("text", "") or "").strip()
+                fallback_candidate_resource_id = str(fallback_candidate.get("resource_id", "") or "").strip()
                 log(
                     f"[ANCHOR][fallback] selected candidate label='{fallback_candidate.get('announcement', '')}' "
                     f"position='{fallback_position}'"
@@ -413,6 +422,8 @@ def stabilize_anchor(
             transition_fast_path=transition_fast_path,
         )
         verify_rows = list(verify_results.get("verify_rows", []))
+        if verify_rows and isinstance(verify_rows[-1], dict):
+            last_verify_row = dict(verify_rows[-1])
         verify_matches = list(verify_results.get("verify_matches", []))
         if verify_matches:
             verify_match = verify_matches[-1]
@@ -528,8 +539,13 @@ def stabilize_anchor(
                 "verify": last_verify,
                 "context": last_context,
                 "verify_rows": verify_rows,
+                "verify_row": last_verify_row,
                 "candidate_count": len(matches),
                 "phase": phase,
+                "start_candidate_source": start_candidate_source,
+                "fallback_candidate_used": fallback_candidate_used,
+                "fallback_candidate_label": fallback_candidate_label,
+                "fallback_candidate_resource_id": fallback_candidate_resource_id,
             }
 
     return {
@@ -539,6 +555,11 @@ def stabilize_anchor(
         "reason": "low_confidence_anchor_start",
         "verify": last_verify,
         "context": last_context,
+        "verify_row": last_verify_row,
         "candidate_count": 0,
         "phase": phase,
+        "start_candidate_source": start_candidate_source,
+        "fallback_candidate_used": fallback_candidate_used,
+        "fallback_candidate_label": fallback_candidate_label,
+        "fallback_candidate_resource_id": fallback_candidate_resource_id,
     }
