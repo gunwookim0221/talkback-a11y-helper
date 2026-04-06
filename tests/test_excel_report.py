@@ -170,6 +170,88 @@ def test_make_result_df_skips_anchor_baseline_rows(monkeypatch):
     assert any("[RESULT] skipped anchor rows count=1" in msg for msg in logs)
 
 
+def test_make_filtered_df_keeps_noise_row_with_review_worthy_mismatch():
+    raw_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "s1",
+                "tab_name": "main",
+                "step_index": 1,
+                "is_noise_step": True,
+                "is_duplicate_step": False,
+                "is_recent_duplicate_step": False,
+                "final_result": "WARN",
+                "visible_label": "Special suggestions Get helpful offers or news on products.",
+                "merged_announcement": "Battery 100 per cent. Special suggestions Get helpful offers or news on products. Off",
+                "review_note": "visible/speech mismatch",
+                "failure_reason": "speech_visible_diverged",
+                "move_result": "moved",
+            }
+        ]
+    )
+
+    filtered_df = make_filtered_df(raw_df)
+    result_df = make_result_df(filtered_df)
+
+    assert len(filtered_df) == 1
+    assert len(result_df) == 1
+    assert result_df.iloc[0]["final_result"] in {"WARN", "FAIL"}
+
+
+def test_make_filtered_df_drops_meaningless_noise_pass_row():
+    raw_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "s1",
+                "tab_name": "main",
+                "step_index": 1,
+                "is_noise_step": True,
+                "is_duplicate_step": False,
+                "is_recent_duplicate_step": False,
+                "final_result": "PASS",
+                "visible_label": "Home",
+                "merged_announcement": "Home",
+                "review_note": "",
+                "failure_reason": "",
+                "move_result": "moved",
+                "rule_compare": "SAME",
+                "speech_match_result": "PASS_EXACT",
+            }
+        ]
+    )
+
+    filtered_df = make_filtered_df(raw_df)
+    assert filtered_df.empty
+
+
+def test_make_filtered_df_keeps_warn_fail_rows_even_when_noise():
+    raw_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "s_warn",
+                "tab_name": "main",
+                "step_index": 1,
+                "is_noise_step": True,
+                "is_duplicate_step": False,
+                "is_recent_duplicate_step": False,
+                "final_result": "WARN",
+            },
+            {
+                "scenario_id": "s_fail",
+                "tab_name": "main",
+                "step_index": 2,
+                "is_noise_step": True,
+                "is_duplicate_step": False,
+                "is_recent_duplicate_step": False,
+                "final_result": "FAIL",
+            },
+        ]
+    )
+
+    filtered_df = make_filtered_df(raw_df)
+    assert filtered_df["final_result"].tolist() == ["WARN", "FAIL"]
+
+
 def test_save_excel_adds_result_crop_hyperlink(tmp_path):
     crop_file = tmp_path / "crops" / "sample_step_1.png"
     crop_file.parent.mkdir(parents=True, exist_ok=True)

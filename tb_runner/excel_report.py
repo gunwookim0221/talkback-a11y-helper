@@ -9,7 +9,7 @@ from tb_runner.image_utils import create_excel_thumbnail, insert_images_to_excel
 from tb_runner.logging_utils import get_recent_logs, log
 from tb_runner.utils import to_json_text
 
-EXCEL_REPORT_VERSION = "1.4.0"
+EXCEL_REPORT_VERSION = "1.4.1"
 
 _DEBUG_LOG_KEYWORDS = (
     "[STEP]",
@@ -375,10 +375,44 @@ def make_filtered_df(raw_df: pd.DataFrame) -> pd.DataFrame:
             return pd.Series([False] * len(raw_df), index=raw_df.index, dtype=bool)
         return raw_df[col].fillna(False).astype(bool)
 
+    def _text_series(col: str) -> pd.Series:
+        if col not in raw_df.columns:
+            return pd.Series([""] * len(raw_df), index=raw_df.index, dtype=object)
+        return raw_df[col].fillna("").astype(str).str.strip()
+
+    def _normalized_text_series(col: str) -> pd.Series:
+        return _text_series(col).str.lower()
+
     is_noise = _bool_series("is_noise_step")
     is_duplicate = _bool_series("is_duplicate_step")
     is_recent_duplicate = _bool_series("is_recent_duplicate_step")
-    keep_mask = ~(is_noise | is_duplicate | is_recent_duplicate)
+
+    final_result = _normalized_text_series("final_result").str.upper()
+    failure_reason = _normalized_text_series("failure_reason")
+    review_note = _normalized_text_series("review_note")
+    visible = _normalized_text_series("visible_label")
+    speech = _normalized_text_series("merged_announcement")
+    normalized_visible = _normalized_text_series("normalized_visible_label")
+    normalized_speech = _normalized_text_series("normalized_announcement")
+    rule_compare = _normalized_text_series("rule_compare")
+    speech_match_result = _normalized_text_series("speech_match_result")
+    if "mismatch_reasons" in raw_df.columns:
+        mismatch_reasons = raw_df["mismatch_reasons"]
+    else:
+        mismatch_reasons = pd.Series([""] * len(raw_df), index=raw_df.index, dtype=object)
+
+    is_warn_or_fail = final_result.isin({"WARN", "FAIL"})
+    has_review_fields = (review_note != "") | (failure_reason != "")
+    has_visible_speech_mismatch = (
+        ((normalized_visible != "") & (normalized_speech != "") & (normalized_visible != normalized_speech))
+        | ((visible != "") & (speech != "") & (visible != speech))
+        | (rule_compare == "diff")
+        | (speech_match_result.str.contains("mismatch", na=False))
+        | mismatch_reasons.apply(lambda value: bool(value) if isinstance(value, list) else bool(str(value or "").strip()))
+    )
+
+    keep_for_review = is_warn_or_fail | has_review_fields | has_visible_speech_mismatch
+    keep_mask = (~(is_noise | is_duplicate | is_recent_duplicate)) | keep_for_review
     return raw_df[keep_mask].copy()
 
 
