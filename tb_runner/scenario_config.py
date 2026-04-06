@@ -20,6 +20,30 @@ DEFAULT_GLOBAL_NAV = {
 
 TAB_CONFIGS = [
     {
+        "scenario_id": "global_nav_main",
+        "scenario_type": "global_nav",
+        "tab_name": "(?i).*(home|devices|life|routines|menu).*",
+        "tab_type": "a",
+        "screen_context_mode": "bottom_tab",
+        "stabilization_mode": "tab_context",
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": "(?i).*(selected|선택됨).*(home|devices|life|routines|menu).*",
+        },
+        "anchor_name": "(?i).*(home|devices|life|routines|menu).*",
+        "anchor_type": "a",
+        "anchor": {
+            "announcement_regex": "(?i).*(selected|선택됨).*(home|devices|life|routines|menu).*",
+            "tie_breaker": "bottom_nav_left_to_right",
+        },
+        "stop_policy": {
+            "stop_on_global_nav_exit": True,
+        },
+        "global_nav": DEFAULT_GLOBAL_NAV,
+        "enabled": False,
+        "max_steps": 10,
+    },
+    {
         "scenario_id": "home_main",
         "scenario_type": "content",
         "tab_name": "(?i).*home.*",
@@ -108,6 +132,73 @@ TAB_CONFIGS = [
             {
                 "action": "scrolltouch",
                 "target": "(?i).*air\\s*care.*|.*aircare.*|.*에어\\s*케어.*",
+                "type": "a",
+            }
+        ],
+
+        "anchor_name": "(?i).*navigate\\s*up.*",
+        "anchor_type": "a",
+        "anchor": {
+            "text_regex": "(?i).*navigate\\s*up.*",
+            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "tie_breaker": "top_left",
+        },
+
+        "context_verify": {
+            "type": "screen_text",
+            "text_regex": "(?i).*air\\s*care.*|.*aircare.*|.*공기.*|.*미세먼지.*",
+        },
+
+        "enabled": True,
+        "max_steps": 100,
+    },
+    # Life 플러그인 Home Care
+    {
+        "scenario_id": "life_home_care_plugin",
+        "scenario_type": "content",
+        "tab_name": "(?i).*life.*",
+        "tab_type": "b",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+
+        "pre_navigation": [
+            {
+                "action": "scrolltouch",
+                "target": "(?i).*home\\s*care.*|.*homecare.*|.*홈\\s*케어.*",
+                "type": "a",
+            }
+        ],
+
+        "anchor_name": "(?i).*navigate\\s*up.*",
+        "anchor_type": "a",
+        "anchor": {
+            "text_regex": "(?i).*navigate\\s*up.*",
+            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "tie_breaker": "top_left",
+        },
+
+        "context_verify": {
+            "type": "screen_text",
+            "text_regex": "(?i).*air\\s*care.*|.*aircare.*|.*공기.*|.*미세먼지.*",
+        },
+
+        "enabled": True,
+        "max_steps": 100,
+    },
+    
+    # Life 플러그인 Energy
+    {
+        "scenario_id": "life_energy_plugin",
+        "scenario_type": "content",
+        "tab_name": "(?i).*life.*",
+        "tab_type": "b",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+
+        "pre_navigation": [
+            {
+                "action": "scrolltouch",
+                "target": "(?i).*energy.*",
                 "type": "a",
             }
         ],
@@ -303,30 +394,7 @@ TAB_CONFIGS = [
             "block_candidates": [],
         },
     },
-    {
-        "scenario_id": "global_nav_main",
-        "scenario_type": "global_nav",
-        "tab_name": "(?i).*(home|devices|life|routines|menu).*",
-        "tab_type": "a",
-        "screen_context_mode": "bottom_tab",
-        "stabilization_mode": "tab_context",
-        "context_verify": {
-            "type": "selected_bottom_tab",
-            "announcement_regex": "(?i).*(selected|선택됨).*(home|devices|life|routines|menu).*",
-        },
-        "anchor_name": "(?i).*(home|devices|life|routines|menu).*",
-        "anchor_type": "a",
-        "anchor": {
-            "announcement_regex": "(?i).*(selected|선택됨).*(home|devices|life|routines|menu).*",
-            "tie_breaker": "bottom_nav_left_to_right",
-        },
-        "stop_policy": {
-            "stop_on_global_nav_exit": True,
-        },
-        "global_nav": DEFAULT_GLOBAL_NAV,
-        "enabled": False,
-        "max_steps": 10,
-    },
+
     {
         "scenario_id": "settings_entry_example",
         "scenario_type": "content",
@@ -391,50 +459,6 @@ TAB_CONFIGS = [
         "enabled": False,
         "max_steps": 20,
     },
-    {
-        "scenario_id": "life_plugin_example",
-        "scenario_type": "content",
-        "tab_name": "(?i).*life.*",
-        "tab_type": "b",
-        "screen_context_mode": "new_screen",
-        "stabilization_mode": "anchor_only",
-        "anchor_name": "(?i).*smartthings.*energy.*",
-        "anchor_type": "a",
-        "anchor": {
-            "text_regex": "(?i).*smartthings.*energy.*",
-            "announcement_regex": "(?i).*smartthings.*energy.*",
-            "tie_breaker": "top_left",
-        },
-        "context_verify": {
-            "type": "screen_text",
-            "text_regex": "(?i).*smartthings.*energy.*",
-        },
-        "enabled": False,
-        "max_steps": 5,
-    },
-    {
-        "scenario_id": "resource_id_only_example",
-        "scenario_type": "content",
-        "tab_name": "(?i).*home.*",
-        "tab_type": "b",
-        "screen_context_mode": "bottom_tab",
-        "stabilization_mode": "anchor_then_context",
-        "anchor_name": "com.samsung.android.oneconnect:id/add_menu_button",
-        "anchor_type": "r",
-        "anchor": {
-            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/add_menu_button",
-            "tie_breaker": "top_left",
-            "allow_resource_id_only": True,
-        },
-        "context_verify": {
-            "type": "selected_bottom_tab",
-            "announcement_regex": "(?i).*(selected|선택됨).*home.*",
-        },
-        "stop_policy": {
-            "stop_on_global_nav_entry": True,
-        },
-        "global_nav": BOTTOM_TAB_GLOBAL_NAV,
-        "enabled": False,
-        "max_steps": 10,
-    },
+
+
 ]
