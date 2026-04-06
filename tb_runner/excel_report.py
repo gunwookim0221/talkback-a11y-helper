@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import re
 
@@ -6,6 +7,17 @@ import pandas as pd
 from tb_runner.image_utils import insert_images_to_excel
 from tb_runner.logging_utils import log
 from tb_runner.utils import to_json_text
+
+EXCEL_REPORT_VERSION = "1.0.0"
+
+
+def _excel_col_to_name(col_idx: int) -> str:
+    col_num = col_idx + 1
+    letters: list[str] = []
+    while col_num > 0:
+        col_num, remainder = divmod(col_num - 1, 26)
+        letters.append(chr(65 + remainder))
+    return "".join(reversed(letters))
 
 
 def add_rule_compare(df: pd.DataFrame) -> pd.DataFrame:
@@ -176,6 +188,7 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
                 "failure_reason",
                 "review_note",
                 "crop_image_path",
+                "result_crop_thumbnail",
             ]
         )
 
@@ -339,6 +352,7 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
         else ("speech_visible_diverged" if row["speech_match_result"] == "FAIL_MISMATCH" else ("fallback_dependent" if row["focus_confidence"] == "LOW" and row["final_result"] != "FAIL" else "")),
         axis=1,
     )
+    result["result_crop_thumbnail"] = ""
 
     return result[
         [
@@ -364,6 +378,7 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
             "failure_reason",
             "review_note",
             "crop_image_path",
+            "result_crop_thumbnail",
         ]
     ]
 
@@ -383,13 +398,16 @@ def _apply_result_crop_hyperlinks(writer: pd.ExcelWriter, result_df: pd.DataFram
         if path_obj.suffix and path_obj.suffix.lower() not in valid_exts:
             return None, "unsupported_extension"
 
-        if not xlsxwriter_mode:
-            return normalized, None
-
         if normalized.startswith(("http://", "https://", "file://", "mailto:", "internal:", "external:")):
             return normalized, None
 
-        safe_path = normalized.replace("\\", "/")
+        abs_path = os.path.abspath(os.path.normpath(normalized))
+        if not abs_path:
+            return None, "unsupported_path_format"
+
+        if not xlsxwriter_mode:
+            return abs_path, None
+        safe_path = abs_path.replace("\\", "/")
         if not safe_path:
             return None, "unsupported_path_format"
         return f"external:{safe_path}", None
@@ -441,6 +459,118 @@ def _apply_result_crop_hyperlinks(writer: pd.ExcelWriter, result_df: pd.DataFram
         log(
             f"[WARN][excel] result crop hyperlink skipped for {skipped_total} rows reasons='{reason_summary}'"
         )
+
+
+def _apply_result_visual_enhancements(writer: pd.ExcelWriter, result_df: pd.DataFrame) -> None:
+    if "result" not in writer.sheets or result_df.empty or "final_result" not in result_df.columns:
+        return
+
+    ws = writer.sheets["result"]
+    is_openpyxl_sheet = hasattr(ws, "cell")
+    is_xlsxwriter_sheet = hasattr(ws, "conditional_format")
+    final_col_idx = result_df.columns.get_loc("final_result")
+    thumb_col_idx = result_df.columns.get_loc("result_crop_thumbnail") if "result_crop_thumbnail" in result_df.columns else -1
+    color_map = {
+        "PASS": "C6EFCE",
+        "WARN": "FFEB9C",
+        "FAIL": "FFC7CE",
+    }
+
+    def _has_mismatch(row_obj) -> bool:
+        reason = str(getattr(row_obj, "failure_reason", "") or "")
+        return "speech_visible_diverged" in reason
+
+    if is_openpyxl_sheet:
+        from openpyxl.drawing.image import Image as XLImage
+        from openpyxl.styles import PatternFill
+
+        max_col = len(result_df.columns)
+        thumb_failures = 0
+        for row_idx, row in enumerate(result_df.itertuples(index=False), start=2):
+            final_result = str(getattr(row, "final_result", "") or "").upper()
+            fill_color = color_map.get(final_result)
+            if fill_color:
+                fill = PatternFill(fill_type="solid", start_color=fill_color, end_color=fill_color)
+                for col in range(1, max_col + 1):
+                    ws.cell(row=row_idx, column=col).fill = fill
+
+            if thumb_col_idx < 0:
+                continue
+
+            mismatch_exists = _has_mismatch(row)
+            needs_thumb = final_result in {"WARN", "FAIL"} or mismatch_exists
+            crop_path = str(getattr(row, "crop_image_path", "") or "").strip()
+            thumb_cell = ws.cell(row=row_idx, column=thumb_col_idx + 1)
+            if not needs_thumb:
+                thumb_cell.value = ""
+                continue
+            if not crop_path or not Path(crop_path).exists():
+                thumb_cell.value = Path(crop_path).name if crop_path else ""
+                continue
+            thumb_cell.value = Path(crop_path).name
+            try:
+                img = XLImage(crop_path)
+                original_width = float(getattr(img, "width", 0) or 0)
+                original_height = float(getattr(img, "height", 0) or 0)
+                if original_width > 0 and original_height > 0:
+                    ratio = min(150.0 / original_width, 1.0)
+                    img.width = max(1, int(original_width * ratio))
+                    img.height = max(1, int(original_height * ratio))
+                ws.add_image(img, thumb_cell.coordinate)
+                ws.row_dimensions[row_idx].height = max(float(ws.row_dimensions[row_idx].height or 0), 80.0)
+            except Exception:
+                thumb_failures += 1
+        if thumb_col_idx >= 0:
+            ws.column_dimensions[ws.cell(row=1, column=thumb_col_idx + 1).column_letter].width = 24
+        if thumb_failures:
+            log(f"[WARN][excel] result thumbnail insert skipped for {thumb_failures} rows")
+        return
+
+    if is_xlsxwriter_sheet:
+        workbook = writer.book
+        max_row = len(result_df)
+        max_col = len(result_df.columns) - 1
+        row_range = f"A2:{_excel_col_to_name(max_col)}{max_row + 1}"
+        pass_fmt = workbook.add_format({"bg_color": "#C6EFCE"})
+        warn_fmt = workbook.add_format({"bg_color": "#FFEB9C"})
+        fail_fmt = workbook.add_format({"bg_color": "#FFC7CE"})
+        result_col_letter = _excel_col_to_name(final_col_idx)
+        ws.conditional_format(row_range, {"type": "formula", "criteria": f'=${result_col_letter}2="PASS"', "format": pass_fmt})
+        ws.conditional_format(row_range, {"type": "formula", "criteria": f'=${result_col_letter}2="WARN"', "format": warn_fmt})
+        ws.conditional_format(row_range, {"type": "formula", "criteria": f'=${result_col_letter}2="FAIL"', "format": fail_fmt})
+        if thumb_col_idx < 0:
+            return
+
+        thumb_failures = 0
+        for row_number, row in enumerate(result_df.itertuples(index=False), start=2):
+            final_result = str(getattr(row, "final_result", "") or "").upper()
+            mismatch_exists = _has_mismatch(row)
+            needs_thumb = final_result in {"WARN", "FAIL"} or mismatch_exists
+            crop_path = str(getattr(row, "crop_image_path", "") or "").strip()
+            display_name = Path(crop_path).name if crop_path else ""
+            if not needs_thumb:
+                ws.write(row_number - 1, thumb_col_idx, "")
+                continue
+            ws.write(row_number - 1, thumb_col_idx, display_name)
+            if not crop_path or not Path(crop_path).exists():
+                continue
+            try:
+                from PIL import Image as PILImage
+
+                with PILImage.open(crop_path) as pil_img:
+                    width, height = pil_img.size
+                if width > 0 and height > 0:
+                    scale = min(150.0 / float(width), 1.0)
+                    options = {"x_scale": scale, "y_scale": scale, "object_position": 1}
+                else:
+                    options = {"object_position": 1}
+                ws.insert_image(row_number - 1, thumb_col_idx, crop_path, options)
+                ws.set_row(row_number - 1, 80)
+            except Exception:
+                thumb_failures += 1
+        ws.set_column(thumb_col_idx, thumb_col_idx, 24)
+        if thumb_failures:
+            log(f"[WARN][excel] result thumbnail insert skipped for {thumb_failures} rows")
 
 
 def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> None:
@@ -519,8 +649,9 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
         summary_df.to_excel(writer, sheet_name="summary", index=False)
         result_df.to_excel(writer, sheet_name="result", index=False)
         _apply_result_crop_hyperlinks(writer, result_df)
+        _apply_result_visual_enhancements(writer, result_df)
 
     if with_images and "crop_image" in raw_df.columns:
-        insert_images_to_excel(output_path, image_col_name="crop_image")
+        insert_images_to_excel(output_path, image_col_name="crop_image", sheet_name="raw")
 
     log(f"[SAVE] saved excel: {output_path} rows={len(raw_df)} with_images={with_images}")
