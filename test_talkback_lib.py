@@ -2196,6 +2196,76 @@ class FocusHelpersTest(unittest.TestCase):
             ["Navigate up Special suggestions Get helpful offers or news on products. Off"],
         )
 
+    def test_collect_focus_step_visible_anchor_trim_without_baseline(self):
+        client = CollectFocusStepClient()
+        client.last_merged_announcement = ""
+        client.partial_payload = ["Navigate up Special suggestions Get helpful offers or news on products. Off"]
+        client.focus_payload = {"text": "Special suggestions Get helpful offers or news on products."}
+
+        step = client.collect_focus_step(dev="SERIAL", move=False, wait_seconds=0.2)
+
+        self.assertTrue(step["snapshot_contaminated"])
+        self.assertEqual(step["trim_reason"], "visible_anchor_prefix_trim")
+        self.assertTrue(step["trim_applied"])
+        self.assertEqual(
+            step["merged_announcement"],
+            "Special suggestions Get helpful offers or news on products. Off",
+        )
+        self.assertEqual(step["announcement_stable_source"], "trimmed_candidate")
+        self.assertFalse(step["used_snapshot"])
+
+    def test_collect_focus_step_keeps_normal_trailing_state_without_trim(self):
+        client = CollectFocusStepClient()
+        client.last_merged_announcement = ""
+        client.partial_payload = ["Sync favourites On"]
+        client.focus_payload = {"text": "Sync favourites"}
+
+        step = client.collect_focus_step(dev="SERIAL", move=False, wait_seconds=0.2)
+
+        self.assertFalse(step["trim_applied"])
+        self.assertEqual(step["merged_announcement"], "Sync favourites On")
+        self.assertEqual(step["trim_reason"], "")
+
+    def test_collect_focus_step_does_not_trim_when_visible_anchor_not_found(self):
+        client = CollectFocusStepClient()
+        client.last_merged_announcement = ""
+        client.partial_payload = ["Weather card added successfully"]
+        client.focus_payload = {"text": "Special suggestions Get helpful offers or news on products."}
+
+        step = client.collect_focus_step(dev="SERIAL", move=False, wait_seconds=0.2)
+
+        self.assertFalse(step["trim_applied"])
+        self.assertEqual(step["merged_announcement"], "Weather card added successfully")
+        self.assertFalse(step["snapshot_contaminated"])
+
+    def test_collect_focus_step_prefers_trimmed_candidate_over_contaminated_snapshot(self):
+        client = CollectFocusStepClient()
+        client.last_merged_announcement = ""
+        client.partial_payload = ["Navigate up Special suggestions Get helpful offers or news on products. Off"]
+        client.focus_payload = {"text": "Special suggestions Get helpful offers or news on products."}
+
+        step = client.collect_focus_step(dev="SERIAL", move=False, wait_seconds=0.2)
+
+        self.assertTrue(step["snapshot_contaminated"])
+        self.assertFalse(step["used_snapshot"])
+        self.assertEqual(step["announcement_stable_source"], "trimmed_candidate")
+        self.assertEqual(step["snapshot_reason"], "prefix_before_visible_anchor")
+
+    def test_collect_focus_step_keeps_contaminated_snapshot_as_fallback_when_no_anchor(self):
+        client = CollectFocusStepClient()
+        client.last_merged_announcement = ""
+        client.partial_payload = ["Navigate up Special suggestions Get helpful offers or news on products. Off"]
+        client.focus_payload = {"text": ""}
+
+        step = client.collect_focus_step(dev="SERIAL", move=False, wait_seconds=0.2)
+
+        self.assertEqual(
+            step["merged_announcement"],
+            "Navigate up Special suggestions Get helpful offers or news on products. Off",
+        )
+        self.assertTrue(step["used_snapshot"])
+        self.assertFalse(step["trim_applied"])
+
 
 if __name__ == "__main__":
     unittest.main()
