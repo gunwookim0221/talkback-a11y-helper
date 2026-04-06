@@ -119,13 +119,16 @@
       }
     },
     "life_main": {
-      "group": "main_tabs"
+      "group": "main_tabs",
+      "enabled": false
     },
     "routines_main": {
-      "group": "main_tabs"
+      "group": "main_tabs",
+      "enabled": false
     },
     "menu_main": {
-      "group": "main_tabs"
+      "group": "main_tabs",
+      "enabled": false
     },
     "life_food_plugin": {
       "group": "plugin_screen",
@@ -146,7 +149,20 @@
       "max_steps": 40
     },
     "resource_id_only_example": {
-      "group": "main_tabs"
+      "group": "main_tabs",
+      "enabled": false
+    },
+    "life_air_care_plugin": {
+      "enabled": true
+    },
+    "life_home_care_plugin": {
+      "enabled": false
+    },
+    "life_energy_plugin": {
+      "enabled": false
+    },
+    "life_pet_care_example": {
+      "enabled": false
     }
   }
 }

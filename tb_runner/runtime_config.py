@@ -13,7 +13,7 @@ from tb_runner.constants import (
 )
 from tb_runner.logging_utils import log
 
-RUNTIME_CONFIG_VERSION = "1.8.1"
+RUNTIME_CONFIG_VERSION = "1.9.0"
 DEFAULT_RUNTIME_CONFIG_PATH = Path("config/runtime_config.json")
 
 
@@ -436,10 +436,19 @@ def load_runtime_bundle(base_tab_configs: list[dict[str, Any]], config_path: str
 
         _apply_typed_override(merged_cfg, scenario_override, runtime_defaults)
 
+        base_enabled = bool(base_cfg.get("enabled", False))
+        if isinstance(scenario_override.get("enabled"), bool):
+            final_enabled = bool(scenario_override.get("enabled"))
+            enabled_source = "runtime"
+        else:
+            final_enabled = False
+            enabled_source = "default"
+        merged_cfg["enabled"] = final_enabled
+
         if scenario_override or group_cfg:
             log(
                 f"[CONFIG] scenario resolved scenario='{scenario_id}' group='{group_name or '-'}' "
-                f"max_steps={merged_cfg.get('max_steps')} enabled={bool(merged_cfg.get('enabled', True))}"
+                f"max_steps={merged_cfg.get('max_steps')} enabled={bool(merged_cfg.get('enabled', False))}"
             )
             if applied_shared_navigation:
                 log(f"[CONFIG] applied shared_navigation='{applied_shared_navigation}'")
@@ -447,6 +456,10 @@ def load_runtime_bundle(base_tab_configs: list[dict[str, Any]], config_path: str
                 log(f"[CONFIG] applied anchor_ref='{applied_anchor_ref}'")
             if applied_pre_navigation_ref:
                 log(f"[CONFIG] applied pre_navigation_ref='{applied_pre_navigation_ref}'")
+        log(
+            f"[CONFIG] scenario enabled scenario='{scenario_id}' source='{enabled_source}' "
+            f"enabled={final_enabled} base_enabled={base_enabled}"
+        )
 
         merged_tab_configs.append(merged_cfg)
 
