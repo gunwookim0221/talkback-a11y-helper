@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 import pandas as pd
 
@@ -142,6 +143,228 @@ def make_summary_df(raw_df: pd.DataFrame, filtered_df: pd.DataFrame) -> pd.DataF
     return pd.DataFrame(rows)
 
 
+def _normalize_compare_text(value: object) -> str:
+    text = str(value or "").strip().lower()
+    text = text.replace("\n", " ")
+    text = re.sub(r"[\.,!?;:\-_/()\[\]{}\"'`]+", " ", text)
+    return " ".join(text.split())
+
+
+def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
+    if filtered_df.empty:
+        return pd.DataFrame(
+            columns=[
+                "scenario_id",
+                "tab",
+                "step",
+                "context_type",
+                "visible",
+                "speech",
+                "move_result",
+                "resource_id",
+                "bounds",
+                "fallback_used",
+                "step_dump_used",
+                "req_id",
+                "timing_move",
+                "timing_get_focus",
+                "timing_total",
+                "traversal_result",
+                "speech_match_result",
+                "focus_confidence",
+                "final_result",
+                "failure_reason",
+                "review_note",
+            ]
+        )
+
+    result = pd.DataFrame(index=filtered_df.index)
+
+    def _pick_col(target: str, candidates: list[str], default: object = "") -> None:
+        for col in candidates:
+            if col in filtered_df.columns:
+                result[target] = filtered_df[col]
+                return
+        result[target] = default
+
+    _pick_col("scenario_id", ["scenario_id"])
+    _pick_col("tab", ["tab", "tab_name"])
+    _pick_col("step", ["step", "step_index"])
+    _pick_col("context_type", ["context_type"])
+
+    _pick_col("visible", ["visible_label", "normalized_visible_label", "text"])
+    _pick_col(
+        "speech",
+        ["merged_announcement", "speech", "announcement", "normalized_announcement"],
+    )
+    _pick_col("move_result", ["move_result"])
+    _pick_col("resource_id", ["focus_view_id", "resource_id"])
+    _pick_col("bounds", ["focus_bounds", "bounds"])
+    _pick_col("fallback_used", ["fallback_used"], default=False)
+    _pick_col("step_dump_used", ["step_dump_used"], default=False)
+    _pick_col("req_id", ["req_id"])
+
+    _pick_col("timing_move", ["timing_move", "move_elapsed_sec"])
+    _pick_col("timing_get_focus", ["timing_get_focus", "step_elapsed_sec"])
+    _pick_col("timing_total", ["timing_total", "step_elapsed_sec"])
+
+    result["move_result"] = result["move_result"].fillna("").astype(str).str.lower().str.strip()
+    result["fallback_used"] = result["fallback_used"].fillna(False).astype(bool)
+    result["step_dump_used"] = result["step_dump_used"].fillna(False).astype(bool)
+
+    result["_norm_visible"] = result["visible"].apply(_normalize_compare_text)
+    result["_norm_speech"] = result["speech"].apply(_normalize_compare_text)
+    if "mismatch_reasons" in filtered_df.columns:
+        result["_mismatch_reasons"] = filtered_df["mismatch_reasons"]
+    else:
+        result["_mismatch_reasons"] = ""
+
+    def _same_topic(a: str, b: str) -> bool:
+        if not a or not b:
+            return False
+        a_tokens = [tok for tok in a.split(" ") if len(tok) > 1]
+        b_tokens = [tok for tok in b.split(" ") if len(tok) > 1]
+        if not a_tokens or not b_tokens:
+            return False
+        a_set = set(a_tokens)
+        b_set = set(b_tokens)
+        return len(a_set & b_set) >= max(1, min(len(a_set), len(b_set)) // 2)
+
+    def _speech_match(row) -> str:
+        visible = row["_norm_visible"]
+        speech = row["_norm_speech"]
+        mismatch_reasons = str(row.get("_mismatch_reasons", "") or "")
+        if "speech_visible_diverged" in mismatch_reasons:
+            return "FAIL_MISMATCH"
+        if visible and speech and visible == speech:
+            return "PASS_EXACT"
+        if visible and speech and (visible in speech or speech in visible):
+            if _same_topic(visible, speech):
+                length_gap = abs(len(visible.split(" ")) - len(speech.split(" ")))
+                return "WARN_CONTEXT_ADDED" if length_gap >= 2 else "PASS_CONTAINS"
+            return "PASS_CONTAINS"
+        if _same_topic(visible, speech):
+            return "WARN_CONTEXT_ADDED"
+        return "FAIL_MISMATCH"
+
+    result["speech_match_result"] = result.apply(_speech_match, axis=1)
+
+    group_keys = [k for k in ["scenario_id", "tab", "context_type"] if k in result.columns]
+    if not group_keys:
+        group_keys = [result.index]
+
+    for _, group in result.groupby(group_keys, dropna=False, sort=False):
+        group_idx = group.index.tolist()
+        moved_idx = [idx for idx in group_idx if result.at[idx, "move_result"] == "moved"]
+        last_moved_idx = moved_idx[-1] if moved_idx else None
+
+        traversal = []
+        failure = []
+        for idx in group_idx:
+            move_result = result.at[idx, "move_result"]
+            is_followup_noise = False
+            if last_moved_idx is not None and idx > last_moved_idx:
+                same_visible = result.at[idx, "_norm_visible"] == result.at[last_moved_idx, "_norm_visible"]
+                same_speech = result.at[idx, "_norm_speech"] == result.at[last_moved_idx, "_norm_speech"]
+                is_repeat_stop = "repeat_no_progress" in str(result.at[idx, "req_id"] or "")
+                is_followup_noise = move_result == "failed" and (same_visible or same_speech or is_repeat_stop)
+
+            if idx == last_moved_idx and any(i > last_moved_idx for i in group_idx if result.at[i, "move_result"] == "failed"):
+                traversal.append("WARN_TERMINAL_BY_REPEAT_STOP")
+                failure.append("terminal_not_handled")
+            elif move_result == "moved":
+                traversal.append("PASS_MOVED")
+                failure.append("")
+            elif is_followup_noise:
+                traversal.append("WARN_TERMINAL_BY_REPEAT_STOP")
+                failure.append("terminal_followup_noise")
+            elif move_result == "failed":
+                if moved_idx:
+                    traversal.append("FAIL_STUCK")
+                    failure.append("repeat_no_progress")
+                else:
+                    traversal.append("FAIL_MOVE")
+                    failure.append("move_failed")
+            else:
+                traversal.append("FAIL_MOVE")
+                failure.append("move_failed")
+
+        result.loc[group_idx, "traversal_result"] = traversal
+        result.loc[group_idx, "failure_reason"] = failure
+
+    def _focus_confidence(row) -> str:
+        if row["fallback_used"] or row["step_dump_used"]:
+            return "LOW"
+        if row["speech_match_result"] in {"PASS_EXACT", "PASS_CONTAINS"} and row["traversal_result"] == "PASS_MOVED":
+            return "HIGH"
+        if row["speech_match_result"] == "FAIL_MISMATCH" or row["traversal_result"].startswith("FAIL"):
+            return "LOW"
+        return "MEDIUM"
+
+    result["focus_confidence"] = result.apply(_focus_confidence, axis=1)
+
+    def _final_result(row) -> str:
+        if row["traversal_result"] in {"FAIL_MOVE", "FAIL_STUCK"} or row["speech_match_result"] == "FAIL_MISMATCH":
+            return "FAIL"
+        if (
+            row["traversal_result"] == "WARN_TERMINAL_BY_REPEAT_STOP"
+            or row["speech_match_result"] == "WARN_CONTEXT_ADDED"
+            or row["focus_confidence"] == "LOW"
+        ):
+            return "WARN"
+        if row["traversal_result"] == "PASS_MOVED" and row["speech_match_result"] in {"PASS_EXACT", "PASS_CONTAINS"}:
+            return "PASS"
+        return "WARN"
+
+    def _review_note(row) -> str:
+        if row["final_result"] == "PASS":
+            return "정상 이동 및 발화 일치"
+        if row["traversal_result"] == "WARN_TERMINAL_BY_REPEAT_STOP":
+            return "실제 마지막 항목으로 보이나 종료 판정 미흡"
+        if row["speech_match_result"] == "WARN_CONTEXT_ADDED":
+            return "정상 이동, speech에 상위 문맥 포함"
+        if row["traversal_result"] == "FAIL_STUCK":
+            return "동일 항목 반복 후 종료"
+        if row["speech_match_result"] == "FAIL_MISMATCH":
+            return "speech와 visible 불일치"
+        return "이동/발화 결과 재검토 필요"
+
+    result["final_result"] = result.apply(_final_result, axis=1)
+    result["review_note"] = result.apply(_review_note, axis=1)
+    result["failure_reason"] = result.apply(
+        lambda row: row["failure_reason"]
+        if row["failure_reason"]
+        else ("speech_visible_diverged" if row["speech_match_result"] == "FAIL_MISMATCH" else ("fallback_dependent" if row["focus_confidence"] == "LOW" and row["final_result"] != "FAIL" else "")),
+        axis=1,
+    )
+
+    return result[
+        [
+            "scenario_id",
+            "tab",
+            "step",
+            "context_type",
+            "visible",
+            "speech",
+            "move_result",
+            "resource_id",
+            "bounds",
+            "fallback_used",
+            "step_dump_used",
+            "req_id",
+            "timing_move",
+            "timing_get_focus",
+            "timing_total",
+            "traversal_result",
+            "speech_match_result",
+            "focus_confidence",
+            "final_result",
+            "failure_reason",
+            "review_note",
+        ]
+    ]
+
+
 def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> None:
     df = pd.DataFrame(rows)
     if df.empty:
@@ -153,8 +376,9 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
     raw_df = df.copy()
     filtered_df = make_filtered_df(raw_df)
     summary_df = make_summary_df(raw_df, filtered_df)
+    result_df = make_result_df(filtered_df)
 
-    log("[SAVE] writing sheets raw/filtered/summary")
+    log("[SAVE] writing sheets raw/filtered/summary/result")
     log(f"[SAVE] filtered rows={len(filtered_df)}, raw rows={len(raw_df)}")
 
     ordered_cols = [
@@ -208,12 +432,14 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
     raw_df = stringify_complex_columns(raw_df)
     filtered_df = stringify_complex_columns(filtered_df)
     summary_df = stringify_complex_columns(summary_df)
+    result_df = stringify_complex_columns(result_df)
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(output_path) as writer:
         raw_df.to_excel(writer, sheet_name="raw", index=False)
         filtered_df.to_excel(writer, sheet_name="filtered", index=False)
         summary_df.to_excel(writer, sheet_name="summary", index=False)
+        result_df.to_excel(writer, sheet_name="result", index=False)
 
     if with_images and "crop_image" in raw_df.columns:
         insert_images_to_excel(output_path, image_col_name="crop_image")
