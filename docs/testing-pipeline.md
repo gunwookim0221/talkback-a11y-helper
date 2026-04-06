@@ -164,10 +164,11 @@ main row에는 후처리 품질 메타데이터가 기록됩니다.
 - `is_noise_step`
 - `noise_reason`
 
-엑셀 저장(`save_excel`)은 3개 시트로 구성됩니다.
+엑셀 저장(`save_excel`)은 4개 시트로 구성됩니다.
 - `raw`: 전체 row + 파생 컬럼
 - `filtered`: noise/duplicate/recent_duplicate 제외
 - `summary`: overall/scenario 집계
+- `result`: 최종 판정(PASS/WARN/FAIL), `failure_reason`, `debug_log_path/debug_log_name`(WARN/FAIL 중심 디버그 로그 링크)
 
 상태 토큰 분리 컬럼:
 - `speech_main`, `speech_status_tokens`

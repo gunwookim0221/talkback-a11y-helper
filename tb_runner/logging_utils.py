@@ -1,4 +1,5 @@
 import time
+from collections import deque
 from pathlib import Path
 from typing import TextIO
 
@@ -6,6 +7,7 @@ from tb_runner.constants import LOG_LEVEL, LOG_LEVEL_ORDER
 
 _normal_log_file: TextIO | None = None
 _debug_log_file: TextIO | None = None
+_recent_logs: deque[str] = deque(maxlen=300)
 
 
 def now_str() -> str:
@@ -61,10 +63,19 @@ def close_log_files() -> None:
     _debug_log_file = None
 
 
+def get_recent_logs(limit: int = 200) -> list[str]:
+    if limit <= 0:
+        return []
+    if limit >= len(_recent_logs):
+        return list(_recent_logs)
+    return list(_recent_logs)[-limit:]
+
+
 def log(msg: str, level: str = "NORMAL") -> None:
     global _normal_log_file, _debug_log_file
     if _should_log(level):
         line = f"[{now_str()}] {msg}"
+        _recent_logs.append(line)
         print(line)
         if _normal_log_file is not None and LOG_LEVEL_ORDER.get(level, 1) <= LOG_LEVEL_ORDER["NORMAL"]:
             try:

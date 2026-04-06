@@ -101,6 +101,8 @@ def test_make_result_df_generates_pass_warn_fail_rows():
     assert "final_result" in result.columns
     assert set(result["final_result"].tolist()) == {"PASS", "WARN", "FAIL"}
     assert "speech_visible_diverged" in set(result["failure_reason"].tolist())
+    assert result.columns[-4] == "debug_log_path"
+    assert result.columns[-3] == "debug_log_name"
     assert result.columns[-2] == "crop_image_path"
     assert result.columns[-1] == "result_crop_thumbnail"
 
@@ -179,6 +181,74 @@ def test_save_excel_adds_result_crop_hyperlink(tmp_path):
     assert crop_cell.value == crop_file.name
     assert crop_cell.hyperlink is not None
     assert crop_cell.hyperlink.target == str(crop_file.resolve())
+
+
+def test_save_excel_writes_debug_log_only_for_warn_fail_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "tb_runner.excel_report.get_recent_logs",
+        lambda limit=200: [
+            "[12:00:00] [STEP] START tab='home' step=2",
+            "[12:00:01] [ROW] fingerprint='abc'",
+            "[12:00:02] [STOP][eval] step=2 decision='stop' reason='repeat_no_progress'",
+            "[12:00:03] [STEP] END tab='home' step=2 req_id='repeat_no_progress'",
+        ],
+    )
+
+    rows = [
+        {
+            "scenario_id": "s_pass",
+            "tab_name": "home",
+            "step_index": 1,
+            "context_type": "main",
+            "visible_label": "Home",
+            "merged_announcement": "Home",
+            "move_result": "moved",
+            "focus_view_id": "id/home",
+            "focus_bounds": "[0,0][10,10]",
+            "fallback_used": False,
+            "step_dump_used": False,
+            "req_id": "r_pass",
+            "step_elapsed_sec": 0.1,
+        },
+        {
+            "scenario_id": "s_fail",
+            "tab_name": "home",
+            "step_index": 2,
+            "context_type": "main",
+            "visible_label": "Step 2",
+            "merged_announcement": "Smart Things Cooking",
+            "move_result": "failed",
+            "focus_view_id": "id/fail",
+            "focus_bounds": "[0,10][10,20]",
+            "fallback_used": True,
+            "step_dump_used": True,
+            "req_id": "repeat_no_progress",
+            "step_elapsed_sec": 0.2,
+        },
+    ]
+    output_path = tmp_path / "report_debug_logs.xlsx"
+    save_excel(rows, str(output_path), with_images=False)
+
+    debug_dir = tmp_path / "debug_logs"
+    debug_files = list(debug_dir.glob("*.log"))
+    assert len(debug_files) == 1
+    assert "s_fail_step_2_req_repeat_no_progress.log" == debug_files[0].name
+    content = debug_files[0].read_text(encoding="utf-8")
+    assert "[ROW_CONTEXT]" in content
+    assert "final_result=FAIL" in content
+    assert "[LOG_SNIPPET]" in content
+
+    wb = openpyxl.load_workbook(output_path)
+    ws = wb["result"]
+    headers = [cell.value for cell in ws[1]]
+    debug_col_idx = headers.index("debug_log_path") + 1
+    pass_debug_cell = ws.cell(row=2, column=debug_col_idx)
+    fail_debug_cell = ws.cell(row=3, column=debug_col_idx)
+
+    assert pass_debug_cell.value in {"", None}
+    assert fail_debug_cell.value == debug_files[0].name
+    assert fail_debug_cell.hyperlink is not None
+    assert fail_debug_cell.hyperlink.target == str(debug_files[0].resolve())
 
 
 def test_save_excel_handles_windows_style_crop_path_without_row_warn_spam(tmp_path, monkeypatch):
