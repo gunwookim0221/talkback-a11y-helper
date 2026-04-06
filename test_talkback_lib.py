@@ -2173,6 +2173,29 @@ class FocusHelpersTest(unittest.TestCase):
         self.assertEqual(step["partial_announcements"], ["안내 1", "안내 2", "안내 3", "안내 4"])
         self.assertGreaterEqual(step["announcement_extra_wait_sec"], 0.35)
 
+    def test_collect_focus_step_trims_previous_prefix_from_selected_speech(self):
+        client = CollectFocusStepClient()
+        client.last_merged_announcement = "Navigate up"
+        client.partial_payload = ["Navigate up Special suggestions Get helpful offers or news on products. Off"]
+
+        step = client.collect_focus_step(
+            dev="SERIAL",
+            move=False,
+            wait_seconds=0.2,
+            announcement_wait_seconds=0.2,
+            announcement_idle_wait_seconds=0.0,
+            announcement_max_extra_wait_seconds=0.0,
+        )
+
+        self.assertEqual(
+            step["merged_announcement"],
+            "Special suggestions Get helpful offers or news on products. Off",
+        )
+        self.assertEqual(
+            step["partial_announcements"],
+            ["Navigate up Special suggestions Get helpful offers or news on products. Off"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
