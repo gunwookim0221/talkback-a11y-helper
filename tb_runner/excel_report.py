@@ -9,7 +9,7 @@ from tb_runner.image_utils import create_excel_thumbnail, insert_images_to_excel
 from tb_runner.logging_utils import log
 from tb_runner.utils import to_json_text
 
-EXCEL_REPORT_VERSION = "1.2.0"
+EXCEL_REPORT_VERSION = "1.2.1"
 
 
 def _excel_col_to_name(col_idx: int) -> str:
@@ -164,7 +164,30 @@ def _normalize_compare_text(value: object) -> str:
 
 
 def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
-    if filtered_df.empty:
+    status_series = (
+        filtered_df["status"].fillna("").astype(str).str.strip().str.upper()
+        if "status" in filtered_df.columns
+        else pd.Series([""] * len(filtered_df), index=filtered_df.index, dtype=object)
+    )
+    if "step_index" in filtered_df.columns:
+        step_source = filtered_df["step_index"]
+    elif "step" in filtered_df.columns:
+        step_source = filtered_df["step"]
+    else:
+        step_source = pd.Series([-1] * len(filtered_df), index=filtered_df.index, dtype=object)
+    step_series = pd.to_numeric(step_source, errors="coerce").fillna(-1)
+    move_series = (
+        filtered_df["move_result"].fillna("").astype(str).str.strip().str.lower()
+        if "move_result" in filtered_df.columns
+        else pd.Series([""] * len(filtered_df), index=filtered_df.index, dtype=object)
+    )
+    skip_anchor_mask = (status_series == "ANCHOR") | ((step_series == 0) & (move_series == ""))
+    skipped_anchor_count = int(skip_anchor_mask.sum())
+    if skipped_anchor_count > 0:
+        log(f"[RESULT] skipped anchor rows count={skipped_anchor_count}")
+    result_source_df = filtered_df.loc[~skip_anchor_mask].copy()
+
+    if result_source_df.empty:
         return pd.DataFrame(
             columns=[
                 "scenario_id",
@@ -193,12 +216,12 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
             ]
         )
 
-    result = pd.DataFrame(index=filtered_df.index)
+    result = pd.DataFrame(index=result_source_df.index)
 
     def _pick_col(target: str, candidates: list[str], default: object = "") -> None:
         for col in candidates:
-            if col in filtered_df.columns:
-                result[target] = filtered_df[col]
+            if col in result_source_df.columns:
+                result[target] = result_source_df[col]
                 return
         result[target] = default
 
@@ -230,8 +253,8 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
 
     result["_norm_visible"] = result["visible"].apply(_normalize_compare_text)
     result["_norm_speech"] = result["speech"].apply(_normalize_compare_text)
-    if "mismatch_reasons" in filtered_df.columns:
-        result["_mismatch_reasons"] = filtered_df["mismatch_reasons"]
+    if "mismatch_reasons" in result_source_df.columns:
+        result["_mismatch_reasons"] = result_source_df["mismatch_reasons"]
     else:
         result["_mismatch_reasons"] = ""
 
