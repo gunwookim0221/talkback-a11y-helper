@@ -43,6 +43,51 @@ _PRE_NAV_CONFIRM_POLL_SLEEP_SECONDS = 0.12
 _RECENT_DUPLICATE_WINDOW = 5
 
 
+def _is_meaningful_text(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    compact = re.sub(r"[\W_]+", "", text, flags=re.UNICODE)
+    return len(compact) >= 2
+
+
+def _is_new_screen_low_confidence_allowed(
+    tab_cfg: dict[str, Any],
+    stabilize_result: dict[str, Any],
+    *,
+    pre_nav_ok: bool,
+    screen_context_mode: str,
+) -> tuple[bool, str]:
+    if not pre_nav_ok:
+        return False, "pre_navigation_failed"
+    if screen_context_mode != "new_screen":
+        return False, "screen_context_mode_not_new_screen"
+
+    fallback_used = bool(stabilize_result.get("fallback_candidate_used"))
+    fallback_label = str(stabilize_result.get("fallback_candidate_label", "") or "").strip()
+    fallback_resource_id = str(stabilize_result.get("fallback_candidate_resource_id", "") or "").strip()
+    if not fallback_used:
+        return False, "fallback_candidate_absent"
+
+    verify_row = stabilize_result.get("verify_row", {})
+    if not isinstance(verify_row, dict):
+        verify_row = {}
+
+    has_meaningful_fallback = _is_meaningful_text(fallback_label) or _is_meaningful_text(fallback_resource_id)
+    has_meaningful_focus = _is_meaningful_text(verify_row.get("visible_label")) or _is_meaningful_text(
+        verify_row.get("merged_announcement")
+    )
+    has_meaningful_talkback = _is_meaningful_text(verify_row.get("talkback_label")) or _is_meaningful_text(
+        verify_row.get("focus_text")
+    )
+    has_top_level_signal = bool(verify_row.get("get_focus_top_level_payload_sufficient")) or bool(
+        verify_row.get("get_focus_fallback_found")
+    )
+    if has_meaningful_fallback and (has_meaningful_focus or has_meaningful_talkback or has_top_level_signal):
+        return True, "fallback_candidate_and_focus_evidence"
+    return False, "insufficient_new_screen_evidence"
+
+
 def _resolve_recovery_policy(tab_cfg: dict[str, Any]) -> dict[str, Any]:
     fallback_policy = {
         "enabled": True,
@@ -685,6 +730,10 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     screen_context_mode = _resolve_screen_context_mode(tab_cfg)
     stabilization_mode = _resolve_stabilization_mode(tab_cfg, screen_context_mode)
     scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    tab_cfg["_scenario_start_mode"] = "anchor_stable"
+    tab_cfg["_scenario_anchor_stable"] = True
+    tab_cfg["_scenario_start_note"] = ""
+    tab_cfg["_scenario_start_source"] = "explicit_anchor"
     pre_navigation = tab_cfg.get("pre_navigation", [])
     has_pre_navigation = isinstance(pre_navigation, list) and bool(pre_navigation)
     is_transition_scenario = has_pre_navigation and (
@@ -781,12 +830,36 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         verify_reads=1 if is_transition_entry_fast_path and not is_strict_main_tab_scenario else 2,
     )
     if not stabilize_result.get("ok"):
-        log(
-            f"[ANCHOR][scenario_start] stabilization failed tab='{tab_cfg.get('tab_name', '')}' "
-            f"scenario='{tab_cfg.get('scenario_id', '')}' "
-            f"low_confidence=true reason='{stabilize_result.get('reason', 'not_stable')}'"
+        low_conf_allowed, low_conf_reason = _is_new_screen_low_confidence_allowed(
+            tab_cfg=tab_cfg,
+            stabilize_result=stabilize_result if isinstance(stabilize_result, dict) else {},
+            pre_nav_ok=pre_nav_ok,
+            screen_context_mode=screen_context_mode,
         )
-        return False
+        if not low_conf_allowed:
+            log(
+                f"[ANCHOR][scenario_start] stabilization failed tab='{tab_cfg.get('tab_name', '')}' "
+                f"scenario='{tab_cfg.get('scenario_id', '')}' "
+                f"low_confidence=true reason='{stabilize_result.get('reason', 'not_stable')}'"
+            )
+            log(
+                f"[ANCHOR][scenario_start] abort low_confidence_fallback=false scenario='{scenario_id}' "
+                f"reason='{low_conf_reason}'"
+            )
+            return False
+
+        start_source = str(stabilize_result.get("start_candidate_source", "") or "fallback_top_content")
+        tab_cfg["_scenario_start_mode"] = "low_confidence_fallback"
+        tab_cfg["_scenario_anchor_stable"] = False
+        tab_cfg["_scenario_start_source"] = start_source
+        tab_cfg["_scenario_start_note"] = (
+            "scenario start anchor unstable; proceeded with low-confidence fallback start"
+        )
+        log(
+            f"[ANCHOR][scenario_start] stabilization failed but proceeding with low-confidence fallback start "
+            f"scenario='{scenario_id}' source='{start_source}' reason='{low_conf_reason}'"
+        )
+        log(f"[SCENARIO][start_mode] scenario='{scenario_id}' mode='low_confidence_fallback'")
     if is_transition_entry_fast_path and not is_strict_main_tab_scenario:
         time.sleep(min(main_step_wait_seconds, _TRANSITION_FAST_STEP_WAIT_SECONDS))
     else:
@@ -957,6 +1030,10 @@ def collect_tab_rows(
     anchor_row["stop_reason"] = ""
     anchor_row["step_elapsed_sec"] = round(anchor_elapsed, 3)
     anchor_row["crop_image"] = "IMAGE"
+    anchor_row["scenario_start_mode"] = str(tab_cfg.get("_scenario_start_mode", "anchor_stable") or "anchor_stable")
+    anchor_row["scenario_start_source"] = str(tab_cfg.get("_scenario_start_source", "explicit_anchor") or "explicit_anchor")
+    anchor_row["anchor_stable"] = bool(tab_cfg.get("_scenario_anchor_stable", True))
+    anchor_row["review_note"] = str(tab_cfg.get("_scenario_start_note", "") or "")
     anchor_row["_step_mono_start"] = time.monotonic() - float(anchor_row.get("t_step_start", 0.0) or 0.0)
     anchor_row = maybe_capture_focus_crop(client, dev, anchor_row, output_base_dir)
     anchor_row.pop("_step_mono_start", None)
