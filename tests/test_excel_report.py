@@ -105,6 +105,43 @@ def test_make_result_df_generates_pass_warn_fail_rows():
     assert result.columns[-1] == "result_crop_thumbnail"
 
 
+def test_make_result_df_skips_anchor_baseline_rows(monkeypatch):
+    logs: list[str] = []
+    monkeypatch.setattr("tb_runner.excel_report.log", lambda msg, level="NORMAL": logs.append(msg))
+
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "s1",
+                "tab_name": "main",
+                "step_index": 0,
+                "context_type": "main",
+                "status": "ANCHOR",
+                "visible_label": "Navigate up",
+                "merged_announcement": "Navigate up",
+                "move_result": "",
+            },
+            {
+                "scenario_id": "s1",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "status": "OK",
+                "visible_label": "Notifications",
+                "merged_announcement": "Notifications",
+                "move_result": "moved",
+            },
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    assert len(result) == 1
+    assert int(result.iloc[0]["step"]) == 1
+    assert result.iloc[0]["final_result"] == "PASS"
+    assert any("[RESULT] skipped anchor rows count=1" in msg for msg in logs)
+
+
 def test_save_excel_adds_result_crop_hyperlink(tmp_path):
     crop_file = tmp_path / "crops" / "sample_step_1.png"
     crop_file.parent.mkdir(parents=True, exist_ok=True)
