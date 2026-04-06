@@ -36,7 +36,7 @@ LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.40"
+CLIENT_ALGORITHM_VERSION = "1.7.41"
 LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
 LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
 
@@ -2216,6 +2216,59 @@ class A11yAdbClient:
         normalized = [item.strip() for item in items if item.strip()]
         return " ".join(normalized)
 
+    @staticmethod
+    def _is_meaningful_prefix(prefix: str) -> bool:
+        normalized_prefix = A11yAdbClient.normalize_for_comparison(prefix)
+        if not normalized_prefix:
+            return False
+        tokens = normalized_prefix.split()
+        if len(tokens) < 2:
+            return False
+        return any(any(ch.isalnum() for ch in token) for token in tokens)
+
+    @staticmethod
+    def _find_visible_anchor_prefix(speech: str, visible_label: str) -> tuple[str, str]:
+        raw_speech = str(speech or "")
+        raw_visible = str(visible_label or "").strip()
+        if not raw_speech.strip() or not raw_visible:
+            return "", "empty_speech_or_visible"
+
+        normalized_speech = A11yAdbClient.normalize_for_comparison(raw_speech)
+        normalized_visible = A11yAdbClient.normalize_for_comparison(raw_visible)
+        if not normalized_speech or not normalized_visible:
+            return "", "empty_normalized_speech_or_visible"
+        if normalized_visible not in normalized_speech:
+            return "", "visible_anchor_not_in_speech"
+        if len(normalized_visible.split()) < 2:
+            return "", "visible_anchor_too_short"
+
+        anchor_start = raw_speech.lower().find(raw_visible.lower())
+        if anchor_start < 0:
+            return "", "visible_anchor_not_found_raw"
+        if anchor_start <= 0:
+            return "", "visible_anchor_at_start"
+
+        prefix = raw_speech[:anchor_start]
+        if not A11yAdbClient._is_meaningful_prefix(prefix):
+            return "", "prefix_not_meaningful"
+        return prefix, "prefix_before_visible_anchor"
+
+    @staticmethod
+    def _is_contaminated_announcement_candidate(speech: str, visible_label: str) -> tuple[bool, str]:
+        prefix, reason = A11yAdbClient._find_visible_anchor_prefix(speech, visible_label)
+        return bool(prefix), reason
+
+    @staticmethod
+    def _try_trim_prefix_by_visible_anchor(speech: str, visible_label: str) -> tuple[str, bool, str]:
+        raw_speech = str(speech or "")
+        prefix, reason = A11yAdbClient._find_visible_anchor_prefix(raw_speech, visible_label)
+        if not prefix:
+            return raw_speech, False, reason
+        trimmed = raw_speech[len(prefix) :].lstrip(" \t,.;:-")
+        if not A11yAdbClient.normalize_for_comparison(trimmed):
+            return raw_speech, False, "trimmed_empty_after_visible_anchor"
+        return trimmed, True, "visible_anchor_prefix_trim"
+
     def get_partial_announcements(
         self,
         dev: Any = None,
@@ -2341,6 +2394,17 @@ class A11yAdbClient:
             "get_focus_final_payload_source": "none",
             "get_focus_final_focus_reason": "",
             "get_focus_dump_replace_reason": "",
+            "trim_considered": False,
+            "trim_applied": False,
+            "trim_before": "",
+            "trim_after": "",
+            "trim_reason": "",
+            "trim_reject_reason": "",
+            "announcement_stable_reason": "",
+            "announcement_stable_source": "",
+            "snapshot_reason": "",
+            "used_snapshot": False,
+            "snapshot_contaminated": False,
         }
 
         if move:
@@ -2365,6 +2429,15 @@ class A11yAdbClient:
 
         ann_started = time.monotonic()
         selected_merged_announcement = ""
+        raw_snapshot_announcement = ""
+        trim_considered = False
+        trim_applied = False
+        trim_before = ""
+        trim_after = ""
+        trim_reason = ""
+        trim_reject_reason = ""
+        selected_reason = "result_row_snapshot"
+        selected_source = "result_row_snapshot"
         try:
             partial_announcements = self.get_partial_announcements(
                 dev=dev,
@@ -2435,8 +2508,10 @@ class A11yAdbClient:
                 self._debug_print(
                     f"[ANN][stable] selected='{self.last_merged_announcement}' reason='{reason}' elapsed={stability_extra_wait:.2f}"
                 )
-            selected_merged_announcement = self._merge_announcements(partial_announcements)
+            raw_snapshot_announcement = self._merge_announcements(partial_announcements)
+            selected_merged_announcement = raw_snapshot_announcement
             selected_norm = self.normalize_for_comparison(selected_merged_announcement)
+            trim_considered = True
             if (
                 baseline_announcement
                 and baseline_norm
@@ -2448,15 +2523,37 @@ class A11yAdbClient:
                 trimmed_merged = selected_merged_announcement[len(baseline_announcement) :].lstrip(" \t,.;:-")
                 trimmed_norm = self.normalize_for_comparison(trimmed_merged)
                 if trimmed_norm:
+                    trim_applied = True
+                    trim_before = selected_merged_announcement
                     selected_merged_announcement = trimmed_merged
+                    trim_after = selected_merged_announcement
+                    trim_reason = "baseline_prefix_trim"
+                    trim_reject_reason = ""
+                    selected_reason = "baseline_prefix_trim"
+                    selected_source = "trimmed_candidate"
+                else:
+                    trim_reject_reason = "baseline_trimmed_empty"
+            elif baseline_announcement:
+                trim_reject_reason = "baseline_rule_not_matched"
+            else:
+                trim_reject_reason = "baseline_empty_visible_anchor_pending"
             self._debug_print(
-                f"[ANN][select] previous='{baseline_announcement}' current='{self._merge_announcements(partial_announcements)}' final='{selected_merged_announcement}'"
+                f"[ANN][trim] considered={str(trim_considered).lower()} applied={str(trim_applied).lower()} "
+                f"before='{trim_before or selected_merged_announcement}' after='{trim_after or selected_merged_announcement}' "
+                f"reject_reason='{trim_reject_reason}' reason='{trim_reason or 'baseline_trim_not_applied'}'"
+            )
+            used_snapshot = self.normalize_for_comparison(selected_merged_announcement) == self.normalize_for_comparison(raw_snapshot_announcement)
+            self._debug_print(
+                f"[ANN][select] previous='{baseline_announcement}' current='{raw_snapshot_announcement}' "
+                f"final='{selected_merged_announcement}' used_snapshot={str(used_snapshot).lower()} "
+                f"used_trimmed_candidate={str(not used_snapshot).lower()}"
             )
             step["partial_announcements"] = self._json_safe_value(partial_announcements)
             step["announcement_extra_wait_sec"] = stability_extra_wait
         except Exception:
             partial_announcements = []
             selected_merged_announcement = ""
+            raw_snapshot_announcement = ""
         step["announcement_elapsed_sec"] = round(time.monotonic() - ann_started, 3)
         step["announcement_count"] = len(partial_announcements)
         step["announcement_window_sec"] = round(float(ann_wait) + float(step.get("announcement_extra_wait_sec", 0.0) or 0.0), 3)
@@ -2466,6 +2563,14 @@ class A11yAdbClient:
         merged_announcement = str(selected_merged_announcement or self._merge_announcements(partial_announcements))
         step["merged_announcement"] = merged_announcement
         step["normalized_announcement"] = self.normalize_for_comparison(merged_announcement)
+        step["trim_considered"] = bool(trim_considered)
+        step["trim_applied"] = bool(trim_applied)
+        step["trim_before"] = trim_before or raw_snapshot_announcement
+        step["trim_after"] = trim_after or merged_announcement
+        step["trim_reason"] = trim_reason
+        step["trim_reject_reason"] = trim_reject_reason
+        step["announcement_stable_reason"] = selected_reason if merged_announcement else "empty"
+        step["announcement_stable_source"] = selected_source if merged_announcement else "none"
 
         saved_last_announcements = list(self.last_announcements)
         saved_last_merged = self.last_merged_announcement
@@ -2519,6 +2624,52 @@ class A11yAdbClient:
                     break
         step["visible_label"] = visible_label
         step["normalized_visible_label"] = self.normalize_for_comparison(visible_label)
+
+        snapshot_contaminated, snapshot_reason = self._is_contaminated_announcement_candidate(
+            raw_snapshot_announcement,
+            visible_label,
+        )
+        if step["merged_announcement"] and visible_label:
+            trimmed_by_visible, visible_trim_applied, visible_trim_reason = self._try_trim_prefix_by_visible_anchor(
+                step["merged_announcement"],
+                visible_label,
+            )
+            if visible_trim_applied:
+                trim_before_value = str(step.get("merged_announcement", "") or "")
+                step["merged_announcement"] = trimmed_by_visible
+                step["normalized_announcement"] = self.normalize_for_comparison(trimmed_by_visible)
+                step["trim_considered"] = True
+                step["trim_applied"] = True
+                step["trim_before"] = trim_before_value
+                step["trim_after"] = trimmed_by_visible
+                step["trim_reason"] = "visible_anchor_prefix_trim"
+                step["trim_reject_reason"] = ""
+                step["announcement_stable_reason"] = "visible_anchor_prefix_trim"
+                step["announcement_stable_source"] = "trimmed_candidate"
+            elif not step.get("trim_reason"):
+                step["trim_considered"] = True
+                step["trim_reject_reason"] = visible_trim_reason
+
+        used_snapshot = (
+            self.normalize_for_comparison(str(step.get("merged_announcement", "") or ""))
+            == self.normalize_for_comparison(raw_snapshot_announcement)
+        )
+        step["used_snapshot"] = bool(used_snapshot)
+        step["snapshot_contaminated"] = bool(snapshot_contaminated)
+        if snapshot_contaminated:
+            step["snapshot_reason"] = snapshot_reason if not used_snapshot else "no_better_recent_poll_candidate_contaminated"
+        else:
+            step["snapshot_reason"] = "no_better_recent_poll_candidate" if used_snapshot else "not_used"
+        self._debug_print(
+            f"[ANN][trim] considered={str(step['trim_considered']).lower()} applied={str(step['trim_applied']).lower()} "
+            f"before='{step['trim_before']}' after='{step['trim_after']}' reject_reason='{step['trim_reject_reason']}' "
+            f"reason='{step['trim_reason'] or 'not_applied'}' strategy='visible_anchor_prefix_trim'"
+        )
+        self._debug_print(
+            f"[ANN][select] used_snapshot={str(step['used_snapshot']).lower()} "
+            f"used_trimmed_candidate={str(step['announcement_stable_source'] == 'trimmed_candidate').lower()} "
+            f"snapshot_contaminated={str(step['snapshot_contaminated']).lower()} snapshot_reason='{step['snapshot_reason']}'"
+        )
 
         trace = self.last_get_focus_trace if isinstance(self.last_get_focus_trace, dict) else {}
         fallback_nodes = trace.get("fallback_dump_nodes")
@@ -2607,6 +2758,12 @@ class A11yAdbClient:
                 if fallback_announcement:
                     step["merged_announcement"] = fallback_announcement
                     step["normalized_announcement"] = self.normalize_for_comparison(fallback_announcement)
+                    step["used_snapshot"] = (
+                        self.normalize_for_comparison(fallback_announcement)
+                        == self.normalize_for_comparison(raw_snapshot_announcement)
+                    )
+                    if not step["used_snapshot"] and step.get("snapshot_reason") == "no_better_recent_poll_candidate":
+                        step["snapshot_reason"] = "not_used"
                     if fallback_source in {"talkbackLabel", "mergedLabel"}:
                         print(f"[ANN][fallback] source='{fallback_source}'")
 

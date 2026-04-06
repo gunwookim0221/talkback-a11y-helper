@@ -347,6 +347,7 @@ adb shell am broadcast -a com.iotpart.sqe.talkbackhelper.ACTION_COMMAND -p com.i
   - 기존 `client/dev` 사용 방식과 동일한 수집용 인스턴스 메서드입니다. 다중 단말 환경에서도 기존과 같이 `dev`를 그대로 넘길 수 있습니다.
   - `move=True`이면 `direction="next"`일 때 `move_focus_smart()`를 우선 사용하고, 그 외 방향은 `move_focus()`를 사용합니다. `move=False`이면 현재 포커스 기준으로 수집만 수행합니다.
   - 내부적으로 `get_partial_announcements()`를 **1회만 호출**해 발화 조각을 모은 뒤 `_merge_announcements()`로 즉시 병합해 step 기준 데이터를 고정합니다.
+  - baseline 발화가 비어 있어도 `visible_label` anchor가 발화 내부에 명확히 포함되면, anchor 시작 전 prefix를 contamination 후보로 간주해 prefix만 보수적으로 trim합니다.
   - 이후 `get_focus()`를 호출하고, `get_focus()`는 `GET_FOCUS` 결과가 비어 있거나 실질적으로 빈 노드일 때 `dump_tree()` fallback(우선순위: `accessibilityFocused` → `focused`)으로 포커스를 복구합니다.
   - 추가로 `success=False`(또는 success 키 누락) + top-level payload 수용 시에는 보수적 정책을 적용합니다. `viewIdResourceName` + 정규화 bounds + (`text` 또는 `contentDescription`)가 모두 갖춰진 **강한 payload**이면 dump를 생략하고 top-level을 유지하며, 조건이 약하면 기존처럼 `dump_tree()` fallback을 1회 시도해 focused 노드로 대체합니다(미발견 시 기존 top-level 유지).
   - step 레벨의 `dump_tree()`는 항상 호출되지 않습니다. `get_focus()` fallback 노드를 재사용할 수 있거나 focus payload 자체가 충분하면 step-level dump를 생략하고, 필요한 경우에만 추가 dump를 수행합니다.
