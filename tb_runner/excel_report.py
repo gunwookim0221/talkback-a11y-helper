@@ -175,6 +175,7 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
                 "final_result",
                 "failure_reason",
                 "review_note",
+                "crop_image_path",
             ]
         )
 
@@ -207,6 +208,7 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     _pick_col("timing_move", ["timing_move", "move_elapsed_sec"])
     _pick_col("timing_get_focus", ["timing_get_focus", "step_elapsed_sec"])
     _pick_col("timing_total", ["timing_total", "step_elapsed_sec"])
+    _pick_col("crop_image_path", ["crop_image_path", "crop_path", "result_crop"])
 
     result["move_result"] = result["move_result"].fillna("").astype(str).str.lower().str.strip()
     result["fallback_used"] = result["fallback_used"].fillna(False).astype(bool)
@@ -361,8 +363,25 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
             "final_result",
             "failure_reason",
             "review_note",
+            "crop_image_path",
         ]
     ]
+
+
+def _apply_result_crop_hyperlinks(writer: pd.ExcelWriter, result_df: pd.DataFrame) -> None:
+    if "result" not in writer.sheets or "crop_image_path" not in result_df.columns:
+        return
+
+    ws = writer.sheets["result"]
+    crop_col_idx = result_df.columns.get_loc("crop_image_path") + 1
+    for row_idx, crop_path in enumerate(result_df["crop_image_path"].tolist(), start=2):
+        path_text = str(crop_path or "").strip()
+        if not path_text:
+            continue
+        cell = ws.cell(row=row_idx, column=crop_col_idx)
+        cell.value = Path(path_text).name or path_text
+        cell.hyperlink = path_text
+        cell.style = "Hyperlink"
 
 
 def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> None:
@@ -440,6 +459,7 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
         filtered_df.to_excel(writer, sheet_name="filtered", index=False)
         summary_df.to_excel(writer, sheet_name="summary", index=False)
         result_df.to_excel(writer, sheet_name="result", index=False)
+        _apply_result_crop_hyperlinks(writer, result_df)
 
     if with_images and "crop_image" in raw_df.columns:
         insert_images_to_excel(output_path, image_col_name="crop_image")

@@ -1,11 +1,13 @@
 import pytest
 
 pd = pytest.importorskip("pandas")
+openpyxl = pytest.importorskip("openpyxl")
 
 from tb_runner.excel_report import (
     add_status_columns,
     make_filtered_df,
     make_result_df,
+    save_excel,
     make_summary_df,
 )
 
@@ -98,3 +100,43 @@ def test_make_result_df_generates_pass_warn_fail_rows():
     assert "final_result" in result.columns
     assert set(result["final_result"].tolist()) == {"PASS", "WARN", "FAIL"}
     assert "speech_visible_diverged" in set(result["failure_reason"].tolist())
+    assert result.columns[-1] == "crop_image_path"
+
+
+def test_save_excel_adds_result_crop_hyperlink(tmp_path):
+    crop_file = tmp_path / "crops" / "sample_step_1.png"
+    crop_file.parent.mkdir(parents=True, exist_ok=True)
+    crop_file.write_bytes(b"fake")
+
+    rows = [
+        {
+            "scenario_id": "s1",
+            "tab_name": "home",
+            "step_index": 1,
+            "context_type": "main",
+            "visible_label": "Home",
+            "merged_announcement": "Home",
+            "move_result": "moved",
+            "focus_view_id": "id/home",
+            "focus_bounds": "[0,0][10,10]",
+            "fallback_used": False,
+            "step_dump_used": False,
+            "req_id": "r1",
+            "step_elapsed_sec": 0.1,
+            "crop_image_path": str(crop_file),
+        }
+    ]
+    output_path = tmp_path / "report.xlsx"
+
+    save_excel(rows, str(output_path), with_images=False)
+
+    wb = openpyxl.load_workbook(output_path)
+    ws = wb["result"]
+    headers = [cell.value for cell in ws[1]]
+    crop_col_idx = headers.index("crop_image_path") + 1
+    crop_cell = ws.cell(row=2, column=crop_col_idx)
+
+    assert headers[-1] == "crop_image_path"
+    assert crop_cell.value == crop_file.name
+    assert crop_cell.hyperlink is not None
+    assert crop_cell.hyperlink.target == str(crop_file)
