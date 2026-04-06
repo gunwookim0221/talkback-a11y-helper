@@ -132,6 +132,8 @@ overlay 수집에서도 별도 announcement 안정화 키 사용:
 - `smart_nav_terminal`
 - `move_terminal`
 - `repeat_no_progress`
+- `repeat_semantic_stall`
+- `repeat_semantic_stall_after_escape` (plugin/new_screen 계열 content 시나리오에서 stall escape 1회 실패 시)
 
 ---
 
