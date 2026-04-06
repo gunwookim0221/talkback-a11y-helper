@@ -121,12 +121,16 @@ def maybe_capture_focus_crop(
     return row
 
 
-def insert_images_to_excel(excel_path: str, image_col_name: str = "crop_image") -> None:
+def insert_images_to_excel(
+    excel_path: str,
+    image_col_name: str = "crop_image",
+    sheet_name: str = "raw",
+) -> None:
     if not ENABLE_IMAGE_INSERT_TO_EXCEL:
         return
 
     wb = load_workbook(excel_path)
-    ws = wb.active
+    ws = wb[sheet_name] if sheet_name in wb.sheetnames else wb.active
 
     headers = [cell.value for cell in ws[1]]
     if image_col_name not in headers or "crop_image_path" not in headers:
