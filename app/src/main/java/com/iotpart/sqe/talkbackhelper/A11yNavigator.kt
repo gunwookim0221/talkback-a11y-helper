@@ -13,7 +13,9 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.74.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.74.1"
+    private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
+    private const val APP_VERSION_CODE_FOR_LOG = -1
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
     private const val MIN_ONECONNECT_SETTINGS_ROW_HEIGHT_PX = 80
 
@@ -407,7 +409,7 @@ object A11yNavigator {
     fun performSmartNext(root: AccessibilityNodeInfo?, currentNode: AccessibilityNodeInfo?): TargetActionOutcome {
         Log.i(
             "A11Y_HELPER",
-            "[VERSION] appVersionName=${BuildConfig.VERSION_NAME} appVersionCode=${BuildConfig.VERSION_CODE} navigatorAlgorithmVersion=$NAVIGATOR_ALGORITHM_VERSION"
+            "[VERSION] appVersionName=$APP_VERSION_NAME_FOR_LOG appVersionCode=$APP_VERSION_CODE_FOR_LOG navigatorAlgorithmVersion=$NAVIGATOR_ALGORITHM_VERSION"
         )
         Log.i("A11Y_HELPER", "[SMART_NEXT] history policy: visited and visible histories separated")
         if (root == null) {
