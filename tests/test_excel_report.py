@@ -140,3 +140,73 @@ def test_save_excel_adds_result_crop_hyperlink(tmp_path):
     assert crop_cell.value == crop_file.name
     assert crop_cell.hyperlink is not None
     assert crop_cell.hyperlink.target == str(crop_file)
+
+
+def test_save_excel_handles_windows_style_crop_path_without_row_warn_spam(tmp_path, monkeypatch):
+    logs: list[str] = []
+    monkeypatch.setattr("tb_runner.excel_report.log", lambda msg, level="NORMAL": logs.append(msg))
+    windows_style_path = r"output\talkback_compare_20260406_151119\crops\file.png"
+
+    rows = [
+        {
+            "scenario_id": "s1",
+            "tab_name": "home",
+            "step_index": 1,
+            "context_type": "main",
+            "visible_label": "Home",
+            "merged_announcement": "Home",
+            "move_result": "moved",
+            "focus_view_id": "id/home",
+            "focus_bounds": "[0,0][10,10]",
+            "fallback_used": False,
+            "step_dump_used": False,
+            "req_id": "r1",
+            "step_elapsed_sec": 0.1,
+            "crop_image_path": windows_style_path,
+        },
+    ]
+    output_path = tmp_path / "report_windows_path.xlsx"
+
+    save_excel(rows, str(output_path), with_images=False)
+
+    wb = openpyxl.load_workbook(output_path)
+    ws = wb["result"]
+    headers = [cell.value for cell in ws[1]]
+    crop_col_idx = headers.index("crop_image_path") + 1
+    crop_cell = ws.cell(row=2, column=crop_col_idx)
+
+    assert crop_cell.value == "file.png"
+    assert not any("row=" in message for message in logs)
+
+
+def test_save_excel_summarizes_skipped_crop_hyperlink_warning(tmp_path, monkeypatch):
+    logs: list[str] = []
+    monkeypatch.setattr("tb_runner.excel_report.log", lambda msg, level="NORMAL": logs.append(msg))
+
+    rows = []
+    for idx in range(2):
+        rows.append(
+            {
+                "scenario_id": "s1",
+                "tab_name": "home",
+                "step_index": idx + 1,
+                "context_type": "main",
+                "visible_label": "Home",
+                "merged_announcement": "Home",
+                "move_result": "moved",
+                "focus_view_id": "id/home",
+                "focus_bounds": "[0,0][10,10]",
+                "fallback_used": False,
+                "step_dump_used": False,
+                "req_id": f"r{idx}",
+                "step_elapsed_sec": 0.1,
+                "crop_image_path": f"output/crops/file_{idx}.txt",
+            }
+        )
+
+    output_path = tmp_path / "report_skip_warn.xlsx"
+    save_excel(rows, str(output_path), with_images=False)
+
+    warn_logs = [message for message in logs if "result crop hyperlink skipped" in message]
+    assert len(warn_logs) == 1
+    assert "2 rows" in warn_logs[0]
