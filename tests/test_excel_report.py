@@ -107,6 +107,32 @@ def test_make_result_df_generates_pass_warn_fail_rows():
     assert result.columns[-1] == "result_crop_thumbnail"
 
 
+def test_make_result_df_uses_get_focus_req_id_when_req_id_missing():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "s_req",
+                "tab_name": "home",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "Home",
+                "merged_announcement": "Home",
+                "move_result": "failed",
+                "focus_view_id": "id/home",
+                "focus_bounds": "[0,0][10,10]",
+                "fallback_used": False,
+                "step_dump_used": False,
+                "get_focus_req_id": "focus_req_123",
+                "step_elapsed_sec": 0.2,
+            }
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    assert result.iloc[0]["req_id"] == "focus_req_123"
+
+
 def test_make_result_df_skips_anchor_baseline_rows(monkeypatch):
     logs: list[str] = []
     monkeypatch.setattr("tb_runner.excel_report.log", lambda msg, level="NORMAL": logs.append(msg))
@@ -236,7 +262,14 @@ def test_save_excel_writes_debug_log_only_for_warn_fail_rows(tmp_path, monkeypat
     content = debug_files[0].read_text(encoding="utf-8")
     assert "[ROW_CONTEXT]" in content
     assert "final_result=FAIL" in content
-    assert "[LOG_SNIPPET]" in content
+    assert "[ANN_TRACE]" in content
+    assert "[ANN][baseline]" in content
+    assert "[ANN][poll]" in content
+    assert "[ANN][stable]" in content
+    assert "[ANN][select]" in content
+    assert "[STEP_TRACE]" in content
+    assert "[SCROLL_TRACE]" in content
+    assert "[FOCUS_TRACE]" in content
 
     wb = openpyxl.load_workbook(output_path)
     ws = wb["result"]

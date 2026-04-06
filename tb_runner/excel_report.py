@@ -9,7 +9,7 @@ from tb_runner.image_utils import create_excel_thumbnail, insert_images_to_excel
 from tb_runner.logging_utils import get_recent_logs, log
 from tb_runner.utils import to_json_text
 
-EXCEL_REPORT_VERSION = "1.3.0"
+EXCEL_REPORT_VERSION = "1.4.0"
 
 _DEBUG_LOG_KEYWORDS = (
     "[STEP]",
@@ -29,6 +29,20 @@ _DEBUG_LOG_FAILURE_REASONS = {
     "move_failed",
     "speech_visible_diverged",
 }
+_ANN_REQUIRED_TAGS = ("[ANN][baseline]", "[ANN][poll]", "[ANN][stable]", "[ANN][select]")
+
+
+def _normalize_step_value(step_value: object) -> str:
+    text = str(step_value or "").strip()
+    if not text:
+        return ""
+    try:
+        numeric = float(text)
+        if numeric.is_integer():
+            return str(int(numeric))
+    except (TypeError, ValueError):
+        return text
+    return text
 
 
 def _sanitize_filename_part(value: object, default: str) -> str:
@@ -52,39 +66,144 @@ def _is_debug_log_target(row) -> bool:
     return final_result == "WARN" and focus_confidence == "LOW"
 
 
-def _build_debug_log_snippet(step_value: object, req_id: str) -> str:
-    recent_logs = get_recent_logs(limit=260)
-    if not recent_logs:
-        return ""
-
-    step_str = str(step_value or "").strip()
-    step_token = f"step={step_str}" if step_str else ""
+def _line_matches_scope(line: str, *, req_id: str, scenario_id: str, step_str: str) -> bool:
     req_token = f"req_id='{req_id}'" if req_id else ""
+    scenario_token = f"scenario='{scenario_id}'" if scenario_id else ""
+    step_token = f"step={step_str}" if step_str else ""
+    if req_token and req_token in line:
+        return True
+    if req_id and req_id in line and any(token in line for token in _DEBUG_LOG_KEYWORDS):
+        return True
+    if scenario_token and step_token and scenario_token in line and step_token in line:
+        return True
+    if step_token and "[STEP]" in line and step_token in line:
+        return True
+    return False
 
-    filtered_lines: list[str] = []
+
+def _build_source_row_index(source_df: pd.DataFrame | None) -> dict[tuple[str, str, str], dict]:
+    if source_df is None or source_df.empty:
+        return {}
+    index: dict[tuple[str, str, str], dict] = {}
+    for row in source_df.itertuples(index=False):
+        scenario = str(getattr(row, "scenario_id", "") or "").strip()
+        tab = str(getattr(row, "tab_name", "") or getattr(row, "tab", "") or "").strip()
+        step = _normalize_step_value(getattr(row, "step_index", getattr(row, "step", "")))
+        if not scenario or not step:
+            continue
+        index[(scenario, tab, step)] = row._asdict()
+    return index
+
+
+def _build_debug_log_sections(
+    row,
+    source_row: dict[str, object] | None,
+    prev_source_row: dict[str, object] | None,
+) -> dict[str, str]:
+    req_id = str(getattr(row, "req_id", "") or "").strip()
+    scenario_id = str(getattr(row, "scenario_id", "") or "").strip()
+    step_str = _normalize_step_value(getattr(row, "step", ""))
+    recent_logs = get_recent_logs(limit=260)
+
+    ann_lines: list[str] = []
+    step_lines: list[str] = []
+    scroll_lines: list[str] = []
+    focus_lines: list[str] = []
+
     for line in recent_logs:
-        if req_token and req_token in line:
-            filtered_lines.append(line)
+        if not _line_matches_scope(line, req_id=req_id, scenario_id=scenario_id, step_str=step_str):
             continue
-        if step_token and step_token in line and any(token in line for token in _DEBUG_LOG_KEYWORDS):
-            filtered_lines.append(line)
-            continue
-        if req_id and req_id in line and any(token in line for token in _DEBUG_LOG_KEYWORDS):
-            filtered_lines.append(line)
-            continue
+        lower = line.lower()
+        if any(tag in line for tag in _ANN_REQUIRED_TAGS):
+            ann_lines.append(line)
+        if "[STEP] START" in line or "[STEP] END" in line or "[STOP][eval]" in line or "[STOP][triggered]" in line:
+            step_lines.append(line)
+        if "[END_CHECK][SCROLL]" in line or "[scroll" in lower or " scrolled" in lower or "smart_next" in lower:
+            scroll_lines.append(line)
+        if "get_focus" in lower or "focus_payload" in lower or "fallback" in lower or "[focus" in lower:
+            focus_lines.append(line)
 
-    if not filtered_lines and step_token:
-        filtered_lines = [
-            line for line in recent_logs if step_token in line and any(token in line for token in _DEBUG_LOG_KEYWORDS)
-        ]
-    if not filtered_lines:
-        filtered_lines = [
-            line for line in recent_logs if any(token in line for token in _DEBUG_LOG_KEYWORDS)
-        ]
-    return "\n".join(filtered_lines[-80:]).strip()
+    source = source_row or {}
+    prev_source = prev_source_row or {}
+    baseline_text = str(prev_source.get("merged_announcement", "") or "")
+    current_speech = str(source.get("merged_announcement", "") or getattr(row, "speech", "") or "")
+    partial_ann = source.get("partial_announcements", [])
+    ann_count = int(source.get("announcement_count", 0) or 0)
+    if not ann_lines:
+        ann_lines.extend(
+            [
+                f"[ANN][baseline] req_id={req_id} text='{baseline_text}' source='prev_step_row'",
+                f"[ANN][poll] req_id={req_id} candidate='{current_speech}' changed={str(bool(current_speech and current_speech != baseline_text)).lower()} count={ann_count}",
+                f"[ANN][stable] req_id={req_id} selected='{current_speech}' reason='result_row_snapshot'",
+                f"[ANN][select] req_id={req_id} previous='{baseline_text}' current='{current_speech}' final='{current_speech}'",
+            ]
+        )
+    else:
+        missing_tags = [tag for tag in _ANN_REQUIRED_TAGS if not any(tag in line for line in ann_lines)]
+        for tag in missing_tags:
+            if tag == "[ANN][baseline]":
+                ann_lines.append(f"{tag} req_id={req_id} text='{baseline_text}' source='prev_step_row_fallback'")
+            elif tag == "[ANN][poll]":
+                ann_lines.append(
+                    f"{tag} req_id={req_id} candidate='{current_speech}' changed={str(bool(current_speech and current_speech != baseline_text)).lower()} count={ann_count}"
+                )
+            elif tag == "[ANN][stable]":
+                ann_lines.append(f"{tag} req_id={req_id} selected='{current_speech}' reason='result_row_snapshot'")
+            elif tag == "[ANN][select]":
+                ann_lines.append(
+                    f"{tag} req_id={req_id} previous='{baseline_text}' current='{current_speech}' final='{current_speech}'"
+                )
+
+    if not step_lines:
+        step_lines.extend(
+            [
+                f"[STEP] START scenario='{scenario_id}' tab='{getattr(row, 'tab', '')}' step={step_str}",
+                f"[STEP] END scenario='{scenario_id}' tab='{getattr(row, 'tab', '')}' step={step_str} move_result='{getattr(row, 'move_result', '')}'",
+                f"[STOP][eval] scenario='{scenario_id}' step={step_str} reason='{getattr(row, 'failure_reason', '')}'",
+            ]
+        )
+
+    smart_result = str(source.get("last_smart_nav_result", "") or "")
+    smart_detail = str(source.get("last_smart_nav_detail", "") or "")
+    smart_terminal = bool(source.get("last_smart_nav_terminal", False))
+    if smart_result or smart_detail:
+        step_lines.append(
+            f"[SMART_NEXT] result='{smart_result}' detail='{smart_detail}' terminal={str(smart_terminal).lower()}"
+        )
+    if not scroll_lines:
+        move_result = str(source.get("move_result", "") or getattr(row, "move_result", "") or "")
+        scroll_lines.append(
+            f"[SCROLL] req_id={req_id} move_result='{move_result}' smart_result='{smart_result}' detail='{smart_detail}' changed={str(move_result in {'scrolled', 'moved'}).lower()}"
+        )
+
+    focus_lines.append(
+        f"[FOCUS] req_id={req_id} get_focus_req_id='{source.get('get_focus_req_id', '')}' "
+        f"source='{source.get('focus_payload_source', '')}' top_level_payload_sufficient={bool(source.get('get_focus_top_level_payload_sufficient', False))} "
+        f"response_success={bool(source.get('get_focus_response_success', False))}"
+    )
+    focus_lines.append(
+        f"[FOCUS] req_id={req_id} fallback_used={bool(source.get('get_focus_fallback_used', False))} "
+        f"fallback_found={bool(source.get('get_focus_fallback_found', False))} "
+        f"dump_attempted={bool(source.get('get_focus_success_false_top_level_dump_attempted', False))} "
+        f"final_payload_source='{source.get('get_focus_final_payload_source', '')}' "
+        f"focus_reason='{source.get('get_focus_final_focus_reason', '')}'"
+    )
+    if isinstance(partial_ann, list) and partial_ann:
+        ann_lines.append(f"[ANN][poll] req_id={req_id} partial_announcements={partial_ann[:3]}")
+
+    return {
+        "ann": "\n".join(ann_lines[-60:]).strip(),
+        "step": "\n".join(step_lines[-40:]).strip(),
+        "scroll": "\n".join(scroll_lines[-40:]).strip(),
+        "focus": "\n".join(focus_lines[-40:]).strip(),
+    }
 
 
-def _populate_result_debug_logs(result_df: pd.DataFrame, output_path: str) -> pd.DataFrame:
+def _populate_result_debug_logs(
+    result_df: pd.DataFrame,
+    output_path: str,
+    source_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
     result_df["debug_log_path"] = ""
     result_df["debug_log_name"] = ""
     if result_df.empty:
@@ -95,17 +214,29 @@ def _populate_result_debug_logs(result_df: pd.DataFrame, output_path: str) -> pd
     write_failures = 0
     write_fail_reason = ""
 
+    source_row_index = _build_source_row_index(source_df)
+
     for row in result_df.itertuples(index=True):
         if not _is_debug_log_target(row):
             continue
         req_id = str(getattr(row, "req_id", "") or "").strip()
         scenario_id = _sanitize_filename_part(getattr(row, "scenario_id", ""), "scenario")
-        step_part = _sanitize_filename_part(getattr(row, "step", ""), "na")
+        step_normalized = _normalize_step_value(getattr(row, "step", ""))
+        step_part = _sanitize_filename_part(step_normalized, "na")
         req_part = _sanitize_filename_part(req_id, "no_req")
         file_name = f"{scenario_id}_step_{step_part}_req_{req_part}.log"
         file_path = debug_dir / file_name
-        snippet_text = _build_debug_log_snippet(getattr(row, "step", ""), req_id)
-        if not snippet_text:
+        scenario_raw = str(getattr(row, "scenario_id", "") or "").strip()
+        tab_raw = str(getattr(row, "tab", "") or "").strip()
+        source_row = source_row_index.get((scenario_raw, tab_raw, step_normalized), {})
+        prev_step = ""
+        try:
+            prev_step = str(int(step_normalized) - 1)
+        except (TypeError, ValueError):
+            prev_step = ""
+        prev_source_row = source_row_index.get((scenario_raw, tab_raw, prev_step), {}) if prev_step else {}
+        sections = _build_debug_log_sections(row, source_row, prev_source_row)
+        if not any(sections.values()):
             continue
         row_context = (
             "[ROW_CONTEXT]\n"
@@ -117,10 +248,19 @@ def _populate_result_debug_logs(result_df: pd.DataFrame, output_path: str) -> pd
             f"speech={getattr(row, 'speech', '')}\n"
             f"final_result={getattr(row, 'final_result', '')}\n"
             f"failure_reason={getattr(row, 'failure_reason', '')}\n\n"
-            "[LOG_SNIPPET]\n"
+            "[ANN_TRACE]\n"
         )
         try:
-            file_path.write_text(f"{row_context}{snippet_text}\n", encoding="utf-8")
+            content = (
+                f"{row_context}{sections.get('ann', '')}\n\n"
+                "[STEP_TRACE]\n"
+                f"{sections.get('step', '')}\n\n"
+                "[SCROLL_TRACE]\n"
+                f"{sections.get('scroll', '')}\n\n"
+                "[FOCUS_TRACE]\n"
+                f"{sections.get('focus', '')}\n"
+            )
+            file_path.write_text(content, encoding="utf-8")
             result_df.at[row.Index, "debug_log_path"] = str(file_path)
             result_df.at[row.Index, "debug_log_name"] = file_name
         except Exception as exc:
@@ -365,7 +505,7 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     _pick_col("bounds", ["focus_bounds", "bounds"])
     _pick_col("fallback_used", ["fallback_used"], default=False)
     _pick_col("step_dump_used", ["step_dump_used"], default=False)
-    _pick_col("req_id", ["req_id"])
+    _pick_col("req_id", ["req_id", "get_focus_req_id"])
 
     _pick_col("timing_move", ["timing_move", "move_elapsed_sec"])
     _pick_col("timing_get_focus", ["timing_get_focus", "step_elapsed_sec"])
@@ -819,7 +959,7 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
     filtered_df = make_filtered_df(raw_df)
     summary_df = make_summary_df(raw_df, filtered_df)
     result_df = make_result_df(filtered_df)
-    result_df = _populate_result_debug_logs(result_df, output_path)
+    result_df = _populate_result_debug_logs(result_df, output_path, source_df=filtered_df)
 
     log("[SAVE] writing sheets raw/filtered/summary/result")
     log(f"[SAVE] filtered rows={len(filtered_df)}, raw rows={len(raw_df)}")
