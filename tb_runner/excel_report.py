@@ -4,11 +4,11 @@ import re
 
 import pandas as pd
 
-from tb_runner.image_utils import insert_images_to_excel
+from tb_runner.image_utils import create_excel_thumbnail, insert_images_to_excel
 from tb_runner.logging_utils import log
 from tb_runner.utils import to_json_text
 
-EXCEL_REPORT_VERSION = "1.0.0"
+EXCEL_REPORT_VERSION = "1.1.0"
 
 
 def _excel_col_to_name(col_idx: int) -> str:
@@ -486,6 +486,7 @@ def _apply_result_visual_enhancements(writer: pd.ExcelWriter, result_df: pd.Data
 
         max_col = len(result_df.columns)
         thumb_failures = 0
+        temp_thumb_paths: list[str] = []
         for row_idx, row in enumerate(result_df.itertuples(index=False), start=2):
             final_result = str(getattr(row, "final_result", "") or "").upper()
             fill_color = color_map.get(final_result)
@@ -509,19 +510,24 @@ def _apply_result_visual_enhancements(writer: pd.ExcelWriter, result_df: pd.Data
                 continue
             thumb_cell.value = Path(crop_path).name
             try:
-                img = XLImage(crop_path)
-                original_width = float(getattr(img, "width", 0) or 0)
-                original_height = float(getattr(img, "height", 0) or 0)
-                if original_width > 0 and original_height > 0:
-                    ratio = min(150.0 / original_width, 1.0)
-                    img.width = max(1, int(original_width * ratio))
-                    img.height = max(1, int(original_height * ratio))
+                thumb_path = create_excel_thumbnail(crop_path)
+                if not thumb_path:
+                    thumb_failures += 1
+                    continue
+                temp_thumb_paths.append(thumb_path)
+                img = XLImage(thumb_path)
                 ws.add_image(img, thumb_cell.coordinate)
-                ws.row_dimensions[row_idx].height = max(float(ws.row_dimensions[row_idx].height or 0), 80.0)
+                row_height = (float(getattr(img, "height", 0) or 0) * 0.75) + 6.0
+                ws.row_dimensions[row_idx].height = max(float(ws.row_dimensions[row_idx].height or 0), row_height)
             except Exception:
                 thumb_failures += 1
         if thumb_col_idx >= 0:
             ws.column_dimensions[ws.cell(row=1, column=thumb_col_idx + 1).column_letter].width = 24
+        for thumb_path in temp_thumb_paths:
+            try:
+                Path(thumb_path).unlink(missing_ok=True)
+            except Exception:
+                pass
         if thumb_failures:
             log(f"[WARN][excel] result thumbnail insert skipped for {thumb_failures} rows")
         return
@@ -555,17 +561,16 @@ def _apply_result_visual_enhancements(writer: pd.ExcelWriter, result_df: pd.Data
             if not crop_path or not Path(crop_path).exists():
                 continue
             try:
-                from PIL import Image as PILImage
-
-                with PILImage.open(crop_path) as pil_img:
-                    width, height = pil_img.size
-                if width > 0 and height > 0:
-                    scale = min(150.0 / float(width), 1.0)
-                    options = {"x_scale": scale, "y_scale": scale, "object_position": 1}
-                else:
-                    options = {"object_position": 1}
-                ws.insert_image(row_number - 1, thumb_col_idx, crop_path, options)
-                ws.set_row(row_number - 1, 80)
+                thumb_path = create_excel_thumbnail(crop_path)
+                if not thumb_path:
+                    thumb_failures += 1
+                    continue
+                ws.insert_image(row_number - 1, thumb_col_idx, thumb_path, {"object_position": 1})
+                ws.set_row(row_number - 1, 78)
+                try:
+                    Path(thumb_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
             except Exception:
                 thumb_failures += 1
         ws.set_column(thumb_col_idx, thumb_col_idx, 24)
@@ -635,8 +640,14 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
         remaining_cols = [c for c in frame.columns if c not in existing_cols]
         return frame[existing_cols + remaining_cols]
 
+    def _move_column_to_end(frame: pd.DataFrame, col_name: str) -> pd.DataFrame:
+        if col_name not in frame.columns:
+            return frame
+        return frame[[c for c in frame.columns if c != col_name] + [col_name]]
+
     raw_df = _reorder_columns(raw_df)
     filtered_df = _reorder_columns(filtered_df)
+    raw_df = _move_column_to_end(raw_df, "crop_image")
     raw_df = stringify_complex_columns(raw_df)
     filtered_df = stringify_complex_columns(filtered_df)
     summary_df = stringify_complex_columns(summary_df)

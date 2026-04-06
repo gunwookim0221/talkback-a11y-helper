@@ -2,6 +2,7 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 openpyxl = pytest.importorskip("openpyxl")
+from PIL import Image
 
 from tb_runner.excel_report import (
     add_status_columns,
@@ -219,8 +220,6 @@ def test_save_excel_adds_result_thumbnail_and_status_color_only_for_warn_fail(tm
     fail_crop = tmp_path / "crops" / "fail.png"
     pass_crop.parent.mkdir(parents=True, exist_ok=True)
     for path in [pass_crop, warn_crop, fail_crop]:
-        from PIL import Image
-
         Image.new("RGB", (300, 100), color="white").save(path)
 
     rows = [
@@ -294,3 +293,43 @@ def test_save_excel_adds_result_thumbnail_and_status_color_only_for_warn_fail(tm
 
     fill_colors = [ws.cell(row=i, column=1).fill.start_color.rgb for i in range(2, 5)]
     assert fill_colors == ["00C6EFCE", "00FFEB9C", "00FFC7CE"]
+
+
+def test_save_excel_raw_sheet_uses_resized_thumbnail_and_rightmost_image_column(tmp_path):
+    crop_file = tmp_path / "crops" / "raw_large.png"
+    crop_file.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (1200, 600), color="white").save(crop_file)
+
+    rows = [
+        {
+            "scenario_id": "s1",
+            "tab_name": "home",
+            "step_index": 1,
+            "context_type": "main",
+            "visible_label": "Home",
+            "merged_announcement": "Home",
+            "move_result": "moved",
+            "focus_view_id": "id/home",
+            "focus_bounds": "[0,0][10,10]",
+            "fallback_used": False,
+            "step_dump_used": False,
+            "req_id": "r1",
+            "step_elapsed_sec": 0.1,
+            "crop_image_path": str(crop_file),
+            "crop_image": "thumbnail",
+        }
+    ]
+    output_path = tmp_path / "report_raw_thumbnail.xlsx"
+
+    save_excel(rows, str(output_path), with_images=True)
+
+    wb = openpyxl.load_workbook(output_path)
+    ws = wb["raw"]
+    headers = [cell.value for cell in ws[1]]
+    image_col_idx = headers.index("crop_image") + 1
+
+    assert headers[-1] == "crop_image"
+    assert ws.cell(row=2, column=image_col_idx).value in {None, "thumbnail"}
+    assert len(ws._images) == 1
+    assert ws._images[0].width <= 160
+    assert ws._images[0].height <= 96

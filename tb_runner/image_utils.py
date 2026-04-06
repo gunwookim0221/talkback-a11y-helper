@@ -11,6 +11,30 @@ from tb_runner.constants import ENABLE_IMAGE_CROP, ENABLE_IMAGE_INSERT_TO_EXCEL
 from tb_runner.logging_utils import log
 from tb_runner.utils import parse_bounds_str, sanitize_filename
 
+EXCEL_IMAGE_THUMBNAIL_VERSION = "1.1.0"
+
+
+def create_excel_thumbnail(
+    image_path: str | Path,
+    *,
+    max_width: int = 160,
+    max_height: int = 96,
+) -> str | None:
+    try:
+        path = Path(image_path)
+        if not path.exists():
+            return None
+        with Image.open(path) as src:
+            thumb = src.copy()
+            thumb.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+            with tempfile.NamedTemporaryFile(suffix=".png", prefix="excel_thumb_", delete=False) as temp_file:
+                temp_path = temp_file.name
+            thumb.save(temp_path, format="PNG", optimize=True)
+            thumb.close()
+            return temp_path
+    except Exception:
+        return None
+
 
 def capture_full_screenshot(client: A11yAdbClient, dev: str, save_path: str) -> None:
     # talkback_lib 내부 private helper 재사용
@@ -141,24 +165,35 @@ def insert_images_to_excel(
     path_col_idx = headers.index("crop_image_path") + 1
 
     col_letter = ws.cell(row=1, column=image_col_idx).column_letter
+    temp_thumb_paths: list[str] = []
 
-    for row_idx in range(2, ws.max_row + 1):
-        path_value = ws.cell(row=row_idx, column=path_col_idx).value
-        if not path_value:
-            continue
+    try:
+        for row_idx in range(2, ws.max_row + 1):
+            path_value = ws.cell(row=row_idx, column=path_col_idx).value
+            if not path_value:
+                continue
 
-        img_path = Path(str(path_value))
-        if not img_path.exists():
-            continue
+            img_path = Path(str(path_value))
+            if not img_path.exists():
+                continue
 
-        try:
-            img = XLImage(str(img_path))
-            img.width = 90
-            img.height = 90
-            ws.add_image(img, f"{col_letter}{row_idx}")
-            ws.row_dimensions[row_idx].height = 72
-        except Exception as exc:
-            log(f"[EXCEL] image insert failed row={row_idx}: {exc}")
+            thumb_path = create_excel_thumbnail(img_path)
+            if not thumb_path:
+                continue
+            temp_thumb_paths.append(thumb_path)
 
-    ws.column_dimensions[col_letter].width = 16
-    wb.save(excel_path)
+            try:
+                img = XLImage(thumb_path)
+                ws.add_image(img, f"{col_letter}{row_idx}")
+                row_height = (float(getattr(img, "height", 0) or 0) * 0.75) + 6.0
+                ws.row_dimensions[row_idx].height = max(float(ws.row_dimensions[row_idx].height or 0), row_height)
+            except Exception as exc:
+                log(f"[EXCEL] image insert failed row={row_idx}: {exc}")
+        ws.column_dimensions[col_letter].width = 24
+        wb.save(excel_path)
+    finally:
+        for thumb_path in temp_thumb_paths:
+            try:
+                Path(thumb_path).unlink(missing_ok=True)
+            except Exception:
+                pass
