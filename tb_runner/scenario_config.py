@@ -1,3 +1,23 @@
+BOTTOM_TAB_GLOBAL_NAV = {
+    "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+    "resource_ids": [
+        "com.samsung.android.oneconnect:id/menu_favorites",
+        "com.samsung.android.oneconnect:id/menu_devices",
+        "com.samsung.android.oneconnect:id/menu_services",
+        "com.samsung.android.oneconnect:id/menu_automations",
+        "com.samsung.android.oneconnect:id/menu_more",
+    ],
+    "selected_pattern": "(?i).*(selected|선택됨).*",
+    "region_hint": "bottom_tabs",
+}
+
+# Legacy compatibility: runtime override가 없을 때 global_nav 시나리오는 auto region 힌트를 유지해야 한다.
+DEFAULT_GLOBAL_NAV = {
+    **BOTTOM_TAB_GLOBAL_NAV,
+    "region_hint": "auto",
+}
+
+
 TAB_CONFIGS = [
     {
         "scenario_id": "home_main",
@@ -27,18 +47,7 @@ TAB_CONFIGS = [
         "stop_policy": {
             "stop_on_global_nav_entry": True,
         },
-        "global_nav": {
-            "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
-            "resource_ids": [
-                "com.samsung.android.oneconnect:id/menu_favorites",
-                "com.samsung.android.oneconnect:id/menu_devices",
-                "com.samsung.android.oneconnect:id/menu_services",
-                "com.samsung.android.oneconnect:id/menu_automations",
-                "com.samsung.android.oneconnect:id/menu_more",
-            ],
-            "selected_pattern": "(?i).*(selected|선택됨).*",
-            "region_hint": "bottom_tabs",
-        },
+        "global_nav": BOTTOM_TAB_GLOBAL_NAV,
         "max_steps": 30,
         "enabled": False,
         "overlay_policy": {
@@ -148,18 +157,7 @@ TAB_CONFIGS = [
         "stop_policy": {
             "stop_on_global_nav_entry": True,
         },
-        "global_nav": {
-            "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
-            "resource_ids": [
-                "com.samsung.android.oneconnect:id/menu_favorites",
-                "com.samsung.android.oneconnect:id/menu_devices",
-                "com.samsung.android.oneconnect:id/menu_services",
-                "com.samsung.android.oneconnect:id/menu_automations",
-                "com.samsung.android.oneconnect:id/menu_more",
-            ],
-            "selected_pattern": "(?i).*(selected|선택됨).*",
-            "region_hint": "bottom_tabs",
-        },
+        "global_nav": BOTTOM_TAB_GLOBAL_NAV,
         "enabled": False,
         "max_steps": 30,
         "overlay_policy": {
@@ -205,18 +203,7 @@ TAB_CONFIGS = [
         "stop_policy": {
             "stop_on_global_nav_entry": True,
         },
-        "global_nav": {
-            "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
-            "resource_ids": [
-                "com.samsung.android.oneconnect:id/menu_favorites",
-                "com.samsung.android.oneconnect:id/menu_devices",
-                "com.samsung.android.oneconnect:id/menu_services",
-                "com.samsung.android.oneconnect:id/menu_automations",
-                "com.samsung.android.oneconnect:id/menu_more",
-            ],
-            "selected_pattern": "(?i).*(selected|선택됨).*",
-            "region_hint": "bottom_tabs",
-        },
+        "global_nav": BOTTOM_TAB_GLOBAL_NAV,
         "enabled": False,
         "max_steps": 30,
         "overlay_policy": {
@@ -262,18 +249,7 @@ TAB_CONFIGS = [
         "stop_policy": {
             "stop_on_global_nav_entry": True,
         },
-        "global_nav": {
-            "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
-            "resource_ids": [
-                "com.samsung.android.oneconnect:id/menu_favorites",
-                "com.samsung.android.oneconnect:id/menu_devices",
-                "com.samsung.android.oneconnect:id/menu_services",
-                "com.samsung.android.oneconnect:id/menu_automations",
-                "com.samsung.android.oneconnect:id/menu_more",
-            ],
-            "selected_pattern": "(?i).*(selected|선택됨).*",
-            "region_hint": "bottom_tabs",
-        },
+        "global_nav": BOTTOM_TAB_GLOBAL_NAV,
         "enabled": False,
         "max_steps": 30,
         "overlay_policy": {
@@ -319,18 +295,7 @@ TAB_CONFIGS = [
         "stop_policy": {
             "stop_on_global_nav_entry": True,
         },
-        "global_nav": {
-            "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
-            "resource_ids": [
-                "com.samsung.android.oneconnect:id/menu_favorites",
-                "com.samsung.android.oneconnect:id/menu_devices",
-                "com.samsung.android.oneconnect:id/menu_services",
-                "com.samsung.android.oneconnect:id/menu_automations",
-                "com.samsung.android.oneconnect:id/menu_more",
-            ],
-            "selected_pattern": "(?i).*(selected|선택됨).*",
-            "region_hint": "bottom_tabs",
-        },
+        "global_nav": BOTTOM_TAB_GLOBAL_NAV,
         "enabled": False,
         "max_steps": 30,
         "overlay_policy": {
@@ -358,18 +323,7 @@ TAB_CONFIGS = [
         "stop_policy": {
             "stop_on_global_nav_exit": True,
         },
-        "global_nav": {
-            "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
-            "resource_ids": [
-                "com.samsung.android.oneconnect:id/menu_favorites",
-                "com.samsung.android.oneconnect:id/menu_devices",
-                "com.samsung.android.oneconnect:id/menu_services",
-                "com.samsung.android.oneconnect:id/menu_automations",
-                "com.samsung.android.oneconnect:id/menu_more",
-            ],
-            "selected_pattern": "(?i).*(selected|선택됨).*",
-            "region_hint": "auto",
-        },
+        "global_nav": DEFAULT_GLOBAL_NAV,
         "enabled": False,
         "max_steps": 10,
     },
@@ -479,18 +433,7 @@ TAB_CONFIGS = [
         "stop_policy": {
             "stop_on_global_nav_entry": True,
         },
-        "global_nav": {
-            "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
-            "resource_ids": [
-                "com.samsung.android.oneconnect:id/menu_favorites",
-                "com.samsung.android.oneconnect:id/menu_devices",
-                "com.samsung.android.oneconnect:id/menu_services",
-                "com.samsung.android.oneconnect:id/menu_automations",
-                "com.samsung.android.oneconnect:id/menu_more",
-            ],
-            "selected_pattern": "(?i).*(selected|선택됨).*",
-            "region_hint": "bottom_tabs",
-        },
+        "global_nav": BOTTOM_TAB_GLOBAL_NAV,
         "enabled": False,
         "max_steps": 10,
     },
