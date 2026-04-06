@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.73.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.74.0"
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
     private const val MIN_ONECONNECT_SETTINGS_ROW_HEIGHT_PX = 80
 
@@ -302,7 +302,25 @@ object A11yNavigator {
             lastContainerLikeCurrentSignature = null
         }
         val originalCurrentIndex = currentIndex
+        var webViewFixEntered = false
+        var webViewFixReason = "eligible"
+        var webViewFixSkipReason = "none"
+        if (currentIndex != -1) {
+            webViewFixReason = "current_index_already_resolved"
+            webViewFixSkipReason = "current_index_resolved"
+        } else if (containerLikeCurrent == null) {
+            webViewFixReason = "current_not_container_like"
+            webViewFixSkipReason = "container_like_current_missing"
+        } else if (traversalList.size < 2) {
+            webViewFixReason = "insufficient_candidates"
+            webViewFixSkipReason = "traversal_size_less_than_two"
+        } else if (!repeatLikeContainerCurrent) {
+            webViewFixReason = "container_signature_not_repeated"
+            webViewFixSkipReason = "repeat_like_current_false"
+        }
+
         if (currentIndex == -1 && containerLikeCurrent != null && traversalList.size >= 2 && repeatLikeContainerCurrent) {
+            webViewFixEntered = true
             val recentFocusCandidateIndex = lastRequestedFocusIndex.takeIf { it in traversalList.indices }
             val closestByBoundsIndex = findClosestNodeBelowCenter(
                 nodes = traversalList,
@@ -316,6 +334,9 @@ object A11yNavigator {
             val correctedLabel = traversalList.getOrNull(correctedIndex)?.let { node ->
                 resolvePrimaryLabel(node) ?: A11yTraversalAnalyzer.recoverDescendantLabel(node) ?: "<no-label>"
             } ?: "<none>"
+            if (correctedIndex !in traversalList.indices) {
+                webViewFixSkipReason = "corrected_index_out_of_bounds"
+            }
             Log.i(
                 "A11Y_HELPER",
                 "[DECIDE][WEBVIEW_FIX] triggered=true originalCurrentIndex=$originalCurrentIndex correctedIndex=$correctedIndex fallbackCurrentCandidate=index:$correctedIndex bounds=${formatBoundsForLog(correctedBounds)} label=${correctedLabel.replace("\n", " ")} recentFocusCandidateIndex=${recentFocusCandidateIndex ?: -1} closestByBoundsIndex=$closestByBoundsIndex"
@@ -352,6 +373,25 @@ object A11yNavigator {
         )
         Log.i(
             "A11Y_HELPER",
+            "[WEBVIEW_FIX][CHECK] entered=$webViewFixEntered reason=$webViewFixReason"
+        )
+        Log.i(
+            "A11Y_HELPER",
+            "[WEBVIEW_FIX][CURRENT] originalCurrentIndex=$originalCurrentIndex correctedCurrentIndex=$currentIndex"
+        )
+        val nextCandidateLabel = traversalList.getOrNull(nextIndex)?.let { node ->
+            resolvePrimaryLabel(node) ?: A11yTraversalAnalyzer.recoverDescendantLabel(node) ?: "<no-label>"
+        } ?: "<none>"
+        Log.i(
+            "A11Y_HELPER",
+            "[WEBVIEW_FIX][NEXT] nextIndex=$nextIndex label=${nextCandidateLabel.replace("\n", " ")}"
+        )
+        Log.i(
+            "A11Y_HELPER",
+            "[WEBVIEW_FIX][SKIP] why skipped=$webViewFixSkipReason"
+        )
+        Log.i(
+            "A11Y_HELPER",
             "[DECIDE][WEBVIEW_FIX] originalCurrentIndex=$originalCurrentIndex correctedIndex=$currentIndex nextCandidateIndex=$nextIndex"
         )
         return CurrentPosition(
@@ -365,6 +405,10 @@ object A11yNavigator {
 
 
     fun performSmartNext(root: AccessibilityNodeInfo?, currentNode: AccessibilityNodeInfo?): TargetActionOutcome {
+        Log.i(
+            "A11Y_HELPER",
+            "[VERSION] appVersionName=${BuildConfig.VERSION_NAME} appVersionCode=${BuildConfig.VERSION_CODE} navigatorAlgorithmVersion=$NAVIGATOR_ALGORITHM_VERSION"
+        )
         Log.i("A11Y_HELPER", "[SMART_NEXT] history policy: visited and visible histories separated")
         if (root == null) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] rootInActiveWindow is null.")
