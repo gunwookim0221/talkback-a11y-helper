@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.74.2"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.74.3"
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
@@ -825,18 +825,23 @@ object A11yNavigator {
             )
             val currentNode = context.resolvedCurrent
                 ?: context.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            val candidateCount = context.traversalList.size
             val noNextCandidate = targetIndex !in context.traversalList.indices || targetIndex <= context.currentIndex
             val repeatedCurrentNode = currentNode != null && focusedAfterFailure != null && isSameNode(currentNode, focusedAfterFailure)
-            if (currentNode != null && noNextCandidate && repeatedCurrentNode) {
-                val candidateCount = context.traversalList.size
-                Log.i("A11Y_HELPER", "[END_CHECK] candidate_count=$candidateCount current_index=${context.currentIndex} target_index=$targetIndex")
-                Log.i("A11Y_HELPER", "[END_CHECK] next_candidate=null")
+            val endCheckEntered = currentNode != null && noNextCandidate
+            Log.i("A11Y_HELPER", "[END_CHECK][ENTER] $endCheckEntered")
+            Log.i(
+                "A11Y_HELPER",
+                "[END_CHECK][STATE] currentIndex=${context.currentIndex}, nextIndex=$targetIndex, candidateCount=$candidateCount"
+            )
+            var scrollAttempted = false
+            var scrollChanged = false
+            if (endCheckEntered) {
                 val oldSnapshot = A11ySnapshotTracker.buildNodeTextSnapshot(context.traversalList)
                 val preScrollResult = context.scrollableNode?.let { scrollTarget ->
                     performScroll(scrollTarget = scrollTarget, reason = "end_check_no_next_candidate")
                 }
-                val scrollAttempted = preScrollResult?.attempted ?: false
-                var scrollChanged = false
+                scrollAttempted = preScrollResult?.attempted ?: false
                 if (preScrollResult?.success == true) {
                     val refreshedRoot = A11ySnapshotTracker.pollForUpdatedRoot(A11yHelperService.instance, oldSnapshot, context.root)
                     if (refreshedRoot != null) {
@@ -844,13 +849,17 @@ object A11yNavigator {
                         scrollChanged = oldSnapshot != refreshedSnapshot
                     }
                 }
-                Log.i("A11Y_HELPER", "[END_CHECK] scroll_attempted=$scrollAttempted")
-                Log.i("A11Y_HELPER", "[END_CHECK] scroll_changed=$scrollChanged")
-                if (!scrollChanged) {
-                    Log.i("A11Y_HELPER", "[END_CHECK] decision=looped")
+            }
+            Log.i("A11Y_HELPER", "[END_CHECK][SCROLL] attempted=$scrollAttempted, changed=$scrollChanged")
+            if (endCheckEntered) {
+                if (!scrollChanged || !repeatedCurrentNode) {
+                    Log.i("A11Y_HELPER", "[END_CHECK][DECISION] looped")
                     return TargetActionOutcome(true, "looped", currentNode)
                 }
+                Log.i("A11Y_HELPER", "[END_CHECK][DECISION] terminal")
+                return TargetActionOutcome(false, "end_of_sequence", currentNode)
             }
+            Log.i("A11Y_HELPER", "[END_CHECK][DECISION] failed")
             val currentNotificationsRow = findOneConnectNotificationsRowContainer(currentNode)
             if (currentNotificationsRow != null) {
                 val intendedNode = context.traversalList.getOrNull(targetIndex)
