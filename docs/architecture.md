@@ -69,6 +69,7 @@ AccessibilityService
 - traversal builder는 OneConnect package에서 section ancestor 하위의 비상호작용 `TextView` 본문을 구조 조건(ancestor 내부 배치, top/bottom chrome 제외, interactive descendant 없음, 유효 bounds) 충족 시에만 제한적으로 후보에 포함해 Food plugin Instructions 본문이 Guided cooking 뒤에 연속 읽기로 이어지도록 합니다.
 - Bottom Bar pre-scroll 직후 새 traversal 스냅샷이 이전과 같을 때는 추가 Bottom Bar fallback/인덱스 동기화 연쇄를 수행하지 않고 즉시 실패 종료(`reached_end_no_scroll_progress`)해 단일 호출 내 sweep loop를 차단합니다.
 - stale index 보정은 `currentIndex < lastRequestedFocusIndex`라도 `currentIndex + 1` 중간 후보가 실제 리스트에 있으면 먼저 소진하도록 완화되어, `lastRequestedFocusIndex + 1` 점프가 본문 마지막 후보를 건너뛰지 않게 했습니다.
+- `WebView`/비-leaf 컨테이너가 현재 포커스로 반복 보고되고 `currentIndex=-1`이 지속될 때는, 직전과 동일 컨테이너 시그니처 반복 + 후보 2개 이상 조건에서만 `[DECIDE][WEBVIEW_FIX]` 보정을 적용합니다. 이때 current는 `lastRequestedFocusIndex`(유효 시) 또는 `findClosestNodeBelowCenter(...)`로 좁게 복원하며, 원본/보정 인덱스 및 next 선택 인덱스를 진단 로그로 함께 남깁니다.
 - 다음 후보가 Bottom Bar로 판정되더라도 `findIntermediateContentCandidateBeforeBottomBar(...)`가 중간 본문(특히 Bottom Bar top 경계 0~80px 위에서 끝나는 얇은 trailing content)을 먼저 반환하면 해당 후보를 우선 포커스합니다.
 - 스크롤 후 후보가 모두 히스토리 또는 skip 규칙으로 제거되어 실제 포커스 시도 대상이 0개면 `looped` 재탐색 대신 즉시 `reached_end`를 반환합니다.
 - 포커스 성공 후 `lastRequestedFocusIndex`를 보정할 때는 좌표 일치만으로 히스토리를 전진시키지 않고, 현재 접근성 포커스 노드의 객체 ID가 traversal 후보와 직접 일치할 때만 엄격하게 반영합니다.
