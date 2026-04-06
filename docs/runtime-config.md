@@ -192,6 +192,7 @@
 - 지원하지 않는 키를 runtime에 넣어도 loader가 사용하지 않습니다.
 - 현재 기본 `config/runtime_config.json`은 main tab 계열(`home/devices/life/routines/menu/resource_id_only`)을 `group=main_tabs`로 정리해
   `use_shared_navigation=bottom_tab_global_nav` 경로를 공통 적용합니다.
+- base scenario(`tb_runner/scenario_config.py`)도 `BOTTOM_TAB_GLOBAL_NAV`/`DEFAULT_GLOBAL_NAV` 상수로 legacy `global_nav` 중복 정의를 제거해, runtime override가 없어도 기존 fallback 동작을 유지합니다.
 
 ---
 
