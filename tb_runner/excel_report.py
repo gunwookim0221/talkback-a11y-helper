@@ -1,4 +1,5 @@
 import os
+from io import BytesIO
 from pathlib import Path
 import re
 
@@ -8,7 +9,7 @@ from tb_runner.image_utils import create_excel_thumbnail, insert_images_to_excel
 from tb_runner.logging_utils import log
 from tb_runner.utils import to_json_text
 
-EXCEL_REPORT_VERSION = "1.1.0"
+EXCEL_REPORT_VERSION = "1.2.0"
 
 
 def _excel_col_to_name(col_idx: int) -> str:
@@ -461,7 +462,12 @@ def _apply_result_crop_hyperlinks(writer: pd.ExcelWriter, result_df: pd.DataFram
         )
 
 
-def _apply_result_visual_enhancements(writer: pd.ExcelWriter, result_df: pd.DataFrame) -> None:
+def _apply_result_visual_enhancements(
+    writer: pd.ExcelWriter,
+    result_df: pd.DataFrame,
+    *,
+    with_images: bool,
+) -> None:
     if "result" not in writer.sheets or result_df.empty or "final_result" not in result_df.columns:
         return
 
@@ -486,6 +492,7 @@ def _apply_result_visual_enhancements(writer: pd.ExcelWriter, result_df: pd.Data
 
         max_col = len(result_df.columns)
         thumb_failures = 0
+        thumb_fail_reasons: dict[str, int] = {}
         temp_thumb_paths: list[str] = []
         for row_idx, row in enumerate(result_df.itertuples(index=False), start=2):
             final_result = str(getattr(row, "final_result", "") or "").upper()
@@ -496,6 +503,9 @@ def _apply_result_visual_enhancements(writer: pd.ExcelWriter, result_df: pd.Data
                     ws.cell(row=row_idx, column=col).fill = fill
 
             if thumb_col_idx < 0:
+                continue
+            if not with_images:
+                ws.cell(row=row_idx, column=thumb_col_idx + 1).value = ""
                 continue
 
             mismatch_exists = _has_mismatch(row)
@@ -513,14 +523,17 @@ def _apply_result_visual_enhancements(writer: pd.ExcelWriter, result_df: pd.Data
                 thumb_path = create_excel_thumbnail(crop_path)
                 if not thumb_path:
                     thumb_failures += 1
+                    thumb_fail_reasons["thumbnail_create_failed"] = thumb_fail_reasons.get("thumbnail_create_failed", 0) + 1
                     continue
                 temp_thumb_paths.append(thumb_path)
                 img = XLImage(thumb_path)
                 ws.add_image(img, thumb_cell.coordinate)
                 row_height = (float(getattr(img, "height", 0) or 0) * 0.75) + 6.0
                 ws.row_dimensions[row_idx].height = max(float(ws.row_dimensions[row_idx].height or 0), row_height)
-            except Exception:
+            except Exception as exc:
                 thumb_failures += 1
+                reason = str(exc) or exc.__class__.__name__
+                thumb_fail_reasons[reason] = thumb_fail_reasons.get(reason, 0) + 1
         if thumb_col_idx >= 0:
             ws.column_dimensions[ws.cell(row=1, column=thumb_col_idx + 1).column_letter].width = 24
         for thumb_path in temp_thumb_paths:
@@ -529,7 +542,10 @@ def _apply_result_visual_enhancements(writer: pd.ExcelWriter, result_df: pd.Data
             except Exception:
                 pass
         if thumb_failures:
-            log(f"[WARN][excel] result thumbnail insert skipped for {thumb_failures} rows")
+            top_reason = max(thumb_fail_reasons.items(), key=lambda item: item[1])[0] if thumb_fail_reasons else "unknown"
+            log(
+                f"[WARN][excel] thumbnail insertion skipped count={thumb_failures} reason='{top_reason}'"
+            )
         return
 
     if is_xlsxwriter_sheet:
@@ -548,6 +564,7 @@ def _apply_result_visual_enhancements(writer: pd.ExcelWriter, result_df: pd.Data
             return
 
         thumb_failures = 0
+        thumb_fail_reasons: dict[str, int] = {}
         for row_number, row in enumerate(result_df.itertuples(index=False), start=2):
             final_result = str(getattr(row, "final_result", "") or "").upper()
             mismatch_exists = _has_mismatch(row)
@@ -557,25 +574,35 @@ def _apply_result_visual_enhancements(writer: pd.ExcelWriter, result_df: pd.Data
             if not needs_thumb:
                 ws.write(row_number - 1, thumb_col_idx, "")
                 continue
+            if not with_images:
+                ws.write(row_number - 1, thumb_col_idx, "")
+                continue
             ws.write(row_number - 1, thumb_col_idx, display_name)
             if not crop_path or not Path(crop_path).exists():
                 continue
             try:
-                thumb_path = create_excel_thumbnail(crop_path)
-                if not thumb_path:
+                thumb_data = create_excel_thumbnail(crop_path, as_bytes=True)
+                if not thumb_data:
                     thumb_failures += 1
+                    thumb_fail_reasons["thumbnail_create_failed"] = thumb_fail_reasons.get("thumbnail_create_failed", 0) + 1
                     continue
-                ws.insert_image(row_number - 1, thumb_col_idx, thumb_path, {"object_position": 1})
+                ws.insert_image(
+                    row_number - 1,
+                    thumb_col_idx,
+                    f"excel_thumb_{row_number}.png",
+                    {"object_position": 1, "image_data": BytesIO(thumb_data)},
+                )
                 ws.set_row(row_number - 1, 78)
-                try:
-                    Path(thumb_path).unlink(missing_ok=True)
-                except Exception:
-                    pass
-            except Exception:
+            except Exception as exc:
                 thumb_failures += 1
+                reason = str(exc) or exc.__class__.__name__
+                thumb_fail_reasons[reason] = thumb_fail_reasons.get(reason, 0) + 1
         ws.set_column(thumb_col_idx, thumb_col_idx, 24)
         if thumb_failures:
-            log(f"[WARN][excel] result thumbnail insert skipped for {thumb_failures} rows")
+            top_reason = max(thumb_fail_reasons.items(), key=lambda item: item[1])[0] if thumb_fail_reasons else "unknown"
+            log(
+                f"[WARN][excel] thumbnail insertion skipped count={thumb_failures} reason='{top_reason}'"
+            )
 
 
 def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> None:
@@ -660,7 +687,7 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
         summary_df.to_excel(writer, sheet_name="summary", index=False)
         result_df.to_excel(writer, sheet_name="result", index=False)
         _apply_result_crop_hyperlinks(writer, result_df)
-        _apply_result_visual_enhancements(writer, result_df)
+        _apply_result_visual_enhancements(writer, result_df, with_images=with_images)
 
     if with_images and "crop_image" in raw_df.columns:
         insert_images_to_excel(output_path, image_col_name="crop_image", sheet_name="raw")

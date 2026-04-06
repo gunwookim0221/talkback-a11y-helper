@@ -11,7 +11,7 @@ from tb_runner.constants import ENABLE_IMAGE_CROP, ENABLE_IMAGE_INSERT_TO_EXCEL
 from tb_runner.logging_utils import log
 from tb_runner.utils import parse_bounds_str, sanitize_filename
 
-EXCEL_IMAGE_THUMBNAIL_VERSION = "1.1.0"
+EXCEL_IMAGE_THUMBNAIL_VERSION = "1.2.0"
 
 
 def create_excel_thumbnail(
@@ -19,7 +19,8 @@ def create_excel_thumbnail(
     *,
     max_width: int = 160,
     max_height: int = 96,
-) -> str | None:
+    as_bytes: bool = False,
+) -> str | bytes | None:
     try:
         path = Path(image_path)
         if not path.exists():
@@ -27,6 +28,13 @@ def create_excel_thumbnail(
         with Image.open(path) as src:
             thumb = src.copy()
             thumb.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+            if as_bytes:
+                from io import BytesIO
+
+                output = BytesIO()
+                thumb.save(output, format="PNG", optimize=True)
+                thumb.close()
+                return output.getvalue()
             with tempfile.NamedTemporaryFile(suffix=".png", prefix="excel_thumb_", delete=False) as temp_file:
                 temp_path = temp_file.name
             thumb.save(temp_path, format="PNG", optimize=True)
