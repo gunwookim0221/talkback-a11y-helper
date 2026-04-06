@@ -373,15 +373,33 @@ def _apply_result_crop_hyperlinks(writer: pd.ExcelWriter, result_df: pd.DataFram
         return
 
     ws = writer.sheets["result"]
-    crop_col_idx = result_df.columns.get_loc("crop_image_path") + 1
+    crop_col_idx = result_df.columns.get_loc("crop_image_path")
+    is_openpyxl_sheet = hasattr(ws, "cell")
+    is_xlsxwriter_sheet = hasattr(ws, "write_url")
     for row_idx, crop_path in enumerate(result_df["crop_image_path"].tolist(), start=2):
         path_text = str(crop_path or "").strip()
         if not path_text:
             continue
-        cell = ws.cell(row=row_idx, column=crop_col_idx)
-        cell.value = Path(path_text).name or path_text
-        cell.hyperlink = path_text
-        cell.style = "Hyperlink"
+        display_text = Path(path_text).name or path_text
+        try:
+            if is_openpyxl_sheet:
+                cell = ws.cell(row=row_idx, column=crop_col_idx + 1)
+                cell.value = display_text
+                cell.hyperlink = path_text
+                cell.style = "Hyperlink"
+            elif is_xlsxwriter_sheet:
+                ws.write_url(row_idx - 1, crop_col_idx, path_text, string=display_text)
+            else:
+                ws.write(row_idx - 1, crop_col_idx, display_text)
+        except Exception as exc:
+            log(f"[WARN][excel] result crop hyperlink skipped reason='{exc}' row={row_idx}")
+            try:
+                if is_openpyxl_sheet:
+                    ws.cell(row=row_idx, column=crop_col_idx + 1).value = display_text
+                elif hasattr(ws, "write"):
+                    ws.write(row_idx - 1, crop_col_idx, display_text)
+            except Exception:
+                continue
 
 
 def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> None:
