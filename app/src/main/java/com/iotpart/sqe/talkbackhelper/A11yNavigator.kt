@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.74.4"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.74.5"
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
@@ -827,12 +827,19 @@ object A11yNavigator {
                 ?: context.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
             val candidateCount = context.traversalList.size
             val noNextCandidate = targetIndex !in context.traversalList.indices || targetIndex <= context.currentIndex
+            val exhaustedSingleTarget = outcome.reason == "single_target_exhausted"
             val repeatedCurrentNode = currentNode != null && focusedAfterFailure != null && isSameNode(currentNode, focusedAfterFailure)
-            val endCheckEntered = currentNode != null && noNextCandidate
-            Log.i("A11Y_HELPER", "[END_CHECK][ENTER] $endCheckEntered")
+            val endCheckEntered = currentNode != null && (noNextCandidate || exhaustedSingleTarget)
+            val endCheckReason = when {
+                currentNode == null -> "no_current"
+                noNextCandidate -> "no_next_candidate"
+                exhaustedSingleTarget -> "single_target_exhausted"
+                else -> "not_applicable"
+            }
+            Log.i("A11Y_HELPER", "[END_CHECK][ENTER] entered=$endCheckEntered reason=$endCheckReason")
             Log.i(
                 "A11Y_HELPER",
-                "[END_CHECK][STATE] currentIndex=${context.currentIndex}, nextIndex=$targetIndex, candidateCount=$candidateCount"
+                "[END_CHECK][STATE] currentIndex=${context.currentIndex} nextIndex=$targetIndex candidateCount=$candidateCount statusBefore=${outcome.reason}"
             )
             var scrollAttempted = false
             var scrollChanged = false
@@ -850,20 +857,27 @@ object A11yNavigator {
                     }
                 }
             }
-            Log.i("A11Y_HELPER", "[END_CHECK][SCROLL] attempted=$scrollAttempted, changed=$scrollChanged")
+            Log.i("A11Y_HELPER", "[END_CHECK][SCROLL] attempted=$scrollAttempted changed=$scrollChanged")
             if (endCheckEntered) {
                 if (!scrollChanged) {
-                    Log.i("A11Y_HELPER", "[END_CHECK][DECISION] terminal(no_scroll_change)")
-                    return TargetActionOutcome(false, "end_of_sequence", currentNode)
+                    val finalOutcome = TargetActionOutcome(false, "end_of_sequence", currentNode)
+                    Log.i("A11Y_HELPER", "[END_CHECK][DECISION] decision=terminal detail=no_scroll_change")
+                    Log.i("A11Y_HELPER", "[END_CHECK][EMIT] terminalFlag=true finalStatus=failed finalDetail=${finalOutcome.reason}")
+                    return finalOutcome
                 }
                 if (repeatedCurrentNode) {
-                    Log.i("A11Y_HELPER", "[END_CHECK][DECISION] terminal(repeated_current)")
-                    return TargetActionOutcome(false, "end_of_sequence", currentNode)
+                    val finalOutcome = TargetActionOutcome(false, "end_of_sequence", currentNode)
+                    Log.i("A11Y_HELPER", "[END_CHECK][DECISION] decision=terminal detail=repeated_current")
+                    Log.i("A11Y_HELPER", "[END_CHECK][EMIT] terminalFlag=true finalStatus=failed finalDetail=${finalOutcome.reason}")
+                    return finalOutcome
                 }
-                Log.i("A11Y_HELPER", "[END_CHECK][DECISION] looped")
-                return TargetActionOutcome(true, "looped", currentNode)
+                val finalOutcome = TargetActionOutcome(true, "looped", currentNode)
+                Log.i("A11Y_HELPER", "[END_CHECK][DECISION] decision=looped detail=scroll_changed")
+                Log.i("A11Y_HELPER", "[END_CHECK][EMIT] terminalFlag=false finalStatus=looped finalDetail=${finalOutcome.reason}")
+                return finalOutcome
             }
-            Log.i("A11Y_HELPER", "[END_CHECK][DECISION] failed")
+            Log.i("A11Y_HELPER", "[END_CHECK][DECISION] decision=failed detail=end_check_not_entered")
+            Log.i("A11Y_HELPER", "[END_CHECK][EMIT] terminalFlag=false finalStatus=failed finalDetail=${outcome.reason}")
             val currentNotificationsRow = findOneConnectNotificationsRowContainer(currentNode)
             if (currentNotificationsRow != null) {
                 val intendedNode = context.traversalList.getOrNull(targetIndex)
