@@ -2294,6 +2294,9 @@ class A11yAdbClient:
         step: dict[str, Any] = {
             "step_index": step_index,
             "move_result": None,
+            "last_smart_nav_result": "",
+            "last_smart_nav_detail": "",
+            "last_smart_nav_terminal": False,
             "focus_node": {},
             "focus_text": "",
             "focus_content_description": "",
@@ -2346,6 +2349,10 @@ class A11yAdbClient:
             step["move_elapsed_sec"] = round(time.monotonic() - move_started, 3)
         else:
             step["move_elapsed_sec"] = 0.0
+        smart_nav_result = self.last_smart_nav_result if isinstance(self.last_smart_nav_result, dict) else {}
+        step["last_smart_nav_result"] = str(smart_nav_result.get("status", "") or "").strip().lower()
+        step["last_smart_nav_detail"] = str(smart_nav_result.get("detail", "") or "").strip().lower()
+        step["last_smart_nav_terminal"] = bool(self.last_smart_nav_terminal)
         step["t_after_move"] = round(time.monotonic() - step_started, 3)
 
         ann_wait = wait_seconds if announcement_wait_seconds is None else announcement_wait_seconds
