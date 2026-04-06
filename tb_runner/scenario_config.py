@@ -19,6 +19,8 @@ DEFAULT_GLOBAL_NAV = {
 
 
 TAB_CONFIGS = [
+    # NOTE: scenario 실행 여부(enabled)의 최종 제어는 runtime_config.json(scenarios.<id>.enabled)에서 수행된다.
+    # base scenario_config.py의 enabled는 정의용 기본값이며, loader에서 실행 제어값으로 사용하지 않는다.
     {
         "scenario_id": "global_nav_main",
         "scenario_type": "global_nav",
@@ -115,7 +117,7 @@ TAB_CONFIGS = [
             "type": "screen_text",
             "text_regex": "(?i).*smart\\s*things\\s*cooking.*|.*ingredients.*|.*모닝빵양배추샌드위치.*",
         },
-        "enabled": True,
+        "enabled": False,
         "max_steps": 100,
     },
 
@@ -149,7 +151,7 @@ TAB_CONFIGS = [
             "text_regex": "(?i).*air\\s*care.*|.*aircare.*|.*에어\\s*케어.*",
         },
 
-        "enabled": True,
+        "enabled": False,
         "max_steps": 10,
     },
     # Life 플러그인 Home Care

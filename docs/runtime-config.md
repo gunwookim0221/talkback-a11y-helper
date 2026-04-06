@@ -173,6 +173,12 @@
 - `script_test.py`는 merged 결과에서 `enabled=false`면 시나리오를 skip
 - step loop 상한은 `max_steps`
 - 시나리오별 임시 우회는 `runtime.scenarios[scenario_id]`에서 관리
+- `enabled` 최종 제어는 **정책 A(runtime 단일 제어)** 입니다.
+  - `runtime.scenarios.<id>.enabled`가 bool이면 그 값을 사용합니다(`source='runtime'`).
+  - 해당 키가 없으면 기본값 `false`를 사용합니다(`source='default'`).
+  - `tb_runner/scenario_config.py`의 `enabled`는 실행 제어 source로 사용하지 않습니다.
+- 실행 시작 시 loader 로그에 아래 형식으로 출처를 출력합니다.
+  - `[CONFIG] scenario enabled scenario='<id>' source='runtime|default' enabled=<bool> base_enabled=<bool>`
 
 ---
 
@@ -190,9 +196,10 @@
 - `runtime.defaults`는 base scenario를 “덮어쓰기”가 아니라 **누락 키 채움 + 공통 baseline 제공**에 가깝습니다.
 - 최종 강제값은 `runtime.scenarios[scenario_id]`가 담당합니다.
 - 지원하지 않는 키를 runtime에 넣어도 loader가 사용하지 않습니다.
+- 새 시나리오를 `scenario_config.py`에 추가했다면, 실행하려면 `runtime_config.json > scenarios.<id>.enabled`를 **반드시 명시**해야 합니다.
 - 현재 기본 `config/runtime_config.json`은 main tab 계열(`home/devices/life/routines/menu/resource_id_only`)을 `group=main_tabs`로 정리해
   `use_shared_navigation=bottom_tab_global_nav` 경로를 공통 적용합니다.
-- base scenario(`tb_runner/scenario_config.py`)도 `BOTTOM_TAB_GLOBAL_NAV`/`DEFAULT_GLOBAL_NAV` 상수로 legacy `global_nav` 중복 정의를 제거해, runtime override가 없어도 기존 fallback 동작을 유지합니다.
+- base scenario(`tb_runner/scenario_config.py`)도 `BOTTOM_TAB_GLOBAL_NAV`/`DEFAULT_GLOBAL_NAV` 상수로 legacy `global_nav` 중복 정의를 제거해 fallback 동작을 유지합니다.
 
 ---
 
