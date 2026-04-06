@@ -168,7 +168,7 @@ main row에는 후처리 품질 메타데이터가 기록됩니다.
 
 엑셀 저장(`save_excel`)은 4개 시트로 구성됩니다.
 - `raw`: 전체 row + 파생 컬럼
-- `filtered`: noise/duplicate/recent_duplicate 제외
+- `filtered`: duplicate/recent_duplicate는 기본 제외하며, noise는 보조 신호로 사용합니다. `WARN/FAIL`, `review_note`/`failure_reason` 존재, visible/speech mismatch(오염 포함) 등 리뷰 가치가 있으면 noise여도 유지합니다.
 - `summary`: overall/scenario 집계
 - `result`: 최종 판정(PASS/WARN/FAIL), `failure_reason`, `debug_log_path/debug_log_name`(WARN/FAIL 중심 디버그 로그 링크)
 
