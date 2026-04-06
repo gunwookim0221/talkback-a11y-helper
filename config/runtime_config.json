@@ -22,66 +22,119 @@
       "stop_on_global_nav_exit": false,
       "stop_on_terminal": true,
       "stop_on_repeat_no_progress": true
+    }
+  },
+  "shared_navigation": {
+    "bottom_tab_global_nav": {
+      "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+      "resource_ids": [
+        "com.samsung.android.oneconnect:id/menu_favorites",
+        "com.samsung.android.oneconnect:id/menu_devices",
+        "com.samsung.android.oneconnect:id/menu_services",
+        "com.samsung.android.oneconnect:id/menu_automations",
+        "com.samsung.android.oneconnect:id/menu_more"
+      ],
+      "selected_pattern": "(?i).*(selected|선택됨).*",
+      "region_hint": "bottom_tabs"
     },
-    "global_nav": {
-      "labels": [],
-      "resource_ids": [],
-      "selected_pattern": "",
+    "default_global_nav": {
+      "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+      "resource_ids": [
+        "com.samsung.android.oneconnect:id/menu_favorites",
+        "com.samsung.android.oneconnect:id/menu_devices",
+        "com.samsung.android.oneconnect:id/menu_services",
+        "com.samsung.android.oneconnect:id/menu_automations",
+        "com.samsung.android.oneconnect:id/menu_more"
+      ],
+      "selected_pattern": "(?i).*(selected|선택됨).*",
       "region_hint": "auto"
     }
   },
+  "shared_anchors": {
+    "home_tab_anchor": {
+      "text_regex": "(?i).*location.*qr.*code.*",
+      "announcement_regex": "(?i).*qr.*code.*",
+      "tie_breaker": "top_left"
+    },
+    "settings_button_anchor": {
+      "resource_id_regex": "com.samsung.android.oneconnect:id/setting_button_layout",
+      "allow_resource_id_only": true
+    }
+  },
+  "shared_pre_navigation": {
+    "enter_food_plugin": [
+      {
+        "action": "scrolltouch",
+        "target": "(?i).*food.*|.*cooking.*|.*smart\\s*things\\s*cooking.*",
+        "type": "a"
+      }
+    ],
+    "enter_settings": [
+      {
+        "action": "select_and_click_focused_or_tap_bounds_center_adb",
+        "target": "com.samsung.android.oneconnect:id/setting_button_layout",
+        "type": "r"
+      }
+    ]
+  },
+  "scenario_groups": {
+    "main_tabs": {
+      "screen_context_mode": "bottom_tab",
+      "stabilization_mode": "anchor_then_context",
+      "use_shared_navigation": "bottom_tab_global_nav"
+    },
+    "plugin_screen": {
+      "screen_context_mode": "new_screen",
+      "stabilization_mode": "anchor_only"
+    }
+  },
   "scenarios": {
+    "home_main": {
+      "group": "main_tabs",
+      "anchor_ref": "home_tab_anchor",
+      "enabled": false,
+      "max_steps": 30,
+      "stop_policy": {
+        "stop_on_global_nav_entry": true
+      }
+    },
     "devices_main": {
+      "group": "main_tabs",
+      "anchor_ref": "home_tab_anchor",
       "enabled": false,
       "max_steps": 10,
       "scenario_type": "content",
       "stop_policy": {
         "stop_on_global_nav_entry": true
-      },
-      "global_nav": {
-        "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
-        "resource_ids": [
-          "com.samsung.android.oneconnect:id/menu_favorites",
-          "com.samsung.android.oneconnect:id/menu_devices",
-          "com.samsung.android.oneconnect:id/menu_services",
-          "com.samsung.android.oneconnect:id/menu_automations",
-          "com.samsung.android.oneconnect:id/menu_more"
-        ],
-        "selected_pattern": "(?i).*(selected|선택됨).*",
-        "region_hint": "bottom_tabs"
       }
     },
     "global_nav_main": {
+      "group": "main_tabs",
       "enabled": false,
       "scenario_type": "global_nav",
       "max_steps": 10,
+      "use_shared_navigation": "default_global_nav",
       "stop_policy": {
         "stop_on_global_nav_exit": true
-      },
-      "global_nav": {
-        "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
-        "resource_ids": [
-          "com.samsung.android.oneconnect:id/menu_favorites",
-          "com.samsung.android.oneconnect:id/menu_devices",
-          "com.samsung.android.oneconnect:id/menu_services",
-          "com.samsung.android.oneconnect:id/menu_automations",
-          "com.samsung.android.oneconnect:id/menu_more"
-        ],
-        "selected_pattern": "(?i).*(selected|선택됨).*",
-        "region_hint": "auto"
-      },
-
-      "life_food_plugin": {
-        "enabled": true,
-        "max_steps": 20,
-        "main_step_wait_seconds": 1.5,
-        "main_announcement_wait_seconds": 2.0,
-        "main_announcement_idle_wait_seconds": 0.7,
-        "main_announcement_max_extra_wait_seconds": 1.8,
-        "pre_navigation_wait_seconds": 1.5
       }
-
-      
+    },
+    "life_food_plugin": {
+      "group": "plugin_screen",
+      "pre_navigation_ref": "enter_food_plugin",
+      "enabled": true,
+      "max_steps": 20,
+      "main_step_wait_seconds": 1.5,
+      "main_announcement_wait_seconds": 2.0,
+      "main_announcement_idle_wait_seconds": 0.7,
+      "main_announcement_max_extra_wait_seconds": 1.8,
+      "pre_navigation_wait_seconds": 1.5
+    },
+    "settings_entry_example": {
+      "group": "plugin_screen",
+      "pre_navigation_ref": "enter_settings",
+      "anchor_ref": "settings_button_anchor",
+      "enabled": true,
+      "max_steps": 40
     }
   }
 }

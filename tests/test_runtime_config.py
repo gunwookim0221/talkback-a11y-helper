@@ -326,3 +326,94 @@ def test_load_runtime_bundle_supports_recovery_override(tmp_path):
     assert home_cfg["recovery"]["max_back_count"] == 3
     assert detail_cfg["recovery"]["target_type"] == "anchor"
     assert detail_cfg["recovery"]["target"] == "(?i).*dashboard.*"
+
+
+def test_load_runtime_bundle_supports_group_and_shared_refs(tmp_path):
+    path = tmp_path / "runtime_shared_refs.json"
+    path.write_text(
+        json.dumps(
+            {
+                "shared_navigation": {
+                    "bottom_tab_global_nav": {
+                        "labels": ["Home", "Devices"],
+                        "resource_ids": ["id/menu_home", "id/menu_devices"],
+                        "selected_pattern": "selected",
+                        "region_hint": "bottom_tabs",
+                    }
+                },
+                "shared_anchors": {
+                    "home_tab_anchor": {
+                        "text_regex": "(?i).*home.*",
+                        "announcement_regex": "(?i).*home.*",
+                        "tie_breaker": "top_left",
+                    }
+                },
+                "shared_pre_navigation": {
+                    "enter_plugin": [
+                        {"action": "scrolltouch", "target": "(?i).*food.*", "type": "a"},
+                    ]
+                },
+                "scenario_groups": {
+                    "main_tabs": {
+                        "screen_context_mode": "bottom_tab",
+                        "stabilization_mode": "anchor_then_context",
+                        "use_shared_navigation": "bottom_tab_global_nav",
+                    },
+                    "plugin_screen": {
+                        "screen_context_mode": "new_screen",
+                        "stabilization_mode": "anchor_only",
+                    },
+                },
+                "scenarios": {
+                    "home_main": {"group": "main_tabs", "anchor_ref": "home_tab_anchor"},
+                    "device_detail": {
+                        "group": "plugin_screen",
+                        "pre_navigation_ref": "enter_plugin",
+                        "max_steps": 11,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    bundle = load_runtime_bundle(_base_tabs(), config_path=path)
+    home_cfg = bundle["tab_configs"][0]
+    detail_cfg = bundle["tab_configs"][1]
+
+    assert home_cfg["screen_context_mode"] == "bottom_tab"
+    assert home_cfg["stabilization_mode"] == "anchor_then_context"
+    assert home_cfg["global_nav"]["labels"] == ["Home", "Devices"]
+    assert home_cfg["anchor"]["text_regex"] == "(?i).*home.*"
+
+    assert detail_cfg["screen_context_mode"] == "new_screen"
+    assert detail_cfg["stabilization_mode"] == "anchor_only"
+    assert detail_cfg["pre_navigation"][0]["target"] == "(?i).*food.*"
+    assert detail_cfg["max_steps"] == 11
+
+
+def test_load_runtime_bundle_supports_legacy_defaults_global_nav_fallback(tmp_path):
+    path = tmp_path / "runtime_legacy_defaults_nav.json"
+    path.write_text(
+        json.dumps(
+            {
+                "defaults": {
+                    "global_nav": {
+                        "labels": ["LegacyHome"],
+                        "resource_ids": ["id/legacy_home"],
+                        "selected_pattern": "legacy_selected",
+                        "region_hint": "left_rail",
+                    }
+                },
+                "scenarios": {
+                    "home_main": {"group": "main_tabs", "use_shared_navigation": "__missing__"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    bundle = load_runtime_bundle(_base_tabs(), config_path=path)
+    home_cfg = bundle["tab_configs"][0]
+    assert home_cfg["global_nav"]["labels"] == ["LegacyHome"]
+    assert home_cfg["global_nav"]["resource_ids"] == ["id/legacy_home"]

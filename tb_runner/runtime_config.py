@@ -13,7 +13,7 @@ from tb_runner.constants import (
 )
 from tb_runner.logging_utils import log
 
-RUNTIME_CONFIG_VERSION = "1.7.27"
+RUNTIME_CONFIG_VERSION = "1.8.0"
 DEFAULT_RUNTIME_CONFIG_PATH = Path("config/runtime_config.json")
 
 
@@ -73,6 +73,109 @@ _OVERRIDE_KEYS = {
     "screen_context_mode",
     "stabilization_mode",
 }
+
+_ALLOWED_SCREEN_CONTEXT_MODE = {"bottom_tab", "new_screen"}
+_ALLOWED_STABILIZATION_MODE = {"tab_context", "anchor_only", "anchor_then_context"}
+_ALLOWED_SCENARIO_TYPE = {"content", "global_nav"}
+_ALLOWED_REGION_HINT = {"bottom_tabs", "left_rail", "auto"}
+
+
+def _normalize_global_nav(raw_global_nav: Any, fallback: dict[str, Any]) -> dict[str, Any]:
+    base = dict(fallback or {})
+    if not isinstance(raw_global_nav, dict):
+        return base
+
+    if isinstance(raw_global_nav.get("labels"), list):
+        base["labels"] = [str(item) for item in raw_global_nav.get("labels", []) if isinstance(item, str)]
+    if isinstance(raw_global_nav.get("resource_ids"), list):
+        base["resource_ids"] = [str(item) for item in raw_global_nav.get("resource_ids", []) if isinstance(item, str)]
+    if "selected_pattern" in raw_global_nav:
+        base["selected_pattern"] = str(raw_global_nav.get("selected_pattern", "") or "")
+    if "region_hint" in raw_global_nav:
+        base["region_hint"] = _to_enum_value(
+            raw_global_nav.get("region_hint"),
+            _ALLOWED_REGION_HINT,
+            str(base.get("region_hint", "auto") or "auto"),
+        )
+    return base
+
+
+def _merge_stop_policy(base_policy: dict[str, Any], override_policy: Any) -> dict[str, Any]:
+    merged_policy = dict(base_policy or {})
+    if not isinstance(override_policy, dict):
+        return merged_policy
+    merged_policy["stop_on_global_nav_entry"] = bool(
+        override_policy.get("stop_on_global_nav_entry", merged_policy.get("stop_on_global_nav_entry", False))
+    )
+    merged_policy["stop_on_global_nav_exit"] = bool(
+        override_policy.get("stop_on_global_nav_exit", merged_policy.get("stop_on_global_nav_exit", False))
+    )
+    merged_policy["stop_on_terminal"] = bool(
+        override_policy.get("stop_on_terminal", merged_policy.get("stop_on_terminal", True))
+    )
+    merged_policy["stop_on_repeat_no_progress"] = bool(
+        override_policy.get("stop_on_repeat_no_progress", merged_policy.get("stop_on_repeat_no_progress", True))
+    )
+    return merged_policy
+
+
+def _apply_typed_override(merged_cfg: dict[str, Any], override_cfg: dict[str, Any], runtime_defaults: dict[str, Any]) -> None:
+    if not isinstance(override_cfg, dict):
+        return
+
+    if "enabled" in override_cfg and isinstance(override_cfg.get("enabled"), bool):
+        merged_cfg["enabled"] = override_cfg.get("enabled")
+    if "max_steps" in override_cfg:
+        merged_cfg["max_steps"] = _to_positive_int(
+            override_cfg.get("max_steps"),
+            int(merged_cfg.get("max_steps", 1) or 1),
+        )
+
+    for key in _OVERRIDE_KEYS:
+        if key not in override_cfg:
+            continue
+        base_value = merged_cfg.get(key, runtime_defaults[key])
+        if isinstance(base_value, int):
+            merged_cfg[key] = _to_positive_int(override_cfg.get(key), base_value)
+        elif isinstance(base_value, str):
+            allowed_values = _ALLOWED_SCREEN_CONTEXT_MODE if key == "screen_context_mode" else _ALLOWED_STABILIZATION_MODE
+            merged_cfg[key] = _to_enum_value(override_cfg.get(key), allowed_values, base_value)
+        else:
+            merged_cfg[key] = _to_positive_float(override_cfg.get(key), float(base_value))
+
+    if "scenario_type" in override_cfg:
+        merged_cfg["scenario_type"] = _to_enum_value(
+            override_cfg.get("scenario_type"),
+            _ALLOWED_SCENARIO_TYPE,
+            str(merged_cfg.get("scenario_type", "content") or "content"),
+        )
+
+    if "stop_policy" in override_cfg:
+        merged_cfg["stop_policy"] = _merge_stop_policy(
+            dict(merged_cfg.get("stop_policy", {}) or {}),
+            override_cfg.get("stop_policy"),
+        )
+
+    if "global_nav" in override_cfg:
+        merged_cfg["global_nav"] = _normalize_global_nav(
+            override_cfg.get("global_nav"),
+            dict(merged_cfg.get("global_nav", runtime_defaults["global_nav"]) or runtime_defaults["global_nav"]),
+        )
+
+    if "recovery" in override_cfg:
+        merged_cfg["recovery"] = _normalize_recovery_config(
+            override_cfg.get("recovery"),
+            dict(merged_cfg.get("recovery", runtime_defaults["recovery"]) or runtime_defaults["recovery"]),
+        )
+
+    if "anchor" in override_cfg and isinstance(override_cfg.get("anchor"), dict):
+        merged_cfg["anchor"] = copy.deepcopy(override_cfg.get("anchor"))
+    if "anchor_name" in override_cfg:
+        merged_cfg["anchor_name"] = str(override_cfg.get("anchor_name", "") or "")
+    if "anchor_type" in override_cfg:
+        merged_cfg["anchor_type"] = str(override_cfg.get("anchor_type", "") or "")
+    if "pre_navigation" in override_cfg and isinstance(override_cfg.get("pre_navigation"), list):
+        merged_cfg["pre_navigation"] = copy.deepcopy(override_cfg.get("pre_navigation"))
 
 
 def _normalize_recovery_config(raw_recovery: Any, fallback: dict[str, Any]) -> dict[str, Any]:
@@ -200,37 +303,16 @@ def _build_runtime_defaults(raw_defaults: dict[str, Any]) -> dict[str, Any]:
             raw_defaults.get("pre_navigation_wait_seconds"),
             _DEFAULTS["pre_navigation_wait_seconds"],
         ),
-        "screen_context_mode": _to_enum_value(
-            raw_defaults.get("screen_context_mode"),
-            {"bottom_tab", "new_screen"},
-            _DEFAULTS["screen_context_mode"],
-        ),
-        "stabilization_mode": _to_enum_value(
-            raw_defaults.get("stabilization_mode"),
-            {"tab_context", "anchor_only", "anchor_then_context"},
-            _DEFAULTS["stabilization_mode"],
-        ),
-        "scenario_type": _to_enum_value(
-            raw_defaults.get("scenario_type"),
-            {"content", "global_nav"},
-            _DEFAULTS["scenario_type"],
-        ),
+        "screen_context_mode": _to_enum_value(raw_defaults.get("screen_context_mode"), _ALLOWED_SCREEN_CONTEXT_MODE, _DEFAULTS["screen_context_mode"]),
+        "stabilization_mode": _to_enum_value(raw_defaults.get("stabilization_mode"), _ALLOWED_STABILIZATION_MODE, _DEFAULTS["stabilization_mode"]),
+        "scenario_type": _to_enum_value(raw_defaults.get("scenario_type"), _ALLOWED_SCENARIO_TYPE, _DEFAULTS["scenario_type"]),
         "stop_policy": {
             "stop_on_global_nav_entry": bool(raw_stop_policy.get("stop_on_global_nav_entry", False)),
             "stop_on_global_nav_exit": bool(raw_stop_policy.get("stop_on_global_nav_exit", False)),
             "stop_on_terminal": bool(raw_stop_policy.get("stop_on_terminal", True)),
             "stop_on_repeat_no_progress": bool(raw_stop_policy.get("stop_on_repeat_no_progress", True)),
         },
-        "global_nav": {
-            "labels": [str(item) for item in raw_global_nav.get("labels", []) if isinstance(item, str)],
-            "resource_ids": [str(item) for item in raw_global_nav.get("resource_ids", []) if isinstance(item, str)],
-            "selected_pattern": str(raw_global_nav.get("selected_pattern", "") or ""),
-            "region_hint": _to_enum_value(
-                raw_global_nav.get("region_hint"),
-                {"bottom_tabs", "left_rail", "auto"},
-                "auto",
-            ),
-        },
+        "global_nav": _normalize_global_nav(raw_global_nav, _DEFAULTS["global_nav"]),
         "recovery": _normalize_recovery_config(
             raw_defaults.get("recovery"),
             _DEFAULTS["recovery"],
@@ -266,8 +348,31 @@ def load_runtime_bundle(base_tab_configs: list[dict[str, Any]], config_path: str
     raw_scenarios = raw_config.get("scenarios", {})
     if not isinstance(raw_scenarios, dict):
         raw_scenarios = {}
+    raw_shared_navigation = raw_config.get("shared_navigation", {})
+    if not isinstance(raw_shared_navigation, dict):
+        raw_shared_navigation = {}
+    raw_shared_anchors = raw_config.get("shared_anchors", {})
+    if not isinstance(raw_shared_anchors, dict):
+        raw_shared_anchors = {}
+    raw_shared_pre_navigation = raw_config.get("shared_pre_navigation", {})
+    if not isinstance(raw_shared_pre_navigation, dict):
+        raw_shared_pre_navigation = {}
+    raw_scenario_groups = raw_config.get("scenario_groups", {})
+    if not isinstance(raw_scenario_groups, dict):
+        raw_scenario_groups = {}
 
     runtime_defaults = _build_runtime_defaults(raw_defaults)
+
+    shared_navigation: dict[str, dict[str, Any]] = {}
+    for nav_name, nav_cfg in raw_shared_navigation.items():
+        if isinstance(nav_name, str) and isinstance(nav_cfg, dict):
+            shared_navigation[nav_name] = _normalize_global_nav(nav_cfg, runtime_defaults["global_nav"])
+
+    if not shared_navigation and isinstance(raw_defaults.get("global_nav"), dict):
+        shared_navigation["__legacy_defaults_global_nav__"] = _normalize_global_nav(
+            raw_defaults.get("global_nav"),
+            runtime_defaults["global_nav"],
+        )
 
     checkpoint_save_every = _to_positive_int(
         raw_global.get("checkpoint_save_every"),
@@ -283,95 +388,65 @@ def load_runtime_bundle(base_tab_configs: list[dict[str, Any]], config_path: str
 
         scenario_id = str(base_cfg.get("scenario_id", "") or "")
         scenario_override = raw_scenarios.get(scenario_id, {})
-        if isinstance(scenario_override, dict):
-            if "enabled" in scenario_override and isinstance(scenario_override.get("enabled"), bool):
-                merged_cfg["enabled"] = scenario_override.get("enabled")
-            if "max_steps" in scenario_override:
-                merged_cfg["max_steps"] = _to_positive_int(
-                    scenario_override.get("max_steps"),
-                    int(base_cfg.get("max_steps", 1) or 1),
-                )
+        if not isinstance(scenario_override, dict):
+            scenario_override = {}
 
-            for key in _OVERRIDE_KEYS:
-                if key in scenario_override:
-                    base_value = merged_cfg.get(key, runtime_defaults[key])
-                    if isinstance(base_value, int):
-                        merged_cfg[key] = _to_positive_int(scenario_override.get(key), base_value)
-                    elif isinstance(base_value, str):
-                        allowed_values = {"bottom_tab", "new_screen"} if key == "screen_context_mode" else {
-                            "tab_context",
-                            "anchor_only",
-                            "anchor_then_context",
-                        }
-                        merged_cfg[key] = _to_enum_value(scenario_override.get(key), allowed_values, base_value)
-                    else:
-                        merged_cfg[key] = _to_positive_float(scenario_override.get(key), float(base_value))
+        group_name = str(scenario_override.get("group", "") or "")
+        group_cfg = raw_scenario_groups.get(group_name, {}) if group_name else {}
+        if not isinstance(group_cfg, dict):
+            group_cfg = {}
+        if group_cfg:
+            _apply_typed_override(merged_cfg, group_cfg, runtime_defaults)
 
-            if "scenario_type" in scenario_override:
-                merged_cfg["scenario_type"] = _to_enum_value(
-                    scenario_override.get("scenario_type"),
-                    {"content", "global_nav"},
-                    str(merged_cfg.get("scenario_type", "content") or "content"),
-                )
+        applied_shared_navigation = ""
+        use_shared_navigation = scenario_override.get("use_shared_navigation")
+        if not isinstance(use_shared_navigation, str) or not use_shared_navigation.strip():
+            use_shared_navigation = group_cfg.get("use_shared_navigation")
+        if isinstance(use_shared_navigation, str) and use_shared_navigation in shared_navigation:
+            _apply_typed_override(
+                merged_cfg,
+                {"global_nav": shared_navigation.get(use_shared_navigation)},
+                runtime_defaults,
+            )
+            applied_shared_navigation = use_shared_navigation
 
-            if "stop_policy" in scenario_override and isinstance(scenario_override.get("stop_policy"), dict):
-                merged_policy = dict(merged_cfg.get("stop_policy", {}) or {})
-                override_policy = scenario_override.get("stop_policy", {})
-                merged_policy["stop_on_global_nav_entry"] = bool(
-                    override_policy.get(
-                        "stop_on_global_nav_entry",
-                        merged_policy.get("stop_on_global_nav_entry", False),
-                    )
-                )
-                merged_policy["stop_on_global_nav_exit"] = bool(
-                    override_policy.get(
-                        "stop_on_global_nav_exit",
-                        merged_policy.get("stop_on_global_nav_exit", False),
-                    )
-                )
-                merged_policy["stop_on_terminal"] = bool(
-                    override_policy.get("stop_on_terminal", merged_policy.get("stop_on_terminal", True))
-                )
-                merged_policy["stop_on_repeat_no_progress"] = bool(
-                    override_policy.get(
-                        "stop_on_repeat_no_progress",
-                        merged_policy.get("stop_on_repeat_no_progress", True),
-                    )
-                )
-                merged_cfg["stop_policy"] = merged_policy
+        applied_anchor_ref = ""
+        anchor_ref = scenario_override.get("anchor_ref")
+        if not isinstance(anchor_ref, str) or not anchor_ref.strip():
+            anchor_ref = group_cfg.get("anchor_ref")
+        if isinstance(anchor_ref, str):
+            anchor_cfg = raw_shared_anchors.get(anchor_ref, {})
+            if isinstance(anchor_cfg, dict):
+                if isinstance(anchor_cfg.get("anchor"), dict):
+                    _apply_typed_override(merged_cfg, {"anchor": anchor_cfg.get("anchor")}, runtime_defaults)
+                elif anchor_cfg:
+                    _apply_typed_override(merged_cfg, {"anchor": anchor_cfg}, runtime_defaults)
+                _apply_typed_override(merged_cfg, anchor_cfg, runtime_defaults)
+                applied_anchor_ref = anchor_ref
 
-            if "global_nav" in scenario_override and isinstance(scenario_override.get("global_nav"), dict):
-                merged_global_nav = dict(merged_cfg.get("global_nav", {}) or {})
-                override_global_nav = scenario_override.get("global_nav", {})
-                if isinstance(override_global_nav.get("labels"), list):
-                    merged_global_nav["labels"] = [
-                        str(item) for item in override_global_nav.get("labels", []) if isinstance(item, str)
-                    ]
-                if isinstance(override_global_nav.get("resource_ids"), list):
-                    merged_global_nav["resource_ids"] = [
-                        str(item) for item in override_global_nav.get("resource_ids", []) if isinstance(item, str)
-                    ]
-                if "selected_pattern" in override_global_nav:
-                    merged_global_nav["selected_pattern"] = str(override_global_nav.get("selected_pattern", "") or "")
-                if "region_hint" in override_global_nav:
-                    merged_global_nav["region_hint"] = _to_enum_value(
-                        override_global_nav.get("region_hint"),
-                        {"bottom_tabs", "left_rail", "auto"},
-                        str(merged_global_nav.get("region_hint", "auto") or "auto"),
-                    )
-                merged_cfg["global_nav"] = merged_global_nav
+        applied_pre_navigation_ref = ""
+        pre_navigation_ref = scenario_override.get("pre_navigation_ref")
+        if not isinstance(pre_navigation_ref, str) or not pre_navigation_ref.strip():
+            pre_navigation_ref = group_cfg.get("pre_navigation_ref")
+        if isinstance(pre_navigation_ref, str):
+            pre_navigation_cfg = raw_shared_pre_navigation.get(pre_navigation_ref)
+            if isinstance(pre_navigation_cfg, list):
+                _apply_typed_override(merged_cfg, {"pre_navigation": pre_navigation_cfg}, runtime_defaults)
+                applied_pre_navigation_ref = pre_navigation_ref
 
-            if "recovery" in scenario_override:
-                merged_cfg["recovery"] = _normalize_recovery_config(
-                    scenario_override.get("recovery"),
-                    dict(merged_cfg.get("recovery", runtime_defaults["recovery"]) or runtime_defaults["recovery"]),
-                )
+        _apply_typed_override(merged_cfg, scenario_override, runtime_defaults)
 
-            if scenario_override:
-                log(
-                    f"[CONFIG] scenario override applied scenario='{scenario_id}' "
-                    f"max_steps={merged_cfg.get('max_steps')} enabled={bool(merged_cfg.get('enabled', True))}"
-                )
+        if scenario_override or group_cfg:
+            log(
+                f"[CONFIG] scenario resolved scenario='{scenario_id}' group='{group_name or '-'}' "
+                f"max_steps={merged_cfg.get('max_steps')} enabled={bool(merged_cfg.get('enabled', True))}"
+            )
+            if applied_shared_navigation:
+                log(f"[CONFIG] applied shared_navigation='{applied_shared_navigation}'")
+            if applied_anchor_ref:
+                log(f"[CONFIG] applied anchor_ref='{applied_anchor_ref}'")
+            if applied_pre_navigation_ref:
+                log(f"[CONFIG] applied pre_navigation_ref='{applied_pre_navigation_ref}'")
 
         merged_tab_configs.append(merged_cfg)
 
