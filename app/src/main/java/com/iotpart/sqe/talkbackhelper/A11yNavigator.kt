@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.71.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.72.0"
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
     private const val MIN_ONECONNECT_SETTINGS_ROW_HEIGHT_PX = 80
 
@@ -295,6 +295,10 @@ object A11yNavigator {
             fallbackIndex = fallbackIndex,
             lastRequestedIndex = lastRequestedFocusIndex,
             traversalSize = traversalList.size
+        )
+        Log.i(
+            "A11Y_HELPER",
+            "[DECIDE][CURRENT] raw=${summarizeNodeForDecision(currentNode)} resolved=${summarizeNodeForDecision(resolvedCurrent)} currentIndex=$currentIndex fallbackIndex=$fallbackIndex nextIndex=$nextIndex size=${traversalList.size}"
         )
         return CurrentPosition(
             resolvedCurrent = resolvedCurrent,
@@ -714,6 +718,11 @@ object A11yNavigator {
         )
         if (!outcome.success) {
             Log.i("A11Y_HELPER", "[EXECUTE] regular single-target failed -> stop sweep targetIndex=$targetIndex reason=${outcome.reason}")
+            val focusedAfterFailure = context.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            Log.i(
+                "A11Y_HELPER",
+                "[EXECUTE][REGULAR_FAIL] target=${summarizeNodeForDecision(targetNode)} focusedAfterFailure=${summarizeNodeForDecision(focusedAfterFailure)} current=${summarizeNodeForDecision(context.resolvedCurrent)}"
+            )
             val currentNode = context.resolvedCurrent
                 ?: context.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
             val currentNotificationsRow = findOneConnectNotificationsRowContainer(currentNode)
@@ -1705,6 +1714,18 @@ object A11yNavigator {
         val bounds = Rect().also { node.getBoundsInScreen(it) }
         val label = resolvePrimaryLabel(node) ?: A11yTraversalAnalyzer.recoverDescendantLabel(node) ?: "<no-label>"
         return "id=${node.viewIdResourceName} bounds=${formatBoundsForLog(bounds)} label=${label.replace("\n", " ")}"
+    }
+
+    private fun summarizeNodeForDecision(node: AccessibilityNodeInfo?): String {
+        if (node == null) return "null"
+        val bounds = Rect().also { node.getBoundsInScreen(it) }
+        val label = resolvePrimaryLabel(node)
+            ?: A11yTraversalAnalyzer.recoverDescendantLabel(node)
+            ?: "<no-label>"
+        val className = node.className?.toString().orEmpty()
+        val viewId = node.viewIdResourceName ?: "<no-id>"
+        val focused = node.isAccessibilityFocused || node.isFocused
+        return "id=$viewId class=$className bounds=${formatBoundsForLog(bounds)} label=${label.replace("\n", " ")} focused=$focused"
     }
 
     private fun dumpDecisionWindow(state: SmartNextRuntimeState, centerIndex: Int, source: String, radius: Int = 4) {

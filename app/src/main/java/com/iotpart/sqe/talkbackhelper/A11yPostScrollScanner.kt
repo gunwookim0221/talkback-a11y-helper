@@ -5,7 +5,7 @@ import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 
 object A11yPostScrollScanner {
-    const val VERSION: String = "1.3.1"
+    const val VERSION: String = "1.3.2"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
     private const val ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/noti_title"
@@ -28,6 +28,12 @@ object A11yPostScrollScanner {
             "A11Y_HELPER",
             "[SMART_NEXT] scan_mode=$scanMode start=${postScrollContext.anchorStartIndex} endExclusive=$scanEndExclusive"
         )
+        if (request.singleTargetOnly) {
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][SINGLE_TARGET] pre_scan candidateCount=${(scanEndExclusive - postScrollContext.anchorStartIndex).coerceAtLeast(0)} excludedIndex=${postScrollContext.excludedIndex} requestedStart=${request.startIndex}"
+            )
+        }
 
         for (index in postScrollContext.anchorStartIndex until scanEndExclusive) {
             val outcome = tryFocusCandidate(
@@ -47,7 +53,10 @@ object A11yPostScrollScanner {
             return loopState.focusedOutcome ?: TargetActionOutcome(false, "failed")
         }
         if (request.singleTargetOnly) {
-            Log.i("A11Y_HELPER", "[SMART_NEXT] single-target mode consumed intended index without success -> stop")
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT] single-target mode consumed intended index without success -> stop reason=single_target_exhausted focusedAny=${loopState.focusedAny} focusAttempted=${loopState.focusAttempted}"
+            )
             return TargetActionOutcome(false, "failed_single_target")
         }
 
@@ -222,13 +231,24 @@ object A11yPostScrollScanner {
             ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
             ?: "<no-label>"
         if (request.isScrollAction && request.preScrollAnchor != null && postScrollContext.resolvedAnchorIndex >= 0 && index <= postScrollContext.resolvedAnchorIndex) {
+            if (request.singleTargetOnly) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT][SINGLE_TARGET] skip index=$index reason=anchor_guard")
+            }
             return null
         }
         val requestedFloorIndex = A11yStateStore.lastRequestedFocusIndex
         if (!request.isScrollAction && requestedFloorIndex >= 0 && index <= requestedFloorIndex) {
+            if (request.singleTargetOnly) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT][SINGLE_TARGET] skip index=$index reason=requested_floor_guard floor=$requestedFloorIndex")
+            }
             return null
         }
-        if (A11yNodeUtils.isNodePhysicallyOffScreen(bounds, context.screenTop, context.screenBottom)) return null
+        if (A11yNodeUtils.isNodePhysicallyOffScreen(bounds, context.screenTop, context.screenBottom)) {
+            if (request.singleTargetOnly) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT][SINGLE_TARGET] skip index=$index reason=off_screen")
+            }
+            return null
+        }
         val isTopBar = A11yNodeUtils.isTopAppBar(node.className?.toString(), node.viewIdResourceName, bounds, context.screenTop, context.screenHeight)
         val isBottomBar = A11yNodeUtils.isBottomNavigationBar(node.className?.toString(), node.viewIdResourceName, bounds, context.screenBottom, context.screenHeight)
         val shouldSkipTopBar = isTopBar && request.isScrollAction
@@ -247,7 +267,12 @@ object A11yPostScrollScanner {
             isInsideMainScrollContainer = localMainScrollContainer?.let { container -> node == container || A11yNodeUtils.isDescendantOf(container, node) { it.parent } } ?: false,
             isTopArea = A11yNodeUtils.isWithinTopContentArea(bounds.top, context.screenTop, context.screenHeight)
         )
-        if (shouldSkipHistory || (request.isScrollAction && inVisitedHistory)) return null
+        if (shouldSkipHistory || (request.isScrollAction && inVisitedHistory)) {
+            if (request.singleTargetOnly) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT][SINGLE_TARGET] skip index=$index reason=history_guard inVisited=$inVisitedHistory")
+            }
+            return null
+        }
         if (postScrollContext.excludedIndex == -1 && !loopState.skippedExcludedNode && shouldSkipExcludedNodeByDescription(
                 nodeDesc = node.contentDescription?.toString(),
                 excludeDesc = request.excludeDesc,
@@ -256,6 +281,9 @@ object A11yPostScrollScanner {
                 screenHeight = context.screenHeight
             )) {
             loopState.skippedExcludedNode = true
+            if (request.singleTargetOnly) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT][SINGLE_TARGET] skip index=$index reason=exclude_desc_guard")
+            }
             return null
         }
         if (!shouldSkipTopBar && !isBottomBar) {
