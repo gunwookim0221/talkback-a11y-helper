@@ -146,11 +146,11 @@ TAB_CONFIGS = [
 
         "context_verify": {
             "type": "screen_text",
-            "text_regex": "(?i).*air\\s*care.*|.*aircare.*|.*공기.*|.*미세먼지.*",
+            "text_regex": "(?i).*air\\s*care.*|.*aircare.*|.*에어\\s*케어.*",
         },
 
         "enabled": True,
-        "max_steps": 100,
+        "max_steps": 10,
     },
     # Life 플러그인 Home Care
     {
@@ -179,11 +179,11 @@ TAB_CONFIGS = [
 
         "context_verify": {
             "type": "screen_text",
-            "text_regex": "(?i).*air\\s*care.*|.*aircare.*|.*공기.*|.*미세먼지.*",
+            "text_regex": "(?i).*home\\s*care.*|.*homecare.*|.*홈\\s*케어.*",
         },
 
-        "enabled": True,
-        "max_steps": 100,
+        "enabled": False,
+        "max_steps": 10,
     },
     
     # Life 플러그인 Energy
@@ -213,11 +213,11 @@ TAB_CONFIGS = [
 
         "context_verify": {
             "type": "screen_text",
-            "text_regex": "(?i).*air\\s*care.*|.*aircare.*|.*공기.*|.*미세먼지.*",
+            "text_regex": "(?i).*energy.*",
         },
 
-        "enabled": True,
-        "max_steps": 100,
+        "enabled": False,
+        "max_steps": 10,
     },
         
     {
