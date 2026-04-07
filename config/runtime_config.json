@@ -89,11 +89,21 @@
     }
   },
   "scenarios": {
-    "home_main": {
+    "global_nav_main": {
       "group": "main_tabs",
-      "anchor_ref": "home_tab_anchor",
-      "enabled": false,
-      "max_steps": 30,
+      "enabled": true,
+      "scenario_type": "global_nav",
+      "max_steps": 10,
+      "use_shared_navigation": "default_global_nav",
+      "stop_policy": {
+        "stop_on_global_nav_exit": true
+      }
+    },
+
+    "home_main": {
+      "group": "main_tabs",      
+      "enabled": true,
+      "max_steps": 5,
       "stop_policy": {
         "stop_on_global_nav_entry": true
       }
@@ -108,16 +118,7 @@
         "stop_on_global_nav_entry": true
       }
     },
-    "global_nav_main": {
-      "group": "main_tabs",
-      "enabled": false,
-      "scenario_type": "global_nav",
-      "max_steps": 10,
-      "use_shared_navigation": "default_global_nav",
-      "stop_policy": {
-        "stop_on_global_nav_exit": true
-      }
-    },
+    
     "life_main": {
       "group": "main_tabs",
       "enabled": false
@@ -133,8 +134,8 @@
     "life_food_plugin": {
       "group": "plugin_screen",
       "pre_navigation_ref": "enter_food_plugin",
-      "enabled": true,
-      "max_steps": 20,
+      "enabled": false,
+      "max_steps": 5,
       "main_step_wait_seconds": 1.5,
       "main_announcement_wait_seconds": 2.0,
       "main_announcement_idle_wait_seconds": 0.7,
@@ -145,24 +146,29 @@
       "group": "plugin_screen",
       "pre_navigation_ref": "enter_settings",
       "anchor_ref": "settings_button_anchor",
-      "enabled": true,
+      "enabled": false,
       "max_steps": 40
     },
     "resource_id_only_example": {
       "group": "main_tabs",
-      "enabled": false
+      "enabled": false,
+      "max_steps": 40
     },
     "life_air_care_plugin": {
-      "enabled": true
+      "enabled": false,
+      "max_steps": 40
     },
     "life_home_care_plugin": {
-      "enabled": false
+      "enabled": false,
+      "max_steps": 40
     },
     "life_energy_plugin": {
-      "enabled": false
+      "enabled": false,
+      "max_steps": 40
     },
     "life_pet_care_example": {
-      "enabled": false
+      "enabled": false,
+      "max_steps": 40
     }
   }
 }
