@@ -9,7 +9,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.5.2"
+    const val VERSION: String = "1.5.3"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -229,7 +229,7 @@ object A11yFocusExecutor {
             root = root
         )
         if (!focusExecution.success) {
-            Log.w(
+            Log.i(
                 "A11Y_HELPER",
                 "[SMART_NEXT][focus_commit] is_scroll_action=$isScrollAction intended_index=$traversalIndex intended_view_id='${target.viewIdResourceName.orEmpty()}' actual_candidate_index=-1 actual_view_id='' identity_matched=false retarget_allowed=false commit_status='failed' reason='focus_action_failed' action_success=${focusExecution.success}"
             )
@@ -253,7 +253,7 @@ object A11yFocusExecutor {
                 "A11Y_HELPER",
                 "[FOCUS_VERIFY] hard_failure_signal external_package_departure targetPackage=$expectedPackageName actual=${A11yNavigator.formatBoundsForLog(focusVerification.actualFocusedBounds)}"
             )
-            Log.w(
+            Log.i(
                 "A11Y_HELPER",
                 "[SMART_NEXT][focus_commit] is_scroll_action=$isScrollAction intended_index=$traversalIndex intended_view_id='${target.viewIdResourceName.orEmpty()}' actual_candidate_index=-1 actual_view_id='${actualFocusedAfterVerification?.viewIdResourceName.orEmpty()}' identity_matched=false retarget_allowed=false commit_status='failed' reason='failed_external_focus_departure' action_success=${focusExecution.success}"
             )
@@ -406,7 +406,7 @@ object A11yFocusExecutor {
         }
         val commitStatus = if (success) requestedStatus else "failed"
         val finalReason = if (success) "success_basis=committed_candidate" else reason
-        Log.w(
+        Log.i(
             "A11Y_HELPER",
             "[SMART_NEXT][focus_commit] is_scroll_action=$isScrollAction intended_index=$intendedIndex intended_view_id='${intendedTarget.viewIdResourceName.orEmpty()}' actual_candidate_index=$actualCandidateIndex actual_view_id='${actualFocusedNode?.viewIdResourceName.orEmpty()}' identity_matched=$identityMatched retarget_allowed=$retarget commit_status='$commitStatus' reason='$finalReason' action_success=$success"
         )
