@@ -153,7 +153,7 @@ object A11yNavigationPolicy {
             "A11Y_HELPER",
             "[DECIDE] current=$currentIndex next=$nextIndex nav=${navigationDecision.type} outOfBounds=$isOutOfBounds atLast=$isCurrentAtLastIndex nextIsBottomBar=$nextIsBottomBar reason=${navigationDecision.reason}"
         )
-        Log.i(
+        Log.w(
             "A11Y_HELPER",
             "[SMART_NEXT][policy] current_index=$currentIndex next_index_initial=$nextIndexInitial next_index_final=$nextIndex next_is_bottom_bar=$nextIsBottomBar continuation_likely=$continuationLikely row_or_grid_continuation=$rowOrGridContinuationDetected continuation_exists_before_bottom_bar=$continuationExistsBeforeBottomBar is_current_near_bottom=$isCurrentNearBottom force_pre_scroll_before_bottom_bar=$forcePreScrollBeforeBottomBar nav_type=${navigationDecision.type}"
         )
