@@ -49,11 +49,12 @@ from talkback_lib.constants import (
     STATUS_SCROLLED,
 )
 from talkback_lib.helper_bridge import HelperBridge
-from talkback_lib.focus_reader import normalize_focus_bounds, parse_focus_bounds_tuple
 from talkback_lib.utils import (
     json_safe_value,
+    normalize_bounds,
     normalize_for_comparison,
     parse_bottom_from_bounds,
+    parse_bounds_tuple,
     safe_parse_json_payload,
 )
 
@@ -644,7 +645,7 @@ class A11yAdbClient:
 
     @staticmethod
     def _normalize_bounds(node: dict[str, Any]) -> str:
-        return normalize_focus_bounds(node)
+        return normalize_bounds(node)
 
     @staticmethod
     def _parse_bottom_from_bounds(bounds: str) -> int:
@@ -652,7 +653,7 @@ class A11yAdbClient:
 
     @staticmethod
     def _parse_bounds_tuple(bounds: str) -> tuple[int, int, int, int] | None:
-        return parse_focus_bounds_tuple(bounds)
+        return parse_bounds_tuple(bounds)
 
     @staticmethod
     def _center_viewport_vertical_range(nodes: list[dict[str, Any]]) -> tuple[float, float]:
