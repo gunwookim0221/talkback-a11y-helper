@@ -426,6 +426,16 @@ class A11yHelperService : AccessibilityService() {
         val detail = outcome.reason
         val normalizedStatus = normalizeSmartNavStatus(outcome.success, detail)
         val flags = buildSmartNavFlags(detail)
+        val resolvedFocusNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val resolvedFocusLabel = (
+            resolvedFocusNode?.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: resolvedFocusNode?.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: ""
+            ).replace("\n", " ").take(96)
+        Log.i(
+            TAG,
+            "[SMART_NEXT][final] success=${outcome.success} status='$normalizedStatus' detail='$detail' resolved_focus_view_id='${resolvedFocusNode?.viewIdResourceName.orEmpty()}' resolved_focus_label='$resolvedFocusLabel' requested_target_view_id='${outcome.target?.viewIdResourceName.orEmpty()}'"
+        )
 
         val resultJson = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())

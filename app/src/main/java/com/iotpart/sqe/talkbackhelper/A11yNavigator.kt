@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.74.5"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.74.6"
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
@@ -923,6 +923,9 @@ object A11yNavigator {
         val currentIndex = state.currentPosition.currentIndex
         val fallbackIndex = state.currentPosition.fallbackIndex
         var nextIndex = state.currentPosition.nextIndex
+        val initialNextIndex = nextIndex
+        var skipCoordinateDuplicateApplied = false
+        var targetDecisionReason = "unchanged"
         val collectCurrentIndex = state.collect.focusState.currentIndex
         val collectNextIndex = state.collect.focusState.nextIndex
         val collectTraversalSize = state.collect.traversalList.size
@@ -996,6 +999,10 @@ object A11yNavigator {
                         Log.i("A11Y_HELPER", "[SMART_NEXT] Skipping coordinate duplicate: jumping from $skippedIndex to $advancedIndex")
                     }
                 )
+                skipCoordinateDuplicateApplied = nextIndex != beforeSkipIndex
+                if (skipCoordinateDuplicateApplied) {
+                    targetDecisionReason = "skip_coordinate_duplicate"
+                }
                 if (debugAroundDecision && skipRecords.isNotEmpty()) {
                     Log.d(
                         "A11Y_HELPER",
@@ -1007,14 +1014,34 @@ object A11yNavigator {
         }
         val beforeSameRowPrevention = nextIndex
         nextIndex = preventOneConnectSettingsSameRowReselection(state, nextIndex)
+        if (nextIndex != beforeSameRowPrevention) {
+            targetDecisionReason = "prevent_same_row_settings"
+        }
+        val beforeNotificationsPrevention = nextIndex
         nextIndex = preventOneConnectNotificationsSameRowReselection(
             state = state,
             nextIndex = nextIndex,
             genericPreventionApplied = nextIndex != beforeSameRowPrevention
         )
+        if (nextIndex != beforeNotificationsPrevention && targetDecisionReason == "unchanged") {
+            targetDecisionReason = "prevent_same_row_notifications"
+        }
         if (debugAroundDecision) {
             Log.d("A11Y_HELPER", "[DEBUG][DECIDE] final_next=${summarizeTraversalCandidate(traversalList, nextIndex, state)}")
         }
+        val currentNode = traversalList.getOrNull(currentIndex)
+        val initialNextNode = traversalList.getOrNull(initialNextIndex)
+        val finalNextNode = traversalList.getOrNull(nextIndex)
+        val currentLabel = (resolvePrimaryLabel(currentNode) ?: A11yTraversalAnalyzer.recoverDescendantLabel(currentNode) ?: "<none>")
+            .replace("\n", " ")
+            .take(72)
+        val finalNextLabel = (resolvePrimaryLabel(finalNextNode) ?: A11yTraversalAnalyzer.recoverDescendantLabel(finalNextNode) ?: "<none>")
+            .replace("\n", " ")
+            .take(72)
+        Log.i(
+            "A11Y_HELPER",
+            "[SMART_NEXT][target] current_index=$currentIndex initial_next_index=$initialNextIndex final_next_index=$nextIndex current_view_id='${currentNode?.viewIdResourceName.orEmpty()}' initial_next_view_id='${initialNextNode?.viewIdResourceName.orEmpty()}' final_next_view_id='${finalNextNode?.viewIdResourceName.orEmpty()}' current_label='$currentLabel' final_next_label='$finalNextLabel' skip_coordinate_duplicate=$skipCoordinateDuplicateApplied reason='$targetDecisionReason'"
+        )
 
         return InitialNextTargetDecision(
             nextIndex = nextIndex,
