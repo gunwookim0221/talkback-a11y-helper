@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.74.6"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.74.7"
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
@@ -1032,10 +1032,10 @@ object A11yNavigator {
         val currentNode = traversalList.getOrNull(currentIndex)
         val initialNextNode = traversalList.getOrNull(initialNextIndex)
         val finalNextNode = traversalList.getOrNull(nextIndex)
-        val currentLabel = (resolvePrimaryLabel(currentNode) ?: A11yTraversalAnalyzer.recoverDescendantLabel(currentNode) ?: "<none>")
+        val currentLabel = (resolvePrimaryLabel(currentNode) ?: currentNode?.let { A11yTraversalAnalyzer.recoverDescendantLabel(it) } ?: "<none>")
             .replace("\n", " ")
             .take(72)
-        val finalNextLabel = (resolvePrimaryLabel(finalNextNode) ?: A11yTraversalAnalyzer.recoverDescendantLabel(finalNextNode) ?: "<none>")
+        val finalNextLabel = (resolvePrimaryLabel(finalNextNode) ?: finalNextNode?.let { A11yTraversalAnalyzer.recoverDescendantLabel(it) } ?: "<none>")
             .replace("\n", " ")
             .take(72)
         Log.i(
