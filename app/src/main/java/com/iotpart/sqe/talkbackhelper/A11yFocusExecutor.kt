@@ -9,7 +9,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.5.0"
+    const val VERSION: String = "1.5.1"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -228,7 +228,15 @@ object A11yFocusExecutor {
             target = target,
             root = root
         )
+        Log.i(
+            "A11Y_HELPER",
+            "[SMART_NEXT][focus_commit] stage='action_result' is_scroll_action=$isScrollAction intended_index=$traversalIndex intended_view_id='${target.viewIdResourceName.orEmpty()}' action_success=${focusExecution.success}"
+        )
         if (!focusExecution.success) {
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][focus_commit] stage='action_failed' is_scroll_action=$isScrollAction intended_index=$traversalIndex intended_view_id='${target.viewIdResourceName.orEmpty()}' commit_status='failed' reason='focus_action_failed'"
+            )
             return ActionResult(false, "failed", target)
         }
 
@@ -397,6 +405,10 @@ object A11yFocusExecutor {
         }
         val commitStatus = if (success) requestedStatus else "failed"
         val finalReason = if (success) "success_basis=committed_candidate" else reason
+        Log.i(
+            "A11Y_HELPER",
+            "[SMART_NEXT][focus_commit] is_scroll_action=$isScrollAction intended_index=$intendedIndex intended_view_id='${intendedTarget.viewIdResourceName.orEmpty()}' actual_candidate_index=$actualCandidateIndex actual_view_id='${actualFocusedNode?.viewIdResourceName.orEmpty()}' identity_matched=$identityMatched retarget_allowed=$retarget commit_status='$commitStatus' reason='$finalReason'"
+        )
         return FocusRetargetDecision(
             finalTarget = finalTarget,
             finalLabel = finalLabel,

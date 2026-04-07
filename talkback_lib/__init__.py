@@ -2622,6 +2622,22 @@ class A11yAdbClient:
             f"step_dump_reason='{step['step_dump_tree_reason']}' "
             f"reason='{step['get_focus_empty_reason']}'"
         )
+        req_id = ""
+        if isinstance(smart_nav_result, dict):
+            req_id = str(smart_nav_result.get("reqId", "") or "").strip()
+        focus_label_for_trace = str(step.get("visible_label", "") or step.get("focus_content_description", "") or "").replace("\n", " ").strip()
+        announcement_for_trace = str(step.get("merged_announcement", "") or "").replace("\n", " ").strip()
+        print(
+            f"[STEP][smart_next_trace] req_id='{req_id}' "
+            f"last_smart_nav_result='{step.get('last_smart_nav_result', '')}' "
+            f"last_smart_nav_detail='{step.get('last_smart_nav_detail', '')}' "
+            f"focus_view_id='{step.get('focus_view_id', '')}' "
+            f"focus_label='{focus_label_for_trace[:96]}' "
+            f"announcement='{announcement_for_trace[:96]}' "
+            f"t_move_done={step.get('t_after_move', 0)} "
+            f"t_ann_done={step.get('t_after_ann', 0)} "
+            f"t_focus_done={step.get('t_after_get_focus', 0)}"
+        )
         return step
 
     def get_announcements(
