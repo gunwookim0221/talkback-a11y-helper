@@ -17,6 +17,7 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
+from talkback_lib.adb_device import AdbDevice
 from talkback_lib.constants import (
     ACTION_CHECK_TARGET,
     ACTION_CLICK_FOCUSED,
@@ -47,6 +48,7 @@ from talkback_lib.constants import (
     STATUS_MOVED,
     STATUS_SCROLLED,
 )
+from talkback_lib.helper_bridge import HelperBridge
 from talkback_lib.utils import (
     json_safe_value,
     normalize_bounds,
@@ -88,6 +90,11 @@ class A11yAdbClient:
         self.last_get_focus_trace: dict[str, Any] = {}
         self._prev_step_merged_announcement: str = ""
         self.log_level = LOG_LEVEL if LOG_LEVEL in LOG_LEVEL_ORDER else "NORMAL"
+        self._adb_device = AdbDevice(
+            adb_path=self.adb_path,
+            resolve_serial=self._resolve_serial,
+        )
+        self._helper_bridge = HelperBridge(client=self)
 
     def _is_debug_log_enabled(self) -> bool:
         return LOG_LEVEL_ORDER.get(self.log_level, 1) >= LOG_LEVEL_ORDER["DEBUG"]
@@ -220,81 +227,13 @@ class A11yAdbClient:
         return {"status": "enabled", "reason": "ok"}
 
     def _run(self, args: list[str], dev: Any = None, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
-        serial = self._resolve_serial(dev)
-        cmd = [self.adb_path]
-        if serial:
-            cmd += ["-s", serial]
-        cmd += args
-        proc = subprocess.run(
-            cmd,
-            check=False,
-            text=True,
-            capture_output=True,
-            timeout=timeout,
-            encoding="utf-8",
-            errors="ignore",
-        )
-        if proc.returncode != 0:
-            stderr = (proc.stderr or "").strip()
-            print(f"[ERROR] 명령 실행 실패(returncode={proc.returncode}): {' '.join(cmd)}")
-            if stderr:
-                print(f"[ERROR] stderr: {stderr}")
-            return ""
-        return proc.stdout.strip()
+        return self._adb_device._run_adb_command(args, dev=dev, timeout=timeout)
 
     def check_helper_status(self, dev: Any = None) -> bool:
-        started = time.monotonic()
-        serial = self._resolve_serial(dev)
-        cache_hit, cached_result = self._get_cached_helper_status(serial=serial)
-        if cache_hit:
-            elapsed = time.monotonic() - started
-            self._debug_print(
-                f"[DEBUG][helper_status] serial={serial or 'default'} cached=True "
-                f"result={cached_result} elapsed={elapsed:.3f}s"
-            )
-            return cached_result
-
-        enabled_services = self._run(
-            ["shell", "settings", "get", "secure", "enabled_accessibility_services"],
-            dev=dev,
-        )
-        helper_enabled = self.package_name in enabled_services
-        if not helper_enabled:
-            print(
-                f"{RED_TEXT}⚠️ [ERROR] 헬퍼 앱의 접근성 서비스가 꺼져 있습니다. "
-                "'설정 > 접근성 > 설치된 앱'에서 활성화해 주세요."
-                f"{RESET_TEXT}"
-            )
-            self._update_helper_status_cache(serial=serial, result=False)
-            elapsed = time.monotonic() - started
-            print(f"[WARN][helper_status] serial={serial or 'default'} result=False reason=service_disabled elapsed={elapsed:.3f}s")
-            return False
-
-        if not self.ping(dev=dev, wait_=3.0):
-            print(
-                f"{RED_TEXT}⚠️ [ERROR] 헬퍼 앱 접근성 서비스가 명령 수신 준비 상태가 아닙니다. "
-                "서비스를 다시 시작하거나 접근성 설정을 재확인해 주세요."
-                f"{RESET_TEXT}"
-            )
-            self._update_helper_status_cache(serial=serial, result=False)
-            elapsed = time.monotonic() - started
-            print(f"[WARN][helper_status] serial={serial or 'default'} result=False reason=ping_failed elapsed={elapsed:.3f}s")
-            return False
-
-        self._update_helper_status_cache(serial=serial, result=True)
-        elapsed = time.monotonic() - started
-        self._debug_print(
-            f"[DEBUG][helper_status] serial={serial or 'default'} cached=False "
-            f"result=True elapsed={elapsed:.3f}s"
-        )
-        return True
+        return self._helper_bridge._helper_ready_check(dev=dev)
 
     def ping(self, dev: Any = None, wait_: float = 3.0) -> bool:
-        self.clear_logcat(dev=dev)
-        req_id = str(uuid.uuid4())[:8]
-        self._broadcast(dev, ACTION_PING, ["--es", "reqId", req_id])
-        result = self._read_log_result(dev, "PING_RESULT", req_id, wait_seconds=wait_)
-        return bool(result.get("success")) and result.get("status") == "READY"
+        return self._helper_bridge._ping_helper(dev=dev, wait_=wait_)
 
     def _broadcast(self, dev: Any, action: str, extras: list[str] | None = None) -> str:
         cmd = ["shell", "am", "broadcast", "-a", action, "-p", self.package_name]
@@ -423,12 +362,7 @@ class A11yAdbClient:
 
     def _take_snapshot(self, dev: Any, save_path: str) -> None:
         """ADB screencap을 수행해 현재 화면을 로컬 파일로 저장합니다."""
-        remote_path = "/sdcard/temp.png"
-        save_file = Path(save_path)
-        save_file.parent.mkdir(parents=True, exist_ok=True)
-
-        self._run(["shell", "screencap", "-p", remote_path], dev=dev)
-        self._run(["pull", remote_path, str(save_file)], dev=dev)
+        self._adb_device._capture_screen(dev=dev, save_path=save_path, remote_path="/sdcard/temp.png")
 
     def _save_failure_image(self, snapshot_path: Path, target_name: str, actual_speech: str) -> None:
         """Fail 케이스용 이미지에 EXPECTED/ACTUAL 오버레이를 추가해 저장합니다."""
@@ -907,32 +841,7 @@ class A11yAdbClient:
         return ""
 
     def tap_xy_adb(self, dev: Any, x: int, y: int, timeout: float = 10.0) -> bool:
-        serial = self._resolve_serial(dev)
-        cmd = [self.adb_path]
-        if serial:
-            cmd += ["-s", serial]
-        cmd += ["shell", "input", "tap", str(int(x)), str(int(y))]
-        try:
-            proc = subprocess.run(
-                cmd,
-                check=False,
-                text=True,
-                capture_output=True,
-                timeout=timeout,
-                encoding="utf-8",
-                errors="ignore",
-            )
-        except Exception as exc:
-            print(f"[WARN][adb_tap] failed reason='exception' serial='{serial or 'default'}' error='{exc}'")
-            return False
-        if proc.returncode != 0:
-            stderr = (proc.stderr or "").strip()
-            print(
-                f"[WARN][adb_tap] failed reason='nonzero_return' serial='{serial or 'default'}' "
-                f"returncode={proc.returncode} stderr='{stderr}'"
-            )
-            return False
-        return True
+        return self._adb_device._tap(dev=dev, x=x, y=y, timeout=timeout)
 
     def tap_bounds_center_adb(
         self,
@@ -1385,14 +1294,10 @@ class A11yAdbClient:
             self.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
             return {}
 
-        self.clear_logcat(dev=dev)
-        self._broadcast(dev, ACTION_GET_FOCUS, ["--es", "reqId", req_id])
-
         try:
-            result = self._read_log_result(
-                dev,
-                "FOCUS_RESULT",
-                req_id,
+            result = self._helper_bridge._request_get_focus(
+                dev=dev,
+                req_id=req_id,
                 wait_seconds=wait_seconds,
                 poll_interval_sec=0.2,
             )
@@ -1918,42 +1823,11 @@ class A11yAdbClient:
         # Keep previous logcat history for SMART_NEXT analysis continuity.
         # self.clear_logcat(dev=dev)
         req_id = str(uuid.uuid4())[:8]
-        self._broadcast(dev, ACTION_SMART_NEXT, ["--es", "reqId", req_id])
-        result = self._read_log_result(
-            dev,
-            "SMART_NAV_RESULT",
-            req_id,
-            wait_seconds=3.0,
-            poll_interval_sec=0.2,
-        )
+        result = self._helper_bridge._request_smart_next(dev=dev, req_id=req_id)
         self.last_smart_nav_result = result
-        detail = str(result.get("detail", "")).strip().lower()
-        flags = {
-            str(flag).strip().lower()
-            for flag in (result.get("flags") or [])
-            if str(flag).strip()
-        }
-        self.last_smart_nav_terminal = detail == "end_of_sequence" or "terminal" in flags
-        if not result.get("success"):
-            return "failed"
-
-        status = str(result.get("status", "failed")).strip().lower()
-        normalized = {
-            "moved": STATUS_MOVED,
-            "scrolled": STATUS_SCROLLED,
-            "looped": STATUS_LOOPED,
-            "failed": STATUS_FAILED,
-            # Backward compatibility for older Android helper builds.
-            "moved_to_bottom_bar": STATUS_MOVED,
-            "moved_to_bottom_bar_direct": STATUS_MOVED,
-            "moved_aligned": STATUS_MOVED,
-        }.get(status)
-        if normalized is not None:
-            return normalized
-
-        if detail in {"moved_to_bottom_bar", "moved_to_bottom_bar_direct", "moved_aligned"}:
-            return STATUS_MOVED
-        return STATUS_FAILED
+        normalized, terminal, _, _ = self._helper_bridge.normalize_smart_next_status(result)
+        self.last_smart_nav_terminal = terminal
+        return normalized
 
     def scrollFind(self, dev, name, wait_=30, direction_='updown', type_='all'):
         if not self.check_helper_status(dev=dev):
