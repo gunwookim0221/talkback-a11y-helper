@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.5.3"
+        private const val VERSION = "1.5.4"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -421,7 +421,15 @@ class A11yHelperService : AccessibilityService() {
 
     fun moveFocusSmart(reqId: String = "none"): JSONObject {
         val currentNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-        val outcome = A11yNavigator.performSmartNext(rootInActiveWindow, currentNode)
+        val outcome = try {
+            A11yNavigator.performSmartNext(rootInActiveWindow, currentNode)
+        } catch (t: Throwable) {
+            Log.w(
+                TAG,
+                "[SMART_NEXT][final] success=false status='failed' detail='exception:${t.javaClass.simpleName}' resolved_focus_view_id='' resolved_focus_label='' requested_target_view_id='' requested_target_label=''"
+            )
+            throw t
+        }
 
         val detail = outcome.reason
         val normalizedStatus = normalizeSmartNavStatus(outcome.success, detail)
