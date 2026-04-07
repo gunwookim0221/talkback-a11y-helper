@@ -17,6 +17,7 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
+from .focus_reader import parse_focus_bounds_tuple
 from talkback_lib.adb_device import AdbDevice
 from talkback_lib.constants import (
     ACTION_CHECK_TARGET,
@@ -664,7 +665,7 @@ class A11yAdbClient:
             if not isinstance(node, dict):
                 return
 
-            parsed = A11yAdbClient._parse_bounds_tuple(A11yAdbClient._normalize_bounds(node))
+            parsed = parse_focus_bounds_tuple(A11yAdbClient._normalize_bounds(node))
             if parsed:
                 _, top, _, bottom = parsed
                 tops.append(top)
@@ -699,7 +700,7 @@ class A11yAdbClient:
                 return
 
             bounds = A11yAdbClient._normalize_bounds(node)
-            parsed = A11yAdbClient._parse_bounds_tuple(bounds)
+            parsed = parse_focus_bounds_tuple(bounds)
             if parsed:
                 _, top, _, bottom = parsed
                 center_y = (top + bottom) / 2.0
@@ -875,7 +876,7 @@ class A11yAdbClient:
             }
             return False
 
-        parsed = self._parse_bounds_tuple(bounds)
+        parsed = parse_focus_bounds_tuple(bounds)
         if not parsed:
             self.last_target_action_result = {
                 "success": False,
@@ -1155,7 +1156,7 @@ class A11yAdbClient:
         pairs = A11yAdbClient._collect_text_nodes_with_bounds(nodes)
         top_candidates: list[tuple[int, int, str, str]] = []
         for text, bounds in pairs:
-            parsed = A11yAdbClient._parse_bounds_tuple(bounds)
+            parsed = parse_focus_bounds_tuple(bounds)
             if not parsed:
                 continue
             left, top, _, _ = parsed
@@ -1401,7 +1402,7 @@ class A11yAdbClient:
             self.last_get_focus_trace["empty_reason"] = ""
             if accepted_with_success_false:
                 normalized_bounds = self._normalize_bounds(focus_node)
-                parsed_bounds = self._parse_bounds_tuple(normalized_bounds)
+                parsed_bounds = parse_focus_bounds_tuple(normalized_bounds)
                 view_id = str(focus_node.get("viewIdResourceName", "") or "").strip()
                 text_value = str(focus_node.get("text", "") or "").strip()
                 content_desc = str(focus_node.get("contentDescription", "") or "").strip()
