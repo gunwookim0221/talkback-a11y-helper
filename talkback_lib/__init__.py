@@ -17,34 +17,50 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
-ACTION_DUMP_TREE = "com.iotpart.sqe.talkbackhelper.DUMP_TREE"
-ACTION_GET_FOCUS = "com.iotpart.sqe.talkbackhelper.GET_FOCUS"
-ACTION_FOCUS_TARGET = "com.iotpart.sqe.talkbackhelper.FOCUS_TARGET"
-ACTION_CLICK_TARGET = "com.iotpart.sqe.talkbackhelper.CLICK_TARGET"
-ACTION_TOUCH_BOUNDS_CENTER_TARGET = "com.iotpart.sqe.talkbackhelper.TOUCH_BOUNDS_CENTER_TARGET"
-ACTION_CHECK_TARGET = "com.iotpart.sqe.talkbackhelper.CHECK_TARGET"
-ACTION_NEXT = "com.iotpart.sqe.talkbackhelper.NEXT"
-ACTION_PREV = "com.iotpart.sqe.talkbackhelper.PREV"
-ACTION_SMART_NEXT = "com.iotpart.sqe.talkbackhelper.SMART_NEXT"
-ACTION_CLICK_FOCUSED = "com.iotpart.sqe.talkbackhelper.CLICK_FOCUSED"
-ACTION_SCROLL = "com.iotpart.sqe.talkbackhelper.SCROLL"
-ACTION_SET_TEXT = "com.iotpart.sqe.talkbackhelper.SET_TEXT"
-ACTION_PING = "com.iotpart.sqe.talkbackhelper.PING"
-ACTION_COMMAND = "com.iotpart.sqe.talkbackhelper.ACTION_COMMAND"
-LOG_TAG = "A11Y_HELPER"
-LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
-LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
-RED_TEXT = "\033[91m"
-RESET_TEXT = "\033[0m"
-CLIENT_ALGORITHM_VERSION = "1.7.41"
-LOG_LEVEL = os.getenv("TB_LOG_LEVEL", "NORMAL").upper()
-LOG_LEVEL_ORDER = {"QUIET": 0, "NORMAL": 1, "DEBUG": 2}
+from talkback_lib.constants import (
+    ACTION_CHECK_TARGET,
+    ACTION_CLICK_FOCUSED,
+    ACTION_CLICK_TARGET,
+    ACTION_COMMAND,
+    ACTION_DUMP_TREE,
+    ACTION_FOCUS_TARGET,
+    ACTION_GET_FOCUS,
+    ACTION_NEXT,
+    ACTION_PING,
+    ACTION_PREV,
+    ACTION_SCROLL,
+    ACTION_SET_TEXT,
+    ACTION_SMART_NEXT,
+    ACTION_TOUCH_BOUNDS_CENTER_TARGET,
+    CLIENT_ALGORITHM_VERSION,
+    DEFAULT_ADB_PATH,
+    DEFAULT_PACKAGE_NAME,
+    DEFAULT_TIMEOUT_SECONDS,
+    LOGCAT_FILTER_SPECS,
+    LOGCAT_TIME_PATTERN,
+    LOG_LEVEL,
+    LOG_LEVEL_ORDER,
+    RED_TEXT,
+    RESET_TEXT,
+    STATUS_FAILED,
+    STATUS_LOOPED,
+    STATUS_MOVED,
+    STATUS_SCROLLED,
+)
+from talkback_lib.utils import (
+    json_safe_value,
+    normalize_bounds,
+    normalize_for_comparison,
+    parse_bottom_from_bounds,
+    parse_bounds_tuple,
+    safe_parse_json_payload,
+)
 
 
 @dataclass
 class A11yAdbClient:
-    adb_path: str = "adb"
-    package_name: str = "com.iotpart.sqe.talkbackhelper"
+    adb_path: str = DEFAULT_ADB_PATH
+    package_name: str = DEFAULT_PACKAGE_NAME
     dev_serial: str | None = None
     start_monitor: bool = True
 
@@ -203,7 +219,7 @@ class A11yAdbClient:
         print("[PREFLIGHT] final_status=enabled final_reason=ok")
         return {"status": "enabled", "reason": "ok"}
 
-    def _run(self, args: list[str], dev: Any = None, timeout: float = 30.0) -> str:
+    def _run(self, args: list[str], dev: Any = None, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
         serial = self._resolve_serial(dev)
         cmd = [self.adb_path]
         if serial:
@@ -347,13 +363,7 @@ class A11yAdbClient:
 
     @staticmethod
     def _parse_json_payload(payload: str, label: str) -> dict[str, Any]:
-        try:
-            parsed = json.loads(payload)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"{label} JSON 파싱 실패: {exc}") from exc
-        if not isinstance(parsed, dict):
-            raise RuntimeError(f"{label} JSON 형식이 올바르지 않습니다.")
-        return parsed
+        return safe_parse_json_payload(payload=payload, label=label)
 
     def _read_log_result(
         self,
@@ -601,48 +611,13 @@ class A11yAdbClient:
 
     @staticmethod
     def normalize_for_comparison(text: str | None) -> str:
-        """비교 전 텍스트를 가볍게 정규화합니다.
-
-        Rules:
-        - ``None``은 빈 문자열로 변환
-        - 줄바꿈/탭을 공백으로 치환 후 `strip()` 적용
-        - 소문자화
-        - 연속 공백을 한 칸으로 축소
-        - 비교를 방해하는 대표 역할/상태 문구(한/영 일부) 제거
-        - 과도하지 않게 일부 기호(`,`, `:`, `;`, `|`)만 공백으로 정리
-        """
-        if text is None:
-            return ""
-
-        normalized = str(text).replace("\n", " ").replace("\t", " ").strip().lower()
-        normalized = re.sub(r"[,:;|]", " ", normalized)
-
-        removable_phrases = (
-            "double tap to activate",
-            "double tap to open",
-            "button",
-            "selected",
-            "disabled",
-            "버튼",
-            "선택됨",
-            "사용 안 함",
-        )
-        for phrase in removable_phrases:
-            normalized = re.sub(rf"(?<!\w){re.escape(phrase)}(?!\w)", " ", normalized)
-
-        normalized = re.sub(r"\s+", " ", normalized)
-        return normalized.strip()
+        """비교 전 텍스트를 가볍게 정규화합니다."""
+        return normalize_for_comparison(text)
 
     @staticmethod
     def _json_safe_value(value: Any) -> Any:
         """dict/list/scalar 중심의 JSON 직렬화 가능한 값으로 최대한 안전하게 변환합니다."""
-        if value is None or isinstance(value, (str, int, float, bool)):
-            return value
-        if isinstance(value, dict):
-            return {str(key): A11yAdbClient._json_safe_value(val) for key, val in value.items()}
-        if isinstance(value, (list, tuple)):
-            return [A11yAdbClient._json_safe_value(item) for item in value]
-        return str(value)
+        return json_safe_value(value)
 
     @staticmethod
     def _collect_text_samples(nodes: list[dict[str, Any]], max_samples: int = 10) -> list[str]:
@@ -736,30 +711,15 @@ class A11yAdbClient:
 
     @staticmethod
     def _normalize_bounds(node: dict[str, Any]) -> str:
-        bounds = node.get("boundsInScreen")
-        if isinstance(bounds, dict):
-            left = bounds.get("left", bounds.get("l"))
-            top = bounds.get("top", bounds.get("t"))
-            right = bounds.get("right", bounds.get("r"))
-            bottom = bounds.get("bottom", bounds.get("b"))
-            return f"{left},{top},{right},{bottom}"
-        if isinstance(bounds, str):
-            return bounds
-        return ""
+        return normalize_bounds(node)
 
     @staticmethod
     def _parse_bottom_from_bounds(bounds: str) -> int:
-        nums = [int(x) for x in re.findall(r"-?\d+", bounds)]
-        if len(nums) >= 4:
-            return nums[3]
-        return -1
+        return parse_bottom_from_bounds(bounds)
 
     @staticmethod
     def _parse_bounds_tuple(bounds: str) -> tuple[int, int, int, int] | None:
-        nums = [int(x) for x in re.findall(r"-?\d+", bounds)]
-        if len(nums) >= 4:
-            return nums[0], nums[1], nums[2], nums[3]
-        return None
+        return parse_bounds_tuple(bounds)
 
     @staticmethod
     def _center_viewport_vertical_range(nodes: list[dict[str, Any]]) -> tuple[float, float]:
@@ -1948,10 +1908,10 @@ class A11yAdbClient:
     def move_focus_smart(self, dev: Any = None, direction: str = "next") -> str:
         direction_token = str(direction).strip().lower()
         if direction_token != "next":
-            return "moved" if self.move_focus(dev=dev, direction=direction_token) else "failed"
+            return STATUS_MOVED if self.move_focus(dev=dev, direction=direction_token) else STATUS_FAILED
 
         if not (self._has_recent_helper_ok(dev=dev) or self.check_helper_status(dev=dev)):
-            return "failed"
+            return STATUS_FAILED
 
         self.last_announcements = []
         self.last_merged_announcement = ""
@@ -1979,21 +1939,21 @@ class A11yAdbClient:
 
         status = str(result.get("status", "failed")).strip().lower()
         normalized = {
-            "moved": "moved",
-            "scrolled": "scrolled",
-            "looped": "looped",
-            "failed": "failed",
+            "moved": STATUS_MOVED,
+            "scrolled": STATUS_SCROLLED,
+            "looped": STATUS_LOOPED,
+            "failed": STATUS_FAILED,
             # Backward compatibility for older Android helper builds.
-            "moved_to_bottom_bar": "moved",
-            "moved_to_bottom_bar_direct": "moved",
-            "moved_aligned": "moved",
+            "moved_to_bottom_bar": STATUS_MOVED,
+            "moved_to_bottom_bar_direct": STATUS_MOVED,
+            "moved_aligned": STATUS_MOVED,
         }.get(status)
         if normalized is not None:
             return normalized
 
         if detail in {"moved_to_bottom_bar", "moved_to_bottom_bar_direct", "moved_aligned"}:
-            return "moved"
-        return "failed"
+            return STATUS_MOVED
+        return STATUS_FAILED
 
     def scrollFind(self, dev, name, wait_=30, direction_='updown', type_='all'):
         if not self.check_helper_status(dev=dev):
