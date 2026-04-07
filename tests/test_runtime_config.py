@@ -111,6 +111,60 @@ def test_load_runtime_bundle_applies_screen_context_overrides(tmp_path):
     assert detail_cfg["stabilization_mode"] == "tab_context"
 
 
+def test_load_runtime_bundle_keeps_global_nav_tab_context_against_group_override(tmp_path):
+    path = tmp_path / "runtime_global_nav_group_override.json"
+    path.write_text(
+        json.dumps(
+            {
+                "scenario_groups": {
+                    "main_tabs": {
+                        "screen_context_mode": "bottom_tab",
+                        "stabilization_mode": "anchor_then_context",
+                    }
+                },
+                "scenarios": {
+                    "global_nav_main": {
+                        "group": "main_tabs",
+                        "enabled": True,
+                        "scenario_type": "global_nav",
+                    },
+                    "home_main": {
+                        "group": "main_tabs",
+                        "enabled": True,
+                        "scenario_type": "content",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    base_tabs = [
+        {
+            "scenario_id": "global_nav_main",
+            "tab_name": "Global",
+            "enabled": False,
+            "max_steps": 5,
+            "scenario_type": "global_nav",
+            "stabilization_mode": "tab_context",
+        },
+        {
+            "scenario_id": "home_main",
+            "tab_name": "Home",
+            "enabled": False,
+            "max_steps": 5,
+            "scenario_type": "content",
+            "stabilization_mode": "anchor_then_context",
+        },
+    ]
+
+    bundle = load_runtime_bundle(base_tabs, config_path=path)
+    global_cfg = bundle["tab_configs"][0]
+    home_cfg = bundle["tab_configs"][1]
+
+    assert global_cfg["stabilization_mode"] == "tab_context"
+    assert home_cfg["stabilization_mode"] == "anchor_then_context"
+
+
 def test_load_runtime_bundle_invalid_screen_context_values_fallback(tmp_path):
     path = tmp_path / "runtime_invalid_modes.json"
     path.write_text(
