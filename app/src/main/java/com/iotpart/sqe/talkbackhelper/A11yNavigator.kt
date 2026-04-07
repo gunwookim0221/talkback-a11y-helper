@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.74.7"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.74.8"
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
@@ -1038,7 +1038,7 @@ object A11yNavigator {
         val finalNextLabel = (resolvePrimaryLabel(finalNextNode) ?: finalNextNode?.let { A11yTraversalAnalyzer.recoverDescendantLabel(it) } ?: "<none>")
             .replace("\n", " ")
             .take(72)
-        Log.i(
+        Log.w(
             "A11Y_HELPER",
             "[SMART_NEXT][target] current_index=$currentIndex initial_next_index=$initialNextIndex final_next_index=$nextIndex current_view_id='${currentNode?.viewIdResourceName.orEmpty()}' initial_next_view_id='${initialNextNode?.viewIdResourceName.orEmpty()}' final_next_view_id='${finalNextNode?.viewIdResourceName.orEmpty()}' current_label='$currentLabel' final_next_label='$finalNextLabel' skip_coordinate_duplicate=$skipCoordinateDuplicateApplied reason='$targetDecisionReason'"
         )
