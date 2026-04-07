@@ -436,6 +436,16 @@ def load_runtime_bundle(base_tab_configs: list[dict[str, Any]], config_path: str
 
         _apply_typed_override(merged_cfg, scenario_override, runtime_defaults)
 
+        normalized_scenario_type = str(merged_cfg.get("scenario_type", "content") or "content").strip().lower()
+        if scenario_id == "global_nav_main" or normalized_scenario_type == "global_nav":
+            requested_mode = str(merged_cfg.get("stabilization_mode", "") or "").strip().lower()
+            if requested_mode != "tab_context":
+                merged_cfg["stabilization_mode"] = "tab_context"
+                log(
+                    f"[GLOBAL_NAV][guard] forcing stabilization_mode='tab_context' "
+                    f"scenario='{scenario_id}' requested='{requested_mode or 'none'}'"
+                )
+
         base_enabled = bool(base_cfg.get("enabled", False))
         if isinstance(scenario_override.get("enabled"), bool):
             final_enabled = bool(scenario_override.get("enabled"))
