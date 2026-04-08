@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.75.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.76.0"
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
@@ -1004,14 +1004,16 @@ object A11yNavigator {
         }
 
         if (currentIndex in traversalList.indices) {
-            val oneConnectBottomTabForcedIndex = resolveOneConnectBottomTabAdjacentNextIndex(
+            val globalNavigationAdjacentIndex = resolveGlobalNavigationAdjacentNextIndex(
                 traversalList = traversalList,
-                currentIndex = currentIndex
+                currentIndex = currentIndex,
+                screenBottom = state.normalize.screenBottom,
+                screenHeight = state.normalize.screenHeight
             )
-            if (oneConnectBottomTabForcedIndex in traversalList.indices && oneConnectBottomTabForcedIndex != nextIndex) {
-                nextIndex = oneConnectBottomTabForcedIndex
-                targetDecisionReason = "oneconnect_bottom_tab_adjacent"
-                Log.i("A11Y_HELPER", "[DECIDE] oneconnect bottom tab adjacent override -> index=$nextIndex")
+            if (globalNavigationAdjacentIndex in traversalList.indices && globalNavigationAdjacentIndex != nextIndex) {
+                nextIndex = globalNavigationAdjacentIndex
+                targetDecisionReason = "global_navigation_adjacent_sibling"
+                Log.i("A11Y_HELPER", "[DECIDE] global navigation adjacent sibling override -> index=$nextIndex")
             }
             val currentBounds = Rect().also { traversalList[currentIndex].getBoundsInScreen(it) }
             val immediateCandidateIndex = currentIndex + 1
@@ -1091,17 +1093,38 @@ object A11yNavigator {
         )
     }
 
-    private fun resolveOneConnectBottomTabAdjacentNextIndex(
+    private fun resolveGlobalNavigationAdjacentNextIndex(
         traversalList: List<AccessibilityNodeInfo>,
-        currentIndex: Int
+        currentIndex: Int,
+        screenBottom: Int,
+        screenHeight: Int
     ): Int {
-        val currentNode = traversalList.getOrNull(currentIndex) ?: return -1
-        if (!A11yNodeUtils.isOneConnectBottomTabNode(currentNode)) return -1
-        val expectedNextTabViewIdSuffix = A11yNodeUtils.nextOneConnectBottomTabViewId(currentNode.viewIdResourceName) ?: return -1
-        return traversalList.indexOfFirst { candidate ->
-            if (!A11yNodeUtils.isOneConnectBottomTabNode(candidate)) return@indexOfFirst false
-            candidate.viewIdResourceName?.substringAfterLast('/') == expectedNextTabViewIdSuffix
-        }
+        return resolveAdjacentGlobalNavigationSiblingIndex(
+            nodes = traversalList,
+            currentIndex = currentIndex,
+            isGlobalNavigationItem = { node ->
+                isGlobalNavigationItemNode(node, screenBottom, screenHeight)
+            },
+            parentOf = { node -> node.parent },
+            isSameNode = ::isSameNode,
+            boundsOf = { node -> Rect().also(node::getBoundsInScreen) }
+        )
+    }
+
+    private fun isGlobalNavigationItemNode(
+        node: AccessibilityNodeInfo?,
+        screenBottom: Int,
+        screenHeight: Int
+    ): Boolean {
+        if (node == null) return false
+        val bounds = Rect().also { node.getBoundsInScreen(it) }
+        return A11yNodeUtils.isBottomNavigationBar(
+            className = node.className?.toString(),
+            viewIdResourceName = node.viewIdResourceName,
+            boundsInScreen = bounds,
+            screenBottom = screenBottom,
+            screenHeight = screenHeight
+        )
     }
 
     private fun findInitialHeroSummaryCandidateIndex(
@@ -1737,6 +1760,112 @@ object A11yNavigator {
         }
         return nextIndex
     }
+
+    internal fun <T> resolveAdjacentGlobalNavigationSiblingIndex(
+        nodes: List<T>,
+        currentIndex: Int,
+        isGlobalNavigationItem: (T) -> Boolean,
+        parentOf: (T) -> T?,
+        isSameNode: (T, T) -> Boolean,
+        boundsOf: (T) -> Rect
+    ): Int {
+        if (currentIndex !in nodes.indices) return -1
+        val currentNode = nodes[currentIndex]
+        if (!isGlobalNavigationItem(currentNode)) return -1
+
+        val globalNavigationIndices = nodes.indices.filter { index -> isGlobalNavigationItem(nodes[index]) }
+        if (globalNavigationIndices.size < 2) return -1
+
+        val groupIndices = resolveGlobalNavigationGroupIndices(
+            nodes = nodes,
+            currentNode = currentNode,
+            globalNavigationIndices = globalNavigationIndices,
+            parentOf = parentOf,
+            isSameNode = isSameNode
+        )
+        if (groupIndices.size < 2) return -1
+
+        val orderedGroupIndices = orderGlobalNavigationGroupIndicesByAxis(
+            nodes = nodes,
+            groupIndices = groupIndices,
+            boundsOf = boundsOf
+        )
+        val orderedCurrentPosition = orderedGroupIndices.indexOfFirst { index -> isSameNode(nodes[index], currentNode) }
+        if (orderedCurrentPosition !in orderedGroupIndices.indices || orderedCurrentPosition == orderedGroupIndices.lastIndex) return -1
+        return orderedGroupIndices[orderedCurrentPosition + 1]
+    }
+
+    private fun <T> resolveGlobalNavigationGroupIndices(
+        nodes: List<T>,
+        currentNode: T,
+        globalNavigationIndices: List<Int>,
+        parentOf: (T) -> T?,
+        isSameNode: (T, T) -> Boolean
+    ): List<Int> {
+        val ancestors = mutableListOf<T>()
+        var cursor = parentOf(currentNode)
+        var guard = 0
+        while (cursor != null && guard < 48) {
+            ancestors += cursor
+            cursor = parentOf(cursor)
+            guard += 1
+        }
+        for (ancestor in ancestors) {
+            val grouped = globalNavigationIndices.filter { index ->
+                isDescendantOf(
+                    node = nodes[index],
+                    ancestor = ancestor,
+                    parentOf = parentOf,
+                    isSameNode = isSameNode
+                )
+            }
+            if (grouped.size >= 2 && grouped.any { index -> isSameNode(nodes[index], currentNode) }) {
+                return grouped
+            }
+        }
+        return emptyList()
+    }
+
+    private fun <T> isDescendantOf(
+        node: T,
+        ancestor: T,
+        parentOf: (T) -> T?,
+        isSameNode: (T, T) -> Boolean
+    ): Boolean {
+        var cursor: T? = node
+        var guard = 0
+        while (cursor != null && guard < 64) {
+            if (isSameNode(cursor, ancestor)) return true
+            cursor = parentOf(cursor)
+            guard += 1
+        }
+        return false
+    }
+
+    private fun <T> orderGlobalNavigationGroupIndicesByAxis(
+        nodes: List<T>,
+        groupIndices: List<Int>,
+        boundsOf: (T) -> Rect
+    ): List<Int> {
+        if (groupIndices.size <= 1) return groupIndices
+        val centerXs = groupIndices.map { index ->
+            val bounds = boundsOf(nodes[index])
+            bounds.left + (bounds.width() / 2)
+        }
+        val centerYs = groupIndices.map { index ->
+            val bounds = boundsOf(nodes[index])
+            bounds.top + (bounds.height() / 2)
+        }
+        val horizontalSpan = (centerXs.maxOrNull() ?: 0) - (centerXs.minOrNull() ?: 0)
+        val verticalSpan = (centerYs.maxOrNull() ?: 0) - (centerYs.minOrNull() ?: 0)
+        val isHorizontalGroup = horizontalSpan >= verticalSpan
+        return if (isHorizontalGroup) {
+            groupIndices.sortedWith(compareBy({ index -> boundsOf(nodes[index]).left }, { index -> boundsOf(nodes[index]).top }))
+        } else {
+            groupIndices.sortedWith(compareBy({ index -> boundsOf(nodes[index]).top }, { index -> boundsOf(nodes[index]).left }))
+        }
+    }
+
     private fun buildPreScrollAnchor(
         focusNodes: List<FocusedNode>,
         currentIndex: Int,
