@@ -1247,6 +1247,29 @@ def collect_tab_rows(
         row = maybe_capture_focus_crop(client, dev, row, output_base_dir)
         row.pop("_step_mono_start", None)
         row["step_total_elapsed_sec"] = round(time.perf_counter() - step_start, 3)
+        scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower()
+        if scenario_type == "global_nav":
+            expected_view_id = str(row.get("smart_nav_requested_view_id", "") or "").strip()
+            resolved_view_id = str(row.get("smart_nav_resolved_view_id", "") or "").strip()
+            actual_view_id = str(row.get("smart_nav_actual_view_id", "") or "").strip()
+            resolved_label = str(row.get("smart_nav_resolved_label", "") or "").strip()
+            actual_label = str(row.get("smart_nav_actual_label", "") or "").strip()
+            expected_norm = expected_view_id.lower()
+            resolved_norm = resolved_view_id.lower()
+            actual_norm = actual_view_id.lower()
+            smart_success = bool(row.get("smart_nav_success", False))
+            resource_matched = bool(expected_norm and (resolved_norm == expected_norm or actual_norm == expected_norm))
+            if smart_success and resource_matched:
+                chosen_view_id = resolved_view_id or actual_view_id
+                chosen_label = resolved_label or actual_label
+                if chosen_view_id:
+                    row["focus_view_id"] = chosen_view_id
+                if chosen_label:
+                    row["visible_label"] = chosen_label
+                    row["normalized_visible_label"] = client.normalize_for_comparison(chosen_label)
+                row["post_move_verdict_source"] = "smart_nav_result_resource_match"
+            elif smart_success:
+                row["post_move_verdict_source"] = "smart_nav_result"
         last_fingerprint, fingerprint_repeat_count = _annotate_row_quality(
             row,
             last_fingerprint=last_fingerprint,

@@ -2208,6 +2208,17 @@ class A11yAdbClient:
             "last_smart_nav_result": "",
             "last_smart_nav_detail": "",
             "last_smart_nav_terminal": False,
+            "smart_nav_req_id": "",
+            "smart_nav_status": "",
+            "smart_nav_detail": "",
+            "smart_nav_requested_view_id": "",
+            "smart_nav_requested_label": "",
+            "smart_nav_resolved_view_id": "",
+            "smart_nav_resolved_label": "",
+            "smart_nav_actual_view_id": "",
+            "smart_nav_actual_label": "",
+            "smart_nav_success": False,
+            "post_move_verdict_source": "focus_announcement",
             "focus_node": {},
             "focus_text": "",
             "focus_content_description": "",
@@ -2275,6 +2286,52 @@ class A11yAdbClient:
         step["last_smart_nav_result"] = str(smart_nav_result.get("status", "") or "").strip().lower()
         step["last_smart_nav_detail"] = str(smart_nav_result.get("detail", "") or "").strip().lower()
         step["last_smart_nav_terminal"] = bool(self.last_smart_nav_terminal)
+        smart_req_id = str(smart_nav_result.get("req_id", "") or smart_nav_result.get("reqId", "") or "").strip()
+        smart_status = str(smart_nav_result.get("status", "") or "").strip().lower()
+        smart_detail = str(smart_nav_result.get("detail", "") or "").strip().lower()
+        smart_requested_view_id = str(
+            smart_nav_result.get("requested_target_view_id", "")
+            or smart_nav_result.get("requestedTargetViewId", "")
+            or ""
+        ).strip()
+        smart_requested_label = str(
+            smart_nav_result.get("requested_target_label", "")
+            or smart_nav_result.get("requestedTargetLabel", "")
+            or ""
+        ).strip()
+        smart_resolved_view_id = str(
+            smart_nav_result.get("resolved_focus_view_id", "")
+            or smart_nav_result.get("resolvedFocusViewId", "")
+            or ""
+        ).strip()
+        smart_resolved_label = str(
+            smart_nav_result.get("resolved_focus_label", "")
+            or smart_nav_result.get("resolvedFocusLabel", "")
+            or ""
+        ).strip()
+        smart_actual_view_id = str(
+            smart_nav_result.get("actual_focused_view_id", "")
+            or smart_nav_result.get("actualFocusedViewId", "")
+            or ""
+        ).strip()
+        smart_actual_label = str(
+            smart_nav_result.get("actual_focused_label", "")
+            or smart_nav_result.get("actualFocusedLabel", "")
+            or ""
+        ).strip()
+        smart_success = bool(smart_nav_result.get("success", False))
+        step["smart_nav_req_id"] = smart_req_id
+        step["smart_nav_status"] = smart_status
+        step["smart_nav_detail"] = smart_detail
+        step["smart_nav_requested_view_id"] = smart_requested_view_id
+        step["smart_nav_requested_label"] = smart_requested_label
+        step["smart_nav_resolved_view_id"] = smart_resolved_view_id
+        step["smart_nav_resolved_label"] = smart_resolved_label
+        step["smart_nav_actual_view_id"] = smart_actual_view_id
+        step["smart_nav_actual_label"] = smart_actual_label
+        step["smart_nav_success"] = smart_success
+        if smart_success and move and str(direction).strip().lower() == "next":
+            step["post_move_verdict_source"] = "smart_nav_result"
         step["t_after_move"] = round(time.monotonic() - step_started, 3)
 
         ann_wait = wait_seconds if announcement_wait_seconds is None else announcement_wait_seconds
@@ -2649,6 +2706,10 @@ class A11yAdbClient:
             f"[STEP][smart_next_trace] req_id='{req_id}' "
             f"last_smart_nav_result='{step.get('last_smart_nav_result', '')}' "
             f"last_smart_nav_detail='{step.get('last_smart_nav_detail', '')}' "
+            f"smart_nav_requested_view_id='{step.get('smart_nav_requested_view_id', '')}' "
+            f"smart_nav_resolved_view_id='{step.get('smart_nav_resolved_view_id', '')}' "
+            f"smart_nav_actual_view_id='{step.get('smart_nav_actual_view_id', '')}' "
+            f"post_move_verdict_source='{step.get('post_move_verdict_source', '')}' "
             f"focus_view_id='{step.get('focus_view_id', '')}' "
             f"focus_label='{focus_label_for_trace[:96]}' "
             f"announcement='{announcement_for_trace[:96]}' "

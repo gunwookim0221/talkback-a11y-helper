@@ -262,9 +262,19 @@ def _build_debug_log_sections(
     smart_result = str(source.get("last_smart_nav_result", "") or "")
     smart_detail = str(source.get("last_smart_nav_detail", "") or "")
     smart_terminal = bool(source.get("last_smart_nav_terminal", False))
+    smart_requested_view_id = str(source.get("smart_nav_requested_view_id", "") or "")
+    smart_resolved_view_id = str(source.get("smart_nav_resolved_view_id", "") or "")
+    smart_actual_view_id = str(source.get("smart_nav_actual_view_id", "") or "")
+    post_move_verdict_source = str(source.get("post_move_verdict_source", "") or "")
     if smart_result or smart_detail:
         step_lines.append(
             f"[SMART_NEXT] req_id='{req_id}' tab='{tab_name}' step={step_str} result='{smart_result}' detail='{smart_detail}' terminal={str(smart_terminal).lower()}"
+        )
+    if smart_requested_view_id or smart_resolved_view_id or smart_actual_view_id or post_move_verdict_source:
+        step_lines.append(
+            f"[SMART_NEXT][verdict] req_id='{req_id}' requested_view_id='{smart_requested_view_id}' "
+            f"resolved_view_id='{smart_resolved_view_id}' actual_view_id='{smart_actual_view_id}' "
+            f"post_move_verdict_source='{post_move_verdict_source}'"
         )
     step_lines.append(
         f"[STEP][summary] req_id={req_id} tab='{tab_name}' step={step_str} move_result='{getattr(row, 'move_result', '')}' terminal={str(smart_terminal).lower()} no_progress={str('repeat_no_progress' in str(getattr(row, 'failure_reason', '') or '')).lower()}"
@@ -632,6 +642,10 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
                 "fallback_used",
                 "step_dump_used",
                 "req_id",
+                "smart_nav_requested_view_id",
+                "smart_nav_resolved_view_id",
+                "smart_nav_actual_view_id",
+                "post_move_verdict_source",
                 "timing_move",
                 "timing_get_focus",
                 "timing_total",
@@ -673,6 +687,10 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     _pick_col("fallback_used", ["fallback_used"], default=False)
     _pick_col("step_dump_used", ["step_dump_used"], default=False)
     _pick_col("req_id", ["req_id", "get_focus_req_id"])
+    _pick_col("smart_nav_requested_view_id", ["smart_nav_requested_view_id"])
+    _pick_col("smart_nav_resolved_view_id", ["smart_nav_resolved_view_id"])
+    _pick_col("smart_nav_actual_view_id", ["smart_nav_actual_view_id"])
+    _pick_col("post_move_verdict_source", ["post_move_verdict_source"])
 
     _pick_col("timing_move", ["timing_move", "move_elapsed_sec"])
     _pick_col("timing_get_focus", ["timing_get_focus", "step_elapsed_sec"])
@@ -702,6 +720,8 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
         return len(a_set & b_set) >= max(1, min(len(a_set), len(b_set)) // 2)
 
     def _speech_match(row) -> str:
+        if str(row.get("post_move_verdict_source", "") or "").strip().lower().startswith("smart_nav_result"):
+            return "PASS_SMART_NAV"
         visible = row["_norm_visible"]
         speech = row["_norm_speech"]
         mismatch_reasons = str(row.get("_mismatch_reasons", "") or "")
@@ -768,6 +788,8 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
             return "LOW"
         if row["speech_match_result"] in {"PASS_EXACT", "PASS_CONTAINS"} and row["traversal_result"] == "PASS_MOVED":
             return "HIGH"
+        if row["speech_match_result"] == "PASS_SMART_NAV" and row["traversal_result"] == "PASS_MOVED":
+            return "HIGH"
         if row["speech_match_result"] == "FAIL_MISMATCH" or row["traversal_result"].startswith("FAIL"):
             return "LOW"
         return "MEDIUM"
@@ -784,6 +806,8 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
         ):
             return "WARN"
         if row["traversal_result"] == "PASS_MOVED" and row["speech_match_result"] in {"PASS_EXACT", "PASS_CONTAINS"}:
+            return "PASS"
+        if row["traversal_result"] == "PASS_MOVED" and row["speech_match_result"] == "PASS_SMART_NAV":
             return "PASS"
         return "WARN"
 
@@ -826,6 +850,10 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
             "fallback_used",
             "step_dump_used",
             "req_id",
+            "smart_nav_requested_view_id",
+            "smart_nav_resolved_view_id",
+            "smart_nav_actual_view_id",
+            "post_move_verdict_source",
             "timing_move",
             "timing_get_focus",
             "timing_total",

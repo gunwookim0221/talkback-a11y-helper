@@ -48,6 +48,8 @@
 
 - `collect_focus_step(move=True, direction="next")`
 - move 결과 + announcement + get_focus + dump/crop + 품질 메타데이터를 row로 누적
+- SMART_NEXT payload(`smart_nav_requested_view_id`, `smart_nav_resolved_view_id`, `smart_nav_actual_view_id`, `post_move_verdict_source`)를 함께 기록
+- `global_nav`에서는 SMART_NEXT의 resolved/actual view id가 requested target view id와 일치하면 이를 post-move 1차 truth로 우선 반영
 - `StopEvaluator`로 종료 여부 판정
 
 ### Announcement 안정화 대기
