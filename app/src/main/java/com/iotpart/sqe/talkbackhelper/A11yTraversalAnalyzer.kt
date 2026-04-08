@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
-    const val VERSION: String = "1.11.0"
+    const val VERSION: String = "1.11.1"
 
     data class CandidateSelectionResult(
         val index: Int,
@@ -102,6 +102,7 @@ object A11yTraversalAnalyzer {
                     ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                     ?: "<no-label>"
                 val tag = if (staticTextDecision.accepted) "static_text_included" else "static_text_rejected"
+                Log.i("A11Y_HELPER", "[SMART_NEXT][canary] stage='before_response'")
                 Log.i(
                     "A11Y_HELPER",
                     "[SMART_NEXT][$tag] reason=${staticTextDecision.reasonCode} class=${node.className} viewId=${node.viewIdResourceName} bounds=$nodeBounds label=${staticLabel.replace("\n", " ")}"
@@ -1223,18 +1224,21 @@ object A11yTraversalAnalyzer {
         if (isOneConnectHeroSummaryContainer(node, descendantTextCandidates)) return false
         if (isContainerLikeClassName(node.className?.toString())) {
             if (OneConnectTraversalPolicy.isOneConnectPackageName(node.packageName?.toString())) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT][canary] stage='before_finalize'")
                 Log.i("A11Y_HELPER", "[SMART_NEXT][hero] rejected reason='container_like_class' class=${node.className}")
             }
             return true
         }
         if (isContainerLikeViewId(node.viewIdResourceName)) {
             if (OneConnectTraversalPolicy.isOneConnectPackageName(node.packageName?.toString())) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT][canary] stage='before_finalize'")
                 Log.i("A11Y_HELPER", "[SMART_NEXT][hero] rejected reason='container_like_view_id' viewId=${node.viewIdResourceName}")
             }
             return true
         }
         if (hasMultipleSiblingLevelInteractiveDescendants(node)) {
             if (OneConnectTraversalPolicy.isOneConnectPackageName(node.packageName?.toString())) {
+                Log.i("A11Y_HELPER", "[SMART_NEXT][canary] stage='before_finalize'")
                 Log.i("A11Y_HELPER", "[SMART_NEXT][hero] rejected reason='multiple_interactive_descendants'")
             }
             return true
@@ -1248,6 +1252,7 @@ object A11yTraversalAnalyzer {
 
         val rejected = !shouldAllowRecoveredDescendantLabelForTraversal(descendantTextCandidates)
         if (rejected && OneConnectTraversalPolicy.isOneConnectPackageName(node.packageName?.toString())) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT][canary] stage='before_finalize'")
             Log.i("A11Y_HELPER", "[SMART_NEXT][hero] rejected reason='recovered_label_disallowed' descendantCount=${descendantTextCandidates.distinct().size}")
         }
         return rejected
