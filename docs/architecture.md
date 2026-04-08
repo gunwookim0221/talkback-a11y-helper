@@ -76,6 +76,7 @@ AccessibilityService
 - 포커스 성공 후 `lastRequestedFocusIndex`를 보정할 때는 좌표 일치만으로 히스토리를 전진시키지 않고, 현재 접근성 포커스 노드의 객체 ID가 traversal 후보와 직접 일치할 때만 엄격하게 반영합니다.
 - 이 공통 보정 루틴은 일반 콘텐츠에만 `ACTION_SHOW_ON_SCREEN`을 허용하며, `isTopAppBarNode`/`isBottomNavigationBarNode`로 분류된 고정 상단바·하단바에서는 보정 액션과 관련 로그를 모두 차단해 시스템 Bounce를 방지합니다.
 - SmartThings 하단 탭 리소스(`menu_services`, `menu_automations`, `menu_more` 포함)는 `isBottomNavigationBarNode`에서 bottom navigation으로 강제 분류되며, 해당 타겟은 `Detected bottom navigation target -> skipping pre-focus alignment` 로그와 함께 pre-focus alignment/readable scroll을 건너뛰고 직접 포커스만 수행합니다.
+- 현재 포커스가 global navigation item으로 판별되면, helper는 해당 아이템과 같은 global navigation group(공통 ancestor) 내부의 item만 추출해 배치 축(가로/세로)을 판정한 뒤 **바로 다음 인접 sibling 1칸만** 다음 타겟으로 강제합니다. 이 규칙은 하단 탭(폰)과 좌측 rail/side navigation(태블릿)에 공통 적용되며, global navigation group 외 일반 content traversal에는 적용하지 않습니다.
 - `findMainScrollContainer`는 화면에서 면적이 가장 큰 `isScrollable=true` 노드를 메인 스크롤 컨테이너로 선택하고, `SMART_NEXT`는 이를 기준으로 스크롤 대상과 컨텐츠/고정 UI 경계를 해석합니다.
 - `isFixedSystemUI`는 노드 또는 조상에 `Toolbar`/`ActionBar`/`BottomNavigationView` 계열 키워드가 있으면 우선 `Fixed UI`로 분류합니다. 그 외에는 `Button`/`ImageButton` 클래스만 엄격한 고정 UI 후보로 보며, `ViewGroup`/`FrameLayout` 등 일반 콘텐츠 컨테이너는 메인 스크롤 영역 근처 콘텐츠로 취급합니다.
 - 스크롤 후 히스토리 필터는 `inHistory=true`인 후보를 기본적으로 모두 스킵하며, 스크롤 직후 1차 탐색에서는 메인 스크롤 내부의 상단 후보도 예외 없이 건너뛰고 새 컨텐츠를 끝까지 우선 탐색합니다. 메인 스크롤 컨테이너 구분은 유지하되, 상단 물리 위치 증거는 `!isFixedUi` 후보에만 재포커스 허용 근거로 사용합니다. 이때 대상 노드가 이미 시스템 접근성 포커스를 보유하면 추가 `ACTION_ACCESSIBILITY_FOCUS`를 생략해 중복 공지를 줄입니다.

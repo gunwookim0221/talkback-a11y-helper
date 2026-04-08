@@ -10,7 +10,68 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.75.0")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.76.0")
+    }
+
+    @Test
+    fun resolveAdjacentGlobalNavigationSiblingIndex_returnsImmediateRightSiblingForHorizontalGroup() {
+        data class Node(
+            val id: String,
+            val parentId: String?,
+            val bounds: Rect,
+            val isGlobalNavigationItem: Boolean
+        )
+
+        val nodes = listOf(
+            Node("content", "root", Rect(0, 0, 1080, 1800), isGlobalNavigationItem = false),
+            Node("home", "bottom_nav", Rect(0, 1800, 216, 1920), isGlobalNavigationItem = true),
+            Node("devices", "bottom_nav", Rect(216, 1800, 432, 1920), isGlobalNavigationItem = true),
+            Node("life", "bottom_nav", Rect(432, 1800, 648, 1920), isGlobalNavigationItem = true),
+            Node("routines", "bottom_nav", Rect(648, 1800, 864, 1920), isGlobalNavigationItem = true),
+            Node("menu", "bottom_nav", Rect(864, 1800, 1080, 1920), isGlobalNavigationItem = true)
+        )
+        val byId = nodes.associateBy { it.id }
+
+        val nextIndex = A11yNavigator.resolveAdjacentGlobalNavigationSiblingIndex(
+            nodes = nodes,
+            currentIndex = 2,
+            isGlobalNavigationItem = { it.isGlobalNavigationItem },
+            parentOf = { node -> node.parentId?.let(byId::get) },
+            isSameNode = { a, b -> a.id == b.id },
+            boundsOf = { it.bounds }
+        )
+
+        assertEquals(3, nextIndex)
+    }
+
+    @Test
+    fun resolveAdjacentGlobalNavigationSiblingIndex_returnsImmediateLowerSiblingForVerticalGroup() {
+        data class Node(
+            val id: String,
+            val parentId: String?,
+            val bounds: Rect,
+            val isGlobalNavigationItem: Boolean
+        )
+
+        val nodes = listOf(
+            Node("content", "root", Rect(320, 0, 1280, 1800), isGlobalNavigationItem = false),
+            Node("home", "left_nav", Rect(0, 200, 320, 360), isGlobalNavigationItem = true),
+            Node("devices", "left_nav", Rect(0, 360, 320, 520), isGlobalNavigationItem = true),
+            Node("life", "left_nav", Rect(0, 520, 320, 680), isGlobalNavigationItem = true),
+            Node("routines", "left_nav", Rect(0, 680, 320, 840), isGlobalNavigationItem = true)
+        )
+        val byId = nodes.associateBy { it.id }
+
+        val nextIndex = A11yNavigator.resolveAdjacentGlobalNavigationSiblingIndex(
+            nodes = nodes,
+            currentIndex = 2,
+            isGlobalNavigationItem = { it.isGlobalNavigationItem },
+            parentOf = { node -> node.parentId?.let(byId::get) },
+            isSameNode = { a, b -> a.id == b.id },
+            boundsOf = { it.bounds }
+        )
+
+        assertEquals(3, nextIndex)
     }
 
     @Test
