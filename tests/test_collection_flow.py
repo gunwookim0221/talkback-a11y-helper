@@ -25,6 +25,7 @@ class DummyClient:
         self.dump_tree_sequence = []
         self.back_calls = 0
         self.last_target_action_result = {}
+        self.focus_sequence = []
 
     def reset_focus_history(self, _dev):
         self.reset_focus_history_calls += 1
@@ -68,6 +69,8 @@ class DummyClient:
 
     def get_focus(self, **kwargs):
         self.get_focus_calls.append(kwargs)
+        if self.focus_sequence:
+            return self.focus_sequence.pop(0)
         return {}
 
     def dump_tree(self, **kwargs):
@@ -84,7 +87,35 @@ class DummyClient:
 
 
 def _base_tab_cfg(max_steps=1):
-    return {"tab_name": "홈", "scenario_id": "s1", "max_steps": max_steps, "tab_type": "t", "tab_name": "홈"}
+    return {
+        "tab_name": "홈",
+        "scenario_id": "s1",
+        "max_steps": max_steps,
+        "tab_type": "t",
+        "tab_name": "홈",
+        "scenario_type": "content",
+        "screen_context_mode": "bottom_tab",
+    }
+
+
+def _global_nav_tab_cfg(max_steps=1):
+    cfg = _base_tab_cfg(max_steps=max_steps)
+    cfg.update(
+        {
+            "scenario_id": "global_nav_main",
+            "scenario_type": "global_nav",
+            "global_nav": {
+                "resource_ids": [
+                    "com.samsung.android.oneconnect:id/menu_favorites",
+                    "com.samsung.android.oneconnect:id/menu_devices",
+                    "com.samsung.android.oneconnect:id/menu_services",
+                    "com.samsung.android.oneconnect:id/menu_automations",
+                    "com.samsung.android.oneconnect:id/menu_more",
+                ]
+            },
+        }
+    )
+    return cfg
 
 
 def _anchor_row():
@@ -272,6 +303,62 @@ def test_collect_tab_rows_unchanged_classification_skips_overlay_routine(monkeyp
     assert called == {"expand": 0, "realign": 0}
 
 
+def test_collect_tab_rows_global_nav_start_gate_abort_on_non_bottom_focus(monkeypatch):
+    client = DummyClient([])
+    client.focus_sequence = [
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/home_button"},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/home_button"},
+    ]
+
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    rows = collection_flow.collect_tab_rows(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=_global_nav_tab_cfg(),
+        all_rows=[],
+        output_path="out.xlsx",
+        output_base_dir="out",
+    )
+
+    assert rows[-1]["status"] == "TAB_OPEN_FAILED"
+    assert rows[-1]["stop_reason"] == "global_nav_start_gate_failed"
+    assert len(client.collect_focus_step_calls) == 0
+    assert len(client.select_calls) == 1
+
+
+def test_collect_tab_rows_global_nav_start_gate_allows_bottom_focus(monkeypatch):
+    client = DummyClient([_anchor_row(), _main_row(1)])
+    client.focus_sequence = [
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/menu_favorites"},
+    ]
+
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
+    monkeypatch.setattr(
+        collection_flow,
+        "should_stop",
+        lambda **k: (
+            True,
+            0,
+            0,
+            "repeat_no_progress",
+            ("", "", ""),
+            {"terminal": False, "same_like_count": 2, "no_progress": True, "reason": "repeat_no_progress"},
+        ),
+    )
+    monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (False, "not_in_global_candidates"))
+
+    rows = collection_flow.collect_tab_rows(client, "SERIAL", _global_nav_tab_cfg(max_steps=1), [], "o.xlsx", "out")
+
+    assert rows[0]["status"] == "ANCHOR"
+    assert len(client.select_calls) == 0
+
+
 def test_recover_to_start_state_skips_when_already_target(monkeypatch):
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
     client = DummyClient([])
@@ -424,6 +511,7 @@ def test_collect_tab_rows_previous_step_not_updated_after_stop_break(monkeypatch
 
 def test_collect_tab_rows_global_nav_only_skips_non_global_nav_rows(monkeypatch):
     client = DummyClient([_anchor_row(), _main_row(1), _main_row(2)])
+    client.focus_sequence = [{"viewIdResourceName": "id.2"}]
     tab_cfg = {
         **_base_tab_cfg(max_steps=2),
         "scenario_type": "global_nav",
@@ -450,6 +538,7 @@ def test_collect_tab_rows_global_nav_only_skips_non_global_nav_rows(monkeypatch)
 
 def test_collect_tab_rows_global_nav_only_disables_overlay(monkeypatch):
     client = DummyClient([_anchor_row(), _main_row(1)])
+    client.focus_sequence = [{"viewIdResourceName": "id.1"}]
     called = {"is_overlay_candidate": 0}
     tab_cfg = {
         **_base_tab_cfg(max_steps=1),
