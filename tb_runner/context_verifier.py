@@ -62,6 +62,40 @@ def verify_context(
     announcement_regex = str(context_cfg.get("announcement_regex", "") or "").strip()
 
     if context_type == "selected_bottom_tab":
+        smart_requested_view_id = str(step.get("smart_nav_requested_view_id", "") or "").strip()
+        smart_resolved_view_id = str(step.get("smart_nav_resolved_view_id", "") or "").strip()
+        smart_actual_view_id = str(step.get("smart_nav_actual_view_id", "") or "").strip()
+        smart_resolved_label = str(step.get("smart_nav_resolved_label", "") or "").strip()
+        smart_actual_label = str(step.get("smart_nav_actual_label", "") or "").strip()
+        smart_success = bool(step.get("smart_nav_success", False))
+        smart_expected_norm = smart_requested_view_id.lower()
+        smart_resolved_norm = smart_resolved_view_id.lower()
+        smart_actual_norm = smart_actual_view_id.lower()
+        smart_view_id_matched = bool(
+            smart_success
+            and smart_expected_norm
+            and (smart_resolved_norm == smart_expected_norm or smart_actual_norm == smart_expected_norm)
+        )
+        if smart_view_id_matched:
+            smart_actual_selected_text = smart_resolved_label or smart_actual_label
+            smart_text_for_match = _expand_bottom_tab_aliases(smart_actual_selected_text)
+            text_ok = True if not text_regex else _safe_regex_search(text_regex, smart_text_for_match)
+            announcement_ok = (
+                True if not announcement_regex else _safe_regex_search(announcement_regex, smart_text_for_match)
+            )
+            return {
+                "ok": text_ok and announcement_ok,
+                "type": context_type,
+                "expected": " | ".join(part for part in [f"text={text_regex}" if text_regex else "", f"announcement={announcement_regex}" if announcement_regex else ""] if part),
+                "actual_text": smart_actual_selected_text,
+                "actual_announcement": smart_actual_selected_text,
+                "actual_selected_text": smart_actual_selected_text,
+                "actual_source": "smart_nav_result",
+                "selected_candidates": [],
+                "dump_source": "smart_nav_result",
+                "lazy_dump_node_count": 0,
+            }
+
         nodes = step.get("dump_tree_nodes", [])
         dump_source = "step_cache"
         lazy_dump_node_count = 0

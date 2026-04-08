@@ -74,3 +74,32 @@ def test_verify_context_selected_bottom_tab_accepts_korean_tab_alias_for_english
     result = verify_context(step, scenario_cfg)
 
     assert result["ok"] is True
+
+
+def test_verify_context_selected_bottom_tab_prefers_smart_nav_result_on_resource_match():
+    step = _step(
+        smart_nav_success=True,
+        smart_nav_requested_view_id="com.samsung.android.oneconnect:id/menu_devices",
+        smart_nav_resolved_view_id="com.samsung.android.oneconnect:id/menu_devices",
+        smart_nav_actual_view_id="com.samsung.android.oneconnect:id/menu_devices",
+        smart_nav_resolved_label="선택됨, 기기",
+        dump_tree_nodes=[
+            {
+                "text": "",
+                "contentDescription": "",
+                "viewIdResourceName": "android:id/list",
+                "selected": False,
+            }
+        ],
+    )
+    scenario_cfg = {
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": r"(?i).*(devices|기기).*",
+        }
+    }
+
+    result = verify_context(step, scenario_cfg)
+
+    assert result["ok"] is True
+    assert result["actual_source"] == "smart_nav_result"

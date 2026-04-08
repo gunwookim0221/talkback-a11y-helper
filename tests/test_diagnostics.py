@@ -13,6 +13,18 @@ def test_detect_step_mismatch_returns_speech_visible_diverged():
     assert low == []
 
 
+def test_detect_step_mismatch_skips_speech_mismatch_when_smart_nav_is_primary_verdict():
+    row = {
+        "normalized_visible_label": "devices",
+        "normalized_announcement": "grid view",
+        "post_move_verdict_source": "smart_nav_result_resource_match",
+    }
+
+    mismatch, _ = detect_step_mismatch(row)
+
+    assert "speech_visible_diverged" not in mismatch
+
+
 def test_detect_step_mismatch_returns_speech_bounds_diverged():
     previous = {
         "normalized_announcement": "same speech",

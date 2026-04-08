@@ -36,6 +36,7 @@ def detect_step_mismatch(
     focus_class_name = str(row.get("focus_node", {}).get("className", "") or "").strip() if isinstance(row.get("focus_node"), dict) else ""
     normalized_visible_label = str(row.get("normalized_visible_label", "") or "").strip()
     context_type = str(row.get("context_type", "") or "").strip().lower()
+    post_move_verdict_source = str(row.get("post_move_verdict_source", "") or "").strip().lower()
 
     top_level_usable = strong_top_level_policy_skip or top_level_payload_sufficient
     if (top_level_suspicious or (focus_source == "top_level" and not response_success)) and not top_level_usable:
@@ -55,7 +56,7 @@ def detect_step_mismatch(
             and (speech_terms[0] == visible_terms[0] or visible_terms[0] in speech_terms[:2])
         )
     )
-    if visible and speech and not speech_visible_compatible:
+    if visible and speech and not speech_visible_compatible and not post_move_verdict_source.startswith("smart_nav_result"):
         mismatch_reasons.append("speech_visible_diverged")
 
     if context_type == "overlay" and not focus_view_id and focus_bounds:
@@ -135,6 +136,9 @@ def is_global_nav_row(
     if not isinstance(global_nav_cfg, dict):
         global_nav_cfg = {}
 
+    smart_resolved_id = _normalize_text(row.get("smart_nav_resolved_view_id", ""))
+    smart_actual_id = _normalize_text(row.get("smart_nav_actual_view_id", ""))
+    smart_requested_id = _normalize_text(row.get("smart_nav_requested_view_id", ""))
     focus_id = _normalize_text(row.get("focus_view_id", "") or row.get("resource_id", ""))
     focus_label = _normalize_text(row.get("visible_label", ""))
     normalized_label = _normalize_text(row.get("normalized_visible_label", ""))
@@ -147,6 +151,16 @@ def is_global_nav_row(
     strong_signal = False
 
     resource_ids = [str(item).strip().lower() for item in global_nav_cfg.get("resource_ids", []) if isinstance(item, str)]
+    smart_match = False
+    if resource_ids:
+        smart_match = any(
+            candidate and any(resource == candidate or resource in candidate for resource in resource_ids)
+            for candidate in (smart_resolved_id, smart_actual_id, smart_requested_id)
+        )
+    if smart_match:
+        score += 4
+        strong_signal = True
+        reasons.append("smart_nav_resource_id")
     if focus_id and resource_ids and any(resource in focus_id for resource in resource_ids):
         score += 3
         strong_signal = True
