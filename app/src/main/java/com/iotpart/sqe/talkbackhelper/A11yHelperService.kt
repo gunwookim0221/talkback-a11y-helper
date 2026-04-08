@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.5.10"
+        private const val VERSION = "1.5.11"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -426,6 +426,13 @@ class A11yHelperService : AccessibilityService() {
     fun moveFocusSmart(reqId: String = "none"): JSONObject {
         A11yHistoryManager.activeSmartNextReqId = reqId
         try {
+            val currentNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            logSmartNextDiag(
+                reqId = reqId,
+                stage = "REAL_ENTRY",
+                currentNode = currentNode,
+                detail = "service_version=$VERSION"
+            )
             Log.i(TAG, "[SMART_NEXT_ACTION][service] req_id='$reqId'")
             Log.i(
                 TAG,
@@ -435,8 +442,8 @@ class A11yHelperService : AccessibilityService() {
                 TAG,
                 "[SMART_NEXT][trace_enter] stage='service_moveFocusSmart' req_id='$reqId'"
             )
-            val currentNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
             val outcome = try {
+                logSmartNextDiag(reqId = reqId, stage = "service_before_performSmartNext", currentNode = currentNode)
                 Log.i(TAG, "[SMART_NEXT_ACTION][before_navigator] req_id='$reqId'")
                 Log.i(
                     TAG,
@@ -447,8 +454,21 @@ class A11yHelperService : AccessibilityService() {
                     TAG,
                     "[SMART_NEXT_ACTION][after_navigator] req_id='$reqId' success=${navigatorOutcome.success} detail='${navigatorOutcome.reason}'"
                 )
+                logSmartNextDiag(
+                    reqId = reqId,
+                    stage = "service_after_performSmartNext",
+                    currentNode = currentNode,
+                    targetNode = navigatorOutcome.target,
+                    detail = "status=${if (navigatorOutcome.success) "success" else "failed"} detail=${navigatorOutcome.reason}"
+                )
                 navigatorOutcome
             } catch (t: Throwable) {
+                logSmartNextDiag(
+                    reqId = reqId,
+                    stage = "exception",
+                    currentNode = currentNode,
+                    detail = "status=failed detail=exception exception_class=${t.javaClass.simpleName} exception_message=${t.message.orEmpty()}"
+                )
                 Log.i(
                     TAG,
                     "[SMART_NEXT][final] success=false status='failed' detail='exception:${t.javaClass.simpleName}' resolved_focus_view_id='' resolved_focus_label='' requested_target_view_id='' requested_target_label=''"
@@ -478,6 +498,14 @@ class A11yHelperService : AccessibilityService() {
                 TAG,
                 "[SMART_NEXT][final] success=${outcome.success} status='$normalizedStatus' detail='$detail' resolved_focus_view_id='${resolvedFocusNode?.viewIdResourceName.orEmpty()}' resolved_focus_label='$resolvedFocusLabel' requested_target_view_id='${outcome.target?.viewIdResourceName.orEmpty()}' requested_target_label='$requestedTargetLabel'"
             )
+            logSmartNextDiag(
+                reqId = reqId,
+                stage = "final",
+                currentNode = currentNode,
+                targetNode = outcome.target,
+                actualNode = resolvedFocusNode,
+                detail = "status=$normalizedStatus detail=$detail"
+            )
 
             val resultJson = JSONObject().apply {
                 put("timestamp", System.currentTimeMillis())
@@ -500,6 +528,28 @@ class A11yHelperService : AccessibilityService() {
         } finally {
             A11yHistoryManager.activeSmartNextReqId = "none"
         }
+    }
+
+    private fun safeLabel(node: AccessibilityNodeInfo?): String {
+        return (
+            node?.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: node?.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: ""
+            ).replace("\n", " ").take(96)
+    }
+
+    private fun logSmartNextDiag(
+        reqId: String,
+        stage: String,
+        currentNode: AccessibilityNodeInfo? = null,
+        targetNode: AccessibilityNodeInfo? = null,
+        actualNode: AccessibilityNodeInfo? = null,
+        detail: String = ""
+    ) {
+        Log.i(
+            TAG,
+            "[SMART_NEXT_DIAG] req_id=$reqId stage=$stage current_view_id=${currentNode?.viewIdResourceName.orEmpty()} current_label='${safeLabel(currentNode)}' target_view_id=${targetNode?.viewIdResourceName.orEmpty()} target_label='${safeLabel(targetNode)}' actual_view_id=${actualNode?.viewIdResourceName.orEmpty()} actual_label='${safeLabel(actualNode)}' $detail"
+        )
     }
 
     fun moveFocus(forward: Boolean, reqId: String = "none"): JSONObject {
