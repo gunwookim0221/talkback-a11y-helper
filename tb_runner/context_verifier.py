@@ -200,11 +200,26 @@ def verify_context(
             expected_parts.append(f"text={text_regex}")
         if announcement_regex:
             expected_parts.append(f"announcement={announcement_regex}")
+        expected_pattern = " | ".join(expected_parts)
+        matched_by = "none"
+        if ok:
+            if actual_source == "selected_candidate":
+                matched_by = "selected_values[0]"
+            elif actual_source in {"global_fallback", "tab_like_candidate"}:
+                matched_by = "fallback_values[0]"
+            else:
+                matched_by = "actual_selected_text"
+        log(
+            f"[TRACE][context_selected_tab] ok={ok} actual_source='{actual_source}' "
+            f"actual='{actual_selected_text}' expected='{expected_pattern}' matched_by='{matched_by}' "
+            f"selected_values={selected_values} fallback_values={fallback_values}",
+            level="DEBUG",
+        )
 
         return {
             "ok": ok,
             "type": context_type,
-            "expected": " | ".join(expected_parts),
+            "expected": expected_pattern,
             "actual_text": actual_text,
             "actual_announcement": actual_announcement,
             "actual_selected_text": actual_selected_text,
