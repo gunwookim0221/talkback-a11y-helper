@@ -132,12 +132,24 @@ def _attempt_tab_focus_alignment(
 
     for attempt in range(1, max_retries + 1):
         type_, pattern, source = deduped_selectors[(attempt - 1) % len(deduped_selectors)]
+        selector_desc = f"{source}:{type_}:{pattern}"
         log(
             f"{log_tag} attempt={attempt}/{max_retries} scenario='{scenario_id}' "
             f"type='{type_}' source='{source}'",
             level="DEBUG",
         )
         aligned = bool(client.select(dev=dev, name=pattern, type_=type_, wait_=select_wait_seconds))
+        last_result = getattr(client, "last_target_action_result", {})
+        target = last_result.get("target", {}) if isinstance(last_result, dict) else {}
+        focus_label = str(target.get("text", "") or target.get("contentDescription", "") or "").strip()
+        focus_resource = str(target.get("viewIdResourceName", "") or target.get("resourceId", "") or "").strip()
+        attempt_reason = str(last_result.get("reason", "ok" if aligned else "selector_not_focused") or "")
+        log(
+            f"[TRACE][focus_align_attempt] scenario='{scenario_id}' attempt={attempt}/{max_retries} "
+            f"target='{selector_desc}' focus_label='{focus_label}' focus_resource='{focus_resource}' "
+            f"matched={aligned} reason='{attempt_reason}'",
+            level="DEBUG",
+        )
         if aligned:
             log(
                 f"{log_tag} success scenario='{scenario_id}' attempt={attempt}/{max_retries} "

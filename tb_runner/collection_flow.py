@@ -845,6 +845,13 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     focus_align_attempted = bool(focus_align_result.get("attempted"))
     focus_align_ok = bool(focus_align_result.get("ok"))
     focus_align_fast = bool(focus_align_result.get("fast_mode"))
+    trace_context_ok = bool(tab_stabilized.get("context", {}).get("ok")) if isinstance(tab_stabilized, dict) else False
+    log(
+        f"[TRACE][open_scenario] scenario='{scenario_id}' stabilization_mode='{stabilization_mode}' "
+        f"focus_align_attempted={focus_align_attempted} focus_align_ok={focus_align_ok} "
+        f"focus_align_reason='{focus_align_result.get('reason', '')}' context_ok={trace_context_ok} "
+        f"anchor_matched=False anchor_stable=False",
+    )
     if focus_align_attempted and not focus_align_ok:
         focus_log_tag = "[TAB][focus_align_fast]" if focus_align_fast else "[TAB][focus_align]"
         log(
@@ -911,6 +918,14 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         phase="scenario_start",
         max_retries=anchor_retry_count,
         verify_reads=1 if is_transition_entry_fast_path and not is_strict_main_tab_scenario else 2,
+    )
+    trace_anchor_matched = bool(stabilize_result.get("matched")) if isinstance(stabilize_result, dict) else False
+    trace_anchor_stable = bool(stabilize_result.get("ok")) if isinstance(stabilize_result, dict) else False
+    log(
+        f"[TRACE][open_scenario] scenario='{scenario_id}' stabilization_mode='{stabilization_mode}' "
+        f"focus_align_attempted={focus_align_attempted} focus_align_ok={focus_align_ok} "
+        f"focus_align_reason='{focus_align_result.get('reason', '')}' context_ok={trace_context_ok} "
+        f"anchor_matched={trace_anchor_matched} anchor_stable={trace_anchor_stable}",
     )
     if not stabilize_result.get("ok"):
         low_conf_allowed, low_conf_reason = _is_new_screen_low_confidence_allowed(
@@ -1091,6 +1106,33 @@ def collect_tab_rows(
             log(format_perf_summary("scenario_summary", scenario_perf.summary_dict()))
         save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
         return rows
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    post_open_focus = client.get_focus(dev=dev, wait_seconds=min(main_step_wait_seconds, 1.0), allow_fallback_dump=False, mode="fast")
+    post_open_trace = getattr(client, "last_get_focus_trace", {}) if isinstance(getattr(client, "last_get_focus_trace", {}), dict) else {}
+    post_view_id = str(post_open_focus.get("viewIdResourceName", "") or post_open_focus.get("resourceId", "") or "").strip() if isinstance(post_open_focus, dict) else ""
+    extract_visible_label = getattr(client, "extract_visible_label_from_focus", None)
+    if callable(extract_visible_label) and isinstance(post_open_focus, dict):
+        post_label = str(extract_visible_label(post_open_focus) or "")
+    else:
+        post_label = str(
+            (post_open_focus.get("text", "") if isinstance(post_open_focus, dict) else "")
+            or (post_open_focus.get("contentDescription", "") if isinstance(post_open_focus, dict) else "")
+            or ""
+        ).strip()
+    post_speech = str(
+        (post_open_focus.get("talkbackLabel", "") if isinstance(post_open_focus, dict) else "")
+        or (post_open_focus.get("mergedLabel", "") if isinstance(post_open_focus, dict) else "")
+        or (post_open_focus.get("contentDescription", "") if isinstance(post_open_focus, dict) else "")
+        or (post_open_focus.get("text", "") if isinstance(post_open_focus, dict) else "")
+        or ""
+    ).strip()
+    post_bounds = str(post_open_focus.get("boundsInScreen", "") or "").strip() if isinstance(post_open_focus, dict) else ""
+    post_source = str(post_open_trace.get("final_payload_source", "none") or "none")
+    post_top_level = bool(post_open_trace.get("accepted_with_success_false", False))
+    log(
+        f"[TRACE][post_open_focus] scenario='{scenario_id}' view_id='{post_view_id}' label='{post_label}' "
+        f"speech='{post_speech}' bounds='{post_bounds}' source='{post_source}' top_level={post_top_level}",
+    )
 
     anchor_start = time.perf_counter()
     anchor_row = client.collect_focus_step(
@@ -1117,6 +1159,16 @@ def collect_tab_rows(
     anchor_row["scenario_start_source"] = str(tab_cfg.get("_scenario_start_source", "explicit_anchor") or "explicit_anchor")
     anchor_row["anchor_stable"] = bool(tab_cfg.get("_scenario_anchor_stable", True))
     anchor_row["review_note"] = str(tab_cfg.get("_scenario_start_note", "") or "")
+    anchor_visible = str(anchor_row.get("visible_label", "") or "").strip()
+    anchor_speech = str(anchor_row.get("merged_announcement", "") or "").strip()
+    anchor_normalized_visible = str(anchor_row.get("normalized_visible_label", "") or "").strip()
+    anchor_view_id = str(anchor_row.get("focus_view_id", "") or "").strip()
+    anchor_is_global_nav = bool(anchor_row.get("is_global_nav", False))
+    log(
+        f"[TRACE][anchor_row] scenario='{scenario_id}' step=0 view_id='{anchor_view_id}' "
+        f"visible='{anchor_visible}' speech='{anchor_speech}' "
+        f"normalized_visible='{anchor_normalized_visible}' is_global_nav={anchor_is_global_nav}",
+    )
     anchor_row["_step_mono_start"] = time.monotonic() - float(anchor_row.get("t_step_start", 0.0) or 0.0)
     anchor_row = maybe_capture_focus_crop(client, dev, anchor_row, output_base_dir)
     anchor_row.pop("_step_mono_start", None)
