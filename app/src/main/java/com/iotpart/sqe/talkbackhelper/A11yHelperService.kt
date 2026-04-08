@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.5.7"
+        private const val VERSION = "1.5.8"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -174,12 +174,14 @@ class A11yHelperService : AccessibilityService() {
     }
 
     fun dumpTree(reqId: String = "none") {
+        Log.i("A11Y_HELPER", "[SMART_NEXT][canary] stage='before_dump_tree'")
         val dumpArray = A11yNavigator.dumpTreeFlat(rootInActiveWindow)
         val dumpString = dumpArray.toString()
         val chunkSize = 3000
 
         if (dumpString.length <= chunkSize) {
             Log.i(TAG, "DUMP_TREE_RESULT $reqId $dumpString")
+            Log.i("A11Y_HELPER", "[SMART_NEXT][canary] stage='after_dump_tree'")
             return
         }
 
@@ -189,6 +191,7 @@ class A11yHelperService : AccessibilityService() {
             Log.i(TAG, "DUMP_TREE_PART $reqId ${dumpString.substring(startIndex, endIndex)}")
             startIndex = endIndex
         }
+        Log.i("A11Y_HELPER", "[SMART_NEXT][canary] stage='after_dump_tree'")
         Log.i(TAG, "DUMP_TREE_END $reqId")
     }
 
