@@ -9,7 +9,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.5.3"
+    const val VERSION: String = "1.5.4"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -231,7 +231,15 @@ object A11yFocusExecutor {
         if (!focusExecution.success) {
             Log.i(
                 "A11Y_HELPER",
+                "[SMART_NEXT][trace_enter] stage='before_focus_commit' intended_view_id='${target.viewIdResourceName.orEmpty()}' commit_status='failed'"
+            )
+            Log.i(
+                "A11Y_HELPER",
                 "[SMART_NEXT][focus_commit] is_scroll_action=$isScrollAction intended_index=$traversalIndex intended_view_id='${target.viewIdResourceName.orEmpty()}' actual_candidate_index=-1 actual_view_id='' identity_matched=false retarget_allowed=false commit_status='failed' reason='focus_action_failed' action_success=${focusExecution.success}"
+            )
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][trace_enter] stage='after_focus_commit' intended_view_id='${target.viewIdResourceName.orEmpty()}' commit_status='failed'"
             )
             return ActionResult(false, "failed", target)
         }
@@ -255,7 +263,15 @@ object A11yFocusExecutor {
             )
             Log.i(
                 "A11Y_HELPER",
+                "[SMART_NEXT][trace_enter] stage='before_focus_commit' intended_view_id='${target.viewIdResourceName.orEmpty()}' commit_status='failed'"
+            )
+            Log.i(
+                "A11Y_HELPER",
                 "[SMART_NEXT][focus_commit] is_scroll_action=$isScrollAction intended_index=$traversalIndex intended_view_id='${target.viewIdResourceName.orEmpty()}' actual_candidate_index=-1 actual_view_id='${actualFocusedAfterVerification?.viewIdResourceName.orEmpty()}' identity_matched=false retarget_allowed=false commit_status='failed' reason='failed_external_focus_departure' action_success=${focusExecution.success}"
+            )
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][trace_enter] stage='after_focus_commit' intended_view_id='${target.viewIdResourceName.orEmpty()}' commit_status='failed'"
             )
             return ActionResult(false, "failed_external_focus_departure", target)
         }
@@ -408,7 +424,15 @@ object A11yFocusExecutor {
         val finalReason = if (success) "success_basis=committed_candidate" else reason
         Log.i(
             "A11Y_HELPER",
+            "[SMART_NEXT][trace_enter] stage='before_focus_commit' intended_view_id='${intendedTarget.viewIdResourceName.orEmpty()}' commit_status='$commitStatus'"
+        )
+        Log.i(
+            "A11Y_HELPER",
             "[SMART_NEXT][focus_commit] is_scroll_action=$isScrollAction intended_index=$intendedIndex intended_view_id='${intendedTarget.viewIdResourceName.orEmpty()}' actual_candidate_index=$actualCandidateIndex actual_view_id='${actualFocusedNode?.viewIdResourceName.orEmpty()}' identity_matched=$identityMatched retarget_allowed=$retarget commit_status='$commitStatus' reason='$finalReason' action_success=$success"
+        )
+        Log.i(
+            "A11Y_HELPER",
+            "[SMART_NEXT][trace_enter] stage='after_focus_commit' intended_view_id='${intendedTarget.viewIdResourceName.orEmpty()}' commit_status='$commitStatus'"
         )
         return FocusRetargetDecision(
             finalTarget = finalTarget,
