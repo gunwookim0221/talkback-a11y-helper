@@ -100,6 +100,29 @@ class HelperBridge:
         )
 
     def _request_smart_next(self, dev: Any, req_id: str) -> dict[str, Any]:
+        serial = self._client._resolve_serial(dev)
+        cmd_parts = [self._client.adb_path]
+        if serial:
+            cmd_parts.extend(["-s", serial])
+        cmd_parts.extend(
+            [
+                "shell",
+                "am",
+                "broadcast",
+                "-a",
+                ACTION_SMART_NEXT,
+                "-p",
+                self._client.package_name,
+                "--es",
+                "reqId",
+                req_id,
+            ]
+        )
+        full_cmd = " ".join(cmd_parts)
+        print(
+            f"[SMART_NEXT_TRACE] before_broadcast action={ACTION_SMART_NEXT} "
+            f"req_id={req_id} fallback=false full_adb_command=\"{full_cmd}\""
+        )
         self._client._broadcast(dev, ACTION_SMART_NEXT, ["--es", "reqId", req_id])
         return self._client._read_log_result(
             dev,
