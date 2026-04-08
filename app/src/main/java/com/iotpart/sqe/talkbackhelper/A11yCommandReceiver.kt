@@ -11,7 +11,7 @@ import java.util.concurrent.Executors
 class A11yCommandReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.2.5"
+        private const val VERSION = "1.2.6"
         private const val ACTION_GET_FOCUS = "com.iotpart.sqe.talkbackhelper.GET_FOCUS"
         private const val ACTION_FOCUS_RESULT = "com.iotpart.sqe.talkbackhelper.FOCUS_RESULT"
         private const val ACTION_DUMP_TREE = "com.iotpart.sqe.talkbackhelper.DUMP_TREE"
@@ -47,6 +47,10 @@ class A11yCommandReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action ?: return
+        Log.i(
+            TAG,
+            "[SMART_NEXT][trace_enter] stage='receiver_onReceive' action='$action'"
+        )
         when (action) {
             ACTION_GET_FOCUS -> handleGetFocus(context, intent)
             ACTION_DUMP_TREE -> handleDumpTree(intent)
@@ -192,6 +196,10 @@ class A11yCommandReceiver : BroadcastReceiver() {
 
     private fun handleSmartNext(context: Context, intent: Intent) {
         val reqId = parseReqId(intent)
+        Log.i(
+            TAG,
+            "[SMART_NEXT][trace_enter] stage='receiver_handleSmartNext' req_id='$reqId'"
+        )
         val service = A11yHelperService.instance
         if (service == null) {
             Log.i(
@@ -204,6 +212,10 @@ class A11yCommandReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         smartNextExecutor.execute {
             try {
+                Log.i(
+                    TAG,
+                    "[SMART_NEXT][trace_enter] stage='receiver_executor_start' req_id='$reqId'"
+                )
                 Log.i(TAG, "[SMART_NEXT] async execution start reqId=$reqId receiverVersion=$VERSION")
                 val result = service.moveFocusSmart(reqId)
                 val status = result.optString("status", "unknown")
