@@ -259,6 +259,68 @@ def _select_recovery_target(client: A11yAdbClient, dev: str, policy: dict[str, A
     return False
 
 
+def _resolve_global_nav_resource_ids(tab_cfg: dict[str, Any]) -> list[str]:
+    global_nav_cfg = tab_cfg.get("global_nav", {})
+    if not isinstance(global_nav_cfg, dict):
+        return []
+    raw_ids = global_nav_cfg.get("resource_ids", [])
+    if not isinstance(raw_ids, list):
+        return []
+    return [str(item or "").strip() for item in raw_ids if str(item or "").strip()]
+
+
+def _ensure_global_nav_start_focus(
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict[str, Any],
+    *,
+    scenario_id: str,
+    focused_view_id: str,
+    wait_seconds: float,
+) -> tuple[bool, dict[str, Any]]:
+    bottom_tab_ids = _resolve_global_nav_resource_ids(tab_cfg)
+    normalized_ids = {item.lower() for item in bottom_tab_ids}
+    focused_norm = focused_view_id.lower()
+    is_bottom_tab = bool(focused_norm) and focused_norm in normalized_ids
+    log(
+        f"[GLOBAL_NAV][start_gate] scenario='{scenario_id}' focused_view_id='{focused_view_id}' "
+        f"is_bottom_tab={str(is_bottom_tab).lower()}"
+    )
+    if is_bottom_tab:
+        log(f"[GLOBAL_NAV][start_gate] passed scenario='{scenario_id}'")
+        return True, {}
+
+    log(
+        f"[GLOBAL_NAV][start_gate] retry_align scenario='{scenario_id}' "
+        f"reason='focused_node_not_bottom_tab' focused_view_id='{focused_view_id}'"
+    )
+    retry_target = bottom_tab_ids[0] if bottom_tab_ids else "com.samsung.android.oneconnect:id/menu_favorites"
+    client.select(dev=dev, name=retry_target, type_="r", wait_=3)
+    time.sleep(min(max(wait_seconds, 0.2), 0.8))
+    retry_focus = client.get_focus(
+        dev=dev,
+        wait_seconds=min(wait_seconds, 1.0),
+        allow_fallback_dump=False,
+        mode="fast",
+    )
+    retry_view_id = (
+        str(retry_focus.get("viewIdResourceName", "") or retry_focus.get("resourceId", "") or "").strip()
+        if isinstance(retry_focus, dict)
+        else ""
+    )
+    retry_norm = retry_view_id.lower()
+    retry_ok = bool(retry_norm) and retry_norm in normalized_ids
+    log(
+        f"[GLOBAL_NAV][start_gate] scenario='{scenario_id}' focused_view_id='{retry_view_id}' "
+        f"is_bottom_tab={str(retry_ok).lower()}"
+    )
+    if retry_ok:
+        log(f"[GLOBAL_NAV][start_gate] passed scenario='{scenario_id}'")
+        return True, retry_focus if isinstance(retry_focus, dict) else {}
+    log(f"[GLOBAL_NAV][start_gate] failed scenario='{scenario_id}' final_view_id='{retry_view_id}'")
+    return False, retry_focus if isinstance(retry_focus, dict) else {}
+
+
 def _send_back(client: A11yAdbClient, dev: str) -> bool:
     run_fn = getattr(client, "_run", None)
     if callable(run_fn):
@@ -1133,6 +1195,49 @@ def collect_tab_rows(
         f"[TRACE][post_open_focus] scenario='{scenario_id}' view_id='{post_view_id}' label='{post_label}' "
         f"speech='{post_speech}' bounds='{post_bounds}' source='{post_source}' top_level={post_top_level}",
     )
+    scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower()
+    screen_context_mode = _resolve_screen_context_mode(tab_cfg)
+    is_global_nav_start_gate = scenario_type == "global_nav" and screen_context_mode == "bottom_tab"
+    if is_global_nav_start_gate:
+        start_gate_ok, gated_focus = _ensure_global_nav_start_focus(
+            client=client,
+            dev=dev,
+            tab_cfg=tab_cfg,
+            scenario_id=scenario_id,
+            focused_view_id=post_view_id,
+            wait_seconds=main_step_wait_seconds,
+        )
+        if not start_gate_ok:
+            row = {
+                "tab_name": tab_cfg["tab_name"],
+                "step_index": -1,
+                "status": "TAB_OPEN_FAILED",
+                "stop_reason": "global_nav_start_gate_failed",
+                "crop_image": "",
+                "crop_image_path": "",
+                "crop_image_saved": False,
+            }
+            row["fingerprint"] = build_row_fingerprint(row)
+            row["fingerprint_repeat_count"] = 0
+            row["is_duplicate_step"] = False
+            row["is_recent_duplicate_step"] = False
+            row["recent_duplicate_distance"] = 0
+            row["recent_duplicate_of_step"] = -1
+            row["normalized_fingerprint"] = ""
+            row["is_recent_semantic_duplicate_step"] = False
+            row["recent_semantic_duplicate_distance"] = 0
+            row["recent_semantic_duplicate_of_step"] = -1
+            row["recent_semantic_unique_count"] = 0
+            row["is_noise_step"] = False
+            row["noise_reason"] = ""
+            rows.append(row)
+            all_rows.append(row)
+            if scenario_perf is not None:
+                scenario_perf.record_row(row)
+                scenario_perf.finalize()
+                log(format_perf_summary("scenario_summary", scenario_perf.summary_dict()))
+            save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
+            return rows
 
     anchor_start = time.perf_counter()
     anchor_row = client.collect_focus_step(

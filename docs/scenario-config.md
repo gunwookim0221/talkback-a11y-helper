@@ -99,6 +99,9 @@ anchor 안정 자체는 공통적으로 2회 연속 검증(짧은 settle 포함)
   - 필요 시 `stop_on_global_nav_entry`로 본문→전역 nav 경계에서 종료
 - `global_nav`
   - 하단 탭/좌측 rail 같은 전역 nav 수집 중심
+  - `global_nav_main`(또는 `scenario_type=global_nav` + `screen_context_mode=bottom_tab`)은
+    scenario open 직후 실제 focused node의 `view_id`가 `global_nav.resource_ids`에 포함될 때만
+    step loop를 시작합니다. 1차 실패 시 tab 재정렬을 1회 시도하고, 재확인 실패 시 수집을 중단합니다.
   - 필요 시 `stop_on_global_nav_exit` 또는 `global_nav_end` 해석 사용
 
 global nav 판별 신호:
