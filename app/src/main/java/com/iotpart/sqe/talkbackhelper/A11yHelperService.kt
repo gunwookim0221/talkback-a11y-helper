@@ -423,8 +423,20 @@ class A11yHelperService : AccessibilityService() {
     }
 
     fun moveFocusSmart(reqId: String = "none"): JSONObject {
+        Log.i(
+            TAG,
+            "[SMART_NEXT][trace_enter] REAL_ENTRY"
+        )
+        Log.i(
+            TAG,
+            "[SMART_NEXT][trace_enter] stage='service_moveFocusSmart' req_id='$reqId'"
+        )
         val currentNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         val outcome = try {
+            Log.i(
+                TAG,
+                "[SMART_NEXT][trace_enter] stage='service_before_performSmartNext' req_id='$reqId'"
+            )
             A11yNavigator.performSmartNext(rootInActiveWindow, currentNode)
         } catch (t: Throwable) {
             Log.i(
