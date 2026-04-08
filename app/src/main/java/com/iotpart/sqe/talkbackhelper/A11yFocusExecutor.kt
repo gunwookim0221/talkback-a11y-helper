@@ -9,7 +9,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.abs
 
 object A11yFocusExecutor {
-    const val VERSION: String = "1.5.4"
+    const val VERSION: String = "1.5.5"
 
     data class FocusExecutionResult(
         val success: Boolean,
@@ -293,7 +293,14 @@ object A11yFocusExecutor {
                 aliasGroupMembers = aliasMembersByTraversalIndex[traversalIndex].orEmpty()
             )
         }
-        if (!commitDecision.success) return ActionResult(false, "failed_focus_rejected", target)
+        if (!commitDecision.success) {
+            val actualFocusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            Log.w(
+                "A11Y_HELPER",
+                "[SMART_NEXT_DEBUG][reject] req_id='${A11yHistoryManager.activeSmartNextReqId}' detail='failed_focus_rejected' branch='requestFocusFlow.commit_decision_failed' target_id='${target.viewIdResourceName.orEmpty()}' target_label='${label.replace("\n", " ")}' target_bounds='${A11yNavigator.formatBoundsForLog(targetBounds)}' perform_action_success=${focusExecution.success} verify_resolved=${focusVerification.resolved} verify_snap_back=${focusVerification.snapBackDetected} verify_hard_failure=${focusVerification.hardFailureSignal} actual_focus_id='${actualFocusedNode?.viewIdResourceName.orEmpty()}' reject_reason='${commitDecision.reason}' commit_source='${commitDecision.source}' commit_status='${commitDecision.commitStatus}'"
+            )
+            return ActionResult(false, "failed_focus_rejected", target)
+        }
         return commitFinalFocusCandidate(
             decision = commitDecision,
             reason = "focus_confirmed_final",
