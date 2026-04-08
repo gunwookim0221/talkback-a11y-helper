@@ -124,6 +124,12 @@ object A11yNavigationPolicy {
             shouldScrollBeforeBottomBar = shouldScrollBeforeBottomBar,
             continuationContentLikelyBelowCurrentGrid = continuationLikely || rowOrGridContinuationDetected
         )
+        val directBottomTabOverride = initialTarget.forceDirectBottomTabFocus && nextIsBottomBar
+        val effectiveContinuationLikely = if (directBottomTabOverride) false else continuationLikely
+        val effectiveRowOrGridContinuationDetected = if (directBottomTabOverride) false else rowOrGridContinuationDetected
+        val effectiveContinuationExistsBeforeBottomBar = if (directBottomTabOverride) false else continuationExistsBeforeBottomBar
+        val effectiveIsCurrentNearBottom = if (directBottomTabOverride) false else isCurrentNearBottom
+        val effectiveForcePreScrollBeforeBottomBar = if (directBottomTabOverride) false else forcePreScrollBeforeBottomBar
         val contentTraversalCompleteBeforeBottomBar = nextIsBottomBar && isContentTraversalCompleteBeforeBottomBar(
             traversalList = traversalList,
             currentIndex = currentIndex,
@@ -142,11 +148,11 @@ object A11yNavigationPolicy {
             nextIsBottomBar = nextIsBottomBar,
             scrollableNodeExists = smartNextState.scrollableContainer != null,
             contentTraversalCompleteBeforeBottomBar = contentTraversalCompleteBeforeBottomBar,
-            continuationLikely = continuationLikely,
-            rowOrGridContinuationDetected = rowOrGridContinuationDetected,
-            continuationExistsBeforeBottomBar = continuationExistsBeforeBottomBar,
-            isCurrentNearBottom = isCurrentNearBottom,
-            forcePreScrollBeforeBottomBar = forcePreScrollBeforeBottomBar,
+            continuationLikely = effectiveContinuationLikely,
+            rowOrGridContinuationDetected = effectiveRowOrGridContinuationDetected,
+            continuationExistsBeforeBottomBar = effectiveContinuationExistsBeforeBottomBar,
+            isCurrentNearBottom = effectiveIsCurrentNearBottom,
+            forcePreScrollBeforeBottomBar = effectiveForcePreScrollBeforeBottomBar,
             isOutOfBounds = isOutOfBounds,
             isCurrentAtLastIndex = isCurrentAtLastIndex,
             shouldScrollAtEnd = shouldScrollAtEnd,
@@ -157,9 +163,12 @@ object A11yNavigationPolicy {
             "A11Y_HELPER",
             "[DECIDE] current=$currentIndex next=$nextIndex nav=${navigationDecision.type} outOfBounds=$isOutOfBounds atLast=$isCurrentAtLastIndex nextIsBottomBar=$nextIsBottomBar reason=${navigationDecision.reason}"
         )
+        if (directBottomTabOverride) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT][policy] direct_bottom_tab_override=true req_id='${A11yHistoryManager.activeSmartNextReqId}'")
+        }
         Log.i(
             "A11Y_HELPER",
-            "[SMART_NEXT][policy] req_id='${A11yHistoryManager.activeSmartNextReqId}' current_view_id='${traversalList.getOrNull(currentIndex)?.viewIdResourceName.orEmpty()}' current_label='${(A11yNavigator.resolvePrimaryLabel(traversalList.getOrNull(currentIndex)) ?: traversalList.getOrNull(currentIndex)?.let { A11yTraversalAnalyzer.recoverDescendantLabel(it) } ?: "<none>").replace("\n", " ").take(72)}' intended_target_view_id='${traversalList.getOrNull(nextIndex)?.viewIdResourceName.orEmpty()}' intended_target_label='${(A11yNavigator.resolvePrimaryLabel(traversalList.getOrNull(nextIndex)) ?: traversalList.getOrNull(nextIndex)?.let { A11yTraversalAnalyzer.recoverDescendantLabel(it) } ?: "<none>").replace("\n", " ").take(72)}' actual_focused_view_id='${state.root.findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.viewIdResourceName.orEmpty()}' actual_focused_label='${(A11yNavigator.resolvePrimaryLabel(state.root.findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)) ?: state.root.findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { A11yTraversalAnalyzer.recoverDescendantLabel(it) } ?: "<none>").replace("\n", " ").take(72)}' status='pending' detail='${navigationDecision.reason}' current_index=$currentIndex next_index_initial=$nextIndexInitial next_index_final=$nextIndex next_is_bottom_bar=$nextIsBottomBar continuation_likely=$continuationLikely row_or_grid_continuation=$rowOrGridContinuationDetected continuation_exists_before_bottom_bar=$continuationExistsBeforeBottomBar is_current_near_bottom=$isCurrentNearBottom force_pre_scroll_before_bottom_bar=$forcePreScrollBeforeBottomBar nav_type=${navigationDecision.type}"
+            "[SMART_NEXT][policy] req_id='${A11yHistoryManager.activeSmartNextReqId}' current_view_id='${traversalList.getOrNull(currentIndex)?.viewIdResourceName.orEmpty()}' current_label='${(A11yNavigator.resolvePrimaryLabel(traversalList.getOrNull(currentIndex)) ?: traversalList.getOrNull(currentIndex)?.let { A11yTraversalAnalyzer.recoverDescendantLabel(it) } ?: "<none>").replace("\n", " ").take(72)}' intended_target_view_id='${traversalList.getOrNull(nextIndex)?.viewIdResourceName.orEmpty()}' intended_target_label='${(A11yNavigator.resolvePrimaryLabel(traversalList.getOrNull(nextIndex)) ?: traversalList.getOrNull(nextIndex)?.let { A11yTraversalAnalyzer.recoverDescendantLabel(it) } ?: "<none>").replace("\n", " ").take(72)}' actual_focused_view_id='${state.root.findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.viewIdResourceName.orEmpty()}' actual_focused_label='${(A11yNavigator.resolvePrimaryLabel(state.root.findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)) ?: state.root.findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { A11yTraversalAnalyzer.recoverDescendantLabel(it) } ?: "<none>").replace("\n", " ").take(72)}' status='pending' detail='${navigationDecision.reason}' current_index=$currentIndex next_index_initial=$nextIndexInitial next_index_final=$nextIndex next_is_bottom_bar=$nextIsBottomBar continuation_likely=$effectiveContinuationLikely row_or_grid_continuation=$effectiveRowOrGridContinuationDetected continuation_exists_before_bottom_bar=$effectiveContinuationExistsBeforeBottomBar is_current_near_bottom=$effectiveIsCurrentNearBottom force_pre_scroll_before_bottom_bar=$effectiveForcePreScrollBeforeBottomBar direct_bottom_tab_override=$directBottomTabOverride nav_type=${navigationDecision.type}"
         )
         Log.i(
             "A11Y_HELPER",

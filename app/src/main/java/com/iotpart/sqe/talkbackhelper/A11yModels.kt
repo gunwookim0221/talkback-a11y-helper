@@ -147,7 +147,8 @@ internal data class SmartNextRuntimeState(
 
 internal data class InitialNextTargetDecision(
     val nextIndex: Int,
-    val selectionDecision: SelectionDecision
+    val selectionDecision: SelectionDecision,
+    val forceDirectBottomTabFocus: Boolean = false
 )
 
 internal data class SmartNextExecutionDecision(

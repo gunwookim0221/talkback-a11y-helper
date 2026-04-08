@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.75.5"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.75.6"
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
@@ -1120,6 +1120,7 @@ object A11yNavigator {
         val initialNextIndex = nextIndex
         var skipCoordinateDuplicateApplied = false
         var targetDecisionReason = "unchanged"
+        var forceDirectBottomTabFocus = false
         val collectCurrentIndex = state.collect.focusState.currentIndex
         val collectNextIndex = state.collect.focusState.nextIndex
         val collectTraversalSize = state.collect.traversalList.size
@@ -1155,9 +1156,12 @@ object A11yNavigator {
             } else {
                 false
             }
+            val nextIsBottomTab = nextBottomTabIndex in traversalList.indices &&
+                isOneConnectBottomTabByViewId(traversalList[nextBottomTabIndex].viewIdResourceName)
+            forceDirectBottomTabFocus = currentIsBottomTab && nextBottomTabIndex in traversalList.indices && nextIsBottomTab && !mixedWithContent
             Log.i(
                 "A11Y_HELPER",
-                "[SMART_NEXT_DEBUG][bottom_tab] req_id='$reqId' current_is_bottom_tab=$currentIsBottomTab current_view_id='${traversalList[currentIndex].viewIdResourceName.orEmpty()}' nav_group_size=${navMembers.size} next_bottom_tab_index=$nextBottomTabIndex next_bottom_tab_view_id='${traversalList.getOrNull(nextBottomTabIndex)?.viewIdResourceName.orEmpty()}' mixed_with_content=$mixedWithContent"
+                "[SMART_NEXT_DEBUG][bottom_tab] req_id='$reqId' current_is_bottom_tab=$currentIsBottomTab current_view_id='${traversalList[currentIndex].viewIdResourceName.orEmpty()}' nav_group_size=${navMembers.size} next_bottom_tab_index=$nextBottomTabIndex next_bottom_tab_view_id='${traversalList.getOrNull(nextBottomTabIndex)?.viewIdResourceName.orEmpty()}' mixed_with_content=$mixedWithContent force_direct_bottom_tab_focus=$forceDirectBottomTabFocus"
             )
         } else {
             logSmartNextDiag(reqId, "global_nav_policy", "current_is_global_nav_item=false nav_group_size=0 axis=unknown reason=current_index_out_of_range")
@@ -1340,7 +1344,8 @@ object A11yNavigator {
                 currentIndex = currentIndex,
                 fallbackIndex = fallbackIndex,
                 nextIndex = nextIndex
-            )
+            ),
+            forceDirectBottomTabFocus = forceDirectBottomTabFocus
         )
     }
 
