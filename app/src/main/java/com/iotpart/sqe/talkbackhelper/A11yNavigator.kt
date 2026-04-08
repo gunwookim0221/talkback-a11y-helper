@@ -13,11 +13,13 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.75.4"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.75.5"
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
     private const val MIN_ONECONNECT_SETTINGS_ROW_HEIGHT_PX = 80
+    private const val ONECONNECT_ON_AIR_CARDS_RECYCLER_VIEW_ID = "com.samsung.android.oneconnect:id/on_air_cards_recycler_view"
+    private val ONECONNECT_BOTTOM_TAB_SUFFIXES = setOf("menu_favorites", "menu_devices", "menu_services", "menu_automations", "menu_more")
 
 
     @Volatile
@@ -106,6 +108,19 @@ object A11yNavigator {
 
     private fun logSmartNextDiag(reqId: String, stage: String, message: String) {
         Log.i("A11Y_HELPER", "[SMART_NEXT_DIAG] req_id=$reqId stage=$stage $message")
+    }
+
+    private fun smartNextDebugNodeSummary(node: AccessibilityNodeInfo?): String {
+        if (node == null) return "id=<none>|class=<none>|label=<none>|merged=<none>|pkg=<none>|bounds=<none>"
+        val bounds = Rect().also(node::getBoundsInScreen)
+        val primaryLabel = (resolvePrimaryLabel(node) ?: "<none>").replace("\n", " ").take(72)
+        val mergedLabel = (A11yTraversalAnalyzer.recoverDescendantLabel(node) ?: "<none>").replace("\n", " ").take(120)
+        return "id=${node.viewIdResourceName.orEmpty()}|class=${node.className}|label=$primaryLabel|merged=$mergedLabel|pkg=${node.packageName}|bounds=${bounds.toShortString()}|clickable=${node.isClickable}|focusable=${node.isFocusable}|visible=${node.isVisibleToUser}|a11yFocused=${node.isAccessibilityFocused}"
+    }
+
+    private fun isOneConnectBottomTabByViewId(viewId: String?): Boolean {
+        val suffix = viewId?.substringAfterLast('/') ?: return false
+        return suffix in ONECONNECT_BOTTOM_TAB_SUFFIXES
     }
 
     private fun collectFocusState(
@@ -485,6 +500,18 @@ object A11yNavigator {
         return try {
             val runtimeState = collectSmartNextRuntimeState(root, currentNode)
             val focusedNow = runtimeState.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            val inputFocusedNow = runtimeState.root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            val focusResolutionSource = when {
+                focusedNow != null -> "accessibilityFocused"
+                inputFocusedNow != null -> "focused"
+                currentNode != null -> "provided_current"
+                runtimeState.currentPosition.resolvedCurrent != null -> "resolved_current_fallback"
+                else -> "none"
+            }
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT_DEBUG][entry] req_id='$reqId' source='$focusResolutionSource' current='${smartNextDebugNodeSummary(currentNode)}' a11y_focused='${smartNextDebugNodeSummary(focusedNow)}' input_focused='${smartNextDebugNodeSummary(inputFocusedNow)}' resolved_current='${smartNextDebugNodeSummary(runtimeState.currentPosition.resolvedCurrent)}' current_index=${runtimeState.currentPosition.currentIndex} next_index=${runtimeState.currentPosition.nextIndex}"
+            )
             logSmartNextDiag(
                 reqId,
                 "current_focused_node_snapshot",
@@ -951,6 +978,10 @@ object A11yNavigator {
         )
         if (outcome.success || reason == "end_of_traversal") return outcome
         if (outcome.reason == "continuation_candidate_unresolved") return TargetActionOutcome(false, "failed")
+        Log.w(
+            "A11Y_HELPER",
+            "[SMART_NEXT_DEBUG][fail] req_id='${A11yHistoryManager.activeSmartNextReqId}' detail='failed_focus_rejected' branch='handlePreScrollAndRefresh.post_scroll_focus_failed' current='${smartNextDebugNodeSummary(context.resolvedCurrent)}' chosen='${smartNextDebugNodeSummary(context.traversalList.getOrNull(executionDecision.nextIndex))}' perform_action_success=false verify_result='post_scroll_failed' reject_reason='post_scroll_focus_failed' visited_size=${context.findAndFocusContext.visitedHistory.size} effective_bottom=${context.effectiveBottom}"
+        )
         Log.e("A11Y_HELPER", "[SMART_NEXT] Post-scroll focus failed. Aborting to prevent fallback sweep loop.")
         return TargetActionOutcome(false, "failed_focus_rejected")
     }
@@ -1114,6 +1145,20 @@ object A11yNavigator {
                 "global_nav_policy",
                 "current_is_global_nav_item=$isCurrentNavItem nav_group_size=${navMembers.size} axis=horizontal current_position=$currentPosition computed_adjacent_target=$adjacentIndex members='$orderedMembers' reason=${if (isCurrentNavItem) "global_nav_detected" else "current_not_nav_item"}"
             )
+            val currentIsBottomTab = isOneConnectBottomTabByViewId(traversalList[currentIndex].viewIdResourceName)
+            val nextBottomTabIndex = resolveOneConnectBottomTabAdjacentNextIndex(
+                traversalList = traversalList,
+                currentIndex = currentIndex
+            )
+            val mixedWithContent = if (nextBottomTabIndex in traversalList.indices && nextBottomTabIndex > currentIndex) {
+                ((currentIndex + 1) until nextBottomTabIndex).any { idx -> !isOneConnectBottomTabByViewId(traversalList[idx].viewIdResourceName) }
+            } else {
+                false
+            }
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT_DEBUG][bottom_tab] req_id='$reqId' current_is_bottom_tab=$currentIsBottomTab current_view_id='${traversalList[currentIndex].viewIdResourceName.orEmpty()}' nav_group_size=${navMembers.size} next_bottom_tab_index=$nextBottomTabIndex next_bottom_tab_view_id='${traversalList.getOrNull(nextBottomTabIndex)?.viewIdResourceName.orEmpty()}' mixed_with_content=$mixedWithContent"
+            )
         } else {
             logSmartNextDiag(reqId, "global_nav_policy", "current_is_global_nav_item=false nav_group_size=0 axis=unknown reason=current_index_out_of_range")
         }
@@ -1189,6 +1234,10 @@ object A11yNavigator {
                     startIndex = nextIndex,
                     boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } },
                     onSkip = { skippedIndex, advancedIndex ->
+                        Log.i(
+                            "A11Y_HELPER",
+                            "[SMART_NEXT_DEBUG][candidate_skip] req_id='$reqId' index=$skippedIndex reason='duplicate_or_invisible' skipped='${summarizeTraversalCandidate(traversalList, skippedIndex, state)}' advanced_to=$advancedIndex"
+                        )
                         if (debugAroundDecision) {
                             skipRecords += "idx=$skippedIndex(${summarizeTraversalCandidate(traversalList, skippedIndex, state)})"
                         }
@@ -1243,6 +1292,37 @@ object A11yNavigator {
             "A11Y_HELPER",
             "[SMART_NEXT][target] req_id='$reqId' current_view_id='${currentNode?.viewIdResourceName.orEmpty()}' current_label='$currentLabel' intended_target_view_id='${finalNextNode?.viewIdResourceName.orEmpty()}' intended_target_label='$finalNextLabel' actual_focused_view_id='${actualFocusedNode?.viewIdResourceName.orEmpty()}' actual_focused_label='$actualFocusedLabel' status='pending' detail='$targetDecisionReason' current_index=$currentIndex initial_next_index=$initialNextIndex final_next_index=$nextIndex initial_next_view_id='${initialNextNode?.viewIdResourceName.orEmpty()}' final_next_view_id='${finalNextNode?.viewIdResourceName.orEmpty()}' skip_coordinate_duplicate=$skipCoordinateDuplicateApplied reason='$targetDecisionReason'"
         )
+        val candidateLogLimit = minOf(10, traversalList.size)
+        for (idx in 0 until candidateLogLimit) {
+            val candidate = traversalList[idx]
+            val bounds = Rect().also { candidate.getBoundsInScreen(it) }
+            val representative = state.normalize.aliasMembersByRepresentativeIndex[idx]?.contains(candidate) == true
+            val label = (resolvePrimaryLabel(candidate) ?: A11yTraversalAnalyzer.recoverDescendantLabel(candidate) ?: "<none>")
+                .replace("\n", " ")
+                .take(96)
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT_DEBUG][candidate] req_id='$reqId' index=$idx id='${candidate.viewIdResourceName.orEmpty()}' class='${candidate.className}' label='$label' bounds='${bounds.toShortString()}' pkg='${candidate.packageName}' clickable=${candidate.isClickable} focusable=${candidate.isFocusable} visible=${candidate.isVisibleToUser} a11y_focused=${candidate.isAccessibilityFocused} representative=$representative"
+            )
+            if (candidate.viewIdResourceName == ONECONNECT_ON_AIR_CARDS_RECYCLER_VIEW_ID) {
+                val parent = candidate.parent
+                Log.i(
+                    "A11Y_HELPER",
+                    "[SMART_NEXT_DEBUG][gridview_candidate] req_id='$reqId' index=$idx reason='present_in_traversal' current_index=$currentIndex single_target_path=true parent_id='${parent?.viewIdResourceName.orEmpty()}' current_id='${currentNode?.viewIdResourceName.orEmpty()}' bounds='${bounds.toShortString()}' in_effective_region=${bounds.top < state.normalize.effectiveBottom && bounds.bottom > state.normalize.screenTop}"
+                )
+            }
+        }
+        Log.i(
+            "A11Y_HELPER",
+            "[SMART_NEXT_DEBUG][chosen] req_id='$reqId' chosen_index=$nextIndex single_target_path=true chosen='${smartNextDebugNodeSummary(finalNextNode)}' reason='$targetDecisionReason' current='${smartNextDebugNodeSummary(currentNode)}'"
+        )
+        if (finalNextNode?.viewIdResourceName == ONECONNECT_ON_AIR_CARDS_RECYCLER_VIEW_ID) {
+            val chosenBounds = Rect().also { finalNextNode.getBoundsInScreen(it) }
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT_DEBUG][gridview_candidate] req_id='$reqId' index=$nextIndex reason='chosen_target' current_index=$currentIndex single_target_path=true current_id='${currentNode?.viewIdResourceName.orEmpty()}' chosen_bounds='${chosenBounds.toShortString()}' in_effective_region=${chosenBounds.top < state.normalize.effectiveBottom && chosenBounds.bottom > state.normalize.screenTop}"
+            )
+        }
         val candidateSlice = (nextIndex until minOf(traversalList.size, nextIndex + 5)).map { idx ->
             val node = traversalList[idx]
             val bounds = Rect().also { node.getBoundsInScreen(it) }

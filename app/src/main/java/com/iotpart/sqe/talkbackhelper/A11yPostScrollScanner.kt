@@ -5,7 +5,7 @@ import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 
 object A11yPostScrollScanner {
-    const val VERSION: String = "1.3.2"
+    const val VERSION: String = "1.3.3"
     private const val ONECONNECT_PACKAGE_NAME = "com.samsung.android.oneconnect"
     private const val ONECONNECT_UPDATE_APP_CARD_VIEW_ID = "com.samsung.android.oneconnect:id/update_app_card"
     private const val ONECONNECT_NOTIFICATIONS_TITLE_VIEW_ID = "com.samsung.android.oneconnect:id/noti_title"
@@ -56,6 +56,10 @@ object A11yPostScrollScanner {
             Log.i(
                 "A11Y_HELPER",
                 "[SMART_NEXT] single-target mode consumed intended index without success -> stop reason=single_target_exhausted focusedAny=${loopState.focusedAny} focusAttempted=${loopState.focusAttempted}"
+            )
+            Log.w(
+                "A11Y_HELPER",
+                "[SMART_NEXT_DEBUG][fail] req_id='${A11yHistoryManager.activeSmartNextReqId}' detail='failed_single_target' branch='findAndFocusFirstContent.single_target_exhausted' start_index=${postScrollContext.anchorStartIndex} end_exclusive=$scanEndExclusive excluded_index=${postScrollContext.excludedIndex} focus_attempted=${loopState.focusAttempted} focused_any=${loopState.focusedAny}"
             )
             return TargetActionOutcome(false, "failed_single_target")
         }
@@ -231,6 +235,7 @@ object A11yPostScrollScanner {
             ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
             ?: "<no-label>"
         if (request.isScrollAction && request.preScrollAnchor != null && postScrollContext.resolvedAnchorIndex >= 0 && index <= postScrollContext.resolvedAnchorIndex) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT_DEBUG][candidate_skip] req_id='${A11yHistoryManager.activeSmartNextReqId}' index=$index reason='anchor_guard'")
             if (request.singleTargetOnly) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT][SINGLE_TARGET] skip index=$index reason=anchor_guard")
             }
@@ -238,12 +243,14 @@ object A11yPostScrollScanner {
         }
         val requestedFloorIndex = A11yStateStore.lastRequestedFocusIndex
         if (!request.isScrollAction && requestedFloorIndex >= 0 && index <= requestedFloorIndex) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT_DEBUG][candidate_skip] req_id='${A11yHistoryManager.activeSmartNextReqId}' index=$index reason='requested_floor_guard' floor=$requestedFloorIndex")
             if (request.singleTargetOnly) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT][SINGLE_TARGET] skip index=$index reason=requested_floor_guard floor=$requestedFloorIndex")
             }
             return null
         }
         if (A11yNodeUtils.isNodePhysicallyOffScreen(bounds, context.screenTop, context.screenBottom)) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT_DEBUG][candidate_skip] req_id='${A11yHistoryManager.activeSmartNextReqId}' index=$index reason='off_screen' bounds='${formatBounds(bounds)}'")
             if (request.singleTargetOnly) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT][SINGLE_TARGET] skip index=$index reason=off_screen")
             }
@@ -268,6 +275,7 @@ object A11yPostScrollScanner {
             isTopArea = A11yNodeUtils.isWithinTopContentArea(bounds.top, context.screenTop, context.screenHeight)
         )
         if (shouldSkipHistory || (request.isScrollAction && inVisitedHistory)) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT_DEBUG][candidate_skip] req_id='${A11yHistoryManager.activeSmartNextReqId}' index=$index reason='history_guard' in_visited=$inVisitedHistory is_fixed_ui=$isFixedUi is_top_bar=$isTopBar is_bottom_bar=$isBottomBar")
             if (request.singleTargetOnly) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT][SINGLE_TARGET] skip index=$index reason=history_guard inVisited=$inVisitedHistory")
             }
@@ -281,6 +289,7 @@ object A11yPostScrollScanner {
                 screenHeight = context.screenHeight
             )) {
             loopState.skippedExcludedNode = true
+            Log.i("A11Y_HELPER", "[SMART_NEXT_DEBUG][candidate_skip] req_id='${A11yHistoryManager.activeSmartNextReqId}' index=$index reason='exclude_desc_guard'")
             if (request.singleTargetOnly) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT][SINGLE_TARGET] skip index=$index reason=exclude_desc_guard")
             }
