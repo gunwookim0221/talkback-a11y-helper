@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.75.2"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.75.3"
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
@@ -413,34 +413,43 @@ object A11yNavigator {
 
 
 
-    fun performSmartNext(root: AccessibilityNodeInfo?, currentNode: AccessibilityNodeInfo?): TargetActionOutcome {
+    fun performSmartNext(
+        root: AccessibilityNodeInfo?,
+        currentNode: AccessibilityNodeInfo?,
+        reqId: String = A11yHistoryManager.activeSmartNextReqId
+    ): TargetActionOutcome {
         Log.i(
             "A11Y_HELPER",
             "[VERSION] appVersionName=$APP_VERSION_NAME_FOR_LOG appVersionCode=$APP_VERSION_CODE_FOR_LOG navigatorAlgorithmVersion=$NAVIGATOR_ALGORITHM_VERSION"
         )
         val currentFocusViewId = currentNode?.viewIdResourceName.orEmpty()
+        val currentFocusLabel = (
+            resolvePrimaryLabel(currentNode)
+                ?: currentNode?.let { A11yTraversalAnalyzer.recoverDescendantLabel(it) }
+                ?: ""
+            ).replace("\n", " ").take(96)
         Log.i(
             "A11Y_HELPER",
-            "[SMART_NEXT][trace_enter] stage='performSmartNext_start' action_id='smart_next' turn_id='${A11yHistoryManager.activeSmartNextTurnId}' root_null=${root == null} current_focus_view_id='$currentFocusViewId'"
+            "[SMART_NEXT][trace_enter] stage='performSmartNext_start' action_id='smart_next' req_id='$reqId' turn_id='${A11yHistoryManager.activeSmartNextTurnId}' root_null=${root == null} current_focus_view_id='$currentFocusViewId'"
         )
         Log.i("A11Y_HELPER", "[SMART_NEXT] history policy: visited and visible histories separated")
         if (root == null) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] rootInActiveWindow is null.")
             Log.i(
                 "A11Y_HELPER",
-                "[SMART_NEXT][policy] current_index=-1 next_index_initial=-1 next_index_final=-1 next_is_bottom_bar=false continuation_likely=false row_or_grid_continuation=false continuation_exists_before_bottom_bar=false is_current_near_bottom=false force_pre_scroll_before_bottom_bar=false nav_type=END"
+                "[SMART_NEXT][policy] req_id='$reqId' current_view_id='$currentFocusViewId' current_label='$currentFocusLabel' intended_target_view_id='' intended_target_label='' actual_focused_view_id='' actual_focused_label='' status='failed_single_target' detail='root_null' current_index=-1 next_index_initial=-1 next_index_final=-1 next_is_bottom_bar=false continuation_likely=false row_or_grid_continuation=false continuation_exists_before_bottom_bar=false is_current_near_bottom=false force_pre_scroll_before_bottom_bar=false nav_type=END"
             )
             Log.i(
                 "A11Y_HELPER",
-                "[SMART_NEXT][target] current_index=-1 initial_next_index=-1 final_next_index=-1 current_view_id='' initial_next_view_id='' final_next_view_id='' current_label='<none>' final_next_label='<none>' skip_coordinate_duplicate=false reason='root_null'"
+                "[SMART_NEXT][target] req_id='$reqId' current_view_id='$currentFocusViewId' current_label='$currentFocusLabel' intended_target_view_id='' intended_target_label='' actual_focused_view_id='' actual_focused_label='' status='failed_single_target' detail='root_null' current_index=-1 initial_next_index=-1 final_next_index=-1 current_view_id='' initial_next_view_id='' final_next_view_id='' current_label='<none>' final_next_label='<none>' skip_coordinate_duplicate=false reason='root_null'"
             )
             Log.i(
                 "A11Y_HELPER",
-                "[SMART_NEXT][focus_commit] is_scroll_action=false intended_index=-1 intended_view_id='' actual_candidate_index=-1 actual_view_id='' identity_matched=false retarget_allowed=false commit_status='failed' reason='root_null' action_success=false"
+                "[SMART_NEXT][focus_commit] req_id='$reqId' current_view_id='$currentFocusViewId' current_label='$currentFocusLabel' intended_target_view_id='' intended_target_label='' actual_focused_view_id='' actual_focused_label='' status='failed_single_target' detail='root_null' is_scroll_action=false intended_index=-1 intended_view_id='' actual_candidate_index=-1 actual_view_id='' identity_matched=false retarget_allowed=false commit_status='failed' reason='root_null' action_success=false"
             )
             Log.i(
                 "A11Y_HELPER",
-                "[SMART_NEXT][final] success=false status='failed_single_target' detail='root_null' resolved_focus_view_id='' resolved_focus_label='' requested_target_view_id='' requested_target_label=''"
+                "[SMART_NEXT][final] req_id='$reqId' success=false status='failed_single_target' detail='root_null' current_view_id='$currentFocusViewId' current_label='$currentFocusLabel' intended_target_view_id='' intended_target_label='' actual_focused_view_id='' actual_focused_label='' resolved_focus_view_id='' resolved_focus_label='' requested_target_view_id='' requested_target_label=''"
             )
             return TargetActionOutcome(false, "Root node is null")
         }
@@ -463,7 +472,7 @@ object A11yNavigator {
                 "A11Y_HELPER",
                 "[SMART_NEXT][trace_enter] stage='before_focus_commit' intended_view_id='${nextActionDecision.state.normalize.traversalList.getOrNull(nextActionDecision.initialTarget.nextIndex)?.viewIdResourceName.orEmpty()}' commit_status='pending'"
             )
-            verifyAndFinalizeNextAction(nextActionDecision, execution)
+            verifyAndFinalizeNextAction(nextActionDecision, execution, reqId)
         } catch (t: Throwable) {
             Log.i(
                 "A11Y_HELPER",
@@ -471,7 +480,7 @@ object A11yNavigator {
             )
             Log.i(
                 "A11Y_HELPER",
-                "[SMART_NEXT][focus_commit] is_scroll_action=false intended_index=-1 intended_view_id='' actual_candidate_index=-1 actual_view_id='' identity_matched=false retarget_allowed=false commit_status='failed' reason='exception:${t.javaClass.simpleName}' action_success=false"
+                "[SMART_NEXT][focus_commit] req_id='$reqId' current_view_id='$currentFocusViewId' current_label='$currentFocusLabel' intended_target_view_id='' intended_target_label='' actual_focused_view_id='' actual_focused_label='' status='failed' detail='exception:${t.javaClass.simpleName}' is_scroll_action=false intended_index=-1 intended_view_id='' actual_candidate_index=-1 actual_view_id='' identity_matched=false retarget_allowed=false commit_status='failed' reason='exception:${t.javaClass.simpleName}' action_success=false"
             )
             Log.i(
                 "A11Y_HELPER",
@@ -483,7 +492,7 @@ object A11yNavigator {
             )
             Log.i(
                 "A11Y_HELPER",
-                "[SMART_NEXT][final] success=false status='failed' detail='exception:${t.javaClass.simpleName}' resolved_focus_view_id='' resolved_focus_label='' requested_target_view_id='' requested_target_label=''"
+                "[SMART_NEXT][final] req_id='$reqId' success=false status='failed' detail='exception:${t.javaClass.simpleName}' current_view_id='$currentFocusViewId' current_label='$currentFocusLabel' intended_target_view_id='' intended_target_label='' actual_focused_view_id='' actual_focused_label='' resolved_focus_view_id='' resolved_focus_label='' requested_target_view_id='' requested_target_label=''"
             )
             throw t
         } finally {
@@ -562,7 +571,8 @@ object A11yNavigator {
 
     private fun verifyAndFinalizeNextAction(
         decision: NextActionDecision,
-        execution: NextActionExecution
+        execution: NextActionExecution,
+        reqId: String
     ): TargetActionOutcome {
         val statusLockedByFinalCommit = A11yHistoryManager.lastFinalCommitTurnId != 0L &&
             A11yHistoryManager.lastFinalCommitTurnId == A11yHistoryManager.activeSmartNextTurnId
@@ -589,12 +599,29 @@ object A11yNavigator {
         val intendedIndex = decision.initialTarget.nextIndex
         val intendedNode = decision.state.normalize.traversalList.getOrNull(intendedIndex)
         val intendedViewId = intendedNode?.viewIdResourceName.orEmpty()
+        val intendedLabel = (
+            resolvePrimaryLabel(intendedNode)
+                ?: intendedNode?.let { A11yTraversalAnalyzer.recoverDescendantLabel(it) }
+                ?: ""
+            ).replace("\n", " ").take(96)
+        val currentNode = decision.state.normalize.traversalList.getOrNull(decision.state.currentPosition.currentIndex)
+        val currentViewId = currentNode?.viewIdResourceName.orEmpty()
+        val currentLabel = (
+            resolvePrimaryLabel(currentNode)
+                ?: currentNode?.let { A11yTraversalAnalyzer.recoverDescendantLabel(it) }
+                ?: ""
+            ).replace("\n", " ").take(96)
         val actualViewId = finalizedOutcome.target?.viewIdResourceName.orEmpty()
+        val actualLabel = (
+            resolvePrimaryLabel(finalizedOutcome.target)
+                ?: finalizedOutcome.target?.let { A11yTraversalAnalyzer.recoverDescendantLabel(it) }
+                ?: ""
+            ).replace("\n", " ").take(96)
         val identityMatched = intendedViewId.isNotBlank() && intendedViewId == actualViewId
         val commitStatus = if (finalizedOutcome.success) "committed" else "failed"
         Log.i(
             "A11Y_HELPER",
-            "[SMART_NEXT][focus_commit] is_scroll_action=false intended_index=$intendedIndex intended_view_id='$intendedViewId' actual_candidate_index=-1 actual_view_id='$actualViewId' identity_matched=$identityMatched retarget_allowed=false commit_status='$commitStatus' reason='${finalizedOutcome.reason}' action_success=${finalizedOutcome.success}"
+            "[SMART_NEXT][focus_commit] req_id='$reqId' current_view_id='$currentViewId' current_label='$currentLabel' intended_target_view_id='$intendedViewId' intended_target_label='$intendedLabel' actual_focused_view_id='$actualViewId' actual_focused_label='$actualLabel' status='${if (finalizedOutcome.success) "moved" else "failed_single_target"}' detail='${finalizedOutcome.reason}' is_scroll_action=false intended_index=$intendedIndex intended_view_id='$intendedViewId' actual_candidate_index=-1 actual_view_id='$actualViewId' identity_matched=$identityMatched retarget_allowed=false commit_status='$commitStatus' reason='${finalizedOutcome.reason}' action_success=${finalizedOutcome.success}"
         )
         Log.i(
             "A11Y_HELPER",
@@ -606,7 +633,7 @@ object A11yNavigator {
         )
         Log.i(
             "A11Y_HELPER",
-            "[SMART_NEXT][final] success=${finalizedOutcome.success} status='${if (finalizedOutcome.success) "moved" else "failed_single_target"}' detail='${finalizedOutcome.reason}' resolved_focus_view_id='$actualViewId' resolved_focus_label='' requested_target_view_id='$intendedViewId' requested_target_label=''"
+            "[SMART_NEXT][final] req_id='$reqId' success=${finalizedOutcome.success} status='${if (finalizedOutcome.success) "moved" else "failed_single_target"}' detail='${finalizedOutcome.reason}' current_view_id='$currentViewId' current_label='$currentLabel' intended_target_view_id='$intendedViewId' intended_target_label='$intendedLabel' actual_focused_view_id='$actualViewId' actual_focused_label='$actualLabel' resolved_focus_view_id='$actualViewId' resolved_focus_label='$actualLabel' requested_target_view_id='$intendedViewId' requested_target_label='$intendedLabel'"
         )
         return finalizedOutcome
     }
@@ -1125,15 +1152,20 @@ object A11yNavigator {
         val currentNode = traversalList.getOrNull(currentIndex)
         val initialNextNode = traversalList.getOrNull(initialNextIndex)
         val finalNextNode = traversalList.getOrNull(nextIndex)
+        val reqId = A11yHistoryManager.activeSmartNextReqId
+        val actualFocusedNode = state.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         val currentLabel = (resolvePrimaryLabel(currentNode) ?: currentNode?.let { A11yTraversalAnalyzer.recoverDescendantLabel(it) } ?: "<none>")
             .replace("\n", " ")
             .take(72)
         val finalNextLabel = (resolvePrimaryLabel(finalNextNode) ?: finalNextNode?.let { A11yTraversalAnalyzer.recoverDescendantLabel(it) } ?: "<none>")
             .replace("\n", " ")
             .take(72)
+        val actualFocusedLabel = (resolvePrimaryLabel(actualFocusedNode) ?: actualFocusedNode?.let { A11yTraversalAnalyzer.recoverDescendantLabel(it) } ?: "<none>")
+            .replace("\n", " ")
+            .take(72)
         Log.w(
             "A11Y_HELPER",
-            "[SMART_NEXT][target] current_index=$currentIndex initial_next_index=$initialNextIndex final_next_index=$nextIndex current_view_id='${currentNode?.viewIdResourceName.orEmpty()}' initial_next_view_id='${initialNextNode?.viewIdResourceName.orEmpty()}' final_next_view_id='${finalNextNode?.viewIdResourceName.orEmpty()}' current_label='$currentLabel' final_next_label='$finalNextLabel' skip_coordinate_duplicate=$skipCoordinateDuplicateApplied reason='$targetDecisionReason'"
+            "[SMART_NEXT][target] req_id='$reqId' current_view_id='${currentNode?.viewIdResourceName.orEmpty()}' current_label='$currentLabel' intended_target_view_id='${finalNextNode?.viewIdResourceName.orEmpty()}' intended_target_label='$finalNextLabel' actual_focused_view_id='${actualFocusedNode?.viewIdResourceName.orEmpty()}' actual_focused_label='$actualFocusedLabel' status='pending' detail='$targetDecisionReason' current_index=$currentIndex initial_next_index=$initialNextIndex final_next_index=$nextIndex initial_next_view_id='${initialNextNode?.viewIdResourceName.orEmpty()}' final_next_view_id='${finalNextNode?.viewIdResourceName.orEmpty()}' skip_coordinate_duplicate=$skipCoordinateDuplicateApplied reason='$targetDecisionReason'"
         )
 
         return InitialNextTargetDecision(
