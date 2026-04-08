@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.74.9"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.75.0"
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
@@ -242,6 +242,7 @@ object A11yNavigator {
         currentNode: AccessibilityNodeInfo?,
         aliasMembersByRepresentativeIndex: Map<Int, List<AccessibilityNodeInfo>> = emptyMap()
     ): CurrentPosition {
+        val rawCurrentNode = currentNode
         val resolvedCurrent = currentNode?.let {
             resolveToClickableAncestor(
                 node = it,
@@ -273,6 +274,12 @@ object A11yNavigator {
                 target = resolvedCurrent
             )
         }
+        if (currentIndex == -1 && A11yNodeUtils.isOneConnectBottomTabNode(rawCurrentNode)) {
+            val currentViewId = rawCurrentNode?.viewIdResourceName
+            currentIndex = traversalList.indexOfFirst { candidate ->
+                candidate.viewIdResourceName == currentViewId && A11yNodeUtils.isOneConnectBottomTabNode(candidate)
+            }
+        }
 
         if (currentIndex != -1) {
             val currentBounds = Rect().also { traversalList[currentIndex].getBoundsInScreen(it) }
@@ -284,8 +291,8 @@ object A11yNavigator {
             }
         }
 
-        val rawOrResolvedCurrent = currentNode ?: resolvedCurrent
-        val containerLikeCurrent = rawOrResolvedCurrent?.takeIf { node ->
+        val normalizedCurrent = currentNode ?: resolvedCurrent
+        val containerLikeCurrent = normalizedCurrent?.takeIf { node ->
             val className = node.className?.toString()
             className?.contains("WebView", ignoreCase = true) == true ||
                 (node.childCount > 0 && (isContainerLikeClassName(className) || isContainerLikeViewId(node.viewIdResourceName)))
@@ -353,10 +360,10 @@ object A11yNavigator {
             )
         }
 
-        val fallbackIndex = if (currentIndex == -1 && rawOrResolvedCurrent != null) {
+        val fallbackIndex = if (currentIndex == -1 && normalizedCurrent != null) {
             findClosestNodeBelowCenter(
                 nodes = traversalList,
-                reference = rawOrResolvedCurrent,
+                reference = normalizedCurrent,
                 boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } }
             )
         } else {
@@ -997,6 +1004,15 @@ object A11yNavigator {
         }
 
         if (currentIndex in traversalList.indices) {
+            val oneConnectBottomTabForcedIndex = resolveOneConnectBottomTabAdjacentNextIndex(
+                traversalList = traversalList,
+                currentIndex = currentIndex
+            )
+            if (oneConnectBottomTabForcedIndex in traversalList.indices && oneConnectBottomTabForcedIndex != nextIndex) {
+                nextIndex = oneConnectBottomTabForcedIndex
+                targetDecisionReason = "oneconnect_bottom_tab_adjacent"
+                Log.i("A11Y_HELPER", "[DECIDE] oneconnect bottom tab adjacent override -> index=$nextIndex")
+            }
             val currentBounds = Rect().also { traversalList[currentIndex].getBoundsInScreen(it) }
             val immediateCandidateIndex = currentIndex + 1
             if (nextIndex == immediateCandidateIndex) {
@@ -1073,6 +1089,19 @@ object A11yNavigator {
                 nextIndex = nextIndex
             )
         )
+    }
+
+    private fun resolveOneConnectBottomTabAdjacentNextIndex(
+        traversalList: List<AccessibilityNodeInfo>,
+        currentIndex: Int
+    ): Int {
+        val currentNode = traversalList.getOrNull(currentIndex) ?: return -1
+        if (!A11yNodeUtils.isOneConnectBottomTabNode(currentNode)) return -1
+        val expectedNextTabViewIdSuffix = A11yNodeUtils.nextOneConnectBottomTabViewId(currentNode.viewIdResourceName) ?: return -1
+        return traversalList.indexOfFirst { candidate ->
+            if (!A11yNodeUtils.isOneConnectBottomTabNode(candidate)) return@indexOfFirst false
+            candidate.viewIdResourceName?.substringAfterLast('/') == expectedNextTabViewIdSuffix
+        }
     }
 
     private fun findInitialHeroSummaryCandidateIndex(
