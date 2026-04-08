@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.75.3"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.75.4"
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
@@ -90,6 +90,22 @@ object A11yNavigator {
         if (node == null) return null
         return node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
             ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+    }
+
+    private fun diagLabel(node: AccessibilityNodeInfo?): String {
+        return (resolvePrimaryLabel(node) ?: node?.let { A11yTraversalAnalyzer.recoverDescendantLabel(it) } ?: "")
+            .replace("\n", " ")
+            .take(72)
+    }
+
+    private fun diagNodeSummary(node: AccessibilityNodeInfo?): String {
+        if (node == null) return "viewId=<none>|label=<none>|bounds=<none>"
+        val bounds = Rect().also { node.getBoundsInScreen(it) }
+        return "viewId=${node.viewIdResourceName.orEmpty()}|label=${diagLabel(node)}|bounds=${bounds.toShortString()}"
+    }
+
+    private fun logSmartNextDiag(reqId: String, stage: String, message: String) {
+        Log.i("A11Y_HELPER", "[SMART_NEXT_DIAG] req_id=$reqId stage=$stage $message")
     }
 
     private fun collectFocusState(
@@ -432,9 +448,19 @@ object A11yNavigator {
             "A11Y_HELPER",
             "[SMART_NEXT][trace_enter] stage='performSmartNext_start' action_id='smart_next' req_id='$reqId' turn_id='${A11yHistoryManager.activeSmartNextTurnId}' root_null=${root == null} current_focus_view_id='$currentFocusViewId'"
         )
+        logSmartNextDiag(
+            reqId,
+            "performSmartNext_start",
+            "current_view_id=$currentFocusViewId current_label='$currentFocusLabel' root_null=${root == null}"
+        )
         Log.i("A11Y_HELPER", "[SMART_NEXT] history policy: visited and visible histories separated")
         if (root == null) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] rootInActiveWindow is null.")
+            logSmartNextDiag(
+                reqId,
+                "final",
+                "status=failed_single_target detail=root_null current_view_id=$currentFocusViewId current_label='$currentFocusLabel'"
+            )
             Log.i(
                 "A11Y_HELPER",
                 "[SMART_NEXT][policy] req_id='$reqId' current_view_id='$currentFocusViewId' current_label='$currentFocusLabel' intended_target_view_id='' intended_target_label='' actual_focused_view_id='' actual_focused_label='' status='failed_single_target' detail='root_null' current_index=-1 next_index_initial=-1 next_index_final=-1 next_is_bottom_bar=false continuation_likely=false row_or_grid_continuation=false continuation_exists_before_bottom_bar=false is_current_near_bottom=false force_pre_scroll_before_bottom_bar=false nav_type=END"
@@ -458,6 +484,12 @@ object A11yNavigator {
         A11yHistoryManager.activeSmartNextTurnId = turnId
         return try {
             val runtimeState = collectSmartNextRuntimeState(root, currentNode)
+            val focusedNow = runtimeState.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            logSmartNextDiag(
+                reqId,
+                "current_focused_node_snapshot",
+                "current_view_id=${focusedNow?.viewIdResourceName.orEmpty()} current_label='${diagLabel(focusedNow)}' candidate_count=${runtimeState.normalize.traversalList.size} current_index=${runtimeState.currentPosition.currentIndex}"
+            )
             Log.i(
                 "A11Y_HELPER",
                 "[SMART_NEXT][trace_enter] stage='before_policy' current_index=${runtimeState.currentPosition.currentIndex} next_index=${runtimeState.currentPosition.nextIndex} nav_type='pending'"
@@ -474,6 +506,11 @@ object A11yNavigator {
             )
             verifyAndFinalizeNextAction(nextActionDecision, execution, reqId)
         } catch (t: Throwable) {
+            logSmartNextDiag(
+                reqId,
+                "exception",
+                "status=failed detail=exception exception_class=${t.javaClass.simpleName} exception_message=${t.message.orEmpty()}"
+            )
             Log.i(
                 "A11Y_HELPER",
                 "[SMART_NEXT][trace_enter] stage='before_focus_commit' intended_view_id='' commit_status='failed'"
@@ -493,6 +530,11 @@ object A11yNavigator {
             Log.i(
                 "A11Y_HELPER",
                 "[SMART_NEXT][final] req_id='$reqId' success=false status='failed' detail='exception:${t.javaClass.simpleName}' current_view_id='$currentFocusViewId' current_label='$currentFocusLabel' intended_target_view_id='' intended_target_label='' actual_focused_view_id='' actual_focused_label='' resolved_focus_view_id='' resolved_focus_label='' requested_target_view_id='' requested_target_label=''"
+            )
+            logSmartNextDiag(
+                reqId,
+                "final",
+                "status=failed detail=exception:${t.javaClass.simpleName} current_view_id=$currentFocusViewId current_label='$currentFocusLabel'"
             )
             throw t
         } finally {
@@ -623,6 +665,11 @@ object A11yNavigator {
             "A11Y_HELPER",
             "[SMART_NEXT][focus_commit] req_id='$reqId' current_view_id='$currentViewId' current_label='$currentLabel' intended_target_view_id='$intendedViewId' intended_target_label='$intendedLabel' actual_focused_view_id='$actualViewId' actual_focused_label='$actualLabel' status='${if (finalizedOutcome.success) "moved" else "failed_single_target"}' detail='${finalizedOutcome.reason}' is_scroll_action=false intended_index=$intendedIndex intended_view_id='$intendedViewId' actual_candidate_index=-1 actual_view_id='$actualViewId' identity_matched=$identityMatched retarget_allowed=false commit_status='$commitStatus' reason='${finalizedOutcome.reason}' action_success=${finalizedOutcome.success}"
         )
+        logSmartNextDiag(
+            reqId,
+            "focus_commit",
+            "current_view_id=$currentViewId current_label='$currentLabel' target_view_id=$intendedViewId target_label='$intendedLabel' actual_view_id=$actualViewId actual_label='$actualLabel' status=$commitStatus detail=${finalizedOutcome.reason} action_success=${finalizedOutcome.success}"
+        )
         Log.i(
             "A11Y_HELPER",
             "[SMART_NEXT][trace_enter] stage='after_focus_commit' intended_view_id='$intendedViewId' commit_status='$commitStatus'"
@@ -634,6 +681,11 @@ object A11yNavigator {
         Log.i(
             "A11Y_HELPER",
             "[SMART_NEXT][final] req_id='$reqId' success=${finalizedOutcome.success} status='${if (finalizedOutcome.success) "moved" else "failed_single_target"}' detail='${finalizedOutcome.reason}' current_view_id='$currentViewId' current_label='$currentLabel' intended_target_view_id='$intendedViewId' intended_target_label='$intendedLabel' actual_focused_view_id='$actualViewId' actual_focused_label='$actualLabel' resolved_focus_view_id='$actualViewId' resolved_focus_label='$actualLabel' requested_target_view_id='$intendedViewId' requested_target_label='$intendedLabel'"
+        )
+        logSmartNextDiag(
+            reqId,
+            "final",
+            "status=${if (finalizedOutcome.success) "moved" else "failed_single_target"} detail=${finalizedOutcome.reason} resolved_view_id=$actualViewId resolved_label='$actualLabel' target_view_id=$intendedViewId target_label='$intendedLabel'"
         )
         return finalizedOutcome
     }
@@ -1040,6 +1092,31 @@ object A11yNavigator {
         val collectCurrentIndex = state.collect.focusState.currentIndex
         val collectNextIndex = state.collect.focusState.nextIndex
         val collectTraversalSize = state.collect.traversalList.size
+        val reqId = A11yHistoryManager.activeSmartNextReqId
+        if (currentIndex in traversalList.indices) {
+            val navMembers = traversalList.withIndex().filter { (_, node) ->
+                A11yNodeUtils.isOneConnectBottomTabNode(node) || A11yNodeUtils.isBottomNavigationBar(
+                    node.className?.toString(),
+                    node.viewIdResourceName,
+                    Rect().also { node.getBoundsInScreen(it) },
+                    state.normalize.screenBottom,
+                    state.normalize.screenHeight
+                )
+            }
+            val isCurrentNavItem = navMembers.any { it.index == currentIndex }
+            val currentPosition = navMembers.indexOfFirst { it.index == currentIndex }
+            val adjacentIndex = navMembers.getOrNull(currentPosition + 1)?.index ?: -1
+            val orderedMembers = navMembers.take(8).joinToString(";") { (idx, node) ->
+                "$idx:${node.viewIdResourceName.orEmpty()}:${diagLabel(node)}"
+            }
+            logSmartNextDiag(
+                reqId,
+                "global_nav_policy",
+                "current_is_global_nav_item=$isCurrentNavItem nav_group_size=${navMembers.size} axis=horizontal current_position=$currentPosition computed_adjacent_target=$adjacentIndex members='$orderedMembers' reason=${if (isCurrentNavItem) "global_nav_detected" else "current_not_nav_item"}"
+            )
+        } else {
+            logSmartNextDiag(reqId, "global_nav_policy", "current_is_global_nav_item=false nav_group_size=0 axis=unknown reason=current_index_out_of_range")
+        }
         val debugAroundDecision = shouldEmitOneConnectSettingsDebugLogs(
             current = traversalList.getOrNull(currentIndex),
             next = traversalList.getOrNull(nextIndex),
@@ -1152,7 +1229,6 @@ object A11yNavigator {
         val currentNode = traversalList.getOrNull(currentIndex)
         val initialNextNode = traversalList.getOrNull(initialNextIndex)
         val finalNextNode = traversalList.getOrNull(nextIndex)
-        val reqId = A11yHistoryManager.activeSmartNextReqId
         val actualFocusedNode = state.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         val currentLabel = (resolvePrimaryLabel(currentNode) ?: currentNode?.let { A11yTraversalAnalyzer.recoverDescendantLabel(it) } ?: "<none>")
             .replace("\n", " ")
@@ -1166,6 +1242,16 @@ object A11yNavigator {
         Log.w(
             "A11Y_HELPER",
             "[SMART_NEXT][target] req_id='$reqId' current_view_id='${currentNode?.viewIdResourceName.orEmpty()}' current_label='$currentLabel' intended_target_view_id='${finalNextNode?.viewIdResourceName.orEmpty()}' intended_target_label='$finalNextLabel' actual_focused_view_id='${actualFocusedNode?.viewIdResourceName.orEmpty()}' actual_focused_label='$actualFocusedLabel' status='pending' detail='$targetDecisionReason' current_index=$currentIndex initial_next_index=$initialNextIndex final_next_index=$nextIndex initial_next_view_id='${initialNextNode?.viewIdResourceName.orEmpty()}' final_next_view_id='${finalNextNode?.viewIdResourceName.orEmpty()}' skip_coordinate_duplicate=$skipCoordinateDuplicateApplied reason='$targetDecisionReason'"
+        )
+        val candidateSlice = (nextIndex until minOf(traversalList.size, nextIndex + 5)).map { idx ->
+            val node = traversalList[idx]
+            val bounds = Rect().also { node.getBoundsInScreen(it) }
+            "idx=$idx,viewId=${node.viewIdResourceName.orEmpty()},label='${diagLabel(node)}',bounds=${bounds.toShortString()},isBottomNav=${A11yNodeUtils.isBottomNavigationBar(node.className?.toString(), node.viewIdResourceName, bounds, state.normalize.screenBottom, state.normalize.screenHeight)},isTopBar=${A11yNodeUtils.isTopAppBar(node, state.normalize.screenTop, state.normalize.screenHeight)}"
+        }.joinToString(" | ")
+        logSmartNextDiag(
+            reqId,
+            "target_selection",
+            "current_index=$currentIndex candidate_count=${traversalList.size} current_node='${diagNodeSummary(currentNode)}' candidates='$candidateSlice' selected_index=$nextIndex target_view_id=${finalNextNode?.viewIdResourceName.orEmpty()} target_label='${diagLabel(finalNextNode)}' reason=$targetDecisionReason excluded_reason=${if (skipCoordinateDuplicateApplied) "skip_coordinate_duplicate_applied" else "none"}"
         )
 
         return InitialNextTargetDecision(

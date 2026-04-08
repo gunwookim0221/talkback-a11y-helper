@@ -21,6 +21,8 @@ from talkback_lib.constants import (
 
 
 class HelperBridge:
+    BRIDGE_VERSION = "1.0.1"
+
     def __init__(self, client: Any) -> None:
         self._client = client
 
@@ -123,14 +125,17 @@ class HelperBridge:
             f"[SMART_NEXT_TRACE] before_broadcast action={ACTION_SMART_NEXT} "
             f"req_id={req_id} fallback=false full_adb_command=\"{full_cmd}\""
         )
-        self._client._broadcast(dev, ACTION_SMART_NEXT, ["--es", "reqId", req_id])
-        return self._client._read_log_result(
+        raw_stdout = self._client._broadcast(dev, ACTION_SMART_NEXT, ["--es", "reqId", req_id])
+        print(f"[SMART_NEXT_TRACE] adb_raw_response req_id={req_id} raw_stdout=\"{raw_stdout}\"")
+        result = self._client._read_log_result(
             dev,
             "SMART_NAV_RESULT",
             req_id,
             wait_seconds=3.0,
             poll_interval_sec=0.2,
         )
+        print(f"[SMART_NEXT_TRACE] parsed_broadcast_result req_id={req_id} raw_json={result}")
+        return result
 
     @staticmethod
     def normalize_smart_next_status(result: dict[str, Any]) -> tuple[str, bool, str, set[str]]:

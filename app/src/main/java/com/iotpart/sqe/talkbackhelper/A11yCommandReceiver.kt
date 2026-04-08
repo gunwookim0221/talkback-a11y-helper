@@ -11,7 +11,7 @@ import java.util.concurrent.Executors
 class A11yCommandReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.2.7"
+        private const val VERSION = "1.2.8"
         private const val ACTION_GET_FOCUS = "com.iotpart.sqe.talkbackhelper.GET_FOCUS"
         private const val ACTION_FOCUS_RESULT = "com.iotpart.sqe.talkbackhelper.FOCUS_RESULT"
         private const val ACTION_DUMP_TREE = "com.iotpart.sqe.talkbackhelper.DUMP_TREE"
@@ -47,6 +47,10 @@ class A11yCommandReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action ?: return
+        val reqId = parseReqId(intent)
+        if (action == ACTION_SMART_NEXT) {
+            logSmartNextDiag(reqId, "receiver_onReceive", "action=$action receiver_version=$VERSION")
+        }
         Log.i(
             TAG,
             "[SMART_NEXT][trace_enter] stage='receiver_onReceive' action='$action'"
@@ -202,12 +206,14 @@ class A11yCommandReceiver : BroadcastReceiver() {
 
     private fun handleSmartNext(context: Context, intent: Intent) {
         val reqId = parseReqId(intent)
+        logSmartNextDiag(reqId, "receiver_handleSmartNext", "receiver_version=$VERSION")
         Log.i(
             TAG,
             "[SMART_NEXT][trace_enter] stage='receiver_handleSmartNext' req_id='$reqId'"
         )
         val service = A11yHelperService.instance
         if (service == null) {
+            logSmartNextDiag(reqId, "final", "status=failed detail=service_unavailable")
             Log.i(
                 TAG,
                 "[SMART_NEXT][final] success=false status='failed' detail='service_unavailable' requested_target_view_id='' resolved_focus_view_id=''"
@@ -218,6 +224,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         smartNextExecutor.execute {
             try {
+                logSmartNextDiag(reqId, "receiver_executor_start", "thread=${Thread.currentThread().name}")
                 Log.i(
                     TAG,
                     "[SMART_NEXT][trace_enter] stage='receiver_executor_start' req_id='$reqId'"
@@ -239,8 +246,14 @@ class A11yCommandReceiver : BroadcastReceiver() {
                     TAG,
                     "[SMART_NEXT][trace_enter] stage='after_final_response' status='$status' detail='$detail'"
                 )
+                logSmartNextDiag(reqId, "receiver_broadcast_sent", "status=$status detail=$detail")
             } catch (t: Throwable) {
                 Log.e(TAG, "[SMART_NEXT] async execution failed reqId=$reqId", t)
+                logSmartNextDiag(
+                    reqId,
+                    "exception",
+                    "status=failed detail=async_exception exception_class=${t.javaClass.simpleName} exception_message=${t.message.orEmpty()}"
+                )
                 Log.i(
                     TAG,
                     "[SMART_NEXT][final] success=false status='failed' detail='async_exception:${t.javaClass.simpleName}' requested_target_view_id='' resolved_focus_view_id=''"
@@ -265,6 +278,10 @@ class A11yCommandReceiver : BroadcastReceiver() {
 
     private fun parseReqId(intent: Intent): String {
         return intent.getStringExtra(EXTRA_REQ_ID)?.trim().takeUnless { it.isNullOrBlank() } ?: DEFAULT_REQ_ID
+    }
+
+    private fun logSmartNextDiag(reqId: String, stage: String, detail: String) {
+        Log.i(TAG, "[SMART_NEXT_DIAG] req_id=$reqId stage=$stage $detail")
     }
 
     private fun parseQuery(intent: Intent, reqId: String): A11yTargetFinder.TargetQuery? {

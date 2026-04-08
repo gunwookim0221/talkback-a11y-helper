@@ -314,19 +314,23 @@ class A11yAdbClient:
     ) -> dict[str, Any]:
         start = time.monotonic()
         interval = max(0.05, poll_interval_sec)
+        print(f"[SMART_NEXT_TRACE] read_log_result_start prefix={prefix} req_id={req_id} wait_seconds={wait_seconds}")
         while time.monotonic() - start < wait_seconds:
             logs = self._run(["logcat", "-d", *LOGCAT_FILTER_SPECS], dev=dev)
             payloads = self._extract_all_payloads(logs, prefix)
             for payload in reversed(payloads):
                 parsed = self._parse_json_payload(payload, prefix)
                 if parsed.get("reqId") == req_id:
+                    print(f"[SMART_NEXT_TRACE] read_log_result_match prefix={prefix} req_id={req_id} parsed={parsed}")
                     return parsed
             elapsed = time.monotonic() - start
             remaining = wait_seconds - elapsed
             if remaining <= 0:
                 break
             time.sleep(min(interval, remaining))
-        return {"success": False, "reason": f"{prefix} 로그를 찾지 못했습니다."}
+        miss = {"success": False, "reason": f"{prefix} 로그를 찾지 못했습니다.", "reqId": req_id}
+        print(f"[SMART_NEXT_TRACE] read_log_result_miss prefix={prefix} req_id={req_id} parsed={miss}")
+        return miss
 
     @staticmethod
     def _extract_all_payloads(log_text: str, prefix: str) -> list[str]:
@@ -1832,10 +1836,15 @@ class A11yAdbClient:
         # Keep previous logcat history for SMART_NEXT analysis continuity.
         # self.clear_logcat(dev=dev)
         req_id = str(uuid.uuid4())[:8]
+        print(f"[SMART_NEXT_TRACE] req_id_generated req_id={req_id} source=move_focus_smart")
         result = self._helper_bridge._request_smart_next(dev=dev, req_id=req_id)
         self.last_smart_nav_result = result
         normalized, terminal, _, _ = self._helper_bridge.normalize_smart_next_status(result)
         self.last_smart_nav_terminal = terminal
+        print(
+            f"[SMART_NEXT_TRACE] move_focus_smart_result req_id={req_id} "
+            f"status={result.get('status', '')} detail={result.get('detail', '')} normalized={normalized}"
+        )
         return normalized
 
     def scrollFind(self, dev, name, wait_=30, direction_='updown', type_='all'):
@@ -2643,6 +2652,9 @@ class A11yAdbClient:
             f"focus_view_id='{step.get('focus_view_id', '')}' "
             f"focus_label='{focus_label_for_trace[:96]}' "
             f"announcement='{announcement_for_trace[:96]}' "
+            f"focus_payload_req_id='{step.get('get_focus_req_id', '')}' "
+            f"focus_payload_source='{step.get('focus_payload_source', '')}' "
+            f"focus_payload_final_source='{step.get('get_focus_final_payload_source', '')}' "
             f"t_move_done={step.get('t_after_move', 0)} "
             f"t_ann_done={step.get('t_after_ann', 0)} "
             f"t_focus_done={step.get('t_after_get_focus', 0)}"
