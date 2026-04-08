@@ -11,7 +11,7 @@ import java.util.concurrent.Executors
 class A11yCommandReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.2.3"
+        private const val VERSION = "1.2.4"
         private const val ACTION_GET_FOCUS = "com.iotpart.sqe.talkbackhelper.GET_FOCUS"
         private const val ACTION_FOCUS_RESULT = "com.iotpart.sqe.talkbackhelper.FOCUS_RESULT"
         private const val ACTION_DUMP_TREE = "com.iotpart.sqe.talkbackhelper.DUMP_TREE"
@@ -194,7 +194,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         val reqId = parseReqId(intent)
         val service = A11yHelperService.instance
         if (service == null) {
-            Log.w(
+            Log.i(
                 TAG,
                 "[SMART_NEXT][final] success=false status='failed' detail='service_unavailable' requested_target_view_id='' resolved_focus_view_id=''"
             )
@@ -213,7 +213,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
                 context.sendBroadcast(reply)
             } catch (t: Throwable) {
                 Log.e(TAG, "[SMART_NEXT] async execution failed reqId=$reqId", t)
-                Log.w(
+                Log.i(
                     TAG,
                     "[SMART_NEXT][final] success=false status='failed' detail='async_exception:${t.javaClass.simpleName}' requested_target_view_id='' resolved_focus_view_id=''"
                 )

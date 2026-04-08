@@ -421,15 +421,15 @@ object A11yNavigator {
         Log.i("A11Y_HELPER", "[SMART_NEXT] history policy: visited and visible histories separated")
         if (root == null) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] rootInActiveWindow is null.")
-            Log.w(
+            Log.i(
                 "A11Y_HELPER",
                 "[SMART_NEXT][policy] current_index=-1 next_index_initial=-1 next_index_final=-1 next_is_bottom_bar=false continuation_likely=false row_or_grid_continuation=false continuation_exists_before_bottom_bar=false is_current_near_bottom=false force_pre_scroll_before_bottom_bar=false nav_type=END"
             )
-            Log.w(
+            Log.i(
                 "A11Y_HELPER",
                 "[SMART_NEXT][target] current_index=-1 initial_next_index=-1 final_next_index=-1 current_view_id='' initial_next_view_id='' final_next_view_id='' current_label='<none>' final_next_label='<none>' skip_coordinate_duplicate=false reason='root_null'"
             )
-            Log.w(
+            Log.i(
                 "A11Y_HELPER",
                 "[SMART_NEXT][focus_commit] is_scroll_action=false intended_index=-1 intended_view_id='' actual_candidate_index=-1 actual_view_id='' identity_matched=false retarget_allowed=false commit_status='failed' reason='root_null' action_success=false"
             )
@@ -549,7 +549,7 @@ object A11yNavigator {
         val actualViewId = finalizedOutcome.target?.viewIdResourceName.orEmpty()
         val identityMatched = intendedViewId.isNotBlank() && intendedViewId == actualViewId
         val commitStatus = if (finalizedOutcome.success) "committed" else "failed"
-        Log.w(
+        Log.i(
             "A11Y_HELPER",
             "[SMART_NEXT][focus_commit] is_scroll_action=false intended_index=$intendedIndex intended_view_id='$intendedViewId' actual_candidate_index=-1 actual_view_id='$actualViewId' identity_matched=$identityMatched retarget_allowed=false commit_status='$commitStatus' reason='${finalizedOutcome.reason}' action_success=${finalizedOutcome.success}"
         )
