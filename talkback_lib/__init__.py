@@ -1812,7 +1812,16 @@ class A11yAdbClient:
 
     def move_focus_smart(self, dev: Any = None, direction: str = "next") -> str:
         direction_token = str(direction).strip().lower()
+        print(
+            f"[SMART_NEXT_TRACE] move_focus_smart_entry "
+            f"action={ACTION_SMART_NEXT} req_id='' fallback={'true' if direction_token != 'next' else 'false'}"
+        )
         if direction_token != "next":
+            print(
+                "[SMART_NEXT_TRACE] move_focus_smart_fallback "
+                f"reason='direction_not_next' action={ACTION_NEXT if direction_token == 'next' else ACTION_PREV if direction_token == 'prev' else 'UNKNOWN'} "
+                "req_id='' fallback=true"
+            )
             return STATUS_MOVED if self.move_focus(dev=dev, direction=direction_token) else STATUS_FAILED
 
         if not (self._has_recent_helper_ok(dev=dev) or self.check_helper_status(dev=dev)):
