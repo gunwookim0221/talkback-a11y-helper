@@ -5,7 +5,7 @@ import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 
 object A11yHistoryManager {
-    const val VERSION: String = "1.5.0"
+    const val VERSION: String = "1.5.1"
     private const val RETARGET_SUPPRESSION_WINDOW_MS: Long = 400L
     private const val TOP_CHROME_SYSTEM_UI_SUPPRESSION_WINDOW_MS: Long = 300L
 
@@ -35,6 +35,8 @@ object A11yHistoryManager {
     internal var lastFinalCommitTurnId: Long = 0L
     @Volatile
     internal var smartNextTurnSeed: Long = 0L
+    @Volatile
+    internal var activeSmartNextReqId: String = "none"
     @Volatile
     private var authoritativeCommittedTurnId: Long = 0L
     @Volatile

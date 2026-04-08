@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.5.9"
+        private const val VERSION = "1.5.10"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -424,77 +424,82 @@ class A11yHelperService : AccessibilityService() {
     }
 
     fun moveFocusSmart(reqId: String = "none"): JSONObject {
-        Log.i(TAG, "[SMART_NEXT_ACTION][service] req_id='$reqId'")
-        Log.i(
-            TAG,
-            "[SMART_NEXT][trace_enter] REAL_ENTRY"
-        )
-        Log.i(
-            TAG,
-            "[SMART_NEXT][trace_enter] stage='service_moveFocusSmart' req_id='$reqId'"
-        )
-        val currentNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-        val outcome = try {
-            Log.i(TAG, "[SMART_NEXT_ACTION][before_navigator] req_id='$reqId'")
+        A11yHistoryManager.activeSmartNextReqId = reqId
+        try {
+            Log.i(TAG, "[SMART_NEXT_ACTION][service] req_id='$reqId'")
             Log.i(
                 TAG,
-                "[SMART_NEXT][trace_enter] stage='service_before_performSmartNext' req_id='$reqId'"
+                "[SMART_NEXT][trace_enter] REAL_ENTRY"
             )
-            val navigatorOutcome = A11yNavigator.performSmartNext(rootInActiveWindow, currentNode)
             Log.i(
                 TAG,
-                "[SMART_NEXT_ACTION][after_navigator] req_id='$reqId' success=${navigatorOutcome.success} detail='${navigatorOutcome.reason}'"
+                "[SMART_NEXT][trace_enter] stage='service_moveFocusSmart' req_id='$reqId'"
             )
-            navigatorOutcome
-        } catch (t: Throwable) {
+            val currentNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            val outcome = try {
+                Log.i(TAG, "[SMART_NEXT_ACTION][before_navigator] req_id='$reqId'")
+                Log.i(
+                    TAG,
+                    "[SMART_NEXT][trace_enter] stage='service_before_performSmartNext' req_id='$reqId'"
+                )
+                val navigatorOutcome = A11yNavigator.performSmartNext(rootInActiveWindow, currentNode, reqId)
+                Log.i(
+                    TAG,
+                    "[SMART_NEXT_ACTION][after_navigator] req_id='$reqId' success=${navigatorOutcome.success} detail='${navigatorOutcome.reason}'"
+                )
+                navigatorOutcome
+            } catch (t: Throwable) {
+                Log.i(
+                    TAG,
+                    "[SMART_NEXT][final] success=false status='failed' detail='exception:${t.javaClass.simpleName}' resolved_focus_view_id='' resolved_focus_label='' requested_target_view_id='' requested_target_label=''"
+                )
+                throw t
+            }
+
+            val detail = outcome.reason
+            val normalizedStatus = normalizeSmartNavStatus(outcome.success, detail)
+            val flags = buildSmartNavFlags(detail)
+            val resolvedFocusNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            val resolvedFocusLabel = (
+                resolvedFocusNode?.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                    ?: resolvedFocusNode?.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                    ?: ""
+                ).replace("\n", " ").take(96)
+            val requestedTargetLabel = (
+                outcome.target?.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                    ?: outcome.target?.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+                    ?: ""
+                ).replace("\n", " ").take(96)
             Log.i(
                 TAG,
-                "[SMART_NEXT][final] success=false status='failed' detail='exception:${t.javaClass.simpleName}' resolved_focus_view_id='' resolved_focus_label='' requested_target_view_id='' requested_target_label=''"
+                "[SMART_NEXT][trace_enter] stage='before_final_response' status='$normalizedStatus' detail='$detail'"
             )
-            throw t
-        }
+            Log.i(
+                TAG,
+                "[SMART_NEXT][final] success=${outcome.success} status='$normalizedStatus' detail='$detail' resolved_focus_view_id='${resolvedFocusNode?.viewIdResourceName.orEmpty()}' resolved_focus_label='$resolvedFocusLabel' requested_target_view_id='${outcome.target?.viewIdResourceName.orEmpty()}' requested_target_label='$requestedTargetLabel'"
+            )
 
-        val detail = outcome.reason
-        val normalizedStatus = normalizeSmartNavStatus(outcome.success, detail)
-        val flags = buildSmartNavFlags(detail)
-        val resolvedFocusNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-        val resolvedFocusLabel = (
-            resolvedFocusNode?.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                ?: resolvedFocusNode?.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                ?: ""
-            ).replace("\n", " ").take(96)
-        val requestedTargetLabel = (
-            outcome.target?.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                ?: outcome.target?.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
-                ?: ""
-            ).replace("\n", " ").take(96)
-        Log.i(
-            TAG,
-            "[SMART_NEXT][trace_enter] stage='before_final_response' status='$normalizedStatus' detail='$detail'"
-        )
-        Log.i(
-            TAG,
-            "[SMART_NEXT][final] success=${outcome.success} status='$normalizedStatus' detail='$detail' resolved_focus_view_id='${resolvedFocusNode?.viewIdResourceName.orEmpty()}' resolved_focus_label='$resolvedFocusLabel' requested_target_view_id='${outcome.target?.viewIdResourceName.orEmpty()}' requested_target_label='$requestedTargetLabel'"
-        )
+            val resultJson = JSONObject().apply {
+                put("timestamp", System.currentTimeMillis())
+                put("reqId", reqId)
+                put("success", outcome.success)
+                put("status", normalizedStatus)
+                put("detail", detail)
+                put("flags", org.json.JSONArray(flags))
+            }
 
-        val resultJson = JSONObject().apply {
-            put("timestamp", System.currentTimeMillis())
-            put("reqId", reqId)
-            put("success", outcome.success)
-            put("status", normalizedStatus)
-            put("detail", detail)
-            put("flags", org.json.JSONArray(flags))
+            Log.i(TAG, "SMART_NAV_RESULT $resultJson")
+            Log.i(
+                TAG,
+                "[SMART_NEXT][trace_enter] stage='after_final_response' status='$normalizedStatus' detail='$detail'"
+            )
+            if (outcome.success && outcome.target != null) {
+                A11yStateStore.update(FocusSnapshot.fromNode(outcome.target))
+            }
+            return resultJson
+        } finally {
+            A11yHistoryManager.activeSmartNextReqId = "none"
         }
-
-        Log.i(TAG, "SMART_NAV_RESULT $resultJson")
-        Log.i(
-            TAG,
-            "[SMART_NEXT][trace_enter] stage='after_final_response' status='$normalizedStatus' detail='$detail'"
-        )
-        if (outcome.success && outcome.target != null) {
-            A11yStateStore.update(FocusSnapshot.fromNode(outcome.target))
-        }
-        return resultJson
     }
 
     fun moveFocus(forward: Boolean, reqId: String = "none"): JSONObject {
