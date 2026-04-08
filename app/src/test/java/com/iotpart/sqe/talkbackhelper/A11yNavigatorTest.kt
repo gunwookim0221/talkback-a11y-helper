@@ -10,7 +10,7 @@ class A11yNavigatorTest {
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.74.3")
+        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.75.0")
     }
 
     @Test
@@ -2747,6 +2747,15 @@ class A11yNavigatorTest {
         )
 
         assertTrue(result)
+    }
+
+    @Test
+    fun nextOneConnectBottomTabViewId_returnsAdjacentTargetOnly() {
+        assertEquals("menu_devices", A11yNodeUtils.nextOneConnectBottomTabViewId("com.samsung.android.oneconnect:id/menu_favorites"))
+        assertEquals("menu_services", A11yNodeUtils.nextOneConnectBottomTabViewId("com.samsung.android.oneconnect:id/menu_devices"))
+        assertEquals("menu_automations", A11yNodeUtils.nextOneConnectBottomTabViewId("com.samsung.android.oneconnect:id/menu_services"))
+        assertEquals("menu_more", A11yNodeUtils.nextOneConnectBottomTabViewId("com.samsung.android.oneconnect:id/menu_automations"))
+        assertEquals(null, A11yNodeUtils.nextOneConnectBottomTabViewId("com.samsung.android.oneconnect:id/menu_more"))
     }
 
     @Test

@@ -7,7 +7,14 @@ import android.view.accessibility.AccessibilityNodeInfo
  * UI 노드의 속성 판별 및 검색을 위한 유틸리티 모음
  */
 object A11yNodeUtils {
-    const val VERSION: String = "1.2.1"
+    const val VERSION: String = "1.2.2"
+    private val ONECONNECT_BOTTOM_TAB_ORDER = listOf(
+        "menu_favorites",
+        "menu_devices",
+        "menu_services",
+        "menu_automations",
+        "menu_more"
+    )
 
     private val SETTINGS_BUTTON_KEYWORDS = listOf("setting_button_layout", "settings", "setting", "gear")
 
@@ -117,6 +124,20 @@ object A11yNodeUtils {
         }
 
         return BOTTOM_NAV_VIEW_ID_KEYWORDS.any { keyword -> normalizedViewId.contains(keyword) }
+    }
+
+    fun isOneConnectBottomTabNode(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null) return false
+        if (!OneConnectTraversalPolicy.isOneConnectPackageName(node.packageName?.toString())) return false
+        val viewIdSuffix = node.viewIdResourceName?.substringAfterLast('/') ?: return false
+        return ONECONNECT_BOTTOM_TAB_ORDER.contains(viewIdSuffix)
+    }
+
+    fun nextOneConnectBottomTabViewId(viewIdResourceName: String?): String? {
+        val viewIdSuffix = viewIdResourceName?.substringAfterLast('/') ?: return null
+        val currentIndex = ONECONNECT_BOTTOM_TAB_ORDER.indexOf(viewIdSuffix)
+        if (currentIndex < 0 || currentIndex >= ONECONNECT_BOTTOM_TAB_ORDER.lastIndex) return null
+        return ONECONNECT_BOTTOM_TAB_ORDER[currentIndex + 1]
     }
 
     fun isContainerLikeClassName(className: String?): Boolean {
