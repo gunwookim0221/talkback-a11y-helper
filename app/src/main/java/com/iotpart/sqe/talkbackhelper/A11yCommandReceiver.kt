@@ -11,7 +11,7 @@ import java.util.concurrent.Executors
 class A11yCommandReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.2.6"
+        private const val VERSION = "1.2.7"
         private const val ACTION_GET_FOCUS = "com.iotpart.sqe.talkbackhelper.GET_FOCUS"
         private const val ACTION_FOCUS_RESULT = "com.iotpart.sqe.talkbackhelper.FOCUS_RESULT"
         private const val ACTION_DUMP_TREE = "com.iotpart.sqe.talkbackhelper.DUMP_TREE"
@@ -53,7 +53,10 @@ class A11yCommandReceiver : BroadcastReceiver() {
         )
         when (action) {
             ACTION_GET_FOCUS -> handleGetFocus(context, intent)
-            ACTION_DUMP_TREE -> handleDumpTree(intent)
+            ACTION_DUMP_TREE -> {
+                Log.i(TAG, "[DUMP_TREE_ACTION][entry] action='$ACTION_DUMP_TREE'")
+                handleDumpTree(intent)
+            }
             ACTION_FOCUS_TARGET -> handleTargetAction(intent, AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
             ACTION_CLICK_TARGET -> {
                 val actionType = if (intent.getBooleanExtra(EXTRA_IS_LONG_CLICK, false)) {
@@ -67,7 +70,10 @@ class A11yCommandReceiver : BroadcastReceiver() {
             ACTION_TOUCH_BOUNDS_CENTER_TARGET -> handleTargetBoundsCenterTap(intent)
             ACTION_NEXT -> handleMoveFocus(intent, true)
             ACTION_PREV -> handleMoveFocus(intent, false)
-            ACTION_SMART_NEXT -> handleSmartNext(context, intent)
+            ACTION_SMART_NEXT -> {
+                Log.i(TAG, "[SMART_NEXT_ACTION][entry] action='$ACTION_SMART_NEXT'")
+                handleSmartNext(context, intent)
+            }
             ACTION_CLICK_FOCUSED -> handleClickFocused(intent)
             ACTION_SCROLL -> handleScroll(intent)
             ACTION_SET_TEXT -> handleSetText(intent)
