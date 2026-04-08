@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.75.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.75.2"
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
@@ -438,6 +438,10 @@ object A11yNavigator {
                 "A11Y_HELPER",
                 "[SMART_NEXT][focus_commit] is_scroll_action=false intended_index=-1 intended_view_id='' actual_candidate_index=-1 actual_view_id='' identity_matched=false retarget_allowed=false commit_status='failed' reason='root_null' action_success=false"
             )
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][final] success=false status='failed_single_target' detail='root_null' resolved_focus_view_id='' resolved_focus_label='' requested_target_view_id='' requested_target_label=''"
+            )
             return TargetActionOutcome(false, "Root node is null")
         }
         A11yHistoryManager.clearAuthoritativeFocusSuppressionWindow("new_smart_next_command_started")
@@ -445,9 +449,43 @@ object A11yNavigator {
         A11yHistoryManager.activeSmartNextTurnId = turnId
         return try {
             val runtimeState = collectSmartNextRuntimeState(root, currentNode)
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][trace_enter] stage='before_policy' current_index=${runtimeState.currentPosition.currentIndex} next_index=${runtimeState.currentPosition.nextIndex} nav_type='pending'"
+            )
             val nextActionDecision = decideNextAction(runtimeState)
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][trace_enter] stage='after_policy' current_index=${runtimeState.currentPosition.currentIndex} next_index=${nextActionDecision.initialTarget.nextIndex} nav_type=${nextActionDecision.navigationDecision.type}"
+            )
             val execution = executeNextAction(nextActionDecision)
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][trace_enter] stage='before_focus_commit' intended_view_id='${nextActionDecision.state.normalize.traversalList.getOrNull(nextActionDecision.initialTarget.nextIndex)?.viewIdResourceName.orEmpty()}' commit_status='pending'"
+            )
             verifyAndFinalizeNextAction(nextActionDecision, execution)
+        } catch (t: Throwable) {
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][trace_enter] stage='before_focus_commit' intended_view_id='' commit_status='failed'"
+            )
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][focus_commit] is_scroll_action=false intended_index=-1 intended_view_id='' actual_candidate_index=-1 actual_view_id='' identity_matched=false retarget_allowed=false commit_status='failed' reason='exception:${t.javaClass.simpleName}' action_success=false"
+            )
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][trace_enter] stage='after_focus_commit' intended_view_id='' commit_status='failed'"
+            )
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][trace_enter] stage='before_final_response' status='failed' detail='exception:${t.javaClass.simpleName}'"
+            )
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][final] success=false status='failed' detail='exception:${t.javaClass.simpleName}' resolved_focus_view_id='' resolved_focus_label='' requested_target_view_id='' requested_target_label=''"
+            )
+            throw t
         } finally {
             A11yHistoryManager.clearTopChromeTransientSystemUiSuppression("smart_next_turn_finished")
             if (A11yHistoryManager.activeSmartNextTurnId == turnId) {
@@ -557,6 +595,18 @@ object A11yNavigator {
         Log.i(
             "A11Y_HELPER",
             "[SMART_NEXT][focus_commit] is_scroll_action=false intended_index=$intendedIndex intended_view_id='$intendedViewId' actual_candidate_index=-1 actual_view_id='$actualViewId' identity_matched=$identityMatched retarget_allowed=false commit_status='$commitStatus' reason='${finalizedOutcome.reason}' action_success=${finalizedOutcome.success}"
+        )
+        Log.i(
+            "A11Y_HELPER",
+            "[SMART_NEXT][trace_enter] stage='after_focus_commit' intended_view_id='$intendedViewId' commit_status='$commitStatus'"
+        )
+        Log.i(
+            "A11Y_HELPER",
+            "[SMART_NEXT][trace_enter] stage='before_final_response' status='${if (finalizedOutcome.success) "success" else "failed"}' detail='${finalizedOutcome.reason}'"
+        )
+        Log.i(
+            "A11Y_HELPER",
+            "[SMART_NEXT][final] success=${finalizedOutcome.success} status='${if (finalizedOutcome.success) "moved" else "failed_single_target"}' detail='${finalizedOutcome.reason}' resolved_focus_view_id='$actualViewId' resolved_focus_label='' requested_target_view_id='$intendedViewId' requested_target_label=''"
         )
         return finalizedOutcome
     }
