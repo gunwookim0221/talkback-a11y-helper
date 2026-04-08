@@ -23,7 +23,7 @@ class A11yHelperService : AccessibilityService() {
             private set
 
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.5.6"
+        private const val VERSION = "1.5.7"
         private const val GESTURE_TAP_DURATION_MS = 90L
         // 일부 단말에서 접근성 제스처 callback(onCompleted/onCancelled) 전달이 2초 내외로 지연될 수 있어
         // 기존 1500ms 대신 callback 분기 구분이 가능한 현실적인 여유 시간을 사용한다.
@@ -447,6 +447,10 @@ class A11yHelperService : AccessibilityService() {
             ).replace("\n", " ").take(96)
         Log.i(
             TAG,
+            "[SMART_NEXT][trace_enter] stage='before_final_response' status='$normalizedStatus' detail='$detail'"
+        )
+        Log.i(
+            TAG,
             "[SMART_NEXT][final] success=${outcome.success} status='$normalizedStatus' detail='$detail' resolved_focus_view_id='${resolvedFocusNode?.viewIdResourceName.orEmpty()}' resolved_focus_label='$resolvedFocusLabel' requested_target_view_id='${outcome.target?.viewIdResourceName.orEmpty()}' requested_target_label='$requestedTargetLabel'"
         )
 
@@ -460,6 +464,10 @@ class A11yHelperService : AccessibilityService() {
         }
 
         Log.i(TAG, "SMART_NAV_RESULT $resultJson")
+        Log.i(
+            TAG,
+            "[SMART_NEXT][trace_enter] stage='after_final_response' status='$normalizedStatus' detail='$detail'"
+        )
         if (outcome.success && outcome.target != null) {
             A11yStateStore.update(FocusSnapshot.fromNode(outcome.target))
         }

@@ -11,7 +11,7 @@ import java.util.concurrent.Executors
 class A11yCommandReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "A11Y_HELPER"
-        private const val VERSION = "1.2.4"
+        private const val VERSION = "1.2.5"
         private const val ACTION_GET_FOCUS = "com.iotpart.sqe.talkbackhelper.GET_FOCUS"
         private const val ACTION_FOCUS_RESULT = "com.iotpart.sqe.talkbackhelper.FOCUS_RESULT"
         private const val ACTION_DUMP_TREE = "com.iotpart.sqe.talkbackhelper.DUMP_TREE"
@@ -206,11 +206,21 @@ class A11yCommandReceiver : BroadcastReceiver() {
             try {
                 Log.i(TAG, "[SMART_NEXT] async execution start reqId=$reqId receiverVersion=$VERSION")
                 val result = service.moveFocusSmart(reqId)
+                val status = result.optString("status", "unknown")
+                val detail = result.optString("detail", "unknown")
+                Log.i(
+                    TAG,
+                    "[SMART_NEXT][trace_enter] stage='before_final_response' status='$status' detail='$detail'"
+                )
                 val reply = Intent("SMART_NAV_RESULT").apply {
                     setPackage(context.packageName)
                     putExtra("json", result.toString())
                 }
                 context.sendBroadcast(reply)
+                Log.i(
+                    TAG,
+                    "[SMART_NEXT][trace_enter] stage='after_final_response' status='$status' detail='$detail'"
+                )
             } catch (t: Throwable) {
                 Log.e(TAG, "[SMART_NEXT] async execution failed reqId=$reqId", t)
                 Log.i(
