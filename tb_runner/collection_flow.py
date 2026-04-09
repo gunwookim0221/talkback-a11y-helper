@@ -1,6 +1,7 @@
 import re
 import time
 from collections import deque
+from dataclasses import dataclass
 from typing import Any
 
 from talkback_lib import A11yAdbClient
@@ -50,6 +51,31 @@ _LIFE_ROOT_APP_BAR_MIN_HITS = 2
 _LIFE_ROOT_VISIBLE_CARD_MIN_HITS = 2
 _LIFE_ROOT_SCORE_THRESHOLD = 3
 _PLUGIN_SCROLL_SEARCH_MAX_STEPS = 5
+
+
+@dataclass
+class StartPipelineResult:
+    success: bool
+    failure_reason: str
+    stabilization_mode: str
+    context_ok: bool
+    anchor_matched: bool
+    anchor_stable: bool
+    focus_align_attempted: bool
+    focus_align_ok: bool
+    focus_align_reason: str
+    pre_navigation_attempted: bool
+    pre_navigation_success: bool
+    open_completed: bool
+    post_open_focus_collected: bool
+    should_enter_main_loop: bool
+    start_row: dict[str, Any] | None
+    needs_open_failed_row: bool
+    anchor_fingerprint: str
+    anchor_repeat_count: int
+    prev_fingerprint: tuple[str, str, str]
+    recent_fingerprint_history: deque[tuple[int, str]]
+    recent_semantic_fingerprint_history: deque[tuple[int, str]]
 
 
 def _is_plugin_anchor_only_new_screen(tab_cfg: dict[str, Any], *, screen_context_mode: str, stabilization_mode: str) -> bool:
@@ -1360,6 +1386,24 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         f"[SCENARIO][stabilization] scenario='{scenario_id}' "
         f"screen_context_mode='{screen_context_mode}' stabilization_mode='{stabilization_mode}'"
     )
+    setattr(client, "last_tab_stabilization_result", {})
+    setattr(client, "last_anchor_stabilize_result", {})
+    setattr(
+        client,
+        "last_start_open_summary",
+        {
+            "stabilization_mode": stabilization_mode,
+            "context_ok": False,
+            "anchor_matched": False,
+            "anchor_stable": False,
+            "focus_align_attempted": False,
+            "focus_align_ok": False,
+            "focus_align_reason": "",
+            "pre_navigation_attempted": bool(has_pre_navigation),
+            "pre_navigation_success": False,
+            "open_completed": False,
+        },
+    )
 
     tab_stabilize_cfg = tab_cfg
     if screen_context_mode == "new_screen":
@@ -1373,6 +1417,7 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         tab_cfg=tab_stabilize_cfg,
         max_retries=tab_retry_count,
     )
+    setattr(client, "last_tab_stabilization_result", tab_stabilized if isinstance(tab_stabilized, dict) else {})
     focus_align_result = tab_stabilized.get("focus_align", {}) if isinstance(tab_stabilized, dict) else {}
     focus_align_attempted = bool(focus_align_result.get("attempted"))
     focus_align_ok = bool(focus_align_result.get("ok"))
@@ -1461,6 +1506,14 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         tab_cfg=tab_cfg,
         transition_fast_path=is_transition_entry_fast_path and not is_strict_main_tab_scenario,
     )
+    start_open_summary = getattr(client, "last_start_open_summary", {})
+    if isinstance(start_open_summary, dict):
+        start_open_summary["context_ok"] = trace_context_ok
+        start_open_summary["focus_align_attempted"] = focus_align_attempted
+        start_open_summary["focus_align_ok"] = focus_align_ok
+        start_open_summary["focus_align_reason"] = str(focus_align_result.get("reason", "") or "")
+        start_open_summary["pre_navigation_success"] = bool(pre_nav_ok)
+        setattr(client, "last_start_open_summary", start_open_summary)
     if not pre_nav_ok:
         return False
 
@@ -1478,6 +1531,7 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     )
     trace_anchor_matched = bool(stabilize_result.get("matched")) if isinstance(stabilize_result, dict) else False
     trace_anchor_stable = bool(stabilize_result.get("ok")) if isinstance(stabilize_result, dict) else False
+    setattr(client, "last_anchor_stabilize_result", stabilize_result if isinstance(stabilize_result, dict) else {})
     log(
         f"[TRACE][open_scenario] scenario='{scenario_id}' stabilization_mode='{stabilization_mode}' "
         f"focus_align_attempted={focus_align_attempted} focus_align_ok={focus_align_ok} "
@@ -1531,6 +1585,12 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         time.sleep(min(main_step_wait_seconds, _TRANSITION_FAST_STEP_WAIT_SECONDS))
     else:
         time.sleep(main_step_wait_seconds)
+    start_open_summary = getattr(client, "last_start_open_summary", {})
+    if isinstance(start_open_summary, dict):
+        start_open_summary["anchor_matched"] = trace_anchor_matched
+        start_open_summary["anchor_stable"] = bool(tab_cfg.get("_scenario_anchor_stable", trace_anchor_stable))
+        start_open_summary["open_completed"] = True
+        setattr(client, "last_start_open_summary", start_open_summary)
     return True
 
 
@@ -2086,6 +2146,237 @@ def _persist_phase(rows: list[dict[str, Any]], tab_cfg: dict[str, Any], *, state
         log(format_perf_summary("scenario_summary", scenario_perf.summary_dict()))
 
 
+def _build_open_failed_row(tab_cfg: dict[str, Any], *, stop_reason: str) -> dict[str, Any]:
+    row = {
+        "tab_name": tab_cfg["tab_name"],
+        "step_index": -1,
+        "status": "TAB_OPEN_FAILED",
+        "stop_reason": stop_reason,
+        "crop_image": "",
+        "crop_image_path": "",
+        "crop_image_saved": False,
+    }
+    row["fingerprint"] = build_row_fingerprint(row)
+    row["fingerprint_repeat_count"] = 0
+    row["is_duplicate_step"] = False
+    row["is_recent_duplicate_step"] = False
+    row["recent_duplicate_distance"] = 0
+    row["recent_duplicate_of_step"] = -1
+    row["normalized_fingerprint"] = ""
+    row["is_recent_semantic_duplicate_step"] = False
+    row["recent_semantic_duplicate_distance"] = 0
+    row["recent_semantic_duplicate_of_step"] = -1
+    row["recent_semantic_unique_count"] = 0
+    row["is_noise_step"] = False
+    row["noise_reason"] = ""
+    return row
+
+
+def _collect_start_anchor_row(
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict[str, Any],
+    *,
+    scenario_id: str,
+    output_base_dir: str,
+    main_step_wait_seconds: float,
+    main_announcement_wait_seconds: float,
+    main_announcement_idle_wait_seconds: float,
+    main_announcement_max_extra_wait_seconds: float,
+) -> dict[str, Any]:
+    anchor_start = time.perf_counter()
+    anchor_row = client.collect_focus_step(
+        dev=dev,
+        step_index=0,
+        move=False,
+        wait_seconds=main_step_wait_seconds,
+        announcement_wait_seconds=main_announcement_wait_seconds,
+        announcement_idle_wait_seconds=main_announcement_idle_wait_seconds,
+        announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
+    )
+    anchor_elapsed = time.perf_counter() - anchor_start
+    anchor_row["tab_name"] = tab_cfg["tab_name"]
+    anchor_row["context_type"] = "main"
+    anchor_row["parent_step_index"] = ""
+    anchor_row["overlay_entry_label"] = ""
+    anchor_row["overlay_recovery_status"] = ""
+    anchor_row["status"] = "ANCHOR"
+    anchor_row["stop_reason"] = ""
+    anchor_row["step_elapsed_sec"] = round(anchor_elapsed, 3)
+    anchor_row["crop_image"] = "IMAGE"
+    anchor_row["scenario_start_mode"] = str(tab_cfg.get("_scenario_start_mode", "anchor_stable") or "anchor_stable")
+    anchor_row["scenario_start_source"] = str(tab_cfg.get("_scenario_start_source", "explicit_anchor") or "explicit_anchor")
+    anchor_row["anchor_stable"] = bool(tab_cfg.get("_scenario_anchor_stable", True))
+    anchor_row["review_note"] = str(tab_cfg.get("_scenario_start_note", "") or "")
+    anchor_visible = str(anchor_row.get("visible_label", "") or "").strip()
+    anchor_speech = str(anchor_row.get("merged_announcement", "") or "").strip()
+    anchor_normalized_visible = str(anchor_row.get("normalized_visible_label", "") or "").strip()
+    anchor_view_id = str(anchor_row.get("focus_view_id", "") or "").strip()
+    anchor_is_global_nav = bool(anchor_row.get("is_global_nav", False))
+    log(
+        f"[TRACE][anchor_row] scenario='{scenario_id}' step=0 view_id='{anchor_view_id}' "
+        f"visible='{anchor_visible}' speech='{anchor_speech}' "
+        f"normalized_visible='{anchor_normalized_visible}' is_global_nav={anchor_is_global_nav}",
+    )
+    anchor_row["_step_mono_start"] = time.monotonic() - float(anchor_row.get("t_step_start", 0.0) or 0.0)
+    anchor_row = maybe_capture_focus_crop(client, dev, anchor_row, output_base_dir)
+    anchor_row.pop("_step_mono_start", None)
+    return anchor_row
+
+
+def _run_start_pipeline(
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict[str, Any],
+    *,
+    output_base_dir: str,
+    main_step_wait_seconds: float,
+    main_announcement_wait_seconds: float,
+    main_announcement_idle_wait_seconds: float,
+    main_announcement_max_extra_wait_seconds: float,
+) -> StartPipelineResult:
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    screen_context_mode = _resolve_screen_context_mode(tab_cfg)
+    stabilization_mode = _resolve_stabilization_mode(tab_cfg, screen_context_mode)
+    result = StartPipelineResult(
+        success=False,
+        failure_reason="",
+        stabilization_mode=stabilization_mode,
+        context_ok=False,
+        anchor_matched=False,
+        anchor_stable=False,
+        focus_align_attempted=False,
+        focus_align_ok=False,
+        focus_align_reason="",
+        pre_navigation_attempted=bool(tab_cfg.get("pre_navigation")),
+        pre_navigation_success=False,
+        open_completed=False,
+        post_open_focus_collected=False,
+        should_enter_main_loop=False,
+        start_row=None,
+        needs_open_failed_row=False,
+        anchor_fingerprint="",
+        anchor_repeat_count=0,
+        prev_fingerprint=("", "", ""),
+        recent_fingerprint_history=deque(maxlen=_RECENT_DUPLICATE_WINDOW),
+        recent_semantic_fingerprint_history=deque(maxlen=_RECENT_DUPLICATE_WINDOW),
+    )
+
+    opened = open_scenario(client, dev, tab_cfg)
+    open_summary = getattr(client, "last_start_open_summary", {})
+    if isinstance(open_summary, dict):
+        result.context_ok = bool(open_summary.get("context_ok"))
+        result.anchor_matched = bool(open_summary.get("anchor_matched"))
+        result.anchor_stable = bool(open_summary.get("anchor_stable"))
+        result.focus_align_attempted = bool(open_summary.get("focus_align_attempted"))
+        result.focus_align_ok = bool(open_summary.get("focus_align_ok"))
+        result.focus_align_reason = str(open_summary.get("focus_align_reason", "") or "")
+        result.pre_navigation_attempted = bool(open_summary.get("pre_navigation_attempted", result.pre_navigation_attempted))
+        result.pre_navigation_success = bool(open_summary.get("pre_navigation_success"))
+        result.open_completed = bool(open_summary.get("open_completed"))
+    tab_trace = getattr(client, "last_tab_stabilization_result", {})
+    if isinstance(tab_trace, dict) and not isinstance(open_summary, dict):
+        context_payload = tab_trace.get("context", {})
+        result.context_ok = bool(context_payload.get("ok")) if isinstance(context_payload, dict) else False
+        focus_align_payload = tab_trace.get("focus_align", {})
+        if isinstance(focus_align_payload, dict):
+            result.focus_align_attempted = bool(focus_align_payload.get("attempted"))
+            result.focus_align_ok = bool(focus_align_payload.get("ok"))
+            result.focus_align_reason = str(focus_align_payload.get("reason", "") or "")
+    if not opened:
+        result.failure_reason = "tab_or_anchor_failed"
+        result.needs_open_failed_row = True
+        return result
+
+    result.open_completed = True
+    stabilize_trace = getattr(client, "last_anchor_stabilize_result", {})
+    if isinstance(stabilize_trace, dict) and not isinstance(open_summary, dict):
+        result.anchor_matched = bool(stabilize_trace.get("matched"))
+        result.anchor_stable = bool(stabilize_trace.get("ok"))
+
+    post_open_focus = client.get_focus(dev=dev, wait_seconds=min(main_step_wait_seconds, 1.0), allow_fallback_dump=False, mode="fast")
+    post_open_trace = getattr(client, "last_get_focus_trace", {}) if isinstance(getattr(client, "last_get_focus_trace", {}), dict) else {}
+    post_view_id = str(post_open_focus.get("viewIdResourceName", "") or post_open_focus.get("resourceId", "") or "").strip() if isinstance(post_open_focus, dict) else ""
+    extract_visible_label = getattr(client, "extract_visible_label_from_focus", None)
+    if callable(extract_visible_label) and isinstance(post_open_focus, dict):
+        post_label = str(extract_visible_label(post_open_focus) or "")
+    else:
+        post_label = str(
+            (post_open_focus.get("text", "") if isinstance(post_open_focus, dict) else "")
+            or (post_open_focus.get("contentDescription", "") if isinstance(post_open_focus, dict) else "")
+            or ""
+        ).strip()
+    post_speech = str(
+        (post_open_focus.get("talkbackLabel", "") if isinstance(post_open_focus, dict) else "")
+        or (post_open_focus.get("mergedLabel", "") if isinstance(post_open_focus, dict) else "")
+        or (post_open_focus.get("contentDescription", "") if isinstance(post_open_focus, dict) else "")
+        or (post_open_focus.get("text", "") if isinstance(post_open_focus, dict) else "")
+        or ""
+    ).strip()
+    post_bounds = str(post_open_focus.get("boundsInScreen", "") or "").strip() if isinstance(post_open_focus, dict) else ""
+    post_source = str(post_open_trace.get("final_payload_source", "none") or "none")
+    post_top_level = bool(post_open_trace.get("accepted_with_success_false", False))
+    log(
+        f"[TRACE][post_open_focus] scenario='{scenario_id}' view_id='{post_view_id}' label='{post_label}' "
+        f"speech='{post_speech}' bounds='{post_bounds}' source='{post_source}' top_level={post_top_level}",
+    )
+    result.post_open_focus_collected = True
+
+    scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower()
+    is_global_nav_start_gate = scenario_type == "global_nav" and screen_context_mode == "bottom_tab"
+    if is_global_nav_start_gate:
+        start_gate_ok, _gated_focus = _ensure_global_nav_start_focus(
+            client=client,
+            dev=dev,
+            tab_cfg=tab_cfg,
+            scenario_id=scenario_id,
+            focused_view_id=post_view_id,
+            wait_seconds=main_step_wait_seconds,
+        )
+        if not start_gate_ok:
+            result.failure_reason = "global_nav_start_gate_failed"
+            result.needs_open_failed_row = True
+            return result
+
+    anchor_row = _collect_start_anchor_row(
+        client,
+        dev,
+        tab_cfg,
+        scenario_id=scenario_id,
+        output_base_dir=output_base_dir,
+        main_step_wait_seconds=main_step_wait_seconds,
+        main_announcement_wait_seconds=main_announcement_wait_seconds,
+        main_announcement_idle_wait_seconds=main_announcement_idle_wait_seconds,
+        main_announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
+    )
+    anchor_fingerprint, anchor_repeat_count = _annotate_row_quality(
+        anchor_row,
+        last_fingerprint="",
+        fingerprint_repeat_count=0,
+        recent_fingerprint_history=result.recent_fingerprint_history,
+        recent_semantic_fingerprint_history=result.recent_semantic_fingerprint_history,
+    )
+    log(
+        f"[ROW] fingerprint='{anchor_row.get('fingerprint', '')}' "
+        f"normalized_fingerprint='{anchor_row.get('normalized_fingerprint', '')}' "
+        f"duplicate={str(bool(anchor_row.get('is_duplicate_step', False))).lower()} "
+        f"recent_duplicate={str(bool(anchor_row.get('is_recent_duplicate_step', False))).lower()} "
+        f"distance={int(anchor_row.get('recent_duplicate_distance', 0) or 0)} "
+        f"recent_semantic_duplicate={str(bool(anchor_row.get('is_recent_semantic_duplicate_step', False))).lower()} "
+        f"semantic_distance={int(anchor_row.get('recent_semantic_duplicate_distance', 0) or 0)} "
+        f"semantic_window_unique={int(anchor_row.get('recent_semantic_unique_count', 0) or 0)} "
+        f"noise={str(bool(anchor_row.get('is_noise_step', False))).lower()}"
+    )
+    result.anchor_stable = bool(tab_cfg.get("_scenario_anchor_stable", result.anchor_stable))
+    result.success = True
+    result.start_row = anchor_row
+    result.anchor_fingerprint = anchor_fingerprint
+    result.anchor_repeat_count = anchor_repeat_count
+    result.prev_fingerprint = make_main_fingerprint(anchor_row)
+    result.should_enter_main_loop = True
+    return result
+
+
 def collect_tab_rows(
     client: A11yAdbClient,
     dev: str,
@@ -2115,187 +2406,50 @@ def collect_tab_rows(
     )
     checkpoint_every = _get_positive_int(checkpoint_save_every, CHECKPOINT_SAVE_EVERY_STEPS)
 
-    opened = open_scenario(client, dev, tab_cfg)
-    if not opened:
-        row = {
-            "tab_name": tab_cfg["tab_name"],
-            "step_index": -1,
-            "status": "TAB_OPEN_FAILED",
-            "stop_reason": "tab_or_anchor_failed",
-            "crop_image": "",
-            "crop_image_path": "",
-            "crop_image_saved": False,
-        }
-        row["fingerprint"] = build_row_fingerprint(row)
-        row["fingerprint_repeat_count"] = 0
-        row["is_duplicate_step"] = False
-        row["is_recent_duplicate_step"] = False
-        row["recent_duplicate_distance"] = 0
-        row["recent_duplicate_of_step"] = -1
-        row["normalized_fingerprint"] = ""
-        row["is_recent_semantic_duplicate_step"] = False
-        row["recent_semantic_duplicate_distance"] = 0
-        row["recent_semantic_duplicate_of_step"] = -1
-        row["recent_semantic_unique_count"] = 0
-        row["is_noise_step"] = False
-        row["noise_reason"] = ""
-        rows.append(row)
-        all_rows.append(row)
+    start_result = _run_start_pipeline(
+        client,
+        dev,
+        tab_cfg,
+        output_base_dir=output_base_dir,
+        main_step_wait_seconds=main_step_wait_seconds,
+        main_announcement_wait_seconds=main_announcement_wait_seconds,
+        main_announcement_idle_wait_seconds=main_announcement_idle_wait_seconds,
+        main_announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
+    )
+    if start_result.needs_open_failed_row:
+        failed_row = _build_open_failed_row(
+            tab_cfg,
+            stop_reason=start_result.failure_reason or "tab_or_anchor_failed",
+        )
+        rows.append(failed_row)
+        all_rows.append(failed_row)
         if scenario_perf is not None:
-            scenario_perf.record_row(row)
+            scenario_perf.record_row(failed_row)
             scenario_perf.finalize()
             log(format_perf_summary("scenario_summary", scenario_perf.summary_dict()))
         save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
         return rows
-    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
-    post_open_focus = client.get_focus(dev=dev, wait_seconds=min(main_step_wait_seconds, 1.0), allow_fallback_dump=False, mode="fast")
-    post_open_trace = getattr(client, "last_get_focus_trace", {}) if isinstance(getattr(client, "last_get_focus_trace", {}), dict) else {}
-    post_view_id = str(post_open_focus.get("viewIdResourceName", "") or post_open_focus.get("resourceId", "") or "").strip() if isinstance(post_open_focus, dict) else ""
-    extract_visible_label = getattr(client, "extract_visible_label_from_focus", None)
-    if callable(extract_visible_label) and isinstance(post_open_focus, dict):
-        post_label = str(extract_visible_label(post_open_focus) or "")
-    else:
-        post_label = str(
-            (post_open_focus.get("text", "") if isinstance(post_open_focus, dict) else "")
-            or (post_open_focus.get("contentDescription", "") if isinstance(post_open_focus, dict) else "")
-            or ""
-        ).strip()
-    post_speech = str(
-        (post_open_focus.get("talkbackLabel", "") if isinstance(post_open_focus, dict) else "")
-        or (post_open_focus.get("mergedLabel", "") if isinstance(post_open_focus, dict) else "")
-        or (post_open_focus.get("contentDescription", "") if isinstance(post_open_focus, dict) else "")
-        or (post_open_focus.get("text", "") if isinstance(post_open_focus, dict) else "")
-        or ""
-    ).strip()
-    post_bounds = str(post_open_focus.get("boundsInScreen", "") or "").strip() if isinstance(post_open_focus, dict) else ""
-    post_source = str(post_open_trace.get("final_payload_source", "none") or "none")
-    post_top_level = bool(post_open_trace.get("accepted_with_success_false", False))
-    log(
-        f"[TRACE][post_open_focus] scenario='{scenario_id}' view_id='{post_view_id}' label='{post_label}' "
-        f"speech='{post_speech}' bounds='{post_bounds}' source='{post_source}' top_level={post_top_level}",
-    )
-    scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower()
-    screen_context_mode = _resolve_screen_context_mode(tab_cfg)
-    is_global_nav_start_gate = scenario_type == "global_nav" and screen_context_mode == "bottom_tab"
-    if is_global_nav_start_gate:
-        start_gate_ok, _gated_focus = _ensure_global_nav_start_focus(
-            client=client,
-            dev=dev,
-            tab_cfg=tab_cfg,
-            scenario_id=scenario_id,
-            focused_view_id=post_view_id,
-            wait_seconds=main_step_wait_seconds,
-        )
-        if not start_gate_ok:
-            row = {
-                "tab_name": tab_cfg["tab_name"],
-                "step_index": -1,
-                "status": "TAB_OPEN_FAILED",
-                "stop_reason": "global_nav_start_gate_failed",
-                "crop_image": "",
-                "crop_image_path": "",
-                "crop_image_saved": False,
-            }
-            row["fingerprint"] = build_row_fingerprint(row)
-            row["fingerprint_repeat_count"] = 0
-            row["is_duplicate_step"] = False
-            row["is_recent_duplicate_step"] = False
-            row["recent_duplicate_distance"] = 0
-            row["recent_duplicate_of_step"] = -1
-            row["normalized_fingerprint"] = ""
-            row["is_recent_semantic_duplicate_step"] = False
-            row["recent_semantic_duplicate_distance"] = 0
-            row["recent_semantic_duplicate_of_step"] = -1
-            row["recent_semantic_unique_count"] = 0
-            row["is_noise_step"] = False
-            row["noise_reason"] = ""
-            rows.append(row)
-            all_rows.append(row)
-            if scenario_perf is not None:
-                scenario_perf.record_row(row)
-                scenario_perf.finalize()
-                log(format_perf_summary("scenario_summary", scenario_perf.summary_dict()))
-            save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
-            return rows
+    if not start_result.should_enter_main_loop or start_result.start_row is None:
+        return rows
 
-    anchor_start = time.perf_counter()
-    anchor_row = client.collect_focus_step(
-        dev=dev,
-        step_index=0,
-        move=False,
-        wait_seconds=main_step_wait_seconds,
-        announcement_wait_seconds=main_announcement_wait_seconds,
-        announcement_idle_wait_seconds=main_announcement_idle_wait_seconds,
-        announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
-    )
-    anchor_elapsed = time.perf_counter() - anchor_start
-
-    anchor_row["tab_name"] = tab_cfg["tab_name"]
-    anchor_row["context_type"] = "main"
-    anchor_row["parent_step_index"] = ""
-    anchor_row["overlay_entry_label"] = ""
-    anchor_row["overlay_recovery_status"] = ""
-    anchor_row["status"] = "ANCHOR"
-    anchor_row["stop_reason"] = ""
-    anchor_row["step_elapsed_sec"] = round(anchor_elapsed, 3)
-    anchor_row["crop_image"] = "IMAGE"
-    anchor_row["scenario_start_mode"] = str(tab_cfg.get("_scenario_start_mode", "anchor_stable") or "anchor_stable")
-    anchor_row["scenario_start_source"] = str(tab_cfg.get("_scenario_start_source", "explicit_anchor") or "explicit_anchor")
-    anchor_row["anchor_stable"] = bool(tab_cfg.get("_scenario_anchor_stable", True))
-    anchor_row["review_note"] = str(tab_cfg.get("_scenario_start_note", "") or "")
-    anchor_visible = str(anchor_row.get("visible_label", "") or "").strip()
-    anchor_speech = str(anchor_row.get("merged_announcement", "") or "").strip()
-    anchor_normalized_visible = str(anchor_row.get("normalized_visible_label", "") or "").strip()
-    anchor_view_id = str(anchor_row.get("focus_view_id", "") or "").strip()
-    anchor_is_global_nav = bool(anchor_row.get("is_global_nav", False))
-    log(
-        f"[TRACE][anchor_row] scenario='{scenario_id}' step=0 view_id='{anchor_view_id}' "
-        f"visible='{anchor_visible}' speech='{anchor_speech}' "
-        f"normalized_visible='{anchor_normalized_visible}' is_global_nav={anchor_is_global_nav}",
-    )
-    anchor_row["_step_mono_start"] = time.monotonic() - float(anchor_row.get("t_step_start", 0.0) or 0.0)
-    anchor_row = maybe_capture_focus_crop(client, dev, anchor_row, output_base_dir)
-    anchor_row.pop("_step_mono_start", None)
-    recent_fingerprint_history: deque[tuple[int, str]] = deque(maxlen=_RECENT_DUPLICATE_WINDOW)
-    recent_semantic_fingerprint_history: deque[tuple[int, str]] = deque(maxlen=_RECENT_DUPLICATE_WINDOW)
-
-    anchor_fingerprint, anchor_repeat_count = _annotate_row_quality(
-        anchor_row,
-        last_fingerprint="",
-        fingerprint_repeat_count=0,
-        recent_fingerprint_history=recent_fingerprint_history,
-        recent_semantic_fingerprint_history=recent_semantic_fingerprint_history,
-    )
-    log(
-        f"[ROW] fingerprint='{anchor_row.get('fingerprint', '')}' "
-        f"normalized_fingerprint='{anchor_row.get('normalized_fingerprint', '')}' "
-        f"duplicate={str(bool(anchor_row.get('is_duplicate_step', False))).lower()} "
-        f"recent_duplicate={str(bool(anchor_row.get('is_recent_duplicate_step', False))).lower()} "
-        f"distance={int(anchor_row.get('recent_duplicate_distance', 0) or 0)} "
-        f"recent_semantic_duplicate={str(bool(anchor_row.get('is_recent_semantic_duplicate_step', False))).lower()} "
-        f"semantic_distance={int(anchor_row.get('recent_semantic_duplicate_distance', 0) or 0)} "
-        f"semantic_window_unique={int(anchor_row.get('recent_semantic_unique_count', 0) or 0)} "
-        f"noise={str(bool(anchor_row.get('is_noise_step', False))).lower()}"
-    )
-
+    anchor_row = start_result.start_row
     rows.append(anchor_row)
     all_rows.append(anchor_row)
     if scenario_perf is not None:
         scenario_perf.record_row(anchor_row)
     save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
-    prev_fingerprint = make_main_fingerprint(anchor_row)
     state = {
-        "last_fingerprint": anchor_fingerprint,
-        "fingerprint_repeat_count": anchor_repeat_count,
+        "last_fingerprint": start_result.anchor_fingerprint,
+        "fingerprint_repeat_count": start_result.anchor_repeat_count,
         "previous_step_row": anchor_row,
-        "prev_fingerprint": prev_fingerprint,
+        "prev_fingerprint": start_result.prev_fingerprint,
         "fail_count": 0,
         "same_count": 0,
         "expanded_overlay_entries": set(),
         "post_realign_pending_steps": 0,
-        "main_step_index_by_fingerprint": {prev_fingerprint: 0},
-        "recent_fingerprint_history": recent_fingerprint_history,
-        "recent_semantic_fingerprint_history": recent_semantic_fingerprint_history,
+        "main_step_index_by_fingerprint": {start_result.prev_fingerprint: 0},
+        "recent_fingerprint_history": start_result.recent_fingerprint_history,
+        "recent_semantic_fingerprint_history": start_result.recent_semantic_fingerprint_history,
         "stop_triggered": False,
         "stop_reason": "",
         "stop_step": -1,
