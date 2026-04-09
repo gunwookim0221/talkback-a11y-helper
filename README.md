@@ -647,3 +647,22 @@ assert client.last_merged_announcement == merged
 
 `select_and_click_focused_or_tap_bounds_center_adb`는 `select(target)` 이후 focus 확인(`last_target_action_result`/`get_focus`)이 성공하면 `click_focused()`로 진입하고, focus 확인이 실패하면 bounded fallback으로 `tap_bounds_center_adb`를 실행합니다.
 `tap_bounds_center_adb` 계열은 현재 화면 dump에서 selector로 찾은 bounds 중심 좌표를 계산해 `adb shell input tap x y`를 1회 전송합니다(없으면 lazy dump 1회 재시도 후 실패 처리).
+
+## Python 숨은 공백 문자(NBSP 등) 방지
+
+Python 파일에서 `SyntaxError: invalid non-printable character U+00A0`가 발생하지 않도록 루트의 `sanitize_whitespace.py`를 사용할 수 있습니다.
+
+```bash
+python sanitize_whitespace.py --dry-run
+python sanitize_whitespace.py
+```
+
+원하면 pre-commit 훅으로 자동 실행할 수 있습니다.
+
+```bash
+cat > .git/hooks/pre-commit <<'HOOK'
+#!/usr/bin/env bash
+python sanitize_whitespace.py
+HOOK
+chmod +x .git/hooks/pre-commit
+```

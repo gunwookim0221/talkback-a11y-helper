@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from talkback_lib import A11yAdbClient
 
+APP_VERSION = "2026.04.09.1"
+
 
 def main() -> None:
     client = A11yAdbClient()
