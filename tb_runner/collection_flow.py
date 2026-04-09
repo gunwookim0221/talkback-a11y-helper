@@ -46,6 +46,9 @@ _STALL_ESCAPE_SAME_LIKE_THRESHOLD = 6
 _STALL_ESCAPE_SEMANTIC_UNIQUE_MAX = 2
 _PLUGIN_ENTRY_RETRY_COUNT = 2
 _PLUGIN_TOP_VERIFY_RETRY_COUNT = 2
+_LIFE_ROOT_APP_BAR_MIN_HITS = 2
+_LIFE_ROOT_VISIBLE_CARD_MIN_HITS = 2
+_LIFE_ROOT_SCORE_THRESHOLD = 3
 
 
 def _is_plugin_anchor_only_new_screen(tab_cfg: dict[str, Any], *, screen_context_mode: str, stabilization_mode: str) -> bool:
@@ -105,26 +108,78 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
     app_bar_hits = 0
     life_selected = False
     visible_card_hits = 0
+    life_root_signature_present = False
+    bottom_nav_life_visible = False
+    service_title_hits = 0
+    description_hits = 0
+    structure_hits = 0
+    life_service_titles = {"food", "energy", "air care", "home care", "pet care"}
+    life_description_contains = (
+        "energy usage",
+        "food preferences",
+        "air quality",
+        "home care",
+        "pet care",
+    )
     for node, _ in flat_nodes:
         if not _node_is_visible(node):
             continue
         label_blob = _node_label_blob(node)
+        normalized_label_blob = re.sub(r"\s+", " ", label_blob).strip().lower()
         resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
+        normalized_resource_id = resource_id.lower()
         selected = bool(node.get("selected"))
         if (
             _safe_regex_search(r"(?i)menu_services", resource_id)
             or _safe_regex_search(r"(?i)\blife\b", label_blob)
         ) and selected:
             life_selected = True
+        if _safe_regex_search(r"(?i)menu_services", resource_id):
+            bottom_nav_life_visible = True
         if _safe_regex_search(r"(?i)\b(add|more options|location|qr code)\b", label_blob):
             app_bar_hits += 1
         if _safe_regex_search(r"(?i)(preinstalledservicecard|servicecard|card)", resource_id):
             visible_card_hits += 1
+        if "divider_text" in normalized_resource_id or "preinstalledservicecard" in normalized_resource_id:
+            structure_hits += 1
+        if "cardtitle" in normalized_resource_id or "carddescription" in normalized_resource_id:
+            structure_hits += 1
+        if normalized_label_blob in life_service_titles:
+            service_title_hits += 1
+        if normalized_label_blob == "more services":
+            structure_hits += 1
+        if any(token in normalized_label_blob for token in life_description_contains):
+            description_hits += 1
+    life_root_signature_present = bool(structure_hits > 0 or service_title_hits > 0 or description_hits > 0)
+    final_score = 0
+    if life_selected:
+        final_score += 1
+    if app_bar_hits >= _LIFE_ROOT_APP_BAR_MIN_HITS:
+        final_score += 1
+    if visible_card_hits >= _LIFE_ROOT_VISIBLE_CARD_MIN_HITS:
+        final_score += 1
+    if life_root_signature_present:
+        final_score += 1
+    if bottom_nav_life_visible:
+        final_score += 1
+    has_root_structure = app_bar_hits >= _LIFE_ROOT_APP_BAR_MIN_HITS or visible_card_hits >= _LIFE_ROOT_VISIBLE_CARD_MIN_HITS
+    ok = bool(life_root_signature_present and has_root_structure and final_score >= _LIFE_ROOT_SCORE_THRESHOLD)
+    if ok:
+        pass_reason = "life_root_signature_and_structure_confirmed"
+        fail_reason = ""
+    else:
+        pass_reason = ""
+        fail_reason = "life_root_not_stable"
     return {
         "life_selected": life_selected,
         "app_bar_hits": app_bar_hits,
         "visible_card_hits": visible_card_hits,
-        "ok": life_selected and app_bar_hits > 0,
+        "life_root_signature_present": life_root_signature_present,
+        "bottom_nav_life_visible": bottom_nav_life_visible,
+        "final_score": final_score,
+        "pass_reason": pass_reason,
+        "fail_reason": fail_reason,
+        "ok": ok,
     }
 
 
@@ -146,11 +201,14 @@ def _verify_plugin_entry_root_state(client: A11yAdbClient, dev: str, *, phase: s
         log(
             f"[SCENARIO][pre_nav][stabilization] phase='{phase}' attempt={attempt}/{_PLUGIN_ENTRY_RETRY_COUNT} "
             f"life_selected={str(snapshot.get('life_selected')).lower()} app_bar_hits={snapshot.get('app_bar_hits', 0)} "
-            f"visible_card_hits={snapshot.get('visible_card_hits', 0)} ok={str(ok).lower()}"
+            f"visible_card_hits={snapshot.get('visible_card_hits', 0)} "
+            f"life_root_signature_present={str(snapshot.get('life_root_signature_present')).lower()} "
+            f"final_score={snapshot.get('final_score', 0)} ok={str(ok).lower()} "
+            f"pass_reason='{snapshot.get('pass_reason', '')}' fail_reason='{snapshot.get('fail_reason', '')}'"
         )
         if ok:
             return True, "root_state_stable"
-        last_reason = "life_root_not_stable"
+        last_reason = str(snapshot.get("fail_reason", "life_root_not_stable") or "life_root_not_stable")
         if attempt < _PLUGIN_ENTRY_RETRY_COUNT:
             time.sleep(0.2)
     return False, last_reason
