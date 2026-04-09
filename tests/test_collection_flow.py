@@ -14,6 +14,7 @@ class DummyClient:
         self.reset_focus_history_calls = 0
         self.touch_calls = []
         self.scroll_touch_calls = []
+        self.scroll_calls = []
         self.scroll_to_top_calls = []
         self.touch_bounds_center_calls = []
         self.tap_bounds_center_adb_calls = []
@@ -45,6 +46,11 @@ class DummyClient:
     def scrollTouch(self, **kwargs):
         self.scroll_touch_calls.append(kwargs)
         self.last_target_action_result = {"reason": "touch_success"}
+        return True
+
+    def scroll(self, dev, direction, step_=50, time_=1000, bounds_=None):
+        _ = (dev, step_, time_, bounds_)
+        self.scroll_calls.append(direction)
         return True
 
     def scroll_to_top(self, **kwargs):
@@ -145,7 +151,7 @@ def _main_row(idx=1):
 def test_open_tab_and_anchor_returns_false_when_tab_stabilization_fails(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": False})
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
-    client = DummyClient([_anchor_row()])
+    client = DummyClient([_anchor_row(), _anchor_row()])
 
     ok = collection_flow.open_tab_and_anchor(client, "SERIAL", _base_tab_cfg())
 
@@ -156,7 +162,7 @@ def test_open_tab_and_anchor_returns_false_when_anchor_stabilization_fails(monke
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": False})
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
-    client = DummyClient([_anchor_row()])
+    client = DummyClient([_anchor_row(), _anchor_row()])
 
     ok = collection_flow.open_tab_and_anchor(client, "SERIAL", _base_tab_cfg())
 
@@ -167,7 +173,7 @@ def test_open_tab_and_anchor_returns_true_when_both_succeed(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
-    client = DummyClient([_anchor_row()])
+    client = DummyClient([_anchor_row(), _anchor_row()])
 
     ok = collection_flow.open_tab_and_anchor(client, "SERIAL", _base_tab_cfg())
 
@@ -812,6 +818,77 @@ def test_open_scenario_pre_navigation_scroll_touch_failure(monkeypatch):
 
     assert ok is False
     assert len(client.scroll_touch_calls) == 1
+
+
+def test_open_scenario_pre_navigation_scroll_touch_plugin_uses_cumulative_downward_search(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+
+    page1 = [
+        {
+            "text": "Life root",
+            "boundsInScreen": "0,0,1080,2000",
+            "visibleToUser": True,
+            "children": [
+                {
+                    "text": "Food",
+                    "boundsInScreen": "100,500,980,760",
+                    "visibleToUser": True,
+                    "clickable": True,
+                    "focusable": True,
+                    "viewIdResourceName": "com.test:id/preInstalledServiceCard",
+                }
+            ],
+        }
+    ]
+    page2 = [
+        {
+            "text": "Life root",
+            "boundsInScreen": "0,0,1080,2000",
+            "visibleToUser": True,
+            "children": [
+                {
+                    "text": "Energy. Monitor and control your home energy usage.",
+                    "boundsInScreen": "100,700,980,980",
+                    "visibleToUser": True,
+                    "clickable": True,
+                    "focusable": True,
+                    "viewIdResourceName": "com.test:id/preInstalledServiceCard",
+                    "children": [
+                        {
+                            "text": "Energy",
+                            "boundsInScreen": "150,740,500,820",
+                            "visibleToUser": True,
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    client.dump_tree_sequence = [page1, page2]
+    monkeypatch.setattr(collection_flow, "_verify_plugin_entry_root_state", lambda *args, **kwargs: (True, "ok"))
+    monkeypatch.setattr(collection_flow, "_verify_scroll_top_state", lambda *args, **kwargs: (True, "life_root_marker_visible", page1))
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_energy_plugin",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "pre_navigation": [{"action": "scrollTouch", "target": "(?i).*energy.*", "type": "a"}],
+        "pre_navigation_retry_count": 3,
+        "max_scroll_search_steps": 4,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert len(client.scroll_to_top_calls) == 1
+    assert len(client.scroll_calls) >= 1
+    assert any("cumulative_mode=true" in line for line in logs)
+    assert any("scroll_forward_and_retry_local_search" in line for line in logs)
 
 
 def test_open_scenario_pre_navigation_touch_bounds_center_bounds_unavailable_failure(monkeypatch):
