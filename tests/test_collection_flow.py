@@ -2156,3 +2156,37 @@ def test_collect_tab_rows_main_tabs_do_not_apply_stall_escape(monkeypatch):
     assert calls["escape"] == 0
     assert rows[1]["status"] == "END"
     assert rows[1]["stop_reason"] == "repeat_semantic_stall"
+
+
+def test_life_root_state_snapshot_allows_unselected_life_tab_with_strong_root_signature():
+    nodes = [
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/menu_services", "selected": False, "visibleToUser": True},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/location_home_button", "text": "Location", "visibleToUser": True},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/add_menu_button", "text": "Add", "visibleToUser": True},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/preInstalledServiceCard", "visibleToUser": True},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/serviceCard", "visibleToUser": True},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/divider_text", "text": "More services", "visibleToUser": True},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/cardTitle", "text": "Energy", "visibleToUser": True},
+    ]
+
+    snapshot = collection_flow._life_root_state_snapshot(nodes)
+
+    assert snapshot["life_selected"] is False
+    assert snapshot["life_root_signature_present"] is True
+    assert snapshot["final_score"] >= 3
+    assert snapshot["ok"] is True
+
+
+def test_life_root_state_snapshot_fails_when_root_signature_missing():
+    nodes = [
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/location_home_button", "text": "Location", "visibleToUser": True},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/add_menu_button", "text": "Add", "visibleToUser": True},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/random_card_container", "visibleToUser": True},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/random_card_container2", "visibleToUser": True},
+    ]
+
+    snapshot = collection_flow._life_root_state_snapshot(nodes)
+
+    assert snapshot["life_root_signature_present"] is False
+    assert snapshot["ok"] is False
+    assert snapshot["fail_reason"] == "life_root_not_stable"
