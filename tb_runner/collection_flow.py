@@ -78,17 +78,6 @@ class StartPipelineResult:
     recent_semantic_fingerprint_history: deque[tuple[int, str]]
 
 
-@dataclass
-class OverlayPhaseResult:
-    triggered: bool
-    classification: str
-    break_reason: str
-    realign_attempted: bool
-    realign_success: bool
-    resume_allowed: bool
-    post_realign_pending_steps_delta: int
-
-
 def _is_plugin_anchor_only_new_screen(tab_cfg: dict[str, Any], *, screen_context_mode: str, stabilization_mode: str) -> bool:
     scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip().lower()
     pre_navigation = tab_cfg.get("pre_navigation", [])
@@ -1685,86 +1674,6 @@ def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     return open_scenario(client, dev, tab_cfg)
 
 
-def _is_overlay_candidate_wrapper(row: dict[str, Any], tab_cfg: dict[str, Any], *, is_global_nav_only_scenario: bool) -> tuple[bool, str]:
-    if is_global_nav_only_scenario:
-        return False, "blocked_by_global_nav_only"
-    return is_overlay_candidate(row, tab_cfg)
-
-
-def _classify_overlay_post_click_wrapper(
-    client: A11yAdbClient,
-    dev: str,
-    tab_cfg: dict[str, Any],
-    pre_click_step: dict[str, Any],
-) -> tuple[str, dict[str, Any]]:
-    return classify_post_click_result(
-        client=client,
-        dev=dev,
-        tab_cfg=tab_cfg,
-        pre_click_step=pre_click_step,
-    )
-
-
-def _run_overlay_collection_wrapper(
-    client: A11yAdbClient,
-    dev: str,
-    tab_cfg: dict[str, Any],
-    row: dict[str, Any],
-    rows: list[dict[str, Any]],
-    all_rows: list[dict[str, Any]],
-    *,
-    output_path: str,
-    output_base_dir: str,
-    scenario_perf: ScenarioPerfStats | None,
-) -> None:
-    expand_overlay(
-        client=client,
-        dev=dev,
-        tab_cfg=tab_cfg,
-        entry_step=row,
-        rows=rows,
-        all_rows=all_rows,
-        output_path=output_path,
-        output_base_dir=output_base_dir,
-        skip_entry_click=True,
-        scenario_perf=scenario_perf,
-    )
-
-
-def _realign_after_overlay_wrapper(
-    client: A11yAdbClient,
-    dev: str,
-    tab_cfg: dict[str, Any],
-    row: dict[str, Any],
-    *,
-    main_step_index_by_fingerprint: dict[tuple[str, str, str], int],
-) -> tuple[dict[str, Any], bool]:
-    realign_result = realign_focus_after_overlay(
-        client=client,
-        dev=dev,
-        entry_step=row,
-        known_step_index_by_fingerprint=main_step_index_by_fingerprint,
-        tab_cfg=tab_cfg,
-    )
-    post_overlay_stabilized_ok = False
-    if realign_result.get("entry_reached"):
-        post_overlay_stabilized = stabilize_anchor(
-            client=client,
-            dev=dev,
-            tab_cfg=tab_cfg,
-            phase="overlay_realign",
-            max_retries=_get_retry_count(tab_cfg, "anchor_retry_count", 2),
-            verify_reads=1,
-        )
-        post_overlay_stabilized_ok = bool(post_overlay_stabilized.get("ok"))
-        if not post_overlay_stabilized_ok:
-            log(
-                f"[ANCHOR][overlay_realign] stabilization failed "
-                f"tab='{tab_cfg.get('tab_name', '')}'"
-            )
-    return realign_result, post_overlay_stabilized_ok
-
-
 def _overlay_phase(
     client: A11yAdbClient,
     dev: str,
@@ -1778,24 +1687,13 @@ def _overlay_phase(
     scenario_perf: ScenarioPerfStats | None,
     main_step_index_by_fingerprint: dict[tuple[str, str, str], int],
     expanded_overlay_entries: set[str],
-) -> OverlayPhaseResult:
+) -> int:
     is_global_nav_only_scenario = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower() == "global_nav"
-    is_candidate, candidate_reason = _is_overlay_candidate_wrapper(
-        row,
-        tab_cfg,
-        is_global_nav_only_scenario=is_global_nav_only_scenario,
-    )
-    result = OverlayPhaseResult(
-        triggered=False,
-        classification="unchanged",
-        break_reason="",
-        realign_attempted=False,
-        realign_success=False,
-        resume_allowed=True,
-        post_realign_pending_steps_delta=0,
-    )
+    is_candidate, candidate_reason = (False, "blocked_by_global_nav_only")
+    if not is_global_nav_only_scenario:
+        is_candidate, candidate_reason = is_overlay_candidate(row, tab_cfg)
+    post_realign_pending_steps_delta = 0
     if is_candidate:
-        result.triggered = True
         fingerprint = make_overlay_entry_fingerprint(tab_cfg["tab_name"], row)
         if fingerprint not in expanded_overlay_entries:
             log(
@@ -1822,8 +1720,6 @@ def _overlay_phase(
                     wait_=3,
                 )
             if not clicked:
-                result.classification = "unchanged"
-                result.break_reason = "entry_click_failed"
                 log(
                     f"[OVERLAY] post_click classification='unchanged' scenario='{tab_cfg.get('scenario_id', '')}' "
                     f"tab='{tab_cfg.get('tab_name', '')}' step={row.get('step_index')} "
@@ -1831,13 +1727,12 @@ def _overlay_phase(
                 )
             else:
                 time.sleep(0.8)
-                classification, post_click_step = _classify_overlay_post_click_wrapper(
+                classification, post_click_step = classify_post_click_result(
                     client=client,
                     dev=dev,
                     tab_cfg=tab_cfg,
                     pre_click_step=row,
                 )
-                result.classification = classification
                 log(
                     f"[OVERLAY] post_click classification='{classification}' "
                     f"scenario='{tab_cfg.get('scenario_id', '')}' tab='{tab_cfg.get('tab_name', '')}' "
@@ -1847,19 +1742,19 @@ def _overlay_phase(
                 )
 
                 if classification == "overlay":
-                    result.break_reason = "overlay"
                     if scenario_perf is not None:
                         scenario_perf.overlay_count += 1
                     before_overlay_len = len(rows)
-                    _run_overlay_collection_wrapper(
+                    expand_overlay(
                         client=client,
                         dev=dev,
                         tab_cfg=tab_cfg,
-                        row=row,
+                        entry_step=row,
                         rows=rows,
                         all_rows=all_rows,
                         output_path=output_path,
                         output_base_dir=output_base_dir,
+                        skip_entry_click=True,
                         scenario_perf=scenario_perf,
                     )
                     if scenario_perf is not None:
@@ -1869,16 +1764,14 @@ def _overlay_phase(
 
                     if scenario_perf is not None:
                         scenario_perf.realign_attempt_count += 1
-                    result.realign_attempted = True
-                    realign_result, _ = _realign_after_overlay_wrapper(
+                    realign_result = realign_focus_after_overlay(
                         client=client,
                         dev=dev,
+                        entry_step=row,
+                        known_step_index_by_fingerprint=main_step_index_by_fingerprint,
                         tab_cfg=tab_cfg,
-                        row=row,
-                        main_step_index_by_fingerprint=main_step_index_by_fingerprint,
                     )
-                    result.realign_success = bool(realign_result.get("entry_reached"))
-                    if scenario_perf is not None and result.realign_success:
+                    if scenario_perf is not None and bool(realign_result.get("entry_reached")):
                         scenario_perf.realign_success_count += 1
                     log(
                         f"[OVERLAY] realign status='{realign_result.get('status')}' "
@@ -1886,22 +1779,32 @@ def _overlay_phase(
                         f"steps_taken={realign_result.get('steps_taken')} "
                         f"match_by='{realign_result.get('match_by', '')}'"
                     )
-                    if result.realign_success:
-                        result.post_realign_pending_steps_delta = 2
+                    if realign_result.get("entry_reached"):
+                        post_realign_pending_steps_delta = 2
+                        post_overlay_stabilized = stabilize_anchor(
+                            client=client,
+                            dev=dev,
+                            tab_cfg=tab_cfg,
+                            phase="overlay_realign",
+                            max_retries=_get_retry_count(tab_cfg, "anchor_retry_count", 2),
+                            verify_reads=1,
+                        )
+                        if not post_overlay_stabilized.get("ok"):
+                            log(
+                                f"[ANCHOR][overlay_realign] stabilization failed "
+                                f"tab='{tab_cfg.get('tab_name', '')}'"
+                            )
                 elif classification == "navigation":
-                    result.break_reason = "navigation"
                     log(
                         f"[OVERLAY] overlay routine skipped (navigation) scenario='{tab_cfg.get('scenario_id', '')}' "
                         f"step={row.get('step_index')}"
                     )
                 else:
-                    result.break_reason = "unchanged"
                     log(
                         f"[OVERLAY] overlay routine skipped (unchanged) scenario='{tab_cfg.get('scenario_id', '')}' "
                         f"step={row.get('step_index')}"
                     )
         else:
-            result.break_reason = "already_expanded"
             log(f"[OVERLAY] skip already expanded entry fingerprint='{fingerprint}'")
     elif candidate_reason == "blocked_no_overlay_policy":
         log(
@@ -1919,7 +1822,7 @@ def _overlay_phase(
             f"tab='{tab_cfg.get('tab_name', '')}' step={row.get('step_index')} "
             f"view_id='{row.get('focus_view_id', '')}' label='{row.get('visible_label', '')}'"
         )
-    return result
+    return post_realign_pending_steps_delta
 
 
 def _main_loop_phase(
@@ -2216,7 +2119,7 @@ def _main_loop_phase(
         if stop or (step_idx % checkpoint_every == 0):
             save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
 
-        overlay_result = _overlay_phase(
+        realign_delta = _overlay_phase(
             client=client,
             dev=dev,
             tab_cfg=tab_cfg,
@@ -2229,11 +2132,8 @@ def _main_loop_phase(
             main_step_index_by_fingerprint=state["main_step_index_by_fingerprint"],
             expanded_overlay_entries=state["expanded_overlay_entries"],
         )
-        if overlay_result.post_realign_pending_steps_delta > 0:
-            state["post_realign_pending_steps"] = max(
-                state["post_realign_pending_steps"],
-                overlay_result.post_realign_pending_steps_delta,
-            )
+        if realign_delta > 0:
+            state["post_realign_pending_steps"] = max(state["post_realign_pending_steps"], realign_delta)
 
         if state["post_realign_pending_steps"] > 0:
             state["post_realign_pending_steps"] -= 1
