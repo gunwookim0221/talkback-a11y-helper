@@ -1,7 +1,7 @@
 import sys
 from types import SimpleNamespace
 
-sys.modules.setdefault("pandas", SimpleNamespace(DataFrame=object))
+sys.modules.setdefault("pandas", SimpleNamespace(DataFrame=object, ExcelWriter=object))
 sys.modules.setdefault("openpyxl", SimpleNamespace(load_workbook=lambda *_args, **_kwargs: None))
 sys.modules.setdefault("openpyxl.drawing.image", SimpleNamespace(Image=object))
 
@@ -94,7 +94,15 @@ def test_classify_post_click_result_guarded_low_overlap_keeps_overlay():
     )
     post = _step(label="Edit", view_id="id.edit", nodes=[{"viewIdResourceName": "id.b", "text": "B", "contentDescription": ""}])
 
-    classification, _ = overlay_logic.classify_post_click_result(_Client(post), "SERIAL", {}, pre)
+    tab_cfg = {
+        "overlay_policy": {
+            "allow_candidates": [
+                {"resource_id": "com.samsung.android.oneconnect:id/add_menu_button", "label": "Add"}
+            ],
+            "block_candidates": [],
+        }
+    }
+    classification, _ = overlay_logic.classify_post_click_result(_Client(post), "SERIAL", tab_cfg, pre)
 
     assert classification == "overlay"
 

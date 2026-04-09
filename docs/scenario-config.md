@@ -133,6 +133,14 @@ global nav 판별 신호:
 
 - `allow_candidates`: overlay entry 후보
 - `block_candidates`: 차단 목록(allow보다 우선)
+- 기본 정책은 **default deny**입니다.
+  - 시나리오에 `overlay_policy`가 없으면 overlay 확장을 시도하지 않습니다.
+  - `overlay_policy`가 있어도 `allow_candidates`가 비어 있으면 overlay 확장을 시도하지 않습니다.
+- 후보 매칭 필드:
+  - `resource_id` (exact)
+  - `label` (`normalized_visible_label` 기준 exact)
+  - `class_name` 또는 `className` (exact)
+  - 여러 필드를 함께 지정하면 AND 조건으로 모두 일치해야 매칭됩니다.
 
 entry click 후에는 post-click probe로 `overlay/navigation/unchanged`를 분류하며,
 `overlay`일 때만 overlay 수집 + 복귀 realign을 수행합니다.

@@ -1723,6 +1723,16 @@ def collect_tab_rows(
                         )
             else:
                 log(f"[OVERLAY] skip already expanded entry fingerprint='{fingerprint}'")
+        elif candidate_reason == "blocked_no_overlay_policy":
+            log(
+                f"[OVERLAY] blocked no_overlay_policy scenario='{tab_cfg.get('scenario_id', '')}' "
+                f"tab='{tab_cfg.get('tab_name', '')}' step={row.get('step_index')}"
+            )
+        elif candidate_reason == "blocked_empty_allow_list":
+            log(
+                f"[OVERLAY] blocked empty_allow_list scenario='{tab_cfg.get('scenario_id', '')}' "
+                f"tab='{tab_cfg.get('tab_name', '')}' step={row.get('step_index')}"
+            )
         elif "blocked" in candidate_reason:
             log(
                 f"[OVERLAY] blocked by scenario policy scenario='{tab_cfg.get('scenario_id', '')}' "

@@ -21,7 +21,7 @@ class _DummyDataFrame:
         return None
 
 
-sys.modules.setdefault("pandas", SimpleNamespace(DataFrame=_DummyDataFrame))
+sys.modules.setdefault("pandas", SimpleNamespace(DataFrame=_DummyDataFrame, ExcelWriter=object))
 sys.modules.setdefault("openpyxl", SimpleNamespace(load_workbook=lambda *_args, **_kwargs: None))
 sys.modules.setdefault("openpyxl.drawing.image", SimpleNamespace(Image=object))
 sys.modules.setdefault("PIL", SimpleNamespace(Image=object))
@@ -115,8 +115,8 @@ def test_should_expand_overlay_matches_allowlisted_resource_id():
         "normalized_visible_label": "random",
     }
     matched, reason = script_test.is_overlay_candidate(step, tab_cfg={})
-    assert matched is True
-    assert reason == "matched_global_candidates"
+    assert matched is False
+    assert reason == "blocked_no_overlay_policy"
 
 
 def test_should_expand_overlay_rejects_non_allowlisted_target():
@@ -126,7 +126,7 @@ def test_should_expand_overlay_rejects_non_allowlisted_target():
     }
     matched, reason = script_test.is_overlay_candidate(step, tab_cfg={})
     assert matched is False
-    assert reason == "not_in_global_candidates"
+    assert reason == "blocked_no_overlay_policy"
 
 
 def test_is_overlay_candidate_blocked_by_scenario_policy():
@@ -153,6 +153,33 @@ def test_is_overlay_candidate_blocked_by_scenario_policy():
     matched, reason = script_test.is_overlay_candidate(step, tab_cfg=tab_cfg)
     assert matched is False
     assert reason == "blocked_by_scenario_policy"
+
+
+def test_is_overlay_candidate_empty_allow_list_is_blocked():
+    step = {
+        "focus_view_id": "com.samsung.android.oneconnect:id/more_menu_button",
+        "normalized_visible_label": "more options",
+    }
+    tab_cfg = {"overlay_policy": {"allow_candidates": [], "block_candidates": []}}
+    matched, reason = script_test.is_overlay_candidate(step, tab_cfg=tab_cfg)
+    assert matched is False
+    assert reason == "blocked_empty_allow_list"
+
+
+def test_is_overlay_candidate_matches_label_and_class_name():
+    step = {
+        "normalized_visible_label": "more options",
+        "focus_node": {"className": "android.widget.Button"},
+    }
+    tab_cfg = {
+        "overlay_policy": {
+            "allow_candidates": [{"label": "More options", "class_name": "android.widget.Button"}],
+            "block_candidates": [],
+        }
+    }
+    matched, reason = script_test.is_overlay_candidate(step, tab_cfg=tab_cfg)
+    assert matched is True
+    assert reason == "matched_scenario_policy"
 
 
 class _ClassifyClient:

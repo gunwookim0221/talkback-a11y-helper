@@ -9,7 +9,6 @@ from tb_runner.constants import (
     MAIN_ANNOUNCEMENT_WAIT_SECONDS,
     MAIN_STEP_WAIT_SECONDS,
     OVERLAY_ANNOUNCEMENT_WAIT_SECONDS,
-    OVERLAY_ENTRY_CANDIDATES,
     OVERLAY_MAX_STEPS,
     OVERLAY_REALIGN_MAX_STEPS,
     OVERLAY_STEP_WAIT_SECONDS,
@@ -42,20 +41,39 @@ def _get_positive_float(tab_cfg: dict[str, Any], key: str, fallback: float) -> f
 def _matches_overlay_candidate(step: dict[str, Any], entry: dict[str, Any]) -> bool:
     focus_view_id = str(step.get("focus_view_id", "") or "").strip()
     normalized_visible_label = str(step.get("normalized_visible_label", "") or "").strip()
+    focus_node = step.get("focus_node")
+    focus_class_name = str(
+        step.get("focus_class_name", "")
+        or step.get("class_name", "")
+        or step.get("className", "")
+        or (focus_node.get("className", "") if isinstance(focus_node, dict) else "")
+        or ""
+    ).strip()
     entry_view_id = str(entry.get("resource_id", "") or "").strip()
     entry_label = str(entry.get("label", "") or "").strip().lower()
-    if entry_view_id and focus_view_id == entry_view_id:
-        return True
-    return bool(entry_label and normalized_visible_label == entry_label)
+    entry_class_name = str(entry.get("class_name", "") or entry.get("className", "") or "").strip()
+
+    has_condition = bool(entry_view_id or entry_label or entry_class_name)
+    if not has_condition:
+        return False
+    if entry_view_id and focus_view_id != entry_view_id:
+        return False
+    if entry_label and normalized_visible_label != entry_label:
+        return False
+    if entry_class_name and focus_class_name != entry_class_name:
+        return False
+    return True
 
 
 def _get_overlay_policy_entries(tab_cfg: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
     policy = tab_cfg.get("overlay_policy")
-    if isinstance(policy, dict):
-        allow_candidates = list(policy.get("allow_candidates", []) or [])
-        block_candidates = list(policy.get("block_candidates", []) or [])
-        return allow_candidates, block_candidates, "scenario_policy"
-    return OVERLAY_ENTRY_CANDIDATES, [], "global_candidates"
+    if not isinstance(policy, dict):
+        return [], [], "no_overlay_policy"
+    allow_candidates = list(policy.get("allow_candidates", []) or [])
+    block_candidates = list(policy.get("block_candidates", []) or [])
+    if not allow_candidates:
+        return [], block_candidates, "empty_allow_list"
+    return allow_candidates, block_candidates, "scenario_policy"
 
 
 def is_overlay_candidate(step: dict[str, Any], tab_cfg: dict[str, Any]) -> tuple[bool, str]:
@@ -64,6 +82,11 @@ def is_overlay_candidate(step: dict[str, Any], tab_cfg: dict[str, Any]) -> tuple
     for entry in block_candidates:
         if _matches_overlay_candidate(step, entry):
             return False, f"blocked_by_{source}"
+
+    if source == "no_overlay_policy":
+        return False, "blocked_no_overlay_policy"
+    if source == "empty_allow_list":
+        return False, "blocked_empty_allow_list"
 
     for entry in allow_candidates:
         if _matches_overlay_candidate(step, entry):
