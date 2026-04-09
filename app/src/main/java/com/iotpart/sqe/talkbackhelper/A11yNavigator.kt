@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.75.7"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.75.8"
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
@@ -1421,6 +1421,22 @@ object A11yNavigator {
             currentIndex = resolveAliasRepresentativeIndex(
                 aliasMembersByRepresentativeIndex = aliasMembersByRepresentativeIndex,
                 target = resolvedCurrent
+            )
+        }
+        if (currentIndex == -1 && rawCurrentNode != null) {
+            currentIndex = A11yTraversalAnalyzer.findNodeIndexByIdentity(
+                nodes = traversalList,
+                target = rawCurrentNode,
+                idOf = { it.viewIdResourceName },
+                textOf = { it.text?.toString() },
+                contentDescriptionOf = { it.contentDescription?.toString() },
+                boundsOf = { Rect().also(it::getBoundsInScreen) }
+            )
+        }
+        if (currentIndex == -1 && rawCurrentNode != null) {
+            currentIndex = resolveAliasRepresentativeIndex(
+                aliasMembersByRepresentativeIndex = aliasMembersByRepresentativeIndex,
+                target = rawCurrentNode
             )
         }
         if (currentIndex == -1 && A11yNodeUtils.isOneConnectBottomTabNode(rawCurrentNode)) {
