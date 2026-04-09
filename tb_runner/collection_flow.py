@@ -1988,6 +1988,16 @@ def _main_loop_phase(
         recent_semantic_duplicate = bool(stop_details.get("recent_semantic_duplicate", False))
         recent_semantic_duplicate_distance = int(stop_details.get("recent_semantic_duplicate_distance", 0) or 0)
         recent_semantic_unique_count = int(stop_details.get("recent_semantic_unique_count", 0) or 0)
+        repeat_class = str(stop_details.get("repeat_class", "") or "none")
+        loop_classification = str(stop_details.get("loop_classification", "") or "none")
+        strict_duplicate = bool(stop_details.get("strict_duplicate", False))
+        semantic_duplicate = bool(stop_details.get("semantic_duplicate", False))
+        hard_no_progress = bool(stop_details.get("hard_no_progress", False))
+        soft_no_progress = bool(stop_details.get("soft_no_progress", False))
+        no_progress_class = str(stop_details.get("no_progress_class", "") or "none")
+        overlay_realign_grace_active = bool(stop_details.get("overlay_realign_grace_active", False))
+        min_step_gate_blocked = bool(stop_details.get("min_step_gate_blocked", False))
+        realign_grace_suppressed = bool(stop_details.get("realign_grace_suppressed", False))
         repeat_stop_hit = bool(stop_details.get("repeat_stop_hit", False))
         scenario_type = str(stop_details.get("scenario_type", tab_cfg.get("scenario_type", "content")) or "content")
         is_global_nav_only_scenario = scenario_type == "global_nav"
@@ -2008,6 +2018,14 @@ def _main_loop_phase(
             f"recent_semantic_duplicate={str(recent_semantic_duplicate).lower()} "
             f"recent_semantic_duplicate_distance={recent_semantic_duplicate_distance} "
             f"recent_semantic_unique_count={recent_semantic_unique_count} "
+            f"strict_duplicate={str(strict_duplicate).lower()} "
+            f"semantic_duplicate={str(semantic_duplicate).lower()} "
+            f"repeat_class='{repeat_class}' loop_classification='{loop_classification}' "
+            f"hard_no_progress={str(hard_no_progress).lower()} soft_no_progress={str(soft_no_progress).lower()} "
+            f"no_progress_class='{no_progress_class}' "
+            f"overlay_realign_grace_active={str(overlay_realign_grace_active).lower()} "
+            f"min_step_gate_blocked={str(min_step_gate_blocked).lower()} "
+            f"realign_grace_suppressed={str(realign_grace_suppressed).lower()} "
             f"repeat_stop_hit={str(repeat_stop_hit).lower()} "
             f"decision='{decision}' reason='{eval_reason}'"
         )

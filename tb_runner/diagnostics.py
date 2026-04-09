@@ -205,6 +205,8 @@ def is_global_nav_row(
 class StopEvaluator:
     _MOVE_FAILURE_RESULTS = {"failed"}
     _MOVE_TERMINAL_RESULTS = {"terminal", "end", "no_next", "no_focus", "cannot_move"}
+    _REPEAT_STOP_REASONS = {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall"}
+    _DEFAULT_MIN_STEPS_BEFORE_REPEAT_STOP = 3
 
     def _signature(self, row: dict[str, Any]) -> tuple[str, str, str, str, str]:
         normalized_visible = str(row.get("normalized_visible_label", "") or "").strip()
@@ -233,6 +235,236 @@ class StopEvaluator:
         )
         return shared >= 3
 
+    def evaluate_repeat(
+        self,
+        *,
+        current_fingerprint: tuple[str, str, str],
+        prev_fingerprint: tuple[str, str, str],
+        current_signature: tuple[str, ...],
+        previous_signature: tuple[str, ...],
+        current_semantic_signature: tuple[str, ...],
+        previous_semantic_signature: tuple[str, ...],
+        recent_duplicate: bool,
+        recent_semantic_duplicate: bool,
+        recent_semantic_duplicate_distance: int,
+        recent_semantic_unique_count: int,
+    ) -> dict[str, Any]:
+        strict_duplicate = False
+        if previous_signature == current_signature and any(current_signature):
+            strict_duplicate = True
+        elif all(current_fingerprint) and current_fingerprint == prev_fingerprint:
+            strict_duplicate = True
+
+        semantic_duplicate = (
+            bool(any(current_semantic_signature))
+            and current_semantic_signature == previous_semantic_signature
+            and not strict_duplicate
+        )
+        same_like = strict_duplicate or semantic_duplicate or self._is_same_like(previous_signature, current_signature)
+        if not semantic_duplicate and bool(any(current_semantic_signature)) and current_semantic_signature == previous_semantic_signature:
+            semantic_duplicate = True
+            same_like = True
+
+        bounded_two_card_loop = (
+            recent_semantic_duplicate
+            and 2 <= recent_semantic_duplicate_distance <= 4
+            and 0 < recent_semantic_unique_count <= 2
+        )
+        if strict_duplicate and semantic_duplicate:
+            repeat_class = "mixed_repeat"
+        elif strict_duplicate:
+            repeat_class = "strict_duplicate"
+        elif semantic_duplicate:
+            repeat_class = "semantic_duplicate"
+        else:
+            repeat_class = "none"
+        harmful_loop = (
+            strict_duplicate
+            or bounded_two_card_loop
+            or (semantic_duplicate and recent_semantic_duplicate and recent_semantic_unique_count <= 2)
+            or (recent_duplicate and recent_semantic_duplicate and recent_semantic_unique_count <= 1)
+        )
+        benign_repeat = (
+            not harmful_loop
+            and semantic_duplicate
+            and (recent_semantic_unique_count >= 3 or recent_semantic_duplicate_distance >= 5)
+        )
+        loop_classification = "harmful_loop" if harmful_loop else "benign_repeat" if benign_repeat else "none"
+        return {
+            "same_like": same_like,
+            "strict_duplicate": strict_duplicate,
+            "semantic_duplicate": semantic_duplicate,
+            "repeat_class": repeat_class,
+            "loop_classification": loop_classification,
+            "bounded_two_card_loop": bounded_two_card_loop,
+        }
+
+    def evaluate_no_progress(
+        self,
+        *,
+        same_like: bool,
+        strict_duplicate: bool,
+        semantic_duplicate: bool,
+        bounded_two_card_loop: bool,
+        move_failed: bool,
+        move_terminal: bool,
+        smart_nav_result: str,
+        fail_count: int,
+        same_count: int,
+        recent_semantic_unique_count: int,
+    ) -> dict[str, Any]:
+        hard_no_progress = (
+            (strict_duplicate and move_failed)
+            or (same_like and move_terminal)
+            or (strict_duplicate and fail_count >= 2)
+        )
+        soft_no_progress = (
+            bounded_two_card_loop
+            or (
+                semantic_duplicate
+                and recent_semantic_unique_count <= 2
+                and (move_failed or smart_nav_result in {"failed", "unchanged"} or same_count >= 4)
+            )
+        )
+        no_progress = hard_no_progress or soft_no_progress
+        no_progress_class = "hard_no_progress" if hard_no_progress else "soft_no_progress" if soft_no_progress else "none"
+        return {
+            "no_progress": no_progress,
+            "hard_no_progress": hard_no_progress,
+            "soft_no_progress": soft_no_progress,
+            "no_progress_class": no_progress_class,
+        }
+
+    def evaluate_overlay_context(self, row: dict[str, Any], repeat_class: str) -> dict[str, Any]:
+        overlay_recovery_status = str(row.get("overlay_recovery_status", "") or "").strip().lower()
+        after_realign = overlay_recovery_status.startswith("after_realign") or overlay_recovery_status.startswith("realign")
+        realign_grace_active = after_realign and repeat_class in {"semantic_duplicate", "mixed_repeat"}
+        return {
+            "overlay_recovery_status": overlay_recovery_status,
+            "after_realign": after_realign,
+            "realign_grace_active": realign_grace_active,
+        }
+
+    def finalize_decision(
+        self,
+        *,
+        stop: bool,
+        reason: str,
+        row: dict[str, Any],
+        effective_stop_policy: dict[str, Any],
+        repeat_class: str,
+        strict_duplicate: bool,
+        hard_no_progress: bool,
+        overlay_ctx: dict[str, Any],
+    ) -> tuple[bool, str, dict[str, Any]]:
+        min_steps_before_repeat_stop = int(
+            effective_stop_policy.get("min_steps_before_repeat_stop", self._DEFAULT_MIN_STEPS_BEFORE_REPEAT_STOP) or 0
+        )
+        step_index = int(row.get("step_index", 0) or 0)
+        min_step_gate_blocked = (
+            stop
+            and reason in self._REPEAT_STOP_REASONS
+            and step_index > 0
+            and step_index < min_steps_before_repeat_stop
+        )
+        if min_step_gate_blocked:
+            stop = False
+            reason = ""
+
+        realign_grace_suppressed = (
+            stop
+            and reason in self._REPEAT_STOP_REASONS
+            and bool(overlay_ctx.get("realign_grace_active", False))
+            and not (strict_duplicate and hard_no_progress)
+        )
+        if realign_grace_suppressed:
+            stop = False
+            reason = ""
+        return stop, reason, {
+            "min_steps_before_repeat_stop": min_steps_before_repeat_stop,
+            "min_step_gate_blocked": min_step_gate_blocked,
+            "realign_grace_suppressed": realign_grace_suppressed,
+        }
+
+    def evaluate_stop(
+        self,
+        *,
+        row: dict[str, Any],
+        previous_row: dict[str, Any] | None,
+        scenario_cfg: dict[str, Any] | None,
+        scenario_type: str,
+        effective_stop_policy: dict[str, Any],
+        terminal_signal: bool,
+        move_failed: bool,
+        move_terminal: bool,
+        fail_count: int,
+        same_count: int,
+        recent_repeat: bool,
+        repeat_eval: dict[str, Any],
+        no_progress_eval: dict[str, Any],
+    ) -> tuple[bool, str, bool, str]:
+        normalized_scenario_type = str(scenario_type or "content").strip().lower()
+        is_curr_global_nav, nav_reason = is_global_nav_row(row, scenario_cfg=scenario_cfg)
+        is_prev_global_nav, _ = is_global_nav_row(previous_row or {}, scenario_cfg=scenario_cfg)
+        reason = ""
+        stop = False
+        if normalized_scenario_type == "content" and bool(effective_stop_policy.get("stop_on_global_nav_entry", False)):
+            if bool(previous_row) and is_curr_global_nav and not is_prev_global_nav:
+                stop = True
+                reason = "global_nav_entry"
+        elif normalized_scenario_type == "global_nav" and bool(effective_stop_policy.get("stop_on_global_nav_exit", False)):
+            if bool(previous_row) and is_prev_global_nav and not is_curr_global_nav:
+                stop = True
+                reason = "global_nav_exit"
+
+        if not stop and terminal_signal and bool(effective_stop_policy.get("stop_on_terminal", True)):
+            stop = True
+            reason = "smart_nav_terminal"
+        elif (
+            not stop
+            and normalized_scenario_type == "global_nav"
+            and bool(effective_stop_policy.get("stop_on_repeat_no_progress", True))
+            and is_curr_global_nav
+            and move_failed
+            and no_progress_eval["no_progress"]
+            and recent_repeat
+        ):
+            stop = True
+            reason = "global_nav_end"
+        elif (
+            not stop
+            and move_terminal
+            and repeat_eval["same_like"]
+            and bool(effective_stop_policy.get("stop_on_terminal", True))
+        ):
+            stop = True
+            reason = "move_terminal"
+        elif not stop and bool(effective_stop_policy.get("stop_on_repeat_no_progress", True)):
+            if repeat_eval["bounded_two_card_loop"]:
+                stop = True
+                reason = "bounded_two_card_loop"
+            elif (
+                same_count >= 8
+                and bool(row.get("is_recent_duplicate_step", False))
+                and bool(row.get("is_recent_semantic_duplicate_step", False))
+                and int(row.get("recent_semantic_unique_count", 0) or 0) <= 1
+                and repeat_eval["semantic_duplicate"]
+            ):
+                stop = True
+                reason = "repeat_semantic_stall"
+            elif no_progress_eval["hard_no_progress"] and repeat_eval["strict_duplicate"]:
+                stop = True
+                reason = "repeat_no_progress"
+            elif (
+                repeat_eval["semantic_duplicate"]
+                and no_progress_eval["soft_no_progress"]
+                and same_count >= 4
+                and int(row.get("recent_semantic_unique_count", 0) or 0) <= 2
+            ):
+                stop = True
+                reason = "repeat_no_progress"
+        return stop, reason, is_curr_global_nav, nav_reason
+
     def evaluate(
         self,
         row: dict[str, Any],
@@ -257,12 +489,25 @@ class StopEvaluator:
         previous_signature = self._signature(previous_row or {})
         current_semantic_signature = self._semantic_signature(row)
         previous_semantic_signature = self._semantic_signature(previous_row or {})
-        same_like = self._is_same_like(previous_signature, current_signature)
-        if not same_like and all(current_fingerprint) and current_fingerprint == prev_fingerprint:
-            same_like = True
-        semantic_same_like = bool(any(current_semantic_signature)) and current_semantic_signature == previous_semantic_signature
-        if semantic_same_like:
-            same_like = True
+        recent_duplicate = bool(row.get("is_recent_duplicate_step", False))
+        recent_duplicate_distance = int(row.get("recent_duplicate_distance", 0) or 0)
+        recent_semantic_duplicate = bool(row.get("is_recent_semantic_duplicate_step", False))
+        recent_semantic_duplicate_distance = int(row.get("recent_semantic_duplicate_distance", 0) or 0)
+        recent_semantic_unique_count = int(row.get("recent_semantic_unique_count", 0) or 0)
+        repeat_eval = self.evaluate_repeat(
+            current_fingerprint=current_fingerprint,
+            prev_fingerprint=prev_fingerprint,
+            current_signature=current_signature,
+            previous_signature=previous_signature,
+            current_semantic_signature=current_semantic_signature,
+            previous_semantic_signature=previous_semantic_signature,
+            recent_duplicate=recent_duplicate,
+            recent_semantic_duplicate=recent_semantic_duplicate,
+            recent_semantic_duplicate_distance=recent_semantic_duplicate_distance,
+            recent_semantic_unique_count=recent_semantic_unique_count,
+        )
+        same_like = bool(repeat_eval["same_like"])
+        semantic_same_like = bool(repeat_eval["semantic_duplicate"] or repeat_eval["repeat_class"] == "mixed_repeat")
         same_count = same_count + 1 if same_like else 0
 
         move_failed = move_result in self._MOVE_FAILURE_RESULTS
@@ -273,27 +518,22 @@ class StopEvaluator:
 
         move_terminal = smart_nav_result in self._MOVE_TERMINAL_RESULTS or move_result in self._MOVE_TERMINAL_RESULTS
 
-        recent_duplicate = bool(row.get("is_recent_duplicate_step", False))
-        recent_duplicate_distance = int(row.get("recent_duplicate_distance", 0) or 0)
-        recent_semantic_duplicate = bool(row.get("is_recent_semantic_duplicate_step", False))
-        recent_semantic_duplicate_distance = int(row.get("recent_semantic_duplicate_distance", 0) or 0)
-        recent_semantic_unique_count = int(row.get("recent_semantic_unique_count", 0) or 0)
-        bounded_two_card_loop = (
-            bool(previous_row)
-            and recent_semantic_duplicate
-            and 2 <= recent_semantic_duplicate_distance <= 4
-            and 0 < recent_semantic_unique_count <= 2
+        no_progress_eval = self.evaluate_no_progress(
+            same_like=same_like,
+            strict_duplicate=bool(repeat_eval["strict_duplicate"]),
+            semantic_duplicate=bool(repeat_eval["semantic_duplicate"]),
+            bounded_two_card_loop=bool(repeat_eval["bounded_two_card_loop"]),
+            move_failed=move_failed,
+            move_terminal=move_terminal,
+            smart_nav_result=smart_nav_result,
+            fail_count=fail_count,
+            same_count=same_count,
+            recent_semantic_unique_count=recent_semantic_unique_count,
         )
-        no_progress = bool(previous_row) and (
-            (same_like and (move_failed or move_terminal or smart_nav_result in {"failed", "unchanged"}))
-            or bounded_two_card_loop
-        )
-        weak_repeat = same_count >= 2
-        weak_move_failure = fail_count >= 2 or move_terminal
-        weak_empty = not str(row.get("visible_label", "") or "").strip() and not str(row.get("merged_announcement", "") or "").strip()
-        overlay_recovery_status = str(row.get("overlay_recovery_status", "") or "").strip().lower()
-        after_realign = overlay_recovery_status.startswith("after_realign") or overlay_recovery_status.startswith("realign")
-        recent_repeat = (same_like and weak_repeat) or bounded_two_card_loop
+        no_progress = bool(previous_row) and bool(no_progress_eval["no_progress"])
+        overlay_ctx = self.evaluate_overlay_context(row=row, repeat_class=str(repeat_eval["repeat_class"]))
+        after_realign = bool(overlay_ctx["after_realign"])
+        recent_repeat = (same_like and same_count >= 2) or bool(repeat_eval["bounded_two_card_loop"])
 
         effective_stop_policy = dict(
             {
@@ -306,65 +546,31 @@ class StopEvaluator:
         normalized_scenario_type = str(scenario_type or "content").strip().lower()
         if isinstance(stop_policy, dict):
             effective_stop_policy.update(stop_policy)
-        realign_repeat_no_progress = (
-            normalized_scenario_type == "content"
-            and after_realign
-            and recent_repeat
-            and no_progress
-            and (move_failed or move_terminal or fail_count >= 2)
+        stop, reason, is_curr_global_nav, nav_reason = self.evaluate_stop(
+            row=row,
+            previous_row=previous_row,
+            scenario_cfg=scenario_cfg,
+            scenario_type=normalized_scenario_type,
+            effective_stop_policy=effective_stop_policy,
+            terminal_signal=terminal_signal,
+            move_failed=move_failed,
+            move_terminal=move_terminal,
+            fail_count=fail_count,
+            same_count=same_count,
+            recent_repeat=recent_repeat,
+            repeat_eval=repeat_eval,
+            no_progress_eval=no_progress_eval,
         )
-        is_curr_global_nav, nav_reason = is_global_nav_row(row, scenario_cfg=scenario_cfg)
-        is_prev_global_nav, _ = is_global_nav_row(previous_row or {}, scenario_cfg=scenario_cfg)
-
-        reason = ""
-        stop = False
-
-        if normalized_scenario_type == "content" and bool(effective_stop_policy.get("stop_on_global_nav_entry", False)):
-            if bool(previous_row) and is_curr_global_nav and not is_prev_global_nav:
-                stop = True
-                reason = "global_nav_entry"
-        elif normalized_scenario_type == "global_nav" and bool(effective_stop_policy.get("stop_on_global_nav_exit", False)):
-            if bool(previous_row) and is_prev_global_nav and not is_curr_global_nav:
-                stop = True
-                reason = "global_nav_exit"
-
-        if not stop and terminal_signal and bool(effective_stop_policy.get("stop_on_terminal", True)):
-            stop = True
-            reason = "smart_nav_terminal"
-        elif (
-            not stop
-            and normalized_scenario_type == "global_nav"
-            and bool(effective_stop_policy.get("stop_on_repeat_no_progress", True))
-            and is_curr_global_nav
-            and move_failed
-            and no_progress
-            and recent_repeat
-        ):
-            stop = True
-            reason = "global_nav_end"
-        elif not stop and move_terminal and same_like and bool(effective_stop_policy.get("stop_on_terminal", True)):
-            stop = True
-            reason = "move_terminal"
-        elif not stop and realign_repeat_no_progress and bool(effective_stop_policy.get("stop_on_repeat_no_progress", True)):
-            stop = True
-            reason = "repeat_no_progress"
-        elif not stop and bool(effective_stop_policy.get("stop_on_repeat_no_progress", True)):
-            weak_signals = sum([1 if weak_repeat else 0, 1 if no_progress else 0, 1 if weak_move_failure else 0, 1 if weak_empty else 0])
-            if weak_signals >= 2 and (same_like or weak_repeat):
-                stop = True
-                reason = "repeat_no_progress"
-            elif bounded_two_card_loop:
-                stop = True
-                reason = "bounded_two_card_loop"
-            elif (
-                same_count >= 8
-                and recent_duplicate
-                and recent_semantic_duplicate
-                and recent_semantic_unique_count <= 1
-                and semantic_same_like
-            ):
-                stop = True
-                reason = "repeat_semantic_stall"
+        stop, reason, decision_meta = self.finalize_decision(
+            stop=stop,
+            reason=reason,
+            row=row,
+            effective_stop_policy=effective_stop_policy,
+            repeat_class=str(repeat_eval["repeat_class"]),
+            strict_duplicate=bool(repeat_eval["strict_duplicate"]),
+            hard_no_progress=bool(no_progress_eval["hard_no_progress"]),
+            overlay_ctx=overlay_ctx,
+        )
 
         details = {
             "terminal": terminal_signal,
@@ -376,13 +582,24 @@ class StopEvaluator:
             "global_nav_reason": nav_reason,
             "after_realign": after_realign,
             "recent_repeat": recent_repeat,
-            "bounded_two_card_loop": bounded_two_card_loop,
+            "bounded_two_card_loop": bool(repeat_eval["bounded_two_card_loop"]),
             "recent_duplicate": recent_duplicate,
             "recent_duplicate_distance": recent_duplicate_distance,
             "recent_semantic_duplicate": recent_semantic_duplicate,
             "recent_semantic_duplicate_distance": recent_semantic_duplicate_distance,
             "recent_semantic_unique_count": recent_semantic_unique_count,
             "semantic_same_like": semantic_same_like,
+            "strict_duplicate": bool(repeat_eval["strict_duplicate"]),
+            "semantic_duplicate": bool(repeat_eval["semantic_duplicate"]),
+            "repeat_class": str(repeat_eval["repeat_class"]),
+            "loop_classification": str(repeat_eval["loop_classification"]),
+            "hard_no_progress": bool(no_progress_eval["hard_no_progress"]),
+            "soft_no_progress": bool(no_progress_eval["soft_no_progress"]),
+            "no_progress_class": str(no_progress_eval["no_progress_class"]),
+            "overlay_realign_grace_active": bool(overlay_ctx["realign_grace_active"]),
+            "min_steps_before_repeat_stop": int(decision_meta["min_steps_before_repeat_stop"]),
+            "min_step_gate_blocked": bool(decision_meta["min_step_gate_blocked"]),
+            "realign_grace_suppressed": bool(decision_meta["realign_grace_suppressed"]),
             "repeat_stop_hit": reason in {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall"},
             "raw_fingerprint": current_fingerprint,
             "semantic_signature": current_semantic_signature,
