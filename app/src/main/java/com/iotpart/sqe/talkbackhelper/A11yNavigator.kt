@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.75.8"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.75.9"
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
@@ -92,6 +92,21 @@ object A11yNavigator {
         if (node == null) return null
         return node.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
             ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
+    }
+
+    private fun isAccessibilityFocusableNode(node: AccessibilityNodeInfo): Boolean {
+        return node.isFocusable || AccessibilityNodeInfoCompat.wrap(node).isScreenReaderFocusable
+    }
+
+    private fun hasReadableLabel(node: AccessibilityNodeInfo): Boolean {
+        val label = resolvePrimaryLabel(node)
+            ?: A11yTraversalAnalyzer.recoverDescendantLabel(node)
+        return !label.isNullOrBlank()
+    }
+
+    private fun hasValidBounds(node: AccessibilityNodeInfo): Boolean {
+        val bounds = Rect().also(node::getBoundsInScreen)
+        return bounds.width() > 0 && bounds.height() > 0
     }
 
     private fun diagLabel(node: AccessibilityNodeInfo?): String {
@@ -474,6 +489,13 @@ object A11yNavigator {
         val turnId = A11yHistoryManager.issueNextSmartNextTurnId()
         A11yHistoryManager.activeSmartNextTurnId = turnId
         return try {
+            attemptWebViewDescend(
+                root = root,
+                currentNode = currentNode,
+                reqId = reqId
+            )?.let { webViewOutcome ->
+                return webViewOutcome
+            }
             val runtimeState = collectSmartNextRuntimeState(root, currentNode)
             val focusedNow = runtimeState.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
             val inputFocusedNow = runtimeState.root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
@@ -546,6 +568,80 @@ object A11yNavigator {
                 A11yHistoryManager.activeSmartNextTurnId = 0L
             }
         }
+    }
+
+    private fun attemptWebViewDescend(
+        root: AccessibilityNodeInfo,
+        currentNode: AccessibilityNodeInfo?,
+        reqId: String
+    ): TargetActionOutcome? {
+        val activeFocusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY) ?: currentNode
+        val isWebViewContainerFocus = activeFocusedNode?.let { node ->
+            node.className?.toString() == "android.webkit.WebView" &&
+                node.isAccessibilityFocused &&
+                node.childCount > 0
+        } == true
+
+        if (!isWebViewContainerFocus || activeFocusedNode == null) {
+            Log.i(
+                "A11Y_HELPER",
+                "[WEBVIEW_DESCEND] detected=false candidate_count=0 selected_bounds=<none> selected_label=<none>"
+            )
+            return null
+        }
+
+        val webViewCandidates = mutableListOf<AccessibilityNodeInfo>()
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(activeFocusedNode)
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            for (index in 0 until node.childCount) {
+                node.getChild(index)?.let { child ->
+                    queue.add(child)
+                    if (child.isVisibleToUser && isAccessibilityFocusableNode(child) && hasReadableLabel(child) && hasValidBounds(child)) {
+                        webViewCandidates.add(child)
+                    }
+                }
+            }
+        }
+
+        val selectedCandidate = webViewCandidates.minWithOrNull(
+            compareBy<AccessibilityNodeInfo>(
+                { Rect().also(it::getBoundsInScreen).top },
+                { Rect().also(it::getBoundsInScreen).left }
+            )
+        )
+        val selectedBounds = selectedCandidate?.let { candidate ->
+            Rect().also(candidate::getBoundsInScreen).toShortString()
+        } ?: "<none>"
+        val selectedLabel = selectedCandidate?.let { candidate ->
+            (resolvePrimaryLabel(candidate) ?: A11yTraversalAnalyzer.recoverDescendantLabel(candidate) ?: "<no-label>")
+                .replace("\n", " ")
+        } ?: "<none>"
+        Log.i(
+            "A11Y_HELPER",
+            "[WEBVIEW_DESCEND] detected=true candidate_count=${webViewCandidates.size} selected_bounds=$selectedBounds selected_label=$selectedLabel"
+        )
+
+        val target = selectedCandidate ?: return null
+        val focusedBefore = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        focusedBefore?.let { clearFocus(it) }
+        val actionSuccess = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+        val focusedAfter = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val moved = actionSuccess && focusedAfter != null && isSameNode(focusedAfter, target)
+        if (!moved) {
+            return null
+        }
+        logSmartNextDiag(
+            reqId,
+            "webview_descend",
+            "status=moved detail=webview_descend current='${diagNodeSummary(activeFocusedNode)}' target='${diagNodeSummary(target)}'"
+        )
+        return TargetActionOutcome(
+            success = true,
+            reason = "webview_descend",
+            target = target
+        )
     }
 
     private fun collectSmartNextRuntimeState(
