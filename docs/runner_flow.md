@@ -22,9 +22,11 @@
 
 ---
 
-## 2) open_scenario 단계
+## 2) start pipeline 단계
 
-`collect_tab_rows` 시작 직후 `open_scenario(...)`를 호출한다.
+`collect_tab_rows` 시작 직후 `_run_start_pipeline(...)`를 호출한다.
+
+start pipeline 내부에서 `open_scenario(...)`를 먼저 실행한 뒤, post-open trace / global nav gate / anchor row(step 0) 수집까지 동일 순서로 처리한다.
 
 핵심 순서:
 1. screen/stabilization 모드 계산 (`_resolve_screen_context_mode`, `_resolve_stabilization_mode`)
@@ -33,6 +35,9 @@
 4. pre-navigation 실행 (`_run_pre_navigation_steps`)
 5. anchor 안정화 (`stabilize_anchor`)
 6. 실패 시 low-confidence fallback 허용 조건 평가 (`_is_new_screen_low_confidence_allowed`)
+7. post-open focus trace
+8. global_nav start gate(해당 시)
+9. anchor row(step 0) 수집/annotation/crop
 
 ### 상태 변경 지점 (mutation)
 - `tab_cfg`에 scenario 시작 상태 메타를 직접 기록:
