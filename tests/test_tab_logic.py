@@ -9,6 +9,7 @@ class FakeTabClient:
         self.touch_point = Mock(return_value=False)
         self.select = Mock(return_value=False)
         self.touch = Mock(return_value=False)
+        self.get_focus = Mock(return_value={})
         self.collect_focus_step = Mock(return_value={})
 
 
@@ -198,3 +199,20 @@ def test_stabilize_tab_selection_main_tab_keeps_verify_step(monkeypatch):
 
     assert result["ok"] is True
     assert client.collect_focus_step.call_count == 1
+
+
+def test_stabilize_tab_selection_focus_align_promoted_by_get_focus(monkeypatch):
+    client = FakeTabClient()
+    client.dump_tree.return_value = [{"viewIdResourceName": "tab_id", "boundsInScreen": "0,0,10,10", "text": "홈"}]
+    client.touch_point.return_value = True
+    client.select.return_value = False
+    client.get_focus.return_value = {"viewIdResourceName": "tab_id", "accessibilityFocused": True, "text": "홈"}
+    client.collect_focus_step.return_value = {"visible_label": "ok"}
+    monkeypatch.setattr(tab_logic, "verify_context", lambda *a, **k: {"ok": True})
+
+    result = tab_logic.stabilize_tab_selection(client, "SERIAL", _tab_cfg(), max_retries=1)
+
+    assert result["ok"] is True
+    assert result["focus_align"]["ok"] is True
+    assert result["focus_align"]["reason"] == "post_focus_verified"
+    client.get_focus.assert_called_once()
