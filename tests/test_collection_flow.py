@@ -1673,6 +1673,66 @@ def test_open_scenario_new_screen_anchor_fail_without_evidence_aborts(monkeypatc
     assert ok is False
 
 
+def test_open_scenario_plugin_new_screen_boilerplate_only_candidate_aborts(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {
+            "ok": False,
+            "reason": "low_confidence_anchor_start",
+            "fallback_candidate_used": False,
+            "fallback_candidate_rejected_reason": "boilerplate_like",
+            "verify_row": {},
+        },
+    )
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_food_plugin",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "pre_navigation": [{"action": "select", "target": ".*food.*", "type": "a"}],
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is False
+
+
+def test_open_scenario_non_plugin_new_screen_does_not_allow_low_confidence_fallback(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {
+            "ok": False,
+            "reason": "low_confidence_anchor_start",
+            "fallback_candidate_used": True,
+            "fallback_candidate_label": "설정",
+            "verify_row": {"visible_label": "설정", "get_focus_top_level_payload_sufficient": True},
+        },
+    )
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    client = DummyClient([_anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "settings_entry_example",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "tab_context",
+        "pre_navigation": [{"action": "select", "target": ".*설정.*", "type": "a"}],
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is False
+
+
 def test_collect_tab_rows_marks_low_confidence_start_metadata(monkeypatch):
     client = DummyClient([_anchor_row(), _main_row(1)])
     monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])

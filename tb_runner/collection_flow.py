@@ -145,10 +145,19 @@ def _is_new_screen_low_confidence_allowed(
         return False, "pre_navigation_failed"
     if screen_context_mode != "new_screen":
         return False, "screen_context_mode_not_new_screen"
+    stabilization_mode = _resolve_stabilization_mode(tab_cfg, screen_context_mode)
+    scenario_group = str(tab_cfg.get("group", "") or "").strip().lower()
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip().lower()
+    is_plugin_scope = stabilization_mode == "anchor_only" or scenario_group == "plugin_screen" or "plugin" in scenario_id
+    if not is_plugin_scope:
+        return False, "not_plugin_new_screen_scope"
 
     fallback_used = bool(stabilize_result.get("fallback_candidate_used"))
     fallback_label = str(stabilize_result.get("fallback_candidate_label", "") or "").strip()
     fallback_resource_id = str(stabilize_result.get("fallback_candidate_resource_id", "") or "").strip()
+    fallback_rejected_reason = str(stabilize_result.get("fallback_candidate_rejected_reason", "") or "").strip()
+    if fallback_rejected_reason == "boilerplate_like":
+        return False, "boilerplate_only_candidate"
     if not fallback_used:
         return False, "fallback_candidate_absent"
 
@@ -163,10 +172,15 @@ def _is_new_screen_low_confidence_allowed(
     has_meaningful_talkback = _is_meaningful_text(verify_row.get("talkback_label")) or _is_meaningful_text(
         verify_row.get("focus_text")
     )
+    has_post_announcement = _is_meaningful_text(verify_row.get("announcement")) or _is_meaningful_text(
+        verify_row.get("normalized_announcement")
+    )
     has_top_level_signal = bool(verify_row.get("get_focus_top_level_payload_sufficient")) or bool(
         verify_row.get("get_focus_fallback_found")
     )
-    if has_meaningful_fallback and (has_meaningful_focus or has_meaningful_talkback or has_top_level_signal):
+    if has_meaningful_fallback and (
+        has_meaningful_focus or has_meaningful_talkback or has_post_announcement or has_top_level_signal
+    ):
         return True, "fallback_candidate_and_focus_evidence"
     return False, "insufficient_new_screen_evidence"
 
@@ -1002,6 +1016,10 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
                 f"scenario='{tab_cfg.get('scenario_id', '')}' "
                 f"low_confidence=true reason='{stabilize_result.get('reason', 'not_stable')}'"
             )
+            if low_conf_reason == "insufficient_new_screen_evidence":
+                log("[ANCHOR][plugin_fallback] skipped reason='insufficient_new_screen_evidence'")
+            elif low_conf_reason == "boilerplate_only_candidate":
+                log("[ANCHOR][plugin_fallback] rejected candidate reason='boilerplate_like'")
             log(
                 f"[ANCHOR][scenario_start] abort low_confidence_fallback=false scenario='{scenario_id}' "
                 f"reason='{low_conf_reason}'"
@@ -1019,6 +1037,14 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             f"[ANCHOR][scenario_start] stabilization failed but proceeding with low-confidence fallback start "
             f"scenario='{scenario_id}' source='{start_source}' reason='{low_conf_reason}'"
         )
+        log(
+            "[ANCHOR][plugin_fallback] candidate_label="
+            f"'{stabilize_result.get('fallback_candidate_label', '')}' "
+            f"candidate_view_id='{stabilize_result.get('fallback_candidate_resource_id', '')}' "
+            "reason='new_screen_evidence_confirmed'"
+        )
+        stabilized_by = "selected" if bool(stabilize_result.get("selected")) else "post_focus_verified"
+        log(f"[ANCHOR][plugin_fallback] stabilized_by='{stabilized_by}'")
         log(f"[SCENARIO][start_mode] scenario='{scenario_id}' mode='low_confidence_fallback'")
     if is_transition_entry_fast_path and not is_strict_main_tab_scenario:
         time.sleep(min(main_step_wait_seconds, _TRANSITION_FAST_STEP_WAIT_SECONDS))

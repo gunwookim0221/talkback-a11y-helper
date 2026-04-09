@@ -231,3 +231,34 @@ def test_stabilize_anchor_fallback_prefers_top_center_then_right(monkeypatch):
 
     assert result["ok"] is True
     assert "top_center_item" in client.select.call_args.kwargs["name"]
+
+
+def test_stabilize_anchor_fallback_rejects_boilerplate_like_top_candidate(monkeypatch):
+    client = FakeAnchorClient()
+    client.dump_tree.return_value = [
+        _focusable_node(
+            "privacy_notice",
+            "I agree to the Privacy Policy and Terms of Use",
+            "[20,260][1040,360]",
+        )
+    ]
+    client.select.return_value = False
+    client.collect_focus_step.return_value = _verify_step(view_id="different", label="different")
+    monkeypatch.setattr(anchor_logic, "verify_context", lambda *a, **k: {"ok": True})
+    tab_cfg = {
+        "scenario_id": "life_food_plugin",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "pre_navigation": [{"action": "select", "target": ".*food.*", "type": "a"}],
+        "anchor_name": "(?i).*navigate\\s*up.*",
+        "anchor_type": "a",
+        "anchor": {
+            "resource_id_regex": "missing",
+            "text_regex": "(?i).*navigate\\s*up.*",
+        },
+    }
+
+    result = anchor_logic.stabilize_anchor(client, "SERIAL", tab_cfg, phase="scenario_start", max_retries=1)
+
+    assert result["ok"] is False
+    assert result["fallback_candidate_rejected_reason"] == "boilerplate_like"

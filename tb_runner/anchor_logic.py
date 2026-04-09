@@ -11,6 +11,16 @@ from tb_runner.utils import _safe_regex_search, parse_bounds_str
 _VALID_STABILIZATION_MODES = {"tab_context", "anchor_only", "anchor_then_context"}
 _ANCHOR_VERIFY_SETTLE_SECONDS = 0.12
 _ANCHOR_VERIFY_SCORE_THRESHOLD = 100
+_PLUGIN_FALLBACK_BOILERPLATE_TOKENS = (
+    "privacy policy",
+    "terms",
+    "conditions",
+    "i agree",
+    "agreement",
+    "개인정보",
+    "약관",
+    "동의",
+)
 
 
 def _extract_candidate_from_node(node: dict[str, Any], index: int = -1) -> dict[str, Any]:
@@ -177,9 +187,27 @@ def _is_fallback_chrome_candidate(candidate: dict[str, Any], screen_width: int, 
     return False
 
 
-def _pick_top_content_fallback_candidate(candidates: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, str]:
+def _is_boilerplate_like_candidate(candidate: dict[str, Any]) -> bool:
+    blob = " ".join(
+        [
+            str(candidate.get("text", "") or "").strip().lower(),
+            str(candidate.get("announcement", "") or "").strip().lower(),
+            str(candidate.get("resource_id", "") or "").strip().lower(),
+        ]
+    ).strip()
+    if not blob:
+        return False
+    if any(token in blob for token in _PLUGIN_FALLBACK_BOILERPLATE_TOKENS):
+        return True
+    compact_len = len(re.sub(r"\s+", "", blob))
+    if compact_len >= 80 and ("policy" in blob or "약관" in blob):
+        return True
+    return False
+
+
+def _pick_top_content_fallback_candidate(candidates: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, str, str]:
     if not candidates:
-        return None, ""
+        return None, "", "no_candidates"
     screen_width = max((int(c.get("right", 0) or 0) for c in candidates), default=0)
     screen_height = max((int(c.get("bottom", 0) or 0) for c in candidates), default=0)
     content_candidates = [
@@ -192,12 +220,12 @@ def _pick_top_content_fallback_candidate(candidates: list[dict[str, Any]]) -> tu
         and not _is_fallback_chrome_candidate(c, screen_width, screen_height)
     ]
     if not content_candidates:
-        return None, ""
+        return None, "", "no_readable_top_candidate"
     top_y = min(int(c.get("top", 10**9)) for c in content_candidates)
     top_row_tolerance = max(24, int(screen_height * 0.02)) if screen_height > 0 else 24
     top_row_candidates = [c for c in content_candidates if int(c.get("top", 10**9)) <= top_y + top_row_tolerance]
     if not top_row_candidates:
-        return None, ""
+        return None, "", "no_readable_top_candidate"
 
     identity_candidates = [
         c
@@ -207,33 +235,62 @@ def _pick_top_content_fallback_candidate(candidates: list[dict[str, Any]]) -> tu
         or str(c.get("resource_id", "") or "").strip()
     ]
     if not identity_candidates:
-        return None, ""
+        return None, "", "no_readable_top_candidate"
+
+    def _pick_non_boilerplate(bucket: list[dict[str, Any]], sort_key: Any, fallback_position: str) -> tuple[dict[str, Any] | None, str]:
+        for candidate in sorted(bucket, key=sort_key):
+            if not _is_boilerplate_like_candidate(candidate):
+                return candidate, fallback_position
+        return None, "boilerplate_like"
+
     if screen_width > 0:
         def _center_x(item: dict[str, Any]) -> int:
             return (int(item.get("left", 0)) + int(item.get("right", 0))) // 2
 
         left_bucket = [c for c in identity_candidates if _center_x(c) <= int(screen_width * 0.34)]
         if left_bucket:
-            return sorted(left_bucket, key=lambda c: (int(c.get("left", 10**9)), int(c.get("top", 10**9))))[0], "top_left"
+            candidate, reason = _pick_non_boilerplate(
+                left_bucket,
+                lambda c: (int(c.get("left", 10**9)), int(c.get("top", 10**9))),
+                "top_left",
+            )
+            if candidate:
+                return candidate, reason, ""
 
         center_bucket = [
             c for c in identity_candidates if int(screen_width * 0.34) < _center_x(c) < int(screen_width * 0.66)
         ]
         if center_bucket:
             center_x = screen_width // 2
-            return sorted(
+            candidate, reason = _pick_non_boilerplate(
                 center_bucket,
-                key=lambda c: (
+                lambda c: (
                     abs(_center_x(c) - center_x),
                     int(c.get("left", 10**9)),
                 ),
-            )[0], "top_center"
+                "top_center",
+            )
+            if candidate:
+                return candidate, reason, ""
 
         right_bucket = [c for c in identity_candidates if _center_x(c) >= int(screen_width * 0.66)]
         if right_bucket:
-            return sorted(right_bucket, key=lambda c: (-int(c.get("right", -1)), int(c.get("top", 10**9))))[0], "top_right"
+            candidate, reason = _pick_non_boilerplate(
+                right_bucket,
+                lambda c: (-int(c.get("right", -1)), int(c.get("top", 10**9))),
+                "top_right",
+            )
+            if candidate:
+                return candidate, reason, ""
 
-    return sorted(identity_candidates, key=lambda c: (int(c.get("left", 10**9)), int(c.get("top", 10**9))))[0], "top_left"
+    candidate, reason = _pick_non_boilerplate(
+        identity_candidates,
+        lambda c: (int(c.get("left", 10**9)), int(c.get("top", 10**9))),
+        "top_left",
+    )
+    if candidate:
+        return candidate, reason, ""
+    return None, "", reason
 
 
 def _build_verify_cfg_for_fallback(candidate: dict[str, Any]) -> dict[str, Any]:
@@ -354,10 +411,12 @@ def stabilize_anchor(
         and screen_context_mode == "new_screen"
         and stabilization_mode == "anchor_only"
     )
+    plugin_fallback_scope = transition_fast_path or "plugin" in scenario_id.lower()
     start_candidate_source = "explicit_anchor"
     fallback_candidate_used = False
     fallback_candidate_label = ""
     fallback_candidate_resource_id = ""
+    fallback_candidate_rejected_reason = ""
     last_verify_row: dict[str, Any] = {}
 
     for attempt in range(1, max_retries + 1):
@@ -370,6 +429,7 @@ def stabilize_anchor(
         matches: list[dict[str, Any]] = []
         best: dict[str, Any] | None = None
         fallback_position = ""
+        fallback_skip_reason = ""
         active_anchor_cfg = dict(anchor_cfg)
         if explicit_anchor_configured:
             matches = [m for m in (match_anchor(c, anchor_cfg) for c in candidates) if m["matched"]]
@@ -381,7 +441,7 @@ def stabilize_anchor(
         if best is None:
             if explicit_anchor_configured:
                 log("[ANCHOR][fallback] explicit anchor not matched, trying top content fallback")
-            fallback_candidate, fallback_position = _pick_top_content_fallback_candidate(candidates)
+            fallback_candidate, fallback_position, fallback_skip_reason = _pick_top_content_fallback_candidate(candidates)
             if fallback_candidate:
                 active_anchor_cfg = _build_verify_cfg_for_fallback(fallback_candidate)
                 best = {"candidate": fallback_candidate, "score": 0, "matched": True, "matched_fields": ["fallback"]}
@@ -393,8 +453,15 @@ def stabilize_anchor(
                     f"[ANCHOR][fallback] selected candidate label='{fallback_candidate.get('announcement', '')}' "
                     f"position='{fallback_position}'"
                 )
+                if plugin_fallback_scope:
+                    log(f"[ANCHOR][plugin_fallback] using_top_start_candidate position='{fallback_position}'")
             else:
                 log("[ANCHOR][fallback] no usable fallback candidate")
+                fallback_candidate_rejected_reason = fallback_skip_reason
+                if plugin_fallback_scope and fallback_skip_reason == "boilerplate_like":
+                    log("[ANCHOR][plugin_fallback] rejected candidate reason='boilerplate_like'")
+                elif plugin_fallback_scope:
+                    log(f"[ANCHOR][plugin_fallback] failed reason='{fallback_skip_reason or 'no_readable_top_candidate'}'")
 
         selected = False
         select_attempted = False
@@ -531,6 +598,9 @@ def stabilize_anchor(
                 f"[ANCHOR][{phase}] success scenario='{scenario_id}' selected={selected} "
                 f"matched={verify_matched} stable={verify_stable} context_ok={context_ok} reason='{success_reason}'"
             )
+            if plugin_fallback_scope and fallback_candidate_used:
+                stabilized_by = "selected" if selected else "post_focus_verified"
+                log(f"[ANCHOR][plugin_fallback] stabilized_by='{stabilized_by}'")
             return {
                 "ok": True,
                 "attempt": attempt,
@@ -546,6 +616,7 @@ def stabilize_anchor(
                 "fallback_candidate_used": fallback_candidate_used,
                 "fallback_candidate_label": fallback_candidate_label,
                 "fallback_candidate_resource_id": fallback_candidate_resource_id,
+                "fallback_candidate_rejected_reason": fallback_candidate_rejected_reason,
             }
 
     return {
@@ -562,4 +633,5 @@ def stabilize_anchor(
         "fallback_candidate_used": fallback_candidate_used,
         "fallback_candidate_label": fallback_candidate_label,
         "fallback_candidate_resource_id": fallback_candidate_resource_id,
+        "fallback_candidate_rejected_reason": fallback_candidate_rejected_reason,
     }
