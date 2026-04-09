@@ -1,5 +1,7 @@
+import os
+
 from tb_runner.scenario_config import TAB_CONFIGS
-from tb_runner.utils import _safe_regex_search
+from tb_runner.utils import _safe_regex_search, configure_process_temp_dir
 
 
 def test_safe_regex_search_returns_false_for_invalid_pattern():
@@ -11,3 +13,11 @@ def test_menu_main_anchor_regex_has_single_leading_ignorecase_flag():
     assert menu_cfg["anchor_name"] == "(?i).*smartthings settings.*|.*settings.*"
     assert menu_cfg["anchor"]["text_regex"] == "(?i).*smartthings settings.*|.*settings.*"
     assert menu_cfg["anchor"]["announcement_regex"] == "(?i).*smartthings settings.*|.*settings.*"
+
+
+def test_configure_process_temp_dir_sets_tmp_and_temp(tmp_path):
+    applied, path_text = configure_process_temp_dir(str(tmp_path / ".tmp"))
+
+    assert os.environ["TMP"] == path_text
+    assert os.environ["TEMP"] == path_text
+    assert applied is True
