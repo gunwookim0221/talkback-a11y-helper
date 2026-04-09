@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.75.6"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.75.7"
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
@@ -281,36 +281,12 @@ object A11yNavigator {
                 isClickable = { node -> node.isClickable }
             )
         }
-        var currentIndex = resolvedCurrent?.let { resolved ->
-            findCurrentTraversalIndex(
-                traversalList = traversalList,
-                currentNode = resolved,
-                isSameNodeMatch = ::isSameNode
-            )
-        } ?: -1
-
-        if (currentIndex == -1 && resolvedCurrent != null) {
-            currentIndex = A11yTraversalAnalyzer.findNodeIndexByIdentity(
-                nodes = traversalList,
-                target = resolvedCurrent,
-                idOf = { it.viewIdResourceName },
-                textOf = { it.text?.toString() },
-                contentDescriptionOf = { it.contentDescription?.toString() },
-                boundsOf = { Rect().also(it::getBoundsInScreen) }
-            )
-        }
-        if (currentIndex == -1 && resolvedCurrent != null) {
-            currentIndex = resolveAliasRepresentativeIndex(
-                aliasMembersByRepresentativeIndex = aliasMembersByRepresentativeIndex,
-                target = resolvedCurrent
-            )
-        }
-        if (currentIndex == -1 && A11yNodeUtils.isOneConnectBottomTabNode(rawCurrentNode)) {
-            val currentViewId = rawCurrentNode?.viewIdResourceName
-            currentIndex = traversalList.indexOfFirst { candidate ->
-                candidate.viewIdResourceName == currentViewId && A11yNodeUtils.isOneConnectBottomTabNode(candidate)
-            }
-        }
+        var currentIndex = findTraversalIndexForCurrentCandidate(
+            traversalList = traversalList,
+            resolvedCurrent = resolvedCurrent,
+            rawCurrentNode = rawCurrentNode,
+            aliasMembersByRepresentativeIndex = aliasMembersByRepresentativeIndex
+        )
 
         if (currentIndex != -1) {
             val currentBounds = Rect().also { traversalList[currentIndex].getBoundsInScreen(it) }
@@ -595,9 +571,25 @@ object A11yNavigator {
         }
 
         val normalizeResult = normalizeSmartNextInputs(root, collectResult)
+        val a11yFocusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val inputFocusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        val resolvedCurrentCandidate = when {
+            a11yFocusedNode != null -> a11yFocusedNode
+            inputFocusedNode != null && findTraversalIndexForCurrentCandidate(
+                traversalList = normalizeResult.traversalList,
+                resolvedCurrent = resolveToClickableAncestor(
+                    node = inputFocusedNode,
+                    parentOf = { node -> node.parent },
+                    isClickable = { node -> node.isClickable }
+                ),
+                rawCurrentNode = inputFocusedNode,
+                aliasMembersByRepresentativeIndex = normalizeResult.aliasMembersByRepresentativeIndex
+            ) != -1 -> inputFocusedNode
+            else -> currentNode
+        }
         val currentPosition = resolveCurrentAndNextIndex(
             traversalList = normalizeResult.traversalList,
-            currentNode = currentNode,
+            currentNode = resolvedCurrentCandidate,
             aliasMembersByRepresentativeIndex = normalizeResult.aliasMembersByRepresentativeIndex
         )
         val visitedHistory = snapshotVisitedHistoryLabels()
@@ -1400,6 +1392,44 @@ object A11yNavigator {
                 ) != -1
             }
         }?.key ?: -1
+    }
+
+    private fun findTraversalIndexForCurrentCandidate(
+        traversalList: List<AccessibilityNodeInfo>,
+        resolvedCurrent: AccessibilityNodeInfo?,
+        rawCurrentNode: AccessibilityNodeInfo?,
+        aliasMembersByRepresentativeIndex: Map<Int, List<AccessibilityNodeInfo>>
+    ): Int {
+        var currentIndex = resolvedCurrent?.let { resolved ->
+            findCurrentTraversalIndex(
+                traversalList = traversalList,
+                currentNode = resolved,
+                isSameNodeMatch = ::isSameNode
+            )
+        } ?: -1
+        if (currentIndex == -1 && resolvedCurrent != null) {
+            currentIndex = A11yTraversalAnalyzer.findNodeIndexByIdentity(
+                nodes = traversalList,
+                target = resolvedCurrent,
+                idOf = { it.viewIdResourceName },
+                textOf = { it.text?.toString() },
+                contentDescriptionOf = { it.contentDescription?.toString() },
+                boundsOf = { Rect().also(it::getBoundsInScreen) }
+            )
+        }
+        if (currentIndex == -1 && resolvedCurrent != null) {
+            currentIndex = resolveAliasRepresentativeIndex(
+                aliasMembersByRepresentativeIndex = aliasMembersByRepresentativeIndex,
+                target = resolvedCurrent
+            )
+        }
+        if (currentIndex == -1 && A11yNodeUtils.isOneConnectBottomTabNode(rawCurrentNode)) {
+            val currentViewId = rawCurrentNode?.viewIdResourceName
+            currentIndex = traversalList.indexOfFirst { candidate ->
+                candidate.viewIdResourceName == currentViewId && A11yNodeUtils.isOneConnectBottomTabNode(candidate)
+            }
+        }
+        return currentIndex
     }
 
     private fun resolveFocusedNodeLabel(node: FocusedNode): String {
