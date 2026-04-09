@@ -329,7 +329,7 @@ def test_should_stop_global_nav_end_when_failed_repeat_no_progress():
     assert details["recent_repeat"] is True
 
 
-def test_should_stop_realign_repeat_no_progress_in_content():
+def test_should_not_stop_realign_semantic_repeat_during_grace_window():
     previous = {
         "normalized_visible_label": "more options",
         "normalized_announcement": "more options",
@@ -344,7 +344,7 @@ def test_should_stop_realign_repeat_no_progress_in_content():
         "normalized_visible_label": "more options",
         "normalized_announcement": "more options",
         "focus_view_id": "id/more",
-        "focus_bounds": "0,0,1,1",
+        "focus_bounds": "0,0,2,2",
         "overlay_recovery_status": "after_realign",
     }
 
@@ -358,10 +358,11 @@ def test_should_stop_realign_repeat_no_progress_in_content():
         stop_policy={"stop_on_repeat_no_progress": True},
     )
 
-    assert stop is True
-    assert reason == "repeat_no_progress"
+    assert stop is False
+    assert reason == ""
     assert details["after_realign"] is True
-    assert details["recent_repeat"] is True
+    assert details["overlay_realign_grace_active"] is True
+    assert details["realign_grace_suppressed"] is False
 
 
 def test_should_not_stop_only_because_after_realign_marker():
@@ -469,3 +470,72 @@ def test_should_not_stop_when_semantic_duplicate_window_is_wide():
     assert stop is False
     assert reason == ""
     assert details["bounded_two_card_loop"] is False
+
+
+def test_should_block_repeat_stop_before_min_step_gate():
+    previous = {
+        "normalized_visible_label": "menu",
+        "normalized_announcement": "menu",
+        "focus_view_id": "id/menu",
+        "focus_bounds": "0,0,10,10",
+    }
+    row = {
+        "step_index": 1,
+        "move_result": "failed",
+        "last_smart_nav_result": "failed",
+        "visible_label": "Menu",
+        "merged_announcement": "Menu",
+        "normalized_visible_label": "menu",
+        "normalized_announcement": "menu",
+        "focus_view_id": "id/menu",
+        "focus_bounds": "0,0,10,10",
+    }
+
+    stop, _, _, reason, _, details = should_stop(
+        row=row,
+        prev_fingerprint=("menu", "id/menu", "0,0,10,10"),
+        fail_count=1,
+        same_count=1,
+        previous_row=previous,
+        scenario_type="content",
+    )
+
+    assert stop is False
+    assert reason == ""
+    assert details["min_step_gate_blocked"] is True
+    assert details["hard_no_progress"] is True
+
+
+def test_should_allow_strict_hard_no_progress_even_after_realign_grace():
+    previous = {
+        "normalized_visible_label": "add",
+        "normalized_announcement": "add",
+        "focus_view_id": "id/add",
+        "focus_bounds": "0,0,1,1",
+    }
+    row = {
+        "step_index": 4,
+        "move_result": "failed",
+        "last_smart_nav_result": "failed",
+        "visible_label": "Add",
+        "merged_announcement": "Add",
+        "normalized_visible_label": "add",
+        "normalized_announcement": "add",
+        "focus_view_id": "id/add",
+        "focus_bounds": "0,0,1,1",
+        "overlay_recovery_status": "after_realign",
+    }
+
+    stop, _, _, reason, _, details = should_stop(
+        row=row,
+        prev_fingerprint=("add", "id/add", "0,0,1,1"),
+        fail_count=1,
+        same_count=1,
+        previous_row=previous,
+        scenario_type="content",
+    )
+
+    assert stop is True
+    assert reason == "repeat_no_progress"
+    assert details["strict_duplicate"] is True
+    assert details["hard_no_progress"] is True
