@@ -1614,6 +1614,478 @@ def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     return open_scenario(client, dev, tab_cfg)
 
 
+def _overlay_phase(
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict[str, Any],
+    row: dict[str, Any],
+    rows: list[dict[str, Any]],
+    all_rows: list[dict[str, Any]],
+    *,
+    output_path: str,
+    output_base_dir: str,
+    scenario_perf: ScenarioPerfStats | None,
+    main_step_index_by_fingerprint: dict[tuple[str, str, str], int],
+    expanded_overlay_entries: set[str],
+) -> int:
+    is_global_nav_only_scenario = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower() == "global_nav"
+    is_candidate, candidate_reason = (False, "blocked_by_global_nav_only")
+    if not is_global_nav_only_scenario:
+        is_candidate, candidate_reason = is_overlay_candidate(row, tab_cfg)
+    post_realign_pending_steps_delta = 0
+    if is_candidate:
+        fingerprint = make_overlay_entry_fingerprint(tab_cfg["tab_name"], row)
+        if fingerprint not in expanded_overlay_entries:
+            log(
+                f"[OVERLAY] candidate matched scenario='{tab_cfg.get('scenario_id', '')}' "
+                f"tab='{tab_cfg.get('tab_name', '')}' step={row.get('step_index')} "
+                f"view_id='{row.get('focus_view_id', '')}' label='{row.get('visible_label', '')}' "
+                f"reason='{candidate_reason}'"
+            )
+            clicked = False
+            row_view_id = str(row.get("focus_view_id", "") or "").strip()
+            row_label = str(row.get("visible_label", "") or "").strip()
+            if row_view_id:
+                clicked = client.touch(
+                    dev=dev,
+                    name=f"^{re.escape(row_view_id)}$",
+                    type_="r",
+                    wait_=3,
+                )
+            elif row_label:
+                clicked = client.touch(
+                    dev=dev,
+                    name=f"^{re.escape(row_label)}$",
+                    type_="a",
+                    wait_=3,
+                )
+            if not clicked:
+                log(
+                    f"[OVERLAY] post_click classification='unchanged' scenario='{tab_cfg.get('scenario_id', '')}' "
+                    f"tab='{tab_cfg.get('tab_name', '')}' step={row.get('step_index')} "
+                    f"view_id='{row_view_id}' label='{row_label}' reason='entry_click_failed'"
+                )
+            else:
+                time.sleep(0.8)
+                classification, post_click_step = classify_post_click_result(
+                    client=client,
+                    dev=dev,
+                    tab_cfg=tab_cfg,
+                    pre_click_step=row,
+                )
+                log(
+                    f"[OVERLAY] post_click classification='{classification}' "
+                    f"scenario='{tab_cfg.get('scenario_id', '')}' tab='{tab_cfg.get('tab_name', '')}' "
+                    f"entry_view_id='{row_view_id}' entry_label='{row_label}' "
+                    f"post_view_id='{post_click_step.get('focus_view_id', '')}' "
+                    f"post_label='{post_click_step.get('visible_label', '')}'"
+                )
+
+                if classification == "overlay":
+                    if scenario_perf is not None:
+                        scenario_perf.overlay_count += 1
+                    before_overlay_len = len(rows)
+                    expand_overlay(
+                        client=client,
+                        dev=dev,
+                        tab_cfg=tab_cfg,
+                        entry_step=row,
+                        rows=rows,
+                        all_rows=all_rows,
+                        output_path=output_path,
+                        output_base_dir=output_base_dir,
+                        skip_entry_click=True,
+                        scenario_perf=scenario_perf,
+                    )
+                    if scenario_perf is not None:
+                        for overlay_row in rows[before_overlay_len:]:
+                            scenario_perf.record_row(overlay_row)
+                    expanded_overlay_entries.add(fingerprint)
+
+                    if scenario_perf is not None:
+                        scenario_perf.realign_attempt_count += 1
+                    realign_result = realign_focus_after_overlay(
+                        client=client,
+                        dev=dev,
+                        entry_step=row,
+                        known_step_index_by_fingerprint=main_step_index_by_fingerprint,
+                        tab_cfg=tab_cfg,
+                    )
+                    if scenario_perf is not None and bool(realign_result.get("entry_reached")):
+                        scenario_perf.realign_success_count += 1
+                    log(
+                        f"[OVERLAY] realign status='{realign_result.get('status')}' "
+                        f"entry_reached={realign_result.get('entry_reached')} "
+                        f"steps_taken={realign_result.get('steps_taken')} "
+                        f"match_by='{realign_result.get('match_by', '')}'"
+                    )
+                    if realign_result.get("entry_reached"):
+                        post_realign_pending_steps_delta = 2
+                        post_overlay_stabilized = stabilize_anchor(
+                            client=client,
+                            dev=dev,
+                            tab_cfg=tab_cfg,
+                            phase="overlay_realign",
+                            max_retries=_get_retry_count(tab_cfg, "anchor_retry_count", 2),
+                            verify_reads=1,
+                        )
+                        if not post_overlay_stabilized.get("ok"):
+                            log(
+                                f"[ANCHOR][overlay_realign] stabilization failed "
+                                f"tab='{tab_cfg.get('tab_name', '')}'"
+                            )
+                elif classification == "navigation":
+                    log(
+                        f"[OVERLAY] overlay routine skipped (navigation) scenario='{tab_cfg.get('scenario_id', '')}' "
+                        f"step={row.get('step_index')}"
+                    )
+                else:
+                    log(
+                        f"[OVERLAY] overlay routine skipped (unchanged) scenario='{tab_cfg.get('scenario_id', '')}' "
+                        f"step={row.get('step_index')}"
+                    )
+        else:
+            log(f"[OVERLAY] skip already expanded entry fingerprint='{fingerprint}'")
+    elif candidate_reason == "blocked_no_overlay_policy":
+        log(
+            f"[OVERLAY] blocked no_overlay_policy scenario='{tab_cfg.get('scenario_id', '')}' "
+            f"tab='{tab_cfg.get('tab_name', '')}' step={row.get('step_index')}"
+        )
+    elif candidate_reason == "blocked_empty_allow_list":
+        log(
+            f"[OVERLAY] blocked empty_allow_list scenario='{tab_cfg.get('scenario_id', '')}' "
+            f"tab='{tab_cfg.get('tab_name', '')}' step={row.get('step_index')}"
+        )
+    elif "blocked" in candidate_reason:
+        log(
+            f"[OVERLAY] blocked by scenario policy scenario='{tab_cfg.get('scenario_id', '')}' "
+            f"tab='{tab_cfg.get('tab_name', '')}' step={row.get('step_index')} "
+            f"view_id='{row.get('focus_view_id', '')}' label='{row.get('visible_label', '')}'"
+        )
+    return post_realign_pending_steps_delta
+
+
+def _main_loop_phase(
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict[str, Any],
+    rows: list[dict[str, Any]],
+    all_rows: list[dict[str, Any]],
+    *,
+    output_path: str,
+    output_base_dir: str,
+    scenario_perf: ScenarioPerfStats | None,
+    checkpoint_every: int,
+    main_step_wait_seconds: float,
+    main_announcement_wait_seconds: float,
+    main_announcement_idle_wait_seconds: float,
+    main_announcement_max_extra_wait_seconds: float,
+    state: dict[str, Any],
+) -> dict[str, Any]:
+    for step_idx in range(1, tab_cfg["max_steps"] + 1):
+        log(f"[STEP] START tab='{tab_cfg['tab_name']}' step={step_idx}")
+        step_start = time.perf_counter()
+
+        row = client.collect_focus_step(
+            dev=dev,
+            step_index=step_idx,
+            move=True,
+            direction="next",
+            wait_seconds=main_step_wait_seconds,
+            announcement_wait_seconds=main_announcement_wait_seconds,
+            announcement_idle_wait_seconds=main_announcement_idle_wait_seconds,
+            announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
+        )
+        step_elapsed = time.perf_counter() - step_start
+
+        row["tab_name"] = tab_cfg["tab_name"]
+        row["context_type"] = "main"
+        row["parent_step_index"] = ""
+        row["overlay_entry_label"] = ""
+        row["overlay_recovery_status"] = "after_realign" if state["post_realign_pending_steps"] > 0 else ""
+        row["status"] = "OK"
+        row["stop_reason"] = ""
+        row["scenario_type"] = str(tab_cfg.get("scenario_type", "content") or "content")
+        row["step_elapsed_sec"] = round(step_elapsed, 3)
+        row["crop_image"] = "IMAGE"
+        row["_step_mono_start"] = time.monotonic() - float(row.get("t_step_start", 0.0) or 0.0)
+        row = maybe_capture_focus_crop(client, dev, row, output_base_dir)
+        row.pop("_step_mono_start", None)
+        row["step_total_elapsed_sec"] = round(time.perf_counter() - step_start, 3)
+        scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower()
+        if scenario_type == "global_nav":
+            expected_view_id = str(row.get("smart_nav_requested_view_id", "") or "").strip()
+            resolved_view_id = str(row.get("smart_nav_resolved_view_id", "") or "").strip()
+            actual_view_id = str(row.get("smart_nav_actual_view_id", "") or "").strip()
+            resolved_label = str(row.get("smart_nav_resolved_label", "") or "").strip()
+            actual_label = str(row.get("smart_nav_actual_label", "") or "").strip()
+            expected_norm = expected_view_id.lower()
+            resolved_norm = resolved_view_id.lower()
+            actual_norm = actual_view_id.lower()
+            smart_success = bool(row.get("smart_nav_success", False))
+            resource_matched = bool(expected_norm and (resolved_norm == expected_norm or actual_norm == expected_norm))
+            if smart_success and resource_matched:
+                chosen_view_id = resolved_view_id or actual_view_id
+                chosen_label = resolved_label or actual_label
+                if chosen_view_id:
+                    row["focus_view_id"] = chosen_view_id
+                if chosen_label:
+                    row["visible_label"] = chosen_label
+                    row["normalized_visible_label"] = client.normalize_for_comparison(chosen_label)
+                row["post_move_verdict_source"] = "smart_nav_result_resource_match"
+            elif smart_success:
+                row["post_move_verdict_source"] = "smart_nav_result"
+        state["last_fingerprint"], state["fingerprint_repeat_count"] = _annotate_row_quality(
+            row,
+            last_fingerprint=state["last_fingerprint"],
+            fingerprint_repeat_count=state["fingerprint_repeat_count"],
+            recent_fingerprint_history=state["recent_fingerprint_history"],
+            recent_semantic_fingerprint_history=state["recent_semantic_fingerprint_history"],
+        )
+        log(
+            f"[ROW] fingerprint='{row.get('fingerprint', '')}' "
+            f"normalized_fingerprint='{row.get('normalized_fingerprint', '')}' "
+            f"duplicate={str(bool(row.get('is_duplicate_step', False))).lower()} "
+            f"recent_duplicate={str(bool(row.get('is_recent_duplicate_step', False))).lower()} "
+            f"distance={int(row.get('recent_duplicate_distance', 0) or 0)} "
+            f"recent_semantic_duplicate={str(bool(row.get('is_recent_semantic_duplicate_step', False))).lower()} "
+            f"semantic_distance={int(row.get('recent_semantic_duplicate_distance', 0) or 0)} "
+            f"semantic_window_unique={int(row.get('recent_semantic_unique_count', 0) or 0)} "
+            f"noise={str(bool(row.get('is_noise_step', False))).lower()}"
+        )
+
+        move_result = str(row.get("move_result", "") or "")
+        visible_label = str(row.get("visible_label", "") or "").strip()
+        merged_announcement = str(row.get("merged_announcement", "") or "").strip()
+
+        log(
+            f"[STEP] END tab='{tab_cfg['tab_name']}' step={step_idx} "
+            f"elapsed={step_elapsed:.2f}s move_result='{move_result}' "
+            f"visible='{visible_label}' speech='{merged_announcement}' "
+            f"crop='{row.get('crop_image_path', '')}' "
+            f"timing(move={row.get('move_elapsed_sec', 0):.3f}s "
+            f"ann={row.get('announcement_elapsed_sec', 0):.3f}s "
+            f"get_focus={row.get('get_focus_elapsed_sec', 0):.3f}s "
+            f"get_focus_fallback_dump={row.get('get_focus_fallback_dump_elapsed_sec', 0):.3f}s "
+            f"step_dump={row.get('step_dump_tree_elapsed_sec', 0):.3f}s "
+            f"crop={row.get('crop_elapsed_sec', 0):.3f}s total={row.get('step_total_elapsed_sec', 0):.3f}s) "
+            f"focus_reason='{row.get('get_focus_empty_reason', '')}' "
+            f"fallback_used={row.get('get_focus_fallback_used', False)} "
+            f"fallback_found={row.get('get_focus_fallback_found', False)} "
+            f"step_dump_used={row.get('step_dump_tree_used', False)} "
+            f"step_dump_reason='{row.get('step_dump_tree_reason', '')}' "
+            f"req_id='{row.get('get_focus_req_id', '')}'"
+        )
+        mismatch_reasons, low_confidence_reasons = detect_step_mismatch(row=row, previous_step=state["previous_step_row"])
+        if mismatch_reasons:
+            log(
+                f"[MISMATCH] step={step_idx} tab='{tab_cfg['tab_name']}' "
+                f"reason='{','.join(mismatch_reasons)}' "
+                f"speech='{merged_announcement}' visible='{visible_label}' "
+                f"focus_bounds='{row.get('focus_bounds', '')}' source='{row.get('focus_payload_source', '')}'"
+            )
+        elif low_confidence_reasons:
+            log(
+                f"[LOW_CONFIDENCE] step={step_idx} tab='{tab_cfg['tab_name']}' "
+                f"reason='{','.join(low_confidence_reasons)}' "
+                f"speech='{merged_announcement}' visible='{visible_label}' "
+                f"focus_bounds='{row.get('focus_bounds', '')}' source='{row.get('focus_payload_source', '')}'"
+            )
+        elif _should_log("DEBUG"):
+            log(
+                f"[DEBUG][diag] step={step_idx} speech_count={row.get('announcement_count', 0)} "
+                f"window={row.get('announcement_window_sec', 0)} "
+                f"focus_source='{row.get('focus_payload_source', '')}' "
+                f"response_success={row.get('get_focus_response_success', False)} "
+                f"t(after_move={row.get('t_after_move', 0)} "
+                f"after_ann={row.get('t_after_ann', 0)} "
+                f"after_focus={row.get('t_after_get_focus', 0)} "
+                f"before_crop={row.get('t_before_crop', 0)} after_crop={row.get('t_after_crop', 0)})",
+                level="DEBUG",
+            )
+
+        stop, state["fail_count"], state["same_count"], reason, state["prev_fingerprint"], stop_details = should_stop(
+            row=row,
+            prev_fingerprint=state["prev_fingerprint"],
+            fail_count=state["fail_count"],
+            same_count=state["same_count"],
+            previous_row=state["previous_step_row"],
+            scenario_type=str(tab_cfg.get("scenario_type", "content") or "content"),
+            stop_policy=tab_cfg.get("stop_policy", {}),
+            scenario_cfg=tab_cfg,
+        )
+        terminal_signal = bool(stop_details.get("terminal", False))
+        same_like_count = int(stop_details.get("same_like_count", 0) or 0)
+        no_progress = bool(stop_details.get("no_progress", False))
+        is_global_nav = bool(stop_details.get("is_global_nav", False))
+        global_nav_reason = str(stop_details.get("global_nav_reason", "") or "")
+        after_realign = bool(stop_details.get("after_realign", False))
+        recent_repeat = bool(stop_details.get("recent_repeat", False))
+        bounded_two_card_loop = bool(stop_details.get("bounded_two_card_loop", False))
+        semantic_same_like = bool(stop_details.get("semantic_same_like", False))
+        recent_duplicate = bool(stop_details.get("recent_duplicate", False))
+        recent_duplicate_distance = int(stop_details.get("recent_duplicate_distance", 0) or 0)
+        recent_semantic_duplicate = bool(stop_details.get("recent_semantic_duplicate", False))
+        recent_semantic_duplicate_distance = int(stop_details.get("recent_semantic_duplicate_distance", 0) or 0)
+        recent_semantic_unique_count = int(stop_details.get("recent_semantic_unique_count", 0) or 0)
+        repeat_stop_hit = bool(stop_details.get("repeat_stop_hit", False))
+        scenario_type = str(stop_details.get("scenario_type", tab_cfg.get("scenario_type", "content")) or "content")
+        is_global_nav_only_scenario = scenario_type == "global_nav"
+        if is_global_nav_only_scenario:
+            is_global_nav, global_nav_reason = is_global_nav_row(row, scenario_cfg=tab_cfg)
+        decision = "stop" if stop else "continue"
+        eval_reason = str(stop_details.get("reason", "") or "none")
+        row["is_global_nav"] = is_global_nav
+        row["global_nav_reason"] = global_nav_reason
+        log(
+            f"[STOP][eval] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
+            f"terminal={str(terminal_signal).lower()} same_like_count={same_like_count} "
+            f"no_progress={str(no_progress).lower()} scenario_type='{scenario_type}' "
+            f"is_global_nav={str(is_global_nav).lower()} after_realign={str(after_realign).lower()} "
+            f"recent_repeat={str(recent_repeat).lower()} bounded_two_card_loop={str(bounded_two_card_loop).lower()} "
+            f"semantic_same_like={str(semantic_same_like).lower()} recent_duplicate={str(recent_duplicate).lower()} "
+            f"recent_duplicate_distance={recent_duplicate_distance} "
+            f"recent_semantic_duplicate={str(recent_semantic_duplicate).lower()} "
+            f"recent_semantic_duplicate_distance={recent_semantic_duplicate_distance} "
+            f"recent_semantic_unique_count={recent_semantic_unique_count} "
+            f"repeat_stop_hit={str(repeat_stop_hit).lower()} "
+            f"decision='{decision}' reason='{eval_reason}'"
+        )
+
+        if stop and reason == "repeat_semantic_stall":
+            should_escape, escape_gate_reason = should_attempt_stall_escape(
+                tab_cfg=tab_cfg,
+                row=row,
+                stop_details=stop_details,
+                stop_reason=reason,
+                escape_attempted=state["stall_escape_attempted"],
+            )
+            if should_escape:
+                log(
+                    f"[STALL] detected scenario='{tab_cfg.get('scenario_id', '')}' step={step_idx} "
+                    f"same_like_count={same_like_count} semantic_window_unique_count={recent_semantic_unique_count}"
+                )
+                state["stall_escape_attempted"] = True
+                log(
+                    f"[STALL] attempting escape scenario='{tab_cfg.get('scenario_id', '')}' "
+                    f"method='refocus_or_realign'"
+                )
+                escape_result = attempt_stall_escape(
+                    client=client,
+                    dev=dev,
+                    row=row,
+                    step_idx=step_idx,
+                    announcement_wait_seconds=main_announcement_wait_seconds,
+                    announcement_idle_wait_seconds=main_announcement_idle_wait_seconds,
+                    announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
+                )
+                escape_success = bool(escape_result.get("success", False))
+                escape_result_reason = str(escape_result.get("reason", "") or "")
+                log(f"[STALL] escape result success={str(escape_success).lower()} reason='{escape_result_reason}'")
+                row["stall_escape_attempted"] = True
+                row["stall_escape_result"] = "success" if escape_success else "failed"
+                row["stall_escape_reason"] = escape_result_reason
+                if escape_success:
+                    stop = False
+                    reason = ""
+                    log(
+                        f"[STOP][eval] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
+                        f"repeat_stop_hit={str(repeat_stop_hit).lower()} but escape_attempted=true"
+                    )
+                else:
+                    reason = "repeat_semantic_stall_after_escape"
+                    stop = True
+            else:
+                if state["stall_escape_attempted"] or escape_gate_reason == "already_attempted":
+                    reason = "repeat_semantic_stall_after_escape"
+                log(
+                    f"[STOP][eval] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
+                    f"repeat_stop_hit={str(repeat_stop_hit).lower()} but escape_attempted={str(state['stall_escape_attempted']).lower()} "
+                    f"escape_gate_reason='{escape_gate_reason}'"
+                )
+
+        if is_global_nav_only_scenario and not is_global_nav:
+            log(
+                f"[GLOBAL_NAV][skip] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
+                f"label='{row.get('visible_label', '')}' view_id='{row.get('focus_view_id', '')}' "
+                f"nav_reason='{global_nav_reason or 'none'}'"
+            )
+            if stop and reason in {"global_nav_exit", "global_nav_end"}:
+                stop = False
+                state["stop_reason"] = ""
+            if state["post_realign_pending_steps"] > 0:
+                state["post_realign_pending_steps"] -= 1
+            continue
+
+        if stop:
+            state["stop_triggered"] = True
+            state["stop_reason"] = reason
+            state["stop_step"] = step_idx
+            if reason == "repeat_semantic_stall_after_escape":
+                log(
+                    f"[STOP][triggered] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
+                    "reason='repeat_semantic_stall_after_escape'"
+                )
+            row["status"] = "END"
+            row["stop_reason"] = reason
+            row["stop_triggered"] = True
+            row["stop_step"] = step_idx
+
+        rows.append(row)
+        all_rows.append(row)
+        if scenario_perf is not None:
+            scenario_perf.record_row(row)
+        row_fingerprint = make_main_fingerprint(row)
+        if all(row_fingerprint):
+            state["main_step_index_by_fingerprint"][row_fingerprint] = step_idx
+        if stop or (step_idx % checkpoint_every == 0):
+            save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
+
+        realign_delta = _overlay_phase(
+            client=client,
+            dev=dev,
+            tab_cfg=tab_cfg,
+            row=row,
+            rows=rows,
+            all_rows=all_rows,
+            output_path=output_path,
+            output_base_dir=output_base_dir,
+            scenario_perf=scenario_perf,
+            main_step_index_by_fingerprint=state["main_step_index_by_fingerprint"],
+            expanded_overlay_entries=state["expanded_overlay_entries"],
+        )
+        if realign_delta > 0:
+            state["post_realign_pending_steps"] = max(state["post_realign_pending_steps"], realign_delta)
+
+        if state["post_realign_pending_steps"] > 0:
+            state["post_realign_pending_steps"] -= 1
+
+        if stop:
+            log(
+                f"[STOP][triggered] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
+                f"decision='stop' reason='{reason}'"
+            )
+            break
+        state["previous_step_row"] = row
+    return state
+
+
+def _persist_phase(rows: list[dict[str, Any]], tab_cfg: dict[str, Any], *, state: dict[str, Any], scenario_perf: ScenarioPerfStats | None) -> None:
+    if not state["stop_triggered"] and rows:
+        state["stop_step"] = int(rows[-1].get("step_index", -1) or -1)
+        state["stop_reason"] = "safety_limit"
+        rows[-1]["stop_triggered"] = False
+        rows[-1]["stop_step"] = state["stop_step"]
+    log(
+        f"[STOP][summary] scenario='{tab_cfg.get('scenario_id', '')}' "
+        f"stop_triggered={str(state['stop_triggered']).lower()} stop_step={state['stop_step']} "
+        f"reason='{state['stop_reason'] or 'none'}'"
+    )
+    if scenario_perf is not None:
+        scenario_perf.finalize()
+        log(format_perf_summary("scenario_summary", scenario_perf.summary_dict()))
+
+
 def collect_tab_rows(
     client: A11yAdbClient,
     dev: str,
@@ -1706,7 +2178,7 @@ def collect_tab_rows(
     screen_context_mode = _resolve_screen_context_mode(tab_cfg)
     is_global_nav_start_gate = scenario_type == "global_nav" and screen_context_mode == "bottom_tab"
     if is_global_nav_start_gate:
-        start_gate_ok, gated_focus = _ensure_global_nav_start_focus(
+        start_gate_ok, _gated_focus = _ensure_global_nav_start_focus(
             client=client,
             dev=dev,
             tab_cfg=tab_cfg,
@@ -1811,439 +2283,40 @@ def collect_tab_rows(
     if scenario_perf is not None:
         scenario_perf.record_row(anchor_row)
     save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
-
     prev_fingerprint = make_main_fingerprint(anchor_row)
-    last_fingerprint = anchor_fingerprint
-    fingerprint_repeat_count = anchor_repeat_count
-    previous_step_row: dict[str, Any] | None = anchor_row
-    fail_count = 0
-    same_count = 0
-    expanded_overlay_entries: set[str] = set()
-    post_realign_pending_steps = 0
-    main_step_index_by_fingerprint: dict[tuple[str, str, str], int] = {
-        prev_fingerprint: 0,
+    state = {
+        "last_fingerprint": anchor_fingerprint,
+        "fingerprint_repeat_count": anchor_repeat_count,
+        "previous_step_row": anchor_row,
+        "prev_fingerprint": prev_fingerprint,
+        "fail_count": 0,
+        "same_count": 0,
+        "expanded_overlay_entries": set(),
+        "post_realign_pending_steps": 0,
+        "main_step_index_by_fingerprint": {prev_fingerprint: 0},
+        "recent_fingerprint_history": recent_fingerprint_history,
+        "recent_semantic_fingerprint_history": recent_semantic_fingerprint_history,
+        "stop_triggered": False,
+        "stop_reason": "",
+        "stop_step": -1,
+        "stall_escape_attempted": False,
     }
-
-    stop_triggered = False
-    stop_reason = ""
-    stop_step = -1
-    stall_escape_attempted = False
-
-    for step_idx in range(1, tab_cfg["max_steps"] + 1):
-        log(f"[STEP] START tab='{tab_cfg['tab_name']}' step={step_idx}")
-        step_start = time.perf_counter()
-
-        row = client.collect_focus_step(
-            dev=dev,
-            step_index=step_idx,
-            move=True,
-            direction="next",
-            wait_seconds=main_step_wait_seconds,
-            announcement_wait_seconds=main_announcement_wait_seconds,
-            announcement_idle_wait_seconds=main_announcement_idle_wait_seconds,
-            announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
-        )
-        step_elapsed = time.perf_counter() - step_start
-
-        row["tab_name"] = tab_cfg["tab_name"]
-        row["context_type"] = "main"
-        row["parent_step_index"] = ""
-        row["overlay_entry_label"] = ""
-        row["overlay_recovery_status"] = "after_realign" if post_realign_pending_steps > 0 else ""
-        row["status"] = "OK"
-        row["stop_reason"] = ""
-        row["scenario_type"] = str(tab_cfg.get("scenario_type", "content") or "content")
-        row["step_elapsed_sec"] = round(step_elapsed, 3)
-        row["crop_image"] = "IMAGE"
-        row["_step_mono_start"] = time.monotonic() - float(row.get("t_step_start", 0.0) or 0.0)
-        row = maybe_capture_focus_crop(client, dev, row, output_base_dir)
-        row.pop("_step_mono_start", None)
-        row["step_total_elapsed_sec"] = round(time.perf_counter() - step_start, 3)
-        scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower()
-        if scenario_type == "global_nav":
-            expected_view_id = str(row.get("smart_nav_requested_view_id", "") or "").strip()
-            resolved_view_id = str(row.get("smart_nav_resolved_view_id", "") or "").strip()
-            actual_view_id = str(row.get("smart_nav_actual_view_id", "") or "").strip()
-            resolved_label = str(row.get("smart_nav_resolved_label", "") or "").strip()
-            actual_label = str(row.get("smart_nav_actual_label", "") or "").strip()
-            expected_norm = expected_view_id.lower()
-            resolved_norm = resolved_view_id.lower()
-            actual_norm = actual_view_id.lower()
-            smart_success = bool(row.get("smart_nav_success", False))
-            resource_matched = bool(expected_norm and (resolved_norm == expected_norm or actual_norm == expected_norm))
-            if smart_success and resource_matched:
-                chosen_view_id = resolved_view_id or actual_view_id
-                chosen_label = resolved_label or actual_label
-                if chosen_view_id:
-                    row["focus_view_id"] = chosen_view_id
-                if chosen_label:
-                    row["visible_label"] = chosen_label
-                    row["normalized_visible_label"] = client.normalize_for_comparison(chosen_label)
-                row["post_move_verdict_source"] = "smart_nav_result_resource_match"
-            elif smart_success:
-                row["post_move_verdict_source"] = "smart_nav_result"
-        last_fingerprint, fingerprint_repeat_count = _annotate_row_quality(
-            row,
-            last_fingerprint=last_fingerprint,
-            fingerprint_repeat_count=fingerprint_repeat_count,
-            recent_fingerprint_history=recent_fingerprint_history,
-            recent_semantic_fingerprint_history=recent_semantic_fingerprint_history,
-        )
-        log(
-            f"[ROW] fingerprint='{row.get('fingerprint', '')}' "
-            f"normalized_fingerprint='{row.get('normalized_fingerprint', '')}' "
-            f"duplicate={str(bool(row.get('is_duplicate_step', False))).lower()} "
-            f"recent_duplicate={str(bool(row.get('is_recent_duplicate_step', False))).lower()} "
-            f"distance={int(row.get('recent_duplicate_distance', 0) or 0)} "
-            f"recent_semantic_duplicate={str(bool(row.get('is_recent_semantic_duplicate_step', False))).lower()} "
-            f"semantic_distance={int(row.get('recent_semantic_duplicate_distance', 0) or 0)} "
-            f"semantic_window_unique={int(row.get('recent_semantic_unique_count', 0) or 0)} "
-            f"noise={str(bool(row.get('is_noise_step', False))).lower()}"
-        )
-
-        move_result = str(row.get("move_result", "") or "")
-        visible_label = str(row.get("visible_label", "") or "").strip()
-        merged_announcement = str(row.get("merged_announcement", "") or "").strip()
-
-        log(
-            f"[STEP] END tab='{tab_cfg['tab_name']}' step={step_idx} "
-            f"elapsed={step_elapsed:.2f}s move_result='{move_result}' "
-            f"visible='{visible_label}' speech='{merged_announcement}' "
-            f"crop='{row.get('crop_image_path', '')}' "
-            f"timing(move={row.get('move_elapsed_sec', 0):.3f}s "
-            f"ann={row.get('announcement_elapsed_sec', 0):.3f}s "
-            f"get_focus={row.get('get_focus_elapsed_sec', 0):.3f}s "
-            f"get_focus_fallback_dump={row.get('get_focus_fallback_dump_elapsed_sec', 0):.3f}s "
-            f"step_dump={row.get('step_dump_tree_elapsed_sec', 0):.3f}s "
-            f"crop={row.get('crop_elapsed_sec', 0):.3f}s total={row.get('step_total_elapsed_sec', 0):.3f}s) "
-            f"focus_reason='{row.get('get_focus_empty_reason', '')}' "
-            f"fallback_used={row.get('get_focus_fallback_used', False)} "
-            f"fallback_found={row.get('get_focus_fallback_found', False)} "
-            f"step_dump_used={row.get('step_dump_tree_used', False)} "
-            f"step_dump_reason='{row.get('step_dump_tree_reason', '')}' "
-            f"req_id='{row.get('get_focus_req_id', '')}'"
-        )
-        mismatch_reasons, low_confidence_reasons = detect_step_mismatch(row=row, previous_step=previous_step_row)
-        if mismatch_reasons:
-            log(
-                f"[MISMATCH] step={step_idx} tab='{tab_cfg['tab_name']}' "
-                f"reason='{','.join(mismatch_reasons)}' "
-                f"speech='{merged_announcement}' visible='{visible_label}' "
-                f"focus_bounds='{row.get('focus_bounds', '')}' source='{row.get('focus_payload_source', '')}'"
-            )
-        elif low_confidence_reasons:
-            log(
-                f"[LOW_CONFIDENCE] step={step_idx} tab='{tab_cfg['tab_name']}' "
-                f"reason='{','.join(low_confidence_reasons)}' "
-                f"speech='{merged_announcement}' visible='{visible_label}' "
-                f"focus_bounds='{row.get('focus_bounds', '')}' source='{row.get('focus_payload_source', '')}'"
-            )
-        elif _should_log("DEBUG"):
-            log(
-                f"[DEBUG][diag] step={step_idx} speech_count={row.get('announcement_count', 0)} "
-                f"window={row.get('announcement_window_sec', 0)} "
-                f"focus_source='{row.get('focus_payload_source', '')}' "
-                f"response_success={row.get('get_focus_response_success', False)} "
-                f"t(after_move={row.get('t_after_move', 0)} "
-                f"after_ann={row.get('t_after_ann', 0)} "
-                f"after_focus={row.get('t_after_get_focus', 0)} "
-                f"before_crop={row.get('t_before_crop', 0)} after_crop={row.get('t_after_crop', 0)})",
-                level="DEBUG",
-            )
-
-        stop, fail_count, same_count, reason, prev_fingerprint, stop_details = should_stop(
-            row=row,
-            prev_fingerprint=prev_fingerprint,
-            fail_count=fail_count,
-            same_count=same_count,
-            previous_row=previous_step_row,
-            scenario_type=str(tab_cfg.get("scenario_type", "content") or "content"),
-            stop_policy=tab_cfg.get("stop_policy", {}),
-            scenario_cfg=tab_cfg,
-        )
-        terminal_signal = bool(stop_details.get("terminal", False))
-        same_like_count = int(stop_details.get("same_like_count", 0) or 0)
-        no_progress = bool(stop_details.get("no_progress", False))
-        is_global_nav = bool(stop_details.get("is_global_nav", False))
-        global_nav_reason = str(stop_details.get("global_nav_reason", "") or "")
-        after_realign = bool(stop_details.get("after_realign", False))
-        recent_repeat = bool(stop_details.get("recent_repeat", False))
-        bounded_two_card_loop = bool(stop_details.get("bounded_two_card_loop", False))
-        semantic_same_like = bool(stop_details.get("semantic_same_like", False))
-        recent_duplicate = bool(stop_details.get("recent_duplicate", False))
-        recent_duplicate_distance = int(stop_details.get("recent_duplicate_distance", 0) or 0)
-        recent_semantic_duplicate = bool(stop_details.get("recent_semantic_duplicate", False))
-        recent_semantic_duplicate_distance = int(stop_details.get("recent_semantic_duplicate_distance", 0) or 0)
-        recent_semantic_unique_count = int(stop_details.get("recent_semantic_unique_count", 0) or 0)
-        repeat_stop_hit = bool(stop_details.get("repeat_stop_hit", False))
-        scenario_type = str(stop_details.get("scenario_type", tab_cfg.get("scenario_type", "content")) or "content")
-        is_global_nav_only_scenario = scenario_type == "global_nav"
-        if is_global_nav_only_scenario:
-            is_global_nav, global_nav_reason = is_global_nav_row(row, scenario_cfg=tab_cfg)
-        decision = "stop" if stop else "continue"
-        eval_reason = str(stop_details.get("reason", "") or "none")
-        row["is_global_nav"] = is_global_nav
-        row["global_nav_reason"] = global_nav_reason
-        log(
-            f"[STOP][eval] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
-            f"terminal={str(terminal_signal).lower()} same_like_count={same_like_count} "
-            f"no_progress={str(no_progress).lower()} scenario_type='{scenario_type}' "
-            f"is_global_nav={str(is_global_nav).lower()} after_realign={str(after_realign).lower()} "
-            f"recent_repeat={str(recent_repeat).lower()} bounded_two_card_loop={str(bounded_two_card_loop).lower()} "
-            f"semantic_same_like={str(semantic_same_like).lower()} recent_duplicate={str(recent_duplicate).lower()} "
-            f"recent_duplicate_distance={recent_duplicate_distance} "
-            f"recent_semantic_duplicate={str(recent_semantic_duplicate).lower()} "
-            f"recent_semantic_duplicate_distance={recent_semantic_duplicate_distance} "
-            f"recent_semantic_unique_count={recent_semantic_unique_count} "
-            f"repeat_stop_hit={str(repeat_stop_hit).lower()} "
-            f"decision='{decision}' reason='{eval_reason}'"
-        )
-
-        if stop and reason == "repeat_semantic_stall":
-            should_escape, escape_gate_reason = should_attempt_stall_escape(
-                tab_cfg=tab_cfg,
-                row=row,
-                stop_details=stop_details,
-                stop_reason=reason,
-                escape_attempted=stall_escape_attempted,
-            )
-            if should_escape:
-                log(
-                    f"[STALL] detected scenario='{tab_cfg.get('scenario_id', '')}' step={step_idx} "
-                    f"same_like_count={same_like_count} semantic_window_unique_count={recent_semantic_unique_count}"
-                )
-                stall_escape_attempted = True
-                log(
-                    f"[STALL] attempting escape scenario='{tab_cfg.get('scenario_id', '')}' "
-                    f"method='refocus_or_realign'"
-                )
-                escape_result = attempt_stall_escape(
-                    client=client,
-                    dev=dev,
-                    row=row,
-                    step_idx=step_idx,
-                    announcement_wait_seconds=main_announcement_wait_seconds,
-                    announcement_idle_wait_seconds=main_announcement_idle_wait_seconds,
-                    announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
-                )
-                escape_success = bool(escape_result.get("success", False))
-                escape_result_reason = str(escape_result.get("reason", "") or "")
-                log(f"[STALL] escape result success={str(escape_success).lower()} reason='{escape_result_reason}'")
-                row["stall_escape_attempted"] = True
-                row["stall_escape_result"] = "success" if escape_success else "failed"
-                row["stall_escape_reason"] = escape_result_reason
-                if escape_success:
-                    stop = False
-                    reason = ""
-                    log(
-                        f"[STOP][eval] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
-                        f"repeat_stop_hit={str(repeat_stop_hit).lower()} but escape_attempted=true"
-                    )
-                else:
-                    reason = "repeat_semantic_stall_after_escape"
-                    stop = True
-            else:
-                if stall_escape_attempted or escape_gate_reason == "already_attempted":
-                    reason = "repeat_semantic_stall_after_escape"
-                log(
-                    f"[STOP][eval] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
-                    f"repeat_stop_hit={str(repeat_stop_hit).lower()} but escape_attempted={str(stall_escape_attempted).lower()} "
-                    f"escape_gate_reason='{escape_gate_reason}'"
-                )
-
-        if is_global_nav_only_scenario and not is_global_nav:
-            log(
-                f"[GLOBAL_NAV][skip] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
-                f"label='{row.get('visible_label', '')}' view_id='{row.get('focus_view_id', '')}' "
-                f"nav_reason='{global_nav_reason or 'none'}'"
-            )
-            if stop and reason in {"global_nav_exit", "global_nav_end"}:
-                stop = False
-                stop_reason = ""
-            if post_realign_pending_steps > 0:
-                post_realign_pending_steps -= 1
-            continue
-
-        if stop:
-            stop_triggered = True
-            stop_reason = reason
-            stop_step = step_idx
-            if reason == "repeat_semantic_stall_after_escape":
-                log(
-                    f"[STOP][triggered] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
-                    "reason='repeat_semantic_stall_after_escape'"
-                )
-            row["status"] = "END"
-            row["stop_reason"] = reason
-            row["stop_triggered"] = True
-            row["stop_step"] = step_idx
-
-        rows.append(row)
-        all_rows.append(row)
-        if scenario_perf is not None:
-            scenario_perf.record_row(row)
-        row_fingerprint = make_main_fingerprint(row)
-        if all(row_fingerprint):
-            main_step_index_by_fingerprint[row_fingerprint] = step_idx
-        if stop or (step_idx % checkpoint_every == 0):
-            save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
-
-        is_candidate, candidate_reason = (False, "blocked_by_global_nav_only")
-        if not is_global_nav_only_scenario:
-            is_candidate, candidate_reason = is_overlay_candidate(row, tab_cfg)
-        if is_candidate:
-            fingerprint = make_overlay_entry_fingerprint(tab_cfg["tab_name"], row)
-            if fingerprint not in expanded_overlay_entries:
-                log(
-                    f"[OVERLAY] candidate matched scenario='{tab_cfg.get('scenario_id', '')}' "
-                    f"tab='{tab_cfg.get('tab_name', '')}' step={row.get('step_index')} "
-                    f"view_id='{row.get('focus_view_id', '')}' label='{row.get('visible_label', '')}' "
-                    f"reason='{candidate_reason}'"
-                )
-                clicked = False
-                row_view_id = str(row.get("focus_view_id", "") or "").strip()
-                row_label = str(row.get("visible_label", "") or "").strip()
-                if row_view_id:
-                    clicked = client.touch(
-                        dev=dev,
-                        name=f"^{re.escape(row_view_id)}$",
-                        type_="r",
-                        wait_=3,
-                    )
-                elif row_label:
-                    clicked = client.touch(
-                        dev=dev,
-                        name=f"^{re.escape(row_label)}$",
-                        type_="a",
-                        wait_=3,
-                    )
-                if not clicked:
-                    log(
-                        f"[OVERLAY] post_click classification='unchanged' scenario='{tab_cfg.get('scenario_id', '')}' "
-                        f"tab='{tab_cfg.get('tab_name', '')}' step={row.get('step_index')} "
-                        f"view_id='{row_view_id}' label='{row_label}' reason='entry_click_failed'"
-                    )
-                else:
-                    time.sleep(0.8)
-                    classification, post_click_step = classify_post_click_result(
-                        client=client,
-                        dev=dev,
-                        tab_cfg=tab_cfg,
-                        pre_click_step=row,
-                    )
-                    log(
-                        f"[OVERLAY] post_click classification='{classification}' "
-                        f"scenario='{tab_cfg.get('scenario_id', '')}' tab='{tab_cfg.get('tab_name', '')}' "
-                        f"entry_view_id='{row_view_id}' entry_label='{row_label}' "
-                        f"post_view_id='{post_click_step.get('focus_view_id', '')}' "
-                        f"post_label='{post_click_step.get('visible_label', '')}'"
-                    )
-
-                    if classification == "overlay":
-                        if scenario_perf is not None:
-                            scenario_perf.overlay_count += 1
-                        before_overlay_len = len(rows)
-                        expand_overlay(
-                            client=client,
-                            dev=dev,
-                            tab_cfg=tab_cfg,
-                            entry_step=row,
-                            rows=rows,
-                            all_rows=all_rows,
-                            output_path=output_path,
-                            output_base_dir=output_base_dir,
-                            skip_entry_click=True,
-                            scenario_perf=scenario_perf,
-                        )
-                        if scenario_perf is not None:
-                            for overlay_row in rows[before_overlay_len:]:
-                                scenario_perf.record_row(overlay_row)
-                        expanded_overlay_entries.add(fingerprint)
-
-                        if scenario_perf is not None:
-                            scenario_perf.realign_attempt_count += 1
-                        realign_result = realign_focus_after_overlay(
-                            client=client,
-                            dev=dev,
-                            entry_step=row,
-                            known_step_index_by_fingerprint=main_step_index_by_fingerprint,
-                            tab_cfg=tab_cfg,
-                        )
-                        if scenario_perf is not None and bool(realign_result.get("entry_reached")):
-                            scenario_perf.realign_success_count += 1
-                        log(
-                            f"[OVERLAY] realign status='{realign_result.get('status')}' "
-                            f"entry_reached={realign_result.get('entry_reached')} "
-                            f"steps_taken={realign_result.get('steps_taken')} "
-                            f"match_by='{realign_result.get('match_by', '')}'"
-                        )
-                        if realign_result.get("entry_reached"):
-                            post_realign_pending_steps = max(post_realign_pending_steps, 2)
-                            post_overlay_stabilized = stabilize_anchor(
-                                client=client,
-                                dev=dev,
-                                tab_cfg=tab_cfg,
-                                phase="overlay_realign",
-                                max_retries=_get_retry_count(tab_cfg, "anchor_retry_count", 2),
-                                verify_reads=1,
-                            )
-                            if not post_overlay_stabilized.get("ok"):
-                                log(
-                                    f"[ANCHOR][overlay_realign] stabilization failed "
-                                    f"tab='{tab_cfg.get('tab_name', '')}'"
-                                )
-                    elif classification == "navigation":
-                        log(
-                            f"[OVERLAY] overlay routine skipped (navigation) scenario='{tab_cfg.get('scenario_id', '')}' "
-                            f"step={row.get('step_index')}"
-                        )
-                    else:
-                        log(
-                            f"[OVERLAY] overlay routine skipped (unchanged) scenario='{tab_cfg.get('scenario_id', '')}' "
-                            f"step={row.get('step_index')}"
-                        )
-            else:
-                log(f"[OVERLAY] skip already expanded entry fingerprint='{fingerprint}'")
-        elif candidate_reason == "blocked_no_overlay_policy":
-            log(
-                f"[OVERLAY] blocked no_overlay_policy scenario='{tab_cfg.get('scenario_id', '')}' "
-                f"tab='{tab_cfg.get('tab_name', '')}' step={row.get('step_index')}"
-            )
-        elif candidate_reason == "blocked_empty_allow_list":
-            log(
-                f"[OVERLAY] blocked empty_allow_list scenario='{tab_cfg.get('scenario_id', '')}' "
-                f"tab='{tab_cfg.get('tab_name', '')}' step={row.get('step_index')}"
-            )
-        elif "blocked" in candidate_reason:
-            log(
-                f"[OVERLAY] blocked by scenario policy scenario='{tab_cfg.get('scenario_id', '')}' "
-                f"tab='{tab_cfg.get('tab_name', '')}' step={row.get('step_index')} "
-                f"view_id='{row.get('focus_view_id', '')}' label='{row.get('visible_label', '')}'"
-            )
-
-        if post_realign_pending_steps > 0:
-            post_realign_pending_steps -= 1
-
-        if stop:
-            log(
-                f"[STOP][triggered] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
-                f"decision='stop' reason='{reason}'"
-            )
-            break
-        previous_step_row = row
-
-    if not stop_triggered and rows:
-        stop_step = int(rows[-1].get("step_index", -1) or -1)
-        stop_reason = "safety_limit"
-        rows[-1]["stop_triggered"] = False
-        rows[-1]["stop_step"] = stop_step
-    log(
-        f"[STOP][summary] scenario='{tab_cfg.get('scenario_id', '')}' "
-        f"stop_triggered={str(stop_triggered).lower()} stop_step={stop_step} reason='{stop_reason or 'none'}'"
+    state = _main_loop_phase(
+        client,
+        dev,
+        tab_cfg,
+        rows,
+        all_rows,
+        output_path=output_path,
+        output_base_dir=output_base_dir,
+        scenario_perf=scenario_perf,
+        checkpoint_every=checkpoint_every,
+        main_step_wait_seconds=main_step_wait_seconds,
+        main_announcement_wait_seconds=main_announcement_wait_seconds,
+        main_announcement_idle_wait_seconds=main_announcement_idle_wait_seconds,
+        main_announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
+        state=state,
     )
-
-    if scenario_perf is not None:
-        scenario_perf.finalize()
-        log(format_perf_summary("scenario_summary", scenario_perf.summary_dict()))
+    _persist_phase(rows, tab_cfg, state=state, scenario_perf=scenario_perf)
 
     return rows
