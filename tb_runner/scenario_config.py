@@ -102,7 +102,7 @@ TAB_CONFIGS = [
         "pre_navigation": [
             {
                 "action": "scrolltouch",
-                "target": "(?i).*food.*|.*cooking.*|.*smart\\s*things\\s*cooking.*",
+                "target": "(?i)(^food$|food\\.|smart\\s*things\\s*cooking|\\bcooking\\b)",
                 "type": "a",
             }
         ],
@@ -133,7 +133,7 @@ TAB_CONFIGS = [
         "pre_navigation": [
             {
                 "action": "scrolltouch",
-                "target": "(?i).*air\\s*care.*|.*aircare.*|.*에어\\s*케어.*",
+                "target": "(?i)(^air\\s*care$|air\\s*care\\.|\\baircare\\b|에어\\s*케어)",
                 "type": "a",
             }
         ],
@@ -166,7 +166,7 @@ TAB_CONFIGS = [
         "pre_navigation": [
             {
                 "action": "scrolltouch",
-                "target": "(?i).*home\\s*care.*|.*homecare.*|.*홈\\s*케어.*",
+                "target": "(?i)(^home\\s*care$|home\\s*care\\.|\\bhomecare\\b|홈\\s*케어)",
                 "type": "a",
             }
         ],
@@ -200,7 +200,7 @@ TAB_CONFIGS = [
         "pre_navigation": [
             {
                 "action": "scrolltouch",
-                "target": "(?i).*energy.*",
+                "target": "(?i)(^energy$|energy\\.|\\bsmart\\s*energy\\b|\\benergy\\b)",
                 "type": "a",
             }
         ],

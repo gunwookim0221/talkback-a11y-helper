@@ -30,6 +30,7 @@ from tb_runner.utils import (
     is_noise_row,
     make_main_fingerprint,
     make_overlay_entry_fingerprint,
+    parse_bounds_str,
 )
 
 _VALID_SCREEN_CONTEXT_MODES = {"bottom_tab", "new_screen"}
@@ -43,6 +44,116 @@ _PRE_NAV_CONFIRM_POLL_SLEEP_SECONDS = 0.12
 _RECENT_DUPLICATE_WINDOW = 5
 _STALL_ESCAPE_SAME_LIKE_THRESHOLD = 6
 _STALL_ESCAPE_SEMANTIC_UNIQUE_MAX = 2
+_PLUGIN_ENTRY_RETRY_COUNT = 2
+_PLUGIN_TOP_VERIFY_RETRY_COUNT = 2
+
+
+def _is_plugin_anchor_only_new_screen(tab_cfg: dict[str, Any], *, screen_context_mode: str, stabilization_mode: str) -> bool:
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip().lower()
+    pre_navigation = tab_cfg.get("pre_navigation", [])
+    has_scrolltouch = isinstance(pre_navigation, list) and any(
+        str(step.get("action", "") or "").strip().lower().replace("-", "").replace("_", "") == "scrolltouch"
+        for step in pre_navigation
+        if isinstance(step, dict)
+    )
+    return (
+        screen_context_mode == "new_screen"
+        and stabilization_mode == "anchor_only"
+        and "plugin" in scenario_id
+        and has_scrolltouch
+    )
+
+
+def _node_is_visible(node: dict[str, Any]) -> bool:
+    if "visibleToUser" in node:
+        return bool(node.get("visibleToUser"))
+    if "isVisibleToUser" in node:
+        return bool(node.get("isVisibleToUser"))
+    return True
+
+
+def _node_label_blob(node: dict[str, Any]) -> str:
+    return " ".join(
+        [
+            str(node.get("text", "") or "").strip(),
+            str(node.get("contentDescription", "") or "").strip(),
+            str(node.get("talkbackLabel", "") or "").strip(),
+            str(node.get("label", "") or "").strip(),
+        ]
+    ).strip()
+
+
+def _iter_tree_nodes_with_parent(nodes: list[dict[str, Any]]) -> list[tuple[dict[str, Any], dict[str, Any] | None]]:
+    flat: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
+    stack: list[tuple[Any, dict[str, Any] | None]] = [(node, None) for node in reversed(nodes)]
+    while stack:
+        node, parent = stack.pop()
+        if not isinstance(node, dict):
+            continue
+        flat.append((node, parent))
+        children = node.get("children")
+        if isinstance(children, list):
+            for child in reversed(children):
+                stack.append((child, node))
+    return flat
+
+
+def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
+    if not isinstance(nodes, list):
+        nodes = []
+    flat_nodes = _iter_tree_nodes_with_parent(nodes)
+    app_bar_hits = 0
+    life_selected = False
+    visible_card_hits = 0
+    for node, _ in flat_nodes:
+        if not _node_is_visible(node):
+            continue
+        label_blob = _node_label_blob(node)
+        resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
+        selected = bool(node.get("selected"))
+        if (
+            _safe_regex_search(r"(?i)menu_services", resource_id)
+            or _safe_regex_search(r"(?i)\blife\b", label_blob)
+        ) and selected:
+            life_selected = True
+        if _safe_regex_search(r"(?i)\b(add|more options|location|qr code)\b", label_blob):
+            app_bar_hits += 1
+        if _safe_regex_search(r"(?i)(preinstalledservicecard|servicecard|card)", resource_id):
+            visible_card_hits += 1
+    return {
+        "life_selected": life_selected,
+        "app_bar_hits": app_bar_hits,
+        "visible_card_hits": visible_card_hits,
+        "ok": life_selected and app_bar_hits > 0,
+    }
+
+
+def _verify_plugin_entry_root_state(client: A11yAdbClient, dev: str, *, phase: str) -> tuple[bool, str]:
+    dump_tree_fn = getattr(client, "dump_tree", None)
+    if not callable(dump_tree_fn):
+        log(f"[SCENARIO][pre_nav][stabilization] phase='{phase}' ok=false reason='dump_tree_not_supported'")
+        return False, "dump_tree_not_supported"
+
+    last_reason = "root_state_unverified"
+    for attempt in range(1, _PLUGIN_ENTRY_RETRY_COUNT + 1):
+        try:
+            nodes = dump_tree_fn(dev=dev)
+        except Exception as exc:
+            nodes = []
+            last_reason = f"dump_failed:{exc}"
+        snapshot = _life_root_state_snapshot(nodes)
+        ok = bool(snapshot.get("ok"))
+        log(
+            f"[SCENARIO][pre_nav][stabilization] phase='{phase}' attempt={attempt}/{_PLUGIN_ENTRY_RETRY_COUNT} "
+            f"life_selected={str(snapshot.get('life_selected')).lower()} app_bar_hits={snapshot.get('app_bar_hits', 0)} "
+            f"visible_card_hits={snapshot.get('visible_card_hits', 0)} ok={str(ok).lower()}"
+        )
+        if ok:
+            return True, "root_state_stable"
+        last_reason = "life_root_not_stable"
+        if attempt < _PLUGIN_ENTRY_RETRY_COUNT:
+            time.sleep(0.2)
+    return False, last_reason
 
 
 def _is_meaningful_text(value: Any) -> bool:
@@ -495,6 +606,8 @@ def _confirm_click_focused_transition(
     tab_cfg: dict[str, Any],
     *,
     transition_fast_path: bool,
+    baseline_nodes: list[dict[str, Any]] | None = None,
+    baseline_window_focus: str = "",
 ) -> tuple[bool, str]:
     max_poll_count = 2 if transition_fast_path else 3
     focus_wait_seconds = 0.28 if transition_fast_path else 0.45
@@ -502,15 +615,15 @@ def _confirm_click_focused_transition(
     has_expected_signal = any(bool(patterns.get(key)) for key in ("anchor_text", "anchor_resource", "context_text"))
     if not has_expected_signal:
         return True, "no_expected_signal_configured"
-    baseline_nodes: list[dict[str, Any]] = []
     dump_tree_fn = getattr(client, "dump_tree", None)
-    if callable(dump_tree_fn):
+    if not baseline_nodes and callable(dump_tree_fn):
         try:
             baseline_nodes = dump_tree_fn(dev=dev)
         except Exception:
             baseline_nodes = []
     baseline_signature = _make_dump_signature(baseline_nodes)
-    baseline_window_focus = _extract_window_focus_line(client, dev)
+    if not baseline_window_focus:
+        baseline_window_focus = _extract_window_focus_line(client, dev)
     saw_dump_change = False
     saw_focus_change = False
 
@@ -665,6 +778,92 @@ def _confirm_focus_target(
     return False, "unmatched"
 
 
+def _verify_scroll_top_state(
+    client: A11yAdbClient,
+    dev: str,
+    *,
+    baseline_nodes: list[dict[str, Any]] | None = None,
+) -> tuple[bool, str, list[dict[str, Any]]]:
+    dump_tree_fn = getattr(client, "dump_tree", None)
+    if not callable(dump_tree_fn):
+        return False, "dump_tree_not_supported", []
+    try:
+        nodes = dump_tree_fn(dev=dev)
+    except Exception as exc:
+        return False, f"dump_failed:{exc}", []
+
+    snapshot = _life_root_state_snapshot(nodes)
+    if not nodes:
+        return True, "empty_dump_skip", nodes
+    if bool(snapshot.get("ok")):
+        return True, "life_root_marker_visible", nodes
+    if isinstance(baseline_nodes, list) and baseline_nodes:
+        before_sig = _make_dump_signature(baseline_nodes)
+        after_sig = _make_dump_signature(nodes)
+        if before_sig and after_sig and before_sig != after_sig:
+            return True, "dump_signature_changed_after_scroll_to_top", nodes
+    return False, "top_marker_missing", nodes
+
+
+def _select_visible_plugin_candidate(
+    *,
+    nodes: list[dict[str, Any]],
+    target: str,
+) -> tuple[dict[str, Any] | None, str]:
+    if not isinstance(nodes, list) or not nodes:
+        return None, "empty_dump"
+    parsed_bounds = [parse_bounds_str(str(node.get("boundsInScreen", "") or "").strip()) for node, _ in _iter_tree_nodes_with_parent(nodes)]
+    parsed_bounds = [b for b in parsed_bounds if b and b[0] < b[2] and b[1] < b[3]]
+    if not parsed_bounds:
+        return None, "viewport_unavailable"
+    viewport_top = min(b[1] for b in parsed_bounds)
+    viewport_bottom = max(b[3] for b in parsed_bounds)
+
+    candidates: list[tuple[tuple[int, int, int, int], dict[str, Any]]] = []
+    for node, parent in _iter_tree_nodes_with_parent(nodes):
+        raw_bounds = str(node.get("boundsInScreen", "") or "").strip()
+        bounds = parse_bounds_str(raw_bounds)
+        if not bounds:
+            continue
+        left, top, right, bottom = bounds
+        if not (left < right and top < bottom):
+            continue
+        if bottom <= viewport_top or top >= viewport_bottom:
+            continue
+        if not _node_is_visible(node):
+            continue
+        label_blob = _node_label_blob(node)
+        if not label_blob or not _safe_regex_search(target, label_blob):
+            continue
+        resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
+        click_node = node
+        if isinstance(parent, dict):
+            parent_clickable = bool(parent.get("clickable")) or bool(parent.get("focusable"))
+            parent_resource = str(parent.get("viewIdResourceName", "") or parent.get("resourceId", "") or "").strip()
+            if parent_clickable or _safe_regex_search(r"(?i)(preinstalledservicecard|servicecard|card)", parent_resource):
+                click_node = parent
+        click_bounds = parse_bounds_str(str(click_node.get("boundsInScreen", "") or "").strip())
+        if not click_bounds:
+            continue
+        c_left, c_top, c_right, c_bottom = click_bounds
+        if not (c_left < c_right and c_top < c_bottom):
+            continue
+        if c_bottom <= viewport_top or c_top >= viewport_bottom:
+            continue
+        score = (
+            1 if bool(click_node.get("clickable")) else 0,
+            1 if _safe_regex_search(r"(?i)(preinstalledservicecard|servicecard|card)", str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "")) else 0,
+            max(0, viewport_bottom - c_bottom),
+            max(0, viewport_bottom - bottom),
+        )
+        candidates.append((score, click_node))
+
+    if not candidates:
+        return None, "no_visible_candidate"
+    candidates.sort(reverse=True, key=lambda item: item[0])
+    return candidates[0][1], f"candidate_count={len(candidates)}"
+
+
 def _run_pre_navigation_steps(
     client: A11yAdbClient,
     dev: str,
@@ -720,6 +919,13 @@ def _run_pre_navigation_steps(
                 step_ok = bool(client.touch(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
             elif action == "scrolltouch":
                 log("[SCENARIO][pre_nav] before scrolltouch, scroll_to_top invoked")
+                before_top_nodes: list[dict[str, Any]] = []
+                dump_tree_fn = getattr(client, "dump_tree", None)
+                if callable(dump_tree_fn):
+                    try:
+                        before_top_nodes = dump_tree_fn(dev=dev)
+                    except Exception:
+                        before_top_nodes = []
                 scroll_to_top_fn = getattr(client, "scroll_to_top", None)
                 if callable(scroll_to_top_fn):
                     try:
@@ -729,7 +935,74 @@ def _run_pre_navigation_steps(
                         log(f"[SCENARIO][pre_nav] scroll_to_top failed reason='{exc}'")
                 else:
                     log("[SCENARIO][pre_nav] scroll_to_top skipped reason='method_not_supported'")
-                step_ok = bool(client.scrollTouch(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
+                top_ok, top_reason, top_nodes = _verify_scroll_top_state(client, dev, baseline_nodes=before_top_nodes)
+                log(
+                    f"[SCENARIO][pre_nav] top_state_verify ok={str(top_ok).lower()} reason='{top_reason}' "
+                    f"scenario='{tab_cfg.get('scenario_id', '')}'"
+                )
+                if not top_ok:
+                    for verify_retry in range(1, _PLUGIN_TOP_VERIFY_RETRY_COUNT + 1):
+                        if callable(scroll_to_top_fn):
+                            try:
+                                scroll_to_top_fn(dev=dev, max_swipes=2, pause=0.4)
+                            except Exception as exc:
+                                log(f"[SCENARIO][pre_nav] scroll_to_top retry failed reason='{exc}'")
+                        top_ok, top_reason, top_nodes = _verify_scroll_top_state(client, dev, baseline_nodes=before_top_nodes)
+                        log(
+                            f"[SCENARIO][pre_nav] top_state_verify retry={verify_retry}/{_PLUGIN_TOP_VERIFY_RETRY_COUNT} "
+                            f"ok={str(top_ok).lower()} reason='{top_reason}'"
+                        )
+                        if top_ok:
+                            break
+
+                selected_node, selected_reason = _select_visible_plugin_candidate(nodes=top_nodes, target=target)
+                if selected_node is not None:
+                    class_name = str(selected_node.get("className", "") or "").strip()
+                    resource_id = str(selected_node.get("viewIdResourceName", "") or selected_node.get("resourceId", "") or "").strip()
+                    bounds = str(selected_node.get("boundsInScreen", "") or "").strip()
+                    visible = _node_is_visible(selected_node)
+                    label_blob = _node_label_blob(selected_node)
+                    log(
+                        f"[SCENARIO][pre_nav][scrolltouch] candidate_select reason='{selected_reason}' class='{class_name}' "
+                        f"resource='{resource_id}' bounds='{bounds}' visible={str(visible).lower()} label='{label_blob[:120]}'"
+                    )
+                    tap_target = resource_id if resource_id else label_blob
+                    tap_type = "r" if resource_id else "a"
+                    log(
+                        f"[SCENARIO][pre_nav][scrolltouch] candidate_accept reason='visible_in_viewport_and_clickable_preferred' "
+                        f"tap_type='{tap_type}'"
+                    )
+                    step_ok = bool(client.tap_bounds_center_adb(dev=dev, name=tap_target, type_=tap_type, dump_nodes=top_nodes))
+                    if step_ok:
+                        confirm_ok, confirm_signal = _confirm_click_focused_transition(
+                            client=client,
+                            dev=dev,
+                            tab_cfg=tab_cfg,
+                            transition_fast_path=transition_fast_path,
+                        )
+                        log(
+                            f"[SCENARIO][pre_nav][scrolltouch] post_click_transition same_screen={str(not confirm_ok).lower()} "
+                            f"signal='{confirm_signal}'"
+                        )
+                        step_ok = confirm_ok
+                else:
+                    log(
+                        f"[SCENARIO][pre_nav][scrolltouch] candidate_select reason='{selected_reason}' "
+                        "fallback='helper_scrollTouch'"
+                    )
+                    step_ok = bool(client.scrollTouch(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
+                    if step_ok:
+                        confirm_ok, confirm_signal = _confirm_click_focused_transition(
+                            client=client,
+                            dev=dev,
+                            tab_cfg=tab_cfg,
+                            transition_fast_path=transition_fast_path,
+                        )
+                        log(
+                            f"[SCENARIO][pre_nav][scrolltouch] post_click_transition same_screen={str(not confirm_ok).lower()} "
+                            f"signal='{confirm_signal}'"
+                        )
+                        step_ok = confirm_ok
             elif action == "touch_bounds_center":
                 step_ok = bool(client.touch_bounds_center(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
             elif action == "tap_bounds_center_adb":
@@ -898,6 +1171,11 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     is_transition_scenario = has_pre_navigation and (
         screen_context_mode == "new_screen" or stabilization_mode == "anchor_only"
     )
+    is_plugin_pre_nav_scenario = _is_plugin_anchor_only_new_screen(
+        tab_cfg,
+        screen_context_mode=screen_context_mode,
+        stabilization_mode=stabilization_mode,
+    )
     is_transition_entry_fast_path = _is_transition_entry_fast_path(tab_cfg)
     is_strict_main_tab_scenario = scenario_id in _STRICT_MAIN_TAB_SCENARIOS
     log(
@@ -934,7 +1212,23 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             f"{focus_log_tag} scenario='{scenario_id}' main_tab={str(is_strict_main_tab_scenario).lower()} "
             f"transition_scenario={str(is_transition_scenario).lower()} result='failed'"
         )
-        if is_transition_scenario and not is_strict_main_tab_scenario:
+        if is_plugin_pre_nav_scenario:
+            plugin_root_ok, plugin_root_reason = _verify_plugin_entry_root_state(
+                client,
+                dev,
+                phase="focus_align_recheck",
+            )
+            if not plugin_root_ok:
+                log(
+                    f"{focus_log_tag} strict failure for plugin pre_navigation scenario='{scenario_id}' "
+                    f"reason='{plugin_root_reason}'"
+                )
+                return False
+            log(
+                f"{focus_log_tag} failed but proceeding after plugin root recheck "
+                f"scenario='{scenario_id}' reason='{plugin_root_reason}'"
+            )
+        elif is_transition_scenario and not is_strict_main_tab_scenario:
             log(
                 f"{focus_log_tag} failed but proceeding (transition scenario) "
                 f"scenario='{scenario_id}'"
@@ -973,6 +1267,15 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         time.sleep(0.1)
     else:
         time.sleep(0.5)
+
+    if is_plugin_pre_nav_scenario:
+        plugin_root_ok, plugin_root_reason = _verify_plugin_entry_root_state(client, dev, phase="before_pre_navigation")
+        if not plugin_root_ok:
+            log(
+                f"[SCENARIO][pre_nav][stabilization] failed scenario='{scenario_id}' "
+                f"reason='{plugin_root_reason}'"
+            )
+            return False
 
     pre_nav_ok = _run_pre_navigation_steps(
         client=client,
