@@ -49,6 +49,7 @@ _PLUGIN_TOP_VERIFY_RETRY_COUNT = 2
 _LIFE_ROOT_APP_BAR_MIN_HITS = 2
 _LIFE_ROOT_VISIBLE_CARD_MIN_HITS = 2
 _LIFE_ROOT_SCORE_THRESHOLD = 3
+_PLUGIN_SCROLL_SEARCH_MAX_STEPS = 5
 
 
 def _is_plugin_anchor_only_new_screen(tab_cfg: dict[str, Any], *, screen_context_mode: str, stabilization_mode: str) -> bool:
@@ -867,18 +868,34 @@ def _select_visible_plugin_candidate(
     *,
     nodes: list[dict[str, Any]],
     target: str,
-) -> tuple[dict[str, Any] | None, str]:
+) -> tuple[dict[str, Any] | None, str, dict[str, int]]:
+    stats = {"visible_candidate_count": 0, "partial_match_count": 0}
     if not isinstance(nodes, list) or not nodes:
-        return None, "empty_dump"
-    parsed_bounds = [parse_bounds_str(str(node.get("boundsInScreen", "") or "").strip()) for node, _ in _iter_tree_nodes_with_parent(nodes)]
+        return None, "empty_dump", stats
+    flat_nodes = _iter_tree_nodes_with_parent(nodes)
+    parsed_bounds = [parse_bounds_str(str(node.get("boundsInScreen", "") or "").strip()) for node, _ in flat_nodes]
     parsed_bounds = [b for b in parsed_bounds if b and b[0] < b[2] and b[1] < b[3]]
     if not parsed_bounds:
-        return None, "viewport_unavailable"
+        return None, "viewport_unavailable", stats
     viewport_top = min(b[1] for b in parsed_bounds)
     viewport_bottom = max(b[3] for b in parsed_bounds)
+    viewport_center = (viewport_top + viewport_bottom) // 2
+
+    normalized_target = str(target or "").strip().lower()
+    target_tokens = [token for token in re.split(r"[^0-9a-zA-Z가-힣]+", normalized_target) if len(token) >= 3]
+
+    descendants_by_container: dict[int, list[str]] = {}
+    for node, parent in flat_nodes:
+        if not isinstance(parent, dict):
+            continue
+        parent_key = id(parent)
+        descendants = descendants_by_container.setdefault(parent_key, [])
+        child_label = _node_label_blob(node)
+        if child_label:
+            descendants.append(child_label)
 
     candidates: list[tuple[tuple[int, int, int, int], dict[str, Any]]] = []
-    for node, parent in _iter_tree_nodes_with_parent(nodes):
+    for node, parent in flat_nodes:
         raw_bounds = str(node.get("boundsInScreen", "") or "").strip()
         bounds = parse_bounds_str(raw_bounds)
         if not bounds:
@@ -908,18 +925,53 @@ def _select_visible_plugin_candidate(
             continue
         if c_bottom <= viewport_top or c_top >= viewport_bottom:
             continue
+        stats["visible_candidate_count"] += 1
+        title_blob = " ".join(
+            [
+                str(click_node.get("text", "") or "").strip(),
+                str(click_node.get("contentDescription", "") or "").strip(),
+            ]
+        ).strip()
+        descendant_blob = " ".join(descendants_by_container.get(id(click_node), []))
+        semantic_blob = " ".join(part for part in [label_blob, title_blob, descendant_blob] if part).strip()
+        if not semantic_blob:
+            continue
+        if target_tokens and any(token in semantic_blob.lower() for token in target_tokens):
+            stats["partial_match_count"] += 1
+        if not (_safe_regex_search(target, title_blob) or _safe_regex_search(target, semantic_blob)):
+            continue
+        card_resource = str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "")
+        center_delta = abs(((c_top + c_bottom) // 2) - viewport_center)
         score = (
-            1 if bool(click_node.get("clickable")) else 0,
-            1 if _safe_regex_search(r"(?i)(preinstalledservicecard|servicecard|card)", str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "")) else 0,
-            max(0, viewport_bottom - c_bottom),
-            max(0, viewport_bottom - bottom),
+            1 if bool(click_node.get("clickable")) or bool(click_node.get("focusable")) else 0,
+            1 if _safe_regex_search(r"(?i)(preinstalledservicecard|servicecard|card)", card_resource) else 0,
+            -center_delta,
+            -c_top,
         )
         candidates.append((score, click_node))
 
     if not candidates:
-        return None, "no_visible_candidate"
+        return None, "no_visible_candidate", stats
     candidates.sort(reverse=True, key=lambda item: item[0])
-    return candidates[0][1], f"candidate_count={len(candidates)}"
+    return candidates[0][1], f"candidate_count={len(candidates)}", stats
+
+
+def _make_visible_plugin_search_signature(nodes: list[dict[str, Any]]) -> str:
+    if not isinstance(nodes, list):
+        return ""
+    parts: list[str] = []
+    for node, _ in _iter_tree_nodes_with_parent(nodes):
+        if not _node_is_visible(node):
+            continue
+        label_blob = _node_label_blob(node)
+        resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
+        bounds = str(node.get("boundsInScreen", "") or "").strip()
+        if not (label_blob or resource_id):
+            continue
+        parts.append(f"{resource_id}|{label_blob}|{bounds}")
+        if len(parts) >= 25:
+            break
+    return "||".join(parts)
 
 
 def _run_pre_navigation_steps(
@@ -967,16 +1019,38 @@ def _run_pre_navigation_steps(
             log(f"[SCENARIO][pre_nav] failed reason='unsupported_action' step={index} action='{action}'")
             return False
 
+        step_retry_count = retry_count
+        if action == "scrolltouch":
+            screen_context_mode = _resolve_screen_context_mode(tab_cfg)
+            stabilization_mode = _resolve_stabilization_mode(tab_cfg, screen_context_mode)
+            if _is_plugin_anchor_only_new_screen(
+                tab_cfg,
+                screen_context_mode=screen_context_mode,
+                stabilization_mode=stabilization_mode,
+            ):
+                step_retry_count = 1
+
         log(f"[SCENARIO][pre_nav] step={index} action={action} target='{target}'")
         step_ok = False
         actual_reason = "unknown"
-        for attempt in range(1, retry_count + 1):
+        for attempt in range(1, step_retry_count + 1):
             if action == "select":
                 step_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
             elif action == "touch":
                 step_ok = bool(client.touch(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
             elif action == "scrolltouch":
-                log("[SCENARIO][pre_nav] before scrolltouch, scroll_to_top invoked")
+                screen_context_mode = _resolve_screen_context_mode(tab_cfg)
+                stabilization_mode = _resolve_stabilization_mode(tab_cfg, screen_context_mode)
+                use_cumulative_search = _is_plugin_anchor_only_new_screen(
+                    tab_cfg,
+                    screen_context_mode=screen_context_mode,
+                    stabilization_mode=stabilization_mode,
+                )
+                max_scroll_search_steps = max(
+                    1,
+                    int(tab_cfg.get("max_scroll_search_steps", _PLUGIN_SCROLL_SEARCH_MAX_STEPS) or _PLUGIN_SCROLL_SEARCH_MAX_STEPS),
+                )
+
                 before_top_nodes: list[dict[str, Any]] = []
                 dump_tree_fn = getattr(client, "dump_tree", None)
                 if callable(dump_tree_fn):
@@ -984,69 +1058,115 @@ def _run_pre_navigation_steps(
                         before_top_nodes = dump_tree_fn(dev=dev)
                     except Exception:
                         before_top_nodes = []
-                scroll_to_top_fn = getattr(client, "scroll_to_top", None)
-                if callable(scroll_to_top_fn):
+                top_nodes = before_top_nodes
+                if attempt == 1:
+                    log(
+                        f"[SCENARIO][pre_nav] before scrolltouch, scroll_to_top invoked cumulative_mode={str(use_cumulative_search).lower()}"
+                    )
+                    scroll_to_top_fn = getattr(client, "scroll_to_top", None)
+                    if callable(scroll_to_top_fn):
+                        try:
+                            scroll_top_result = scroll_to_top_fn(dev=dev, max_swipes=5, pause=0.6)
+                            log(f"[SCENARIO][pre_nav] scroll_to_top result={scroll_top_result}")
+                        except Exception as exc:
+                            log(f"[SCENARIO][pre_nav] scroll_to_top failed reason='{exc}'")
+                    else:
+                        log("[SCENARIO][pre_nav] scroll_to_top skipped reason='method_not_supported'")
+                    top_ok, top_reason, top_nodes = _verify_scroll_top_state(client, dev, baseline_nodes=before_top_nodes)
+                    log(
+                        f"[SCENARIO][pre_nav] top_state_verify ok={str(top_ok).lower()} reason='{top_reason}' "
+                        f"scenario='{tab_cfg.get('scenario_id', '')}'"
+                    )
+                    if not top_ok:
+                        for verify_retry in range(1, _PLUGIN_TOP_VERIFY_RETRY_COUNT + 1):
+                            if callable(scroll_to_top_fn):
+                                try:
+                                    scroll_to_top_fn(dev=dev, max_swipes=2, pause=0.4)
+                                except Exception as exc:
+                                    log(f"[SCENARIO][pre_nav] scroll_to_top retry failed reason='{exc}'")
+                            top_ok, top_reason, top_nodes = _verify_scroll_top_state(client, dev, baseline_nodes=before_top_nodes)
+                            log(
+                                f"[SCENARIO][pre_nav] top_state_verify retry={verify_retry}/{_PLUGIN_TOP_VERIFY_RETRY_COUNT} "
+                                f"ok={str(top_ok).lower()} reason='{top_reason}'"
+                            )
+                            if top_ok:
+                                break
+                else:
                     try:
-                        scroll_top_result = scroll_to_top_fn(dev=dev, max_swipes=5, pause=0.6)
-                        log(f"[SCENARIO][pre_nav] scroll_to_top result={scroll_top_result}")
-                    except Exception as exc:
-                        log(f"[SCENARIO][pre_nav] scroll_to_top failed reason='{exc}'")
-                else:
-                    log("[SCENARIO][pre_nav] scroll_to_top skipped reason='method_not_supported'")
-                top_ok, top_reason, top_nodes = _verify_scroll_top_state(client, dev, baseline_nodes=before_top_nodes)
-                log(
-                    f"[SCENARIO][pre_nav] top_state_verify ok={str(top_ok).lower()} reason='{top_reason}' "
-                    f"scenario='{tab_cfg.get('scenario_id', '')}'"
-                )
-                if not top_ok:
-                    for verify_retry in range(1, _PLUGIN_TOP_VERIFY_RETRY_COUNT + 1):
-                        if callable(scroll_to_top_fn):
-                            try:
-                                scroll_to_top_fn(dev=dev, max_swipes=2, pause=0.4)
-                            except Exception as exc:
-                                log(f"[SCENARIO][pre_nav] scroll_to_top retry failed reason='{exc}'")
-                        top_ok, top_reason, top_nodes = _verify_scroll_top_state(client, dev, baseline_nodes=before_top_nodes)
-                        log(
-                            f"[SCENARIO][pre_nav] top_state_verify retry={verify_retry}/{_PLUGIN_TOP_VERIFY_RETRY_COUNT} "
-                            f"ok={str(top_ok).lower()} reason='{top_reason}'"
-                        )
-                        if top_ok:
-                            break
+                        top_nodes = dump_tree_fn(dev=dev) if callable(dump_tree_fn) else []
+                    except Exception:
+                        top_nodes = []
 
-                selected_node, selected_reason = _select_visible_plugin_candidate(nodes=top_nodes, target=target)
-                if selected_node is not None:
-                    class_name = str(selected_node.get("className", "") or "").strip()
-                    resource_id = str(selected_node.get("viewIdResourceName", "") or selected_node.get("resourceId", "") or "").strip()
-                    bounds = str(selected_node.get("boundsInScreen", "") or "").strip()
-                    visible = _node_is_visible(selected_node)
-                    label_blob = _node_label_blob(selected_node)
-                    log(
-                        f"[SCENARIO][pre_nav][scrolltouch] candidate_select reason='{selected_reason}' class='{class_name}' "
-                        f"resource='{resource_id}' bounds='{bounds}' visible={str(visible).lower()} label='{label_blob[:120]}'"
-                    )
-                    tap_target = resource_id if resource_id else label_blob
-                    tap_type = "r" if resource_id else "a"
-                    log(
-                        f"[SCENARIO][pre_nav][scrolltouch] candidate_accept reason='visible_in_viewport_and_clickable_preferred' "
-                        f"tap_type='{tap_type}'"
-                    )
-                    step_ok = bool(client.tap_bounds_center_adb(dev=dev, name=tap_target, type_=tap_type, dump_nodes=top_nodes))
-                    if step_ok:
-                        confirm_ok, confirm_signal = _confirm_click_focused_transition(
-                            client=client,
-                            dev=dev,
-                            tab_cfg=tab_cfg,
-                            transition_fast_path=transition_fast_path,
-                        )
+                last_signature = _make_visible_plugin_search_signature(top_nodes)
+                fallback_reason = "local_search_exhausted"
+                for scroll_step in range(1, max_scroll_search_steps + 1):
+                    selected_node, selected_reason, candidate_stats = _select_visible_plugin_candidate(nodes=top_nodes, target=target)
+                    if selected_node is not None:
+                        class_name = str(selected_node.get("className", "") or "").strip()
+                        resource_id = str(selected_node.get("viewIdResourceName", "") or selected_node.get("resourceId", "") or "").strip()
+                        bounds = str(selected_node.get("boundsInScreen", "") or "").strip()
+                        visible = _node_is_visible(selected_node)
+                        label_blob = _node_label_blob(selected_node)
                         log(
-                            f"[SCENARIO][pre_nav][scrolltouch] post_click_transition same_screen={str(not confirm_ok).lower()} "
-                            f"signal='{confirm_signal}'"
+                            f"[SCENARIO][pre_nav][scrolltouch] candidate_select reason='{selected_reason}' class='{class_name}' "
+                            f"resource='{resource_id}' bounds='{bounds}' visible={str(visible).lower()} label='{label_blob[:120]}' "
+                            f"scroll_step={scroll_step}/{max_scroll_search_steps} cumulative_mode={str(use_cumulative_search).lower()}"
                         )
-                        step_ok = confirm_ok
-                else:
+                        tap_target = resource_id if resource_id else label_blob
+                        tap_type = "r" if resource_id else "a"
+                        step_ok = bool(client.tap_bounds_center_adb(dev=dev, name=tap_target, type_=tap_type, dump_nodes=top_nodes))
+                        if step_ok:
+                            confirm_ok, confirm_signal = _confirm_click_focused_transition(
+                                client=client,
+                                dev=dev,
+                                tab_cfg=tab_cfg,
+                                transition_fast_path=transition_fast_path,
+                            )
+                            log(
+                                f"[SCENARIO][pre_nav][scrolltouch] post_click_transition same_screen={str(not confirm_ok).lower()} "
+                                f"signal='{confirm_signal}'"
+                            )
+                            step_ok = confirm_ok
+                        break
+
+                    if scroll_step >= max_scroll_search_steps:
+                        fallback_reason = "max_scroll_search_steps_reached"
+                        log(
+                            f"[SCENARIO][pre_nav][scrolltouch] visible_candidate_count={candidate_stats.get('visible_candidate_count', 0)} "
+                            f"partial_match_count={candidate_stats.get('partial_match_count', 0)} "
+                            f"scroll_step={scroll_step}/{max_scroll_search_steps} "
+                            "action='local_search_exhausted' scroll_performed=false "
+                            f"cumulative_mode={str(use_cumulative_search).lower()}"
+                        )
+                        break
+
+                    scrolled = bool(client.scroll(dev=dev, direction="down")) if hasattr(client, "scroll") else False
                     log(
-                        f"[SCENARIO][pre_nav][scrolltouch] candidate_select reason='{selected_reason}' "
-                        "fallback='helper_scrollTouch'"
+                        f"[SCENARIO][pre_nav][scrolltouch] visible_candidate_count={candidate_stats.get('visible_candidate_count', 0)} "
+                        f"partial_match_count={candidate_stats.get('partial_match_count', 0)} "
+                        f"scroll_step={scroll_step}/{max_scroll_search_steps} "
+                        "action='scroll_forward_and_retry_local_search' "
+                        f"scroll_performed={str(scrolled).lower()} cumulative_mode={str(use_cumulative_search).lower()}"
+                    )
+                    if not scrolled:
+                        fallback_reason = "scroll_forward_failed"
+                        break
+                    time.sleep(min(step_wait_seconds, 0.45))
+                    try:
+                        top_nodes = dump_tree_fn(dev=dev) if callable(dump_tree_fn) else []
+                    except Exception:
+                        top_nodes = []
+                    current_signature = _make_visible_plugin_search_signature(top_nodes)
+                    if current_signature and last_signature and current_signature == last_signature:
+                        fallback_reason = "semantic_no_change_after_scroll"
+                        break
+                    last_signature = current_signature
+
+                if not step_ok:
+                    log(
+                        f"[SCENARIO][pre_nav][scrolltouch] candidate_select reason='no_local_match' "
+                        f"fallback='helper_scrollTouch' reason_detail='{fallback_reason}' "
+                        f"cumulative_mode={str(use_cumulative_search).lower()}"
                     )
                     step_ok = bool(client.scrollTouch(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
                     if step_ok:
@@ -1188,8 +1308,8 @@ def _run_pre_navigation_steps(
             if step_ok:
                 log(f"[SCENARIO][pre_nav] success step={index} reason='{actual_reason}'")
                 break
-            if attempt < retry_count:
-                log(f"[SCENARIO][pre_nav] retry step={index} attempt={attempt}/{retry_count} reason='{actual_reason}'")
+            if attempt < step_retry_count:
+                log(f"[SCENARIO][pre_nav] retry step={index} attempt={attempt}/{step_retry_count} reason='{actual_reason}'")
 
         if not step_ok:
             log(f"[SCENARIO][pre_nav] failed reason='action_failed' step={index}")
