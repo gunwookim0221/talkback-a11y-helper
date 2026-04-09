@@ -130,6 +130,7 @@ def _attempt_tab_focus_alignment(
         log(f"{log_tag} skipped scenario='{scenario_id}' reason='no_selector'", level="DEBUG")
         return {"attempted": False, "ok": False, "reason": "no_selector"}
 
+    get_focus_fn = getattr(client, "get_focus", None)
     for attempt in range(1, max_retries + 1):
         type_, pattern, source = deduped_selectors[(attempt - 1) % len(deduped_selectors)]
         selector_desc = f"{source}:{type_}:{pattern}"
@@ -157,6 +158,44 @@ def _attempt_tab_focus_alignment(
                 level="DEBUG",
             )
             return {"attempted": True, "ok": True, "attempt": attempt, "type": type_, "source": source}
+        if callable(get_focus_fn):
+            focus_node = get_focus_fn(
+                dev=dev,
+                wait_seconds=min(float(select_wait_seconds), 1.0),
+                allow_fallback_dump=not fast_mode,
+                mode="fast" if fast_mode else "normal",
+            )
+            focus_snapshot = focus_node if isinstance(focus_node, dict) else {}
+            focus_match = match_tab_candidate(focus_snapshot, normalized_tab_cfg)
+            focus_matched = bool(focus_match.get("matched"))
+            focus_flag = bool(focus_snapshot.get("accessibilityFocused")) or bool(focus_snapshot.get("focused"))
+            focus_resource = str(
+                focus_snapshot.get("viewIdResourceName", "") or focus_snapshot.get("resourceId", "") or ""
+            ).strip()
+            focus_label = str(
+                focus_snapshot.get("talkbackLabel", "")
+                or focus_snapshot.get("contentDescription", "")
+                or focus_snapshot.get("text", "")
+                or ""
+            ).strip()
+            if focus_matched and focus_flag:
+                log(
+                    f"{log_tag} success scenario='{scenario_id}' attempt={attempt}/{max_retries} "
+                    f"type='{type_}' source='{source}' via='post_get_focus' "
+                    f"focus_resource='{focus_resource}' focus_label='{focus_label}'",
+                    level="DEBUG",
+                )
+                return {
+                    "attempted": True,
+                    "ok": True,
+                    "attempt": attempt,
+                    "type": type_,
+                    "source": source,
+                    "reason": "post_focus_verified",
+                    "via": "get_focus",
+                    "focus_resource": focus_resource,
+                    "focus_label": focus_label,
+                }
 
     last_result = getattr(client, "last_target_action_result", {})
     target = last_result.get("target", {}) if isinstance(last_result, dict) else {}
