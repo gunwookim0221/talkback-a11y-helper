@@ -2266,6 +2266,49 @@ class FocusHelpersTest(unittest.TestCase):
         self.assertTrue(step["used_snapshot"])
         self.assertFalse(step["trim_applied"])
 
+    def test_collect_focus_step_trims_battery_suffix_when_prefix_matches_focus(self):
+        client = CollectFocusStepClient()
+        client.partial_payload = ["My home Battery 100 per cent."]
+        client.focus_payload = {
+            "text": "My home, Change location",
+            "talkbackLabel": "My home, Change location",
+        }
+
+        step = client.collect_focus_step(dev="SERIAL", move=False, wait_seconds=0.2)
+
+        self.assertEqual(step["merged_announcement"], "My home")
+        self.assertEqual(step["trim_reason"], "battery_suffix")
+        self.assertTrue(step["trim_applied"])
+
+    def test_collect_focus_step_does_not_trim_battery_only_announcement(self):
+        client = CollectFocusStepClient()
+        client.partial_payload = ["Battery 100 per cent."]
+        client.focus_payload = {"text": "Status panel"}
+
+        step = client.collect_focus_step(dev="SERIAL", move=False, wait_seconds=0.2)
+
+        self.assertEqual(step["merged_announcement"], "Battery 100 per cent.")
+        self.assertNotEqual(step["trim_reason"], "battery_suffix")
+
+    def test_collect_focus_step_keeps_non_battery_speech_unchanged(self):
+        client = CollectFocusStepClient()
+        client.partial_payload = ["Map View"]
+        client.focus_payload = {"text": "Map View"}
+
+        step = client.collect_focus_step(dev="SERIAL", move=False, wait_seconds=0.2)
+
+        self.assertEqual(step["merged_announcement"], "Map View")
+
+    def test_collect_focus_step_does_not_trim_when_battery_is_semantic_content(self):
+        client = CollectFocusStepClient()
+        client.partial_payload = ["Battery usage by app"]
+        client.focus_payload = {"text": "Battery usage by app"}
+
+        step = client.collect_focus_step(dev="SERIAL", move=False, wait_seconds=0.2)
+
+        self.assertEqual(step["merged_announcement"], "Battery usage by app")
+        self.assertNotEqual(step["trim_reason"], "battery_suffix")
+
 
 if __name__ == "__main__":
     unittest.main()

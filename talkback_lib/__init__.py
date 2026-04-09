@@ -2121,6 +2121,33 @@ class A11yAdbClient:
             return raw_speech, False, "trimmed_empty_after_visible_anchor"
         return trimmed, True, "visible_anchor_prefix_trim"
 
+    @staticmethod
+    def _is_battery_suffix_compatible(prefix: str, anchor_label: str) -> bool:
+        prefix_norm = A11yAdbClient.normalize_for_comparison(prefix)
+        anchor_norm = A11yAdbClient.normalize_for_comparison(anchor_label)
+        if not prefix_norm or not anchor_norm:
+            return False
+        return prefix_norm == anchor_norm or prefix_norm in anchor_norm or anchor_norm in prefix_norm
+
+    @staticmethod
+    def _try_trim_battery_suffix_noise(speech: str, anchor_labels: list[str]) -> tuple[str, bool, str]:
+        raw_speech = str(speech or "")
+        if not raw_speech.strip():
+            return raw_speech, False, "empty_speech"
+
+        match = re.search(r"\s+battery\s+\d{1,3}\s*(?:per\s+cent|percent)\.?\s*$", raw_speech, flags=re.IGNORECASE)
+        if not match:
+            return raw_speech, False, "battery_suffix_not_found"
+
+        prefix = raw_speech[: match.start()].rstrip(" \t,.;:-")
+        if not prefix:
+            return raw_speech, False, "battery_only_announcement"
+
+        for anchor_label in anchor_labels:
+            if A11yAdbClient._is_battery_suffix_compatible(prefix, anchor_label):
+                return prefix, True, "battery_suffix"
+        return raw_speech, False, "battery_prefix_anchor_mismatch"
+
     def get_partial_announcements(
         self,
         dev: Any = None,
@@ -2673,8 +2700,31 @@ class A11yAdbClient:
                     )
                     if not step["used_snapshot"] and step.get("snapshot_reason") == "no_better_recent_poll_candidate":
                         step["snapshot_reason"] = "not_used"
-                    if fallback_source in {"talkbackLabel", "mergedLabel"}:
-                        print(f"[ANN][fallback] source='{fallback_source}'")
+                if fallback_source in {"talkbackLabel", "mergedLabel"}:
+                    print(f"[ANN][fallback] source='{fallback_source}'")
+
+        noise_trimmed, noise_trim_applied, noise_trim_reason = self._try_trim_battery_suffix_noise(
+            step.get("merged_announcement", ""),
+            [
+                str(step.get("visible_label", "") or "").strip(),
+                str(safe_focus_node.get("talkbackLabel", "") or "").strip() if isinstance(safe_focus_node, dict) else "",
+                str(safe_focus_node.get("text", "") or "").strip() if isinstance(safe_focus_node, dict) else "",
+                str(safe_focus_node.get("contentDescription", "") or "").strip() if isinstance(safe_focus_node, dict) else "",
+            ],
+        )
+        if noise_trim_applied:
+            before_value = str(step.get("merged_announcement", "") or "")
+            step["merged_announcement"] = noise_trimmed
+            step["normalized_announcement"] = self.normalize_for_comparison(noise_trimmed)
+            step["trim_considered"] = True
+            step["trim_applied"] = True
+            step["trim_before"] = before_value
+            step["trim_after"] = noise_trimmed
+            step["trim_reason"] = noise_trim_reason
+            step["trim_reject_reason"] = ""
+            print(
+                f"[ANN][noise_trim] reason='{noise_trim_reason}' before='{before_value}' after='{noise_trimmed}'"
+            )
 
         step["last_announcements"] = self._json_safe_value(saved_last_announcements)
         step["last_merged_announcement"] = saved_last_merged
