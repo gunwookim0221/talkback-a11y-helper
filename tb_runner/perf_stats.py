@@ -4,6 +4,16 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from tb_runner.logging_utils import log
+
+try:
+    from xlsxwriter.exceptions import FileCreateError as XlsxFileCreateError
+except Exception:  # pragma: no cover - xlsxwriter 미설치 환경 호환
+    class XlsxFileCreateError(Exception):
+        pass
+
+SAVE_EXCEL_RETRY_COUNT = 5
+SAVE_EXCEL_RETRY_SLEEP_SEC = 1.0
 
 
 def _safe_float(value: Any) -> float:
@@ -186,4 +196,18 @@ def save_excel_with_perf(
 ) -> None:
     if scenario_perf is not None:
         scenario_perf.save_excel_count += 1
-    save_excel_func(rows, output_path, with_images=with_images)
+    for attempt in range(1, SAVE_EXCEL_RETRY_COUNT + 1):
+        try:
+            save_excel_func(rows, output_path, with_images=with_images)
+            if attempt > 1:
+                log(f"[SAVE][retry] success attempt={attempt}/{SAVE_EXCEL_RETRY_COUNT} output='{output_path}'")
+            return
+        except (XlsxFileCreateError, PermissionError) as exc:
+            log(
+                f"[SAVE][retry] attempt={attempt}/{SAVE_EXCEL_RETRY_COUNT} "
+                f"output='{output_path}' error='{exc.__class__.__name__}: {exc}'"
+            )
+            if attempt >= SAVE_EXCEL_RETRY_COUNT:
+                raise
+            log(f"[SAVE][retry] sleep_seconds={SAVE_EXCEL_RETRY_SLEEP_SEC}")
+            time.sleep(SAVE_EXCEL_RETRY_SLEEP_SEC)

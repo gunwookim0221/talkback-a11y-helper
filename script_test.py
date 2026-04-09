@@ -23,13 +23,18 @@ from tb_runner.logging_utils import close_log_files, configure_log_files, log
 from tb_runner.perf_stats import RunPerfStats, format_perf_summary, save_excel_with_perf
 from tb_runner.scenario_config import TAB_CONFIGS
 from tb_runner.runtime_config import load_runtime_bundle
-from tb_runner.utils import generate_output_path
+from tb_runner.utils import configure_process_temp_dir, generate_output_path
 
 
 def main():
+    temp_override_applied, temp_override_path = configure_process_temp_dir("output/.tmp")
     output_path = generate_output_path()
     output_base_dir = str(Path(output_path).with_suffix(""))
     configure_log_files(output_path)
+    log(
+        f"[SAVE][temp] override tmp='{temp_override_path}' temp='{temp_override_path}' "
+        f"applied={str(temp_override_applied).lower()}"
+    )
 
     log(f"[MAIN] script start (version={SCRIPT_VERSION}, log_level={LOG_LEVEL})")
     client = A11yAdbClient(dev_serial=DEV_SERIAL)

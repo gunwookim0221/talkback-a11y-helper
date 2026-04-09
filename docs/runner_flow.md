@@ -177,6 +177,12 @@ overlay 확장 후:
 - 예외 발생 시: `with_images=False` 저장 후 재예외.
 - `finally`에서 항상 `with_images=True` 최종 저장.
 - 최종 run perf summary 로그 출력 후 로그 파일 종료.
+- 스크립트 시작 시 Python 프로세스의 `TMP/TEMP`를 `output/.tmp`로 오버라이드하여 xlsxwriter 임시 파일 경로를 프로젝트 내부로 고정한다.
+
+### 저장 안정화 (`tb_runner/perf_stats.py`)
+- 공통 저장 진입점 `save_excel_with_perf(...)`에서 `FileCreateError`/`PermissionError`만 최대 5회 재시도한다.
+- 재시도 간 1.0초 대기하며 `[SAVE][retry]` 로그로 시도 횟수, 오류 타입, output 경로를 남긴다.
+- 마지막 시도까지 실패하면 예외를 그대로 상위로 전달한다(예외 삼키기 없음).
 
 ### Side effect
 - 엑셀 파일 반복 overwrite/갱신

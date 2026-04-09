@@ -1,3 +1,5 @@
+import pytest
+
 from tb_runner.perf_stats import RunPerfStats, ScenarioPerfStats
 
 
@@ -83,3 +85,40 @@ def test_run_summary_aggregates_success_false_top_level_counts():
 
     assert summary["success_false_top_level_dump_attempt_count"] == 1
     assert summary["success_false_top_level_dump_found_count"] == 1
+
+
+def test_save_excel_with_perf_retries_on_permission_error(monkeypatch):
+    from tb_runner import perf_stats
+
+    attempts: list[int] = []
+    sleep_calls: list[float] = []
+
+    def flaky_save(rows, output_path, with_images):
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise PermissionError("WinError 32")
+
+    monkeypatch.setattr(perf_stats.time, "sleep", lambda sec: sleep_calls.append(sec))
+    perf_stats.save_excel_with_perf(flaky_save, [], "output/test.xlsx", with_images=False)
+
+    assert len(attempts) == 3
+    assert sleep_calls == [
+        perf_stats.SAVE_EXCEL_RETRY_SLEEP_SEC,
+        perf_stats.SAVE_EXCEL_RETRY_SLEEP_SEC,
+    ]
+
+
+def test_save_excel_with_perf_raises_after_max_retries(monkeypatch):
+    from tb_runner import perf_stats
+
+    monkeypatch.setattr(perf_stats.time, "sleep", lambda _sec: None)
+    def always_fail(_rows, _output_path, with_images):
+        raise PermissionError("WinError 32")
+
+    with pytest.raises(PermissionError):
+        perf_stats.save_excel_with_perf(
+            always_fail,
+            [],
+            "output/test.xlsx",
+            with_images=False,
+        )

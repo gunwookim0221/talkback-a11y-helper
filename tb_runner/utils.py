@@ -1,8 +1,10 @@
 import ast
 import json
 import logging
+import os
 import re
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -11,6 +13,18 @@ logger = logging.getLogger(__name__)
 def generate_output_path() -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return f"output/talkback_compare_{timestamp}.xlsx"
+
+
+def configure_process_temp_dir(temp_dir: str = "output/.tmp") -> tuple[bool, str]:
+    temp_path = Path(temp_dir).resolve()
+    temp_path.mkdir(parents=True, exist_ok=True)
+    temp_path_text = str(temp_path)
+    prev_tmp = os.environ.get("TMP")
+    prev_temp = os.environ.get("TEMP")
+    os.environ["TMP"] = temp_path_text
+    os.environ["TEMP"] = temp_path_text
+    applied = prev_tmp != temp_path_text or prev_temp != temp_path_text
+    return applied, temp_path_text
 
 
 def to_json_text(value: Any) -> str:
