@@ -224,6 +224,33 @@ def test_realign_focus_after_overlay_entry_not_found(monkeypatch):
     assert result["status"] == "realign_entry_not_found"
 
 
+def test_realign_focus_after_overlay_falls_back_to_prev_direction(monkeypatch):
+    entry = _step(step_index=3, label="entry", view_id="id.entry", bounds="0,0,10,10")
+    current = _step(step_index=7, label="current", view_id="id.current", bounds="10,10,20,20")
+
+    def _probe(**kwargs):
+        if not kwargs.get("move"):
+            return current
+        direction = kwargs.get("direction")
+        if direction == "next":
+            return _step(step_index=8, label="other", view_id="id.other", bounds="20,20,30,30")
+        return _step(step_index=9, label="entry", view_id="id.entry", bounds="0,0,10,10")
+
+    monkeypatch.setattr(overlay_logic, "collect_realign_probe", _probe)
+    monkeypatch.setattr(overlay_logic, "OVERLAY_REALIGN_MAX_STEPS", 2)
+
+    result = overlay_logic.realign_focus_after_overlay(
+        client=object(),
+        dev="SERIAL",
+        entry_step=entry,
+        known_step_index_by_fingerprint={},
+    )
+
+    assert result["status"] == "realign_entry_reached"
+    assert result["entry_reached"] is True
+    assert result["match_by"] == "view_id"
+
+
 def test_expand_overlay_breaks_on_same_overlay_fingerprint(monkeypatch):
     first = _step(
         step_index=1,

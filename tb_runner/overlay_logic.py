@@ -21,7 +21,7 @@ from tb_runner.perf_stats import ScenarioPerfStats, save_excel_with_perf
 from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 
 
-OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v2"
+OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v3"
 
 
 def _get_positive_int(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
@@ -363,29 +363,30 @@ def realign_focus_after_overlay(
             "current_step": current_step,
         }
 
-    for realign_idx in range(1, OVERLAY_REALIGN_MAX_STEPS + 1):
-        probe_step = collect_realign_probe(
-            client=client,
-            dev=dev,
-            move=True,
-            probe_idx=realign_idx,
-            direction="next",
-            wait_seconds=main_step_wait_seconds,
-        )
-        match_by = get_overlay_entry_match_by(probe_step, entry_step)
-        if match_by:
-            if match_by == "bounds":
-                log(
-                    f"[WARN] overlay realign matched by bounds only "
-                    f"probe_idx={realign_idx} entry_label='{entry_step.get('visible_label', '')}'",
-                )
-            return {
-                "status": "realign_entry_reached",
-                "steps_taken": realign_idx,
-                "entry_reached": True,
-                "match_by": match_by,
-                "current_step": probe_step,
-            }
+    for direction in ("next", "prev"):
+        for realign_idx in range(1, OVERLAY_REALIGN_MAX_STEPS + 1):
+            probe_step = collect_realign_probe(
+                client=client,
+                dev=dev,
+                move=True,
+                probe_idx=realign_idx,
+                direction=direction,
+                wait_seconds=main_step_wait_seconds,
+            )
+            match_by = get_overlay_entry_match_by(probe_step, entry_step)
+            if match_by:
+                if match_by == "bounds":
+                    log(
+                        f"[WARN] overlay realign matched by bounds only "
+                        f"probe_idx={realign_idx} entry_label='{entry_step.get('visible_label', '')}'",
+                    )
+                return {
+                    "status": "realign_entry_reached",
+                    "steps_taken": realign_idx,
+                    "entry_reached": True,
+                    "match_by": match_by,
+                    "current_step": probe_step,
+                }
 
     return {
         "status": "realign_entry_not_found",
