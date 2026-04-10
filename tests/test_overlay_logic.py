@@ -116,6 +116,34 @@ def test_realign_focus_after_overlay_already_on_entry(monkeypatch):
     assert result["status"] == "already_on_entry"
 
 
+def test_realign_focus_after_overlay_matches_partial_label(monkeypatch):
+    entry = _step(step_index=3, label="add device", view_id="", bounds="0,0,10,10")
+    monkeypatch.setattr(
+        overlay_logic,
+        "collect_realign_probe",
+        lambda **kwargs: _step(step_index=7, label="add", view_id="", bounds="20,20,30,30"),
+    )
+
+    result = overlay_logic.realign_focus_after_overlay(client=object(), dev="SERIAL", entry_step=entry, known_step_index_by_fingerprint={})
+
+    assert result["status"] == "already_on_entry"
+    assert result["match_by"] == "label_partial"
+
+
+def test_realign_focus_after_overlay_matches_bounds_overlap(monkeypatch):
+    entry = _step(step_index=3, label="entry", view_id="", bounds="0,0,100,100")
+    monkeypatch.setattr(
+        overlay_logic,
+        "collect_realign_probe",
+        lambda **kwargs: _step(step_index=7, label="other", view_id="", bounds="5,5,95,95"),
+    )
+
+    result = overlay_logic.realign_focus_after_overlay(client=object(), dev="SERIAL", entry_step=entry, known_step_index_by_fingerprint={})
+
+    assert result["status"] == "already_on_entry"
+    assert result["match_by"] == "bounds_overlap"
+
+
 def test_realign_focus_after_overlay_skip_when_not_before_entry(monkeypatch):
     entry = _step(step_index=3, label="entry", view_id="id.entry", bounds="0,0,10,10")
     current = _step(step_index=7, label="current", view_id="id.current", bounds="10,10,20,20")

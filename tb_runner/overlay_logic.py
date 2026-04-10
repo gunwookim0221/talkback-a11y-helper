@@ -20,6 +20,10 @@ from tb_runner.logging_utils import log
 from tb_runner.perf_stats import ScenarioPerfStats, save_excel_with_perf
 from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 
+
+OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v2"
+
+
 def _get_positive_int(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
     value = tab_cfg.get(key, fallback)
     if isinstance(value, bool):
@@ -217,14 +221,38 @@ def get_overlay_entry_match_by(current_step: dict[str, Any], entry_step: dict[st
     entry_view_id = str(entry_step.get("focus_view_id", "") or "").strip()
     if current_view_id and entry_view_id and current_view_id == entry_view_id:
         return "view_id"
+
     current_label = str(current_step.get("normalized_visible_label", "") or "").strip()
     entry_label = str(entry_step.get("normalized_visible_label", "") or "").strip()
     if current_label and entry_label and current_label == entry_label:
         return "label"
+    if current_label and entry_label and (current_label in entry_label or entry_label in current_label):
+        return "label_partial"
+
     current_bounds = str(current_step.get("focus_bounds", "") or "").strip()
     entry_bounds = str(entry_step.get("focus_bounds", "") or "").strip()
     if current_bounds and entry_bounds and current_bounds == entry_bounds:
         return "bounds"
+    if current_bounds and entry_bounds:
+        try:
+            current_left, current_top, current_right, current_bottom = [int(part) for part in current_bounds.split(",")]
+            entry_left, entry_top, entry_right, entry_bottom = [int(part) for part in entry_bounds.split(",")]
+        except ValueError:
+            return ""
+
+        overlap_left = max(current_left, entry_left)
+        overlap_top = max(current_top, entry_top)
+        overlap_right = min(current_right, entry_right)
+        overlap_bottom = min(current_bottom, entry_bottom)
+        overlap_width = max(0, overlap_right - overlap_left)
+        overlap_height = max(0, overlap_bottom - overlap_top)
+        overlap_area = overlap_width * overlap_height
+        if overlap_area > 0:
+            current_area = max(1, (current_right - current_left) * (current_bottom - current_top))
+            entry_area = max(1, (entry_right - entry_left) * (entry_bottom - entry_top))
+            overlap_ratio = overlap_area / float(max(1, min(current_area, entry_area)))
+            if overlap_ratio >= 0.65:
+                return "bounds_overlap"
     return ""
 
 
@@ -363,6 +391,7 @@ def realign_focus_after_overlay(
         "status": "realign_entry_not_found",
         "steps_taken": OVERLAY_REALIGN_MAX_STEPS,
         "entry_reached": False,
+        "match_by": "",
         "current_step": current_step,
     }
 
