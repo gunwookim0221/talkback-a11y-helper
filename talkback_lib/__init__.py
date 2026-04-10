@@ -60,6 +60,7 @@ from talkback_lib.utils import (
 
 RETRY_TIMEOUT_REFACTOR_VERSION = "PR11.0"
 PR12_REFACTOR_CLEANUP_VERSION = "PR12.0"
+PR13_CACHE_OPT_VERSION = "PR13.1"
 
 
 @dataclass
@@ -92,6 +93,9 @@ class A11yAdbClient:
         self.helper_status_fail_cache_ttl_sec: float = 0.7
         self.last_get_focus_trace: dict[str, Any] = {}
         self._prev_step_merged_announcement: str = ""
+        self._last_action_payload: dict[str, Any] | None = None
+        self._last_action_req_id: str = ""
+        self._last_action_timestamp: float = 0.0
         self.log_level = LOG_LEVEL if LOG_LEVEL in LOG_LEVEL_ORDER else "NORMAL"
         self._adb_device = AdbDevice(
             adb_path=self.adb_path,
@@ -315,6 +319,15 @@ class A11yAdbClient:
         wait_seconds: float = 2.0,
         poll_interval_sec: float = 0.25,
     ) -> dict[str, Any]:
+        cache_window_sec = 0.4
+        now_mono = time.monotonic()
+        if (
+            prefix == "TARGET_ACTION_RESULT"
+            and self._last_action_req_id == req_id
+            and isinstance(self._last_action_payload, dict)
+            and now_mono - self._last_action_timestamp < cache_window_sec
+        ):
+            return self._last_action_payload
         start = time.monotonic()
         interval = max(0.05, poll_interval_sec)
         print(f"[SMART_NEXT_TRACE] read_log_result_start prefix={prefix} req_id={req_id} wait_seconds={wait_seconds}")
@@ -324,6 +337,10 @@ class A11yAdbClient:
             for payload in reversed(payloads):
                 parsed = self._parse_json_payload(payload, prefix)
                 if parsed.get("reqId") == req_id:
+                    if prefix == "TARGET_ACTION_RESULT" and bool(parsed.get("success")):
+                        self._last_action_payload = parsed
+                        self._last_action_req_id = req_id
+                        self._last_action_timestamp = time.monotonic()
                     print(f"[SMART_NEXT_TRACE] read_log_result_match prefix={prefix} req_id={req_id} parsed={parsed}")
                     return parsed
             elapsed = time.monotonic() - start
@@ -1062,6 +1079,8 @@ class A11yAdbClient:
 
             # 2) payload 파싱 및 성공/실패 판정
             result = self._read_log_result(dev, "TARGET_ACTION_RESULT", req_id)
+            if self._is_target_action_payload_missing(result, req_id):
+                return False, {}
             self.last_target_action_result = self._normalize_target_action_payload(result)
             if self._is_target_action_success(result):
                 self._wait_for_speech_if_needed(dev)
