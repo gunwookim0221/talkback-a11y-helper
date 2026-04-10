@@ -98,6 +98,10 @@ start pipeline 내부에서 `open_scenario(...)`를 먼저 실행한 뒤, post-o
 
 `for step_idx in range(1, tab_cfg["max_steps"] + 1)` 루프에서 본 수집을 수행한다.
 
+참고(PR6):
+- `collect_tab_rows`는 main/persist 단계의 공유 상태를 `MainLoopState`, `CollectionPhaseContext`로 묶어 전달한다.
+- 이 변경은 **상태 전달 정리 목적**이며, 실행 순서(`open -> main -> overlay -> realign -> stop -> persist`)와 정책 의미는 유지한다.
+
 ## 5-1) step 수집 (focus / announcement / crop / fallback)
 
 각 step에서:
