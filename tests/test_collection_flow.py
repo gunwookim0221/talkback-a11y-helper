@@ -896,6 +896,43 @@ def test_open_scenario_pre_navigation_scroll_touch_plugin_uses_cumulative_downwa
     assert any("scroll_forward_and_retry_local_search" in line for line in logs)
 
 
+def test_select_visible_plugin_candidate_promotes_clickable_card_from_descendant_label():
+    nodes = [
+        {
+            "text": "Life",
+            "boundsInScreen": "0,0,1080,2200",
+            "visibleToUser": True,
+            "children": [
+                {
+                    "boundsInScreen": "100,620,980,980",
+                    "visibleToUser": True,
+                    "clickable": True,
+                    "focusable": True,
+                    "viewIdResourceName": "com.test:id/preInstalledServiceCard",
+                    "children": [
+                        {
+                            "text": "Air Care",
+                            "boundsInScreen": "140,680,520,760",
+                            "visibleToUser": False,
+                            "viewIdResourceName": "com.test:id/tvHeaderTitle",
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+
+    selected, reason, stats = collection_flow._select_visible_plugin_candidate(
+        nodes=nodes,
+        target=r"(?i).*air\s*care.*",
+    )
+
+    assert selected is not None
+    assert "candidate_count=" in reason
+    assert stats.get("visible_candidate_count", 0) >= 1
+    assert stats.get("partial_match_count", 0) >= 1
+
+
 def test_confirm_click_focused_transition_life_energy_rejects_weak_signal(monkeypatch):
     client = DummyClient([])
     baseline_nodes = [
