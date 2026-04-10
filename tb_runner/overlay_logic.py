@@ -327,7 +327,7 @@ def realign_focus_after_overlay(
         }
 
     seen_idx = known_step_index_by_fingerprint.get(current_fp)
-    if seen_idx is None or seen_idx >= entry_idx:
+    if seen_idx is not None and seen_idx >= entry_idx:
         return {
             "status": "skip_realign_not_before_entry",
             "steps_taken": 0,
