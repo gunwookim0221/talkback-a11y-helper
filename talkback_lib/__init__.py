@@ -17,6 +17,8 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
+from talkback_lib.action_result_parser import ActionResultParser
+from talkback_lib.adb_executor import AdbExecutor
 from talkback_lib.adb_device import AdbDevice
 from talkback_lib.constants import (
     ACTION_CHECK_TARGET,
@@ -49,6 +51,7 @@ from talkback_lib.constants import (
     STATUS_SCROLLED,
 )
 from talkback_lib.helper_bridge import HelperBridge
+from talkback_lib.logcat_reader import LogcatReader
 from talkback_lib.utils import (
     json_safe_value,
     normalize_bounds,
@@ -61,6 +64,7 @@ from talkback_lib.utils import (
 RETRY_TIMEOUT_REFACTOR_VERSION = "PR11.0"
 PR12_REFACTOR_CLEANUP_VERSION = "PR12.0"
 PR13_CACHE_OPT_VERSION = "PR13.1"
+PR14_CLIENT_SPLIT_VERSION = "PR14-A.0"
 
 
 @dataclass
@@ -101,6 +105,8 @@ class A11yAdbClient:
             adb_path=self.adb_path,
             resolve_serial=self._resolve_serial,
         )
+        self._adb_executor = AdbExecutor(self._adb_device)
+        self._logcat_reader = LogcatReader(run_cmd=self._run_via_client)
         self._helper_bridge = HelperBridge(client=self)
 
     def _is_debug_log_enabled(self) -> bool:
@@ -234,7 +240,10 @@ class A11yAdbClient:
         return {"status": "enabled", "reason": "ok"}
 
     def _run(self, args: list[str], dev: Any = None, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
-        return self._adb_device._run_adb_command(args, dev=dev, timeout=timeout)
+        return self._adb_executor.run(args, dev=dev, timeout=timeout)
+
+    def _run_via_client(self, args: list[str], dev: Any = None, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
+        return self._run(args, dev=dev, timeout=timeout)
 
     def check_helper_status(self, dev: Any = None) -> bool:
         return self._helper_bridge._helper_ready_check(dev=dev)
@@ -332,7 +341,7 @@ class A11yAdbClient:
         interval = max(0.05, poll_interval_sec)
         print(f"[SMART_NEXT_TRACE] read_log_result_start prefix={prefix} req_id={req_id} wait_seconds={wait_seconds}")
         while time.monotonic() - start < wait_seconds:
-            logs = self._run(["logcat", "-d", *LOGCAT_FILTER_SPECS], dev=dev)
+            logs = self._logcat_reader.dump_filtered(dev=dev)
             payloads = self._extract_all_payloads(logs, prefix)
             for payload in reversed(payloads):
                 parsed = self._parse_json_payload(payload, prefix)
@@ -354,28 +363,15 @@ class A11yAdbClient:
 
     @staticmethod
     def _extract_all_payloads(log_text: str, prefix: str) -> list[str]:
-        pattern = re.compile(rf"{re.escape(prefix)}\s+(.*)$")
-        payloads: list[str] = []
-        for line in log_text.splitlines():
-            m = pattern.search(line)
-            if m:
-                payloads.append(m.group(1).strip())
-        return payloads
+        return LogcatReader.extract_all_payloads(log_text=log_text, prefix=prefix)
 
     @staticmethod
     def _extract_req_payloads(log_text: str, prefix: str, req_id: str) -> list[str]:
-        pattern = re.compile(rf"{re.escape(prefix)}\s+{re.escape(req_id)}\s+(.*)$")
-        payloads: list[str] = []
-        for line in log_text.splitlines():
-            m = pattern.search(line)
-            if m:
-                payloads.append(m.group(1).strip())
-        return payloads
+        return LogcatReader.extract_req_payloads(log_text=log_text, prefix=prefix, req_id=req_id)
 
     @staticmethod
     def _has_req_marker(log_text: str, prefix: str, req_id: str) -> bool:
-        marker = f"{prefix} {req_id}"
-        return any(marker in line for line in log_text.splitlines())
+        return LogcatReader.has_req_marker(log_text=log_text, prefix=prefix, req_id=req_id)
 
     def clear_logcat(self, dev: Any = None) -> str:
         try:
@@ -467,7 +463,7 @@ class A11yAdbClient:
         start_time = time.time()
         logs = ""
         while time.time() - start_time < wait_seconds:
-            logs = self._run(["logcat", "-v", "raw", "-d", *LOGCAT_FILTER_SPECS], dev=dev)
+            logs = self._logcat_reader.dump_raw_filtered(dev=dev)
             if self._has_req_marker(logs, "DUMP_TREE_END", req_id):
                 break
             time.sleep(1.0)
@@ -969,25 +965,12 @@ class A11yAdbClient:
         detail: str | None = None,
         raw: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        class _NormalizedActionResult(dict):
-            def __bool__(self) -> bool:
-                return bool(self.get("success"))
-
-            def __eq__(self, other: object) -> bool:
-                if isinstance(other, str):
-                    return str(self.get("status", "")) == other
-                return super().__eq__(other)
-
-        normalized_status = status or (STATUS_MOVED if bool(success) else STATUS_FAILED)
-        result: dict[str, Any] = _NormalizedActionResult({
-            "success": bool(success),
-            "status": normalized_status,
-        })
-        if detail is not None:
-            result["detail"] = detail
-        if isinstance(raw, dict):
-            result["raw"] = raw
-        return result
+        return ActionResultParser.normalize_action_result(
+            success=success,
+            status=status,
+            detail=detail,
+            raw=raw,
+        )
 
     def _run_with_retry(
         self,
@@ -1012,23 +995,19 @@ class A11yAdbClient:
 
     @staticmethod
     def _is_target_action_payload_missing(result: dict[str, Any], req_id: str) -> bool:
-        return (
-            isinstance(result, dict)
-            and result.get("reqId") == req_id
-            and str(result.get("reason", "")).strip() == "TARGET_ACTION_RESULT 로그를 찾지 못했습니다."
-        )
+        return ActionResultParser.is_target_action_payload_missing(result=result, req_id=req_id)
 
     @staticmethod
     def _is_target_action_success(result: Any) -> bool:
-        return isinstance(result, dict) and bool(result.get("success"))
+        return ActionResultParser.is_target_action_success(result=result)
 
     @staticmethod
     def _is_target_action_payload_for_req(result: dict[str, Any], req_id: str) -> bool:
-        return isinstance(result, dict) and result.get("reqId") == req_id
+        return ActionResultParser.is_target_action_payload_for_req(result=result, req_id=req_id)
 
     @staticmethod
     def _normalize_target_action_payload(result: Any) -> dict[str, Any]:
-        return result if isinstance(result, dict) else {"success": False, "reason": "unknown"}
+        return ActionResultParser.normalize_target_action_payload(result=result)
 
     def touch(
         self,
