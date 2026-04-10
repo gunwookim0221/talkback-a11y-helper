@@ -132,6 +132,26 @@ def test_realign_focus_after_overlay_skip_when_not_before_entry(monkeypatch):
     assert result["status"] == "skip_realign_not_before_entry"
 
 
+def test_realign_focus_after_overlay_unknown_fingerprint_keeps_realign(monkeypatch):
+    entry = _step(step_index=3, label="entry", view_id="id.entry", bounds="0,0,10,10")
+    current = _step(step_index=7, label="current", view_id="id.current", bounds="10,10,20,20")
+    probes = [current, _step(step_index=8, label="entry", view_id="id.entry", bounds="0,0,10,10")]
+
+    def _probe(**kwargs):
+        return probes.pop(0)
+
+    monkeypatch.setattr(overlay_logic, "collect_realign_probe", _probe)
+
+    result = overlay_logic.realign_focus_after_overlay(
+        client=object(),
+        dev="SERIAL",
+        entry_step=entry,
+        known_step_index_by_fingerprint={},
+    )
+
+    assert result["status"] == "realign_entry_reached"
+
+
 def test_realign_focus_after_overlay_entry_reached(monkeypatch):
     entry = _step(step_index=3, label="entry", view_id="id.entry", bounds="0,0,10,10")
     current = _step(step_index=7, label="current", view_id="id.current", bounds="10,10,20,20")
