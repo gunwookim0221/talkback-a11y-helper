@@ -59,7 +59,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-recheck-v7"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr16-scrolltouch-semantic-label-filter-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr15-scrolltouch-candidate-rejection-v1"
 
 
 
@@ -1187,6 +1187,16 @@ def _select_visible_plugin_candidate(
             _append_rejection(stats, "no_label_blob")
             _record_inspect(stats, node_ref=node, promoted_click_node=promoted_click_node, reject_reason="no_label_blob")
             continue
+        if not _safe_regex_search(target, " ".join(part for part in [label_blob, click_label_blob, click_descendant_blob] if part)):
+            _append_rejection(stats, "filtered_before_candidate")
+            _record_inspect(
+                stats,
+                node_ref=node,
+                promoted_click_node=promoted_click_node,
+                reject_reason="filtered_before_candidate",
+                stage="label_filter",
+            )
+            continue
         click_bounds = parse_bounds_str(str(click_node.get("boundsInScreen", "") or "").strip())
         if not click_bounds:
             _append_rejection(stats, "no_click_node_bounds")
@@ -1222,26 +1232,10 @@ def _select_visible_plugin_candidate(
             ]
         ).strip()
         descendant_blob = click_descendant_blob
-        semantic_blob = " ".join(part for part in [label_blob, click_label_blob, title_blob, descendant_blob] if part).strip()
+        semantic_blob = " ".join(part for part in [label_blob, title_blob, descendant_blob] if part).strip()
         if not semantic_blob:
             _append_rejection(stats, "promoted_label_empty")
             _record_inspect(stats, node_ref=node, promoted_click_node=promoted_click_node, reject_reason="promoted_label_empty")
-            continue
-        if not _safe_regex_search(target, semantic_blob):
-            _append_rejection(stats, "filtered_before_candidate")
-            _record_inspect(
-                stats,
-                node_ref=node,
-                promoted_click_node=promoted_click_node,
-                reject_reason="filtered_before_candidate",
-                stage="label_filter",
-            )
-            _record_pre_candidate(
-                stats,
-                node_ref=node,
-                promoted_click_node=promoted_click_node,
-                reason="label_filter_after_semantic_merge",
-            )
             continue
         if target_tokens and any(token in semantic_blob.lower() for token in target_tokens):
             stats["partial_match_count"] += 1
