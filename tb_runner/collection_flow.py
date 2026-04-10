@@ -57,7 +57,7 @@ _LIFE_ENERGY_SCENARIO_ID = "life_energy_plugin"
 _LIFE_ENERGY_FAMILY_CARE_REGEX = r"(?i)\b(family\s*care|add\s*family\s*member|me)\b"
 _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr5-normalization-v2"
-COLLECTION_FLOW_GUARD_VERSION = "life-energy-entry-recheck-v3"
+COLLECTION_FLOW_GUARD_VERSION = "life-energy-entry-recheck-v4"
 
 
 @dataclass
@@ -265,8 +265,7 @@ def _verify_plugin_entry_root_state(
         )
         if is_life_energy_before_pre_nav:
             relaxed_scrolltouch_entry_ok = bool(
-                not family_care_signature_seen
-                and int(snapshot.get("navigate_up_hits", 0) or 0) == 0
+                int(snapshot.get("navigate_up_hits", 0) or 0) == 0
                 and bool(snapshot.get("life_selected") or snapshot.get("bottom_nav_life_visible"))
                 and int(snapshot.get("app_bar_hits", 0) or 0) >= _LIFE_ROOT_APP_BAR_MIN_HITS
             )
@@ -296,8 +295,7 @@ def _verify_plugin_entry_root_state(
                     recheck_snapshot = _life_root_state_snapshot(recheck_nodes)
                     recheck_ok = bool(recheck_snapshot.get("ok"))
                     relaxed_recheck_ok = bool(
-                        not family_care_signature_seen
-                        and int(recheck_snapshot.get("navigate_up_hits", 0) or 0) == 0
+                        int(recheck_snapshot.get("navigate_up_hits", 0) or 0) == 0
                         and bool(recheck_snapshot.get("life_selected") or recheck_snapshot.get("bottom_nav_life_visible"))
                         and int(recheck_snapshot.get("app_bar_hits", 0) or 0) >= _LIFE_ROOT_APP_BAR_MIN_HITS
                     )
@@ -313,9 +311,6 @@ def _verify_plugin_entry_root_state(
                         f"family_care_signature_seen={str(family_care_signature_seen).lower()} "
                         f"ok={str(recheck_ok).lower()} relaxed_ok={str(relaxed_recheck_ok).lower()}"
                     )
-                    if family_care_signature_seen and not recheck_ok:
-                        last_reason = "life_root_not_stable"
-                        break
                     if recheck_ok:
                         return True, "root_state_stable_recheck"
                     if relaxed_recheck_ok:
