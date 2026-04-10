@@ -142,7 +142,7 @@ TAB_CONFIGS = [
         "pre_navigation": [
             {
                 "action": "scrolltouch",
-                "target": "(?i)(^air\\s*care$|air\\s*care\\.|\\baircare\\b|에어\\s*케어)",
+                "target": "(?i)(^smart\\s*air\\s*care$|^air\\s*care$|air\\s*care\\.|\\baircare\\b|에어\\s*케어)",
                 "type": "a",
             }
         ],
@@ -157,7 +157,7 @@ TAB_CONFIGS = [
 
         "context_verify": {
             "type": "screen_text",
-            "text_regex": "(?i).*air\\s*care.*|.*aircare.*|.*에어\\s*케어.*",
+            "text_regex": "(?i).*smart\\s*air\\s*care.*|.*air\\s*care.*|.*aircare.*|.*에어\\s*케어.*|.*air\\s*quality.*|.*공기\\s*질.*",
         },
         "overlay_policy": {
             "allow_candidates": [
