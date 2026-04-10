@@ -1788,7 +1788,8 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
                 phase="focus_align_recheck",
                 scenario_id=scenario_id,
             )
-            if not plugin_root_ok:
+            permissive_plugin_reasons = {"life_root_not_stable", "selector_not_focused"}
+            if not plugin_root_ok and plugin_root_reason not in permissive_plugin_reasons:
                 log(
                     f"{focus_log_tag} strict failure for plugin pre_navigation scenario='{scenario_id}' "
                     f"reason='{plugin_root_reason}'"
