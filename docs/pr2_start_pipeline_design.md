@@ -1,5 +1,10 @@
 # PR2 Start Pipeline 구조화 설계서 (동작 변경 없음)
 
+> [!IMPORTANT]
+> 이 문서는 **historical design record(당시 설계 기록)** 입니다.
+> 현재 운영 기준은 `docs/current-client-architecture.md` 및 운영 문서(`system-overview.md`, `architecture.md`, `testing-pipeline.md`)를 우선 참조하세요.
+
+
 본 문서는 `docs/pr1_function_split.md` 이후 단계(PR2)로, Python runner의 **scenario start pipeline**을 명시적으로 구조화하기 위한 설계를 정의한다. 
 
 - 대상 범위: `script_test.py`, `tb_runner/*` 중 **start 진입 파이프라인 관련 로직**

@@ -1,11 +1,13 @@
 # A11yAdbClient API Reference
 
-`talkback_lib.py`의 `A11yAdbClient`에서 외부 호출을 위해 제공하는 퍼블릭 메서드만 정리한 문서입니다.  
-(내부 헬퍼 메서드: `_run`, `_broadcast`, `_extract_*` 등 `_` 접두사 메서드는 제외)
+`talkback_lib/__init__.py`의 `A11yAdbClient` 퍼블릭 메서드 기준 문서입니다.  
+PR14 이후 내부 구현은 모듈로 분리되었지만, 이 문서는 **외부 호출 계약(public API)** 기준으로 유지합니다.  
+(내부 `_` 접두사 메서드/서비스 구현 세부는 제외)
 
 > 참고:
 > - 본 문서는 helper/client API 기준서입니다.
 > - collector 시나리오 흐름(anchor stabilization, overlay, stop policy, raw/filtered/summary)은 `docs/testing-pipeline.md`, `docs/system-overview.md`를 확인하세요.
+> - 현재 client 내부 구조(분리 모듈/불변 계약)는 `docs/current-client-architecture.md`를 확인하세요.
 > - scenario-level 실행 정책(`screen_context_mode`, `stabilization_mode`, context 분기)은 `docs/scenario-config.md`를 확인하세요.
 
 ## Table of Contents

@@ -1,5 +1,10 @@
 # PR1 함수 분해 설계서 (동작 변경 없음)
 
+> [!IMPORTANT]
+> 이 문서는 **historical design record(당시 설계 기록)** 입니다.
+> 현재 운영 기준은 `docs/current-client-architecture.md` 및 운영 문서(`system-overview.md`, `architecture.md`, `testing-pipeline.md`)를 우선 참조하세요.
+
+
 본 문서는 `tb_runner/collection_flow.py`의 `collect_tab_rows`를 PR1에서 분해할 때의 설계 계약을 정의한다.
 
 핵심 원칙:
