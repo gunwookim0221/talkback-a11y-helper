@@ -55,6 +55,7 @@ _LIFE_ENERGY_SCENARIO_ID = "life_energy_plugin"
 _LIFE_ENERGY_FAMILY_CARE_REGEX = r"(?i)\b(family\s*care|add\s*family\s*member|me)\b"
 _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr5-normalization-v2"
+COLLECTION_FLOW_GUARD_VERSION = "life-energy-entry-recheck-v1"
 
 
 @dataclass
@@ -1614,6 +1615,9 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         log(f"[ANCHOR][plugin_fallback] stabilized_by='{stabilized_by}'")
         log(f"[SCENARIO][start_mode] scenario='{scenario_id}' mode='low_confidence_fallback'")
     if scenario_id == _LIFE_ENERGY_SCENARIO_ID:
+        stabilize_reason = str(stabilize_result.get("reason", "") or "").strip().lower()
+        should_recheck_entry = stabilize_reason in {"focus_shift", "verified_without_select"}
+        recheck_attempts = 2 if should_recheck_entry else 1
         post_focus = client.get_focus(
             dev=dev,
             wait_seconds=min(main_step_wait_seconds, 0.8),
@@ -1629,20 +1633,34 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         generic_navigate_up_only = bool(_safe_regex_search(_LIFE_ENERGY_NAVIGATE_UP_REGEX, post_label)) and not post_view_id
         dump_tree_fn = getattr(client, "dump_tree", None)
         post_nodes: list[dict[str, Any]] = []
-        if callable(dump_tree_fn):
-            try:
-                post_nodes = dump_tree_fn(dev=dev)
-            except Exception:
-                post_nodes = []
-        energy_signature_seen = any(
-            _safe_regex_search(r"(?i).*energy.*", _node_label_blob(node))
-            for node, _ in _iter_tree_nodes_with_parent(post_nodes)
-        )
-        family_signature_seen = any(
-            _safe_regex_search(_LIFE_ENERGY_FAMILY_CARE_REGEX, _node_label_blob(node))
-            for node, _ in _iter_tree_nodes_with_parent(post_nodes)
-        )
-        if generic_navigate_up_only or (family_signature_seen and not energy_signature_seen):
+        energy_signature_seen = False
+        family_signature_seen = False
+        for recheck_idx in range(recheck_attempts):
+            if callable(dump_tree_fn):
+                try:
+                    post_nodes = dump_tree_fn(dev=dev)
+                except Exception:
+                    post_nodes = []
+            tree_nodes_with_parent = _iter_tree_nodes_with_parent(post_nodes)
+            energy_signature_seen = any(
+                _safe_regex_search(r"(?i).*energy.*", _node_label_blob(node)) for node, _ in tree_nodes_with_parent
+            )
+            family_signature_seen = any(
+                _safe_regex_search(_LIFE_ENERGY_FAMILY_CARE_REGEX, _node_label_blob(node))
+                for node, _ in tree_nodes_with_parent
+            )
+            if family_signature_seen and not energy_signature_seen:
+                break
+            if energy_signature_seen:
+                break
+            if recheck_idx < recheck_attempts - 1:
+                log(
+                    f"[SCENARIO][life_energy_guard] recheck scenario='{scenario_id}' "
+                    f"attempt={recheck_idx + 1}/{recheck_attempts} reason='missing_energy_signature' "
+                    f"stabilize_reason='{stabilize_reason or 'none'}'"
+                )
+                time.sleep(min(main_step_wait_seconds, 0.35))
+        if (generic_navigate_up_only and not energy_signature_seen) or (family_signature_seen and not energy_signature_seen):
             log(
                 f"[SCENARIO][life_energy_guard] failed scenario='{scenario_id}' "
                 f"generic_navigate_up_only={str(generic_navigate_up_only).lower()} "
