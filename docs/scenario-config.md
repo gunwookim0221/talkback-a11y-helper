@@ -42,7 +42,7 @@
 - `tab`: tab 선택 후보 규칙(resource/text/announcement/tie_breaker)
 - `pre_navigation`: anchor 전에 수행할 bounded 이동(select/touch/scrollTouch). `scrollTouch`는 기본적으로 실행 직전에 `scroll_to_top`으로 best-effort 초기화한 뒤 검색을 시작하며, `new_screen` plugin 진입 시나리오에서는 한 step 내부에서 누적 downward 탐색을 수행합니다(초기 1회만 top reset).
   - `life_energy_plugin`에서는 진입 성공 판정을 좁게 적용합니다. `anchor_match`/화면 전환 흔들림(덤프/윈도우 포커스 변경) 같은 약한 신호만으로는 pre-navigation 성공으로 확정하지 않고, Energy 시그니처가 확인되지 않으면 실패/재시도로 처리합니다. 단, `focus_shift`/`verified_without_select` 같은 약한 성공 사유 직후에는 guard 단계에서 1회 추가 dump 재확인을 허용해 실제 Energy 화면 진입(true positive)을 회복합니다.
-  - 추가로 `before_pre_navigation` 루트 안정화에서 `life_root_not_stable`이 발생하더라도, Life 탭 선택/앱바/카드 힌트가 이미 보이는 경우에 한해 `life_energy_plugin` 전용으로 매우 짧은 재관찰(최대 2회)을 수행합니다. 재관찰에서도 root signature가 없거나 Family Care 시그니처가 보이면 그대로 실패 처리합니다.
+  - 추가로 `before_pre_navigation` 루트 안정화에서 `life_root_not_stable`이 발생하더라도, `life_energy_plugin` 전용으로 **scrollTouch 진입 허용 gate**를 별도로 둡니다. Life 탭 선택(또는 하단 Life 노출) + 앱바 신호가 충분하고(`add/more options/location/qr code`) + `Navigate up`/Family Care 시그니처가 없으면, Energy 카드가 아직 안 보여도 pre-navigation(scrollTouch) 진입을 허용합니다. 그 외에는 기존처럼 짧은 재관찰(최대 2회) 후 실패 처리합니다.
 - `anchor`: 안정화 대상 규칙(resource/text/announcement/class/bounds/tie_breaker)
 - `context_verify`: 문맥 검증 규칙
 - `screen_context_mode`: `bottom_tab | new_screen`
