@@ -27,7 +27,7 @@ LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 RED_TEXT = "\033[91m"
 RESET_TEXT = "\033[0m"
 
-CLIENT_ALGORITHM_VERSION = "1.7.69"
+CLIENT_ALGORITHM_VERSION = "1.7.68"
 
 DEFAULT_PACKAGE_NAME = "com.iotpart.sqe.talkbackhelper"
 DEFAULT_ADB_PATH = "adb"
