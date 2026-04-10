@@ -57,7 +57,7 @@ _LIFE_ENERGY_SCENARIO_ID = "life_energy_plugin"
 _LIFE_ENERGY_FAMILY_CARE_REGEX = r"(?i)\b(family\s*care|add\s*family\s*member|me)\b"
 _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
-COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-recheck-v6"
+COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-recheck-v7"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 
 
@@ -1099,16 +1099,17 @@ def _select_visible_plugin_candidate(
             continue
         if not _node_is_visible(node):
             continue
-        label_blob = _node_label_blob(node)
-        if not label_blob or not _safe_regex_search(target, label_blob):
-            continue
-        resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
         click_node = node
         if isinstance(parent, dict):
             parent_clickable = bool(parent.get("clickable")) or bool(parent.get("focusable"))
             parent_resource = str(parent.get("viewIdResourceName", "") or parent.get("resourceId", "") or "").strip()
             if parent_clickable or _safe_regex_search(r"(?i)(preinstalledservicecard|servicecard|card)", parent_resource):
                 click_node = parent
+        label_blob = _node_label_blob(node)
+        click_label_blob = _node_label_blob(click_node)
+        click_descendant_blob = " ".join(descendants_by_container.get(id(click_node), []))
+        if not _safe_regex_search(target, " ".join(part for part in [label_blob, click_label_blob, click_descendant_blob] if part)):
+            continue
         click_bounds = parse_bounds_str(str(click_node.get("boundsInScreen", "") or "").strip())
         if not click_bounds:
             continue
@@ -1124,7 +1125,7 @@ def _select_visible_plugin_candidate(
                 str(click_node.get("contentDescription", "") or "").strip(),
             ]
         ).strip()
-        descendant_blob = " ".join(descendants_by_container.get(id(click_node), []))
+        descendant_blob = click_descendant_blob
         semantic_blob = " ".join(part for part in [label_blob, title_blob, descendant_blob] if part).strip()
         if not semantic_blob:
             continue
