@@ -59,6 +59,7 @@ from talkback_lib.utils import (
 )
 
 RETRY_TIMEOUT_REFACTOR_VERSION = "PR11.0"
+PR12_REFACTOR_CLEANUP_VERSION = "PR12.0"
 
 
 @dataclass
@@ -992,6 +993,26 @@ class A11yAdbClient:
             time.sleep(sleep_seconds)
         return timeout_fn()
 
+    @staticmethod
+    def _is_target_action_payload_missing(result: dict[str, Any], req_id: str) -> bool:
+        return (
+            isinstance(result, dict)
+            and result.get("reqId") == req_id
+            and str(result.get("reason", "")).strip() == "TARGET_ACTION_RESULT 로그를 찾지 못했습니다."
+        )
+
+    @staticmethod
+    def _is_target_action_success(result: Any) -> bool:
+        return isinstance(result, dict) and bool(result.get("success"))
+
+    @staticmethod
+    def _is_target_action_payload_for_req(result: dict[str, Any], req_id: str) -> bool:
+        return isinstance(result, dict) and result.get("reqId") == req_id
+
+    @staticmethod
+    def _normalize_target_action_payload(result: Any) -> dict[str, Any]:
+        return result if isinstance(result, dict) else {"success": False, "reason": "unknown"}
+
     def touch(
         self,
         dev,
@@ -1016,6 +1037,7 @@ class A11yAdbClient:
         self.last_merged_announcement = ""
         
         def _attempt_touch() -> tuple[bool, dict[str, Any]]:
+            # 1) 요청 준비/전송
             self._refresh_tree_if_needed(dev)
             self.clear_logcat(dev=dev)
             req_id = str(uuid.uuid4())[:8]
@@ -1037,10 +1059,11 @@ class A11yAdbClient:
                 ACTION_CLICK_TARGET,
                 extras,
             )
+
+            # 2) payload 파싱 및 성공/실패 판정
             result = self._read_log_result(dev, "TARGET_ACTION_RESULT", req_id)
-            self.last_target_action_result = result if isinstance(result, dict) else {"success": False, "reason": "unknown"}
-            success = bool(result.get("success"))
-            if success:
+            self.last_target_action_result = self._normalize_target_action_payload(result)
+            if self._is_target_action_success(result):
                 self._wait_for_speech_if_needed(dev)
                 return True, self._normalize_action_result(
                     success=True,
@@ -1048,6 +1071,7 @@ class A11yAdbClient:
                     detail=str(self.last_target_action_result.get("reason", "")) or None,
                     raw=self.last_target_action_result,
                 )
+            # 3) 실패 시 재시도 루프로 복귀
             return False, {}
 
         def _touch_timeout() -> dict[str, Any]:
@@ -1145,6 +1169,7 @@ class A11yAdbClient:
         ci_name = name if normalized_type in {"r", "resourceid"} else self._normalize_case_insensitive_pattern(name)
 
         def _attempt_select() -> tuple[bool, dict[str, Any]]:
+            # 1) 요청 준비/전송
             self._refresh_tree_if_needed(dev)
             self.clear_logcat(dev=dev)
             req_id = str(uuid.uuid4())[:8]
@@ -1165,15 +1190,14 @@ class A11yAdbClient:
                 ACTION_FOCUS_TARGET,
                 extras,
             )
+
+            # 2) payload 파싱 및 payload_missing 우선 판정
             result = self._read_log_result(dev, "TARGET_ACTION_RESULT", req_id)
-            payload_missing = (
-                isinstance(result, dict)
-                and result.get("reqId") == req_id
-                and str(result.get("reason", "")).strip() == "TARGET_ACTION_RESULT 로그를 찾지 못했습니다."
-            )
-            if payload_missing:
+            if self._is_target_action_payload_missing(result, req_id):
                 return False, {}
-            if isinstance(result, dict) and result.get("reqId") == req_id:
+
+            # 3) req_id가 일치하는 payload면 success=false 포함 원본을 그대로 반환
+            if self._is_target_action_payload_for_req(result, req_id):
                 # success=false인 경우에도 helper의 원본 payload를 보존한다.
                 self.last_target_action_result = result
                 return True, self._normalize_action_result(
@@ -1182,6 +1206,8 @@ class A11yAdbClient:
                     detail=str(result.get("reason", "")) or None,
                     raw=result,
                 )
+
+            # 4) payload가 아직 준비되지 않은 경우 재시도 루프로 복귀
             return False, {}
 
         def _select_timeout() -> dict[str, Any]:
@@ -1986,6 +2012,8 @@ class A11yAdbClient:
                 raw={"status": STATUS_FAILED, "detail": "timeout"},
             )
 
+        # run_immediately=True:
+        # SMART_NEXT는 내부적으로 즉시 단건 처리되는 요청이라 대기 루프 진입 전에 1회 즉시 시도한다.
         return self._run_with_retry(
             wait_seconds=0.0,
             sleep_seconds=0.0,
