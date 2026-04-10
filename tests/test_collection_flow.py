@@ -799,6 +799,8 @@ def test_open_scenario_pre_navigation_scroll_touch_failure(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
     client = DummyClient([_anchor_row()])
 
     def _scroll_touch(**kwargs):
@@ -818,6 +820,9 @@ def test_open_scenario_pre_navigation_scroll_touch_failure(monkeypatch):
 
     assert ok is False
     assert len(client.scroll_touch_calls) == 1
+    assert any("[SCENARIO][pre_nav][scrolltouch][debug]" in line for line in logs)
+    assert any("exact_match_count=" in line for line in logs)
+    assert any("fallback='helper_scrollTouch'" in line for line in logs)
 
 
 def test_open_scenario_pre_navigation_scroll_touch_plugin_uses_cumulative_downward_search(monkeypatch):

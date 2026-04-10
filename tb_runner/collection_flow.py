@@ -57,7 +57,7 @@ _LIFE_ENERGY_SCENARIO_ID = "life_energy_plugin"
 _LIFE_ENERGY_FAMILY_CARE_REGEX = r"(?i)\b(family\s*care|add\s*family\s*member|me)\b"
 _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
-COLLECTION_FLOW_GUARD_VERSION = "life-energy-entry-recheck-v4"
+COLLECTION_FLOW_GUARD_VERSION = "life-energy-entry-recheck-v5"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 
 
@@ -1047,8 +1047,15 @@ def _select_visible_plugin_candidate(
     *,
     nodes: list[dict[str, Any]],
     target: str,
-) -> tuple[dict[str, Any] | None, str, dict[str, int]]:
-    stats = {"visible_candidate_count": 0, "partial_match_count": 0}
+) -> tuple[dict[str, Any] | None, str, dict[str, Any]]:
+    stats: dict[str, Any] = {
+        "visible_candidate_count": 0,
+        "partial_match_count": 0,
+        "exact_match_count": 0,
+        "visible_samples": [],
+        "partial_samples": [],
+        "rejection_counts": {"semantic_miss": 0},
+    }
     if not isinstance(nodes, list) or not nodes:
         return None, "empty_dump", stats
     flat_nodes = _iter_tree_nodes_with_parent(nodes)
@@ -1118,8 +1125,19 @@ def _select_visible_plugin_candidate(
         if target_tokens and any(token in semantic_blob.lower() for token in target_tokens):
             stats["partial_match_count"] += 1
         if not (_safe_regex_search(target, title_blob) or _safe_regex_search(target, semantic_blob)):
+            stats["rejection_counts"]["semantic_miss"] = int(stats["rejection_counts"].get("semantic_miss", 0)) + 1
             continue
         card_resource = str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "")
+        class_name = str(click_node.get("className", "") or "").strip()
+        bounds_repr = str(click_node.get("boundsInScreen", "") or "").strip()
+        sample_repr = (
+            f"label='{label_blob[:60]}' rid='{card_resource[:40]}' cls='{class_name[:32]}' bounds='{bounds_repr[:24]}'"
+        )
+        if len(stats["visible_samples"]) < 5:
+            stats["visible_samples"].append(sample_repr)
+        is_exact = bool(_safe_regex_search(target, title_blob))
+        if is_exact:
+            stats["exact_match_count"] += 1
         center_delta = abs(((c_top + c_bottom) // 2) - viewport_center)
         score = (
             1 if bool(click_node.get("clickable")) or bool(click_node.get("focusable")) else 0,
@@ -1127,6 +1145,8 @@ def _select_visible_plugin_candidate(
             -center_delta,
             -c_top,
         )
+        if target_tokens and any(token in semantic_blob.lower() for token in target_tokens) and len(stats["partial_samples"]) < 5:
+            stats["partial_samples"].append(sample_repr)
         candidates.append((score, click_node))
 
     if not candidates:
@@ -1280,6 +1300,24 @@ def _run_pre_navigation_steps(
                 fallback_reason = "local_search_exhausted"
                 for scroll_step in range(1, max_scroll_search_steps + 1):
                     selected_node, selected_reason, candidate_stats = _select_visible_plugin_candidate(nodes=top_nodes, target=target)
+                    visible_samples = candidate_stats.get("visible_samples", [])
+                    partial_samples = candidate_stats.get("partial_samples", [])
+                    rejection_counts = candidate_stats.get("rejection_counts", {})
+                    visible_preview = " | ".join(visible_samples[:3]) if isinstance(visible_samples, list) and visible_samples else "-"
+                    partial_preview = " | ".join(partial_samples[:3]) if isinstance(partial_samples, list) and partial_samples else "-"
+                    semantic_miss_count = 0
+                    if isinstance(rejection_counts, dict):
+                        semantic_miss_count = int(rejection_counts.get("semantic_miss", 0) or 0)
+                    log(
+                        f"[SCENARIO][pre_nav][scrolltouch][debug] scroll_step={scroll_step}/{max_scroll_search_steps} "
+                        f"visible_candidate_count={candidate_stats.get('visible_candidate_count', 0)} "
+                        f"partial_match_count={candidate_stats.get('partial_match_count', 0)} "
+                        f"exact_match_count={candidate_stats.get('exact_match_count', 0)} "
+                        f"semantic_miss_count={semantic_miss_count} "
+                        f"visible_top='{visible_preview[:360]}' partial_top='{partial_preview[:360]}' "
+                        f"local_search_nodes={len(top_nodes) if isinstance(top_nodes, list) else 0} "
+                        f"selected={str(selected_node is not None).lower()} selected_reason='{selected_reason}'"
+                    )
                     if selected_node is not None:
                         class_name = str(selected_node.get("className", "") or "").strip()
                         resource_id = str(selected_node.get("viewIdResourceName", "") or selected_node.get("resourceId", "") or "").strip()
@@ -1310,6 +1348,8 @@ def _run_pre_navigation_steps(
 
                     if scroll_step >= max_scroll_search_steps:
                         fallback_reason = "max_scroll_search_steps_reached"
+                        if not isinstance(top_nodes, list) or not top_nodes:
+                            fallback_reason = "local_search_empty_after_scroll"
                         log(
                             f"[SCENARIO][pre_nav][scrolltouch] visible_candidate_count={candidate_stats.get('visible_candidate_count', 0)} "
                             f"partial_match_count={candidate_stats.get('partial_match_count', 0)} "
@@ -1335,6 +1375,8 @@ def _run_pre_navigation_steps(
                         top_nodes = dump_tree_fn(dev=dev) if callable(dump_tree_fn) else []
                     except Exception:
                         top_nodes = []
+                    if not top_nodes:
+                        fallback_reason = "local_search_empty_after_scroll"
                     current_signature = _make_visible_plugin_search_signature(top_nodes)
                     if current_signature and last_signature and current_signature == last_signature:
                         fallback_reason = "semantic_no_change_after_scroll"
