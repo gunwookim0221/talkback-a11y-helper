@@ -821,7 +821,9 @@ def test_open_scenario_pre_navigation_scroll_touch_failure(monkeypatch):
     assert ok is False
     assert len(client.scroll_touch_calls) == 1
     assert any("[SCENARIO][pre_nav][scrolltouch][debug]" in line for line in logs)
+    assert any("[SCENARIO][pre_nav][scrolltouch][inspect]" in line for line in logs)
     assert any("exact_match_count=" in line for line in logs)
+    assert any("rejections='" in line for line in logs)
     assert any("fallback='helper_scrollTouch'" in line for line in logs)
 
 
@@ -901,7 +903,7 @@ def test_select_visible_plugin_candidate_promotes_clickable_card_from_descendant
         {
             "text": "Life",
             "boundsInScreen": "0,0,1080,2200",
-            "visibleToUser": True,
+            "visibleToUser": False,
             "children": [
                 {
                     "boundsInScreen": "100,620,980,980",
@@ -931,6 +933,53 @@ def test_select_visible_plugin_candidate_promotes_clickable_card_from_descendant
     assert "candidate_count=" in reason
     assert stats.get("visible_candidate_count", 0) >= 1
     assert stats.get("partial_match_count", 0) >= 1
+    assert any("reason='survive_candidate'" in sample for sample in stats.get("inspect_samples", []))
+
+
+def test_select_visible_plugin_candidate_collects_rejection_reasons_and_pre_candidate_samples():
+    nodes = [
+        {
+            "text": "Life",
+            "boundsInScreen": "0,0,1080,2200",
+            "visibleToUser": False,
+            "children": [
+                {
+                    "text": "Air Care",
+                    "boundsInScreen": "100,600,980,920",
+                    "visibleToUser": False,
+                    "viewIdResourceName": "com.test:id/titleHidden",
+                },
+                {
+                    "text": "Container without bounds",
+                    "boundsInScreen": "",
+                    "visibleToUser": True,
+                    "clickable": True,
+                    "focusable": True,
+                    "viewIdResourceName": "com.test:id/preInstalledServiceCard",
+                    "children": [
+                        {
+                            "text": "Air Care",
+                            "boundsInScreen": "160,1040,400,1120",
+                            "visibleToUser": True,
+                            "viewIdResourceName": "com.test:id/tvHeaderTitle",
+                        },
+                    ],
+                },
+            ],
+        }
+    ]
+
+    selected, reason, stats = collection_flow._select_visible_plugin_candidate(
+        nodes=nodes,
+        target=r"(?i).*air\s*care.*",
+    )
+
+    assert selected is None
+    assert reason == "no_visible_candidate"
+    assert stats.get("rejection_counts", {}).get("invisible_node", 0) >= 1
+    assert stats.get("rejection_counts", {}).get("no_click_node_bounds", 0) >= 1
+    assert any("reason='invisible_node'" in sample for sample in stats.get("inspect_samples", []))
+    assert any("promotion_fail:no_click_node_bounds" in sample for sample in stats.get("pre_candidate_fail_samples", []))
 
 
 def test_confirm_click_focused_transition_life_energy_rejects_weak_signal(monkeypatch):

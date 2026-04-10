@@ -59,6 +59,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-recheck-v7"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr15-scrolltouch-candidate-rejection-v1"
 
 
 
@@ -1054,13 +1055,77 @@ def _select_visible_plugin_candidate(
     nodes: list[dict[str, Any]],
     target: str,
 ) -> tuple[dict[str, Any] | None, str, dict[str, Any]]:
+    sample_limit = 10
+    sample_text_limit = 72
+    sample_id_limit = 48
+    sample_class_limit = 36
+
+    def _clip(value: Any, limit: int) -> str:
+        return str(value or "").strip()[:limit]
+
+    def _append_rejection(stats_map: dict[str, Any], reason: str) -> None:
+        rejection_counts = stats_map.setdefault("rejection_counts", {})
+        rejection_counts[reason] = int(rejection_counts.get(reason, 0) or 0) + 1
+
+    def _record_inspect(
+        stats_map: dict[str, Any],
+        *,
+        node_ref: dict[str, Any],
+        promoted_click_node: dict[str, Any] | None,
+        reject_reason: str,
+        stage: str = "filtered",
+    ) -> None:
+        samples = stats_map.setdefault("inspect_samples", [])
+        if len(samples) >= sample_limit:
+            return
+        resource_id = _clip(node_ref.get("viewIdResourceName", "") or node_ref.get("resourceId", ""), sample_id_limit)
+        class_name = _clip(node_ref.get("className", ""), sample_class_limit)
+        label_blob = _clip(_node_label_blob(node_ref), sample_text_limit)
+        visible = _node_is_visible(node_ref)
+        clickable = bool(node_ref.get("clickable"))
+        focusable = bool(node_ref.get("focusable"))
+        effective_clickable = clickable or focusable
+        promoted = isinstance(promoted_click_node, dict)
+        samples.append(
+            "label='{}' rid='{}' cls='{}' visible={} clickable={} focusable={} effectiveClickable={} promoted_click_node={} stage='{}' reason='{}'".format(
+                label_blob,
+                resource_id,
+                class_name,
+                str(bool(visible)).lower(),
+                str(clickable).lower(),
+                str(focusable).lower(),
+                str(effective_clickable).lower(),
+                str(promoted).lower(),
+                stage,
+                reject_reason,
+            )
+        )
+
+    def _record_pre_candidate(
+        stats_map: dict[str, Any],
+        *,
+        node_ref: dict[str, Any],
+        promoted_click_node: dict[str, Any] | None,
+        reason: str,
+    ) -> None:
+        samples = stats_map.setdefault("pre_candidate_fail_samples", [])
+        if len(samples) >= sample_limit:
+            return
+        source_node = promoted_click_node if isinstance(promoted_click_node, dict) else node_ref
+        label_blob = _clip(_node_label_blob(source_node), sample_text_limit)
+        rid = _clip(source_node.get("viewIdResourceName", "") or source_node.get("resourceId", ""), sample_id_limit)
+        cls = _clip(source_node.get("className", ""), sample_class_limit)
+        samples.append(f"label='{label_blob}' rid='{rid}' cls='{cls}' reason='{reason}'")
+
     stats: dict[str, Any] = {
         "visible_candidate_count": 0,
         "partial_match_count": 0,
         "exact_match_count": 0,
         "visible_samples": [],
         "partial_samples": [],
-        "rejection_counts": {"semantic_miss": 0},
+        "inspect_samples": [],
+        "pre_candidate_fail_samples": [],
+        "rejection_counts": {},
     }
     if not isinstance(nodes, list) or not nodes:
         return None, "empty_dump", stats
@@ -1091,32 +1156,73 @@ def _select_visible_plugin_candidate(
         raw_bounds = str(node.get("boundsInScreen", "") or "").strip()
         bounds = parse_bounds_str(raw_bounds)
         if not bounds:
+            _append_rejection(stats, "invalid_bounds")
+            _record_inspect(stats, node_ref=node, promoted_click_node=None, reject_reason="invalid_bounds")
             continue
         left, top, right, bottom = bounds
         if not (left < right and top < bottom):
+            _append_rejection(stats, "invalid_bounds_geometry")
+            _record_inspect(stats, node_ref=node, promoted_click_node=None, reject_reason="invalid_bounds_geometry")
             continue
         if bottom <= viewport_top or top >= viewport_bottom:
+            _append_rejection(stats, "outside_viewport")
+            _record_inspect(stats, node_ref=node, promoted_click_node=None, reject_reason="outside_viewport")
             continue
         if not _node_is_visible(node):
+            _append_rejection(stats, "invisible_node")
+            _record_inspect(stats, node_ref=node, promoted_click_node=None, reject_reason="invisible_node")
             continue
         click_node = node
+        promoted_click_node: dict[str, Any] | None = None
         if isinstance(parent, dict):
             parent_clickable = bool(parent.get("clickable")) or bool(parent.get("focusable"))
             parent_resource = str(parent.get("viewIdResourceName", "") or parent.get("resourceId", "") or "").strip()
             if parent_clickable or _safe_regex_search(r"(?i)(preinstalledservicecard|servicecard|card)", parent_resource):
                 click_node = parent
+                promoted_click_node = parent
         label_blob = _node_label_blob(node)
         click_label_blob = _node_label_blob(click_node)
         click_descendant_blob = " ".join(descendants_by_container.get(id(click_node), []))
+        if not (label_blob or click_label_blob or click_descendant_blob):
+            _append_rejection(stats, "no_label_blob")
+            _record_inspect(stats, node_ref=node, promoted_click_node=promoted_click_node, reject_reason="no_label_blob")
+            continue
         if not _safe_regex_search(target, " ".join(part for part in [label_blob, click_label_blob, click_descendant_blob] if part)):
+            _append_rejection(stats, "filtered_before_candidate")
+            _record_inspect(
+                stats,
+                node_ref=node,
+                promoted_click_node=promoted_click_node,
+                reject_reason="filtered_before_candidate",
+                stage="label_filter",
+            )
             continue
         click_bounds = parse_bounds_str(str(click_node.get("boundsInScreen", "") or "").strip())
         if not click_bounds:
+            _append_rejection(stats, "no_click_node_bounds")
+            _record_inspect(stats, node_ref=node, promoted_click_node=promoted_click_node, reject_reason="no_click_node_bounds")
+            _record_pre_candidate(stats, node_ref=node, promoted_click_node=promoted_click_node, reason="promotion_fail:no_click_node_bounds")
             continue
         c_left, c_top, c_right, c_bottom = click_bounds
         if not (c_left < c_right and c_top < c_bottom):
+            _append_rejection(stats, "invalid_click_node_bounds")
+            _record_inspect(
+                stats,
+                node_ref=node,
+                promoted_click_node=promoted_click_node,
+                reject_reason="invalid_click_node_bounds",
+            )
+            _record_pre_candidate(
+                stats,
+                node_ref=node,
+                promoted_click_node=promoted_click_node,
+                reason="promotion_fail:invalid_click_node_bounds",
+            )
             continue
         if c_bottom <= viewport_top or c_top >= viewport_bottom:
+            _append_rejection(stats, "click_node_not_visible")
+            _record_inspect(stats, node_ref=node, promoted_click_node=promoted_click_node, reject_reason="click_node_not_visible")
+            _record_pre_candidate(stats, node_ref=node, promoted_click_node=promoted_click_node, reason="actionability_fail:click_node_not_visible")
             continue
         stats["visible_candidate_count"] += 1
         title_blob = " ".join(
@@ -1128,11 +1234,26 @@ def _select_visible_plugin_candidate(
         descendant_blob = click_descendant_blob
         semantic_blob = " ".join(part for part in [label_blob, title_blob, descendant_blob] if part).strip()
         if not semantic_blob:
+            _append_rejection(stats, "promoted_label_empty")
+            _record_inspect(stats, node_ref=node, promoted_click_node=promoted_click_node, reject_reason="promoted_label_empty")
             continue
         if target_tokens and any(token in semantic_blob.lower() for token in target_tokens):
             stats["partial_match_count"] += 1
         if not (_safe_regex_search(target, title_blob) or _safe_regex_search(target, semantic_blob)):
-            stats["rejection_counts"]["semantic_miss"] = int(stats["rejection_counts"].get("semantic_miss", 0)) + 1
+            _append_rejection(stats, "semantic_miss")
+            _record_inspect(
+                stats,
+                node_ref=node,
+                promoted_click_node=promoted_click_node,
+                reject_reason="semantic_miss",
+                stage="semantic_filter",
+            )
+            _record_pre_candidate(
+                stats,
+                node_ref=node,
+                promoted_click_node=promoted_click_node,
+                reason="semantic_pass_partial_but_exact_fail",
+            )
             continue
         card_resource = str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "")
         class_name = str(click_node.get("className", "") or "").strip()
@@ -1154,6 +1275,13 @@ def _select_visible_plugin_candidate(
         )
         if target_tokens and any(token in semantic_blob.lower() for token in target_tokens) and len(stats["partial_samples"]) < 5:
             stats["partial_samples"].append(sample_repr)
+        _record_inspect(
+            stats,
+            node_ref=node,
+            promoted_click_node=promoted_click_node,
+            reject_reason="survive_candidate",
+            stage="candidate_ready",
+        )
         candidates.append((score, click_node))
 
     if not candidates:
@@ -1309,21 +1437,37 @@ def _run_pre_navigation_steps(
                     selected_node, selected_reason, candidate_stats = _select_visible_plugin_candidate(nodes=top_nodes, target=target)
                     visible_samples = candidate_stats.get("visible_samples", [])
                     partial_samples = candidate_stats.get("partial_samples", [])
+                    inspect_samples = candidate_stats.get("inspect_samples", [])
+                    pre_candidate_fail_samples = candidate_stats.get("pre_candidate_fail_samples", [])
                     rejection_counts = candidate_stats.get("rejection_counts", {})
                     visible_preview = " | ".join(visible_samples[:3]) if isinstance(visible_samples, list) and visible_samples else "-"
                     partial_preview = " | ".join(partial_samples[:3]) if isinstance(partial_samples, list) and partial_samples else "-"
-                    semantic_miss_count = 0
-                    if isinstance(rejection_counts, dict):
-                        semantic_miss_count = int(rejection_counts.get("semantic_miss", 0) or 0)
+                    rejection_summary = "-"
+                    if isinstance(rejection_counts, dict) and rejection_counts:
+                        sorted_rejections = sorted(rejection_counts.items(), key=lambda item: (-int(item[1] or 0), str(item[0])))
+                        rejection_summary = ", ".join(f"{name}:{count}" for name, count in sorted_rejections[:6])
+                    inspect_preview = (
+                        " | ".join(inspect_samples[:5]) if isinstance(inspect_samples, list) and inspect_samples else "-"
+                    )
+                    pre_candidate_preview = (
+                        " | ".join(pre_candidate_fail_samples[:3])
+                        if isinstance(pre_candidate_fail_samples, list) and pre_candidate_fail_samples
+                        else "-"
+                    )
                     log(
                         f"[SCENARIO][pre_nav][scrolltouch][debug] scroll_step={scroll_step}/{max_scroll_search_steps} "
                         f"visible_candidate_count={candidate_stats.get('visible_candidate_count', 0)} "
                         f"partial_match_count={candidate_stats.get('partial_match_count', 0)} "
                         f"exact_match_count={candidate_stats.get('exact_match_count', 0)} "
-                        f"semantic_miss_count={semantic_miss_count} "
+                        f"rejections='{rejection_summary[:360]}' "
                         f"visible_top='{visible_preview[:360]}' partial_top='{partial_preview[:360]}' "
+                        f"pre_candidate_top='{pre_candidate_preview[:360]}' "
                         f"local_search_nodes={len(top_nodes) if isinstance(top_nodes, list) else 0} "
                         f"selected={str(selected_node is not None).lower()} selected_reason='{selected_reason}'"
+                    )
+                    log(
+                        f"[SCENARIO][pre_nav][scrolltouch][inspect] scroll_step={scroll_step}/{max_scroll_search_steps} "
+                        f"samples='{inspect_preview[:1200]}'"
                     )
                     if selected_node is not None:
                         class_name = str(selected_node.get("className", "") or "").strip()
