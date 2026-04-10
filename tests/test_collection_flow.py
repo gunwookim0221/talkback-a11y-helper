@@ -2505,6 +2505,29 @@ def test_verify_plugin_entry_root_state_allows_relaxed_gate_with_family_care_car
     assert reason in {"root_state_stable", "root_state_scrolltouch_entry_relaxed"}
 
 
+def test_verify_plugin_entry_root_state_allows_life_air_care_relaxed_gate_with_family_care_signal(monkeypatch):
+    client = DummyClient([])
+    client.dump_tree_sequence = [
+        [
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/location_home_button", "text": "Location", "visibleToUser": True},
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/add_menu_button", "text": "Add", "visibleToUser": True},
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/cardTitle", "text": "Family Care", "visibleToUser": True},
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/cardDescription", "text": "Add family member", "visibleToUser": True},
+        ]
+    ]
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    ok, reason = collection_flow._verify_plugin_entry_root_state(
+        client,
+        "SERIAL",
+        phase="before_pre_navigation",
+        scenario_id="life_air_care_plugin",
+    )
+
+    assert ok is True
+    assert reason in {"root_state_stable", "root_state_scrolltouch_entry_relaxed"}
+
+
 def test_verify_plugin_entry_root_state_relaxed_gate_blocks_navigate_up_detail(monkeypatch):
     client = DummyClient([])
     fail_nodes = [

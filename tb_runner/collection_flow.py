@@ -57,7 +57,7 @@ _LIFE_ENERGY_SCENARIO_ID = "life_energy_plugin"
 _LIFE_ENERGY_FAMILY_CARE_REGEX = r"(?i)\b(family\s*care|add\s*family\s*member|me)\b"
 _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
-COLLECTION_FLOW_GUARD_VERSION = "life-energy-entry-recheck-v5"
+COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-recheck-v6"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 
 
@@ -304,14 +304,19 @@ def _verify_plugin_entry_root_state(
         if ok:
             return True, "root_state_stable"
         last_reason = str(snapshot.get("fail_reason", "life_root_not_stable") or "life_root_not_stable")
-        is_life_energy_before_pre_nav = (
-            str(scenario_id or "").strip().lower() == _LIFE_ENERGY_SCENARIO_ID
-            and phase == "before_pre_navigation"
+        normalized_scenario_id = str(scenario_id or "").strip().lower()
+        is_life_plugin_before_pre_nav = (
+            phase == "before_pre_navigation"
+            and normalized_scenario_id.startswith("life_")
+            and normalized_scenario_id.endswith("_plugin")
         )
-        if is_life_energy_before_pre_nav:
+        if is_life_plugin_before_pre_nav:
             relaxed_scrolltouch_entry_ok = bool(
                 int(snapshot.get("navigate_up_hits", 0) or 0) == 0
-                and bool(snapshot.get("life_selected") or snapshot.get("bottom_nav_life_visible"))
+                and (
+                    bool(snapshot.get("life_selected") or snapshot.get("bottom_nav_life_visible"))
+                    or family_care_signature_seen
+                )
                 and int(snapshot.get("app_bar_hits", 0) or 0) >= _LIFE_ROOT_APP_BAR_MIN_HITS
             )
             if relaxed_scrolltouch_entry_ok:
@@ -325,6 +330,7 @@ def _verify_plugin_entry_root_state(
                 or snapshot.get("bottom_nav_life_visible")
                 or int(snapshot.get("app_bar_hits", 0) or 0) >= _LIFE_ROOT_APP_BAR_MIN_HITS
                 or int(snapshot.get("visible_card_hits", 0) or 0) >= _LIFE_ROOT_VISIBLE_CARD_MIN_HITS
+                or family_care_signature_seen
             )
             if transient_candidate:
                 for recheck_idx in range(1, _LIFE_ROOT_TRANSIENT_RECHECK_COUNT + 1):
