@@ -50,12 +50,14 @@ _PLUGIN_TOP_VERIFY_RETRY_COUNT = 2
 _LIFE_ROOT_APP_BAR_MIN_HITS = 2
 _LIFE_ROOT_VISIBLE_CARD_MIN_HITS = 2
 _LIFE_ROOT_SCORE_THRESHOLD = 3
+_LIFE_ROOT_TRANSIENT_RECHECK_COUNT = 2
+_LIFE_ROOT_TRANSIENT_RECHECK_SLEEP_SECONDS = 0.12
 _PLUGIN_SCROLL_SEARCH_MAX_STEPS = 5
 _LIFE_ENERGY_SCENARIO_ID = "life_energy_plugin"
 _LIFE_ENERGY_FAMILY_CARE_REGEX = r"(?i)\b(family\s*care|add\s*family\s*member|me)\b"
 _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr5-normalization-v2"
-COLLECTION_FLOW_GUARD_VERSION = "life-energy-entry-recheck-v1"
+COLLECTION_FLOW_GUARD_VERSION = "life-energy-entry-recheck-v2"
 
 
 @dataclass
@@ -215,7 +217,13 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _verify_plugin_entry_root_state(client: A11yAdbClient, dev: str, *, phase: str) -> tuple[bool, str]:
+def _verify_plugin_entry_root_state(
+    client: A11yAdbClient,
+    dev: str,
+    *,
+    phase: str,
+    scenario_id: str = "",
+) -> tuple[bool, str]:
     dump_tree_fn = getattr(client, "dump_tree", None)
     if not callable(dump_tree_fn):
         log(f"[SCENARIO][pre_nav][stabilization] phase='{phase}' ok=false reason='dump_tree_not_supported'")
@@ -241,6 +249,47 @@ def _verify_plugin_entry_root_state(client: A11yAdbClient, dev: str, *, phase: s
         if ok:
             return True, "root_state_stable"
         last_reason = str(snapshot.get("fail_reason", "life_root_not_stable") or "life_root_not_stable")
+        is_life_energy_before_pre_nav = (
+            str(scenario_id or "").strip().lower() == _LIFE_ENERGY_SCENARIO_ID
+            and phase == "before_pre_navigation"
+        )
+        if is_life_energy_before_pre_nav:
+            transient_candidate = bool(
+                snapshot.get("life_selected")
+                or snapshot.get("bottom_nav_life_visible")
+                or int(snapshot.get("app_bar_hits", 0) or 0) >= _LIFE_ROOT_APP_BAR_MIN_HITS
+                or int(snapshot.get("visible_card_hits", 0) or 0) >= _LIFE_ROOT_VISIBLE_CARD_MIN_HITS
+            )
+            if transient_candidate:
+                for recheck_idx in range(1, _LIFE_ROOT_TRANSIENT_RECHECK_COUNT + 1):
+                    time.sleep(_LIFE_ROOT_TRANSIENT_RECHECK_SLEEP_SECONDS)
+                    try:
+                        recheck_nodes = dump_tree_fn(dev=dev)
+                    except Exception:
+                        recheck_nodes = []
+                    family_care_signature_seen = any(
+                        _safe_regex_search(_LIFE_ENERGY_FAMILY_CARE_REGEX, _node_label_blob(node))
+                        for node, _ in _iter_tree_nodes_with_parent(recheck_nodes)
+                    )
+                    recheck_snapshot = _life_root_state_snapshot(recheck_nodes)
+                    recheck_ok = bool(recheck_snapshot.get("ok"))
+                    log(
+                        f"[SCENARIO][pre_nav][stabilization][recheck] phase='{phase}' "
+                        f"attempt={attempt}/{_PLUGIN_ENTRY_RETRY_COUNT} recheck={recheck_idx}/{_LIFE_ROOT_TRANSIENT_RECHECK_COUNT} "
+                        f"life_selected={str(recheck_snapshot.get('life_selected')).lower()} "
+                        f"app_bar_hits={recheck_snapshot.get('app_bar_hits', 0)} "
+                        f"visible_card_hits={recheck_snapshot.get('visible_card_hits', 0)} "
+                        f"life_root_signature_present={str(recheck_snapshot.get('life_root_signature_present')).lower()} "
+                        f"final_score={recheck_snapshot.get('final_score', 0)} "
+                        f"family_care_signature_seen={str(family_care_signature_seen).lower()} "
+                        f"ok={str(recheck_ok).lower()}"
+                    )
+                    if family_care_signature_seen and not recheck_ok:
+                        last_reason = "life_root_not_stable"
+                        break
+                    if recheck_ok:
+                        return True, "root_state_stable_recheck"
+                    last_reason = str(recheck_snapshot.get("fail_reason", last_reason) or last_reason)
         if attempt < _PLUGIN_ENTRY_RETRY_COUNT:
             time.sleep(0.2)
     return False, last_reason
@@ -1473,6 +1522,7 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
                 client,
                 dev,
                 phase="focus_align_recheck",
+                scenario_id=scenario_id,
             )
             if not plugin_root_ok:
                 log(
@@ -1525,7 +1575,12 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         time.sleep(0.5)
 
     if is_plugin_pre_nav_scenario:
-        plugin_root_ok, plugin_root_reason = _verify_plugin_entry_root_state(client, dev, phase="before_pre_navigation")
+        plugin_root_ok, plugin_root_reason = _verify_plugin_entry_root_state(
+            client,
+            dev,
+            phase="before_pre_navigation",
+            scenario_id=scenario_id,
+        )
         if not plugin_root_ok:
             log(
                 f"[SCENARIO][pre_nav][stabilization] failed scenario='{scenario_id}' "
