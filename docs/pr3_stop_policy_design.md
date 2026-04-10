@@ -1,5 +1,10 @@
 # PR3 Stop Policy 설계서 (동작 변경)
 
+> [!IMPORTANT]
+> 이 문서는 **historical design record(당시 설계 기록)** 입니다.
+> 현재 운영 기준은 `docs/current-client-architecture.md` 및 운영 문서(`system-overview.md`, `architecture.md`, `testing-pipeline.md`)를 우선 참조하세요.
+
+
 본 문서는 PR1(함수 분해), PR2(start pipeline 구조화) 이후 단계로, Python runner의 **stop policy / 반복 탐지 / no_progress 판단 / overlay 이후 흐름 제어**를 실제 코드 기준으로 보완하는 설계 문서다.
 
 - 대상 범위: `script_test.py`, `tb_runner/*` 중 stop/loop/overlay 후속 제어

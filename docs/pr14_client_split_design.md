@@ -1,5 +1,10 @@
 # PR14 Client 분해 설계서 (동작 보존 최우선)
 
+> [!IMPORTANT]
+> 이 문서는 **historical design record(당시 설계 기록)** 입니다.
+> 현재 운영 기준은 `docs/current-client-architecture.md` 및 운영 문서(`system-overview.md`, `architecture.md`, `testing-pipeline.md`)를 우선 참조하세요.
+
+
 본 문서는 `talkback_lib/__init__.py`에 집중된 책임을 다음 리팩토링 단계에서 안전하게 분리하기 위한 **기준 설계서**다.
 
 - 범위: Python client (`talkback_lib/__init__.py`) 구조 분해 설계

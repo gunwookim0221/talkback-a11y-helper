@@ -1,63 +1,49 @@
-# System Overview
+# System Overview (현재 운영 기준)
 
-[Architecture 보기](architecture.md) | [Testing Pipeline 보기](testing-pipeline.md)
+[Architecture](architecture.md) | [Testing Pipeline](testing-pipeline.md) | [Current Client Architecture](current-client-architecture.md)
 
-## Overview
+---
 
-기존 사내 UI 자동화 라이브러리는 객체 탐색/클릭을 포함한 핵심 기능을 이미 제공하며, 일반 테스트 환경에서는 안정적으로 동작합니다.
+## 1) 시스템 목적
 
-이 시스템(`talkback-a11y-helper`)의 도입 목적은 기존 라이브러리 대체가 아니라, **TalkBack이 켜진 접근성 테스트 환경에서만 발생하는 객체 인식/제어 공백을 보완**하는 데 있습니다.
+`talkback-a11y-helper`는 기존 자동화 라이브러리를 대체하는 프로젝트가 아니라,
+**TalkBack 활성화 환경에서 발생하는 접근성 제어 공백을 보완**하는 프로젝트입니다.
 
-운영 원칙은 다음과 같습니다.
+- 일반 환경: 기존 자동화 경로 사용
+- TalkBack 환경 실패 구간: helper + Python runner 경로 사용
 
-- 일반 환경: 기존(레거시) 자동화 함수 사용
-- 접근성(TalkBack) 환경에서 기존 함수 실패 시: 헬퍼 앱 기반 경로로 Override/Fallback
+---
 
-즉 본 시스템은 전면 교체 솔루션이 아니라, 접근성 환경 전용의 보완 계층으로서 자동화 신뢰도를 높이는 것을 목표로 합니다.
+## 2) 현재 구성
 
-현재 저장소의 runner 단계는 **DFS/full-depth 탐색 확장 전 단계**로, 한 화면의 선형(`SMART_NEXT`) 수집 안정화와 결과 정제에 집중합니다.
+### Android Helper (`app/`)
+- 접근성 이벤트 수신
+- broadcast 액션 처리(GET_FOCUS, DUMP_TREE, SMART_NEXT 등)
+- 포커스/클릭/스크롤/텍스트 입력 액션 실행
 
-- collector: deterministic 수집(재현 가능한 step-by-step 결과) 우선
-- 품질판단(노이즈/중복/의미 해석): 결과 row 후처리 및 analyzer 단계에서 분리 처리
-- full-depth/그래프 탐색: 장기 확장 과제로 분리
+### Python Runner (`script_test.py`, `tb_runner/`, `talkback_lib/`)
+- scenario open → step loop → overlay → stop 판단 → 저장
+- row 기반 결과 수집 및 엑셀 리포트 생성
 
-## End-to-End Flow
+---
 
-```text
-PC Automation Script
-    -> ADB broadcast
-    -> Helper App
-    -> Accessibility Tree Dump / Target Action
-    -> Target App UI
-```
+## 3) 현재 실행 축
 
-## Automation Communication Flow
+1. `script_test.py`가 runtime 설정을 병합
+2. 시나리오별 `collect_tab_rows(...)` 실행
+3. step마다 `A11yAdbClient.collect_focus_step(...)` 호출
+4. `StopEvaluator`로 종료 판단
+5. `save_excel_with_perf(...)`로 checkpoint/final 저장
 
-1. Automation Script(Python/CI)가 액션을 선택합니다.
-2. `adb broadcast` 명령으로 헬퍼 앱에 제어 신호를 보냅니다.
-3. 헬퍼 앱이 접근성 트리를 순회하거나 타겟 노드를 검색합니다.
-4. 덤프 결과 또는 타겟 액션 수행 결과를 JSON/로그로 제공합니다.
+---
 
-## Supported Broadcast Actions
+## 4) 현재 문서 우선순위
 
-- `com.iotpart.sqe.talkbackhelper.GET_FOCUS`
-- `com.iotpart.sqe.talkbackhelper.DUMP_TREE`
-- `com.iotpart.sqe.talkbackhelper.FOCUS_TARGET` (`targetName`, `targetType`, `targetIndex`, `className`, `clickable`, `focusable`, `targetText`, `targetId`)
-- `com.iotpart.sqe.talkbackhelper.CLICK_TARGET` (`targetName`, `targetType`, `targetIndex`, `isLongClick`)
-- `com.iotpart.sqe.talkbackhelper.CHECK_TARGET` (`targetName`, `targetType`, `targetIndex`, `className`, `clickable`, `focusable`, `targetText`, `targetId`)
-- `com.iotpart.sqe.talkbackhelper.NEXT`
-- `com.iotpart.sqe.talkbackhelper.PREV`
-- `com.iotpart.sqe.talkbackhelper.SMART_NEXT`
-- `com.iotpart.sqe.talkbackhelper.CLICK_FOCUSED`
+운영/구현 기준은 아래 문서를 우선합니다.
 
-## Stability Characteristics
+1. `docs/current-client-architecture.md`
+2. `docs/testing-pipeline.md`
+3. `docs/api-reference.md`
+4. `docs/runner_flow.md`
 
-- 좌표 입력 대신 접근성 노드 자체를 기준으로 제어
-- 전체 화면 트리를 Flat JSON으로 수집해 외부 스크립트가 파싱하기 쉬움
-- `targetName`/`targetType`/`targetIndex` 기본 매칭 + `className`/`clickable`/`focusable`/`targetText`/`targetId` AND 필터로 정밀 제어
-- `NEXT/PREV`는 클릭 가능한 부모 그룹을 우선하고, 그 자식 파편 노드는 이동 경로에서 제외
-
-
-## Security Guardrail
-
-- 명령 receiver는 `android.permission.DUMP` 보호 권한으로 노출되어, ADB shell 또는 시스템 수준 권한을 가진 송신자만 브로드캐스트를 전송할 수 있습니다.
+PR 설계 문서(`docs/pr*.md`)는 historical design record이며, 현재 운영 기준 문서가 아닙니다.

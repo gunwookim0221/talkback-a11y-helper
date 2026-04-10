@@ -1,5 +1,10 @@
 # PR4 Overlay Flow 설계서 (구조/계약 정리 중심)
 
+> [!IMPORTANT]
+> 이 문서는 **historical design record(당시 설계 기록)** 입니다.
+> 현재 운영 기준은 `docs/current-client-architecture.md` 및 운영 문서(`system-overview.md`, `architecture.md`, `testing-pipeline.md`)를 우선 참조하세요.
+
+
 본 문서는 PR1/PR2/PR3 다음 단계로, Python runner의 overlay 구간을 **정책(policy) / 실행(execution) / 복귀(realign/recovery) / 저장(persist)** 책임으로 분리하기 위한 기준서다.
 
 - 대상 범위: `script_test.py`, `tb_runner/collection_flow.py`, `tb_runner/overlay_logic.py` 중심의 Python runner overlay 흐름
