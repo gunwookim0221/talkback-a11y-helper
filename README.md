@@ -628,6 +628,7 @@ assert client.last_merged_announcement == merged
 - stop evaluator는 단일 약신호(예: same-like만 감지)로 즉시 종료하지 않고, `repeat + no_progress + move failure/terminal` 조합이 확인될 때 보수적으로 종료합니다.
 - `content`에서는 `global_nav_entry`를 유지하면서도, overlay realign 직후 동일 흐름 반복(`after_realign + recent_repeat + no_progress`)이 확인될 때만 `repeat_no_progress` 후보로 조기 종료할 수 있습니다.
 - `global_nav`에서는 마지막 항목에서 `move_result=failed + same_like 반복 + no_progress` 패턴이 누적되면 `global_nav_end` reason으로 더 명확하게 종료를 기록합니다(기존 `repeat_no_progress` 계열과 호환).
+- `[STOP][eval]` 로그의 기존 핵심 키는 유지되며, 뒤쪽에 `stop_explain_*` 필드가 추가되어 입력/반복/무진전/게이트 상태를 포렌식 없이 추적할 수 있습니다(판정 로직/결과는 동일).
 
 ### pre_navigation action 예시 (Settings focusable 대응)
 

@@ -1910,6 +1910,9 @@ def _build_stop_evaluation_inputs(
     global_nav_reason = str(stop_details.get("global_nav_reason", "") or "")
     if is_global_nav_only_scenario:
         is_global_nav, global_nav_reason = is_global_nav_row(row, scenario_cfg=tab_cfg)
+    stop_explain = stop_details.get("stop_explain", {})
+    if not isinstance(stop_explain, dict):
+        stop_explain = {}
     return {
         "terminal_signal": bool(stop_details.get("terminal", False)),
         "same_like_count": int(stop_details.get("same_like_count", 0) or 0),
@@ -1939,7 +1942,48 @@ def _build_stop_evaluation_inputs(
         "realign_grace_suppressed": bool(stop_details.get("realign_grace_suppressed", False)),
         "repeat_stop_hit": bool(stop_details.get("repeat_stop_hit", False)),
         "eval_reason": str(stop_details.get("reason", "") or "none"),
+        "stop_explain_version": str(stop_details.get("stop_explain_version", "") or ""),
+        "stop_explain": stop_explain,
     }
+
+
+def _format_stop_explain_log_fields(stop_eval_inputs: dict[str, Any], decision: str) -> str:
+    stop_explain = stop_eval_inputs.get("stop_explain", {})
+    if not isinstance(stop_explain, dict):
+        stop_explain = {}
+    repeat = stop_explain.get("repeat", {})
+    if not isinstance(repeat, dict):
+        repeat = {}
+    no_progress = stop_explain.get("no_progress", {})
+    if not isinstance(no_progress, dict):
+        no_progress = {}
+    overlay_context = stop_explain.get("overlay_context", {})
+    if not isinstance(overlay_context, dict):
+        overlay_context = {}
+    gates = stop_explain.get("gates", {})
+    if not isinstance(gates, dict):
+        gates = {}
+    inputs = stop_explain.get("inputs", {})
+    if not isinstance(inputs, dict):
+        inputs = {}
+    return (
+        f"stop_explain_version='{str(stop_eval_inputs.get('stop_explain_version', '') or 'none')}' "
+        f"stop_explain_input='step:{int(inputs.get('step_index', 0) or 0)}|move:{str(inputs.get('move_result', '') or 'none')}|"
+        f"smart:{str(inputs.get('smart_nav_result', '') or 'none')}|same:{int(inputs.get('same_like_count', 0) or 0)}|"
+        f"fail:{int(inputs.get('fail_count', 0) or 0)}' "
+        f"stop_explain_repeat='recent:{str(bool(repeat.get('recent_repeat', False))).lower()}|"
+        f"class:{str(repeat.get('repeat_class', '') or 'none')}|strict:{str(bool(repeat.get('strict_duplicate', False))).lower()}|"
+        f"semantic:{str(bool(repeat.get('semantic_duplicate', False))).lower()}|loop:{str(repeat.get('loop_classification', '') or 'none')}|"
+        f"two_card:{str(bool(repeat.get('bounded_two_card_loop', False))).lower()}' "
+        f"stop_explain_no_progress='hit:{str(bool(no_progress.get('no_progress', False))).lower()}|"
+        f"class:{str(no_progress.get('no_progress_class', '') or 'none')}|hard:{str(bool(no_progress.get('hard_no_progress', False))).lower()}|"
+        f"soft:{str(bool(no_progress.get('soft_no_progress', False))).lower()}' "
+        f"stop_explain_gate='candidate:{str(bool(gates.get('repeat_trigger_candidate', False))).lower()}|"
+        f"min_block:{str(bool(gates.get('min_step_gate_blocked', False))).lower()}|"
+        f"realign_suppress:{str(bool(overlay_context.get('realign_grace_suppressed', False))).lower()}|"
+        f"realign_active:{str(bool(overlay_context.get('realign_grace_active', False))).lower()}|"
+        f"decision:{decision}'"
+    )
 
 
 def _annotate_row_quality(
@@ -2293,6 +2337,7 @@ def _main_loop_phase(
         repeat_stop_hit = bool(stop_eval_inputs["repeat_stop_hit"])
         decision = "stop" if stop else "continue"
         eval_reason = str(stop_eval_inputs["eval_reason"])
+        explain_log_fields = _format_stop_explain_log_fields(stop_eval_inputs=stop_eval_inputs, decision=decision)
         row["is_global_nav"] = is_global_nav
         row["global_nav_reason"] = global_nav_reason
         log(
@@ -2315,7 +2360,8 @@ def _main_loop_phase(
             f"min_step_gate_blocked={str(min_step_gate_blocked).lower()} "
             f"realign_grace_suppressed={str(realign_grace_suppressed).lower()} "
             f"repeat_stop_hit={str(repeat_stop_hit).lower()} "
-            f"decision='{decision}' reason='{eval_reason}'"
+            f"decision='{decision}' reason='{eval_reason}' "
+            f"{explain_log_fields}"
         )
 
         if stop and reason == "repeat_semantic_stall":
