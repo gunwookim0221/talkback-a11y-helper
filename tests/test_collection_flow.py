@@ -2421,3 +2421,56 @@ def test_life_root_state_snapshot_fails_when_root_signature_missing():
     assert snapshot["life_root_signature_present"] is False
     assert snapshot["ok"] is False
     assert snapshot["fail_reason"] == "life_root_not_stable"
+
+
+def test_verify_plugin_entry_root_state_allows_life_energy_transient_recheck(monkeypatch):
+    client = DummyClient([])
+    client.dump_tree_sequence = [
+        [
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/location_home_button", "text": "Location", "visibleToUser": True},
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/add_menu_button", "text": "Add", "visibleToUser": True},
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/random_card_container", "visibleToUser": True},
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/random_card_container2", "visibleToUser": True},
+        ],
+        [
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/location_home_button", "text": "Location", "visibleToUser": True},
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/add_menu_button", "text": "Add", "visibleToUser": True},
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/preInstalledServiceCard", "visibleToUser": True},
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/serviceCard", "visibleToUser": True},
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/divider_text", "text": "More services", "visibleToUser": True},
+        ],
+    ]
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    ok, reason = collection_flow._verify_plugin_entry_root_state(
+        client,
+        "SERIAL",
+        phase="before_pre_navigation",
+        scenario_id="life_energy_plugin",
+    )
+
+    assert ok is True
+    assert reason == "root_state_stable_recheck"
+
+
+def test_verify_plugin_entry_root_state_does_not_apply_transient_recheck_to_other_scenarios(monkeypatch):
+    client = DummyClient([])
+    fail_nodes = [
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/location_home_button", "text": "Location", "visibleToUser": True},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/add_menu_button", "text": "Add", "visibleToUser": True},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/random_card_container", "visibleToUser": True},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/random_card_container2", "visibleToUser": True},
+    ]
+    client.dump_tree_sequence = [fail_nodes, fail_nodes]
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    ok, reason = collection_flow._verify_plugin_entry_root_state(
+        client,
+        "SERIAL",
+        phase="before_pre_navigation",
+        scenario_id="other_plugin",
+    )
+
+    assert ok is False
+    assert reason == "life_root_not_stable"
+    assert len(client.dump_tree_calls) == collection_flow._PLUGIN_ENTRY_RETRY_COUNT
