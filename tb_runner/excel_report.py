@@ -9,7 +9,7 @@ from tb_runner.image_utils import create_excel_thumbnail, insert_images_to_excel
 from tb_runner.logging_utils import get_recent_logs, log
 from tb_runner.utils import to_json_text
 
-EXCEL_REPORT_VERSION = "1.4.2"
+EXCEL_REPORT_VERSION = "1.4.3"
 
 _DEBUG_LOG_KEYWORDS = (
     "[STEP]",
@@ -1030,7 +1030,6 @@ def _apply_result_visual_enhancements(
         max_col = len(result_df.columns)
         thumb_failures = 0
         thumb_fail_reasons: dict[str, int] = {}
-        temp_thumb_paths: list[str] = []
         for row_idx, row in enumerate(result_df.itertuples(index=False), start=2):
             final_result = str(getattr(row, "final_result", "") or "").upper()
             fill_color = color_map.get(final_result)
@@ -1057,13 +1056,12 @@ def _apply_result_visual_enhancements(
                 continue
             thumb_cell.value = Path(crop_path).name
             try:
-                thumb_path = create_excel_thumbnail(crop_path)
-                if not thumb_path:
+                thumb_data = create_excel_thumbnail(crop_path, as_bytes=True)
+                if not thumb_data:
                     thumb_failures += 1
                     thumb_fail_reasons["thumbnail_create_failed"] = thumb_fail_reasons.get("thumbnail_create_failed", 0) + 1
                     continue
-                temp_thumb_paths.append(thumb_path)
-                img = XLImage(thumb_path)
+                img = XLImage(BytesIO(thumb_data))
                 ws.add_image(img, thumb_cell.coordinate)
                 row_height = (float(getattr(img, "height", 0) or 0) * 0.75) + 6.0
                 ws.row_dimensions[row_idx].height = max(float(ws.row_dimensions[row_idx].height or 0), row_height)
@@ -1073,11 +1071,6 @@ def _apply_result_visual_enhancements(
                 thumb_fail_reasons[reason] = thumb_fail_reasons.get(reason, 0) + 1
         if thumb_col_idx >= 0:
             ws.column_dimensions[ws.cell(row=1, column=thumb_col_idx + 1).column_letter].width = 24
-        for thumb_path in temp_thumb_paths:
-            try:
-                Path(thumb_path).unlink(missing_ok=True)
-            except Exception:
-                pass
         if thumb_failures:
             top_reason = max(thumb_fail_reasons.items(), key=lambda item: item[1])[0] if thumb_fail_reasons else "unknown"
             log(
