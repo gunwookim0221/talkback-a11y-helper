@@ -41,6 +41,7 @@
 - `scenario_type`: `content | global_nav`
 - `tab`: tab 선택 후보 규칙(resource/text/announcement/tie_breaker)
 - `pre_navigation`: anchor 전에 수행할 bounded 이동(select/touch/scrollTouch). `scrollTouch`는 기본적으로 실행 직전에 `scroll_to_top`으로 best-effort 초기화한 뒤 검색을 시작하며, `new_screen` plugin 진입 시나리오에서는 한 step 내부에서 누적 downward 탐색을 수행합니다(초기 1회만 top reset).
+  - `life_energy_plugin`에서는 진입 성공 판정을 좁게 적용합니다. `anchor_match`/화면 전환 흔들림(덤프/윈도우 포커스 변경) 같은 약한 신호만으로는 pre-navigation 성공으로 확정하지 않고, Energy 시그니처가 확인되지 않으면 실패/재시도로 처리합니다.
 - `anchor`: 안정화 대상 규칙(resource/text/announcement/class/bounds/tie_breaker)
 - `context_verify`: 문맥 검증 규칙
 - `screen_context_mode`: `bottom_tab | new_screen`
