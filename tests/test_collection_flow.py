@@ -946,6 +946,37 @@ def test_open_scenario_life_energy_guard_rejects_family_care_entry(monkeypatch):
     assert any("[SCENARIO][life_energy_guard] failed" in line for line in logs)
 
 
+def test_open_scenario_life_energy_guard_recheck_recovers_energy_entry(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {"ok": True, "selected": False, "reason": "verified_without_select", "matched": True},
+    )
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    client.focus_sequence = [{"text": "Navigate up", "contentDescription": "Navigate up", "viewIdResourceName": ""}]
+    client.dump_tree_sequence = [
+        [{"text": "Navigate up"}],
+        [{"text": "Energy score"}, {"text": "Battery usage"}],
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_energy_plugin",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert any("[SCENARIO][life_energy_guard] recheck" in line for line in logs)
+    assert not any("[SCENARIO][life_energy_guard] failed" in line for line in logs)
+
+
 def test_open_scenario_pre_navigation_touch_bounds_center_bounds_unavailable_failure(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
