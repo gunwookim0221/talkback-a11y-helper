@@ -56,9 +56,45 @@ _PLUGIN_SCROLL_SEARCH_MAX_STEPS = 5
 _LIFE_ENERGY_SCENARIO_ID = "life_energy_plugin"
 _LIFE_ENERGY_FAMILY_CARE_REGEX = r"(?i)\b(family\s*care|add\s*family\s*member|me)\b"
 _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
-COLLECTION_FLOW_DECISION_DATA_VERSION = "pr5-normalization-v2"
+COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-energy-entry-recheck-v4"
 
+
+
+
+@dataclass
+class MainLoopState:
+    last_fingerprint: str
+    fingerprint_repeat_count: int
+    previous_step_row: dict[str, Any]
+    prev_fingerprint: tuple[str, str, str]
+    fail_count: int
+    same_count: int
+    expanded_overlay_entries: set[str]
+    post_realign_pending_steps: int
+    main_step_index_by_fingerprint: dict[tuple[str, str, str], int]
+    recent_fingerprint_history: deque[tuple[int, str]]
+    recent_semantic_fingerprint_history: deque[tuple[int, str]]
+    stop_triggered: bool
+    stop_reason: str
+    stop_step: int
+    stall_escape_attempted: bool
+
+
+@dataclass
+class CollectionPhaseContext:
+    tab_cfg: dict[str, Any]
+    rows: list[dict[str, Any]]
+    all_rows: list[dict[str, Any]]
+    output_path: str
+    output_base_dir: str
+    scenario_perf: ScenarioPerfStats | None
+    checkpoint_every: int
+    main_step_wait_seconds: float
+    main_announcement_wait_seconds: float
+    main_announcement_idle_wait_seconds: float
+    main_announcement_max_extra_wait_seconds: float
+    state: MainLoopState
 
 @dataclass
 class StartPipelineResult:
@@ -2088,20 +2124,13 @@ def _overlay_phase(
 def _main_loop_phase(
     client: A11yAdbClient,
     dev: str,
-    tab_cfg: dict[str, Any],
-    rows: list[dict[str, Any]],
-    all_rows: list[dict[str, Any]],
-    *,
-    output_path: str,
-    output_base_dir: str,
-    scenario_perf: ScenarioPerfStats | None,
-    checkpoint_every: int,
-    main_step_wait_seconds: float,
-    main_announcement_wait_seconds: float,
-    main_announcement_idle_wait_seconds: float,
-    main_announcement_max_extra_wait_seconds: float,
-    state: dict[str, Any],
-) -> dict[str, Any]:
+    phase_ctx: CollectionPhaseContext,
+) -> MainLoopState:
+    tab_cfg = phase_ctx.tab_cfg
+    rows = phase_ctx.rows
+    all_rows = phase_ctx.all_rows
+    scenario_perf = phase_ctx.scenario_perf
+    state = phase_ctx.state
     for step_idx in range(1, tab_cfg["max_steps"] + 1):
         log(f"[STEP] START tab='{tab_cfg['tab_name']}' step={step_idx}")
         step_start = time.perf_counter()
@@ -2111,10 +2140,10 @@ def _main_loop_phase(
             step_index=step_idx,
             move=True,
             direction="next",
-            wait_seconds=main_step_wait_seconds,
-            announcement_wait_seconds=main_announcement_wait_seconds,
-            announcement_idle_wait_seconds=main_announcement_idle_wait_seconds,
-            announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
+            wait_seconds=phase_ctx.main_step_wait_seconds,
+            announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
+            announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
+            announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
         )
         step_elapsed = time.perf_counter() - step_start
 
@@ -2122,14 +2151,14 @@ def _main_loop_phase(
         row["context_type"] = "main"
         row["parent_step_index"] = ""
         row["overlay_entry_label"] = ""
-        row["overlay_recovery_status"] = "after_realign" if state["post_realign_pending_steps"] > 0 else ""
+        row["overlay_recovery_status"] = "after_realign" if state.post_realign_pending_steps > 0 else ""
         row["status"] = "OK"
         row["stop_reason"] = ""
         row["scenario_type"] = str(tab_cfg.get("scenario_type", "content") or "content")
         row["step_elapsed_sec"] = round(step_elapsed, 3)
         row["crop_image"] = "IMAGE"
         row["_step_mono_start"] = time.monotonic() - float(row.get("t_step_start", 0.0) or 0.0)
-        row = maybe_capture_focus_crop(client, dev, row, output_base_dir)
+        row = maybe_capture_focus_crop(client, dev, row, phase_ctx.output_base_dir)
         row.pop("_step_mono_start", None)
         row["step_total_elapsed_sec"] = round(time.perf_counter() - step_start, 3)
         scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower()
@@ -2155,12 +2184,12 @@ def _main_loop_phase(
                 row["post_move_verdict_source"] = "smart_nav_result_resource_match"
             elif smart_success:
                 row["post_move_verdict_source"] = "smart_nav_result"
-        state["last_fingerprint"], state["fingerprint_repeat_count"] = _annotate_row_quality(
+        state.last_fingerprint, state.fingerprint_repeat_count = _annotate_row_quality(
             row,
-            last_fingerprint=state["last_fingerprint"],
-            fingerprint_repeat_count=state["fingerprint_repeat_count"],
-            recent_fingerprint_history=state["recent_fingerprint_history"],
-            recent_semantic_fingerprint_history=state["recent_semantic_fingerprint_history"],
+            last_fingerprint=state.last_fingerprint,
+            fingerprint_repeat_count=state.fingerprint_repeat_count,
+            recent_fingerprint_history=state.recent_fingerprint_history,
+            recent_semantic_fingerprint_history=state.recent_semantic_fingerprint_history,
         )
         log(
             f"[ROW] fingerprint='{row.get('fingerprint', '')}' "
@@ -2196,7 +2225,7 @@ def _main_loop_phase(
             f"step_dump_reason='{row.get('step_dump_tree_reason', '')}' "
             f"req_id='{row.get('get_focus_req_id', '')}'"
         )
-        mismatch_reasons, low_confidence_reasons = detect_step_mismatch(row=row, previous_step=state["previous_step_row"])
+        mismatch_reasons, low_confidence_reasons = detect_step_mismatch(row=row, previous_step=state.previous_step_row)
         if mismatch_reasons:
             log(
                 f"[MISMATCH] step={step_idx} tab='{tab_cfg['tab_name']}' "
@@ -2224,12 +2253,12 @@ def _main_loop_phase(
                 level="DEBUG",
             )
 
-        stop, state["fail_count"], state["same_count"], reason, state["prev_fingerprint"], stop_details = should_stop(
+        stop, state.fail_count, state.same_count, reason, state.prev_fingerprint, stop_details = should_stop(
             row=row,
-            prev_fingerprint=state["prev_fingerprint"],
-            fail_count=state["fail_count"],
-            same_count=state["same_count"],
-            previous_row=state["previous_step_row"],
+            prev_fingerprint=state.prev_fingerprint,
+            fail_count=state.fail_count,
+            same_count=state.same_count,
+            previous_row=state.previous_step_row,
             scenario_type=str(tab_cfg.get("scenario_type", "content") or "content"),
             stop_policy=tab_cfg.get("stop_policy", {}),
             scenario_cfg=tab_cfg,
@@ -2295,14 +2324,14 @@ def _main_loop_phase(
                 row=row,
                 stop_details=stop_details,
                 stop_reason=reason,
-                escape_attempted=state["stall_escape_attempted"],
+                escape_attempted=state.stall_escape_attempted,
             )
             if should_escape:
                 log(
                     f"[STALL] detected scenario='{tab_cfg.get('scenario_id', '')}' step={step_idx} "
                     f"same_like_count={same_like_count} semantic_window_unique_count={recent_semantic_unique_count}"
                 )
-                state["stall_escape_attempted"] = True
+                state.stall_escape_attempted = True
                 log(
                     f"[STALL] attempting escape scenario='{tab_cfg.get('scenario_id', '')}' "
                     f"method='refocus_or_realign'"
@@ -2312,9 +2341,9 @@ def _main_loop_phase(
                     dev=dev,
                     row=row,
                     step_idx=step_idx,
-                    announcement_wait_seconds=main_announcement_wait_seconds,
-                    announcement_idle_wait_seconds=main_announcement_idle_wait_seconds,
-                    announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
+                    announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
+                    announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
+                    announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
                 )
                 escape_success = bool(escape_result.get("success", False))
                 escape_result_reason = str(escape_result.get("reason", "") or "")
@@ -2333,11 +2362,11 @@ def _main_loop_phase(
                     reason = "repeat_semantic_stall_after_escape"
                     stop = True
             else:
-                if state["stall_escape_attempted"] or escape_gate_reason == "already_attempted":
+                if state.stall_escape_attempted or escape_gate_reason == "already_attempted":
                     reason = "repeat_semantic_stall_after_escape"
                 log(
                     f"[STOP][eval] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
-                    f"repeat_stop_hit={str(repeat_stop_hit).lower()} but escape_attempted={str(state['stall_escape_attempted']).lower()} "
+                    f"repeat_stop_hit={str(repeat_stop_hit).lower()} but escape_attempted={str(state.stall_escape_attempted).lower()} "
                     f"escape_gate_reason='{escape_gate_reason}'"
                 )
 
@@ -2349,15 +2378,15 @@ def _main_loop_phase(
             )
             if stop and reason in {"global_nav_exit", "global_nav_end"}:
                 stop = False
-                state["stop_reason"] = ""
-            if state["post_realign_pending_steps"] > 0:
-                state["post_realign_pending_steps"] -= 1
+                state.stop_reason = ""
+            if state.post_realign_pending_steps > 0:
+                state.post_realign_pending_steps -= 1
             continue
 
         if stop:
-            state["stop_triggered"] = True
-            state["stop_reason"] = reason
-            state["stop_step"] = step_idx
+            state.stop_triggered = True
+            state.stop_reason = reason
+            state.stop_step = step_idx
             if reason == "repeat_semantic_stall_after_escape":
                 log(
                     f"[STOP][triggered] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
@@ -2374,9 +2403,9 @@ def _main_loop_phase(
             scenario_perf.record_row(row)
         row_fingerprint = make_main_fingerprint(row)
         if all(row_fingerprint):
-            state["main_step_index_by_fingerprint"][row_fingerprint] = step_idx
-        if stop or (step_idx % checkpoint_every == 0):
-            save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
+            state.main_step_index_by_fingerprint[row_fingerprint] = step_idx
+        if stop or (step_idx % phase_ctx.checkpoint_every == 0):
+            save_excel_with_perf(save_excel, all_rows, phase_ctx.output_path, with_images=False, scenario_perf=scenario_perf)
 
         realign_delta = _overlay_phase(
             client=client,
@@ -2385,17 +2414,17 @@ def _main_loop_phase(
             row=row,
             rows=rows,
             all_rows=all_rows,
-            output_path=output_path,
-            output_base_dir=output_base_dir,
+            output_path=phase_ctx.output_path,
+            output_base_dir=phase_ctx.output_base_dir,
             scenario_perf=scenario_perf,
-            main_step_index_by_fingerprint=state["main_step_index_by_fingerprint"],
-            expanded_overlay_entries=state["expanded_overlay_entries"],
+            main_step_index_by_fingerprint=state.main_step_index_by_fingerprint,
+            expanded_overlay_entries=state.expanded_overlay_entries,
         )
         if realign_delta > 0:
-            state["post_realign_pending_steps"] = max(state["post_realign_pending_steps"], realign_delta)
+            state.post_realign_pending_steps = max(state.post_realign_pending_steps, realign_delta)
 
-        if state["post_realign_pending_steps"] > 0:
-            state["post_realign_pending_steps"] -= 1
+        if state.post_realign_pending_steps > 0:
+            state.post_realign_pending_steps -= 1
 
         if stop:
             log(
@@ -2403,20 +2432,24 @@ def _main_loop_phase(
                 f"decision='stop' reason='{reason}'"
             )
             break
-        state["previous_step_row"] = row
+        state.previous_step_row = row
     return state
 
 
-def _persist_phase(rows: list[dict[str, Any]], tab_cfg: dict[str, Any], *, state: dict[str, Any], scenario_perf: ScenarioPerfStats | None) -> None:
-    if not state["stop_triggered"] and rows:
-        state["stop_step"] = int(rows[-1].get("step_index", -1) or -1)
-        state["stop_reason"] = "safety_limit"
+def _persist_phase(phase_ctx: CollectionPhaseContext) -> None:
+    rows = phase_ctx.rows
+    tab_cfg = phase_ctx.tab_cfg
+    state = phase_ctx.state
+    scenario_perf = phase_ctx.scenario_perf
+    if not state.stop_triggered and rows:
+        state.stop_step = int(rows[-1].get("step_index", -1) or -1)
+        state.stop_reason = "safety_limit"
         rows[-1]["stop_triggered"] = False
-        rows[-1]["stop_step"] = state["stop_step"]
+        rows[-1]["stop_step"] = state.stop_step
     log(
         f"[STOP][summary] scenario='{tab_cfg.get('scenario_id', '')}' "
-        f"stop_triggered={str(state['stop_triggered']).lower()} stop_step={state['stop_step']} "
-        f"reason='{state['stop_reason'] or 'none'}'"
+        f"stop_triggered={str(state.stop_triggered).lower()} stop_step={state.stop_step} "
+        f"reason='{state.stop_reason or 'none'}'"
     )
     if scenario_perf is not None:
         scenario_perf.finalize()
@@ -2715,29 +2748,27 @@ def collect_tab_rows(
     if scenario_perf is not None:
         scenario_perf.record_row(anchor_row)
     save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
-    state = {
-        "last_fingerprint": start_result.anchor_fingerprint,
-        "fingerprint_repeat_count": start_result.anchor_repeat_count,
-        "previous_step_row": anchor_row,
-        "prev_fingerprint": start_result.prev_fingerprint,
-        "fail_count": 0,
-        "same_count": 0,
-        "expanded_overlay_entries": set(),
-        "post_realign_pending_steps": 0,
-        "main_step_index_by_fingerprint": {start_result.prev_fingerprint: 0},
-        "recent_fingerprint_history": start_result.recent_fingerprint_history,
-        "recent_semantic_fingerprint_history": start_result.recent_semantic_fingerprint_history,
-        "stop_triggered": False,
-        "stop_reason": "",
-        "stop_step": -1,
-        "stall_escape_attempted": False,
-    }
-    state = _main_loop_phase(
-        client,
-        dev,
-        tab_cfg,
-        rows,
-        all_rows,
+    state = MainLoopState(
+        last_fingerprint=start_result.anchor_fingerprint,
+        fingerprint_repeat_count=start_result.anchor_repeat_count,
+        previous_step_row=anchor_row,
+        prev_fingerprint=start_result.prev_fingerprint,
+        fail_count=0,
+        same_count=0,
+        expanded_overlay_entries=set(),
+        post_realign_pending_steps=0,
+        main_step_index_by_fingerprint={start_result.prev_fingerprint: 0},
+        recent_fingerprint_history=start_result.recent_fingerprint_history,
+        recent_semantic_fingerprint_history=start_result.recent_semantic_fingerprint_history,
+        stop_triggered=False,
+        stop_reason="",
+        stop_step=-1,
+        stall_escape_attempted=False,
+    )
+    phase_ctx = CollectionPhaseContext(
+        tab_cfg=tab_cfg,
+        rows=rows,
+        all_rows=all_rows,
         output_path=output_path,
         output_base_dir=output_base_dir,
         scenario_perf=scenario_perf,
@@ -2748,6 +2779,7 @@ def collect_tab_rows(
         main_announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
         state=state,
     )
-    _persist_phase(rows, tab_cfg, state=state, scenario_perf=scenario_perf)
+    _main_loop_phase(client, dev, phase_ctx)
+    _persist_phase(phase_ctx)
 
     return rows
