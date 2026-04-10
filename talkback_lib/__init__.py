@@ -942,6 +942,32 @@ class A11yAdbClient:
         except Exception as exc:
             print(f"[DEBUG][isin] 텍스트 노드 샘플 수집 실패: {exc}")
 
+    def _normalize_action_result(
+        self,
+        success: bool,
+        status: str | None = None,
+        detail: str | None = None,
+        raw: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        class _NormalizedActionResult(dict):
+            def __bool__(self) -> bool:
+                return bool(self.get("success"))
+
+            def __eq__(self, other: object) -> bool:
+                if isinstance(other, str):
+                    return str(self.get("status", "")) == other
+                return super().__eq__(other)
+
+        normalized_status = status or (STATUS_MOVED if bool(success) else STATUS_FAILED)
+        result: dict[str, Any] = _NormalizedActionResult({
+            "success": bool(success),
+            "status": normalized_status,
+        })
+        if detail is not None:
+            result["detail"] = detail
+        if isinstance(raw, dict):
+            result["raw"] = raw
+        return result
 
     def touch(
         self,
@@ -954,10 +980,15 @@ class A11yAdbClient:
         class_name: str = None,
         clickable: bool = None,
         focusable: bool = None,
-    ) -> bool:
+    ) -> dict[str, Any]:
         if not self.check_helper_status(dev=dev):
             self.last_target_action_result = {"success": False, "reason": "helper_unavailable"}
-            return False
+            return self._normalize_action_result(
+                success=False,
+                status=STATUS_FAILED,
+                detail="helper_unavailable",
+                raw=self.last_target_action_result,
+            )
         self.last_announcements = []
         self.last_merged_announcement = ""
         deadline = time.monotonic() + wait_
@@ -985,12 +1016,23 @@ class A11yAdbClient:
             )
             result = self._read_log_result(dev, "TARGET_ACTION_RESULT", req_id)
             self.last_target_action_result = result if isinstance(result, dict) else {"success": False, "reason": "unknown"}
-            if bool(result.get("success")):
+            success = bool(result.get("success"))
+            if success:
                 self._wait_for_speech_if_needed(dev)
-                return True
+                return self._normalize_action_result(
+                    success=True,
+                    status=STATUS_MOVED,
+                    detail=str(self.last_target_action_result.get("reason", "")) or None,
+                    raw=self.last_target_action_result,
+                )
             time.sleep(0.5)
         self.last_target_action_result = {"success": False, "reason": "timeout"}
-        return False
+        return self._normalize_action_result(
+            success=False,
+            status=STATUS_FAILED,
+            detail="timeout",
+            raw=self.last_target_action_result,
+        )
 
     def touch_point(self, dev, x: int, y: int) -> bool:
         if not self.check_helper_status(dev=dev):
@@ -1057,9 +1099,14 @@ class A11yAdbClient:
         class_name: str = None,
         clickable: bool = None,
         focusable: bool = None,
-    ) -> bool:
+    ) -> dict[str, Any]:
         if not self.check_helper_status(dev=dev):
-            return False
+            return self._normalize_action_result(
+                success=False,
+                status=STATUS_FAILED,
+                detail="helper_unavailable",
+                raw={"success": False, "reason": "helper_unavailable"},
+            )
         self.last_announcements = []
         self.last_merged_announcement = ""
         deadline = time.monotonic() + wait_
@@ -1087,13 +1134,31 @@ class A11yAdbClient:
                 extras,
             )
             result = self._read_log_result(dev, "TARGET_ACTION_RESULT", req_id)
+            payload_missing = (
+                isinstance(result, dict)
+                and result.get("reqId") == req_id
+                and str(result.get("reason", "")).strip() == "TARGET_ACTION_RESULT 로그를 찾지 못했습니다."
+            )
+            if payload_missing:
+                time.sleep(0.5)
+                continue
             if isinstance(result, dict) and result.get("reqId") == req_id:
                 # success=false인 경우에도 helper의 원본 payload를 보존한다.
                 self.last_target_action_result = result
-                return bool(result.get("success"))
+                return self._normalize_action_result(
+                    success=bool(result.get("success")),
+                    status=STATUS_MOVED if bool(result.get("success")) else STATUS_FAILED,
+                    detail=str(result.get("reason", "")) or None,
+                    raw=result,
+                )
             time.sleep(0.5)
         self.last_target_action_result = {"success": False, "reason": "timeout"}
-        return False
+        return self._normalize_action_result(
+            success=False,
+            status=STATUS_FAILED,
+            detail="timeout",
+            raw=self.last_target_action_result,
+        )
 
     def click_focused(self, dev: Any = None, wait_: int = 5) -> bool:
         if not self.check_helper_status(dev=dev):
@@ -1823,7 +1888,7 @@ class A11yAdbClient:
         label = device_id or "default"
         print(f"[{label}] Focus history has been explicitly reset.")
 
-    def move_focus_smart(self, dev: Any = None, direction: str = "next") -> str:
+    def move_focus_smart(self, dev: Any = None, direction: str = "next") -> dict[str, Any]:
         direction_token = str(direction).strip().lower()
         print(
             f"[SMART_NEXT_TRACE] move_focus_smart_entry "
@@ -1835,10 +1900,20 @@ class A11yAdbClient:
                 f"reason='direction_not_next' action={ACTION_NEXT if direction_token == 'next' else ACTION_PREV if direction_token == 'prev' else 'UNKNOWN'} "
                 "req_id='' fallback=true"
             )
-            return STATUS_MOVED if self.move_focus(dev=dev, direction=direction_token) else STATUS_FAILED
+            moved = self.move_focus(dev=dev, direction=direction_token)
+            normalized_status = STATUS_MOVED if moved else STATUS_FAILED
+            return self._normalize_action_result(
+                success=bool(moved),
+                status=normalized_status,
+                raw={"status": normalized_status, "detail": "", "fallback": True},
+            )
 
         if not (self._has_recent_helper_ok(dev=dev) or self.check_helper_status(dev=dev)):
-            return STATUS_FAILED
+            return self._normalize_action_result(
+                success=False,
+                status=STATUS_FAILED,
+                raw={"status": STATUS_FAILED, "detail": "helper_unavailable"},
+            )
 
         self.last_announcements = []
         self.last_merged_announcement = ""
@@ -1854,7 +1929,12 @@ class A11yAdbClient:
             f"[SMART_NEXT_TRACE] move_focus_smart_result req_id={req_id} "
             f"status={result.get('status', '')} detail={result.get('detail', '')} normalized={normalized}"
         )
-        return normalized
+        return self._normalize_action_result(
+            success=normalized != STATUS_FAILED,
+            status=normalized,
+            detail=str(result.get("detail", "")) or None,
+            raw=result if isinstance(result, dict) else {},
+        )
 
     def scrollFind(self, dev, name, wait_=30, direction_='updown', type_='all'):
         if not self.check_helper_status(dev=dev):
