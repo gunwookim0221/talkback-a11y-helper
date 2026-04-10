@@ -51,7 +51,10 @@ _LIFE_ROOT_APP_BAR_MIN_HITS = 2
 _LIFE_ROOT_VISIBLE_CARD_MIN_HITS = 2
 _LIFE_ROOT_SCORE_THRESHOLD = 3
 _PLUGIN_SCROLL_SEARCH_MAX_STEPS = 5
-COLLECTION_FLOW_DECISION_DATA_VERSION = "pr5-normalization-v1"
+_LIFE_ENERGY_SCENARIO_ID = "life_energy_plugin"
+_LIFE_ENERGY_FAMILY_CARE_REGEX = r"(?i)\b(family\s*care|add\s*family\s*member|me)\b"
+_LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
+COLLECTION_FLOW_DECISION_DATA_VERSION = "pr5-normalization-v2"
 
 
 @dataclass
@@ -695,6 +698,8 @@ def _confirm_click_focused_transition(
     baseline_nodes: list[dict[str, Any]] | None = None,
     baseline_window_focus: str = "",
 ) -> tuple[bool, str]:
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip().lower()
+    strict_life_energy_mode = scenario_id == _LIFE_ENERGY_SCENARIO_ID
     max_poll_count = 2 if transition_fast_path else 3
     focus_wait_seconds = 0.28 if transition_fast_path else 0.45
     patterns = _build_transition_patterns(tab_cfg)
@@ -712,6 +717,7 @@ def _confirm_click_focused_transition(
         baseline_window_focus = _extract_window_focus_line(client, dev)
     saw_dump_change = False
     saw_focus_change = False
+    saw_conflicting_screen_signature = False
 
     for poll_idx in range(max_poll_count):
         current_nodes: list[dict[str, Any]] = []
@@ -720,10 +726,20 @@ def _confirm_click_focused_transition(
                 current_nodes = dump_tree_fn(dev=dev)
             except Exception:
                 current_nodes = []
+        energy_signature_seen = False
         for node in current_nodes:
+            if strict_life_energy_mode and _safe_regex_search(patterns.get("context_text", ""), _node_label_blob(node)):
+                energy_signature_seen = True
             matched, signal = _node_matches_transition_pattern(node, patterns)
             if matched:
+                if strict_life_energy_mode and signal == "anchor_match" and not energy_signature_seen:
+                    continue
                 return True, signal
+        if strict_life_energy_mode and not energy_signature_seen:
+            for node, _ in _iter_tree_nodes_with_parent(current_nodes):
+                if _safe_regex_search(_LIFE_ENERGY_FAMILY_CARE_REGEX, _node_label_blob(node)):
+                    saw_conflicting_screen_signature = True
+                    break
 
         current_signature = _make_dump_signature(current_nodes)
         if current_signature and baseline_signature and current_signature != baseline_signature:
@@ -738,7 +754,18 @@ def _confirm_click_focused_transition(
             )
             focus_matched, _ = _node_matches_transition_pattern(focus_node, patterns)
             if focus_matched:
-                return True, "focus_shift"
+                if strict_life_energy_mode:
+                    focus_label = _node_label_blob(focus_node)
+                    focus_view_id = str(
+                        focus_node.get("viewIdResourceName", "") or focus_node.get("resourceId", "") or ""
+                    ).strip()
+                    is_generic_navigate_up = bool(_safe_regex_search(_LIFE_ENERGY_NAVIGATE_UP_REGEX, focus_label))
+                    if is_generic_navigate_up and not focus_view_id:
+                        pass
+                    else:
+                        return True, "focus_shift"
+                else:
+                    return True, "focus_shift"
 
         current_window_focus = _extract_window_focus_line(client, dev)
         if current_window_focus and baseline_window_focus and current_window_focus != baseline_window_focus:
@@ -747,6 +774,10 @@ def _confirm_click_focused_transition(
         if poll_idx < max_poll_count - 1:
             time.sleep(_PRE_NAV_CONFIRM_POLL_SLEEP_SECONDS)
 
+    if strict_life_energy_mode and saw_conflicting_screen_signature:
+        return False, "conflicting_screen_signature"
+    if strict_life_energy_mode and (saw_dump_change or saw_focus_change):
+        return False, "weak_transition_signal_only"
     if saw_dump_change:
         return True, "dump_signature_changed"
     if saw_focus_change:
@@ -1582,6 +1613,44 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         stabilized_by = "selected" if bool(stabilize_result.get("selected")) else "post_focus_verified"
         log(f"[ANCHOR][plugin_fallback] stabilized_by='{stabilized_by}'")
         log(f"[SCENARIO][start_mode] scenario='{scenario_id}' mode='low_confidence_fallback'")
+    if scenario_id == _LIFE_ENERGY_SCENARIO_ID:
+        post_focus = client.get_focus(
+            dev=dev,
+            wait_seconds=min(main_step_wait_seconds, 0.8),
+            allow_fallback_dump=False,
+            mode="fast",
+        )
+        post_view_id = (
+            str(post_focus.get("viewIdResourceName", "") or post_focus.get("resourceId", "") or "").strip()
+            if isinstance(post_focus, dict)
+            else ""
+        )
+        post_label = _node_label_blob(post_focus if isinstance(post_focus, dict) else {})
+        generic_navigate_up_only = bool(_safe_regex_search(_LIFE_ENERGY_NAVIGATE_UP_REGEX, post_label)) and not post_view_id
+        dump_tree_fn = getattr(client, "dump_tree", None)
+        post_nodes: list[dict[str, Any]] = []
+        if callable(dump_tree_fn):
+            try:
+                post_nodes = dump_tree_fn(dev=dev)
+            except Exception:
+                post_nodes = []
+        energy_signature_seen = any(
+            _safe_regex_search(r"(?i).*energy.*", _node_label_blob(node))
+            for node, _ in _iter_tree_nodes_with_parent(post_nodes)
+        )
+        family_signature_seen = any(
+            _safe_regex_search(_LIFE_ENERGY_FAMILY_CARE_REGEX, _node_label_blob(node))
+            for node, _ in _iter_tree_nodes_with_parent(post_nodes)
+        )
+        if generic_navigate_up_only or (family_signature_seen and not energy_signature_seen):
+            log(
+                f"[SCENARIO][life_energy_guard] failed scenario='{scenario_id}' "
+                f"generic_navigate_up_only={str(generic_navigate_up_only).lower()} "
+                f"family_signature_seen={str(family_signature_seen).lower()} "
+                f"energy_signature_seen={str(energy_signature_seen).lower()} "
+                "reason='entry_not_confirmed'"
+            )
+            return False
     if is_transition_entry_fast_path and not is_strict_main_tab_scenario:
         time.sleep(min(main_step_wait_seconds, _TRANSITION_FAST_STEP_WAIT_SECONDS))
     else:

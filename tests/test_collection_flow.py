@@ -891,6 +891,61 @@ def test_open_scenario_pre_navigation_scroll_touch_plugin_uses_cumulative_downwa
     assert any("scroll_forward_and_retry_local_search" in line for line in logs)
 
 
+def test_confirm_click_focused_transition_life_energy_rejects_weak_signal(monkeypatch):
+    client = DummyClient([])
+    baseline_nodes = [
+        {"text": "Energy", "viewIdResourceName": "id.card.energy"},
+    ]
+    current_nodes = [
+        {"text": "Navigate up", "contentDescription": "Navigate up", "viewIdResourceName": ""},
+    ]
+    client.dump_tree_sequence = [current_nodes, current_nodes, current_nodes]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_energy_plugin",
+        "anchor": {"text_regex": "(?i).*navigate\\s*up.*"},
+        "context_verify": {"type": "screen_text", "text_regex": "(?i).*energy.*"},
+    }
+
+    ok, reason = collection_flow._confirm_click_focused_transition(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        transition_fast_path=False,
+        baseline_nodes=baseline_nodes,
+    )
+
+    assert ok is False
+    assert reason == "weak_transition_signal_only"
+
+
+def test_open_scenario_life_energy_guard_rejects_family_care_entry(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {"ok": True, "selected": False, "reason": "verified_without_select", "matched": True},
+    )
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    client.focus_sequence = [{"text": "Navigate up", "contentDescription": "Navigate up", "viewIdResourceName": ""}]
+    client.dump_tree_sequence = [[{"text": "Family Care"}, {"text": "Add family member"}]]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_energy_plugin",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is False
+    assert any("[SCENARIO][life_energy_guard] failed" in line for line in logs)
+
+
 def test_open_scenario_pre_navigation_touch_bounds_center_bounds_unavailable_failure(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
