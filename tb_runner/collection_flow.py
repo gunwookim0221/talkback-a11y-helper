@@ -57,7 +57,7 @@ _LIFE_ENERGY_SCENARIO_ID = "life_energy_plugin"
 _LIFE_ENERGY_FAMILY_CARE_REGEX = r"(?i)\b(family\s*care|add\s*family\s*member|me)\b"
 _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr5-normalization-v2"
-COLLECTION_FLOW_GUARD_VERSION = "life-energy-entry-recheck-v2"
+COLLECTION_FLOW_GUARD_VERSION = "life-energy-entry-recheck-v3"
 
 
 @dataclass
@@ -147,6 +147,7 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
     service_title_hits = 0
     description_hits = 0
     structure_hits = 0
+    navigate_up_hits = 0
     life_service_titles = {"food", "energy", "air care", "home care", "pet care"}
     life_description_contains = (
         "energy usage",
@@ -172,6 +173,8 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
             bottom_nav_life_visible = True
         if _safe_regex_search(r"(?i)\b(add|more options|location|qr code)\b", label_blob):
             app_bar_hits += 1
+        if _safe_regex_search(_LIFE_ENERGY_NAVIGATE_UP_REGEX, label_blob):
+            navigate_up_hits += 1
         if _safe_regex_search(r"(?i)(preinstalledservicecard|servicecard|card)", resource_id):
             visible_card_hits += 1
         if "divider_text" in normalized_resource_id or "preinstalledservicecard" in normalized_resource_id:
@@ -210,6 +213,7 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         "visible_card_hits": visible_card_hits,
         "life_root_signature_present": life_root_signature_present,
         "bottom_nav_life_visible": bottom_nav_life_visible,
+        "navigate_up_hits": navigate_up_hits,
         "final_score": final_score,
         "pass_reason": pass_reason,
         "fail_reason": fail_reason,
@@ -238,11 +242,17 @@ def _verify_plugin_entry_root_state(
             last_reason = f"dump_failed:{exc}"
         snapshot = _life_root_state_snapshot(nodes)
         ok = bool(snapshot.get("ok"))
+        family_care_signature_seen = any(
+            _safe_regex_search(_LIFE_ENERGY_FAMILY_CARE_REGEX, _node_label_blob(node))
+            for node, _ in _iter_tree_nodes_with_parent(nodes)
+        )
         log(
             f"[SCENARIO][pre_nav][stabilization] phase='{phase}' attempt={attempt}/{_PLUGIN_ENTRY_RETRY_COUNT} "
             f"life_selected={str(snapshot.get('life_selected')).lower()} app_bar_hits={snapshot.get('app_bar_hits', 0)} "
             f"visible_card_hits={snapshot.get('visible_card_hits', 0)} "
             f"life_root_signature_present={str(snapshot.get('life_root_signature_present')).lower()} "
+            f"navigate_up_hits={snapshot.get('navigate_up_hits', 0)} "
+            f"family_care_signature_seen={str(family_care_signature_seen).lower()} "
             f"final_score={snapshot.get('final_score', 0)} ok={str(ok).lower()} "
             f"pass_reason='{snapshot.get('pass_reason', '')}' fail_reason='{snapshot.get('fail_reason', '')}'"
         )
@@ -254,6 +264,18 @@ def _verify_plugin_entry_root_state(
             and phase == "before_pre_navigation"
         )
         if is_life_energy_before_pre_nav:
+            relaxed_scrolltouch_entry_ok = bool(
+                not family_care_signature_seen
+                and int(snapshot.get("navigate_up_hits", 0) or 0) == 0
+                and bool(snapshot.get("life_selected") or snapshot.get("bottom_nav_life_visible"))
+                and int(snapshot.get("app_bar_hits", 0) or 0) >= _LIFE_ROOT_APP_BAR_MIN_HITS
+            )
+            if relaxed_scrolltouch_entry_ok:
+                log(
+                    f"[SCENARIO][pre_nav][stabilization][life_energy_relaxed_gate] phase='{phase}' "
+                    f"attempt={attempt}/{_PLUGIN_ENTRY_RETRY_COUNT} allow_scrolltouch=true reason='life_plugin_list_likely'"
+                )
+                return True, "root_state_scrolltouch_entry_relaxed"
             transient_candidate = bool(
                 snapshot.get("life_selected")
                 or snapshot.get("bottom_nav_life_visible")
@@ -273,6 +295,12 @@ def _verify_plugin_entry_root_state(
                     )
                     recheck_snapshot = _life_root_state_snapshot(recheck_nodes)
                     recheck_ok = bool(recheck_snapshot.get("ok"))
+                    relaxed_recheck_ok = bool(
+                        not family_care_signature_seen
+                        and int(recheck_snapshot.get("navigate_up_hits", 0) or 0) == 0
+                        and bool(recheck_snapshot.get("life_selected") or recheck_snapshot.get("bottom_nav_life_visible"))
+                        and int(recheck_snapshot.get("app_bar_hits", 0) or 0) >= _LIFE_ROOT_APP_BAR_MIN_HITS
+                    )
                     log(
                         f"[SCENARIO][pre_nav][stabilization][recheck] phase='{phase}' "
                         f"attempt={attempt}/{_PLUGIN_ENTRY_RETRY_COUNT} recheck={recheck_idx}/{_LIFE_ROOT_TRANSIENT_RECHECK_COUNT} "
@@ -280,15 +308,18 @@ def _verify_plugin_entry_root_state(
                         f"app_bar_hits={recheck_snapshot.get('app_bar_hits', 0)} "
                         f"visible_card_hits={recheck_snapshot.get('visible_card_hits', 0)} "
                         f"life_root_signature_present={str(recheck_snapshot.get('life_root_signature_present')).lower()} "
+                        f"navigate_up_hits={recheck_snapshot.get('navigate_up_hits', 0)} "
                         f"final_score={recheck_snapshot.get('final_score', 0)} "
                         f"family_care_signature_seen={str(family_care_signature_seen).lower()} "
-                        f"ok={str(recheck_ok).lower()}"
+                        f"ok={str(recheck_ok).lower()} relaxed_ok={str(relaxed_recheck_ok).lower()}"
                     )
                     if family_care_signature_seen and not recheck_ok:
                         last_reason = "life_root_not_stable"
                         break
                     if recheck_ok:
                         return True, "root_state_stable_recheck"
+                    if relaxed_recheck_ok:
+                        return True, "root_state_scrolltouch_entry_relaxed_recheck"
                     last_reason = str(recheck_snapshot.get("fail_reason", last_reason) or last_reason)
         if attempt < _PLUGIN_ENTRY_RETRY_COUNT:
             time.sleep(0.2)

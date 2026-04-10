@@ -2453,6 +2453,51 @@ def test_verify_plugin_entry_root_state_allows_life_energy_transient_recheck(mon
     assert reason == "root_state_stable_recheck"
 
 
+def test_verify_plugin_entry_root_state_allows_life_energy_relaxed_scrolltouch_gate(monkeypatch):
+    client = DummyClient([])
+    client.dump_tree_sequence = [
+        [
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/menu_services", "selected": True, "visibleToUser": True},
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/location_home_button", "text": "Location", "visibleToUser": True},
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/add_menu_button", "text": "Add", "visibleToUser": True},
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/random_container", "visibleToUser": True},
+        ]
+    ]
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    ok, reason = collection_flow._verify_plugin_entry_root_state(
+        client,
+        "SERIAL",
+        phase="before_pre_navigation",
+        scenario_id="life_energy_plugin",
+    )
+
+    assert ok is True
+    assert reason == "root_state_scrolltouch_entry_relaxed"
+
+
+def test_verify_plugin_entry_root_state_relaxed_gate_blocks_navigate_up_detail(monkeypatch):
+    client = DummyClient([])
+    fail_nodes = [
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/menu_services", "selected": True, "visibleToUser": True},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/location_home_button", "text": "Location", "visibleToUser": True},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/add_menu_button", "text": "Add", "visibleToUser": True},
+        {"contentDescription": "Navigate up", "visibleToUser": True},
+    ]
+    client.dump_tree_sequence = [fail_nodes, fail_nodes, fail_nodes, fail_nodes, fail_nodes, fail_nodes]
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    ok, reason = collection_flow._verify_plugin_entry_root_state(
+        client,
+        "SERIAL",
+        phase="before_pre_navigation",
+        scenario_id="life_energy_plugin",
+    )
+
+    assert ok is False
+    assert reason == "life_root_not_stable"
+
+
 def test_verify_plugin_entry_root_state_does_not_apply_transient_recheck_to_other_scenarios(monkeypatch):
     client = DummyClient([])
     fail_nodes = [
