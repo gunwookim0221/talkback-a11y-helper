@@ -58,6 +58,8 @@ from talkback_lib.utils import (
     safe_parse_json_payload,
 )
 
+RETRY_TIMEOUT_REFACTOR_VERSION = "PR11.0"
+
 
 @dataclass
 class A11yAdbClient:
@@ -969,6 +971,27 @@ class A11yAdbClient:
             result["raw"] = raw
         return result
 
+    def _run_with_retry(
+        self,
+        wait_seconds: float,
+        sleep_seconds: float,
+        attempt_fn: Any,
+        timeout_fn: Any,
+        run_immediately: bool = False,
+    ) -> Any:
+        deadline = time.monotonic() + wait_seconds
+        if run_immediately:
+            done, value = attempt_fn()
+            if done:
+                return value
+            time.sleep(sleep_seconds)
+        while time.monotonic() <= deadline:
+            done, value = attempt_fn()
+            if done:
+                return value
+            time.sleep(sleep_seconds)
+        return timeout_fn()
+
     def touch(
         self,
         dev,
@@ -991,8 +1014,8 @@ class A11yAdbClient:
             )
         self.last_announcements = []
         self.last_merged_announcement = ""
-        deadline = time.monotonic() + wait_
-        while time.monotonic() <= deadline:
+        
+        def _attempt_touch() -> tuple[bool, dict[str, Any]]:
             self._refresh_tree_if_needed(dev)
             self.clear_logcat(dev=dev)
             req_id = str(uuid.uuid4())[:8]
@@ -1019,19 +1042,28 @@ class A11yAdbClient:
             success = bool(result.get("success"))
             if success:
                 self._wait_for_speech_if_needed(dev)
-                return self._normalize_action_result(
+                return True, self._normalize_action_result(
                     success=True,
                     status=STATUS_MOVED,
                     detail=str(self.last_target_action_result.get("reason", "")) or None,
                     raw=self.last_target_action_result,
                 )
-            time.sleep(0.5)
-        self.last_target_action_result = {"success": False, "reason": "timeout"}
-        return self._normalize_action_result(
-            success=False,
-            status=STATUS_FAILED,
-            detail="timeout",
-            raw=self.last_target_action_result,
+            return False, {}
+
+        def _touch_timeout() -> dict[str, Any]:
+            self.last_target_action_result = {"success": False, "reason": "timeout"}
+            return self._normalize_action_result(
+                success=False,
+                status=STATUS_FAILED,
+                detail="timeout",
+                raw=self.last_target_action_result,
+            )
+
+        return self._run_with_retry(
+            wait_seconds=wait_,
+            sleep_seconds=0.5,
+            attempt_fn=_attempt_touch,
+            timeout_fn=_touch_timeout,
         )
 
     def touch_point(self, dev, x: int, y: int) -> bool:
@@ -1109,10 +1141,10 @@ class A11yAdbClient:
             )
         self.last_announcements = []
         self.last_merged_announcement = ""
-        deadline = time.monotonic() + wait_
         normalized_type = str(type_).strip().lower()
         ci_name = name if normalized_type in {"r", "resourceid"} else self._normalize_case_insensitive_pattern(name)
-        while time.monotonic() <= deadline:
+
+        def _attempt_select() -> tuple[bool, dict[str, Any]]:
             self._refresh_tree_if_needed(dev)
             self.clear_logcat(dev=dev)
             req_id = str(uuid.uuid4())[:8]
@@ -1140,24 +1172,32 @@ class A11yAdbClient:
                 and str(result.get("reason", "")).strip() == "TARGET_ACTION_RESULT 로그를 찾지 못했습니다."
             )
             if payload_missing:
-                time.sleep(0.5)
-                continue
+                return False, {}
             if isinstance(result, dict) and result.get("reqId") == req_id:
                 # success=false인 경우에도 helper의 원본 payload를 보존한다.
                 self.last_target_action_result = result
-                return self._normalize_action_result(
+                return True, self._normalize_action_result(
                     success=bool(result.get("success")),
                     status=STATUS_MOVED if bool(result.get("success")) else STATUS_FAILED,
                     detail=str(result.get("reason", "")) or None,
                     raw=result,
                 )
-            time.sleep(0.5)
-        self.last_target_action_result = {"success": False, "reason": "timeout"}
-        return self._normalize_action_result(
-            success=False,
-            status=STATUS_FAILED,
-            detail="timeout",
-            raw=self.last_target_action_result,
+            return False, {}
+
+        def _select_timeout() -> dict[str, Any]:
+            self.last_target_action_result = {"success": False, "reason": "timeout"}
+            return self._normalize_action_result(
+                success=False,
+                status=STATUS_FAILED,
+                detail="timeout",
+                raw=self.last_target_action_result,
+            )
+
+        return self._run_with_retry(
+            wait_seconds=wait_,
+            sleep_seconds=0.5,
+            attempt_fn=_attempt_select,
+            timeout_fn=_select_timeout,
         )
 
     def click_focused(self, dev: Any = None, wait_: int = 5) -> bool:
@@ -1919,21 +1959,39 @@ class A11yAdbClient:
         self.last_merged_announcement = ""
         # Keep previous logcat history for SMART_NEXT analysis continuity.
         # self.clear_logcat(dev=dev)
-        req_id = str(uuid.uuid4())[:8]
-        print(f"[SMART_NEXT_TRACE] req_id_generated req_id={req_id} source=move_focus_smart")
-        result = self._helper_bridge._request_smart_next(dev=dev, req_id=req_id)
-        self.last_smart_nav_result = result
-        normalized, terminal, _, _ = self._helper_bridge.normalize_smart_next_status(result)
-        self.last_smart_nav_terminal = terminal
-        print(
-            f"[SMART_NEXT_TRACE] move_focus_smart_result req_id={req_id} "
-            f"status={result.get('status', '')} detail={result.get('detail', '')} normalized={normalized}"
-        )
-        return self._normalize_action_result(
-            success=normalized != STATUS_FAILED,
-            status=normalized,
-            detail=str(result.get("detail", "")) or None,
-            raw=result if isinstance(result, dict) else {},
+
+        def _attempt_smart_next() -> tuple[bool, dict[str, Any]]:
+            req_id = str(uuid.uuid4())[:8]
+            print(f"[SMART_NEXT_TRACE] req_id_generated req_id={req_id} source=move_focus_smart")
+            result = self._helper_bridge._request_smart_next(dev=dev, req_id=req_id)
+            self.last_smart_nav_result = result
+            normalized, terminal, _, _ = self._helper_bridge.normalize_smart_next_status(result)
+            self.last_smart_nav_terminal = terminal
+            print(
+                f"[SMART_NEXT_TRACE] move_focus_smart_result req_id={req_id} "
+                f"status={result.get('status', '')} detail={result.get('detail', '')} normalized={normalized}"
+            )
+            return True, self._normalize_action_result(
+                success=normalized != STATUS_FAILED,
+                status=normalized,
+                detail=str(result.get("detail", "")) or None,
+                raw=result if isinstance(result, dict) else {},
+            )
+
+        def _smart_next_timeout() -> dict[str, Any]:
+            return self._normalize_action_result(
+                success=False,
+                status=STATUS_FAILED,
+                detail="timeout",
+                raw={"status": STATUS_FAILED, "detail": "timeout"},
+            )
+
+        return self._run_with_retry(
+            wait_seconds=0.0,
+            sleep_seconds=0.0,
+            attempt_fn=_attempt_smart_next,
+            timeout_fn=_smart_next_timeout,
+            run_immediately=True,
         )
 
     def scrollFind(self, dev, name, wait_=30, direction_='updown', type_='all'):
