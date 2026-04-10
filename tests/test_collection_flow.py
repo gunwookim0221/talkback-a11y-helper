@@ -2042,6 +2042,74 @@ def test_collect_tab_rows_marks_noise_when_speech_is_empty(monkeypatch):
     assert rows[1]["noise_reason"] == "speech_empty"
 
 
+def test_normalize_row_decision_inputs_builds_duplicate_and_semantic_snapshot():
+    row = {
+        "step_index": 5,
+        "visible_label": "Wi-Fi",
+        "normalized_visible_label": "wi-fi",
+        "merged_announcement": "Wi-Fi",
+        "focus_view_id": "id.wifi",
+        "focus_bounds": "0,10,10,20",
+    }
+    recent_fingerprint_history = collection_flow.deque(
+        [
+            (3, collection_flow.build_row_fingerprint(row)),
+            (4, "another-fingerprint"),
+        ],
+        maxlen=5,
+    )
+    recent_semantic_fingerprint_history = collection_flow.deque(
+        [
+            (2, "semantic-x"),
+            (3, collection_flow.build_row_semantic_fingerprint(row)),
+            (4, "semantic-y"),
+        ],
+        maxlen=5,
+    )
+
+    snapshot = collection_flow._normalize_row_decision_inputs(
+        row,
+        last_fingerprint=collection_flow.build_row_fingerprint(row),
+        fingerprint_repeat_count=2,
+        recent_fingerprint_history=recent_fingerprint_history,
+        recent_semantic_fingerprint_history=recent_semantic_fingerprint_history,
+    )
+
+    assert snapshot["fingerprint_repeat_count"] == 3
+    assert snapshot["is_duplicate_step"] is True
+    assert snapshot["is_recent_duplicate_step"] is True
+    assert snapshot["recent_duplicate_distance"] == 2
+    assert snapshot["recent_duplicate_of_step"] == 3
+    assert snapshot["is_recent_semantic_duplicate_step"] is True
+    assert snapshot["recent_semantic_duplicate_distance"] == 2
+    assert snapshot["recent_semantic_duplicate_of_step"] == 3
+    assert snapshot["recent_semantic_unique_count"] == 3
+
+
+def test_build_stop_evaluation_inputs_applies_global_nav_override(monkeypatch):
+    row = {
+        "visible_label": "홈",
+        "focus_view_id": "com.example:id/home",
+    }
+    tab_cfg = {**_base_tab_cfg(), "scenario_type": "global_nav"}
+    stop_details = {
+        "scenario_type": "global_nav",
+        "is_global_nav": False,
+        "global_nav_reason": "from_stop_details",
+        "repeat_class": "strict",
+        "loop_classification": "none",
+    }
+    monkeypatch.setattr(collection_flow, "is_global_nav_row", lambda *_args, **_kwargs: (True, "from_override"))
+
+    snapshot = collection_flow._build_stop_evaluation_inputs(stop_details=stop_details, row=row, tab_cfg=tab_cfg)
+
+    assert snapshot["scenario_type"] == "global_nav"
+    assert snapshot["is_global_nav_only_scenario"] is True
+    assert snapshot["is_global_nav"] is True
+    assert snapshot["global_nav_reason"] == "from_override"
+    assert snapshot["repeat_class"] == "strict"
+
+
 def test_collect_tab_rows_attempts_stall_escape_once_before_stop(monkeypatch):
     client = DummyClient([_anchor_row(), _main_row(1), _main_row(2)])
     stop_sequence = iter(

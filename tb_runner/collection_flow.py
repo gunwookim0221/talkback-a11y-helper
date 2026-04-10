@@ -51,6 +51,7 @@ _LIFE_ROOT_APP_BAR_MIN_HITS = 2
 _LIFE_ROOT_VISIBLE_CARD_MIN_HITS = 2
 _LIFE_ROOT_SCORE_THRESHOLD = 3
 _PLUGIN_SCROLL_SEARCH_MAX_STEPS = 5
+COLLECTION_FLOW_DECISION_DATA_VERSION = "pr5-normalization-v1"
 
 
 @dataclass
@@ -1602,29 +1603,23 @@ def _get_positive_int(value: Any, fallback: int) -> int:
     return fallback
 
 
-def _annotate_row_quality(
-    row: dict[str, Any],
+def _normalize_step_index(raw_step_index: Any) -> int:
+    if isinstance(raw_step_index, bool):
+        return -1
+    try:
+        return int(raw_step_index)
+    except (TypeError, ValueError):
+        return -1
+
+
+def _build_repeat_quality_snapshot(
     *,
-    last_fingerprint: str,
-    fingerprint_repeat_count: int,
+    step_index: int,
+    fingerprint: str,
+    normalized_fingerprint: str,
     recent_fingerprint_history: deque[tuple[int, str]],
     recent_semantic_fingerprint_history: deque[tuple[int, str]],
-) -> tuple[str, int]:
-    fingerprint = build_row_fingerprint(row)
-    normalized_fingerprint = build_row_semantic_fingerprint(row)
-    if fingerprint == last_fingerprint:
-        fingerprint_repeat_count += 1
-    else:
-        fingerprint_repeat_count = 0
-
-    raw_step_index = row.get("step_index", -1)
-    if isinstance(raw_step_index, bool):
-        step_index = -1
-    else:
-        try:
-            step_index = int(raw_step_index)
-        except (TypeError, ValueError):
-            step_index = -1
+) -> dict[str, Any]:
     is_recent_duplicate_step = False
     recent_duplicate_distance = 0
     recent_duplicate_of_step = -1
@@ -1634,6 +1629,7 @@ def _annotate_row_quality(
             recent_duplicate_distance = max(step_index - prev_step_index, 0)
             recent_duplicate_of_step = prev_step_index
             break
+
     is_recent_semantic_duplicate_step = False
     recent_semantic_duplicate_distance = 0
     recent_semantic_duplicate_of_step = -1
@@ -1651,23 +1647,119 @@ def _annotate_row_quality(
     if recent_window_keys:
         recent_semantic_unique_count = len(set(recent_window_keys))
 
+    return {
+        "is_recent_duplicate_step": is_recent_duplicate_step,
+        "recent_duplicate_distance": recent_duplicate_distance,
+        "recent_duplicate_of_step": recent_duplicate_of_step,
+        "is_recent_semantic_duplicate_step": is_recent_semantic_duplicate_step,
+        "recent_semantic_duplicate_distance": recent_semantic_duplicate_distance,
+        "recent_semantic_duplicate_of_step": recent_semantic_duplicate_of_step,
+        "recent_semantic_unique_count": recent_semantic_unique_count,
+    }
+
+
+def _normalize_row_decision_inputs(
+    row: dict[str, Any],
+    *,
+    last_fingerprint: str,
+    fingerprint_repeat_count: int,
+    recent_fingerprint_history: deque[tuple[int, str]],
+    recent_semantic_fingerprint_history: deque[tuple[int, str]],
+) -> dict[str, Any]:
+    fingerprint = build_row_fingerprint(row)
+    normalized_fingerprint = build_row_semantic_fingerprint(row)
+    if fingerprint == last_fingerprint:
+        next_fingerprint_repeat_count = fingerprint_repeat_count + 1
+    else:
+        next_fingerprint_repeat_count = 0
+
+    step_index = _normalize_step_index(row.get("step_index", -1))
+    repeat_quality = _build_repeat_quality_snapshot(
+        step_index=step_index,
+        fingerprint=fingerprint,
+        normalized_fingerprint=normalized_fingerprint,
+        recent_fingerprint_history=recent_fingerprint_history,
+        recent_semantic_fingerprint_history=recent_semantic_fingerprint_history,
+    )
     is_noise_step, noise_reason = is_noise_row(row)
-    row["fingerprint"] = fingerprint
-    row["normalized_fingerprint"] = normalized_fingerprint
-    row["fingerprint_repeat_count"] = fingerprint_repeat_count
-    row["is_duplicate_step"] = fingerprint_repeat_count > 0
-    row["is_recent_duplicate_step"] = is_recent_duplicate_step
-    row["recent_duplicate_distance"] = recent_duplicate_distance
-    row["recent_duplicate_of_step"] = recent_duplicate_of_step
-    row["is_recent_semantic_duplicate_step"] = is_recent_semantic_duplicate_step
-    row["recent_semantic_duplicate_distance"] = recent_semantic_duplicate_distance
-    row["recent_semantic_duplicate_of_step"] = recent_semantic_duplicate_of_step
-    row["recent_semantic_unique_count"] = recent_semantic_unique_count
-    row["is_noise_step"] = is_noise_step
-    row["noise_reason"] = noise_reason
+    return {
+        "step_index": step_index,
+        "fingerprint": fingerprint,
+        "normalized_fingerprint": normalized_fingerprint,
+        "fingerprint_repeat_count": next_fingerprint_repeat_count,
+        "is_duplicate_step": next_fingerprint_repeat_count > 0,
+        "is_noise_step": is_noise_step,
+        "noise_reason": noise_reason,
+        **repeat_quality,
+    }
+
+
+def _build_stop_evaluation_inputs(
+    *,
+    stop_details: dict[str, Any],
+    row: dict[str, Any],
+    tab_cfg: dict[str, Any],
+) -> dict[str, Any]:
+    scenario_type = str(stop_details.get("scenario_type", tab_cfg.get("scenario_type", "content")) or "content")
+    is_global_nav_only_scenario = scenario_type == "global_nav"
+    is_global_nav = bool(stop_details.get("is_global_nav", False))
+    global_nav_reason = str(stop_details.get("global_nav_reason", "") or "")
+    if is_global_nav_only_scenario:
+        is_global_nav, global_nav_reason = is_global_nav_row(row, scenario_cfg=tab_cfg)
+    return {
+        "terminal_signal": bool(stop_details.get("terminal", False)),
+        "same_like_count": int(stop_details.get("same_like_count", 0) or 0),
+        "no_progress": bool(stop_details.get("no_progress", False)),
+        "scenario_type": scenario_type,
+        "is_global_nav_only_scenario": is_global_nav_only_scenario,
+        "is_global_nav": is_global_nav,
+        "global_nav_reason": global_nav_reason,
+        "after_realign": bool(stop_details.get("after_realign", False)),
+        "recent_repeat": bool(stop_details.get("recent_repeat", False)),
+        "bounded_two_card_loop": bool(stop_details.get("bounded_two_card_loop", False)),
+        "semantic_same_like": bool(stop_details.get("semantic_same_like", False)),
+        "recent_duplicate": bool(stop_details.get("recent_duplicate", False)),
+        "recent_duplicate_distance": int(stop_details.get("recent_duplicate_distance", 0) or 0),
+        "recent_semantic_duplicate": bool(stop_details.get("recent_semantic_duplicate", False)),
+        "recent_semantic_duplicate_distance": int(stop_details.get("recent_semantic_duplicate_distance", 0) or 0),
+        "recent_semantic_unique_count": int(stop_details.get("recent_semantic_unique_count", 0) or 0),
+        "repeat_class": str(stop_details.get("repeat_class", "") or "none"),
+        "loop_classification": str(stop_details.get("loop_classification", "") or "none"),
+        "strict_duplicate": bool(stop_details.get("strict_duplicate", False)),
+        "semantic_duplicate": bool(stop_details.get("semantic_duplicate", False)),
+        "hard_no_progress": bool(stop_details.get("hard_no_progress", False)),
+        "soft_no_progress": bool(stop_details.get("soft_no_progress", False)),
+        "no_progress_class": str(stop_details.get("no_progress_class", "") or "none"),
+        "overlay_realign_grace_active": bool(stop_details.get("overlay_realign_grace_active", False)),
+        "min_step_gate_blocked": bool(stop_details.get("min_step_gate_blocked", False)),
+        "realign_grace_suppressed": bool(stop_details.get("realign_grace_suppressed", False)),
+        "repeat_stop_hit": bool(stop_details.get("repeat_stop_hit", False)),
+        "eval_reason": str(stop_details.get("reason", "") or "none"),
+    }
+
+
+def _annotate_row_quality(
+    row: dict[str, Any],
+    *,
+    last_fingerprint: str,
+    fingerprint_repeat_count: int,
+    recent_fingerprint_history: deque[tuple[int, str]],
+    recent_semantic_fingerprint_history: deque[tuple[int, str]],
+) -> tuple[str, int]:
+    decision_inputs = _normalize_row_decision_inputs(
+        row,
+        last_fingerprint=last_fingerprint,
+        fingerprint_repeat_count=fingerprint_repeat_count,
+        recent_fingerprint_history=recent_fingerprint_history,
+        recent_semantic_fingerprint_history=recent_semantic_fingerprint_history,
+    )
+    row.update(decision_inputs)
+    step_index = int(decision_inputs["step_index"])
+    fingerprint = str(decision_inputs["fingerprint"])
+    normalized_fingerprint = str(decision_inputs["normalized_fingerprint"])
     recent_fingerprint_history.append((step_index, fingerprint))
     recent_semantic_fingerprint_history.append((step_index, normalized_fingerprint))
-    return fingerprint, fingerprint_repeat_count
+    return fingerprint, int(decision_inputs["fingerprint_repeat_count"])
 
 
 def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
@@ -1974,37 +2066,36 @@ def _main_loop_phase(
             stop_policy=tab_cfg.get("stop_policy", {}),
             scenario_cfg=tab_cfg,
         )
-        terminal_signal = bool(stop_details.get("terminal", False))
-        same_like_count = int(stop_details.get("same_like_count", 0) or 0)
-        no_progress = bool(stop_details.get("no_progress", False))
-        is_global_nav = bool(stop_details.get("is_global_nav", False))
-        global_nav_reason = str(stop_details.get("global_nav_reason", "") or "")
-        after_realign = bool(stop_details.get("after_realign", False))
-        recent_repeat = bool(stop_details.get("recent_repeat", False))
-        bounded_two_card_loop = bool(stop_details.get("bounded_two_card_loop", False))
-        semantic_same_like = bool(stop_details.get("semantic_same_like", False))
-        recent_duplicate = bool(stop_details.get("recent_duplicate", False))
-        recent_duplicate_distance = int(stop_details.get("recent_duplicate_distance", 0) or 0)
-        recent_semantic_duplicate = bool(stop_details.get("recent_semantic_duplicate", False))
-        recent_semantic_duplicate_distance = int(stop_details.get("recent_semantic_duplicate_distance", 0) or 0)
-        recent_semantic_unique_count = int(stop_details.get("recent_semantic_unique_count", 0) or 0)
-        repeat_class = str(stop_details.get("repeat_class", "") or "none")
-        loop_classification = str(stop_details.get("loop_classification", "") or "none")
-        strict_duplicate = bool(stop_details.get("strict_duplicate", False))
-        semantic_duplicate = bool(stop_details.get("semantic_duplicate", False))
-        hard_no_progress = bool(stop_details.get("hard_no_progress", False))
-        soft_no_progress = bool(stop_details.get("soft_no_progress", False))
-        no_progress_class = str(stop_details.get("no_progress_class", "") or "none")
-        overlay_realign_grace_active = bool(stop_details.get("overlay_realign_grace_active", False))
-        min_step_gate_blocked = bool(stop_details.get("min_step_gate_blocked", False))
-        realign_grace_suppressed = bool(stop_details.get("realign_grace_suppressed", False))
-        repeat_stop_hit = bool(stop_details.get("repeat_stop_hit", False))
-        scenario_type = str(stop_details.get("scenario_type", tab_cfg.get("scenario_type", "content")) or "content")
-        is_global_nav_only_scenario = scenario_type == "global_nav"
-        if is_global_nav_only_scenario:
-            is_global_nav, global_nav_reason = is_global_nav_row(row, scenario_cfg=tab_cfg)
+        stop_eval_inputs = _build_stop_evaluation_inputs(stop_details=stop_details, row=row, tab_cfg=tab_cfg)
+        terminal_signal = bool(stop_eval_inputs["terminal_signal"])
+        same_like_count = int(stop_eval_inputs["same_like_count"])
+        no_progress = bool(stop_eval_inputs["no_progress"])
+        scenario_type = str(stop_eval_inputs["scenario_type"])
+        is_global_nav_only_scenario = bool(stop_eval_inputs["is_global_nav_only_scenario"])
+        is_global_nav = bool(stop_eval_inputs["is_global_nav"])
+        global_nav_reason = str(stop_eval_inputs["global_nav_reason"])
+        after_realign = bool(stop_eval_inputs["after_realign"])
+        recent_repeat = bool(stop_eval_inputs["recent_repeat"])
+        bounded_two_card_loop = bool(stop_eval_inputs["bounded_two_card_loop"])
+        semantic_same_like = bool(stop_eval_inputs["semantic_same_like"])
+        recent_duplicate = bool(stop_eval_inputs["recent_duplicate"])
+        recent_duplicate_distance = int(stop_eval_inputs["recent_duplicate_distance"])
+        recent_semantic_duplicate = bool(stop_eval_inputs["recent_semantic_duplicate"])
+        recent_semantic_duplicate_distance = int(stop_eval_inputs["recent_semantic_duplicate_distance"])
+        recent_semantic_unique_count = int(stop_eval_inputs["recent_semantic_unique_count"])
+        repeat_class = str(stop_eval_inputs["repeat_class"])
+        loop_classification = str(stop_eval_inputs["loop_classification"])
+        strict_duplicate = bool(stop_eval_inputs["strict_duplicate"])
+        semantic_duplicate = bool(stop_eval_inputs["semantic_duplicate"])
+        hard_no_progress = bool(stop_eval_inputs["hard_no_progress"])
+        soft_no_progress = bool(stop_eval_inputs["soft_no_progress"])
+        no_progress_class = str(stop_eval_inputs["no_progress_class"])
+        overlay_realign_grace_active = bool(stop_eval_inputs["overlay_realign_grace_active"])
+        min_step_gate_blocked = bool(stop_eval_inputs["min_step_gate_blocked"])
+        realign_grace_suppressed = bool(stop_eval_inputs["realign_grace_suppressed"])
+        repeat_stop_hit = bool(stop_eval_inputs["repeat_stop_hit"])
         decision = "stop" if stop else "continue"
-        eval_reason = str(stop_details.get("reason", "") or "none")
+        eval_reason = str(stop_eval_inputs["eval_reason"])
         row["is_global_nav"] = is_global_nav
         row["global_nav_reason"] = global_nav_reason
         log(
