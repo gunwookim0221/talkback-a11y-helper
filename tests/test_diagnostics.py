@@ -539,3 +539,42 @@ def test_should_allow_strict_hard_no_progress_even_after_realign_grace():
     assert reason == "repeat_no_progress"
     assert details["strict_duplicate"] is True
     assert details["hard_no_progress"] is True
+
+
+def test_should_include_stop_explain_snapshot_without_changing_decision():
+    previous = {
+        "normalized_visible_label": "add",
+        "normalized_announcement": "add",
+        "focus_view_id": "id/add",
+        "focus_bounds": "0,0,1,1",
+    }
+    row = {
+        "step_index": 4,
+        "move_result": "failed",
+        "last_smart_nav_result": "failed",
+        "visible_label": "Add",
+        "merged_announcement": "Add",
+        "normalized_visible_label": "add",
+        "normalized_announcement": "add",
+        "focus_view_id": "id/add",
+        "focus_bounds": "0,0,1,1",
+        "overlay_recovery_status": "after_realign",
+    }
+
+    stop, _, _, reason, _, details = should_stop(
+        row=row,
+        prev_fingerprint=("add", "id/add", "0,0,1,1"),
+        fail_count=1,
+        same_count=1,
+        previous_row=previous,
+        scenario_type="content",
+    )
+
+    assert stop is True
+    assert reason == "repeat_no_progress"
+    assert details["stop_explain_version"] == "pr7_explain_v1"
+    explain = details["stop_explain"]
+    assert explain["repeat"]["repeat_class"] == details["repeat_class"]
+    assert explain["no_progress"]["no_progress_class"] == "hard_no_progress"
+    assert explain["overlay_context"]["realign_grace_suppressed"] is False
+    assert explain["gates"]["min_step_gate_blocked"] is False

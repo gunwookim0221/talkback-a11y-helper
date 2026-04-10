@@ -207,6 +207,7 @@ class StopEvaluator:
     _MOVE_TERMINAL_RESULTS = {"terminal", "end", "no_next", "no_focus", "cannot_move"}
     _REPEAT_STOP_REASONS = {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall"}
     _DEFAULT_MIN_STEPS_BEFORE_REPEAT_STOP = 3
+    _STOP_EXPLAIN_VERSION = "pr7_explain_v1"
 
     def _signature(self, row: dict[str, Any]) -> tuple[str, str, str, str, str]:
         normalized_visible = str(row.get("normalized_visible_label", "") or "").strip()
@@ -384,6 +385,70 @@ class StopEvaluator:
             "min_steps_before_repeat_stop": min_steps_before_repeat_stop,
             "min_step_gate_blocked": min_step_gate_blocked,
             "realign_grace_suppressed": realign_grace_suppressed,
+        }
+
+    def _build_stop_explain_snapshot(
+        self,
+        *,
+        row: dict[str, Any],
+        move_result: str,
+        smart_nav_result: str,
+        repeat_eval: dict[str, Any],
+        no_progress_eval: dict[str, Any],
+        overlay_ctx: dict[str, Any],
+        decision_meta: dict[str, Any],
+        same_count: int,
+        fail_count: int,
+        recent_repeat: bool,
+        reason: str,
+    ) -> dict[str, Any]:
+        repeat_trigger_candidate = bool(
+            repeat_eval["bounded_two_card_loop"]
+            or (no_progress_eval["hard_no_progress"] and repeat_eval["strict_duplicate"])
+            or (
+                repeat_eval["semantic_duplicate"]
+                and no_progress_eval["soft_no_progress"]
+                and same_count >= 4
+                and int(row.get("recent_semantic_unique_count", 0) or 0) <= 2
+            )
+        )
+        return {
+            "version": self._STOP_EXPLAIN_VERSION,
+            "inputs": {
+                "step_index": int(row.get("step_index", 0) or 0),
+                "move_result": move_result,
+                "smart_nav_result": smart_nav_result,
+                "same_like_count": same_count,
+                "fail_count": fail_count,
+            },
+            "repeat": {
+                "recent_repeat": recent_repeat,
+                "repeat_class": str(repeat_eval["repeat_class"]),
+                "strict_duplicate": bool(repeat_eval["strict_duplicate"]),
+                "semantic_duplicate": bool(repeat_eval["semantic_duplicate"]),
+                "bounded_two_card_loop": bool(repeat_eval["bounded_two_card_loop"]),
+                "loop_classification": str(repeat_eval["loop_classification"]),
+            },
+            "no_progress": {
+                "no_progress": bool(no_progress_eval["no_progress"]),
+                "hard_no_progress": bool(no_progress_eval["hard_no_progress"]),
+                "soft_no_progress": bool(no_progress_eval["soft_no_progress"]),
+                "no_progress_class": str(no_progress_eval["no_progress_class"]),
+            },
+            "overlay_context": {
+                "after_realign": bool(overlay_ctx["after_realign"]),
+                "realign_grace_active": bool(overlay_ctx["realign_grace_active"]),
+                "realign_grace_suppressed": bool(decision_meta["realign_grace_suppressed"]),
+            },
+            "gates": {
+                "repeat_trigger_candidate": repeat_trigger_candidate,
+                "min_steps_before_repeat_stop": int(decision_meta["min_steps_before_repeat_stop"]),
+                "min_step_gate_blocked": bool(decision_meta["min_step_gate_blocked"]),
+            },
+            "decision": {
+                "stop": bool(reason),
+                "reason": reason or "none",
+            },
         }
 
     def evaluate_stop(
@@ -571,6 +636,20 @@ class StopEvaluator:
             hard_no_progress=bool(no_progress_eval["hard_no_progress"]),
             overlay_ctx=overlay_ctx,
         )
+        stop_explain = self._build_stop_explain_snapshot(
+            row=row,
+            move_result=move_result,
+            smart_nav_result=smart_nav_result,
+            repeat_eval=repeat_eval,
+            no_progress_eval=no_progress_eval,
+            overlay_ctx=overlay_ctx,
+            decision_meta=decision_meta,
+            same_count=same_count,
+            fail_count=fail_count,
+            recent_repeat=recent_repeat,
+            reason=reason,
+        )
+        stop_explain["decision"]["stop"] = stop
 
         details = {
             "terminal": terminal_signal,
@@ -603,6 +682,8 @@ class StopEvaluator:
             "repeat_stop_hit": reason in {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall"},
             "raw_fingerprint": current_fingerprint,
             "semantic_signature": current_semantic_signature,
+            "stop_explain": stop_explain,
+            "stop_explain_version": self._STOP_EXPLAIN_VERSION,
         }
         return stop, fail_count, same_count, reason, current_fingerprint, details
 
