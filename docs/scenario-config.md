@@ -39,8 +39,10 @@
 - `enabled`: (base 정의값) 실행 여부 기본값. 최종 실행 제어는 runtime(`config/runtime_config.json`)에서 결정
 - `max_steps`: main step 상한
 - `scenario_type`: `content | global_nav`
+- `entry_type`: plugin 진입 방식 힌트. 현재 Life plugin에서 `card | direct_select`를 사용하며, `direct_select`는 post-open verify/negative guard를 통과해야 최종 성공으로 확정됩니다.
 - `tab`: tab 선택 후보 규칙(resource/text/announcement/tie_breaker)
 - `pre_navigation`: anchor 전에 수행할 bounded 이동(select/touch/scrollTouch). `scrollTouch`는 기본적으로 실행 직전에 `scroll_to_top`으로 best-effort 초기화한 뒤 검색을 시작하며, `new_screen` plugin 진입 시나리오에서는 한 step 내부에서 누적 downward 탐색을 수행합니다(초기 1회만 top reset).
+  - Life plugin 진입 contract 로그: `[SCENARIO][entry_contract]`에서 `success_verified | verify_failed | false_success_guard | no_match | text_only_no_promotion | wrong_open` taxonomy를 노출합니다.
 - 디버그 관측성: `scrollTouch` local search 단계에서 `[SCENARIO][pre_nav][scrolltouch][debug]`에 `rejections`, `pre_candidate_top`, `xml_fallback_attempted`, `xml_fallback_reason`이 포함되고, `[SCENARIO][pre_nav][scrolltouch][inspect]`에 상위 inspect sample(visible/clickable/promotion/reject reason)이 출력됩니다. 후보 선택 로그에는 `promoted_container`, `promotion_attempted`, `promotion_source(helper|xml_live|none)`, `promotion_reason`, `promotion_candidate_count`, `promoted_from`, `promoted_to`, `selected_area`, `text_area`, `area_ratio`, `ancestor_distance`, `tap_point`, `tap_strategy`, `rank_summary_top3`가 포함되며, 스크롤 후 재탐색 로그에는 `settle_wait_ms`가 포함됩니다.
   - `life_air_care_plugin`의 실패 분석을 위해 `scrollTouch` 각 탐색 step마다 경량 캡처 번들(`screenshot.png`, `helper_dump.json`, `meta.json`)을 누적 저장하고, 최종 실패 시에는 같은 run 폴더 아래 `final_failure`에 풀 번들(`window_dump.xml`, `focus_payload.json` 포함)을 추가 저장합니다.
   - `life_energy_plugin`에서는 진입 성공 판정을 좁게 적용합니다. `anchor_match`/화면 전환 흔들림(덤프/윈도우 포커스 변경) 같은 약한 신호만으로는 pre-navigation 성공으로 확정하지 않고, Energy 시그니처가 확인되지 않으면 실패/재시도로 처리합니다. 단, `focus_shift`/`verified_without_select` 같은 약한 성공 사유 직후에는 guard 단계에서 1회 추가 dump 재확인을 허용해 실제 Energy 화면 진입(true positive)을 회복합니다.

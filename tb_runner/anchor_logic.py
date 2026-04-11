@@ -178,7 +178,10 @@ def _is_fallback_chrome_candidate(candidate: dict[str, Any], screen_width: int, 
     if screen_height > 0 and top >= int(screen_height * 0.78):
         if any(token in f"{resource_id} {class_name} {label_blob}" for token in ("bottom", "navigation", "tab", "menu_")):
             return True
-    if any(token in f"{resource_id} {class_name} {label_blob}" for token in ("statusbar", "systemui", "more", "location")):
+    if any(
+        token in f"{resource_id} {class_name} {label_blob}"
+        for token in ("statusbar", "systemui", "more", "location", "home_button", "qr code", "change location", "add")
+    ):
         return True
     if screen_width > 0 and (right <= 0 or left >= screen_width):
         return True

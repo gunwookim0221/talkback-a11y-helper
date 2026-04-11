@@ -124,6 +124,7 @@
 
 - `enabled` (bool)
 - `max_steps` (positive int)
+- `entry_type` (`card | direct_select`)
 - `group` (string): `scenario_groups` 키 참조
 - `anchor_ref` (string): `shared_anchors` 키 참조
 - `pre_navigation_ref` (string): `shared_pre_navigation` 키 참조

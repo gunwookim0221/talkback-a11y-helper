@@ -134,6 +134,7 @@ TAB_CONFIGS = [
     {
         "scenario_id": "life_air_care_plugin",
         "scenario_type": "content",
+        "entry_type": "card",
         "tab_name": "(?i).*life.*",
         "tab_type": "b",
         "screen_context_mode": "new_screen",
@@ -176,6 +177,7 @@ TAB_CONFIGS = [
     {
         "scenario_id": "life_home_care_plugin",
         "scenario_type": "content",
+        "entry_type": "card",
         "tab_name": "(?i).*life.*",
         "tab_type": "b",
         "screen_context_mode": "new_screen",
@@ -219,6 +221,7 @@ TAB_CONFIGS = [
     {
         "scenario_id": "life_energy_plugin",
         "scenario_type": "content",
+        "entry_type": "card",
         "tab_name": "(?i).*life.*",
         "tab_type": "b",
         "screen_context_mode": "new_screen",
@@ -471,6 +474,7 @@ TAB_CONFIGS = [
     {
         "scenario_id": "life_pet_care_example",
         "scenario_type": "content",
+        "entry_type": "direct_select",
         "tab_name": "(?i).*life.*",
         "tab_type": "b",
         "screen_context_mode": "new_screen",
