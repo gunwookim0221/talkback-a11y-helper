@@ -63,9 +63,9 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr22-scrolltouch-xml-live-refine-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr24-card-entry-generalization-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
-COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr23-life-entry-contract-v1"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr24-life-card-entry-contract-v2"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -822,6 +822,12 @@ def _is_negative_post_open_focus_signal(view_id: str, label: str, speech: str) -
 def _matches_post_open_verify(tab_cfg: dict[str, Any], view_id: str, label: str, speech: str) -> bool:
     context_verify = dict(tab_cfg.get("context_verify", {}) or {})
     candidates = [str(view_id or ""), str(label or ""), str(speech or "")]
+    verify_tokens = tab_cfg.get("verify_tokens", [])
+    if isinstance(verify_tokens, list):
+        normalized_blob = " ".join(candidates).lower()
+        normalized_tokens = [str(token or "").strip().lower() for token in verify_tokens if str(token or "").strip()]
+        if normalized_tokens and any(token in normalized_blob for token in normalized_tokens):
+            return True
     text_regex = str(context_verify.get("text_regex", "") or "").strip()
     announcement_regex = str(context_verify.get("announcement_regex", "") or "").strip()
     if text_regex and any(_safe_regex_search(text_regex, value) for value in candidates):
@@ -829,6 +835,40 @@ def _matches_post_open_verify(tab_cfg: dict[str, Any], view_id: str, label: str,
     if announcement_regex and any(_safe_regex_search(announcement_regex, value) for value in candidates):
         return True
     return False
+
+
+def _has_post_open_negative_verify_token(tab_cfg: dict[str, Any], view_id: str, label: str, speech: str) -> bool:
+    negative_tokens = tab_cfg.get("negative_verify_tokens", [])
+    if not isinstance(negative_tokens, list) or not negative_tokens:
+        return False
+    normalized_blob = " ".join([str(view_id or ""), str(label or ""), str(speech or "")]).lower()
+    normalized_tokens = [str(token or "").strip().lower() for token in negative_tokens if str(token or "").strip()]
+    return bool(normalized_tokens and any(token in normalized_blob for token in normalized_tokens))
+
+
+def _get_card_entry_spec(tab_cfg: dict[str, Any], target: str) -> dict[str, Any]:
+    entry_match = tab_cfg.get("entry_match", {})
+    if not isinstance(entry_match, dict):
+        entry_match = {}
+    title_patterns = entry_match.get("title_patterns", [])
+    if not isinstance(title_patterns, list):
+        title_patterns = []
+    description_patterns = entry_match.get("description_patterns", [])
+    if not isinstance(description_patterns, list):
+        description_patterns = []
+    resource_patterns = entry_match.get("resource_patterns", [])
+    if not isinstance(resource_patterns, list):
+        resource_patterns = []
+    normalized_target = str(target or "").strip()
+    normalized_title_patterns = [str(pattern or "").strip() for pattern in title_patterns if str(pattern or "").strip()]
+    if normalized_target and not normalized_title_patterns:
+        normalized_title_patterns = [normalized_target]
+    return {
+        "title_patterns": normalized_title_patterns,
+        "description_patterns": [str(pattern or "").strip() for pattern in description_patterns if str(pattern or "").strip()],
+        "resource_patterns": [str(pattern or "").strip() for pattern in resource_patterns if str(pattern or "").strip()],
+        "allow_description_match": bool(entry_match.get("allow_description_match")),
+    }
 
 
 def _capture_pre_navigation_failure_bundle(
@@ -1414,6 +1454,7 @@ def _select_visible_plugin_candidate(
     target: str,
     scenario_id: str = "",
     xml_nodes: list[dict[str, Any]] | None = None,
+    entry_spec: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, str, dict[str, Any], dict[str, Any]]:
     sample_limit = 10
     sample_text_limit = 72
@@ -1532,13 +1573,18 @@ def _select_visible_plugin_candidate(
     viewport_center = (viewport_top + viewport_bottom) // 2
     viewport_area = max(1, (viewport_right - viewport_left) * (viewport_bottom - viewport_top))
 
-    normalized_target = str(target or "").strip().lower()
-    target_tokens = [token for token in re.split(r"[^0-9a-zA-Z가-힣]+", normalized_target) if len(token) >= 3]
-    normalized_scenario_id = str(scenario_id or "").strip().lower()
-    is_life_air_care_target = (
-        normalized_scenario_id == _LIFE_AIR_CARE_SCENARIO_ID and "air" in normalized_target and "care" in normalized_target
-    )
-    life_air_care_desc_keywords = ("air quality", "air comfort")
+    card_entry_spec = dict(entry_spec or {})
+    title_patterns = [str(pattern or "").strip() for pattern in card_entry_spec.get("title_patterns", []) if str(pattern or "").strip()]
+    description_patterns = [str(pattern or "").strip() for pattern in card_entry_spec.get("description_patterns", []) if str(pattern or "").strip()]
+    resource_patterns = [str(pattern or "").strip() for pattern in card_entry_spec.get("resource_patterns", []) if str(pattern or "").strip()]
+    allow_description_match = bool(card_entry_spec.get("allow_description_match"))
+    if not title_patterns:
+        title_patterns = [str(target or "").strip()]
+    target_tokens: list[str] = []
+    for pattern in [*title_patterns, *description_patterns]:
+        pattern_tokens = [token for token in re.split(r"[^0-9a-zA-Z가-힣]+", pattern.lower()) if len(token) >= 3]
+        target_tokens.extend(pattern_tokens)
+    target_tokens = sorted(set(target_tokens))
 
     descendants_by_container: dict[int, list[str]] = {}
     for node, parent in flat_nodes:
@@ -1770,10 +1816,11 @@ def _select_visible_plugin_candidate(
             )
             continue
         pre_semantic_blob = " ".join(part for part in [label_blob, click_label_blob, click_descendant_blob] if part).strip()
-        description_semantic_match = bool(
-            is_life_air_care_target and any(keyword in pre_semantic_blob.lower() for keyword in life_air_care_desc_keywords)
+        title_semantic_match = any(_safe_regex_search(pattern, pre_semantic_blob) for pattern in title_patterns)
+        description_semantic_match = allow_description_match and any(
+            _safe_regex_search(pattern, pre_semantic_blob) for pattern in description_patterns
         )
-        if not (_safe_regex_search(target, pre_semantic_blob) or description_semantic_match):
+        if not (title_semantic_match or description_semantic_match):
             _append_rejection(stats, "filtered_before_candidate")
             _record_inspect(
                 stats,
@@ -1849,14 +1896,22 @@ def _select_visible_plugin_candidate(
             )
             continue
         semantic_blob_lower = semantic_blob.lower()
-        description_semantic_match = bool(
-            is_life_air_care_target and any(keyword in semantic_blob_lower for keyword in life_air_care_desc_keywords)
+        resource_blob = " ".join(
+            [
+                str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip(),
+                str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "").strip(),
+            ]
+        ).strip()
+        title_semantic_match = any(_safe_regex_search(pattern, title_blob) or _safe_regex_search(pattern, semantic_blob) for pattern in title_patterns)
+        description_semantic_match = allow_description_match and any(
+            _safe_regex_search(pattern, semantic_blob) for pattern in description_patterns
         )
+        resource_semantic_match = any(_safe_regex_search(pattern, resource_blob) for pattern in resource_patterns)
         if target_tokens and any(token in semantic_blob_lower for token in target_tokens):
             stats["partial_match_count"] += 1
-        elif description_semantic_match:
+        elif description_semantic_match or resource_semantic_match:
             stats["partial_match_count"] += 1
-        semantic_match = bool(_safe_regex_search(target, title_blob) or _safe_regex_search(target, semantic_blob) or description_semantic_match)
+        semantic_match = bool(title_semantic_match or description_semantic_match or resource_semantic_match)
         if not semantic_match:
             _append_rejection(stats, "semantic_miss")
             _record_inspect(
@@ -2183,17 +2238,20 @@ def _run_pre_navigation_steps(
                 post_scroll_settle_ms = 250
                 xml_fallback_attempted = False
                 xml_fallback_reason = "not_attempted"
+                entry_type = str(tab_cfg.get("entry_type", _ENTRY_TYPE_CARD) or _ENTRY_TYPE_CARD).strip().lower()
+                card_entry_spec = _get_card_entry_spec(tab_cfg, target)
                 for scroll_step in range(1, max_scroll_search_steps + 1):
                     selected_node, selected_reason, candidate_stats, selected_meta = _select_visible_plugin_candidate(
                         nodes=top_nodes,
                         target=target,
                         scenario_id=scenario_id,
+                        entry_spec=card_entry_spec,
                     )
                     rejection_counts = candidate_stats.get("rejection_counts", {})
                     needs_xml_fallback = bool(
                         selected_node is None
                         and not xml_fallback_attempted
-                        and scenario_id == _LIFE_AIR_CARE_SCENARIO_ID
+                        and entry_type == _ENTRY_TYPE_CARD
                         and int(candidate_stats.get("partial_match_count", 0) or 0) > 0
                         and int((rejection_counts or {}).get("non_actionable_without_promotion", 0) or 0) > 0
                     )
@@ -2206,6 +2264,7 @@ def _run_pre_navigation_steps(
                                 target=target,
                                 scenario_id=scenario_id,
                                 xml_nodes=xml_nodes,
+                                entry_spec=card_entry_spec,
                             )
                             rejection_counts = candidate_stats.get("rejection_counts", {})
                     visible_samples = candidate_stats.get("visible_samples", [])
@@ -2892,6 +2951,7 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         or ""
     ).strip()
     has_negative_signal = _is_negative_post_open_focus_signal(post_view_id, post_label, post_speech)
+    has_negative_verify_token = _has_post_open_negative_verify_token(tab_cfg, post_view_id, post_label, post_speech)
     fallback_used = bool(stabilize_result.get("fallback_candidate_used"))
     matches_verify = _matches_post_open_verify(tab_cfg, post_view_id, post_label, post_speech)
     if has_negative_signal and (entry_type == _ENTRY_TYPE_DIRECT_SELECT or fallback_used):
@@ -2914,6 +2974,20 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         if isinstance(start_open_summary, dict):
             start_open_summary["entry_contract_reason"] = _ENTRY_REASON_VERIFY_FAILED
             start_open_summary["entry_contract_detail"] = "post_open_verify_miss"
+            setattr(client, "last_start_open_summary", start_open_summary)
+        return False
+    requires_card_verify = entry_type == _ENTRY_TYPE_CARD and isinstance(tab_cfg.get("verify_tokens"), list) and bool(tab_cfg.get("verify_tokens"))
+    if requires_card_verify and (has_negative_verify_token or not matches_verify):
+        failure_reason = _ENTRY_REASON_WRONG_OPEN if (has_negative_signal or has_negative_verify_token) else _ENTRY_REASON_VERIFY_FAILED
+        failure_detail = "post_open_negative_verify_token" if has_negative_verify_token else "post_open_verify_miss"
+        log(
+            f"[SCENARIO][entry_contract] failed scenario='{scenario_id}' entry_type='{entry_type}' "
+            f"reason='{failure_reason}' detail='{failure_detail}'"
+        )
+        start_open_summary = getattr(client, "last_start_open_summary", {})
+        if isinstance(start_open_summary, dict):
+            start_open_summary["entry_contract_reason"] = failure_reason
+            start_open_summary["entry_contract_detail"] = failure_detail
             setattr(client, "last_start_open_summary", start_open_summary)
         return False
     if is_transition_entry_fast_path and not is_strict_main_tab_scenario:

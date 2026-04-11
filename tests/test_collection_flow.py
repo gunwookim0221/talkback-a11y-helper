@@ -1025,6 +1025,11 @@ def test_select_visible_plugin_candidate_promotes_non_clickable_description_to_o
         nodes=nodes,
         target=r"(?i).*air\s*care.*",
         scenario_id="life_air_care_plugin",
+        entry_spec={
+            "title_patterns": [r"(?i).*air\s*care.*"],
+            "description_patterns": [r"(?i)(air\s*quality|air\s*comfort)"],
+            "allow_description_match": True,
+        },
     )
 
     assert selected is not None
@@ -1067,6 +1072,11 @@ def test_select_visible_plugin_candidate_life_air_care_description_keyword_promo
         nodes=nodes,
         target=r"(?i).*air\s*care.*",
         scenario_id="life_air_care_plugin",
+        entry_spec={
+            "title_patterns": [r"(?i).*air\s*care.*"],
+            "description_patterns": [r"(?i)(air\s*quality|air\s*comfort)"],
+            "allow_description_match": True,
+        },
     )
 
     assert selected is not None
@@ -1142,6 +1152,11 @@ def test_select_visible_plugin_candidate_rejects_non_actionable_match_without_pr
         nodes=nodes,
         target=r"(?i).*air\s*care.*",
         scenario_id="life_air_care_plugin",
+        entry_spec={
+            "title_patterns": [r"(?i).*air\s*care.*"],
+            "description_patterns": [r"(?i)(air\s*quality|air\s*comfort)"],
+            "allow_description_match": True,
+        },
     )
 
     assert selected is None
@@ -1191,6 +1206,11 @@ def test_select_visible_plugin_candidate_promotes_to_effective_clickable_card_fo
         nodes=nodes,
         target=r"(?i)(^smart\s*air\s*care$|^air\s*care$|air\s*care\.|\baircare\b|에어\s*케어)",
         scenario_id="life_air_care_plugin",
+        entry_spec={
+            "title_patterns": [r"(?i).*air\s*care.*"],
+            "description_patterns": [r"(?i)(air\s*quality|air\s*comfort)"],
+            "allow_description_match": True,
+        },
     )
 
     assert selected is not None
@@ -1243,6 +1263,11 @@ def test_select_visible_plugin_candidate_xml_fallback_promotes_clickable_contain
         target=r"(?i).*air\s*care.*",
         scenario_id="life_air_care_plugin",
         xml_nodes=xml_nodes,
+        entry_spec={
+            "title_patterns": [r"(?i).*air\s*care.*"],
+            "description_patterns": [r"(?i)(air\s*quality|air\s*comfort)"],
+            "allow_description_match": True,
+        },
     )
 
     assert selected is not None
@@ -1252,6 +1277,60 @@ def test_select_visible_plugin_candidate_xml_fallback_promotes_clickable_contain
     assert selected_meta.get("promotion_attempted") is True
     assert selected_meta.get("promoted_to", "").endswith("preInstalledServiceCard")
     assert stats.get("rejection_counts", {}).get("non_actionable_without_promotion", 0) == 0
+
+
+def test_select_visible_plugin_candidate_card_entry_spec_description_match_promotes_energy_xml_container():
+    helper_nodes = [
+        {
+            "text": "Life",
+            "boundsInScreen": "0,0,1080,2200",
+            "visibleToUser": True,
+            "children": [
+                {
+                    "text": "Add an appliance to start measuring energy usage.",
+                    "boundsInScreen": "180,760,920,860",
+                    "visibleToUser": True,
+                    "clickable": False,
+                    "focusable": False,
+                    "viewIdResourceName": "com.test:id/tvHeaderTitle",
+                    "className": "android.widget.TextView",
+                }
+            ],
+        }
+    ]
+    xml_nodes = [
+        {
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2200",
+            "children": [
+                {
+                    "boundsInScreen": "100,620,980,980",
+                    "visibleToUser": True,
+                    "clickable": True,
+                    "focusable": False,
+                    "viewIdResourceName": "com.test:id/preInstalledServiceCard",
+                    "className": "android.widget.FrameLayout",
+                }
+            ],
+        }
+    ]
+
+    selected, reason, stats, selected_meta = collection_flow._select_visible_plugin_candidate(
+        nodes=helper_nodes,
+        target=r"(?i)(^energy$|energy\.|\bsmart\s*energy\b|\benergy\b)",
+        scenario_id="life_energy_plugin",
+        xml_nodes=xml_nodes,
+        entry_spec={
+            "title_patterns": [r"(?i)(^energy$|energy\.|\bsmart\s*energy\b|\benergy\b)"],
+            "description_patterns": [r"(?i)(energy\s*usage|measuring\s*energy\s*usage|appliance)"],
+            "allow_description_match": True,
+        },
+    )
+
+    assert selected is not None
+    assert "candidate_count=" in reason
+    assert selected_meta.get("promotion_source") == "xml_live"
+    assert stats.get("partial_match_count", 0) >= 1
 
 
 def test_select_visible_plugin_candidate_xml_live_prefers_specific_small_candidate_over_oversized_wrapper():
@@ -1303,6 +1382,11 @@ def test_select_visible_plugin_candidate_xml_live_prefers_specific_small_candida
         target=r"(?i).*air\s*care.*",
         scenario_id="life_air_care_plugin",
         xml_nodes=xml_nodes,
+        entry_spec={
+            "title_patterns": [r"(?i).*air\s*care.*"],
+            "description_patterns": [r"(?i)(air\s*quality|air\s*comfort)"],
+            "allow_description_match": True,
+        },
     )
 
     assert selected is not None
@@ -1352,6 +1436,11 @@ def test_select_visible_plugin_candidate_xml_live_oversized_generic_wrapper_is_d
         target=r"(?i).*air\s*care.*",
         scenario_id="life_air_care_plugin",
         xml_nodes=xml_nodes,
+        entry_spec={
+            "title_patterns": [r"(?i).*air\s*care.*"],
+            "description_patterns": [r"(?i)(air\s*quality|air\s*comfort)"],
+            "allow_description_match": True,
+        },
     )
 
     assert selected is None
@@ -1400,6 +1489,11 @@ def test_select_visible_plugin_candidate_xml_live_generic_wrapper_uses_refined_t
         target=r"(?i).*air\s*care.*",
         scenario_id="life_air_care_plugin",
         xml_nodes=xml_nodes,
+        entry_spec={
+            "title_patterns": [r"(?i).*air\s*care.*"],
+            "description_patterns": [r"(?i)(air\s*quality|air\s*comfort)"],
+            "allow_description_match": True,
+        },
     )
 
     assert selected is not None
@@ -1439,6 +1533,11 @@ def test_select_visible_plugin_candidate_rejects_oversized_root_during_promotion
         nodes=nodes,
         target=r"(?i).*air\s*care.*",
         scenario_id="life_air_care_plugin",
+        entry_spec={
+            "title_patterns": [r"(?i).*air\s*care.*"],
+            "description_patterns": [r"(?i)(air\s*quality|air\s*comfort)"],
+            "allow_description_match": True,
+        },
     )
 
     assert selected is None
@@ -1639,6 +1738,81 @@ def test_open_scenario_card_entry_keeps_air_care_success(monkeypatch):
     assert ok is True
     summary = getattr(client, "last_start_open_summary", {})
     assert summary.get("entry_contract_reason") == "success_verified"
+
+
+def test_open_scenario_card_entry_pre_nav_failure_reason_maps_no_match(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True, "matched": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    def _pre_nav_fail(**kwargs):
+        client = kwargs["client"]
+        setattr(client, "last_pre_nav_failure_reason", "no_local_match")
+        return False
+
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", _pre_nav_fail)
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_home_care_plugin",
+        "entry_type": "card",
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is False
+    summary = getattr(client, "last_start_open_summary", {})
+    assert summary.get("entry_contract_reason") == "no_match"
+
+
+def test_open_scenario_card_entry_pre_nav_failure_reason_maps_text_only_no_promotion(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True, "matched": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    def _pre_nav_fail(**kwargs):
+        client = kwargs["client"]
+        setattr(client, "last_pre_nav_failure_reason", "non_actionable_without_promotion")
+        return False
+
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", _pre_nav_fail)
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_energy_plugin",
+        "entry_type": "card",
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is False
+    summary = getattr(client, "last_start_open_summary", {})
+    assert summary.get("entry_contract_reason") == "text_only_no_promotion"
+
+
+def test_open_scenario_card_entry_verify_tokens_miss_maps_verify_failed(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {"ok": True, "selected": True, "reason": "selected_and_verified", "matched": True},
+    )
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    client.focus_sequence = [{"viewIdResourceName": "com.example:id/content", "text": "Unknown screen"}]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_energy_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["energy", "energy usage"],
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is False
+    summary = getattr(client, "last_start_open_summary", {})
+    assert summary.get("entry_contract_reason") == "verify_failed"
 
 
 def test_open_scenario_pre_navigation_touch_bounds_center_bounds_unavailable_failure(monkeypatch):
