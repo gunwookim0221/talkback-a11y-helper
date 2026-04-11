@@ -9,6 +9,7 @@ capture_debug_bundle.py
 """
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -19,11 +20,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-SCRIPT_VERSION = "2.0.0"
+SCRIPT_VERSION = "2.1.0"
 OUTPUT_BASE = Path("output/capture_bundles")
 DEFAULT_MODE = "scroll_capture"
 DEFAULT_WAIT_SECONDS = 0.8
-DEFAULT_MAX_STEPS = 12
+DEFAULT_MAX_STEPS = 10
+DEFAULT_SAVE_XML = True
 SCREENSHOT_FORMAT = "jpg"
 SCREENSHOT_JPG_QUALITY = 85
 SUMMARY_TOP_N = 8
@@ -100,11 +102,19 @@ def get_connected_devices() -> list[str]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Auto capture debug bundles for Life plugin scroll analysis")
-    parser.add_argument("--mode", choices=["scroll_capture", "single_capture"], default=DEFAULT_MODE)
-    parser.add_argument("--serial", default="", help="ADB serial (기본: 첫 번째 연결 기기)")
+    parser.add_argument("--mode", choices=["scroll_capture"], default=DEFAULT_MODE)
     parser.add_argument("--max_steps", type=int, default=DEFAULT_MAX_STEPS)
-    parser.add_argument("--wait", type=float, default=DEFAULT_WAIT_SECONDS)
+    parser.add_argument("--save_xml", type=parse_bool_arg, default=DEFAULT_SAVE_XML)
     return parser.parse_args()
+
+
+def parse_bool_arg(value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n"}:
+        return False
+    raise argparse.ArgumentTypeError("불리언 값은 true/false 로 입력하세요.")
 
 
 def resolve_serial(serial_arg: str, serials: list[str]) -> str:
@@ -143,10 +153,8 @@ def capture_screenshot(out_dir: Path, serial: str) -> tuple[bool, Optional[Path]
             pulled_png.unlink(missing_ok=True)
             return True, final_path, None
 
-        # Pillow 미설치 환경에서는 raw png를 jpg 이름으로 보관하지 않고 png fallback 저장
-        fallback = out_dir / "screenshot.png"
-        pulled_png.replace(fallback)
-        return True, fallback, "Pillow 미설치로 png fallback 저장"
+        pulled_png.unlink(missing_ok=True)
+        return False, None, "Pillow 미설치로 screenshot.jpg 생성 불가"
     except Exception as e:
         return False, None, str(e)
 
@@ -198,15 +206,6 @@ def summarize_nodes(nodes: list[dict[str, Any]], top_n: int = SUMMARY_TOP_N) -> 
     }
 
 
-def make_step_signature(summary: dict[str, Any]) -> str:
-    parts = [
-        "|".join(summary.get("visible_labels_top_n", [])),
-        "|".join(summary.get("resource_ids_top_n", [])),
-        "|".join(summary.get("class_names_top_n", [])),
-    ]
-    return "@@".join(parts)
-
-
 def enter_life_tab(dev: str) -> dict[str, Any]:
     try:
         result = client.touch(dev=dev, name=LIFE_TAB_REGEX, type_="t", wait_=4)
@@ -218,29 +217,75 @@ def enter_life_tab(dev: str) -> dict[str, Any]:
         return {"ok": False, "error": str(e)}
 
 
-def capture_step(step_dir: Path, serial: str, step_index: int, scroll_performed: bool, note: str) -> dict[str, Any]:
+def build_step_summary(nodes: list[dict[str, Any]], top_n: int = SUMMARY_TOP_N) -> dict[str, Any]:
+    summary = summarize_nodes(nodes, top_n=top_n)
+    summary_text = "||".join([
+        "|".join(summary["visible_labels_top_n"]),
+        "|".join(summary["resource_ids_top_n"]),
+        "|".join(summary["class_names_top_n"]),
+    ])
+    summary_hash = hashlib.sha1(summary_text.encode("utf-8")).hexdigest()[:12]
+
+    maybe_card_like = []
+    for node in nodes:
+        class_name = _pick_str(node, ["class_name", "className", "class"]).lower()
+        clickable = bool(node.get("clickable"))
+        label = _pick_str(node, ["text", "contentDescription", "content_desc", "description"])
+        resource_id = _pick_str(node, ["view_id_resource_name", "view_id", "resourceId", "resource_id"])
+        if ("card" in class_name or "item" in class_name or clickable) and (label or resource_id):
+            maybe_card_like.append(f"{label or '[no-text]'}::{resource_id or '[no-id]'}")
+        if len(maybe_card_like) >= top_n:
+            break
+
+    summary["duplicate_summary_hash"] = summary_hash
+    summary["maybe_card_like_nodes_top_n"] = maybe_card_like
+    summary["top_bar_present"] = any("toolbar" in c.lower() for c in summary["class_names_top_n"])
+    summary["bottom_tab_present"] = any("tab" in c.lower() for c in summary["class_names_top_n"])
+    return summary
+
+
+def save_step_bundle(
+    step_dir: Path,
+    serial: str,
+    step_index: int,
+    scroll_performed: bool,
+    scroll_result: str,
+    save_xml: bool,
+    notes: str,
+) -> dict[str, Any]:
     ensure_dir(step_dir)
 
     helper_nodes = get_helper_nodes(serial)
     write_json(step_dir / "helper_dump.json", helper_nodes)
 
-    summary = summarize_nodes(helper_nodes)
+    summary = build_step_summary(helper_nodes)
 
     screenshot_ok, screenshot_path, screenshot_err = capture_screenshot(step_dir, serial)
-    xml_ok, xml_path, xml_err = capture_uiautomator_xml(step_dir, serial)
+    xml_ok = False
+    xml_path: Optional[Path] = None
+    xml_err: Optional[str] = None
+    if save_xml:
+        xml_ok, xml_path, xml_err = capture_uiautomator_xml(step_dir, serial)
 
     meta = {
         "script_version": SCRIPT_VERSION,
+        "capture_mode": DEFAULT_MODE,
         "step_index": step_index,
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "scroll_performed": scroll_performed,
+        "scroll_result": scroll_result,
         "helper_node_count": summary["helper_node_count"],
+        "xml_saved": xml_ok,
+        "screenshot_saved": screenshot_ok,
         "visible_labels_top_n": summary["visible_labels_top_n"],
         "resource_ids_top_n": summary["resource_ids_top_n"],
         "class_names_top_n": summary["class_names_top_n"],
-        "xml_saved": xml_ok,
-        "screenshot_saved": screenshot_ok,
-        "note": note,
+        "maybe_card_like_nodes_top_n": summary["maybe_card_like_nodes_top_n"],
+        "duplicate_summary_hash": summary["duplicate_summary_hash"],
+        "reached_end_guess": False,
+        "top_bar_present": summary["top_bar_present"],
+        "bottom_tab_present": summary["bottom_tab_present"],
+        "notes": notes,
     }
     if screenshot_path:
         meta["screenshot_path"] = screenshot_path.name
@@ -250,12 +295,14 @@ def capture_step(step_dir: Path, serial: str, step_index: int, scroll_performed:
         meta["screenshot_note"] = screenshot_err
     if xml_err:
         meta["xml_note"] = xml_err
+    if not save_xml:
+        meta["xml_note"] = "save_xml=false 로 XML 저장 생략"
 
     write_json(step_dir / "meta.json", meta)
-    return {"meta": meta, "signature": make_step_signature(summary)}
+    return {"meta": meta, "signature": summary["duplicate_summary_hash"]}
 
 
-def run_scroll_capture(serial: str, max_steps: int, wait_seconds: float) -> Path:
+def run_scroll_capture(serial: str, max_steps: int, save_xml: bool, wait_seconds: float) -> Path:
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = OUTPUT_BASE / "life_plugin_scroll_capture" / run_id
     ensure_dir(run_dir)
@@ -266,10 +313,9 @@ def run_scroll_capture(serial: str, max_steps: int, wait_seconds: float) -> Path
         "serial": serial,
         "run_id": run_id,
         "max_steps": max_steps,
-        "wait_seconds": wait_seconds,
+        "save_xml": save_xml,
         "screenshot_format": SCREENSHOT_FORMAT,
         "screenshot_quality": SCREENSHOT_JPG_QUALITY,
-        "life_tab_regex": LIFE_TAB_REGEX,
         "started_at": datetime.now().isoformat(timespec="seconds"),
     }
 
@@ -289,24 +335,36 @@ def run_scroll_capture(serial: str, max_steps: int, wait_seconds: float) -> Path
     records: list[dict[str, Any]] = []
     previous_signature = ""
     repeated_count = 0
+    reached_end_guess = False
 
     for step in range(1, max(1, max_steps) + 1):
         step_dir = run_dir / f"step_{step:02d}"
         note = "initial_capture" if step == 1 else "after_scroll_down"
-        captured = capture_step(step_dir, serial=serial, step_index=step, scroll_performed=(step > 1), note=note)
+        captured = save_step_bundle(
+            step_dir=step_dir,
+            serial=serial,
+            step_index=step,
+            scroll_performed=(step > 1),
+            scroll_result="captured",
+            save_xml=save_xml,
+            notes=note,
+        )
         records.append(captured["meta"])
         signature = captured["signature"]
 
         if step > 1 and signature == previous_signature:
             repeated_count += 1
-            records[-1]["note"] = "same_visible_summary_detected"
+            reached_end_guess = True
+            records[-1]["notes"] = "same_visible_summary_detected"
+            records[-1]["reached_end_guess"] = True
+            records[-1]["scroll_result"] = "same_summary_repeated"
             log(f"⚠️ step={step} 동일 화면 반복 감지")
             break
 
         previous_signature = signature
 
         if step >= max_steps:
-            records[-1]["note"] = "max_steps_reached"
+            records[-1]["notes"] = "max_steps_reached"
             break
 
         scrolled = False
@@ -316,40 +374,35 @@ def run_scroll_capture(serial: str, max_steps: int, wait_seconds: float) -> Path
             scrolled = False
 
         if not scrolled:
-            records[-1]["note"] = "scroll_not_performed_or_end_reached"
+            reached_end_guess = True
+            records[-1]["notes"] = "scroll_not_performed_or_end_reached"
+            records[-1]["reached_end_guess"] = True
+            records[-1]["scroll_result"] = "scroll_not_performed_or_end_reached"
             log(f"⚠️ step={step} 이후 스크롤 불가 추정, 종료")
             break
 
         time.sleep(max(0.0, wait_seconds))
 
-    session_meta["finished_at"] = datetime.now().isoformat(timespec="seconds")
-    session_meta["captured_steps"] = len(records)
-    session_meta["same_screen_repeat_count"] = repeated_count
-    write_json(run_dir / "session_meta.json", session_meta)
-    write_json(run_dir / "capture_result.json", records)
+    summary = {
+        "script_version": SCRIPT_VERSION,
+        "capture_mode": DEFAULT_MODE,
+        "serial": serial,
+        "run_id": run_id,
+        "max_steps": max_steps,
+        "save_xml": save_xml,
+        "screenshot_format": SCREENSHOT_FORMAT,
+        "screenshot_quality": SCREENSHOT_JPG_QUALITY,
+        "started_at": session_meta["started_at"],
+        "finished_at": datetime.now().isoformat(timespec="seconds"),
+        "captured_steps": len(records),
+        "same_screen_repeat_count": repeated_count,
+        "reached_end_guess": reached_end_guess,
+        "life_tab_entry": life_result,
+        "scroll_to_top": top_result,
+        "steps": records,
+    }
+    write_json(run_dir / "summary.json", summary)
 
-    return run_dir
-
-
-def run_single_capture(serial: str) -> Path:
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = OUTPUT_BASE / "single_capture" / run_id
-    ensure_dir(run_dir)
-    step_dir = run_dir / "step_01"
-    capture_step(step_dir=step_dir, serial=serial, step_index=1, scroll_performed=False, note="single_capture")
-    write_json(
-        run_dir / "session_meta.json",
-        {
-            "script_version": SCRIPT_VERSION,
-            "mode": "single_capture",
-            "serial": serial,
-            "run_id": run_id,
-            "screenshot_format": SCREENSHOT_FORMAT,
-            "screenshot_quality": SCREENSHOT_JPG_QUALITY,
-            "captured_steps": 1,
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-        },
-    )
     return run_dir
 
 
@@ -358,17 +411,19 @@ def main() -> None:
 
     try:
         serials = get_connected_devices()
-        serial = resolve_serial(args.serial, serials)
+        serial = resolve_serial("", serials)
     except Exception as e:
         print(f"❌ 기기 확인 실패: {e}")
         return
 
-    log(f"모드={args.mode}, serial={serial}, max_steps={args.max_steps}, wait={args.wait}")
+    log(f"모드={args.mode}, serial={serial}, max_steps={args.max_steps}, save_xml={args.save_xml}")
 
-    if args.mode == "single_capture":
-        out_dir = run_single_capture(serial)
-    else:
-        out_dir = run_scroll_capture(serial=serial, max_steps=args.max_steps, wait_seconds=args.wait)
+    out_dir = run_scroll_capture(
+        serial=serial,
+        max_steps=args.max_steps,
+        save_xml=args.save_xml,
+        wait_seconds=DEFAULT_WAIT_SECONDS,
+    )
 
     print(f"\n✅ 캡처 완료: {out_dir.resolve()}")
 
