@@ -2693,6 +2693,7 @@ def test_capture_pre_navigation_failure_bundle_saves_expected_files(tmp_path, mo
 
     bundle = Path(bundle_path)
     assert bundle.exists()
+    assert bundle.name == "final_failure"
     assert (bundle / "screenshot.png").exists()
     assert (bundle / "window_dump.xml").exists()
     assert (bundle / "helper_dump.json").exists()
@@ -2701,6 +2702,41 @@ def test_capture_pre_navigation_failure_bundle_saves_expected_files(tmp_path, mo
     assert meta["scenario_id"] == "life_air_care_plugin"
     assert meta["failure_reason"] == "no_local_match"
     assert meta["step_index"] == 3
+
+
+def test_capture_scrolltouch_step_bundle_saves_expected_files(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client = DummyClient([])
+    client.dump_tree_sequence = [[{"text": "Air Care", "visibleToUser": True}]]
+    monkeypatch.setattr(client, "_take_snapshot", lambda _dev, save_path: Path(save_path).write_bytes(b"png"), raising=False)
+    monkeypatch.setattr(client, "_resolve_serial", lambda _dev: "SERIAL123", raising=False)
+    monkeypatch.setattr(collection_flow, "datetime", SimpleNamespace(
+        now=lambda tz=None: __import__("datetime").datetime(2026, 1, 1, 12, 0, 0, tzinfo=tz),
+    ))
+
+    bundle_path = collection_flow._capture_scrolltouch_step_bundle(
+        client,
+        "SERIAL",
+        scenario_id="life_air_care_plugin",
+        capture_run_id="20260101_120000",
+        step_index=1,
+        scroll_step=2,
+        target_regex="(?i).*air care.*",
+        selected=False,
+        selected_reason="no_visible_candidate",
+        candidate_stats={"visible_candidate_count": 0, "partial_match_count": 0, "exact_match_count": 0},
+    )
+
+    bundle = Path(bundle_path)
+    assert bundle.exists()
+    assert bundle.name == "step_02"
+    assert (bundle / "screenshot.png").exists()
+    assert (bundle / "helper_dump.json").exists()
+    meta = json.loads((bundle / "meta.json").read_text(encoding="utf-8"))
+    assert meta["phase"] == "scrolltouch_step"
+    assert meta["scroll_step"] == 2
+    assert meta["visible_candidate_count"] == 0
+    assert meta["selected"] is False
 
 
 def test_run_pre_navigation_steps_triggers_capture_for_life_air_care_failure(monkeypatch):
@@ -2731,6 +2767,52 @@ def test_run_pre_navigation_steps_triggers_capture_for_life_air_care_failure(mon
     assert captured["scenario_id"] == "life_air_care_plugin"
     assert captured["failure_phase"] == "pre_navigation"
     assert captured["failure_reason"] == "Target node not found"
+
+
+def test_run_pre_navigation_steps_scrolltouch_accumulates_step_and_final_capture_in_same_run(monkeypatch):
+    client = DummyClient([])
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append((level, message)))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "datetime", SimpleNamespace(
+        now=lambda tz=None: __import__("datetime").datetime(2026, 1, 1, 12, 0, 0, tzinfo=tz),
+    ))
+
+    client.dump_tree_sequence = [
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+    ]
+    monkeypatch.setattr(client, "scroll_to_top", lambda **kwargs: {"ok": True}, raising=False)
+    monkeypatch.setattr(collection_flow, "_verify_scroll_top_state", lambda *args, **kwargs: (True, "ok", []))
+    monkeypatch.setattr(client, "scroll", lambda **kwargs: True, raising=False)
+    monkeypatch.setattr(client, "scrollTouch", lambda **kwargs: False, raising=False)
+
+    ok = collection_flow._run_pre_navigation_steps(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={
+            "scenario_id": "life_air_care_plugin",
+            "screen_context_mode": "new_screen",
+            "stabilization_mode": "anchor_only",
+            "pre_navigation": [{"action": "scrollTouch", "target": "(?i).*air care.*", "type": "a"}],
+            "pre_navigation_retry_count": 1,
+            "max_scroll_search_steps": 2,
+        },
+    )
+
+    assert ok is False
+    assert any("[CAPTURE][scrolltouch_step]" in line for _, line in logs)
+    assert any("[CAPTURE][pre_nav_failure]" in line and "/final_failure'" in line for _, line in logs)
+    step_dir = Path("output/capture_bundles/life_air_care_plugin/20260101_120000/step_01")
+    final_dir = Path("output/capture_bundles/life_air_care_plugin/20260101_120000/final_failure")
+    assert step_dir.exists()
+    assert final_dir.exists()
 
 
 def test_capture_pre_navigation_failure_bundle_logs_partial_failure(monkeypatch, tmp_path):
