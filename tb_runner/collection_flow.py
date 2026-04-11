@@ -77,6 +77,7 @@ _ENTRY_REASON_WRONG_OPEN = "wrong_open"
 _ENTRY_REASON_FALSE_SUCCESS_GUARD = "false_success_guard"
 _ENTRY_REASON_VERIFY_FAILED = "verify_failed"
 _ENTRY_REASON_SUCCESS_VERIFIED = "success_verified"
+_ENTRY_REASON_SPECIAL_STATE_HANDLED = "special_state_handled"
 _CARD_ENTRY_VERIFY_RECHECK_COUNT = 2
 _CARD_ENTRY_VERIFY_RECHECK_SLEEP_SECONDS = 0.2
 
@@ -134,6 +135,10 @@ class StartPipelineResult:
     entry_type: str
     entry_contract_reason: str
     entry_contract_detail: str
+    special_state_detected: bool
+    special_state_kind: str
+    special_state_handling: str
+    special_state_back_status: str
     post_open_focus_collected: bool
     should_enter_main_loop: bool
     start_row: dict[str, Any] | None
@@ -881,6 +886,61 @@ def _collect_post_open_visible_text(client: A11yAdbClient, dev: str) -> str:
         if len(visible_fragments) >= 30:
             break
     return " ".join(visible_fragments).strip()
+
+
+def _classify_special_post_open_state(
+    tab_cfg: dict[str, Any],
+    *,
+    post_view_id: str,
+    post_label: str,
+    post_speech: str,
+    visible_verify_text: str,
+    matches_verify: bool,
+) -> tuple[bool, str, dict[str, Any]]:
+    if str(tab_cfg.get("entry_type", _ENTRY_TYPE_CARD) or _ENTRY_TYPE_CARD).strip().lower() != _ENTRY_TYPE_CARD:
+        return False, "", {}
+    handling = str(tab_cfg.get("special_state_handling", "") or "").strip().lower()
+    if not handling:
+        return False, "", {}
+
+    special_tokens_raw = tab_cfg.get("special_state_tokens", [])
+    cta_tokens_raw = tab_cfg.get("special_state_cta_tokens", [])
+    special_tokens = [str(token or "").strip().lower() for token in special_tokens_raw if str(token or "").strip()]
+    cta_tokens = [str(token or "").strip().lower() for token in cta_tokens_raw if str(token or "").strip()]
+    if not special_tokens or not cta_tokens:
+        return False, "", {}
+
+    blob_candidates = [post_view_id, post_label, post_speech, visible_verify_text]
+    normalized_blob = " ".join(str(value or "") for value in blob_candidates).lower()
+    if not normalized_blob.strip():
+        return False, "", {}
+
+    special_hits = [token for token in special_tokens if token in normalized_blob]
+    cta_hits = [token for token in cta_tokens if token in normalized_blob]
+    if not cta_hits:
+        return False, "", {}
+
+    verify_tokens_raw = tab_cfg.get("verify_tokens", [])
+    verify_tokens = [str(token or "").strip().lower() for token in verify_tokens_raw if str(token or "").strip()]
+    verify_hit = bool(matches_verify or (verify_tokens and any(token in normalized_blob for token in verify_tokens)))
+    long_intro_like = len(visible_verify_text.strip()) >= 80 or len(post_speech.strip()) >= 80
+    special_hit_count = len(special_hits)
+    cta_hit_count = len(cta_hits)
+
+    detected = bool(
+        (verify_hit and special_hit_count >= 1 and cta_hit_count >= 1)
+        or (special_hit_count >= 2 and cta_hit_count >= 1)
+        or (long_intro_like and special_hit_count >= 1 and cta_hit_count >= 1)
+    )
+    if not detected:
+        return False, "", {}
+    return True, "onboarding_or_empty_state", {
+        "special_hits": special_hits,
+        "cta_hits": cta_hits,
+        "verify_hit": verify_hit,
+        "long_intro_like": long_intro_like,
+        "handling": handling,
+    }
 
 
 def _get_card_entry_spec(tab_cfg: dict[str, Any], target: str) -> dict[str, Any]:
@@ -3099,6 +3159,71 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             start_open_summary["entry_contract_detail"] = failure_detail
             setattr(client, "last_start_open_summary", start_open_summary)
         return False
+    if (
+        entry_type == _ENTRY_TYPE_CARD
+        and not visible_verify_text
+        and (tab_cfg.get("special_state_tokens") or tab_cfg.get("special_state_cta_tokens"))
+    ):
+        visible_verify_text = _collect_post_open_visible_text(client, dev)
+    special_state_detected, special_state_kind, special_state_meta = _classify_special_post_open_state(
+        tab_cfg,
+        post_view_id=post_view_id,
+        post_label=post_label,
+        post_speech=post_speech,
+        visible_verify_text=visible_verify_text,
+        matches_verify=matches_verify,
+    )
+    if special_state_detected:
+        handling = str(special_state_meta.get("handling", "") or "back_after_read")
+        special_hits = ",".join(special_state_meta.get("special_hits", []))
+        cta_hits = ",".join(special_state_meta.get("cta_hits", []))
+        verify_hit = bool(special_state_meta.get("verify_hit", False))
+        long_intro_like = bool(special_state_meta.get("long_intro_like", False))
+        log(
+            f"[SCENARIO][special_state] detected scenario='{scenario_id}' entry_type='{entry_type}' "
+            f"kind='{special_state_kind}' handling='{handling}' verify_hit={str(verify_hit).lower()} "
+            f"long_intro_like={str(long_intro_like).lower()} special_hits='{special_hits}' cta_hits='{cta_hits}'"
+        )
+        read_wait_seconds = min(main_step_wait_seconds, 0.5)
+        if read_wait_seconds > 0:
+            time.sleep(read_wait_seconds)
+        back_status = "skipped"
+        if handling == "back_after_read":
+            back_ok = _send_back(client, dev)
+            if not back_ok:
+                back_status = "back_failed"
+            else:
+                time.sleep(min(main_step_wait_seconds, 0.6))
+                after_back_focus = client.get_focus(
+                    dev=dev,
+                    wait_seconds=min(main_step_wait_seconds, 0.8),
+                    allow_fallback_dump=False,
+                    mode="fast",
+                )
+                after_back_blob = _node_label_blob(after_back_focus if isinstance(after_back_focus, dict) else {}).lower()
+                cta_tokens = [
+                    str(token or "").strip().lower()
+                    for token in tab_cfg.get("special_state_cta_tokens", [])
+                    if str(token or "").strip()
+                ]
+                still_cta = bool(after_back_blob and cta_tokens and any(token in after_back_blob for token in cta_tokens))
+                back_status = "back_sent_still_cta" if still_cta else "back_sent_exit"
+        start_open_summary = getattr(client, "last_start_open_summary", {})
+        if isinstance(start_open_summary, dict):
+            start_open_summary["open_completed"] = True
+            start_open_summary["entry_contract_reason"] = _ENTRY_REASON_SPECIAL_STATE_HANDLED
+            start_open_summary["entry_contract_detail"] = "onboarding_back_exit"
+            start_open_summary["special_state_detected"] = True
+            start_open_summary["special_state_kind"] = special_state_kind
+            start_open_summary["special_state_handling"] = handling
+            start_open_summary["special_state_back_status"] = back_status
+            setattr(client, "last_start_open_summary", start_open_summary)
+        log(
+            f"[SCENARIO][entry_contract] handled scenario='{scenario_id}' entry_type='{entry_type}' "
+            f"reason='{_ENTRY_REASON_SPECIAL_STATE_HANDLED}' detail='onboarding_back_exit' "
+            f"back_status='{back_status}'"
+        )
+        return True
     if is_transition_entry_fast_path and not is_strict_main_tab_scenario:
         time.sleep(min(main_step_wait_seconds, _TRANSITION_FAST_STEP_WAIT_SECONDS))
     else:
@@ -3897,11 +4022,11 @@ def _persist_phase(phase_ctx: CollectionPhaseContext) -> None:
         log(format_perf_summary("scenario_summary", scenario_perf.summary_dict()))
 
 
-def _build_open_failed_row(tab_cfg: dict[str, Any], *, stop_reason: str) -> dict[str, Any]:
+def _build_terminal_row(tab_cfg: dict[str, Any], *, stop_reason: str, status: str = "TAB_OPEN_FAILED") -> dict[str, Any]:
     row = {
         "tab_name": tab_cfg["tab_name"],
         "step_index": -1,
-        "status": "TAB_OPEN_FAILED",
+        "status": status,
         "stop_reason": stop_reason,
         "crop_image": "",
         "crop_image_path": "",
@@ -4005,6 +4130,10 @@ def _run_start_pipeline(
         entry_type=str(tab_cfg.get("entry_type", _ENTRY_TYPE_CARD) or _ENTRY_TYPE_CARD),
         entry_contract_reason=_ENTRY_REASON_VERIFY_FAILED,
         entry_contract_detail="",
+        special_state_detected=False,
+        special_state_kind="",
+        special_state_handling="",
+        special_state_back_status="",
         post_open_focus_collected=False,
         should_enter_main_loop=False,
         start_row=None,
@@ -4031,6 +4160,10 @@ def _run_start_pipeline(
         result.entry_type = str(open_summary.get("entry_type", result.entry_type) or result.entry_type)
         result.entry_contract_reason = str(open_summary.get("entry_contract_reason", result.entry_contract_reason) or result.entry_contract_reason)
         result.entry_contract_detail = str(open_summary.get("entry_contract_detail", result.entry_contract_detail) or result.entry_contract_detail)
+        result.special_state_detected = bool(open_summary.get("special_state_detected", False))
+        result.special_state_kind = str(open_summary.get("special_state_kind", "") or "")
+        result.special_state_handling = str(open_summary.get("special_state_handling", "") or "")
+        result.special_state_back_status = str(open_summary.get("special_state_back_status", "") or "")
     tab_trace = getattr(client, "last_tab_stabilization_result", {})
     if isinstance(tab_trace, dict) and not isinstance(open_summary, dict):
         context_payload = tab_trace.get("context", {})
@@ -4043,6 +4176,12 @@ def _run_start_pipeline(
     if not opened:
         result.failure_reason = "tab_or_anchor_failed"
         result.needs_open_failed_row = True
+        return result
+
+    if result.entry_contract_reason == _ENTRY_REASON_SPECIAL_STATE_HANDLED:
+        result.success = True
+        result.open_completed = True
+        result.should_enter_main_loop = False
         return result
 
     result.open_completed = True
@@ -4174,7 +4313,7 @@ def collect_tab_rows(
         main_announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
     )
     if start_result.needs_open_failed_row:
-        failed_row = _build_open_failed_row(
+        failed_row = _build_terminal_row(
             tab_cfg,
             stop_reason=start_result.failure_reason or "tab_or_anchor_failed",
         )
@@ -4186,7 +4325,27 @@ def collect_tab_rows(
             log(format_perf_summary("scenario_summary", scenario_perf.summary_dict()))
         save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
         return rows
-    if not start_result.should_enter_main_loop or start_result.start_row is None:
+    if not start_result.should_enter_main_loop:
+        if start_result.entry_contract_reason == _ENTRY_REASON_SPECIAL_STATE_HANDLED:
+            handled_row = _build_terminal_row(
+                tab_cfg,
+                stop_reason=_ENTRY_REASON_SPECIAL_STATE_HANDLED,
+                status="SPECIAL_STATE_HANDLED",
+            )
+            handled_row["entry_contract_detail"] = start_result.entry_contract_detail or "onboarding_back_exit"
+            handled_row["special_state_detected"] = bool(start_result.special_state_detected)
+            handled_row["special_state_kind"] = str(start_result.special_state_kind or "onboarding_or_empty_state")
+            handled_row["special_state_handling"] = str(start_result.special_state_handling or "back_after_read")
+            handled_row["special_state_back_status"] = str(start_result.special_state_back_status or "")
+            rows.append(handled_row)
+            all_rows.append(handled_row)
+            if scenario_perf is not None:
+                scenario_perf.record_row(handled_row)
+                scenario_perf.finalize()
+                log(format_perf_summary("scenario_summary", scenario_perf.summary_dict()))
+            save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
+        return rows
+    if start_result.start_row is None:
         return rows
 
     anchor_row = start_result.start_row

@@ -1,4 +1,4 @@
-SCENARIO_CONFIG_VERSION = "2026.04.11-home-care-discover-v1"
+SCENARIO_CONFIG_VERSION = "2026.04.11-special-state-handling-v1"
 
 BOTTOM_TAB_GLOBAL_NAV = {
     "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
@@ -220,6 +220,15 @@ TAB_CONFIGS = [
         },
         "verify_tokens": ["home care", "smart care", "home appliances"],
         "negative_verify_tokens": ["air care", "energy"],
+        "special_state_tokens": [
+            "smartthings home care",
+            "always manage your home appliances optimally",
+            "home care constantly monitors devices",
+            "ai diagnosis",
+            "maintenance",
+        ],
+        "special_state_cta_tokens": ["start"],
+        "special_state_handling": "back_after_read",
 
         "anchor_name": "(?i).*navigate\\s*up.*",
         "anchor_type": "a",
