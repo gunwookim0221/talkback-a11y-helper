@@ -62,9 +62,10 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-recheck-v7"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr19-scrolltouch-description-promotion-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr20-scrolltouch-actionable-gate-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
+_LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
 
 
@@ -1062,6 +1063,7 @@ def _confirm_click_focused_transition(
 ) -> tuple[bool, str]:
     scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip().lower()
     strict_life_energy_mode = scenario_id == _LIFE_ENERGY_SCENARIO_ID
+    strict_life_air_care_mode = scenario_id == _LIFE_AIR_CARE_SCENARIO_ID
     max_poll_count = 2 if transition_fast_path else 3
     focus_wait_seconds = 0.28 if transition_fast_path else 0.45
     patterns = _build_transition_patterns(tab_cfg)
@@ -1080,6 +1082,7 @@ def _confirm_click_focused_transition(
     saw_dump_change = False
     saw_focus_change = False
     saw_conflicting_screen_signature = False
+    saw_air_care_signature = False
 
     for poll_idx in range(max_poll_count):
         current_nodes: list[dict[str, Any]] = []
@@ -1090,10 +1093,15 @@ def _confirm_click_focused_transition(
                 current_nodes = []
         energy_signature_seen = False
         for node in current_nodes:
+            if strict_life_air_care_mode and _safe_regex_search(_LIFE_AIR_CARE_VERIFY_REGEX, _node_label_blob(node)):
+                saw_air_care_signature = True
+                return True, "air_care_verify"
             if strict_life_energy_mode and _safe_regex_search(patterns.get("context_text", ""), _node_label_blob(node)):
                 energy_signature_seen = True
             matched, signal = _node_matches_transition_pattern(node, patterns)
             if matched:
+                if strict_life_air_care_mode and signal == "anchor_match":
+                    continue
                 if strict_life_energy_mode and signal == "anchor_match" and not energy_signature_seen:
                     continue
                 return True, signal
@@ -1116,6 +1124,13 @@ def _confirm_click_focused_transition(
             )
             focus_matched, _ = _node_matches_transition_pattern(focus_node, patterns)
             if focus_matched:
+                if strict_life_air_care_mode:
+                    focus_label = _node_label_blob(focus_node)
+                    if _safe_regex_search(_LIFE_AIR_CARE_VERIFY_REGEX, focus_label):
+                        saw_air_care_signature = True
+                        return True, "air_care_focus_verify"
+                if strict_life_air_care_mode:
+                    continue
                 if strict_life_energy_mode:
                     focus_label = _node_label_blob(focus_node)
                     focus_view_id = str(
@@ -1140,6 +1155,8 @@ def _confirm_click_focused_transition(
         return False, "conflicting_screen_signature"
     if strict_life_energy_mode and (saw_dump_change or saw_focus_change):
         return False, "weak_transition_signal_only"
+    if strict_life_air_care_mode and not saw_air_care_signature:
+        return False, "air_care_verify_missing"
     if saw_dump_change:
         return True, "dump_signature_changed"
     if saw_focus_change:
@@ -1604,6 +1621,24 @@ def _select_visible_plugin_candidate(
                 promoted_click_node = overlapping_candidates[0][4]
                 click_node = promoted_click_node
                 promotion_reason = str(overlapping_candidates[0][5])
+        if click_node is node and not (bool(click_node.get("clickable")) or bool(click_node.get("focusable"))):
+            _append_rejection(stats, "non_actionable_without_promotion")
+            _record_inspect(
+                stats,
+                node_ref=node,
+                promoted_click_node=promoted_click_node,
+                reject_reason="non_actionable_without_promotion",
+                stage="actionability_gate",
+                matched_text_node=matched_text_node,
+                promotion_reason=promotion_reason,
+            )
+            _record_pre_candidate(
+                stats,
+                node_ref=node,
+                promoted_click_node=promoted_click_node,
+                reason="actionability_fail:non_actionable_without_promotion",
+            )
+            continue
         card_resource = str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "")
         class_name = str(click_node.get("className", "") or "").strip()
         bounds_repr = str(click_node.get("boundsInScreen", "") or "").strip()

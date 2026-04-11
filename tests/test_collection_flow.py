@@ -1118,6 +1118,45 @@ def test_select_visible_plugin_candidate_description_keyword_is_scoped_to_life_a
     assert stats.get("rejection_counts", {}).get("filtered_before_candidate", 0) >= 1
 
 
+def test_select_visible_plugin_candidate_rejects_non_actionable_match_without_promotion():
+    nodes = [
+        {
+            "text": "Life",
+            "boundsInScreen": "0,0,1080,2200",
+            "visibleToUser": True,
+            "children": [
+                {
+                    "text": "Air Care",
+                    "boundsInScreen": "170,760,930,850",
+                    "visibleToUser": True,
+                    "clickable": False,
+                    "focusable": False,
+                    "viewIdResourceName": "com.test:id/tvHeaderTitle",
+                    "className": "android.widget.TextView",
+                }
+            ],
+        }
+    ]
+
+    selected, reason, stats, selected_meta = collection_flow._select_visible_plugin_candidate(
+        nodes=nodes,
+        target=r"(?i).*air\s*care.*",
+        scenario_id="life_air_care_plugin",
+    )
+
+    assert selected is None
+    assert reason == "no_visible_candidate"
+    assert selected_meta.get("promoted_container") is False
+    assert stats.get("rejection_counts", {}).get("non_actionable_without_promotion", 0) >= 1
+    assert any(
+        "reason='non_actionable_without_promotion'" in sample for sample in stats.get("inspect_samples", [])
+    )
+    assert any(
+        "actionability_fail:non_actionable_without_promotion" in sample
+        for sample in stats.get("pre_candidate_fail_samples", [])
+    )
+
+
 def test_confirm_click_focused_transition_life_energy_rejects_weak_signal(monkeypatch):
     client = DummyClient([])
     baseline_nodes = [
@@ -1144,6 +1183,32 @@ def test_confirm_click_focused_transition_life_energy_rejects_weak_signal(monkey
 
     assert ok is False
     assert reason == "weak_transition_signal_only"
+
+
+def test_confirm_click_focused_transition_life_air_care_requires_plugin_specific_verify(monkeypatch):
+    client = DummyClient([])
+    baseline_nodes = [{"text": "Air Care", "viewIdResourceName": "id.card.aircare"}]
+    current_nodes = [
+        {"text": "Navigate up", "contentDescription": "Navigate up", "viewIdResourceName": ""},
+    ]
+    client.dump_tree_sequence = [current_nodes, current_nodes, current_nodes]
+    client.focus_sequence = [{"text": "Navigate up", "contentDescription": "Navigate up", "viewIdResourceName": ""}]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_air_care_plugin",
+        "anchor": {"text_regex": "(?i).*navigate\\s*up.*"},
+    }
+
+    ok, reason = collection_flow._confirm_click_focused_transition(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        transition_fast_path=False,
+        baseline_nodes=baseline_nodes,
+    )
+
+    assert ok is False
+    assert reason == "air_care_verify_missing"
 
 
 def test_open_scenario_life_energy_guard_rejects_family_care_entry(monkeypatch):
