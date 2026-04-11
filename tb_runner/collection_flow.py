@@ -2,6 +2,9 @@ import re
 import time
 from collections import deque
 from dataclasses import dataclass
+from datetime import datetime, timezone
+import json
+from pathlib import Path
 from typing import Any
 
 from talkback_lib import A11yAdbClient
@@ -60,6 +63,9 @@ COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-recheck-v7"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr15-scrolltouch-candidate-rejection-v1"
+COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v1"
+_LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
+_PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
 
 
 
@@ -778,6 +784,98 @@ def _extract_window_focus_line(client: A11yAdbClient, dev: str) -> str:
     return ""
 
 
+def _capture_pre_navigation_failure_bundle(
+    client: A11yAdbClient,
+    dev: str,
+    *,
+    scenario_id: str,
+    failure_phase: str,
+    failure_reason: str,
+    step_index: int,
+    target_regex: str,
+) -> str:
+    normalized_scenario_id = str(scenario_id or "").strip().lower()
+    normalized_reason = str(failure_reason or "").strip().lower()
+    if normalized_scenario_id != _LIFE_AIR_CARE_SCENARIO_ID:
+        return ""
+    if normalized_reason not in _PRE_NAV_CAPTURE_REASON_KEYS:
+        return ""
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    bundle_dir = Path("output") / "capture_bundles" / normalized_scenario_id / f"{timestamp}_s{max(step_index, 0)}"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+
+    screenshot_path = bundle_dir / "screenshot.png"
+    window_dump_path = bundle_dir / "window_dump.xml"
+    helper_dump_path = bundle_dir / "helper_dump.json"
+    focus_payload_path = bundle_dir / "focus_payload.json"
+    meta_path = bundle_dir / "meta.json"
+
+    try:
+        client._take_snapshot(dev, str(screenshot_path))
+    except Exception:
+        pass
+
+    run_fn = getattr(client, "_run", None)
+    if callable(run_fn):
+        try:
+            remote_xml = f"/sdcard/window_dump_{timestamp}.xml"
+            run_fn(["shell", "uiautomator", "dump", remote_xml], dev=dev)
+            run_fn(["pull", remote_xml, str(window_dump_path)], dev=dev)
+            run_fn(["shell", "rm", "-f", remote_xml], dev=dev)
+        except Exception:
+            pass
+
+    helper_dump: Any = []
+    dump_tree_fn = getattr(client, "dump_tree", None)
+    if callable(dump_tree_fn):
+        try:
+            helper_dump = dump_tree_fn(dev=dev)
+        except Exception as exc:
+            helper_dump = {"error": f"dump_tree_failed:{exc}"}
+    try:
+        helper_dump_path.write_text(json.dumps(helper_dump, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+    focus_payload: dict[str, Any] = {}
+    get_focus_fn = getattr(client, "get_focus", None)
+    if callable(get_focus_fn):
+        try:
+            focus_payload["focus_node"] = get_focus_fn(dev=dev, wait_seconds=0.8, allow_fallback_dump=False, mode="fast")
+        except Exception as exc:
+            focus_payload["focus_error"] = f"get_focus_failed:{exc}"
+    trace = getattr(client, "last_get_focus_trace", {})
+    if isinstance(trace, dict):
+        focus_payload["get_focus_trace"] = trace
+    try:
+        focus_payload_path.write_text(json.dumps(focus_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+    serial = ""
+    try:
+        serial = str(client._resolve_serial(dev) or "")
+    except Exception:
+        serial = ""
+    meta = {
+        "version": COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION,
+        "scenario_id": normalized_scenario_id,
+        "failure_phase": str(failure_phase or ""),
+        "failure_reason": str(failure_reason or ""),
+        "step_index": int(step_index),
+        "target_regex": str(target_regex or ""),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "device_serial": serial,
+    }
+    try:
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+    return str(bundle_dir)
+
+
 def _build_transition_patterns(tab_cfg: dict[str, Any]) -> dict[str, str]:
     anchor_cfg = dict(tab_cfg.get("anchor", {}) or {})
     context_cfg = dict(tab_cfg.get("context_verify", {}) or {})
@@ -1367,6 +1465,7 @@ def _run_pre_navigation_steps(
         log(f"[SCENARIO][pre_nav] step={index} action={action} target='{target}'")
         step_ok = False
         actual_reason = "unknown"
+        local_match_failed = False
         for attempt in range(1, step_retry_count + 1):
             if action == "select":
                 step_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
@@ -1535,6 +1634,7 @@ def _run_pre_navigation_steps(
                     last_signature = current_signature
 
                 if not step_ok:
+                    local_match_failed = True
                     log(
                         f"[SCENARIO][pre_nav][scrolltouch] candidate_select reason='no_local_match' "
                         f"fallback='helper_scrollTouch' reason_detail='{fallback_reason}' "
@@ -1684,6 +1784,27 @@ def _run_pre_navigation_steps(
                 log(f"[SCENARIO][pre_nav] retry step={index} attempt={attempt}/{step_retry_count} reason='{actual_reason}'")
 
         if not step_ok:
+            failure_reason_for_capture = "action_failed"
+            normalized_actual_reason = str(actual_reason or "").strip().lower()
+            if local_match_failed:
+                failure_reason_for_capture = "no_local_match"
+            elif normalized_actual_reason == "target node not found":
+                failure_reason_for_capture = "Target node not found"
+            capture_path = _capture_pre_navigation_failure_bundle(
+                client,
+                dev,
+                scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+                failure_phase="pre_navigation",
+                failure_reason=failure_reason_for_capture,
+                step_index=index,
+                target_regex=target,
+            )
+            if capture_path:
+                log(
+                    f"[SCENARIO][pre_nav][capture] saved path='{capture_path}' "
+                    "failure_phase='pre_navigation' "
+                    f"failure_reason='{failure_reason_for_capture}'"
+                )
             log(f"[SCENARIO][pre_nav] failed reason='action_failed' step={index}")
             log(f"[SCENARIO][pre_nav] failed reason='action_failed' detail='{actual_reason}' step={index}")
             return False
@@ -1846,6 +1967,21 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             scenario_id=scenario_id,
         )
         if not plugin_root_ok:
+            capture_path = _capture_pre_navigation_failure_bundle(
+                client,
+                dev,
+                scenario_id=scenario_id,
+                failure_phase="before_pre_navigation",
+                failure_reason=plugin_root_reason,
+                step_index=0,
+                target_regex="",
+            )
+            if capture_path:
+                log(
+                    f"[SCENARIO][pre_nav][capture] saved path='{capture_path}' "
+                    "failure_phase='before_pre_navigation' "
+                    f"failure_reason='{plugin_root_reason}'"
+                )
             log(
                 f"[SCENARIO][pre_nav][stabilization] failed scenario='{scenario_id}' "
                 f"reason='{plugin_root_reason}'"
