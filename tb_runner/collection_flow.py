@@ -65,7 +65,7 @@ COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr24-card-entry-generalization-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
-COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr24-life-card-entry-contract-v2"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr24-life-card-entry-contract-v3"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -326,12 +326,12 @@ def _verify_plugin_entry_root_state(
             return True, "root_state_stable"
         last_reason = str(snapshot.get("fail_reason", "life_root_not_stable") or "life_root_not_stable")
         normalized_scenario_id = str(scenario_id or "").strip().lower()
-        is_life_plugin_before_pre_nav = (
-            phase == "before_pre_navigation"
+        is_life_plugin_gate_phase = (
+            phase in {"before_pre_navigation", "focus_align_recheck"}
             and normalized_scenario_id.startswith("life_")
             and normalized_scenario_id.endswith("_plugin")
         )
-        if is_life_plugin_before_pre_nav:
+        if is_life_plugin_gate_phase:
             relaxed_scrolltouch_entry_ok = bool(
                 int(snapshot.get("navigate_up_hits", 0) or 0) == 0
                 and (
@@ -368,7 +368,10 @@ def _verify_plugin_entry_root_state(
                     recheck_ok = bool(recheck_snapshot.get("ok"))
                     relaxed_recheck_ok = bool(
                         int(recheck_snapshot.get("navigate_up_hits", 0) or 0) == 0
-                        and bool(recheck_snapshot.get("life_selected") or recheck_snapshot.get("bottom_nav_life_visible"))
+                        and (
+                            bool(recheck_snapshot.get("life_selected") or recheck_snapshot.get("bottom_nav_life_visible"))
+                            or family_care_signature_seen
+                        )
                         and int(recheck_snapshot.get("app_bar_hits", 0) or 0) >= _LIFE_ROOT_APP_BAR_MIN_HITS
                     )
                     log(
