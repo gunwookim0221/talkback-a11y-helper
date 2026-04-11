@@ -1,4 +1,6 @@
 import sys
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 sys.modules.setdefault("pandas", SimpleNamespace(DataFrame=object, ExcelWriter=object))
@@ -2658,3 +2660,74 @@ def test_verify_plugin_entry_root_state_does_not_apply_transient_recheck_to_othe
     assert ok is False
     assert reason == "life_root_not_stable"
     assert len(client.dump_tree_calls) == collection_flow._PLUGIN_ENTRY_RETRY_COUNT
+
+
+def test_capture_pre_navigation_failure_bundle_saves_expected_files(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client = DummyClient([])
+    client.dump_tree_sequence = [[{"text": "Air Care", "visibleToUser": True}]]
+    monkeypatch.setattr(client, "_take_snapshot", lambda _dev, save_path: Path(save_path).write_bytes(b"png"), raising=False)
+    monkeypatch.setattr(client, "_resolve_serial", lambda _dev: "SERIAL123", raising=False)
+
+    def _run(args, **kwargs):
+        if args[:3] == ["pull", "/sdcard/window_dump_20260101_120000.xml", str(Path("x"))]:
+            return ""
+        if args[0] == "pull":
+            Path(args[2]).write_text("<hierarchy/>", encoding="utf-8")
+        return ""
+
+    monkeypatch.setattr(client, "_run", _run, raising=False)
+    monkeypatch.setattr(collection_flow, "datetime", SimpleNamespace(
+        now=lambda tz=None: __import__("datetime").datetime(2026, 1, 1, 12, 0, 0, tzinfo=tz),
+    ))
+
+    bundle_path = collection_flow._capture_pre_navigation_failure_bundle(
+        client,
+        "SERIAL",
+        scenario_id="life_air_care_plugin",
+        failure_phase="pre_navigation",
+        failure_reason="no_local_match",
+        step_index=3,
+        target_regex="(?i).*air care.*",
+    )
+
+    bundle = Path(bundle_path)
+    assert bundle.exists()
+    assert (bundle / "screenshot.png").exists()
+    assert (bundle / "window_dump.xml").exists()
+    assert (bundle / "helper_dump.json").exists()
+    assert (bundle / "focus_payload.json").exists()
+    meta = json.loads((bundle / "meta.json").read_text(encoding="utf-8"))
+    assert meta["scenario_id"] == "life_air_care_plugin"
+    assert meta["failure_reason"] == "no_local_match"
+    assert meta["step_index"] == 3
+
+
+def test_run_pre_navigation_steps_triggers_capture_for_life_air_care_failure(monkeypatch):
+    client = DummyClient([])
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(client, "select", lambda **kwargs: False)
+    client.last_target_action_result = {"reason": "Target node not found"}
+
+    captured = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return "output/capture_bundles/life_air_care_plugin/test"
+
+    monkeypatch.setattr(collection_flow, "_capture_pre_navigation_failure_bundle", lambda *args, **kwargs: _capture(**kwargs))
+
+    ok = collection_flow._run_pre_navigation_steps(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={
+            "scenario_id": "life_air_care_plugin",
+            "pre_navigation": [{"action": "select", "target": "foo", "type": "a"}],
+            "pre_navigation_retry_count": 1,
+        },
+    )
+
+    assert ok is False
+    assert captured["scenario_id"] == "life_air_care_plugin"
+    assert captured["failure_phase"] == "pre_navigation"
+    assert captured["failure_reason"] == "Target node not found"
