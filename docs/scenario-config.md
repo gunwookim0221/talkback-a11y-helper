@@ -40,6 +40,12 @@
 - `max_steps`: main step 상한
 - `scenario_type`: `content | global_nav`
 - `entry_type`: plugin 진입 방식 힌트. 현재 Life plugin에서 `card | direct_select`를 사용하며, `direct_select`는 post-open verify/negative guard를 통과해야 최종 성공으로 확정됩니다.
+- `entry_match`: `entry_type=card`용 semantic 매칭 스펙.
+  - `title_patterns`: 카드 제목/대표 라벨 매칭 regex 목록
+  - `description_patterns`: 설명문(`tvHeaderTitle` 등) 매칭 regex 목록
+  - `resource_patterns`: resource-id/class 힌트 매칭 regex 목록
+  - `allow_description_match`: 설명문 매칭 허용 여부
+- `verify_tokens` / `negative_verify_tokens`: post-open contract 검증 토큰(포커스 view/text/speech blob 기준)
 - `tab`: tab 선택 후보 규칙(resource/text/announcement/tie_breaker)
 - `pre_navigation`: anchor 전에 수행할 bounded 이동(select/touch/scrollTouch). `scrollTouch`는 기본적으로 실행 직전에 `scroll_to_top`으로 best-effort 초기화한 뒤 검색을 시작하며, `new_screen` plugin 진입 시나리오에서는 한 step 내부에서 누적 downward 탐색을 수행합니다(초기 1회만 top reset).
   - Life plugin 진입 contract 로그: `[SCENARIO][entry_contract]`에서 `success_verified | verify_failed | false_success_guard | no_match | text_only_no_promotion | wrong_open` taxonomy를 노출합니다.

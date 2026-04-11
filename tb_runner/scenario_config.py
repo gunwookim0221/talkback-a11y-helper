@@ -147,6 +147,19 @@ TAB_CONFIGS = [
                 "type": "a",
             }
         ],
+        "entry_match": {
+            "title_patterns": [
+                "(?i)(^smart\\s*air\\s*care$|^air\\s*care$|air\\s*care\\.|\\baircare\\b|에어\\s*케어)",
+            ],
+            "description_patterns": [
+                "(?i)(air\\s*quality|air\\s*comfort|outdoor\\s*air\\s*quality|pm\\s*10|pm\\s*2\\.5)",
+            ],
+            "resource_patterns": [
+                "(?i)(preinstalledservicecard|servicecard|air)",
+            ],
+            "allow_description_match": True,
+        },
+        "verify_tokens": ["air care", "outdoor air quality", "pm 10", "pm 2.5", "air control"],
 
         "anchor_name": "(?i).*navigate\\s*up.*",
         "anchor_type": "a",
@@ -190,6 +203,19 @@ TAB_CONFIGS = [
                 "type": "a",
             }
         ],
+        "entry_match": {
+            "title_patterns": [
+                "(?i)(^home\\s*care$|home\\s*care\\.|\\bhomecare\\b|홈\\s*케어)",
+            ],
+            "description_patterns": [
+                "(?i)(home\\s*care|care\\s*at\\s*home|smart\\s*home|living\\s*care|홈\\s*케어)",
+            ],
+            "resource_patterns": [
+                "(?i)(preinstalledservicecard|servicecard|home|care|card|container|item)",
+            ],
+            "allow_description_match": True,
+        },
+        "verify_tokens": ["home care", "smart home", "living care", "홈 케어"],
 
         "anchor_name": "(?i).*navigate\\s*up.*",
         "anchor_type": "a",
@@ -234,6 +260,19 @@ TAB_CONFIGS = [
                 "type": "a",
             }
         ],
+        "entry_match": {
+            "title_patterns": [
+                "(?i)(^energy$|energy\\.|\\bsmart\\s*energy\\b|\\benergy\\b)",
+            ],
+            "description_patterns": [
+                "(?i)(energy\\s*usage|measuring\\s*energy\\s*usage|add\\s*an\\s*appliance|appliance)",
+            ],
+            "resource_patterns": [
+                "(?i)(preinstalledservicecard|servicecard|energy|card|container|item)",
+            ],
+            "allow_description_match": True,
+        },
+        "verify_tokens": ["energy", "energy usage", "measuring energy usage", "appliance"],
 
         "anchor_name": "(?i).*navigate\\s*up.*",
         "anchor_type": "a",
