@@ -61,13 +61,22 @@ _LIFE_ENERGY_SCENARIO_ID = "life_energy_plugin"
 _LIFE_ENERGY_FAMILY_CARE_REGEX = r"(?i)\b(family\s*care|add\s*family\s*member|me)\b"
 _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
-COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-recheck-v7"
+COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr22-scrolltouch-xml-live-refine-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr23-life-entry-contract-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
+_ENTRY_TYPE_CARD = "card"
+_ENTRY_TYPE_DIRECT_SELECT = "direct_select"
+_ENTRY_REASON_NO_MATCH = "no_match"
+_ENTRY_REASON_TEXT_ONLY_NO_PROMOTION = "text_only_no_promotion"
+_ENTRY_REASON_WRONG_OPEN = "wrong_open"
+_ENTRY_REASON_FALSE_SUCCESS_GUARD = "false_success_guard"
+_ENTRY_REASON_VERIFY_FAILED = "verify_failed"
+_ENTRY_REASON_SUCCESS_VERIFIED = "success_verified"
 
 
 
@@ -120,6 +129,9 @@ class StartPipelineResult:
     pre_navigation_attempted: bool
     pre_navigation_success: bool
     open_completed: bool
+    entry_type: str
+    entry_contract_reason: str
+    entry_contract_detail: str
     post_open_focus_collected: bool
     should_enter_main_loop: bool
     start_row: dict[str, Any] | None
@@ -784,6 +796,39 @@ def _extract_window_focus_line(client: A11yAdbClient, dev: str) -> str:
         if "mCurrentFocus" in line or "mFocusedApp" in line:
             return line.strip()
     return ""
+
+
+def _map_pre_nav_failure_reason_to_entry_reason(reason: str) -> str:
+    normalized = str(reason or "").strip().lower()
+    if "no_local_match" in normalized or "target node not found" in normalized:
+        return _ENTRY_REASON_NO_MATCH
+    if "non_actionable_without_promotion" in normalized:
+        return _ENTRY_REASON_TEXT_ONLY_NO_PROMOTION
+    return _ENTRY_REASON_VERIFY_FAILED
+
+
+def _is_negative_post_open_focus_signal(view_id: str, label: str, speech: str) -> bool:
+    blob = " ".join([str(view_id or "").lower(), str(label or "").lower(), str(speech or "").lower()]).strip()
+    if not blob:
+        return False
+    return bool(
+        _safe_regex_search(
+            r"(?i)(home_button|\bqr\s*code\b|\bchange\s*location\b|\badd\b|\bmore options\b|menu_(favorites|devices|services|automations|more)|toolbar|actionbar|bottom\s*tab|top\s*chrome)",
+            blob,
+        )
+    )
+
+
+def _matches_post_open_verify(tab_cfg: dict[str, Any], view_id: str, label: str, speech: str) -> bool:
+    context_verify = dict(tab_cfg.get("context_verify", {}) or {})
+    candidates = [str(view_id or ""), str(label or ""), str(speech or "")]
+    text_regex = str(context_verify.get("text_regex", "") or "").strip()
+    announcement_regex = str(context_verify.get("announcement_regex", "") or "").strip()
+    if text_regex and any(_safe_regex_search(text_regex, value) for value in candidates):
+        return True
+    if announcement_regex and any(_safe_regex_search(announcement_regex, value) for value in candidates):
+        return True
+    return False
 
 
 def _capture_pre_navigation_failure_bundle(
@@ -2012,8 +2057,10 @@ def _run_pre_navigation_steps(
 ) -> bool:
     pre_navigation = tab_cfg.get("pre_navigation", [])
     if not isinstance(pre_navigation, list) or not pre_navigation:
+        setattr(client, "last_pre_nav_failure_reason", "")
         return True
     scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    setattr(client, "last_pre_nav_failure_reason", "")
     capture_run_id = ""
     if scenario_id.strip().lower() == _LIFE_AIR_CARE_SCENARIO_ID:
         capture_run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -2466,6 +2513,7 @@ def _run_pre_navigation_steps(
                 failure_reason_for_capture = "no_local_match"
             elif normalized_actual_reason == "target node not found":
                 failure_reason_for_capture = "Target node not found"
+            setattr(client, "last_pre_nav_failure_reason", str(failure_reason_for_capture or actual_reason or "action_failed"))
             _capture_pre_navigation_failure_bundle(
                 client,
                 dev,
@@ -2495,6 +2543,7 @@ def _run_pre_navigation_steps(
         time.sleep(step_wait_seconds)
 
     log("[SCENARIO][pre_nav] success")
+    setattr(client, "last_pre_nav_failure_reason", "")
     return True
 
 
@@ -2505,6 +2554,9 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     screen_context_mode = _resolve_screen_context_mode(tab_cfg)
     stabilization_mode = _resolve_stabilization_mode(tab_cfg, screen_context_mode)
     scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    entry_type = str(tab_cfg.get("entry_type", _ENTRY_TYPE_CARD) or _ENTRY_TYPE_CARD).strip().lower()
+    if entry_type not in {_ENTRY_TYPE_CARD, _ENTRY_TYPE_DIRECT_SELECT}:
+        entry_type = _ENTRY_TYPE_CARD
     tab_cfg["_scenario_start_mode"] = "anchor_stable"
     tab_cfg["_scenario_anchor_stable"] = True
     tab_cfg["_scenario_start_note"] = ""
@@ -2541,6 +2593,9 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             "pre_navigation_attempted": bool(has_pre_navigation),
             "pre_navigation_success": False,
             "open_completed": False,
+            "entry_type": entry_type,
+            "entry_contract_reason": _ENTRY_REASON_VERIFY_FAILED,
+            "entry_contract_detail": "",
         },
     )
 
@@ -2680,6 +2735,12 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         start_open_summary["pre_navigation_success"] = bool(pre_nav_ok)
         setattr(client, "last_start_open_summary", start_open_summary)
     if not pre_nav_ok:
+        start_open_summary = getattr(client, "last_start_open_summary", {})
+        if isinstance(start_open_summary, dict):
+            pre_nav_reason = _map_pre_nav_failure_reason_to_entry_reason(str(getattr(client, "last_pre_nav_failure_reason", "") or ""))
+            start_open_summary["entry_contract_reason"] = pre_nav_reason
+            start_open_summary["entry_contract_detail"] = str(getattr(client, "last_pre_nav_failure_reason", "") or "pre_navigation_failed")
+            setattr(client, "last_start_open_summary", start_open_summary)
         return False
 
     anchor_stabilize_cfg = dict(tab_cfg)
@@ -2724,6 +2785,11 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
                 f"[ANCHOR][scenario_start] abort low_confidence_fallback=false scenario='{scenario_id}' "
                 f"reason='{low_conf_reason}'"
             )
+            start_open_summary = getattr(client, "last_start_open_summary", {})
+            if isinstance(start_open_summary, dict):
+                start_open_summary["entry_contract_reason"] = _ENTRY_REASON_VERIFY_FAILED
+                start_open_summary["entry_contract_detail"] = str(low_conf_reason or "anchor_not_stable")
+                setattr(client, "last_start_open_summary", start_open_summary)
             return False
 
         start_source = str(stabilize_result.get("start_candidate_source", "") or "fallback_top_content")
@@ -2800,7 +2866,56 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
                 f"energy_signature_seen={str(energy_signature_seen).lower()} "
                 "reason='entry_not_confirmed'"
             )
+            start_open_summary = getattr(client, "last_start_open_summary", {})
+            if isinstance(start_open_summary, dict):
+                start_open_summary["entry_contract_reason"] = _ENTRY_REASON_VERIFY_FAILED
+                start_open_summary["entry_contract_detail"] = "life_energy_guard:entry_not_confirmed"
+                setattr(client, "last_start_open_summary", start_open_summary)
             return False
+    post_focus = client.get_focus(
+        dev=dev,
+        wait_seconds=min(main_step_wait_seconds, 0.8),
+        allow_fallback_dump=False,
+        mode="fast",
+    )
+    post_view_id = (
+        str(post_focus.get("viewIdResourceName", "") or post_focus.get("resourceId", "") or "").strip()
+        if isinstance(post_focus, dict)
+        else ""
+    )
+    post_label = _node_label_blob(post_focus if isinstance(post_focus, dict) else {})
+    post_speech = str(
+        (post_focus.get("talkbackLabel", "") if isinstance(post_focus, dict) else "")
+        or (post_focus.get("mergedLabel", "") if isinstance(post_focus, dict) else "")
+        or (post_focus.get("contentDescription", "") if isinstance(post_focus, dict) else "")
+        or (post_focus.get("text", "") if isinstance(post_focus, dict) else "")
+        or ""
+    ).strip()
+    has_negative_signal = _is_negative_post_open_focus_signal(post_view_id, post_label, post_speech)
+    fallback_used = bool(stabilize_result.get("fallback_candidate_used"))
+    matches_verify = _matches_post_open_verify(tab_cfg, post_view_id, post_label, post_speech)
+    if has_negative_signal and (entry_type == _ENTRY_TYPE_DIRECT_SELECT or fallback_used):
+        log(
+            f"[SCENARIO][entry_contract] failed scenario='{scenario_id}' entry_type='{entry_type}' "
+            f"reason='{_ENTRY_REASON_FALSE_SUCCESS_GUARD}' view_id='{post_view_id}' label='{post_label}'"
+        )
+        start_open_summary = getattr(client, "last_start_open_summary", {})
+        if isinstance(start_open_summary, dict):
+            start_open_summary["entry_contract_reason"] = _ENTRY_REASON_FALSE_SUCCESS_GUARD
+            start_open_summary["entry_contract_detail"] = "negative_post_open_focus"
+            setattr(client, "last_start_open_summary", start_open_summary)
+        return False
+    if entry_type == _ENTRY_TYPE_DIRECT_SELECT and not matches_verify:
+        log(
+            f"[SCENARIO][entry_contract] failed scenario='{scenario_id}' entry_type='{entry_type}' "
+            f"reason='{_ENTRY_REASON_VERIFY_FAILED}' detail='post_open_verify_miss'"
+        )
+        start_open_summary = getattr(client, "last_start_open_summary", {})
+        if isinstance(start_open_summary, dict):
+            start_open_summary["entry_contract_reason"] = _ENTRY_REASON_VERIFY_FAILED
+            start_open_summary["entry_contract_detail"] = "post_open_verify_miss"
+            setattr(client, "last_start_open_summary", start_open_summary)
+        return False
     if is_transition_entry_fast_path and not is_strict_main_tab_scenario:
         time.sleep(min(main_step_wait_seconds, _TRANSITION_FAST_STEP_WAIT_SECONDS))
     else:
@@ -2810,7 +2925,13 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         start_open_summary["anchor_matched"] = trace_anchor_matched
         start_open_summary["anchor_stable"] = bool(tab_cfg.get("_scenario_anchor_stable", trace_anchor_stable))
         start_open_summary["open_completed"] = True
+        start_open_summary["entry_contract_reason"] = _ENTRY_REASON_SUCCESS_VERIFIED
+        start_open_summary["entry_contract_detail"] = "plugin_open_verified"
         setattr(client, "last_start_open_summary", start_open_summary)
+    log(
+        f"[SCENARIO][entry_contract] success scenario='{scenario_id}' entry_type='{entry_type}' "
+        f"reason='{_ENTRY_REASON_SUCCESS_VERIFIED}' detail='plugin_open_verified'"
+    )
     return True
 
 
@@ -3146,6 +3267,11 @@ def _execute_overlay_for_candidate(
                 log(
                     f"[ANCHOR][overlay_realign] stabilization failed "
                     f"tab='{tab_cfg.get('tab_name', '')}'"
+                )
+            else:
+                log(
+                    f"[ANCHOR][overlay_realign] success scenario='{tab_cfg.get('scenario_id', '')}' "
+                    "reason='overlay_realign_verified'"
                 )
             return OverlayPhaseResult(
                 candidate_checked=True,
@@ -3691,6 +3817,9 @@ def _run_start_pipeline(
         pre_navigation_attempted=bool(tab_cfg.get("pre_navigation")),
         pre_navigation_success=False,
         open_completed=False,
+        entry_type=str(tab_cfg.get("entry_type", _ENTRY_TYPE_CARD) or _ENTRY_TYPE_CARD),
+        entry_contract_reason=_ENTRY_REASON_VERIFY_FAILED,
+        entry_contract_detail="",
         post_open_focus_collected=False,
         should_enter_main_loop=False,
         start_row=None,
@@ -3714,6 +3843,9 @@ def _run_start_pipeline(
         result.pre_navigation_attempted = bool(open_summary.get("pre_navigation_attempted", result.pre_navigation_attempted))
         result.pre_navigation_success = bool(open_summary.get("pre_navigation_success"))
         result.open_completed = bool(open_summary.get("open_completed"))
+        result.entry_type = str(open_summary.get("entry_type", result.entry_type) or result.entry_type)
+        result.entry_contract_reason = str(open_summary.get("entry_contract_reason", result.entry_contract_reason) or result.entry_contract_reason)
+        result.entry_contract_detail = str(open_summary.get("entry_contract_detail", result.entry_contract_detail) or result.entry_contract_detail)
     tab_trace = getattr(client, "last_tab_stabilization_result", {})
     if isinstance(tab_trace, dict) and not isinstance(open_summary, dict):
         context_payload = tab_trace.get("context", {})

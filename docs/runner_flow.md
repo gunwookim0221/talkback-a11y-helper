@@ -38,6 +38,7 @@ start pipeline 내부에서 `open_scenario(...)`를 먼저 실행한 뒤, post-o
 5. anchor 안정화 (`stabilize_anchor`)
 6. 실패 시 low-confidence fallback 허용 조건 평가 (`_is_new_screen_low_confidence_allowed`)
 7. post-open focus trace
+   - Life plugin의 경우 entry contract 판정 로그(`[SCENARIO][entry_contract]`)를 남기며, `success_verified | verify_failed | false_success_guard | no_match | text_only_no_promotion | wrong_open` taxonomy로 최종 진입 판정을 분리한다.
 8. global_nav start gate(해당 시)
 9. anchor row(step 0) 수집/annotation/crop
 
@@ -149,6 +150,7 @@ overlay 후보면 entry click 시도 후 `classify_post_click_result`로 분기:
 overlay 확장 후:
 - `realign_focus_after_overlay(...)` 실행
 - realign 성공 시 `stabilize_anchor(phase="overlay_realign")` 재호출
+  - 이때 overlay 복귀 성공 로그는 `overlay_realign_verified`, plugin 진입 성공 로그는 `plugin_open_verified`로 분리한다.
 
 ### Side effect (overlay 구간)
 - overlay row들이 `rows/all_rows`에 추가됨.
