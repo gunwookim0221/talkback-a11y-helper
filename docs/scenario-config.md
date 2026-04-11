@@ -47,6 +47,9 @@
   - `resource_patterns`: resource-id/class 힌트 매칭 regex 목록
   - `allow_description_match`: 설명문 매칭 허용 여부
 - `verify_tokens` / `negative_verify_tokens`: post-open contract 검증 토큰(포커스 view/text/speech blob 기준)
+- `special_state_tokens` / `special_state_cta_tokens` / `special_state_handling` (선택): `entry_type=card` 시나리오에서 post-open 성공 직후 onboarding/empty/CTA 상태를 보수적으로 감지하기 위한 추가 토큰/동작 설정.
+  - 감지는 **verify/title 계열 신호 + special_state token + CTA token** 조합(또는 long intro + CTA 조합)일 때만 동작하며, CTA 단독 매치는 허용하지 않습니다.
+  - `special_state_handling="back_after_read"`면 최소 1회 읽기 대기 후 BACK을 수행하고, main loop 진입 없이 `special_state_handled` 종료로 기록합니다.
 - `tab`: tab 선택 후보 규칙(resource/text/announcement/tie_breaker)
 - `pre_navigation`: anchor 전에 수행할 bounded 이동(select/touch/scrollTouch). `scrollTouch`는 기본적으로 실행 직전에 `scroll_to_top`으로 best-effort 초기화한 뒤 검색을 시작하며, `new_screen` plugin 진입 시나리오에서는 한 step 내부에서 누적 downward 탐색을 수행합니다(초기 1회만 top reset).
   - Life plugin 진입 contract 로그: `[SCENARIO][entry_contract]`에서 `success_verified | verify_failed | false_success_guard | no_match | text_only_no_promotion | wrong_open` taxonomy를 노출합니다.

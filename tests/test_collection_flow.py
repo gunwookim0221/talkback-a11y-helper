@@ -1928,6 +1928,160 @@ def test_open_scenario_card_entry_energy_recheck_uses_visible_text_after_transit
     assert summary.get("entry_contract_reason") == "success_verified"
 
 
+def test_open_scenario_card_entry_handles_special_state_with_back(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {"ok": True, "selected": True, "reason": "selected_and_verified", "matched": True},
+    )
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    client.focus_sequence = [
+        {"viewIdResourceName": "com.example:id/title", "text": "SmartThings Home Care"},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/menu_services", "text": "Life"},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_home_care_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["home care", "smart care", "home appliances"],
+        "special_state_tokens": [
+            "smartthings home care",
+            "always manage your home appliances optimally",
+            "home care constantly monitors devices",
+        ],
+        "special_state_cta_tokens": ["start"],
+        "special_state_handling": "back_after_read",
+    }
+    monkeypatch.setattr(
+        collection_flow,
+        "_collect_post_open_visible_text",
+        lambda *_args, **_kwargs: "SmartThings Home Care Always manage your home appliances optimally Start",
+    )
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    summary = getattr(client, "last_start_open_summary", {})
+    assert summary.get("entry_contract_reason") == "special_state_handled"
+    assert summary.get("special_state_detected") is True
+    assert summary.get("special_state_kind") == "onboarding_or_empty_state"
+    assert summary.get("special_state_handling") == "back_after_read"
+    assert summary.get("special_state_back_status") == "back_sent_exit"
+    assert client.back_calls == 1
+
+
+def test_open_scenario_card_entry_does_not_misclassify_air_care_normal_content(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {"ok": True, "selected": True, "reason": "selected_and_verified", "matched": True},
+    )
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    client.focus_sequence = [{"viewIdResourceName": "com.example:id/title", "text": "Smart Air Care PM 2.5"}]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_air_care_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["air care"],
+        "special_state_tokens": ["smartthings home care", "home care constantly monitors devices"],
+        "special_state_cta_tokens": ["start"],
+        "special_state_handling": "back_after_read",
+    }
+    monkeypatch.setattr(collection_flow, "_collect_post_open_visible_text", lambda *_args, **_kwargs: "Smart Air Care PM 2.5")
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    summary = getattr(client, "last_start_open_summary", {})
+    assert summary.get("entry_contract_reason") == "success_verified"
+    assert summary.get("special_state_detected") is not True
+    assert client.back_calls == 0
+
+
+def test_collect_tab_rows_adds_special_state_handled_row_and_skips_main_loop(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {"ok": True, "selected": True, "reason": "selected_and_verified", "matched": True},
+    )
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "save_excel_with_perf", lambda *_args, **_kwargs: None)
+
+    client = DummyClient([])
+    client.focus_sequence = [
+        {"viewIdResourceName": "com.example:id/title", "text": "SmartThings Home Care"},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/menu_services", "text": "Life"},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(max_steps=3),
+        "scenario_id": "life_home_care_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["home care", "smart care", "home appliances"],
+        "special_state_tokens": [
+            "smartthings home care",
+            "always manage your home appliances optimally",
+            "home care constantly monitors devices",
+        ],
+        "special_state_cta_tokens": ["start"],
+        "special_state_handling": "back_after_read",
+    }
+    monkeypatch.setattr(
+        collection_flow,
+        "_collect_post_open_visible_text",
+        lambda *_args, **_kwargs: "SmartThings Home Care Always manage your home appliances optimally Start",
+    )
+
+    rows = collection_flow.collect_tab_rows(client, "SERIAL", tab_cfg, [], "o.xlsx", "out")
+
+    assert len(rows) == 1
+    assert rows[0]["status"] == "SPECIAL_STATE_HANDLED"
+    assert rows[0]["stop_reason"] == "special_state_handled"
+    assert rows[0]["special_state_kind"] == "onboarding_or_empty_state"
+    assert rows[0]["special_state_handling"] == "back_after_read"
+    assert rows[0]["special_state_back_status"] == "back_sent_exit"
+    assert client.back_calls == 1
+    assert client.collect_focus_step_calls == []
+
+
+def test_open_scenario_card_entry_does_not_misclassify_energy_normal_content(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {"ok": True, "selected": True, "reason": "selected_and_verified", "matched": True},
+    )
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    client.focus_sequence = [{"viewIdResourceName": "com.example:id/title", "text": "SmartThings Energy usage"}]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_energy_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["smartthings energy", "energy usage"],
+        "special_state_tokens": ["smartthings home care", "home care constantly monitors devices"],
+        "special_state_cta_tokens": ["start"],
+        "special_state_handling": "back_after_read",
+    }
+    monkeypatch.setattr(collection_flow, "_collect_post_open_visible_text", lambda *_args, **_kwargs: "SmartThings Energy usage")
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    summary = getattr(client, "last_start_open_summary", {})
+    assert summary.get("entry_contract_reason") == "success_verified"
+    assert summary.get("special_state_detected") is not True
+    assert client.back_calls == 0
+
+
 def test_open_scenario_pre_navigation_touch_bounds_center_bounds_unavailable_failure(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
