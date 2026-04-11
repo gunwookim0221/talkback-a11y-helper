@@ -898,6 +898,7 @@ def test_open_scenario_pre_navigation_scroll_touch_plugin_uses_cumulative_downwa
     assert len(client.scroll_calls) >= 1
     assert any("cumulative_mode=true" in line for line in logs)
     assert any("scroll_forward_and_retry_local_search" in line for line in logs)
+    assert any("settle_wait_ms=250" in line for line in logs)
 
 
 def test_select_visible_plugin_candidate_promotes_clickable_card_from_descendant_label():
@@ -926,7 +927,7 @@ def test_select_visible_plugin_candidate_promotes_clickable_card_from_descendant
         }
     ]
 
-    selected, reason, stats = collection_flow._select_visible_plugin_candidate(
+    selected, reason, stats, selected_meta = collection_flow._select_visible_plugin_candidate(
         nodes=nodes,
         target=r"(?i).*air\s*care.*",
     )
@@ -935,6 +936,7 @@ def test_select_visible_plugin_candidate_promotes_clickable_card_from_descendant
     assert "candidate_count=" in reason
     assert stats.get("visible_candidate_count", 0) >= 1
     assert stats.get("partial_match_count", 0) >= 1
+    assert selected_meta.get("promoted_to", "").endswith("preInstalledServiceCard")
     assert any("reason='survive_candidate'" in sample for sample in stats.get("inspect_samples", []))
 
 
@@ -971,7 +973,7 @@ def test_select_visible_plugin_candidate_collects_rejection_reasons_and_pre_cand
         }
     ]
 
-    selected, reason, stats = collection_flow._select_visible_plugin_candidate(
+    selected, reason, stats, _ = collection_flow._select_visible_plugin_candidate(
         nodes=nodes,
         target=r"(?i).*air\s*care.*",
     )
@@ -982,6 +984,53 @@ def test_select_visible_plugin_candidate_collects_rejection_reasons_and_pre_cand
     assert stats.get("rejection_counts", {}).get("no_click_node_bounds", 0) >= 1
     assert any("reason='invisible_node'" in sample for sample in stats.get("inspect_samples", []))
     assert any("promotion_fail:no_click_node_bounds" in sample for sample in stats.get("pre_candidate_fail_samples", []))
+
+
+def test_select_visible_plugin_candidate_promotes_non_clickable_description_to_overlapping_card():
+    nodes = [
+        {
+            "text": "Life",
+            "boundsInScreen": "0,0,1080,2200",
+            "visibleToUser": True,
+            "children": [
+                {
+                    "text": "맞춤형 Air Care 서비스를 이용해보세요.",
+                    "boundsInScreen": "180,760,920,860",
+                    "visibleToUser": True,
+                    "clickable": False,
+                    "focusable": False,
+                    "viewIdResourceName": "com.test:id/tvCardDescription",
+                },
+                {
+                    "boundsInScreen": "100,620,980,980",
+                    "visibleToUser": True,
+                    "clickable": True,
+                    "focusable": True,
+                    "viewIdResourceName": "com.test:id/preInstalledServiceCard",
+                    "className": "android.widget.FrameLayout",
+                    "children": [
+                        {
+                            "text": "온도 관리",
+                            "boundsInScreen": "150,680,560,750",
+                            "visibleToUser": True,
+                            "viewIdResourceName": "com.test:id/tvHeaderTitle",
+                        }
+                    ],
+                },
+            ],
+        }
+    ]
+
+    selected, reason, stats, selected_meta = collection_flow._select_visible_plugin_candidate(
+        nodes=nodes,
+        target=r"(?i).*air\s*care.*",
+    )
+
+    assert selected is not None
+    assert "candidate_count=" in reason
+    assert stats.get("partial_match_count", 0) >= 1
+    assert selected_meta.get("promoted_container") is True
+    assert selected_meta.get("promoted_to", "").endswith("preInstalledServiceCard")
 
 
 def test_confirm_click_focused_transition_life_energy_rejects_weak_signal(monkeypatch):

@@ -62,7 +62,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-recheck-v7"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr17-scrolltouch-step-capture-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr18-scrolltouch-card-promotion-settle-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -1288,7 +1288,7 @@ def _select_visible_plugin_candidate(
     *,
     nodes: list[dict[str, Any]],
     target: str,
-) -> tuple[dict[str, Any] | None, str, dict[str, Any]]:
+) -> tuple[dict[str, Any] | None, str, dict[str, Any], dict[str, Any]]:
     sample_limit = 10
     sample_text_limit = 72
     sample_id_limit = 48
@@ -1361,13 +1361,19 @@ def _select_visible_plugin_candidate(
         "pre_candidate_fail_samples": [],
         "rejection_counts": {},
     }
+    selected_meta: dict[str, Any] = {
+        "promoted_container": False,
+        "promotion_reason": "none",
+        "promoted_from": "",
+        "promoted_to": "",
+    }
     if not isinstance(nodes, list) or not nodes:
-        return None, "empty_dump", stats
+        return None, "empty_dump", stats, selected_meta
     flat_nodes = _iter_tree_nodes_with_parent(nodes)
     parsed_bounds = [parse_bounds_str(str(node.get("boundsInScreen", "") or "").strip()) for node, _ in flat_nodes]
     parsed_bounds = [b for b in parsed_bounds if b and b[0] < b[2] and b[1] < b[3]]
     if not parsed_bounds:
-        return None, "viewport_unavailable", stats
+        return None, "viewport_unavailable", stats, selected_meta
     viewport_top = min(b[1] for b in parsed_bounds)
     viewport_bottom = max(b[3] for b in parsed_bounds)
     viewport_center = (viewport_top + viewport_bottom) // 2
@@ -1385,7 +1391,24 @@ def _select_visible_plugin_candidate(
         if child_label:
             descendants.append(child_label)
 
-    candidates: list[tuple[tuple[int, int, int, int], dict[str, Any]]] = []
+    actionable_nodes: list[tuple[dict[str, Any], tuple[int, int, int, int], bool]] = []
+    for candidate_node, _ in flat_nodes:
+        candidate_bounds = parse_bounds_str(str(candidate_node.get("boundsInScreen", "") or "").strip())
+        if not candidate_bounds or not (candidate_bounds[0] < candidate_bounds[2] and candidate_bounds[1] < candidate_bounds[3]):
+            continue
+        if not _node_is_visible(candidate_node):
+            continue
+        candidate_clickable = bool(candidate_node.get("clickable")) or bool(candidate_node.get("focusable"))
+        candidate_resource = str(candidate_node.get("viewIdResourceName", "") or candidate_node.get("resourceId", "") or "").strip()
+        candidate_class_name = str(candidate_node.get("className", "") or "").strip()
+        is_card_like = bool(
+            _safe_regex_search(r"(?i)(preinstalledservicecard|servicecard|content_view|frameLayout|card|container|root)", candidate_resource)
+            or _safe_regex_search(r"(?i)(card|frame.?layout)", candidate_class_name)
+        )
+        if candidate_clickable or is_card_like:
+            actionable_nodes.append((candidate_node, candidate_bounds, is_card_like))
+
+    candidates: list[tuple[tuple[int, int, int, int], dict[str, Any], dict[str, Any]]] = []
     for node, parent in flat_nodes:
         raw_bounds = str(node.get("boundsInScreen", "") or "").strip()
         bounds = parse_bounds_str(raw_bounds)
@@ -1408,12 +1431,14 @@ def _select_visible_plugin_candidate(
             continue
         click_node = node
         promoted_click_node: dict[str, Any] | None = None
+        promotion_reason = "none"
         if isinstance(parent, dict):
             parent_clickable = bool(parent.get("clickable")) or bool(parent.get("focusable"))
             parent_resource = str(parent.get("viewIdResourceName", "") or parent.get("resourceId", "") or "").strip()
             if parent_clickable or _safe_regex_search(r"(?i)(preinstalledservicecard|servicecard|card)", parent_resource):
                 click_node = parent
                 promoted_click_node = parent
+                promotion_reason = "parent_clickable_or_card"
         label_blob = _node_label_blob(node)
         click_label_blob = _node_label_blob(click_node)
         click_descendant_blob = " ".join(descendants_by_container.get(id(click_node), []))
@@ -1489,6 +1514,34 @@ def _select_visible_plugin_candidate(
                 reason="semantic_pass_partial_but_exact_fail",
             )
             continue
+        if click_node is node and not (bool(click_node.get("clickable")) or bool(click_node.get("focusable"))):
+            overlapping_candidates: list[tuple[int, int, int, int, dict[str, Any], str]] = []
+            for action_node, action_bounds, is_card_like in actionable_nodes:
+                if action_node is node:
+                    continue
+                a_left, a_top, a_right, a_bottom = action_bounds
+                fully_contains = a_left <= left and a_top <= top and a_right >= right and a_bottom >= bottom
+                overlap_w = max(0, min(right, a_right) - max(left, a_left))
+                overlap_h = max(0, min(bottom, a_bottom) - max(top, a_top))
+                if not fully_contains and (overlap_w <= 0 or overlap_h <= 0):
+                    continue
+                area = max(1, (a_right - a_left) * (a_bottom - a_top))
+                overlap_area = overlap_w * overlap_h
+                overlap_ratio = int((overlap_area / area) * 1000)
+                action_clickable = bool(action_node.get("clickable")) or bool(action_node.get("focusable"))
+                overlap_score = (
+                    1 if fully_contains else 0,
+                    1 if action_clickable else 0,
+                    1 if is_card_like else 0,
+                    overlap_ratio,
+                )
+                reason = "overlap_containment_clickable_card" if fully_contains else "overlap_clickable_card"
+                overlapping_candidates.append((*overlap_score, action_node, reason))
+            if overlapping_candidates:
+                overlapping_candidates.sort(reverse=True, key=lambda item: item[:4])
+                promoted_click_node = overlapping_candidates[0][4]
+                click_node = promoted_click_node
+                promotion_reason = str(overlapping_candidates[0][5])
         card_resource = str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "")
         class_name = str(click_node.get("className", "") or "").strip()
         bounds_repr = str(click_node.get("boundsInScreen", "") or "").strip()
@@ -1516,12 +1569,20 @@ def _select_visible_plugin_candidate(
             reject_reason="survive_candidate",
             stage="candidate_ready",
         )
-        candidates.append((score, click_node))
+        promoted_from = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or node.get("className", "") or "").strip()
+        promoted_to = str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or click_node.get("className", "") or "").strip()
+        candidate_meta = {
+            "promoted_container": bool(promoted_click_node is not None),
+            "promotion_reason": promotion_reason if promoted_click_node is not None else "none",
+            "promoted_from": promoted_from,
+            "promoted_to": promoted_to,
+        }
+        candidates.append((score, click_node, candidate_meta))
 
     if not candidates:
-        return None, "no_visible_candidate", stats
+        return None, "no_visible_candidate", stats, selected_meta
     candidates.sort(reverse=True, key=lambda item: item[0])
-    return candidates[0][1], f"candidate_count={len(candidates)}", stats
+    return candidates[0][1], f"candidate_count={len(candidates)}", stats, candidates[0][2]
 
 
 def _make_visible_plugin_search_signature(nodes: list[dict[str, Any]]) -> str:
@@ -1672,8 +1733,12 @@ def _run_pre_navigation_steps(
 
                 last_signature = _make_visible_plugin_search_signature(top_nodes)
                 fallback_reason = "local_search_exhausted"
+                post_scroll_settle_ms = 250
                 for scroll_step in range(1, max_scroll_search_steps + 1):
-                    selected_node, selected_reason, candidate_stats = _select_visible_plugin_candidate(nodes=top_nodes, target=target)
+                    selected_node, selected_reason, candidate_stats, selected_meta = _select_visible_plugin_candidate(
+                        nodes=top_nodes,
+                        target=target,
+                    )
                     visible_samples = candidate_stats.get("visible_samples", [])
                     partial_samples = candidate_stats.get("partial_samples", [])
                     inspect_samples = candidate_stats.get("inspect_samples", [])
@@ -1730,6 +1795,10 @@ def _run_pre_navigation_steps(
                         log(
                             f"[SCENARIO][pre_nav][scrolltouch] candidate_select reason='{selected_reason}' class='{class_name}' "
                             f"resource='{resource_id}' bounds='{bounds}' visible={str(visible).lower()} label='{label_blob[:120]}' "
+                            f"promoted_container={str(bool(selected_meta.get('promoted_container', False))).lower()} "
+                            f"promotion_reason='{str(selected_meta.get('promotion_reason', 'none'))}' "
+                            f"promoted_from='{str(selected_meta.get('promoted_from', ''))[:80]}' "
+                            f"promoted_to='{str(selected_meta.get('promoted_to', ''))[:80]}' "
                             f"scroll_step={scroll_step}/{max_scroll_search_steps} cumulative_mode={str(use_cumulative_search).lower()}"
                         )
                         tap_target = resource_id if resource_id else label_blob
@@ -1768,12 +1837,14 @@ def _run_pre_navigation_steps(
                         f"partial_match_count={candidate_stats.get('partial_match_count', 0)} "
                         f"scroll_step={scroll_step}/{max_scroll_search_steps} "
                         "action='scroll_forward_and_retry_local_search' "
-                        f"scroll_performed={str(scrolled).lower()} cumulative_mode={str(use_cumulative_search).lower()}"
+                        f"scroll_performed={str(scrolled).lower()} settle_wait_ms={post_scroll_settle_ms} "
+                        f"cumulative_mode={str(use_cumulative_search).lower()}"
                     )
                     if not scrolled:
                         fallback_reason = "scroll_forward_failed"
                         break
-                    time.sleep(min(step_wait_seconds, 0.45))
+                    settle_wait_seconds = max(min(step_wait_seconds, 0.45), post_scroll_settle_ms / 1000.0)
+                    time.sleep(settle_wait_seconds)
                     try:
                         top_nodes = dump_tree_fn(dev=dev) if callable(dump_tree_fn) else []
                     except Exception:
