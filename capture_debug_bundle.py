@@ -1,103 +1,34 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-capture_debug_bundle_v103.py
+capture_debug_bundle.py
 
 목적
-- 특정 앱/화면 상태에서 분석용 증적 묶음(debug bundle)을 한 번에 저장한다.
-- 저장 항목:
-  1) helper dump
-  2) get_focus 결과
-  3) UIAutomator XML dump
-  4) screenshot
-  5) a11y helper 관련 logcat
-  6) 메타데이터/요약 파일
-
-왜 쓰는가
-- smart move / candidate selection / anchor fallback / hero summary 누락 같은 문제를
-  "같은 시점" 기준으로 비교 분석하기 위함.
-- helper tree와 일반 XML tree, 실제 스크린샷을 묶어두면 원인 파악이 훨씬 쉬워진다.
-
-실행 방법
-1) talkback-a11y-helper 폴더 안에 이 파일을 둔다.
-2) 가상환경 활성화 후 실행:
-   python capture_debug_bundle_v103.py
-3) 수동으로 원하는 앱/화면까지 이동한다.
-4) 안내에 따라:
-   - 단건(single)
-   - 전/후(before_after)
-   중 하나로 캡처한다.
-
-간단 입력 예시
-- 전체 설정을 한 줄로 빠르게 입력 가능:
-  sma food add ba j 85
-
-  의미:
-  - 앱 이름: sma
-  - 화면 이름: food
-  - 버튼/동작: add
-  - 모드: before_after
-  - 스크린샷 포맷: jpg
-  - jpg 품질: 85
-
-- 더 짧게:
-  st set gear s j 82
-
-지원 약어
-- 모드:
-  s  = single
-  ba = before_after
-- 포맷:
-  j = jpg
-  p = png
-
-주의
-- JPG 저장은 Pillow(PIL)가 있으면 안정적으로 동작한다.
-- Pillow가 없으면 PNG로 fallback 할 수 있다.
-- adb가 PATH에 있어야 한다.
-- 여러 기기 연결 시 serial 지정 가능하다.
-
-권장
-- 일반 분석용: jpg 품질 85~90
-- 글자 선명도 조금 더 중요: 90~92
-- 원본 보존 우선: png
+- 사용자 입력 없이 Life plugin list 스크롤 상태를 자동으로 기록한다.
+- 기본 동작은 scroll_capture 모드이며, 각 스텝마다 screenshot/helper dump/xml/meta를 저장한다.
 """
 
+import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 import time
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
-# =========================================================
-# 기본 설정
-# =========================================================
-SCRIPT_VERSION = "1.0.3"
-OUTPUT_BASE = Path("capture_bundles")
-DEFAULT_WAIT_SECONDS = 1.0
-DEFAULT_MODE = "single"
-DEFAULT_IMAGE_FORMAT = "jpg"
-DEFAULT_JPG_QUALITY = 88
+SCRIPT_VERSION = "2.0.0"
+OUTPUT_BASE = Path("output/capture_bundles")
+DEFAULT_MODE = "scroll_capture"
+DEFAULT_WAIT_SECONDS = 0.8
+DEFAULT_MAX_STEPS = 12
+SCREENSHOT_FORMAT = "jpg"
+SCREENSHOT_JPG_QUALITY = 85
+SUMMARY_TOP_N = 8
+LIFE_TAB_REGEX = "(?i).*life.*"
 
-# logcat 필터를 너무 강하게 잡으면 필요한 로그가 빠질 수 있어서,
-# 우선 전체 로그를 가져온 뒤 helper 관련 라인 위주로 따로 summary를 만든다.
-LOGCAT_FILTER_KEYWORDS = [
-    "A11Y_HELPER",
-    "FOCUS_RESULT",
-    "FOCUS_UPDATE",
-    "SMART_NEXT",
-    "A11yNavigator",
-    "A11yTraversalAnalyzer",
-    "get_focus",
-]
-
-# =========================================================
-# 현재 작업 디렉토리 / import 경로 설정
-# =========================================================
 current_dir = os.getcwd()
 print(f"현재 작업 디렉토리: {current_dir}")
 
@@ -111,7 +42,6 @@ except ImportError as e:
     print(f"❌ talkback_lib import 실패: {e}")
     raise
 
-# Pillow는 선택사항
 try:
     from PIL import Image
     PIL_AVAILABLE = True
@@ -120,60 +50,28 @@ except Exception:
 
 client = A11yAdbClient()
 
-# =========================================================
-# 유틸
-# =========================================================
+
 def now_str() -> str:
     return datetime.now().strftime("%H:%M:%S")
+
 
 def log(msg: str) -> None:
     print(f"[{now_str()}] {msg}")
 
+
 def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
-def sanitize_name(text: str, limit: int = 80) -> str:
-    text = (text or "").strip()
-    if not text:
-        return "unknown"
-    text = re.sub(r'[<>:"/\\|?*\n\r\t]+', "_", text)
-    text = re.sub(r"\s+", "_", text)
-    text = re.sub(r"_+", "_", text).strip("._ ")
-    if not text:
-        text = "unknown"
-    return text[:limit]
-
-def unique_dir(path: Path) -> Path:
-    if not path.exists():
-        return path
-    idx = 2
-    while True:
-        candidate = Path(f"{path}_v{idx}")
-        if not candidate.exists():
-            return candidate
-        idx += 1
 
 def write_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
+
 def write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-def safe_len(obj: Any) -> Optional[int]:
-    try:
-        return len(obj)
-    except Exception:
-        return None
 
-# =========================================================
-# ADB 실행
-# =========================================================
-def run_adb(args, serial: Optional[str] = None, check: bool = True) -> subprocess.CompletedProcess:
-    """
-    Windows에서 adb 출력에 UTF-8 문자열이 섞일 수 있으므로
-    cp949 기본 디코딩을 쓰면 UnicodeDecodeError가 날 수 있다.
-    그래서 encoding='utf-8', errors='replace'로 고정한다.
-    """
+def run_adb(args: list[str], serial: Optional[str] = None, check: bool = True) -> subprocess.CompletedProcess:
     cmd = ["adb"]
     if serial:
         cmd += ["-s", serial]
@@ -187,9 +85,10 @@ def run_adb(args, serial: Optional[str] = None, check: bool = True) -> subproces
         errors="replace",
     )
 
+
 def get_connected_devices() -> list[str]:
     result = run_adb(["devices"], check=True)
-    devices = []
+    devices: list[str] = []
     for line in result.stdout.splitlines():
         line = line.strip()
         if not line or line.startswith("List of devices attached"):
@@ -198,508 +97,281 @@ def get_connected_devices() -> list[str]:
             devices.append(line.split("\t")[0].strip())
     return devices
 
-# =========================================================
-# 입력 처리
-# =========================================================
-def normalize_mode(value: str) -> str:
-    value = (value or "").strip().lower()
-    mapping = {
-        "s": "single",
-        "single": "single",
-        "1": "single",
-        "ba": "before_after",
-        "before_after": "before_after",
-        "beforeafter": "before_after",
-        "b": "before_after",
-        "2": "before_after",
-    }
-    return mapping.get(value, DEFAULT_MODE)
 
-def normalize_image_format(value: str) -> str:
-    value = (value or "").strip().lower()
-    mapping = {
-        "j": "jpg",
-        "jpg": "jpg",
-        "jpeg": "jpg",
-        "p": "png",
-        "png": "png",
-    }
-    return mapping.get(value, DEFAULT_IMAGE_FORMAT)
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Auto capture debug bundles for Life plugin scroll analysis")
+    parser.add_argument("--mode", choices=["scroll_capture", "single_capture"], default=DEFAULT_MODE)
+    parser.add_argument("--serial", default="", help="ADB serial (기본: 첫 번째 연결 기기)")
+    parser.add_argument("--max_steps", type=int, default=DEFAULT_MAX_STEPS)
+    parser.add_argument("--wait", type=float, default=DEFAULT_WAIT_SECONDS)
+    return parser.parse_args()
 
-def try_parse_quality(value: str) -> int:
+
+def resolve_serial(serial_arg: str, serials: list[str]) -> str:
+    if serial_arg:
+        if serial_arg not in serials:
+            raise ValueError(f"요청한 serial을 찾을 수 없습니다: {serial_arg}")
+        return serial_arg
+    if not serials:
+        raise ValueError("연결된 Android device가 없습니다.")
+    return serials[0]
+
+
+def capture_uiautomator_xml(out_dir: Path, serial: str) -> tuple[bool, Optional[Path], Optional[str]]:
+    remote_xml = "/sdcard/window_dump.xml"
+    local_xml = out_dir / "window_dump.xml"
     try:
-        q = int(value)
-        return max(1, min(100, q))
-    except Exception:
-        return DEFAULT_JPG_QUALITY
+        run_adb(["shell", "uiautomator", "dump", remote_xml], serial=serial, check=True)
+        run_adb(["pull", remote_xml, str(local_xml)], serial=serial, check=True)
+        return True, local_xml, None
+    except Exception as e:
+        return False, None, str(e)
 
-def prompt_with_default(prompt: str, default: str) -> str:
-    raw = input(prompt).strip()
-    return raw if raw else default
 
-def parse_quick_line(line: str) -> Optional[Dict[str, Any]]:
-    """
-    빠른 입력 포맷:
-      app screen action mode [imgfmt] [quality]
+def capture_screenshot(out_dir: Path, serial: str) -> tuple[bool, Optional[Path], Optional[str]]:
+    remote_png = "/sdcard/__capture_debug_bundle_screen.png"
+    pulled_png = out_dir / "__raw_screen.png"
+    final_path = out_dir / "screenshot.jpg"
 
-    예:
-      sma food add ba j 85
-      st settings gear s
-      st device more ba png
-    """
-    tokens = [t for t in line.strip().split() if t]
-    if len(tokens) < 4:
-        return None
+    try:
+        run_adb(["shell", "screencap", "-p", remote_png], serial=serial, check=True)
+        run_adb(["pull", remote_png, str(pulled_png)], serial=serial, check=True)
 
-    app_name = tokens[0]
-    screen_name = tokens[1]
-    action_name = tokens[2]
-    mode = normalize_mode(tokens[3])
+        if PIL_AVAILABLE:
+            with Image.open(pulled_png) as img:
+                img.convert("RGB").save(final_path, format="JPEG", quality=SCREENSHOT_JPG_QUALITY, optimize=True)
+            pulled_png.unlink(missing_ok=True)
+            return True, final_path, None
 
-    image_format = DEFAULT_IMAGE_FORMAT
-    jpg_quality = DEFAULT_JPG_QUALITY
+        # Pillow 미설치 환경에서는 raw png를 jpg 이름으로 보관하지 않고 png fallback 저장
+        fallback = out_dir / "screenshot.png"
+        pulled_png.replace(fallback)
+        return True, fallback, "Pillow 미설치로 png fallback 저장"
+    except Exception as e:
+        return False, None, str(e)
 
-    if len(tokens) >= 5:
-        image_format = normalize_image_format(tokens[4])
 
-    if len(tokens) >= 6:
-        jpg_quality = try_parse_quality(tokens[5])
+def get_helper_nodes(dev: str) -> list[dict[str, Any]]:
+    dump = client.dump_tree(dev=dev)
+    if isinstance(dump, list):
+        return [node for node in dump if isinstance(node, dict)]
+    if isinstance(dump, dict):
+        nodes = dump.get("nodes")
+        if isinstance(nodes, list):
+            return [node for node in nodes if isinstance(node, dict)]
+    return []
+
+
+def _pick_str(node: dict[str, Any], keys: list[str]) -> str:
+    for key in keys:
+        value = node.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def summarize_nodes(nodes: list[dict[str, Any]], top_n: int = SUMMARY_TOP_N) -> dict[str, Any]:
+    labels = []
+    resource_ids = []
+    class_names = []
+
+    for node in nodes:
+        label = _pick_str(node, ["text", "contentDescription", "content_desc", "description"])
+        resource_id = _pick_str(node, ["view_id_resource_name", "view_id", "resourceId", "resource_id"])
+        class_name = _pick_str(node, ["class_name", "className", "class"])
+
+        if label:
+            labels.append(label)
+        if resource_id:
+            resource_ids.append(resource_id)
+        if class_name:
+            class_names.append(class_name)
+
+    def _top(values: list[str]) -> list[str]:
+        return [name for name, _ in Counter(values).most_common(top_n)]
 
     return {
-        "app_name": app_name,
-        "screen_name": screen_name,
-        "action_name": action_name,
-        "mode": mode,
-        "image_format": image_format,
-        "jpg_quality": jpg_quality,
+        "helper_node_count": len(nodes),
+        "visible_labels_top_n": _top(labels),
+        "resource_ids_top_n": _top(resource_ids),
+        "class_names_top_n": _top(class_names),
     }
 
-def collect_user_inputs(serials: list[str]) -> Dict[str, Any]:
-    print("=" * 72)
-    print("TalkBack Debug Bundle Capture")
-    print("helper dump + get_focus + xml dump + screenshot + logcat 저장")
-    print("=" * 72)
 
-    default_serial = serials[0] if serials else ""
-    print(f"연결된 device: {', '.join(serials) if serials else '(없음)'}")
-    serial = input("serial 변경이 필요하면 입력, 그대로면 Enter: ").strip() or default_serial
+def make_step_signature(summary: dict[str, Any]) -> str:
+    parts = [
+        "|".join(summary.get("visible_labels_top_n", [])),
+        "|".join(summary.get("resource_ids_top_n", [])),
+        "|".join(summary.get("class_names_top_n", [])),
+    ]
+    return "@@".join(parts)
 
-    print("\n빠른 입력 가능 예시: sma food add ba j 85")
-    quick = input("빠른 입력(Enter면 개별 입력): ").strip()
 
-    parsed = parse_quick_line(quick) if quick else None
-
-    if parsed:
-        app_name = parsed["app_name"]
-        screen_name = parsed["screen_name"]
-        action_name = parsed["action_name"]
-        mode = parsed["mode"]
-        image_format = parsed["image_format"]
-        jpg_quality = parsed["jpg_quality"]
-        print(f"빠른 입력 해석 완료 → app={app_name}, screen={screen_name}, action={action_name}, mode={mode}, fmt={image_format}, quality={jpg_quality}")
-    else:
-        app_name = prompt_with_default("앱 이름(예: SmartThings): ", "app")
-        screen_name = prompt_with_default("화면 이름(예: Food_detail): ", "screen")
-        action_name = prompt_with_default("직전에 누른 버튼/동작(예: Add_button): ", "action")
-        mode = normalize_mode(input("캡처 모드 [single/s 또는 before_after/ba] (기본 single): ").strip())
-        image_format = normalize_image_format(input("스크린샷 포맷 [jpg/j 또는 png/p] (기본 jpg): ").strip())
-        jpg_quality = DEFAULT_JPG_QUALITY
-        if image_format == "jpg":
-            jpg_quality = try_parse_quality(input(f"jpg 품질 1~100 (기본 {DEFAULT_JPG_QUALITY}): ").strip())
-
-    wait_seconds = DEFAULT_WAIT_SECONDS
-    wait_input = input(f"엔터 후 캡처 전 대기 초(기본 {DEFAULT_WAIT_SECONDS}): ").strip()
-    if wait_input:
-        try:
-            wait_seconds = max(0.0, float(wait_input))
-        except Exception:
-            pass
-
-    return {
-        "serial": serial,
-        "app_name": sanitize_name(app_name),
-        "screen_name": sanitize_name(screen_name),
-        "action_name": sanitize_name(action_name),
-        "mode": mode,
-        "image_format": image_format,
-        "jpg_quality": jpg_quality,
-        "wait_seconds": wait_seconds,
-    }
-
-# =========================================================
-# talkback_lib 호출
-# =========================================================
-def try_call_client_method(*method_names, default=None):
-    for method_name in method_names:
-        if hasattr(client, method_name):
-            method = getattr(client, method_name)
-            try:
-                return method()
-            except TypeError:
-                try:
-                    return method(serial=None)
-                except Exception:
-                    continue
-            except Exception:
-                continue
-    return default
-
-def reset_focus_history_safe() -> Dict[str, Any]:
+def enter_life_tab(dev: str) -> dict[str, Any]:
     try:
-        client.reset_focus_history()
-        return {"ok": True}
+        result = client.touch(dev=dev, name=LIFE_TAB_REGEX, type_="t", wait_=4)
+        return {
+            "ok": bool(result.get("success")),
+            "result": result,
+        }
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
-def capture_helper_dump(out_dir: Path) -> Dict[str, Any]:
-    """
-    helper dump 결과를 최대한 보존한다.
-    반환 타입이 dict/list/string 무엇이든 저장 가능하게 한다.
-    """
-    result = try_call_client_method(
-        "dump_tree",
-        "dump_a11y_tree",
-        "dump_current_screen",
-        "get_a11y_dump",
-        "get_dump",
-        default=None,
-    )
 
-    summary_lines = []
-    meta = {
-        "available": result is not None,
-        "type": type(result).__name__ if result is not None else None,
-    }
+def capture_step(step_dir: Path, serial: str, step_index: int, scroll_performed: bool, note: str) -> dict[str, Any]:
+    ensure_dir(step_dir)
 
-    if result is None:
-        summary_lines.append("helper dump를 가져오지 못했습니다.")
-        write_text(out_dir / "helper_dump_summary.txt", "\n".join(summary_lines))
-        write_json(out_dir / "helper_dump_metadata.json", meta)
-        return meta
+    helper_nodes = get_helper_nodes(serial)
+    write_json(step_dir / "helper_dump.json", helper_nodes)
 
-    if isinstance(result, dict):
-        write_json(out_dir / "helper_dump_raw.json", result)
-        nodes = result.get("nodes")
-        metadata = result.get("metadata", {})
-        if nodes is not None:
-            write_json(out_dir / "helper_dump_nodes.json", nodes)
-            meta["nodes_count"] = safe_len(nodes)
-        if metadata:
-            write_json(out_dir / "helper_dump_metadata.json", metadata)
-        else:
-            write_json(out_dir / "helper_dump_metadata.json", meta)
+    summary = summarize_nodes(helper_nodes)
 
-        summary_lines.append(f"type=dict")
-        summary_lines.append(f"keys={list(result.keys())}")
-        if nodes is not None:
-            summary_lines.append(f"nodes_count={safe_len(nodes)}")
-
-    elif isinstance(result, list):
-        write_json(out_dir / "helper_dump_nodes.json", result)
-        meta["nodes_count"] = safe_len(result)
-        write_json(out_dir / "helper_dump_metadata.json", meta)
-        summary_lines.append("type=list")
-        summary_lines.append(f"nodes_count={safe_len(result)}")
-
-    else:
-        text = str(result)
-        write_text(out_dir / "helper_dump_text.txt", text)
-        write_json(out_dir / "helper_dump_metadata.json", meta)
-        summary_lines.append(f"type={type(result).__name__}")
-        summary_lines.append(f"text_length={len(text)}")
-
-    write_text(out_dir / "helper_dump_summary.txt", "\n".join(summary_lines))
-    return meta
-
-def capture_get_focus(out_dir: Path) -> Dict[str, Any]:
-    """
-    get_focus 계열 메서드의 반환값을 가능한 한 그대로 저장한다.
-    """
-    result = try_call_client_method(
-        "get_focus",
-        "get_focus_info",
-        "get_current_focus",
-        "read_focus",
-        default=None,
-    )
-
-    info = {"available": result is not None, "type": type(result).__name__ if result is not None else None}
-
-    if result is None:
-        write_text(out_dir / "focus_payload.txt", "get_focus 결과 없음")
-        write_json(out_dir / "focus_trace.json", info)
-        return info
-
-    if isinstance(result, (dict, list)):
-        write_json(out_dir / "focus_payload.json", result)
-    else:
-        write_text(out_dir / "focus_payload.txt", str(result))
-
-    write_json(out_dir / "focus_trace.json", info)
-    return info
-
-# =========================================================
-# XML / Screenshot / Logcat
-# =========================================================
-def capture_uiautomator_xml(out_dir: Path, serial: str) -> Path:
-    remote_xml = "/sdcard/window_dump.xml"
-    local_xml = out_dir / "window_dump.xml"
-    run_adb(["shell", "uiautomator", "dump", remote_xml], serial=serial, check=True)
-    run_adb(["pull", remote_xml, str(local_xml)], serial=serial, check=True)
-    return local_xml
-
-def capture_screenshot(out_dir: Path, serial: str, image_format: str, jpg_quality: int) -> Path:
-    remote_png = "/sdcard/__capture_debug_bundle_screen.png"
-    pulled_png = out_dir / "__raw_screen.png"
-
-    run_adb(["shell", "screencap", "-p", remote_png], serial=serial, check=True)
-    run_adb(["pull", remote_png, str(pulled_png)], serial=serial, check=True)
-
-    if image_format == "png":
-        final_path = out_dir / "screenshot.png"
-        if final_path.exists():
-            final_path.unlink()
-        pulled_png.replace(final_path)
-        return final_path
-
-    # jpg 요청
-    final_path = out_dir / "screenshot.jpg"
-    if PIL_AVAILABLE:
-        with Image.open(pulled_png) as img:
-            rgb = img.convert("RGB")
-            rgb.save(final_path, format="JPEG", quality=jpg_quality, optimize=True)
-        try:
-            pulled_png.unlink(missing_ok=True)
-        except Exception:
-            pass
-        return final_path
-
-    # Pillow 없으면 png fallback
-    fallback = out_dir / "screenshot.png"
-    if fallback.exists():
-        fallback.unlink()
-    pulled_png.replace(fallback)
-    return fallback
-
-def capture_logcat(out_dir: Path, serial: str) -> Dict[str, Any]:
-    """
-    전체 logcat 저장 + helper 관련 키워드 summary 저장.
-    """
-    result = run_adb(["logcat", "-d", "-v", "time"], serial=serial, check=True)
-    full_text = result.stdout or ""
-    full_path = out_dir / "logcat_full.txt"
-    write_text(full_path, full_text)
-
-    filtered_lines = []
-    for line in full_text.splitlines():
-        upper = line.upper()
-        if any(keyword.upper() in upper for keyword in LOGCAT_FILTER_KEYWORDS):
-            filtered_lines.append(line)
-
-    filtered_text = "\n".join(filtered_lines)
-    filtered_path = out_dir / "logcat_a11y_helper.txt"
-    write_text(filtered_path, filtered_text)
-
-    return {
-        "full_lines": len(full_text.splitlines()),
-        "filtered_lines": len(filtered_lines),
-        "full_path": str(full_path),
-        "filtered_path": str(filtered_path),
-    }
-
-# =========================================================
-# 메타 정보
-# =========================================================
-def get_window_focus_info(serial: str) -> str:
-    try:
-        result = run_adb(["shell", "dumpsys", "window", "windows"], serial=serial, check=True)
-        for line in result.stdout.splitlines():
-            if "mCurrentFocus" in line or "mFocusedApp" in line:
-                return line.strip()
-    except Exception:
-        pass
-    return "unknown_focus"
-
-def write_readme(out_dir: Path, image_format: str, jpg_quality: int) -> None:
-    content = f"""이 폴더는 TalkBack 디버그 분석용 캡처 결과입니다.
-
-파일 설명
-- meta.json: 캡처 시각, 기기, 입력값 등 메타데이터
-- helper_dump_*: helper dump 원본/요약
-- focus_payload.*: get_focus 응답
-- focus_trace.json: get_focus 저장 메타
-- window_dump.xml: UIAutomator 일반 XML dump
-- screenshot.*: 스크린샷
-- logcat_full.txt: 전체 logcat
-- logcat_a11y_helper.txt: helper 관련 키워드만 필터한 로그
-- capture_result.json: 각 단계 저장 결과 요약
-
-스크린샷 설정
-- format={image_format}
-- jpg_quality={jpg_quality}
-
-권장 비교
-1. screenshot에서 실제 보이는 객체 확인
-2. window_dump.xml에서 raw tree 구조 확인
-3. helper_dump에서 helper 후보/노드 구조 확인
-4. focus_payload에서 현재 focus 판단 확인
-5. logcat_a11y_helper.txt에서 smart move / get_focus 관련 로그 확인
-"""
-    write_text(out_dir / "README_CAPTURE.txt", content)
-
-# =========================================================
-# 단일 캡처
-# =========================================================
-def do_capture_bundle(base_name: str, out_dir: Path, serial: str, image_format: str, jpg_quality: int, wait_seconds: float) -> Dict[str, Any]:
-    ensure_dir(out_dir)
-
-    time.sleep(wait_seconds)
-
-    reset_result = reset_focus_history_safe()
-    if reset_result.get("ok"):
-        log("✅ focus history reset 완료")
-    else:
-        log(f"⚠️ focus history reset 실패: {reset_result.get('error')}")
+    screenshot_ok, screenshot_path, screenshot_err = capture_screenshot(step_dir, serial)
+    xml_ok, xml_path, xml_err = capture_uiautomator_xml(step_dir, serial)
 
     meta = {
         "script_version": SCRIPT_VERSION,
-        "captured_at": datetime.now().isoformat(timespec="seconds"),
-        "base_name": base_name,
+        "step_index": step_index,
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "scroll_performed": scroll_performed,
+        "helper_node_count": summary["helper_node_count"],
+        "visible_labels_top_n": summary["visible_labels_top_n"],
+        "resource_ids_top_n": summary["resource_ids_top_n"],
+        "class_names_top_n": summary["class_names_top_n"],
+        "xml_saved": xml_ok,
+        "screenshot_saved": screenshot_ok,
+        "note": note,
+    }
+    if screenshot_path:
+        meta["screenshot_path"] = screenshot_path.name
+    if xml_path:
+        meta["xml_path"] = xml_path.name
+    if screenshot_err:
+        meta["screenshot_note"] = screenshot_err
+    if xml_err:
+        meta["xml_note"] = xml_err
+
+    write_json(step_dir / "meta.json", meta)
+    return {"meta": meta, "signature": make_step_signature(summary)}
+
+
+def run_scroll_capture(serial: str, max_steps: int, wait_seconds: float) -> Path:
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = OUTPUT_BASE / "life_plugin_scroll_capture" / run_id
+    ensure_dir(run_dir)
+
+    session_meta: dict[str, Any] = {
+        "script_version": SCRIPT_VERSION,
+        "mode": "scroll_capture",
         "serial": serial,
-        "cwd": os.getcwd(),
-        "window_focus_info": get_window_focus_info(serial),
-        "image_format_requested": image_format,
-        "jpg_quality": jpg_quality,
-        "pillow_available": PIL_AVAILABLE,
-    }
-    write_json(out_dir / "meta.json", meta)
-
-    result = {
-        "meta": meta,
-        "reset_focus_history": reset_result,
+        "run_id": run_id,
+        "max_steps": max_steps,
+        "wait_seconds": wait_seconds,
+        "screenshot_format": SCREENSHOT_FORMAT,
+        "screenshot_quality": SCREENSHOT_JPG_QUALITY,
+        "life_tab_regex": LIFE_TAB_REGEX,
+        "started_at": datetime.now().isoformat(timespec="seconds"),
     }
 
-    try:
-        helper_meta = capture_helper_dump(out_dir)
-        result["helper_dump"] = helper_meta
-        log(f"✅ helper dump 저장 완료 (nodes={helper_meta.get('nodes_count')})")
-    except Exception as e:
-        result["helper_dump"] = {"ok": False, "error": str(e)}
-        log(f"⚠️ helper dump 저장 실패: {e}")
+    life_result = enter_life_tab(serial)
+    session_meta["life_tab_entry"] = life_result
+    if life_result.get("ok"):
+        log("✅ Life 탭 진입 시도 성공")
+    else:
+        log("⚠️ Life 탭 진입 실패(또는 이미 Life 아님), 현재 화면 기준으로 캡처 진행")
 
     try:
-        focus_meta = capture_get_focus(out_dir)
-        result["get_focus"] = focus_meta
-        log("✅ get_focus 저장 완료")
+        top_result = client.scroll_to_top(dev=serial, max_swipes=5, pause=max(0.3, wait_seconds))
     except Exception as e:
-        result["get_focus"] = {"ok": False, "error": str(e)}
-        log(f"⚠️ get_focus 저장 실패: {e}")
+        top_result = {"ok": False, "reason": "exception", "error": str(e)}
+    session_meta["scroll_to_top"] = top_result
 
-    try:
-        xml_path = capture_uiautomator_xml(out_dir, serial)
-        result["uiautomator_xml"] = {"ok": True, "path": str(xml_path)}
-        log("✅ UIAutomator XML 저장 완료")
-    except Exception as e:
-        result["uiautomator_xml"] = {"ok": False, "error": str(e)}
-        log(f"⚠️ UIAutomator XML 저장 실패: {e}")
+    records: list[dict[str, Any]] = []
+    previous_signature = ""
+    repeated_count = 0
 
-    try:
-        screenshot_path = capture_screenshot(out_dir, serial, image_format, jpg_quality)
-        result["screenshot"] = {"ok": True, "path": str(screenshot_path)}
-        log(f"✅ 스크린샷 저장 완료 ({screenshot_path.name})")
-    except Exception as e:
-        result["screenshot"] = {"ok": False, "error": str(e)}
-        log(f"⚠️ 스크린샷 저장 실패: {e}")
+    for step in range(1, max(1, max_steps) + 1):
+        step_dir = run_dir / f"step_{step:02d}"
+        note = "initial_capture" if step == 1 else "after_scroll_down"
+        captured = capture_step(step_dir, serial=serial, step_index=step, scroll_performed=(step > 1), note=note)
+        records.append(captured["meta"])
+        signature = captured["signature"]
 
-    try:
-        logcat_result = capture_logcat(out_dir, serial)
-        result["logcat"] = {"ok": True, **logcat_result}
-        log(f"✅ logcat 저장 완료 (filtered_lines={logcat_result.get('filtered_lines')})")
-    except Exception as e:
-        result["logcat"] = {"ok": False, "error": str(e)}
-        log(f"⚠️ logcat 저장 실패: {e}")
+        if step > 1 and signature == previous_signature:
+            repeated_count += 1
+            records[-1]["note"] = "same_visible_summary_detected"
+            log(f"⚠️ step={step} 동일 화면 반복 감지")
+            break
 
-    write_readme(out_dir, image_format, jpg_quality)
-    write_json(out_dir / "capture_result.json", result)
-    return result
+        previous_signature = signature
 
-# =========================================================
-# 메인
-# =========================================================
+        if step >= max_steps:
+            records[-1]["note"] = "max_steps_reached"
+            break
+
+        scrolled = False
+        try:
+            scrolled = bool(client.scroll(dev=serial, direction="down"))
+        except Exception:
+            scrolled = False
+
+        if not scrolled:
+            records[-1]["note"] = "scroll_not_performed_or_end_reached"
+            log(f"⚠️ step={step} 이후 스크롤 불가 추정, 종료")
+            break
+
+        time.sleep(max(0.0, wait_seconds))
+
+    session_meta["finished_at"] = datetime.now().isoformat(timespec="seconds")
+    session_meta["captured_steps"] = len(records)
+    session_meta["same_screen_repeat_count"] = repeated_count
+    write_json(run_dir / "session_meta.json", session_meta)
+    write_json(run_dir / "capture_result.json", records)
+
+    return run_dir
+
+
+def run_single_capture(serial: str) -> Path:
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = OUTPUT_BASE / "single_capture" / run_id
+    ensure_dir(run_dir)
+    step_dir = run_dir / "step_01"
+    capture_step(step_dir=step_dir, serial=serial, step_index=1, scroll_performed=False, note="single_capture")
+    write_json(
+        run_dir / "session_meta.json",
+        {
+            "script_version": SCRIPT_VERSION,
+            "mode": "single_capture",
+            "serial": serial,
+            "run_id": run_id,
+            "screenshot_format": SCREENSHOT_FORMAT,
+            "screenshot_quality": SCREENSHOT_JPG_QUALITY,
+            "captured_steps": 1,
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+        },
+    )
+    return run_dir
+
+
 def main() -> None:
+    args = parse_args()
+
     try:
         serials = get_connected_devices()
+        serial = resolve_serial(args.serial, serials)
     except Exception as e:
-        print(f"❌ adb devices 실패: {e}")
+        print(f"❌ 기기 확인 실패: {e}")
         return
 
-    if not serials:
-        print("❌ 연결된 Android device가 없습니다.")
-        return
+    log(f"모드={args.mode}, serial={serial}, max_steps={args.max_steps}, wait={args.wait}")
 
-    config = collect_user_inputs(serials)
-
-    serial = config["serial"]
-    app_name = config["app_name"]
-    screen_name = config["screen_name"]
-    action_name = config["action_name"]
-    mode = config["mode"]
-    image_format = config["image_format"]
-    jpg_quality = config["jpg_quality"]
-    wait_seconds = config["wait_seconds"]
-
-    if not serial:
-        print("❌ 사용할 serial이 없습니다.")
-        return
-
-    if mode == "single":
-        input("\n[SINGLE] 원하는 화면 상태를 맞춘 뒤 Enter를 누르세요...")
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        base_name = f"{timestamp}__{app_name}__{screen_name}__{action_name}"
-        out_dir = unique_dir(OUTPUT_BASE / base_name)
-
-        do_capture_bundle(
-            base_name=base_name,
-            out_dir=out_dir,
-            serial=serial,
-            image_format=image_format,
-            jpg_quality=jpg_quality,
-            wait_seconds=wait_seconds,
-        )
-        print(f"\n✅ SINGLE 저장 완료: {out_dir.resolve()}")
-
+    if args.mode == "single_capture":
+        out_dir = run_single_capture(serial)
     else:
-        input("\n[BEFORE] 원하는 화면 상태를 맞춘 뒤 Enter를 누르세요...")
-        timestamp_before = datetime.now().strftime("%Y%m%d_%H%M%S")
-        base_before = f"{timestamp_before}__{app_name}__{screen_name}__{action_name}__before"
-        out_before = unique_dir(OUTPUT_BASE / base_before)
+        out_dir = run_scroll_capture(serial=serial, max_steps=args.max_steps, wait_seconds=args.wait)
 
-        do_capture_bundle(
-            base_name=base_before,
-            out_dir=out_before,
-            serial=serial,
-            image_format=image_format,
-            jpg_quality=jpg_quality,
-            wait_seconds=wait_seconds,
-        )
-        print(f"\n✅ BEFORE 저장 완료: {out_before.resolve()}")
+    print(f"\n✅ 캡처 완료: {out_dir.resolve()}")
 
-        input("\n[AFTER] 버튼을 누르거나 화면 전이 후 Enter를 누르세요...")
-        timestamp_after = datetime.now().strftime("%Y%m%d_%H%M%S")
-        base_after = f"{timestamp_after}__{app_name}__{screen_name}__{action_name}__after"
-        out_after = unique_dir(OUTPUT_BASE / base_after)
-
-        do_capture_bundle(
-            base_name=base_after,
-            out_dir=out_after,
-            serial=serial,
-            image_format=image_format,
-            jpg_quality=jpg_quality,
-            wait_seconds=wait_seconds,
-        )
-        print(f"\n✅ AFTER 저장 완료: {out_after.resolve()}")
-
-    print("\n완료")
 
 if __name__ == "__main__":
     main()
