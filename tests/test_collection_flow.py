@@ -1202,7 +1202,7 @@ def test_select_visible_plugin_candidate_promotes_to_effective_clickable_card_fo
     assert stats.get("rejection_counts", {}).get("non_actionable_without_promotion", 0) == 0
 
 
-def test_select_visible_plugin_candidate_xml_fallback_promotes_clickable_container():
+def test_select_visible_plugin_candidate_xml_live_fallback_promotes_clickable_container():
     helper_nodes = [
         {
             "text": "Life",
@@ -1248,7 +1248,7 @@ def test_select_visible_plugin_candidate_xml_fallback_promotes_clickable_contain
     assert selected is not None
     assert "candidate_count=" in reason
     assert selected_meta.get("promoted_container") is True
-    assert selected_meta.get("promotion_source") == "xml"
+    assert selected_meta.get("promotion_source") == "xml_live"
     assert selected_meta.get("promotion_attempted") is True
     assert selected_meta.get("promoted_to", "").endswith("preInstalledServiceCard")
     assert stats.get("rejection_counts", {}).get("non_actionable_without_promotion", 0) == 0
@@ -3073,6 +3073,42 @@ def test_capture_scrolltouch_step_bundle_saves_expected_files(tmp_path, monkeypa
     assert meta["scroll_step"] == 2
     assert meta["visible_candidate_count"] == 0
     assert meta["selected"] is False
+    assert meta["xml_fallback_attempted"] is False
+    assert meta["xml_snapshot_saved"] is False
+
+
+def test_capture_scrolltouch_step_bundle_saves_xml_when_fallback_attempted(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client = DummyClient([])
+    client.dump_tree_sequence = [[{"text": "Air Care", "visibleToUser": True}]]
+    monkeypatch.setattr(client, "_take_snapshot", lambda _dev, save_path: Path(save_path).write_bytes(b"png"), raising=False)
+    monkeypatch.setattr(client, "_resolve_serial", lambda _dev: "SERIAL123", raising=False)
+    bundle_path = collection_flow._capture_scrolltouch_step_bundle(
+        client,
+        "SERIAL",
+        scenario_id="life_air_care_plugin",
+        capture_run_id="20260101_120000",
+        step_index=1,
+        scroll_step=3,
+        target_regex="(?i).*air care.*",
+        selected=True,
+        selected_reason="candidate_count=1",
+        candidate_stats={
+            "visible_candidate_count": 1,
+            "partial_match_count": 1,
+            "exact_match_count": 1,
+            "xml_fallback_attempted": True,
+            "xml_fallback_reason": "ok",
+        },
+        xml_dump_text="<hierarchy><node text='air care'/></hierarchy>",
+    )
+
+    bundle = Path(bundle_path)
+    assert (bundle / "window_dump.xml").exists()
+    meta = json.loads((bundle / "meta.json").read_text(encoding="utf-8"))
+    assert meta["xml_fallback_attempted"] is True
+    assert meta["xml_fallback_reason"] == "ok"
+    assert meta["xml_snapshot_saved"] is True
 
 
 def test_run_pre_navigation_steps_triggers_capture_for_life_air_care_failure(monkeypatch):

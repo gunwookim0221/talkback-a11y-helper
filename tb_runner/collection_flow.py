@@ -63,7 +63,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-recheck-v7"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr21-scrolltouch-promotion-fallback-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr22-scrolltouch-xml-live-step-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
@@ -925,6 +925,7 @@ def _capture_scrolltouch_step_bundle(
     selected: bool,
     selected_reason: str,
     candidate_stats: dict[str, Any] | None,
+    xml_dump_text: str = "",
     log_fn: Callable[..., None] = log,
 ) -> str:
     normalized_scenario_id = str(scenario_id or "").strip().lower()
@@ -945,6 +946,7 @@ def _capture_scrolltouch_step_bundle(
 
     screenshot_path = bundle_dir / "screenshot.png"
     helper_dump_path = bundle_dir / "helper_dump.json"
+    xml_dump_path = bundle_dir / "window_dump.xml"
     meta_path = bundle_dir / "meta.json"
     first_failure_reason = ""
 
@@ -965,6 +967,13 @@ def _capture_scrolltouch_step_bundle(
         helper_dump_path.write_text(json.dumps(helper_dump, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as exc:
         first_failure_reason = first_failure_reason or f"helper_dump_write_failed:{exc}"
+    xml_snapshot_saved = False
+    if str(xml_dump_text or "").strip():
+        try:
+            xml_dump_path.write_text(str(xml_dump_text), encoding="utf-8")
+            xml_snapshot_saved = True
+        except Exception as exc:
+            first_failure_reason = first_failure_reason or f"window_dump_write_failed:{exc}"
 
     rejection_counts = stats_map.get("rejection_counts", {})
     rejection_summary = ""
@@ -992,6 +1001,9 @@ def _capture_scrolltouch_step_bundle(
         "exact_match_count": int(stats_map.get("exact_match_count", 0) or 0),
         "selected": bool(selected),
         "selected_reason": str(selected_reason or ""),
+        "xml_fallback_attempted": bool(stats_map.get("xml_fallback_attempted", False)),
+        "xml_fallback_reason": str(stats_map.get("xml_fallback_reason", "not_attempted") or "not_attempted"),
+        "xml_snapshot_saved": xml_snapshot_saved,
         "visible_top": " | ".join(visible_samples[:3]) if isinstance(visible_samples, list) else "",
         "partial_top": " | ".join(partial_samples[:3]) if isinstance(partial_samples, list) else "",
         "rejection_summary": rejection_summary,
@@ -1312,16 +1324,16 @@ def _parse_uiautomator_bounds(bounds_raw: str) -> tuple[int, int, int, int] | No
     return left, top, right, bottom
 
 
-def _load_scrolltouch_xml_nodes(client: A11yAdbClient, dev: str) -> tuple[list[dict[str, Any]], str]:
+def _load_scrolltouch_xml_nodes(client: A11yAdbClient, dev: str) -> tuple[list[dict[str, Any]], str, str]:
     run_fn = getattr(client, "_run", None)
     if not callable(run_fn):
-        return [], "run_not_supported"
+        return [], "run_not_supported", ""
     remote_xml = "/sdcard/window_dump_scrolltouch.xml"
     try:
         run_fn(["shell", "uiautomator", "dump", remote_xml], dev=dev)
         xml_text = str(run_fn(["shell", "cat", remote_xml], dev=dev) or "").strip()
     except Exception as exc:
-        return [], f"dump_failed:{exc}"
+        return [], f"dump_failed:{exc}", ""
     finally:
         try:
             run_fn(["shell", "rm", "-f", remote_xml], dev=dev)
@@ -1329,11 +1341,11 @@ def _load_scrolltouch_xml_nodes(client: A11yAdbClient, dev: str) -> tuple[list[d
             pass
 
     if not xml_text:
-        return [], "empty_xml"
+        return [], "empty_xml", ""
     try:
         root = ET.fromstring(xml_text)
     except Exception as exc:
-        return [], f"parse_failed:{exc}"
+        return [], f"parse_failed:{exc}", xml_text
 
     parsed_nodes: list[dict[str, Any]] = []
     for element in root.iter("node"):
@@ -1356,8 +1368,8 @@ def _load_scrolltouch_xml_nodes(client: A11yAdbClient, dev: str) -> tuple[list[d
         )
 
     if not parsed_nodes:
-        return [], "no_parsed_nodes"
-    return [{"children": parsed_nodes, "visibleToUser": True, "boundsInScreen": "0,0,1,1"}], "ok"
+        return [], "no_parsed_nodes", xml_text
+    return [{"children": parsed_nodes, "visibleToUser": True, "boundsInScreen": "0,0,1,1"}], "ok", xml_text
 
 
 def _select_visible_plugin_candidate(
@@ -1462,6 +1474,8 @@ def _select_visible_plugin_candidate(
         "promoted_to": "",
         "promotion_candidate_count": 0,
         "promotion_debug_summary": "",
+        "xml_fallback_attempted": False,
+        "xml_fallback_reason": "not_attempted",
     }
     if not isinstance(nodes, list) or not nodes:
         return None, "empty_dump", stats, selected_meta
@@ -1780,7 +1794,7 @@ def _select_visible_plugin_candidate(
                     promoted_click_node = promoted_from_xml
                     click_node = promoted_from_xml
                     promotion_reason = xml_reason
-                    promotion_source = "xml"
+                    promotion_source = "xml_live"
         if click_node is node and not _is_actionable(click_node):
             _append_rejection(stats, "non_actionable_without_promotion")
             _record_inspect(
@@ -2002,6 +2016,7 @@ def _run_pre_navigation_steps(
                 post_scroll_settle_ms = 250
                 xml_fallback_attempted = False
                 xml_fallback_reason = "not_attempted"
+                xml_live_dump_text = ""
                 for scroll_step in range(1, max_scroll_search_steps + 1):
                     selected_node, selected_reason, candidate_stats, selected_meta = _select_visible_plugin_candidate(
                         nodes=top_nodes,
@@ -2018,7 +2033,7 @@ def _run_pre_navigation_steps(
                     )
                     if needs_xml_fallback:
                         xml_fallback_attempted = True
-                        xml_nodes, xml_fallback_reason = _load_scrolltouch_xml_nodes(client=client, dev=dev)
+                        xml_nodes, xml_fallback_reason, xml_live_dump_text = _load_scrolltouch_xml_nodes(client=client, dev=dev)
                         if xml_nodes:
                             selected_node, selected_reason, candidate_stats, selected_meta = _select_visible_plugin_candidate(
                                 nodes=top_nodes,
@@ -2027,6 +2042,10 @@ def _run_pre_navigation_steps(
                                 xml_nodes=xml_nodes,
                             )
                             rejection_counts = candidate_stats.get("rejection_counts", {})
+                    candidate_stats["xml_fallback_attempted"] = xml_fallback_attempted
+                    candidate_stats["xml_fallback_reason"] = xml_fallback_reason
+                    selected_meta["xml_fallback_attempted"] = xml_fallback_attempted
+                    selected_meta["xml_fallback_reason"] = xml_fallback_reason
                     visible_samples = candidate_stats.get("visible_samples", [])
                     partial_samples = candidate_stats.get("partial_samples", [])
                     inspect_samples = candidate_stats.get("inspect_samples", [])
@@ -2073,6 +2092,7 @@ def _run_pre_navigation_steps(
                         selected=selected_node is not None,
                         selected_reason=selected_reason,
                         candidate_stats=candidate_stats,
+                        xml_dump_text=xml_live_dump_text if xml_fallback_attempted else "",
                         log_fn=log,
                     )
                     if selected_node is not None:
