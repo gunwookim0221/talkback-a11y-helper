@@ -2731,3 +2731,92 @@ def test_run_pre_navigation_steps_triggers_capture_for_life_air_care_failure(mon
     assert captured["scenario_id"] == "life_air_care_plugin"
     assert captured["failure_phase"] == "pre_navigation"
     assert captured["failure_reason"] == "Target node not found"
+
+
+def test_capture_pre_navigation_failure_bundle_logs_partial_failure(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    client = DummyClient([])
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append((level, message)))
+    monkeypatch.setattr(client, "_take_snapshot", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("snap_fail")), raising=False)
+    monkeypatch.setattr(client, "_resolve_serial", lambda _dev: "SERIAL123", raising=False)
+
+    def _run(args, **kwargs):
+        _ = kwargs
+        if args[0] == "pull":
+            raise RuntimeError("pull_fail")
+        return ""
+
+    monkeypatch.setattr(client, "_run", _run, raising=False)
+    monkeypatch.setattr(collection_flow, "datetime", SimpleNamespace(
+        now=lambda tz=None: __import__("datetime").datetime(2026, 1, 1, 12, 0, 0, tzinfo=tz),
+    ))
+
+    bundle_path = collection_flow._capture_pre_navigation_failure_bundle(
+        client,
+        "SERIAL",
+        scenario_id="life_air_care_plugin",
+        failure_phase="pre_navigation",
+        failure_reason="action_failed",
+        step_index=1,
+        target_regex="foo",
+        log_fn=collection_flow.log,
+    )
+
+    assert Path(bundle_path).exists()
+    assert any("[CAPTURE][pre_nav_failure] start" in line and "phase='pre_navigation'" in line for _, line in logs)
+    assert any(
+        "[CAPTURE][pre_nav_failure] failed" in line
+        and "saved_files='helper_dump.json,focus_payload.json,meta.json'" in line
+        and "failed_files='screenshot.png:snap_fail,window_dump.xml:pull_fail'" in line
+        for _, line in logs
+    )
+
+
+def test_open_scenario_focus_align_strict_failure_triggers_capture(monkeypatch):
+    client = DummyClient([])
+    logs = []
+    capture_calls = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append((level, message)))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_tab_selection",
+        lambda **kwargs: {
+            "ok": True,
+            "selected": True,
+            "context": {"ok": True},
+            "focus_align": {"attempted": True, "ok": False, "fast_mode": True, "reason": "focus_miss"},
+        },
+    )
+    monkeypatch.setattr(
+        collection_flow,
+        "_verify_plugin_entry_root_state",
+        lambda *args, **kwargs: (False, "life_root_not_stable"),
+    )
+    monkeypatch.setattr(
+        collection_flow,
+        "_capture_pre_navigation_failure_bundle",
+        lambda *args, **kwargs: capture_calls.append(kwargs) or "output/capture_bundles/life_air_care_plugin/test",
+    )
+
+    ok = collection_flow.open_scenario(
+        client,
+        "SERIAL",
+        {
+            "scenario_id": "life_air_care_plugin",
+            "tab_name": "홈",
+            "tab_type": "t",
+            "scenario_type": "content",
+            "screen_context_mode": "new_screen",
+            "stabilization_mode": "anchor_only",
+            "pre_navigation": [{"action": "scrollTouch", "target": "foo", "type": "a"}],
+        },
+    )
+
+    assert ok is False
+    assert capture_calls
+    assert capture_calls[0]["failure_phase"] == "focus_align_recheck"
+    assert capture_calls[0]["failure_reason"] == "life_root_not_stable"
+    assert any("strict failure for plugin pre_navigation" in line for _, line in logs)
