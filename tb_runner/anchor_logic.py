@@ -21,6 +21,17 @@ _PLUGIN_FALLBACK_BOILERPLATE_TOKENS = (
     "약관",
     "동의",
 )
+_DIRECT_SELECT_GENERIC_TOP_TOKENS = (
+    " no activity",
+    " activity",
+    " (me)",
+    " profile",
+    " family",
+    " member",
+    "내 활동",
+    "프로필",
+    "가족",
+)
 
 
 def _extract_candidate_from_node(node: dict[str, Any], index: int = -1) -> dict[str, Any]:
@@ -264,11 +275,41 @@ def _pick_top_content_fallback_candidate(
                 token_hit_candidates.append(candidate)
         if token_hit_candidates:
             identity_candidates = token_hit_candidates
+    if normalized_entry_type == "direct_select":
+        non_generic_candidates = []
+        for candidate in identity_candidates:
+            blob = " ".join(
+                [
+                    str(candidate.get("announcement", "") or "").strip().lower(),
+                    str(candidate.get("text", "") or "").strip().lower(),
+                    str(candidate.get("resource_id", "") or "").strip().lower(),
+                ]
+            )
+            if any(token in f" {blob}" for token in _DIRECT_SELECT_GENERIC_TOP_TOKENS):
+                continue
+            non_generic_candidates.append(candidate)
+        if non_generic_candidates:
+            identity_candidates = non_generic_candidates
 
     def _candidate_sort_key(candidate: dict[str, Any], base_sort_key: Any) -> Any:
         base_key = base_sort_key(candidate)
+        blob = " ".join(
+            [
+                str(candidate.get("announcement", "") or "").strip().lower(),
+                str(candidate.get("text", "") or "").strip().lower(),
+                str(candidate.get("resource_id", "") or "").strip().lower(),
+            ]
+        )
+        width = max(1, int(candidate.get("right", 0) or 0) - int(candidate.get("left", 0) or 0))
+        height = max(1, int(candidate.get("bottom", 0) or 0) - int(candidate.get("top", 0) or 0))
+        oversized_penalty = 1 if screen_width > 0 and screen_height > 0 and (
+            (width / max(1, screen_width) >= 0.88) and (height / max(1, screen_height) >= 0.24)
+        ) else 0
+        generic_profile_penalty = 1 if normalized_entry_type == "direct_select" and any(
+            token in f" {blob}" for token in _DIRECT_SELECT_GENERIC_TOP_TOKENS
+        ) else 0
         if not prioritize_verify_tokens:
-            return (1, 0, base_key)
+            return (generic_profile_penalty, oversized_penalty, base_key)
         blob = " ".join(
             [
                 str(candidate.get("announcement", "") or "").strip().lower(),
@@ -277,12 +318,7 @@ def _pick_top_content_fallback_candidate(
             ]
         )
         verify_hit = any(token in blob for token in normalized_verify_tokens)
-        width = max(1, int(candidate.get("right", 0) or 0) - int(candidate.get("left", 0) or 0))
-        height = max(1, int(candidate.get("bottom", 0) or 0) - int(candidate.get("top", 0) or 0))
-        oversized_penalty = 1 if screen_width > 0 and screen_height > 0 and (
-            (width / max(1, screen_width) >= 0.88) and (height / max(1, screen_height) >= 0.24)
-        ) else 0
-        return (0 if verify_hit else 1, oversized_penalty, base_key)
+        return (0 if verify_hit else 1, generic_profile_penalty, oversized_penalty, base_key)
 
     def _pick_non_boilerplate(bucket: list[dict[str, Any]], sort_key: Any, fallback_position: str) -> tuple[dict[str, Any] | None, str]:
         for candidate in sorted(bucket, key=lambda item: _candidate_sort_key(item, sort_key)):

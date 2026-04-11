@@ -65,7 +65,7 @@ COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr24-card-entry-generalization-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
-COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr25-direct-select-post-open-verify-v1"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr25-direct-select-post-open-verify-v2"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -82,6 +82,7 @@ _CARD_ENTRY_VERIFY_RECHECK_COUNT = 2
 _CARD_ENTRY_VERIFY_RECHECK_SLEEP_SECONDS = 0.2
 _DIRECT_SELECT_VERIFY_RECHECK_COUNT = 2
 _DIRECT_SELECT_VERIFY_RECHECK_SLEEP_SECONDS = 0.16
+_DIRECT_SELECT_NEGATIVE_VERIFY_PERSIST_THRESHOLD = 2
 
 
 
@@ -3138,6 +3139,7 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             post_speech,
             extra_candidates=extra_verify_candidates if extra_verify_candidates else None,
         )
+        negative_verify_hits = 1 if has_negative_verify_token else 0
         if not matches_verify:
             for _ in range(_DIRECT_SELECT_VERIFY_RECHECK_COUNT):
                 time.sleep(min(main_step_wait_seconds, _DIRECT_SELECT_VERIFY_RECHECK_SLEEP_SECONDS))
@@ -3160,13 +3162,16 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
                     recheck_label,
                     recheck_speech,
                 )
-                has_negative_verify_token = has_negative_verify_token or _has_post_open_negative_verify_token(
+                current_negative_verify = _has_post_open_negative_verify_token(
                     tab_cfg,
                     recheck_view_id,
                     recheck_label,
                     recheck_speech,
                     extra_candidates=extra_verify_candidates if extra_verify_candidates else None,
                 )
+                has_negative_verify_token = has_negative_verify_token or current_negative_verify
+                if current_negative_verify:
+                    negative_verify_hits += 1
                 matches_verify = _matches_post_open_verify(
                     tab_cfg,
                     recheck_view_id,
@@ -3175,8 +3180,12 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
                     extra_candidates=extra_verify_candidates if extra_verify_candidates else None,
                 )
                 post_view_id, post_label, post_speech = recheck_view_id, recheck_label, recheck_speech
-                if matches_verify or has_negative_signal or has_negative_verify_token:
+                if matches_verify or has_negative_signal:
                     break
+        has_negative_verify_token = (
+            not matches_verify
+            and negative_verify_hits >= _DIRECT_SELECT_NEGATIVE_VERIFY_PERSIST_THRESHOLD
+        )
     if entry_type == _ENTRY_TYPE_CARD and not matches_verify:
         visible_verify_text = _collect_post_open_visible_text(client, dev)
         if visible_verify_text:

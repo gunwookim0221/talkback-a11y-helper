@@ -312,3 +312,27 @@ def test_stabilize_anchor_direct_select_fallback_prefers_verify_token_candidate(
 
     assert result["fallback_candidate_label"] == "Pet Care"
     assert "pet_plugin_entry" in client.select.call_args.kwargs["name"]
+
+
+def test_stabilize_anchor_direct_select_fallback_demotes_generic_activity_top_candidate(monkeypatch):
+    client = FakeAnchorClient()
+    client.dump_tree.return_value = [
+        _focusable_node("family_me_card", "안 창준 (Me) No activity", "[20,260][1060,700]"),
+        _focusable_node("pet_plugin_entry", "Companion service", "[700,260][1030,340]"),
+    ]
+    client.select.return_value = True
+    monkeypatch.setattr(anchor_logic, "verify_context", lambda *a, **k: {"ok": True})
+    tab_cfg = {
+        "scenario_id": "life_pet_care_example",
+        "entry_type": "direct_select",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "pre_navigation": [{"action": "select", "target": ".*pet.*", "type": "a"}],
+        "anchor_name": "(?i).*pet\\s*care.*",
+        "anchor_type": "a",
+        "anchor": {},
+    }
+
+    result = anchor_logic.stabilize_anchor(client, "SERIAL", tab_cfg, phase="scenario_start", max_retries=1)
+
+    assert result["fallback_candidate_resource_id"] == "pet_plugin_entry"
