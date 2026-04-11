@@ -1815,6 +1815,48 @@ def test_open_scenario_card_entry_verify_tokens_miss_maps_verify_failed(monkeypa
     assert summary.get("entry_contract_reason") == "verify_failed"
 
 
+def test_open_scenario_card_entry_recovers_when_initial_focus_is_navigate_up(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {"ok": True, "selected": True, "reason": "selected_and_verified", "matched": True},
+    )
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    def _pre_nav_success(**kwargs):
+        client = kwargs["client"]
+        setattr(client, "last_post_click_transition_same_screen", False)
+        setattr(client, "last_post_click_transition_signal", "air_care_verify")
+        return True
+
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", _pre_nav_success)
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    client.focus_sequence = [
+        {"viewIdResourceName": "", "text": "Navigate up", "contentDescription": "Navigate up"},
+        {"viewIdResourceName": "", "text": "Navigate up", "contentDescription": "Navigate up"},
+        {"viewIdResourceName": "", "text": "Navigate up", "contentDescription": "Navigate up"},
+    ]
+    client.dump_tree_sequence = [
+        [{"text": "Navigate up", "viewIdResourceName": ""}],
+        [{"text": "Smart Air Care", "viewIdResourceName": "com.example:id/title"}],
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_air_care_plugin",
+        "entry_type": "card",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "verify_tokens": ["air care"],
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    summary = getattr(client, "last_start_open_summary", {})
+    assert summary.get("entry_contract_reason") == "success_verified"
+
+
 def test_open_scenario_card_entry_energy_succeeds_with_smartthings_energy_verify_token(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(
@@ -1834,6 +1876,49 @@ def test_open_scenario_card_entry_energy_succeeds_with_smartthings_energy_verify
         "scenario_id": "life_energy_plugin",
         "entry_type": "card",
         "verify_tokens": ["smartthings energy"],
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    summary = getattr(client, "last_start_open_summary", {})
+    assert summary.get("entry_contract_reason") == "success_verified"
+
+
+def test_open_scenario_card_entry_energy_recheck_uses_visible_text_after_transition(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {"ok": True, "selected": True, "reason": "selected_and_verified", "matched": True},
+    )
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    def _pre_nav_success(**kwargs):
+        client = kwargs["client"]
+        setattr(client, "last_post_click_transition_same_screen", False)
+        setattr(client, "last_post_click_transition_signal", "screen_text")
+        return True
+
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", _pre_nav_success)
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    client.focus_sequence = [
+        {"viewIdResourceName": "", "text": "Navigate up", "contentDescription": "Navigate up"},
+        {"viewIdResourceName": "", "text": "Navigate up", "contentDescription": "Navigate up"},
+        {"viewIdResourceName": "com.example:id/title", "text": "SmartThings Energy"},
+    ]
+    client.dump_tree_sequence = [
+        [{"text": "Navigate up", "viewIdResourceName": ""}],
+        [{"text": "SmartThings Energy", "viewIdResourceName": "com.example:id/title"}],
+        [{"text": "Energy usage", "viewIdResourceName": "com.example:id/subtitle"}],
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_energy_plugin",
+        "entry_type": "card",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "verify_tokens": ["smartthings energy", "energy usage"],
     }
 
     ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
