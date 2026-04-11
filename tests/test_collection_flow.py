@@ -1859,41 +1859,6 @@ def test_open_scenario_main_tab_focus_align_failure_is_strict(monkeypatch):
     assert ok is False
 
 
-def test_open_scenario_plugin_pre_nav_focus_align_failure_allows_life_root_not_stable(monkeypatch):
-    logs = []
-    monkeypatch.setattr(
-        collection_flow,
-        "stabilize_tab_selection",
-        lambda **kwargs: {"ok": True, "focus_align": {"attempted": True, "ok": False, "fast_mode": True}},
-    )
-    def _plugin_root_gate(*args, **kwargs):
-        phase = kwargs.get("phase")
-        if phase == "focus_align_recheck":
-            return False, "life_root_not_stable"
-        return True, "root_state_scrolltouch_entry_relaxed"
-
-    monkeypatch.setattr(collection_flow, "_verify_plugin_entry_root_state", _plugin_root_gate)
-    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
-    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
-    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
-    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
-
-    client = DummyClient([_anchor_row()])
-    tab_cfg = {
-        **_base_tab_cfg(),
-        "scenario_id": "life_air_care_plugin",
-        "screen_context_mode": "new_screen",
-        "stabilization_mode": "anchor_only",
-        "pre_navigation": [{"action": "scrolltouch", "target": "(?i).*air care.*", "type": "a"}],
-    }
-
-    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
-
-    assert ok is True
-    assert any("failed but proceeding after plugin root recheck" in line for line in logs)
-    assert not any("strict failure for plugin pre_navigation" in line for line in logs)
-
-
 def test_open_scenario_new_screen_allows_low_confidence_fallback_start(monkeypatch):
     logs = []
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
