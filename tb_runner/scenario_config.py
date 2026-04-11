@@ -1,4 +1,4 @@
-SCENARIO_CONFIG_VERSION = "2026.04.11-direct-select-verify-v1"
+SCENARIO_CONFIG_VERSION = "2026.04.11-direct-select-verify-v2"
 
 BOTTOM_TAB_GLOBAL_NAV = {
     "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
@@ -557,8 +557,6 @@ TAB_CONFIGS = [
             "qr code",
             "change location",
             "home_button",
-            "add",
-            "more options",
             "menu_favorites",
             "menu_devices",
             "menu_services",
