@@ -149,11 +149,7 @@
       "enabled": false,
       "max_steps": 40
     },
-    "resource_id_only_example": {
-      "group": "main_tabs",
-      "enabled": false,
-      "max_steps": 40
-    },
+
     "life_air_care_plugin": {
       "enabled": false,
       "max_steps": 40
