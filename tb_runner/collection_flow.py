@@ -65,7 +65,7 @@ COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr24-card-entry-generalization-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
-COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr25-direct-select-post-open-verify-v2"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr25-direct-select-post-open-verify-v3"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -83,6 +83,7 @@ _CARD_ENTRY_VERIFY_RECHECK_SLEEP_SECONDS = 0.2
 _DIRECT_SELECT_VERIFY_RECHECK_COUNT = 2
 _DIRECT_SELECT_VERIFY_RECHECK_SLEEP_SECONDS = 0.16
 _DIRECT_SELECT_NEGATIVE_VERIFY_PERSIST_THRESHOLD = 2
+_DIRECT_SELECT_DIAGNOSTIC_SCENARIOS = {"life_pet_care_example"}
 
 
 
@@ -891,6 +892,11 @@ def _has_post_open_negative_verify_token(
     normalized_blob = " ".join(candidates).lower()
     normalized_tokens = [str(token or "").strip().lower() for token in negative_tokens if str(token or "").strip()]
     return bool(normalized_tokens and any(token in normalized_blob for token in normalized_tokens))
+
+
+def _collect_token_hits(tokens: list[str], values: list[str]) -> list[str]:
+    normalized_blob = " ".join(str(value or "") for value in values).lower()
+    return [token for token in tokens if token and token in normalized_blob]
 
 
 def _collect_post_open_visible_text(client: A11yAdbClient, dev: str) -> str:
@@ -3117,6 +3123,17 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     visible_verify_text = ""
     extra_verify_candidates: list[str] = []
     matches_verify = _matches_post_open_verify(tab_cfg, post_view_id, post_label, post_speech)
+    negative_verify_hits = 1 if has_negative_verify_token else 0
+    diagnostic_entry = (
+        entry_type == _ENTRY_TYPE_DIRECT_SELECT
+        and str(scenario_id or "").strip().lower() in _DIRECT_SELECT_DIAGNOSTIC_SCENARIOS
+    )
+    normalized_verify_tokens = [
+        str(token or "").strip().lower() for token in tab_cfg.get("verify_tokens", []) if str(token or "").strip()
+    ]
+    normalized_negative_tokens = [
+        str(token or "").strip().lower() for token in tab_cfg.get("negative_verify_tokens", []) if str(token or "").strip()
+    ]
     if entry_type == _ENTRY_TYPE_DIRECT_SELECT and not matches_verify:
         visible_verify_text = _collect_post_open_visible_text(client, dev)
         extra_verify_candidates = _build_direct_select_verify_candidates(
@@ -3139,9 +3156,29 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             post_speech,
             extra_candidates=extra_verify_candidates if extra_verify_candidates else None,
         )
-        negative_verify_hits = 1 if has_negative_verify_token else 0
+        if diagnostic_entry:
+            initial_verify_hits = _collect_token_hits(
+                normalized_verify_tokens,
+                [post_view_id, post_label, post_speech, visible_verify_text, *extra_verify_candidates],
+            )
+            initial_negative_hits = _collect_token_hits(
+                normalized_negative_tokens,
+                [post_view_id, post_label, post_speech, visible_verify_text, *extra_verify_candidates],
+            )
+            log(
+                "[SCENARIO][direct_select][snapshot] "
+                f"scenario='{scenario_id}' focus_view_id='{post_view_id}' "
+                f"focus_label='{post_label}' speech='{post_speech}' "
+                f"visible='{visible_verify_text}' "
+                f"fallback_label='{str(stabilize_result.get('fallback_candidate_label', '') or '').strip() or 'none'}' "
+                f"post_open_anchor='{str(stabilize_result.get('fallback_candidate_resource_id', '') or '').strip() or 'none'}' "
+                f"verify_hits='{','.join(initial_verify_hits) or 'none'}' "
+                f"negative_hits='{','.join(initial_negative_hits) or 'none'}' "
+                f"matches_verify={str(matches_verify).lower()} "
+                f"has_negative_verify_token={str(has_negative_verify_token).lower()}"
+            )
         if not matches_verify:
-            for _ in range(_DIRECT_SELECT_VERIFY_RECHECK_COUNT):
+            for recheck_idx in range(_DIRECT_SELECT_VERIFY_RECHECK_COUNT):
                 time.sleep(min(main_step_wait_seconds, _DIRECT_SELECT_VERIFY_RECHECK_SLEEP_SECONDS))
                 recheck_focus = client.get_focus(
                     dev=dev,
@@ -3180,6 +3217,26 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
                     extra_candidates=extra_verify_candidates if extra_verify_candidates else None,
                 )
                 post_view_id, post_label, post_speech = recheck_view_id, recheck_label, recheck_speech
+                if diagnostic_entry:
+                    recheck_verify_hits = _collect_token_hits(
+                        normalized_verify_tokens,
+                        [recheck_view_id, recheck_label, recheck_speech, visible_verify_text, *extra_verify_candidates],
+                    )
+                    recheck_negative_hits = _collect_token_hits(
+                        normalized_negative_tokens,
+                        [recheck_view_id, recheck_label, recheck_speech, visible_verify_text, *extra_verify_candidates],
+                    )
+                    log(
+                        "[SCENARIO][direct_select][recheck] "
+                        f"scenario='{scenario_id}' attempt={recheck_idx + 1}/{_DIRECT_SELECT_VERIFY_RECHECK_COUNT} "
+                        f"focus_view_id='{recheck_view_id}' focus_label='{recheck_label}' speech='{recheck_speech}' "
+                        f"visible='{visible_verify_text}' "
+                        f"verify_hits='{','.join(recheck_verify_hits) or 'none'}' "
+                        f"negative_hits='{','.join(recheck_negative_hits) or 'none'}' "
+                        f"matches_verify={str(matches_verify).lower()} "
+                        f"current_negative_verify={str(current_negative_verify).lower()} "
+                        f"negative_verify_hits={negative_verify_hits}"
+                    )
                 if matches_verify or has_negative_signal:
                     break
         has_negative_verify_token = (
@@ -3256,6 +3313,26 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             setattr(client, "last_start_open_summary", start_open_summary)
         return False
     if entry_type == _ENTRY_TYPE_DIRECT_SELECT and has_negative_verify_token:
+        if diagnostic_entry:
+            wrong_open_verify_hits = _collect_token_hits(
+                normalized_verify_tokens,
+                [post_view_id, post_label, post_speech, visible_verify_text, *extra_verify_candidates],
+            )
+            wrong_open_negative_hits = _collect_token_hits(
+                normalized_negative_tokens,
+                [post_view_id, post_label, post_speech, visible_verify_text, *extra_verify_candidates],
+            )
+            log(
+                "[SCENARIO][direct_select][wrong_open_evidence] "
+                f"scenario='{scenario_id}' focus_view_id='{post_view_id}' "
+                f"focus_label='{post_label}' speech='{post_speech}' "
+                f"verify_hits='{','.join(wrong_open_verify_hits) or 'none'}' "
+                f"negative_hits='{','.join(wrong_open_negative_hits) or 'none'}' "
+                f"negative_verify_hits={negative_verify_hits} "
+                f"persist_threshold={_DIRECT_SELECT_NEGATIVE_VERIFY_PERSIST_THRESHOLD} "
+                f"matches_verify={str(matches_verify).lower()} "
+                f"has_negative_signal={str(has_negative_signal).lower()}"
+            )
         log(
             f"[SCENARIO][entry_contract] failed scenario='{scenario_id}' entry_type='{entry_type}' "
             f"reason='{_ENTRY_REASON_WRONG_OPEN}' detail='post_open_negative_verify_token'"
