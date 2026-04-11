@@ -62,7 +62,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-recheck-v7"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr18-scrolltouch-card-promotion-settle-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr19-scrolltouch-description-promotion-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -1288,6 +1288,7 @@ def _select_visible_plugin_candidate(
     *,
     nodes: list[dict[str, Any]],
     target: str,
+    scenario_id: str = "",
 ) -> tuple[dict[str, Any] | None, str, dict[str, Any], dict[str, Any]]:
     sample_limit = 10
     sample_text_limit = 72
@@ -1308,6 +1309,10 @@ def _select_visible_plugin_candidate(
         promoted_click_node: dict[str, Any] | None,
         reject_reason: str,
         stage: str = "filtered",
+        matched_text_node: str = "",
+        promotion_reason: str = "none",
+        promoted_from: str = "",
+        promoted_to: str = "",
     ) -> None:
         samples = stats_map.setdefault("inspect_samples", [])
         if len(samples) >= sample_limit:
@@ -1321,7 +1326,7 @@ def _select_visible_plugin_candidate(
         effective_clickable = clickable or focusable
         promoted = isinstance(promoted_click_node, dict)
         samples.append(
-            "label='{}' rid='{}' cls='{}' visible={} clickable={} focusable={} effectiveClickable={} promoted_click_node={} stage='{}' reason='{}'".format(
+            "label='{}' rid='{}' cls='{}' visible={} clickable={} focusable={} effectiveClickable={} matched_text_node='{}' promoted_container={} promotion_reason='{}' promoted_from='{}' promoted_to='{}' stage='{}' reason='{}'".format(
                 label_blob,
                 resource_id,
                 class_name,
@@ -1329,7 +1334,11 @@ def _select_visible_plugin_candidate(
                 str(clickable).lower(),
                 str(focusable).lower(),
                 str(effective_clickable).lower(),
+                _clip(matched_text_node, sample_text_limit),
                 str(promoted).lower(),
+                _clip(promotion_reason, sample_text_limit),
+                _clip(promoted_from, sample_id_limit),
+                _clip(promoted_to, sample_id_limit),
                 stage,
                 reject_reason,
             )
@@ -1380,6 +1389,11 @@ def _select_visible_plugin_candidate(
 
     normalized_target = str(target or "").strip().lower()
     target_tokens = [token for token in re.split(r"[^0-9a-zA-Z가-힣]+", normalized_target) if len(token) >= 3]
+    normalized_scenario_id = str(scenario_id or "").strip().lower()
+    is_life_air_care_target = (
+        normalized_scenario_id == _LIFE_AIR_CARE_SCENARIO_ID and "air" in normalized_target and "care" in normalized_target
+    )
+    life_air_care_desc_keywords = ("air quality", "air comfort")
 
     descendants_by_container: dict[int, list[str]] = {}
     for node, parent in flat_nodes:
@@ -1432,6 +1446,9 @@ def _select_visible_plugin_candidate(
         click_node = node
         promoted_click_node: dict[str, Any] | None = None
         promotion_reason = "none"
+        matched_text_node = (
+            str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or node.get("className", "") or "node").strip()
+        )
         if isinstance(parent, dict):
             parent_clickable = bool(parent.get("clickable")) or bool(parent.get("focusable"))
             parent_resource = str(parent.get("viewIdResourceName", "") or parent.get("resourceId", "") or "").strip()
@@ -1444,9 +1461,20 @@ def _select_visible_plugin_candidate(
         click_descendant_blob = " ".join(descendants_by_container.get(id(click_node), []))
         if not (label_blob or click_label_blob or click_descendant_blob):
             _append_rejection(stats, "no_label_blob")
-            _record_inspect(stats, node_ref=node, promoted_click_node=promoted_click_node, reject_reason="no_label_blob")
+            _record_inspect(
+                stats,
+                node_ref=node,
+                promoted_click_node=promoted_click_node,
+                reject_reason="no_label_blob",
+                matched_text_node=matched_text_node,
+                promotion_reason=promotion_reason,
+            )
             continue
-        if not _safe_regex_search(target, " ".join(part for part in [label_blob, click_label_blob, click_descendant_blob] if part)):
+        pre_semantic_blob = " ".join(part for part in [label_blob, click_label_blob, click_descendant_blob] if part).strip()
+        description_semantic_match = bool(
+            is_life_air_care_target and any(keyword in pre_semantic_blob.lower() for keyword in life_air_care_desc_keywords)
+        )
+        if not (_safe_regex_search(target, pre_semantic_blob) or description_semantic_match):
             _append_rejection(stats, "filtered_before_candidate")
             _record_inspect(
                 stats,
@@ -1454,12 +1482,21 @@ def _select_visible_plugin_candidate(
                 promoted_click_node=promoted_click_node,
                 reject_reason="filtered_before_candidate",
                 stage="label_filter",
+                matched_text_node=matched_text_node,
+                promotion_reason=promotion_reason,
             )
             continue
         click_bounds = parse_bounds_str(str(click_node.get("boundsInScreen", "") or "").strip())
         if not click_bounds:
             _append_rejection(stats, "no_click_node_bounds")
-            _record_inspect(stats, node_ref=node, promoted_click_node=promoted_click_node, reject_reason="no_click_node_bounds")
+            _record_inspect(
+                stats,
+                node_ref=node,
+                promoted_click_node=promoted_click_node,
+                reject_reason="no_click_node_bounds",
+                matched_text_node=matched_text_node,
+                promotion_reason=promotion_reason,
+            )
             _record_pre_candidate(stats, node_ref=node, promoted_click_node=promoted_click_node, reason="promotion_fail:no_click_node_bounds")
             continue
         c_left, c_top, c_right, c_bottom = click_bounds
@@ -1470,6 +1507,8 @@ def _select_visible_plugin_candidate(
                 node_ref=node,
                 promoted_click_node=promoted_click_node,
                 reject_reason="invalid_click_node_bounds",
+                matched_text_node=matched_text_node,
+                promotion_reason=promotion_reason,
             )
             _record_pre_candidate(
                 stats,
@@ -1480,7 +1519,14 @@ def _select_visible_plugin_candidate(
             continue
         if c_bottom <= viewport_top or c_top >= viewport_bottom:
             _append_rejection(stats, "click_node_not_visible")
-            _record_inspect(stats, node_ref=node, promoted_click_node=promoted_click_node, reject_reason="click_node_not_visible")
+            _record_inspect(
+                stats,
+                node_ref=node,
+                promoted_click_node=promoted_click_node,
+                reject_reason="click_node_not_visible",
+                matched_text_node=matched_text_node,
+                promotion_reason=promotion_reason,
+            )
             _record_pre_candidate(stats, node_ref=node, promoted_click_node=promoted_click_node, reason="actionability_fail:click_node_not_visible")
             continue
         stats["visible_candidate_count"] += 1
@@ -1494,11 +1540,25 @@ def _select_visible_plugin_candidate(
         semantic_blob = " ".join(part for part in [label_blob, title_blob, descendant_blob] if part).strip()
         if not semantic_blob:
             _append_rejection(stats, "promoted_label_empty")
-            _record_inspect(stats, node_ref=node, promoted_click_node=promoted_click_node, reject_reason="promoted_label_empty")
+            _record_inspect(
+                stats,
+                node_ref=node,
+                promoted_click_node=promoted_click_node,
+                reject_reason="promoted_label_empty",
+                matched_text_node=matched_text_node,
+                promotion_reason=promotion_reason,
+            )
             continue
-        if target_tokens and any(token in semantic_blob.lower() for token in target_tokens):
+        semantic_blob_lower = semantic_blob.lower()
+        description_semantic_match = bool(
+            is_life_air_care_target and any(keyword in semantic_blob_lower for keyword in life_air_care_desc_keywords)
+        )
+        if target_tokens and any(token in semantic_blob_lower for token in target_tokens):
             stats["partial_match_count"] += 1
-        if not (_safe_regex_search(target, title_blob) or _safe_regex_search(target, semantic_blob)):
+        elif description_semantic_match:
+            stats["partial_match_count"] += 1
+        semantic_match = bool(_safe_regex_search(target, title_blob) or _safe_regex_search(target, semantic_blob) or description_semantic_match)
+        if not semantic_match:
             _append_rejection(stats, "semantic_miss")
             _record_inspect(
                 stats,
@@ -1506,6 +1566,8 @@ def _select_visible_plugin_candidate(
                 promoted_click_node=promoted_click_node,
                 reject_reason="semantic_miss",
                 stage="semantic_filter",
+                matched_text_node=matched_text_node,
+                promotion_reason=promotion_reason,
             )
             _record_pre_candidate(
                 stats,
@@ -1562,20 +1624,25 @@ def _select_visible_plugin_candidate(
         )
         if target_tokens and any(token in semantic_blob.lower() for token in target_tokens) and len(stats["partial_samples"]) < 5:
             stats["partial_samples"].append(sample_repr)
+        promoted_from = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or node.get("className", "") or "").strip()
+        promoted_to = str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or click_node.get("className", "") or "").strip()
         _record_inspect(
             stats,
             node_ref=node,
             promoted_click_node=promoted_click_node,
             reject_reason="survive_candidate",
             stage="candidate_ready",
+            matched_text_node=matched_text_node,
+            promotion_reason=promotion_reason,
+            promoted_from=promoted_from,
+            promoted_to=promoted_to,
         )
-        promoted_from = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or node.get("className", "") or "").strip()
-        promoted_to = str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or click_node.get("className", "") or "").strip()
         candidate_meta = {
             "promoted_container": bool(promoted_click_node is not None),
             "promotion_reason": promotion_reason if promoted_click_node is not None else "none",
             "promoted_from": promoted_from,
             "promoted_to": promoted_to,
+            "matched_text_node": matched_text_node,
         }
         candidates.append((score, click_node, candidate_meta))
 
@@ -1738,6 +1805,7 @@ def _run_pre_navigation_steps(
                     selected_node, selected_reason, candidate_stats, selected_meta = _select_visible_plugin_candidate(
                         nodes=top_nodes,
                         target=target,
+                        scenario_id=scenario_id,
                     )
                     visible_samples = candidate_stats.get("visible_samples", [])
                     partial_samples = candidate_stats.get("partial_samples", [])
@@ -1796,6 +1864,7 @@ def _run_pre_navigation_steps(
                             f"[SCENARIO][pre_nav][scrolltouch] candidate_select reason='{selected_reason}' class='{class_name}' "
                             f"resource='{resource_id}' bounds='{bounds}' visible={str(visible).lower()} label='{label_blob[:120]}' "
                             f"promoted_container={str(bool(selected_meta.get('promoted_container', False))).lower()} "
+                            f"matched_text_node='{str(selected_meta.get('matched_text_node', ''))[:80]}' "
                             f"promotion_reason='{str(selected_meta.get('promotion_reason', 'none'))}' "
                             f"promoted_from='{str(selected_meta.get('promoted_from', ''))[:80]}' "
                             f"promoted_to='{str(selected_meta.get('promoted_to', ''))[:80]}' "

@@ -991,7 +991,7 @@ def test_select_visible_plugin_candidate_promotes_non_clickable_description_to_o
         {
             "text": "Life",
             "boundsInScreen": "0,0,1080,2200",
-            "visibleToUser": True,
+            "visibleToUser": False,
             "children": [
                 {
                     "text": "맞춤형 Air Care 서비스를 이용해보세요.",
@@ -1024,6 +1024,7 @@ def test_select_visible_plugin_candidate_promotes_non_clickable_description_to_o
     selected, reason, stats, selected_meta = collection_flow._select_visible_plugin_candidate(
         nodes=nodes,
         target=r"(?i).*air\s*care.*",
+        scenario_id="life_air_care_plugin",
     )
 
     assert selected is not None
@@ -1031,6 +1032,90 @@ def test_select_visible_plugin_candidate_promotes_non_clickable_description_to_o
     assert stats.get("partial_match_count", 0) >= 1
     assert selected_meta.get("promoted_container") is True
     assert selected_meta.get("promoted_to", "").endswith("preInstalledServiceCard")
+    assert any("matched_text_node='com.test:id/tvCardDescription'" in sample for sample in stats.get("inspect_samples", []))
+
+
+def test_select_visible_plugin_candidate_life_air_care_description_keyword_promotes_card_container():
+    nodes = [
+        {
+            "text": "Life",
+            "boundsInScreen": "0,0,1080,2200",
+            "visibleToUser": False,
+            "children": [
+                {
+                    "text": "Monitor air quality and air comfort in each room of your home.",
+                    "boundsInScreen": "170,760,930,850",
+                    "visibleToUser": True,
+                    "clickable": False,
+                    "focusable": False,
+                    "viewIdResourceName": "com.test:id/tvHeaderTitle",
+                    "className": "android.widget.TextView",
+                },
+                {
+                    "boundsInScreen": "100,620,980,980",
+                    "visibleToUser": True,
+                    "clickable": True,
+                    "focusable": True,
+                    "viewIdResourceName": "com.test:id/preInstalledServiceCard",
+                    "className": "android.widget.FrameLayout",
+                },
+            ],
+        }
+    ]
+
+    selected, reason, stats, selected_meta = collection_flow._select_visible_plugin_candidate(
+        nodes=nodes,
+        target=r"(?i).*air\s*care.*",
+        scenario_id="life_air_care_plugin",
+    )
+
+    assert selected is not None
+    assert "candidate_count=" in reason
+    assert stats.get("visible_candidate_count", 0) >= 1
+    assert stats.get("partial_match_count", 0) >= 1
+    assert selected_meta.get("promoted_container") is True
+    assert selected_meta.get("promotion_reason") in {"overlap_containment_clickable_card", "overlap_clickable_card"}
+    assert selected_meta.get("promoted_from", "").endswith("tvHeaderTitle")
+    assert selected_meta.get("promoted_to", "").endswith("preInstalledServiceCard")
+
+
+def test_select_visible_plugin_candidate_description_keyword_is_scoped_to_life_air_care():
+    nodes = [
+        {
+            "text": "Life",
+            "boundsInScreen": "0,0,1080,2200",
+            "visibleToUser": True,
+            "children": [
+                {
+                    "text": "Monitor air quality and air comfort in each room of your home.",
+                    "boundsInScreen": "170,760,930,850",
+                    "visibleToUser": True,
+                    "clickable": False,
+                    "focusable": False,
+                    "viewIdResourceName": "com.test:id/tvHeaderTitle",
+                    "className": "android.widget.TextView",
+                },
+                {
+                    "boundsInScreen": "100,620,980,980",
+                    "visibleToUser": True,
+                    "clickable": True,
+                    "focusable": True,
+                    "viewIdResourceName": "com.test:id/preInstalledServiceCard",
+                    "className": "android.widget.FrameLayout",
+                },
+            ],
+        }
+    ]
+
+    selected, reason, stats, _ = collection_flow._select_visible_plugin_candidate(
+        nodes=nodes,
+        target=r"(?i).*air\s*care.*",
+        scenario_id="life_energy_plugin",
+    )
+
+    assert selected is None
+    assert reason == "no_visible_candidate"
+    assert stats.get("rejection_counts", {}).get("filtered_before_candidate", 0) >= 1
 
 
 def test_confirm_click_focused_transition_life_energy_rejects_weak_signal(monkeypatch):
