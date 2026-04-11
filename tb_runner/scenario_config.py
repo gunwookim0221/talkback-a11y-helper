@@ -272,7 +272,7 @@ TAB_CONFIGS = [
             ],
             "allow_description_match": True,
         },
-        "verify_tokens": ["energy", "energy usage", "measuring energy usage", "appliance"],
+        "verify_tokens": ["energy", "smartthings energy", "energy usage", "measuring energy usage", "appliance"],
 
         "anchor_name": "(?i).*navigate\\s*up.*",
         "anchor_type": "a",

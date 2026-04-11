@@ -1815,6 +1815,34 @@ def test_open_scenario_card_entry_verify_tokens_miss_maps_verify_failed(monkeypa
     assert summary.get("entry_contract_reason") == "verify_failed"
 
 
+def test_open_scenario_card_entry_energy_succeeds_with_smartthings_energy_verify_token(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {"ok": True, "selected": True, "reason": "selected_and_verified", "matched": True},
+    )
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    client.focus_sequence = [
+        {"viewIdResourceName": "com.example:id/title", "text": "SmartThings Energy"},
+        {"viewIdResourceName": "com.example:id/title", "text": "SmartThings Energy"},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_energy_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["smartthings energy"],
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    summary = getattr(client, "last_start_open_summary", {})
+    assert summary.get("entry_contract_reason") == "success_verified"
+
+
 def test_open_scenario_pre_navigation_touch_bounds_center_bounds_unavailable_failure(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
@@ -3361,6 +3389,28 @@ def test_verify_plugin_entry_root_state_allows_life_air_care_relaxed_gate_with_f
     assert reason in {"root_state_stable", "root_state_scrolltouch_entry_relaxed"}
 
 
+def test_verify_plugin_entry_root_state_allows_focus_align_recheck_relaxed_gate(monkeypatch):
+    client = DummyClient([])
+    client.dump_tree_sequence = [
+        [
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/location_home_button", "text": "Location", "visibleToUser": True},
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/add_menu_button", "text": "Add", "visibleToUser": True},
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/cardTitle", "text": "Family Care", "visibleToUser": True},
+        ]
+    ]
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    ok, reason = collection_flow._verify_plugin_entry_root_state(
+        client,
+        "SERIAL",
+        phase="focus_align_recheck",
+        scenario_id="life_air_care_plugin",
+    )
+
+    assert ok is True
+    assert reason == "root_state_scrolltouch_entry_relaxed"
+
+
 def test_verify_plugin_entry_root_state_relaxed_gate_blocks_navigate_up_detail(monkeypatch):
     client = DummyClient([])
     fail_nodes = [
@@ -3647,3 +3697,44 @@ def test_open_scenario_focus_align_strict_failure_triggers_capture(monkeypatch):
     assert capture_calls[0]["failure_phase"] == "focus_align_recheck"
     assert capture_calls[0]["failure_reason"] == "life_root_not_stable"
     assert any("strict failure for plugin pre_navigation" in line for _, line in logs)
+
+
+def test_open_scenario_focus_align_recheck_relaxed_gate_proceeds_to_pre_navigation(monkeypatch):
+    client = DummyClient([])
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    pre_nav_called = {"value": False}
+
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_tab_selection",
+        lambda **kwargs: {
+            "ok": True,
+            "selected": True,
+            "context": {"ok": True},
+            "focus_align": {"attempted": True, "ok": False, "fast_mode": True, "reason": "focus_miss"},
+        },
+    )
+    monkeypatch.setattr(collection_flow, "_verify_plugin_entry_root_state", lambda *args, **kwargs: (True, "root_state_scrolltouch_entry_relaxed"))
+    monkeypatch.setattr(
+        collection_flow,
+        "_run_pre_navigation_steps",
+        lambda **kwargs: pre_nav_called.__setitem__("value", True) or True,
+    )
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True, "matched": True})
+
+    ok = collection_flow.open_scenario(
+        client,
+        "SERIAL",
+        {
+            "scenario_id": "life_air_care_plugin",
+            "tab_name": "홈",
+            "tab_type": "t",
+            "scenario_type": "content",
+            "screen_context_mode": "new_screen",
+            "stabilization_mode": "anchor_only",
+            "pre_navigation": [{"action": "scrollTouch", "target": "foo", "type": "a"}],
+        },
+    )
+
+    assert ok is True
+    assert pre_nav_called["value"] is True
