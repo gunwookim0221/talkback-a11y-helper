@@ -62,7 +62,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-recheck-v7"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr20-scrolltouch-actionable-gate-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr20-scrolltouch-actionable-gate-v2"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
@@ -1319,6 +1319,12 @@ def _select_visible_plugin_candidate(
         rejection_counts = stats_map.setdefault("rejection_counts", {})
         rejection_counts[reason] = int(rejection_counts.get(reason, 0) or 0) + 1
 
+    def _is_actionable(node_ref: dict[str, Any]) -> bool:
+        clickable = bool(node_ref.get("clickable"))
+        focusable = bool(node_ref.get("focusable"))
+        effective_clickable = bool(node_ref.get("effectiveClickable"))
+        return clickable or focusable or effective_clickable
+
     def _record_inspect(
         stats_map: dict[str, Any],
         *,
@@ -1429,7 +1435,7 @@ def _select_visible_plugin_candidate(
             continue
         if not _node_is_visible(candidate_node):
             continue
-        candidate_clickable = bool(candidate_node.get("clickable")) or bool(candidate_node.get("focusable"))
+        candidate_clickable = _is_actionable(candidate_node)
         candidate_resource = str(candidate_node.get("viewIdResourceName", "") or candidate_node.get("resourceId", "") or "").strip()
         candidate_class_name = str(candidate_node.get("className", "") or "").strip()
         is_card_like = bool(
@@ -1593,7 +1599,7 @@ def _select_visible_plugin_candidate(
                 reason="semantic_pass_partial_but_exact_fail",
             )
             continue
-        if click_node is node and not (bool(click_node.get("clickable")) or bool(click_node.get("focusable"))):
+        if click_node is node and not _is_actionable(click_node):
             overlapping_candidates: list[tuple[int, int, int, int, dict[str, Any], str]] = []
             for action_node, action_bounds, is_card_like in actionable_nodes:
                 if action_node is node:
@@ -1607,7 +1613,7 @@ def _select_visible_plugin_candidate(
                 area = max(1, (a_right - a_left) * (a_bottom - a_top))
                 overlap_area = overlap_w * overlap_h
                 overlap_ratio = int((overlap_area / area) * 1000)
-                action_clickable = bool(action_node.get("clickable")) or bool(action_node.get("focusable"))
+                action_clickable = _is_actionable(action_node)
                 overlap_score = (
                     1 if fully_contains else 0,
                     1 if action_clickable else 0,
@@ -1621,7 +1627,7 @@ def _select_visible_plugin_candidate(
                 promoted_click_node = overlapping_candidates[0][4]
                 click_node = promoted_click_node
                 promotion_reason = str(overlapping_candidates[0][5])
-        if click_node is node and not (bool(click_node.get("clickable")) or bool(click_node.get("focusable"))):
+        if click_node is node and not _is_actionable(click_node):
             _append_rejection(stats, "non_actionable_without_promotion")
             _record_inspect(
                 stats,
@@ -1652,7 +1658,7 @@ def _select_visible_plugin_candidate(
             stats["exact_match_count"] += 1
         center_delta = abs(((c_top + c_bottom) // 2) - viewport_center)
         score = (
-            1 if bool(click_node.get("clickable")) or bool(click_node.get("focusable")) else 0,
+            1 if _is_actionable(click_node) else 0,
             1 if _safe_regex_search(r"(?i)(preinstalledservicecard|servicecard|card)", card_resource) else 0,
             -center_delta,
             -c_top,
