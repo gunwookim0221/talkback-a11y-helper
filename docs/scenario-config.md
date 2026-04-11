@@ -6,6 +6,7 @@
 
 - 실제 지원 키/동작의 최종 기준: `tb_runner/runtime_config.py`, `tb_runner/scenario_config.py`, `tb_runner/collection_flow.py`, `tb_runner/anchor_logic.py`
 - 본 문서는 구현을 과장하지 않고, 현재 동작을 읽기 쉽게 정리하는 목적입니다.
+- `tb_runner/scenario_config.py` 상단의 `SCENARIO_CONFIG_VERSION`은 시나리오 스펙 변경 이력을 확인하기 위한 버전 문자열입니다.
 
 ---
 

@@ -1,3 +1,5 @@
+SCENARIO_CONFIG_VERSION = "2026.04.11-home-care-discover-v1"
+
 BOTTOM_TAB_GLOBAL_NAV = {
     "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
     "resource_ids": [
@@ -205,17 +207,19 @@ TAB_CONFIGS = [
         ],
         "entry_match": {
             "title_patterns": [
-                "(?i)(^home\\s*care$|home\\s*care\\.|\\bhomecare\\b|홈\\s*케어)",
+                "(?i)(^home\\s*care$|^smart\\s*home\\s*care$|home\\s*care\\.|\\bhomecare\\b|홈\\s*케어)",
             ],
             "description_patterns": [
-                "(?i)(home\\s*care|care\\s*at\\s*home|smart\\s*home|living\\s*care|홈\\s*케어)",
+                "(?i).*connect\\s*samsung\\s*home\\s*appliances.*smart\\s*care.*latest\\s*ai\\s*technology.*",
+                "(?i)(connect\\s*samsung\\s*home\\s*appliances.*smart\\s*care)",
+                "(?i)(home\\s*appliances.*smart\\s*care)",
+                "(?i)(smart\\s*care.*latest\\s*ai\\s*technology)",
             ],
-            "resource_patterns": [
-                "(?i)(preinstalledservicecard|servicecard|home|care|card|container|item)",
-            ],
+            "resource_patterns": [],
             "allow_description_match": True,
         },
-        "verify_tokens": ["home care", "smart home", "living care", "홈 케어"],
+        "verify_tokens": ["home care", "smart care", "home appliances"],
+        "negative_verify_tokens": ["air care", "energy"],
 
         "anchor_name": "(?i).*navigate\\s*up.*",
         "anchor_type": "a",
