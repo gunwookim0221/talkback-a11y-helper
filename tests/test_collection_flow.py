@@ -1157,6 +1157,49 @@ def test_select_visible_plugin_candidate_rejects_non_actionable_match_without_pr
     )
 
 
+def test_select_visible_plugin_candidate_promotes_to_effective_clickable_card_for_air_care():
+    nodes = [
+        {
+            "text": "Life",
+            "boundsInScreen": "0,0,1080,2200",
+            "visibleToUser": True,
+            "children": [
+                {
+                    "text": "Monitor air quality and air comfort in each room of your home.",
+                    "boundsInScreen": "180,760,920,860",
+                    "visibleToUser": True,
+                    "clickable": False,
+                    "focusable": False,
+                    "effectiveClickable": False,
+                    "viewIdResourceName": "com.test:id/tvHeaderTitle",
+                    "className": "android.widget.TextView",
+                },
+                {
+                    "boundsInScreen": "100,620,980,980",
+                    "visibleToUser": True,
+                    "clickable": False,
+                    "focusable": False,
+                    "effectiveClickable": True,
+                    "viewIdResourceName": "com.test:id/pluginCardContainer",
+                    "className": "android.widget.LinearLayout",
+                },
+            ],
+        }
+    ]
+
+    selected, reason, stats, selected_meta = collection_flow._select_visible_plugin_candidate(
+        nodes=nodes,
+        target=r"(?i)(^smart\s*air\s*care$|^air\s*care$|air\s*care\.|\baircare\b|에어\s*케어)",
+        scenario_id="life_air_care_plugin",
+    )
+
+    assert selected is not None
+    assert "candidate_count=" in reason
+    assert selected_meta.get("promoted_container") is True
+    assert selected_meta.get("promoted_to", "").endswith("pluginCardContainer")
+    assert stats.get("rejection_counts", {}).get("non_actionable_without_promotion", 0) == 0
+
+
 def test_confirm_click_focused_transition_life_energy_rejects_weak_signal(monkeypatch):
     client = DummyClient([])
     baseline_nodes = [
