@@ -15,6 +15,15 @@ def test_menu_main_anchor_regex_has_single_leading_ignorecase_flag():
     assert menu_cfg["anchor"]["announcement_regex"] == "(?i).*smartthings settings.*|.*settings.*"
 
 
+def test_life_pet_care_example_uses_card_entry_spec():
+    pet_cfg = next(cfg for cfg in TAB_CONFIGS if cfg.get("scenario_id") == "life_pet_care_example")
+
+    assert pet_cfg["entry_type"] == "card"
+    assert pet_cfg["pre_navigation"][0]["action"] == "scrolltouch"
+    assert pet_cfg["entry_match"]["allow_description_match"] is True
+    assert "(?i).*take care of your pet.*" in pet_cfg["entry_match"]["description_patterns"]
+
+
 def test_configure_process_temp_dir_sets_tmp_and_temp(tmp_path):
     applied, path_text = configure_process_temp_dir(str(tmp_path / ".tmp"))
 

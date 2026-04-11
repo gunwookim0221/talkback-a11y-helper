@@ -1333,6 +1333,64 @@ def test_select_visible_plugin_candidate_card_entry_spec_description_match_promo
     assert stats.get("partial_match_count", 0) >= 1
 
 
+def test_select_visible_plugin_candidate_card_entry_spec_description_match_promotes_pet_care_xml_container():
+    helper_nodes = [
+        {
+            "text": "Life",
+            "boundsInScreen": "0,0,1080,2200",
+            "visibleToUser": True,
+            "children": [
+                {
+                    "text": "You can take care of your pet with devices connected to SmartThings while you're away from home. Start by entering your pet's profile.",
+                    "boundsInScreen": "180,760,920,860",
+                    "visibleToUser": True,
+                    "clickable": False,
+                    "focusable": False,
+                    "viewIdResourceName": "com.test:id/tvHeaderTitle",
+                    "className": "android.widget.TextView",
+                }
+            ],
+        }
+    ]
+    xml_nodes = [
+        {
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2200",
+            "children": [
+                {
+                    "boundsInScreen": "100,620,980,980",
+                    "visibleToUser": True,
+                    "clickable": True,
+                    "focusable": False,
+                    "viewIdResourceName": "com.test:id/preInstalledServiceCard",
+                    "className": "android.widget.FrameLayout",
+                }
+            ],
+        }
+    ]
+
+    selected, reason, stats, selected_meta = collection_flow._select_visible_plugin_candidate(
+        nodes=helper_nodes,
+        target=r"(?i)(^pet\s*care$|.*pet\s*care.*|.*펫\s*케어.*)",
+        scenario_id="life_pet_care_example",
+        xml_nodes=xml_nodes,
+        entry_spec={
+            "title_patterns": [r"(?i)^pet\s*care$", r"(?i).*pet\s*care.*", r"(?i).*펫\s*케어.*"],
+            "description_patterns": [
+                r"(?i).*take care of your pet.*",
+                r"(?i).*connected to SmartThings.*",
+                r"(?i).*entering your pet'?s profile.*",
+            ],
+            "allow_description_match": True,
+        },
+    )
+
+    assert selected is not None
+    assert "candidate_count=" in reason
+    assert selected_meta.get("promotion_source") == "xml_live"
+    assert stats.get("partial_match_count", 0) >= 1
+
+
 def test_select_visible_plugin_candidate_xml_live_prefers_specific_small_candidate_over_oversized_wrapper():
     helper_nodes = [
         {
@@ -1850,6 +1908,35 @@ def test_open_scenario_card_entry_keeps_air_care_success(monkeypatch):
 
     assert ok is True
     summary = getattr(client, "last_start_open_summary", {})
+    assert summary.get("entry_contract_reason") == "success_verified"
+
+
+def test_open_scenario_card_entry_pet_care_uses_card_verify_flow(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {"ok": True, "selected": False, "reason": "verified_without_select", "matched": True},
+    )
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    client.focus_sequence = [{"viewIdResourceName": "com.example:id/title", "text": "Pet Care"}]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_pet_care_example",
+        "entry_type": "card",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "verify_tokens": ["pet care", "pet's profile"],
+        "negative_verify_tokens": ["qr code", "change location", "home_button"],
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    summary = getattr(client, "last_start_open_summary", {})
+    assert summary.get("entry_type") == "card"
     assert summary.get("entry_contract_reason") == "success_verified"
 
 

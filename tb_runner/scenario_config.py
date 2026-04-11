@@ -1,4 +1,4 @@
-SCENARIO_CONFIG_VERSION = "2026.04.11-direct-select-verify-v2"
+SCENARIO_CONFIG_VERSION = "2026.04.11-pet-care-card-entry-v1"
 
 BOTTOM_TAB_GLOBAL_NAV = {
     "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
@@ -526,18 +526,32 @@ TAB_CONFIGS = [
     {
         "scenario_id": "life_pet_care_example",
         "scenario_type": "content",
-        "entry_type": "direct_select",
+        "entry_type": "card",
         "tab_name": "(?i).*life.*",
         "tab_type": "b",
         "screen_context_mode": "new_screen",
         "stabilization_mode": "anchor_only",
         "pre_navigation": [
             {
-                "action": "select",
-                "target": "(?i).*pet\\s*care.*|.*펫\\s*케어.*",
+                "action": "scrolltouch",
+                "target": "(?i)(^pet\\s*care$|.*pet\\s*care.*|.*펫\\s*케어.*)",
                 "type": "a",
             }
         ],
+        "entry_match": {
+            "title_patterns": [
+                "(?i)^pet\\s*care$",
+                "(?i).*pet\\s*care.*",
+                "(?i).*펫\\s*케어.*",
+            ],
+            "description_patterns": [
+                "(?i).*take care of your pet.*",
+                "(?i).*connected to SmartThings.*",
+                "(?i).*entering your pet'?s profile.*",
+            ],
+            "resource_patterns": [],
+            "allow_description_match": True,
+        },
         "anchor_name": "(?i).*pet\\s*care.*|.*펫\\s*케어.*",
         "anchor_type": "a",
         "anchor": {
@@ -548,6 +562,9 @@ TAB_CONFIGS = [
         "verify_tokens": [
             "pet care",
             "smartthings pet care",
+            "pet",
+            "profile",
+            "pet's profile",
             "pet profile",
             "pet routine",
             "반려",
@@ -564,9 +581,8 @@ TAB_CONFIGS = [
             "menu_more",
         ],
         "context_verify": {
-            "type": "focused_anchor",
-            "text_regex": "(?i).*pet\\s*care.*|.*펫\\s*케어.*",
-            "announcement_regex": "(?i).*pet\\s*care.*|.*펫\\s*케어.*",
+            "type": "screen_text",
+            "text_regex": "(?i).*pet\\s*care.*|.*pet'?s\\s*profile.*|.*펫\\s*케어.*",
         },
         "enabled": False,
         "max_steps": 20,
