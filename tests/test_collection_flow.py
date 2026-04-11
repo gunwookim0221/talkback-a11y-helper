@@ -1074,7 +1074,7 @@ def test_select_visible_plugin_candidate_life_air_care_description_keyword_promo
     assert stats.get("visible_candidate_count", 0) >= 1
     assert stats.get("partial_match_count", 0) >= 1
     assert selected_meta.get("promoted_container") is True
-    assert selected_meta.get("promotion_reason") in {"overlap_containment_clickable_card", "overlap_clickable_card"}
+    assert selected_meta.get("promotion_reason") in {"helper_containment_container", "helper_nearby_container"}
     assert selected_meta.get("promoted_from", "").endswith("tvHeaderTitle")
     assert selected_meta.get("promoted_to", "").endswith("preInstalledServiceCard")
 
@@ -1196,8 +1196,102 @@ def test_select_visible_plugin_candidate_promotes_to_effective_clickable_card_fo
     assert selected is not None
     assert "candidate_count=" in reason
     assert selected_meta.get("promoted_container") is True
+    assert selected_meta.get("promotion_source") == "helper"
+    assert selected_meta.get("promotion_attempted") is True
     assert selected_meta.get("promoted_to", "").endswith("pluginCardContainer")
     assert stats.get("rejection_counts", {}).get("non_actionable_without_promotion", 0) == 0
+
+
+def test_select_visible_plugin_candidate_xml_fallback_promotes_clickable_container():
+    helper_nodes = [
+        {
+            "text": "Life",
+            "boundsInScreen": "0,0,1080,2200",
+            "visibleToUser": True,
+            "children": [
+                {
+                    "text": "Monitor air quality and air comfort in each room of your home.",
+                    "boundsInScreen": "180,760,920,860",
+                    "visibleToUser": True,
+                    "clickable": False,
+                    "focusable": False,
+                    "viewIdResourceName": "com.test:id/tvHeaderTitle",
+                    "className": "android.widget.TextView",
+                }
+            ],
+        }
+    ]
+    xml_nodes = [
+        {
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2200",
+            "children": [
+                {
+                    "boundsInScreen": "100,620,980,980",
+                    "visibleToUser": True,
+                    "clickable": True,
+                    "focusable": False,
+                    "viewIdResourceName": "com.test:id/preInstalledServiceCard",
+                    "className": "android.widget.FrameLayout",
+                }
+            ],
+        }
+    ]
+
+    selected, reason, stats, selected_meta = collection_flow._select_visible_plugin_candidate(
+        nodes=helper_nodes,
+        target=r"(?i).*air\s*care.*",
+        scenario_id="life_air_care_plugin",
+        xml_nodes=xml_nodes,
+    )
+
+    assert selected is not None
+    assert "candidate_count=" in reason
+    assert selected_meta.get("promoted_container") is True
+    assert selected_meta.get("promotion_source") == "xml"
+    assert selected_meta.get("promotion_attempted") is True
+    assert selected_meta.get("promoted_to", "").endswith("preInstalledServiceCard")
+    assert stats.get("rejection_counts", {}).get("non_actionable_without_promotion", 0) == 0
+
+
+def test_select_visible_plugin_candidate_rejects_oversized_root_during_promotion():
+    nodes = [
+        {
+            "text": "Life",
+            "boundsInScreen": "0,0,1080,2200",
+            "visibleToUser": True,
+            "children": [
+                {
+                    "boundsInScreen": "0,0,1080,2200",
+                    "visibleToUser": True,
+                    "clickable": True,
+                    "focusable": True,
+                    "viewIdResourceName": "android:id/content",
+                    "className": "android.widget.FrameLayout",
+                },
+                {
+                    "text": "Monitor air quality and air comfort in each room of your home.",
+                    "boundsInScreen": "180,760,920,860",
+                    "visibleToUser": True,
+                    "clickable": False,
+                    "focusable": False,
+                    "viewIdResourceName": "com.test:id/tvHeaderTitle",
+                    "className": "android.widget.TextView",
+                },
+            ],
+        }
+    ]
+
+    selected, reason, stats, selected_meta = collection_flow._select_visible_plugin_candidate(
+        nodes=nodes,
+        target=r"(?i).*air\s*care.*",
+        scenario_id="life_air_care_plugin",
+    )
+
+    assert selected is None
+    assert reason == "no_visible_candidate"
+    assert selected_meta.get("promoted_container") is False
+    assert stats.get("rejection_counts", {}).get("non_actionable_without_promotion", 0) >= 1
 
 
 def test_confirm_click_focused_transition_life_energy_rejects_weak_signal(monkeypatch):
