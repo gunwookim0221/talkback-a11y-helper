@@ -62,7 +62,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-recheck-v7"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr15-scrolltouch-candidate-rejection-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr17-scrolltouch-step-capture-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -793,6 +793,7 @@ def _capture_pre_navigation_failure_bundle(
     failure_reason: str,
     step_index: int,
     target_regex: str,
+    capture_run_id: str = "",
     log_fn: Callable[..., None] = log,
 ) -> str:
     normalized_scenario_id = str(scenario_id or "").strip().lower()
@@ -802,8 +803,8 @@ def _capture_pre_navigation_failure_bundle(
     if normalized_reason not in _PRE_NAV_CAPTURE_REASON_KEYS:
         return ""
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    bundle_dir = Path("output") / "capture_bundles" / normalized_scenario_id / f"{timestamp}_s{max(step_index, 0)}"
+    capture_root_id = str(capture_run_id or "").strip() or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    bundle_dir = Path("output") / "capture_bundles" / normalized_scenario_id / capture_root_id / "final_failure"
     bundle_path = str(bundle_dir)
     log_fn(
         f"[CAPTURE][pre_nav_failure] start scenario='{normalized_scenario_id}' "
@@ -835,7 +836,7 @@ def _capture_pre_navigation_failure_bundle(
     run_fn = getattr(client, "_run", None)
     if callable(run_fn):
         try:
-            remote_xml = f"/sdcard/window_dump_{timestamp}.xml"
+            remote_xml = f"/sdcard/window_dump_{capture_root_id}.xml"
             run_fn(["shell", "uiautomator", "dump", remote_xml], dev=dev)
             run_fn(["pull", remote_xml, str(window_dump_path)], dev=dev)
             run_fn(["shell", "rm", "-f", remote_xml], dev=dev)
@@ -907,6 +908,107 @@ def _capture_pre_navigation_failure_bundle(
             f"[CAPTURE][pre_nav_failure] saved path='{bundle_path}' files='{saved_summary}'"
         )
 
+    return bundle_path
+
+
+def _capture_scrolltouch_step_bundle(
+    client: A11yAdbClient,
+    dev: str,
+    *,
+    scenario_id: str,
+    capture_run_id: str,
+    step_index: int,
+    scroll_step: int,
+    target_regex: str,
+    selected: bool,
+    selected_reason: str,
+    candidate_stats: dict[str, Any] | None,
+    log_fn: Callable[..., None] = log,
+) -> str:
+    normalized_scenario_id = str(scenario_id or "").strip().lower()
+    if normalized_scenario_id != _LIFE_AIR_CARE_SCENARIO_ID:
+        return ""
+
+    capture_root_id = str(capture_run_id or "").strip() or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    stats_map = candidate_stats if isinstance(candidate_stats, dict) else {}
+    bundle_dir = Path("output") / "capture_bundles" / normalized_scenario_id / capture_root_id / f"step_{max(int(scroll_step), 0):02d}"
+    bundle_path = str(bundle_dir)
+    try:
+        bundle_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        log_fn(
+            f"[CAPTURE][scrolltouch_step] failed path='{bundle_path}' step={max(int(scroll_step), 0)} reason='mkdir_failed:{exc}'"
+        )
+        return ""
+
+    screenshot_path = bundle_dir / "screenshot.png"
+    helper_dump_path = bundle_dir / "helper_dump.json"
+    meta_path = bundle_dir / "meta.json"
+    first_failure_reason = ""
+
+    try:
+        client._take_snapshot(dev, str(screenshot_path))
+    except Exception as exc:
+        first_failure_reason = first_failure_reason or f"snapshot_failed:{exc}"
+
+    helper_dump: Any = []
+    dump_tree_fn = getattr(client, "dump_tree", None)
+    if callable(dump_tree_fn):
+        try:
+            helper_dump = dump_tree_fn(dev=dev)
+        except Exception as exc:
+            first_failure_reason = first_failure_reason or f"dump_tree_failed:{exc}"
+            helper_dump = {"error": f"dump_tree_failed:{exc}"}
+    try:
+        helper_dump_path.write_text(json.dumps(helper_dump, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as exc:
+        first_failure_reason = first_failure_reason or f"helper_dump_write_failed:{exc}"
+
+    rejection_counts = stats_map.get("rejection_counts", {})
+    rejection_summary = ""
+    if isinstance(rejection_counts, dict) and rejection_counts:
+        sorted_rejections = sorted(rejection_counts.items(), key=lambda item: (-int(item[1] or 0), str(item[0])))
+        rejection_summary = ", ".join(f"{name}:{count}" for name, count in sorted_rejections[:6])
+    visible_samples = stats_map.get("visible_samples", [])
+    partial_samples = stats_map.get("partial_samples", [])
+    serial = ""
+    try:
+        serial = str(client._resolve_serial(dev) or "")
+    except Exception:
+        serial = ""
+    meta = {
+        "version": COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION,
+        "scenario_id": normalized_scenario_id,
+        "phase": "scrolltouch_step",
+        "scroll_step": int(scroll_step),
+        "step_index": int(step_index),
+        "target_regex": str(target_regex or ""),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "device_serial": serial,
+        "visible_candidate_count": int(stats_map.get("visible_candidate_count", 0) or 0),
+        "partial_match_count": int(stats_map.get("partial_match_count", 0) or 0),
+        "exact_match_count": int(stats_map.get("exact_match_count", 0) or 0),
+        "selected": bool(selected),
+        "selected_reason": str(selected_reason or ""),
+        "visible_top": " | ".join(visible_samples[:3]) if isinstance(visible_samples, list) else "",
+        "partial_top": " | ".join(partial_samples[:3]) if isinstance(partial_samples, list) else "",
+        "rejection_summary": rejection_summary,
+    }
+    try:
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as exc:
+        first_failure_reason = first_failure_reason or f"meta_write_failed:{exc}"
+
+    if first_failure_reason:
+        log_fn(
+            f"[CAPTURE][scrolltouch_step] failed path='{bundle_path}' step={max(int(scroll_step), 0)} reason='{first_failure_reason}'"
+        )
+    else:
+        log_fn(
+            f"[CAPTURE][scrolltouch_step] saved path='{bundle_path}' step={max(int(scroll_step), 0)} "
+            f"visible_candidate_count={int(stats_map.get('visible_candidate_count', 0) or 0)} "
+            f"partial_match_count={int(stats_map.get('partial_match_count', 0) or 0)}"
+        )
     return bundle_path
 
 
@@ -1450,6 +1552,10 @@ def _run_pre_navigation_steps(
     pre_navigation = tab_cfg.get("pre_navigation", [])
     if not isinstance(pre_navigation, list) or not pre_navigation:
         return True
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    capture_run_id = ""
+    if scenario_id.strip().lower() == _LIFE_AIR_CARE_SCENARIO_ID:
+        capture_run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
     retry_count = _get_retry_count(tab_cfg, "pre_navigation_retry_count", 2)
     wait_seconds = _get_wait_seconds(tab_cfg, "pre_navigation_wait_seconds", MAIN_STEP_WAIT_SECONDS)
@@ -1601,6 +1707,19 @@ def _run_pre_navigation_steps(
                     log(
                         f"[SCENARIO][pre_nav][scrolltouch][inspect] scroll_step={scroll_step}/{max_scroll_search_steps} "
                         f"samples='{inspect_preview[:1200]}'"
+                    )
+                    _capture_scrolltouch_step_bundle(
+                        client,
+                        dev,
+                        scenario_id=scenario_id,
+                        capture_run_id=capture_run_id,
+                        step_index=index,
+                        scroll_step=scroll_step,
+                        target_regex=target,
+                        selected=selected_node is not None,
+                        selected_reason=selected_reason,
+                        candidate_stats=candidate_stats,
+                        log_fn=log,
                     )
                     if selected_node is not None:
                         class_name = str(selected_node.get("className", "") or "").strip()
@@ -1827,11 +1946,12 @@ def _run_pre_navigation_steps(
             _capture_pre_navigation_failure_bundle(
                 client,
                 dev,
-                scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+                scenario_id=scenario_id,
                 failure_phase="pre_navigation",
                 failure_reason=failure_reason_for_capture,
                 step_index=index,
                 target_regex=target,
+                capture_run_id=capture_run_id,
                 log_fn=log,
             )
             log(f"[SCENARIO][pre_nav] failed reason='action_failed' step={index}")
