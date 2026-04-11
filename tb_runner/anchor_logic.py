@@ -224,6 +224,8 @@ def _pick_top_content_fallback_candidate(
     *,
     entry_type: str = "",
     verify_tokens: list[str] | None = None,
+    negative_verify_tokens: list[str] | None = None,
+    diagnostics: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any] | None, str, str]:
     if not candidates:
         return None, "", "no_candidates"
@@ -259,6 +261,9 @@ def _pick_top_content_fallback_candidate(
     normalized_entry_type = str(entry_type or "").strip().lower()
     normalized_verify_tokens = [
         str(token or "").strip().lower() for token in (verify_tokens or []) if str(token or "").strip()
+    ]
+    normalized_negative_tokens = [
+        str(token or "").strip().lower() for token in (negative_verify_tokens or []) if str(token or "").strip()
     ]
     prioritize_verify_tokens = normalized_entry_type == "direct_select" and bool(normalized_verify_tokens)
     if prioritize_verify_tokens:
@@ -319,6 +324,45 @@ def _pick_top_content_fallback_candidate(
         )
         verify_hit = any(token in blob for token in normalized_verify_tokens)
         return (0 if verify_hit else 1, generic_profile_penalty, oversized_penalty, base_key)
+
+    if isinstance(diagnostics, list):
+        diagnostics.clear()
+        for idx, candidate in enumerate(identity_candidates):
+            blob = " ".join(
+                [
+                    str(candidate.get("announcement", "") or "").strip().lower(),
+                    str(candidate.get("text", "") or "").strip().lower(),
+                    str(candidate.get("resource_id", "") or "").strip().lower(),
+                ]
+            )
+            width = max(1, int(candidate.get("right", 0) or 0) - int(candidate.get("left", 0) or 0))
+            height = max(1, int(candidate.get("bottom", 0) or 0) - int(candidate.get("top", 0) or 0))
+            oversized_penalty = 1 if screen_width > 0 and screen_height > 0 and (
+                (width / max(1, screen_width) >= 0.88) and (height / max(1, screen_height) >= 0.24)
+            ) else 0
+            generic_profile_penalty = 1 if normalized_entry_type == "direct_select" and any(
+                token in f" {blob}" for token in _DIRECT_SELECT_GENERIC_TOP_TOKENS
+            ) else 0
+            verify_hit_tokens = [token for token in normalized_verify_tokens if token and token in blob]
+            negative_hit_tokens = [token for token in normalized_negative_tokens if token and token in blob]
+            diagnostics.append(
+                {
+                    "rank_seed": idx + 1,
+                    "label": str(candidate.get("announcement", "") or candidate.get("text", "") or "").strip(),
+                    "normalized_label": blob,
+                    "resource_id": str(candidate.get("resource_id", "") or "").strip(),
+                    "class_name": str(candidate.get("class_name", "") or "").strip(),
+                    "bounds": str(candidate.get("bounds", "") or "").strip(),
+                    "visible": bool(candidate.get("visible_to_user", True)),
+                    "clickable": bool(candidate.get("clickable", False)),
+                    "focusable": bool(candidate.get("focusable", False)),
+                    "effective_clickable": bool(candidate.get("clickable", False) or candidate.get("focusable", False)),
+                    "verify_hit_tokens": verify_hit_tokens,
+                    "negative_hit_tokens": negative_hit_tokens,
+                    "generic_top_penalty": generic_profile_penalty,
+                    "oversized_penalty": oversized_penalty,
+                }
+            )
 
     def _pick_non_boilerplate(bucket: list[dict[str, Any]], sort_key: Any, fallback_position: str) -> tuple[dict[str, Any] | None, str]:
         for candidate in sorted(bucket, key=lambda item: _candidate_sort_key(item, sort_key)):
@@ -521,6 +565,7 @@ def stabilize_anchor(
             log("[ANCHOR][fallback] no explicit anchor configured")
 
         fallback_candidate: dict[str, Any] | None = None
+        fallback_diagnostics: list[dict[str, Any]] = []
         if best is None:
             if explicit_anchor_configured:
                 log("[ANCHOR][fallback] explicit anchor not matched, trying top content fallback")
@@ -528,6 +573,8 @@ def stabilize_anchor(
                 candidates,
                 entry_type=str(tab_cfg.get("entry_type", "") or ""),
                 verify_tokens=tab_cfg.get("verify_tokens", []),
+                negative_verify_tokens=tab_cfg.get("negative_verify_tokens", []),
+                diagnostics=fallback_diagnostics,
             )
             if fallback_candidate:
                 active_anchor_cfg = _build_verify_cfg_for_fallback(fallback_candidate)
@@ -549,6 +596,43 @@ def stabilize_anchor(
                     log("[ANCHOR][plugin_fallback] rejected candidate reason='boilerplate_like'")
                 elif plugin_fallback_scope:
                     log(f"[ANCHOR][plugin_fallback] failed reason='{fallback_skip_reason or 'no_readable_top_candidate'}'")
+            entry_type = str(tab_cfg.get("entry_type", "") or "").strip().lower()
+            scenario_id_l = scenario_id.strip().lower()
+            if entry_type == "direct_select" and (
+                scenario_id_l == "life_pet_care_example"
+                or scenario_id_l.startswith("life_pet_care")
+            ):
+                for row in sorted(
+                    fallback_diagnostics[:5],
+                    key=lambda item: (
+                        int(item.get("generic_top_penalty", 0)),
+                        int(item.get("oversized_penalty", 0)),
+                        int(item.get("rank_seed", 0)),
+                    ),
+                ):
+                    selected = (
+                        bool(fallback_candidate)
+                        and str(row.get("resource_id", "") or "") == str(fallback_candidate.get("resource_id", "") or "")
+                        and str(row.get("bounds", "") or "") == str(fallback_candidate.get("bounds", "") or "")
+                    )
+                    log(
+                        "[ANCHOR][fallback][diagnostic] "
+                        f"scenario='{scenario_id}' "
+                        f"label='{row.get('label', '')}' "
+                        f"normalized='{row.get('normalized_label', '')}' "
+                        f"resource_id='{row.get('resource_id', '')}' "
+                        f"class_name='{row.get('class_name', '')}' "
+                        f"bounds='{row.get('bounds', '')}' "
+                        f"visible={str(bool(row.get('visible', False))).lower()} "
+                        f"clickable={str(bool(row.get('clickable', False))).lower()} "
+                        f"focusable={str(bool(row.get('focusable', False))).lower()} "
+                        f"effective_clickable={str(bool(row.get('effective_clickable', False))).lower()} "
+                        f"verify_hits='{','.join(row.get('verify_hit_tokens', [])) or 'none'}' "
+                        f"negative_hits='{','.join(row.get('negative_hit_tokens', [])) or 'none'}' "
+                        f"generic_top_penalty={int(row.get('generic_top_penalty', 0))} "
+                        f"oversized_penalty={int(row.get('oversized_penalty', 0))} "
+                        f"selected={str(selected).lower()}"
+                    )
 
         selected = False
         select_attempted = False
