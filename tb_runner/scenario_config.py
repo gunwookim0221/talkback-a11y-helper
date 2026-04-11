@@ -1,4 +1,4 @@
-SCENARIO_CONFIG_VERSION = "2026.04.11-special-state-handling-v1"
+SCENARIO_CONFIG_VERSION = "2026.04.11-direct-select-verify-v1"
 
 BOTTOM_TAB_GLOBAL_NAV = {
     "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
@@ -545,6 +545,26 @@ TAB_CONFIGS = [
             "announcement_regex": "(?i).*pet\\s*care.*|.*펫\\s*케어.*",
             "tie_breaker": "top_left",
         },
+        "verify_tokens": [
+            "pet care",
+            "smartthings pet care",
+            "pet profile",
+            "pet routine",
+            "반려",
+            "펫 케어",
+        ],
+        "negative_verify_tokens": [
+            "qr code",
+            "change location",
+            "home_button",
+            "add",
+            "more options",
+            "menu_favorites",
+            "menu_devices",
+            "menu_services",
+            "menu_automations",
+            "menu_more",
+        ],
         "context_verify": {
             "type": "focused_anchor",
             "text_regex": "(?i).*pet\\s*care.*|.*펫\\s*케어.*",

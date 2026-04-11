@@ -65,7 +65,7 @@ COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr24-card-entry-generalization-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
-COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr24-life-card-entry-contract-v4"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr25-direct-select-post-open-verify-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -80,6 +80,8 @@ _ENTRY_REASON_SUCCESS_VERIFIED = "success_verified"
 _ENTRY_REASON_SPECIAL_STATE_HANDLED = "special_state_handled"
 _CARD_ENTRY_VERIFY_RECHECK_COUNT = 2
 _CARD_ENTRY_VERIFY_RECHECK_SLEEP_SECONDS = 0.2
+_DIRECT_SELECT_VERIFY_RECHECK_COUNT = 2
+_DIRECT_SELECT_VERIFY_RECHECK_SLEEP_SECONDS = 0.16
 
 
 
@@ -856,11 +858,36 @@ def _matches_post_open_verify(
     return False
 
 
-def _has_post_open_negative_verify_token(tab_cfg: dict[str, Any], view_id: str, label: str, speech: str) -> bool:
+def _extract_post_open_focus_fields(focus_node: Any) -> tuple[str, str, str]:
+    if not isinstance(focus_node, dict):
+        return "", "", ""
+    view_id = str(focus_node.get("viewIdResourceName", "") or focus_node.get("resourceId", "") or "").strip()
+    label = _node_label_blob(focus_node)
+    speech = str(
+        focus_node.get("talkbackLabel", "")
+        or focus_node.get("mergedLabel", "")
+        or focus_node.get("contentDescription", "")
+        or focus_node.get("text", "")
+        or ""
+    ).strip()
+    return view_id, label, speech
+
+
+def _has_post_open_negative_verify_token(
+    tab_cfg: dict[str, Any],
+    view_id: str,
+    label: str,
+    speech: str,
+    *,
+    extra_candidates: list[str] | None = None,
+) -> bool:
     negative_tokens = tab_cfg.get("negative_verify_tokens", [])
     if not isinstance(negative_tokens, list) or not negative_tokens:
         return False
-    normalized_blob = " ".join([str(view_id or ""), str(label or ""), str(speech or "")]).lower()
+    candidates = [str(view_id or ""), str(label or ""), str(speech or "")]
+    if isinstance(extra_candidates, list):
+        candidates.extend(str(value or "") for value in extra_candidates if str(value or "").strip())
+    normalized_blob = " ".join(candidates).lower()
     normalized_tokens = [str(token or "").strip().lower() for token in negative_tokens if str(token or "").strip()]
     return bool(normalized_tokens and any(token in normalized_blob for token in normalized_tokens))
 
@@ -886,6 +913,41 @@ def _collect_post_open_visible_text(client: A11yAdbClient, dev: str) -> str:
         if len(visible_fragments) >= 30:
             break
     return " ".join(visible_fragments).strip()
+
+
+def _build_direct_select_verify_candidates(
+    *,
+    stabilize_result: dict[str, Any],
+    visible_verify_text: str,
+    transition_verify_hint: str,
+    post_click_transition_same_screen: bool,
+) -> list[str]:
+    extra_candidates: list[str] = []
+    if visible_verify_text:
+        extra_candidates.extend([visible_verify_text, visible_verify_text.lower()])
+    if not post_click_transition_same_screen and transition_verify_hint:
+        extra_candidates.append(transition_verify_hint)
+    fallback_label = str(stabilize_result.get("fallback_candidate_label", "") or "").strip()
+    fallback_resource_id = str(stabilize_result.get("fallback_candidate_resource_id", "") or "").strip()
+    if fallback_label:
+        extra_candidates.append(fallback_label)
+    if fallback_resource_id:
+        extra_candidates.append(fallback_resource_id)
+    verify_row = stabilize_result.get("verify_row", {})
+    if isinstance(verify_row, dict):
+        for key in (
+            "visible_label",
+            "merged_announcement",
+            "talkback_label",
+            "focus_text",
+            "announcement",
+            "normalized_announcement",
+            "focus_view_id",
+        ):
+            value = str(verify_row.get(key, "") or "").strip()
+            if value:
+                extra_candidates.append(value)
+    return extra_candidates
 
 
 def _classify_special_post_open_state(
@@ -3044,19 +3106,7 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         allow_fallback_dump=False,
         mode="fast",
     )
-    post_view_id = (
-        str(post_focus.get("viewIdResourceName", "") or post_focus.get("resourceId", "") or "").strip()
-        if isinstance(post_focus, dict)
-        else ""
-    )
-    post_label = _node_label_blob(post_focus if isinstance(post_focus, dict) else {})
-    post_speech = str(
-        (post_focus.get("talkbackLabel", "") if isinstance(post_focus, dict) else "")
-        or (post_focus.get("mergedLabel", "") if isinstance(post_focus, dict) else "")
-        or (post_focus.get("contentDescription", "") if isinstance(post_focus, dict) else "")
-        or (post_focus.get("text", "") if isinstance(post_focus, dict) else "")
-        or ""
-    ).strip()
+    post_view_id, post_label, post_speech = _extract_post_open_focus_fields(post_focus)
     has_negative_signal = _is_negative_post_open_focus_signal(post_view_id, post_label, post_speech)
     has_negative_verify_token = _has_post_open_negative_verify_token(tab_cfg, post_view_id, post_label, post_speech)
     fallback_used = bool(stabilize_result.get("fallback_candidate_used"))
@@ -3064,7 +3114,69 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     post_click_transition_signal = str(getattr(client, "last_post_click_transition_signal", "") or "").strip()
     transition_verify_hint = post_click_transition_signal.replace("_", " ").strip().lower()
     visible_verify_text = ""
+    extra_verify_candidates: list[str] = []
     matches_verify = _matches_post_open_verify(tab_cfg, post_view_id, post_label, post_speech)
+    if entry_type == _ENTRY_TYPE_DIRECT_SELECT and not matches_verify:
+        visible_verify_text = _collect_post_open_visible_text(client, dev)
+        extra_verify_candidates = _build_direct_select_verify_candidates(
+            stabilize_result=stabilize_result,
+            visible_verify_text=visible_verify_text,
+            transition_verify_hint=transition_verify_hint,
+            post_click_transition_same_screen=post_click_transition_same_screen,
+        )
+        matches_verify = _matches_post_open_verify(
+            tab_cfg,
+            post_view_id,
+            post_label,
+            post_speech,
+            extra_candidates=extra_verify_candidates if extra_verify_candidates else None,
+        )
+        has_negative_verify_token = has_negative_verify_token or _has_post_open_negative_verify_token(
+            tab_cfg,
+            post_view_id,
+            post_label,
+            post_speech,
+            extra_candidates=extra_verify_candidates if extra_verify_candidates else None,
+        )
+        if not matches_verify:
+            for _ in range(_DIRECT_SELECT_VERIFY_RECHECK_COUNT):
+                time.sleep(min(main_step_wait_seconds, _DIRECT_SELECT_VERIFY_RECHECK_SLEEP_SECONDS))
+                recheck_focus = client.get_focus(
+                    dev=dev,
+                    wait_seconds=min(main_step_wait_seconds, 0.8),
+                    allow_fallback_dump=False,
+                    mode="fast",
+                )
+                recheck_view_id, recheck_label, recheck_speech = _extract_post_open_focus_fields(recheck_focus)
+                visible_verify_text = _collect_post_open_visible_text(client, dev)
+                extra_verify_candidates = _build_direct_select_verify_candidates(
+                    stabilize_result=stabilize_result,
+                    visible_verify_text=visible_verify_text,
+                    transition_verify_hint=transition_verify_hint,
+                    post_click_transition_same_screen=post_click_transition_same_screen,
+                )
+                has_negative_signal = has_negative_signal or _is_negative_post_open_focus_signal(
+                    recheck_view_id,
+                    recheck_label,
+                    recheck_speech,
+                )
+                has_negative_verify_token = has_negative_verify_token or _has_post_open_negative_verify_token(
+                    tab_cfg,
+                    recheck_view_id,
+                    recheck_label,
+                    recheck_speech,
+                    extra_candidates=extra_verify_candidates if extra_verify_candidates else None,
+                )
+                matches_verify = _matches_post_open_verify(
+                    tab_cfg,
+                    recheck_view_id,
+                    recheck_label,
+                    recheck_speech,
+                    extra_candidates=extra_verify_candidates if extra_verify_candidates else None,
+                )
+                post_view_id, post_label, post_speech = recheck_view_id, recheck_label, recheck_speech
+                if matches_verify or has_negative_signal or has_negative_verify_token:
+                    break
     if entry_type == _ENTRY_TYPE_CARD and not matches_verify:
         visible_verify_text = _collect_post_open_visible_text(client, dev)
         if visible_verify_text:
@@ -3132,6 +3244,17 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         if isinstance(start_open_summary, dict):
             start_open_summary["entry_contract_reason"] = _ENTRY_REASON_FALSE_SUCCESS_GUARD
             start_open_summary["entry_contract_detail"] = "negative_post_open_focus"
+            setattr(client, "last_start_open_summary", start_open_summary)
+        return False
+    if entry_type == _ENTRY_TYPE_DIRECT_SELECT and has_negative_verify_token:
+        log(
+            f"[SCENARIO][entry_contract] failed scenario='{scenario_id}' entry_type='{entry_type}' "
+            f"reason='{_ENTRY_REASON_WRONG_OPEN}' detail='post_open_negative_verify_token'"
+        )
+        start_open_summary = getattr(client, "last_start_open_summary", {})
+        if isinstance(start_open_summary, dict):
+            start_open_summary["entry_contract_reason"] = _ENTRY_REASON_WRONG_OPEN
+            start_open_summary["entry_contract_detail"] = "post_open_negative_verify_token"
             setattr(client, "last_start_open_summary", start_open_summary)
         return False
     if entry_type == _ENTRY_TYPE_DIRECT_SELECT and not matches_verify:

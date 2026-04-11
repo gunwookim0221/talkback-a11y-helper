@@ -208,7 +208,12 @@ def _is_boilerplate_like_candidate(candidate: dict[str, Any]) -> bool:
     return False
 
 
-def _pick_top_content_fallback_candidate(candidates: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, str, str]:
+def _pick_top_content_fallback_candidate(
+    candidates: list[dict[str, Any]],
+    *,
+    entry_type: str = "",
+    verify_tokens: list[str] | None = None,
+) -> tuple[dict[str, Any] | None, str, str]:
     if not candidates:
         return None, "", "no_candidates"
     screen_width = max((int(c.get("right", 0) or 0) for c in candidates), default=0)
@@ -240,8 +245,47 @@ def _pick_top_content_fallback_candidate(candidates: list[dict[str, Any]]) -> tu
     if not identity_candidates:
         return None, "", "no_readable_top_candidate"
 
+    normalized_entry_type = str(entry_type or "").strip().lower()
+    normalized_verify_tokens = [
+        str(token or "").strip().lower() for token in (verify_tokens or []) if str(token or "").strip()
+    ]
+    prioritize_verify_tokens = normalized_entry_type == "direct_select" and bool(normalized_verify_tokens)
+    if prioritize_verify_tokens:
+        token_hit_candidates = []
+        for candidate in identity_candidates:
+            blob = " ".join(
+                [
+                    str(candidate.get("announcement", "") or "").strip().lower(),
+                    str(candidate.get("text", "") or "").strip().lower(),
+                    str(candidate.get("resource_id", "") or "").strip().lower(),
+                ]
+            )
+            if any(token in blob for token in normalized_verify_tokens):
+                token_hit_candidates.append(candidate)
+        if token_hit_candidates:
+            identity_candidates = token_hit_candidates
+
+    def _candidate_sort_key(candidate: dict[str, Any], base_sort_key: Any) -> Any:
+        base_key = base_sort_key(candidate)
+        if not prioritize_verify_tokens:
+            return (1, 0, base_key)
+        blob = " ".join(
+            [
+                str(candidate.get("announcement", "") or "").strip().lower(),
+                str(candidate.get("text", "") or "").strip().lower(),
+                str(candidate.get("resource_id", "") or "").strip().lower(),
+            ]
+        )
+        verify_hit = any(token in blob for token in normalized_verify_tokens)
+        width = max(1, int(candidate.get("right", 0) or 0) - int(candidate.get("left", 0) or 0))
+        height = max(1, int(candidate.get("bottom", 0) or 0) - int(candidate.get("top", 0) or 0))
+        oversized_penalty = 1 if screen_width > 0 and screen_height > 0 and (
+            (width / max(1, screen_width) >= 0.88) and (height / max(1, screen_height) >= 0.24)
+        ) else 0
+        return (0 if verify_hit else 1, oversized_penalty, base_key)
+
     def _pick_non_boilerplate(bucket: list[dict[str, Any]], sort_key: Any, fallback_position: str) -> tuple[dict[str, Any] | None, str]:
-        for candidate in sorted(bucket, key=sort_key):
+        for candidate in sorted(bucket, key=lambda item: _candidate_sort_key(item, sort_key)):
             if not _is_boilerplate_like_candidate(candidate):
                 return candidate, fallback_position
         return None, "boilerplate_like"
@@ -444,7 +488,11 @@ def stabilize_anchor(
         if best is None:
             if explicit_anchor_configured:
                 log("[ANCHOR][fallback] explicit anchor not matched, trying top content fallback")
-            fallback_candidate, fallback_position, fallback_skip_reason = _pick_top_content_fallback_candidate(candidates)
+            fallback_candidate, fallback_position, fallback_skip_reason = _pick_top_content_fallback_candidate(
+                candidates,
+                entry_type=str(tab_cfg.get("entry_type", "") or ""),
+                verify_tokens=tab_cfg.get("verify_tokens", []),
+            )
             if fallback_candidate:
                 active_anchor_cfg = _build_verify_cfg_for_fallback(fallback_candidate)
                 best = {"candidate": fallback_candidate, "score": 0, "matched": True, "matched_fields": ["fallback"]}

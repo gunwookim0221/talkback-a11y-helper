@@ -1704,6 +1704,7 @@ def test_open_scenario_direct_select_fails_when_post_open_verify_missing(monkeyp
         "entry_type": "direct_select",
         "screen_context_mode": "new_screen",
         "stabilization_mode": "anchor_only",
+        "verify_tokens": ["pet care", "smartthings pet care"],
         "context_verify": {"type": "focused_anchor", "text_regex": "(?i).*pet\\s*care.*"},
     }
 
@@ -1712,6 +1713,80 @@ def test_open_scenario_direct_select_fails_when_post_open_verify_missing(monkeyp
     assert ok is False
     summary = getattr(client, "last_start_open_summary", {})
     assert summary.get("entry_contract_reason") == "verify_failed"
+
+
+def test_open_scenario_direct_select_recovers_with_visible_plugin_token(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {
+            "ok": True,
+            "selected": True,
+            "reason": "selected_and_verified",
+            "matched": True,
+            "fallback_candidate_label": "Pet Care",
+            "fallback_candidate_resource_id": "com.example:id/pet_card",
+            "verify_row": {"visible_label": "Pet Care"},
+        },
+    )
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    client.focus_sequence = [
+        {"viewIdResourceName": "", "text": "Navigate up", "contentDescription": "Navigate up"},
+        {"viewIdResourceName": "", "text": "Navigate up", "contentDescription": "Navigate up"},
+    ]
+    client.dump_tree_sequence = [
+        [{"text": "Pet Care Dashboard", "viewIdResourceName": "com.example:id/title"}],
+        [{"text": "SmartThings Pet Care", "viewIdResourceName": "com.example:id/title"}],
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_pet_care_example",
+        "entry_type": "direct_select",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "verify_tokens": ["pet care", "smartthings pet care"],
+        "context_verify": {"type": "focused_anchor", "text_regex": "(?i).*pet\\s*care.*"},
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    summary = getattr(client, "last_start_open_summary", {})
+    assert summary.get("entry_contract_reason") == "success_verified"
+
+
+def test_open_scenario_direct_select_keeps_wrong_open_on_negative_verify_token(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {"ok": True, "selected": True, "reason": "selected_and_verified", "matched": True},
+    )
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    client.focus_sequence = [{"viewIdResourceName": "com.example:id/content", "text": "Unknown screen"}]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_pet_care_example",
+        "entry_type": "direct_select",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "verify_tokens": ["pet care", "smartthings pet care"],
+        "negative_verify_tokens": ["qr code", "home_button"],
+        "context_verify": {"type": "focused_anchor", "text_regex": "(?i).*pet\\s*care.*"},
+    }
+    monkeypatch.setattr(collection_flow, "_collect_post_open_visible_text", lambda *_args, **_kwargs: "QR code Change location")
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is False
+    summary = getattr(client, "last_start_open_summary", {})
+    assert summary.get("entry_contract_reason") == "wrong_open"
+    assert summary.get("entry_contract_detail") == "post_open_negative_verify_token"
 
 
 def test_open_scenario_card_entry_keeps_air_care_success(monkeypatch):
