@@ -65,7 +65,7 @@ COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr24-card-entry-generalization-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
-COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr24-life-card-entry-contract-v3"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr24-life-card-entry-contract-v4"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -77,6 +77,8 @@ _ENTRY_REASON_WRONG_OPEN = "wrong_open"
 _ENTRY_REASON_FALSE_SUCCESS_GUARD = "false_success_guard"
 _ENTRY_REASON_VERIFY_FAILED = "verify_failed"
 _ENTRY_REASON_SUCCESS_VERIFIED = "success_verified"
+_CARD_ENTRY_VERIFY_RECHECK_COUNT = 2
+_CARD_ENTRY_VERIFY_RECHECK_SLEEP_SECONDS = 0.2
 
 
 
@@ -822,9 +824,18 @@ def _is_negative_post_open_focus_signal(view_id: str, label: str, speech: str) -
     )
 
 
-def _matches_post_open_verify(tab_cfg: dict[str, Any], view_id: str, label: str, speech: str) -> bool:
+def _matches_post_open_verify(
+    tab_cfg: dict[str, Any],
+    view_id: str,
+    label: str,
+    speech: str,
+    *,
+    extra_candidates: list[str] | None = None,
+) -> bool:
     context_verify = dict(tab_cfg.get("context_verify", {}) or {})
     candidates = [str(view_id or ""), str(label or ""), str(speech or "")]
+    if isinstance(extra_candidates, list):
+        candidates.extend(str(value or "") for value in extra_candidates if str(value or "").strip())
     verify_tokens = tab_cfg.get("verify_tokens", [])
     if isinstance(verify_tokens, list):
         normalized_blob = " ".join(candidates).lower()
@@ -847,6 +858,29 @@ def _has_post_open_negative_verify_token(tab_cfg: dict[str, Any], view_id: str, 
     normalized_blob = " ".join([str(view_id or ""), str(label or ""), str(speech or "")]).lower()
     normalized_tokens = [str(token or "").strip().lower() for token in negative_tokens if str(token or "").strip()]
     return bool(normalized_tokens and any(token in normalized_blob for token in normalized_tokens))
+
+
+def _collect_post_open_visible_text(client: A11yAdbClient, dev: str) -> str:
+    dump_tree_fn = getattr(client, "dump_tree", None)
+    if not callable(dump_tree_fn):
+        return ""
+    try:
+        nodes = dump_tree_fn(dev=dev)
+    except Exception:
+        return ""
+    if not isinstance(nodes, list) or not nodes:
+        return ""
+    visible_fragments: list[str] = []
+    for node, _ in _iter_tree_nodes_with_parent(nodes):
+        if not _node_is_visible(node):
+            continue
+        label_blob = _node_label_blob(node)
+        if not label_blob:
+            continue
+        visible_fragments.append(label_blob)
+        if len(visible_fragments) >= 30:
+            break
+    return " ".join(visible_fragments).strip()
 
 
 def _get_card_entry_spec(tab_cfg: dict[str, Any], target: str) -> dict[str, Any]:
@@ -2119,6 +2153,8 @@ def _run_pre_navigation_steps(
         return True
     scenario_id = str(tab_cfg.get("scenario_id", "") or "")
     setattr(client, "last_pre_nav_failure_reason", "")
+    setattr(client, "last_post_click_transition_same_screen", True)
+    setattr(client, "last_post_click_transition_signal", "")
     capture_run_id = ""
     if scenario_id.strip().lower() == _LIFE_AIR_CARE_SCENARIO_ID:
         capture_run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -2376,6 +2412,8 @@ def _run_pre_navigation_steps(
                                 f"[SCENARIO][pre_nav][scrolltouch] post_click_transition same_screen={str(not confirm_ok).lower()} "
                                 f"signal='{confirm_signal}'"
                             )
+                            setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
+                            setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
                             step_ok = confirm_ok
                         break
 
@@ -2437,6 +2475,8 @@ def _run_pre_navigation_steps(
                             f"[SCENARIO][pre_nav][scrolltouch] post_click_transition same_screen={str(not confirm_ok).lower()} "
                             f"signal='{confirm_signal}'"
                         )
+                        setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
+                        setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
                         step_ok = confirm_ok
             elif action == "touch_bounds_center":
                 step_ok = bool(client.touch_bounds_center(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
@@ -2513,6 +2553,8 @@ def _run_pre_navigation_steps(
                             f"[SCENARIO][pre_nav][confirm] method='click_focused' signal='{confirm_signal}' "
                             f"success={str(confirm_ok).lower()} step={index}"
                         )
+                        setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
+                        setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
                         step_ok = confirm_ok
                     else:
                         confirm_signal = "click_focused_failed"
@@ -2658,6 +2700,8 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             "entry_type": entry_type,
             "entry_contract_reason": _ENTRY_REASON_VERIFY_FAILED,
             "entry_contract_detail": "",
+            "post_click_transition_same_screen": True,
+            "post_click_transition_signal": "",
         },
     )
 
@@ -2956,7 +3000,69 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     has_negative_signal = _is_negative_post_open_focus_signal(post_view_id, post_label, post_speech)
     has_negative_verify_token = _has_post_open_negative_verify_token(tab_cfg, post_view_id, post_label, post_speech)
     fallback_used = bool(stabilize_result.get("fallback_candidate_used"))
+    post_click_transition_same_screen = bool(getattr(client, "last_post_click_transition_same_screen", True))
+    post_click_transition_signal = str(getattr(client, "last_post_click_transition_signal", "") or "").strip()
+    transition_verify_hint = post_click_transition_signal.replace("_", " ").strip().lower()
+    visible_verify_text = ""
     matches_verify = _matches_post_open_verify(tab_cfg, post_view_id, post_label, post_speech)
+    if entry_type == _ENTRY_TYPE_CARD and not matches_verify:
+        visible_verify_text = _collect_post_open_visible_text(client, dev)
+        if visible_verify_text:
+            matches_verify = _matches_post_open_verify(
+                tab_cfg,
+                post_view_id,
+                post_label,
+                post_speech,
+                extra_candidates=[
+                    visible_verify_text,
+                    visible_verify_text.lower(),
+                    transition_verify_hint if not post_click_transition_same_screen else "",
+                ],
+            )
+        if not matches_verify:
+            for recheck_idx in range(_CARD_ENTRY_VERIFY_RECHECK_COUNT):
+                time.sleep(min(main_step_wait_seconds, _CARD_ENTRY_VERIFY_RECHECK_SLEEP_SECONDS))
+                recheck_focus = client.get_focus(
+                    dev=dev,
+                    wait_seconds=min(main_step_wait_seconds, 0.8),
+                    allow_fallback_dump=False,
+                    mode="fast",
+                )
+                recheck_view_id = (
+                    str(recheck_focus.get("viewIdResourceName", "") or recheck_focus.get("resourceId", "") or "").strip()
+                    if isinstance(recheck_focus, dict)
+                    else ""
+                )
+                recheck_label = _node_label_blob(recheck_focus if isinstance(recheck_focus, dict) else {})
+                recheck_speech = str(
+                    (recheck_focus.get("talkbackLabel", "") if isinstance(recheck_focus, dict) else "")
+                    or (recheck_focus.get("mergedLabel", "") if isinstance(recheck_focus, dict) else "")
+                    or (recheck_focus.get("contentDescription", "") if isinstance(recheck_focus, dict) else "")
+                    or (recheck_focus.get("text", "") if isinstance(recheck_focus, dict) else "")
+                    or ""
+                ).strip()
+                visible_verify_text = _collect_post_open_visible_text(client, dev)
+                extra_candidates = [visible_verify_text, visible_verify_text.lower()] if visible_verify_text else []
+                if not post_click_transition_same_screen and transition_verify_hint:
+                    extra_candidates.append(transition_verify_hint)
+                matches_verify = _matches_post_open_verify(
+                    tab_cfg,
+                    recheck_view_id,
+                    recheck_label,
+                    recheck_speech,
+                    extra_candidates=extra_candidates if extra_candidates else None,
+                )
+                if matches_verify:
+                    post_view_id = recheck_view_id
+                    post_label = recheck_label
+                    post_speech = recheck_speech
+                    break
+            if matches_verify:
+                log(
+                    f"[SCENARIO][entry_contract][card_verify_recheck] scenario='{scenario_id}' "
+                    f"recovered=true post_click_transition_same_screen={str(post_click_transition_same_screen).lower()} "
+                    f"signal='{post_click_transition_signal or 'none'}'"
+                )
     if has_negative_signal and (entry_type == _ENTRY_TYPE_DIRECT_SELECT or fallback_used):
         log(
             f"[SCENARIO][entry_contract] failed scenario='{scenario_id}' entry_type='{entry_type}' "
@@ -3002,6 +3108,8 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         start_open_summary["anchor_matched"] = trace_anchor_matched
         start_open_summary["anchor_stable"] = bool(tab_cfg.get("_scenario_anchor_stable", trace_anchor_stable))
         start_open_summary["open_completed"] = True
+        start_open_summary["post_click_transition_same_screen"] = post_click_transition_same_screen
+        start_open_summary["post_click_transition_signal"] = post_click_transition_signal
         start_open_summary["entry_contract_reason"] = _ENTRY_REASON_SUCCESS_VERIFIED
         start_open_summary["entry_contract_detail"] = "plugin_open_verified"
         setattr(client, "last_start_open_summary", start_open_summary)
