@@ -934,6 +934,7 @@ def test_select_visible_plugin_candidate_promotes_clickable_card_from_descendant
     assert stats.get("visible_candidate_count", 0) >= 1
     assert stats.get("partial_match_count", 0) >= 1
     assert any("reason='survive_candidate'" in sample for sample in stats.get("inspect_samples", []))
+    assert all("stage='label_filter'" not in sample for sample in stats.get("inspect_samples", []))
 
 
 def test_select_visible_plugin_candidate_collects_rejection_reasons_and_pre_candidate_samples():
@@ -980,6 +981,45 @@ def test_select_visible_plugin_candidate_collects_rejection_reasons_and_pre_cand
     assert stats.get("rejection_counts", {}).get("no_click_node_bounds", 0) >= 1
     assert any("reason='invisible_node'" in sample for sample in stats.get("inspect_samples", []))
     assert any("promotion_fail:no_click_node_bounds" in sample for sample in stats.get("pre_candidate_fail_samples", []))
+
+
+def test_select_visible_plugin_candidate_filters_after_semantic_text_construction():
+    nodes = [
+        {
+            "text": "Life",
+            "boundsInScreen": "0,0,1080,2200",
+            "visibleToUser": True,
+            "children": [
+                {
+                    "boundsInScreen": "100,620,980,980",
+                    "visibleToUser": True,
+                    "clickable": True,
+                    "focusable": True,
+                    "viewIdResourceName": "com.test:id/preInstalledServiceCard",
+                    "children": [
+                        {
+                            "text": "Air Care",
+                            "boundsInScreen": "140,680,520,760",
+                            "visibleToUser": True,
+                            "viewIdResourceName": "com.test:id/tvHeaderTitle",
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+
+    selected, reason, stats = collection_flow._select_visible_plugin_candidate(
+        nodes=nodes,
+        target=r"(?i).*pet\s*care.*",
+    )
+
+    assert selected is None
+    assert reason == "no_visible_candidate"
+    assert stats.get("visible_candidate_count", 0) >= 1
+    assert stats.get("rejection_counts", {}).get("semantic_miss", 0) >= 1
+    assert all("reason='filtered_before_candidate'" not in sample for sample in stats.get("inspect_samples", []))
+    assert any("stage='semantic_filter'" in sample for sample in stats.get("inspect_samples", []))
 
 
 def test_confirm_click_focused_transition_life_energy_rejects_weak_signal(monkeypatch):

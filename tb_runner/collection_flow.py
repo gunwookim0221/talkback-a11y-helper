@@ -59,7 +59,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-recheck-v7"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr15-scrolltouch-candidate-rejection-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr16-scrolltouch-semantic-order-v1"
 
 
 
@@ -1074,6 +1074,7 @@ def _select_visible_plugin_candidate(
         promoted_click_node: dict[str, Any] | None,
         reject_reason: str,
         stage: str = "filtered",
+        semantic_text: str = "",
     ) -> None:
         samples = stats_map.setdefault("inspect_samples", [])
         if len(samples) >= sample_limit:
@@ -1086,8 +1087,9 @@ def _select_visible_plugin_candidate(
         focusable = bool(node_ref.get("focusable"))
         effective_clickable = clickable or focusable
         promoted = isinstance(promoted_click_node, dict)
+        semantic_preview = _clip(re.sub(r"\s+", " ", semantic_text).strip(), sample_text_limit)
         samples.append(
-            "label='{}' rid='{}' cls='{}' visible={} clickable={} focusable={} effectiveClickable={} promoted_click_node={} stage='{}' reason='{}'".format(
+            "label='{}' rid='{}' cls='{}' visible={} clickable={} focusable={} effectiveClickable={} promoted_click_node={} semantic='{}' stage='{}' reason='{}'".format(
                 label_blob,
                 resource_id,
                 class_name,
@@ -1096,6 +1098,7 @@ def _select_visible_plugin_candidate(
                 str(focusable).lower(),
                 str(effective_clickable).lower(),
                 str(promoted).lower(),
+                semantic_preview,
                 stage,
                 reject_reason,
             )
@@ -1183,20 +1186,6 @@ def _select_visible_plugin_candidate(
         label_blob = _node_label_blob(node)
         click_label_blob = _node_label_blob(click_node)
         click_descendant_blob = " ".join(descendants_by_container.get(id(click_node), []))
-        if not (label_blob or click_label_blob or click_descendant_blob):
-            _append_rejection(stats, "no_label_blob")
-            _record_inspect(stats, node_ref=node, promoted_click_node=promoted_click_node, reject_reason="no_label_blob")
-            continue
-        if not _safe_regex_search(target, " ".join(part for part in [label_blob, click_label_blob, click_descendant_blob] if part)):
-            _append_rejection(stats, "filtered_before_candidate")
-            _record_inspect(
-                stats,
-                node_ref=node,
-                promoted_click_node=promoted_click_node,
-                reject_reason="filtered_before_candidate",
-                stage="label_filter",
-            )
-            continue
         click_bounds = parse_bounds_str(str(click_node.get("boundsInScreen", "") or "").strip())
         if not click_bounds:
             _append_rejection(stats, "no_click_node_bounds")
@@ -1232,14 +1221,20 @@ def _select_visible_plugin_candidate(
             ]
         ).strip()
         descendant_blob = click_descendant_blob
-        semantic_blob = " ".join(part for part in [label_blob, title_blob, descendant_blob] if part).strip()
+        semantic_blob = " ".join(part for part in [label_blob, click_label_blob, title_blob, descendant_blob] if part).strip()
         if not semantic_blob:
             _append_rejection(stats, "promoted_label_empty")
-            _record_inspect(stats, node_ref=node, promoted_click_node=promoted_click_node, reject_reason="promoted_label_empty")
+            _record_inspect(
+                stats,
+                node_ref=node,
+                promoted_click_node=promoted_click_node,
+                reject_reason="promoted_label_empty",
+                semantic_text=semantic_blob,
+            )
             continue
         if target_tokens and any(token in semantic_blob.lower() for token in target_tokens):
             stats["partial_match_count"] += 1
-        if not (_safe_regex_search(target, title_blob) or _safe_regex_search(target, semantic_blob)):
+        if not _safe_regex_search(target, semantic_blob):
             _append_rejection(stats, "semantic_miss")
             _record_inspect(
                 stats,
@@ -1247,6 +1242,7 @@ def _select_visible_plugin_candidate(
                 promoted_click_node=promoted_click_node,
                 reject_reason="semantic_miss",
                 stage="semantic_filter",
+                semantic_text=semantic_blob,
             )
             _record_pre_candidate(
                 stats,
@@ -1281,6 +1277,7 @@ def _select_visible_plugin_candidate(
             promoted_click_node=promoted_click_node,
             reject_reason="survive_candidate",
             stage="candidate_ready",
+            semantic_text=semantic_blob,
         )
         candidates.append((score, click_node))
 
