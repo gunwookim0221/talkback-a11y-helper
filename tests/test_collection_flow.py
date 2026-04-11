@@ -1248,10 +1248,163 @@ def test_select_visible_plugin_candidate_xml_fallback_promotes_clickable_contain
     assert selected is not None
     assert "candidate_count=" in reason
     assert selected_meta.get("promoted_container") is True
-    assert selected_meta.get("promotion_source") == "xml"
+    assert selected_meta.get("promotion_source") == "xml_live"
     assert selected_meta.get("promotion_attempted") is True
     assert selected_meta.get("promoted_to", "").endswith("preInstalledServiceCard")
     assert stats.get("rejection_counts", {}).get("non_actionable_without_promotion", 0) == 0
+
+
+def test_select_visible_plugin_candidate_xml_live_prefers_specific_small_candidate_over_oversized_wrapper():
+    helper_nodes = [
+        {
+            "text": "Life",
+            "boundsInScreen": "0,0,1080,2340",
+            "visibleToUser": True,
+            "children": [
+                {
+                    "text": "Monitor air quality and air comfort in each room of your home.",
+                    "boundsInScreen": "120,1760,980,1860",
+                    "visibleToUser": True,
+                    "clickable": False,
+                    "focusable": False,
+                    "viewIdResourceName": "com.test:id/tvHeaderTitle",
+                    "className": "android.widget.TextView",
+                }
+            ],
+        }
+    ]
+    xml_nodes = [
+        {
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2340",
+            "children": [
+                {
+                    "boundsInScreen": "42,1752,1038,2316",
+                    "visibleToUser": True,
+                    "clickable": True,
+                    "focusable": True,
+                    "viewIdResourceName": "",
+                    "className": "android.widget.RelativeLayout",
+                },
+                {
+                    "boundsInScreen": "96,1728,984,2088",
+                    "visibleToUser": True,
+                    "clickable": True,
+                    "focusable": False,
+                    "viewIdResourceName": "com.test:id/preInstalledServiceCard",
+                    "className": "android.widget.FrameLayout",
+                },
+            ],
+        }
+    ]
+
+    selected, reason, _, selected_meta = collection_flow._select_visible_plugin_candidate(
+        nodes=helper_nodes,
+        target=r"(?i).*air\s*care.*",
+        scenario_id="life_air_care_plugin",
+        xml_nodes=xml_nodes,
+    )
+
+    assert selected is not None
+    assert "candidate_count=" in reason
+    assert str(selected.get("viewIdResourceName", "")).endswith("preInstalledServiceCard")
+    assert selected_meta.get("promotion_source") == "xml_live"
+
+
+def test_select_visible_plugin_candidate_xml_live_oversized_generic_wrapper_is_demoted():
+    helper_nodes = [
+        {
+            "text": "Life",
+            "boundsInScreen": "0,0,1080,2340",
+            "visibleToUser": True,
+            "children": [
+                {
+                    "text": "Monitor air quality and air comfort in each room of your home.",
+                    "boundsInScreen": "120,1760,980,1860",
+                    "visibleToUser": True,
+                    "clickable": False,
+                    "focusable": False,
+                    "viewIdResourceName": "com.test:id/tvHeaderTitle",
+                    "className": "android.widget.TextView",
+                }
+            ],
+        }
+    ]
+    xml_nodes = [
+        {
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2340",
+            "children": [
+                {
+                    "boundsInScreen": "0,1200,1080,2340",
+                    "visibleToUser": True,
+                    "clickable": True,
+                    "focusable": True,
+                    "viewIdResourceName": "",
+                    "className": "android.widget.RelativeLayout",
+                }
+            ],
+        }
+    ]
+
+    selected, reason, _, selected_meta = collection_flow._select_visible_plugin_candidate(
+        nodes=helper_nodes,
+        target=r"(?i).*air\s*care.*",
+        scenario_id="life_air_care_plugin",
+        xml_nodes=xml_nodes,
+    )
+
+    assert selected is None
+    assert reason == "no_visible_candidate"
+    assert selected_meta.get("promoted_container") is False
+
+
+def test_select_visible_plugin_candidate_xml_live_generic_wrapper_uses_refined_tap_strategy():
+    helper_nodes = [
+        {
+            "text": "Life",
+            "boundsInScreen": "0,0,1080,2340",
+            "visibleToUser": True,
+            "children": [
+                {
+                    "text": "Monitor air quality and air comfort in each room of your home.",
+                    "boundsInScreen": "180,1780,920,1880",
+                    "visibleToUser": True,
+                    "clickable": False,
+                    "focusable": False,
+                    "viewIdResourceName": "com.test:id/tvHeaderTitle",
+                    "className": "android.widget.TextView",
+                }
+            ],
+        }
+    ]
+    xml_nodes = [
+        {
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2340",
+            "children": [
+                {
+                    "boundsInScreen": "42,1700,1038,2300",
+                    "visibleToUser": True,
+                    "clickable": True,
+                    "focusable": True,
+                    "viewIdResourceName": "",
+                    "className": "android.widget.RelativeLayout",
+                }
+            ],
+        }
+    ]
+
+    selected, _, _, selected_meta = collection_flow._select_visible_plugin_candidate(
+        nodes=helper_nodes,
+        target=r"(?i).*air\s*care.*",
+        scenario_id="life_air_care_plugin",
+        xml_nodes=xml_nodes,
+    )
+
+    assert selected is not None
+    assert selected_meta.get("promotion_source") == "xml_live"
+    assert selected_meta.get("tap_strategy") in {"text_center", "refined_body_point"}
 
 
 def test_select_visible_plugin_candidate_rejects_oversized_root_during_promotion():

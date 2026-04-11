@@ -63,7 +63,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-recheck-v7"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr21-scrolltouch-promotion-fallback-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr22-scrolltouch-xml-live-refine-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
@@ -925,6 +925,7 @@ def _capture_scrolltouch_step_bundle(
     selected: bool,
     selected_reason: str,
     candidate_stats: dict[str, Any] | None,
+    selected_meta: dict[str, Any] | None = None,
     log_fn: Callable[..., None] = log,
 ) -> str:
     normalized_scenario_id = str(scenario_id or "").strip().lower()
@@ -933,6 +934,7 @@ def _capture_scrolltouch_step_bundle(
 
     capture_root_id = str(capture_run_id or "").strip() or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     stats_map = candidate_stats if isinstance(candidate_stats, dict) else {}
+    selected_meta_map = selected_meta if isinstance(selected_meta, dict) else {}
     bundle_dir = Path("output") / "capture_bundles" / normalized_scenario_id / capture_root_id / f"step_{max(int(scroll_step), 0):02d}"
     bundle_path = str(bundle_dir)
     try:
@@ -995,6 +997,7 @@ def _capture_scrolltouch_step_bundle(
         "visible_top": " | ".join(visible_samples[:3]) if isinstance(visible_samples, list) else "",
         "partial_top": " | ".join(partial_samples[:3]) if isinstance(partial_samples, list) else "",
         "rejection_summary": rejection_summary,
+        "selected_meta": selected_meta_map,
     }
     try:
         meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1462,6 +1465,13 @@ def _select_visible_plugin_candidate(
         "promoted_to": "",
         "promotion_candidate_count": 0,
         "promotion_debug_summary": "",
+        "selected_area": 0,
+        "matched_text_area": 0,
+        "selected_to_text_area_ratio": 0.0,
+        "ancestor_distance": -1,
+        "tap_point": "",
+        "tap_strategy": "center",
+        "rank_summary_top3": "",
     }
     if not isinstance(nodes, list) or not nodes:
         return None, "empty_dump", stats, selected_meta
@@ -1512,9 +1522,19 @@ def _select_visible_plugin_candidate(
         if candidate_clickable or is_card_like:
             actionable_nodes.append((candidate_node, candidate_bounds, is_card_like))
 
+    parent_by_node_id: dict[int, dict[str, Any]] = {}
+    for child, parent in flat_nodes:
+        if isinstance(parent, dict):
+            parent_by_node_id[id(child)] = parent
+
+    xml_flat_nodes: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
+    xml_parent_by_node_id: dict[int, dict[str, Any]] = {}
     xml_actionable_nodes: list[tuple[dict[str, Any], tuple[int, int, int, int], bool]] = []
     if isinstance(xml_nodes, list) and xml_nodes:
-        for xml_candidate_node, _ in _iter_tree_nodes_with_parent(xml_nodes):
+        for xml_candidate_node, xml_parent in _iter_tree_nodes_with_parent(xml_nodes):
+            xml_flat_nodes.append((xml_candidate_node, xml_parent if isinstance(xml_parent, dict) else None))
+            if isinstance(xml_parent, dict):
+                xml_parent_by_node_id[id(xml_candidate_node)] = xml_parent
             xml_bounds = parse_bounds_str(str(xml_candidate_node.get("boundsInScreen", "") or "").strip())
             if not xml_bounds or not (xml_bounds[0] < xml_bounds[2] and xml_bounds[1] < xml_bounds[3]):
                 continue
@@ -1534,18 +1554,32 @@ def _select_visible_plugin_candidate(
 
     def _select_promoted_container(
         *,
+        matched_node: dict[str, Any],
         node_bounds: tuple[int, int, int, int],
         viewport_bounds: tuple[int, int],
         source_nodes: list[tuple[dict[str, Any], tuple[int, int, int, int], bool]],
         source_name: str,
-    ) -> tuple[dict[str, Any] | None, str, int, str]:
+        parent_map: dict[int, dict[str, Any]],
+    ) -> tuple[dict[str, Any] | None, str, int, str, int, str]:
         left, top, right, bottom = node_bounds
         viewport_t, viewport_b = viewport_bounds
         node_area = max(1, (right - left) * (bottom - top))
         node_center_x = (left + right) // 2
         node_center_y = (top + bottom) // 2
         viewport_area = max(1, (viewport_right - viewport_left) * max(1, viewport_b - viewport_t))
+        nearest_actionable_ancestor: dict[str, Any] | None = None
+        ancestor_distance = -1
+        cursor = parent_map.get(id(matched_node))
+        distance = 1
+        while isinstance(cursor, dict) and distance <= 8:
+            if _is_actionable(cursor):
+                nearest_actionable_ancestor = cursor
+                ancestor_distance = distance
+                break
+            cursor = parent_map.get(id(cursor))
+            distance += 1
         scored_candidates: list[tuple[tuple[int, int, int, int, int, int], dict[str, Any], str]] = []
+        scored_summary: list[tuple[int, str]] = []
         for action_node, action_bounds, is_card_like in source_nodes:
             a_left, a_top, a_right, a_bottom = action_bounds
             if a_bottom <= viewport_t or a_top >= viewport_b:
@@ -1566,28 +1600,76 @@ def _select_visible_plugin_candidate(
             action_clickable = _is_actionable(action_node)
             action_resource = str(action_node.get("viewIdResourceName", "") or action_node.get("resourceId", "") or "").strip()
             action_class = str(action_node.get("className", "") or "").strip()
+            action_label = _node_label_blob(action_node)
             has_container_hint = bool(
                 _safe_regex_search(r"(?i)(card|container|layout|frame|root|item)", action_resource)
                 or _safe_regex_search(r"(?i)(card|container|layout|frame|root|item)", action_class)
             )
+            class_hint = bool(_safe_regex_search(r"(?i)(button|imagebutton|card|item|container)", action_class))
+            width = max(1, a_right - a_left)
+            height = max(1, a_bottom - a_top)
+            text_area_ratio = area / float(node_area)
+            width_ratio = width / max(1, viewport_right - viewport_left)
+            height_ratio = height / max(1, viewport_bottom - viewport_top)
+            overly_large_generic = bool(
+                text_area_ratio >= 6.0
+                and width_ratio >= 0.86
+                and height_ratio >= 0.26
+                and not action_resource
+                and not action_label
+                and _safe_regex_search(r"(?i)relative.?layout", action_class)
+            )
+            if overly_large_generic:
+                continue
             reason = f"{source_name}_nearby_container"
             if fully_contains:
                 reason = f"{source_name}_containment_container"
+            if isinstance(nearest_actionable_ancestor, dict) and action_node is nearest_actionable_ancestor:
+                reason = f"{source_name}_nearest_actionable_ancestor"
+            specificity_score = 0
+            if action_resource:
+                specificity_score += 2
+            if action_clickable:
+                specificity_score += 2
+            if class_hint or is_card_like:
+                specificity_score += 1
+            if action_label:
+                specificity_score += 1
+            if _safe_regex_search(r"(?i)relative.?layout", action_class) and not action_resource and not action_label:
+                specificity_score -= 2
+            area_penalty = 0
+            if text_area_ratio >= 8.0:
+                area_penalty -= 3
+            elif text_area_ratio >= 5.0:
+                area_penalty -= 2
+            elif text_area_ratio >= 3.0:
+                area_penalty -= 1
+            ancestor_priority = 0
+            if isinstance(nearest_actionable_ancestor, dict):
+                if action_node is nearest_actionable_ancestor:
+                    ancestor_priority = 4
+                else:
+                    ancestor_priority = -1
             score = (
-                1 if fully_contains else 0,
+                ancestor_priority,
                 1 if action_clickable else 0,
+                specificity_score,
                 1 if has_container_hint else 0,
-                1 if is_card_like else 0,
-                overlap_ratio,
+                overlap_ratio + (area_penalty * 100),
                 -center_distance,
             )
             scored_candidates.append((score, action_node, reason))
+            if len(scored_summary) < 12:
+                summary_id = action_resource or action_class or "node"
+                scored_summary.append((sum(score), f"{summary_id}:{reason}:ov={overlap_ratio}:ar={text_area_ratio:.2f}:sp={specificity_score}:ad={ancestor_distance}"))
         if not scored_candidates:
-            return None, "none", 0, f"{source_name}:no_candidate"
+            return None, "none", 0, f"{source_name}:no_candidate", ancestor_distance, ""
         scored_candidates.sort(reverse=True, key=lambda item: item[0])
+        scored_summary.sort(key=lambda item: item[0], reverse=True)
+        top3_summary = " | ".join(item[1] for item in scored_summary[:3])
         best_node = scored_candidates[0][1]
         best_reason = scored_candidates[0][2]
-        return best_node, best_reason, len(scored_candidates), f"{source_name}:candidate_count={len(scored_candidates)}"
+        return best_node, best_reason, len(scored_candidates), f"{source_name}:candidate_count={len(scored_candidates)}", ancestor_distance, top3_summary
 
     candidates: list[tuple[tuple[int, int, int, int], dict[str, Any], dict[str, Any]]] = []
     for node, parent in flat_nodes:
@@ -1752,13 +1834,17 @@ def _select_visible_plugin_candidate(
         promotion_source = "none"
         promotion_candidate_count = 0
         promotion_debug_summary = ""
+        ancestor_distance = -1
+        rank_summary_top3 = ""
         if click_node is node and not _is_actionable(click_node):
             promotion_attempted = True
-            promoted_from_helper, helper_reason, helper_candidate_count, helper_debug = _select_promoted_container(
+            promoted_from_helper, helper_reason, helper_candidate_count, helper_debug, helper_ancestor_distance, helper_top3 = _select_promoted_container(
+                matched_node=node,
                 node_bounds=bounds,
                 viewport_bounds=(viewport_top, viewport_bottom),
                 source_nodes=actionable_nodes,
                 source_name="helper",
+                parent_map=parent_by_node_id,
             )
             promotion_candidate_count = helper_candidate_count
             promotion_debug_summary = helper_debug
@@ -1767,12 +1853,16 @@ def _select_visible_plugin_candidate(
                 click_node = promoted_from_helper
                 promotion_reason = helper_reason
                 promotion_source = "helper"
+                ancestor_distance = helper_ancestor_distance
+                rank_summary_top3 = helper_top3
             elif xml_actionable_nodes:
-                promoted_from_xml, xml_reason, xml_candidate_count, xml_debug = _select_promoted_container(
+                promoted_from_xml, xml_reason, xml_candidate_count, xml_debug, xml_ancestor_distance, xml_top3 = _select_promoted_container(
+                    matched_node=node,
                     node_bounds=bounds,
                     viewport_bounds=(viewport_top, viewport_bottom),
                     source_nodes=xml_actionable_nodes,
-                    source_name="xml",
+                    source_name="xml_live",
+                    parent_map=xml_parent_by_node_id,
                 )
                 promotion_candidate_count = max(promotion_candidate_count, xml_candidate_count)
                 promotion_debug_summary = f"{helper_debug};{xml_debug}"
@@ -1780,7 +1870,9 @@ def _select_visible_plugin_candidate(
                     promoted_click_node = promoted_from_xml
                     click_node = promoted_from_xml
                     promotion_reason = xml_reason
-                    promotion_source = "xml"
+                    promotion_source = "xml_live"
+                    ancestor_distance = xml_ancestor_distance
+                    rank_summary_top3 = xml_top3
         if click_node is node and not _is_actionable(click_node):
             _append_rejection(stats, "non_actionable_without_promotion")
             _record_inspect(
@@ -1798,6 +1890,14 @@ def _select_visible_plugin_candidate(
                 promoted_click_node=promoted_click_node,
                 reason="actionability_fail:non_actionable_without_promotion",
             )
+            continue
+        click_bounds = parse_bounds_str(str(click_node.get("boundsInScreen", "") or "").strip())
+        if not click_bounds:
+            _append_rejection(stats, "no_click_node_bounds_after_promotion")
+            continue
+        c_left, c_top, c_right, c_bottom = click_bounds
+        if not (c_left < c_right and c_top < c_bottom):
+            _append_rejection(stats, "invalid_click_node_bounds_after_promotion")
             continue
         card_resource = str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "")
         class_name = str(click_node.get("className", "") or "").strip()
@@ -1821,6 +1921,32 @@ def _select_visible_plugin_candidate(
             stats["partial_samples"].append(sample_repr)
         promoted_from = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or node.get("className", "") or "").strip()
         promoted_to = str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or click_node.get("className", "") or "").strip()
+        matched_text_bounds = bounds
+        selected_area = max(1, (c_right - c_left) * (c_bottom - c_top))
+        matched_text_area = max(1, (matched_text_bounds[2] - matched_text_bounds[0]) * (matched_text_bounds[3] - matched_text_bounds[1]))
+        area_ratio = round(selected_area / float(matched_text_area), 3)
+        center_x = (c_left + c_right) // 2
+        center_y = (c_top + c_bottom) // 2
+        text_center_x = (matched_text_bounds[0] + matched_text_bounds[2]) // 2
+        text_center_y = (matched_text_bounds[1] + matched_text_bounds[3]) // 2
+        tap_strategy = "center"
+        tap_x = center_x
+        tap_y = center_y
+        is_generic_wrapper = bool(
+            promotion_source == "xml_live"
+            and _safe_regex_search(r"(?i)relative.?layout|linear.?layout|frame.?layout", class_name)
+            and not card_resource
+            and not _node_label_blob(click_node)
+            and area_ratio >= 2.0
+        )
+        if is_generic_wrapper:
+            tap_x = min(max(text_center_x, c_left + 1), c_right - 1)
+            tap_y = min(max(text_center_y, c_top + 1), c_bottom - 1)
+            tap_strategy = "text_center"
+            refined_y = text_center_y - max(6, (matched_text_bounds[3] - matched_text_bounds[1]) // 6)
+            if c_top < refined_y < c_bottom:
+                tap_y = refined_y
+                tap_strategy = "refined_body_point"
         _record_inspect(
             stats,
             node_ref=node,
@@ -1842,6 +1968,14 @@ def _select_visible_plugin_candidate(
             "promotion_candidate_count": promotion_candidate_count,
             "promotion_debug_summary": promotion_debug_summary,
             "matched_text_node": matched_text_node,
+            "matched_text_bounds": f"{matched_text_bounds[0]},{matched_text_bounds[1]},{matched_text_bounds[2]},{matched_text_bounds[3]}",
+            "selected_area": selected_area,
+            "matched_text_area": matched_text_area,
+            "selected_to_text_area_ratio": area_ratio,
+            "ancestor_distance": ancestor_distance,
+            "tap_point": f"{tap_x},{tap_y}",
+            "tap_strategy": tap_strategy,
+            "rank_summary_top3": rank_summary_top3,
         }
         candidates.append((score, click_node, candidate_meta))
 
@@ -2073,6 +2207,7 @@ def _run_pre_navigation_steps(
                         selected=selected_node is not None,
                         selected_reason=selected_reason,
                         candidate_stats=candidate_stats,
+                        selected_meta=selected_meta,
                         log_fn=log,
                     )
                     if selected_node is not None:
@@ -2093,11 +2228,34 @@ def _run_pre_navigation_steps(
                             f"promotion_debug_summary='{str(selected_meta.get('promotion_debug_summary', ''))[:120]}' "
                             f"promoted_from='{str(selected_meta.get('promoted_from', ''))[:80]}' "
                             f"promoted_to='{str(selected_meta.get('promoted_to', ''))[:80]}' "
+                            f"selected_area={int(selected_meta.get('selected_area', 0) or 0)} "
+                            f"text_area={int(selected_meta.get('matched_text_area', 0) or 0)} "
+                            f"area_ratio={float(selected_meta.get('selected_to_text_area_ratio', 0.0) or 0.0):.3f} "
+                            f"ancestor_distance={int(selected_meta.get('ancestor_distance', -1) or -1)} "
+                            f"tap_point='{str(selected_meta.get('tap_point', ''))[:24]}' "
+                            f"tap_strategy='{str(selected_meta.get('tap_strategy', 'center'))[:24]}' "
+                            f"rank_summary_top3='{str(selected_meta.get('rank_summary_top3', ''))[:220]}' "
                             f"scroll_step={scroll_step}/{max_scroll_search_steps} cumulative_mode={str(use_cumulative_search).lower()}"
                         )
                         tap_target = resource_id if resource_id else label_blob
                         tap_type = "r" if resource_id else "a"
-                        step_ok = bool(client.tap_bounds_center_adb(dev=dev, name=tap_target, type_=tap_type, dump_nodes=top_nodes))
+                        tap_strategy = str(selected_meta.get("tap_strategy", "center") or "center").strip().lower()
+                        tap_point_raw = str(selected_meta.get("tap_point", "") or "").strip()
+                        tap_point: tuple[int, int] | None = None
+                        if tap_point_raw:
+                            parts = [part.strip() for part in tap_point_raw.split(",")]
+                            if len(parts) == 2 and all(part.lstrip("-").isdigit() for part in parts):
+                                tap_point = (int(parts[0]), int(parts[1]))
+                        step_ok = False
+                        if (
+                            str(selected_meta.get("promotion_source", "none")) == "xml_live"
+                            and tap_strategy in {"text_center", "refined_body_point"}
+                            and tap_point
+                            and hasattr(client, "tap_xy_adb")
+                        ):
+                            step_ok = bool(client.tap_xy_adb(dev=dev, x=int(tap_point[0]), y=int(tap_point[1])))
+                        else:
+                            step_ok = bool(client.tap_bounds_center_adb(dev=dev, name=tap_target, type_=tap_type, dump_nodes=top_nodes))
                         if step_ok:
                             confirm_ok, confirm_signal = _confirm_click_focused_transition(
                                 client=client,
