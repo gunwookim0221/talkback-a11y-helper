@@ -286,3 +286,29 @@ def test_stabilize_anchor_fallback_rejects_home_button_chrome_candidate(monkeypa
 
     assert result["ok"] is False
     assert result["fallback_candidate_rejected_reason"] == "no_readable_top_candidate"
+
+
+def test_stabilize_anchor_direct_select_fallback_prefers_verify_token_candidate(monkeypatch):
+    client = FakeAnchorClient()
+    client.dump_tree.return_value = [
+        _focusable_node("top_left_generic", "Welcome", "[20,260][960,520]"),
+        _focusable_node("pet_plugin_entry", "Pet Care", "[740,260][1030,340]"),
+    ]
+    client.select.return_value = True
+    monkeypatch.setattr(anchor_logic, "verify_context", lambda *a, **k: {"ok": True})
+    tab_cfg = {
+        "scenario_id": "life_pet_care_example",
+        "entry_type": "direct_select",
+        "verify_tokens": ["pet care"],
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "pre_navigation": [{"action": "select", "target": ".*pet.*", "type": "a"}],
+        "anchor_name": "(?i).*pet\\s*care.*",
+        "anchor_type": "a",
+        "anchor": {},
+    }
+
+    result = anchor_logic.stabilize_anchor(client, "SERIAL", tab_cfg, phase="scenario_start", max_retries=1)
+
+    assert result["fallback_candidate_label"] == "Pet Care"
+    assert "pet_plugin_entry" in client.select.call_args.kwargs["name"]

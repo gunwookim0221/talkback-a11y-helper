@@ -40,7 +40,7 @@
 - `enabled`: (base 정의값) 실행 여부 기본값. 최종 실행 제어는 runtime(`config/runtime_config.json`)에서 결정
 - `max_steps`: main step 상한
 - `scenario_type`: `content | global_nav`
-- `entry_type`: plugin 진입 방식 힌트. 현재 Life plugin에서 `card | direct_select`를 사용하며, `direct_select`는 post-open verify/negative guard를 통과해야 최종 성공으로 확정됩니다.
+- `entry_type`: plugin 진입 방식 힌트. 현재 Life plugin에서 `card | direct_select`를 사용하며, `direct_select`는 post-open verify/negative guard를 통과해야 최종 성공으로 확정됩니다. `direct_select`에서는 초기 focus miss 시 짧은 recheck 동안 `visible text`, `speech`, `fallback candidate label`, `verify_row`까지 함께 재검증해 실제 landing content를 보수적으로 재확인합니다.
 - `entry_match`: `entry_type=card`용 semantic 매칭 스펙.
   - `title_patterns`: 카드 제목/대표 라벨 매칭 regex 목록
   - `description_patterns`: 설명문(`tvHeaderTitle` 등) 매칭 regex 목록
@@ -82,7 +82,7 @@
 
 anchor 안정 자체는 공통적으로 2회 연속 검증(짧은 settle 포함)을 사용합니다.
 
-추가로 anchor 미지정이거나 explicit anchor 매칭이 실패하면, runner는 dump 기준 `content` 영역 후보에서 상단 행의 대표 fallback anchor를 자동 선택합니다. 우선순위는 `top-left → top-center → top-right`이며, 상/하단 chrome 후보(toolbar/bottom nav/system UI)는 제외하려고 시도합니다.
+추가로 anchor 미지정이거나 explicit anchor 매칭이 실패하면, runner는 dump 기준 `content` 영역 후보에서 상단 행의 대표 fallback anchor를 자동 선택합니다. 우선순위는 `top-left → top-center → top-right`이며, 상/하단 chrome 후보(toolbar/bottom nav/system UI)는 제외하려고 시도합니다. `direct_select` 시나리오에서 `verify_tokens`가 있으면 token hit 후보를 우선해 oversized generic top block 선택을 줄입니다.
 
 `screen_context_mode=new_screen` 시나리오에서는 `scenario_start` anchor stabilization이 실패해도, 아래 신호가 동시에 충분하면 abort 대신 low-confidence fallback start로 main traversal을 진행합니다.
 - pre_navigation 성공
