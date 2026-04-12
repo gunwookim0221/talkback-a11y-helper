@@ -65,7 +65,7 @@ COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr31-scrolltouch-candidate-click-result-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
-COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr32-air-entry-contract-guard-bypass-v1"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr33-air-entry-contract-top-chrome-guard-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -974,21 +974,57 @@ def _is_air_verified_entry_context(
     pre_navigation_success: bool,
     post_click_transition_signal: str,
     post_click_transition_same_screen: bool,
+    post_view_id: str,
+    post_label: str,
+    post_speech: str,
+    stabilize_result: dict[str, Any],
     anchor_fallback_source: str,
     air_anchor_fallback_accepted: bool,
-) -> bool:
+) -> tuple[bool, str]:
     normalized_scenario_id = str(scenario_id or "").strip().lower()
     normalized_signal = str(post_click_transition_signal or "").strip().lower()
     normalized_fallback_source = str(anchor_fallback_source or "").strip().lower()
-    return (
-        normalized_scenario_id == _LIFE_AIR_CARE_SCENARIO_ID
-        and bool(pre_navigation_success)
-        and (normalized_signal == "air_care_verify" or post_click_transition_same_screen is False)
-        and (
-            normalized_fallback_source in {"top_level_fallback", "focus_fallback"}
-            or bool(air_anchor_fallback_accepted)
-        )
+    if normalized_scenario_id != _LIFE_AIR_CARE_SCENARIO_ID:
+        return False, "not_air_care_scenario"
+    if not bool(pre_navigation_success):
+        return False, "pre_navigation_not_verified"
+    if not (normalized_signal == "air_care_verify" or post_click_transition_same_screen is False):
+        return False, "missing_transition_signal"
+    if not (normalized_fallback_source in {"top_level_fallback", "focus_fallback"} or bool(air_anchor_fallback_accepted)):
+        return False, "fallback_not_accepted"
+
+    verify_row = stabilize_result.get("verify_row", {}) if isinstance(stabilize_result, dict) else {}
+    if not isinstance(verify_row, dict):
+        verify_row = {}
+
+    post_focus_is_top_chrome = _is_negative_post_open_focus_signal(post_view_id, post_label, post_speech)
+    fallback_label = str(stabilize_result.get("fallback_candidate_label", "") or "").strip() if isinstance(stabilize_result, dict) else ""
+    fallback_resource_id = (
+        str(stabilize_result.get("fallback_candidate_resource_id", "") or "").strip() if isinstance(stabilize_result, dict) else ""
     )
+    fallback_is_top_chrome = _is_negative_post_open_focus_signal(fallback_resource_id, fallback_label, "")
+
+    evidence_candidates: list[tuple[str, str, str]] = [
+        (post_view_id, post_label, post_speech),
+        (fallback_resource_id, fallback_label, ""),
+        (
+            str(verify_row.get("focus_view_id", "") or "").strip(),
+            str(verify_row.get("visible_label", "") or "").strip(),
+            str(verify_row.get("talkback_label", "") or verify_row.get("merged_announcement", "") or "").strip(),
+        ),
+    ]
+    for evidence_view_id, evidence_label, evidence_speech in evidence_candidates:
+        if not _safe_regex_search(
+            _LIFE_AIR_CARE_VERIFY_REGEX,
+            " ".join([evidence_view_id, evidence_label, evidence_speech]).strip(),
+        ):
+            continue
+        if _is_negative_post_open_focus_signal(evidence_view_id, evidence_label, evidence_speech):
+            continue
+        return True, "air_internal_signal"
+    if post_focus_is_top_chrome or fallback_is_top_chrome:
+        return False, "top_chrome_focus"
+    return False, "air_internal_signal_missing"
 
 
 def _classify_special_post_open_state(
@@ -3681,11 +3717,15 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     pre_navigation_success = bool(start_open_summary.get("pre_navigation_success")) if isinstance(start_open_summary, dict) else False
     anchor_fallback_source = str(start_open_summary.get("anchor_fallback_source", "") or "").strip() if isinstance(start_open_summary, dict) else ""
     air_anchor_fallback_accepted = bool(start_open_summary.get("air_anchor_fallback_accepted")) if isinstance(start_open_summary, dict) else False
-    air_verified_entry_context = _is_air_verified_entry_context(
+    air_verified_entry_context, air_verified_entry_reason = _is_air_verified_entry_context(
         scenario_id=scenario_id,
         pre_navigation_success=pre_navigation_success,
         post_click_transition_signal=post_click_transition_signal,
         post_click_transition_same_screen=post_click_transition_same_screen,
+        post_view_id=post_view_id,
+        post_label=post_label,
+        post_speech=post_speech,
+        stabilize_result=stabilize_result if isinstance(stabilize_result, dict) else {},
         anchor_fallback_source=anchor_fallback_source,
         air_anchor_fallback_accepted=air_anchor_fallback_accepted,
     )
@@ -3875,6 +3915,11 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         if air_verified_entry_context:
             log("[ENTRY][air] false_success_guard bypassed")
         else:
+            if (
+                str(scenario_id or "").strip().lower() == _LIFE_AIR_CARE_SCENARIO_ID
+                and air_verified_entry_reason == "top_chrome_focus"
+            ):
+                log("[ENTRY][air] rejected false plugin entry due to top_chrome_focus")
             log(
                 f"[SCENARIO][entry_contract] failed scenario='{scenario_id}' entry_type='{entry_type}' "
                 f"reason='{_ENTRY_REASON_FALSE_SUCCESS_GUARD}' view_id='{post_view_id}' label='{post_label}'"
