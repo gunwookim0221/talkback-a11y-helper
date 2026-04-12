@@ -1,4 +1,4 @@
-SCENARIO_CONFIG_VERSION = "2026.04.11-pet-care-card-entry-v1"
+SCENARIO_CONFIG_VERSION = "2026.04.12-pet-care-onboarding-special-state-v1"
 
 BOTTOM_TAB_GLOBAL_NAV = {
     "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
@@ -562,6 +562,7 @@ TAB_CONFIGS = [
         "verify_tokens": [
             "pet care",
             "smartthings pet care",
+            "petcare service plugin",
             "pet",
             "profile",
             "pet's profile",
@@ -570,6 +571,15 @@ TAB_CONFIGS = [
             "반려",
             "펫 케어",
         ],
+        "special_state_tokens": [
+            "petcare service plugin",
+            "care for your pet",
+            "leaving your pet alone",
+            "keep them safe and entertained",
+        ],
+        "special_state_cta_tokens": ["start"],
+        "special_state_handling": "back_after_read",
+        "special_state_intro_like_min_length": 70,
         "negative_verify_tokens": [
             "qr code",
             "change location",

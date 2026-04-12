@@ -974,6 +974,7 @@ def _classify_special_post_open_state(
 
     special_tokens_raw = tab_cfg.get("special_state_tokens", [])
     cta_tokens_raw = tab_cfg.get("special_state_cta_tokens", [])
+    intro_like_min_length = int(tab_cfg.get("special_state_intro_like_min_length", 80) or 80)
     special_tokens = [str(token or "").strip().lower() for token in special_tokens_raw if str(token or "").strip()]
     cta_tokens = [str(token or "").strip().lower() for token in cta_tokens_raw if str(token or "").strip()]
     if not special_tokens or not cta_tokens:
@@ -992,14 +993,15 @@ def _classify_special_post_open_state(
     verify_tokens_raw = tab_cfg.get("verify_tokens", [])
     verify_tokens = [str(token or "").strip().lower() for token in verify_tokens_raw if str(token or "").strip()]
     verify_hit = bool(matches_verify or (verify_tokens and any(token in normalized_blob for token in verify_tokens)))
-    long_intro_like = len(visible_verify_text.strip()) >= 80 or len(post_speech.strip()) >= 80
+    long_intro_like = len(visible_verify_text.strip()) >= intro_like_min_length or len(post_speech.strip()) >= intro_like_min_length
     special_hit_count = len(special_hits)
     cta_hit_count = len(cta_hits)
 
     detected = bool(
-        (verify_hit and special_hit_count >= 1 and cta_hit_count >= 1)
-        or (special_hit_count >= 2 and cta_hit_count >= 1)
-        or (long_intro_like and special_hit_count >= 1 and cta_hit_count >= 1)
+        verify_hit
+        and cta_hit_count >= 1
+        and special_hit_count >= 1
+        and (long_intro_like or special_hit_count >= 2)
     )
     if not detected:
         return False, "", {}
