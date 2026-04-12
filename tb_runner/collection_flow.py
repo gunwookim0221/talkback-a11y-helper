@@ -63,7 +63,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr29-scrolltouch-xml-ancestor-fallback-v3"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr30-scrolltouch-fallback-order-fix-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr25-direct-select-post-open-verify-v3"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -1754,6 +1754,7 @@ def _select_visible_plugin_candidate(
         "actionable_ancestor_found": False,
         "candidate_committed": False,
         "last_promotion_result_reason": "none",
+        "will_try_xml_live_fallback": False,
     }
     selected_meta: dict[str, Any] = {
         "promoted_container": False,
@@ -2490,11 +2491,10 @@ def _select_visible_plugin_candidate(
         promotion_debug_summary = ""
         ancestor_distance = -1
         rank_summary_top3 = ""
-        requires_promotion_fallback = bool(
-            not _is_actionable(click_node)
-            and int(stats.get("partial_match_count", 0) or 0) > 0
-            and matched_text_node
-        )
+        actionable_before_fallback = bool(_is_actionable(click_node))
+        helper_result = "not_attempted"
+        commit_to_candidate = bool(actionable_before_fallback)
+        requires_promotion_fallback = bool((not actionable_before_fallback) and matched_text_node)
         if requires_promotion_fallback:
             promotion_attempted = True
             promoted_from_helper, helper_reason, helper_candidate_count, helper_debug, helper_ancestor_distance, helper_top3 = _select_promoted_container(
@@ -2507,7 +2507,7 @@ def _select_visible_plugin_candidate(
             )
             promotion_candidate_count = helper_candidate_count
             promotion_debug_summary = helper_debug
-            helper_committed = bool(isinstance(promoted_from_helper, dict) and _is_actionable(promoted_from_helper))
+            helper_result = helper_reason if isinstance(promoted_from_helper, dict) else "none"
             if isinstance(promoted_from_helper, dict):
                 promoted_click_node = promoted_from_helper
                 click_node = promoted_from_helper
@@ -2515,7 +2515,26 @@ def _select_visible_plugin_candidate(
                 promotion_source = "helper"
                 ancestor_distance = helper_ancestor_distance
                 rank_summary_top3 = helper_top3
-            if (not helper_committed) and xml_flat_nodes:
+            commit_to_candidate = bool(_is_actionable(click_node))
+            should_try_xml_live_fallback = bool(
+                matched_text_node
+                and int(stats.get("partial_match_count", 0) or 0) > 0
+                and (helper_result == "none" or not commit_to_candidate)
+                and not actionable_before_fallback
+            )
+            stats["will_try_xml_live_fallback"] = bool(should_try_xml_live_fallback)
+            log(
+                "[SCROLLTOUCH][promotion][fallback_decision] matched_text_found={} partial_match_count={} helper_result='{}' "
+                "commit_to_candidate={} actionable_before_fallback={} will_try_xml_live_fallback={}".format(
+                    str(bool(matched_text_node)).lower(),
+                    int(stats.get("partial_match_count", 0) or 0),
+                    str(helper_result)[:64],
+                    str(bool(commit_to_candidate)).lower(),
+                    str(bool(actionable_before_fallback)).lower(),
+                    str(bool(should_try_xml_live_fallback)).lower(),
+                )
+            )
+            if should_try_xml_live_fallback and xml_flat_nodes:
                 promoted_from_xml, xml_reason, xml_candidate_count, xml_debug, xml_ancestor_distance, xml_top3 = _select_promoted_container(
                     matched_node=node,
                     node_bounds=bounds,
@@ -2534,6 +2553,7 @@ def _select_visible_plugin_candidate(
                     promotion_source = "xml_live"
                     ancestor_distance = xml_ancestor_distance
                     rank_summary_top3 = xml_top3
+                commit_to_candidate = bool(_is_actionable(click_node))
             selected_container_bounds = str(click_node.get("boundsInScreen", "") or "").strip()
             selected_container_class = str(click_node.get("className", "") or "").strip()
             selected_container_view_id = str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "").strip()
@@ -2560,6 +2580,14 @@ def _select_visible_plugin_candidate(
                 )
             )
         if not _is_actionable(click_node):
+            if bool(stats.get("will_try_xml_live_fallback", False)) and not xml_flat_nodes:
+                _record_pre_candidate(
+                    stats,
+                    node_ref=node,
+                    promoted_click_node=promoted_click_node,
+                    reason="actionability_fail:awaiting_xml_live_fallback",
+                )
+                continue
             stats["last_promotion_result_reason"] = "non_actionable_without_promotion"
             _append_rejection(stats, "non_actionable_without_promotion")
             _record_inspect(
@@ -2863,6 +2891,8 @@ def _run_pre_navigation_steps(
                         and not xml_fallback_attempted
                         and entry_type == _ENTRY_TYPE_CARD
                         and (
+                            bool(candidate_stats.get("will_try_xml_live_fallback", False))
+                            or
                             int(candidate_stats.get("visible_candidate_count", 0) or 0) == 0
                             or (
                                 int(candidate_stats.get("partial_match_count", 0) or 0) > 0
@@ -2992,6 +3022,10 @@ def _run_pre_navigation_steps(
                             setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
                             setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
                             step_ok = confirm_ok
+                            if not step_ok:
+                                fallback_reason = f"post_click_transition_failed:{confirm_signal}"
+                        else:
+                            fallback_reason = "candidate_dispatch_failed"
                         break
 
                     if scroll_step >= max_scroll_search_steps:
