@@ -97,6 +97,7 @@ TAB_CONFIGS = [
     {
         "scenario_id": "life_food_plugin",
         "scenario_type": "content",
+        "entry_type": "card",
         "tab_name": "(?i).*life.*",
         "tab_type": "b",
         "screen_context_mode": "new_screen",
@@ -108,6 +109,16 @@ TAB_CONFIGS = [
                 "type": "a",
             }
         ],
+        "entry_match": {
+            "title_patterns": [
+                "(?i)(^food$|food\\.|smart\\s*things\\s*cooking|\\bcooking\\b)",
+            ],
+            "description_patterns": [],
+            "resource_patterns": [
+                "(?i)(preinstalledservicecard|servicecard|food|cook|card|container|item)",
+            ],
+            "allow_description_match": False,
+        },
         "anchor_name": "(?i).*navigate\\s*up.*",
         "anchor_type": "a",
         "anchor": {
