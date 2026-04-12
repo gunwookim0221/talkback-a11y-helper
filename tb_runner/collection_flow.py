@@ -63,7 +63,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr28-generic-container-promotion-salvage-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr27-food-entry-promotion-threshold-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr25-direct-select-post-open-verify-v3"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -1838,7 +1838,6 @@ def _select_visible_plugin_candidate(
             cursor = parent_map.get(id(cursor))
             distance += 1
         scored_candidates: list[tuple[tuple[int, int, int, int, int, int], dict[str, Any], str]] = []
-        containment_override_candidates: list[tuple[tuple[int, int], dict[str, Any], str]] = []
         scored_summary: list[tuple[int, str]] = []
         for action_node, action_bounds, is_card_like in source_nodes:
             a_left, a_top, a_right, a_bottom = action_bounds
@@ -1872,18 +1871,15 @@ def _select_visible_plugin_candidate(
             width_ratio = width / max(1, viewport_right - viewport_left)
             height_ratio = height / max(1, viewport_bottom - viewport_top)
             overly_large_generic = bool(
-                text_area_ratio >= 10.0
+                text_area_ratio >= 8.0
                 and width_ratio >= 0.86
-                and height_ratio >= 0.45
+                and height_ratio >= 0.30
                 and not action_resource
                 and not action_label
                 and _safe_regex_search(r"(?i)relative.?layout", action_class)
             )
             if overly_large_generic:
                 continue
-            if (fully_contains or overlap_ratio >= 800) and _is_actionable(action_node):
-                containment_reason = f"{source_name}_containment_override"
-                containment_override_candidates.append(((center_distance, area), action_node, containment_reason))
             reason = f"{source_name}_nearby_container"
             if fully_contains:
                 reason = f"{source_name}_containment_container"
@@ -1925,19 +1921,6 @@ def _select_visible_plugin_candidate(
             if len(scored_summary) < 12:
                 summary_id = action_resource or action_class or "node"
                 scored_summary.append((sum(score), f"{summary_id}:{reason}:ov={overlap_ratio}:ar={text_area_ratio:.2f}:sp={specificity_score}:ad={ancestor_distance}"))
-        if containment_override_candidates:
-            containment_override_candidates.sort(key=lambda item: item[0])
-            top3_summary = " | ".join(item[1] for item in sorted(scored_summary, key=lambda item: item[0], reverse=True)[:3])
-            selected_node = containment_override_candidates[0][1]
-            selected_reason = containment_override_candidates[0][2]
-            return (
-                selected_node,
-                selected_reason,
-                max(len(scored_candidates), len(containment_override_candidates)),
-                f"{source_name}:containment_override_count={len(containment_override_candidates)}",
-                ancestor_distance,
-                top3_summary,
-            )
         if not scored_candidates:
             return None, "none", 0, f"{source_name}:no_candidate", ancestor_distance, ""
         scored_candidates.sort(reverse=True, key=lambda item: item[0])
@@ -2168,65 +2151,6 @@ def _select_visible_plugin_candidate(
                     promotion_source = "xml_live"
                     ancestor_distance = xml_ancestor_distance
                     rank_summary_top3 = xml_top3
-            if click_node is node and not _is_actionable(click_node) and stats["partial_match_count"] > 0 and promotion_candidate_count >= 1 and matched_text_node:
-                salvage_candidates: list[tuple[tuple[int, int], dict[str, Any]]] = []
-                for xml_node, xml_bounds, _ in xml_actionable_nodes:
-                    if not _is_actionable(xml_node):
-                        continue
-                    x_left, x_top, x_right, x_bottom = xml_bounds
-                    overlap_w = max(0, min(right, x_right) - max(left, x_left))
-                    overlap_h = max(0, min(bottom, x_bottom) - max(top, x_top))
-                    overlap_area = overlap_w * overlap_h
-                    overlap_ratio = int((overlap_area / max(1, node_area)) * 1000)
-                    fully_contains = x_left <= left and x_top <= top and x_right >= right and x_bottom >= bottom
-                    if not fully_contains and overlap_ratio < 800:
-                        continue
-                    xml_resource = str(xml_node.get("viewIdResourceName", "") or xml_node.get("resourceId", "") or "").strip()
-                    xml_class_name = str(xml_node.get("className", "") or "").strip()
-                    xml_area = max(1, (x_right - x_left) * (x_bottom - x_top))
-                    is_fullscreen_like = xml_area >= int(viewport_area * 0.92)
-                    is_excluded_container = bool(
-                        _safe_regex_search(r"(?i)(recycler.?view|root)", f"{xml_resource} {xml_class_name}")
-                    )
-                    if is_fullscreen_like or is_excluded_container:
-                        continue
-                    center_x = (x_left + x_right) // 2
-                    center_y = (x_top + x_bottom) // 2
-                    node_center_x = (left + right) // 2
-                    node_center_y = (top + bottom) // 2
-                    center_distance = abs(center_x - node_center_x) + abs(center_y - node_center_y)
-                    salvage_candidates.append(((center_distance, xml_area), xml_node))
-                if salvage_candidates:
-                    salvage_candidates.sort(key=lambda item: item[0])
-                    promoted_click_node = salvage_candidates[0][1]
-                    click_node = promoted_click_node
-                    promotion_reason = "salvage_fallback"
-                    promotion_source = "xml_live"
-                    log(
-                        "[SCROLLTOUCH][promotion][salvage] matched_text_node='{}' selected_container='{}' reason='{}'".format(
-                            matched_text_node,
-                            str(
-                                promoted_click_node.get("viewIdResourceName", "")
-                                or promoted_click_node.get("resourceId", "")
-                                or promoted_click_node.get("className", "")
-                                or "node"
-                            ).strip(),
-                            "salvage_fallback",
-                        )
-                    )
-        if promoted_click_node is not None and promotion_reason.endswith("containment_override"):
-            log(
-                "[SCROLLTOUCH][promotion][salvage] matched_text_node='{}' selected_container='{}' reason='{}'".format(
-                    matched_text_node,
-                    str(
-                        promoted_click_node.get("viewIdResourceName", "")
-                        or promoted_click_node.get("resourceId", "")
-                        or promoted_click_node.get("className", "")
-                        or "node"
-                    ).strip(),
-                    "containment_override",
-                )
-            )
         if click_node is node and not _is_actionable(click_node):
             _append_rejection(stats, "non_actionable_without_promotion")
             _record_inspect(
