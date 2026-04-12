@@ -65,7 +65,7 @@ COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr31-scrolltouch-candidate-click-result-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
-COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr33-air-entry-contract-top-chrome-guard-v1"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr34-air-entry-contract-list-screen-guard-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -1003,6 +1003,19 @@ def _is_air_verified_entry_context(
         str(stabilize_result.get("fallback_candidate_resource_id", "") or "").strip() if isinstance(stabilize_result, dict) else ""
     )
     fallback_is_top_chrome = _is_negative_post_open_focus_signal(fallback_resource_id, fallback_label, "")
+    list_screen_regex = (
+        r"(?i)(preinstalledservicecard|servicecard|cardtitle|carddescription|divider_text|"
+        r"\b(plants|clothing\s*care|food|energy|pet\s*care|home\s*care)\b)"
+    )
+    post_focus_blob = " ".join([post_view_id, post_label, post_speech]).strip()
+    fallback_blob = " ".join([fallback_resource_id, fallback_label]).strip()
+    if (
+        post_focus_is_top_chrome
+        or fallback_is_top_chrome
+        or _safe_regex_search(list_screen_regex, post_focus_blob)
+        or _safe_regex_search(list_screen_regex, fallback_blob)
+    ):
+        return False, "list_screen_focus"
 
     evidence_candidates: list[tuple[str, str, str]] = [
         (post_view_id, post_label, post_speech),
@@ -1014,17 +1027,15 @@ def _is_air_verified_entry_context(
         ),
     ]
     for evidence_view_id, evidence_label, evidence_speech in evidence_candidates:
-        if not _safe_regex_search(
-            _LIFE_AIR_CARE_VERIFY_REGEX,
-            " ".join([evidence_view_id, evidence_label, evidence_speech]).strip(),
-        ):
+        evidence_blob = " ".join([evidence_view_id, evidence_label, evidence_speech]).strip()
+        if not _safe_regex_search(_LIFE_AIR_CARE_VERIFY_REGEX, evidence_blob):
             continue
         if _is_negative_post_open_focus_signal(evidence_view_id, evidence_label, evidence_speech):
             continue
-        return True, "air_internal_signal"
-    if post_focus_is_top_chrome or fallback_is_top_chrome:
-        return False, "top_chrome_focus"
-    return False, "air_internal_signal_missing"
+        if _safe_regex_search(list_screen_regex, evidence_blob):
+            continue
+        return True, "air_internal_content_signal"
+    return False, "air_internal_content_missing"
 
 
 def _classify_special_post_open_state(
@@ -3912,14 +3923,14 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
                     f"signal='{post_click_transition_signal or 'none'}'"
                 )
     if has_negative_signal and (entry_type == _ENTRY_TYPE_DIRECT_SELECT or fallback_used):
-        if air_verified_entry_context:
+        if air_verified_entry_context and air_verified_entry_reason == "air_internal_content_signal":
             log("[ENTRY][air] false_success_guard bypassed")
         else:
             if (
                 str(scenario_id or "").strip().lower() == _LIFE_AIR_CARE_SCENARIO_ID
-                and air_verified_entry_reason == "top_chrome_focus"
+                and air_verified_entry_reason == "list_screen_focus"
             ):
-                log("[ENTRY][air] rejected false plugin entry due to top_chrome_focus")
+                log("[ENTRY][air] rejected plugin entry due to list_screen_focus")
             log(
                 f"[SCENARIO][entry_contract] failed scenario='{scenario_id}' entry_type='{entry_type}' "
                 f"reason='{_ENTRY_REASON_FALSE_SUCCESS_GUARD}' view_id='{post_view_id}' label='{post_label}'"

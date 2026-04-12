@@ -1997,7 +1997,7 @@ def test_open_scenario_direct_select_blocks_home_button_by_false_success_guard(m
     assert summary.get("entry_contract_reason") == "false_success_guard"
 
 
-def test_open_scenario_air_card_bypasses_false_success_guard_when_verified_transition_and_fallback(monkeypatch):
+def test_open_scenario_air_card_rejects_list_screen_focus_even_with_transition_and_fallback(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(
         collection_flow,
@@ -2036,11 +2036,11 @@ def test_open_scenario_air_card_bypasses_false_success_guard_when_verified_trans
 
     ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
 
-    assert ok is True
+    assert ok is False
     summary = getattr(client, "last_start_open_summary", {})
-    assert summary.get("entry_contract_reason") == "success_verified"
-    assert summary.get("entry_contract_detail") == "plugin_open_verified"
-    assert any("[ENTRY][air] false_success_guard bypassed" in line for line in logs)
+    assert summary.get("entry_contract_reason") == "false_success_guard"
+    assert summary.get("entry_contract_detail") == "negative_post_open_focus"
+    assert any("[ENTRY][air] rejected plugin entry due to list_screen_focus" in line for line in logs)
 
 
 def test_open_scenario_air_card_keeps_false_success_guard_without_transition_verify(monkeypatch):
