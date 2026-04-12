@@ -1,4 +1,4 @@
-SCENARIO_CONFIG_VERSION = "2026.04.12-life-food-hidden-title-inference-v1"
+SCENARIO_CONFIG_VERSION = "2026.04.12-pet-care-scenario-id-rename-v2"
 
 BOTTOM_TAB_GLOBAL_NAV = {
     "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
@@ -113,14 +113,11 @@ TAB_CONFIGS = [
             "title_patterns": [
                 "(?i)(^food$|food\\.|smart\\s*things\\s*cooking|\\bcooking\\b)",
             ],
-            "description_patterns": [
-                "(?i)(smart\\s*things\\s*cooking|\\bcooking\\b)",
-            ],
+            "description_patterns": [],
             "resource_patterns": [
-                "(?i)(preinstalledservicecard|servicecard|card|container|item|tvheadertitle|bodyimage|indicator|pager|dot)",
+                "(?i)(preinstalledservicecard|servicecard|food|cook|card|container|item)",
             ],
-            "allow_description_match": True,
-            "allow_title_hidden_card_inference": True,
+            "allow_description_match": False,
         },
         "anchor_name": "(?i).*navigate\\s*up.*",
         "anchor_type": "a",

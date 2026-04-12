@@ -63,7 +63,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr26-title-hidden-card-inference-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr24-card-entry-generalization-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr25-direct-select-post-open-verify-v3"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -1036,7 +1036,6 @@ def _get_card_entry_spec(tab_cfg: dict[str, Any], target: str) -> dict[str, Any]
         "description_patterns": [str(pattern or "").strip() for pattern in description_patterns if str(pattern or "").strip()],
         "resource_patterns": [str(pattern or "").strip() for pattern in resource_patterns if str(pattern or "").strip()],
         "allow_description_match": bool(entry_match.get("allow_description_match")),
-        "allow_title_hidden_card_inference": bool(entry_match.get("allow_title_hidden_card_inference")),
     }
 
 
@@ -1747,7 +1746,6 @@ def _select_visible_plugin_candidate(
     description_patterns = [str(pattern or "").strip() for pattern in card_entry_spec.get("description_patterns", []) if str(pattern or "").strip()]
     resource_patterns = [str(pattern or "").strip() for pattern in card_entry_spec.get("resource_patterns", []) if str(pattern or "").strip()]
     allow_description_match = bool(card_entry_spec.get("allow_description_match"))
-    allow_title_hidden_card_inference = bool(card_entry_spec.get("allow_title_hidden_card_inference"))
     if not title_patterns:
         title_patterns = [str(target or "").strip()]
     target_tokens: list[str] = []
@@ -1812,56 +1810,6 @@ def _select_visible_plugin_candidate(
             )
             if xml_clickable or xml_is_card_like:
                 xml_actionable_nodes.append((xml_candidate_node, xml_bounds, xml_is_card_like))
-
-    structure_evidence_cache: dict[int, dict[str, Any]] = {}
-
-    def _collect_structure_evidence(container_node: dict[str, Any]) -> dict[str, Any]:
-        cache_key = id(container_node)
-        cached = structure_evidence_cache.get(cache_key)
-        if isinstance(cached, dict):
-            return cached
-        has_text_descendant = False
-        has_image_descendant = False
-        has_indicator_descendant = False
-        descendant_resource_parts: list[str] = []
-        text_descendant_count = 0
-        image_descendant_count = 0
-        for descendant_node, _ in _iter_tree_nodes_with_parent([container_node]):
-            if descendant_node is container_node:
-                continue
-            if not _node_is_visible(descendant_node):
-                continue
-            descendant_resource = str(
-                descendant_node.get("viewIdResourceName", "") or descendant_node.get("resourceId", "") or ""
-            ).strip()
-            descendant_class = str(descendant_node.get("className", "") or "").strip()
-            if descendant_resource:
-                descendant_resource_parts.append(descendant_resource)
-            if descendant_class:
-                descendant_resource_parts.append(descendant_class)
-            descendant_text = _node_label_blob(descendant_node)
-            if descendant_text:
-                has_text_descendant = True
-                text_descendant_count += 1
-            image_like = bool(
-                _safe_regex_search(r"(?i)(imageview|imagebutton)", descendant_class)
-                or _safe_regex_search(r"(?i)(image|thumbnail|illustration|photo|hero|poster)", descendant_resource)
-            )
-            if image_like:
-                has_image_descendant = True
-                image_descendant_count += 1
-            if _safe_regex_search(r"(?i)(indicator|pager|dot)", descendant_resource):
-                has_indicator_descendant = True
-        evidence = {
-            "has_text_descendant": has_text_descendant,
-            "has_image_descendant": has_image_descendant,
-            "has_indicator_descendant": has_indicator_descendant,
-            "text_descendant_count": text_descendant_count,
-            "image_descendant_count": image_descendant_count,
-            "descendant_resource_blob": " ".join(descendant_resource_parts),
-        }
-        structure_evidence_cache[cache_key] = evidence
-        return evidence
 
     def _select_promoted_container(
         *,
@@ -2040,29 +1988,7 @@ def _select_visible_plugin_candidate(
         description_semantic_match = allow_description_match and any(
             _safe_regex_search(pattern, pre_semantic_blob) for pattern in description_patterns
         )
-        structure_evidence = _collect_structure_evidence(click_node)
-        pre_resource_blob = " ".join(
-            part
-            for part in [
-                str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip(),
-                str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "").strip(),
-                str(structure_evidence.get("descendant_resource_blob", "") or "").strip(),
-            ]
-            if part
-        ).strip()
-        pre_resource_semantic_match = any(_safe_regex_search(pattern, pre_resource_blob) for pattern in resource_patterns)
-        hidden_title_structure_match = bool(
-            allow_title_hidden_card_inference
-            and not title_semantic_match
-            and pre_resource_semantic_match
-            and bool(structure_evidence.get("has_text_descendant"))
-            and bool(structure_evidence.get("has_image_descendant"))
-            and (
-                bool(structure_evidence.get("has_indicator_descendant"))
-                or int(structure_evidence.get("text_descendant_count", 0) or 0) >= 2
-            )
-        )
-        if not (title_semantic_match or description_semantic_match or hidden_title_structure_match):
+        if not (title_semantic_match or description_semantic_match):
             _append_rejection(stats, "filtered_before_candidate")
             _record_inspect(
                 stats,
@@ -2142,7 +2068,6 @@ def _select_visible_plugin_candidate(
             [
                 str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip(),
                 str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "").strip(),
-                str(structure_evidence.get("descendant_resource_blob", "") or "").strip(),
             ]
         ).strip()
         title_semantic_match = any(_safe_regex_search(pattern, title_blob) or _safe_regex_search(pattern, semantic_blob) for pattern in title_patterns)
@@ -2165,8 +2090,6 @@ def _select_visible_plugin_candidate(
             and any(_safe_regex_search(pattern, click_descendant_blob) for pattern in title_patterns)
         )
         semantic_match = bool(title_semantic_match or description_semantic_match or resource_semantic_match or container_title_match)
-        if not semantic_match and hidden_title_structure_match:
-            semantic_match = True
         if not semantic_match:
             _append_rejection(stats, "semantic_miss")
             _record_inspect(
