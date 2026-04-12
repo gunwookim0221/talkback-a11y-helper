@@ -1,4 +1,4 @@
-SCENARIO_CONFIG_VERSION = "2026.04.12-food-entry-and-promotion-threshold-v1"
+SCENARIO_CONFIG_VERSION = "2026.04.12-life-plugin-entry-scenarios-v1"
 
 BOTTOM_TAB_GLOBAL_NAV = {
     "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
@@ -606,6 +606,265 @@ TAB_CONFIGS = [
         "context_verify": {
             "type": "screen_text",
             "text_regex": "(?i).*pet\\s*care.*|.*pet'?s\\s*profile.*|.*펫\\s*케어.*",
+        },
+        "enabled": False,
+        "max_steps": 20,
+    },
+    {
+        "scenario_id": "life_family_care_plugin",
+        "scenario_type": "content",
+        "entry_type": "card",
+        "tab_name": "(?i).*life.*",
+        "tab_type": "b",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "pre_navigation": [
+            {
+                "action": "scrolltouch",
+                "target": "(?i)(^family\\s*care$|.*family\\s*care.*|.*패밀리\\s*케어.*)",
+                "type": "a",
+            }
+        ],
+        "entry_match": {
+            "title_patterns": [
+                "(?i)(^family\\s*care$|.*family\\s*care.*|.*패밀리\\s*케어.*)",
+            ],
+            "description_patterns": [],
+            "resource_patterns": [],
+            "allow_description_match": True,
+        },
+        "anchor_name": "(?i).*navigate\\s*up.*",
+        "anchor_type": "a",
+        "anchor": {
+            "text_regex": "(?i).*navigate\\s*up.*",
+            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "tie_breaker": "top_left",
+        },
+        "context_verify": {
+            "type": "screen_text",
+            "text_regex": "(?i).*family\\s*care.*|.*패밀리\\s*케어.*",
+        },
+        "enabled": False,
+        "max_steps": 20,
+    },
+    {
+        "scenario_id": "life_plant_care_plugin",
+        "scenario_type": "content",
+        "entry_type": "card",
+        "tab_name": "(?i).*life.*",
+        "tab_type": "b",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "pre_navigation": [
+            {
+                "action": "scrolltouch",
+                "target": "(?i)(^plant\\s*care$|.*plant\\s*care.*|.*플랜트\\s*케어.*|.*식물.*)",
+                "type": "a",
+            }
+        ],
+        "entry_match": {
+            "title_patterns": [
+                "(?i)(^plant\\s*care$|.*plant\\s*care.*|.*플랜트\\s*케어.*|.*식물.*)",
+            ],
+            "description_patterns": [],
+            "resource_patterns": [],
+            "allow_description_match": True,
+        },
+        "anchor_name": "(?i).*navigate\\s*up.*",
+        "anchor_type": "a",
+        "anchor": {
+            "text_regex": "(?i).*navigate\\s*up.*",
+            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "tie_breaker": "top_left",
+        },
+        "context_verify": {
+            "type": "screen_text",
+            "text_regex": "(?i).*plant\\s*care.*|.*플랜트\\s*케어.*|.*식물.*",
+        },
+        "enabled": False,
+        "max_steps": 20,
+    },
+    {
+        "scenario_id": "life_clothing_care_plugin",
+        "scenario_type": "content",
+        "entry_type": "card",
+        "tab_name": "(?i).*life.*",
+        "tab_type": "b",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "pre_navigation": [
+            {
+                "action": "scrolltouch",
+                "target": "(?i)(^clothing\\s*care$|.*clothing\\s*care.*|.*shoe\\s*care.*|.*의류.*)",
+                "type": "a",
+            }
+        ],
+        "entry_match": {
+            "title_patterns": [
+                "(?i)(^clothing\\s*care$|.*clothing\\s*care.*|.*shoe\\s*care.*|.*의류.*)",
+            ],
+            "description_patterns": [],
+            "resource_patterns": [],
+            "allow_description_match": True,
+        },
+        "anchor_name": "(?i).*navigate\\s*up.*",
+        "anchor_type": "a",
+        "anchor": {
+            "text_regex": "(?i).*navigate\\s*up.*",
+            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "tie_breaker": "top_left",
+        },
+        "context_verify": {
+            "type": "screen_text",
+            "text_regex": "(?i).*clothing\\s*care.*|.*shoe\\s*care.*|.*의류.*",
+        },
+        "enabled": False,
+        "max_steps": 20,
+    },
+    {
+        "scenario_id": "life_find_plugin",
+        "scenario_type": "content",
+        "entry_type": "card",
+        "tab_name": "(?i).*life.*",
+        "tab_type": "b",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "pre_navigation": [
+            {
+                "action": "scrolltouch",
+                "target": "(?i)(^smart\\s*find$|^find$|smart\\s*find\\.|.*smart\\s*find.*)",
+                "type": "a",
+            }
+        ],
+        "entry_match": {
+            "title_patterns": [
+                "(?i)(^smart\\s*find$|^find$|smart\\s*find\\.|.*smart\\s*find.*)",
+            ],
+            "description_patterns": [],
+            "resource_patterns": [],
+            "allow_description_match": True,
+        },
+        "anchor_name": "(?i).*navigate\\s*up.*",
+        "anchor_type": "a",
+        "anchor": {
+            "text_regex": "(?i).*navigate\\s*up.*",
+            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "tie_breaker": "top_left",
+        },
+        "context_verify": {
+            "type": "screen_text",
+            "text_regex": "(?i).*smart\\s*find.*|^find$|.*find\\s*my\\s*(mobile|device|tag).*$",
+        },
+        "enabled": False,
+        "max_steps": 20,
+    },
+    {
+        "scenario_id": "life_video_plugin",
+        "scenario_type": "content",
+        "entry_type": "card",
+        "tab_name": "(?i).*life.*",
+        "tab_type": "b",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "pre_navigation": [
+            {
+                "action": "scrolltouch",
+                "target": "(?i)(^video$|^smart\\s*video$|smart\\s*video\\.|.*smart\\s*video.*)",
+                "type": "a",
+            }
+        ],
+        "entry_match": {
+            "title_patterns": [
+                "(?i)(^video$|^smart\\s*video$|smart\\s*video\\.|.*smart\\s*video.*)",
+            ],
+            "description_patterns": [],
+            "resource_patterns": [],
+            "allow_description_match": True,
+        },
+        "anchor_name": "(?i).*navigate\\s*up.*",
+        "anchor_type": "a",
+        "anchor": {
+            "text_regex": "(?i).*navigate\\s*up.*",
+            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "tie_breaker": "top_left",
+        },
+        "context_verify": {
+            "type": "screen_text",
+            "text_regex": "(?i).*video.*",
+        },
+        "enabled": False,
+        "max_steps": 20,
+    },
+    {
+        "scenario_id": "life_home_monitor_plugin",
+        "scenario_type": "content",
+        "entry_type": "card",
+        "tab_name": "(?i).*life.*",
+        "tab_type": "b",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "pre_navigation": [
+            {
+                "action": "scrolltouch",
+                "target": "(?i)(^home\\s*monitor$|.*home\\s*monitor.*)",
+                "type": "a",
+            }
+        ],
+        "entry_match": {
+            "title_patterns": [
+                "(?i)(^home\\s*monitor$|.*home\\s*monitor.*)",
+            ],
+            "description_patterns": [],
+            "resource_patterns": [],
+            "allow_description_match": True,
+        },
+        "anchor_name": "(?i).*navigate\\s*up.*",
+        "anchor_type": "a",
+        "anchor": {
+            "text_regex": "(?i).*navigate\\s*up.*",
+            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "tie_breaker": "top_left",
+        },
+        "context_verify": {
+            "type": "screen_text",
+            "text_regex": "(?i).*home\\s*monitor.*",
+        },
+        "enabled": False,
+        "max_steps": 20,
+    },
+    {
+        "scenario_id": "life_music_sync_plugin",
+        "scenario_type": "content",
+        "entry_type": "card",
+        "tab_name": "(?i).*life.*",
+        "tab_type": "b",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "pre_navigation": [
+            {
+                "action": "scrolltouch",
+                "target": "(?i)(^music\\s*sync$|.*music\\s*sync.*)",
+                "type": "a",
+            }
+        ],
+        "entry_match": {
+            "title_patterns": [
+                "(?i)(^music\\s*sync$|.*music\\s*sync.*)",
+            ],
+            "description_patterns": [],
+            "resource_patterns": [],
+            "allow_description_match": True,
+        },
+        "anchor_name": "(?i).*navigate\\s*up.*",
+        "anchor_type": "a",
+        "anchor": {
+            "text_regex": "(?i).*navigate\\s*up.*",
+            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "tie_breaker": "top_left",
+        },
+        "context_verify": {
+            "type": "screen_text",
+            "text_regex": "(?i).*music\\s*sync.*",
         },
         "enabled": False,
         "max_steps": 20,
