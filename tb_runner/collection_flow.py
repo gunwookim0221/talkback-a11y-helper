@@ -63,7 +63,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr27-food-entry-promotion-threshold-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr28-scrolltouch-card-parent-promotion-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr25-direct-select-post-open-verify-v3"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -1704,6 +1704,8 @@ def _select_visible_plugin_candidate(
         "visible_candidate_count": 0,
         "partial_match_count": 0,
         "exact_match_count": 0,
+        "rejected_large_container_count": 0,
+        "rejected_list_like_container_count": 0,
         "visible_samples": [],
         "partial_samples": [],
         "inspect_samples": [],
@@ -1723,6 +1725,9 @@ def _select_visible_plugin_candidate(
         "matched_text_area": 0,
         "selected_to_text_area_ratio": 0.0,
         "ancestor_distance": -1,
+        "selected_ancestor_distance": -1,
+        "selected_container_class": "",
+        "selected_container_view_id": "",
         "tap_point": "",
         "tap_strategy": "center",
         "rank_summary_top3": "",
@@ -1828,9 +1833,11 @@ def _select_visible_plugin_candidate(
         viewport_area = max(1, (viewport_right - viewport_left) * max(1, viewport_b - viewport_t))
         nearest_actionable_ancestor: dict[str, Any] | None = None
         ancestor_distance = -1
+        ancestor_distance_by_node_id: dict[int, int] = {}
         cursor = parent_map.get(id(matched_node))
         distance = 1
         while isinstance(cursor, dict) and distance <= 8:
+            ancestor_distance_by_node_id[id(cursor)] = distance
             if _is_actionable(cursor):
                 nearest_actionable_ancestor = cursor
                 ancestor_distance = distance
@@ -1857,9 +1864,23 @@ def _select_visible_plugin_candidate(
             center_y = (a_top + a_bottom) // 2
             center_distance = abs(center_x - node_center_x) + abs(center_y - node_center_y)
             action_clickable = _is_actionable(action_node)
+            if not action_clickable:
+                continue
             action_resource = str(action_node.get("viewIdResourceName", "") or action_node.get("resourceId", "") or "").strip()
             action_class = str(action_node.get("className", "") or "").strip()
             action_label = _node_label_blob(action_node)
+            lower_rid = action_resource.lower()
+            lower_cls = action_class.lower()
+            is_list_like_container = bool(
+                _safe_regex_search(r"(?i)(recycler.?view|grid.?view|list.?view|viewpager|pager|scroll.?view)", action_resource)
+                or _safe_regex_search(r"(?i)(recycler.?view|grid.?view|list.?view|viewpager|pager|scroll.?view)", action_class)
+                or lower_rid.endswith("/recycler_view")
+                or lower_rid.endswith(":id/recycler_view")
+                or lower_cls.endswith("recyclerview")
+            )
+            if is_list_like_container:
+                stats["rejected_list_like_container_count"] += 1
+                continue
             has_container_hint = bool(
                 _safe_regex_search(r"(?i)(card|container|layout|frame|root|item)", action_resource)
                 or _safe_regex_search(r"(?i)(card|container|layout|frame|root|item)", action_class)
@@ -1870,6 +1891,9 @@ def _select_visible_plugin_candidate(
             text_area_ratio = area / float(node_area)
             width_ratio = width / max(1, viewport_right - viewport_left)
             height_ratio = height / max(1, viewport_bottom - viewport_top)
+            candidate_ancestor_distance = int(ancestor_distance_by_node_id.get(id(action_node), 999))
+            if candidate_ancestor_distance > 6:
+                candidate_ancestor_distance = 999
             overly_large_generic = bool(
                 text_area_ratio >= 8.0
                 and width_ratio >= 0.86
@@ -1878,7 +1902,16 @@ def _select_visible_plugin_candidate(
                 and not action_label
                 and _safe_regex_search(r"(?i)relative.?layout", action_class)
             )
-            if overly_large_generic:
+            is_large_container = bool(
+                area > int(viewport_area * 0.70)
+                or (width_ratio >= 0.95 and height_ratio >= 0.55)
+                or text_area_ratio >= 10.0
+                or overly_large_generic
+            )
+            if is_large_container:
+                stats["rejected_large_container_count"] += 1
+                continue
+            if candidate_ancestor_distance == 999 and not (fully_contains and (has_container_hint or is_card_like)):
                 continue
             reason = f"{source_name}_nearby_container"
             if fully_contains:
@@ -1909,26 +1942,47 @@ def _select_visible_plugin_candidate(
                     ancestor_priority = 4
                 else:
                     ancestor_priority = -1
+            card_size_delta = abs(text_area_ratio - 3.2)
             score = (
-                ancestor_priority,
-                1 if action_clickable else 0,
-                specificity_score,
-                1 if has_container_hint else 0,
-                overlap_ratio + (area_penalty * 100),
-                -center_distance,
+                1 if candidate_ancestor_distance < 999 else 0,
+                -candidate_ancestor_distance,
+                -int(card_size_delta * 100),
+                1 if not is_large_container else 0,
+                ancestor_priority + specificity_score + (1 if has_container_hint else 0),
+                overlap_ratio + (area_penalty * 100) - center_distance,
             )
             scored_candidates.append((score, action_node, reason))
             if len(scored_summary) < 12:
                 summary_id = action_resource or action_class or "node"
-                scored_summary.append((sum(score), f"{summary_id}:{reason}:ov={overlap_ratio}:ar={text_area_ratio:.2f}:sp={specificity_score}:ad={ancestor_distance}"))
+                scored_summary.append(
+                    (
+                        sum(score),
+                        f"{summary_id}:{reason}:ov={overlap_ratio}:ar={text_area_ratio:.2f}:sp={specificity_score}:ad={candidate_ancestor_distance}",
+                    )
+                )
         if not scored_candidates:
-            return None, "none", 0, f"{source_name}:no_candidate", ancestor_distance, ""
+            return (
+                None,
+                "none",
+                0,
+                f"{source_name}:no_candidate:rejected_large={int(stats.get('rejected_large_container_count', 0) or 0)}:rejected_list_like={int(stats.get('rejected_list_like_container_count', 0) or 0)}",
+                ancestor_distance,
+                "",
+            )
         scored_candidates.sort(reverse=True, key=lambda item: item[0])
         scored_summary.sort(key=lambda item: item[0], reverse=True)
         top3_summary = " | ".join(item[1] for item in scored_summary[:3])
         best_node = scored_candidates[0][1]
         best_reason = scored_candidates[0][2]
-        return best_node, best_reason, len(scored_candidates), f"{source_name}:candidate_count={len(scored_candidates)}", ancestor_distance, top3_summary
+        best_distance = int(ancestor_distance_by_node_id.get(id(best_node), ancestor_distance if ancestor_distance >= 0 else 999))
+        return (
+            best_node,
+            best_reason,
+            len(scored_candidates),
+            f"{source_name}:candidate_count={len(scored_candidates)}:rejected_large={int(stats.get('rejected_large_container_count', 0) or 0)}:rejected_list_like={int(stats.get('rejected_list_like_container_count', 0) or 0)}",
+            best_distance,
+            top3_summary,
+        )
 
     candidates: list[tuple[tuple[int, int, int, int], dict[str, Any], dict[str, Any]]] = []
     for node, parent in flat_nodes:
@@ -2151,6 +2205,20 @@ def _select_visible_plugin_candidate(
                     promotion_source = "xml_live"
                     ancestor_distance = xml_ancestor_distance
                     rank_summary_top3 = xml_top3
+            selected_container_class = str(click_node.get("className", "") or "").strip()
+            selected_container_view_id = str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "").strip()
+            log(
+                "[SCROLLTOUCH][promotion][salvage] source='{}' reason='{}' selected_ancestor_distance={} selected_container_class='{}' selected_container_view_id='{}' "
+                "rejected_large_container_count={} rejected_list_like_container_count={}".format(
+                    promotion_source,
+                    promotion_reason,
+                    int(ancestor_distance),
+                    selected_container_class[:48],
+                    selected_container_view_id[:64],
+                    int(stats.get("rejected_large_container_count", 0) or 0),
+                    int(stats.get("rejected_list_like_container_count", 0) or 0),
+                )
+            )
         if click_node is node and not _is_actionable(click_node):
             _append_rejection(stats, "non_actionable_without_promotion")
             _record_inspect(
@@ -2251,6 +2319,9 @@ def _select_visible_plugin_candidate(
             "matched_text_area": matched_text_area,
             "selected_to_text_area_ratio": area_ratio,
             "ancestor_distance": ancestor_distance,
+            "selected_ancestor_distance": ancestor_distance,
+            "selected_container_class": class_name,
+            "selected_container_view_id": card_resource,
             "tap_point": f"{tap_x},{tap_y}",
             "tap_strategy": tap_strategy,
             "rank_summary_top3": rank_summary_top3,
