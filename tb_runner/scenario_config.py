@@ -1,4 +1,4 @@
-SCENARIO_CONFIG_VERSION = "2026.04.12-pet-care-scenario-id-rename-v2"
+SCENARIO_CONFIG_VERSION = "2026.04.12-food-entry-and-promotion-threshold-v1"
 
 BOTTOM_TAB_GLOBAL_NAV = {
     "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
@@ -113,11 +113,13 @@ TAB_CONFIGS = [
             "title_patterns": [
                 "(?i)(^food$|food\\.|smart\\s*things\\s*cooking|\\bcooking\\b)",
             ],
-            "description_patterns": [],
+            "description_patterns": [
+                "(?i)(smart\\s*things\\s*cooking|\\bcooking\\b|\\bmeal\\b|\\brecipe\\b|barcode\\s*scan|kitchen\\s*appliance)",
+            ],
             "resource_patterns": [
                 "(?i)(preinstalledservicecard|servicecard|food|cook|card|container|item)",
             ],
-            "allow_description_match": False,
+            "allow_description_match": True,
         },
         "anchor_name": "(?i).*navigate\\s*up.*",
         "anchor_type": "a",

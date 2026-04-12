@@ -63,7 +63,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr24-card-entry-generalization-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr27-food-entry-promotion-threshold-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr25-direct-select-post-open-verify-v3"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -1851,7 +1851,7 @@ def _select_visible_plugin_candidate(
             overlap_h = max(0, min(bottom, a_bottom) - max(top, a_top))
             overlap_area = overlap_w * overlap_h
             overlap_ratio = int((overlap_area / node_area) * 1000)
-            if not fully_contains and overlap_ratio < 280:
+            if not fully_contains and overlap_ratio < 220:
                 continue
             center_x = (a_left + a_right) // 2
             center_y = (a_top + a_bottom) // 2
@@ -1871,9 +1871,9 @@ def _select_visible_plugin_candidate(
             width_ratio = width / max(1, viewport_right - viewport_left)
             height_ratio = height / max(1, viewport_bottom - viewport_top)
             overly_large_generic = bool(
-                text_area_ratio >= 6.0
+                text_area_ratio >= 8.0
                 and width_ratio >= 0.86
-                and height_ratio >= 0.26
+                and height_ratio >= 0.30
                 and not action_resource
                 and not action_label
                 and _safe_regex_search(r"(?i)relative.?layout", action_class)
