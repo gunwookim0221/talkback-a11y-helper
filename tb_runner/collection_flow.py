@@ -63,7 +63,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr28-scrolltouch-card-parent-promotion-v2"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr28-scrolltouch-card-parent-promotion-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr25-direct-select-post-open-verify-v3"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -1831,59 +1831,17 @@ def _select_visible_plugin_candidate(
         node_center_x = (left + right) // 2
         node_center_y = (top + bottom) // 2
         viewport_area = max(1, (viewport_right - viewport_left) * max(1, viewport_b - viewport_t))
-        def _is_root_like_container(node_ref: dict[str, Any], bounds_ref: tuple[int, int, int, int]) -> bool:
-            n_left, n_top, n_right, n_bottom = bounds_ref
-            n_width = max(1, n_right - n_left)
-            n_height = max(1, n_bottom - n_top)
-            width_ratio = n_width / max(1, viewport_right - viewport_left)
-            height_ratio = n_height / max(1, viewport_bottom - viewport_top)
-            area_ratio = (n_width * n_height) / float(viewport_area)
-            node_resource = str(node_ref.get("viewIdResourceName", "") or node_ref.get("resourceId", "") or "").strip()
-            node_class = str(node_ref.get("className", "") or "").strip()
-            node_label = _node_label_blob(node_ref)
-            is_list_like = bool(
-                _safe_regex_search(r"(?i)(recycler.?view|grid.?view|list.?view|viewpager|pager|scroll.?view)", node_resource)
-                or _safe_regex_search(r"(?i)(recycler.?view|grid.?view|list.?view|viewpager|pager|scroll.?view)", node_class)
-            )
-            if is_list_like:
-                return True
-            return bool(
-                width_ratio >= 0.985
-                and height_ratio >= 0.92
-                and area_ratio >= 0.90
-                and (
-                    not node_resource
-                    or _safe_regex_search(r"(?i)(root|content|container|main|fragment|activity)", node_resource)
-                )
-                and (
-                    not node_label
-                    or _safe_regex_search(r"(?i)(home|life|devices|routines)", node_label)
-                )
-            )
-
         nearest_actionable_ancestor: dict[str, Any] | None = None
         ancestor_distance = -1
         ancestor_distance_by_node_id: dict[int, int] = {}
-        fallback_root: dict[str, Any] | None = matched_node
-        if not isinstance(parent_map.get(id(matched_node)), dict) and source_name == "xml_live":
-            matched_blob = _node_label_blob(matched_node)
-            for xml_node, _ in xml_flat_nodes:
-                xml_bounds = str(xml_node.get("boundsInScreen", "") or "").strip()
-                if xml_bounds != str(matched_node.get("boundsInScreen", "") or "").strip():
-                    continue
-                if _node_label_blob(xml_node) == matched_blob:
-                    fallback_root = xml_node
-                    break
-        cursor = parent_map.get(id(fallback_root))
+        cursor = parent_map.get(id(matched_node))
         distance = 1
         while isinstance(cursor, dict) and distance <= 8:
             ancestor_distance_by_node_id[id(cursor)] = distance
             if _is_actionable(cursor):
-                cursor_bounds = parse_bounds_str(str(cursor.get("boundsInScreen", "") or "").strip())
-                if cursor_bounds and not _is_root_like_container(cursor, cursor_bounds):
-                    nearest_actionable_ancestor = cursor
-                    ancestor_distance = distance
-                    break
+                nearest_actionable_ancestor = cursor
+                ancestor_distance = distance
+                break
             cursor = parent_map.get(id(cursor))
             distance += 1
         scored_candidates: list[tuple[tuple[int, int, int, int, int, int], dict[str, Any], str]] = []
@@ -1945,8 +1903,8 @@ def _select_visible_plugin_candidate(
                 and _safe_regex_search(r"(?i)relative.?layout", action_class)
             )
             is_large_container = bool(
-                area > int(viewport_area * 0.92)
-                or (width_ratio >= 0.985 and height_ratio >= 0.90)
+                area > int(viewport_area * 0.70)
+                or (width_ratio >= 0.95 and height_ratio >= 0.55)
                 or text_area_ratio >= 10.0
                 or overly_large_generic
             )
@@ -2003,39 +1961,6 @@ def _select_visible_plugin_candidate(
                     )
                 )
         if not scored_candidates:
-            if isinstance(nearest_actionable_ancestor, dict):
-                nearest_bounds = parse_bounds_str(str(nearest_actionable_ancestor.get("boundsInScreen", "") or "").strip())
-                if nearest_bounds and not _is_root_like_container(nearest_actionable_ancestor, nearest_bounds):
-                    nearest_class = str(nearest_actionable_ancestor.get("className", "") or "").strip()
-                    nearest_rid = str(
-                        nearest_actionable_ancestor.get("viewIdResourceName", "")
-                        or nearest_actionable_ancestor.get("resourceId", "")
-                        or ""
-                    ).strip()
-                    log(
-                        "[SCROLLTOUCH][promotion][ancestor_fallback] matched_text_node='{}' selected_container='{}|{}|{}' "
-                        "ancestor_distance={} reason='closest_actionable_ancestor' source='{}'".format(
-                            str(
-                                matched_node.get("viewIdResourceName", "")
-                                or matched_node.get("resourceId", "")
-                                or matched_node.get("className", "")
-                                or "node"
-                            ).strip()[:72],
-                            nearest_class[:48],
-                            nearest_rid[:64],
-                            str(nearest_actionable_ancestor.get("boundsInScreen", "") or "").strip()[:40],
-                            int(ancestor_distance),
-                            source_name,
-                        )
-                    )
-                    return (
-                        nearest_actionable_ancestor,
-                        f"{source_name}_closest_actionable_ancestor",
-                        1,
-                        f"{source_name}:ancestor_fallback:rejected_large={int(stats.get('rejected_large_container_count', 0) or 0)}:rejected_list_like={int(stats.get('rejected_list_like_container_count', 0) or 0)}",
-                        ancestor_distance,
-                        f"ancestor_fallback:{nearest_rid or nearest_class or 'node'}:ad={ancestor_distance}",
-                    )
             return (
                 None,
                 "none",
