@@ -63,7 +63,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr28-scrolltouch-card-parent-promotion-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr29-scrolltouch-xml-ancestor-fallback-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr25-direct-select-post-open-verify-v3"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -1824,6 +1824,7 @@ def _select_visible_plugin_candidate(
         source_nodes: list[tuple[dict[str, Any], tuple[int, int, int, int], bool]],
         source_name: str,
         parent_map: dict[int, dict[str, Any]],
+        source_flat_nodes: list[tuple[dict[str, Any], dict[str, Any] | None]] | None = None,
     ) -> tuple[dict[str, Any] | None, str, int, str, int, str]:
         left, top, right, bottom = node_bounds
         viewport_t, viewport_b = viewport_bounds
@@ -1834,17 +1835,73 @@ def _select_visible_plugin_candidate(
         nearest_actionable_ancestor: dict[str, Any] | None = None
         ancestor_distance = -1
         ancestor_distance_by_node_id: dict[int, int] = {}
-        cursor = parent_map.get(id(matched_node))
+        trace_lines: list[str] = []
+        matched_view_id = str(
+            matched_node.get("viewIdResourceName", "") or matched_node.get("resourceId", "") or matched_node.get("className", "") or "node"
+        ).strip()
+        matched_bounds_repr = f"{left},{top},{right},{bottom}"
+
+        matched_reference_node = matched_node
+        if source_name == "xml_live" and source_flat_nodes:
+            matched_label = _node_label_blob(matched_node)
+            normalized_matched_label = re.sub(r"\s+", " ", matched_label).strip().lower()
+            best_xml_node: dict[str, Any] | None = None
+            best_xml_score = -1
+            for xml_node, _ in source_flat_nodes:
+                xml_bounds = parse_bounds_str(str(xml_node.get("boundsInScreen", "") or "").strip())
+                if not xml_bounds or xml_bounds != node_bounds:
+                    continue
+                xml_label = _node_label_blob(xml_node)
+                normalized_xml_label = re.sub(r"\s+", " ", xml_label).strip().lower()
+                score = 1
+                if normalized_matched_label and normalized_xml_label and normalized_matched_label == normalized_xml_label:
+                    score += 2
+                if score > best_xml_score:
+                    best_xml_score = score
+                    best_xml_node = xml_node
+            if isinstance(best_xml_node, dict):
+                matched_reference_node = best_xml_node
+
+        cursor = parent_map.get(id(matched_reference_node))
         distance = 1
         while isinstance(cursor, dict) and distance <= 8:
             ancestor_distance_by_node_id[id(cursor)] = distance
+            trace_lines.append(
+                "depth={} class={} clickable={} focusable={} view_id={}".format(
+                    distance,
+                    str(cursor.get("className", "") or "").strip() or "-",
+                    str(bool(cursor.get("clickable"))).lower(),
+                    str(bool(cursor.get("focusable"))).lower(),
+                    str(cursor.get("viewIdResourceName", "") or cursor.get("resourceId", "") or "").strip() or "-",
+                )
+            )
             if _is_actionable(cursor):
                 nearest_actionable_ancestor = cursor
                 ancestor_distance = distance
                 break
             cursor = parent_map.get(id(cursor))
             distance += 1
+        trace_summary = " | ".join(trace_lines) if trace_lines else "empty"
+
+        def _is_excluded_ancestor(node: dict[str, Any], distance: int) -> bool:
+            class_name = str(node.get("className", "") or "").strip()
+            resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
+            if _safe_regex_search(r"(?i)(recycler.?view|grid.?view|list.?view)", class_name) or _safe_regex_search(
+                r"(?i)(recycler.?view|grid.?view|list.?view)", resource_id
+            ):
+                return True
+            node_bounds = parse_bounds_str(str(node.get("boundsInScreen", "") or "").strip())
+            if node_bounds:
+                n_left, n_top, n_right, n_bottom = node_bounds
+                node_area = max(1, (n_right - n_left) * (n_bottom - n_top))
+                if node_area > int(viewport_area * 0.94):
+                    return True
+            if distance >= 7 and not resource_id and not _node_label_blob(node):
+                return True
+            return False
+
         scored_candidates: list[tuple[tuple[int, int, int, int, int, int], dict[str, Any], str]] = []
+        containment_candidates: list[tuple[tuple[int, int, int, int, int, int], dict[str, Any], str]] = []
         scored_summary: list[tuple[int, str]] = []
         for action_node, action_bounds, is_card_like in source_nodes:
             a_left, a_top, a_right, a_bottom = action_bounds
@@ -1952,6 +2009,8 @@ def _select_visible_plugin_candidate(
                 overlap_ratio + (area_penalty * 100) - center_distance,
             )
             scored_candidates.append((score, action_node, reason))
+            if fully_contains:
+                containment_candidates.append((score, action_node, reason))
             if len(scored_summary) < 12:
                 summary_id = action_resource or action_class or "node"
                 scored_summary.append(
@@ -1960,7 +2019,56 @@ def _select_visible_plugin_candidate(
                         f"{summary_id}:{reason}:ov={overlap_ratio}:ar={text_area_ratio:.2f}:sp={specificity_score}:ad={candidate_ancestor_distance}",
                     )
                 )
+        scored_summary.sort(key=lambda item: item[0], reverse=True)
+        top3_summary = " | ".join(item[1] for item in scored_summary[:3])
+        if containment_candidates:
+            containment_candidates.sort(reverse=True, key=lambda item: item[0])
+            best_node = containment_candidates[0][1]
+            best_reason = containment_candidates[0][2]
+            best_distance = int(ancestor_distance_by_node_id.get(id(best_node), ancestor_distance if ancestor_distance >= 0 else 999))
+            return (
+                best_node,
+                best_reason,
+                len(containment_candidates),
+                f"{source_name}:containment_candidate_count={len(containment_candidates)}:rejected_large={int(stats.get('rejected_large_container_count', 0) or 0)}:rejected_list_like={int(stats.get('rejected_list_like_container_count', 0) or 0)}",
+                best_distance,
+                top3_summary,
+            )
+        if isinstance(nearest_actionable_ancestor, dict) and source_name == "xml_live":
+            if not _is_excluded_ancestor(nearest_actionable_ancestor, ancestor_distance):
+                selected_class = str(nearest_actionable_ancestor.get("className", "") or "").strip()
+                selected_view_id = str(
+                    nearest_actionable_ancestor.get("viewIdResourceName", "") or nearest_actionable_ancestor.get("resourceId", "") or ""
+                ).strip()
+                log(
+                    "[SCROLLTOUCH][promotion][ancestor_fallback] matched_text_view_id='{}' matched_text_bounds='{}' ancestor_depth={} "
+                    "selected_class='{}' selected_view_id='{}' clickable={} focusable={} reason='closest_actionable_ancestor'".format(
+                        matched_view_id[:64],
+                        matched_bounds_repr,
+                        int(ancestor_distance),
+                        selected_class[:48],
+                        selected_view_id[:64],
+                        str(bool(nearest_actionable_ancestor.get("clickable"))).lower(),
+                        str(bool(nearest_actionable_ancestor.get("focusable"))).lower(),
+                    )
+                )
+                return (
+                    nearest_actionable_ancestor,
+                    "xml_live_closest_actionable_ancestor",
+                    1,
+                    f"{source_name}:ancestor_fallback",
+                    ancestor_distance,
+                    trace_summary,
+                )
         if not scored_candidates:
+            if source_name == "xml_live":
+                log(
+                    "[SCROLLTOUCH][promotion][ancestor_trace] matched_text_view_id='{}' matched_text_bounds='{}' trace='{}'".format(
+                        matched_view_id[:64],
+                        matched_bounds_repr,
+                        trace_summary[:400],
+                    )
+                )
             return (
                 None,
                 "none",
@@ -1970,8 +2078,6 @@ def _select_visible_plugin_candidate(
                 "",
             )
         scored_candidates.sort(reverse=True, key=lambda item: item[0])
-        scored_summary.sort(key=lambda item: item[0], reverse=True)
-        top3_summary = " | ".join(item[1] for item in scored_summary[:3])
         best_node = scored_candidates[0][1]
         best_reason = scored_candidates[0][2]
         best_distance = int(ancestor_distance_by_node_id.get(id(best_node), ancestor_distance if ancestor_distance >= 0 else 999))
@@ -2187,7 +2293,7 @@ def _select_visible_plugin_candidate(
                 promotion_source = "helper"
                 ancestor_distance = helper_ancestor_distance
                 rank_summary_top3 = helper_top3
-            elif xml_actionable_nodes:
+            elif xml_flat_nodes:
                 promoted_from_xml, xml_reason, xml_candidate_count, xml_debug, xml_ancestor_distance, xml_top3 = _select_promoted_container(
                     matched_node=node,
                     node_bounds=bounds,
@@ -2195,6 +2301,7 @@ def _select_visible_plugin_candidate(
                     source_nodes=xml_actionable_nodes,
                     source_name="xml_live",
                     parent_map=xml_parent_by_node_id,
+                    source_flat_nodes=xml_flat_nodes,
                 )
                 promotion_candidate_count = max(promotion_candidate_count, xml_candidate_count)
                 promotion_debug_summary = f"{helper_debug};{xml_debug}"
