@@ -29,7 +29,10 @@ def test_life_food_plugin_uses_card_entry_spec():
 
     assert food_cfg["entry_type"] == "card"
     assert food_cfg["pre_navigation"][0]["action"] == "scrolltouch"
-    assert food_cfg["entry_match"]["allow_description_match"] is False
+    assert food_cfg["entry_match"]["allow_description_match"] is True
+    assert "(?i)(smart\\s*things\\s*cooking|\\bcooking\\b|\\bmeal\\b|\\brecipe\\b|barcode\\s*scan|kitchen\\s*appliance)" in food_cfg[
+        "entry_match"
+    ]["description_patterns"]
     assert "(?i)(^food$|food\\.|smart\\s*things\\s*cooking|\\bcooking\\b)" in food_cfg["entry_match"]["title_patterns"]
 
 
