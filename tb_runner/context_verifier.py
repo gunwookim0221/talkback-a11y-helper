@@ -15,38 +15,6 @@ _TAB_ALIAS_TO_CANONICAL = {
     "선택됨": "selected",
     "새 콘텐츠 사용 가능": "new content available",
 }
-CONTEXT_VERIFIER_VERSION = "air-plugin-weak-success-v1"
-
-
-def is_air_plugin_context(step: dict[str, Any], scenario_cfg: dict[str, Any]) -> bool:
-    scenario_id = str(scenario_cfg.get("scenario_id", "") or "").strip().lower()
-    if scenario_id == "life_air_care_plugin":
-        return True
-    if "air" not in scenario_id:
-        return False
-    pre_navigation = scenario_cfg.get("pre_navigation", [])
-    if not isinstance(pre_navigation, list):
-        return False
-    for nav_step in pre_navigation:
-        if not isinstance(nav_step, dict):
-            continue
-        target_name = str(nav_step.get("targetName", "") or "").strip().lower()
-        target = str(nav_step.get("target", "") or "").strip().lower()
-        if "air care" in target_name or "air care" in target:
-            return True
-    return False
-
-
-def has_structural_focus_signal(step: dict[str, Any]) -> bool:
-    bounds = str(step.get("focus_bounds", "") or step.get("boundsInScreen", "") or "").strip()
-    class_name = str(step.get("focus_class_name", "") or step.get("className", "") or "").strip()
-    resource_id = str(
-        step.get("focus_view_id", "")
-        or step.get("viewIdResourceName", "")
-        or step.get("resourceId", "")
-        or ""
-    ).strip()
-    return bool(bounds or class_name or resource_id)
 
 
 def _expand_bottom_tab_aliases(value: str) -> str:
