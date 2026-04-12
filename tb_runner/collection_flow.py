@@ -65,7 +65,7 @@ COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr31-scrolltouch-candidate-click-result-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
-COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr34-air-entry-contract-list-screen-guard-v1"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr34-air-entry-contract-list-screen-guard-v2"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -833,6 +833,69 @@ def _is_negative_post_open_focus_signal(view_id: str, label: str, speech: str) -
     )
 
 
+def _collect_air_list_screen_evidence(
+    nodes: list[dict[str, Any]] | None,
+    *,
+    extra_blobs: list[str] | None = None,
+) -> dict[str, bool]:
+    if not isinstance(nodes, list):
+        nodes = []
+    has_home_button = False
+    has_tab_title = False
+    has_add_menu_button = False
+    has_more_menu_button = False
+    has_change_location = False
+    has_other_plugin_cards = False
+    list_container_hits = 0
+    other_cards_regex = r"(?i)\b(plants|clothing\s*care|food|energy|pet\s*care|home\s*care)\b"
+    for node, _ in _iter_tree_nodes_with_parent(nodes):
+        if not _node_is_visible(node):
+            continue
+        resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip().lower()
+        label_blob = _node_label_blob(node)
+        if "home_button" in resource_id:
+            has_home_button = True
+        if "tab_title" in resource_id:
+            has_tab_title = True
+        if "add_menu_button" in resource_id:
+            has_add_menu_button = True
+        if "more_menu_button" in resource_id:
+            has_more_menu_button = True
+        if _safe_regex_search(r"(?i)\bchange\s*location\b", label_blob):
+            has_change_location = True
+        if _safe_regex_search(other_cards_regex, label_blob):
+            has_other_plugin_cards = True
+        if _safe_regex_search(r"(?i)(preinstalledservicecard|servicecard|cardtitle|carddescription|divider_text)", resource_id):
+            list_container_hits += 1
+    if isinstance(extra_blobs, list):
+        for blob in extra_blobs:
+            if _safe_regex_search(other_cards_regex, str(blob or "")):
+                has_other_plugin_cards = True
+                break
+    has_multi_card_container = list_container_hits >= 2
+    has_list_screen_evidence = any(
+        (
+            has_home_button,
+            has_tab_title,
+            has_add_menu_button,
+            has_more_menu_button,
+            has_change_location,
+            has_other_plugin_cards,
+            has_multi_card_container,
+        )
+    )
+    return {
+        "has_home_button": has_home_button,
+        "has_tab_title": has_tab_title,
+        "has_add_menu_button": has_add_menu_button,
+        "has_more_menu_button": has_more_menu_button,
+        "has_change_location": has_change_location,
+        "has_other_plugin_cards": has_other_plugin_cards,
+        "has_multi_card_container": has_multi_card_container,
+        "has_list_screen_evidence": has_list_screen_evidence,
+    }
+
+
 def _matches_post_open_verify(
     tab_cfg: dict[str, Any],
     view_id: str,
@@ -980,6 +1043,7 @@ def _is_air_verified_entry_context(
     stabilize_result: dict[str, Any],
     anchor_fallback_source: str,
     air_anchor_fallback_accepted: bool,
+    air_list_screen_evidence: dict[str, bool] | None = None,
 ) -> tuple[bool, str]:
     normalized_scenario_id = str(scenario_id or "").strip().lower()
     normalized_signal = str(post_click_transition_signal or "").strip().lower()
@@ -992,6 +1056,8 @@ def _is_air_verified_entry_context(
         return False, "missing_transition_signal"
     if not (normalized_fallback_source in {"top_level_fallback", "focus_fallback"} or bool(air_anchor_fallback_accepted)):
         return False, "fallback_not_accepted"
+    if isinstance(air_list_screen_evidence, dict) and bool(air_list_screen_evidence.get("has_list_screen_evidence")):
+        return False, "list_screen_evidence"
 
     verify_row = stabilize_result.get("verify_row", {}) if isinstance(stabilize_result, dict) else {}
     if not isinstance(verify_row, dict):
@@ -1456,6 +1522,7 @@ def _confirm_click_focused_transition(
     saw_focus_change = False
     saw_conflicting_screen_signature = False
     saw_air_care_signature = False
+    saw_air_list_screen_evidence = False
 
     for poll_idx in range(max_poll_count):
         current_nodes: list[dict[str, Any]] = []
@@ -1465,9 +1532,19 @@ def _confirm_click_focused_transition(
             except Exception:
                 current_nodes = []
         energy_signature_seen = False
+        air_list_screen_evidence = _collect_air_list_screen_evidence(current_nodes) if strict_life_air_care_mode else {}
         for node in current_nodes:
             if strict_life_air_care_mode and _safe_regex_search(_LIFE_AIR_CARE_VERIFY_REGEX, _node_label_blob(node)):
                 saw_air_care_signature = True
+                if bool(air_list_screen_evidence.get("has_list_screen_evidence")):
+                    saw_air_list_screen_evidence = True
+                    log(
+                        "[VERIFY][air] rejected due to list_screen_evidence "
+                        f"has_home_button={str(bool(air_list_screen_evidence.get('has_home_button'))).lower()} "
+                        f"has_change_location={str(bool(air_list_screen_evidence.get('has_change_location'))).lower()} "
+                        f"has_other_plugin_cards={str(bool(air_list_screen_evidence.get('has_other_plugin_cards'))).lower()}"
+                    )
+                    continue
                 return True, "air_care_verify"
             if strict_life_energy_mode and _safe_regex_search(patterns.get("context_text", ""), _node_label_blob(node)):
                 energy_signature_seen = True
@@ -1501,6 +1578,9 @@ def _confirm_click_focused_transition(
                     focus_label = _node_label_blob(focus_node)
                     if _safe_regex_search(_LIFE_AIR_CARE_VERIFY_REGEX, focus_label):
                         saw_air_care_signature = True
+                        if bool(air_list_screen_evidence.get("has_list_screen_evidence")):
+                            saw_air_list_screen_evidence = True
+                            continue
                         return True, "air_care_focus_verify"
                 if strict_life_air_care_mode:
                     continue
@@ -1528,6 +1608,8 @@ def _confirm_click_focused_transition(
         return False, "conflicting_screen_signature"
     if strict_life_energy_mode and (saw_dump_change or saw_focus_change):
         return False, "weak_transition_signal_only"
+    if strict_life_air_care_mode and saw_air_list_screen_evidence:
+        return False, "air_care_list_screen_evidence"
     if strict_life_air_care_mode and not saw_air_care_signature:
         return False, "air_care_verify_missing"
     if saw_dump_change:
@@ -3728,6 +3810,17 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     pre_navigation_success = bool(start_open_summary.get("pre_navigation_success")) if isinstance(start_open_summary, dict) else False
     anchor_fallback_source = str(start_open_summary.get("anchor_fallback_source", "") or "").strip() if isinstance(start_open_summary, dict) else ""
     air_anchor_fallback_accepted = bool(start_open_summary.get("air_anchor_fallback_accepted")) if isinstance(start_open_summary, dict) else False
+    dump_tree_fn = getattr(client, "dump_tree", None)
+    air_post_nodes: list[dict[str, Any]] = []
+    if str(scenario_id or "").strip().lower() == _LIFE_AIR_CARE_SCENARIO_ID and callable(dump_tree_fn):
+        try:
+            air_post_nodes = dump_tree_fn(dev=dev)
+        except Exception:
+            air_post_nodes = []
+    air_list_screen_evidence = _collect_air_list_screen_evidence(
+        air_post_nodes,
+        extra_blobs=[post_view_id, post_label, post_speech],
+    ) if str(scenario_id or "").strip().lower() == _LIFE_AIR_CARE_SCENARIO_ID else {}
     air_verified_entry_context, air_verified_entry_reason = _is_air_verified_entry_context(
         scenario_id=scenario_id,
         pre_navigation_success=pre_navigation_success,
@@ -3739,6 +3832,7 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         stabilize_result=stabilize_result if isinstance(stabilize_result, dict) else {},
         anchor_fallback_source=anchor_fallback_source,
         air_anchor_fallback_accepted=air_anchor_fallback_accepted,
+        air_list_screen_evidence=air_list_screen_evidence if isinstance(air_list_screen_evidence, dict) else None,
     )
     transition_verify_hint = post_click_transition_signal.replace("_", " ").strip().lower()
     visible_verify_text = ""
@@ -3939,6 +4033,29 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             if isinstance(start_open_summary, dict):
                 start_open_summary["entry_contract_reason"] = _ENTRY_REASON_FALSE_SUCCESS_GUARD
                 start_open_summary["entry_contract_detail"] = "negative_post_open_focus"
+                setattr(client, "last_start_open_summary", start_open_summary)
+            return False
+    if str(scenario_id or "").strip().lower() == _LIFE_AIR_CARE_SCENARIO_ID:
+        if bool(air_list_screen_evidence.get("has_list_screen_evidence")):
+            log(
+                f"[SCENARIO][entry_contract] failed scenario='{scenario_id}' entry_type='{entry_type}' "
+                "reason='verify_failed' detail='air_list_screen_evidence'"
+            )
+            start_open_summary = getattr(client, "last_start_open_summary", {})
+            if isinstance(start_open_summary, dict):
+                start_open_summary["entry_contract_reason"] = _ENTRY_REASON_VERIFY_FAILED
+                start_open_summary["entry_contract_detail"] = "air_list_screen_evidence"
+                setattr(client, "last_start_open_summary", start_open_summary)
+            return False
+        if not air_verified_entry_context:
+            log(
+                f"[SCENARIO][entry_contract] failed scenario='{scenario_id}' entry_type='{entry_type}' "
+                f"reason='{_ENTRY_REASON_VERIFY_FAILED}' detail='{air_verified_entry_reason or 'air_verify_miss'}'"
+            )
+            start_open_summary = getattr(client, "last_start_open_summary", {})
+            if isinstance(start_open_summary, dict):
+                start_open_summary["entry_contract_reason"] = _ENTRY_REASON_VERIFY_FAILED
+                start_open_summary["entry_contract_detail"] = str(air_verified_entry_reason or "air_verify_miss")
                 setattr(client, "last_start_open_summary", start_open_summary)
             return False
     if entry_type == _ENTRY_TYPE_DIRECT_SELECT and has_negative_verify_token:
