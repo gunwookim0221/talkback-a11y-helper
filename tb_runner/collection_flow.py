@@ -15,7 +15,6 @@ from tb_runner.constants import (
     MAIN_ANNOUNCEMENT_WAIT_SECONDS,
     MAIN_STEP_WAIT_SECONDS,
 )
-from tb_runner.context_verifier import has_structural_focus_signal, is_air_plugin_context
 from tb_runner.diagnostics import detect_step_mismatch, should_stop
 from tb_runner.diagnostics import is_global_nav_row
 from tb_runner.excel_report import save_excel
@@ -67,7 +66,6 @@ COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr31-scrolltouch-candidate-click-result-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr25-direct-select-post-open-verify-v3"
-COLLECTION_FLOW_AIR_WEAK_SUCCESS_VERSION = "air-plugin-weak-success-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -516,9 +514,6 @@ def _is_new_screen_low_confidence_allowed(
     if not is_plugin_scope:
         return False, "not_plugin_new_screen_scope"
 
-    scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower()
-    air_plugin_context = scenario_type == "content" and is_air_plugin_context(stabilize_result if isinstance(stabilize_result, dict) else {}, tab_cfg)
-
     fallback_used = bool(stabilize_result.get("fallback_candidate_used"))
     fallback_label = str(stabilize_result.get("fallback_candidate_label", "") or "").strip()
     fallback_resource_id = str(stabilize_result.get("fallback_candidate_resource_id", "") or "").strip()
@@ -526,11 +521,6 @@ def _is_new_screen_low_confidence_allowed(
     if fallback_rejected_reason == "boilerplate_like":
         return False, "boilerplate_only_candidate"
     if not fallback_used:
-        verify_row = stabilize_result.get("verify_row", {})
-        if not isinstance(verify_row, dict):
-            verify_row = {}
-        if air_plugin_context and has_structural_focus_signal(verify_row):
-            return True, "air_plugin_structural_focus"
         return False, "fallback_candidate_absent"
 
     verify_row = stabilize_result.get("verify_row", {})
@@ -3554,8 +3544,6 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
                 setattr(client, "last_start_open_summary", start_open_summary)
             return False
 
-        if low_conf_reason == "air_plugin_structural_focus":
-            log("[CTX][air] weak success accepted (no readable candidate)")
         start_source = str(stabilize_result.get("start_candidate_source", "") or "fallback_top_content")
         tab_cfg["_scenario_start_mode"] = "low_confidence_fallback"
         tab_cfg["_scenario_anchor_stable"] = False
