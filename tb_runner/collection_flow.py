@@ -63,7 +63,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr30-scrolltouch-fallback-order-fix-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr30-scrolltouch-fallback-order-fix-v2"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr25-direct-select-post-open-verify-v3"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -2580,14 +2580,6 @@ def _select_visible_plugin_candidate(
                 )
             )
         if not _is_actionable(click_node):
-            if bool(stats.get("will_try_xml_live_fallback", False)) and not xml_flat_nodes:
-                _record_pre_candidate(
-                    stats,
-                    node_ref=node,
-                    promoted_click_node=promoted_click_node,
-                    reason="actionability_fail:awaiting_xml_live_fallback",
-                )
-                continue
             stats["last_promotion_result_reason"] = "non_actionable_without_promotion"
             _append_rejection(stats, "non_actionable_without_promotion")
             _record_inspect(
@@ -2888,7 +2880,6 @@ def _run_pre_navigation_steps(
                     rejection_counts = candidate_stats.get("rejection_counts", {})
                     needs_xml_fallback = bool(
                         selected_node is None
-                        and not xml_fallback_attempted
                         and entry_type == _ENTRY_TYPE_CARD
                         and (
                             bool(candidate_stats.get("will_try_xml_live_fallback", False))
@@ -2898,6 +2889,10 @@ def _run_pre_navigation_steps(
                                 int(candidate_stats.get("partial_match_count", 0) or 0) > 0
                                 and int((rejection_counts or {}).get("non_actionable_without_promotion", 0) or 0) > 0
                             )
+                        )
+                        and (
+                            not xml_fallback_attempted
+                            or bool(candidate_stats.get("will_try_xml_live_fallback", False))
                         )
                     )
                     if needs_xml_fallback:
