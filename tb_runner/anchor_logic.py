@@ -64,6 +64,9 @@ def _extract_candidate_from_node(node: dict[str, Any], index: int = -1) -> dict[
         "focusable": bool(node.get("focusable", False)),
         "clickable": bool(node.get("clickable", False)),
         "visible_to_user": bool(node.get("visibleToUser", True)),
+        "focused": bool(node.get("focused", False)),
+        "accessibility_focused": bool(node.get("accessibilityFocused", False)),
+        "selected": bool(node.get("selected", False)),
     }
 
 def _extract_candidate_from_step(step: dict[str, Any]) -> dict[str, Any]:
@@ -217,6 +220,42 @@ def _is_boilerplate_like_candidate(candidate: dict[str, Any]) -> bool:
     if compact_len >= 80 and ("policy" in blob or "약관" in blob):
         return True
     return False
+
+
+def _is_air_plugin_context(scenario_id: str, pre_nav_target: str) -> bool:
+    scenario = str(scenario_id or "").strip().lower()
+    pre_nav = str(pre_nav_target or "").strip().lower()
+    return "air" in scenario or ("air" in pre_nav if pre_nav else False)
+
+
+def _select_focus_based_candidate(focus_node: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(focus_node, dict):
+        return None
+    bounds = str(focus_node.get("bounds", "") or "").strip()
+    if not bounds:
+        return None
+    parsed = parse_bounds_str(bounds)
+    if not parsed:
+        nums = [int(v) for v in re.findall(r"-?\d+", bounds)]
+        if len(nums) >= 4:
+            parsed = (nums[0], nums[1], nums[2], nums[3])
+    top, left, right, bottom = (parsed[1], parsed[0], parsed[2], parsed[3]) if parsed else (10**9, 10**9, -1, -1)
+    return {
+        "source": "focus_fallback",
+        "index": int(focus_node.get("index", -1) or -1),
+        "text": str(focus_node.get("text", "") or "").strip(),
+        "class_name": str(focus_node.get("class_name", "") or "").strip(),
+        "announcement": str(focus_node.get("announcement", "") or "").strip(),
+        "resource_id": str(focus_node.get("resource_id", "") or "").strip(),
+        "bounds": bounds,
+        "top": top,
+        "left": left,
+        "right": right,
+        "bottom": bottom,
+        "focusable": bool(focus_node.get("focusable", False)),
+        "clickable": bool(focus_node.get("clickable", False)),
+        "visible_to_user": bool(focus_node.get("visible_to_user", True)),
+    }
 
 
 def _pick_top_content_fallback_candidate(
@@ -431,6 +470,9 @@ def _build_verify_cfg_for_fallback(candidate: dict[str, Any]) -> dict[str, Any]:
         verify_cfg["text_regex"] = f"^{re.escape(text)}$"
     elif announcement:
         verify_cfg["announcement_regex"] = f"^{re.escape(announcement)}$"
+    bounds = str(candidate.get("bounds", "") or "").strip()
+    if bounds:
+        verify_cfg["bounds_regex"] = f"^{re.escape(bounds)}$"
     return verify_cfg
 
 
@@ -529,6 +571,8 @@ def stabilize_anchor(
     last_verify: dict[str, Any] = {}
     last_context: dict[str, Any] = {"ok": True, "type": "none", "expected": ""}
     scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    pre_nav_target = str(tab_cfg.get("pre_nav_target", "") or "")
+    air_plugin_context = _is_air_plugin_context(scenario_id, pre_nav_target)
     pre_navigation = tab_cfg.get("pre_navigation", [])
     has_pre_navigation = isinstance(pre_navigation, list) and bool(pre_navigation)
     screen_context_mode = str(tab_cfg.get("screen_context_mode", "") or "").strip().lower()
@@ -590,12 +634,72 @@ def stabilize_anchor(
                 if plugin_fallback_scope:
                     log(f"[ANCHOR][plugin_fallback] using_top_start_candidate position='{fallback_position}'")
             else:
-                log("[ANCHOR][fallback] no usable fallback candidate")
-                fallback_candidate_rejected_reason = fallback_skip_reason
-                if plugin_fallback_scope and fallback_skip_reason == "boilerplate_like":
-                    log("[ANCHOR][plugin_fallback] rejected candidate reason='boilerplate_like'")
-                elif plugin_fallback_scope:
-                    log(f"[ANCHOR][plugin_fallback] failed reason='{fallback_skip_reason or 'no_readable_top_candidate'}'")
+                if air_plugin_context:
+                    focus_candidate = _select_focus_based_candidate(
+                        next(
+                            (
+                                c
+                                for c in candidates
+                                if bool(c.get("visible_to_user", True))
+                                and bool(
+                                    c.get("accessibility_focused", False)
+                                    or c.get("focused", False)
+                                    or c.get("selected", False)
+                                )
+                            ),
+                            None,
+                        )
+                    )
+                    if focus_candidate:
+                        fallback_candidate = focus_candidate
+                        fallback_position = "focus"
+                        active_anchor_cfg = _build_verify_cfg_for_fallback(fallback_candidate)
+                        best = {"candidate": fallback_candidate, "score": 0, "matched": True, "matched_fields": ["fallback"]}
+                        start_candidate_source = "fallback_focus"
+                        fallback_candidate_used = True
+                        fallback_candidate_label = str(
+                            fallback_candidate.get("announcement", "") or fallback_candidate.get("text", "") or ""
+                        ).strip()
+                        fallback_candidate_resource_id = str(fallback_candidate.get("resource_id", "") or "").strip()
+                        log("[ANCHOR][air] focus-based fallback accepted")
+                    else:
+                        top_level_candidate = next(
+                            (
+                                c
+                                for c in sorted(
+                                    candidates,
+                                    key=lambda item: (int(item.get("top", 10**9)), int(item.get("left", 10**9))),
+                                )
+                                if bool(c.get("visible_to_user", True)) and str(c.get("bounds", "") or "").strip()
+                            ),
+                            None,
+                        )
+                        if top_level_candidate:
+                            fallback_candidate = dict(top_level_candidate)
+                            fallback_candidate["source"] = "top_level_fallback"
+                            fallback_position = "top_level"
+                            active_anchor_cfg = _build_verify_cfg_for_fallback(fallback_candidate)
+                            best = {
+                                "candidate": fallback_candidate,
+                                "score": 0,
+                                "matched": True,
+                                "matched_fields": ["fallback"],
+                            }
+                            start_candidate_source = "fallback_top_level"
+                            fallback_candidate_used = True
+                            fallback_candidate_label = str(
+                                fallback_candidate.get("announcement", "") or fallback_candidate.get("text", "") or ""
+                            ).strip()
+                            fallback_candidate_resource_id = str(fallback_candidate.get("resource_id", "") or "").strip()
+                            log("[ANCHOR][air] top-level fallback accepted")
+                            fallback_skip_reason = ""
+                if fallback_candidate is None:
+                    log("[ANCHOR][fallback] no usable fallback candidate")
+                    fallback_candidate_rejected_reason = fallback_skip_reason
+                    if plugin_fallback_scope and fallback_skip_reason == "boilerplate_like":
+                        log("[ANCHOR][plugin_fallback] rejected candidate reason='boilerplate_like'")
+                    elif plugin_fallback_scope:
+                        log(f"[ANCHOR][plugin_fallback] failed reason='{fallback_skip_reason or 'no_readable_top_candidate'}'")
             entry_type = str(tab_cfg.get("entry_type", "") or "").strip().lower()
             scenario_id_l = scenario_id.strip().lower()
             if entry_type == "direct_select" and (
