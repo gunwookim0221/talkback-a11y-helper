@@ -65,7 +65,7 @@ COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr31-scrolltouch-candidate-click-result-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
-COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr35-air-entry-contract-observability-v1"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr36-air-entry-contract-success-preserve-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -1053,14 +1053,14 @@ def _is_air_verified_entry_context(
     normalized_scenario_id = str(scenario_id or "").strip().lower()
     normalized_signal = str(post_click_transition_signal or "").strip().lower()
     normalized_fallback_source = str(anchor_fallback_source or "").strip().lower()
+    has_transition_signal = bool(normalized_signal == "air_care_verify" or post_click_transition_same_screen is False)
+    fallback_accepted = bool(
+        normalized_fallback_source in {"top_level_fallback", "focus_fallback"} or bool(air_anchor_fallback_accepted)
+    )
     if normalized_scenario_id != _LIFE_AIR_CARE_SCENARIO_ID:
         return False, "not_air_care_scenario"
     if not bool(pre_navigation_success):
         return False, "pre_navigation_not_verified"
-    if not (normalized_signal == "air_care_verify" or post_click_transition_same_screen is False):
-        return False, "missing_transition_signal"
-    if not (normalized_fallback_source in {"top_level_fallback", "focus_fallback"} or bool(air_anchor_fallback_accepted)):
-        return False, "fallback_not_accepted"
     if isinstance(air_list_screen_evidence, dict) and bool(air_list_screen_evidence.get("has_list_screen_evidence")):
         log(
             "[VERIFY][air][reject_basis] reason='list_screen_evidence' "
@@ -1131,6 +1131,10 @@ def _is_air_verified_entry_context(
             "negative_evidence_present=false negative_evidence_summary='none'"
         )
         return True, "air_internal_content_signal"
+    if not has_transition_signal:
+        return False, "missing_transition_signal"
+    if not fallback_accepted:
+        return False, "fallback_not_accepted"
     return False, "air_internal_content_missing"
 
 
@@ -4137,15 +4141,27 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
                     f"signal='{post_click_transition_signal or 'none'}'"
                 )
     is_air_scenario = str(scenario_id or "").strip().lower() == _LIFE_AIR_CARE_SCENARIO_ID
+    air_requires_verify = (
+        entry_type == _ENTRY_TYPE_CARD and isinstance(tab_cfg.get("verify_tokens"), list) and bool(tab_cfg.get("verify_tokens"))
+    )
+    post_click_success_seen = not post_click_transition_same_screen
     air_verify_success_seen = bool(air_verified_entry_context)
+    air_verified_success_seen = bool(
+        air_verify_success_seen
+        or (
+            post_click_success_seen
+            and str(post_click_transition_signal or "").strip().lower() == "air_care_verify"
+        )
+        or matches_verify
+    )
     air_verify_reject_seen = bool(
-        str(air_verified_entry_reason or "").strip().lower() in {"list_screen_evidence", "list_screen_focus", "fallback_not_accepted"}
+        str(air_verified_entry_reason or "").strip().lower() in {"list_screen_evidence", "list_screen_focus"}
     )
     if is_air_scenario:
         log(
             "[ENTRY][air][verdict_inputs] "
             f"scenario_id='{scenario_id}' "
-            f"post_click_success_seen={str(not post_click_transition_same_screen).lower()} "
+            f"post_click_success_seen={str(post_click_success_seen).lower()} "
             f"air_verify_success_seen={str(air_verify_success_seen).lower()} "
             f"air_verify_reject_seen={str(air_verify_reject_seen).lower()} "
             f"anchor_fallback_accepted={str(air_anchor_fallback_accepted).lower()} "
@@ -4205,7 +4221,7 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             log(
                 "[ENTRY][air][verdict_inputs] "
                 f"scenario_id='{scenario_id}' "
-                f"post_click_success_seen={str(not post_click_transition_same_screen).lower()} "
+                f"post_click_success_seen={str(post_click_success_seen).lower()} "
                 f"air_verify_success_seen={str(air_verify_success_seen).lower()} "
                 f"air_verify_reject_seen={str(air_verify_reject_seen).lower()} "
                 f"anchor_fallback_accepted={str(air_anchor_fallback_accepted).lower()} "
@@ -4226,7 +4242,21 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
                 start_open_summary["entry_contract_detail"] = "air_list_screen_evidence"
                 setattr(client, "last_start_open_summary", start_open_summary)
             return False
-        if not air_verified_entry_context:
+        preserve_success = bool(is_air_scenario and air_verified_success_seen and not air_verify_reject_seen)
+        allow_missing_transition = bool(
+            is_air_scenario
+            and (air_verified_success_seen or not air_requires_verify)
+            and str(air_verified_entry_reason or "").strip().lower() == "missing_transition_signal"
+        )
+        if str(air_verified_entry_reason or "").strip().lower() == "fallback_not_accepted" and preserve_success:
+            log("[ENTRY][air][preserve] keep success despite fallback_not_accepted")
+        if not air_verified_entry_context and allow_missing_transition:
+            log("[ENTRY][air][preserve] ignore missing_transition_signal due to prior success")
+        if (
+            not air_verified_entry_context
+            and not allow_missing_transition
+            and not (str(air_verified_entry_reason or "").strip().lower() == "fallback_not_accepted" and preserve_success)
+        ):
             applied_rule = (
                 "reject_fallback_not_accepted"
                 if str(air_verified_entry_reason or "").strip().lower() == "fallback_not_accepted"
@@ -4239,7 +4269,7 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             log(
                 "[ENTRY][air][verdict_inputs] "
                 f"scenario_id='{scenario_id}' "
-                f"post_click_success_seen={str(not post_click_transition_same_screen).lower()} "
+                f"post_click_success_seen={str(post_click_success_seen).lower()} "
                 f"air_verify_success_seen={str(air_verify_success_seen).lower()} "
                 f"air_verify_reject_seen={str(air_verify_reject_seen).lower()} "
                 f"anchor_fallback_accepted={str(air_anchor_fallback_accepted).lower()} "
@@ -4403,7 +4433,7 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         log(
             "[ENTRY][air][verdict_inputs] "
             f"scenario_id='{scenario_id}' "
-            f"post_click_success_seen={str(not post_click_transition_same_screen).lower()} "
+            f"post_click_success_seen={str(post_click_success_seen).lower()} "
             f"air_verify_success_seen={str(air_verify_success_seen).lower()} "
             f"air_verify_reject_seen={str(air_verify_reject_seen).lower()} "
             f"anchor_fallback_accepted={str(air_anchor_fallback_accepted).lower()} "
