@@ -2173,6 +2173,57 @@ def test_open_scenario_card_entry_handles_special_state_with_back(monkeypatch):
     assert client.back_calls == 1
 
 
+def test_open_scenario_card_entry_handles_pet_care_onboarding_special_state(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {"ok": True, "selected": True, "reason": "selected_and_verified", "matched": True},
+    )
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    client.focus_sequence = [
+        {"viewIdResourceName": "com.example:id/title", "text": "PetCare Service Plugin"},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/menu_services", "text": "Life"},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_pet_care_example",
+        "entry_type": "card",
+        "verify_tokens": ["pet care", "petcare service plugin", "pet profile"],
+        "special_state_tokens": [
+            "petcare service plugin",
+            "care for your pet",
+            "leaving your pet alone",
+            "keep them safe and entertained",
+        ],
+        "special_state_cta_tokens": ["start"],
+        "special_state_handling": "back_after_read",
+        "special_state_intro_like_min_length": 70,
+    }
+    monkeypatch.setattr(
+        collection_flow,
+        "_collect_post_open_visible_text",
+        lambda *_args, **_kwargs: (
+            "PetCare Service Plugin Care for your pet, even when you're not home. "
+            "Leaving your pet alone can be stressful. Keep them safe and entertained Start"
+        ),
+    )
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    summary = getattr(client, "last_start_open_summary", {})
+    assert summary.get("entry_contract_reason") == "special_state_handled"
+    assert summary.get("entry_contract_detail") == "onboarding_back_exit"
+    assert summary.get("special_state_detected") is True
+    assert summary.get("special_state_kind") == "onboarding_or_empty_state"
+    assert summary.get("special_state_handling") == "back_after_read"
+    assert summary.get("special_state_back_status") == "back_sent_exit"
+    assert client.back_calls == 1
+
+
 def test_open_scenario_card_entry_does_not_misclassify_air_care_normal_content(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(
