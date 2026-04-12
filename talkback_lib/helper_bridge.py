@@ -22,6 +22,7 @@ from talkback_lib.constants import (
 
 class HelperBridge:
     BRIDGE_VERSION = "1.0.1"
+    _PREFLIGHT_LIGHT_CMD_TIMEOUT_SEC = 5.0
 
     def __init__(self, client: Any) -> None:
         self._client = client
@@ -40,19 +41,45 @@ class HelperBridge:
     def _helper_ready_check(self, dev: Any = None) -> bool:
         started = time.monotonic()
         serial = self._client._resolve_serial(dev)
+        serial_label = serial or "default"
         cache_hit, cached_result = self._client._get_cached_helper_status(serial=serial)
         if cache_hit:
             elapsed = time.monotonic() - started
             self._client._debug_print(
-                f"[DEBUG][helper_status] serial={serial or 'default'} cached=True "
+                f"[DEBUG][helper_status] serial={serial_label} cached=True "
                 f"result={cached_result} elapsed={elapsed:.3f}s"
             )
             return cached_result
 
-        enabled_services = self._client._run(
-            ["shell", "settings", "get", "secure", "enabled_accessibility_services"],
-            dev=dev,
-        )
+        self._client._debug_print("[PREFLIGHT][helper] checking enabled_accessibility_services")
+        try:
+            enabled_services = self._client._run(
+                ["shell", "settings", "get", "secure", "enabled_accessibility_services"],
+                dev=dev,
+                timeout=self._PREFLIGHT_LIGHT_CMD_TIMEOUT_SEC,
+            )
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:
+            self._client._update_helper_status_cache(serial=serial, result=False)
+            elapsed = time.monotonic() - started
+            print(
+                f"[PREFLIGHT][helper] adb failure during enabled_accessibility_services error='{exc}'"
+            )
+            print(
+                f"[PREFLIGHT][helper] helper_ready=False reason='adb_failure' "
+                f"serial={serial_label} elapsed={elapsed:.3f}s"
+            )
+            return False
+        if not enabled_services:
+            self._client._update_helper_status_cache(serial=serial, result=False)
+            elapsed = time.monotonic() - started
+            print("[PREFLIGHT][helper] adb timeout or failure during enabled_accessibility_services")
+            print(
+                f"[PREFLIGHT][helper] helper_ready=False reason='adb_timeout_or_failure' "
+                f"serial={serial_label} elapsed={elapsed:.3f}s"
+            )
+            return False
         helper_enabled = self._client.package_name in enabled_services
         if not helper_enabled:
             print(
@@ -62,9 +89,14 @@ class HelperBridge:
             )
             self._client._update_helper_status_cache(serial=serial, result=False)
             elapsed = time.monotonic() - started
-            print(f"[WARN][helper_status] serial={serial or 'default'} result=False reason=service_disabled elapsed={elapsed:.3f}s")
+            print(f"[WARN][helper_status] serial={serial_label} result=False reason=service_disabled elapsed={elapsed:.3f}s")
+            print(
+                f"[PREFLIGHT][helper] helper_ready=False reason='service_disabled' "
+                f"serial={serial_label} elapsed={elapsed:.3f}s"
+            )
             return False
 
+        self._client._debug_print("[PREFLIGHT][helper] checking helper ping readiness")
         if not self._client.ping(dev=dev, wait_=3.0):
             print(
                 f"{RED_TEXT}⚠️ [ERROR] 헬퍼 앱 접근성 서비스가 명령 수신 준비 상태가 아닙니다. "
@@ -73,13 +105,21 @@ class HelperBridge:
             )
             self._client._update_helper_status_cache(serial=serial, result=False)
             elapsed = time.monotonic() - started
-            print(f"[WARN][helper_status] serial={serial or 'default'} result=False reason=ping_failed elapsed={elapsed:.3f}s")
+            print(f"[WARN][helper_status] serial={serial_label} result=False reason=ping_failed elapsed={elapsed:.3f}s")
+            print(
+                f"[PREFLIGHT][helper] helper_ready=False reason='ping_failed' "
+                f"serial={serial_label} elapsed={elapsed:.3f}s"
+            )
             return False
 
         self._client._update_helper_status_cache(serial=serial, result=True)
         elapsed = time.monotonic() - started
+        print(
+            f"[PREFLIGHT][helper] helper_ready=True reason='ok' "
+            f"serial={serial_label} elapsed={elapsed:.3f}s"
+        )
         self._client._debug_print(
-            f"[DEBUG][helper_status] serial={serial or 'default'} cached=False "
+            f"[DEBUG][helper_status] serial={serial_label} cached=False "
             f"result=True elapsed={elapsed:.3f}s"
         )
         return True
