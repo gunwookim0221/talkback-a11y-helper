@@ -46,7 +46,6 @@
   - `description_patterns`: 설명문(`tvHeaderTitle` 등) 매칭 regex 목록
   - `resource_patterns`: resource-id/class 힌트 매칭 regex 목록
   - `allow_description_match`: 설명문 매칭 허용 여부
-  - `allow_title_hidden_card_inference`: title 텍스트가 helper/local search에 직접 노출되지 않아도, 같은 카드 container의 구조 증거(텍스트+이미지+indicator/resource 힌트)가 충분하면 후보 승격을 허용하는 보조 플래그
 - `verify_tokens` / `negative_verify_tokens`: post-open contract 검증 토큰(포커스 view/text/speech blob 기준)
 - `special_state_tokens` / `special_state_cta_tokens` / `special_state_handling` / `special_state_intro_like_min_length` (선택): `entry_type=card` 시나리오에서 post-open 성공 직후 onboarding/empty/CTA 상태를 보수적으로 감지하기 위한 추가 토큰/동작 설정.
   - 감지는 **verify/title 계열 신호 + special_state token + CTA token**을 기본으로 하며, long intro-like 텍스트(`special_state_intro_like_min_length`, 기본 80자) 또는 복수 special token hit가 함께 있을 때만 동작합니다. CTA 단독/intro 단독 매치는 허용하지 않습니다.
