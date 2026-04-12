@@ -162,7 +162,7 @@
       "enabled": false,
       "max_steps": 40
     },
-    "life_pet_care_example": {
+    "life_pet_care_plugin": {
       "enabled": false,
       "max_steps": 40
     }

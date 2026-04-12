@@ -273,7 +273,7 @@ def test_stabilize_anchor_fallback_rejects_home_button_chrome_candidate(monkeypa
     client.collect_focus_step.return_value = _verify_step(view_id="different", label="different")
     monkeypatch.setattr(anchor_logic, "verify_context", lambda *a, **k: {"ok": True})
     tab_cfg = {
-        "scenario_id": "life_pet_care_example",
+        "scenario_id": "life_pet_care_plugin",
         "screen_context_mode": "new_screen",
         "stabilization_mode": "anchor_only",
         "pre_navigation": [{"action": "select", "target": ".*pet.*", "type": "a"}],
@@ -297,7 +297,7 @@ def test_stabilize_anchor_direct_select_fallback_prefers_verify_token_candidate(
     client.select.return_value = True
     monkeypatch.setattr(anchor_logic, "verify_context", lambda *a, **k: {"ok": True})
     tab_cfg = {
-        "scenario_id": "life_pet_care_example",
+        "scenario_id": "life_pet_care_plugin",
         "entry_type": "direct_select",
         "verify_tokens": ["pet care"],
         "screen_context_mode": "new_screen",
@@ -323,7 +323,7 @@ def test_stabilize_anchor_direct_select_fallback_demotes_generic_activity_top_ca
     client.select.return_value = True
     monkeypatch.setattr(anchor_logic, "verify_context", lambda *a, **k: {"ok": True})
     tab_cfg = {
-        "scenario_id": "life_pet_care_example",
+        "scenario_id": "life_pet_care_plugin",
         "entry_type": "direct_select",
         "screen_context_mode": "new_screen",
         "stabilization_mode": "anchor_only",

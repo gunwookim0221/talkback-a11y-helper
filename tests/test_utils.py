@@ -15,8 +15,8 @@ def test_menu_main_anchor_regex_has_single_leading_ignorecase_flag():
     assert menu_cfg["anchor"]["announcement_regex"] == "(?i).*smartthings settings.*|.*settings.*"
 
 
-def test_life_pet_care_example_uses_card_entry_spec():
-    pet_cfg = next(cfg for cfg in TAB_CONFIGS if cfg.get("scenario_id") == "life_pet_care_example")
+def test_life_pet_care_plugin_uses_card_entry_spec():
+    pet_cfg = next(cfg for cfg in TAB_CONFIGS if cfg.get("scenario_id") == "life_pet_care_plugin")
 
     assert pet_cfg["entry_type"] == "card"
     assert pet_cfg["pre_navigation"][0]["action"] == "scrolltouch"
