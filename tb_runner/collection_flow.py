@@ -63,7 +63,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr29-scrolltouch-xml-ancestor-fallback-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr29-scrolltouch-xml-ancestor-fallback-v2"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr25-direct-select-post-open-verify-v3"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -1200,6 +1200,8 @@ def _capture_scrolltouch_step_bundle(
 
     screenshot_path = bundle_dir / "screenshot.png"
     helper_dump_path = bundle_dir / "helper_dump.json"
+    window_dump_path = bundle_dir / "window_dump.xml"
+    promotion_debug_meta_path = bundle_dir / "promotion_debug_meta.json"
     meta_path = bundle_dir / "meta.json"
     first_failure_reason = ""
 
@@ -1220,6 +1222,37 @@ def _capture_scrolltouch_step_bundle(
         helper_dump_path.write_text(json.dumps(helper_dump, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as exc:
         first_failure_reason = first_failure_reason or f"helper_dump_write_failed:{exc}"
+
+    should_capture_xml = int(stats_map.get("partial_match_count", 0) or 0) > 0
+    if should_capture_xml:
+        run_fn = getattr(client, "_run", None)
+        if callable(run_fn):
+            remote_xml = f"/sdcard/window_dump_scrolltouch_step_{max(int(scroll_step), 0)}.xml"
+            try:
+                run_fn(["shell", "uiautomator", "dump", remote_xml], dev=dev)
+                run_fn(["pull", remote_xml, str(window_dump_path)], dev=dev)
+            except Exception as exc:
+                first_failure_reason = first_failure_reason or f"window_dump_failed:{exc}"
+            finally:
+                try:
+                    run_fn(["shell", "rm", "-f", remote_xml], dev=dev)
+                except Exception:
+                    pass
+        else:
+            first_failure_reason = first_failure_reason or "window_dump_failed:run_not_supported"
+
+    promotion_debug_meta = {
+        "version": COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION,
+        "scroll_step": int(scroll_step),
+        "partial_match_count": int(stats_map.get("partial_match_count", 0) or 0),
+        "candidate_stats": stats_map,
+        "selected_meta": selected_meta_map,
+        "xml_snapshot_saved": bool(should_capture_xml and window_dump_path.exists()),
+    }
+    try:
+        promotion_debug_meta_path.write_text(json.dumps(promotion_debug_meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as exc:
+        first_failure_reason = first_failure_reason or f"promotion_debug_meta_write_failed:{exc}"
 
     rejection_counts = stats_map.get("rejection_counts", {})
     rejection_summary = ""
@@ -1251,6 +1284,8 @@ def _capture_scrolltouch_step_bundle(
         "partial_top": " | ".join(partial_samples[:3]) if isinstance(partial_samples, list) else "",
         "rejection_summary": rejection_summary,
         "selected_meta": selected_meta_map,
+        "window_dump_saved": bool(window_dump_path.exists()),
+        "promotion_debug_meta_saved": bool(promotion_debug_meta_path.exists()),
     }
     try:
         meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1711,6 +1746,14 @@ def _select_visible_plugin_candidate(
         "inspect_samples": [],
         "pre_candidate_fail_samples": [],
         "rejection_counts": {},
+        "promotion_attempted": False,
+        "matched_text_found": False,
+        "xml_node_found": False,
+        "xml_match_strategy": "none",
+        "ancestor_chain_depth": 0,
+        "actionable_ancestor_found": False,
+        "candidate_committed": False,
+        "last_promotion_result_reason": "none",
     }
     selected_meta: dict[str, Any] = {
         "promoted_container": False,
@@ -1839,14 +1882,33 @@ def _select_visible_plugin_candidate(
         matched_view_id = str(
             matched_node.get("viewIdResourceName", "") or matched_node.get("resourceId", "") or matched_node.get("className", "") or "node"
         ).strip()
+        matched_label = _node_label_blob(matched_node)
         matched_bounds_repr = f"{left},{top},{right},{bottom}"
+        stats["promotion_attempted"] = True
+        stats["matched_text_found"] = True
+        log(
+            "[SCROLLTOUCH][promotion][enter] source_snapshot='{}' matched_text_node='{}' matched_text_view_id='{}' matched_text_label='{}' "
+            "matched_text_bounds='{}' node_clickable={} node_focusable={} node_effective_clickable={} promotion_attempted=true".format(
+                source_name,
+                matched_view_id[:64],
+                matched_view_id[:64],
+                matched_label[:120],
+                matched_bounds_repr,
+                str(bool(matched_node.get("clickable"))).lower(),
+                str(bool(matched_node.get("focusable"))).lower(),
+                str(_is_actionable(matched_node)).lower(),
+            )
+        )
 
         matched_reference_node = matched_node
+        xml_node_found = False
+        xml_match_strategy = "none"
         if source_name == "xml_live" and source_flat_nodes:
-            matched_label = _node_label_blob(matched_node)
             normalized_matched_label = re.sub(r"\s+", " ", matched_label).strip().lower()
             best_xml_node: dict[str, Any] | None = None
             best_xml_score = -1
+            best_strategy = "none"
+            best_has_view_id = False
             for xml_node, _ in source_flat_nodes:
                 xml_bounds = parse_bounds_str(str(xml_node.get("boundsInScreen", "") or "").strip())
                 if not xml_bounds or xml_bounds != node_bounds:
@@ -1854,34 +1916,48 @@ def _select_visible_plugin_candidate(
                 xml_label = _node_label_blob(xml_node)
                 normalized_xml_label = re.sub(r"\s+", " ", xml_label).strip().lower()
                 score = 1
+                node_view_id = str(xml_node.get("viewIdResourceName", "") or xml_node.get("resourceId", "") or "").strip()
+                matched_node_view_id = str(matched_node.get("viewIdResourceName", "") or matched_node.get("resourceId", "") or "").strip()
+                has_view_id_match = bool(node_view_id and matched_node_view_id and node_view_id == matched_node_view_id)
                 if normalized_matched_label and normalized_xml_label and normalized_matched_label == normalized_xml_label:
                     score += 2
+                if has_view_id_match:
+                    score += 3
+                strategy = "bounds"
+                if has_view_id_match and normalized_matched_label and normalized_xml_label and normalized_matched_label == normalized_xml_label:
+                    strategy = "mixed"
+                elif has_view_id_match:
+                    strategy = "view_id"
+                elif normalized_matched_label and normalized_xml_label and normalized_matched_label == normalized_xml_label:
+                    strategy = "text"
                 if score > best_xml_score:
                     best_xml_score = score
                     best_xml_node = xml_node
+                    best_strategy = strategy
+                    best_has_view_id = has_view_id_match
             if isinstance(best_xml_node, dict):
                 matched_reference_node = best_xml_node
-
-        cursor = parent_map.get(id(matched_reference_node))
-        distance = 1
-        while isinstance(cursor, dict) and distance <= 8:
-            ancestor_distance_by_node_id[id(cursor)] = distance
-            trace_lines.append(
-                "depth={} class={} clickable={} focusable={} view_id={}".format(
-                    distance,
-                    str(cursor.get("className", "") or "").strip() or "-",
-                    str(bool(cursor.get("clickable"))).lower(),
-                    str(bool(cursor.get("focusable"))).lower(),
-                    str(cursor.get("viewIdResourceName", "") or cursor.get("resourceId", "") or "").strip() or "-",
+                xml_node_found = True
+                xml_match_strategy = best_strategy if best_strategy != "none" else ("view_id" if best_has_view_id else "bounds")
+                stats["xml_node_found"] = True
+                stats["xml_match_strategy"] = xml_match_strategy
+        if source_name == "xml_live":
+            xml_class = str(matched_reference_node.get("className", "") or "").strip()
+            xml_view_id = str(matched_reference_node.get("viewIdResourceName", "") or matched_reference_node.get("resourceId", "") or "").strip()
+            xml_bounds_repr = str(matched_reference_node.get("boundsInScreen", "") or "").strip()
+            log(
+                "[SCROLLTOUCH][promotion][xml_resolve] matched_text_view_id='{}' matched_text_label='{}' matched_text_bounds='{}' "
+                "xml_node_found={} xml_match_strategy='{}' xml_node_class='{}' xml_node_view_id='{}' xml_node_bounds='{}'".format(
+                    matched_view_id[:64],
+                    matched_label[:120],
+                    matched_bounds_repr,
+                    str(xml_node_found).lower(),
+                    xml_match_strategy,
+                    xml_class[:64],
+                    xml_view_id[:64],
+                    xml_bounds_repr[:64],
                 )
             )
-            if _is_actionable(cursor):
-                nearest_actionable_ancestor = cursor
-                ancestor_distance = distance
-                break
-            cursor = parent_map.get(id(cursor))
-            distance += 1
-        trace_summary = " | ".join(trace_lines) if trace_lines else "empty"
 
         def _is_excluded_ancestor(node: dict[str, Any], distance: int) -> bool:
             class_name = str(node.get("className", "") or "").strip()
@@ -1900,15 +1976,117 @@ def _select_visible_plugin_candidate(
                 return True
             return False
 
+        def _ancestor_exclude_reason(node: dict[str, Any], distance: int) -> str:
+            class_name = str(node.get("className", "") or "").strip()
+            resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
+            if _safe_regex_search(r"(?i)(recycler.?view|grid.?view|list.?view)", class_name) or _safe_regex_search(
+                r"(?i)(recycler.?view|grid.?view|list.?view)", resource_id
+            ):
+                return "recycler_excluded"
+            node_bounds = parse_bounds_str(str(node.get("boundsInScreen", "") or "").strip())
+            if node_bounds:
+                n_left, n_top, n_right, n_bottom = node_bounds
+                node_area = max(1, (n_right - n_left) * (n_bottom - n_top))
+                if node_area > int(viewport_area * 0.94):
+                    return "oversized_root"
+            if distance >= 7 and not resource_id and not _node_label_blob(node):
+                return "root_excluded"
+            return "none"
+
+        cursor = parent_map.get(id(matched_reference_node))
+        distance = 1
+        while isinstance(cursor, dict) and distance <= 8:
+            ancestor_distance_by_node_id[id(cursor)] = distance
+            is_excluded = _is_excluded_ancestor(cursor, distance)
+            exclude_reason = _ancestor_exclude_reason(cursor, distance) if is_excluded else "none"
+            cursor_class = str(cursor.get("className", "") or "").strip()
+            cursor_view_id = str(cursor.get("viewIdResourceName", "") or cursor.get("resourceId", "") or "").strip()
+            cursor_bounds = str(cursor.get("boundsInScreen", "") or "").strip()
+            trace_lines.append(
+                "depth={} class={} view_id={} bounds={} clickable={} focusable={} effective_clickable={} excluded={} exclude_reason={}".format(
+                    distance,
+                    cursor_class or "-",
+                    cursor_view_id or "-",
+                    cursor_bounds or "-",
+                    str(bool(cursor.get("clickable"))).lower(),
+                    str(bool(cursor.get("focusable"))).lower(),
+                    str(_is_actionable(cursor)).lower(),
+                    str(bool(is_excluded)).lower(),
+                    exclude_reason,
+                )
+            )
+            log(
+                "[SCROLLTOUCH][promotion][ancestor_trace] matched_text_view_id='{}' matched_text_bounds='{}' depth={} class='{}' view_id='{}' "
+                "bounds='{}' clickable={} focusable={} effective_clickable={} excluded={} exclude_reason='{}'".format(
+                    matched_view_id[:64],
+                    matched_bounds_repr,
+                    int(distance),
+                    cursor_class[:64],
+                    cursor_view_id[:64],
+                    cursor_bounds[:64],
+                    str(bool(cursor.get("clickable"))).lower(),
+                    str(bool(cursor.get("focusable"))).lower(),
+                    str(_is_actionable(cursor)).lower(),
+                    str(bool(is_excluded)).lower(),
+                    exclude_reason,
+                )
+            )
+            if _is_actionable(cursor):
+                nearest_actionable_ancestor = cursor
+                ancestor_distance = distance
+                break
+            cursor = parent_map.get(id(cursor))
+            distance += 1
+        stats["ancestor_chain_depth"] = max(int(stats.get("ancestor_chain_depth", 0) or 0), len(trace_lines))
+        if isinstance(nearest_actionable_ancestor, dict):
+            stats["actionable_ancestor_found"] = True
+        trace_summary = " | ".join(trace_lines) if trace_lines else "empty"
+
+        def _log_promotion_exit(result_node: dict[str, Any] | None, result_reason: str) -> None:
+            result = "selected" if isinstance(result_node, dict) else "none"
+            stats["last_promotion_result_reason"] = result_reason
+            result_class = ""
+            result_view_id = ""
+            result_bounds = ""
+            if isinstance(result_node, dict):
+                result_class = str(result_node.get("className", "") or "").strip()
+                result_view_id = str(result_node.get("viewIdResourceName", "") or result_node.get("resourceId", "") or "").strip()
+                result_bounds = str(result_node.get("boundsInScreen", "") or "").strip()
+            log(
+                "[SCROLLTOUCH][promotion][exit] source_snapshot='{}' matched_text_view_id='{}' matched_text_label='{}' matched_text_bounds='{}' "
+                "promotion_attempted=true result='{}' result_reason='{}' selected_container_class='{}' selected_container_view_id='{}' selected_container_bounds='{}'".format(
+                    source_name,
+                    matched_view_id[:64],
+                    matched_label[:120],
+                    matched_bounds_repr,
+                    result,
+                    result_reason[:80],
+                    result_class[:64],
+                    result_view_id[:64],
+                    result_bounds[:64],
+                )
+            )
+
         scored_candidates: list[tuple[tuple[int, int, int, int, int, int], dict[str, Any], str]] = []
         containment_candidates: list[tuple[tuple[int, int, int, int, int, int], dict[str, Any], str]] = []
         scored_summary: list[tuple[int, str]] = []
         for action_node, action_bounds, is_card_like in source_nodes:
             a_left, a_top, a_right, a_bottom = action_bounds
+            action_resource = str(action_node.get("viewIdResourceName", "") or action_node.get("resourceId", "") or "").strip()
+            action_class = str(action_node.get("className", "") or "").strip()
+            action_depth = int(ancestor_distance_by_node_id.get(id(action_node), -1))
             if a_bottom <= viewport_t or a_top >= viewport_b:
                 continue
             area = max(1, (a_right - a_left) * (a_bottom - a_top))
             if area > int(viewport_area * 0.92):
+                log(
+                    "[SCROLLTOUCH][promotion][ancestor_candidate] depth={} class='{}' view_id='{}' actionable={} accepted=false accepted_reason='none' rejected_reason='oversized_root'".format(
+                        action_depth,
+                        action_class[:64],
+                        action_resource[:64],
+                        str(_is_actionable(action_node)).lower(),
+                    )
+                )
                 continue
             fully_contains = a_left <= left and a_top <= top and a_right >= right and a_bottom >= bottom
             overlap_w = max(0, min(right, a_right) - max(left, a_left))
@@ -1922,9 +2100,14 @@ def _select_visible_plugin_candidate(
             center_distance = abs(center_x - node_center_x) + abs(center_y - node_center_y)
             action_clickable = _is_actionable(action_node)
             if not action_clickable:
+                log(
+                    "[SCROLLTOUCH][promotion][ancestor_candidate] depth={} class='{}' view_id='{}' actionable=false accepted=false accepted_reason='none' rejected_reason='not_actionable'".format(
+                        action_depth,
+                        action_class[:64],
+                        action_resource[:64],
+                    )
+                )
                 continue
-            action_resource = str(action_node.get("viewIdResourceName", "") or action_node.get("resourceId", "") or "").strip()
-            action_class = str(action_node.get("className", "") or "").strip()
             action_label = _node_label_blob(action_node)
             lower_rid = action_resource.lower()
             lower_cls = action_class.lower()
@@ -1937,6 +2120,13 @@ def _select_visible_plugin_candidate(
             )
             if is_list_like_container:
                 stats["rejected_list_like_container_count"] += 1
+                log(
+                    "[SCROLLTOUCH][promotion][ancestor_candidate] depth={} class='{}' view_id='{}' actionable=true accepted=false accepted_reason='none' rejected_reason='recycler_excluded'".format(
+                        action_depth,
+                        action_class[:64],
+                        action_resource[:64],
+                    )
+                )
                 continue
             has_container_hint = bool(
                 _safe_regex_search(r"(?i)(card|container|layout|frame|root|item)", action_resource)
@@ -1967,8 +2157,22 @@ def _select_visible_plugin_candidate(
             )
             if is_large_container:
                 stats["rejected_large_container_count"] += 1
+                log(
+                    "[SCROLLTOUCH][promotion][ancestor_candidate] depth={} class='{}' view_id='{}' actionable=true accepted=false accepted_reason='none' rejected_reason='oversized_root'".format(
+                        action_depth,
+                        action_class[:64],
+                        action_resource[:64],
+                    )
+                )
                 continue
             if candidate_ancestor_distance == 999 and not (fully_contains and (has_container_hint or is_card_like)):
+                log(
+                    "[SCROLLTOUCH][promotion][ancestor_candidate] depth={} class='{}' view_id='{}' actionable=true accepted=false accepted_reason='none' rejected_reason='root_excluded'".format(
+                        action_depth,
+                        action_class[:64],
+                        action_resource[:64],
+                    )
+                )
                 continue
             reason = f"{source_name}_nearby_container"
             if fully_contains:
@@ -2009,6 +2213,14 @@ def _select_visible_plugin_candidate(
                 overlap_ratio + (area_penalty * 100) - center_distance,
             )
             scored_candidates.append((score, action_node, reason))
+            log(
+                "[SCROLLTOUCH][promotion][ancestor_candidate] depth={} class='{}' view_id='{}' actionable=true accepted=true accepted_reason='{}' rejected_reason='none'".format(
+                    action_depth,
+                    action_class[:64],
+                    action_resource[:64],
+                    reason[:64],
+                )
+            )
             if fully_contains:
                 containment_candidates.append((score, action_node, reason))
             if len(scored_summary) < 12:
@@ -2026,6 +2238,7 @@ def _select_visible_plugin_candidate(
             best_node = containment_candidates[0][1]
             best_reason = containment_candidates[0][2]
             best_distance = int(ancestor_distance_by_node_id.get(id(best_node), ancestor_distance if ancestor_distance >= 0 else 999))
+            _log_promotion_exit(best_node, best_reason)
             return (
                 best_node,
                 best_reason,
@@ -2052,6 +2265,7 @@ def _select_visible_plugin_candidate(
                         str(bool(nearest_actionable_ancestor.get("focusable"))).lower(),
                     )
                 )
+                _log_promotion_exit(nearest_actionable_ancestor, "xml_live_closest_actionable_ancestor")
                 return (
                     nearest_actionable_ancestor,
                     "xml_live_closest_actionable_ancestor",
@@ -2069,6 +2283,7 @@ def _select_visible_plugin_candidate(
                         trace_summary[:400],
                     )
                 )
+            _log_promotion_exit(None, "none")
             return (
                 None,
                 "none",
@@ -2081,6 +2296,7 @@ def _select_visible_plugin_candidate(
         best_node = scored_candidates[0][1]
         best_reason = scored_candidates[0][2]
         best_distance = int(ancestor_distance_by_node_id.get(id(best_node), ancestor_distance if ancestor_distance >= 0 else 999))
+        _log_promotion_exit(best_node, best_reason)
         return (
             best_node,
             best_reason,
@@ -2312,6 +2528,7 @@ def _select_visible_plugin_candidate(
                     promotion_source = "xml_live"
                     ancestor_distance = xml_ancestor_distance
                     rank_summary_top3 = xml_top3
+            selected_container_bounds = str(click_node.get("boundsInScreen", "") or "").strip()
             selected_container_class = str(click_node.get("className", "") or "").strip()
             selected_container_view_id = str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "").strip()
             log(
@@ -2326,7 +2543,18 @@ def _select_visible_plugin_candidate(
                     int(stats.get("rejected_list_like_container_count", 0) or 0),
                 )
             )
+            log(
+                "[SCROLLTOUCH][promotion][commit] selected_container_class='{}' selected_container_view_id='{}' selected_container_bounds='{}' "
+                "commit_to_candidate={} commit_stage='promotion_select' commit_failure_reason='{}'".format(
+                    selected_container_class[:64],
+                    selected_container_view_id[:64],
+                    selected_container_bounds[:64],
+                    str(bool(click_node is not node and _is_actionable(click_node))).lower(),
+                    "selected but not committed" if click_node is node else "none",
+                )
+            )
         if click_node is node and not _is_actionable(click_node):
+            stats["last_promotion_result_reason"] = "non_actionable_without_promotion"
             _append_rejection(stats, "non_actionable_without_promotion")
             _record_inspect(
                 stats,
@@ -2342,6 +2570,14 @@ def _select_visible_plugin_candidate(
                 node_ref=node,
                 promoted_click_node=promoted_click_node,
                 reason="actionability_fail:non_actionable_without_promotion",
+            )
+            log(
+                "[SCROLLTOUCH][promotion][commit] selected_container_class='{}' selected_container_view_id='{}' selected_container_bounds='{}' "
+                "commit_to_candidate=false commit_stage='actionability_gate' commit_failure_reason='not_committed'".format(
+                    str(click_node.get("className", "") or "").strip()[:64],
+                    str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "").strip()[:64],
+                    str(click_node.get("boundsInScreen", "") or "").strip()[:64],
+                )
             )
             continue
         click_bounds = parse_bounds_str(str(click_node.get("boundsInScreen", "") or "").strip())
@@ -2433,6 +2669,15 @@ def _select_visible_plugin_candidate(
             "tap_strategy": tap_strategy,
             "rank_summary_top3": rank_summary_top3,
         }
+        stats["candidate_committed"] = True
+        log(
+            "[SCROLLTOUCH][promotion][commit] selected_container_class='{}' selected_container_view_id='{}' selected_container_bounds='{}' "
+            "commit_to_candidate=true commit_stage='candidate_append' commit_failure_reason='none'".format(
+                class_name[:64],
+                card_resource[:64],
+                bounds_repr[:64],
+            )
+        )
         candidates.append((score, click_node, candidate_meta))
 
     if not candidates:
@@ -2782,6 +3027,18 @@ def _run_pre_navigation_steps(
 
                 if not step_ok:
                     local_match_failed = True
+                    log(
+                        f"[SCROLLTOUCH][promotion][final_state] visible_candidate_count={int(candidate_stats.get('visible_candidate_count', 0) or 0)} "
+                        f"partial_match_count={int(candidate_stats.get('partial_match_count', 0) or 0)} "
+                        f"matched_text_found={str(bool(candidate_stats.get('matched_text_found', False))).lower()} "
+                        f"promotion_attempted={str(bool(candidate_stats.get('promotion_attempted', False))).lower()} "
+                        f"xml_node_found={str(bool(candidate_stats.get('xml_node_found', False))).lower()} "
+                        f"xml_match_strategy='{str(candidate_stats.get('xml_match_strategy', 'none'))[:32]}' "
+                        f"ancestor_chain_depth={int(candidate_stats.get('ancestor_chain_depth', 0) or 0)} "
+                        f"actionable_ancestor_found={str(bool(candidate_stats.get('actionable_ancestor_found', False))).lower()} "
+                        f"candidate_committed={str(bool(candidate_stats.get('candidate_committed', False))).lower()} "
+                        f"final_reason='no_local_match:{fallback_reason}'"
+                    )
                     log(
                         f"[SCENARIO][pre_nav][scrolltouch] candidate_select reason='no_local_match' "
                         f"fallback='helper_scrollTouch' reason_detail='{fallback_reason}' "
