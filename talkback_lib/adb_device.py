@@ -15,21 +15,45 @@ class AdbDevice:
         self.adb_path = adb_path
         self._resolve_serial = resolve_serial
 
-    def _run_adb_command(self, args: list[str], dev: Any = None, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
+    @staticmethod
+    def _effective_timeout(args: list[str], timeout: float | None) -> float:
+        if timeout is not None and timeout > 0:
+            return float(timeout)
+        lightweight_shell_cmds = {"settings", "getprop", "dumpsys"}
+        if len(args) >= 3 and args[0] == "shell" and args[1] in lightweight_shell_cmds:
+            return 5.0
+        return DEFAULT_TIMEOUT_SECONDS
+
+    def _run_adb_command(self, args: list[str], dev: Any = None, timeout: float | None = DEFAULT_TIMEOUT_SECONDS) -> str:
         serial = self._resolve_serial(dev)
         cmd = [self.adb_path]
         if serial:
             cmd += ["-s", serial]
         cmd += args
-        proc = subprocess.run(
-            cmd,
-            check=False,
-            text=True,
-            capture_output=True,
-            timeout=timeout,
-            encoding="utf-8",
-            errors="ignore",
-        )
+        effective_timeout = self._effective_timeout(args, timeout)
+        try:
+            proc = subprocess.run(
+                cmd,
+                check=False,
+                text=True,
+                capture_output=True,
+                timeout=effective_timeout,
+                encoding="utf-8",
+                errors="ignore",
+            )
+        except KeyboardInterrupt:
+            raise
+        except subprocess.TimeoutExpired:
+            print(
+                f"[ERROR][adb] timeout after {effective_timeout:.1f}s: {' '.join(cmd)}"
+            )
+            return ""
+        except FileNotFoundError as exc:
+            print(f"[ERROR][adb] executable_not_found path='{self.adb_path}' error='{exc}'")
+            return ""
+        except OSError as exc:
+            print(f"[ERROR][adb] execution_failed cmd='{' '.join(cmd)}' error='{exc}'")
+            return ""
         if proc.returncode != 0:
             stderr = (proc.stderr or "").strip()
             print(f"[ERROR] 명령 실행 실패(returncode={proc.returncode}): {' '.join(cmd)}")
