@@ -312,7 +312,7 @@ def test_collect_tab_rows_unchanged_classification_skips_overlay_routine(monkeyp
 
 
 def test_collect_tab_rows_global_nav_start_gate_abort_on_non_bottom_focus(monkeypatch):
-    client = DummyClient([])
+    client = DummyClient([_anchor_row()])
     client.focus_sequence = [
         {"viewIdResourceName": "com.samsung.android.oneconnect:id/home_button"},
         {"viewIdResourceName": "com.samsung.android.oneconnect:id/home_button"},
@@ -369,7 +369,7 @@ def test_collect_tab_rows_global_nav_start_gate_allows_bottom_focus(monkeypatch)
 
 def test_recover_to_start_state_skips_when_already_target(monkeypatch):
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
-    client = DummyClient([])
+    client = DummyClient([_anchor_row()])
     client.dump_tree_sequence = [
         [
             {
@@ -827,6 +827,72 @@ def test_open_scenario_pre_navigation_scroll_touch_failure(monkeypatch):
     assert any("exact_match_count=" in line for line in logs)
     assert any("rejections='" in line for line in logs)
     assert any("fallback='helper_scrollTouch'" in line for line in logs)
+
+
+def test_run_pre_navigation_scrolltouch_dispatch_false_but_transition_success_logs_success(monkeypatch):
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+    monkeypatch.setattr(
+        collection_flow,
+        "_select_visible_plugin_candidate",
+        lambda **kwargs: (
+            {"text": "Energy", "clickable": True, "viewIdResourceName": "com.test:id/preInstalledServiceCard"},
+            "candidate_found",
+            {"candidate_committed": True, "visible_candidate_count": 1, "partial_match_count": 1},
+            {},
+        ),
+    )
+    monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **kwargs: (True, "screen_text"))
+
+    client = DummyClient([_anchor_row()])
+    client.tap_bounds_center_adb = lambda **kwargs: False
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "scrollTouch", "target": "(?i).*energy.*", "type": "a"}],
+        "pre_navigation_retry_count": 1,
+    }
+
+    ok = collection_flow._run_pre_navigation_steps(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert any("candidate_click_dispatch_result success=false" in line for line in logs)
+    assert any("post_click_transition same_screen=false" in line for line in logs)
+    assert any("candidate_click_result=success" in line for line in logs)
+    assert not any("candidate_click_failed:dispatch_failed" in line for line in logs)
+
+
+def test_run_pre_navigation_scrolltouch_dispatch_false_and_same_screen_logs_dispatch_failed(monkeypatch):
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+    monkeypatch.setattr(
+        collection_flow,
+        "_select_visible_plugin_candidate",
+        lambda **kwargs: (
+            {"text": "Energy", "clickable": True, "viewIdResourceName": "com.test:id/preInstalledServiceCard"},
+            "candidate_found",
+            {"candidate_committed": True, "visible_candidate_count": 1, "partial_match_count": 1},
+            {},
+        ),
+    )
+    monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **kwargs: (False, "same_screen"))
+
+    client = DummyClient([])
+    client.tap_bounds_center_adb = lambda **kwargs: False
+    client.scrollTouch = lambda **kwargs: False
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "pre_navigation": [{"action": "scrollTouch", "target": "(?i).*energy.*", "type": "a"}],
+        "pre_navigation_retry_count": 1,
+    }
+
+    ok = collection_flow._run_pre_navigation_steps(client, "SERIAL", tab_cfg)
+
+    assert ok is False
+    assert any("candidate_click_dispatch_result success=false" in line for line in logs)
+    assert any("post_click_transition same_screen=true" in line for line in logs)
+    assert any("candidate_click_failed:dispatch_failed" in line for line in logs)
 
 
 def test_open_scenario_pre_navigation_scroll_touch_plugin_uses_cumulative_downward_search(monkeypatch):

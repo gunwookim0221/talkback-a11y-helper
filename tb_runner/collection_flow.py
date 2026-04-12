@@ -63,7 +63,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr30-scrolltouch-fallback-order-fix-v2"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr31-scrolltouch-candidate-click-result-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr25-direct-select-post-open-verify-v3"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -2994,33 +2994,41 @@ def _run_pre_navigation_steps(
                             if len(parts) == 2 and all(part.lstrip("-").isdigit() for part in parts):
                                 tap_point = (int(parts[0]), int(parts[1]))
                         step_ok = False
+                        click_dispatch_success = False
                         if (
                             str(selected_meta.get("promotion_source", "none")) == "xml_live"
                             and tap_strategy in {"text_center", "refined_body_point"}
                             and tap_point
                             and hasattr(client, "tap_xy_adb")
                         ):
-                            step_ok = bool(client.tap_xy_adb(dev=dev, x=int(tap_point[0]), y=int(tap_point[1])))
+                            click_dispatch_success = bool(client.tap_xy_adb(dev=dev, x=int(tap_point[0]), y=int(tap_point[1])))
                         else:
-                            step_ok = bool(client.tap_bounds_center_adb(dev=dev, name=tap_target, type_=tap_type, dump_nodes=top_nodes))
+                            click_dispatch_success = bool(
+                                client.tap_bounds_center_adb(dev=dev, name=tap_target, type_=tap_type, dump_nodes=top_nodes)
+                            )
+                        log(
+                            f"[DEBUG] candidate_click_dispatch_result success={str(click_dispatch_success).lower()}"
+                        )
+                        confirm_ok, confirm_signal = _confirm_click_focused_transition(
+                            client=client,
+                            dev=dev,
+                            tab_cfg=tab_cfg,
+                            transition_fast_path=transition_fast_path,
+                        )
+                        log(
+                            f"[SCENARIO][pre_nav][scrolltouch] post_click_transition same_screen={str(not confirm_ok).lower()} "
+                            f"signal='{confirm_signal}'"
+                        )
+                        setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
+                        setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
+                        step_ok = confirm_ok
                         if step_ok:
-                            confirm_ok, confirm_signal = _confirm_click_focused_transition(
-                                client=client,
-                                dev=dev,
-                                tab_cfg=tab_cfg,
-                                transition_fast_path=transition_fast_path,
-                            )
-                            log(
-                                f"[SCENARIO][pre_nav][scrolltouch] post_click_transition same_screen={str(not confirm_ok).lower()} "
-                                f"signal='{confirm_signal}'"
-                            )
-                            setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
-                            setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
-                            step_ok = confirm_ok
-                            if not step_ok:
-                                fallback_reason = f"post_click_transition_failed:{confirm_signal}"
+                            log("[INFO] candidate_click_result=success")
+                        elif not click_dispatch_success:
+                            fallback_reason = "dispatch_failed"
+                            log("[WARN] candidate_click_failed:dispatch_failed")
                         else:
-                            fallback_reason = "candidate_dispatch_failed"
+                            fallback_reason = f"post_click_transition_failed:{confirm_signal}"
                         break
 
                     if scroll_step >= max_scroll_search_steps:
@@ -3076,7 +3084,7 @@ def _run_pre_navigation_steps(
                             f"ancestor_chain_depth={int(candidate_stats.get('ancestor_chain_depth', 0) or 0)} "
                             f"actionable_ancestor_found={str(bool(candidate_stats.get('actionable_ancestor_found', False))).lower()} "
                             f"candidate_committed={str(candidate_committed).lower()} "
-                            f"final_reason='candidate_selected_click_failed:{fallback_reason}'"
+                            f"final_reason='candidate_click_failed:{fallback_reason}'"
                         )
                         log(
                             f"[SCENARIO][pre_nav][scrolltouch] candidate_select reason='candidate_click_failed' "
