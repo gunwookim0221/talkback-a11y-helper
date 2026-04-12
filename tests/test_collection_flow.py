@@ -1084,7 +1084,11 @@ def test_select_visible_plugin_candidate_life_air_care_description_keyword_promo
     assert stats.get("visible_candidate_count", 0) >= 1
     assert stats.get("partial_match_count", 0) >= 1
     assert selected_meta.get("promoted_container") is True
-    assert selected_meta.get("promotion_reason") in {"helper_containment_container", "helper_nearby_container"}
+    assert selected_meta.get("promotion_reason") in {
+        "helper_containment_container",
+        "helper_nearby_container",
+        "helper_nearest_actionable_ancestor",
+    }
     assert selected_meta.get("promoted_from", "").endswith("tvHeaderTitle")
     assert selected_meta.get("promoted_to", "").endswith("preInstalledServiceCard")
 
@@ -1715,6 +1719,75 @@ def test_select_visible_plugin_candidate_rejects_oversized_root_during_promotion
     assert reason == "no_visible_candidate"
     assert selected_meta.get("promoted_container") is False
     assert stats.get("rejection_counts", {}).get("non_actionable_without_promotion", 0) >= 1
+    assert "rejected_large_container_count" in stats
+
+
+def test_select_visible_plugin_candidate_promotion_skips_list_like_container_and_keeps_card_parent():
+    nodes = [
+        {
+            "text": "Life",
+            "boundsInScreen": "0,0,1080,2200",
+            "visibleToUser": True,
+            "children": [
+                {
+                    "boundsInScreen": "30,420,1050,1980",
+                    "visibleToUser": True,
+                    "clickable": True,
+                    "focusable": True,
+                    "viewIdResourceName": "com.test:id/recycler_view",
+                    "className": "androidx.recyclerview.widget.RecyclerView",
+                    "children": [
+                        {
+                            "boundsInScreen": "90,700,990,980",
+                            "visibleToUser": True,
+                            "clickable": True,
+                            "focusable": True,
+                            "viewIdResourceName": "com.test:id/pluginCardContainer",
+                            "className": "android.widget.FrameLayout",
+                            "children": [
+                                {
+                                    "boundsInScreen": "120,730,960,960",
+                                    "visibleToUser": True,
+                                    "clickable": False,
+                                    "focusable": False,
+                                    "viewIdResourceName": "com.test:id/pluginBody",
+                                    "className": "android.widget.LinearLayout",
+                                    "children": [
+                                        {
+                                            "text": "SmartThings Cooking",
+                                            "boundsInScreen": "160,760,880,830",
+                                            "visibleToUser": True,
+                                            "clickable": False,
+                                            "focusable": False,
+                                            "viewIdResourceName": "com.test:id/tvHeaderTitle",
+                                            "className": "android.widget.TextView",
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+
+    selected, reason, stats, selected_meta = collection_flow._select_visible_plugin_candidate(
+        nodes=nodes,
+        target=r"(?i)(^food$|food\.|smart\s*things\s*cooking|\bcooking\b)",
+        scenario_id="life_food_plugin",
+        entry_spec={
+            "title_patterns": [r"(?i)(^food$|food\.|smart\s*things\s*cooking|\bcooking\b)"],
+            "description_patterns": [],
+            "allow_description_match": False,
+        },
+    )
+
+    assert selected is not None
+    assert "candidate_count=" in reason
+    assert selected_meta.get("selected_container_view_id", "").endswith("pluginCardContainer")
+    assert "recycler_view" not in selected_meta.get("selected_container_view_id", "")
+    assert stats.get("rejected_list_like_container_count", 0) >= 1
 
 
 def test_confirm_click_focused_transition_life_energy_rejects_weak_signal(monkeypatch):
