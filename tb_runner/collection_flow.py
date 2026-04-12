@@ -63,7 +63,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr31-scrolltouch-candidate-click-result-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr37-scrolltouch-relaxed-semantic-fallback-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr36-air-entry-contract-success-preserve-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -1948,6 +1948,14 @@ def _select_visible_plugin_candidate(
         effective_clickable = bool(node_ref.get("effectiveClickable"))
         return clickable or focusable or effective_clickable
 
+    def _normalize_phrase(value: str) -> str:
+        lowered = str(value or "").strip().lower()
+        cleaned = re.sub(r"[^\w가-힣]+", " ", lowered)
+        return re.sub(r"\s+", " ", cleaned).strip()
+
+    def _tokenize_blob(value: str) -> set[str]:
+        return {token for token in re.split(r"[^0-9a-zA-Z가-힣]+", str(value or "").lower()) if len(token) >= 3}
+
     def _record_inspect(
         stats_map: dict[str, Any],
         *,
@@ -2738,6 +2746,43 @@ def _select_visible_plugin_candidate(
             and any(_safe_regex_search(pattern, click_descendant_blob) for pattern in title_patterns)
         )
         semantic_match = bool(title_semantic_match or description_semantic_match or resource_semantic_match or container_title_match)
+        relaxed_semantic_match = False
+        if not semantic_match:
+            click_node_resource = str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "").strip()
+            click_node_class_name = str(click_node.get("className", "") or "").strip()
+            click_node_container_like = bool(
+                _safe_regex_search(r"(?i)(card|container|layout|frame|content|item|root)", click_node_resource)
+                or _safe_regex_search(r"(?i)(card|container|layout|frame|viewgroup)", click_node_class_name)
+            )
+            actionable_or_container_like = bool(_is_actionable(click_node) or click_node_container_like)
+            semantic_evidence_present = bool(click_descendant_blob.strip() or title_blob.strip() or label_blob.strip())
+            if actionable_or_container_like and semantic_evidence_present:
+                normalized_semantic_blob = _normalize_phrase(semantic_blob)
+                normalized_target_phrases = {
+                    phrase
+                    for phrase in (_normalize_phrase(pattern) for pattern in [*title_patterns, *description_patterns, target])
+                    if len(phrase) >= 4
+                }
+                phrase_contains_match = bool(
+                    normalized_semantic_blob
+                    and any(
+                        phrase in normalized_semantic_blob or normalized_semantic_blob in phrase
+                        for phrase in normalized_target_phrases
+                    )
+                )
+                semantic_tokens = _tokenize_blob(" ".join([semantic_blob, title_blob, click_descendant_blob]))
+                overlap_tokens = semantic_tokens.intersection(set(target_tokens))
+                token_overlap_match = len(overlap_tokens) >= 2
+                generic_single_token_target = bool(
+                    len(target_tokens) == 1 and next(iter(target_tokens), "") in {"find", "video"}
+                )
+                if generic_single_token_target:
+                    companion_tokens = {"smart"}
+                    has_companion_evidence = bool(companion_tokens.intersection(semantic_tokens))
+                    token_overlap_match = bool(overlap_tokens and has_companion_evidence)
+                    phrase_contains_match = bool(phrase_contains_match and has_companion_evidence)
+                relaxed_semantic_match = bool(phrase_contains_match or token_overlap_match)
+        semantic_match = bool(semantic_match or relaxed_semantic_match)
         if not semantic_match:
             _append_rejection(stats, "semantic_miss")
             _record_inspect(
@@ -2900,6 +2945,7 @@ def _select_visible_plugin_candidate(
         score = (
             1 if _is_actionable(click_node) else 0,
             1 if _safe_regex_search(r"(?i)(preinstalledservicecard|servicecard|card)", card_resource) else 0,
+            0 if relaxed_semantic_match else 1,
             -center_delta,
             -c_top,
         )

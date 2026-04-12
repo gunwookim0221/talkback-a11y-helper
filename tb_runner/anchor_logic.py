@@ -262,6 +262,7 @@ def _pick_top_content_fallback_candidate(
     candidates: list[dict[str, Any]],
     *,
     entry_type: str = "",
+    allow_readable_only_fallback: bool = False,
     verify_tokens: list[str] | None = None,
     negative_verify_tokens: list[str] | None = None,
     diagnostics: list[dict[str, Any]] | None = None,
@@ -270,7 +271,7 @@ def _pick_top_content_fallback_candidate(
         return None, "", "no_candidates"
     screen_width = max((int(c.get("right", 0) or 0) for c in candidates), default=0)
     screen_height = max((int(c.get("bottom", 0) or 0) for c in candidates), default=0)
-    content_candidates = [
+    actionable_content_candidates = [
         c
         for c in candidates
         if bool(c.get("visible_to_user", True))
@@ -279,6 +280,20 @@ def _pick_top_content_fallback_candidate(
         and int(c.get("left", 10**9)) >= 0
         and not _is_fallback_chrome_candidate(c, screen_width, screen_height)
     ]
+    readable_content_candidates = [
+        c
+        for c in candidates
+        if bool(c.get("visible_to_user", True))
+        and int(c.get("top", 10**9)) >= 0
+        and int(c.get("left", 10**9)) >= 0
+        and (
+            str(c.get("announcement", "") or "").strip()
+            or str(c.get("text", "") or "").strip()
+            or str(c.get("resource_id", "") or "").strip()
+        )
+        and not _is_fallback_chrome_candidate(c, screen_width, screen_height)
+    ]
+    content_candidates = actionable_content_candidates or (readable_content_candidates if allow_readable_only_fallback else [])
     if not content_candidates:
         return None, "", "no_readable_top_candidate"
     top_y = min(int(c.get("top", 10**9)) for c in content_candidates)
@@ -296,6 +311,32 @@ def _pick_top_content_fallback_candidate(
     ]
     if not identity_candidates:
         return None, "", "no_readable_top_candidate"
+    if allow_readable_only_fallback and not actionable_content_candidates:
+        non_oversized_readable_candidates = []
+        for candidate in identity_candidates:
+            width = max(1, int(candidate.get("right", 0) or 0) - int(candidate.get("left", 0) or 0))
+            height = max(1, int(candidate.get("bottom", 0) or 0) - int(candidate.get("top", 0) or 0))
+            width_ratio = width / max(1, screen_width) if screen_width > 0 else 0.0
+            height_ratio = height / max(1, screen_height) if screen_height > 0 else 0.0
+            class_name = str(candidate.get("class_name", "") or "").strip().lower()
+            label_blob = " ".join(
+                [
+                    str(candidate.get("announcement", "") or "").strip().lower(),
+                    str(candidate.get("text", "") or "").strip().lower(),
+                ]
+            ).strip()
+            oversized_generic_container = bool(
+                width_ratio >= 0.94
+                and height_ratio >= 0.62
+                and _safe_regex_search(r"(?i)(layout|viewgroup|frame)", class_name)
+                and len(re.sub(r"\s+", "", label_blob)) <= 20
+            )
+            if oversized_generic_container:
+                continue
+            non_oversized_readable_candidates.append(candidate)
+        if not non_oversized_readable_candidates:
+            return None, "", "no_readable_top_candidate"
+        identity_candidates = non_oversized_readable_candidates
 
     normalized_entry_type = str(entry_type or "").strip().lower()
     normalized_verify_tokens = [
@@ -582,6 +623,12 @@ def stabilize_anchor(
         and screen_context_mode == "new_screen"
         and stabilization_mode == "anchor_only"
     )
+    readable_only_fallback_scope = (
+        phase == "scenario_start"
+        and "plugin" in scenario_id.lower()
+        and screen_context_mode == "new_screen"
+        and stabilization_mode == "anchor_only"
+    )
     plugin_fallback_scope = transition_fast_path or "plugin" in scenario_id.lower()
     start_candidate_source = "explicit_anchor"
     fallback_candidate_used = False
@@ -616,6 +663,7 @@ def stabilize_anchor(
             fallback_candidate, fallback_position, fallback_skip_reason = _pick_top_content_fallback_candidate(
                 candidates,
                 entry_type=str(tab_cfg.get("entry_type", "") or ""),
+                allow_readable_only_fallback=readable_only_fallback_scope,
                 verify_tokens=tab_cfg.get("verify_tokens", []),
                 negative_verify_tokens=tab_cfg.get("negative_verify_tokens", []),
                 diagnostics=fallback_diagnostics,
