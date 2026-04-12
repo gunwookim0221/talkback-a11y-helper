@@ -63,7 +63,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr29-scrolltouch-xml-ancestor-fallback-v2"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr29-scrolltouch-xml-ancestor-fallback-v3"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr25-direct-select-post-open-verify-v3"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -2490,7 +2490,12 @@ def _select_visible_plugin_candidate(
         promotion_debug_summary = ""
         ancestor_distance = -1
         rank_summary_top3 = ""
-        if click_node is node and not _is_actionable(click_node):
+        requires_promotion_fallback = bool(
+            not _is_actionable(click_node)
+            and int(stats.get("partial_match_count", 0) or 0) > 0
+            and matched_text_node
+        )
+        if requires_promotion_fallback:
             promotion_attempted = True
             promoted_from_helper, helper_reason, helper_candidate_count, helper_debug, helper_ancestor_distance, helper_top3 = _select_promoted_container(
                 matched_node=node,
@@ -2502,6 +2507,7 @@ def _select_visible_plugin_candidate(
             )
             promotion_candidate_count = helper_candidate_count
             promotion_debug_summary = helper_debug
+            helper_committed = bool(isinstance(promoted_from_helper, dict) and _is_actionable(promoted_from_helper))
             if isinstance(promoted_from_helper, dict):
                 promoted_click_node = promoted_from_helper
                 click_node = promoted_from_helper
@@ -2509,7 +2515,7 @@ def _select_visible_plugin_candidate(
                 promotion_source = "helper"
                 ancestor_distance = helper_ancestor_distance
                 rank_summary_top3 = helper_top3
-            elif xml_flat_nodes:
+            if (not helper_committed) and xml_flat_nodes:
                 promoted_from_xml, xml_reason, xml_candidate_count, xml_debug, xml_ancestor_distance, xml_top3 = _select_promoted_container(
                     matched_node=node,
                     node_bounds=bounds,
@@ -2549,11 +2555,11 @@ def _select_visible_plugin_candidate(
                     selected_container_class[:64],
                     selected_container_view_id[:64],
                     selected_container_bounds[:64],
-                    str(bool(click_node is not node and _is_actionable(click_node))).lower(),
-                    "selected but not committed" if click_node is node else "none",
+                    str(bool(_is_actionable(click_node))).lower(),
+                    "not_committed" if not _is_actionable(click_node) else "none",
                 )
             )
-        if click_node is node and not _is_actionable(click_node):
+        if not _is_actionable(click_node):
             stats["last_promotion_result_reason"] = "non_actionable_without_promotion"
             _append_rejection(stats, "non_actionable_without_promotion")
             _record_inspect(
@@ -2841,6 +2847,7 @@ def _run_pre_navigation_steps(
                 post_scroll_settle_ms = 250
                 xml_fallback_attempted = False
                 xml_fallback_reason = "not_attempted"
+                selected_candidate_observed = False
                 entry_type = str(tab_cfg.get("entry_type", _ENTRY_TYPE_CARD) or _ENTRY_TYPE_CARD).strip().lower()
                 card_entry_spec = _get_card_entry_spec(tab_cfg, target)
                 for scroll_step in range(1, max_scroll_search_steps + 1):
@@ -2925,6 +2932,7 @@ def _run_pre_navigation_steps(
                         log_fn=log,
                     )
                     if selected_node is not None:
+                        selected_candidate_observed = True
                         class_name = str(selected_node.get("className", "") or "").strip()
                         resource_id = str(selected_node.get("viewIdResourceName", "") or selected_node.get("resourceId", "") or "").strip()
                         bounds = str(selected_node.get("boundsInScreen", "") or "").strip()
@@ -3027,23 +3035,43 @@ def _run_pre_navigation_steps(
 
                 if not step_ok:
                     local_match_failed = True
-                    log(
-                        f"[SCROLLTOUCH][promotion][final_state] visible_candidate_count={int(candidate_stats.get('visible_candidate_count', 0) or 0)} "
-                        f"partial_match_count={int(candidate_stats.get('partial_match_count', 0) or 0)} "
-                        f"matched_text_found={str(bool(candidate_stats.get('matched_text_found', False))).lower()} "
-                        f"promotion_attempted={str(bool(candidate_stats.get('promotion_attempted', False))).lower()} "
-                        f"xml_node_found={str(bool(candidate_stats.get('xml_node_found', False))).lower()} "
-                        f"xml_match_strategy='{str(candidate_stats.get('xml_match_strategy', 'none'))[:32]}' "
-                        f"ancestor_chain_depth={int(candidate_stats.get('ancestor_chain_depth', 0) or 0)} "
-                        f"actionable_ancestor_found={str(bool(candidate_stats.get('actionable_ancestor_found', False))).lower()} "
-                        f"candidate_committed={str(bool(candidate_stats.get('candidate_committed', False))).lower()} "
-                        f"final_reason='no_local_match:{fallback_reason}'"
-                    )
-                    log(
-                        f"[SCENARIO][pre_nav][scrolltouch] candidate_select reason='no_local_match' "
-                        f"fallback='helper_scrollTouch' reason_detail='{fallback_reason}' "
-                        f"cumulative_mode={str(use_cumulative_search).lower()}"
-                    )
+                    candidate_committed = bool(candidate_stats.get("candidate_committed", False))
+                    if selected_candidate_observed or candidate_committed:
+                        log(
+                            f"[SCROLLTOUCH][promotion][final_state] visible_candidate_count={int(candidate_stats.get('visible_candidate_count', 0) or 0)} "
+                            f"partial_match_count={int(candidate_stats.get('partial_match_count', 0) or 0)} "
+                            f"matched_text_found={str(bool(candidate_stats.get('matched_text_found', False))).lower()} "
+                            f"promotion_attempted={str(bool(candidate_stats.get('promotion_attempted', False))).lower()} "
+                            f"xml_node_found={str(bool(candidate_stats.get('xml_node_found', False))).lower()} "
+                            f"xml_match_strategy='{str(candidate_stats.get('xml_match_strategy', 'none'))[:32]}' "
+                            f"ancestor_chain_depth={int(candidate_stats.get('ancestor_chain_depth', 0) or 0)} "
+                            f"actionable_ancestor_found={str(bool(candidate_stats.get('actionable_ancestor_found', False))).lower()} "
+                            f"candidate_committed={str(candidate_committed).lower()} "
+                            f"final_reason='candidate_selected_click_failed:{fallback_reason}'"
+                        )
+                        log(
+                            f"[SCENARIO][pre_nav][scrolltouch] candidate_select reason='candidate_click_failed' "
+                            f"fallback='helper_scrollTouch' reason_detail='{fallback_reason}' "
+                            f"cumulative_mode={str(use_cumulative_search).lower()}"
+                        )
+                    else:
+                        log(
+                            f"[SCROLLTOUCH][promotion][final_state] visible_candidate_count={int(candidate_stats.get('visible_candidate_count', 0) or 0)} "
+                            f"partial_match_count={int(candidate_stats.get('partial_match_count', 0) or 0)} "
+                            f"matched_text_found={str(bool(candidate_stats.get('matched_text_found', False))).lower()} "
+                            f"promotion_attempted={str(bool(candidate_stats.get('promotion_attempted', False))).lower()} "
+                            f"xml_node_found={str(bool(candidate_stats.get('xml_node_found', False))).lower()} "
+                            f"xml_match_strategy='{str(candidate_stats.get('xml_match_strategy', 'none'))[:32]}' "
+                            f"ancestor_chain_depth={int(candidate_stats.get('ancestor_chain_depth', 0) or 0)} "
+                            f"actionable_ancestor_found={str(bool(candidate_stats.get('actionable_ancestor_found', False))).lower()} "
+                            f"candidate_committed={str(candidate_committed).lower()} "
+                            f"final_reason='no_local_match:{fallback_reason}'"
+                        )
+                        log(
+                            f"[SCENARIO][pre_nav][scrolltouch] candidate_select reason='no_local_match' "
+                            f"fallback='helper_scrollTouch' reason_detail='{fallback_reason}' "
+                            f"cumulative_mode={str(use_cumulative_search).lower()}"
+                        )
                     step_ok = bool(client.scrollTouch(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
                     if step_ok:
                         confirm_ok, confirm_signal = _confirm_click_focused_transition(
