@@ -24,6 +24,15 @@ def test_life_pet_care_plugin_uses_card_entry_spec():
     assert "(?i).*take care of your pet.*" in pet_cfg["entry_match"]["description_patterns"]
 
 
+def test_life_food_plugin_uses_card_entry_spec():
+    food_cfg = next(cfg for cfg in TAB_CONFIGS if cfg.get("scenario_id") == "life_food_plugin")
+
+    assert food_cfg["entry_type"] == "card"
+    assert food_cfg["pre_navigation"][0]["action"] == "scrolltouch"
+    assert food_cfg["entry_match"]["allow_description_match"] is False
+    assert "(?i)(^food$|food\\.|smart\\s*things\\s*cooking|\\bcooking\\b)" in food_cfg["entry_match"]["title_patterns"]
+
+
 def test_configure_process_temp_dir_sets_tmp_and_temp(tmp_path):
     applied, path_text = configure_process_temp_dir(str(tmp_path / ".tmp"))
 

@@ -2079,7 +2079,17 @@ def _select_visible_plugin_candidate(
             stats["partial_match_count"] += 1
         elif description_semantic_match or resource_semantic_match:
             stats["partial_match_count"] += 1
-        semantic_match = bool(title_semantic_match or description_semantic_match or resource_semantic_match)
+        click_node_class_name = str(click_node.get("className", "") or "").strip()
+        container_class_match = bool(_safe_regex_search(r"(?i)(frame.?layout|relative.?layout|viewgroup)", click_node_class_name))
+        container_has_text_descendant = bool(click_descendant_blob.strip())
+        container_title_match = bool(
+            container_class_match
+            and container_has_text_descendant
+            and _node_is_visible(click_node)
+            and _is_actionable(click_node)
+            and any(_safe_regex_search(pattern, click_descendant_blob) for pattern in title_patterns)
+        )
+        semantic_match = bool(title_semantic_match or description_semantic_match or resource_semantic_match or container_title_match)
         if not semantic_match:
             _append_rejection(stats, "semantic_miss")
             _record_inspect(
@@ -2422,8 +2432,13 @@ def _run_pre_navigation_steps(
                         selected_node is None
                         and not xml_fallback_attempted
                         and entry_type == _ENTRY_TYPE_CARD
-                        and int(candidate_stats.get("partial_match_count", 0) or 0) > 0
-                        and int((rejection_counts or {}).get("non_actionable_without_promotion", 0) or 0) > 0
+                        and (
+                            int(candidate_stats.get("visible_candidate_count", 0) or 0) == 0
+                            or (
+                                int(candidate_stats.get("partial_match_count", 0) or 0) > 0
+                                and int((rejection_counts or {}).get("non_actionable_without_promotion", 0) or 0) > 0
+                            )
+                        )
                     )
                     if needs_xml_fallback:
                         xml_fallback_attempted = True

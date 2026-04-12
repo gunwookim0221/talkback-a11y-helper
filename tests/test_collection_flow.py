@@ -1279,6 +1279,53 @@ def test_select_visible_plugin_candidate_xml_fallback_promotes_clickable_contain
     assert stats.get("rejection_counts", {}).get("non_actionable_without_promotion", 0) == 0
 
 
+def test_select_visible_plugin_candidate_accepts_actionable_viewgroup_container_with_food_title_descendant():
+    nodes = [
+        {
+            "text": "Life",
+            "boundsInScreen": "0,0,1080,2200",
+            "visibleToUser": True,
+            "children": [
+                {
+                    "boundsInScreen": "120,620,960,980",
+                    "visibleToUser": True,
+                    "clickable": True,
+                    "focusable": False,
+                    "viewIdResourceName": "com.test:id/serviceCardContainer",
+                    "className": "android.view.ViewGroup",
+                    "children": [
+                        {
+                            "text": "SmartThings Cooking",
+                            "boundsInScreen": "180,700,840,760",
+                            "visibleToUser": True,
+                            "clickable": False,
+                            "focusable": False,
+                            "viewIdResourceName": "com.test:id/tvHeaderTitle",
+                            "className": "android.widget.TextView",
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+
+    selected, reason, stats, _ = collection_flow._select_visible_plugin_candidate(
+        nodes=nodes,
+        target=r"(?i)(^food$|food\.|smart\s*things\s*cooking|\bcooking\b)",
+        scenario_id="life_food_plugin",
+        entry_spec={
+            "title_patterns": [r"(?i)(^food$|food\.|smart\s*things\s*cooking|\bcooking\b)"],
+            "description_patterns": [],
+            "resource_patterns": [r"(?i)(servicecard|card|container|food|cook)"],
+            "allow_description_match": False,
+        },
+    )
+
+    assert selected is not None
+    assert "candidate_count=" in reason
+    assert stats.get("visible_candidate_count", 0) >= 1
+
+
 def test_select_visible_plugin_candidate_card_entry_spec_description_match_promotes_energy_xml_container():
     helper_nodes = [
         {
@@ -1331,6 +1378,72 @@ def test_select_visible_plugin_candidate_card_entry_spec_description_match_promo
     assert "candidate_count=" in reason
     assert selected_meta.get("promotion_source") == "xml_live"
     assert stats.get("partial_match_count", 0) >= 1
+
+
+def test_run_pre_navigation_steps_forces_xml_live_fallback_when_visible_candidate_count_zero(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    client = DummyClient([_anchor_row()])
+    client.scrollTouch = lambda **kwargs: False
+    client.dump_tree_sequence = [
+        [
+            {
+                "text": "Life",
+                "boundsInScreen": "0,0,1080,2200",
+                "visibleToUser": True,
+                "children": [],
+            }
+        ]
+    ]
+
+    select_calls = {"count": 0}
+
+    def _select_candidate(**kwargs):
+        select_calls["count"] += 1
+        if select_calls["count"] == 1:
+            return None, "no_visible_candidate", {"visible_candidate_count": 0, "rejection_counts": {}}, {}
+        return None, "still_no_visible_candidate", {"visible_candidate_count": 0, "rejection_counts": {}}, {}
+
+    xml_calls = {"count": 0}
+
+    def _load_xml(**kwargs):
+        xml_calls["count"] += 1
+        return (
+            [
+                {
+                    "visibleToUser": True,
+                    "boundsInScreen": "0,0,1080,2200",
+                    "children": [],
+                }
+            ],
+            "ok",
+        )
+
+    monkeypatch.setattr(collection_flow, "_select_visible_plugin_candidate", _select_candidate)
+    monkeypatch.setattr(collection_flow, "_load_scrolltouch_xml_nodes", _load_xml)
+
+    ok = collection_flow._run_pre_navigation_steps(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={
+            "scenario_id": "life_food_plugin",
+            "screen_context_mode": "new_screen",
+            "stabilization_mode": "anchor_only",
+            "entry_type": "card",
+            "max_scroll_search_steps": 1,
+            "pre_navigation_retry_count": 1,
+            "pre_navigation_wait_seconds": 0.1,
+            "pre_navigation": [{"action": "scrolltouch", "target": "(?i).*food.*", "type": "a"}],
+            "anchor": {"target": "anchor", "type": "t"},
+        },
+    )
+
+    assert ok is False
+    assert select_calls["count"] >= 2
+    assert xml_calls["count"] == 1
+    assert any("xml_fallback_attempted=true" in line for line in logs)
 
 
 def test_select_visible_plugin_candidate_card_entry_spec_description_match_promotes_pet_care_xml_container():
