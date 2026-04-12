@@ -65,7 +65,7 @@ COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr31-scrolltouch-candidate-click-result-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
-COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr25-direct-select-post-open-verify-v3"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr32-air-entry-contract-guard-bypass-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -955,6 +955,40 @@ def _build_direct_select_verify_candidates(
             if value:
                 extra_candidates.append(value)
     return extra_candidates
+
+
+def _resolve_anchor_fallback_source(stabilize_result: dict[str, Any]) -> str:
+    if not isinstance(stabilize_result, dict):
+        return ""
+    start_candidate_source = str(stabilize_result.get("start_candidate_source", "") or "").strip().lower()
+    if start_candidate_source == "fallback_top_level":
+        return "top_level_fallback"
+    if start_candidate_source == "fallback_focus":
+        return "focus_fallback"
+    return ""
+
+
+def _is_air_verified_entry_context(
+    *,
+    scenario_id: str,
+    pre_navigation_success: bool,
+    post_click_transition_signal: str,
+    post_click_transition_same_screen: bool,
+    anchor_fallback_source: str,
+    air_anchor_fallback_accepted: bool,
+) -> bool:
+    normalized_scenario_id = str(scenario_id or "").strip().lower()
+    normalized_signal = str(post_click_transition_signal or "").strip().lower()
+    normalized_fallback_source = str(anchor_fallback_source or "").strip().lower()
+    return (
+        normalized_scenario_id == _LIFE_AIR_CARE_SCENARIO_ID
+        and bool(pre_navigation_success)
+        and (normalized_signal == "air_care_verify" or post_click_transition_same_screen is False)
+        and (
+            normalized_fallback_source in {"top_level_fallback", "focus_fallback"}
+            or bool(air_anchor_fallback_accepted)
+        )
+    )
 
 
 def _classify_special_post_open_state(
@@ -3509,6 +3543,8 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     )
     trace_anchor_matched = bool(stabilize_result.get("matched")) if isinstance(stabilize_result, dict) else False
     trace_anchor_stable = bool(stabilize_result.get("ok")) if isinstance(stabilize_result, dict) else False
+    anchor_fallback_source = _resolve_anchor_fallback_source(stabilize_result if isinstance(stabilize_result, dict) else {})
+    air_anchor_fallback_accepted = bool(anchor_fallback_source in {"top_level_fallback", "focus_fallback"})
     setattr(client, "last_anchor_stabilize_result", stabilize_result if isinstance(stabilize_result, dict) else {})
     log(
         f"[TRACE][open_scenario] scenario='{scenario_id}' stabilization_mode='{stabilization_mode}' "
@@ -3516,6 +3552,11 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         f"focus_align_reason='{focus_align_result.get('reason', '')}' context_ok={trace_context_ok} "
         f"anchor_matched={trace_anchor_matched} anchor_stable={trace_anchor_stable}",
     )
+    start_open_summary = getattr(client, "last_start_open_summary", {})
+    if isinstance(start_open_summary, dict):
+        start_open_summary["anchor_fallback_source"] = anchor_fallback_source
+        start_open_summary["air_anchor_fallback_accepted"] = air_anchor_fallback_accepted
+        setattr(client, "last_start_open_summary", start_open_summary)
     if not stabilize_result.get("ok"):
         low_conf_allowed, low_conf_reason = _is_new_screen_low_confidence_allowed(
             tab_cfg=tab_cfg,
@@ -3636,6 +3677,18 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     fallback_used = bool(stabilize_result.get("fallback_candidate_used"))
     post_click_transition_same_screen = bool(getattr(client, "last_post_click_transition_same_screen", True))
     post_click_transition_signal = str(getattr(client, "last_post_click_transition_signal", "") or "").strip()
+    start_open_summary = getattr(client, "last_start_open_summary", {})
+    pre_navigation_success = bool(start_open_summary.get("pre_navigation_success")) if isinstance(start_open_summary, dict) else False
+    anchor_fallback_source = str(start_open_summary.get("anchor_fallback_source", "") or "").strip() if isinstance(start_open_summary, dict) else ""
+    air_anchor_fallback_accepted = bool(start_open_summary.get("air_anchor_fallback_accepted")) if isinstance(start_open_summary, dict) else False
+    air_verified_entry_context = _is_air_verified_entry_context(
+        scenario_id=scenario_id,
+        pre_navigation_success=pre_navigation_success,
+        post_click_transition_signal=post_click_transition_signal,
+        post_click_transition_same_screen=post_click_transition_same_screen,
+        anchor_fallback_source=anchor_fallback_source,
+        air_anchor_fallback_accepted=air_anchor_fallback_accepted,
+    )
     transition_verify_hint = post_click_transition_signal.replace("_", " ").strip().lower()
     visible_verify_text = ""
     extra_verify_candidates: list[str] = []
@@ -3819,16 +3872,19 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
                     f"signal='{post_click_transition_signal or 'none'}'"
                 )
     if has_negative_signal and (entry_type == _ENTRY_TYPE_DIRECT_SELECT or fallback_used):
-        log(
-            f"[SCENARIO][entry_contract] failed scenario='{scenario_id}' entry_type='{entry_type}' "
-            f"reason='{_ENTRY_REASON_FALSE_SUCCESS_GUARD}' view_id='{post_view_id}' label='{post_label}'"
-        )
-        start_open_summary = getattr(client, "last_start_open_summary", {})
-        if isinstance(start_open_summary, dict):
-            start_open_summary["entry_contract_reason"] = _ENTRY_REASON_FALSE_SUCCESS_GUARD
-            start_open_summary["entry_contract_detail"] = "negative_post_open_focus"
-            setattr(client, "last_start_open_summary", start_open_summary)
-        return False
+        if air_verified_entry_context:
+            log("[ENTRY][air] false_success_guard bypassed")
+        else:
+            log(
+                f"[SCENARIO][entry_contract] failed scenario='{scenario_id}' entry_type='{entry_type}' "
+                f"reason='{_ENTRY_REASON_FALSE_SUCCESS_GUARD}' view_id='{post_view_id}' label='{post_label}'"
+            )
+            start_open_summary = getattr(client, "last_start_open_summary", {})
+            if isinstance(start_open_summary, dict):
+                start_open_summary["entry_contract_reason"] = _ENTRY_REASON_FALSE_SUCCESS_GUARD
+                start_open_summary["entry_contract_detail"] = "negative_post_open_focus"
+                setattr(client, "last_start_open_summary", start_open_summary)
+            return False
     if entry_type == _ENTRY_TYPE_DIRECT_SELECT and has_negative_verify_token:
         if diagnostic_entry:
             wrong_open_verify_hits = _collect_token_hits(

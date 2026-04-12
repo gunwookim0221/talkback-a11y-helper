@@ -1997,6 +1997,87 @@ def test_open_scenario_direct_select_blocks_home_button_by_false_success_guard(m
     assert summary.get("entry_contract_reason") == "false_success_guard"
 
 
+def test_open_scenario_air_card_bypasses_false_success_guard_when_verified_transition_and_fallback(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {
+            "ok": True,
+            "selected": True,
+            "reason": "selected_and_verified",
+            "matched": True,
+            "fallback_candidate_used": True,
+            "start_candidate_source": "fallback_top_level",
+        },
+    )
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    def _pre_nav_success(**kwargs):
+        client = kwargs["client"]
+        setattr(client, "last_post_click_transition_same_screen", False)
+        setattr(client, "last_post_click_transition_signal", "air_care_verify")
+        return True
+
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", _pre_nav_success)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, *args, **kwargs: logs.append(message))
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    client.focus_sequence = [
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/home_button", "text": "Home"},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_air_care_plugin",
+        "entry_type": "card",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    summary = getattr(client, "last_start_open_summary", {})
+    assert summary.get("entry_contract_reason") == "success_verified"
+    assert summary.get("entry_contract_detail") == "plugin_open_verified"
+    assert any("[ENTRY][air] false_success_guard bypassed" in line for line in logs)
+
+
+def test_open_scenario_air_card_keeps_false_success_guard_without_transition_verify(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {
+            "ok": True,
+            "selected": True,
+            "reason": "selected_and_verified",
+            "matched": True,
+            "fallback_candidate_used": True,
+            "start_candidate_source": "fallback_top_level",
+        },
+    )
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    client.focus_sequence = [
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/home_button", "text": "Home"},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_air_care_plugin",
+        "entry_type": "card",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is False
+    summary = getattr(client, "last_start_open_summary", {})
+    assert summary.get("entry_contract_reason") == "false_success_guard"
+
+
 def test_open_scenario_direct_select_fails_when_post_open_verify_missing(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(
