@@ -1372,7 +1372,7 @@ def test_select_visible_plugin_candidate_card_entry_spec_description_match_promo
     selected, reason, stats, selected_meta = collection_flow._select_visible_plugin_candidate(
         nodes=helper_nodes,
         target=r"(?i)(^pet\s*care$|.*pet\s*care.*|.*펫\s*케어.*)",
-        scenario_id="life_pet_care_example",
+        scenario_id="life_pet_care_plugin",
         xml_nodes=xml_nodes,
         entry_spec={
             "title_patterns": [r"(?i)^pet\s*care$", r"(?i).*pet\s*care.*", r"(?i).*펫\s*케어.*"],
@@ -1731,7 +1731,7 @@ def test_open_scenario_direct_select_blocks_home_button_by_false_success_guard(m
     ]
     tab_cfg = {
         **_base_tab_cfg(),
-        "scenario_id": "life_pet_care_example",
+        "scenario_id": "life_pet_care_plugin",
         "entry_type": "direct_select",
         "screen_context_mode": "new_screen",
         "stabilization_mode": "anchor_only",
@@ -1758,7 +1758,7 @@ def test_open_scenario_direct_select_fails_when_post_open_verify_missing(monkeyp
     client.focus_sequence = [{"viewIdResourceName": "com.example:id/content", "text": "Unknown screen"}]
     tab_cfg = {
         **_base_tab_cfg(),
-        "scenario_id": "life_pet_care_example",
+        "scenario_id": "life_pet_care_plugin",
         "entry_type": "direct_select",
         "screen_context_mode": "new_screen",
         "stabilization_mode": "anchor_only",
@@ -1801,7 +1801,7 @@ def test_open_scenario_direct_select_recovers_with_visible_plugin_token(monkeypa
     ]
     tab_cfg = {
         **_base_tab_cfg(),
-        "scenario_id": "life_pet_care_example",
+        "scenario_id": "life_pet_care_plugin",
         "entry_type": "direct_select",
         "screen_context_mode": "new_screen",
         "stabilization_mode": "anchor_only",
@@ -1829,7 +1829,7 @@ def test_open_scenario_direct_select_keeps_wrong_open_on_negative_verify_token(m
     client.focus_sequence = [{"viewIdResourceName": "com.example:id/content", "text": "Unknown screen"}]
     tab_cfg = {
         **_base_tab_cfg(),
-        "scenario_id": "life_pet_care_example",
+        "scenario_id": "life_pet_care_plugin",
         "entry_type": "direct_select",
         "screen_context_mode": "new_screen",
         "stabilization_mode": "anchor_only",
@@ -1869,7 +1869,7 @@ def test_open_scenario_direct_select_transient_negative_verify_then_plugin_token
     )
     tab_cfg = {
         **_base_tab_cfg(),
-        "scenario_id": "life_pet_care_example",
+        "scenario_id": "life_pet_care_plugin",
         "entry_type": "direct_select",
         "screen_context_mode": "new_screen",
         "stabilization_mode": "anchor_only",
@@ -1924,7 +1924,7 @@ def test_open_scenario_card_entry_pet_care_uses_card_verify_flow(monkeypatch):
     client.focus_sequence = [{"viewIdResourceName": "com.example:id/title", "text": "Pet Care"}]
     tab_cfg = {
         **_base_tab_cfg(),
-        "scenario_id": "life_pet_care_example",
+        "scenario_id": "life_pet_care_plugin",
         "entry_type": "card",
         "screen_context_mode": "new_screen",
         "stabilization_mode": "anchor_only",
@@ -2189,7 +2189,7 @@ def test_open_scenario_card_entry_handles_pet_care_onboarding_special_state(monk
     ]
     tab_cfg = {
         **_base_tab_cfg(),
-        "scenario_id": "life_pet_care_example",
+        "scenario_id": "life_pet_care_plugin",
         "entry_type": "card",
         "verify_tokens": ["pet care", "petcare service plugin", "pet profile"],
         "special_state_tokens": [

@@ -1,4 +1,4 @@
-SCENARIO_CONFIG_VERSION = "2026.04.12-pet-care-onboarding-special-state-v1"
+SCENARIO_CONFIG_VERSION = "2026.04.12-pet-care-scenario-id-rename-v2"
 
 BOTTOM_TAB_GLOBAL_NAV = {
     "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
@@ -524,7 +524,7 @@ TAB_CONFIGS = [
         "max_steps": 30,
     },
     {
-        "scenario_id": "life_pet_care_example",
+        "scenario_id": "life_pet_care_plugin",
         "scenario_type": "content",
         "entry_type": "card",
         "tab_name": "(?i).*life.*",

@@ -599,7 +599,7 @@ def stabilize_anchor(
             entry_type = str(tab_cfg.get("entry_type", "") or "").strip().lower()
             scenario_id_l = scenario_id.strip().lower()
             if entry_type == "direct_select" and (
-                scenario_id_l == "life_pet_care_example"
+                scenario_id_l == "life_pet_care_plugin"
                 or scenario_id_l.startswith("life_pet_care")
             ):
                 for row in sorted(
