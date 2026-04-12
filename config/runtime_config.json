@@ -165,6 +165,34 @@
     "life_pet_care_plugin": {
       "enabled": false,
       "max_steps": 40
+    },
+    "life_family_care_plugin": {
+      "enabled": false,
+      "max_steps": 40
+    },
+    "life_plant_care_plugin": {
+      "enabled": false,
+      "max_steps": 40
+    },
+    "life_clothing_care_plugin": {
+      "enabled": false,
+      "max_steps": 40
+    },
+    "life_find_plugin": {
+      "enabled": false,
+      "max_steps": 40
+    },
+    "life_video_plugin": {
+      "enabled": false,
+      "max_steps": 40
+    },
+    "life_home_monitor_plugin": {
+      "enabled": false,
+      "max_steps": 40
+    },
+    "life_music_sync_plugin": {
+      "enabled": false,
+      "max_steps": 40
     }
   }
 }
