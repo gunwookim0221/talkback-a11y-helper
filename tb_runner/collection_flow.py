@@ -63,7 +63,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr39-scrolltouch-pre-candidate-probe-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr40-scrolltouch-rerank-gate-fix-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr36-air-entry-contract-success-preserve-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -2678,7 +2678,7 @@ def _select_visible_plugin_candidate(
             top3_summary,
         )
 
-    candidates: list[tuple[tuple[int, int, int, int], dict[str, Any], dict[str, Any]]] = []
+    candidates: list[tuple[float, dict[str, Any], dict[str, Any]]] = []
     for node, parent in flat_nodes:
         raw_bounds = str(node.get("boundsInScreen", "") or "").strip()
         bounds = parse_bounds_str(raw_bounds)
@@ -3196,13 +3196,6 @@ def _select_visible_plugin_candidate(
         if is_exact:
             stats["exact_match_count"] += 1
         center_delta = abs(((c_top + c_bottom) // 2) - viewport_center)
-        score = (
-            1 if _is_actionable(click_node) else 0,
-            1 if _safe_regex_search(r"(?i)(preinstalledservicecard|servicecard|card)", card_resource) else 0,
-            0 if relaxed_semantic_match else 1,
-            -center_delta,
-            -c_top,
-        )
         if target_tokens and any(token in semantic_blob.lower() for token in target_tokens) and len(stats["partial_samples"]) < 5:
             stats["partial_samples"].append(sample_repr)
         promoted_from = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or node.get("className", "") or "").strip()
@@ -3211,6 +3204,39 @@ def _select_visible_plugin_candidate(
         selected_area = max(1, (c_right - c_left) * (c_bottom - c_top))
         matched_text_area = max(1, (matched_text_bounds[2] - matched_text_bounds[0]) * (matched_text_bounds[3] - matched_text_bounds[1]))
         area_ratio = round(selected_area / float(matched_text_area), 3)
+        text_inter_left = max(c_left, matched_text_bounds[0])
+        text_inter_top = max(c_top, matched_text_bounds[1])
+        text_inter_right = min(c_right, matched_text_bounds[2])
+        text_inter_bottom = min(c_bottom, matched_text_bounds[3])
+        text_intersection_area = 0
+        if text_inter_left < text_inter_right and text_inter_top < text_inter_bottom:
+            text_intersection_area = (text_inter_right - text_inter_left) * (text_inter_bottom - text_inter_top)
+        containment_score = round(min(1.0, text_intersection_area / float(matched_text_area)), 3)
+        title_exact_match = 1.0 if is_exact else 0.0
+        title_partial_match = 1.0 if (target_tokens and any(token in semantic_blob.lower() for token in target_tokens)) else 0.0
+        semantic_score = 1.0 if semantic_match else 0.0
+        structure_score = round(max(0.0, 1.0 - (center_delta / float(max(1, viewport_bottom - viewport_top)))), 3)
+        accumulated_score = round((title_exact_match * 1.0) + (title_partial_match * 0.6) + (semantic_score * 0.4), 3)
+        final_score = (
+            (semantic_score * 3.0)
+            + (title_exact_match * 2.5)
+            + (title_partial_match * 1.5)
+            + (containment_score * 1.0)
+            + (structure_score * 0.5)
+            + (accumulated_score * 0.3)
+        )
+        xml_live_containment = bool(str(promotion_reason or "").startswith("xml_live_containment_container"))
+        log(
+            "[SCROLLTOUCH][RERANK_SCORE] candidate='{}' semantic={} title_exact={} title_partial={} containment={} structure={} final_score={:.3f}".format(
+                _clip(card_resource or label_blob or class_name, 80),
+                str(bool(semantic_match)).lower(),
+                f"{title_exact_match:.1f}",
+                f"{title_partial_match:.1f}",
+                f"{containment_score:.3f}",
+                f"{structure_score:.3f}",
+                float(final_score),
+            )
+        )
         center_x = (c_left + c_right) // 2
         center_y = (c_top + c_bottom) // 2
         text_center_x = (matched_text_bounds[0] + matched_text_bounds[2]) // 2
@@ -3274,6 +3300,15 @@ def _select_visible_plugin_candidate(
             "tap_point": f"{tap_x},{tap_y}",
             "tap_strategy": tap_strategy,
             "rank_summary_top3": rank_summary_top3,
+            "semantic_match": bool(semantic_match),
+            "containment_score": float(containment_score),
+            "xml_live_containment": bool(xml_live_containment),
+            "title_exact_match": float(title_exact_match),
+            "title_partial_match": float(title_partial_match),
+            "structure_score": float(structure_score),
+            "accumulated_score": float(accumulated_score),
+            "final_score": float(final_score),
+            "is_near_exact_text_match": bool(title_exact_match >= 1.0 or (title_partial_match >= 1.0 and semantic_score >= 1.0)),
         }
         stats["candidate_committed"] = True
         log(
@@ -3284,12 +3319,61 @@ def _select_visible_plugin_candidate(
                 bounds_repr[:64],
             )
         )
-        candidates.append((score, click_node, candidate_meta))
+        candidates.append((float(final_score), click_node, candidate_meta))
 
     if not candidates:
         return None, "no_visible_candidate", stats, selected_meta
-    candidates.sort(reverse=True, key=lambda item: item[0])
-    return candidates[0][1], f"candidate_count={len(candidates)}", stats, candidates[0][2]
+    semantic_candidates = [item for item in candidates if bool(item[2].get("semantic_match", False))]
+    rerank_enabled = bool(len(candidates) >= 2 and len(semantic_candidates) >= 1)
+    log(
+        "[SCROLLTOUCH][RERANK_GATE] candidate_count={} semantic_candidates={} rerank_enabled={}".format(
+            len(candidates),
+            len(semantic_candidates),
+            str(rerank_enabled).lower(),
+        )
+    )
+    if len(candidates) == 1:
+        only_meta = candidates[0][2]
+        only_containment = float(only_meta.get("containment_score", 0.0) or 0.0)
+        only_xml_live_containment = bool(only_meta.get("xml_live_containment", False))
+        only_semantic = bool(only_meta.get("semantic_match", False))
+        if only_semantic and (only_containment >= 0.8 or only_xml_live_containment):
+            log(
+                "[SCROLLTOUCH][IMMEDIATE_STRONG_SINGLE] reason=single_strong_candidate containment={} semantic={}".format(
+                    f"{only_containment:.3f}",
+                    str(only_semantic).lower(),
+                )
+            )
+            return candidates[0][1], "immediate_strong_single", stats, only_meta
+    if rerank_enabled:
+        candidates.sort(
+            reverse=True,
+            key=lambda item: (
+                1 if bool(item[2].get("is_near_exact_text_match", False)) else 0,
+                float(item[0]),
+                float(item[2].get("containment_score", 0.0) or 0.0),
+                float(item[2].get("structure_score", 0.0) or 0.0),
+            ),
+        )
+    else:
+        candidates.sort(reverse=True, key=lambda item: float(item[0]))
+    winner = candidates[0]
+    if not bool(winner[2].get("semantic_match", False)) and semantic_candidates:
+        semantic_candidates.sort(reverse=True, key=lambda item: float(item[0]))
+        winner = semantic_candidates[0]
+        log(
+            "[SCROLLTOUCH][RERANK_FALLBACK] reason=winner_not_semantic selected='{}'".format(
+                _clip(str(winner[2].get("selected_container_view_id", "") or winner[1].get("className", "") or ""), 80)
+            )
+        )
+    if len(candidates) >= 2:
+        second_meta = candidates[1][2]
+        winner[2]["second_tap_point"] = str(second_meta.get("tap_point", "") or "")
+        winner[2]["second_tap_strategy"] = str(second_meta.get("tap_strategy", "center") or "center")
+        winner[2]["second_resource_id"] = str(second_meta.get("selected_container_view_id", "") or "")
+        winner[2]["second_label"] = _node_label_blob(candidates[1][1])
+        winner[2]["second_promotion_source"] = str(second_meta.get("promotion_source", "none") or "none")
+    return winner[1], f"candidate_count={len(candidates)}", stats, winner[2]
 
 
 def _make_visible_plugin_search_signature(nodes: list[dict[str, Any]]) -> str:
@@ -3630,6 +3714,57 @@ def _run_pre_navigation_steps(
                             log("[WARN] candidate_click_failed:dispatch_failed")
                         else:
                             fallback_reason = f"post_click_transition_failed:{confirm_signal}"
+                            second_resource_id = str(selected_meta.get("second_resource_id", "") or "").strip()
+                            second_label = str(selected_meta.get("second_label", "") or "").strip()
+                            second_tap_strategy = str(selected_meta.get("second_tap_strategy", "center") or "center").strip().lower()
+                            second_tap_point_raw = str(selected_meta.get("second_tap_point", "") or "").strip()
+                            second_tap_point: tuple[int, int] | None = None
+                            if second_tap_point_raw:
+                                second_parts = [part.strip() for part in second_tap_point_raw.split(",")]
+                                if len(second_parts) == 2 and all(part.lstrip("-").isdigit() for part in second_parts):
+                                    second_tap_point = (int(second_parts[0]), int(second_parts[1]))
+                            if second_resource_id or second_label:
+                                log(
+                                    "[SCROLLTOUCH][CLICK_RETRY] attempt=2 candidate='{}'".format(
+                                        _clip(second_resource_id or second_label, 80)
+                                    )
+                                )
+                                second_click_dispatch_success = False
+                                if (
+                                    str(selected_meta.get("second_promotion_source", "none")) == "xml_live"
+                                    and second_tap_strategy in {"text_center", "refined_body_point"}
+                                    and second_tap_point
+                                    and hasattr(client, "tap_xy_adb")
+                                ):
+                                    second_click_dispatch_success = bool(
+                                        client.tap_xy_adb(dev=dev, x=int(second_tap_point[0]), y=int(second_tap_point[1]))
+                                    )
+                                else:
+                                    second_tap_target = second_resource_id if second_resource_id else second_label
+                                    second_tap_type = "r" if second_resource_id else "a"
+                                    second_click_dispatch_success = bool(
+                                        client.tap_bounds_center_adb(dev=dev, name=second_tap_target, type_=second_tap_type, dump_nodes=top_nodes)
+                                    )
+                                if second_click_dispatch_success:
+                                    second_confirm_ok, second_confirm_signal = _confirm_click_focused_transition(
+                                        client=client,
+                                        dev=dev,
+                                        tab_cfg=tab_cfg,
+                                        transition_fast_path=transition_fast_path,
+                                    )
+                                    log(
+                                        f"[SCENARIO][pre_nav][scrolltouch] post_click_transition same_screen={str(not second_confirm_ok).lower()} "
+                                        f"signal='{second_confirm_signal}'"
+                                    )
+                                    setattr(client, "last_post_click_transition_same_screen", not second_confirm_ok)
+                                    setattr(client, "last_post_click_transition_signal", str(second_confirm_signal or ""))
+                                    step_ok = bool(second_confirm_ok)
+                                    if step_ok:
+                                        fallback_reason = "none"
+                                    else:
+                                        fallback_reason = f"post_click_transition_failed:{second_confirm_signal}"
+                                else:
+                                    fallback_reason = "dispatch_failed_retry2"
                         break
 
                     if scroll_step >= max_scroll_search_steps:
