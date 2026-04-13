@@ -63,7 +63,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr38-scrolltouch-normalized-semantic-gate-v2"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr39-scrolltouch-pre-candidate-probe-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr36-air-entry-contract-success-preserve-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -1967,6 +1967,13 @@ def _select_visible_plugin_candidate(
         promotion_reason: str = "none",
         promoted_from: str = "",
         promoted_to: str = "",
+        filter_stage: str = "filtered_hard",
+        hard_reject_reason: str = "none",
+        probe_allowed: bool = False,
+        probe_text_source: str = "none",
+        probe_match_reason: str = "none",
+        probe_guard_reason: str = "none",
+        probe_promoted: bool = False,
     ) -> None:
         samples = stats_map.setdefault("inspect_samples", [])
         if len(samples) >= sample_limit:
@@ -1980,7 +1987,7 @@ def _select_visible_plugin_candidate(
         effective_clickable = clickable or focusable
         promoted = isinstance(promoted_click_node, dict)
         samples.append(
-            "label='{}' rid='{}' cls='{}' visible={} clickable={} focusable={} effectiveClickable={} matched_text_node='{}' promoted_container={} promotion_reason='{}' promoted_from='{}' promoted_to='{}' stage='{}' reason='{}'".format(
+            "label='{}' rid='{}' cls='{}' visible={} clickable={} focusable={} effectiveClickable={} matched_text_node='{}' promoted_container={} promotion_reason='{}' promoted_from='{}' promoted_to='{}' stage='{}' reason='{}' filter_stage='{}' hard_reject_reason='{}' probe_allowed={} probe_text_source='{}' probe_match_reason='{}' probe_guard_reason='{}' probe_promoted={}".format(
                 label_blob,
                 resource_id,
                 class_name,
@@ -1995,6 +2002,13 @@ def _select_visible_plugin_candidate(
                 _clip(promoted_to, sample_id_limit),
                 stage,
                 reject_reason,
+                filter_stage,
+                hard_reject_reason,
+                str(bool(probe_allowed)).lower(),
+                _clip(probe_text_source, sample_text_limit),
+                _clip(probe_match_reason, sample_text_limit),
+                _clip(probe_guard_reason, sample_text_limit),
+                str(bool(probe_promoted)).lower(),
             )
         )
 
@@ -2021,7 +2035,18 @@ def _select_visible_plugin_candidate(
         "relaxed_semantic_match_count": 0,
         "generic_guard_block_count": 0,
         "fallback_applied_count": 0,
+        "hard_filter_reject_count": 0,
+        "semantic_probe_pool_count": 0,
+        "semantic_probe_match_count": 0,
+        "semantic_probe_reject_count": 0,
+        "candidate_from_probe_count": 0,
+        "probe_guard_block_count": 0,
+        "helper_text_hit_count": 0,
+        "xml_live_text_hit_count": 0,
+        "descendant_text_hit_count": 0,
         "relaxed_semantic_samples": [],
+        "probe_samples": [],
+        "probe_reject_samples": [],
         "rejected_large_container_count": 0,
         "rejected_list_like_container_count": 0,
         "visible_samples": [],
@@ -2100,6 +2125,18 @@ def _select_visible_plugin_candidate(
             normalized_target_phrases.add(normalized_phrase)
     if target_tokens:
         normalized_target_phrases.add(_normalize_phrase(" ".join(target_tokens)))
+    target_token_set = set(target_tokens)
+
+    def _is_chrome_like_blob(blob: str) -> bool:
+        return bool(_safe_regex_search(r"(?i)\b(add|more options|location|navigate up|home|back|button)\b", blob))
+
+    def _is_large_or_list_like_node(node_ref: dict[str, Any], node_bounds: tuple[int, int, int, int]) -> bool:
+        node_class_name = str(node_ref.get("className", "") or "")
+        node_resource = str(node_ref.get("viewIdResourceName", "") or node_ref.get("resourceId", "") or "")
+        node_area_local = max(1, (node_bounds[2] - node_bounds[0]) * (node_bounds[3] - node_bounds[1]))
+        is_large_root = bool(node_area_local >= int(viewport_area * 0.92) and not _is_actionable(node_ref))
+        is_list_like = bool(_safe_regex_search(r"(?i)(recycler.?view|grid.?view|list.?view)", f"{node_class_name} {node_resource}"))
+        return is_large_root or is_list_like
 
     descendants_by_container: dict[int, list[str]] = {}
     for node, parent in flat_nodes:
@@ -2110,6 +2147,33 @@ def _select_visible_plugin_candidate(
         child_label = _node_label_blob(node)
         if child_label:
             descendants.append(child_label)
+    helper_text_hit_count = 0
+    descendant_text_hit_count = 0
+    for node, _ in flat_nodes:
+        helper_blob = _node_label_blob(node)
+        descendant_blob = " ".join(descendants_by_container.get(id(node), []))
+        helper_norm = _normalize_phrase(helper_blob)
+        descendant_norm = _normalize_phrase(descendant_blob)
+        helper_hit = bool(
+            helper_norm
+            and (
+                any(phrase in helper_norm or helper_norm in phrase for phrase in normalized_target_phrases if phrase)
+                or bool(target_token_set and _tokenize_blob(helper_blob).intersection(target_token_set))
+            )
+        )
+        descendant_hit = bool(
+            descendant_norm
+            and (
+                any(phrase in descendant_norm or descendant_norm in phrase for phrase in normalized_target_phrases if phrase)
+                or bool(target_token_set and _tokenize_blob(descendant_blob).intersection(target_token_set))
+            )
+        )
+        if helper_hit:
+            helper_text_hit_count += 1
+        if descendant_hit:
+            descendant_text_hit_count += 1
+    stats["helper_text_hit_count"] = helper_text_hit_count
+    stats["descendant_text_hit_count"] = descendant_text_hit_count
 
     actionable_nodes: list[tuple[dict[str, Any], tuple[int, int, int, int], bool]] = []
     for candidate_node, _ in flat_nodes:
@@ -2137,6 +2201,7 @@ def _select_visible_plugin_candidate(
     xml_parent_by_node_id: dict[int, dict[str, Any]] = {}
     xml_actionable_nodes: list[tuple[dict[str, Any], tuple[int, int, int, int], bool]] = []
     if isinstance(xml_nodes, list) and xml_nodes:
+        xml_text_hit_count = 0
         for xml_candidate_node, xml_parent in _iter_tree_nodes_with_parent(xml_nodes):
             xml_flat_nodes.append((xml_candidate_node, xml_parent if isinstance(xml_parent, dict) else None))
             if isinstance(xml_parent, dict):
@@ -2157,6 +2222,14 @@ def _select_visible_plugin_candidate(
             )
             if xml_clickable or xml_is_card_like:
                 xml_actionable_nodes.append((xml_candidate_node, xml_bounds, xml_is_card_like))
+            xml_blob = _node_label_blob(xml_candidate_node)
+            xml_norm = _normalize_phrase(xml_blob)
+            if xml_norm and (
+                any(phrase in xml_norm or xml_norm in phrase for phrase in normalized_target_phrases if phrase)
+                or bool(target_token_set and _tokenize_blob(xml_blob).intersection(target_token_set))
+            ):
+                xml_text_hit_count += 1
+        stats["xml_live_text_hit_count"] = xml_text_hit_count
 
     def _select_promoted_container(
         *,
@@ -2676,7 +2749,6 @@ def _select_visible_plugin_candidate(
             )
         )
         semantic_tokens = _tokenize_blob(" ".join([label_blob, click_label_blob, click_descendant_blob]))
-        target_token_set = set(target_tokens)
         overlap_tokens = semantic_tokens.intersection(target_token_set)
         required_overlap = len(target_token_set) if len(target_token_set) <= 2 else len(target_token_set) - 1
         token_cover_match = bool(target_token_set and len(overlap_tokens) >= max(1, required_overlap))
@@ -2698,16 +2770,94 @@ def _select_visible_plugin_candidate(
         generic_guard_passed = bool((not generic_single_token_target) or generic_guard_checks >= 2)
         if generic_single_token_target and relaxed_gate_match and not generic_guard_passed:
             stats["generic_guard_block_count"] += 1
-        if not (title_semantic_match or description_semantic_match or (relaxed_gate_match and generic_guard_passed)):
+        pre_candidate_match = bool(title_semantic_match or description_semantic_match or (relaxed_gate_match and generic_guard_passed))
+        probe_allowed = False
+        probe_promoted = False
+        probe_text_source = "none"
+        probe_match_reason = "none"
+        probe_guard_reason = "none"
+        hard_reject_reason = "none"
+        if not pre_candidate_match:
+            card_like_hint = bool(
+                _safe_regex_search(r"(?i)(card|container|layout|frame|content|item|root|servicecard)", click_node_resource)
+                or _safe_regex_search(r"(?i)(card|layout|viewgroup|frame)", click_node_class_name)
+            )
+            has_text_evidence = bool(pre_semantic_blob.strip() or click_descendant_blob.strip())
+            if not has_text_evidence:
+                hard_reject_reason = "probe_no_text_evidence"
+            elif _is_chrome_like_blob(pre_semantic_blob):
+                hard_reject_reason = "probe_chrome_like"
+            elif _is_large_or_list_like_node(click_node, (left, top, right, bottom)):
+                hard_reject_reason = "probe_large_or_list_like"
+            elif not _node_is_visible(click_node):
+                hard_reject_reason = "probe_not_visible"
+            elif not (card_like_hint or bool(click_descendant_blob.strip())):
+                hard_reject_reason = "probe_not_card_like"
+            else:
+                probe_allowed = True
+                stats["semantic_probe_pool_count"] += 1
+                if len(stats["probe_samples"]) < 5:
+                    stats["probe_samples"].append(
+                        "source='pre_candidate' reason='semantic_probe_allowed' rid='{}'".format(
+                            _clip(click_node_resource or click_node.get("resourceId", ""), sample_id_limit)
+                        )
+                    )
+                probe_phrase_match = semantic_contains_phrase
+                probe_token_match = token_cover_match
+                if probe_phrase_match:
+                    probe_match_reason = "normalized_phrase_contains"
+                elif probe_token_match:
+                    probe_match_reason = "token_cover_match"
+                if click_descendant_blob.strip():
+                    probe_text_source = "descendant_text"
+                elif click_label_blob.strip():
+                    probe_text_source = "click_label"
+                elif label_blob.strip():
+                    probe_text_source = "node_label"
+                else:
+                    probe_text_source = "semantic_blob"
+                probe_guard_passed = generic_guard_passed
+                if generic_single_token_target and (probe_phrase_match or probe_token_match) and not probe_guard_passed:
+                    stats["probe_guard_block_count"] += 1
+                    probe_guard_reason = "generic_token_guard_failed"
+                elif not (probe_phrase_match or probe_token_match):
+                    probe_guard_reason = "probe_semantic_miss"
+                else:
+                    probe_guard_reason = "passed"
+                if probe_guard_passed and (probe_phrase_match or probe_token_match):
+                    pre_candidate_match = True
+                    probe_promoted = True
+                    stats["semantic_probe_match_count"] += 1
+                else:
+                    stats["semantic_probe_reject_count"] += 1
+                    if len(stats["probe_reject_samples"]) < 5:
+                        stats["probe_reject_samples"].append(
+                            "reason='{}' rid='{}'".format(
+                                probe_guard_reason,
+                                _clip(click_node_resource or click_node.get("resourceId", ""), sample_id_limit),
+                            )
+                        )
+            if not probe_allowed:
+                stats["hard_filter_reject_count"] += 1
+        if not pre_candidate_match:
+            _append_rejection(stats, "filtered_hard" if not probe_allowed else "semantic_probe_rejected")
+            reject_reason = "filtered_hard" if not probe_allowed else "semantic_probe_rejected"
             _append_rejection(stats, "filtered_before_candidate")
             _record_inspect(
                 stats,
                 node_ref=node,
                 promoted_click_node=promoted_click_node,
-                reject_reason="filtered_before_candidate",
+                reject_reason=reject_reason,
                 stage="label_filter",
                 matched_text_node=matched_text_node,
                 promotion_reason=promotion_reason,
+                filter_stage="filtered_hard" if not probe_allowed else "semantic_probe_rejected",
+                hard_reject_reason=hard_reject_reason,
+                probe_allowed=probe_allowed,
+                probe_text_source=probe_text_source,
+                probe_match_reason=probe_match_reason,
+                probe_guard_reason=probe_guard_reason,
+                probe_promoted=probe_promoted,
             )
             continue
         click_bounds = parse_bounds_str(str(click_node.get("boundsInScreen", "") or "").strip())
@@ -2873,6 +3023,14 @@ def _select_visible_plugin_candidate(
                     )
                 )
         if not semantic_match:
+            if probe_allowed:
+                stats["semantic_probe_reject_count"] += 1
+                if len(stats["probe_reject_samples"]) < 5:
+                    stats["probe_reject_samples"].append(
+                        "reason='semantic_probe_post_filter_miss' rid='{}'".format(
+                            _clip(str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or ""), sample_id_limit)
+                        )
+                    )
             _append_rejection(stats, "semantic_miss")
             _record_inspect(
                 stats,
@@ -2882,6 +3040,13 @@ def _select_visible_plugin_candidate(
                 stage="semantic_filter",
                 matched_text_node=matched_text_node,
                 promotion_reason=promotion_reason,
+                filter_stage="semantic_probe_rejected" if probe_allowed else "filtered_hard",
+                hard_reject_reason=hard_reject_reason,
+                probe_allowed=probe_allowed,
+                probe_text_source=probe_text_source,
+                probe_match_reason=probe_match_reason,
+                probe_guard_reason=probe_guard_reason,
+                probe_promoted=False,
             )
             _record_pre_candidate(
                 stats,
@@ -3068,6 +3233,8 @@ def _select_visible_plugin_candidate(
             if c_top < refined_y < c_bottom:
                 tap_y = refined_y
                 tap_strategy = "refined_body_point"
+        if probe_promoted:
+            stats["candidate_from_probe_count"] += 1
         _record_inspect(
             stats,
             node_ref=node,
@@ -3078,6 +3245,13 @@ def _select_visible_plugin_candidate(
             promotion_reason=promotion_reason,
             promoted_from=promoted_from,
             promoted_to=promoted_to,
+            filter_stage="semantic_probe_allowed" if probe_allowed else "filtered_hard",
+            hard_reject_reason=hard_reject_reason,
+            probe_allowed=probe_allowed,
+            probe_text_source=probe_text_source,
+            probe_match_reason=probe_match_reason,
+            probe_guard_reason=probe_guard_reason,
+            probe_promoted=probe_promoted,
         )
         candidate_meta = {
             "promoted_container": bool(promoted_click_node is not None),
@@ -3321,6 +3495,12 @@ def _run_pre_navigation_steps(
                     partial_preview = " | ".join(partial_samples[:3]) if isinstance(partial_samples, list) and partial_samples else "-"
                     relaxed_samples = candidate_stats.get("relaxed_semantic_samples", [])
                     relaxed_preview = " | ".join(relaxed_samples[:3]) if isinstance(relaxed_samples, list) and relaxed_samples else "-"
+                    probe_samples = candidate_stats.get("probe_samples", [])
+                    probe_preview = " | ".join(probe_samples[:3]) if isinstance(probe_samples, list) and probe_samples else "-"
+                    probe_reject_samples = candidate_stats.get("probe_reject_samples", [])
+                    probe_reject_preview = (
+                        " | ".join(probe_reject_samples[:3]) if isinstance(probe_reject_samples, list) and probe_reject_samples else "-"
+                    )
                     rejection_summary = "-"
                     if isinstance(rejection_counts, dict) and rejection_counts:
                         sorted_rejections = sorted(rejection_counts.items(), key=lambda item: (-int(item[1] or 0), str(item[0])))
@@ -3341,10 +3521,20 @@ def _run_pre_navigation_steps(
                         f"relaxed_semantic_match_count={candidate_stats.get('relaxed_semantic_match_count', 0)} "
                         f"fallback_applied_count={candidate_stats.get('fallback_applied_count', 0)} "
                         f"generic_guard_block_count={candidate_stats.get('generic_guard_block_count', 0)} "
+                        f"hard_filter_reject_count={candidate_stats.get('hard_filter_reject_count', 0)} "
+                        f"semantic_probe_pool_count={candidate_stats.get('semantic_probe_pool_count', 0)} "
+                        f"semantic_probe_match_count={candidate_stats.get('semantic_probe_match_count', 0)} "
+                        f"semantic_probe_reject_count={candidate_stats.get('semantic_probe_reject_count', 0)} "
+                        f"candidate_from_probe_count={candidate_stats.get('candidate_from_probe_count', 0)} "
+                        f"probe_guard_block_count={candidate_stats.get('probe_guard_block_count', 0)} "
+                        f"helper_text_hit_count={candidate_stats.get('helper_text_hit_count', 0)} "
+                        f"xml_live_text_hit_count={candidate_stats.get('xml_live_text_hit_count', 0)} "
+                        f"descendant_text_hit_count={candidate_stats.get('descendant_text_hit_count', 0)} "
                         f"xml_fallback_attempted={str(xml_fallback_attempted).lower()} "
                         f"xml_fallback_reason='{xml_fallback_reason}' "
                         f"rejections='{rejection_summary[:360]}' "
                         f"visible_top='{visible_preview[:360]}' partial_top='{partial_preview[:360]}' relaxed_top='{relaxed_preview[:360]}' "
+                        f"probe_top='{probe_preview[:360]}' probe_reject_top='{probe_reject_preview[:360]}' "
                         f"pre_candidate_top='{pre_candidate_preview[:360]}' "
                         f"local_search_nodes={len(top_nodes) if isinstance(top_nodes, list) else 0} "
                         f"selected={str(selected_node is not None).lower()} selected_reason='{selected_reason}'"
