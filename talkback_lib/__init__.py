@@ -383,11 +383,7 @@ class A11yAdbClient:
         return LogcatReader.has_req_marker(log_text=log_text, prefix=prefix, req_id=req_id)
 
     def clear_logcat(self, dev: Any = None) -> str:
-        try:
-            return self._run(["logcat", "-c"], dev=dev, timeout=5.0)
-        except subprocess.TimeoutExpired:
-            print("[WARN] logcat -c timed out, skipping...")
-            return ""
+        return self._adb_device._clear_logcat_best_effort(dev=dev, timeout=1.5)
 
     def _take_snapshot(self, dev: Any, save_path: str) -> None:
         """ADB screencap을 수행해 현재 화면을 로컬 파일로 저장합니다."""

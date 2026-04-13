@@ -62,6 +62,49 @@ class AdbDevice:
             return ""
         return proc.stdout.strip()
 
+    def _clear_logcat_best_effort(self, dev: Any = None, timeout: float = 1.5) -> str:
+        serial = self._resolve_serial(dev)
+        cmd = [self.adb_path]
+        if serial:
+            cmd += ["-s", serial]
+        cmd += ["logcat", "-c"]
+        safe_timeout = max(0.2, float(timeout))
+        try:
+            with subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+            ) as proc:
+                try:
+                    stdout, stderr = proc.communicate(timeout=safe_timeout)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.communicate()
+                    print(
+                        f"[WARN][adb] best_effort logcat -c timeout after {safe_timeout:.1f}s: {' '.join(cmd)}"
+                    )
+                    return ""
+        except KeyboardInterrupt:
+            print("[WARN][adb] best_effort logcat -c interrupted, skipping...")
+            return ""
+        except FileNotFoundError as exc:
+            print(f"[WARN][adb] best_effort logcat -c executable_not_found path='{self.adb_path}' error='{exc}'")
+            return ""
+        except OSError as exc:
+            print(f"[WARN][adb] best_effort logcat -c execution_failed cmd='{' '.join(cmd)}' error='{exc}'")
+            return ""
+
+        if proc.returncode != 0:
+            print(
+                f"[WARN][adb] best_effort logcat -c failed returncode={proc.returncode} stderr='{(stderr or '').strip()}'"
+            )
+            return ""
+        return (stdout or "").strip()
+
     def _shell(self, dev: Any, shell_args: list[str], timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
         return self._run_adb_command(["shell", *shell_args], dev=dev, timeout=timeout)
 
