@@ -63,7 +63,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr37-scrolltouch-relaxed-semantic-fallback-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr38-scrolltouch-normalized-semantic-gate-v2"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr36-air-entry-contract-success-preserve-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -1949,7 +1949,7 @@ def _select_visible_plugin_candidate(
         return clickable or focusable or effective_clickable
 
     def _normalize_phrase(value: str) -> str:
-        lowered = str(value or "").strip().lower()
+        lowered = str(value or "").replace("\n", " ").replace("\r", " ").strip().lower()
         cleaned = re.sub(r"[^\w가-힣]+", " ", lowered)
         return re.sub(r"\s+", " ", cleaned).strip()
 
@@ -2018,6 +2018,10 @@ def _select_visible_plugin_candidate(
         "visible_candidate_count": 0,
         "partial_match_count": 0,
         "exact_match_count": 0,
+        "relaxed_semantic_match_count": 0,
+        "generic_guard_block_count": 0,
+        "fallback_applied_count": 0,
+        "relaxed_semantic_samples": [],
         "rejected_large_container_count": 0,
         "rejected_list_like_container_count": 0,
         "visible_samples": [],
@@ -2081,6 +2085,21 @@ def _select_visible_plugin_candidate(
         pattern_tokens = [token for token in re.split(r"[^0-9a-zA-Z가-힣]+", pattern.lower()) if len(token) >= 3]
         target_tokens.extend(pattern_tokens)
     target_tokens = sorted(set(target_tokens))
+    normalized_target_phrases: set[str] = set()
+    normalized_pattern_inputs = [*title_patterns, *description_patterns, str(target or "").strip()]
+    for pattern in normalized_pattern_inputs:
+        if not pattern:
+            continue
+        phrase_seed = str(pattern)
+        phrase_seed = re.sub(r"\(\?i\)", " ", phrase_seed)
+        phrase_seed = re.sub(r"\[sS]\*", " ", phrase_seed)
+        phrase_seed = re.sub(r"\[sS]\+", " ", phrase_seed)
+        phrase_seed = re.sub(r"[\^\$\|\(\)\[\]\{\}\?\*\+\\]", " ", phrase_seed)
+        normalized_phrase = _normalize_phrase(phrase_seed)
+        if len(normalized_phrase) >= 4:
+            normalized_target_phrases.add(normalized_phrase)
+    if target_tokens:
+        normalized_target_phrases.add(_normalize_phrase(" ".join(target_tokens)))
 
     descendants_by_container: dict[int, list[str]] = {}
     for node, parent in flat_nodes:
@@ -2644,7 +2663,42 @@ def _select_visible_plugin_candidate(
         description_semantic_match = allow_description_match and any(
             _safe_regex_search(pattern, pre_semantic_blob) for pattern in description_patterns
         )
-        if not (title_semantic_match or description_semantic_match):
+        label_normalized = _normalize_phrase(label_blob)
+        click_label_normalized = _normalize_phrase(click_label_blob)
+        descendant_normalized = _normalize_phrase(click_descendant_blob)
+        pre_semantic_normalized = _normalize_phrase(pre_semantic_blob)
+        semantic_contains_phrase = bool(
+            pre_semantic_normalized
+            and any(
+                phrase in pre_semantic_normalized or pre_semantic_normalized in phrase
+                for phrase in normalized_target_phrases
+                if phrase
+            )
+        )
+        semantic_tokens = _tokenize_blob(" ".join([label_blob, click_label_blob, click_descendant_blob]))
+        target_token_set = set(target_tokens)
+        overlap_tokens = semantic_tokens.intersection(target_token_set)
+        required_overlap = len(target_token_set) if len(target_token_set) <= 2 else len(target_token_set) - 1
+        token_cover_match = bool(target_token_set and len(overlap_tokens) >= max(1, required_overlap))
+        generic_single_token_target = bool(len(target_token_set) == 1 and next(iter(target_token_set), "") in {"find", "video"})
+        generic_guard_checks = 0
+        if bool(_is_actionable(click_node)) or bool(_safe_regex_search(r"(?i)(card|container|layout|item|content)", str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "") + " " + str(click_node.get("className", "") or ""))):
+            generic_guard_checks += 1
+        if descendant_normalized or click_label_normalized:
+            generic_guard_checks += 1
+        if bool(_safe_regex_search(r"(?i)(smart|servicecard|plugin|care|find|video)", pre_semantic_blob)):
+            generic_guard_checks += 1
+        if not bool(_safe_regex_search(r"(?i)\b(add|more options|location|navigate up|home|back|button)\b", pre_semantic_blob)):
+            generic_guard_checks += 1
+        click_node_class_name = str(click_node.get("className", "") or "")
+        click_node_resource = str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "")
+        if not bool(_safe_regex_search(r"(?i)(recycler.?view|grid.?view|list.?view)", click_node_class_name + " " + click_node_resource)):
+            generic_guard_checks += 1
+        relaxed_gate_match = bool(semantic_contains_phrase or token_cover_match)
+        generic_guard_passed = bool((not generic_single_token_target) or generic_guard_checks >= 2)
+        if generic_single_token_target and relaxed_gate_match and not generic_guard_passed:
+            stats["generic_guard_block_count"] += 1
+        if not (title_semantic_match or description_semantic_match or (relaxed_gate_match and generic_guard_passed)):
             _append_rejection(stats, "filtered_before_candidate")
             _record_inspect(
                 stats,
@@ -2747,6 +2801,9 @@ def _select_visible_plugin_candidate(
         )
         semantic_match = bool(title_semantic_match or description_semantic_match or resource_semantic_match or container_title_match)
         relaxed_semantic_match = False
+        relaxed_source = "none"
+        relaxed_reason = "none"
+        generic_guard_passed_final = True
         if not semantic_match:
             click_node_resource = str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "").strip()
             click_node_class_name = str(click_node.get("className", "") or "").strip()
@@ -2758,31 +2815,63 @@ def _select_visible_plugin_candidate(
             semantic_evidence_present = bool(click_descendant_blob.strip() or title_blob.strip() or label_blob.strip())
             if actionable_or_container_like and semantic_evidence_present:
                 normalized_semantic_blob = _normalize_phrase(semantic_blob)
-                normalized_target_phrases = {
-                    phrase
-                    for phrase in (_normalize_phrase(pattern) for pattern in [*title_patterns, *description_patterns, target])
-                    if len(phrase) >= 4
-                }
                 phrase_contains_match = bool(
                     normalized_semantic_blob
                     and any(
                         phrase in normalized_semantic_blob or normalized_semantic_blob in phrase
                         for phrase in normalized_target_phrases
+                        if phrase
                     )
                 )
                 semantic_tokens = _tokenize_blob(" ".join([semantic_blob, title_blob, click_descendant_blob]))
-                overlap_tokens = semantic_tokens.intersection(set(target_tokens))
-                token_overlap_match = len(overlap_tokens) >= 2
+                target_token_set = set(target_tokens)
+                overlap_tokens = semantic_tokens.intersection(target_token_set)
+                required_overlap = len(target_token_set) if len(target_token_set) <= 2 else len(target_token_set) - 1
+                token_overlap_match = bool(target_token_set and len(overlap_tokens) >= max(1, required_overlap))
                 generic_single_token_target = bool(
-                    len(target_tokens) == 1 and next(iter(target_tokens), "") in {"find", "video"}
+                    len(target_token_set) == 1 and next(iter(target_token_set), "") in {"find", "video"}
                 )
-                if generic_single_token_target:
-                    companion_tokens = {"smart"}
-                    has_companion_evidence = bool(companion_tokens.intersection(semantic_tokens))
-                    token_overlap_match = bool(overlap_tokens and has_companion_evidence)
-                    phrase_contains_match = bool(phrase_contains_match and has_companion_evidence)
-                relaxed_semantic_match = bool(phrase_contains_match or token_overlap_match)
+                generic_guard_checks = 0
+                if actionable_or_container_like:
+                    generic_guard_checks += 1
+                if bool(title_blob.strip() or click_descendant_blob.strip()):
+                    generic_guard_checks += 1
+                if bool(_safe_regex_search(r"(?i)(smart|service|plugin|care|find|video)", semantic_blob)):
+                    generic_guard_checks += 1
+                if not bool(_safe_regex_search(r"(?i)\b(add|more options|location|navigate up|home|button)\b", semantic_blob)):
+                    generic_guard_checks += 1
+                if not bool(_safe_regex_search(r"(?i)(recycler.?view|grid.?view|list.?view)", click_node_class_name + " " + click_node_resource)):
+                    generic_guard_checks += 1
+                generic_guard_passed_final = bool((not generic_single_token_target) or generic_guard_checks >= 2)
+                if generic_single_token_target and not generic_guard_passed_final and (phrase_contains_match or token_overlap_match):
+                    stats["generic_guard_block_count"] += 1
+                if phrase_contains_match and generic_guard_passed_final:
+                    relaxed_semantic_match = True
+                    relaxed_reason = "normalized_phrase_contains"
+                    if descendant_blob.strip():
+                        relaxed_source = "descendant_summary"
+                    elif title_blob.strip():
+                        relaxed_source = "descendant_title"
+                    elif label_blob.strip():
+                        relaxed_source = "node_label"
+                    else:
+                        relaxed_source = "semantic_blob"
+                elif token_overlap_match and generic_guard_passed_final:
+                    relaxed_semantic_match = True
+                    relaxed_reason = "token_cover_match"
+                    relaxed_source = "semantic_blob"
         semantic_match = bool(semantic_match or relaxed_semantic_match)
+        if relaxed_semantic_match:
+            stats["fallback_applied_count"] += 1
+            stats["relaxed_semantic_match_count"] += 1
+            if len(stats["relaxed_semantic_samples"]) < 5:
+                stats["relaxed_semantic_samples"].append(
+                    "source='{}' reason='{}' generic_token_guard_passed={} exact_or_partial_absent=true".format(
+                        relaxed_source,
+                        relaxed_reason,
+                        str(bool(generic_guard_passed_final)).lower(),
+                    )
+                )
         if not semantic_match:
             _append_rejection(stats, "semantic_miss")
             _record_inspect(
@@ -3230,6 +3319,8 @@ def _run_pre_navigation_steps(
                     pre_candidate_fail_samples = candidate_stats.get("pre_candidate_fail_samples", [])
                     visible_preview = " | ".join(visible_samples[:3]) if isinstance(visible_samples, list) and visible_samples else "-"
                     partial_preview = " | ".join(partial_samples[:3]) if isinstance(partial_samples, list) and partial_samples else "-"
+                    relaxed_samples = candidate_stats.get("relaxed_semantic_samples", [])
+                    relaxed_preview = " | ".join(relaxed_samples[:3]) if isinstance(relaxed_samples, list) and relaxed_samples else "-"
                     rejection_summary = "-"
                     if isinstance(rejection_counts, dict) and rejection_counts:
                         sorted_rejections = sorted(rejection_counts.items(), key=lambda item: (-int(item[1] or 0), str(item[0])))
@@ -3247,10 +3338,13 @@ def _run_pre_navigation_steps(
                         f"visible_candidate_count={candidate_stats.get('visible_candidate_count', 0)} "
                         f"partial_match_count={candidate_stats.get('partial_match_count', 0)} "
                         f"exact_match_count={candidate_stats.get('exact_match_count', 0)} "
+                        f"relaxed_semantic_match_count={candidate_stats.get('relaxed_semantic_match_count', 0)} "
+                        f"fallback_applied_count={candidate_stats.get('fallback_applied_count', 0)} "
+                        f"generic_guard_block_count={candidate_stats.get('generic_guard_block_count', 0)} "
                         f"xml_fallback_attempted={str(xml_fallback_attempted).lower()} "
                         f"xml_fallback_reason='{xml_fallback_reason}' "
                         f"rejections='{rejection_summary[:360]}' "
-                        f"visible_top='{visible_preview[:360]}' partial_top='{partial_preview[:360]}' "
+                        f"visible_top='{visible_preview[:360]}' partial_top='{partial_preview[:360]}' relaxed_top='{relaxed_preview[:360]}' "
                         f"pre_candidate_top='{pre_candidate_preview[:360]}' "
                         f"local_search_nodes={len(top_nodes) if isinstance(top_nodes, list) else 0} "
                         f"selected={str(selected_node is not None).lower()} selected_reason='{selected_reason}'"
