@@ -63,7 +63,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr40-scrolltouch-global-pool-rerank-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr39-scrolltouch-pre-candidate-probe-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr36-air-entry-contract-success-preserve-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -2063,8 +2063,6 @@ def _select_visible_plugin_candidate(
         "candidate_committed": False,
         "last_promotion_result_reason": "none",
         "will_try_xml_live_fallback": False,
-        "candidate_pool": [],
-        "source_text_hit_count": {"exact": 0, "partial": 0, "probe": 0, "promoted": 0, "xml_live": 0},
     }
     selected_meta: dict[str, Any] = {
         "promoted_container": False,
@@ -3198,6 +3196,13 @@ def _select_visible_plugin_candidate(
         if is_exact:
             stats["exact_match_count"] += 1
         center_delta = abs(((c_top + c_bottom) // 2) - viewport_center)
+        score = (
+            1 if _is_actionable(click_node) else 0,
+            1 if _safe_regex_search(r"(?i)(preinstalledservicecard|servicecard|card)", card_resource) else 0,
+            0 if relaxed_semantic_match else 1,
+            -center_delta,
+            -c_top,
+        )
         if target_tokens and any(token in semantic_blob.lower() for token in target_tokens) and len(stats["partial_samples"]) < 5:
             stats["partial_samples"].append(sample_repr)
         promoted_from = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or node.get("className", "") or "").strip()
@@ -3230,41 +3235,6 @@ def _select_visible_plugin_candidate(
                 tap_strategy = "refined_body_point"
         if probe_promoted:
             stats["candidate_from_probe_count"] += 1
-        match_type = "partial"
-        if is_exact:
-            match_type = "exact"
-        elif probe_promoted:
-            match_type = "probe"
-        elif relaxed_semantic_match:
-            match_type = "partial"
-        source_type = "xml_live" if promotion_source == "xml_live" else ("promoted" if promoted_click_node is not None else match_type)
-        source_hits = stats.get("source_text_hit_count", {})
-        if isinstance(source_hits, dict):
-            source_hits[source_type] = int(source_hits.get(source_type, 0) or 0) + 1
-        structure_score = 1.3 if _safe_regex_search(r"(?i)(preinstalledservicecard|servicecard|card|content_view)", card_resource) else 0.0
-        container_score = 1.0 if _safe_regex_search(r"(?i)(card|frame.?layout|linear.?layout|relative.?layout|container)", f"{card_resource} {class_name}") else 0.0
-        actionability_score = 1.4 if _is_actionable(click_node) else 0.0
-        text_score = 0.0
-        if is_exact:
-            text_score = 4.2
-        elif probe_promoted:
-            text_score = 2.8
-        elif relaxed_semantic_match:
-            text_score = 1.6
-        else:
-            text_score = 2.2
-        if matched_text_node == "description":
-            text_score -= 0.7
-        position_score = max(0.0, 1.2 - min(center_delta / max(1.0, (viewport_bottom - viewport_top) / 2.0), 1.2))
-        penalty = 0.0
-        if _is_chrome_like_blob(f"{label_blob} {card_resource}"):
-            penalty += 3.8
-        if _safe_regex_search(r"(?i)(recycler.?view|viewpager|appbar|toolbar|bottom.?nav|menu|home|button)", f"{class_name} {card_resource}"):
-            penalty += 3.2
-        if selected_area >= int(viewport_area * 0.93):
-            penalty += 4.2
-        total_score = round(text_score + structure_score + container_score + actionability_score + position_score - penalty, 3)
-        score = (total_score, 1 if is_exact else 0, 1 if promotion_source == "xml_live" else 0, -center_delta, -c_top)
         _record_inspect(
             stats,
             node_ref=node,
@@ -3304,21 +3274,7 @@ def _select_visible_plugin_candidate(
             "tap_point": f"{tap_x},{tap_y}",
             "tap_strategy": tap_strategy,
             "rank_summary_top3": rank_summary_top3,
-            "match_type": match_type,
-            "source_type": source_type,
-            "text_score": text_score,
-            "structure_score": structure_score,
-            "position_score": position_score,
-            "actionability_score": actionability_score,
-            "container_score": container_score,
-            "total_score": total_score,
-            "candidate_label": label_blob,
-            "candidate_label_norm": _normalize_phrase(label_blob),
-            "bounds": bounds_repr,
         }
-        stats_pool = stats.get("candidate_pool")
-        if isinstance(stats_pool, list):
-            stats_pool.append(candidate_meta.copy())
         stats["candidate_committed"] = True
         log(
             "[SCROLLTOUCH][promotion][commit] selected_container_class='{}' selected_container_view_id='{}' selected_container_bounds='{}' "
@@ -3333,21 +3289,6 @@ def _select_visible_plugin_candidate(
     if not candidates:
         return None, "no_visible_candidate", stats, selected_meta
     candidates.sort(reverse=True, key=lambda item: item[0])
-    winner_score = float(candidates[0][2].get("total_score", 0.0) or 0.0)
-    runner_score = float(candidates[1][2].get("total_score", 0.0) or -99.0) if len(candidates) > 1 else -99.0
-    immediate_select_allowed = bool(
-        (
-            int(stats.get("exact_match_count", 0) or 0) > 0
-            and winner_score >= 6.0
-            and (winner_score - runner_score) >= 0.5
-        )
-        or (
-            str(candidates[0][2].get("promotion_source", "none")) == "xml_live"
-            and winner_score >= 6.5
-            and len(candidates) <= 2
-        )
-    )
-    candidates[0][2]["immediate_select_allowed"] = immediate_select_allowed
     return candidates[0][1], f"candidate_count={len(candidates)}", stats, candidates[0][2]
 
 
@@ -3507,12 +3448,6 @@ def _run_pre_navigation_steps(
                 xml_fallback_attempted = False
                 xml_fallback_reason = "not_attempted"
                 selected_candidate_observed = False
-                pooled_candidates_raw: list[dict[str, Any]] = []
-                pooled_candidate_map: dict[str, dict[str, Any]] = {}
-                pooled_hard_reject_count = 0
-                pooled_probe_pool_count = 0
-                pooled_probe_miss_count = 0
-                pooled_source_text_hits: dict[str, int] = {"exact": 0, "partial": 0, "probe": 0, "promoted": 0, "xml_live": 0}
                 entry_type = str(tab_cfg.get("entry_type", _ENTRY_TYPE_CARD) or _ENTRY_TYPE_CARD).strip().lower()
                 card_entry_spec = _get_card_entry_spec(tab_cfg, target)
                 for scroll_step in range(1, max_scroll_search_steps + 1):
@@ -3552,37 +3487,6 @@ def _run_pre_navigation_steps(
                                 entry_spec=card_entry_spec,
                             )
                             rejection_counts = candidate_stats.get("rejection_counts", {})
-                    pooled_hard_reject_count += int(candidate_stats.get("hard_filter_reject_count", 0) or 0)
-                    pooled_probe_pool_count += int(candidate_stats.get("semantic_probe_pool_count", 0) or 0)
-                    pooled_probe_miss_count += int(candidate_stats.get("semantic_probe_reject_count", 0) or 0)
-                    source_hits = candidate_stats.get("source_text_hit_count", {})
-                    if isinstance(source_hits, dict):
-                        for source_key, source_count in source_hits.items():
-                            pooled_source_text_hits[str(source_key)] = int(pooled_source_text_hits.get(str(source_key), 0) or 0) + int(source_count or 0)
-                    step_candidates = candidate_stats.get("candidate_pool", [])
-                    if isinstance(step_candidates, list):
-                        for pooled_meta in step_candidates:
-                            if not isinstance(pooled_meta, dict):
-                                continue
-                            pooled_entry = dict(pooled_meta)
-                            pooled_entry["source_step_index"] = scroll_step
-                            pooled_entry["selection_mode"] = "pooled_rerank"
-                            pooled_entry["source_type"] = str(pooled_meta.get("source_type", pooled_meta.get("match_type", "partial")) or "partial")
-                            rid = str(pooled_entry.get("selected_container_view_id", "") or "").strip().lower()
-                            label_norm = str(pooled_entry.get("candidate_label_norm", "") or "").strip().lower()
-                            promoted_to = str(pooled_entry.get("promoted_to", "") or "").strip().lower()
-                            bounds_key = str(pooled_entry.get("bounds", "") or pooled_entry.get("matched_text_bounds", "") or "").strip()
-                            dedupe_key = f"{rid}|{label_norm}|{promoted_to}|{bounds_key}"
-                            pooled_candidates_raw.append(pooled_entry)
-                            existing = pooled_candidate_map.get(dedupe_key)
-                            if existing is None:
-                                pooled_entry["observed_count"] = 1
-                                pooled_candidate_map[dedupe_key] = pooled_entry
-                            else:
-                                existing["observed_count"] = int(existing.get("observed_count", 1) or 1) + 1
-                                if float(pooled_entry.get("total_score", 0.0) or 0.0) > float(existing.get("total_score", 0.0) or 0.0):
-                                    pooled_entry["observed_count"] = int(existing.get("observed_count", 1) or 1)
-                                    pooled_candidate_map[dedupe_key] = pooled_entry
                     visible_samples = candidate_stats.get("visible_samples", [])
                     partial_samples = candidate_stats.get("partial_samples", [])
                     inspect_samples = candidate_stats.get("inspect_samples", [])
@@ -3655,37 +3559,6 @@ def _run_pre_navigation_steps(
                     )
                     if selected_node is not None:
                         selected_candidate_observed = True
-                        immediate_select_allowed = bool(selected_meta.get("immediate_select_allowed", False))
-                        if not immediate_select_allowed:
-                            log(
-                                f"[SCENARIO][pre_nav][scrolltouch][pool] defer_immediate scroll_step={scroll_step}/{max_scroll_search_steps} "
-                                f"reason='candidate_not_strong_enough' selected_reason='{selected_reason}' total_score={float(selected_meta.get('total_score', 0.0) or 0.0):.3f}"
-                            )
-                            if scroll_step >= max_scroll_search_steps:
-                                fallback_reason = "max_scroll_search_steps_reached"
-                                break
-                            scrolled = bool(client.scroll(dev=dev, direction="down")) if hasattr(client, "scroll") else False
-                            log(
-                                f"[SCENARIO][pre_nav][scrolltouch] action='scroll_forward_for_pool' scroll_step={scroll_step}/{max_scroll_search_steps} "
-                                f"scroll_performed={str(scrolled).lower()} settle_wait_ms={post_scroll_settle_ms}"
-                            )
-                            if not scrolled:
-                                fallback_reason = "scroll_forward_failed"
-                                break
-                            settle_wait_seconds = max(min(step_wait_seconds, 0.45), post_scroll_settle_ms / 1000.0)
-                            time.sleep(settle_wait_seconds)
-                            try:
-                                top_nodes = dump_tree_fn(dev=dev) if callable(dump_tree_fn) else []
-                            except Exception:
-                                top_nodes = []
-                            if not top_nodes:
-                                fallback_reason = "local_search_empty_after_scroll"
-                            current_signature = _make_visible_plugin_search_signature(top_nodes)
-                            if current_signature and last_signature and current_signature == last_signature:
-                                fallback_reason = "semantic_no_change_after_scroll"
-                                break
-                            last_signature = current_signature
-                            continue
                         class_name = str(selected_node.get("className", "") or "").strip()
                         resource_id = str(selected_node.get("viewIdResourceName", "") or selected_node.get("resourceId", "") or "").strip()
                         bounds = str(selected_node.get("boundsInScreen", "") or "").strip()
@@ -3694,7 +3567,6 @@ def _run_pre_navigation_steps(
                         log(
                             f"[SCENARIO][pre_nav][scrolltouch] candidate_select reason='{selected_reason}' class='{class_name}' "
                             f"resource='{resource_id}' bounds='{bounds}' visible={str(visible).lower()} label='{label_blob[:120]}' "
-                            "selection_mode='immediate' "
                             f"promoted_container={str(bool(selected_meta.get('promoted_container', False))).lower()} "
                             f"promotion_attempted={str(bool(selected_meta.get('promotion_attempted', False))).lower()} "
                             f"promotion_source='{str(selected_meta.get('promotion_source', 'none'))}' "
@@ -3798,116 +3670,6 @@ def _run_pre_navigation_steps(
                         fallback_reason = "semantic_no_change_after_scroll"
                         break
                     last_signature = current_signature
-
-                if not step_ok:
-                    deduped_candidates = list(pooled_candidate_map.values())
-                    for pooled_candidate in deduped_candidates:
-                        observed_count = int(pooled_candidate.get("observed_count", 1) or 1)
-                        pooled_candidate["stability_score"] = round(min(0.6, 0.15 * max(0, observed_count - 1)), 3)
-                        pooled_candidate["total_score"] = round(
-                            float(pooled_candidate.get("total_score", 0.0) or 0.0) + float(pooled_candidate.get("stability_score", 0.0) or 0.0),
-                            3,
-                        )
-                    deduped_candidates.sort(key=lambda item: float(item.get("total_score", 0.0) or 0.0), reverse=True)
-                    log(
-                        f"[SCROLLTOUCH][pool] candidate_count={len(pooled_candidates_raw)} deduped_count={len(deduped_candidates)}"
-                    )
-                    top3_entries: list[str] = []
-                    for top_idx, pooled_candidate in enumerate(deduped_candidates[:3], start=1):
-                        top3_entries.append(
-                            "rank={} rid='{}' cls='{}' bounds='{}' total_score={:.3f} text_score={:.3f} structure_score={:.3f} actionability_score={:.3f} promotion_reason='{}' match_type='{}'".format(
-                                top_idx,
-                                str(pooled_candidate.get("selected_container_view_id", "") or "")[:64],
-                                str(pooled_candidate.get("selected_container_class", "") or "")[:48],
-                                str(pooled_candidate.get("bounds", "") or "")[:48],
-                                float(pooled_candidate.get("total_score", 0.0) or 0.0),
-                                float(pooled_candidate.get("text_score", 0.0) or 0.0),
-                                float(pooled_candidate.get("structure_score", 0.0) or 0.0),
-                                float(pooled_candidate.get("actionability_score", 0.0) or 0.0),
-                                str(pooled_candidate.get("promotion_reason", "none"))[:48],
-                                str(pooled_candidate.get("match_type", "partial"))[:24],
-                            )
-                        )
-                    log(f"[SCROLLTOUCH][pool][top3] {' | '.join(top3_entries) if top3_entries else '-'}")
-                    winner = deduped_candidates[0] if deduped_candidates else None
-                    winner_reason = "none"
-                    threshold = 5.4
-                    if isinstance(winner, dict):
-                        winner_blob = "{} {} {}".format(
-                            str(winner.get("candidate_label", "") or ""),
-                            str(winner.get("selected_container_view_id", "") or ""),
-                            str(winner.get("selected_container_class", "") or ""),
-                        )
-                        chrome_like_winner = bool(
-                            _safe_regex_search(r"(?i)\b(add|more|location|navigate up|home|toolbar|appbar|button)\b", winner_blob)
-                        )
-                        recycler_like_winner = bool(
-                            _safe_regex_search(r"(?i)(recycler.?view|viewpager|list.?view|grid.?view|bottom.?nav|appbar)", winner_blob)
-                        )
-                        winner_score = float(winner.get("total_score", 0.0) or 0.0)
-                        if chrome_like_winner:
-                            winner_reason = "only_chrome_candidates"
-                        elif recycler_like_winner:
-                            winner_reason = "only_recycler_root_candidates"
-                        elif winner_score < threshold:
-                            winner_reason = "all_candidates_below_threshold"
-                        else:
-                            winner_reason = "selected"
-                    no_winner_reason = winner_reason
-                    if winner_reason == "selected" and isinstance(winner, dict):
-                        log(
-                            f"[SCROLLTOUCH][pool][winner] resource='{str(winner.get('selected_container_view_id', '') or '')[:80]}' "
-                            f"reason='score_rank_1' total_score={float(winner.get('total_score', 0.0) or 0.0):.3f}"
-                        )
-                        log("[SCROLLTOUCH][pool][decision] mode='pooled_rerank'")
-                        selected_candidate_observed = True
-                        tap_target = str(winner.get("selected_container_view_id", "") or "").strip() or str(winner.get("candidate_label", "") or "").strip()
-                        tap_type = "r" if str(winner.get("selected_container_view_id", "") or "").strip() else "a"
-                        tap_point_raw = str(winner.get("tap_point", "") or "").strip()
-                        tap_strategy = str(winner.get("tap_strategy", "center") or "center").strip().lower()
-                        tap_point: tuple[int, int] | None = None
-                        if tap_point_raw:
-                            parts = [part.strip() for part in tap_point_raw.split(",")]
-                            if len(parts) == 2 and all(part.lstrip("-").isdigit() for part in parts):
-                                tap_point = (int(parts[0]), int(parts[1]))
-                        click_dispatch_success = False
-                        if (
-                            str(winner.get("promotion_source", "none")) == "xml_live"
-                            and tap_strategy in {"text_center", "refined_body_point"}
-                            and tap_point
-                            and hasattr(client, "tap_xy_adb")
-                        ):
-                            click_dispatch_success = bool(client.tap_xy_adb(dev=dev, x=int(tap_point[0]), y=int(tap_point[1])))
-                        else:
-                            click_dispatch_success = bool(client.tap_bounds_center_adb(dev=dev, name=tap_target, type_=tap_type, dump_nodes=top_nodes))
-                        confirm_ok, confirm_signal = _confirm_click_focused_transition(
-                            client=client,
-                            dev=dev,
-                            tab_cfg=tab_cfg,
-                            transition_fast_path=transition_fast_path,
-                        )
-                        log(
-                            f"[SCENARIO][pre_nav][scrolltouch] post_click_transition same_screen={str(not confirm_ok).lower()} "
-                            f"signal='{confirm_signal}'"
-                        )
-                        setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
-                        setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
-                        step_ok = bool(confirm_ok)
-                        if not step_ok:
-                            fallback_reason = "pooled_candidate_click_failed" if not click_dispatch_success else f"pooled_post_click_transition_failed:{confirm_signal}"
-                    else:
-                        if not pooled_candidates_raw and pooled_probe_pool_count <= 0:
-                            no_winner_reason = "no_text_evidence"
-                        elif pooled_candidates_raw and not deduped_candidates:
-                            no_winner_reason = "dedupe_removed_all"
-                        elif pooled_probe_pool_count > 0 and pooled_probe_miss_count >= pooled_probe_pool_count:
-                            no_winner_reason = "all_probe_semantic_miss"
-                        log(
-                            f"[SCROLLTOUCH][pool][fail] candidate_total={len(pooled_candidates_raw)} deduped_total={len(deduped_candidates)} "
-                            f"hard_reject_count={pooled_hard_reject_count} semantic_probe_pool_count={pooled_probe_pool_count} "
-                            f"semantic_probe_miss_count={pooled_probe_miss_count} source_text_hits='{pooled_source_text_hits}' "
-                            f"why='{no_winner_reason}'"
-                        )
 
                 if not step_ok:
                     local_match_failed = True
