@@ -1,4 +1,4 @@
-SCENARIO_CONFIG_VERSION = "2026.04.12-life-plugin-entry-scenarios-v1"
+SCENARIO_CONFIG_VERSION = "2026.04.13-life-plugin-scrolltouch-semantic-alias-v1"
 
 BOTTOM_TAB_GLOBAL_NAV = {
     "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
@@ -632,6 +632,11 @@ TAB_CONFIGS = [
             "description_patterns": [],
             "resource_patterns": [],
             "allow_description_match": True,
+            "semantic_probe": {
+                "aliases": ["family", "family care", "family monitor"],
+                "hint_tokens": ["security", "smoke", "leak"],
+                "generic_weak_tokens": [],
+            },
         },
         "anchor_name": "(?i).*navigate\\s*up.*",
         "anchor_type": "a",
@@ -669,6 +674,11 @@ TAB_CONFIGS = [
             "description_patterns": [],
             "resource_patterns": [],
             "allow_description_match": True,
+            "semantic_probe": {
+                "aliases": ["plant", "plant care", "garden", "plants", "식물"],
+                "hint_tokens": [],
+                "generic_weak_tokens": [],
+            },
         },
         "anchor_name": "(?i).*navigate\\s*up.*",
         "anchor_type": "a",
@@ -743,6 +753,11 @@ TAB_CONFIGS = [
             "description_patterns": [],
             "resource_patterns": [],
             "allow_description_match": True,
+            "semantic_probe": {
+                "aliases": ["smart find", "find", "location", "tracker", "tag"],
+                "hint_tokens": [],
+                "generic_weak_tokens": ["find"],
+            },
         },
         "anchor_name": "(?i).*navigate\\s*up.*",
         "anchor_type": "a",
@@ -780,6 +795,11 @@ TAB_CONFIGS = [
             "description_patterns": [],
             "resource_patterns": [],
             "allow_description_match": True,
+            "semantic_probe": {
+                "aliases": ["smart video", "video", "camera", "live view", "recording"],
+                "hint_tokens": [],
+                "generic_weak_tokens": ["video"],
+            },
         },
         "anchor_name": "(?i).*navigate\\s*up.*",
         "anchor_type": "a",

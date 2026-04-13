@@ -63,7 +63,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr40-scrolltouch-rerank-gate-fix-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-alias-evidence-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr36-air-entry-contract-success-preserve-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -1208,6 +1208,18 @@ def _get_card_entry_spec(tab_cfg: dict[str, Any], target: str) -> dict[str, Any]
     resource_patterns = entry_match.get("resource_patterns", [])
     if not isinstance(resource_patterns, list):
         resource_patterns = []
+    semantic_probe_cfg = entry_match.get("semantic_probe", {})
+    if not isinstance(semantic_probe_cfg, dict):
+        semantic_probe_cfg = {}
+    semantic_aliases = semantic_probe_cfg.get("aliases", [])
+    if not isinstance(semantic_aliases, list):
+        semantic_aliases = []
+    semantic_hint_tokens = semantic_probe_cfg.get("hint_tokens", [])
+    if not isinstance(semantic_hint_tokens, list):
+        semantic_hint_tokens = []
+    generic_weak_tokens = semantic_probe_cfg.get("generic_weak_tokens", [])
+    if not isinstance(generic_weak_tokens, list):
+        generic_weak_tokens = []
     normalized_target = str(target or "").strip()
     normalized_title_patterns = [str(pattern or "").strip() for pattern in title_patterns if str(pattern or "").strip()]
     if normalized_target and not normalized_title_patterns:
@@ -1217,6 +1229,9 @@ def _get_card_entry_spec(tab_cfg: dict[str, Any], target: str) -> dict[str, Any]
         "description_patterns": [str(pattern or "").strip() for pattern in description_patterns if str(pattern or "").strip()],
         "resource_patterns": [str(pattern or "").strip() for pattern in resource_patterns if str(pattern or "").strip()],
         "allow_description_match": bool(entry_match.get("allow_description_match")),
+        "semantic_probe_aliases": [str(item or "").strip().lower() for item in semantic_aliases if str(item or "").strip()],
+        "semantic_probe_hint_tokens": [str(item or "").strip().lower() for item in semantic_hint_tokens if str(item or "").strip()],
+        "semantic_probe_generic_weak_tokens": [str(item or "").strip().lower() for item in generic_weak_tokens if str(item or "").strip()],
     }
 
 
@@ -1956,6 +1971,14 @@ def _select_visible_plugin_candidate(
     def _tokenize_blob(value: str) -> set[str]:
         return {token for token in re.split(r"[^0-9a-zA-Z가-힣]+", str(value or "").lower()) if len(token) >= 3}
 
+    def _tokenize_resource_id(value: str) -> set[str]:
+        raw = str(value or "").strip()
+        if not raw:
+            return set()
+        base = raw.split("/")[-1]
+        split_camel = re.sub(r"([a-z])([A-Z])", r"\1 \2", base)
+        return _tokenize_blob(split_camel.replace("_", " "))
+
     def _record_inspect(
         stats_map: dict[str, Any],
         *,
@@ -1974,6 +1997,13 @@ def _select_visible_plugin_candidate(
         probe_match_reason: str = "none",
         probe_guard_reason: str = "none",
         probe_promoted: bool = False,
+        alias_hit_count: int = 0,
+        alias_hit_top: str = "",
+        resource_token_hit_count: int = 0,
+        descendant_alias_hit_count: int = 0,
+        semantic_evidence_class: str = "miss",
+        probe_accept_reason: str = "none",
+        probe_reject_reason: str = "none",
     ) -> None:
         samples = stats_map.setdefault("inspect_samples", [])
         if len(samples) >= sample_limit:
@@ -1987,7 +2017,7 @@ def _select_visible_plugin_candidate(
         effective_clickable = clickable or focusable
         promoted = isinstance(promoted_click_node, dict)
         samples.append(
-            "label='{}' rid='{}' cls='{}' visible={} clickable={} focusable={} effectiveClickable={} matched_text_node='{}' promoted_container={} promotion_reason='{}' promoted_from='{}' promoted_to='{}' stage='{}' reason='{}' filter_stage='{}' hard_reject_reason='{}' probe_allowed={} probe_text_source='{}' probe_match_reason='{}' probe_guard_reason='{}' probe_promoted={}".format(
+            "label='{}' rid='{}' cls='{}' visible={} clickable={} focusable={} effectiveClickable={} matched_text_node='{}' promoted_container={} promotion_reason='{}' promoted_from='{}' promoted_to='{}' stage='{}' reason='{}' filter_stage='{}' hard_reject_reason='{}' probe_allowed={} probe_text_source='{}' probe_match_reason='{}' probe_guard_reason='{}' probe_promoted={} alias_hit_count={} alias_hit_top='{}' resource_token_hit_count={} descendant_alias_hit_count={} semantic_evidence_class='{}' probe_accept_reason='{}' probe_reject_reason='{}'".format(
                 label_blob,
                 resource_id,
                 class_name,
@@ -2009,6 +2039,13 @@ def _select_visible_plugin_candidate(
                 _clip(probe_match_reason, sample_text_limit),
                 _clip(probe_guard_reason, sample_text_limit),
                 str(bool(probe_promoted)).lower(),
+                int(alias_hit_count),
+                _clip(alias_hit_top, sample_text_limit),
+                int(resource_token_hit_count),
+                int(descendant_alias_hit_count),
+                _clip(semantic_evidence_class, sample_text_limit),
+                _clip(probe_accept_reason, sample_text_limit),
+                _clip(probe_reject_reason, sample_text_limit),
             )
         )
 
@@ -2041,6 +2078,14 @@ def _select_visible_plugin_candidate(
         "semantic_probe_reject_count": 0,
         "candidate_from_probe_count": 0,
         "probe_guard_block_count": 0,
+        "alias_hit_count": 0,
+        "alias_hit_top": "",
+        "resource_token_hit_count": 0,
+        "resource_token_hit_top": "",
+        "descendant_alias_hit_count": 0,
+        "semantic_evidence_class": "miss",
+        "probe_accept_reason": "none",
+        "probe_reject_reason": "none",
         "helper_text_hit_count": 0,
         "xml_live_text_hit_count": 0,
         "descendant_text_hit_count": 0,
@@ -2126,6 +2171,24 @@ def _select_visible_plugin_candidate(
     if target_tokens:
         normalized_target_phrases.add(_normalize_phrase(" ".join(target_tokens)))
     target_token_set = set(target_tokens)
+    semantic_aliases = [str(item or "").strip().lower() for item in card_entry_spec.get("semantic_probe_aliases", []) if str(item or "").strip()]
+    semantic_hint_tokens = {
+        str(item or "").strip().lower() for item in card_entry_spec.get("semantic_probe_hint_tokens", []) if str(item or "").strip()
+    }
+    generic_weak_tokens = {
+        str(item or "").strip().lower() for item in card_entry_spec.get("semantic_probe_generic_weak_tokens", []) if str(item or "").strip()
+    }
+    alias_phrase_map: list[tuple[str, set[str]]] = []
+    alias_token_set: set[str] = set()
+    for alias in semantic_aliases:
+        alias_norm = _normalize_phrase(alias)
+        if not alias_norm:
+            continue
+        alias_tokens = _tokenize_blob(alias_norm)
+        alias_phrase_map.append((alias_norm, alias_tokens))
+        alias_token_set.update(alias_tokens)
+    combined_target_tokens = set(target_token_set)
+    combined_target_tokens.update(alias_token_set)
 
     def _is_chrome_like_blob(blob: str) -> bool:
         return bool(_safe_regex_search(r"(?i)\b(add|more options|location|navigate up|home|back|button)\b", blob))
@@ -2750,11 +2813,38 @@ def _select_visible_plugin_candidate(
         )
         semantic_tokens = _tokenize_blob(" ".join([label_blob, click_label_blob, click_descendant_blob]))
         overlap_tokens = semantic_tokens.intersection(target_token_set)
+        combined_overlap_tokens = semantic_tokens.intersection(combined_target_tokens)
         required_overlap = len(target_token_set) if len(target_token_set) <= 2 else len(target_token_set) - 1
         token_cover_match = bool(target_token_set and len(overlap_tokens) >= max(1, required_overlap))
+        click_node_resource = str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "")
+        click_node_class_name = str(click_node.get("className", "") or "")
+        alias_hits: list[str] = []
+        alias_token_pair_hits = 0
+        descendant_alias_hit_count = 0
+        content_desc_alias_hit_count = 0
+        content_desc_normalized = _normalize_phrase(str(click_node.get("contentDescription", "") or ""))
+        for alias_phrase, alias_tokens in alias_phrase_map:
+            alias_in_any = bool(alias_phrase and pre_semantic_normalized and alias_phrase in pre_semantic_normalized)
+            alias_in_descendant = bool(alias_phrase and descendant_normalized and alias_phrase in descendant_normalized)
+            alias_in_content_desc = bool(alias_phrase and content_desc_normalized and alias_phrase in content_desc_normalized)
+            if alias_in_any:
+                alias_hits.append(alias_phrase)
+            if alias_in_descendant:
+                descendant_alias_hit_count += 1
+            if alias_in_content_desc:
+                content_desc_alias_hit_count += 1
+            if len(alias_tokens) >= 2 and len(alias_tokens.intersection(semantic_tokens)) >= 2:
+                alias_token_pair_hits += 1
+        resource_tokens = set()
+        resource_tokens.update(_tokenize_resource_id(node.get("viewIdResourceName", "") or node.get("resourceId", "")))
+        resource_tokens.update(_tokenize_resource_id(click_node_resource))
+        resource_token_alias_hits = resource_tokens.intersection(alias_token_set.union(semantic_hint_tokens))
+        resource_token_hit_count = len(resource_token_alias_hits)
+        resource_hint_combo_hit = bool(resource_token_hit_count and (alias_hits or semantic_hint_tokens.intersection(semantic_tokens)))
+        weak_generic_tokens = generic_weak_tokens.intersection(combined_overlap_tokens)
         generic_single_token_target = bool(len(target_token_set) == 1 and next(iter(target_token_set), "") in {"find", "video"})
         generic_guard_checks = 0
-        if bool(_is_actionable(click_node)) or bool(_safe_regex_search(r"(?i)(card|container|layout|item|content)", str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "") + " " + str(click_node.get("className", "") or ""))):
+        if bool(_is_actionable(click_node)) or bool(_safe_regex_search(r"(?i)(card|container|layout|item|content)", click_node_resource + " " + click_node_class_name)):
             generic_guard_checks += 1
         if descendant_normalized or click_label_normalized:
             generic_guard_checks += 1
@@ -2762,15 +2852,72 @@ def _select_visible_plugin_candidate(
             generic_guard_checks += 1
         if not bool(_safe_regex_search(r"(?i)\b(add|more options|location|navigate up|home|back|button)\b", pre_semantic_blob)):
             generic_guard_checks += 1
-        click_node_class_name = str(click_node.get("className", "") or "")
-        click_node_resource = str(click_node.get("viewIdResourceName", "") or click_node.get("resourceId", "") or "")
         if not bool(_safe_regex_search(r"(?i)(recycler.?view|grid.?view|list.?view)", click_node_class_name + " " + click_node_resource)):
             generic_guard_checks += 1
-        relaxed_gate_match = bool(semantic_contains_phrase or token_cover_match)
+        strong_evidence_count = 0
+        medium_evidence_count = 0
+        weak_evidence_count = 0
+        if semantic_contains_phrase or token_cover_match:
+            strong_evidence_count += 1
+        if alias_hits:
+            strong_evidence_count += 1
+        if alias_token_pair_hits > 0:
+            strong_evidence_count += 1
+        if descendant_alias_hit_count > 0:
+            medium_evidence_count += 1
+        if resource_hint_combo_hit:
+            medium_evidence_count += 1
+        if content_desc_alias_hit_count > 0:
+            medium_evidence_count += 1
+        if weak_generic_tokens:
+            weak_evidence_count += 1
+        if strong_evidence_count >= 1:
+            semantic_evidence_class = "strong"
+        elif medium_evidence_count >= 1:
+            semantic_evidence_class = "medium"
+        elif weak_evidence_count >= 1:
+            semantic_evidence_class = "weak"
+        else:
+            semantic_evidence_class = "miss"
+        alias_hit_count = len(alias_hits)
+        alias_hit_top = alias_hits[0] if alias_hits else ""
+        resource_token_hit_top = " + ".join(sorted(resource_token_alias_hits)[:2]) if resource_token_alias_hits else ""
+        stats["alias_hit_count"] += alias_hit_count
+        if alias_hit_top and not stats.get("alias_hit_top"):
+            stats["alias_hit_top"] = alias_hit_top
+        stats["resource_token_hit_count"] += resource_token_hit_count
+        if resource_token_hit_top and not stats.get("resource_token_hit_top"):
+            stats["resource_token_hit_top"] = resource_token_hit_top
+        stats["descendant_alias_hit_count"] += descendant_alias_hit_count
+        stats["semantic_evidence_class"] = semantic_evidence_class
+        relaxed_gate_match = bool(
+            semantic_contains_phrase
+            or token_cover_match
+            or alias_hit_count > 0
+            or alias_token_pair_hits > 0
+            or medium_evidence_count > 0
+            or weak_evidence_count > 0
+        )
         generic_guard_passed = bool((not generic_single_token_target) or generic_guard_checks >= 2)
         if generic_single_token_target and relaxed_gate_match and not generic_guard_passed:
             stats["generic_guard_block_count"] += 1
-        pre_candidate_match = bool(title_semantic_match or description_semantic_match or (relaxed_gate_match and generic_guard_passed))
+        card_like_hint = bool(
+            _safe_regex_search(r"(?i)(card|container|layout|frame|content|item|root|servicecard)", click_node_resource)
+            or _safe_regex_search(r"(?i)(card|layout|viewgroup|frame)", click_node_class_name)
+        )
+        probe_accept_reason = "none"
+        probe_reject_reason = "none"
+        evidence_pass = False
+        if strong_evidence_count >= 1:
+            evidence_pass = True
+            probe_accept_reason = "strong_single"
+        elif medium_evidence_count >= 2:
+            evidence_pass = True
+            probe_accept_reason = "medium_plus_medium"
+        elif medium_evidence_count >= 1 and weak_evidence_count >= 1 and card_like_hint:
+            evidence_pass = True
+            probe_accept_reason = "medium_plus_weak_with_card"
+        pre_candidate_match = bool(title_semantic_match or description_semantic_match or (evidence_pass and generic_guard_passed and card_like_hint))
         probe_allowed = False
         probe_promoted = False
         probe_text_source = "none"
@@ -2778,21 +2925,22 @@ def _select_visible_plugin_candidate(
         probe_guard_reason = "none"
         hard_reject_reason = "none"
         if not pre_candidate_match:
-            card_like_hint = bool(
-                _safe_regex_search(r"(?i)(card|container|layout|frame|content|item|root|servicecard)", click_node_resource)
-                or _safe_regex_search(r"(?i)(card|layout|viewgroup|frame)", click_node_class_name)
-            )
             has_text_evidence = bool(pre_semantic_blob.strip() or click_descendant_blob.strip())
             if not has_text_evidence:
                 hard_reject_reason = "probe_no_text_evidence"
+                probe_reject_reason = hard_reject_reason
             elif _is_chrome_like_blob(pre_semantic_blob):
                 hard_reject_reason = "probe_chrome_like"
+                probe_reject_reason = hard_reject_reason
             elif _is_large_or_list_like_node(click_node, (left, top, right, bottom)):
                 hard_reject_reason = "probe_large_or_list_like"
+                probe_reject_reason = hard_reject_reason
             elif not _node_is_visible(click_node):
                 hard_reject_reason = "probe_not_visible"
+                probe_reject_reason = hard_reject_reason
             elif not (card_like_hint or bool(click_descendant_blob.strip())):
                 hard_reject_reason = "probe_not_card_like"
+                probe_reject_reason = hard_reject_reason
             else:
                 probe_allowed = True
                 stats["semantic_probe_pool_count"] += 1
@@ -2802,12 +2950,9 @@ def _select_visible_plugin_candidate(
                             _clip(click_node_resource or click_node.get("resourceId", ""), sample_id_limit)
                         )
                     )
-                probe_phrase_match = semantic_contains_phrase
-                probe_token_match = token_cover_match
-                if probe_phrase_match:
-                    probe_match_reason = "normalized_phrase_contains"
-                elif probe_token_match:
-                    probe_match_reason = "token_cover_match"
+                probe_phrase_match = semantic_contains_phrase or bool(alias_hits)
+                probe_token_match = bool(token_cover_match or alias_token_pair_hits > 0 or resource_hint_combo_hit)
+                probe_match_reason = semantic_evidence_class
                 if click_descendant_blob.strip():
                     probe_text_source = "descendant_text"
                 elif click_label_blob.strip():
@@ -2820,21 +2965,29 @@ def _select_visible_plugin_candidate(
                 if generic_single_token_target and (probe_phrase_match or probe_token_match) and not probe_guard_passed:
                     stats["probe_guard_block_count"] += 1
                     probe_guard_reason = "generic_token_guard_failed"
-                elif not (probe_phrase_match or probe_token_match):
+                    probe_reject_reason = "generic_token_without_card_evidence"
+                elif not evidence_pass:
                     probe_guard_reason = "probe_semantic_miss"
+                    probe_reject_reason = "insufficient_evidence"
                 else:
                     probe_guard_reason = "passed"
-                if probe_guard_passed and (probe_phrase_match or probe_token_match):
+                if probe_guard_passed and evidence_pass and card_like_hint:
                     pre_candidate_match = True
                     probe_promoted = True
                     stats["semantic_probe_match_count"] += 1
+                    stats["probe_accept_reason"] = probe_accept_reason
                 else:
                     stats["semantic_probe_reject_count"] += 1
+                    if not probe_reject_reason:
+                        probe_reject_reason = "generic_token_without_card_evidence" if not card_like_hint else "insufficient_evidence"
+                    stats["probe_reject_reason"] = probe_reject_reason
                     if len(stats["probe_reject_samples"]) < 5:
                         stats["probe_reject_samples"].append(
-                            "reason='{}' rid='{}'".format(
-                                probe_guard_reason,
+                            "reason='{}' rid='{}' alias_hit_top='{}' resource_token_hit_top='{}'".format(
+                                probe_reject_reason or probe_guard_reason,
                                 _clip(click_node_resource or click_node.get("resourceId", ""), sample_id_limit),
+                                _clip(alias_hit_top, sample_text_limit),
+                                _clip(resource_token_hit_top, sample_text_limit),
                             )
                         )
             if not probe_allowed:
@@ -2858,6 +3011,13 @@ def _select_visible_plugin_candidate(
                 probe_match_reason=probe_match_reason,
                 probe_guard_reason=probe_guard_reason,
                 probe_promoted=probe_promoted,
+                alias_hit_count=alias_hit_count,
+                alias_hit_top=alias_hit_top,
+                resource_token_hit_count=resource_token_hit_count,
+                descendant_alias_hit_count=descendant_alias_hit_count,
+                semantic_evidence_class=semantic_evidence_class,
+                probe_accept_reason=probe_accept_reason,
+                probe_reject_reason=probe_reject_reason,
             )
             continue
         click_bounds = parse_bounds_str(str(click_node.get("boundsInScreen", "") or "").strip())
@@ -2935,7 +3095,7 @@ def _select_visible_plugin_candidate(
             _safe_regex_search(pattern, semantic_blob) for pattern in description_patterns
         )
         resource_semantic_match = any(_safe_regex_search(pattern, resource_blob) for pattern in resource_patterns)
-        if target_tokens and any(token in semantic_blob_lower for token in target_tokens):
+        if combined_target_tokens and any(token in semantic_blob_lower for token in combined_target_tokens):
             stats["partial_match_count"] += 1
         elif description_semantic_match or resource_semantic_match:
             stats["partial_match_count"] += 1
@@ -2974,10 +3134,19 @@ def _select_visible_plugin_candidate(
                     )
                 )
                 semantic_tokens = _tokenize_blob(" ".join([semantic_blob, title_blob, click_descendant_blob]))
-                target_token_set = set(target_tokens)
                 overlap_tokens = semantic_tokens.intersection(target_token_set)
+                combined_overlap_tokens = semantic_tokens.intersection(combined_target_tokens)
                 required_overlap = len(target_token_set) if len(target_token_set) <= 2 else len(target_token_set) - 1
                 token_overlap_match = bool(target_token_set and len(overlap_tokens) >= max(1, required_overlap))
+                alias_overlap_count = len(semantic_tokens.intersection(alias_token_set))
+                descendant_alias_hit = bool(descendant_normalized and any(alias_phrase in descendant_normalized for alias_phrase, _ in alias_phrase_map))
+                content_desc_normalized = _normalize_phrase(str(click_node.get("contentDescription", "") or ""))
+                content_desc_alias_hit = bool(content_desc_normalized and any(alias_phrase in content_desc_normalized for alias_phrase, _ in alias_phrase_map))
+                resource_tokens = set()
+                resource_tokens.update(_tokenize_resource_id(node.get("viewIdResourceName", "") or node.get("resourceId", "")))
+                resource_tokens.update(_tokenize_resource_id(click_node_resource))
+                resource_alias_hit = bool(resource_tokens.intersection(alias_token_set.union(semantic_hint_tokens)))
+                weak_generic_hit = bool(generic_weak_tokens.intersection(combined_overlap_tokens))
                 generic_single_token_target = bool(
                     len(target_token_set) == 1 and next(iter(target_token_set), "") in {"find", "video"}
                 )
@@ -2993,11 +3162,19 @@ def _select_visible_plugin_candidate(
                 if not bool(_safe_regex_search(r"(?i)(recycler.?view|grid.?view|list.?view)", click_node_class_name + " " + click_node_resource)):
                     generic_guard_checks += 1
                 generic_guard_passed_final = bool((not generic_single_token_target) or generic_guard_checks >= 2)
-                if generic_single_token_target and not generic_guard_passed_final and (phrase_contains_match or token_overlap_match):
+                if generic_single_token_target and not generic_guard_passed_final and (phrase_contains_match or token_overlap_match or weak_generic_hit):
                     stats["generic_guard_block_count"] += 1
-                if phrase_contains_match and generic_guard_passed_final:
+                strong_evidence = bool(phrase_contains_match or token_overlap_match or alias_overlap_count >= 2)
+                medium_evidence_count = 0
+                if descendant_alias_hit:
+                    medium_evidence_count += 1
+                if resource_alias_hit:
+                    medium_evidence_count += 1
+                if content_desc_alias_hit:
+                    medium_evidence_count += 1
+                if strong_evidence and generic_guard_passed_final:
                     relaxed_semantic_match = True
-                    relaxed_reason = "normalized_phrase_contains"
+                    relaxed_reason = "strong_single"
                     if descendant_blob.strip():
                         relaxed_source = "descendant_summary"
                     elif title_blob.strip():
@@ -3006,9 +3183,13 @@ def _select_visible_plugin_candidate(
                         relaxed_source = "node_label"
                     else:
                         relaxed_source = "semantic_blob"
-                elif token_overlap_match and generic_guard_passed_final:
+                elif medium_evidence_count >= 2 and generic_guard_passed_final:
                     relaxed_semantic_match = True
-                    relaxed_reason = "token_cover_match"
+                    relaxed_reason = "medium_plus_medium"
+                    relaxed_source = "semantic_blob"
+                elif medium_evidence_count >= 1 and weak_generic_hit and click_node_container_like and generic_guard_passed_final:
+                    relaxed_semantic_match = True
+                    relaxed_reason = "medium_plus_weak_with_card"
                     relaxed_source = "semantic_blob"
         semantic_match = bool(semantic_match or relaxed_semantic_match)
         if relaxed_semantic_match:
@@ -3047,6 +3228,13 @@ def _select_visible_plugin_candidate(
                 probe_match_reason=probe_match_reason,
                 probe_guard_reason=probe_guard_reason,
                 probe_promoted=False,
+                alias_hit_count=alias_hit_count,
+                alias_hit_top=alias_hit_top,
+                resource_token_hit_count=resource_token_hit_count,
+                descendant_alias_hit_count=descendant_alias_hit_count,
+                semantic_evidence_class=semantic_evidence_class,
+                probe_accept_reason=probe_accept_reason,
+                probe_reject_reason=probe_reject_reason or "semantic_probe_post_filter_miss",
             )
             _record_pre_candidate(
                 stats,
@@ -3611,6 +3799,14 @@ def _run_pre_navigation_steps(
                         f"semantic_probe_reject_count={candidate_stats.get('semantic_probe_reject_count', 0)} "
                         f"candidate_from_probe_count={candidate_stats.get('candidate_from_probe_count', 0)} "
                         f"probe_guard_block_count={candidate_stats.get('probe_guard_block_count', 0)} "
+                        f"alias_hit_count={candidate_stats.get('alias_hit_count', 0)} "
+                        f"alias_hit_top='{str(candidate_stats.get('alias_hit_top', '') or '')[:120]}' "
+                        f"resource_token_hit_count={candidate_stats.get('resource_token_hit_count', 0)} "
+                        f"resource_token_hit_top='{str(candidate_stats.get('resource_token_hit_top', '') or '')[:120]}' "
+                        f"descendant_alias_hit_count={candidate_stats.get('descendant_alias_hit_count', 0)} "
+                        f"semantic_evidence_class='{candidate_stats.get('semantic_evidence_class', 'miss')}' "
+                        f"probe_accept_reason='{candidate_stats.get('probe_accept_reason', 'none')}' "
+                        f"probe_reject_reason='{candidate_stats.get('probe_reject_reason', 'none')}' "
                         f"helper_text_hit_count={candidate_stats.get('helper_text_hit_count', 0)} "
                         f"xml_live_text_hit_count={candidate_stats.get('xml_live_text_hit_count', 0)} "
                         f"descendant_text_hit_count={candidate_stats.get('descendant_text_hit_count', 0)} "

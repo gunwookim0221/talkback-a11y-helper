@@ -46,6 +46,10 @@
   - `description_patterns`: 설명문(`tvHeaderTitle` 등) 매칭 regex 목록
   - `resource_patterns`: resource-id/class 힌트 매칭 regex 목록
   - `allow_description_match`: 설명문 매칭 허용 여부
+  - `semantic_probe` (선택): scrollTouch local search 후보 보강용 alias/hint 설정
+    - `aliases`: 짧은 alias phrase 목록(예: `family monitor`, `smart find`)
+    - `hint_tokens`: alias와 함께 medium evidence를 구성하는 보조 토큰(예: `security`, `smoke`)
+    - `generic_weak_tokens`: 단독으로는 약한 증거로만 취급되는 generic 토큰(예: `find`, `video`)
 - `verify_tokens` / `negative_verify_tokens`: post-open contract 검증 토큰(포커스 view/text/speech blob 기준)
 - `special_state_tokens` / `special_state_cta_tokens` / `special_state_handling` / `special_state_intro_like_min_length` (선택): `entry_type=card` 시나리오에서 post-open 성공 직후 onboarding/empty/CTA 상태를 보수적으로 감지하기 위한 추가 토큰/동작 설정.
   - 감지는 **verify/title 계열 신호 + special_state token + CTA token**을 기본으로 하며, long intro-like 텍스트(`special_state_intro_like_min_length`, 기본 80자) 또는 복수 special token hit가 함께 있을 때만 동작합니다. CTA 단독/intro 단독 매치는 허용하지 않습니다.
@@ -54,6 +58,7 @@
 - `pre_navigation`: anchor 전에 수행할 bounded 이동(select/touch/scrollTouch). `scrollTouch`는 기본적으로 실행 직전에 `scroll_to_top`으로 best-effort 초기화한 뒤 검색을 시작하며, `new_screen` plugin 진입 시나리오에서는 한 step 내부에서 누적 downward 탐색을 수행합니다(초기 1회만 top reset).
   - Life plugin 진입 contract 로그: `[SCENARIO][entry_contract]`에서 `success_verified | verify_failed | false_success_guard | no_match | text_only_no_promotion | wrong_open` taxonomy를 노출합니다.
 - 디버그 관측성: `scrollTouch` local search 단계에서 `[SCENARIO][pre_nav][scrolltouch][debug]`에 `rejections`, `pre_candidate_top`, `xml_fallback_attempted`, `xml_fallback_reason`이 포함되고, `[SCENARIO][pre_nav][scrolltouch][inspect]`에 상위 inspect sample(visible/clickable/promotion/reject reason)이 출력됩니다. 후보 선택 로그에는 `promoted_container`, `promotion_attempted`, `promotion_source(helper|xml_live|none)`, `promotion_reason`, `promotion_candidate_count`, `promoted_from`, `promoted_to`, `selected_area`, `text_area`, `area_ratio`, `ancestor_distance`, `tap_point`, `tap_strategy`, `rank_summary_top3`가 포함되며, 스크롤 후 재탐색 로그에는 `settle_wait_ms`가 포함됩니다.
+  - semantic probe 디버그에는 `alias_hit_count`, `alias_hit_top`, `resource_token_hit_count`, `resource_token_hit_top`, `descendant_alias_hit_count`, `semantic_evidence_class`, `probe_accept_reason`, `probe_reject_reason`가 추가로 포함됩니다.
   - `entry_type=card`의 promotion 단계에서는 containment 후보가 없을 때 xml parent-chain 기반 ancestor fallback을 수행합니다. 성공 시 `[SCROLLTOUCH][promotion][ancestor_fallback]`, 실패 시 `[SCROLLTOUCH][promotion][ancestor_trace]` 로그로 매칭 텍스트/ancestor depth/선택 container 정보를 노출합니다.
   - `entry_type=card`에서는 local search에서 `visible_candidate_count==0`이면 xml live fallback을 강제로 1회 시도해 helper dump에서 놓친 container 후보를 보강합니다.
   - `life_air_care_plugin`의 실패 분석을 위해 `scrollTouch` 각 탐색 step마다 경량 캡처 번들(`screenshot.png`, `helper_dump.json`, `meta.json`)을 누적 저장하고, 최종 실패 시에는 같은 run 폴더 아래 `final_failure`에 풀 번들(`window_dump.xml`, `focus_payload.json` 포함)을 추가 저장합니다.
