@@ -126,7 +126,8 @@ print("helper ready:", ready)
 `clear_logcat(dev: Any = None) -> str`
 
 ### 설명
-`adb logcat -c`를 호출해 로그 버퍼를 초기화합니다. 새 명령의 응답 로그만 읽고 싶을 때 유용합니다.
+`adb logcat -c`를 **best-effort**로 호출해 로그 버퍼를 초기화합니다.  
+ADB 지연/오류/timeout/interrupt가 발생해도 예외를 전파하지 않고 빈 문자열을 반환하며, 전체 자동화 흐름은 계속 진행합니다.
 
 ### Parameters
 
