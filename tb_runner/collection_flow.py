@@ -67,7 +67,7 @@ COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-a
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr47-life-plugin-xml-entry-strict-phrase-gate-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr49-entry-special-state-routing-v1"
-COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr53-life-recover-appbar-detail-fallback-v1"
+COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr54-life-recover-post-plugin-back-first-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v1"
 SCROLLTOUCH_DEBUG_CAPTURE_ENABLED = False
 SCROLLTOUCH_DEBUG_VERBOSE_LOG_ENABLED = False
@@ -984,10 +984,65 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
         f"navigate_up_hits={navigate_up_hits} package_signature_present={str(package_signature_present).lower()} "
         f"family_care_signature_seen={str(initial_family_care_signature_seen).lower()}"
     )
-    if life_root_like:
+    root_fast_pass = bool(life_root_like)
+    last_main_traversal_summary = getattr(client, "last_main_traversal_summary", {})
+    if not isinstance(last_main_traversal_summary, dict):
+        last_main_traversal_summary = {}
+    main_steps_completed = int(last_main_traversal_summary.get("main_steps_completed", 0) or 0)
+    traversal_finished = bool(last_main_traversal_summary.get("traversal_finished", False))
+    traversal_stop_reason = str(last_main_traversal_summary.get("stop_reason", "") or "")
+    scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower()
+    scenario_is_plugin_content = bool(("plugin" in scenario_id.lower()) or scenario_type in {"content", "plugin"})
+    recover_invocation_reason = str(tab_cfg.get("_recover_invocation_reason", "") or "").strip().lower()
+    special_state_recover_invocation = recover_invocation_reason in {"special_state_post_back", "entry_guard_identity_mismatch"}
+    overlay_context_active = bool(tab_cfg.get("_recover_overlay_active", False))
+    post_plugin_back_first = bool(
+        (not root_fast_pass)
+        and scenario_is_plugin_content
+        and traversal_finished
+        and (main_steps_completed > 0)
+        and (not special_state_recover_invocation)
+        and (not overlay_context_active)
+    )
+    log(f"[RECOVER][strategy] root_fast_pass={str(root_fast_pass).lower()}")
+    log(f"[RECOVER][strategy] post_plugin_back_first={str(post_plugin_back_first).lower()}")
+    log(f"[RECOVER][strategy] main_steps_completed={main_steps_completed}")
+    log(f"[RECOVER][strategy] stop_reason='{traversal_stop_reason or 'none'}'")
+    if root_fast_pass:
         log("[RECOVER][decision] skip_back_due_to_global_nav=true state='life_root_like'" if global_nav_visible else "[RECOVER][decision] skip_back_due_to_global_nav=false state='life_root_like'")
         log("[RECOVER] success reason='already_at_life_root'")
         return True
+    if post_plugin_back_first:
+        log("[RECOVER][post_plugin_back] start")
+        back_sent = _send_back(client, dev)
+        log(f"[RECOVER][post_plugin_back] back_sent={str(back_sent).lower()}")
+        if not back_sent:
+            log("[RECOVER] failed reason='back_failed'")
+            return False
+        time.sleep(wait_seconds)
+        verify_ok, verify_reason = _verify_plugin_entry_root_state(
+            client,
+            dev,
+            phase="recover_post_plugin_back",
+            scenario_id=scenario_id,
+        )
+        post_back_state = _analyze_current_state(client, dev)
+        inside = _is_inside_smartthings(post_back_state)
+        log(
+            "[RECOVER][post_back_check] "
+            f"inside={str(inside).lower()} "
+            f"package={str(post_back_state.get('package_signature_present', False)).lower()} "
+            f"app_bar_hits={int(post_back_state.get('app_bar_hits', 0) or 0)}"
+        )
+        if not inside:
+            log("[RECOVER][abort] app_exit_detected_after_back")
+            log("[RECOVER] failed reason='outside_app_no_fallback'")
+            return False
+        log(f"[RECOVER][post_plugin_back] verify_ok={str(verify_ok).lower()} reason='{verify_reason}'")
+        if verify_ok:
+            log("[RECOVER] success reason='post_plugin_back_verified'")
+            return True
+        log("[RECOVER][post_plugin_back] fallback_to_classifier=true")
     skip_back_due_to_global_nav = bool(global_nav_visible)
     allow_detail_exit_back = bool((not global_nav_visible) and (not life_root_like) and (plugin_detail_like or plugin_detail_unfocused_like))
     use_detail_exit_due_to_unfocused_internal = bool(
@@ -5003,7 +5058,15 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             recover_success = False
             log("[PLUGIN_START][recover_before_entry] triggered=true")
             for recover_attempt in range(1, 3):
-                recover_success = recover_to_start_state(client, dev, tab_cfg)
+                previous_recover_invocation_reason = tab_cfg.get("_recover_invocation_reason", None)
+                tab_cfg["_recover_invocation_reason"] = "plugin_start"
+                try:
+                    recover_success = recover_to_start_state(client, dev, tab_cfg)
+                finally:
+                    if previous_recover_invocation_reason is None:
+                        tab_cfg.pop("_recover_invocation_reason", None)
+                    else:
+                        tab_cfg["_recover_invocation_reason"] = previous_recover_invocation_reason
                 if recover_success:
                     break
                 if recover_attempt < 2:
@@ -5823,7 +5886,15 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             log("[SPECIAL_STATE][recover] start")
             recover_ok = False
             for recover_attempt in range(1, 3):
-                recover_ok = recover_to_start_state(client, dev, tab_cfg)
+                previous_recover_invocation_reason = tab_cfg.get("_recover_invocation_reason", None)
+                tab_cfg["_recover_invocation_reason"] = "special_state_post_back"
+                try:
+                    recover_ok = recover_to_start_state(client, dev, tab_cfg)
+                finally:
+                    if previous_recover_invocation_reason is None:
+                        tab_cfg.pop("_recover_invocation_reason", None)
+                    else:
+                        tab_cfg["_recover_invocation_reason"] = previous_recover_invocation_reason
                 if recover_ok:
                     post_recover_state = _analyze_current_state(client, dev)
                     inside = _is_inside_smartthings(post_recover_state)
@@ -5890,7 +5961,15 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         log(
             f"[ENTRY_GUARD][identity_mismatch] scenario='{scenario_id}' actual='{identity_actual}'"
         )
-        recover_ok = recover_to_start_state(client, dev, tab_cfg)
+        previous_recover_invocation_reason = tab_cfg.get("_recover_invocation_reason", None)
+        tab_cfg["_recover_invocation_reason"] = "entry_guard_identity_mismatch"
+        try:
+            recover_ok = recover_to_start_state(client, dev, tab_cfg)
+        finally:
+            if previous_recover_invocation_reason is None:
+                tab_cfg.pop("_recover_invocation_reason", None)
+            else:
+                tab_cfg["_recover_invocation_reason"] = previous_recover_invocation_reason
         log(
             f"[ENTRY_GUARD][identity_mismatch] recover_triggered=true "
             f"recover_success={str(recover_ok).lower()}"
@@ -7037,6 +7116,17 @@ def collect_tab_rows(
     checkpoint_save_every: int = CHECKPOINT_SAVE_EVERY_STEPS,
 ) -> list[dict]:
     rows: list[dict] = []
+    setattr(
+        client,
+        "last_main_traversal_summary",
+        {
+            "scenario_id": str(tab_cfg.get("scenario_id", "") or ""),
+            "scenario_type": str(tab_cfg.get("scenario_type", "") or ""),
+            "main_steps_completed": 0,
+            "stop_reason": "",
+            "traversal_finished": False,
+        },
+    )
     main_step_wait_seconds = _get_wait_seconds(tab_cfg, "main_step_wait_seconds", MAIN_STEP_WAIT_SECONDS)
     main_announcement_wait_seconds = _get_wait_seconds(
         tab_cfg,
@@ -7140,5 +7230,17 @@ def collect_tab_rows(
     )
     _main_loop_phase(client, dev, phase_ctx)
     _persist_phase(phase_ctx)
+    main_steps_completed = sum(1 for row in rows if int(row.get("step_index", -1) or -1) > 0)
+    setattr(
+        client,
+        "last_main_traversal_summary",
+        {
+            "scenario_id": str(tab_cfg.get("scenario_id", "") or ""),
+            "scenario_type": str(tab_cfg.get("scenario_type", "") or ""),
+            "main_steps_completed": int(main_steps_completed),
+            "stop_reason": str(state.stop_reason or ""),
+            "traversal_finished": True,
+        },
+    )
 
     return rows
