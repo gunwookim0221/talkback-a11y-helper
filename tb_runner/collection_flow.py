@@ -67,6 +67,7 @@ COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-a
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr42-life-plugin-xml-entry-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr36-air-entry-contract-success-preserve-v1"
+COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr43-special-state-recover-and-life-list-guard-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -406,6 +407,41 @@ def _verify_plugin_entry_root_state(
         if attempt < _PLUGIN_ENTRY_RETRY_COUNT:
             time.sleep(0.2)
     return False, last_reason
+
+
+def _is_life_plugin_scenario(scenario_id: str) -> bool:
+    normalized_scenario_id = str(scenario_id or "").strip().lower()
+    return bool(normalized_scenario_id.startswith("life_") and normalized_scenario_id.endswith("_plugin"))
+
+
+def _detect_life_plugin_identity_mismatch(
+    *,
+    scenario_id: str,
+    post_view_id: str,
+    post_label: str,
+    post_speech: str,
+    nodes: list[dict[str, Any]] | None = None,
+) -> tuple[bool, str]:
+    normalized_scenario_id = str(scenario_id or "").strip().lower()
+    expected_regex = ""
+    if normalized_scenario_id == "life_plant_care_plugin":
+        expected_regex = r"(?i)\bplant"
+    elif normalized_scenario_id == "life_clothing_care_plugin":
+        expected_regex = r"(?i)\bclothing"
+    if not expected_regex:
+        return False, ""
+
+    evidence_blobs = [str(post_view_id or ""), str(post_label or ""), str(post_speech or "")]
+    if isinstance(nodes, list):
+        for node, _ in _iter_tree_nodes_with_parent(nodes):
+            evidence_blobs.append(_node_label_blob(node))
+            evidence_blobs.append(str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or ""))
+    joined_blob = "\n".join(blob for blob in evidence_blobs if str(blob or "").strip())
+    family_seen = bool(_safe_regex_search(_LIFE_ENERGY_FAMILY_CARE_REGEX, joined_blob))
+    expected_seen = bool(_safe_regex_search(expected_regex, joined_blob))
+    if family_seen and not expected_seen:
+        return True, "family_care"
+    return False, ""
 
 
 def _is_meaningful_text(value: Any) -> bool:
@@ -4492,8 +4528,62 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             "entry_contract_detail": "",
             "post_click_transition_same_screen": True,
             "post_click_transition_signal": "",
+            "collection_flow_life_recovery_version": COLLECTION_FLOW_LIFE_RECOVERY_VERSION,
         },
     )
+
+    is_life_plugin_scenario = _is_life_plugin_scenario(scenario_id)
+    if is_life_plugin_scenario:
+        life_list_ok, life_list_reason = _verify_plugin_entry_root_state(
+            client,
+            dev,
+            phase="plugin_start",
+            scenario_id=scenario_id,
+        )
+        log(
+            f"[PLUGIN_START][life_list_check] ok={str(life_list_ok).lower()} "
+            f"reason='{life_list_reason}'"
+        )
+        recover_triggered = not life_list_ok
+        recover_success = True
+        if recover_triggered:
+            recover_success = False
+            log("[PLUGIN_START][recover_before_entry] triggered=true")
+            for recover_attempt in range(1, 3):
+                recover_success = recover_to_start_state(client, dev, tab_cfg)
+                if recover_success:
+                    break
+                if recover_attempt < 2:
+                    log(
+                        f"[PLUGIN_START][recover_before_entry] retry={recover_attempt}/2 "
+                        "reason='recover_to_start_state_failed'"
+                    )
+            if recover_success:
+                life_list_ok, life_list_reason = _verify_plugin_entry_root_state(
+                    client,
+                    dev,
+                    phase="plugin_start_post_recover",
+                    scenario_id=scenario_id,
+                )
+                log(
+                    f"[PLUGIN_START][life_list_check] ok={str(life_list_ok).lower()} "
+                    f"reason='{life_list_reason}'"
+                )
+                recover_success = bool(life_list_ok)
+        else:
+            log("[PLUGIN_START][recover_before_entry] triggered=false")
+        log(
+            f"[PLUGIN_START][recover_before_entry] success={str(bool(recover_success)).lower()}"
+        )
+        if not recover_success:
+            start_open_summary = getattr(client, "last_start_open_summary", {})
+            if isinstance(start_open_summary, dict):
+                start_open_summary["entry_contract_reason"] = _ENTRY_REASON_VERIFY_FAILED
+                start_open_summary["entry_contract_detail"] = (
+                    f"life_list_not_ready:{life_list_reason or 'recover_failed'}"
+                )
+                setattr(client, "last_start_open_summary", start_open_summary)
+            return False
 
     tab_stabilize_cfg = tab_cfg
     if screen_context_mode == "new_screen":
@@ -4808,6 +4898,35 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     anchor_fallback_source = str(start_open_summary.get("anchor_fallback_source", "") or "").strip() if isinstance(start_open_summary, dict) else ""
     air_anchor_fallback_accepted = bool(start_open_summary.get("air_anchor_fallback_accepted")) if isinstance(start_open_summary, dict) else False
     dump_tree_fn = getattr(client, "dump_tree", None)
+    identity_nodes: list[dict[str, Any]] = []
+    if callable(dump_tree_fn):
+        try:
+            identity_nodes = dump_tree_fn(dev=dev)
+        except Exception:
+            identity_nodes = []
+    identity_mismatch, identity_actual = _detect_life_plugin_identity_mismatch(
+        scenario_id=scenario_id,
+        post_view_id=post_view_id,
+        post_label=post_label,
+        post_speech=post_speech,
+        nodes=identity_nodes,
+    )
+    if identity_mismatch:
+        log(
+            f"[ENTRY_GUARD][identity_mismatch] scenario='{scenario_id}' actual='{identity_actual}'"
+        )
+        recover_ok = recover_to_start_state(client, dev, tab_cfg)
+        log(
+            f"[ENTRY_GUARD][identity_mismatch] recover_triggered=true "
+            f"recover_success={str(recover_ok).lower()}"
+        )
+        start_open_summary = getattr(client, "last_start_open_summary", {})
+        if isinstance(start_open_summary, dict):
+            start_open_summary["entry_contract_reason"] = _ENTRY_REASON_WRONG_OPEN
+            start_open_summary["entry_contract_detail"] = f"identity_mismatch:{identity_actual or 'unknown'}"
+            setattr(client, "last_start_open_summary", start_open_summary)
+        return False
+
     air_post_nodes: list[dict[str, Any]] = []
     if str(scenario_id or "").strip().lower() == _LIFE_AIR_CARE_SCENARIO_ID and callable(dump_tree_fn):
         try:
@@ -5248,10 +5367,13 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         if read_wait_seconds > 0:
             time.sleep(read_wait_seconds)
         back_status = "skipped"
+        recover_reason = "not_required"
+        recover_ok = handling != "back_after_read"
         if handling == "back_after_read":
             back_ok = _send_back(client, dev)
             if not back_ok:
                 back_status = "back_failed"
+                recover_reason = "back_failed"
             else:
                 time.sleep(min(main_step_wait_seconds, 0.6))
                 after_back_focus = client.get_focus(
@@ -5268,11 +5390,44 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
                 ]
                 still_cta = bool(after_back_blob and cta_tokens and any(token in after_back_blob for token in cta_tokens))
                 back_status = "back_sent_still_cta" if still_cta else "back_sent_exit"
+                recover_reason = "post_back_focus_still_cta" if still_cta else "post_back_focus_exit"
+            log("[SPECIAL_STATE][recover] start")
+            recover_ok = False
+            for recover_attempt in range(1, 3):
+                recover_ok = recover_to_start_state(client, dev, tab_cfg)
+                if recover_ok:
+                    recover_reason = "life_plugin_list_recovered"
+                    break
+                recover_reason = "recover_to_start_state_failed"
+                if recover_attempt < 2:
+                    log(
+                        f"[SPECIAL_STATE][recover] retry={recover_attempt}/2 "
+                        "target='life_plugin_list' reason='recover_to_start_state_failed'"
+                    )
+            log(
+                f"[SPECIAL_STATE][recover] success={str(recover_ok).lower()} "
+                f"target='life_plugin_list' reason='{recover_reason}'"
+            )
+        if not recover_ok:
+            start_open_summary = getattr(client, "last_start_open_summary", {})
+            if isinstance(start_open_summary, dict):
+                start_open_summary["entry_contract_reason"] = _ENTRY_REASON_VERIFY_FAILED
+                start_open_summary["entry_contract_detail"] = f"special_state_recover_failed:{recover_reason}"
+                start_open_summary["special_state_detected"] = True
+                start_open_summary["special_state_kind"] = special_state_kind
+                start_open_summary["special_state_handling"] = handling
+                start_open_summary["special_state_back_status"] = back_status
+                setattr(client, "last_start_open_summary", start_open_summary)
+            log(
+                f"[SCENARIO][entry_contract] failed scenario='{scenario_id}' entry_type='{entry_type}' "
+                f"reason='{_ENTRY_REASON_VERIFY_FAILED}' detail='special_state_recover_failed:{recover_reason}'"
+            )
+            return False
         start_open_summary = getattr(client, "last_start_open_summary", {})
         if isinstance(start_open_summary, dict):
             start_open_summary["open_completed"] = True
             start_open_summary["entry_contract_reason"] = _ENTRY_REASON_SPECIAL_STATE_HANDLED
-            start_open_summary["entry_contract_detail"] = "onboarding_back_exit"
+            start_open_summary["entry_contract_detail"] = "onboarding_back_exit_recovered"
             start_open_summary["special_state_detected"] = True
             start_open_summary["special_state_kind"] = special_state_kind
             start_open_summary["special_state_handling"] = handling
@@ -5280,7 +5435,7 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             setattr(client, "last_start_open_summary", start_open_summary)
         log(
             f"[SCENARIO][entry_contract] handled scenario='{scenario_id}' entry_type='{entry_type}' "
-            f"reason='{_ENTRY_REASON_SPECIAL_STATE_HANDLED}' detail='onboarding_back_exit' "
+            f"reason='{_ENTRY_REASON_SPECIAL_STATE_HANDLED}' detail='onboarding_back_exit_recovered' "
             f"back_status='{back_status}'"
         )
         return True
