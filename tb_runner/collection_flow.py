@@ -64,7 +64,7 @@ COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-alias-evidence-v1"
-COLLECTION_FLOW_XML_ENTRY_VERSION = "pr45-life-plugin-xml-entry-target-gate-v2"
+COLLECTION_FLOW_XML_ENTRY_VERSION = "pr46-life-plugin-xml-entry-strict-target-gate-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr36-air-entry-contract-success-preserve-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr45-recover-life-root-stop-v2"
@@ -2053,6 +2053,36 @@ def _run_xml_scroll_search_tap(
         r"menu_(favorites|devices|services|automations|more)|recycler|viewpager)"
     )
     container_regex = re.compile(r"(?i)(card|container|item|layout|frame|linear|relative|constraint|service)")
+
+    def _collect_descendant_blob(node_ref: dict[str, Any]) -> str:
+        labels: list[str] = []
+        children = node_ref.get("children")
+        if not isinstance(children, list):
+            return ""
+        stack: list[Any] = list(children)
+        while stack:
+            current = stack.pop()
+            if not isinstance(current, dict):
+                continue
+            labels.append(_node_label_blob(current))
+            current_children = current.get("children")
+            if isinstance(current_children, list):
+                stack.extend(current_children)
+        return " ".join(text for text in labels if text).strip()
+
+    def _match_source(text_value: str, *, min_phrase_len: int = 4) -> tuple[bool, str]:
+        normalized_value = re.sub(r"\s+", " ", str(text_value or "")).strip().lower()
+        if not normalized_value:
+            return False, ""
+        if target_regex.search(text_value):
+            return True, text_value.strip()
+        if target_phrase and len(target_phrase) >= min_phrase_len and target_phrase in normalized_value:
+            return True, text_value.strip()
+        token_hits = [token for token in target_tokens if token in normalized_value]
+        if token_hits and strong_target_tokens.intersection(set(token_hits)):
+            return True, text_value.strip()
+        return False, ""
+
     last_signature = ""
     failure_reason = "no_candidate_in_dump"
     for scroll_step in range(0, max_scroll_search_steps + 1):
@@ -2060,7 +2090,7 @@ def _run_xml_scroll_search_tap(
         if not xml_nodes:
             log(f"[XMLENTRY][search] step={scroll_step}/{max_scroll_search_steps} candidate_count=0 reason='{xml_reason}'")
             failure_reason = "no_candidate_in_dump"
-        candidate_samples: list[tuple[int, dict[str, Any], str, str, bool]] = []
+        candidate_samples: list[dict[str, Any]] = []
         chrome_rejects = 0
         root_rejects = 0
         parent_map: dict[int, dict[str, Any] | None] = {}
@@ -2076,10 +2106,25 @@ def _run_xml_scroll_search_tap(
             resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
             normalized_blob = re.sub(r"\s+", " ", label_blob).strip().lower()
             token_hits = [token for token in target_tokens if token in normalized_blob]
-            strong_token_hit = bool(strong_target_tokens.intersection(set(token_hits)))
-            phrase_hit = bool(target_phrase and len(target_phrase) >= 4 and target_phrase in normalized_blob)
             token_hit = bool(token_hits)
-            regex_hit = bool(target_regex.search(label_blob) or target_regex.search(resource_id))
+            node_text = str(node.get("text", "") or "").strip()
+            node_desc = str(node.get("contentDescription", "") or "").strip()
+            descendant_blob = _collect_descendant_blob(node)
+            title_match, title_match_text = _match_source(node_text)
+            desc_match, desc_match_text = _match_source(node_desc)
+            descendant_match, descendant_match_text = _match_source(descendant_blob)
+            resource_match, resource_match_text = _match_source(resource_id, min_phrase_len=3)
+            target_match = bool(title_match or desc_match or descendant_match or resource_match)
+            match_source = ""
+            matched_text = ""
+            if title_match:
+                match_source, matched_text = "title", title_match_text
+            elif desc_match:
+                match_source, matched_text = "content-desc", desc_match_text
+            elif descendant_match:
+                match_source, matched_text = "descendant", descendant_match_text
+            elif resource_match:
+                match_source, matched_text = "resource", resource_match_text
             promoted = node
             promoted_reason = "text_node_bounds"
             current = node
@@ -2114,28 +2159,41 @@ def _run_xml_scroll_search_tap(
                 continue
             if area_ratio < 0.0015:
                 continue
-            target_match = bool(regex_hit or phrase_hit or strong_token_hit)
-            score = (200 if regex_hit else 0) + (80 if token_hit else 0) + (40 if "container" in promoted_reason else 0)
-            candidate_samples.append((score, promoted, promoted_reason, f"{label_blob}||{area_ratio:.4f}", target_match))
-        candidate_samples.sort(key=lambda item: item[0], reverse=True)
-        target_candidates = [sample for sample in candidate_samples if sample[4]]
+            score = (200 if target_match else 0) + (80 if token_hit else 0) + (40 if "container" in promoted_reason else 0)
+            candidate_samples.append(
+                {
+                    "score": score,
+                    "node": promoted,
+                    "reason": promoted_reason,
+                    "sample_text": label_blob,
+                    "area_ratio": f"{area_ratio:.4f}",
+                    "target_match": target_match,
+                    "match_source": match_source,
+                    "matched_text": matched_text,
+                }
+            )
+        candidate_samples.sort(key=lambda item: int(item.get("score", 0)), reverse=True)
+        target_candidates = [sample for sample in candidate_samples if bool(sample.get("target_match"))]
         log(
             f"[XMLENTRY][search] step={scroll_step}/{max_scroll_search_steps} "
             f"visible_candidates={len(candidate_samples)} target_candidates={len(target_candidates)}"
         )
         for rank, sample in enumerate(candidate_samples[:3], start=1):
-            sample_bounds = str(sample[1].get("boundsInScreen", "") or "").strip()
-            sample_rid = str(sample[1].get("viewIdResourceName", "") or sample[1].get("resourceId", "") or "").strip()
-            sample_cls = str(sample[1].get("className", "") or "").strip()
-            sample_text, _, sample_area_ratio = sample[3].partition("||")
+            sample_node = sample.get("node", {})
+            sample_bounds = str(sample_node.get("boundsInScreen", "") or "").strip()
+            sample_rid = str(sample_node.get("viewIdResourceName", "") or sample_node.get("resourceId", "") or "").strip()
+            sample_cls = str(sample_node.get("className", "") or "").strip()
+            sample_text = str(sample.get("sample_text", "") or "")
+            sample_area_ratio = str(sample.get("area_ratio", "0") or "0")
             log(
-                f"[XMLENTRY][search][top] rank={rank} reason='{sample[2]}' text='{sample_text[:48]}' "
+                f"[XMLENTRY][search][top] rank={rank} reason='{sample.get('reason', '')}' text='{sample_text[:48]}' "
                 f"rid='{sample_rid[:72]}' class='{sample_cls[:48]}' bounds='{sample_bounds}'"
-                f" area_ratio='{sample_area_ratio or '0'}' target_match={str(sample[4]).lower()}"
+                f" area_ratio='{sample_area_ratio or '0'}' target_match={str(bool(sample.get('target_match'))).lower()}"
+                f" match_source='{str(sample.get('match_source', '') or '')}'"
             )
         if target_candidates:
             selected = target_candidates[0]
-            selected_node = selected[1]
+            selected_node = selected.get("node", {})
             selected_bounds = parse_bounds_str(str(selected_node.get("boundsInScreen", "") or "").strip())
             if not selected_bounds:
                 failure_reason = "bounds_missing"
@@ -2145,8 +2203,10 @@ def _run_xml_scroll_search_tap(
             selected_resource = str(selected_node.get("viewIdResourceName", "") or selected_node.get("resourceId", "") or "").strip()
             selected_text = _node_label_blob(selected_node)
             log(
-                f"[XMLENTRY][select] reason='{selected[2]}' resource='{selected_resource[:96]}' "
-                f"bounds='{selected_node.get('boundsInScreen', '')}' text='{selected_text[:80]}'"
+                f"[XMLENTRY][select] reason='{selected.get('reason', '')}' resource='{selected_resource[:96]}' "
+                f"bounds='{selected_node.get('boundsInScreen', '')}' text='{selected_text[:80]}' "
+                f"target_match=true match_source='{selected.get('match_source', '')}' "
+                f"matched_text='{str(selected.get('matched_text', '') or '')[:80]}'"
             )
             tap_ok = False
             if hasattr(client, "tap_xy_adb"):
@@ -2185,10 +2245,11 @@ def _run_xml_scroll_search_tap(
         elif candidate_samples and not target_candidates:
             failure_reason = "no_target_candidate_yet"
         if scroll_step >= max_scroll_search_steps:
-            failure_reason = "max_scroll_reached" if failure_reason == "no_candidate_in_dump" else failure_reason
+            if failure_reason in {"no_candidate_in_dump", "no_target_candidate_yet", "max_scroll_reached"}:
+                failure_reason = "target_not_found_after_scroll"
             break
         scrolled = bool(client.scroll(dev=dev, direction="down")) if hasattr(client, "scroll") else False
-        scroll_reason = "no_target_candidate_yet" if candidate_samples and not target_candidates else "search_continue"
+        scroll_reason = "no_target_candidate" if not target_candidates else "search_continue"
         log(
             f"[XMLENTRY][scroll] step={scroll_step}/{max_scroll_search_steps} "
             f"performed={str(scrolled).lower()} reason='{scroll_reason}'"

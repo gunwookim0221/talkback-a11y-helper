@@ -4561,3 +4561,127 @@ def test_open_scenario_focus_align_recheck_relaxed_gate_proceeds_to_pre_navigati
 
     assert ok is True
     assert pre_nav_called["value"] is True
+
+
+def test_xml_entry_strict_target_gating_scrolls_until_target_then_selects(monkeypatch):
+    class XmlClient:
+        def __init__(self):
+            self.scroll_calls = []
+            self.tap_calls = []
+
+        def scroll(self, dev, direction, step_=50, time_=1000, bounds_=None):
+            _ = (dev, step_, time_, bounds_)
+            self.scroll_calls.append(direction)
+            return True
+
+        def tap_xy_adb(self, dev, x, y):
+            self.tap_calls.append((dev, x, y))
+            return True
+
+    first_nodes = [
+        {
+            "text": "Family Care",
+            "contentDescription": "",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/service_card",
+            "className": "android.widget.FrameLayout",
+            "clickable": True,
+            "focusable": False,
+            "effectiveClickable": True,
+            "visibleToUser": True,
+            "boundsInScreen": "0,300,1080,760",
+            "children": [],
+        }
+    ]
+    second_nodes = [
+        {
+            "text": "Air Care",
+            "contentDescription": "",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/service_card",
+            "className": "android.widget.FrameLayout",
+            "clickable": True,
+            "focusable": False,
+            "effectiveClickable": True,
+            "visibleToUser": True,
+            "boundsInScreen": "0,280,1080,740",
+            "children": [],
+        }
+    ]
+    dumps = iter([(first_nodes, "ok"), (second_nodes, "ok")])
+    logs = []
+    monkeypatch.setattr(collection_flow, "_load_scrolltouch_xml_nodes", lambda **kwargs: next(dumps))
+    monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **kwargs: (True, "transition_confirmed"))
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    client = XmlClient()
+    ok, reason = collection_flow._run_xml_scroll_search_tap(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_id": "life_air_care_plugin"},
+        target=r"(?i)\b(air\s*care|smart\s*air\s*care|에어\s*케어)\b",
+        type_="card",
+        max_scroll_search_steps=2,
+        step_wait_seconds=0.2,
+        transition_fast_path=False,
+    )
+
+    assert ok is True
+    assert reason == "xml_entry_success"
+    assert client.scroll_calls == ["down"]
+    assert len(client.tap_calls) == 1
+    assert any("target_candidates=0" in line for line in logs)
+    assert any("[XMLENTRY][scroll]" in line and "reason='no_target_candidate'" in line for line in logs)
+    assert any("[XMLENTRY][select]" in line and "target_match=true" in line and "matched_text='Air Care'" in line for line in logs)
+
+
+def test_xml_entry_strict_target_gating_returns_not_found_when_target_missing(monkeypatch):
+    class XmlClient:
+        def __init__(self):
+            self.scroll_calls = []
+            self.tap_calls = []
+
+        def scroll(self, dev, direction, step_=50, time_=1000, bounds_=None):
+            _ = (dev, step_, time_, bounds_)
+            self.scroll_calls.append(direction)
+            return True
+
+        def tap_xy_adb(self, dev, x, y):
+            self.tap_calls.append((dev, x, y))
+            return True
+
+    nodes = [
+        {
+            "text": "Family Care",
+            "contentDescription": "",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/service_card",
+            "className": "android.widget.FrameLayout",
+            "clickable": True,
+            "focusable": False,
+            "effectiveClickable": True,
+            "visibleToUser": True,
+            "boundsInScreen": "0,300,1080,760",
+            "children": [],
+        }
+    ]
+    logs = []
+    monkeypatch.setattr(collection_flow, "_load_scrolltouch_xml_nodes", lambda **kwargs: (nodes, "ok"))
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    client = XmlClient()
+    ok, reason = collection_flow._run_xml_scroll_search_tap(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_id": "life_air_care_plugin"},
+        target=r"(?i)\b(air\s*care|smart\s*air\s*care|에어\s*케어)\b",
+        type_="card",
+        max_scroll_search_steps=1,
+        step_wait_seconds=0.2,
+        transition_fast_path=False,
+    )
+
+    assert ok is False
+    assert reason == "target_not_found_after_scroll"
+    assert client.scroll_calls == ["down"]
+    assert client.tap_calls == []
+    assert any("[XMLENTRY][result] success=false reason='target_not_found_after_scroll'" in line for line in logs)
