@@ -66,7 +66,7 @@ COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-alias-evidence-v1"
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr47-life-plugin-xml-entry-strict-phrase-gate-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
-COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr36-air-entry-contract-success-preserve-v1"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr36-air-entry-contract-success-preserve-v2"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr48-plugin-detail-exit-back-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
@@ -1234,51 +1234,96 @@ def _classify_special_post_open_state(
     post_speech: str,
     visible_verify_text: str,
     matches_verify: bool,
+    post_nodes: list[dict[str, Any]] | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     if str(tab_cfg.get("entry_type", _ENTRY_TYPE_CARD) or _ENTRY_TYPE_CARD).strip().lower() != _ENTRY_TYPE_CARD:
         return False, "", {}
-    handling = str(tab_cfg.get("special_state_handling", "") or "").strip().lower()
-    if not handling:
-        return False, "", {}
+    handling = str(tab_cfg.get("special_state_handling", "") or "").strip().lower() or "back_after_read"
 
     special_tokens_raw = tab_cfg.get("special_state_tokens", [])
     cta_tokens_raw = tab_cfg.get("special_state_cta_tokens", [])
     intro_like_min_length = int(tab_cfg.get("special_state_intro_like_min_length", 80) or 80)
     special_tokens = [str(token or "").strip().lower() for token in special_tokens_raw if str(token or "").strip()]
     cta_tokens = [str(token or "").strip().lower() for token in cta_tokens_raw if str(token or "").strip()]
-    if not special_tokens or not cta_tokens:
-        return False, "", {}
+    if not isinstance(post_nodes, list):
+        post_nodes = []
 
     blob_candidates = [post_view_id, post_label, post_speech, visible_verify_text]
     normalized_blob = " ".join(str(value or "") for value in blob_candidates).lower()
-    if not normalized_blob.strip():
+    if not normalized_blob.strip() and not post_nodes:
         return False, "", {}
 
     special_hits = [token for token in special_tokens if token in normalized_blob]
     cta_hits = [token for token in cta_tokens if token in normalized_blob]
-    if not cta_hits:
-        return False, "", {}
+    generic_cta_tokens = ("start", "get started", "connect", "set up", "setup", "continue", "next", "try")
+    generic_cta_hits = [token for token in generic_cta_tokens if token in normalized_blob]
+    if generic_cta_hits:
+        cta_hits = sorted(set([*cta_hits, *generic_cta_hits]))
 
     verify_tokens_raw = tab_cfg.get("verify_tokens", [])
     verify_tokens = [str(token or "").strip().lower() for token in verify_tokens_raw if str(token or "").strip()]
     verify_hit = bool(matches_verify or (verify_tokens and any(token in normalized_blob for token in verify_tokens)))
     long_intro_like = len(visible_verify_text.strip()) >= intro_like_min_length or len(post_speech.strip()) >= intro_like_min_length
+    if not long_intro_like and len(post_label.strip()) >= intro_like_min_length:
+        long_intro_like = True
     special_hit_count = len(special_hits)
     cta_hit_count = len(cta_hits)
 
+    flat_nodes = _iter_tree_nodes_with_parent(post_nodes)
+    meaningful_texts: list[str] = []
+    short_cta_nodes = 0
+    chrome_hits = 0
+    for node, _ in flat_nodes:
+        if not _node_is_visible(node):
+            continue
+        view_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip().lower()
+        if view_id and ("toolbar" in view_id or "appbar" in view_id or "action_bar" in view_id or "navigate_up" in view_id):
+            chrome_hits += 1
+        text_blob = _node_label_blob(node).strip()
+        if not text_blob:
+            continue
+        lowered = text_blob.lower()
+        meaningful_texts.append(lowered)
+        token_len = len(lowered.split())
+        if token_len <= 4 and any(token in lowered for token in generic_cta_tokens):
+            short_cta_nodes += 1
+    unique_text_count = len(set(meaningful_texts))
+    low_content_diversity = bool(unique_text_count and unique_text_count <= 5)
+    cta_pair = 1 <= short_cta_nodes <= 2
+    intro_focus_like = bool(post_label.strip() and len(post_label.strip()) >= 24 and "list" not in post_view_id and "recycler" not in post_view_id)
+    top_chrome_intro_cta = bool(chrome_hits >= 1 and (cta_hit_count >= 1 or cta_pair) and long_intro_like)
+
     detected = bool(
-        verify_hit
-        and cta_hit_count >= 1
-        and special_hit_count >= 1
-        and (long_intro_like or special_hit_count >= 2)
+        ((verify_hit and cta_hit_count >= 1 and special_hit_count >= 1 and (long_intro_like or special_hit_count >= 2)))
+        or (
+            (cta_hit_count >= 1 or cta_pair)
+            and long_intro_like
+            and (low_content_diversity or top_chrome_intro_cta or intro_focus_like)
+        )
     )
-    if not detected:
-        return False, "", {}
-    return True, "onboarding_or_empty_state", {
+    signals: list[str] = []
+    if long_intro_like:
+        signals.append("long_intro")
+    if cta_hit_count >= 1 or cta_pair:
+        signals.append("cta")
+    if low_content_diversity:
+        signals.append("low_content_diversity")
+    if top_chrome_intro_cta:
+        signals.append("top_chrome_intro_cta")
+    if intro_focus_like:
+        signals.append("intro_focus")
+    if verify_hit and special_hit_count >= 1:
+        signals.append("verify_and_special_token")
+    return detected, "setup_needed_or_empty_state" if detected else "", {
+        "signals": signals,
         "special_hits": special_hits,
         "cta_hits": cta_hits,
         "verify_hit": verify_hit,
         "long_intro_like": long_intro_like,
+        "low_content_diversity": low_content_diversity,
+        "cta_pair": cta_pair,
+        "top_chrome_intro_cta": top_chrome_intro_cta,
+        "intro_focus_like": intro_focus_like,
         "handling": handling,
     }
 
@@ -5105,22 +5150,6 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         post_speech=post_speech,
         nodes=identity_nodes,
     )
-    if identity_mismatch:
-        log(
-            f"[ENTRY_GUARD][identity_mismatch] scenario='{scenario_id}' actual='{identity_actual}'"
-        )
-        recover_ok = recover_to_start_state(client, dev, tab_cfg)
-        log(
-            f"[ENTRY_GUARD][identity_mismatch] recover_triggered=true "
-            f"recover_success={str(recover_ok).lower()}"
-        )
-        start_open_summary = getattr(client, "last_start_open_summary", {})
-        if isinstance(start_open_summary, dict):
-            start_open_summary["entry_contract_reason"] = _ENTRY_REASON_WRONG_OPEN
-            start_open_summary["entry_contract_detail"] = f"identity_mismatch:{identity_actual or 'unknown'}"
-            setattr(client, "last_start_open_summary", start_open_summary)
-        return False
-
     air_post_nodes: list[dict[str, Any]] = []
     if str(scenario_id or "").strip().lower() == _LIFE_AIR_CARE_SCENARIO_ID and callable(dump_tree_fn):
         try:
@@ -5476,6 +5505,140 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
                 start_open_summary["entry_contract_detail"] = str(air_verified_entry_reason or "air_verify_miss")
                 setattr(client, "last_start_open_summary", start_open_summary)
             return False
+    entry_verify_candidate_success = bool(matches_verify and not has_negative_signal and not has_negative_verify_token)
+    if (
+        entry_type == _ENTRY_TYPE_CARD
+        and not visible_verify_text
+        and (tab_cfg.get("special_state_tokens") or tab_cfg.get("special_state_cta_tokens") or identity_nodes)
+    ):
+        visible_verify_text = _collect_post_open_visible_text(client, dev)
+    special_state_detected, special_state_kind, special_state_meta = _classify_special_post_open_state(
+        tab_cfg,
+        post_view_id=post_view_id,
+        post_label=post_label,
+        post_speech=post_speech,
+        visible_verify_text=visible_verify_text,
+        matches_verify=matches_verify,
+        post_nodes=identity_nodes,
+    )
+    special_signals = ",".join(special_state_meta.get("signals", [])) if isinstance(special_state_meta, dict) else ""
+    log(
+        "[ENTRY][special_state_check] "
+        f"detected={str(bool(special_state_detected)).lower()} "
+        f"signals='{special_signals or 'none'}' "
+        f"kind='{special_state_kind or 'none'}'"
+    )
+    if special_state_detected and not entry_verify_candidate_success:
+        log("[ENTRY][special_state_check] decision='route_to_special_state'")
+        handling = str(special_state_meta.get("handling", "") or "back_after_read")
+        special_hits = ",".join(special_state_meta.get("special_hits", []))
+        cta_hits = ",".join(special_state_meta.get("cta_hits", []))
+        verify_hit = bool(special_state_meta.get("verify_hit", False))
+        long_intro_like = bool(special_state_meta.get("long_intro_like", False))
+        log(
+            f"[SCENARIO][special_state] detected scenario='{scenario_id}' entry_type='{entry_type}' "
+            f"kind='{special_state_kind}' handling='{handling}' verify_hit={str(verify_hit).lower()} "
+            f"long_intro_like={str(long_intro_like).lower()} special_hits='{special_hits}' cta_hits='{cta_hits}'"
+        )
+        read_wait_seconds = min(main_step_wait_seconds, 0.5)
+        if read_wait_seconds > 0:
+            time.sleep(read_wait_seconds)
+        back_status = "skipped"
+        recover_reason = "not_required"
+        recover_ok = handling != "back_after_read"
+        if handling == "back_after_read":
+            back_ok = _send_back(client, dev)
+            if not back_ok:
+                back_status = "back_failed"
+                recover_reason = "back_failed"
+            else:
+                time.sleep(min(main_step_wait_seconds, 0.6))
+                after_back_focus = client.get_focus(
+                    dev=dev,
+                    wait_seconds=min(main_step_wait_seconds, 0.8),
+                    allow_fallback_dump=False,
+                    mode="fast",
+                )
+                after_back_blob = _node_label_blob(after_back_focus if isinstance(after_back_focus, dict) else {}).lower()
+                cta_tokens = [
+                    str(token or "").strip().lower()
+                    for token in tab_cfg.get("special_state_cta_tokens", [])
+                    if str(token or "").strip()
+                ]
+                if not cta_tokens:
+                    cta_tokens = ["start", "get started", "connect", "set up", "setup", "continue", "next", "try"]
+                still_cta = bool(after_back_blob and any(token in after_back_blob for token in cta_tokens))
+                back_status = "back_sent_still_cta" if still_cta else "back_sent_exit"
+                recover_reason = "post_back_focus_still_cta" if still_cta else "post_back_focus_exit"
+            log("[SPECIAL_STATE][recover] start")
+            recover_ok = False
+            for recover_attempt in range(1, 3):
+                recover_ok = recover_to_start_state(client, dev, tab_cfg)
+                if recover_ok:
+                    recover_reason = "life_plugin_list_recovered"
+                    break
+                recover_reason = "recover_to_start_state_failed"
+                if recover_attempt < 2:
+                    log(
+                        f"[SPECIAL_STATE][recover] retry={recover_attempt}/2 "
+                        "target='life_plugin_list' reason='recover_to_start_state_failed'"
+                    )
+            log(
+                f"[SPECIAL_STATE][recover] success={str(recover_ok).lower()} "
+                f"target='life_plugin_list' reason='{recover_reason}'"
+            )
+        if not recover_ok:
+            start_open_summary = getattr(client, "last_start_open_summary", {})
+            if isinstance(start_open_summary, dict):
+                start_open_summary["entry_contract_reason"] = _ENTRY_REASON_VERIFY_FAILED
+                start_open_summary["entry_contract_detail"] = f"special_state_recover_failed:{recover_reason}"
+                start_open_summary["special_state_detected"] = True
+                start_open_summary["special_state_kind"] = special_state_kind
+                start_open_summary["special_state_handling"] = handling
+                start_open_summary["special_state_back_status"] = back_status
+                setattr(client, "last_start_open_summary", start_open_summary)
+            log(
+                f"[SCENARIO][entry_contract] failed scenario='{scenario_id}' entry_type='{entry_type}' "
+                f"reason='{_ENTRY_REASON_VERIFY_FAILED}' detail='special_state_recover_failed:{recover_reason}'"
+            )
+            return False
+        start_open_summary = getattr(client, "last_start_open_summary", {})
+        if isinstance(start_open_summary, dict):
+            start_open_summary["open_completed"] = True
+            start_open_summary["entry_contract_reason"] = _ENTRY_REASON_SPECIAL_STATE_HANDLED
+            start_open_summary["entry_contract_detail"] = "onboarding_back_exit_recovered"
+            start_open_summary["special_state_detected"] = True
+            start_open_summary["special_state_kind"] = special_state_kind
+            start_open_summary["special_state_handling"] = handling
+            start_open_summary["special_state_back_status"] = back_status
+            setattr(client, "last_start_open_summary", start_open_summary)
+        log(
+            f"[SCENARIO][entry_contract] handled scenario='{scenario_id}' entry_type='{entry_type}' "
+            f"reason='{_ENTRY_REASON_SPECIAL_STATE_HANDLED}' detail='onboarding_back_exit_recovered' "
+            f"back_status='{back_status}'"
+        )
+        return True
+    if special_state_detected:
+        log("[ENTRY][special_state_check] decision='keep_success_path'")
+    else:
+        log("[ENTRY][special_state_check] decision='continue_verify'")
+
+    if identity_mismatch:
+        log(
+            f"[ENTRY_GUARD][identity_mismatch] scenario='{scenario_id}' actual='{identity_actual}'"
+        )
+        recover_ok = recover_to_start_state(client, dev, tab_cfg)
+        log(
+            f"[ENTRY_GUARD][identity_mismatch] recover_triggered=true "
+            f"recover_success={str(recover_ok).lower()}"
+        )
+        start_open_summary = getattr(client, "last_start_open_summary", {})
+        if isinstance(start_open_summary, dict):
+            start_open_summary["entry_contract_reason"] = _ENTRY_REASON_WRONG_OPEN
+            start_open_summary["entry_contract_detail"] = f"identity_mismatch:{identity_actual or 'unknown'}"
+            setattr(client, "last_start_open_summary", start_open_summary)
+        return False
+
     if entry_type == _ENTRY_TYPE_DIRECT_SELECT and has_negative_verify_token:
         if diagnostic_entry:
             wrong_open_verify_hits = _collect_token_hits(
@@ -5532,107 +5695,6 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             start_open_summary["entry_contract_detail"] = failure_detail
             setattr(client, "last_start_open_summary", start_open_summary)
         return False
-    if (
-        entry_type == _ENTRY_TYPE_CARD
-        and not visible_verify_text
-        and (tab_cfg.get("special_state_tokens") or tab_cfg.get("special_state_cta_tokens"))
-    ):
-        visible_verify_text = _collect_post_open_visible_text(client, dev)
-    special_state_detected, special_state_kind, special_state_meta = _classify_special_post_open_state(
-        tab_cfg,
-        post_view_id=post_view_id,
-        post_label=post_label,
-        post_speech=post_speech,
-        visible_verify_text=visible_verify_text,
-        matches_verify=matches_verify,
-    )
-    if special_state_detected:
-        handling = str(special_state_meta.get("handling", "") or "back_after_read")
-        special_hits = ",".join(special_state_meta.get("special_hits", []))
-        cta_hits = ",".join(special_state_meta.get("cta_hits", []))
-        verify_hit = bool(special_state_meta.get("verify_hit", False))
-        long_intro_like = bool(special_state_meta.get("long_intro_like", False))
-        log(
-            f"[SCENARIO][special_state] detected scenario='{scenario_id}' entry_type='{entry_type}' "
-            f"kind='{special_state_kind}' handling='{handling}' verify_hit={str(verify_hit).lower()} "
-            f"long_intro_like={str(long_intro_like).lower()} special_hits='{special_hits}' cta_hits='{cta_hits}'"
-        )
-        read_wait_seconds = min(main_step_wait_seconds, 0.5)
-        if read_wait_seconds > 0:
-            time.sleep(read_wait_seconds)
-        back_status = "skipped"
-        recover_reason = "not_required"
-        recover_ok = handling != "back_after_read"
-        if handling == "back_after_read":
-            back_ok = _send_back(client, dev)
-            if not back_ok:
-                back_status = "back_failed"
-                recover_reason = "back_failed"
-            else:
-                time.sleep(min(main_step_wait_seconds, 0.6))
-                after_back_focus = client.get_focus(
-                    dev=dev,
-                    wait_seconds=min(main_step_wait_seconds, 0.8),
-                    allow_fallback_dump=False,
-                    mode="fast",
-                )
-                after_back_blob = _node_label_blob(after_back_focus if isinstance(after_back_focus, dict) else {}).lower()
-                cta_tokens = [
-                    str(token or "").strip().lower()
-                    for token in tab_cfg.get("special_state_cta_tokens", [])
-                    if str(token or "").strip()
-                ]
-                still_cta = bool(after_back_blob and cta_tokens and any(token in after_back_blob for token in cta_tokens))
-                back_status = "back_sent_still_cta" if still_cta else "back_sent_exit"
-                recover_reason = "post_back_focus_still_cta" if still_cta else "post_back_focus_exit"
-            log("[SPECIAL_STATE][recover] start")
-            recover_ok = False
-            for recover_attempt in range(1, 3):
-                recover_ok = recover_to_start_state(client, dev, tab_cfg)
-                if recover_ok:
-                    recover_reason = "life_plugin_list_recovered"
-                    break
-                recover_reason = "recover_to_start_state_failed"
-                if recover_attempt < 2:
-                    log(
-                        f"[SPECIAL_STATE][recover] retry={recover_attempt}/2 "
-                        "target='life_plugin_list' reason='recover_to_start_state_failed'"
-                    )
-            log(
-                f"[SPECIAL_STATE][recover] success={str(recover_ok).lower()} "
-                f"target='life_plugin_list' reason='{recover_reason}'"
-            )
-        if not recover_ok:
-            start_open_summary = getattr(client, "last_start_open_summary", {})
-            if isinstance(start_open_summary, dict):
-                start_open_summary["entry_contract_reason"] = _ENTRY_REASON_VERIFY_FAILED
-                start_open_summary["entry_contract_detail"] = f"special_state_recover_failed:{recover_reason}"
-                start_open_summary["special_state_detected"] = True
-                start_open_summary["special_state_kind"] = special_state_kind
-                start_open_summary["special_state_handling"] = handling
-                start_open_summary["special_state_back_status"] = back_status
-                setattr(client, "last_start_open_summary", start_open_summary)
-            log(
-                f"[SCENARIO][entry_contract] failed scenario='{scenario_id}' entry_type='{entry_type}' "
-                f"reason='{_ENTRY_REASON_VERIFY_FAILED}' detail='special_state_recover_failed:{recover_reason}'"
-            )
-            return False
-        start_open_summary = getattr(client, "last_start_open_summary", {})
-        if isinstance(start_open_summary, dict):
-            start_open_summary["open_completed"] = True
-            start_open_summary["entry_contract_reason"] = _ENTRY_REASON_SPECIAL_STATE_HANDLED
-            start_open_summary["entry_contract_detail"] = "onboarding_back_exit_recovered"
-            start_open_summary["special_state_detected"] = True
-            start_open_summary["special_state_kind"] = special_state_kind
-            start_open_summary["special_state_handling"] = handling
-            start_open_summary["special_state_back_status"] = back_status
-            setattr(client, "last_start_open_summary", start_open_summary)
-        log(
-            f"[SCENARIO][entry_contract] handled scenario='{scenario_id}' entry_type='{entry_type}' "
-            f"reason='{_ENTRY_REASON_SPECIAL_STATE_HANDLED}' detail='onboarding_back_exit_recovered' "
-            f"back_status='{back_status}'"
-        )
-        return True
     if is_transition_entry_fast_path and not is_strict_main_tab_scenario:
         time.sleep(min(main_step_wait_seconds, _TRANSITION_FAST_STEP_WAIT_SECONDS))
     else:
