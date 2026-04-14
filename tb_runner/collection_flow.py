@@ -67,7 +67,7 @@ COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-a
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr47-life-plugin-xml-entry-strict-phrase-gate-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr49-entry-special-state-routing-v1"
-COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr52-life-recover-unfocused-plugin-detail-v1"
+COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr53-life-recover-appbar-detail-fallback-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v1"
 SCROLLTOUCH_DEBUG_CAPTURE_ENABLED = False
 SCROLLTOUCH_DEBUG_VERBOSE_LOG_ENABLED = False
@@ -947,6 +947,14 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
         and visible_card_hits == 0
         and detail_chrome_body_score >= 2
     )
+    plugin_detail_fallback_like = bool(
+        app_bar_hits >= _LIFE_ROOT_APP_BAR_MIN_HITS
+        and (not global_nav_visible)
+        and (not life_root_like)
+        and (not plugin_detail_like)
+        and (focus_present or visible_content_hits > 0)
+    )
+    plugin_detail_like = bool(plugin_detail_like or plugin_detail_fallback_like)
     plugin_detail_unfocused_like = bool(
         not global_nav_visible
         and not life_root_like
