@@ -67,7 +67,7 @@ COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-a
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr47-life-plugin-xml-entry-strict-phrase-gate-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr49-entry-special-state-routing-v1"
-COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr48-plugin-detail-exit-back-v2"
+COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr50-life-root-global-nav-guard-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -226,6 +226,28 @@ def _iter_tree_nodes_with_parent(nodes: list[dict[str, Any]]) -> list[tuple[dict
     return flat
 
 
+def _has_global_nav_signals(state: list[dict[str, Any]]) -> tuple[bool, int]:
+    if not isinstance(state, list):
+        return False, 0
+    nav_id_tokens = ("menu_favorites", "menu_devices", "menu_services", "menu_automations", "menu_more")
+    nav_text_tokens = ("home", "devices", "life", "routines", "menu")
+    nav_hits = 0
+    for node, _ in _iter_tree_nodes_with_parent(state):
+        if not _node_is_visible(node):
+            continue
+        resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip().lower()
+        label_blob = _node_label_blob(node).lower()
+        if any(token in resource_id for token in nav_id_tokens):
+            nav_hits += 1
+            continue
+        if any(re.search(rf"(?<!\w){re.escape(token)}(?!\w)", label_blob) for token in nav_text_tokens):
+            nav_hits += 1
+            continue
+        if "bottomnavigation" in resource_id or "bottom_nav" in resource_id:
+            nav_hits += 1
+    return nav_hits > 0, nav_hits
+
+
 def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
     if not isinstance(nodes, list):
         nodes = []
@@ -235,6 +257,7 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
     visible_card_hits = 0
     life_root_signature_present = False
     bottom_nav_life_visible = False
+    global_nav_visible, bottom_nav_hits = _has_global_nav_signals(nodes)
     service_title_hits = 0
     description_hits = 0
     structure_hits = 0
@@ -290,10 +313,26 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         final_score += 1
     if bottom_nav_life_visible:
         final_score += 1
-    has_root_structure = app_bar_hits >= _LIFE_ROOT_APP_BAR_MIN_HITS or visible_card_hits >= _LIFE_ROOT_VISIBLE_CARD_MIN_HITS
-    ok = bool(life_root_signature_present and has_root_structure and final_score >= _LIFE_ROOT_SCORE_THRESHOLD)
+    root_structure_stable = bool(
+        (app_bar_hits >= _LIFE_ROOT_APP_BAR_MIN_HITS and (visible_card_hits > 0 or life_root_signature_present))
+        or visible_card_hits >= _LIFE_ROOT_VISIBLE_CARD_MIN_HITS
+    )
+    top_bar_with_global_nav = bool(app_bar_hits >= _LIFE_ROOT_APP_BAR_MIN_HITS and global_nav_visible)
+    ok = bool(
+        global_nav_visible
+        or root_structure_stable
+        or top_bar_with_global_nav
+        or (life_root_signature_present and final_score >= _LIFE_ROOT_SCORE_THRESHOLD)
+    )
     if ok:
-        pass_reason = "life_root_signature_and_structure_confirmed"
+        if global_nav_visible:
+            pass_reason = "global_nav_visible"
+        elif root_structure_stable:
+            pass_reason = "life_root_structure_stable"
+        elif top_bar_with_global_nav:
+            pass_reason = "top_bar_with_global_nav"
+        else:
+            pass_reason = "life_root_signature_and_structure_confirmed"
         fail_reason = ""
     else:
         pass_reason = ""
@@ -304,6 +343,10 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         "visible_card_hits": visible_card_hits,
         "life_root_signature_present": life_root_signature_present,
         "bottom_nav_life_visible": bottom_nav_life_visible,
+        "global_nav_visible": global_nav_visible,
+        "bottom_nav_hits": bottom_nav_hits,
+        "root_structure_stable": root_structure_stable,
+        "top_bar_with_global_nav": top_bar_with_global_nav,
         "navigate_up_hits": navigate_up_hits,
         "final_score": final_score,
         "pass_reason": pass_reason,
@@ -341,6 +384,9 @@ def _verify_plugin_entry_root_state(
             f"[SCENARIO][pre_nav][stabilization] phase='{phase}' attempt={attempt}/{_PLUGIN_ENTRY_RETRY_COUNT} "
             f"life_selected={str(snapshot.get('life_selected')).lower()} app_bar_hits={snapshot.get('app_bar_hits', 0)} "
             f"visible_card_hits={snapshot.get('visible_card_hits', 0)} "
+            f"global_nav_visible={str(snapshot.get('global_nav_visible')).lower()} "
+            f"bottom_nav_hits={snapshot.get('bottom_nav_hits', 0)} "
+            f"root_structure_stable={str(snapshot.get('root_structure_stable')).lower()} "
             f"life_root_signature_present={str(snapshot.get('life_root_signature_present')).lower()} "
             f"navigate_up_hits={snapshot.get('navigate_up_hits', 0)} "
             f"family_care_signature_seen={str(family_care_signature_seen).lower()} "
@@ -405,6 +451,9 @@ def _verify_plugin_entry_root_state(
                         f"life_selected={str(recheck_snapshot.get('life_selected')).lower()} "
                         f"app_bar_hits={recheck_snapshot.get('app_bar_hits', 0)} "
                         f"visible_card_hits={recheck_snapshot.get('visible_card_hits', 0)} "
+                        f"global_nav_visible={str(recheck_snapshot.get('global_nav_visible')).lower()} "
+                        f"bottom_nav_hits={recheck_snapshot.get('bottom_nav_hits', 0)} "
+                        f"root_structure_stable={str(recheck_snapshot.get('root_structure_stable')).lower()} "
                         f"life_root_signature_present={str(recheck_snapshot.get('life_root_signature_present')).lower()} "
                         f"navigate_up_hits={recheck_snapshot.get('navigate_up_hits', 0)} "
                         f"final_score={recheck_snapshot.get('final_score', 0)} "
@@ -826,28 +875,55 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
     app_bar_hits = int(initial_snapshot.get("app_bar_hits", 0) or 0)
     navigate_up_hits = int(initial_snapshot.get("navigate_up_hits", 0) or 0)
     life_root_signature_present = bool(initial_snapshot.get("life_root_signature_present"))
-    life_list_like = bool(initial_ok or (visible_card_hits > 0 and life_root_signature_present))
-    plugin_detail_like = bool(
-        not life_list_like
-        and visible_card_hits == 0
-        and (life_root_signature_present or package_signature_present)
-        and (navigate_up_hits > 0 or app_bar_hits > 0 or initial_family_care_signature_seen)
+    global_nav_visible = bool(initial_snapshot.get("global_nav_visible"))
+    bottom_nav_hits = int(initial_snapshot.get("bottom_nav_hits", 0) or 0)
+    root_structure_stable = bool(initial_snapshot.get("root_structure_stable"))
+    top_bar_with_global_nav = bool(initial_snapshot.get("top_bar_with_global_nav"))
+    life_root_like = bool(
+        global_nav_visible
+        or initial_ok
+        or root_structure_stable
+        or top_bar_with_global_nav
+        or (visible_card_hits > 0 and life_root_signature_present)
     )
-    recover_state_kind = "unknown"
-    if life_list_like:
-        recover_state_kind = "life_list_like"
-    elif plugin_detail_like:
-        recover_state_kind = "plugin_detail_like"
+    detail_chrome_body_score = 0
+    if navigate_up_hits > 0:
+        detail_chrome_body_score += 1
+    if app_bar_hits > 0:
+        detail_chrome_body_score += 1
+    if life_root_signature_present:
+        detail_chrome_body_score += 1
+    if package_signature_present:
+        detail_chrome_body_score += 1
+    plugin_detail_like = bool(
+        not global_nav_visible
+        and not life_root_like
+        and visible_card_hits == 0
+        and detail_chrome_body_score >= 2
+    )
+    recover_state_kind = "life_root_like" if life_root_like else ("plugin_detail_like" if plugin_detail_like else "unknown")
+    log(f"[STATE][root_check] global_nav_visible={str(global_nav_visible).lower()}")
+    log(f"[STATE][root_check] bottom_nav_hits={bottom_nav_hits}")
+    log(f"[STATE][root_check] life_root_like={str(life_root_like).lower()}")
+    log(f"[STATE][root_check] plugin_detail_like={str(plugin_detail_like).lower()}")
     log(
         f"[RECOVER][state] kind='{recover_state_kind}' initial_verify_ok={str(initial_ok).lower()} "
         f"initial_verify_reason='{initial_reason}' app_bar_hits={app_bar_hits} visible_card_hits={visible_card_hits} "
         f"life_root_signature_present={str(life_root_signature_present).lower()} "
-        f"navigate_up_hits={navigate_up_hits} package_signature_present={str(package_signature_present).lower()}"
+        f"navigate_up_hits={navigate_up_hits} package_signature_present={str(package_signature_present).lower()} "
+        f"family_care_signature_seen={str(initial_family_care_signature_seen).lower()}"
     )
-    if life_list_like:
+    if life_root_like:
+        log("[RECOVER][decision] skip_back_due_to_global_nav=true state='life_root_like'" if global_nav_visible else "[RECOVER][decision] skip_back_due_to_global_nav=false state='life_root_like'")
         log("[RECOVER] success reason='already_at_life_root'")
         return True
-    if plugin_detail_like:
+    skip_back_due_to_global_nav = bool(global_nav_visible)
+    allow_detail_exit_back = bool((not global_nav_visible) and (not life_root_like) and plugin_detail_like)
+    log(
+        f"[RECOVER][decision] skip_back_due_to_global_nav={str(skip_back_due_to_global_nav).lower()} "
+        f"state='{recover_state_kind}'"
+    )
+    if allow_detail_exit_back:
         log("[RECOVER][detail_exit] start")
         back_sent = _send_back(client, dev)
         log(f"[RECOVER][detail_exit] back_sent={str(back_sent).lower()}")
