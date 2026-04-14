@@ -67,7 +67,7 @@ COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-a
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr47-life-plugin-xml-entry-strict-phrase-gate-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr49-entry-special-state-routing-v1"
-COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr48-plugin-detail-exit-back-v1"
+COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr48-plugin-detail-exit-back-v2"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -756,6 +756,36 @@ def _send_back(client: A11yAdbClient, dev: str) -> bool:
     return False
 
 
+def _analyze_current_state(client: A11yAdbClient, dev: str) -> dict[str, Any]:
+    dump_tree_fn = getattr(client, "dump_tree", None)
+    if not callable(dump_tree_fn):
+        return {
+            "package_signature_present": False,
+            "app_bar_hits": 0,
+        }
+    try:
+        nodes = dump_tree_fn(dev=dev)
+    except Exception:
+        return {
+            "package_signature_present": False,
+            "app_bar_hits": 0,
+        }
+    node_list = nodes if isinstance(nodes, list) else []
+    snapshot = _life_root_state_snapshot(node_list)
+    package_signature_present = any(
+        "com.samsung.android.oneconnect" in str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").lower()
+        for node, _ in _iter_tree_nodes_with_parent(node_list)
+    )
+    return {
+        "package_signature_present": bool(package_signature_present),
+        "app_bar_hits": int(snapshot.get("app_bar_hits", 0) or 0),
+    }
+
+
+def _is_inside_smartthings(state: dict[str, Any]) -> bool:
+    return bool(state.get("package_signature_present") or int(state.get("app_bar_hits", 0) or 0) >= 1)
+
+
 def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, Any]) -> bool:
     policy = _resolve_recovery_policy(tab_cfg)
     if not policy.get("enabled", True):
@@ -831,10 +861,35 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
             phase="recover_detail_exit_back",
             scenario_id=scenario_id,
         )
+        post_back_state = _analyze_current_state(client, dev)
+        inside = _is_inside_smartthings(post_back_state)
+        log(
+            "[RECOVER][post_back_check] "
+            f"inside={str(inside).lower()} "
+            f"package={str(post_back_state.get('package_signature_present', False)).lower()} "
+            f"app_bar_hits={int(post_back_state.get('app_bar_hits', 0) or 0)}"
+        )
+        if not inside:
+            log("[RECOVER][abort] app_exit_detected_after_back")
+            log("[RECOVER] failed reason='outside_app_no_fallback'")
+            return False
         log(f"[RECOVER][detail_exit] verify_ok={str(verify_ok).lower()} reason='{verify_reason}'")
         if verify_ok:
             log("[RECOVER] success reason='detail_exit_back_verified'")
             return True
+
+    pre_fallback_state = _analyze_current_state(client, dev)
+    pre_fallback_inside = _is_inside_smartthings(pre_fallback_state)
+    if not pre_fallback_inside:
+        log(
+            "[RECOVER][post_back_check] "
+            f"inside={str(pre_fallback_inside).lower()} "
+            f"package={str(pre_fallback_state.get('package_signature_present', False)).lower()} "
+            f"app_bar_hits={int(pre_fallback_state.get('app_bar_hits', 0) or 0)}"
+        )
+        log("[RECOVER][abort] app_exit_detected_after_back")
+        log("[RECOVER] failed reason='outside_app_no_fallback'")
+        return False
 
     log("[RECOVER][fallback] entering_select_fallback")
     resource_select_success, label_select_success, select_success, fallback_reason = _select_recovery_target(client, dev, policy)
@@ -5609,6 +5664,19 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             for recover_attempt in range(1, 3):
                 recover_ok = recover_to_start_state(client, dev, tab_cfg)
                 if recover_ok:
+                    post_recover_state = _analyze_current_state(client, dev)
+                    inside = _is_inside_smartthings(post_recover_state)
+                    log(
+                        "[SPECIAL_STATE][post_recover_check] "
+                        f"inside_smartthings={str(inside).lower()} "
+                        f"package={str(post_recover_state.get('package_signature_present', False)).lower()} "
+                        f"app_bar_hits={int(post_recover_state.get('app_bar_hits', 0) or 0)}"
+                    )
+                    if not inside:
+                        log("[SPECIAL_STATE][post_recover_check] detected_app_exit -> abort_recover")
+                        recover_reason = "app_exited_after_back"
+                        recover_ok = False
+                        break
                     recover_reason = "life_plugin_list_recovered"
                     break
                 recover_reason = "recover_to_start_state_failed"
