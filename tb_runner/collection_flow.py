@@ -67,7 +67,7 @@ COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-a
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr47-life-plugin-xml-entry-strict-phrase-gate-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr36-air-entry-contract-success-preserve-v1"
-COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr45-recover-life-root-stop-v2"
+COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr48-plugin-detail-exit-back-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -763,7 +763,6 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
         return True
 
     wait_seconds = _get_wait_seconds(tab_cfg, "back_recovery_wait_seconds", MAIN_STEP_WAIT_SECONDS)
-    max_back_count = int(policy.get("max_back_count", 3) or 3)
     scenario_id = str(tab_cfg.get("scenario_id", "") or "")
     log("[RECOVER] start")
 
@@ -772,16 +771,12 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
         log("[RECOVER] failed reason='dump_tree_unavailable'")
         return False
 
-    initial_ok, _ = _verify_plugin_entry_root_state(
+    initial_ok, initial_reason = _verify_plugin_entry_root_state(
         client,
         dev,
         phase="recover_initial_verify",
         scenario_id=scenario_id,
     )
-    if initial_ok:
-        log("[RECOVER] success reason='already_at_life_root'")
-        return True
-
     try:
         initial_nodes = dump_tree_fn(dev=dev)
     except Exception as exc:
@@ -793,54 +788,53 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
         _safe_regex_search(_LIFE_ENERGY_FAMILY_CARE_REGEX, _node_label_blob(node))
         for node, _ in _iter_tree_nodes_with_parent(initial_nodes if isinstance(initial_nodes, list) else [])
     )
-    detail_like_state = bool(
-        int(initial_snapshot.get("navigate_up_hits", 0) or 0) > 0
-        or initial_family_care_signature_seen
-        or (
-            not bool(initial_snapshot.get("life_root_signature_present"))
-            and int(initial_snapshot.get("visible_card_hits", 0) or 0) == 0
-        )
+    package_signature_present = any(
+        "com.samsung.android.oneconnect" in str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").lower()
+        for node, _ in _iter_tree_nodes_with_parent(initial_nodes if isinstance(initial_nodes, list) else [])
     )
-
-    if detail_like_state:
-        log("[RECOVER][back_loop] start")
-        for attempt in range(1, max_back_count + 1):
-            state_label = "detail_like" if detail_like_state else "non_root"
-            log(f"[RECOVER][back_loop] attempt={attempt} state='{state_label}'")
-            if not _send_back(client, dev):
-                log("[RECOVER] failed reason='back_failed'")
-                return False
-            time.sleep(wait_seconds)
-            verify_ok, verify_reason = _verify_plugin_entry_root_state(
-                client,
-                dev,
-                phase=f"recover_back_loop_{attempt}",
-                scenario_id=scenario_id,
-            )
-            log(
-                f"[RECOVER][back_loop] attempt={attempt} verify_ok={str(verify_ok).lower()} "
-                f"reason='{verify_reason}'"
-            )
-            if verify_ok:
-                log("[RECOVER] success reason='back_loop_verified'")
-                return True
-            try:
-                back_nodes = dump_tree_fn(dev=dev)
-            except Exception:
-                back_nodes = []
-            back_snapshot = _life_root_state_snapshot(back_nodes if isinstance(back_nodes, list) else [])
-            life_root_restored = bool(
-                (back_snapshot.get("life_selected") or back_snapshot.get("bottom_nav_life_visible"))
-                and (
-                    int(back_snapshot.get("app_bar_hits", 0) or 0) >= 1
-                    or int(back_snapshot.get("visible_card_hits", 0) or 0) >= 1
-                    or bool(back_snapshot.get("life_root_signature_present"))
-                )
-            )
-            if life_root_restored:
-                log("[RECOVER][back_loop] stop reason='life_root_restored'")
-                log("[RECOVER] success reason='back_loop_life_root_restored'")
-                return True
+    visible_card_hits = int(initial_snapshot.get("visible_card_hits", 0) or 0)
+    app_bar_hits = int(initial_snapshot.get("app_bar_hits", 0) or 0)
+    navigate_up_hits = int(initial_snapshot.get("navigate_up_hits", 0) or 0)
+    life_root_signature_present = bool(initial_snapshot.get("life_root_signature_present"))
+    life_list_like = bool(initial_ok or (visible_card_hits > 0 and life_root_signature_present))
+    plugin_detail_like = bool(
+        not life_list_like
+        and visible_card_hits == 0
+        and (life_root_signature_present or package_signature_present)
+        and (navigate_up_hits > 0 or app_bar_hits > 0 or initial_family_care_signature_seen)
+    )
+    recover_state_kind = "unknown"
+    if life_list_like:
+        recover_state_kind = "life_list_like"
+    elif plugin_detail_like:
+        recover_state_kind = "plugin_detail_like"
+    log(
+        f"[RECOVER][state] kind='{recover_state_kind}' initial_verify_ok={str(initial_ok).lower()} "
+        f"initial_verify_reason='{initial_reason}' app_bar_hits={app_bar_hits} visible_card_hits={visible_card_hits} "
+        f"life_root_signature_present={str(life_root_signature_present).lower()} "
+        f"navigate_up_hits={navigate_up_hits} package_signature_present={str(package_signature_present).lower()}"
+    )
+    if life_list_like:
+        log("[RECOVER] success reason='already_at_life_root'")
+        return True
+    if plugin_detail_like:
+        log("[RECOVER][detail_exit] start")
+        back_sent = _send_back(client, dev)
+        log(f"[RECOVER][detail_exit] back_sent={str(back_sent).lower()}")
+        if not back_sent:
+            log("[RECOVER] failed reason='back_failed'")
+            return False
+        time.sleep(wait_seconds)
+        verify_ok, verify_reason = _verify_plugin_entry_root_state(
+            client,
+            dev,
+            phase="recover_detail_exit_back",
+            scenario_id=scenario_id,
+        )
+        log(f"[RECOVER][detail_exit] verify_ok={str(verify_ok).lower()} reason='{verify_reason}'")
+        if verify_ok:
+            log("[RECOVER] success reason='detail_exit_back_verified'")
+            return True
 
     log("[RECOVER][fallback] entering_select_fallback")
     resource_select_success, label_select_success, select_success, fallback_reason = _select_recovery_target(client, dev, policy)
@@ -866,7 +860,7 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
     if label_select_success and not verify_ok:
         log("[RECOVER] label fallback verify_ok=false")
     if verify_ok:
-        log("[RECOVER] success reason='select_fallback_verified'")
+        log("[RECOVER] success reason='fallback_verified'")
         return True
 
     log("[RECOVER] failed reason='life_root_not_reached'")
