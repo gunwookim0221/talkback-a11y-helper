@@ -64,10 +64,10 @@ COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-alias-evidence-v1"
-COLLECTION_FLOW_XML_ENTRY_VERSION = "pr42-life-plugin-xml-entry-v1"
+COLLECTION_FLOW_XML_ENTRY_VERSION = "pr45-life-plugin-xml-entry-target-gate-v2"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr36-air-entry-contract-success-preserve-v1"
-COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr44-recover-back-priority-verified-v1"
+COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr45-recover-life-root-stop-v2"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -590,7 +590,7 @@ def _resolve_recovery_policy(tab_cfg: dict[str, Any]) -> dict[str, Any]:
         "target_type": "bottom_tab",
         "target": "(?i).*home.*",
         "resource_id": "com.samsung.android.oneconnect:id/menu_favorites",
-        "max_back_count": 5,
+        "max_back_count": 3,
     }
     raw_policy = tab_cfg.get("recovery", {})
     if not isinstance(raw_policy, dict):
@@ -603,10 +603,10 @@ def _resolve_recovery_policy(tab_cfg: dict[str, Any]) -> dict[str, Any]:
         policy["target_type"] = "bottom_tab"
     policy["target"] = str(policy.get("target", "") or "")
     policy["resource_id"] = str(policy.get("resource_id", "") or "")
-    max_back_count = policy.get("max_back_count", 5)
+    max_back_count = policy.get("max_back_count", 3)
     if isinstance(max_back_count, bool) or not isinstance(max_back_count, int) or max_back_count <= 0:
-        max_back_count = 5
-    policy["max_back_count"] = max_back_count
+        max_back_count = 3
+    policy["max_back_count"] = max(1, min(max_back_count, 3))
     return policy
 
 
@@ -647,20 +647,28 @@ def _is_recovery_target_detected(nodes: list[dict[str, Any]], policy: dict[str, 
     return False, False
 
 
-def _select_recovery_target(client: A11yAdbClient, dev: str, policy: dict[str, Any]) -> tuple[bool, bool, bool]:
+def _select_recovery_target(client: A11yAdbClient, dev: str, policy: dict[str, Any]) -> tuple[bool, bool, bool, str]:
     resource_id = str(policy.get("resource_id", "") or "").strip()
     target_pattern = str(policy.get("target", "") or "").strip()
     target_type = str(policy.get("target_type", "bottom_tab") or "bottom_tab")
     resource_select_success = False
     label_select_success = False
     if resource_id:
-        resource_select_success = bool(client.select(dev=dev, name=resource_id, type_="r", wait_=3))
+        try:
+            resource_select_success = bool(client.select(dev=dev, name=resource_id, type_="r", wait_=3))
+        except Exception as exc:
+            log(f"[RECOVER][fallback] parse_error='{exc}'")
+            return False, False, False, "fallback_result_parse_error"
     if not resource_select_success and target_pattern:
         fallback_type = "a"
         if target_type == "resource_id":
             fallback_type = "r"
-        label_select_success = bool(client.select(dev=dev, name=target_pattern, type_=fallback_type, wait_=3))
-    return resource_select_success, label_select_success, bool(resource_select_success or label_select_success)
+        try:
+            label_select_success = bool(client.select(dev=dev, name=target_pattern, type_=fallback_type, wait_=3))
+        except Exception as exc:
+            log(f"[RECOVER][fallback] parse_error='{exc}'")
+            return False, False, False, "fallback_result_parse_error"
+    return resource_select_success, label_select_success, bool(resource_select_success or label_select_success), "ok"
 
 
 def _resolve_global_nav_resource_ids(tab_cfg: dict[str, Any]) -> list[str]:
@@ -743,7 +751,7 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
         return True
 
     wait_seconds = _get_wait_seconds(tab_cfg, "back_recovery_wait_seconds", MAIN_STEP_WAIT_SECONDS)
-    max_back_count = int(policy.get("max_back_count", 5) or 5)
+    max_back_count = int(policy.get("max_back_count", 3) or 3)
     scenario_id = str(tab_cfg.get("scenario_id", "") or "")
     log("[RECOVER] start")
 
@@ -804,9 +812,26 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
             if verify_ok:
                 log("[RECOVER] success reason='back_loop_verified'")
                 return True
+            try:
+                back_nodes = dump_tree_fn(dev=dev)
+            except Exception:
+                back_nodes = []
+            back_snapshot = _life_root_state_snapshot(back_nodes if isinstance(back_nodes, list) else [])
+            life_root_restored = bool(
+                (back_snapshot.get("life_selected") or back_snapshot.get("bottom_nav_life_visible"))
+                and (
+                    int(back_snapshot.get("app_bar_hits", 0) or 0) >= 1
+                    or int(back_snapshot.get("visible_card_hits", 0) or 0) >= 1
+                    or bool(back_snapshot.get("life_root_signature_present"))
+                )
+            )
+            if life_root_restored:
+                log("[RECOVER][back_loop] stop reason='life_root_restored'")
+                log("[RECOVER] success reason='back_loop_life_root_restored'")
+                return True
 
     log("[RECOVER][fallback] entering_select_fallback")
-    resource_select_success, label_select_success, select_success = _select_recovery_target(client, dev, policy)
+    resource_select_success, label_select_success, select_success, fallback_reason = _select_recovery_target(client, dev, policy)
     log(
         f"[RECOVER][fallback] resource_select_success={str(resource_select_success).lower()} "
         f"label_select_success={str(label_select_success).lower()}"
@@ -814,7 +839,8 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
     if label_select_success:
         log("[RECOVER] label fallback candidate matched")
     if not select_success:
-        log("[RECOVER] failed reason='life_root_not_reached'")
+        fail_reason = "fallback_result_parse_error" if fallback_reason == "fallback_result_parse_error" else "life_root_not_reached"
+        log(f"[RECOVER] failed reason='{fail_reason}'")
         return False
 
     time.sleep(wait_seconds)
@@ -2018,6 +2044,10 @@ def _run_xml_scroll_search_tap(
     scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip().lower()
     target_regex = re.compile(target) if target else re.compile(r"$^")
     target_tokens = {token for token in re.split(r"[^0-9a-zA-Z가-힣]+", target.lower()) if len(token) >= 3}
+    generic_weak_tokens = {"care", "life", "plugin", "service", "card"}
+    strong_target_tokens = {token for token in target_tokens if token not in generic_weak_tokens}
+    target_phrase_seed = re.sub(r"[\^\$\|\(\)\[\]\{\}\?\*\+\\]", " ", str(target or ""))
+    target_phrase = re.sub(r"\s+", " ", target_phrase_seed).strip().lower()
     excluded_regex = re.compile(
         r"(?i)(home_button|tab_title|\badd\b|\bmore\b|toolbar|actionbar|appbar|navigate up|location|"
         r"menu_(favorites|devices|services|automations|more)|recycler|viewpager)"
@@ -2030,7 +2060,7 @@ def _run_xml_scroll_search_tap(
         if not xml_nodes:
             log(f"[XMLENTRY][search] step={scroll_step}/{max_scroll_search_steps} candidate_count=0 reason='{xml_reason}'")
             failure_reason = "no_candidate_in_dump"
-        candidate_samples: list[tuple[int, dict[str, Any], str, str]] = []
+        candidate_samples: list[tuple[int, dict[str, Any], str, str, bool]] = []
         chrome_rejects = 0
         root_rejects = 0
         parent_map: dict[int, dict[str, Any] | None] = {}
@@ -2045,10 +2075,11 @@ def _run_xml_scroll_search_tap(
             label_blob = _node_label_blob(node)
             resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
             normalized_blob = re.sub(r"\s+", " ", label_blob).strip().lower()
-            token_hit = bool(target_tokens and any(token in normalized_blob for token in target_tokens))
+            token_hits = [token for token in target_tokens if token in normalized_blob]
+            strong_token_hit = bool(strong_target_tokens.intersection(set(token_hits)))
+            phrase_hit = bool(target_phrase and len(target_phrase) >= 4 and target_phrase in normalized_blob)
+            token_hit = bool(token_hits)
             regex_hit = bool(target_regex.search(label_blob) or target_regex.search(resource_id))
-            if not (regex_hit or token_hit):
-                continue
             promoted = node
             promoted_reason = "text_node_bounds"
             current = node
@@ -2083,10 +2114,15 @@ def _run_xml_scroll_search_tap(
                 continue
             if area_ratio < 0.0015:
                 continue
+            target_match = bool(regex_hit or phrase_hit or strong_token_hit)
             score = (200 if regex_hit else 0) + (80 if token_hit else 0) + (40 if "container" in promoted_reason else 0)
-            candidate_samples.append((score, promoted, promoted_reason, f"{label_blob}||{area_ratio:.4f}"))
+            candidate_samples.append((score, promoted, promoted_reason, f"{label_blob}||{area_ratio:.4f}", target_match))
         candidate_samples.sort(key=lambda item: item[0], reverse=True)
-        log(f"[XMLENTRY][search] step={scroll_step}/{max_scroll_search_steps} candidate_count={len(candidate_samples)}")
+        target_candidates = [sample for sample in candidate_samples if sample[4]]
+        log(
+            f"[XMLENTRY][search] step={scroll_step}/{max_scroll_search_steps} "
+            f"visible_candidates={len(candidate_samples)} target_candidates={len(target_candidates)}"
+        )
         for rank, sample in enumerate(candidate_samples[:3], start=1):
             sample_bounds = str(sample[1].get("boundsInScreen", "") or "").strip()
             sample_rid = str(sample[1].get("viewIdResourceName", "") or sample[1].get("resourceId", "") or "").strip()
@@ -2095,10 +2131,10 @@ def _run_xml_scroll_search_tap(
             log(
                 f"[XMLENTRY][search][top] rank={rank} reason='{sample[2]}' text='{sample_text[:48]}' "
                 f"rid='{sample_rid[:72]}' class='{sample_cls[:48]}' bounds='{sample_bounds}'"
-                f" area_ratio='{sample_area_ratio or '0'}'"
+                f" area_ratio='{sample_area_ratio or '0'}' target_match={str(sample[4]).lower()}"
             )
-        if candidate_samples:
-            selected = candidate_samples[0]
+        if target_candidates:
+            selected = target_candidates[0]
             selected_node = selected[1]
             selected_bounds = parse_bounds_str(str(selected_node.get("boundsInScreen", "") or "").strip())
             if not selected_bounds:
@@ -2146,11 +2182,17 @@ def _run_xml_scroll_search_tap(
             failure_reason = "only_chrome_candidates"
         elif root_rejects > 0 and not candidate_samples:
             failure_reason = "only_root_candidates"
+        elif candidate_samples and not target_candidates:
+            failure_reason = "no_target_candidate_yet"
         if scroll_step >= max_scroll_search_steps:
             failure_reason = "max_scroll_reached" if failure_reason == "no_candidate_in_dump" else failure_reason
             break
         scrolled = bool(client.scroll(dev=dev, direction="down")) if hasattr(client, "scroll") else False
-        log(f"[XMLENTRY][scroll] step={scroll_step}/{max_scroll_search_steps} performed={str(scrolled).lower()}")
+        scroll_reason = "no_target_candidate_yet" if candidate_samples and not target_candidates else "search_continue"
+        log(
+            f"[XMLENTRY][scroll] step={scroll_step}/{max_scroll_search_steps} "
+            f"performed={str(scrolled).lower()} reason='{scroll_reason}'"
+        )
         if not scrolled:
             break
         time.sleep(max(min(step_wait_seconds, 0.45), 0.2))
