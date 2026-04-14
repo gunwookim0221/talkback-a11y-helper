@@ -64,6 +64,7 @@ start pipeline 내부에서 `open_scenario(...)`를 먼저 실행한 뒤, post-o
 `open_scenario` 내부에서 `_run_pre_navigation_steps(...)`가 실행된다.
 
 - `tab_cfg["pre_navigation"]` 리스트를 순회하며 `select + click_focused` 또는 direct 액션 수행.
+- Life plugin에서는 `xml_scroll_search_tap` 액션으로 XML dump 기반 후보 탐색/스크롤/ADB tap 진입을 먼저 시도할 수 있으며, 실패 시 기존 `scrollTouch` fallback 경로를 유지한다.
 - step별 retry/reason을 추적하고 실패 시 즉시 `False` 반환.
 - 각 pre-navigation step 후 `collect_focus_step(...)`를 음수 step index로 호출해 상태를 확인.
 
