@@ -66,7 +66,7 @@ COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-alias-evidence-v1"
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr47-life-plugin-xml-entry-strict-phrase-gate-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
-COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr36-air-entry-contract-success-preserve-v2"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr49-entry-special-state-routing-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr48-plugin-detail-exit-back-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
@@ -5528,13 +5528,47 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         f"signals='{special_signals or 'none'}' "
         f"kind='{special_state_kind or 'none'}'"
     )
-    if special_state_detected and not entry_verify_candidate_success:
-        log("[ENTRY][special_state_check] decision='route_to_special_state'")
+    special_state_route_reason = "none"
+    special_state_kind_is_setup_needed = str(special_state_kind or "").strip().lower() == "setup_needed_or_empty_state"
+    special_state_long_intro_like = bool(special_state_meta.get("long_intro_like", False))
+    special_state_cta_like = bool(
+        special_state_meta.get("cta_hits")
+        or special_state_meta.get("cta_pair", False)
+    )
+    special_state_low_content_diversity = bool(special_state_meta.get("low_content_diversity", False))
+    special_state_intro_focus_like = bool(special_state_meta.get("intro_focus_like", False))
+    strong_generic_special_state_evidence = bool(
+        special_state_kind_is_setup_needed
+        and special_state_long_intro_like
+        and special_state_cta_like
+        and special_state_low_content_diversity
+        and special_state_intro_focus_like
+    )
+    route_to_special_state = bool(
+        special_state_detected
+        and (
+            not entry_verify_candidate_success
+            or strong_generic_special_state_evidence
+        )
+    )
+    if route_to_special_state:
+        special_state_route_reason = (
+            "special_state_detected_verify_not_success"
+            if not entry_verify_candidate_success
+            else "special_state_detected_strong_generic_evidence"
+        )
+        log(
+            "[ENTRY][special_state_check] "
+            "decision='route_to_special_state' "
+            f"reason='{special_state_route_reason}'"
+        )
         handling = str(special_state_meta.get("handling", "") or "back_after_read")
         special_hits = ",".join(special_state_meta.get("special_hits", []))
         cta_hits = ",".join(special_state_meta.get("cta_hits", []))
         verify_hit = bool(special_state_meta.get("verify_hit", False))
-        long_intro_like = bool(special_state_meta.get("long_intro_like", False))
+        long_intro_like = special_state_long_intro_like
+        log(f"[ENTRY][special_state_route] handling='{handling}'")
+        log("[ENTRY][special_state_route] main_traversal_skipped=true")
         log(
             f"[SCENARIO][special_state] detected scenario='{scenario_id}' entry_type='{entry_type}' "
             f"kind='{special_state_kind}' handling='{handling}' verify_hit={str(verify_hit).lower()} "
