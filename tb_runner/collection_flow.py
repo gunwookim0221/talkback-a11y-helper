@@ -64,7 +64,7 @@ COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-alias-evidence-v1"
-COLLECTION_FLOW_XML_ENTRY_VERSION = "pr46-life-plugin-xml-entry-strict-target-gate-v1"
+COLLECTION_FLOW_XML_ENTRY_VERSION = "pr47-life-plugin-xml-entry-strict-phrase-gate-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr36-air-entry-contract-success-preserve-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr45-recover-life-root-stop-v2"
@@ -86,6 +86,18 @@ _DIRECT_SELECT_VERIFY_RECHECK_COUNT = 2
 _DIRECT_SELECT_VERIFY_RECHECK_SLEEP_SECONDS = 0.16
 _DIRECT_SELECT_NEGATIVE_VERIFY_PERSIST_THRESHOLD = 2
 _DIRECT_SELECT_DIAGNOSTIC_SCENARIOS = {"life_pet_care_plugin"}
+STRICT_PLUGIN_ENTRY_PHRASES: dict[str, dict[str, tuple[str, ...]]] = {
+    "life_air_care_plugin": {"strict": ("air care", "smart air care", "에어 케어"), "title_only": ()},
+    "life_home_care_plugin": {"strict": ("home care", "smartthings home care", "홈 케어"), "title_only": ()},
+    "life_family_care_plugin": {"strict": ("family care", "패밀리 케어"), "title_only": ()},
+    "life_plant_care_plugin": {"strict": ("plant care", "plants", "식물"), "title_only": ()},
+    "life_clothing_care_plugin": {"strict": ("clothing care", "shoe care", "의류"), "title_only": ()},
+    "life_find_plugin": {"strict": ("smart find",), "title_only": ("find",)},
+    "life_video_plugin": {"strict": ("smart video",), "title_only": ("video",)},
+    "life_home_monitor_plugin": {"strict": ("home monitor",), "title_only": ("monitor",)},
+    "life_music_sync_plugin": {"strict": ("music sync",), "title_only": ("sync",)},
+    "life_pet_care_plugin": {"strict": ("pet care", "펫 케어"), "title_only": ()},
+}
 
 
 
@@ -2042,10 +2054,23 @@ def _run_xml_scroll_search_tap(
     transition_fast_path: bool,
 ) -> tuple[bool, str]:
     scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip().lower()
+    strict_phrase_cfg = STRICT_PLUGIN_ENTRY_PHRASES.get(scenario_id, {})
+    strict_phrases = tuple(str(phrase).strip().lower() for phrase in strict_phrase_cfg.get("strict", ()) if str(phrase).strip())
+    title_only_phrases = tuple(
+        str(phrase).strip().lower() for phrase in strict_phrase_cfg.get("title_only", ()) if str(phrase).strip()
+    )
+    strict_phrase_mode = bool(strict_phrases or title_only_phrases)
+    negative_phrases: tuple[str, ...] = tuple(
+        phrase
+        for other_scenario_id, phrase_cfg in STRICT_PLUGIN_ENTRY_PHRASES.items()
+        if other_scenario_id != scenario_id
+        for phrase in (
+            tuple(str(p).strip().lower() for p in phrase_cfg.get("strict", ()) if str(p).strip())
+            + tuple(str(p).strip().lower() for p in phrase_cfg.get("title_only", ()) if str(p).strip())
+        )
+    )
     target_regex = re.compile(target) if target else re.compile(r"$^")
     target_tokens = {token for token in re.split(r"[^0-9a-zA-Z가-힣]+", target.lower()) if len(token) >= 3}
-    generic_weak_tokens = {"care", "life", "plugin", "service", "card"}
-    strong_target_tokens = {token for token in target_tokens if token not in generic_weak_tokens}
     target_phrase_seed = re.sub(r"[\^\$\|\(\)\[\]\{\}\?\*\+\\]", " ", str(target or ""))
     target_phrase = re.sub(r"\s+", " ", target_phrase_seed).strip().lower()
     excluded_regex = re.compile(
@@ -2070,7 +2095,21 @@ def _run_xml_scroll_search_tap(
                 stack.extend(current_children)
         return " ".join(text for text in labels if text).strip()
 
+    def _normalize_for_phrase(value: str) -> str:
+        lowered = str(value or "").replace("\n", " ").replace("\r", " ").strip().lower()
+        cleaned = re.sub(r"[^0-9a-zA-Z가-힣]+", " ", lowered)
+        return re.sub(r"\s+", " ", cleaned).strip()
+
+    def _contains_phrase(value: str, phrase: str) -> bool:
+        normalized_value = f" {_normalize_for_phrase(value)} "
+        normalized_phrase = f" {_normalize_for_phrase(phrase)} "
+        if normalized_phrase.strip() == "":
+            return False
+        return normalized_phrase in normalized_value
+
     def _match_source(text_value: str, *, min_phrase_len: int = 4) -> tuple[bool, str]:
+        if strict_phrase_mode:
+            return False, ""
         normalized_value = re.sub(r"\s+", " ", str(text_value or "")).strip().lower()
         if not normalized_value:
             return False, ""
@@ -2079,7 +2118,7 @@ def _run_xml_scroll_search_tap(
         if target_phrase and len(target_phrase) >= min_phrase_len and target_phrase in normalized_value:
             return True, text_value.strip()
         token_hits = [token for token in target_tokens if token in normalized_value]
-        if token_hits and strong_target_tokens.intersection(set(token_hits)):
+        if token_hits:
             return True, text_value.strip()
         return False, ""
 
@@ -2104,27 +2143,61 @@ def _run_xml_scroll_search_tap(
                 continue
             label_blob = _node_label_blob(node)
             resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
-            normalized_blob = re.sub(r"\s+", " ", label_blob).strip().lower()
-            token_hits = [token for token in target_tokens if token in normalized_blob]
-            token_hit = bool(token_hits)
             node_text = str(node.get("text", "") or "").strip()
             node_desc = str(node.get("contentDescription", "") or "").strip()
             descendant_blob = _collect_descendant_blob(node)
-            title_match, title_match_text = _match_source(node_text)
-            desc_match, desc_match_text = _match_source(node_desc)
-            descendant_match, descendant_match_text = _match_source(descendant_blob)
-            resource_match, resource_match_text = _match_source(resource_id, min_phrase_len=3)
-            target_match = bool(title_match or desc_match or descendant_match or resource_match)
+            title_match = False
+            desc_match = False
+            descendant_match = False
+            target_match = False
             match_source = ""
-            matched_text = ""
-            if title_match:
-                match_source, matched_text = "title", title_match_text
-            elif desc_match:
-                match_source, matched_text = "content-desc", desc_match_text
-            elif descendant_match:
-                match_source, matched_text = "descendant", descendant_match_text
-            elif resource_match:
-                match_source, matched_text = "resource", resource_match_text
+            matched_phrase = ""
+            negative_plugin_phrase = ""
+            if strict_phrase_mode:
+                for phrase in strict_phrases + title_only_phrases:
+                    if _contains_phrase(node_text, phrase):
+                        title_match = True
+                        target_match = True
+                        match_source = "title"
+                        matched_phrase = phrase
+                        break
+                if not target_match:
+                    for phrase in strict_phrases:
+                        if _contains_phrase(node_desc, phrase):
+                            desc_match = True
+                            target_match = True
+                            match_source = "content-desc"
+                            matched_phrase = phrase
+                            break
+                if not target_match:
+                    for phrase in strict_phrases:
+                        if _contains_phrase(descendant_blob, phrase):
+                            descendant_match = True
+                            target_match = True
+                            match_source = "descendant"
+                            matched_phrase = phrase
+                            break
+                for phrase in negative_phrases:
+                    if _contains_phrase(node_text, phrase) or _contains_phrase(node_desc, phrase) or _contains_phrase(descendant_blob, phrase):
+                        negative_plugin_phrase = phrase
+                        target_match = False
+                        match_source = ""
+                        matched_phrase = ""
+                        break
+            else:
+                title_match, title_match_text = _match_source(node_text)
+                desc_match, desc_match_text = _match_source(node_desc)
+                descendant_match, descendant_match_text = _match_source(descendant_blob)
+                resource_match, resource_match_text = _match_source(resource_id, min_phrase_len=3)
+                target_match = bool(title_match or desc_match or descendant_match or resource_match)
+                if title_match:
+                    match_source, matched_phrase = "title", title_match_text
+                elif desc_match:
+                    match_source, matched_phrase = "content-desc", desc_match_text
+                elif descendant_match:
+                    match_source, matched_phrase = "descendant", descendant_match_text
+                elif resource_match:
+                    match_source, matched_phrase = "resource", resource_match_text
             promoted = node
             promoted_reason = "text_node_bounds"
             current = node
@@ -2159,7 +2232,7 @@ def _run_xml_scroll_search_tap(
                 continue
             if area_ratio < 0.0015:
                 continue
-            score = (200 if target_match else 0) + (80 if token_hit else 0) + (40 if "container" in promoted_reason else 0)
+            score = (200 if target_match else 0) + (40 if "container" in promoted_reason else 0)
             candidate_samples.append(
                 {
                     "score": score,
@@ -2169,7 +2242,8 @@ def _run_xml_scroll_search_tap(
                     "area_ratio": f"{area_ratio:.4f}",
                     "target_match": target_match,
                     "match_source": match_source,
-                    "matched_text": matched_text,
+                    "matched_phrase": matched_phrase,
+                    "negative_plugin_phrase": negative_plugin_phrase,
                 }
             )
         candidate_samples.sort(key=lambda item: int(item.get("score", 0)), reverse=True)
@@ -2190,6 +2264,8 @@ def _run_xml_scroll_search_tap(
                 f"rid='{sample_rid[:72]}' class='{sample_cls[:48]}' bounds='{sample_bounds}'"
                 f" area_ratio='{sample_area_ratio or '0'}' target_match={str(bool(sample.get('target_match'))).lower()}"
                 f" match_source='{str(sample.get('match_source', '') or '')}'"
+                f" matched_phrase='{str(sample.get('matched_phrase', '') or '')[:80]}'"
+                f" negative_plugin_phrase='{str(sample.get('negative_plugin_phrase', '') or '')[:80]}'"
             )
         if target_candidates:
             selected = target_candidates[0]
@@ -2206,7 +2282,7 @@ def _run_xml_scroll_search_tap(
                 f"[XMLENTRY][select] reason='{selected.get('reason', '')}' resource='{selected_resource[:96]}' "
                 f"bounds='{selected_node.get('boundsInScreen', '')}' text='{selected_text[:80]}' "
                 f"target_match=true match_source='{selected.get('match_source', '')}' "
-                f"matched_text='{str(selected.get('matched_text', '') or '')[:80]}'"
+                f"matched_phrase='{str(selected.get('matched_phrase', '') or '')[:80]}'"
             )
             tap_ok = False
             if hasattr(client, "tap_xy_adb"):
@@ -2249,7 +2325,9 @@ def _run_xml_scroll_search_tap(
                 failure_reason = "target_not_found_after_scroll"
             break
         scrolled = bool(client.scroll(dev=dev, direction="down")) if hasattr(client, "scroll") else False
-        scroll_reason = "no_target_candidate" if not target_candidates else "search_continue"
+        scroll_reason = "no_strict_target_candidate" if strict_phrase_mode and not target_candidates else (
+            "no_target_candidate" if not target_candidates else "search_continue"
+        )
         log(
             f"[XMLENTRY][scroll] step={scroll_step}/{max_scroll_search_steps} "
             f"performed={str(scrolled).lower()} reason='{scroll_reason}'"
