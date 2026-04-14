@@ -67,7 +67,7 @@ COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-a
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr47-life-plugin-xml-entry-strict-phrase-gate-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr49-entry-special-state-routing-v1"
-COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr50-life-root-global-nav-guard-v1"
+COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr52-life-recover-unfocused-plugin-detail-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v1"
 SCROLLTOUCH_DEBUG_CAPTURE_ENABLED = False
 SCROLLTOUCH_DEBUG_VERBOSE_LOG_ENABLED = False
@@ -874,13 +874,34 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
         return False
 
     initial_snapshot = _life_root_state_snapshot(initial_nodes if isinstance(initial_nodes, list) else [])
+    initial_node_list = initial_nodes if isinstance(initial_nodes, list) else []
+    focus_present = False
+    accessibility_focus_present = False
+    get_focus_fn = getattr(client, "get_focus", None)
+    if callable(get_focus_fn):
+        try:
+            focus_node = get_focus_fn(
+                dev=dev,
+                wait_seconds=min(max(wait_seconds, 0.2), 1.0),
+                allow_fallback_dump=False,
+                mode="fast",
+            )
+        except Exception:
+            focus_node = {}
+        if isinstance(focus_node, dict) and focus_node:
+            focus_present = True
+            accessibility_focus_present = bool(
+                focus_node.get("accessibilityFocused") or focus_node.get("isAccessibilityFocused")
+            )
+    log(f"[STATE][focus_check] focus_present={str(focus_present).lower()}")
+    log(f"[STATE][focus_check] accessibility_focus_present={str(accessibility_focus_present).lower()}")
     initial_family_care_signature_seen = any(
         _safe_regex_search(_LIFE_ENERGY_FAMILY_CARE_REGEX, _node_label_blob(node))
-        for node, _ in _iter_tree_nodes_with_parent(initial_nodes if isinstance(initial_nodes, list) else [])
+        for node, _ in _iter_tree_nodes_with_parent(initial_node_list)
     )
     package_signature_present = any(
         "com.samsung.android.oneconnect" in str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").lower()
-        for node, _ in _iter_tree_nodes_with_parent(initial_nodes if isinstance(initial_nodes, list) else [])
+        for node, _ in _iter_tree_nodes_with_parent(initial_node_list)
     )
     visible_card_hits = int(initial_snapshot.get("visible_card_hits", 0) or 0)
     app_bar_hits = int(initial_snapshot.get("app_bar_hits", 0) or 0)
@@ -906,17 +927,48 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
         detail_chrome_body_score += 1
     if package_signature_present:
         detail_chrome_body_score += 1
+    visible_content_hits = 0
+    for node, _ in _iter_tree_nodes_with_parent(initial_node_list):
+        if not _node_is_visible(node):
+            continue
+        label_blob = _node_label_blob(node)
+        if len(label_blob) >= 2:
+            visible_content_hits += 1
+    plugin_internal_evidence_score = detail_chrome_body_score + (1 if visible_content_hits >= 3 else 0)
+    recent_plugin_context = "plugin" in str(tab_cfg.get("scenario_id", "") or "").strip().lower()
+    log(
+        "[STATE][state_hint] "
+        f"plugin_internal_evidence=score:{plugin_internal_evidence_score},detail:{detail_chrome_body_score},content:{visible_content_hits}"
+    )
+    log(f"[STATE][state_hint] recent_plugin_context={str(recent_plugin_context).lower()}")
     plugin_detail_like = bool(
         not global_nav_visible
         and not life_root_like
         and visible_card_hits == 0
         and detail_chrome_body_score >= 2
     )
-    recover_state_kind = "life_root_like" if life_root_like else ("plugin_detail_like" if plugin_detail_like else "unknown")
+    plugin_detail_unfocused_like = bool(
+        not global_nav_visible
+        and not life_root_like
+        and visible_card_hits == 0
+        and plugin_internal_evidence_score >= 2
+        and recent_plugin_context
+        and (not focus_present or not accessibility_focus_present)
+    )
+    recover_state_kind = (
+        "life_root_like"
+        if life_root_like
+        else (
+            "plugin_detail_like"
+            if plugin_detail_like
+            else ("plugin_detail_unfocused_like" if plugin_detail_unfocused_like else "unknown")
+        )
+    )
     log(f"[STATE][root_check] global_nav_visible={str(global_nav_visible).lower()}")
     log(f"[STATE][root_check] bottom_nav_hits={bottom_nav_hits}")
     log(f"[STATE][root_check] life_root_like={str(life_root_like).lower()}")
     log(f"[STATE][root_check] plugin_detail_like={str(plugin_detail_like).lower()}")
+    log(f"[STATE][root_check] plugin_detail_unfocused_like={str(plugin_detail_unfocused_like).lower()}")
     log(
         f"[RECOVER][state] kind='{recover_state_kind}' initial_verify_ok={str(initial_ok).lower()} "
         f"initial_verify_reason='{initial_reason}' app_bar_hits={app_bar_hits} visible_card_hits={visible_card_hits} "
@@ -929,7 +981,14 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
         log("[RECOVER] success reason='already_at_life_root'")
         return True
     skip_back_due_to_global_nav = bool(global_nav_visible)
-    allow_detail_exit_back = bool((not global_nav_visible) and (not life_root_like) and plugin_detail_like)
+    allow_detail_exit_back = bool((not global_nav_visible) and (not life_root_like) and (plugin_detail_like or plugin_detail_unfocused_like))
+    use_detail_exit_due_to_unfocused_internal = bool(
+        allow_detail_exit_back and not plugin_detail_like and plugin_detail_unfocused_like
+    )
+    log(
+        "[RECOVER][decision] "
+        f"use_detail_exit_due_to_unfocused_internal={str(use_detail_exit_due_to_unfocused_internal).lower()}"
+    )
     log(
         f"[RECOVER][decision] skip_back_due_to_global_nav={str(skip_back_due_to_global_nav).lower()} "
         f"state='{recover_state_kind}'"
