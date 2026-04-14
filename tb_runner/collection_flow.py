@@ -68,6 +68,9 @@ COLLECTION_FLOW_XML_ENTRY_VERSION = "pr47-life-plugin-xml-entry-strict-phrase-ga
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr49-entry-special-state-routing-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr50-life-root-global-nav-guard-v1"
+COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v1"
+SCROLLTOUCH_DEBUG_CAPTURE_ENABLED = False
+SCROLLTOUCH_DEBUG_VERBOSE_LOG_ENABLED = False
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -98,6 +101,14 @@ STRICT_PLUGIN_ENTRY_PHRASES: dict[str, dict[str, tuple[str, ...]]] = {
     "life_music_sync_plugin": {"strict": ("music sync",), "title_only": ("sync",)},
     "life_pet_care_plugin": {"strict": ("pet care", "펫 케어"), "title_only": ()},
 }
+
+
+def _resolve_scrolltouch_debug_flags(tab_cfg: dict[str, Any]) -> tuple[bool, bool]:
+    debug_capture_enabled = bool(tab_cfg.get("scrolltouch_debug_capture_enabled", SCROLLTOUCH_DEBUG_CAPTURE_ENABLED))
+    debug_verbose_log_enabled = bool(
+        tab_cfg.get("scrolltouch_debug_verbose_log_enabled", SCROLLTOUCH_DEBUG_VERBOSE_LOG_ENABLED)
+    )
+    return debug_capture_enabled, debug_verbose_log_enabled
 
 
 
@@ -4171,11 +4182,12 @@ def _run_pre_navigation_steps(
         setattr(client, "last_pre_nav_failure_reason", "")
         return True
     scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    scrolltouch_debug_capture_enabled, scrolltouch_debug_verbose_log_enabled = _resolve_scrolltouch_debug_flags(tab_cfg)
     setattr(client, "last_pre_nav_failure_reason", "")
     setattr(client, "last_post_click_transition_same_screen", True)
     setattr(client, "last_post_click_transition_signal", "")
     capture_run_id = ""
-    if scenario_id.strip().lower() == _LIFE_AIR_CARE_SCENARIO_ID:
+    if scrolltouch_debug_capture_enabled and scenario_id.strip().lower() == _LIFE_AIR_CARE_SCENARIO_ID:
         capture_run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
     retry_count = _get_retry_count(tab_cfg, "pre_navigation_retry_count", 2)
@@ -4365,7 +4377,7 @@ def _run_pre_navigation_steps(
                             or bool(candidate_stats.get("will_try_xml_live_fallback", False))
                         )
                     )
-                    if needs_xml_fallback:
+                    if needs_xml_fallback and scrolltouch_debug_capture_enabled:
                         xml_fallback_attempted = True
                         xml_nodes, xml_fallback_reason = _load_scrolltouch_xml_nodes(client=client, dev=dev)
                         if xml_nodes:
@@ -4403,58 +4415,60 @@ def _run_pre_navigation_steps(
                         if isinstance(pre_candidate_fail_samples, list) and pre_candidate_fail_samples
                         else "-"
                     )
-                    log(
-                        f"[SCENARIO][pre_nav][scrolltouch][debug] scroll_step={scroll_step}/{max_scroll_search_steps} "
-                        f"visible_candidate_count={candidate_stats.get('visible_candidate_count', 0)} "
-                        f"partial_match_count={candidate_stats.get('partial_match_count', 0)} "
-                        f"exact_match_count={candidate_stats.get('exact_match_count', 0)} "
-                        f"relaxed_semantic_match_count={candidate_stats.get('relaxed_semantic_match_count', 0)} "
-                        f"fallback_applied_count={candidate_stats.get('fallback_applied_count', 0)} "
-                        f"generic_guard_block_count={candidate_stats.get('generic_guard_block_count', 0)} "
-                        f"hard_filter_reject_count={candidate_stats.get('hard_filter_reject_count', 0)} "
-                        f"semantic_probe_pool_count={candidate_stats.get('semantic_probe_pool_count', 0)} "
-                        f"semantic_probe_match_count={candidate_stats.get('semantic_probe_match_count', 0)} "
-                        f"semantic_probe_reject_count={candidate_stats.get('semantic_probe_reject_count', 0)} "
-                        f"candidate_from_probe_count={candidate_stats.get('candidate_from_probe_count', 0)} "
-                        f"probe_guard_block_count={candidate_stats.get('probe_guard_block_count', 0)} "
-                        f"alias_hit_count={candidate_stats.get('alias_hit_count', 0)} "
-                        f"alias_hit_top='{str(candidate_stats.get('alias_hit_top', '') or '')[:120]}' "
-                        f"resource_token_hit_count={candidate_stats.get('resource_token_hit_count', 0)} "
-                        f"resource_token_hit_top='{str(candidate_stats.get('resource_token_hit_top', '') or '')[:120]}' "
-                        f"descendant_alias_hit_count={candidate_stats.get('descendant_alias_hit_count', 0)} "
-                        f"semantic_evidence_class='{candidate_stats.get('semantic_evidence_class', 'miss')}' "
-                        f"probe_accept_reason='{candidate_stats.get('probe_accept_reason', 'none')}' "
-                        f"probe_reject_reason='{candidate_stats.get('probe_reject_reason', 'none')}' "
-                        f"helper_text_hit_count={candidate_stats.get('helper_text_hit_count', 0)} "
-                        f"xml_live_text_hit_count={candidate_stats.get('xml_live_text_hit_count', 0)} "
-                        f"descendant_text_hit_count={candidate_stats.get('descendant_text_hit_count', 0)} "
-                        f"xml_fallback_attempted={str(xml_fallback_attempted).lower()} "
-                        f"xml_fallback_reason='{xml_fallback_reason}' "
-                        f"rejections='{rejection_summary[:360]}' "
-                        f"visible_top='{visible_preview[:360]}' partial_top='{partial_preview[:360]}' relaxed_top='{relaxed_preview[:360]}' "
-                        f"probe_top='{probe_preview[:360]}' probe_reject_top='{probe_reject_preview[:360]}' "
-                        f"pre_candidate_top='{pre_candidate_preview[:360]}' "
-                        f"local_search_nodes={len(top_nodes) if isinstance(top_nodes, list) else 0} "
-                        f"selected={str(selected_node is not None).lower()} selected_reason='{selected_reason}'"
-                    )
-                    log(
-                        f"[SCENARIO][pre_nav][scrolltouch][inspect] scroll_step={scroll_step}/{max_scroll_search_steps} "
-                        f"samples='{inspect_preview[:1200]}'"
-                    )
-                    _capture_scrolltouch_step_bundle(
-                        client,
-                        dev,
-                        scenario_id=scenario_id,
-                        capture_run_id=capture_run_id,
-                        step_index=index,
-                        scroll_step=scroll_step,
-                        target_regex=target,
-                        selected=selected_node is not None,
-                        selected_reason=selected_reason,
-                        candidate_stats=candidate_stats,
-                        selected_meta=selected_meta,
-                        log_fn=log,
-                    )
+                    if scrolltouch_debug_verbose_log_enabled:
+                        log(
+                            f"[SCENARIO][pre_nav][scrolltouch][debug] scroll_step={scroll_step}/{max_scroll_search_steps} "
+                            f"visible_candidate_count={candidate_stats.get('visible_candidate_count', 0)} "
+                            f"partial_match_count={candidate_stats.get('partial_match_count', 0)} "
+                            f"exact_match_count={candidate_stats.get('exact_match_count', 0)} "
+                            f"relaxed_semantic_match_count={candidate_stats.get('relaxed_semantic_match_count', 0)} "
+                            f"fallback_applied_count={candidate_stats.get('fallback_applied_count', 0)} "
+                            f"generic_guard_block_count={candidate_stats.get('generic_guard_block_count', 0)} "
+                            f"hard_filter_reject_count={candidate_stats.get('hard_filter_reject_count', 0)} "
+                            f"semantic_probe_pool_count={candidate_stats.get('semantic_probe_pool_count', 0)} "
+                            f"semantic_probe_match_count={candidate_stats.get('semantic_probe_match_count', 0)} "
+                            f"semantic_probe_reject_count={candidate_stats.get('semantic_probe_reject_count', 0)} "
+                            f"candidate_from_probe_count={candidate_stats.get('candidate_from_probe_count', 0)} "
+                            f"probe_guard_block_count={candidate_stats.get('probe_guard_block_count', 0)} "
+                            f"alias_hit_count={candidate_stats.get('alias_hit_count', 0)} "
+                            f"alias_hit_top='{str(candidate_stats.get('alias_hit_top', '') or '')[:120]}' "
+                            f"resource_token_hit_count={candidate_stats.get('resource_token_hit_count', 0)} "
+                            f"resource_token_hit_top='{str(candidate_stats.get('resource_token_hit_top', '') or '')[:120]}' "
+                            f"descendant_alias_hit_count={candidate_stats.get('descendant_alias_hit_count', 0)} "
+                            f"semantic_evidence_class='{candidate_stats.get('semantic_evidence_class', 'miss')}' "
+                            f"probe_accept_reason='{candidate_stats.get('probe_accept_reason', 'none')}' "
+                            f"probe_reject_reason='{candidate_stats.get('probe_reject_reason', 'none')}' "
+                            f"helper_text_hit_count={candidate_stats.get('helper_text_hit_count', 0)} "
+                            f"xml_live_text_hit_count={candidate_stats.get('xml_live_text_hit_count', 0)} "
+                            f"descendant_text_hit_count={candidate_stats.get('descendant_text_hit_count', 0)} "
+                            f"xml_fallback_attempted={str(xml_fallback_attempted).lower()} "
+                            f"xml_fallback_reason='{xml_fallback_reason}' "
+                            f"rejections='{rejection_summary[:360]}' "
+                            f"visible_top='{visible_preview[:360]}' partial_top='{partial_preview[:360]}' relaxed_top='{relaxed_preview[:360]}' "
+                            f"probe_top='{probe_preview[:360]}' probe_reject_top='{probe_reject_preview[:360]}' "
+                            f"pre_candidate_top='{pre_candidate_preview[:360]}' "
+                            f"local_search_nodes={len(top_nodes) if isinstance(top_nodes, list) else 0} "
+                            f"selected={str(selected_node is not None).lower()} selected_reason='{selected_reason}'"
+                        )
+                        log(
+                            f"[SCENARIO][pre_nav][scrolltouch][inspect] scroll_step={scroll_step}/{max_scroll_search_steps} "
+                            f"samples='{inspect_preview[:1200]}'"
+                        )
+                    if scrolltouch_debug_capture_enabled:
+                        _capture_scrolltouch_step_bundle(
+                            client,
+                            dev,
+                            scenario_id=scenario_id,
+                            capture_run_id=capture_run_id,
+                            step_index=index,
+                            scroll_step=scroll_step,
+                            target_regex=target,
+                            selected=selected_node is not None,
+                            selected_reason=selected_reason,
+                            candidate_stats=candidate_stats,
+                            selected_meta=selected_meta,
+                            log_fn=log,
+                        )
                     if selected_node is not None:
                         selected_candidate_observed = True
                         class_name = str(selected_node.get("className", "") or "").strip()
@@ -4814,17 +4828,18 @@ def _run_pre_navigation_steps(
             elif normalized_actual_reason == "target node not found":
                 failure_reason_for_capture = "Target node not found"
             setattr(client, "last_pre_nav_failure_reason", str(failure_reason_for_capture or actual_reason or "action_failed"))
-            _capture_pre_navigation_failure_bundle(
-                client,
-                dev,
-                scenario_id=scenario_id,
-                failure_phase="pre_navigation",
-                failure_reason=failure_reason_for_capture,
-                step_index=index,
-                target_regex=target,
-                capture_run_id=capture_run_id,
-                log_fn=log,
-            )
+            if scrolltouch_debug_capture_enabled:
+                _capture_pre_navigation_failure_bundle(
+                    client,
+                    dev,
+                    scenario_id=scenario_id,
+                    failure_phase="pre_navigation",
+                    failure_reason=failure_reason_for_capture,
+                    step_index=index,
+                    target_regex=target,
+                    capture_run_id=capture_run_id,
+                    log_fn=log,
+                )
             log(f"[SCENARIO][pre_nav] failed reason='action_failed' step={index}")
             log(f"[SCENARIO][pre_nav] failed reason='action_failed' detail='{actual_reason}' step={index}")
             return False
@@ -4873,6 +4888,7 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     )
     is_transition_entry_fast_path = _is_transition_entry_fast_path(tab_cfg)
     is_strict_main_tab_scenario = scenario_id in _STRICT_MAIN_TAB_SCENARIOS
+    scrolltouch_debug_capture_enabled, _ = _resolve_scrolltouch_debug_flags(tab_cfg)
     log(
         f"[SCENARIO][stabilization] scenario='{scenario_id}' "
         f"screen_context_mode='{screen_context_mode}' stabilization_mode='{stabilization_mode}'"
@@ -4997,16 +5013,17 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
                     f"{focus_log_tag} strict failure for plugin pre_navigation scenario='{scenario_id}' "
                     f"reason='{plugin_root_reason}'"
                 )
-                _capture_pre_navigation_failure_bundle(
-                    client,
-                    dev,
-                    scenario_id=scenario_id,
-                    failure_phase="focus_align_recheck",
-                    failure_reason=plugin_root_reason,
-                    step_index=1,
-                    target_regex="",
-                    log_fn=log,
-                )
+                if scrolltouch_debug_capture_enabled:
+                    _capture_pre_navigation_failure_bundle(
+                        client,
+                        dev,
+                        scenario_id=scenario_id,
+                        failure_phase="focus_align_recheck",
+                        failure_reason=plugin_root_reason,
+                        step_index=1,
+                        target_regex="",
+                        log_fn=log,
+                    )
                 return False
             log(
                 f"{focus_log_tag} failed but proceeding after plugin root recheck "
@@ -5060,16 +5077,17 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             scenario_id=scenario_id,
         )
         if not plugin_root_ok:
-            _capture_pre_navigation_failure_bundle(
-                client,
-                dev,
-                scenario_id=scenario_id,
-                failure_phase="before_pre_navigation",
-                failure_reason=plugin_root_reason,
-                step_index=0,
-                target_regex="",
-                log_fn=log,
-            )
+            if scrolltouch_debug_capture_enabled:
+                _capture_pre_navigation_failure_bundle(
+                    client,
+                    dev,
+                    scenario_id=scenario_id,
+                    failure_phase="before_pre_navigation",
+                    failure_reason=plugin_root_reason,
+                    step_index=0,
+                    target_regex="",
+                    log_fn=log,
+                )
             log(
                 f"[SCENARIO][pre_nav][stabilization] failed scenario='{scenario_id}' "
                 f"reason='{plugin_root_reason}'"
