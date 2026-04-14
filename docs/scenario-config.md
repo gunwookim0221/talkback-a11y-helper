@@ -55,7 +55,9 @@
   - 감지는 **verify/title 계열 신호 + special_state token + CTA token**을 기본으로 하며, long intro-like 텍스트(`special_state_intro_like_min_length`, 기본 80자) 또는 복수 special token hit가 함께 있을 때만 동작합니다. CTA 단독/intro 단독 매치는 허용하지 않습니다.
   - `special_state_handling="back_after_read"`면 최소 1회 읽기 대기 후 BACK을 수행하고, main loop 진입 없이 `special_state_handled` 종료로 기록합니다.
 - `tab`: tab 선택 후보 규칙(resource/text/announcement/tie_breaker)
-- `pre_navigation`: anchor 전에 수행할 bounded 이동(select/touch/scrollTouch). `scrollTouch`는 기본적으로 실행 직전에 `scroll_to_top`으로 best-effort 초기화한 뒤 검색을 시작하며, `new_screen` plugin 진입 시나리오에서는 한 step 내부에서 누적 downward 탐색을 수행합니다(초기 1회만 top reset).
+- `pre_navigation`: anchor 전에 수행할 bounded 이동(select/touch/scrollTouch/xml_scroll_search_tap).
+  - `scrollTouch`는 기본적으로 실행 직전에 `scroll_to_top`으로 best-effort 초기화한 뒤 검색을 시작하며, `new_screen` plugin 진입 시나리오에서는 한 step 내부에서 누적 downward 탐색을 수행합니다(초기 1회만 top reset).
+  - `xml_scroll_search_tap`은 dump XML 기준으로 텍스트/리소스 매칭 → container promotion → bounds center ADB tap을 우선 시도하고, 전환 미확인 시 기존 `scrollTouch` fallback을 수행합니다.
   - Life plugin 진입 contract 로그: `[SCENARIO][entry_contract]`에서 `success_verified | verify_failed | false_success_guard | no_match | text_only_no_promotion | wrong_open` taxonomy를 노출합니다.
 - 디버그 관측성: `scrollTouch` local search 단계에서 `[SCENARIO][pre_nav][scrolltouch][debug]`에 `rejections`, `pre_candidate_top`, `xml_fallback_attempted`, `xml_fallback_reason`이 포함되고, `[SCENARIO][pre_nav][scrolltouch][inspect]`에 상위 inspect sample(visible/clickable/promotion/reject reason)이 출력됩니다. 후보 선택 로그에는 `promoted_container`, `promotion_attempted`, `promotion_source(helper|xml_live|none)`, `promotion_reason`, `promotion_candidate_count`, `promoted_from`, `promoted_to`, `selected_area`, `text_area`, `area_ratio`, `ancestor_distance`, `tap_point`, `tap_strategy`, `rank_summary_top3`가 포함되며, 스크롤 후 재탐색 로그에는 `settle_wait_ms`가 포함됩니다.
   - semantic probe 디버그에는 `alias_hit_count`, `alias_hit_top`, `resource_token_hit_count`, `resource_token_hit_top`, `descendant_alias_hit_count`, `semantic_evidence_class`, `probe_accept_reason`, `probe_reject_reason`가 추가로 포함됩니다.

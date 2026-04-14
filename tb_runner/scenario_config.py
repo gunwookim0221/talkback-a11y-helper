@@ -1,4 +1,4 @@
-SCENARIO_CONFIG_VERSION = "2026.04.13-life-plugin-scrolltouch-semantic-alias-v1"
+SCENARIO_CONFIG_VERSION = "2026.04.13-life-plugin-xml-entry-v1"
 
 BOTTOM_TAB_GLOBAL_NAV = {
     "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
@@ -157,7 +157,7 @@ TAB_CONFIGS = [
 
         "pre_navigation": [
             {
-                "action": "scrolltouch",
+                "action": "xml_scroll_search_tap",
                 "target": "(?i)(^smart\\s*air\\s*care$|^air\\s*care$|air\\s*care\\.|\\baircare\\b|에어\\s*케어)",
                 "type": "a",
             }
@@ -213,7 +213,7 @@ TAB_CONFIGS = [
 
         "pre_navigation": [
             {
-                "action": "scrolltouch",
+                "action": "xml_scroll_search_tap",
                 "target": "(?i)(^home\\s*care$|home\\s*care\\.|\\bhomecare\\b|홈\\s*케어)",
                 "type": "a",
             }
@@ -281,7 +281,7 @@ TAB_CONFIGS = [
 
         "pre_navigation": [
             {
-                "action": "scrolltouch",
+                "action": "xml_scroll_search_tap",
                 "target": "(?i)(^energy$|energy\\.|\\bsmart\\s*energy\\b|\\benergy\\b)",
                 "type": "a",
             }
@@ -546,7 +546,7 @@ TAB_CONFIGS = [
         "stabilization_mode": "anchor_only",
         "pre_navigation": [
             {
-                "action": "scrolltouch",
+                "action": "xml_scroll_search_tap",
                 "target": "(?i)(^pet\\s*care$|.*pet\\s*care.*|.*펫\\s*케어.*)",
                 "type": "a",
             }
@@ -620,7 +620,7 @@ TAB_CONFIGS = [
         "stabilization_mode": "anchor_only",
         "pre_navigation": [
             {
-                "action": "scrolltouch",
+                "action": "xml_scroll_search_tap",
                 "target": "(?i)(^family\\s*care$|.*family\\s*care.*|.*패밀리\\s*케어.*)",
                 "type": "a",
             }
@@ -662,7 +662,7 @@ TAB_CONFIGS = [
         "stabilization_mode": "anchor_only",
         "pre_navigation": [
             {
-                "action": "scrolltouch",
+                "action": "xml_scroll_search_tap",
                 "target": "(?i)(^plant\\s*care$|.*plant\\s*care.*|.*플랜트\\s*케어.*|.*식물.*)",
                 "type": "a",
             }
@@ -704,7 +704,7 @@ TAB_CONFIGS = [
         "stabilization_mode": "anchor_only",
         "pre_navigation": [
             {
-                "action": "scrolltouch",
+                "action": "xml_scroll_search_tap",
                 "target": "(?i)(^clothing\\s*care$|.*clothing\\s*care.*|.*shoe\\s*care.*|.*의류.*)",
                 "type": "a",
             }
@@ -741,7 +741,7 @@ TAB_CONFIGS = [
         "stabilization_mode": "anchor_only",
         "pre_navigation": [
             {
-                "action": "scrolltouch",
+                "action": "xml_scroll_search_tap",
                 "target": "(?i)(^smart\\s*find$|^find$|smart\\s*find\\.|.*smart\\s*find.*)",
                 "type": "a",
             }
@@ -783,7 +783,7 @@ TAB_CONFIGS = [
         "stabilization_mode": "anchor_only",
         "pre_navigation": [
             {
-                "action": "scrolltouch",
+                "action": "xml_scroll_search_tap",
                 "target": "(?i)(^video$|^smart\\s*video$|smart\\s*video\\.|.*smart\\s*video.*)",
                 "type": "a",
             }
@@ -825,7 +825,7 @@ TAB_CONFIGS = [
         "stabilization_mode": "anchor_only",
         "pre_navigation": [
             {
-                "action": "scrolltouch",
+                "action": "xml_scroll_search_tap",
                 "target": "(?i)(^home\\s*monitor$|.*home\\s*monitor.*)",
                 "type": "a",
             }
@@ -862,7 +862,7 @@ TAB_CONFIGS = [
         "stabilization_mode": "anchor_only",
         "pre_navigation": [
             {
-                "action": "scrolltouch",
+                "action": "xml_scroll_search_tap",
                 "target": "(?i)(^music\\s*sync$|.*music\\s*sync.*)",
                 "type": "a",
             }

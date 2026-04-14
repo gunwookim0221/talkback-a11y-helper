@@ -64,6 +64,7 @@ COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-alias-evidence-v1"
+COLLECTION_FLOW_XML_ENTRY_VERSION = "pr42-life-plugin-xml-entry-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr36-air-entry-contract-success-preserve-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -1912,29 +1913,199 @@ def _load_scrolltouch_xml_nodes(client: A11yAdbClient, dev: str) -> tuple[list[d
     except Exception as exc:
         return [], f"parse_failed:{exc}"
 
-    parsed_nodes: list[dict[str, Any]] = []
-    for element in root.iter("node"):
+    def _parse_element(element: ET.Element) -> dict[str, Any] | None:
         bounds_tuple = _parse_uiautomator_bounds(str(element.attrib.get("bounds", "") or ""))
         if not bounds_tuple:
-            continue
+            return None
         left, top, right, bottom = bounds_tuple
-        parsed_nodes.append(
-            {
-                "text": str(element.attrib.get("text", "") or "").strip(),
-                "contentDescription": str(element.attrib.get("content-desc", "") or "").strip(),
-                "viewIdResourceName": str(element.attrib.get("resource-id", "") or "").strip(),
-                "className": str(element.attrib.get("class", "") or "").strip(),
-                "clickable": str(element.attrib.get("clickable", "") or "").strip().lower() == "true",
-                "focusable": str(element.attrib.get("focusable", "") or "").strip().lower() == "true",
-                "effectiveClickable": str(element.attrib.get("clickable", "") or "").strip().lower() == "true",
-                "visibleToUser": str(element.attrib.get("visible-to-user", "") or "").strip().lower() != "false",
-                "boundsInScreen": f"{left},{top},{right},{bottom}",
-            }
-        )
+        node: dict[str, Any] = {
+            "text": str(element.attrib.get("text", "") or "").strip(),
+            "contentDescription": str(element.attrib.get("content-desc", "") or "").strip(),
+            "viewIdResourceName": str(element.attrib.get("resource-id", "") or "").strip(),
+            "className": str(element.attrib.get("class", "") or "").strip(),
+            "clickable": str(element.attrib.get("clickable", "") or "").strip().lower() == "true",
+            "focusable": str(element.attrib.get("focusable", "") or "").strip().lower() == "true",
+            "effectiveClickable": str(element.attrib.get("clickable", "") or "").strip().lower() == "true",
+            "visibleToUser": str(element.attrib.get("visible-to-user", "") or "").strip().lower() != "false",
+            "boundsInScreen": f"{left},{top},{right},{bottom}",
+            "children": [],
+        }
+        children: list[dict[str, Any]] = []
+        for child in list(element):
+            child_node = _parse_element(child)
+            if isinstance(child_node, dict):
+                children.append(child_node)
+        node["children"] = children
+        return node
 
-    if not parsed_nodes:
+    hierarchy_children: list[dict[str, Any]] = []
+    for child in list(root):
+        parsed_child = _parse_element(child)
+        if isinstance(parsed_child, dict):
+            hierarchy_children.append(parsed_child)
+
+    if not hierarchy_children:
         return [], "no_parsed_nodes"
-    return [{"children": parsed_nodes, "visibleToUser": True, "boundsInScreen": "0,0,1,1"}], "ok"
+    return [{"children": hierarchy_children, "visibleToUser": True, "boundsInScreen": "0,0,1,1"}], "ok"
+
+
+def _run_xml_scroll_search_tap(
+    client: A11yAdbClient,
+    dev: str,
+    *,
+    tab_cfg: dict[str, Any],
+    target: str,
+    type_: str,
+    max_scroll_search_steps: int,
+    step_wait_seconds: float,
+    transition_fast_path: bool,
+) -> tuple[bool, str]:
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip().lower()
+    target_regex = re.compile(target) if target else re.compile(r"$^")
+    target_tokens = {token for token in re.split(r"[^0-9a-zA-Z가-힣]+", target.lower()) if len(token) >= 3}
+    excluded_regex = re.compile(
+        r"(?i)(home_button|tab_title|\badd\b|\bmore\b|toolbar|actionbar|appbar|navigate up|location|"
+        r"menu_(favorites|devices|services|automations|more)|recycler|viewpager)"
+    )
+    container_regex = re.compile(r"(?i)(card|container|item|layout|frame|linear|relative|constraint|service)")
+    last_signature = ""
+    failure_reason = "no_candidate_in_dump"
+    for scroll_step in range(0, max_scroll_search_steps + 1):
+        xml_nodes, xml_reason = _load_scrolltouch_xml_nodes(client=client, dev=dev)
+        if not xml_nodes:
+            log(f"[XMLENTRY][search] step={scroll_step}/{max_scroll_search_steps} candidate_count=0 reason='{xml_reason}'")
+            failure_reason = "no_candidate_in_dump"
+        candidate_samples: list[tuple[int, dict[str, Any], str, str]] = []
+        chrome_rejects = 0
+        root_rejects = 0
+        parent_map: dict[int, dict[str, Any] | None] = {}
+        for map_node, map_parent in _iter_tree_nodes_with_parent(xml_nodes):
+            parent_map[id(map_node)] = map_parent if isinstance(map_parent, dict) else None
+        for node, parent in _iter_tree_nodes_with_parent(xml_nodes):
+            if not _node_is_visible(node):
+                continue
+            bounds = parse_bounds_str(str(node.get("boundsInScreen", "") or "").strip())
+            if not bounds:
+                continue
+            label_blob = _node_label_blob(node)
+            resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
+            normalized_blob = re.sub(r"\s+", " ", label_blob).strip().lower()
+            token_hit = bool(target_tokens and any(token in normalized_blob for token in target_tokens))
+            regex_hit = bool(target_regex.search(label_blob) or target_regex.search(resource_id))
+            if not (regex_hit or token_hit):
+                continue
+            promoted = node
+            promoted_reason = "text_node_bounds"
+            current = node
+            parent_hops = 0
+            while isinstance(parent, dict) and parent_hops < 6:
+                parent_bounds = parse_bounds_str(str(parent.get("boundsInScreen", "") or "").strip())
+                parent_resource = str(parent.get("viewIdResourceName", "") or parent.get("resourceId", "") or "").strip()
+                parent_class = str(parent.get("className", "") or "").strip()
+                is_actionable = bool(parent.get("clickable")) or bool(parent.get("focusable")) or bool(parent.get("effectiveClickable"))
+                parent_card_like = bool(container_regex.search(parent_resource) or container_regex.search(parent_class))
+                if parent_bounds and (is_actionable or parent_card_like):
+                    promoted = parent
+                    promoted_reason = "actionable_container" if is_actionable else "card_like_container"
+                    break
+                current = parent
+                parent = parent_map.get(id(current))
+                parent_hops += 1
+            promoted_bounds = parse_bounds_str(str(promoted.get("boundsInScreen", "") or "").strip())
+            if not promoted_bounds:
+                failure_reason = "bounds_missing"
+                continue
+            width = max(1, promoted_bounds[2] - promoted_bounds[0])
+            height = max(1, promoted_bounds[3] - promoted_bounds[1])
+            promoted_area = width * height
+            area_ratio = promoted_area / 2073600.0
+            promoted_blob = f"{_node_label_blob(promoted)} {str(promoted.get('viewIdResourceName', '') or promoted.get('resourceId', '') or '')} {str(promoted.get('className', '') or '')}"
+            if excluded_regex.search(promoted_blob):
+                chrome_rejects += 1
+                continue
+            if area_ratio > 0.78:
+                root_rejects += 1
+                continue
+            if area_ratio < 0.0015:
+                continue
+            score = (200 if regex_hit else 0) + (80 if token_hit else 0) + (40 if "container" in promoted_reason else 0)
+            candidate_samples.append((score, promoted, promoted_reason, f"{label_blob}||{area_ratio:.4f}"))
+        candidate_samples.sort(key=lambda item: item[0], reverse=True)
+        log(f"[XMLENTRY][search] step={scroll_step}/{max_scroll_search_steps} candidate_count={len(candidate_samples)}")
+        for rank, sample in enumerate(candidate_samples[:3], start=1):
+            sample_bounds = str(sample[1].get("boundsInScreen", "") or "").strip()
+            sample_rid = str(sample[1].get("viewIdResourceName", "") or sample[1].get("resourceId", "") or "").strip()
+            sample_cls = str(sample[1].get("className", "") or "").strip()
+            sample_text, _, sample_area_ratio = sample[3].partition("||")
+            log(
+                f"[XMLENTRY][search][top] rank={rank} reason='{sample[2]}' text='{sample_text[:48]}' "
+                f"rid='{sample_rid[:72]}' class='{sample_cls[:48]}' bounds='{sample_bounds}'"
+                f" area_ratio='{sample_area_ratio or '0'}'"
+            )
+        if candidate_samples:
+            selected = candidate_samples[0]
+            selected_node = selected[1]
+            selected_bounds = parse_bounds_str(str(selected_node.get("boundsInScreen", "") or "").strip())
+            if not selected_bounds:
+                failure_reason = "bounds_missing"
+                break
+            center_x = int((selected_bounds[0] + selected_bounds[2]) / 2)
+            center_y = int((selected_bounds[1] + selected_bounds[3]) / 2)
+            selected_resource = str(selected_node.get("viewIdResourceName", "") or selected_node.get("resourceId", "") or "").strip()
+            selected_text = _node_label_blob(selected_node)
+            log(
+                f"[XMLENTRY][select] reason='{selected[2]}' resource='{selected_resource[:96]}' "
+                f"bounds='{selected_node.get('boundsInScreen', '')}' text='{selected_text[:80]}'"
+            )
+            tap_ok = False
+            if hasattr(client, "tap_xy_adb"):
+                tap_ok = bool(client.tap_xy_adb(dev=dev, x=center_x, y=center_y))
+            else:
+                run_fn = getattr(client, "_run", None)
+                if callable(run_fn):
+                    try:
+                        run_fn(["shell", "input", "tap", str(center_x), str(center_y)], dev=dev)
+                        tap_ok = True
+                    except Exception:
+                        tap_ok = False
+            if not tap_ok:
+                failure_reason = "bounds_missing"
+                break
+            confirm_ok, confirm_signal = _confirm_click_focused_transition(
+                client=client,
+                dev=dev,
+                tab_cfg=tab_cfg,
+                transition_fast_path=transition_fast_path,
+            )
+            setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
+            setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
+            if confirm_ok:
+                log("[XMLENTRY][result] success=true reason='transition_confirmed'")
+                return True, "xml_entry_success"
+            failure_reason = "tap_dispatched_but_no_transition"
+            log(
+                f"[XMLENTRY][result] success=false reason='{failure_reason}' signal='{confirm_signal}' scenario='{scenario_id}' type='{type_}'"
+            )
+            break
+        if chrome_rejects > 0 and not candidate_samples:
+            failure_reason = "only_chrome_candidates"
+        elif root_rejects > 0 and not candidate_samples:
+            failure_reason = "only_root_candidates"
+        if scroll_step >= max_scroll_search_steps:
+            failure_reason = "max_scroll_reached" if failure_reason == "no_candidate_in_dump" else failure_reason
+            break
+        scrolled = bool(client.scroll(dev=dev, direction="down")) if hasattr(client, "scroll") else False
+        log(f"[XMLENTRY][scroll] step={scroll_step}/{max_scroll_search_steps} performed={str(scrolled).lower()}")
+        if not scrolled:
+            break
+        time.sleep(max(min(step_wait_seconds, 0.45), 0.2))
+        current_signature = _make_visible_plugin_search_signature(xml_nodes)
+        if current_signature and last_signature and current_signature == last_signature:
+            failure_reason = "max_scroll_reached"
+            break
+        last_signature = current_signature
+    log(f"[XMLENTRY][result] success=false reason='{failure_reason}'")
+    return False, failure_reason
 
 
 def _select_visible_plugin_candidate(
@@ -3617,6 +3788,8 @@ def _run_pre_navigation_steps(
         action = str(step.get("action", "") or "").strip().lower()
         if action in {"scroll_touch", "scroll-touch"}:
             action = "scrolltouch"
+        if action in {"xmlscrollsearchtap", "xml_scroll_search_tap", "dump_scroll_search_tap"}:
+            action = "xml_scroll_search_tap"
         target = str(step.get("target", "") or "").strip()
         type_ = str(step.get("type", "a") or "a").strip()
         if not action or not target:
@@ -3626,6 +3799,7 @@ def _run_pre_navigation_steps(
             "select",
             "touch",
             "scrolltouch",
+            "xml_scroll_search_tap",
             "touch_bounds_center",
             "select_and_click_focused",
             "tap_bounds_center_adb",
@@ -3636,7 +3810,7 @@ def _run_pre_navigation_steps(
             return False
 
         step_retry_count = retry_count
-        if action == "scrolltouch":
+        if action in {"scrolltouch", "xml_scroll_search_tap"}:
             screen_context_mode = _resolve_screen_context_mode(tab_cfg)
             stabilization_mode = _resolve_stabilization_mode(tab_cfg, screen_context_mode)
             if _is_plugin_anchor_only_new_screen(
@@ -3655,6 +3829,44 @@ def _run_pre_navigation_steps(
                 step_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
             elif action == "touch":
                 step_ok = bool(client.touch(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
+            elif action == "xml_scroll_search_tap":
+                max_scroll_search_steps = max(
+                    1,
+                    int(step.get("max_scroll_search_steps", tab_cfg.get("max_scroll_search_steps", _PLUGIN_SCROLL_SEARCH_MAX_STEPS)) or _PLUGIN_SCROLL_SEARCH_MAX_STEPS),
+                )
+                if attempt == 1:
+                    log("[XMLENTRY][search] pre_reset scroll_to_top=true")
+                    scroll_to_top_fn = getattr(client, "scroll_to_top", None)
+                    if callable(scroll_to_top_fn):
+                        try:
+                            scroll_to_top_fn(dev=dev, max_swipes=5, pause=0.6)
+                        except Exception as exc:
+                            log(f"[XMLENTRY][search] pre_reset_failed reason='{exc}'")
+                step_ok, xml_reason = _run_xml_scroll_search_tap(
+                    client,
+                    dev,
+                    tab_cfg=tab_cfg,
+                    target=target,
+                    type_=type_,
+                    max_scroll_search_steps=max_scroll_search_steps,
+                    step_wait_seconds=step_wait_seconds,
+                    transition_fast_path=transition_fast_path,
+                )
+                if not step_ok:
+                    fallback_reason = f"xml_entry_failed:{xml_reason}"
+                    log(f"[SCENARIO][pre_nav][xmlentry] fallback='helper_scrollTouch' reason='{fallback_reason}'")
+                    step_ok = bool(client.scrollTouch(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
+                    if step_ok:
+                        confirm_ok, confirm_signal = _confirm_click_focused_transition(
+                            client=client,
+                            dev=dev,
+                            tab_cfg=tab_cfg,
+                            transition_fast_path=transition_fast_path,
+                        )
+                        setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
+                        setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
+                        step_ok = bool(confirm_ok)
+                local_match_failed = not step_ok
             elif action == "scrolltouch":
                 screen_context_mode = _resolve_screen_context_mode(tab_cfg)
                 stabilization_mode = _resolve_stabilization_mode(tab_cfg, screen_context_mode)
