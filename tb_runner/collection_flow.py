@@ -67,7 +67,7 @@ COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-a
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr42-life-plugin-xml-entry-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr36-air-entry-contract-success-preserve-v1"
-COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr43-special-state-recover-and-life-list-guard-v1"
+COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr44-recover-back-priority-verified-v1"
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
@@ -647,29 +647,20 @@ def _is_recovery_target_detected(nodes: list[dict[str, Any]], policy: dict[str, 
     return False, False
 
 
-def _select_recovery_target(client: A11yAdbClient, dev: str, policy: dict[str, Any]) -> bool:
+def _select_recovery_target(client: A11yAdbClient, dev: str, policy: dict[str, Any]) -> tuple[bool, bool, bool]:
     resource_id = str(policy.get("resource_id", "") or "").strip()
     target_pattern = str(policy.get("target", "") or "").strip()
     target_type = str(policy.get("target_type", "bottom_tab") or "bottom_tab")
+    resource_select_success = False
+    label_select_success = False
     if resource_id:
-        if bool(client.select(dev=dev, name=resource_id, type_="r", wait_=3)):
-            return True
-        if target_pattern:
-            log("[RECOVER] resource select failed, trying label fallback")
-            fallback_type = "a"
-            if target_type == "resource_id":
-                fallback_type = "r"
-            if bool(client.select(dev=dev, name=target_pattern, type_=fallback_type, wait_=3)):
-                log("[RECOVER] select fallback succeeded")
-                return True
-            log("[RECOVER] select fallback failed")
-        return False
-    if target_pattern:
-        select_type = "a"
+        resource_select_success = bool(client.select(dev=dev, name=resource_id, type_="r", wait_=3))
+    if not resource_select_success and target_pattern:
+        fallback_type = "a"
         if target_type == "resource_id":
-            select_type = "r"
-        return bool(client.select(dev=dev, name=target_pattern, type_=select_type, wait_=3))
-    return False
+            fallback_type = "r"
+        label_select_success = bool(client.select(dev=dev, name=target_pattern, type_=fallback_type, wait_=3))
+    return resource_select_success, label_select_success, bool(resource_select_success or label_select_success)
 
 
 def _resolve_global_nav_resource_ids(tab_cfg: dict[str, Any]) -> list[str]:
@@ -753,6 +744,7 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
 
     wait_seconds = _get_wait_seconds(tab_cfg, "back_recovery_wait_seconds", MAIN_STEP_WAIT_SECONDS)
     max_back_count = int(policy.get("max_back_count", 5) or 5)
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
     log("[RECOVER] start")
 
     dump_tree_fn = getattr(client, "dump_tree", None)
@@ -760,59 +752,86 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
         log("[RECOVER] failed reason='dump_tree_unavailable'")
         return False
 
-    for attempt in range(0, max_back_count + 1):
-        if attempt > 0:
-            log(f"[RECOVER] back attempt={attempt}/{max_back_count}", level="DEBUG")
-            back_ok = _send_back(client, dev)
-            if not back_ok:
+    initial_ok, _ = _verify_plugin_entry_root_state(
+        client,
+        dev,
+        phase="recover_initial_verify",
+        scenario_id=scenario_id,
+    )
+    if initial_ok:
+        log("[RECOVER] success reason='already_at_life_root'")
+        return True
+
+    try:
+        initial_nodes = dump_tree_fn(dev=dev)
+    except Exception as exc:
+        log(f"[RECOVER] failed reason='dump_tree_failed:{exc}'")
+        return False
+
+    initial_snapshot = _life_root_state_snapshot(initial_nodes if isinstance(initial_nodes, list) else [])
+    initial_family_care_signature_seen = any(
+        _safe_regex_search(_LIFE_ENERGY_FAMILY_CARE_REGEX, _node_label_blob(node))
+        for node, _ in _iter_tree_nodes_with_parent(initial_nodes if isinstance(initial_nodes, list) else [])
+    )
+    detail_like_state = bool(
+        int(initial_snapshot.get("navigate_up_hits", 0) or 0) > 0
+        or initial_family_care_signature_seen
+        or (
+            not bool(initial_snapshot.get("life_root_signature_present"))
+            and int(initial_snapshot.get("visible_card_hits", 0) or 0) == 0
+        )
+    )
+
+    if detail_like_state:
+        log("[RECOVER][back_loop] start")
+        for attempt in range(1, max_back_count + 1):
+            state_label = "detail_like" if detail_like_state else "non_root"
+            log(f"[RECOVER][back_loop] attempt={attempt} state='{state_label}'")
+            if not _send_back(client, dev):
                 log("[RECOVER] failed reason='back_failed'")
                 return False
             time.sleep(wait_seconds)
+            verify_ok, verify_reason = _verify_plugin_entry_root_state(
+                client,
+                dev,
+                phase=f"recover_back_loop_{attempt}",
+                scenario_id=scenario_id,
+            )
+            log(
+                f"[RECOVER][back_loop] attempt={attempt} verify_ok={str(verify_ok).lower()} "
+                f"reason='{verify_reason}'"
+            )
+            if verify_ok:
+                log("[RECOVER] success reason='back_loop_verified'")
+                return True
 
-        try:
-            nodes = dump_tree_fn(dev=dev)
-        except Exception as exc:
-            log(f"[RECOVER] failed reason='dump_tree_failed:{exc}'")
-            return False
+    log("[RECOVER][fallback] entering_select_fallback")
+    resource_select_success, label_select_success, select_success = _select_recovery_target(client, dev, policy)
+    log(
+        f"[RECOVER][fallback] resource_select_success={str(resource_select_success).lower()} "
+        f"label_select_success={str(label_select_success).lower()}"
+    )
+    if label_select_success:
+        log("[RECOVER] label fallback candidate matched")
+    if not select_success:
+        log("[RECOVER] failed reason='life_root_not_reached'")
+        return False
 
-        detected, needs_select = _is_recovery_target_detected(nodes if isinstance(nodes, list) else [], policy)
-        if not detected:
-            continue
-
-        log(f"[RECOVER] target detected type={policy.get('target_type', 'bottom_tab')}", level="DEBUG")
-        if needs_select:
-            log("[RECOVER] selecting target", level="DEBUG")
-            if not _select_recovery_target(client, dev, policy):
-                continue
-            log("[RECOVER] verify after select", level="DEBUG")
-            verify_sleeps = [wait_seconds, min(wait_seconds, 0.4)]
-            verified = False
-            verified_needs_select = True
-            for sleep_seconds in verify_sleeps:
-                time.sleep(sleep_seconds)
-                try:
-                    verify_nodes = dump_tree_fn(dev=dev)
-                except Exception:
-                    verify_nodes = []
-                verified, verified_needs_select = _is_recovery_target_detected(
-                    verify_nodes if isinstance(verify_nodes, list) else [],
-                    policy,
-                )
-                if verified and not verified_needs_select:
-                    break
-
-            if not verified:
-                continue
-            if verified_needs_select and str(policy.get("target_type", "bottom_tab") or "bottom_tab") == "bottom_tab":
-                log("[RECOVER] verify soft-success reason='target_present_after_select'", level="DEBUG")
-            elif verified_needs_select:
-                continue
-            log("[RECOVER] success after select verify", level="DEBUG")
-
-        log("[RECOVER] success")
+    time.sleep(wait_seconds)
+    verify_ok, verify_reason = _verify_plugin_entry_root_state(
+        client,
+        dev,
+        phase="recover_select_fallback",
+        scenario_id=scenario_id,
+    )
+    log(f"[RECOVER][fallback] verify_ok={str(verify_ok).lower()} reason='{verify_reason}'")
+    if label_select_success and not verify_ok:
+        log("[RECOVER] label fallback verify_ok=false")
+    if verify_ok:
+        log("[RECOVER] success reason='select_fallback_verified'")
         return True
 
-    log("[RECOVER] failed reason='target_not_reached'")
+    log("[RECOVER] failed reason='life_root_not_reached'")
     return False
 
 
