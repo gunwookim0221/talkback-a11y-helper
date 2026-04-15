@@ -67,7 +67,7 @@ COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-a
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr47-life-plugin-xml-entry-strict-phrase-gate-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr49-entry-special-state-routing-v1"
-COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr54-life-recover-post-plugin-back-first-v1"
+COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr55-life-root-residue-gate-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v1"
 SCROLLTOUCH_DEBUG_CAPTURE_ENABLED = False
 SCROLLTOUCH_DEBUG_VERBOSE_LOG_ENABLED = False
@@ -273,6 +273,12 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
     description_hits = 0
     structure_hits = 0
     navigate_up_hits = 0
+    internal_toolbar_hits = 0
+    internal_action_hits = 0
+    plugin_signature_hits = 0
+    action_label_regex = r"(?i)\b(add|more options|profile|member|menu|settings|edit|search|location|qr code)\b"
+    toolbar_resource_regex = r"(?i)(toolbar|action_bar|appbar|actionmenu|topappbar)"
+    internal_resource_regex = r"(?i)(detail|content_view|plugin|action_menu|overflow)"
     life_service_titles = {"food", "energy", "air care", "home care", "pet care"}
     life_description_contains = (
         "energy usage",
@@ -298,6 +304,14 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
             bottom_nav_life_visible = True
         if _safe_regex_search(r"(?i)\b(add|more options|location|qr code)\b", label_blob):
             app_bar_hits += 1
+        if _safe_regex_search(action_label_regex, label_blob):
+            internal_action_hits += 1
+        if _safe_regex_search(toolbar_resource_regex, resource_id):
+            internal_toolbar_hits += 1
+        if _safe_regex_search(internal_resource_regex, resource_id):
+            plugin_signature_hits += 1
+        if _safe_regex_search(_LIFE_ENERGY_FAMILY_CARE_REGEX, label_blob):
+            plugin_signature_hits += 1
         if _safe_regex_search(_LIFE_ENERGY_NAVIGATE_UP_REGEX, label_blob):
             navigate_up_hits += 1
         if _safe_regex_search(r"(?i)(preinstalledservicecard|servicecard|card)", resource_id):
@@ -329,15 +343,30 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         or visible_card_hits >= _LIFE_ROOT_VISIBLE_CARD_MIN_HITS
     )
     top_bar_with_global_nav = bool(app_bar_hits >= _LIFE_ROOT_APP_BAR_MIN_HITS and global_nav_visible)
+    detail_residue_present = bool(
+        (global_nav_visible and navigate_up_hits > 0)
+        or (
+            global_nav_visible
+            and internal_toolbar_hits > 0
+            and internal_action_hits > visible_card_hits
+            and not root_structure_stable
+        )
+        or (
+            visible_card_hits == 0
+            and (internal_toolbar_hits + internal_action_hits + plugin_signature_hits) >= 2
+            and (navigate_up_hits > 0 or internal_action_hits > 0)
+        )
+    )
+    life_root_fast_pass = bool(global_nav_visible and not detail_residue_present)
     ok = bool(
-        global_nav_visible
+        life_root_fast_pass
         or root_structure_stable
-        or top_bar_with_global_nav
+        or (top_bar_with_global_nav and not detail_residue_present)
         or (life_root_signature_present and final_score >= _LIFE_ROOT_SCORE_THRESHOLD)
     )
     if ok:
-        if global_nav_visible:
-            pass_reason = "global_nav_visible"
+        if life_root_fast_pass:
+            pass_reason = "global_nav_visible_without_residue"
         elif root_structure_stable:
             pass_reason = "life_root_structure_stable"
         elif top_bar_with_global_nav:
@@ -347,7 +376,7 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         fail_reason = ""
     else:
         pass_reason = ""
-        fail_reason = "life_root_not_stable"
+        fail_reason = "detail_residue_detected" if detail_residue_present else "life_root_not_stable"
     return {
         "life_selected": life_selected,
         "app_bar_hits": app_bar_hits,
@@ -359,6 +388,11 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         "root_structure_stable": root_structure_stable,
         "top_bar_with_global_nav": top_bar_with_global_nav,
         "navigate_up_hits": navigate_up_hits,
+        "internal_toolbar_hits": internal_toolbar_hits,
+        "internal_action_hits": internal_action_hits,
+        "plugin_signature_hits": plugin_signature_hits,
+        "detail_residue_present": detail_residue_present,
+        "life_root_fast_pass": life_root_fast_pass,
         "final_score": final_score,
         "pass_reason": pass_reason,
         "fail_reason": fail_reason,
@@ -391,6 +425,15 @@ def _verify_plugin_entry_root_state(
             _safe_regex_search(_LIFE_ENERGY_FAMILY_CARE_REGEX, _node_label_blob(node))
             for node, _ in _iter_tree_nodes_with_parent(nodes)
         )
+        detail_residue_present = bool(snapshot.get("detail_residue_present"))
+        fast_pass_allowed = bool(snapshot.get("life_root_fast_pass"))
+        log(f"[STATE][root_gate] global_nav_visible={str(bool(snapshot.get('global_nav_visible'))).lower()}")
+        log(f"[STATE][root_gate] detail_residue_present={str(detail_residue_present).lower()}")
+        log(f"[STATE][root_gate] fast_pass_allowed={str(fast_pass_allowed).lower()}")
+        log(f"[STATE][residue] internal_toolbar_hits={int(snapshot.get('internal_toolbar_hits', 0) or 0)}")
+        log(f"[STATE][residue] internal_action_hits={int(snapshot.get('internal_action_hits', 0) or 0)}")
+        log(f"[STATE][residue] plugin_signature_hits={int(snapshot.get('plugin_signature_hits', 0) or 0)}")
+        log(f"[STATE][residue] visible_card_hits={int(snapshot.get('visible_card_hits', 0) or 0)}")
         log(
             f"[SCENARIO][pre_nav][stabilization] phase='{phase}' attempt={attempt}/{_PLUGIN_ENTRY_RETRY_COUNT} "
             f"life_selected={str(snapshot.get('life_selected')).lower()} app_bar_hits={snapshot.get('app_bar_hits', 0)} "
@@ -400,6 +443,8 @@ def _verify_plugin_entry_root_state(
             f"root_structure_stable={str(snapshot.get('root_structure_stable')).lower()} "
             f"life_root_signature_present={str(snapshot.get('life_root_signature_present')).lower()} "
             f"navigate_up_hits={snapshot.get('navigate_up_hits', 0)} "
+            f"detail_residue_present={str(detail_residue_present).lower()} "
+            f"fast_pass_allowed={str(fast_pass_allowed).lower()} "
             f"family_care_signature_seen={str(family_care_signature_seen).lower()} "
             f"final_score={snapshot.get('final_score', 0)} ok={str(ok).lower()} "
             f"pass_reason='{snapshot.get('pass_reason', '')}' fail_reason='{snapshot.get('fail_reason', '')}'"
@@ -911,8 +956,10 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
     bottom_nav_hits = int(initial_snapshot.get("bottom_nav_hits", 0) or 0)
     root_structure_stable = bool(initial_snapshot.get("root_structure_stable"))
     top_bar_with_global_nav = bool(initial_snapshot.get("top_bar_with_global_nav"))
+    detail_residue_present = bool(initial_snapshot.get("detail_residue_present"))
+    life_root_fast_pass = bool(initial_snapshot.get("life_root_fast_pass"))
     life_root_like = bool(
-        global_nav_visible
+        life_root_fast_pass
         or initial_ok
         or root_structure_stable
         or top_bar_with_global_nav
@@ -975,6 +1022,13 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
     log(f"[STATE][root_check] global_nav_visible={str(global_nav_visible).lower()}")
     log(f"[STATE][root_check] bottom_nav_hits={bottom_nav_hits}")
     log(f"[STATE][root_check] life_root_like={str(life_root_like).lower()}")
+    log(f"[STATE][root_gate] global_nav_visible={str(global_nav_visible).lower()}")
+    log(f"[STATE][root_gate] detail_residue_present={str(detail_residue_present).lower()}")
+    log(f"[STATE][root_gate] fast_pass_allowed={str(life_root_fast_pass).lower()}")
+    log(f"[STATE][residue] internal_toolbar_hits={int(initial_snapshot.get('internal_toolbar_hits', 0) or 0)}")
+    log(f"[STATE][residue] internal_action_hits={int(initial_snapshot.get('internal_action_hits', 0) or 0)}")
+    log(f"[STATE][residue] plugin_signature_hits={int(initial_snapshot.get('plugin_signature_hits', 0) or 0)}")
+    log(f"[STATE][residue] visible_card_hits={visible_card_hits}")
     log(f"[STATE][root_check] plugin_detail_like={str(plugin_detail_like).lower()}")
     log(f"[STATE][root_check] plugin_detail_unfocused_like={str(plugin_detail_unfocused_like).lower()}")
     log(
@@ -982,9 +1036,11 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
         f"initial_verify_reason='{initial_reason}' app_bar_hits={app_bar_hits} visible_card_hits={visible_card_hits} "
         f"life_root_signature_present={str(life_root_signature_present).lower()} "
         f"navigate_up_hits={navigate_up_hits} package_signature_present={str(package_signature_present).lower()} "
-        f"family_care_signature_seen={str(initial_family_care_signature_seen).lower()}"
+        f"family_care_signature_seen={str(initial_family_care_signature_seen).lower()} "
+        f"detail_residue_present={str(detail_residue_present).lower()} "
+        f"fast_pass_allowed={str(life_root_fast_pass).lower()}"
     )
-    root_fast_pass = bool(life_root_like)
+    root_fast_pass = bool(life_root_like and not detail_residue_present)
     last_main_traversal_summary = getattr(client, "last_main_traversal_summary", {})
     if not isinstance(last_main_traversal_summary, dict):
         last_main_traversal_summary = {}
@@ -1005,6 +1061,10 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
         and (not overlay_context_active)
     )
     log(f"[RECOVER][strategy] root_fast_pass={str(root_fast_pass).lower()}")
+    log(
+        f"[RECOVER][strategy] blocked_root_fast_pass_due_to_residue="
+        f"{str(bool(detail_residue_present and life_root_like)).lower()}"
+    )
     log(f"[RECOVER][strategy] post_plugin_back_first={str(post_plugin_back_first).lower()}")
     log(f"[RECOVER][strategy] main_steps_completed={main_steps_completed}")
     log(f"[RECOVER][strategy] stop_reason='{traversal_stop_reason or 'none'}'")
