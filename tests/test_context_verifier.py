@@ -103,3 +103,27 @@ def test_verify_context_selected_bottom_tab_prefers_smart_nav_result_on_resource
 
     assert result["ok"] is True
     assert result["actual_source"] == "smart_nav_result"
+
+
+def test_verify_context_selected_bottom_tab_ignores_plugin_internal_selected_tab():
+    step = _step(
+        dump_tree_nodes=[
+            {
+                "text": "Life",
+                "contentDescription": "selected",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/plugin_inner_tab_life",
+                "selected": True,
+                "boundsInScreen": "0,0,100,100",
+            }
+        ]
+    )
+    scenario_cfg = {
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": r"(?i).*(life|라이프).*",
+        }
+    }
+
+    result = verify_context(step, scenario_cfg)
+
+    assert result["ok"] is False
