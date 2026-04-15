@@ -826,13 +826,13 @@ TAB_CONFIGS = [
         "pre_navigation": [
             {
                 "action": "xml_scroll_search_tap",
-                "target": "(?i)(^home\\s*monitor$|.*home\\s*monitor.*)",
+                "target": "(?i)\\bhome\\s*monitor\\b",
                 "type": "a",
             }
         ],
         "entry_match": {
             "title_patterns": [
-                "(?i)(^home\\s*monitor$|.*home\\s*monitor.*)",
+                "(?i)\\bhome\\s*monitor\\b",
             ],
             "description_patterns": [],
             "resource_patterns": [],
@@ -847,7 +847,7 @@ TAB_CONFIGS = [
         },
         "context_verify": {
             "type": "screen_text",
-            "text_regex": "(?i).*home\\s*monitor.*",
+            "text_regex": "(?i)\\bhome\\s*monitor\\b",
         },
         "enabled": False,
         "max_steps": 20,
