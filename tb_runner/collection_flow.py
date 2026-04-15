@@ -12,6 +12,7 @@ from talkback_lib import A11yAdbClient
 from tb_runner.anchor_logic import stabilize_anchor
 from tb_runner.constants import (
     CHECKPOINT_SAVE_EVERY_STEPS,
+    LOG_LEVEL,
     MAIN_ANNOUNCEMENT_WAIT_SECONDS,
     MAIN_STEP_WAIT_SECONDS,
 )
@@ -68,7 +69,7 @@ COLLECTION_FLOW_XML_ENTRY_VERSION = "pr47-life-plugin-xml-entry-strict-phrase-ga
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr49-entry-special-state-routing-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr55-life-root-residue-gate-v1"
-COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v1"
+COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
 SCROLLTOUCH_DEBUG_CAPTURE_ENABLED = False
 SCROLLTOUCH_DEBUG_VERBOSE_LOG_ENABLED = False
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -104,10 +105,13 @@ STRICT_PLUGIN_ENTRY_PHRASES: dict[str, dict[str, tuple[str, ...]]] = {
 
 
 def _resolve_scrolltouch_debug_flags(tab_cfg: dict[str, Any]) -> tuple[bool, bool]:
-    debug_capture_enabled = bool(tab_cfg.get("scrolltouch_debug_capture_enabled", SCROLLTOUCH_DEBUG_CAPTURE_ENABLED))
-    debug_verbose_log_enabled = bool(
+    explicit_capture_enabled = bool(tab_cfg.get("scrolltouch_debug_capture_enabled", SCROLLTOUCH_DEBUG_CAPTURE_ENABLED))
+    explicit_verbose_log_enabled = bool(
         tab_cfg.get("scrolltouch_debug_verbose_log_enabled", SCROLLTOUCH_DEBUG_VERBOSE_LOG_ENABLED)
     )
+    debug_mode_enabled = LOG_LEVEL == "DEBUG"
+    debug_capture_enabled = explicit_capture_enabled and debug_mode_enabled
+    debug_verbose_log_enabled = explicit_verbose_log_enabled and debug_mode_enabled
     return debug_capture_enabled, debug_verbose_log_enabled
 
 
