@@ -65,7 +65,7 @@ COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-alias-evidence-v1"
-COLLECTION_FLOW_XML_ENTRY_VERSION = "pr63-xml-entry-title-descendant-guard-v1"
+COLLECTION_FLOW_XML_ENTRY_VERSION = "pr64-xml-entry-descendant-title-strict-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr62-entry-post-open-identity-observability-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
@@ -2444,6 +2444,23 @@ def _run_xml_scroll_search_tap(
 
     def _collect_title_like_descendant_texts(node_ref: dict[str, Any], *, limit: int = 6) -> list[str]:
         title_like: list[str] = []
+        sentence_like_verbs = {
+            "monitor",
+            "sync",
+            "locate",
+            "manage",
+            "control",
+            "track",
+            "check",
+            "view",
+            "find",
+            "discover",
+            "see",
+            "get",
+            "set",
+            "use",
+            "learn",
+        }
         parent_bounds = parse_bounds_str(str(node_ref.get("boundsInScreen", "") or "").strip())
         parent_top = parent_bounds[1] if parent_bounds else 0
         parent_height = max(1, (parent_bounds[3] - parent_bounds[1])) if parent_bounds else 1
@@ -2460,8 +2477,11 @@ def _run_xml_scroll_search_tap(
             label = text_value or desc_value
             if label:
                 normalized_label = _normalize_for_phrase(label)
-                token_count = len([token for token in normalized_label.split(" ") if token])
+                normalized_tokens = [token for token in normalized_label.split(" ") if token]
+                token_count = len(normalized_tokens)
                 has_sentence_punctuation = bool(re.search(r"[\,\.\!\?\:\;]", label))
+                has_lower_start_word = bool(re.search(r"\b[a-z][a-z0-9\-]*\b", label))
+                has_sentence_verb = any(token in sentence_like_verbs for token in normalized_tokens)
                 current_bounds = parse_bounds_str(str(current.get("boundsInScreen", "") or "").strip())
                 is_upper_region = True
                 if current_bounds and parent_bounds:
@@ -2469,9 +2489,11 @@ def _run_xml_scroll_search_tap(
                     is_upper_region = center_y <= int(parent_top + (parent_height * 0.55))
                 if (
                     normalized_label
-                    and 1 <= token_count <= 4
+                    and 1 <= token_count <= 3
                     and len(normalized_label) <= 32
                     and not has_sentence_punctuation
+                    and not has_lower_start_word
+                    and not (token_count >= 3 and has_sentence_verb)
                     and is_upper_region
                 ):
                     title_like.append(label)
@@ -2581,10 +2603,17 @@ def _run_xml_scroll_search_tap(
                             break
                 if not target_match:
                     for phrase in strict_phrases:
-                        if (
-                            _phrase_token_count(phrase) >= 2
-                            and any(_contains_phrase(candidate, phrase) for candidate in descendant_title_texts)
-                        ) or (_phrase_token_count(phrase) < 2 and _contains_phrase(descendant_title_blob, phrase)):
+                        phrase_token_count = _phrase_token_count(phrase)
+                        normalized_phrase = _normalize_for_phrase(phrase)
+                        descendant_phrase_match = False
+                        if phrase_token_count >= 2:
+                            descendant_phrase_match = any(
+                                _normalize_for_phrase(candidate) == normalized_phrase
+                                for candidate in descendant_title_texts
+                            )
+                        else:
+                            descendant_phrase_match = _contains_phrase(descendant_title_blob, phrase)
+                        if descendant_phrase_match:
                             descendant_match = True
                             target_match = True
                             match_source = "descendant_title"
@@ -2639,12 +2668,20 @@ def _run_xml_scroll_search_tap(
             promoted_own_text = str(promoted.get("text", "") or "").strip()
             promoted_own_desc = str(promoted.get("contentDescription", "") or "").strip()
             promoted_descendant_blob = _collect_descendant_blob(promoted)
+            promoted_own_label = promoted_own_text or promoted_own_desc
             representative_label = _node_label_blob(promoted)
             representative_label_source = (
                 "own_text"
                 if promoted_own_text
                 else ("own_content_desc" if promoted_own_desc else ("descendant" if promoted_descendant_blob else "empty"))
             )
+            if target_match and match_source == "descendant_title" and promoted_own_label:
+                normalized_phrase = _normalize_for_phrase(matched_phrase)
+                normalized_own_label = _normalize_for_phrase(promoted_own_label)
+                if normalized_phrase and normalized_own_label and normalized_phrase not in normalized_own_label:
+                    target_match = False
+                    match_source = ""
+                    matched_phrase = ""
             promoted_blob = f"{_node_label_blob(promoted)} {str(promoted.get('viewIdResourceName', '') or promoted.get('resourceId', '') or '')} {str(promoted.get('className', '') or '')}"
             if excluded_regex.search(promoted_blob):
                 chrome_rejects += 1
