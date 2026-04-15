@@ -59,9 +59,9 @@
   - `scrollTouch`는 기본적으로 실행 직전에 `scroll_to_top`으로 best-effort 초기화한 뒤 검색을 시작하며, `new_screen` plugin 진입 시나리오에서는 한 step 내부에서 누적 downward 탐색을 수행합니다(초기 1회만 top reset).
   - `xml_scroll_search_tap`은 dump XML 기준으로 텍스트/리소스 매칭 → container promotion → bounds center ADB tap을 우선 시도하고, 전환 미확인 시 기존 `scrollTouch` fallback을 수행합니다.
   - Life plugin 진입 contract 로그: `[SCENARIO][entry_contract]`에서 `success_verified | verify_failed | false_success_guard | no_match | text_only_no_promotion | wrong_open` taxonomy를 노출합니다.
-- 디버그 관측성(기본 비활성화): `scrolltouch_debug_capture_enabled`(default: `false`) 또는 `scrolltouch_debug_verbose_log_enabled`(default: `false`)를 켠 경우에만 상세 debug/inspect 로그와 캡처 번들이 활성화됩니다.
-  - `scrolltouch_debug_verbose_log_enabled=true`면 `scrollTouch` local search 단계에서 `[SCENARIO][pre_nav][scrolltouch][debug]`/`[inspect]` 로그(`rejections`, `pre_candidate_top`, `xml_fallback_attempted`, `xml_fallback_reason`, inspect sample 등)를 출력합니다.
-  - `scrolltouch_debug_capture_enabled=true`면 scrollTouch 디버깅용 screenshot/helper dump/uiautomator XML/focus payload 캡처가 활성화되고, 이때에만 xml live fallback 보강 경로와 `output/capture_bundles/...` 저장이 동작합니다.
+- 디버그 관측성(기본 비활성화): 아래 항목은 **`TB_LOG_LEVEL=DEBUG` + 명시적 플래그 true**를 동시에 만족할 때만 활성화됩니다(기본 `false`).
+  - `scrolltouch_debug_verbose_log_enabled=true` + `TB_LOG_LEVEL=DEBUG`면 `scrollTouch` local search 단계에서 `[SCENARIO][pre_nav][scrolltouch][debug]`/`[inspect]` 로그(`rejections`, `pre_candidate_top`, `xml_fallback_attempted`, `xml_fallback_reason`, inspect sample 등)를 출력합니다.
+  - `scrolltouch_debug_capture_enabled=true` + `TB_LOG_LEVEL=DEBUG`면 scrollTouch 디버깅용 screenshot/helper dump/uiautomator XML/focus payload 캡처가 활성화되고, 이때에만 xml live fallback 보강 경로와 `output/capture_bundles/...` 저장이 동작합니다.
   - semantic probe 디버그에는 `alias_hit_count`, `alias_hit_top`, `resource_token_hit_count`, `resource_token_hit_top`, `descendant_alias_hit_count`, `semantic_evidence_class`, `probe_accept_reason`, `probe_reject_reason`가 추가로 포함됩니다.
   - `entry_type=card`의 promotion 단계에서는 containment 후보가 없을 때 xml parent-chain 기반 ancestor fallback을 수행합니다. 성공 시 `[SCROLLTOUCH][promotion][ancestor_fallback]`, 실패 시 `[SCROLLTOUCH][promotion][ancestor_trace]` 로그로 매칭 텍스트/ancestor depth/선택 container 정보를 노출합니다.
   - `entry_type=card`의 local search xml live fallback 보강(`visible_candidate_count==0` 또는 promotion 조건)은 `scrolltouch_debug_capture_enabled=true`일 때만 수행됩니다.
