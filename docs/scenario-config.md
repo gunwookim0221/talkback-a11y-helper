@@ -58,7 +58,7 @@
 - `pre_navigation`: anchor 전에 수행할 bounded 이동(select/touch/scrollTouch/xml_scroll_search_tap).
   - `scrollTouch`는 기본적으로 실행 직전에 `scroll_to_top`으로 best-effort 초기화한 뒤 검색을 시작하며, `new_screen` plugin 진입 시나리오에서는 한 step 내부에서 누적 downward 탐색을 수행합니다(초기 1회만 top reset).
   - `xml_scroll_search_tap`은 dump XML 기준으로 텍스트/리소스 매칭 → container promotion → bounds center ADB tap을 우선 시도하고, 전환 미확인 시 기존 `scrollTouch` fallback을 수행합니다.
-  - `xml_scroll_search_tap` 디버그 로그로 `[XMLENTRY][candidate_compare]`, `[XMLENTRY][select_debug]`가 추가되어 상위 후보 비교/최종 선택 텍스트 출처(own text vs descendant)를 함께 확인할 수 있습니다.
+  - `xml_scroll_search_tap` 디버그 로그로 `[XMLENTRY][candidate_compare]`, `[XMLENTRY][select_debug]`가 추가되어 상위 후보 비교/최종 선택 텍스트 출처(own text vs descendant_title)를 함께 확인할 수 있습니다(문장형 descendant 본문은 매칭에서 제외).
   - Life plugin 진입 contract 로그: `[SCENARIO][entry_contract]`에서 `success_verified | verify_failed | false_success_guard | no_match | text_only_no_promotion | wrong_open` taxonomy를 노출합니다.
 - 디버그 관측성(기본 비활성화): 아래 항목은 **`TB_LOG_LEVEL=DEBUG` + 명시적 플래그 true**를 동시에 만족할 때만 활성화됩니다(기본 `false`).
   - `scrolltouch_debug_verbose_log_enabled=true` + `TB_LOG_LEVEL=DEBUG`면 `scrollTouch` local search 단계에서 `[SCENARIO][pre_nav][scrolltouch][debug]`/`[inspect]` 로그(`rejections`, `pre_candidate_top`, `xml_fallback_attempted`, `xml_fallback_reason`, inspect sample 등)를 출력합니다.
