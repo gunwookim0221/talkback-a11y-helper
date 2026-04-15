@@ -68,7 +68,7 @@ COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-a
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr47-life-plugin-xml-entry-strict-phrase-gate-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr49-entry-special-state-routing-v1"
-COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr55-life-root-residue-gate-v1"
+COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr56-life-root-residue-clear-recover-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
 SCROLLTOUCH_DEBUG_CAPTURE_ENABLED = False
 SCROLLTOUCH_DEBUG_VERBOSE_LOG_ENABLED = False
@@ -1044,7 +1044,8 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
         f"detail_residue_present={str(detail_residue_present).lower()} "
         f"fast_pass_allowed={str(life_root_fast_pass).lower()}"
     )
-    root_fast_pass = bool(life_root_like and not detail_residue_present)
+    fast_pass_allowed = bool(life_root_fast_pass)
+    root_fast_pass = bool(life_root_like and fast_pass_allowed)
     last_main_traversal_summary = getattr(client, "last_main_traversal_summary", {})
     if not isinstance(last_main_traversal_summary, dict):
         last_main_traversal_summary = {}
@@ -1064,6 +1065,9 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
         and (not special_state_recover_invocation)
         and (not overlay_context_active)
     )
+    skip_back_due_to_global_nav_allowed = bool(global_nav_visible and not detail_residue_present)
+    residue_clear_required = bool(detail_residue_present)
+    log(f"[RECOVER][strategy] fast_pass_allowed={str(fast_pass_allowed).lower()}")
     log(f"[RECOVER][strategy] root_fast_pass={str(root_fast_pass).lower()}")
     log(
         f"[RECOVER][strategy] blocked_root_fast_pass_due_to_residue="
@@ -1072,10 +1076,39 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
     log(f"[RECOVER][strategy] post_plugin_back_first={str(post_plugin_back_first).lower()}")
     log(f"[RECOVER][strategy] main_steps_completed={main_steps_completed}")
     log(f"[RECOVER][strategy] stop_reason='{traversal_stop_reason or 'none'}'")
+    log(
+        f"[RECOVER][decision] skip_back_due_to_global_nav_allowed="
+        f"{str(skip_back_due_to_global_nav_allowed).lower()}"
+    )
     if root_fast_pass:
-        log("[RECOVER][decision] skip_back_due_to_global_nav=true state='life_root_like'" if global_nav_visible else "[RECOVER][decision] skip_back_due_to_global_nav=false state='life_root_like'")
+        log(
+            "[RECOVER][decision] skip_back_due_to_global_nav=true state='life_root_like'"
+            if skip_back_due_to_global_nav_allowed
+            else "[RECOVER][decision] skip_back_due_to_global_nav=false state='life_root_like'"
+        )
+        log("[RECOVER][decision] residue_clear_required=false")
         log("[RECOVER] success reason='already_at_life_root'")
         return True
+    log(f"[RECOVER][decision] residue_clear_required={str(residue_clear_required).lower()}")
+    if residue_clear_required:
+        log("[RECOVER][residue_clear] start")
+        back_sent = _send_back(client, dev)
+        log(f"[RECOVER][residue_clear] back_sent={str(back_sent).lower()}")
+        if not back_sent:
+            log("[RECOVER] failed reason='back_failed'")
+            return False
+        time.sleep(wait_seconds)
+        verify_ok, verify_reason = _verify_plugin_entry_root_state(
+            client,
+            dev,
+            phase="recover_residue_clear_back",
+            scenario_id=scenario_id,
+        )
+        log(f"[RECOVER][residue_clear] verify_ok={str(verify_ok).lower()} reason='{verify_reason}'")
+        if verify_ok:
+            log("[RECOVER] success reason='residue_clear_verified'")
+            return True
+        log("[RECOVER][residue_clear] fallback_to_classifier=true")
     if post_plugin_back_first:
         log("[RECOVER][post_plugin_back] start")
         back_sent = _send_back(client, dev)
@@ -1107,7 +1140,7 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
             log("[RECOVER] success reason='post_plugin_back_verified'")
             return True
         log("[RECOVER][post_plugin_back] fallback_to_classifier=true")
-    skip_back_due_to_global_nav = bool(global_nav_visible)
+    skip_back_due_to_global_nav = bool(skip_back_due_to_global_nav_allowed)
     allow_detail_exit_back = bool((not global_nav_visible) and (not life_root_like) and (plugin_detail_like or plugin_detail_unfocused_like))
     use_detail_exit_due_to_unfocused_internal = bool(
         allow_detail_exit_back and not plugin_detail_like and plugin_detail_unfocused_like
