@@ -101,7 +101,7 @@ STRICT_PLUGIN_ENTRY_PHRASES: dict[str, dict[str, tuple[str, ...]]] = {
     "life_clothing_care_plugin": {"strict": ("clothing care", "shoe care", "의류"), "title_only": ()},
     "life_find_plugin": {"strict": ("smart find",), "title_only": ("find",)},
     "life_video_plugin": {"strict": ("smart video",), "title_only": ("video",)},
-    "life_home_monitor_plugin": {"strict": ("home monitor",), "title_only": ("monitor",)},
+    "life_home_monitor_plugin": {"strict": ("home monitor",), "title_only": ()},
     "life_music_sync_plugin": {"strict": ("music sync",), "title_only": ("sync",)},
     "life_pet_care_plugin": {"strict": ("pet care", "펫 케어"), "title_only": ()},
 }
