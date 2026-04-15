@@ -65,9 +65,9 @@ COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-alias-evidence-v1"
-COLLECTION_FLOW_XML_ENTRY_VERSION = "pr47-life-plugin-xml-entry-strict-phrase-gate-v1"
+COLLECTION_FLOW_XML_ENTRY_VERSION = "pr62-xml-entry-candidate-observability-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
-COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr59-entry-special-state-routing-consistency-v1"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr62-entry-post-open-identity-observability-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
 COLLECTION_FLOW_LIFE_RESET_VERSION = "pr61-life-reset-strict-global-nav-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
@@ -1333,6 +1333,59 @@ def _collect_post_open_visible_text(client: A11yAdbClient, dev: str) -> str:
     return " ".join(visible_fragments).strip()
 
 
+def _collect_post_open_identity_snapshot(
+    *,
+    tab_cfg: dict[str, Any],
+    post_view_id: str,
+    post_label: str,
+    post_speech: str,
+    post_nodes: list[dict[str, Any]] | None,
+    matches_verify: bool,
+) -> dict[str, Any]:
+    if not isinstance(post_nodes, list):
+        post_nodes = []
+    top_visible_labels: list[str] = []
+    body_texts: list[str] = []
+    title_candidates: list[str] = []
+    back_button_present = False
+    for node, _ in _iter_tree_nodes_with_parent(post_nodes):
+        if not _node_is_visible(node):
+            continue
+        node_view_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip().lower()
+        node_label = _node_label_blob(node).strip()
+        if not node_label:
+            continue
+        lowered_label = node_label.lower()
+        if len(top_visible_labels) < 5:
+            top_visible_labels.append(node_label)
+        if len(body_texts) < 5 and len(node_label) >= 5:
+            body_texts.append(node_label)
+        if len(title_candidates) < 3 and (
+            "cardtitle" in node_view_id
+            or "title" in node_view_id
+            or "plugin" in node_view_id
+            or len(node_label) <= 36
+        ):
+            title_candidates.append(node_label)
+        if (
+            "navigate_up" in node_view_id
+            or "back" in node_view_id
+            or _safe_regex_search(r"(?i)\b(back|navigate up)\b", lowered_label)
+        ):
+            back_button_present = True
+    special_tokens = [str(token or "").strip().lower() for token in tab_cfg.get("special_state_tokens", []) if str(token or "").strip()]
+    identity_blob = " ".join([post_view_id, post_label, post_speech, *top_visible_labels, *body_texts]).lower()
+    special_token_hit = bool(special_tokens and any(token in identity_blob for token in special_tokens))
+    return {
+        "top_visible_labels": top_visible_labels[:5],
+        "body_texts": body_texts[:5],
+        "title_candidates": title_candidates[:3],
+        "back_button_present": back_button_present,
+        "verify_hit": bool(matches_verify),
+        "special_token_hit": special_token_hit,
+    }
+
+
 def _build_direct_select_verify_candidates(
     *,
     stabilize_result: dict[str, Any],
@@ -2389,6 +2442,26 @@ def _run_xml_scroll_search_tap(
                 stack.extend(current_children)
         return " ".join(text for text in labels if text).strip()
 
+    def _collect_descendant_texts(node_ref: dict[str, Any], *, limit: int = 3) -> list[str]:
+        texts: list[str] = []
+        children = node_ref.get("children")
+        if not isinstance(children, list):
+            return texts
+        stack: list[Any] = list(children)
+        while stack and len(texts) < limit:
+            current = stack.pop(0)
+            if not isinstance(current, dict):
+                continue
+            text_value = str(current.get("text", "") or "").strip()
+            desc_value = str(current.get("contentDescription", "") or "").strip()
+            label = text_value or desc_value
+            if label:
+                texts.append(label)
+            current_children = current.get("children")
+            if isinstance(current_children, list):
+                stack.extend(current_children)
+        return texts
+
     def _normalize_for_phrase(value: str) -> str:
         lowered = str(value or "").replace("\n", " ").replace("\r", " ").strip().lower()
         cleaned = re.sub(r"[^0-9a-zA-Z가-힣]+", " ", lowered)
@@ -2517,6 +2590,15 @@ def _run_xml_scroll_search_tap(
             height = max(1, promoted_bounds[3] - promoted_bounds[1])
             promoted_area = width * height
             area_ratio = promoted_area / 2073600.0
+            promoted_own_text = str(promoted.get("text", "") or "").strip()
+            promoted_own_desc = str(promoted.get("contentDescription", "") or "").strip()
+            promoted_descendant_blob = _collect_descendant_blob(promoted)
+            representative_label = _node_label_blob(promoted)
+            representative_label_source = (
+                "own_text"
+                if promoted_own_text
+                else ("own_content_desc" if promoted_own_desc else ("descendant" if promoted_descendant_blob else "empty"))
+            )
             promoted_blob = f"{_node_label_blob(promoted)} {str(promoted.get('viewIdResourceName', '') or promoted.get('resourceId', '') or '')} {str(promoted.get('className', '') or '')}"
             if excluded_regex.search(promoted_blob):
                 chrome_rejects += 1
@@ -2533,6 +2615,13 @@ def _run_xml_scroll_search_tap(
                     "node": promoted,
                     "reason": promoted_reason,
                     "sample_text": label_blob,
+                    "representative_label": representative_label,
+                    "representative_label_source": representative_label_source,
+                    "own_text": promoted_own_text,
+                    "own_content_desc": promoted_own_desc,
+                    "normalized_own_text": _normalize_for_phrase(promoted_own_text),
+                    "descendant_text_summary": _collect_descendant_texts(promoted, limit=3),
+                    "descendant_blob": promoted_descendant_blob,
                     "area_ratio": f"{area_ratio:.4f}",
                     "target_match": target_match,
                     "match_source": match_source,
@@ -2564,6 +2653,23 @@ def _run_xml_scroll_search_tap(
         if target_candidates:
             selected = target_candidates[0]
             selected_node = selected.get("node", {})
+            selected_rank = next((idx for idx, item in enumerate(candidate_samples, start=1) if item is selected), -1)
+            for rank, sample in enumerate(candidate_samples[:3], start=1):
+                sample_node = sample.get("node", {})
+                log(
+                    "[XMLENTRY][candidate_compare] "
+                    f"scenario_id='{scenario_id or 'none'}' rank={rank} "
+                    f"rid='{str(sample_node.get('viewIdResourceName', '') or sample_node.get('resourceId', '') or '').strip()[:72]}' "
+                    f"class='{str(sample_node.get('className', '') or '').strip()[:48]}' "
+                    f"bounds='{str(sample_node.get('boundsInScreen', '') or '').strip()}' "
+                    f"own_text='{str(sample.get('own_text', '') or '')[:48]}' "
+                    f"descendant_text_summary='{','.join(str(v or '')[:24] for v in sample.get('descendant_text_summary', []) if str(v or '').strip()) or 'none'}' "
+                    f"matched_phrase='{str(sample.get('matched_phrase', '') or '')[:64]}' "
+                    f"match_source='{str(sample.get('match_source', '') or '')}' "
+                    f"selected_priority='{int(sample.get('score', 0) or 0)}:{str(sample.get('reason', '') or '')}' "
+                    f"negative_plugin_phrase='{str(sample.get('negative_plugin_phrase', '') or '')[:64]}' "
+                    f"selected={str(sample is selected).lower()}"
+                )
             selected_bounds = parse_bounds_str(str(selected_node.get("boundsInScreen", "") or "").strip())
             if not selected_bounds:
                 failure_reason = "bounds_missing"
@@ -2577,6 +2683,37 @@ def _run_xml_scroll_search_tap(
                 f"bounds='{selected_node.get('boundsInScreen', '')}' text='{selected_text[:80]}' "
                 f"target_match=true match_source='{selected.get('match_source', '')}' "
                 f"matched_phrase='{str(selected.get('matched_phrase', '') or '')[:80]}'"
+            )
+            selected_own_text = str(selected.get("own_text", "") or "").strip()
+            selected_desc_texts = [str(value or "").strip() for value in selected.get("descendant_text_summary", []) if str(value or "").strip()]
+            normalized_selected_own_text = str(selected.get("normalized_own_text", "") or "").strip()
+            selected_match_source = str(selected.get("match_source", "") or "").strip()
+            title_desc_disagree = bool(
+                normalized_selected_own_text
+                and selected_desc_texts
+                and all(
+                    normalized_selected_own_text not in _normalize_for_phrase(text)
+                    and _normalize_for_phrase(text) not in normalized_selected_own_text
+                    for text in selected_desc_texts
+                )
+            )
+            log(
+                "[XMLENTRY][select_debug] "
+                f"scenario_id='{scenario_id or 'none'}' "
+                f"class='{str(selected_node.get('className', '') or '').strip()[:64]}' "
+                f"rid='{selected_resource[:96]}' "
+                f"bounds='{str(selected_node.get('boundsInScreen', '') or '').strip()}' "
+                f"own_text='{selected_own_text[:72]}' "
+                f"own_content_desc='{str(selected.get('own_content_desc', '') or '')[:72]}' "
+                f"normalized_own_text='{normalized_selected_own_text[:72]}' "
+                f"descendant_text_summary='{','.join(text[:24] for text in selected_desc_texts[:3]) or 'none'}' "
+                f"matched_phrase='{str(selected.get('matched_phrase', '') or '')[:80]}' "
+                f"match_source='{selected_match_source}' "
+                f"selected_reason='{str(selected.get('reason', '') or '')}' "
+                f"candidate_rank={selected_rank} "
+                f"title_descendant_disagree={str(title_desc_disagree).lower()} "
+                f"representative_visible_label='{str(selected.get('representative_label', '') or '')[:80]}' "
+                f"representative_label_source='{str(selected.get('representative_label_source', '') or '')}'"
             )
             tap_ok = False
             if hasattr(client, "tap_xy_adb"):
@@ -5763,6 +5900,25 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         and (tab_cfg.get("special_state_tokens") or tab_cfg.get("special_state_cta_tokens") or identity_nodes)
     ):
         visible_verify_text = _collect_post_open_visible_text(client, dev)
+    post_open_identity = _collect_post_open_identity_snapshot(
+        tab_cfg=tab_cfg,
+        post_view_id=post_view_id,
+        post_label=post_label,
+        post_speech=post_speech,
+        post_nodes=identity_nodes,
+        matches_verify=matches_verify,
+    )
+    log(
+        "[ENTRY][post_open_identity] "
+        f"scenario_id='{scenario_id or 'none'}' "
+        f"top_visible_labels='{','.join(str(v or '')[:24] for v in post_open_identity.get('top_visible_labels', [])) or 'none'}' "
+        f"top_focus_label='{post_label[:72] or 'none'}' "
+        f"back_button_present={str(bool(post_open_identity.get('back_button_present'))).lower()} "
+        f"body_texts='{','.join(str(v or '')[:24] for v in post_open_identity.get('body_texts', [])) or 'none'}' "
+        f"plugin_title_candidates='{','.join(str(v or '')[:24] for v in post_open_identity.get('title_candidates', [])) or 'none'}' "
+        f"verify_hit={str(bool(post_open_identity.get('verify_hit'))).lower()} "
+        f"special_token_hit={str(bool(post_open_identity.get('special_token_hit'))).lower()}"
+    )
     special_state_detected, special_state_kind, special_state_meta = _classify_special_post_open_state(
         tab_cfg,
         post_view_id=post_view_id,
