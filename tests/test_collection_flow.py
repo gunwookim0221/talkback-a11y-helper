@@ -4983,3 +4983,115 @@ def test_xml_entry_strict_target_gating_accepts_short_descendant_title_phrase(mo
     assert reason == "xml_entry_success"
     assert client.tap_calls
     assert any("matched_phrase='home monitor'" in line for line in logs if "[XMLENTRY][select" in line)
+
+
+def test_xml_entry_strict_target_gating_rejects_descendant_match_when_own_text_conflicts(monkeypatch):
+    class XmlClient:
+        def __init__(self):
+            self.tap_calls = []
+
+        def tap_xy_adb(self, dev, x, y):
+            self.tap_calls.append((dev, x, y))
+            return True
+
+    nodes = [
+        {
+            "text": "Air Care",
+            "contentDescription": "",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/service_card",
+            "className": "android.widget.FrameLayout",
+            "clickable": True,
+            "focusable": False,
+            "effectiveClickable": True,
+            "visibleToUser": True,
+            "boundsInScreen": "0,260,1080,840",
+            "children": [
+                {
+                    "text": "Home Monitor",
+                    "contentDescription": "",
+                    "viewIdResourceName": "",
+                    "className": "android.widget.TextView",
+                    "clickable": False,
+                    "focusable": False,
+                    "effectiveClickable": False,
+                    "visibleToUser": False,
+                    "boundsInScreen": "48,320,540,380",
+                    "children": [],
+                }
+            ],
+        }
+    ]
+    monkeypatch.setattr(collection_flow, "_load_scrolltouch_xml_nodes", lambda **kwargs: (nodes, "ok"))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    client = XmlClient()
+    ok, reason = collection_flow._run_xml_scroll_search_tap(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_id": "life_home_monitor_plugin"},
+        target=r"(?i)\b(home\s*monitor)\b",
+        type_="card",
+        max_scroll_search_steps=0,
+        step_wait_seconds=0.2,
+        transition_fast_path=False,
+    )
+
+    assert ok is False
+    assert reason == "target_not_found_after_scroll"
+    assert client.tap_calls == []
+
+
+def test_xml_entry_strict_target_gating_rejects_partial_multiword_descendant_phrase(monkeypatch):
+    class XmlClient:
+        def __init__(self):
+            self.tap_calls = []
+
+        def tap_xy_adb(self, dev, x, y):
+            self.tap_calls.append((dev, x, y))
+            return True
+
+    nodes = [
+        {
+            "text": "",
+            "contentDescription": "",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/service_card",
+            "className": "android.widget.FrameLayout",
+            "clickable": True,
+            "focusable": False,
+            "effectiveClickable": True,
+            "visibleToUser": True,
+            "boundsInScreen": "0,260,1080,840",
+            "children": [
+                {
+                    "text": "Smart Monitor",
+                    "contentDescription": "",
+                    "viewIdResourceName": "",
+                    "className": "android.widget.TextView",
+                    "clickable": False,
+                    "focusable": False,
+                    "effectiveClickable": False,
+                    "visibleToUser": True,
+                    "boundsInScreen": "48,320,540,380",
+                    "children": [],
+                }
+            ],
+        }
+    ]
+    monkeypatch.setattr(collection_flow, "_load_scrolltouch_xml_nodes", lambda **kwargs: (nodes, "ok"))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    client = XmlClient()
+    ok, reason = collection_flow._run_xml_scroll_search_tap(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_id": "life_home_monitor_plugin"},
+        target=r"(?i)\b(home\s*monitor)\b",
+        type_="card",
+        max_scroll_search_steps=0,
+        step_wait_seconds=0.2,
+        transition_fast_path=False,
+    )
+
+    assert ok is False
+    assert reason == "target_not_found_after_scroll"
+    assert client.tap_calls == []
