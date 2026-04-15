@@ -65,7 +65,7 @@ COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-alias-evidence-v1"
-COLLECTION_FLOW_XML_ENTRY_VERSION = "pr62-xml-entry-candidate-observability-v1"
+COLLECTION_FLOW_XML_ENTRY_VERSION = "pr63-xml-entry-title-descendant-guard-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr62-entry-post-open-identity-observability-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
@@ -2442,6 +2442,44 @@ def _run_xml_scroll_search_tap(
                 stack.extend(current_children)
         return " ".join(text for text in labels if text).strip()
 
+    def _collect_title_like_descendant_texts(node_ref: dict[str, Any], *, limit: int = 6) -> list[str]:
+        title_like: list[str] = []
+        parent_bounds = parse_bounds_str(str(node_ref.get("boundsInScreen", "") or "").strip())
+        parent_top = parent_bounds[1] if parent_bounds else 0
+        parent_height = max(1, (parent_bounds[3] - parent_bounds[1])) if parent_bounds else 1
+        children = node_ref.get("children")
+        if not isinstance(children, list):
+            return title_like
+        stack: list[Any] = list(children)
+        while stack and len(title_like) < limit:
+            current = stack.pop(0)
+            if not isinstance(current, dict):
+                continue
+            text_value = str(current.get("text", "") or "").strip()
+            desc_value = str(current.get("contentDescription", "") or "").strip()
+            label = text_value or desc_value
+            if label:
+                normalized_label = _normalize_for_phrase(label)
+                token_count = len([token for token in normalized_label.split(" ") if token])
+                has_sentence_punctuation = bool(re.search(r"[\,\.\!\?\:\;]", label))
+                current_bounds = parse_bounds_str(str(current.get("boundsInScreen", "") or "").strip())
+                is_upper_region = True
+                if current_bounds and parent_bounds:
+                    center_y = int((current_bounds[1] + current_bounds[3]) / 2)
+                    is_upper_region = center_y <= int(parent_top + (parent_height * 0.55))
+                if (
+                    normalized_label
+                    and 1 <= token_count <= 4
+                    and len(normalized_label) <= 32
+                    and not has_sentence_punctuation
+                    and is_upper_region
+                ):
+                    title_like.append(label)
+            current_children = current.get("children")
+            if isinstance(current_children, list):
+                stack.extend(current_children)
+        return title_like
+
     def _collect_descendant_texts(node_ref: dict[str, Any], *, limit: int = 3) -> list[str]:
         texts: list[str] = []
         children = node_ref.get("children")
@@ -2473,6 +2511,9 @@ def _run_xml_scroll_search_tap(
         if normalized_phrase.strip() == "":
             return False
         return normalized_phrase in normalized_value
+
+    def _phrase_token_count(value: str) -> int:
+        return len([token for token in _normalize_for_phrase(value).split(" ") if token])
 
     def _match_source(text_value: str, *, min_phrase_len: int = 4) -> tuple[bool, str]:
         if strict_phrase_mode:
@@ -2513,6 +2554,8 @@ def _run_xml_scroll_search_tap(
             node_text = str(node.get("text", "") or "").strip()
             node_desc = str(node.get("contentDescription", "") or "").strip()
             descendant_blob = _collect_descendant_blob(node)
+            descendant_title_texts = _collect_title_like_descendant_texts(node)
+            descendant_title_blob = " ".join(descendant_title_texts).strip()
             title_match = False
             desc_match = False
             descendant_match = False
@@ -2538,10 +2581,13 @@ def _run_xml_scroll_search_tap(
                             break
                 if not target_match:
                     for phrase in strict_phrases:
-                        if _contains_phrase(descendant_blob, phrase):
+                        if (
+                            _phrase_token_count(phrase) >= 2
+                            and any(_contains_phrase(candidate, phrase) for candidate in descendant_title_texts)
+                        ) or (_phrase_token_count(phrase) < 2 and _contains_phrase(descendant_title_blob, phrase)):
                             descendant_match = True
                             target_match = True
-                            match_source = "descendant"
+                            match_source = "descendant_title"
                             matched_phrase = phrase
                             break
                 for phrase in negative_phrases:
@@ -2554,7 +2600,7 @@ def _run_xml_scroll_search_tap(
             else:
                 title_match, title_match_text = _match_source(node_text)
                 desc_match, desc_match_text = _match_source(node_desc)
-                descendant_match, descendant_match_text = _match_source(descendant_blob)
+                descendant_match, descendant_match_text = _match_source(descendant_title_blob)
                 resource_match, resource_match_text = _match_source(resource_id, min_phrase_len=3)
                 target_match = bool(title_match or desc_match or descendant_match or resource_match)
                 if title_match:
@@ -2562,7 +2608,7 @@ def _run_xml_scroll_search_tap(
                 elif desc_match:
                     match_source, matched_phrase = "content-desc", desc_match_text
                 elif descendant_match:
-                    match_source, matched_phrase = "descendant", descendant_match_text
+                    match_source, matched_phrase = "descendant_title", descendant_match_text
                 elif resource_match:
                     match_source, matched_phrase = "resource", resource_match_text
             promoted = node
