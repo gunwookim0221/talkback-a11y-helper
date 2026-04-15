@@ -68,8 +68,8 @@ COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-a
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr47-life-plugin-xml-entry-strict-phrase-gate-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr49-entry-special-state-routing-v1"
-COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr57-life-reset-deterministic-reentry-v1"
-COLLECTION_FLOW_LIFE_RESET_VERSION = "pr57-life-reset-deterministic-reentry-v1"
+COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
+COLLECTION_FLOW_LIFE_RESET_VERSION = "pr58-life-reset-ready-gate-relax-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
 SCROLLTOUCH_DEBUG_CAPTURE_ENABLED = False
 SCROLLTOUCH_DEBUG_VERBOSE_LOG_ENABLED = False
@@ -906,10 +906,7 @@ def _is_inside_smartthings(state: dict[str, Any]) -> bool:
 def _is_life_list_ready(snapshot: dict[str, Any]) -> bool:
     global_nav_visible = bool(snapshot.get("global_nav_visible"))
     life_tab_selected = bool(snapshot.get("life_selected") or snapshot.get("bottom_nav_life_visible"))
-    plugin_card_list_visible = bool(
-        int(snapshot.get("visible_card_hits", 0) or 0) > 0 or bool(snapshot.get("life_root_signature_present"))
-    )
-    return bool(global_nav_visible and life_tab_selected and plugin_card_list_visible)
+    return bool(global_nav_visible and life_tab_selected)
 
 
 def _verify_fresh_life_list_state(
@@ -930,15 +927,21 @@ def _verify_fresh_life_list_state(
             last_reason = f"dump_failed:{exc}"
         snapshot = _life_root_state_snapshot(nodes if isinstance(nodes, list) else [])
         life_list_ready = _is_life_list_ready(snapshot)
+        plugin_card_list_visible = bool(
+            int(snapshot.get("visible_card_hits", 0) or 0) > 0 or bool(snapshot.get("life_root_signature_present"))
+        )
         log(
             f"[LIFE_RESET] verify phase='{phase}' attempt={attempt}/{_PLUGIN_ENTRY_RETRY_COUNT} "
             f"global_nav_visible={str(bool(snapshot.get('global_nav_visible'))).lower()} "
             f"life_tab_selected={str(bool(snapshot.get('life_selected') or snapshot.get('bottom_nav_life_visible'))).lower()} "
-            f"plugin_card_list_visible={str(bool(int(snapshot.get('visible_card_hits', 0) or 0) > 0 or snapshot.get('life_root_signature_present'))).lower()} "
+            f"plugin_card_list_visible={str(plugin_card_list_visible).lower()} "
             f"life_list_ready={str(life_list_ready).lower()}"
         )
         if life_list_ready:
-            return True, "life_list_ready"
+            if not plugin_card_list_visible:
+                log("[LIFE_RESET] plugin_card_list_visible=false (soft_only=true)")
+                return True, "life_tab_ready"
+            return True, "life_tab_ready_with_card_evidence"
         last_reason = "life_list_not_ready"
         if attempt < _PLUGIN_ENTRY_RETRY_COUNT:
             time.sleep(0.2)
@@ -1034,8 +1037,8 @@ def _ensure_life_plugin_list_ready(client: A11yAdbClient, dev: str, tab_cfg: dic
         life_list_ready, verify_reason = _verify_fresh_life_list_state(client, dev, phase="life_reset")
         log(f"[LIFE_RESET] life_list_ready={str(life_list_ready).lower()}")
         if life_list_ready:
-            log("[LIFE_RESET] success=true")
-            return True, "life_list_ready"
+            log(f"[LIFE_RESET] success=true reason='{verify_reason}'")
+            return True, verify_reason
         if attempt >= max_attempts:
             log(f"[LIFE_RESET] success=false fail reason='{verify_reason}'")
             return False, verify_reason
