@@ -68,7 +68,7 @@ COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-a
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr47-life-plugin-xml-entry-strict-phrase-gate-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr49-entry-special-state-routing-v1"
-COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr56-life-root-residue-clear-recover-v1"
+COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr56-life-root-residue-clear-recover-v2"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
 SCROLLTOUCH_DEBUG_CAPTURE_ENABLED = False
 SCROLLTOUCH_DEBUG_VERBOSE_LOG_ENABLED = False
@@ -1067,6 +1067,9 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
     )
     skip_back_due_to_global_nav_allowed = bool(global_nav_visible and not detail_residue_present)
     residue_clear_required = bool(detail_residue_present)
+    residue_clear_mode = "none"
+    if residue_clear_required:
+        residue_clear_mode = "select_only" if global_nav_visible else "back"
     log(f"[RECOVER][strategy] fast_pass_allowed={str(fast_pass_allowed).lower()}")
     log(f"[RECOVER][strategy] root_fast_pass={str(root_fast_pass).lower()}")
     log(
@@ -1087,28 +1090,49 @@ def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, A
             else "[RECOVER][decision] skip_back_due_to_global_nav=false state='life_root_like'"
         )
         log("[RECOVER][decision] residue_clear_required=false")
+        log("[RECOVER][decision] residue_clear_mode='none'")
         log("[RECOVER] success reason='already_at_life_root'")
         return True
     log(f"[RECOVER][decision] residue_clear_required={str(residue_clear_required).lower()}")
+    log(f"[RECOVER][decision] residue_clear_mode='{residue_clear_mode}'")
     if residue_clear_required:
-        log("[RECOVER][residue_clear] start")
-        back_sent = _send_back(client, dev)
-        log(f"[RECOVER][residue_clear] back_sent={str(back_sent).lower()}")
-        if not back_sent:
-            log("[RECOVER] failed reason='back_failed'")
-            return False
-        time.sleep(wait_seconds)
-        verify_ok, verify_reason = _verify_plugin_entry_root_state(
-            client,
-            dev,
-            phase="recover_residue_clear_back",
-            scenario_id=scenario_id,
-        )
-        log(f"[RECOVER][residue_clear] verify_ok={str(verify_ok).lower()} reason='{verify_reason}'")
-        if verify_ok:
-            log("[RECOVER] success reason='residue_clear_verified'")
-            return True
-        log("[RECOVER][residue_clear] fallback_to_classifier=true")
+        if residue_clear_mode == "select_only":
+            log("[RECOVER][residue_clear_select] start")
+            resource_select_success, label_select_success, select_success, _ = _select_recovery_target(client, dev, policy)
+            log(f"[RECOVER][residue_clear_select] resource_select_success={str(resource_select_success).lower()}")
+            log(f"[RECOVER][residue_clear_select] label_select_success={str(label_select_success).lower()}")
+            if select_success:
+                time.sleep(wait_seconds)
+            verify_ok, verify_reason = _verify_plugin_entry_root_state(
+                client,
+                dev,
+                phase="recover_residue_clear_select_only",
+                scenario_id=scenario_id,
+            )
+            log(f"[RECOVER][residue_clear_select] verify_ok={str(verify_ok).lower()} reason='{verify_reason}'")
+            if verify_ok:
+                log("[RECOVER] success reason='residue_clear_select_verified'")
+                return True
+            log("[RECOVER][residue_clear_select] fallback_to_classifier=true")
+        elif residue_clear_mode == "back":
+            log("[RECOVER][residue_clear_back] start")
+            back_sent = _send_back(client, dev)
+            log(f"[RECOVER][residue_clear_back] back_sent={str(back_sent).lower()}")
+            if not back_sent:
+                log("[RECOVER] failed reason='back_failed'")
+                return False
+            time.sleep(wait_seconds)
+            verify_ok, verify_reason = _verify_plugin_entry_root_state(
+                client,
+                dev,
+                phase="recover_residue_clear_back",
+                scenario_id=scenario_id,
+            )
+            log(f"[RECOVER][residue_clear_back] verify_ok={str(verify_ok).lower()} reason='{verify_reason}'")
+            if verify_ok:
+                log("[RECOVER] success reason='residue_clear_back_verified'")
+                return True
+            log("[RECOVER][residue_clear_back] fallback_to_classifier=true")
     if post_plugin_back_first:
         log("[RECOVER][post_plugin_back] start")
         back_sent = _send_back(client, dev)
