@@ -67,7 +67,7 @@ COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-alias-evidence-v1"
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr47-life-plugin-xml-entry-strict-phrase-gate-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
-COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr49-entry-special-state-routing-v1"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr59-entry-special-state-routing-consistency-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
 COLLECTION_FLOW_LIFE_RESET_VERSION = "pr58-life-reset-ready-gate-relax-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
@@ -5726,6 +5726,7 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     )
     special_state_low_content_diversity = bool(special_state_meta.get("low_content_diversity", False))
     special_state_intro_focus_like = bool(special_state_meta.get("intro_focus_like", False))
+    special_state_top_chrome_intro_cta = bool(special_state_meta.get("top_chrome_intro_cta", False))
     strong_generic_special_state_evidence = bool(
         special_state_kind_is_setup_needed
         and special_state_long_intro_like
@@ -5733,18 +5734,29 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         and special_state_low_content_diversity
         and special_state_intro_focus_like
     )
+    consistent_intro_special_state_evidence = bool(
+        special_state_kind_is_setup_needed
+        and special_state_long_intro_like
+        and (special_state_cta_like or special_state_intro_focus_like or special_state_top_chrome_intro_cta)
+        and (special_state_low_content_diversity or special_state_intro_focus_like or special_state_top_chrome_intro_cta)
+    )
     route_to_special_state = bool(
         special_state_detected
         and (
             not entry_verify_candidate_success
             or strong_generic_special_state_evidence
+            or consistent_intro_special_state_evidence
         )
     )
     if route_to_special_state:
         special_state_route_reason = (
             "special_state_detected_verify_not_success"
             if not entry_verify_candidate_success
-            else "special_state_detected_strong_generic_evidence"
+            else (
+                "special_state_detected_strong_generic_evidence"
+                if strong_generic_special_state_evidence
+                else "special_state_detected_consistent_intro_evidence"
+            )
         )
         log(
             "[ENTRY][special_state_check] "
