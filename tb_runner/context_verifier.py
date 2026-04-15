@@ -114,6 +114,7 @@ def verify_context(
         fallback_values: list[str] = []
         selected_candidate_debug_rows: list[dict[str, str]] = []
         tab_like_candidate_debug_rows: list[dict[str, str]] = []
+        tab_like_candidate_eval_rows: list[dict[str, Any]] = []
         tab_like_fallback_values: list[str] = []
         actual_source = "none"
 
@@ -140,11 +141,22 @@ def verify_context(
                 or re.search(r"(home|devices|life|routines|menu|selected|선택됨)", f"{text} {description} {announcement}", flags=re.IGNORECASE)
             )
             if tab_like:
+                eval_text = _expand_bottom_tab_aliases(combined or marker)
+                text_matched = True if not text_regex else _safe_regex_search(text_regex, eval_text)
+                announcement_matched = True if not announcement_regex else _safe_regex_search(announcement_regex, eval_text)
                 tab_like_candidate_debug_rows.append(
                     {
                         "text": text,
                         "announcement": announcement,
                         "resource_id": view_id,
+                    }
+                )
+                tab_like_candidate_eval_rows.append(
+                    {
+                        "text": text,
+                        "resource_id": view_id,
+                        "selected": selected_state,
+                        "matched": bool(text_matched and announcement_matched),
                     }
                 )
                 if combined:
@@ -249,6 +261,34 @@ def verify_context(
             f"selected_values={selected_values} fallback_values={fallback_values}",
             level="DEBUG",
         )
+        if not ok:
+            verify_reason = "regex_mismatch"
+            if not tab_like_candidate_eval_rows:
+                verify_reason = "no_bottom_nav_candidates"
+            elif not selected_values:
+                verify_reason = "selected_candidate_missing"
+            elif not text_ok:
+                verify_reason = "text_regex_mismatch"
+            elif not announcement_ok:
+                verify_reason = "announcement_regex_mismatch"
+            expected_id_hint = smart_requested_view_id or smart_resolved_view_id or smart_actual_view_id
+            candidate_summary = "; ".join(
+                [
+                    (
+                        f"text='{str(candidate.get('text', '') or '').strip()}' "
+                        f"res_id='{str(candidate.get('resource_id', '') or '').strip()}' "
+                        f"selected={str(bool(candidate.get('selected', False))).lower()} "
+                        f"matched={str(bool(candidate.get('matched', False))).lower()}"
+                    )
+                    for candidate in tab_like_candidate_eval_rows[:5]
+                ]
+            )
+            log(
+                "[TAB][verify_debug] "
+                f"expected_view_id='{expected_id_hint}' text_regex='{text_regex}' announcement_regex='{announcement_regex}' "
+                f"actual='{actual_selected_text}' reason='{verify_reason}' "
+                f"candidates='{candidate_summary or 'none'}'"
+            )
 
         return {
             "ok": ok,
