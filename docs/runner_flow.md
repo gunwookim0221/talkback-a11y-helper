@@ -17,7 +17,7 @@
 - `run_perf.start_scenario(...)`로 시나리오 성능 컨텍스트를 시작한다.
 - `collect_tab_rows(...)`를 시나리오별로 1회 호출한다.
 - 첫 시나리오 이후에는 `recover_to_start_state(...)`를 시도해 다음 시나리오 시작 상태를 맞춘다.
-  - Life plugin 시나리오는 추정 기반 residue 복구 대신 `LIFE_RESET` 경로(앱 내부 확인 → bottom nav 확보 → Life 탭 재선택 → 탭 상태 검증)로 다음 시나리오 시작 전 fresh list를 재구축한다. 이때 plugin card 노출 여부는 hard gate가 아니라 진단 신호로만 사용한다.
+  - Life plugin 시나리오는 추정 기반 residue 복구 대신 `LIFE_RESET` 경로(앱 내부 확인 → **SmartThings main bottom nav 시그니처 확보** → Life 탭 재선택 → 탭 상태 검증)로 다음 시나리오 시작 전 fresh list를 재구축한다. 이때 plugin card 노출 여부는 hard gate가 아니라 진단 신호로만 사용한다.
   - BACK 이후 상태가 SmartThings 내부(`package_signature_present` 또는 `app_bar_hits>=1`)가 아니면 즉시 중단한다.
 
 ### Side effect

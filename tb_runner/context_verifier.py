@@ -125,7 +125,6 @@ def verify_context(
             description = str(node.get("contentDescription", "") or "").strip()
             announcement = str(node.get("talkbackLabel", "") or "").strip()
             view_id = str(node.get("viewIdResourceName", "") or "").strip()
-            class_name = str(node.get("className", "") or "").strip()
             bounds = str(node.get("boundsInScreen", "") or "").strip()
             selected_raw = node.get("selected")
             selected_state = bool(selected_raw) if not isinstance(selected_raw, str) else selected_raw.strip().lower() == "true"
@@ -134,13 +133,16 @@ def verify_context(
                 combined = announcement
             marker = f"text='{text}' desc='{description}' selected={selected_state} viewId='{view_id}' bounds='{bounds}'"
             selected_candidates.append(marker)
-            if combined:
-                fallback_values.append(combined)
-            tab_like = bool(
-                re.search(r"(menu_|bottom|tab|navigation)", f"{view_id} {class_name}", flags=re.IGNORECASE)
-                or re.search(r"(home|devices|life|routines|menu|selected|선택됨)", f"{text} {description} {announcement}", flags=re.IGNORECASE)
+            is_main_bottom_nav_candidate = bool(
+                re.search(
+                    r"com\.samsung\.android\.oneconnect:id/(menu_(favorites|devices|services|automations|more)|bottom_(favorites|devices|services|automations|more))",
+                    view_id,
+                    flags=re.IGNORECASE,
+                )
             )
-            if tab_like:
+            if is_main_bottom_nav_candidate and combined:
+                fallback_values.append(combined)
+            if is_main_bottom_nav_candidate:
                 eval_text = _expand_bottom_tab_aliases(combined or marker)
                 text_matched = True if not text_regex else _safe_regex_search(text_regex, eval_text)
                 announcement_matched = True if not announcement_regex else _safe_regex_search(announcement_regex, eval_text)
@@ -161,7 +163,9 @@ def verify_context(
                 )
                 if combined:
                     tab_like_fallback_values.append(combined)
-            if selected_state or re.search(r"(selected|선택됨)", combined or "", flags=re.IGNORECASE):
+            if is_main_bottom_nav_candidate and (
+                selected_state or re.search(r"(selected|선택됨)", combined or "", flags=re.IGNORECASE)
+            ):
                 selected_values.append(combined or marker)
                 selected_candidate_debug_rows.append(
                     {

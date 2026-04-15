@@ -4174,6 +4174,46 @@ def test_life_root_state_snapshot_fails_when_root_signature_missing():
     assert snapshot["fail_reason"] == "life_root_not_stable"
 
 
+def test_has_global_nav_signals_requires_multiple_main_menu_resource_ids():
+    plugin_like_nodes = [
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/plugin_bottom_tab_one", "visibleToUser": True},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/plugin_bottom_tab_two", "visibleToUser": True},
+        {"text": "Routines", "visibleToUser": True},
+    ]
+
+    visible, hits = collection_flow._has_global_nav_signals(plugin_like_nodes)
+
+    assert visible is False
+    assert hits == 0
+
+    mixed_nodes = [
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/menu_services", "visibleToUser": True},
+    ]
+    visible_single, hits_single = collection_flow._has_global_nav_signals(mixed_nodes)
+    assert visible_single is False
+    assert hits_single == 1
+
+    strong_nodes = [
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/menu_services", "visibleToUser": True},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/menu_devices", "visibleToUser": True},
+    ]
+    visible_strong, hits_strong = collection_flow._has_global_nav_signals(strong_nodes)
+    assert visible_strong is True
+    assert hits_strong == 2
+
+
+def test_life_root_state_snapshot_does_not_mark_life_selected_from_label_only():
+    nodes = [
+        {"text": "Life", "contentDescription": "selected", "selected": True, "visibleToUser": True},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/menu_devices", "visibleToUser": True},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/menu_more", "visibleToUser": True},
+    ]
+
+    snapshot = collection_flow._life_root_state_snapshot(nodes)
+
+    assert snapshot["life_selected"] is False
+
+
 def test_verify_plugin_entry_root_state_allows_life_energy_transient_recheck(monkeypatch):
     client = DummyClient([])
     client.dump_tree_sequence = [

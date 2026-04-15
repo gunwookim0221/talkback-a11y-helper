@@ -69,7 +69,7 @@ COLLECTION_FLOW_XML_ENTRY_VERSION = "pr47-life-plugin-xml-entry-strict-phrase-ga
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr59-entry-special-state-routing-consistency-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
-COLLECTION_FLOW_LIFE_RESET_VERSION = "pr60-life-reset-tab-reselect-debug-v1"
+COLLECTION_FLOW_LIFE_RESET_VERSION = "pr61-life-reset-strict-global-nav-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
 SCROLLTOUCH_DEBUG_CAPTURE_ENABLED = False
 SCROLLTOUCH_DEBUG_VERBOSE_LOG_ENABLED = False
@@ -248,22 +248,19 @@ def _has_global_nav_signals(state: list[dict[str, Any]]) -> tuple[bool, int]:
     if not isinstance(state, list):
         return False, 0
     nav_id_tokens = ("menu_favorites", "menu_devices", "menu_services", "menu_automations", "menu_more")
-    nav_text_tokens = ("home", "devices", "life", "routines", "menu")
-    nav_hits = 0
+    nav_hits_by_token: set[str] = set()
     for node, _ in _iter_tree_nodes_with_parent(state):
         if not _node_is_visible(node):
             continue
         resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip().lower()
-        label_blob = _node_label_blob(node).lower()
-        if any(token in resource_id for token in nav_id_tokens):
-            nav_hits += 1
+        if "com.samsung.android.oneconnect:id/" not in resource_id:
             continue
-        if any(re.search(rf"(?<!\w){re.escape(token)}(?!\w)", label_blob) for token in nav_text_tokens):
-            nav_hits += 1
-            continue
-        if "bottomnavigation" in resource_id or "bottom_nav" in resource_id:
-            nav_hits += 1
-    return nav_hits > 0, nav_hits
+        for token in nav_id_tokens:
+            if token in resource_id:
+                nav_hits_by_token.add(token)
+                break
+    nav_hits = len(nav_hits_by_token)
+    return nav_hits >= 2, nav_hits
 
 
 def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
@@ -302,10 +299,7 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
         normalized_resource_id = resource_id.lower()
         selected = bool(node.get("selected"))
-        if (
-            _safe_regex_search(r"(?i)menu_services", resource_id)
-            or _safe_regex_search(r"(?i)\blife\b", label_blob)
-        ) and selected:
+        if _safe_regex_search(r"(?i)menu_services", resource_id) and selected:
             life_selected = True
         if _safe_regex_search(r"(?i)menu_services", resource_id):
             bottom_nav_life_visible = True
