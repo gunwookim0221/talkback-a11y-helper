@@ -69,7 +69,7 @@ COLLECTION_FLOW_XML_ENTRY_VERSION = "pr47-life-plugin-xml-entry-strict-phrase-ga
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr59-entry-special-state-routing-consistency-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
-COLLECTION_FLOW_LIFE_RESET_VERSION = "pr58-life-reset-ready-gate-relax-v1"
+COLLECTION_FLOW_LIFE_RESET_VERSION = "pr60-life-reset-tab-reselect-debug-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
 SCROLLTOUCH_DEBUG_CAPTURE_ENABLED = False
 SCROLLTOUCH_DEBUG_VERBOSE_LOG_ENABLED = False
@@ -951,6 +951,9 @@ def _verify_fresh_life_list_state(
 def _ensure_life_plugin_list_ready(client: A11yAdbClient, dev: str, tab_cfg: dict[str, Any]) -> tuple[bool, str]:
     wait_seconds = _get_wait_seconds(tab_cfg, "back_recovery_wait_seconds", MAIN_STEP_WAIT_SECONDS)
     max_attempts = 2
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip() or "unknown"
+    invocation_phase = str(tab_cfg.get("_recover_invocation_reason", "") or "").strip() or "default"
+    pre_reset_state_logged = False
     log("[LIFE_RESET] start")
 
     def _read_snapshot() -> tuple[list[dict[str, Any]], dict[str, Any], bool]:
@@ -972,7 +975,39 @@ def _ensure_life_plugin_list_ready(client: A11yAdbClient, dev: str, tab_cfg: dic
         return nodes, snapshot, app_inside
 
     for attempt in range(1, max_attempts + 1):
-        _, snapshot, app_inside = _read_snapshot()
+        current_nodes, snapshot, app_inside = _read_snapshot()
+        if not pre_reset_state_logged and scenario_id == "life_plant_care_plugin":
+            focused_node = next(
+                (
+                    node
+                    for node, _ in _iter_tree_nodes_with_parent(current_nodes)
+                    if bool(node.get("accessibilityFocused")) or bool(node.get("focused"))
+                ),
+                {},
+            )
+            focus_view_id = str(
+                focused_node.get("viewIdResourceName", "")
+                or focused_node.get("resourceId", "")
+                or ""
+            ).strip()
+            focus_label = str(
+                focused_node.get("text", "")
+                or focused_node.get("contentDescription", "")
+                or focused_node.get("talkbackLabel", "")
+                or ""
+            ).strip()
+            log(
+                "[RECOVER][pre_life_reset_state] "
+                f"scenario='{scenario_id}' "
+                f"focus_view_id='{focus_view_id}' "
+                f"focus_label='{focus_label}' "
+                f"is_global_nav={str(bool(snapshot.get('global_nav_visible'))).lower()} "
+                f"back_button_visible={str(bool(snapshot.get('navigate_up_visible'))).lower()} "
+                f"bottom_nav_candidates={int(snapshot.get('bottom_nav_hits', 0) or 0)} "
+                f"life_tab_candidate_present={str(bool(snapshot.get('bottom_nav_life_visible'))).lower()} "
+                f"life_tab_selected_candidate_present={str(bool(snapshot.get('life_selected'))).lower()}"
+            )
+            pre_reset_state_logged = True
         log(f"[LIFE_RESET] app_inside={str(app_inside).lower()}")
         for _ in range(2):
             if app_inside:
@@ -1017,15 +1052,48 @@ def _ensure_life_plugin_list_ready(client: A11yAdbClient, dev: str, tab_cfg: dic
         time.sleep(0.15)
 
         life_tab_reselected = False
+        life_tab_select_mode = "resource_id"
+        life_tab_target = _LIFE_TAB_RESOURCE_ID
+        life_tab_select_raw: Any = None
+        life_tab_verify_ok = bool(snapshot.get("life_selected") or snapshot.get("bottom_nav_life_visible"))
+        life_tab_verify_actual = str(snapshot.get("life_selected_text", "") or "").strip()
+        log(
+            "[LIFE_RESET][tab_reselect_attempt] "
+            f"scenario='{scenario_id}' phase='{invocation_phase}' attempt={attempt}/{max_attempts} "
+            f"package_inside={str(app_inside).lower()} "
+            f"global_nav_visible={str(bool(snapshot.get('global_nav_visible'))).lower()} "
+            f"select_mode='{life_tab_select_mode}' target='{life_tab_target}'"
+        )
         try:
-            life_tab_reselected = bool(client.select(dev=dev, name=_LIFE_TAB_RESOURCE_ID, type_="r", wait_=3))
+            life_tab_select_raw = client.select(dev=dev, name=_LIFE_TAB_RESOURCE_ID, type_="r", wait_=3)
+            life_tab_reselected = bool(life_tab_select_raw)
         except Exception:
+            life_tab_select_raw = None
             life_tab_reselected = False
         if not life_tab_reselected:
+            life_tab_select_mode = "announcement_regex_fallback"
+            life_tab_target = "(?i).*life.*"
             try:
-                life_tab_reselected = bool(client.select(dev=dev, name="(?i).*life.*", type_="a", wait_=3))
+                life_tab_select_raw = client.select(dev=dev, name="(?i).*life.*", type_="a", wait_=3)
+                life_tab_reselected = bool(life_tab_select_raw)
             except Exception:
+                life_tab_select_raw = None
                 life_tab_reselected = False
+        life_tab_reselected_basis = (
+            "select_success_only"
+            if life_tab_reselected
+            else ("select_failed_verify_ok" if life_tab_verify_ok else "select_failed_verify_failed")
+        )
+        log(
+            "[LIFE_RESET][tab_reselect_result] "
+            f"scenario='{scenario_id}' phase='{invocation_phase}' attempt={attempt}/{max_attempts} "
+            f"select_mode='{life_tab_select_mode}' target='{life_tab_target}' "
+            f"select_raw='{life_tab_select_raw}' select_success={str(life_tab_reselected).lower()} "
+            f"verify_selected_bottom_tab_ok={str(life_tab_verify_ok).lower()} "
+            f"verify_actual='{life_tab_verify_actual}' "
+            "verify_source='pre_select_snapshot' "
+            f"life_tab_reselected={str(life_tab_reselected).lower()} basis='{life_tab_reselected_basis}'"
+        )
         log(f"[LIFE_RESET] life_tab_reselected={str(life_tab_reselected).lower()}")
         if not life_tab_reselected:
             if attempt < max_attempts:
