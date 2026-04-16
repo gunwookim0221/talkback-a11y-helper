@@ -133,6 +133,37 @@ def test_make_result_df_uses_get_focus_req_id_when_req_id_missing():
     assert result.iloc[0]["req_id"] == "focus_req_123"
 
 
+def test_make_result_df_treats_successful_move_result_dict_as_pass_moved():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "s_nav",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "Devices",
+                "merged_announcement": "QR code Devices",
+                "move_result": "{'success': true, 'status': 'moved', 'detail': 'moved'}",
+                "last_smart_nav_result": "moved",
+                "smart_nav_success": True,
+                "focus_view_id": "com.samsung.android.oneconnect:id/menu_devices",
+                "focus_bounds": "[0,0][10,10]",
+                "fallback_used": False,
+                "step_dump_used": False,
+                "req_id": "r_nav_1",
+                "post_move_verdict_source": "smart_nav_result_resource_match",
+                "step_elapsed_sec": 0.2,
+            }
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    assert result.iloc[0]["traversal_result"] == "PASS_MOVED"
+    assert result.iloc[0]["failure_reason"] == ""
+    assert result.iloc[0]["final_result"] == "PASS"
+
+
 def test_make_result_df_skips_anchor_baseline_rows(monkeypatch):
     logs: list[str] = []
     monkeypatch.setattr("tb_runner.excel_report.log", lambda msg, level="NORMAL": logs.append(msg))

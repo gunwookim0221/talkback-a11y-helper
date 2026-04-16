@@ -5,6 +5,7 @@ import re
 
 import pandas as pd
 
+from tb_runner.diagnostics import normalize_move_result
 from tb_runner.image_utils import create_excel_thumbnail, insert_images_to_excel
 from tb_runner.logging_utils import get_recent_logs, log
 from tb_runner.utils import to_json_text
@@ -687,6 +688,8 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     _pick_col("fallback_used", ["fallback_used"], default=False)
     _pick_col("step_dump_used", ["step_dump_used"], default=False)
     _pick_col("req_id", ["req_id", "get_focus_req_id"])
+    _pick_col("last_smart_nav_result", ["last_smart_nav_result"])
+    _pick_col("smart_nav_success", ["smart_nav_success"], default=False)
     _pick_col("smart_nav_requested_view_id", ["smart_nav_requested_view_id"])
     _pick_col("smart_nav_resolved_view_id", ["smart_nav_resolved_view_id"])
     _pick_col("smart_nav_actual_view_id", ["smart_nav_actual_view_id"])
@@ -697,7 +700,7 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     _pick_col("timing_total", ["timing_total", "step_elapsed_sec"])
     _pick_col("crop_image_path", ["crop_image_path", "crop_path", "result_crop"])
 
-    result["move_result"] = result["move_result"].fillna("").astype(str).str.lower().str.strip()
+    result["move_result"] = result.apply(normalize_move_result, axis=1)
     result["fallback_used"] = result["fallback_used"].fillna(False).astype(bool)
     result["step_dump_used"] = result["step_dump_used"].fillna(False).astype(bool)
 

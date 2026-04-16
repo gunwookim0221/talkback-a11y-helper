@@ -152,6 +152,33 @@ def test_should_stop_when_repeat_and_no_progress():
     assert details["no_progress"] is True
 
 
+def test_should_stop_does_not_treat_successful_move_dict_as_move_failed():
+    row = {
+        "move_result": {"success": True, "status": "moved", "detail": "moved"},
+        "last_smart_nav_result": "moved",
+        "smart_nav_success": True,
+        "normalized_visible_label": "devices",
+        "normalized_announcement": "devices",
+        "focus_view_id": "com.samsung.android.oneconnect:id/menu_devices",
+        "focus_bounds": "0,0,1,1",
+    }
+
+    stop, fail_count, _, reason, _, details = should_stop(
+        row=row,
+        prev_fingerprint=("", "", ""),
+        fail_count=0,
+        same_count=0,
+        previous_row=None,
+        scenario_type="global_nav",
+        stop_policy={"stop_on_repeat_no_progress": True},
+    )
+
+    assert stop is False
+    assert fail_count == 0
+    assert reason == ""
+    assert details["reason"] == ""
+
+
 def test_should_stop_empty_only_is_not_immediate_stop():
     stop, _, _, reason, _, details = should_stop(
         row={"move_result": "moved", "visible_label": "", "merged_announcement": ""},

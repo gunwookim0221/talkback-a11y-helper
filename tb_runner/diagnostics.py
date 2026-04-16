@@ -4,6 +4,55 @@ from typing import Any
 from tb_runner.utils import normalize_semantic_text, parse_bounds_str
 
 
+_MOVE_SUCCESS_RESULTS = {"moved", "scrolled", "edge_realign_then_moved"}
+_MOVE_FAILURE_RESULTS = {"failed"}
+_MOVE_TERMINAL_RESULTS = {"terminal", "end", "no_next", "no_focus", "cannot_move"}
+
+
+def _extract_move_result_from_text(raw: str) -> tuple[str, bool | None]:
+    text = str(raw or "").strip().lower()
+    if not text:
+        return "", None
+    status_match = re.search(r"[\"']status[\"']\s*:\s*[\"']([^\"']+)[\"']", text)
+    success_match = re.search(r"[\"']success[\"']\s*:\s*(true|false)", text)
+    status = str(status_match.group(1) if status_match else "").strip().lower()
+    success: bool | None = None
+    if success_match:
+        success = success_match.group(1) == "true"
+    return status, success
+
+
+def normalize_move_result(row: dict[str, Any]) -> str:
+    raw_move_result = row.get("move_result", "")
+    status = ""
+    success: bool | None = None
+    if isinstance(raw_move_result, dict):
+        status = str(raw_move_result.get("status", "") or "").strip().lower()
+        if "success" in raw_move_result:
+            success = bool(raw_move_result.get("success", False))
+    else:
+        status, success = _extract_move_result_from_text(raw_move_result)
+        if not status:
+            status = str(raw_move_result or "").strip().lower()
+
+    if success is True and status in _MOVE_SUCCESS_RESULTS:
+        return status
+    if success is False and status in (_MOVE_FAILURE_RESULTS | _MOVE_TERMINAL_RESULTS):
+        return status
+    if status in (_MOVE_SUCCESS_RESULTS | _MOVE_FAILURE_RESULTS | _MOVE_TERMINAL_RESULTS):
+        return status
+
+    smart_nav_status = str(row.get("last_smart_nav_result", "") or "").strip().lower()
+    smart_nav_success = bool(row.get("smart_nav_success", False))
+    if smart_nav_success and smart_nav_status in _MOVE_SUCCESS_RESULTS:
+        return smart_nav_status
+    if smart_nav_status in (_MOVE_FAILURE_RESULTS | _MOVE_TERMINAL_RESULTS):
+        return smart_nav_status
+    if smart_nav_success and smart_nav_status:
+        return smart_nav_status
+    return status
+
+
 def _bounds_changed_significantly(prev_bounds: str, curr_bounds: str) -> bool:
     prev = parse_bounds_str(prev_bounds)
     curr = parse_bounds_str(curr_bounds)
@@ -203,8 +252,8 @@ def is_global_nav_row(
 
 
 class StopEvaluator:
-    _MOVE_FAILURE_RESULTS = {"failed"}
-    _MOVE_TERMINAL_RESULTS = {"terminal", "end", "no_next", "no_focus", "cannot_move"}
+    _MOVE_FAILURE_RESULTS = _MOVE_FAILURE_RESULTS
+    _MOVE_TERMINAL_RESULTS = _MOVE_TERMINAL_RESULTS
     _REPEAT_STOP_REASONS = {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall"}
     _DEFAULT_MIN_STEPS_BEFORE_REPEAT_STOP = 3
     _STOP_EXPLAIN_VERSION = "pr7_explain_v1"
@@ -541,7 +590,7 @@ class StopEvaluator:
         stop_policy: dict[str, Any] | None = None,
         scenario_cfg: dict[str, Any] | None = None,
     ) -> tuple[bool, int, int, str, tuple[str, str, str], dict[str, Any]]:
-        move_result = str(row.get("move_result", "") or "").strip().lower()
+        move_result = normalize_move_result(row)
         smart_nav_result = str(row.get("last_smart_nav_result", "") or "").strip().lower()
         terminal_signal = bool(row.get("last_smart_nav_terminal", False))
 
