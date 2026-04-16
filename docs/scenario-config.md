@@ -54,6 +54,7 @@
 - `special_state_tokens` / `special_state_cta_tokens` / `special_state_handling` / `special_state_intro_like_min_length` (선택): `entry_type=card` 시나리오에서 post-open 성공 직후 onboarding/empty/CTA 상태를 보수적으로 감지하기 위한 추가 토큰/동작 설정.
   - 감지는 **verify/title 계열 신호 + special_state token + CTA token**을 기본으로 하며, long intro-like 텍스트(`special_state_intro_like_min_length`, 기본 80자) 또는 복수 special token hit가 함께 있을 때만 동작합니다. CTA 단독/intro 단독 매치는 허용하지 않습니다.
   - `special_state_handling="back_after_read"`면 최소 1회 읽기 대기 후 BACK을 수행하고, main loop 진입 없이 `special_state_handled` 종료로 기록합니다.
+  - 적용 범위는 plugin/new_screen 진입 시나리오 기준이며, `screen_context_mode=bottom_tab`/`scenario_type=global_nav`/`group=main_tabs`에서는 special-state route를 수행하지 않습니다.
 - `tab`: tab 선택 후보 규칙(resource/text/announcement/tie_breaker)
 - `pre_navigation`: anchor 전에 수행할 bounded 이동(select/touch/scrollTouch/xml_scroll_search_tap).
   - `scrollTouch`는 기본적으로 실행 직전에 `scroll_to_top`으로 best-effort 초기화한 뒤 검색을 시작하며, `new_screen` plugin 진입 시나리오에서는 한 step 내부에서 누적 downward 탐색을 수행합니다(초기 1회만 top reset).

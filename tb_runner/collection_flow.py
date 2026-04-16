@@ -67,7 +67,7 @@ COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-alias-evidence-v1"
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr64-xml-entry-descendant-title-strict-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
-COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr62-entry-post-open-identity-observability-v1"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr65-main-tab-special-state-scope-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
 COLLECTION_FLOW_LIFE_RESET_VERSION = "pr61-life-reset-strict-global-nav-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
@@ -1634,6 +1634,18 @@ def _classify_special_post_open_state(
         "intro_focus_like": intro_focus_like,
         "handling": handling,
     }
+
+
+def _is_special_state_route_allowed(tab_cfg: dict[str, Any], *, screen_context_mode: str) -> bool:
+    scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower()
+    scenario_group = str(tab_cfg.get("group", "") or "").strip().lower()
+    if screen_context_mode == "bottom_tab":
+        return False
+    if scenario_type == "global_nav":
+        return False
+    if scenario_group == "main_tabs":
+        return False
+    return True
 
 
 def _get_card_entry_spec(tab_cfg: dict[str, Any], target: str) -> dict[str, Any]:
@@ -6018,6 +6030,18 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         f"signals='{special_signals or 'none'}' "
         f"kind='{special_state_kind or 'none'}'"
     )
+    special_state_route_allowed = _is_special_state_route_allowed(
+        tab_cfg,
+        screen_context_mode=screen_context_mode,
+    )
+    if not special_state_route_allowed:
+        log(
+            "[ENTRY][special_state_check] "
+            "decision='skip_special_state_route' "
+            f"screen_context_mode='{screen_context_mode}' "
+            f"scenario_type='{str(tab_cfg.get('scenario_type', 'content') or 'content').strip().lower()}' "
+            f"group='{str(tab_cfg.get('group', '') or '').strip().lower() or 'none'}'"
+        )
     special_state_route_reason = "none"
     special_state_kind_is_setup_needed = str(special_state_kind or "").strip().lower() == "setup_needed_or_empty_state"
     special_state_long_intro_like = bool(special_state_meta.get("long_intro_like", False))
@@ -6042,6 +6066,8 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         and (special_state_low_content_diversity or special_state_intro_focus_like or special_state_top_chrome_intro_cta)
     )
     route_to_special_state = bool(
+        special_state_route_allowed
+        and
         special_state_detected
         and (
             not entry_verify_candidate_success
