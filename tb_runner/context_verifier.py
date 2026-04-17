@@ -16,6 +16,11 @@ _TAB_ALIAS_TO_CANONICAL = {
     "새 콘텐츠 사용 가능": "new content available",
 }
 
+_BOTTOM_GLOBAL_NAV_RESOURCE_REGEX = re.compile(
+    r"com\.samsung\.android\.oneconnect:id/(menu_(favorites|devices|services|automations|more)|bottom_(favorites|devices|services|automations|more))",
+    flags=re.IGNORECASE,
+)
+
 
 def _expand_bottom_tab_aliases(value: str) -> str:
     text = str(value or "")
@@ -29,6 +34,37 @@ def _expand_bottom_tab_aliases(value: str) -> str:
     if not normalized_additions:
         return text
     return f"{text}, {', '.join(normalized_additions)}"
+
+
+def _is_bottom_nav_resource_id(view_id: str, scenario_cfg: dict[str, Any]) -> bool:
+    normalized_view_id = str(view_id or "").strip().lower()
+    if not normalized_view_id:
+        return False
+    global_nav_cfg = scenario_cfg.get("global_nav", {})
+    if isinstance(global_nav_cfg, dict):
+        known_ids = [str(item or "").strip().lower() for item in global_nav_cfg.get("resource_ids", []) if isinstance(item, str)]
+        if known_ids and normalized_view_id in known_ids:
+            return True
+    return bool(_BOTTOM_GLOBAL_NAV_RESOURCE_REGEX.search(normalized_view_id))
+
+
+def _build_focus_selected_text(step: dict[str, Any]) -> str:
+    focus_node = step.get("focus_node", {})
+    source_map = focus_node if isinstance(focus_node, dict) else {}
+    values: list[str] = []
+    for value in (
+        source_map.get("talkbackLabel", ""),
+        source_map.get("mergedLabel", ""),
+        source_map.get("contentDescription", ""),
+        source_map.get("text", ""),
+        step.get("visible_label", ""),
+        step.get("merged_announcement", ""),
+        step.get("focus_content_description", ""),
+    ):
+        normalized = str(value or "").strip()
+        if normalized and normalized not in values:
+            values.append(normalized)
+    return " | ".join(values)
 
 
 def verify_context(
@@ -96,6 +132,55 @@ def verify_context(
                 "lazy_dump_node_count": 0,
             }
 
+        focus_node = step.get("focus_node", {})
+        focus_node_map = focus_node if isinstance(focus_node, dict) else {}
+        focus_view_id = str(
+            focus_node_map.get("viewIdResourceName", "")
+            or focus_node_map.get("resourceId", "")
+            or step.get("focus_view_id", "")
+            or ""
+        ).strip()
+        focus_selected_text = _build_focus_selected_text(step)
+        focus_selected_text_for_match = _expand_bottom_tab_aliases(focus_selected_text)
+        focus_has_selected_signal = bool(re.search(r"(selected|선택됨)", focus_selected_text_for_match, flags=re.IGNORECASE))
+        focus_payload_strong = bool(step.get("get_focus_top_level_payload_sufficient", False)) or str(
+            step.get("get_focus_final_payload_source", "") or ""
+        ).strip().lower() in {"top_level", "fallback_dump"}
+        focus_bottom_nav_hit = _is_bottom_nav_resource_id(focus_view_id, scenario_cfg)
+        focus_text_ok = True if not text_regex else _safe_regex_search(text_regex, focus_selected_text_for_match)
+        focus_announcement_ok = (
+            True if not announcement_regex else _safe_regex_search(announcement_regex, focus_selected_text_for_match)
+        )
+        if (
+            focus_payload_strong
+            and focus_bottom_nav_hit
+            and focus_has_selected_signal
+            and focus_text_ok
+            and focus_announcement_ok
+        ):
+            expected_parts = []
+            if text_regex:
+                expected_parts.append(f"text={text_regex}")
+            if announcement_regex:
+                expected_parts.append(f"announcement={announcement_regex}")
+            expected_pattern = " | ".join(expected_parts)
+            log(
+                f"[CONTEXT][selected_tab_fast_path] ok=True view_id='{focus_view_id}' source='focus_payload'",
+                level="DEBUG",
+            )
+            return {
+                "ok": True,
+                "type": context_type,
+                "expected": expected_pattern,
+                "actual_text": focus_selected_text,
+                "actual_announcement": focus_selected_text,
+                "actual_selected_text": focus_selected_text,
+                "actual_source": "focus_payload_fast_path",
+                "selected_candidates": [],
+                "dump_source": "focus_payload",
+                "lazy_dump_node_count": 0,
+            }
+
         nodes = step.get("dump_tree_nodes", [])
         dump_source = "step_cache"
         lazy_dump_node_count = 0
@@ -134,11 +219,7 @@ def verify_context(
             marker = f"text='{text}' desc='{description}' selected={selected_state} viewId='{view_id}' bounds='{bounds}'"
             selected_candidates.append(marker)
             is_main_bottom_nav_candidate = bool(
-                re.search(
-                    r"com\.samsung\.android\.oneconnect:id/(menu_(favorites|devices|services|automations|more)|bottom_(favorites|devices|services|automations|more))",
-                    view_id,
-                    flags=re.IGNORECASE,
-                )
+                _is_bottom_nav_resource_id(view_id, scenario_cfg)
             )
             if is_main_bottom_nav_candidate and combined:
                 fallback_values.append(combined)
