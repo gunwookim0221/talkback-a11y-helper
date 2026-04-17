@@ -10,7 +10,7 @@ from tb_runner.image_utils import create_excel_thumbnail, insert_images_to_excel
 from tb_runner.logging_utils import get_recent_logs, log
 from tb_runner.utils import to_json_text
 
-EXCEL_REPORT_VERSION = "1.4.4"
+EXCEL_REPORT_VERSION = "1.4.3"
 
 _DEBUG_LOG_KEYWORDS = (
     "[STEP]",
@@ -38,40 +38,6 @@ _KEY_VALUE_PATTERNS = {
     "scenario": (r"scenario='([^']*)'", r'scenario="([^"]*)"', r"scenario=([^\s,]+)", r"scenario_id='([^']*)'", r'scenario_id="([^"]*)"', r"scenario_id=([^\s,]+)"),
     "step": (r"step=([0-9]+)", r"step_index=([0-9]+)"),
 }
-
-
-def _is_missing_value(value: object) -> bool:
-    if value is None:
-        return True
-    text = str(value).strip()
-    return text == "" or text.lower() == "nan"
-
-
-def _is_garbage_row_dict(row: dict[str, object]) -> bool:
-    if not isinstance(row, dict):
-        return False
-
-    step_value = row.get("step", row.get("step_index", ""))
-    step_num = pd.to_numeric(step_value, errors="coerce")
-    step_is_negative = bool(pd.notna(step_num) and float(step_num) < 0)
-
-    req_missing = _is_missing_value(row.get("req_id", row.get("get_focus_req_id", "")))
-    move_missing = _is_missing_value(row.get("move_result", ""))
-
-    visible_missing = _is_missing_value(row.get("visible", row.get("visible_label", "")))
-    speech_missing = _is_missing_value(row.get("speech", row.get("merged_announcement", "")))
-    resource_missing = _is_missing_value(row.get("resource_id", row.get("focus_view_id", "")))
-    bounds_missing = _is_missing_value(row.get("bounds", row.get("focus_bounds", "")))
-    payload_empty = visible_missing and speech_missing and resource_missing and bounds_missing
-
-    return step_is_negative and req_missing and move_missing and payload_empty
-
-
-def _filter_garbage_rows_df(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return df
-    keep_mask = ~df.apply(lambda row: _is_garbage_row_dict(row.to_dict()), axis=1)
-    return df.loc[keep_mask].copy()
 
 
 def _normalize_step_value(step_value: object) -> str:
@@ -388,8 +354,6 @@ def _populate_result_debug_logs(
     source_row_index = _build_source_row_index(source_df)
 
     for row in result_df.itertuples(index=True):
-        if _is_garbage_row_dict(row._asdict()):
-            continue
         if not _is_debug_log_target(row):
             continue
         req_id = str(getattr(row, "req_id", "") or "").strip()
@@ -550,8 +514,6 @@ def add_status_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def make_filtered_df(raw_df: pd.DataFrame) -> pd.DataFrame:
-    raw_df = _filter_garbage_rows_df(raw_df)
-
     def _bool_series(col: str) -> pd.Series:
         if col not in raw_df.columns:
             return pd.Series([False] * len(raw_df), index=raw_df.index, dtype=bool)
@@ -643,7 +605,6 @@ def _normalize_compare_text(value: object) -> str:
 
 
 def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
-    filtered_df = _filter_garbage_rows_df(filtered_df)
     status_series = (
         filtered_df["status"].fillna("").astype(str).str.strip().str.upper()
         if "status" in filtered_df.columns
@@ -766,17 +727,9 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
             return "PASS_SMART_NAV"
         visible = row["_norm_visible"]
         speech = row["_norm_speech"]
-        move_result = str(row.get("move_result", "") or "").strip().lower()
-        resource_id = str(row.get("resource_id", "") or "").strip()
-        bounds = str(row.get("bounds", "") or "").strip()
-        has_focus_metadata = bool(resource_id and resource_id.lower() != "nan" and bounds and bounds.lower() != "nan")
         mismatch_reasons = str(row.get("_mismatch_reasons", "") or "")
         if "speech_visible_diverged" in mismatch_reasons:
             return "FAIL_MISMATCH"
-        if not visible and has_focus_metadata and move_result in {"moved", "scrolled", "edge_realign_then_moved"}:
-            if speech:
-                return "PASS_RESOURCE_ANCHORED"
-            return "WARN_RESOURCE_ONLY"
         if visible and speech and visible == speech:
             return "PASS_EXACT"
         if visible and speech and (visible in speech or speech in visible):
@@ -796,7 +749,7 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
 
     for _, group in result.groupby(group_keys, dropna=False, sort=False):
         group_idx = group.index.tolist()
-        moved_idx = [idx for idx in group_idx if result.at[idx, "move_result"] in {"moved", "scrolled", "edge_realign_then_moved"}]
+        moved_idx = [idx for idx in group_idx if result.at[idx, "move_result"] == "moved"]
         last_moved_idx = moved_idx[-1] if moved_idx else None
 
         traversal = []
@@ -813,11 +766,8 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
             if idx == last_moved_idx and any(i > last_moved_idx for i in group_idx if result.at[i, "move_result"] == "failed"):
                 traversal.append("WARN_TERMINAL_BY_REPEAT_STOP")
                 failure.append("terminal_not_handled")
-            elif move_result in {"moved", "edge_realign_then_moved"}:
+            elif move_result == "moved":
                 traversal.append("PASS_MOVED")
-                failure.append("")
-            elif move_result == "scrolled":
-                traversal.append("PASS_SCROLLED")
                 failure.append("")
             elif is_followup_noise:
                 traversal.append("WARN_TERMINAL_BY_REPEAT_STOP")
@@ -839,14 +789,12 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     def _focus_confidence(row) -> str:
         if row["fallback_used"] or row["step_dump_used"]:
             return "LOW"
-        if row["speech_match_result"] in {"PASS_EXACT", "PASS_CONTAINS"} and row["traversal_result"] in {"PASS_MOVED", "PASS_SCROLLED"}:
+        if row["speech_match_result"] in {"PASS_EXACT", "PASS_CONTAINS"} and row["traversal_result"] == "PASS_MOVED":
             return "HIGH"
-        if row["speech_match_result"] in {"PASS_SMART_NAV", "PASS_RESOURCE_ANCHORED"} and row["traversal_result"] in {"PASS_MOVED", "PASS_SCROLLED"}:
+        if row["speech_match_result"] == "PASS_SMART_NAV" and row["traversal_result"] == "PASS_MOVED":
             return "HIGH"
         if row["speech_match_result"] == "FAIL_MISMATCH" or row["traversal_result"].startswith("FAIL"):
             return "LOW"
-        if row["speech_match_result"] == "WARN_RESOURCE_ONLY" and row["traversal_result"] in {"PASS_MOVED", "PASS_SCROLLED"}:
-            return "MEDIUM"
         return "MEDIUM"
 
     result["focus_confidence"] = result.apply(_focus_confidence, axis=1)
@@ -860,9 +808,9 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
             or row["focus_confidence"] == "LOW"
         ):
             return "WARN"
-        if row["traversal_result"] in {"PASS_MOVED", "PASS_SCROLLED"} and row["speech_match_result"] in {"PASS_EXACT", "PASS_CONTAINS"}:
+        if row["traversal_result"] == "PASS_MOVED" and row["speech_match_result"] in {"PASS_EXACT", "PASS_CONTAINS"}:
             return "PASS"
-        if row["traversal_result"] in {"PASS_MOVED", "PASS_SCROLLED"} and row["speech_match_result"] in {"PASS_SMART_NAV", "PASS_RESOURCE_ANCHORED"}:
+        if row["traversal_result"] == "PASS_MOVED" and row["speech_match_result"] == "PASS_SMART_NAV":
             return "PASS"
         return "WARN"
 
@@ -1194,11 +1142,6 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
     df = pd.DataFrame(rows)
     if df.empty:
         log("[SAVE] skip: no rows")
-        return
-
-    df = _filter_garbage_rows_df(df)
-    if df.empty:
-        log("[SAVE] skip: only garbage rows")
         return
 
     df = add_rule_compare(df)
