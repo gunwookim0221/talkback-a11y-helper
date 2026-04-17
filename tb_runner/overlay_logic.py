@@ -22,7 +22,7 @@ from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 
 
 OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v3"
-OVERLAY_REPEAT_GUARD_VERSION = "pr66-overlay-repeat-guard-v1"
+OVERLAY_REPEAT_GUARD_VERSION = "pr66-overlay-repeat-guard-v2"
 
 
 def _get_positive_int(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
@@ -464,7 +464,7 @@ def expand_overlay(
     overlay_same_count = 0
     overlay_same_fingerprint_streak = 0
     overlay_same_focus_streak = 0
-    overlay_repeat_warmup_rows = 2
+    overlay_duplicate_streak = 0
     for overlay_step_idx in range(1, OVERLAY_MAX_STEPS + 1):
         overlay_row = client.collect_focus_step(
             dev=dev,
@@ -504,6 +504,32 @@ def expand_overlay(
             or (previous_announcement and previous_announcement == current_announcement)
         )
         same_focus_detected = same_focus_triplet or repeated_label_or_announcement
+        same_resource_id = bool(overlay_previous_row) and (
+            str((overlay_previous_row or {}).get("focus_view_id", "") or "").strip()
+            == str(overlay_row.get("focus_view_id", "") or "").strip()
+        )
+        same_bounds = bool(overlay_previous_row) and (
+            str((overlay_previous_row or {}).get("focus_bounds", "") or "").strip()
+            == str(overlay_row.get("focus_bounds", "") or "").strip()
+        )
+        same_overlay_context = bool(overlay_previous_row) and (
+            str((overlay_previous_row or {}).get("context_type", "") or "").strip()
+            == str(overlay_row.get("context_type", "") or "").strip()
+            and str((overlay_previous_row or {}).get("overlay_entry_label", "") or "").strip()
+            == str(overlay_row.get("overlay_entry_label", "") or "").strip()
+            and str((overlay_previous_row or {}).get("parent_step_index", "") or "").strip()
+            == str(overlay_row.get("parent_step_index", "") or "").strip()
+        )
+        duplicate_overlay_row = bool(overlay_previous_row) and all(
+            [
+                same_overlay_fingerprint,
+                same_overlay_context,
+                same_resource_id,
+                same_bounds,
+                previous_visible == current_visible,
+                previous_announcement == current_announcement,
+            ]
+        )
         move_result = str(overlay_row.get("move_result", "") or "").strip().lower()
         move_failed_without_focus_change = move_result in {"failed", "no_progress"} and (
             same_focus_triplet or same_overlay_fingerprint
@@ -512,7 +538,7 @@ def expand_overlay(
             overlay_same_fingerprint_streak + 1 if same_overlay_fingerprint else 0
         )
         overlay_same_focus_streak = overlay_same_focus_streak + 1 if same_focus_detected else 0
-        in_repeat_warmup = len(overlay_rows) < overlay_repeat_warmup_rows
+        overlay_duplicate_streak = overlay_duplicate_streak + 1 if duplicate_overlay_row else 0
 
         if same_focus_detected:
             log(
@@ -522,18 +548,18 @@ def expand_overlay(
             )
 
         forced_overlay_break_reason = ""
-        if move_failed_without_focus_change and not in_repeat_warmup:
+        if duplicate_overlay_row and move_result in {"failed", "no_progress"} and overlay_duplicate_streak >= 2:
+            forced_overlay_break_reason = "same_overlay_item_no_progress"
+        elif move_failed_without_focus_change:
             forced_overlay_break_reason = "move_failed_without_focus_change"
         elif (
             same_overlay_fingerprint
-            and not in_repeat_warmup
             and overlay_same_fingerprint_streak >= 2
             and move_result in {"failed", "no_progress"}
         ):
             forced_overlay_break_reason = "same_overlay_fingerprint"
         elif (
             same_focus_detected
-            and not in_repeat_warmup
             and overlay_same_focus_streak >= 2
             and move_result in {"failed", "no_progress"}
         ):
@@ -546,6 +572,14 @@ def expand_overlay(
                 overlay_previous_row["stop_reason"] = forced_overlay_break_reason
             save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
             break
+
+        if duplicate_overlay_row:
+            log(
+                f"[OVERLAY][dedup] skip_duplicate_row=true step={overlay_step_idx} "
+                f"view_id='{overlay_row.get('focus_view_id', '')}' bounds='{overlay_row.get('focus_bounds', '')}' "
+                f"move_result='{move_result}' duplicate_streak={overlay_duplicate_streak}"
+            )
+            continue
 
         overlay_row["_step_mono_start"] = time.monotonic() - float(overlay_row.get("t_step_start", 0.0) or 0.0)
         overlay_row = maybe_capture_focus_crop(client, dev, overlay_row, output_base_dir)
