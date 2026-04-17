@@ -23,8 +23,8 @@ from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 
 OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v3"
 OVERLAY_REPEAT_GUARD_VERSION = "pr66-overlay-repeat-guard-v3"
-OVERLAY_ADVANCEMENT_GUARD_VERSION = "pr67-overlay-advance-on-duplicate-v2"
-OVERLAY_ENTRY_ADVANCEMENT_VERSION = "pr68-overlay-entry-advancement-v1"
+OVERLAY_ADVANCEMENT_GUARD_VERSION = "pr67-overlay-advance-on-duplicate-v3"
+OVERLAY_ENTRY_ADVANCEMENT_VERSION = "pr68-overlay-entry-advancement-v2"
 
 
 def _get_positive_int(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
@@ -434,6 +434,9 @@ def expand_overlay(
     checkpoint_every = _get_positive_int(tab_cfg, "checkpoint_save_every", CHECKPOINT_SAVE_EVERY_STEPS)
     overlay_max_advancement_failures = _get_positive_int(tab_cfg, "overlay_max_advancement_failures", 4)
     overlay_min_rows_before_stall = max(2, _get_positive_int(tab_cfg, "overlay_min_rows_before_stall", 3))
+    overlay_min_distinct_rows_before_stall = max(2, _get_positive_int(tab_cfg, "overlay_min_distinct_rows_before_stall", 2))
+    overlay_duplicate_rescue_trigger = max(1, _get_positive_int(tab_cfg, "overlay_duplicate_rescue_trigger", 2))
+    overlay_duplicate_rescue_budget = max(1, _get_positive_int(tab_cfg, "overlay_duplicate_rescue_budget", 3))
 
     entry_label = str(entry_step.get("visible_label", "") or "").strip()
     entry_view_id = str(entry_step.get("focus_view_id", "") or "").strip()
@@ -472,6 +475,7 @@ def expand_overlay(
     overlay_duplicate_streak = 0
     overlay_advancement_fail_streak = 0
     overlay_seen_fingerprints: set[str] = set()
+    overlay_duplicate_rescue_count = 0
     def _prepare_overlay_row(row: dict[str, Any], step_index: int) -> dict[str, Any]:
         row["step_index"] = step_index
         row["tab_name"] = tab_cfg["tab_name"]
@@ -492,7 +496,15 @@ def expand_overlay(
             str(initial_row.get("visible_label", "") or "").strip()
             or str(initial_row.get("merged_announcement", "") or "").strip()
         )
-        if has_initial_payload and not is_placeholder_row(initial_row):
+        initial_meaningful_item = bool(
+            has_initial_payload
+            and (
+                str(initial_row.get("normalized_visible_label", "") or "").strip()
+                or str(initial_row.get("visible_label", "") or "").strip()
+                or str(initial_row.get("merged_announcement", "") or "").strip()
+            )
+        )
+        if has_initial_payload and (initial_meaningful_item or not is_placeholder_row(initial_row)):
             initial_row["_step_mono_start"] = time.monotonic() - float(initial_row.get("t_step_start", 0.0) or 0.0)
             initial_row = maybe_capture_focus_crop(client, dev, initial_row, output_base_dir)
             initial_row.pop("_step_mono_start", None)
@@ -607,10 +619,20 @@ def expand_overlay(
         move_result = str(overlay_row.get("move_result", "") or "").strip().lower()
         overlay_row_fingerprint = build_row_fingerprint(overlay_row)
         seen_overlay_row = bool(overlay_row_fingerprint) and overlay_row_fingerprint in overlay_seen_fingerprints
-        can_stall_overlay = len(overlay_rows) >= 2
+        has_min_distinct_overlay_rows = len(overlay_seen_fingerprints) >= overlay_min_distinct_rows_before_stall
+        rescue_pending = bool(
+            same_focus_detected
+            and overlay_duplicate_streak >= overlay_duplicate_rescue_trigger
+            and overlay_duplicate_rescue_count < overlay_duplicate_rescue_budget
+        )
+        can_stall_overlay = len(overlay_rows) >= 2 and has_min_distinct_overlay_rows
         advancement_failed = can_stall_overlay and (
             (move_result in {"failed", "no_progress"} and not actionable_changed)
-            or (repeat_requires_stall and len(overlay_rows) >= overlay_min_rows_before_stall)
+            or (
+                repeat_requires_stall
+                and len(overlay_rows) >= overlay_min_rows_before_stall
+                and not rescue_pending
+            )
         )
         overlay_advancement_fail_streak = overlay_advancement_fail_streak + 1 if advancement_failed else 0
         overlay_same_fingerprint_streak = (
@@ -627,7 +649,9 @@ def expand_overlay(
             )
 
         forced_overlay_break_reason = ""
-        if overlay_advancement_fail_streak >= overlay_max_advancement_failures:
+        if overlay_advancement_fail_streak >= overlay_max_advancement_failures and (
+            has_min_distinct_overlay_rows or overlay_duplicate_rescue_count >= overlay_duplicate_rescue_budget
+        ):
             forced_overlay_break_reason = "overlay_advancement_stalled"
 
         if forced_overlay_break_reason:
@@ -639,6 +663,15 @@ def expand_overlay(
             break
 
         if duplicate_overlay_row or seen_overlay_row:
+            if rescue_pending:
+                rescue_result = str(client.move_focus_smart(dev=dev, direction="next") or "").strip().lower()
+                overlay_duplicate_rescue_count += 1
+                log(
+                    f"[OVERLAY][rescue] duplicate_streak={overlay_duplicate_streak} "
+                    f"rescue_count={overlay_duplicate_rescue_count}/{overlay_duplicate_rescue_budget} "
+                    f"view_id='{overlay_row.get('focus_view_id', '')}' move_result='{rescue_result}'",
+                    level="DEBUG",
+                )
             log(
                 f"[OVERLAY][dedup] skip_duplicate_row=true step={overlay_step_idx} "
                 f"view_id='{overlay_row.get('focus_view_id', '')}' bounds='{overlay_row.get('focus_bounds', '')}' "
