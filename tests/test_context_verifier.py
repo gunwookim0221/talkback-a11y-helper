@@ -127,3 +127,81 @@ def test_verify_context_selected_bottom_tab_ignores_plugin_internal_selected_tab
     result = verify_context(step, scenario_cfg)
 
     assert result["ok"] is False
+
+
+class _DumpGuardClient:
+    def dump_tree(self, dev: str = ""):
+        raise AssertionError("dump_tree should not be called")
+
+
+def test_verify_context_selected_bottom_tab_uses_focus_payload_fast_path_without_dump():
+    step = _step(
+        focus_node={
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_favorites",
+            "contentDescription": "Selected, Home, Tab 1 of 5",
+            "mergedLabel": "Selected, Home, Tab 1 of 5",
+        },
+        focus_view_id="com.samsung.android.oneconnect:id/menu_favorites",
+        visible_label="Selected, Home, Tab 1 of 5",
+        merged_announcement="Selected, Home, Tab 1 of 5",
+        dump_tree_nodes=[],
+        get_focus_top_level_payload_sufficient=True,
+        get_focus_final_payload_source="top_level",
+    )
+    scenario_cfg = {
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": r"(?i).*(selected|선택됨).*(home|홈).*",
+        },
+        "global_nav": {
+            "resource_ids": [
+                "com.samsung.android.oneconnect:id/menu_favorites",
+            ]
+        },
+    }
+
+    result = verify_context(step, scenario_cfg, client=_DumpGuardClient(), dev="serial")
+
+    assert result["ok"] is True
+    assert result["actual_source"] == "focus_payload_fast_path"
+    assert result["dump_source"] == "focus_payload"
+
+
+def test_verify_context_selected_bottom_tab_falls_back_to_dump_when_focus_signal_is_weak():
+    class _LazyDumpClient:
+        def dump_tree(self, dev: str = ""):
+            return [
+                {
+                    "text": "Home",
+                    "contentDescription": "Selected, Home, Tab 1 of 5",
+                    "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_favorites",
+                    "selected": True,
+                }
+            ]
+
+    step = _step(
+        focus_node={
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_favorites",
+            "contentDescription": "Home, Tab 1 of 5",
+        },
+        focus_view_id="com.samsung.android.oneconnect:id/menu_favorites",
+        dump_tree_nodes=[],
+        get_focus_top_level_payload_sufficient=False,
+        get_focus_final_payload_source="none",
+    )
+    scenario_cfg = {
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": r"(?i).*(selected|선택됨).*(home|홈).*",
+        },
+        "global_nav": {
+            "resource_ids": [
+                "com.samsung.android.oneconnect:id/menu_favorites",
+            ]
+        },
+    }
+
+    result = verify_context(step, scenario_cfg, client=_LazyDumpClient(), dev="serial")
+
+    assert result["ok"] is True
+    assert result["dump_source"] == "lazy_dump"
