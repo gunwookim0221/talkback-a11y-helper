@@ -6622,6 +6622,7 @@ def _execute_overlay_for_candidate(
             output_base_dir=output_base_dir,
             skip_entry_click=True,
             scenario_perf=scenario_perf,
+            initial_overlay_step=post_click_step,
         )
         if scenario_perf is not None:
             for overlay_row in rows[before_overlay_len:]:
