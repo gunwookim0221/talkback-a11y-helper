@@ -22,7 +22,8 @@ from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 
 
 OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v3"
-OVERLAY_REPEAT_GUARD_VERSION = "pr66-overlay-repeat-guard-v2"
+OVERLAY_REPEAT_GUARD_VERSION = "pr66-overlay-repeat-guard-v3"
+OVERLAY_ADVANCEMENT_GUARD_VERSION = "pr67-overlay-advance-on-duplicate-v1"
 
 
 def _get_positive_int(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
@@ -409,6 +410,7 @@ def expand_overlay(
     output_base_dir: str,
     skip_entry_click: bool = False,
     scenario_perf: ScenarioPerfStats | None = None,
+    initial_overlay_step: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     overlay_rows: list[dict[str, Any]] = []
     overlay_step_wait_seconds = _get_positive_float(tab_cfg, "overlay_step_wait_seconds", OVERLAY_STEP_WAIT_SECONDS)
@@ -429,6 +431,7 @@ def expand_overlay(
     )
     back_recovery_wait_seconds = _get_positive_float(tab_cfg, "back_recovery_wait_seconds", BACK_RECOVERY_WAIT_SECONDS)
     checkpoint_every = _get_positive_int(tab_cfg, "checkpoint_save_every", CHECKPOINT_SAVE_EVERY_STEPS)
+    overlay_max_advancement_failures = _get_positive_int(tab_cfg, "overlay_max_advancement_failures", 4)
 
     entry_label = str(entry_step.get("visible_label", "") or "").strip()
     entry_view_id = str(entry_step.get("focus_view_id", "") or "").strip()
@@ -465,17 +468,24 @@ def expand_overlay(
     overlay_same_fingerprint_streak = 0
     overlay_same_focus_streak = 0
     overlay_duplicate_streak = 0
+    overlay_advancement_fail_streak = 0
+    overlay_seen_fingerprints: set[str] = set()
     for overlay_step_idx in range(1, OVERLAY_MAX_STEPS + 1):
-        overlay_row = client.collect_focus_step(
-            dev=dev,
-            step_index=overlay_step_idx,
-            move=True,
-            direction="next",
-            wait_seconds=overlay_step_wait_seconds,
-            announcement_wait_seconds=overlay_announcement_wait_seconds,
-            announcement_idle_wait_seconds=overlay_announcement_idle_wait_seconds,
-            announcement_max_extra_wait_seconds=overlay_announcement_max_extra_wait_seconds,
-        )
+        if overlay_step_idx == 1 and isinstance(initial_overlay_step, dict):
+            overlay_row = dict(initial_overlay_step)
+            overlay_row["step_index"] = overlay_step_idx
+            overlay_row.setdefault("move_result", "post_click_probe")
+        else:
+            overlay_row = client.collect_focus_step(
+                dev=dev,
+                step_index=overlay_step_idx,
+                move=True,
+                direction="next",
+                wait_seconds=overlay_step_wait_seconds,
+                announcement_wait_seconds=overlay_announcement_wait_seconds,
+                announcement_idle_wait_seconds=overlay_announcement_idle_wait_seconds,
+                announcement_max_extra_wait_seconds=overlay_announcement_max_extra_wait_seconds,
+            )
         overlay_row["tab_name"] = tab_cfg["tab_name"]
         overlay_row["context_type"] = "overlay"
         overlay_row["parent_step_index"] = parent_step_index
@@ -531,9 +541,10 @@ def expand_overlay(
             ]
         )
         move_result = str(overlay_row.get("move_result", "") or "").strip().lower()
-        move_failed_without_focus_change = move_result in {"failed", "no_progress"} and (
-            same_focus_triplet or same_overlay_fingerprint
-        )
+        overlay_row_fingerprint = build_row_fingerprint(overlay_row)
+        seen_overlay_row = bool(overlay_row_fingerprint) and overlay_row_fingerprint in overlay_seen_fingerprints
+        advancement_failed = move_result in {"failed", "no_progress"} or same_focus_detected or seen_overlay_row
+        overlay_advancement_fail_streak = overlay_advancement_fail_streak + 1 if advancement_failed else 0
         overlay_same_fingerprint_streak = (
             overlay_same_fingerprint_streak + 1 if same_overlay_fingerprint else 0
         )
@@ -548,22 +559,8 @@ def expand_overlay(
             )
 
         forced_overlay_break_reason = ""
-        if duplicate_overlay_row and move_result in {"failed", "no_progress"} and overlay_duplicate_streak >= 2:
-            forced_overlay_break_reason = "same_overlay_item_no_progress"
-        elif move_failed_without_focus_change:
-            forced_overlay_break_reason = "move_failed_without_focus_change"
-        elif (
-            same_overlay_fingerprint
-            and overlay_same_fingerprint_streak >= 2
-            and move_result in {"failed", "no_progress"}
-        ):
-            forced_overlay_break_reason = "same_overlay_fingerprint"
-        elif (
-            same_focus_detected
-            and overlay_same_focus_streak >= 2
-            and move_result in {"failed", "no_progress"}
-        ):
-            forced_overlay_break_reason = "same_overlay_focus"
+        if overlay_advancement_fail_streak >= overlay_max_advancement_failures:
+            forced_overlay_break_reason = "overlay_advancement_stalled"
 
         if forced_overlay_break_reason:
             log(f"[OVERLAY][break] reason='{forced_overlay_break_reason}' step={overlay_step_idx}")
@@ -573,11 +570,12 @@ def expand_overlay(
             save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
             break
 
-        if duplicate_overlay_row:
+        if duplicate_overlay_row or seen_overlay_row:
             log(
                 f"[OVERLAY][dedup] skip_duplicate_row=true step={overlay_step_idx} "
                 f"view_id='{overlay_row.get('focus_view_id', '')}' bounds='{overlay_row.get('focus_bounds', '')}' "
-                f"move_result='{move_result}' duplicate_streak={overlay_duplicate_streak}"
+                f"move_result='{move_result}' duplicate_streak={overlay_duplicate_streak} seen_before={str(seen_overlay_row).lower()} "
+                f"advancement_fail_streak={overlay_advancement_fail_streak}"
             )
             continue
 
@@ -588,6 +586,8 @@ def expand_overlay(
         overlay_rows.append(overlay_row)
         rows.append(overlay_row)
         all_rows.append(overlay_row)
+        if overlay_row_fingerprint:
+            overlay_seen_fingerprints.add(overlay_row_fingerprint)
 
         (
             should_end_overlay,

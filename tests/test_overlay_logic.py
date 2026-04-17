@@ -399,7 +399,36 @@ def test_expand_overlay_breaks_on_repeated_fingerprint_with_no_progress(monkeypa
 
     assert len(overlay_rows) == 1
     assert overlay_rows[-1]["stop_reason"] in {
-        "same_overlay_item_no_progress",
-        "same_overlay_fingerprint",
-        "move_failed_without_focus_change",
+        "overlay_advancement_stalled",
     }
+
+
+def test_expand_overlay_keeps_initial_post_click_focus_as_first_row(monkeypatch):
+    next_row = _step(step_index=2, label="Add service", view_id="id/title", bounds="20,20,40,40")
+    client = _OverlayClient([next_row])
+    tab_cfg = {"tab_name": "Home"}
+    entry_step = _step(step_index=3, label="Add", view_id="id/add")
+    initial_overlay_step = _step(step_index=99, label="Add favourites", view_id="id/title", bounds="10,10,30,30")
+    rows: list[dict[str, str]] = []
+    all_rows: list[dict[str, str]] = []
+
+    monkeypatch.setattr(overlay_logic, "maybe_capture_focus_crop", lambda *_args, **_kwargs: _args[2])
+    monkeypatch.setattr(overlay_logic, "save_excel_with_perf", lambda *args, **kwargs: None)
+    monkeypatch.setattr(overlay_logic, "OVERLAY_MAX_STEPS", 2)
+
+    overlay_rows = overlay_logic.expand_overlay(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        entry_step=entry_step,
+        rows=rows,
+        all_rows=all_rows,
+        output_path="out.xlsx",
+        output_base_dir="output",
+        skip_entry_click=True,
+        initial_overlay_step=initial_overlay_step,
+    )
+
+    assert len(overlay_rows) == 2
+    assert overlay_rows[0]["visible_label"] == "Add favourites"
+    assert overlay_rows[1]["visible_label"] == "Add service"
