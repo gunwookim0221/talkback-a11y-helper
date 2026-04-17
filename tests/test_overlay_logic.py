@@ -362,6 +362,42 @@ def test_expand_overlay_keeps_collecting_when_focus_changes(monkeypatch):
     assert overlay_rows[0]["focus_view_id"] != overlay_rows[1]["focus_view_id"]
 
 
+def test_expand_overlay_does_not_stall_on_repeated_label_only(monkeypatch):
+    first = _step(step_index=1, label="Delete", view_id="id/item1", bounds="10,10,40,40")
+    second = _step(step_index=2, label="Delete", view_id="id/item2", bounds="10,50,40,80")
+    third = _step(step_index=3, label="Delete", view_id="id/item3", bounds="10,90,40,120")
+    fourth = _step(step_index=4, label="Delete", view_id="id/item4", bounds="10,130,40,160")
+    fifth = _step(step_index=5, label="Import QR code", view_id="id/item5", bounds="10,170,40,200")
+
+    client = _OverlayClient([first, second, third, fourth, fifth])
+    tab_cfg = {
+        "tab_name": "Routines",
+        "overlay_max_advancement_failures": 2,
+    }
+    entry_step = _step(step_index=3, label="More options", view_id="id/more")
+    rows: list[dict[str, str]] = []
+    all_rows: list[dict[str, str]] = []
+
+    monkeypatch.setattr(overlay_logic, "maybe_capture_focus_crop", lambda *_args, **_kwargs: _args[2])
+    monkeypatch.setattr(overlay_logic, "save_excel_with_perf", lambda *args, **kwargs: None)
+    monkeypatch.setattr(overlay_logic, "OVERLAY_MAX_STEPS", 5)
+
+    overlay_rows = overlay_logic.expand_overlay(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        entry_step=entry_step,
+        rows=rows,
+        all_rows=all_rows,
+        output_path="out.xlsx",
+        output_base_dir="output",
+        skip_entry_click=True,
+    )
+
+    assert len(overlay_rows) == 5
+    assert overlay_rows[-1]["visible_label"] == "Import QR code"
+
+
 def test_expand_overlay_breaks_on_repeated_fingerprint_with_no_progress(monkeypatch):
     first = _step(step_index=1, label="Delete", view_id="id/title", bounds="10,10,40,40")
     first["move_result"] = "ok"

@@ -23,7 +23,7 @@ from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 
 OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v3"
 OVERLAY_REPEAT_GUARD_VERSION = "pr66-overlay-repeat-guard-v3"
-OVERLAY_ADVANCEMENT_GUARD_VERSION = "pr67-overlay-advance-on-duplicate-v1"
+OVERLAY_ADVANCEMENT_GUARD_VERSION = "pr67-overlay-advance-on-duplicate-v2"
 
 
 def _get_positive_int(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
@@ -432,6 +432,7 @@ def expand_overlay(
     back_recovery_wait_seconds = _get_positive_float(tab_cfg, "back_recovery_wait_seconds", BACK_RECOVERY_WAIT_SECONDS)
     checkpoint_every = _get_positive_int(tab_cfg, "checkpoint_save_every", CHECKPOINT_SAVE_EVERY_STEPS)
     overlay_max_advancement_failures = _get_positive_int(tab_cfg, "overlay_max_advancement_failures", 4)
+    overlay_min_rows_before_stall = _get_positive_int(tab_cfg, "overlay_min_rows_before_stall", 3)
 
     entry_label = str(entry_step.get("visible_label", "") or "").strip()
     entry_view_id = str(entry_step.get("focus_view_id", "") or "").strip()
@@ -543,7 +544,10 @@ def expand_overlay(
         move_result = str(overlay_row.get("move_result", "") or "").strip().lower()
         overlay_row_fingerprint = build_row_fingerprint(overlay_row)
         seen_overlay_row = bool(overlay_row_fingerprint) and overlay_row_fingerprint in overlay_seen_fingerprints
-        advancement_failed = move_result in {"failed", "no_progress"} or same_focus_detected or seen_overlay_row
+        strong_same_focus_detected = same_focus_triplet and same_resource_id and same_bounds
+        advancement_failed = move_result in {"failed", "no_progress"} or (
+            strong_same_focus_detected and len(overlay_rows) >= overlay_min_rows_before_stall
+        )
         overlay_advancement_fail_streak = overlay_advancement_fail_streak + 1 if advancement_failed else 0
         overlay_same_fingerprint_streak = (
             overlay_same_fingerprint_streak + 1 if same_overlay_fingerprint else 0
