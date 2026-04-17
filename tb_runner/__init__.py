@@ -1,3 +1,3 @@
 """talkback runner package."""
 
-__version__ = "1.7.95"
+__version__ = "1.7.96"

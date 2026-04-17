@@ -16,7 +16,7 @@ from tb_runner.constants import (
     MAIN_ANNOUNCEMENT_WAIT_SECONDS,
     MAIN_STEP_WAIT_SECONDS,
 )
-from tb_runner.diagnostics import detect_step_mismatch, should_stop
+from tb_runner.diagnostics import classify_step_result, detect_step_mismatch, should_stop
 from tb_runner.diagnostics import is_global_nav_row
 from tb_runner.excel_report import save_excel
 from tb_runner.image_utils import maybe_capture_focus_crop
@@ -6938,6 +6938,14 @@ def _main_loop_phase(
         explain_log_fields = _format_stop_explain_log_fields(stop_eval_inputs=stop_eval_inputs, decision=decision)
         row["is_global_nav"] = is_global_nav
         row["global_nav_reason"] = global_nav_reason
+        result_summary = classify_step_result(
+            row,
+            mismatch_reasons=mismatch_reasons,
+            no_progress=no_progress,
+            stop_reason=reason,
+            terminal_signal=terminal_signal,
+        )
+        row.update(result_summary)
         log(
             f"[STOP][eval] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
             f"terminal={str(terminal_signal).lower()} same_like_count={same_like_count} "
@@ -6959,6 +6967,8 @@ def _main_loop_phase(
             f"realign_grace_suppressed={str(realign_grace_suppressed).lower()} "
             f"repeat_stop_hit={str(repeat_stop_hit).lower()} "
             f"decision='{decision}' reason='{eval_reason}' "
+            f"traversal_result='{row.get('traversal_result', '')}' final_result='{row.get('final_result', '')}' "
+            f"failure_reason='{row.get('failure_reason', '')}' "
             f"{explain_log_fields}"
         )
 
