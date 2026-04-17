@@ -9,6 +9,134 @@ _MOVE_FAILURE_RESULTS = {"failed"}
 _MOVE_TERMINAL_RESULTS = {"terminal", "end", "no_next", "no_focus", "cannot_move"}
 
 
+def _normalize_compare_text(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    text = text.replace("\n", " ")
+    text = re.sub(r"[\.,!?;:\-_/()\[\]{}\"'`]+", " ", text)
+    return " ".join(text.split())
+
+
+def _same_topic(a: str, b: str) -> bool:
+    if not a or not b:
+        return False
+    a_tokens = [tok for tok in a.split(" ") if len(tok) > 1]
+    b_tokens = [tok for tok in b.split(" ") if len(tok) > 1]
+    if not a_tokens or not b_tokens:
+        return False
+    a_set = set(a_tokens)
+    b_set = set(b_tokens)
+    return len(a_set & b_set) >= max(1, min(len(a_set), len(b_set)) // 2)
+
+
+def _is_missing_like(value: Any) -> bool:
+    if value is None:
+        return True
+    text = str(value).strip().lower()
+    return text in {"", "nan", "none", "null"}
+
+
+def is_placeholder_row(row: dict[str, Any]) -> bool:
+    step_index = row.get("step_index", row.get("step", -1))
+    try:
+        if int(step_index) < 0:
+            return True
+    except Exception:
+        return True
+    req_id = row.get("req_id", row.get("get_focus_req_id", ""))
+    move_result = row.get("move_result", "")
+    if _is_missing_like(req_id) and _is_missing_like(move_result):
+        visible = row.get("visible_label", row.get("visible", ""))
+        speech = row.get("merged_announcement", row.get("speech", ""))
+        resource_id = row.get("focus_view_id", row.get("resource_id", ""))
+        bounds = row.get("focus_bounds", row.get("bounds", ""))
+        if all(_is_missing_like(v) for v in (visible, speech, resource_id, bounds)):
+            return True
+    return False
+
+
+def classify_step_result(
+    row: dict[str, Any],
+    *,
+    mismatch_reasons: list[str],
+    no_progress: bool,
+    stop_reason: str,
+    terminal_signal: bool,
+) -> dict[str, str]:
+    move_result = normalize_move_result(row)
+    visible = _normalize_compare_text(row.get("normalized_visible_label", row.get("visible_label", "")))
+    speech = _normalize_compare_text(row.get("normalized_announcement", row.get("merged_announcement", "")))
+    post_move_verdict_source = str(row.get("post_move_verdict_source", "") or "").strip().lower()
+    mismatch_text = " ".join(str(item or "") for item in mismatch_reasons)
+
+    if post_move_verdict_source.startswith("smart_nav_result"):
+        speech_match_result = "PASS_SMART_NAV"
+    elif "speech_visible_diverged" in mismatch_text:
+        speech_match_result = "FAIL_MISMATCH"
+    elif visible and speech and visible == speech:
+        speech_match_result = "PASS_EXACT"
+    elif visible and speech and (visible in speech or speech in visible):
+        if _same_topic(visible, speech):
+            length_gap = abs(len(visible.split(" ")) - len(speech.split(" ")))
+            speech_match_result = "WARN_CONTEXT_ADDED" if length_gap >= 2 else "PASS_CONTAINS"
+        else:
+            speech_match_result = "PASS_CONTAINS"
+    elif _same_topic(visible, speech):
+        speech_match_result = "WARN_CONTEXT_ADDED"
+    else:
+        speech_match_result = "FAIL_MISMATCH"
+
+    has_payload = any(
+        str(row.get(key, "") or "").strip()
+        for key in ("visible_label", "merged_announcement", "focus_view_id", "focus_bounds")
+    )
+    if move_result in {"moved", "edge_realign_then_moved"}:
+        traversal_result = "PASS_MOVED"
+        failure_reason = ""
+    elif move_result == "scrolled":
+        if has_payload and not no_progress and not terminal_signal:
+            traversal_result = "PASS_SCROLLED"
+            failure_reason = ""
+        elif stop_reason in {"repeat_no_progress", "repeat_semantic_stall", "repeat_semantic_stall_after_escape", "bounded_two_card_loop"}:
+            traversal_result = "FAIL_STUCK"
+            failure_reason = "repeat_no_progress"
+        else:
+            traversal_result = "FAIL_MOVE"
+            failure_reason = "move_failed"
+    elif move_result == "failed":
+        if stop_reason in {"repeat_no_progress", "repeat_semantic_stall", "repeat_semantic_stall_after_escape", "bounded_two_card_loop"} or no_progress:
+            traversal_result = "FAIL_STUCK"
+            failure_reason = "repeat_no_progress"
+        else:
+            traversal_result = "FAIL_MOVE"
+            failure_reason = "move_failed"
+    elif move_result in _MOVE_TERMINAL_RESULTS:
+        traversal_result = "WARN_TERMINAL_BY_REPEAT_STOP"
+        failure_reason = "terminal_not_handled"
+    else:
+        traversal_result = "FAIL_MOVE"
+        failure_reason = "move_failed"
+
+    if traversal_result.startswith("FAIL") or speech_match_result == "FAIL_MISMATCH":
+        final_result = "FAIL"
+    elif traversal_result == "WARN_TERMINAL_BY_REPEAT_STOP" or speech_match_result == "WARN_CONTEXT_ADDED":
+        final_result = "WARN"
+    elif traversal_result in {"PASS_MOVED", "PASS_SCROLLED"} and speech_match_result in {"PASS_EXACT", "PASS_CONTAINS", "PASS_SMART_NAV"}:
+        final_result = "PASS"
+    else:
+        final_result = "WARN"
+
+    if failure_reason == "" and speech_match_result == "FAIL_MISMATCH":
+        failure_reason = "speech_visible_diverged"
+
+    return {
+        "move_result": move_result,
+        "speech_match_result": speech_match_result,
+        "traversal_result": traversal_result,
+        "final_result": final_result,
+        "failure_reason": failure_reason,
+    }
+
+
 def _extract_move_result_from_text(raw: str) -> tuple[str, bool | None]:
     text = str(raw or "").strip().lower()
     if not text:

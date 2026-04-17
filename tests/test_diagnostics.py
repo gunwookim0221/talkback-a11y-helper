@@ -1,4 +1,4 @@
-from tb_runner.diagnostics import detect_step_mismatch, should_stop
+from tb_runner.diagnostics import classify_step_result, detect_step_mismatch, should_stop
 
 
 def test_detect_step_mismatch_returns_speech_visible_diverged():
@@ -231,6 +231,28 @@ def test_should_stop_repeat_semantic_stall_when_moved_but_same_semantic_target_r
     assert same_count == 8
     assert reason == "repeat_semantic_stall"
     assert details["repeat_stop_hit"] is True
+
+
+def test_classify_step_result_marks_scrolled_with_payload_as_pass():
+    row = {
+        "move_result": "scrolled",
+        "visible_label": "Labs",
+        "merged_announcement": "Labs",
+        "focus_view_id": "id/labs",
+        "focus_bounds": "[0,0][100,100]",
+    }
+
+    summary = classify_step_result(
+        row,
+        mismatch_reasons=[],
+        no_progress=False,
+        stop_reason="",
+        terminal_signal=False,
+    )
+
+    assert summary["traversal_result"] == "PASS_SCROLLED"
+    assert summary["final_result"] == "PASS"
+    assert summary["failure_reason"] == ""
 
 
 def test_should_stop_content_global_nav_entry():

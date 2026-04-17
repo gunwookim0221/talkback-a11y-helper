@@ -201,6 +201,67 @@ def test_make_result_df_skips_anchor_baseline_rows(monkeypatch):
     assert any("[RESULT] skipped anchor rows count=1" in msg for msg in logs)
 
 
+def test_make_result_df_skips_placeholder_rows(monkeypatch):
+    logs: list[str] = []
+    monkeypatch.setattr("tb_runner.excel_report.log", lambda msg, level="NORMAL": logs.append(msg))
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "s1",
+                "tab_name": "main",
+                "step_index": -1,
+                "context_type": "main",
+                "req_id": "nan",
+                "move_result": "nan",
+                "visible_label": "nan",
+                "merged_announcement": "nan",
+                "focus_view_id": "nan",
+                "focus_bounds": "nan",
+            },
+            {
+                "scenario_id": "s1",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "Home",
+                "merged_announcement": "Home",
+                "move_result": "moved",
+            },
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    assert len(result) == 1
+    assert int(result.iloc[0]["step"]) == 1
+    assert any("[RESULT] skipped placeholder rows count=1" in msg for msg in logs)
+
+
+def test_make_result_df_prefers_upstream_classification():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "s_up",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "Labs",
+                "merged_announcement": "Labs",
+                "move_result": "scrolled",
+                "traversal_result": "PASS_SCROLLED",
+                "speech_match_result": "PASS_SMART_NAV",
+                "final_result": "PASS",
+                "failure_reason": "",
+            }
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    assert result.iloc[0]["traversal_result"] == "PASS_SCROLLED"
+    assert result.iloc[0]["final_result"] == "PASS"
+
+
 def test_make_filtered_df_keeps_noise_row_with_review_worthy_mismatch():
     raw_df = pd.DataFrame(
         [

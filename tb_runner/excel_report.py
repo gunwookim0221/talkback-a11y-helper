@@ -5,7 +5,7 @@ import re
 
 import pandas as pd
 
-from tb_runner.diagnostics import normalize_move_result
+from tb_runner.diagnostics import is_placeholder_row, normalize_move_result
 from tb_runner.image_utils import create_excel_thumbnail, insert_images_to_excel
 from tb_runner.logging_utils import get_recent_logs, log
 from tb_runner.utils import to_json_text
@@ -627,6 +627,12 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     if skipped_anchor_count > 0:
         log(f"[RESULT] skipped anchor rows count={skipped_anchor_count}")
     result_source_df = filtered_df.loc[~skip_anchor_mask].copy()
+    if not result_source_df.empty:
+        placeholder_mask = result_source_df.apply(lambda row: is_placeholder_row(row.to_dict()), axis=1)
+        skipped_placeholder_count = int(placeholder_mask.sum())
+        if skipped_placeholder_count > 0:
+            log(f"[RESULT] skipped placeholder rows count={skipped_placeholder_count}")
+            result_source_df = result_source_df.loc[~placeholder_mask].copy()
 
     if result_source_df.empty:
         return pd.DataFrame(
@@ -699,6 +705,10 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     _pick_col("timing_get_focus", ["timing_get_focus", "step_elapsed_sec"])
     _pick_col("timing_total", ["timing_total", "step_elapsed_sec"])
     _pick_col("crop_image_path", ["crop_image_path", "crop_path", "result_crop"])
+    _pick_col("traversal_result", ["traversal_result"])
+    _pick_col("speech_match_result", ["speech_match_result"])
+    _pick_col("final_result", ["final_result"])
+    _pick_col("failure_reason", ["failure_reason"])
 
     result["move_result"] = result.apply(normalize_move_result, axis=1)
     result["fallback_used"] = result["fallback_used"].fillna(False).astype(bool)
@@ -741,7 +751,9 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
             return "WARN_CONTEXT_ADDED"
         return "FAIL_MISMATCH"
 
-    result["speech_match_result"] = result.apply(_speech_match, axis=1)
+    computed_speech_match = result.apply(_speech_match, axis=1)
+    existing_speech_match = result["speech_match_result"].fillna("").astype(str).str.strip()
+    result["speech_match_result"] = existing_speech_match.where(existing_speech_match != "", computed_speech_match)
 
     group_keys = [k for k in ["scenario_id", "tab", "context_type"] if k in result.columns]
     if not group_keys:
@@ -783,8 +795,12 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
                 traversal.append("FAIL_MOVE")
                 failure.append("move_failed")
 
-        result.loc[group_idx, "traversal_result"] = traversal
-        result.loc[group_idx, "failure_reason"] = failure
+        existing_traversal = result.loc[group_idx, "traversal_result"].fillna("").astype(str).str.strip()
+        existing_failure = result.loc[group_idx, "failure_reason"].fillna("").astype(str).str.strip()
+        computed_traversal = pd.Series(traversal, index=group_idx, dtype=object)
+        computed_failure = pd.Series(failure, index=group_idx, dtype=object)
+        result.loc[group_idx, "traversal_result"] = existing_traversal.where(existing_traversal != "", computed_traversal)
+        result.loc[group_idx, "failure_reason"] = existing_failure.where(existing_failure != "", computed_failure)
 
     def _focus_confidence(row) -> str:
         if row["fallback_used"] or row["step_dump_used"]:
@@ -827,7 +843,9 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
             return "speech와 visible 불일치"
         return "이동/발화 결과 재검토 필요"
 
-    result["final_result"] = result.apply(_final_result, axis=1)
+    computed_final_result = result.apply(_final_result, axis=1)
+    existing_final_result = result["final_result"].fillna("").astype(str).str.strip().str.upper()
+    result["final_result"] = existing_final_result.where(existing_final_result != "", computed_final_result)
     result["review_note"] = result.apply(_review_note, axis=1)
     result["failure_reason"] = result.apply(
         lambda row: row["failure_reason"]
