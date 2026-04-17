@@ -17,6 +17,78 @@ class StepCollectionService:
     def __init__(self, client: Any) -> None:
         self.client = client
 
+    def _collect_focus_anchor_labels(self, safe_focus_node: dict[str, Any], visible_label: str) -> list[str]:
+        anchors: list[str] = []
+        for value in (
+            visible_label,
+            safe_focus_node.get("talkbackLabel", "") if isinstance(safe_focus_node, dict) else "",
+            safe_focus_node.get("mergedLabel", "") if isinstance(safe_focus_node, dict) else "",
+            safe_focus_node.get("contentDescription", "") if isinstance(safe_focus_node, dict) else "",
+            safe_focus_node.get("text", "") if isinstance(safe_focus_node, dict) else "",
+        ):
+            text = str(value or "").strip()
+            if text and text not in anchors:
+                anchors.append(text)
+        return anchors
+
+    def _focus_affinity_score(self, speech: str, focus_anchor_labels: list[str]) -> int:
+        normalized_speech = self.client.normalize_for_comparison(speech)
+        if not normalized_speech:
+            return 0
+        best = 0
+        for label in focus_anchor_labels:
+            normalized_label = self.client.normalize_for_comparison(label)
+            if not normalized_label:
+                continue
+            if normalized_speech == normalized_label:
+                return 4
+            if normalized_speech.endswith(normalized_label) or normalized_speech.startswith(normalized_label):
+                best = max(best, 3)
+            elif normalized_label in normalized_speech:
+                best = max(best, 2)
+        return best
+
+    def _trim_context_to_focus_anchor(
+        self,
+        speech: str,
+        focus_anchor_labels: list[str],
+        icon_only_focus: bool,
+    ) -> tuple[str, bool, str]:
+        raw_speech = str(speech or "").strip()
+        normalized_speech = self.client.normalize_for_comparison(raw_speech)
+        if not raw_speech or not normalized_speech:
+            return raw_speech, False, "empty_speech"
+        if not focus_anchor_labels:
+            return raw_speech, False, "missing_focus_anchor"
+
+        best_anchor = ""
+        best_anchor_norm = ""
+        for anchor in focus_anchor_labels:
+            normalized_anchor = self.client.normalize_for_comparison(anchor)
+            if not normalized_anchor or normalized_anchor not in normalized_speech:
+                continue
+            if len(normalized_anchor) > len(best_anchor_norm):
+                best_anchor = str(anchor).strip()
+                best_anchor_norm = normalized_anchor
+        if not best_anchor:
+            return raw_speech, False, "focus_anchor_not_in_speech"
+        if normalized_speech == best_anchor_norm:
+            return raw_speech, False, "already_focus_aligned"
+
+        lower_speech = raw_speech.lower()
+        lower_anchor = best_anchor.lower()
+        anchor_index = lower_speech.rfind(lower_anchor)
+        if anchor_index < 0:
+            return raw_speech, False, "focus_anchor_raw_not_found"
+        prefix = raw_speech[:anchor_index].strip(" \t,.;:-")
+        suffix = raw_speech[anchor_index + len(best_anchor) :].strip(" \t,.;:-")
+        prefix_norm = self.client.normalize_for_comparison(prefix)
+        suffix_norm = self.client.normalize_for_comparison(suffix)
+        extra_token_count = len((prefix_norm + " " + suffix_norm).strip().split()) if (prefix_norm or suffix_norm) else 0
+        if extra_token_count < 2 and not (icon_only_focus and (prefix_norm or suffix_norm)):
+            return raw_speech, False, "context_tokens_too_short"
+        return best_anchor, True, "focus_anchor_context_trim"
+
     def collect_focus_step(
         self,
         dev: Any = None,
@@ -243,11 +315,45 @@ class StepCollectionService:
                     break
         step["visible_label"] = visible_label
         step["normalized_visible_label"] = self.client.normalize_for_comparison(visible_label)
+        focus_anchor_labels = self._collect_focus_anchor_labels(safe_focus_node, visible_label)
+        focus_tb_label = str(
+            safe_focus_node.get("talkbackLabel", "")
+            or safe_focus_node.get("mergedLabel", "")
+            or safe_focus_node.get("contentDescription", "")
+            or safe_focus_node.get("text", "")
+            or ""
+        ).strip()
+        focus_class_name = str(
+            safe_focus_node.get("className", "")
+            or safe_focus_node.get("class", "")
+            or ""
+        ).strip()
+        focus_resource_id = str(step.get("focus_view_id", "") or "").strip()
+        icon_only_focus = bool(
+            not self.client.normalize_for_comparison(visible_label)
+            and (
+                bool(focus_tb_label)
+                or "button" in focus_class_name.lower()
+                or "imagebutton" in focus_class_name.lower()
+                or "setting_button" in focus_resource_id.lower()
+            )
+        )
 
         snapshot_contaminated, snapshot_reason = self.client._is_contaminated_announcement_candidate(
             raw_snapshot_announcement,
             visible_label,
         )
+        if not snapshot_contaminated and focus_anchor_labels and raw_snapshot_announcement:
+            trimmed_snapshot, trimmed_snapshot_applied, _ = self._trim_context_to_focus_anchor(
+                raw_snapshot_announcement,
+                focus_anchor_labels,
+                icon_only_focus=icon_only_focus,
+            )
+            if trimmed_snapshot_applied:
+                raw_snapshot_announcement = trimmed_snapshot
+                snapshot_contaminated = True
+                snapshot_reason = "focus_anchor_context_trim_candidate"
+
         if step["merged_announcement"] and visible_label:
             trimmed_by_visible, visible_trim_applied, visible_trim_reason = self.client._try_trim_prefix_by_visible_anchor(
                 step["merged_announcement"],
@@ -269,16 +375,58 @@ class StepCollectionService:
                 step["trim_considered"] = True
                 step["trim_reject_reason"] = visible_trim_reason
 
+        if step["merged_announcement"] and focus_anchor_labels:
+            trimmed_by_focus, focus_trim_applied, focus_trim_reason = self._trim_context_to_focus_anchor(
+                str(step.get("merged_announcement", "") or ""),
+                focus_anchor_labels,
+                icon_only_focus=icon_only_focus,
+            )
+            if focus_trim_applied:
+                trim_before_value = str(step.get("merged_announcement", "") or "")
+                step["merged_announcement"] = trimmed_by_focus
+                step["normalized_announcement"] = self.client.normalize_for_comparison(trimmed_by_focus)
+                step["trim_considered"] = True
+                step["trim_applied"] = True
+                step["trim_before"] = trim_before_value
+                step["trim_after"] = trimmed_by_focus
+                step["trim_reason"] = focus_trim_reason
+                step["trim_reject_reason"] = ""
+                step["announcement_stable_reason"] = focus_trim_reason
+                step["announcement_stable_source"] = "trimmed_candidate"
+            elif not step.get("trim_reason"):
+                step["trim_considered"] = True
+                step["trim_reject_reason"] = focus_trim_reason
+
         used_snapshot = (
             self.client.normalize_for_comparison(str(step.get("merged_announcement", "") or ""))
             == self.client.normalize_for_comparison(raw_snapshot_announcement)
         )
         step["used_snapshot"] = bool(used_snapshot)
         step["snapshot_contaminated"] = bool(snapshot_contaminated)
-        if snapshot_contaminated:
-            step["snapshot_reason"] = snapshot_reason if not used_snapshot else "no_better_recent_poll_candidate_contaminated"
+        focus_final_affinity = self._focus_affinity_score(str(step.get("merged_announcement", "") or ""), focus_anchor_labels)
+        if step["used_snapshot"] and focus_anchor_labels and (
+            focus_final_affinity <= 1 or (icon_only_focus and focus_final_affinity < 3)
+        ):
+            fallback_focus_announcement = str(focus_tb_label or "").strip()
+            if fallback_focus_announcement:
+                step["merged_announcement"] = fallback_focus_announcement
+                step["normalized_announcement"] = self.client.normalize_for_comparison(fallback_focus_announcement)
+                step["used_snapshot"] = False
+                step["trim_considered"] = True
+                step["trim_applied"] = True
+                step["trim_before"] = str(step.get("trim_before", "") or raw_snapshot_announcement)
+                step["trim_after"] = fallback_focus_announcement
+                step["trim_reason"] = "focus_anchor_snapshot_reject"
+                step["trim_reject_reason"] = ""
+                step["announcement_stable_reason"] = "focus_anchor_snapshot_reject"
+                step["announcement_stable_source"] = "focus_label_fallback"
+                step["snapshot_reason"] = "focus_affinity_mismatch_snapshot_rejected"
+                step["snapshot_contaminated"] = True
+        if snapshot_contaminated and not str(step.get("snapshot_reason", "") or "").strip():
+            step["snapshot_reason"] = snapshot_reason if not step["used_snapshot"] else "no_better_recent_poll_candidate_contaminated"
         else:
-            step["snapshot_reason"] = "no_better_recent_poll_candidate" if used_snapshot else "not_used"
+            if not str(step.get("snapshot_reason", "") or "").strip():
+                step["snapshot_reason"] = "no_better_recent_poll_candidate" if step["used_snapshot"] else "not_used"
         self.client._debug_print(
             f"[ANN][trim] considered={str(step['trim_considered']).lower()} applied={str(step['trim_applied']).lower()} "
             f"before='{step['trim_before']}' after='{step['trim_after']}' reject_reason='{step['trim_reject_reason']}' "
