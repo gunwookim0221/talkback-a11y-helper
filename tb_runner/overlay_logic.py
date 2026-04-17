@@ -22,6 +22,7 @@ from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 
 
 OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v3"
+OVERLAY_REPEAT_GUARD_VERSION = "pr66-overlay-repeat-guard-v1"
 
 
 def _get_positive_int(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
@@ -461,6 +462,9 @@ def expand_overlay(
     overlay_previous_row: dict[str, Any] | None = None
     overlay_fail_count = 0
     overlay_same_count = 0
+    overlay_same_fingerprint_streak = 0
+    overlay_same_focus_streak = 0
+    overlay_repeat_warmup_rows = 2
     for overlay_step_idx in range(1, OVERLAY_MAX_STEPS + 1):
         overlay_row = client.collect_focus_step(
             dev=dev,
@@ -504,6 +508,11 @@ def expand_overlay(
         move_failed_without_focus_change = move_result in {"failed", "no_progress"} and (
             same_focus_triplet or same_overlay_fingerprint
         )
+        overlay_same_fingerprint_streak = (
+            overlay_same_fingerprint_streak + 1 if same_overlay_fingerprint else 0
+        )
+        overlay_same_focus_streak = overlay_same_focus_streak + 1 if same_focus_detected else 0
+        in_repeat_warmup = len(overlay_rows) < overlay_repeat_warmup_rows
 
         if same_focus_detected:
             log(
@@ -513,11 +522,21 @@ def expand_overlay(
             )
 
         forced_overlay_break_reason = ""
-        if move_failed_without_focus_change:
+        if move_failed_without_focus_change and not in_repeat_warmup:
             forced_overlay_break_reason = "move_failed_without_focus_change"
-        elif same_overlay_fingerprint:
+        elif (
+            same_overlay_fingerprint
+            and not in_repeat_warmup
+            and overlay_same_fingerprint_streak >= 2
+            and move_result in {"failed", "no_progress"}
+        ):
             forced_overlay_break_reason = "same_overlay_fingerprint"
-        elif same_focus_detected:
+        elif (
+            same_focus_detected
+            and not in_repeat_warmup
+            and overlay_same_focus_streak >= 2
+            and move_result in {"failed", "no_progress"}
+        ):
             forced_overlay_break_reason = "same_overlay_focus"
 
         if forced_overlay_break_reason:

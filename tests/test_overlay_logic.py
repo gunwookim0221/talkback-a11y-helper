@@ -251,7 +251,7 @@ def test_realign_focus_after_overlay_falls_back_to_prev_direction(monkeypatch):
     assert result["match_by"] == "view_id"
 
 
-def test_expand_overlay_breaks_on_same_overlay_fingerprint(monkeypatch):
+def test_expand_overlay_keeps_first_two_rows_even_when_fingerprint_repeats(monkeypatch):
     first = _step(
         step_index=1,
         label="Add device",
@@ -270,7 +270,7 @@ def test_expand_overlay_breaks_on_same_overlay_fingerprint(monkeypatch):
 
     monkeypatch.setattr(overlay_logic, "maybe_capture_focus_crop", lambda *_args, **_kwargs: _args[2])
     monkeypatch.setattr(overlay_logic, "save_excel_with_perf", lambda *args, **kwargs: None)
-    monkeypatch.setattr(overlay_logic, "OVERLAY_MAX_STEPS", 5)
+    monkeypatch.setattr(overlay_logic, "OVERLAY_MAX_STEPS", 2)
 
     overlay_rows = overlay_logic.expand_overlay(
         client=client,
@@ -284,8 +284,8 @@ def test_expand_overlay_breaks_on_same_overlay_fingerprint(monkeypatch):
         skip_entry_click=True,
     )
 
-    assert len(overlay_rows) == 1
-    assert overlay_rows[0]["stop_reason"] == "same_overlay_fingerprint"
+    assert len(overlay_rows) == 2
+    assert overlay_rows[0]["focus_view_id"] == overlay_rows[1]["focus_view_id"]
 
 
 def test_expand_overlay_keeps_collecting_when_focus_changes(monkeypatch):
@@ -316,3 +316,42 @@ def test_expand_overlay_keeps_collecting_when_focus_changes(monkeypatch):
 
     assert len(overlay_rows) == 2
     assert overlay_rows[0]["focus_view_id"] != overlay_rows[1]["focus_view_id"]
+
+
+def test_expand_overlay_breaks_on_repeated_fingerprint_with_no_progress(monkeypatch):
+    first = _step(step_index=1, label="Delete", view_id="id/title", bounds="10,10,40,40")
+    first["move_result"] = "ok"
+    second = first.copy()
+    second["step_index"] = 2
+    second["move_result"] = "ok"
+    third = first.copy()
+    third["step_index"] = 3
+    third["move_result"] = "no_progress"
+    fourth = first.copy()
+    fourth["step_index"] = 4
+    fourth["move_result"] = "no_progress"
+
+    client = _OverlayClient([first, second, third, fourth])
+    tab_cfg = {"tab_name": "Life"}
+    entry_step = _step(step_index=5, label="More options", view_id="id/more")
+    rows: list[dict[str, str]] = []
+    all_rows: list[dict[str, str]] = []
+
+    monkeypatch.setattr(overlay_logic, "maybe_capture_focus_crop", lambda *_args, **_kwargs: _args[2])
+    monkeypatch.setattr(overlay_logic, "save_excel_with_perf", lambda *args, **kwargs: None)
+    monkeypatch.setattr(overlay_logic, "OVERLAY_MAX_STEPS", 6)
+
+    overlay_rows = overlay_logic.expand_overlay(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        entry_step=entry_step,
+        rows=rows,
+        all_rows=all_rows,
+        output_path="out.xlsx",
+        output_base_dir="output",
+        skip_entry_click=True,
+    )
+
+    assert len(overlay_rows) == 2
+    assert overlay_rows[-1]["stop_reason"] in {"same_overlay_fingerprint", "move_failed_without_focus_change"}
