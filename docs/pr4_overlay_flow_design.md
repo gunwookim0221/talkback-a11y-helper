@@ -51,9 +51,9 @@
 
 ### 1-5. overlay break 조건
 - `expand_overlay` 내부 강제 break(should_stop 이전) 조건:
-  - `move_failed_without_focus_change`
-  - `same_overlay_fingerprint`
-  - `same_overlay_focus`
+  - `move_failed_without_focus_change` (overlay warmup 이후)
+  - `same_overlay_fingerprint` (overlay warmup 이후 + 연속 반복 + `no_progress/failed` 결합)
+  - `same_overlay_focus` (overlay warmup 이후 + 연속 반복 + `no_progress/failed` 결합)
 - 반복 징후 시 `[OVERLAY][repeat]`, 실제 break 시 `[OVERLAY][break]` 로그를 남긴다.
 - 강제 break가 없으면 overlay row를 append 후 `should_stop(...)`를 overlay 컨텍스트에서 다시 호출하여 종료를 판단한다.
 
