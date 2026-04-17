@@ -13,7 +13,7 @@ from tb_runner.constants import (
     OVERLAY_REALIGN_MAX_STEPS,
     OVERLAY_STEP_WAIT_SECONDS,
 )
-from tb_runner.diagnostics import should_stop
+from tb_runner.diagnostics import is_placeholder_row, should_stop
 from tb_runner.excel_report import save_excel
 from tb_runner.image_utils import maybe_capture_focus_crop
 from tb_runner.logging_utils import log
@@ -24,6 +24,7 @@ from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v3"
 OVERLAY_REPEAT_GUARD_VERSION = "pr66-overlay-repeat-guard-v3"
 OVERLAY_ADVANCEMENT_GUARD_VERSION = "pr67-overlay-advance-on-duplicate-v2"
+OVERLAY_ENTRY_ADVANCEMENT_VERSION = "pr68-overlay-entry-advancement-v1"
 
 
 def _get_positive_int(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
@@ -432,7 +433,7 @@ def expand_overlay(
     back_recovery_wait_seconds = _get_positive_float(tab_cfg, "back_recovery_wait_seconds", BACK_RECOVERY_WAIT_SECONDS)
     checkpoint_every = _get_positive_int(tab_cfg, "checkpoint_save_every", CHECKPOINT_SAVE_EVERY_STEPS)
     overlay_max_advancement_failures = _get_positive_int(tab_cfg, "overlay_max_advancement_failures", 4)
-    overlay_min_rows_before_stall = _get_positive_int(tab_cfg, "overlay_min_rows_before_stall", 3)
+    overlay_min_rows_before_stall = max(2, _get_positive_int(tab_cfg, "overlay_min_rows_before_stall", 3))
 
     entry_label = str(entry_step.get("visible_label", "") or "").strip()
     entry_view_id = str(entry_step.get("focus_view_id", "") or "").strip()
@@ -471,30 +472,51 @@ def expand_overlay(
     overlay_duplicate_streak = 0
     overlay_advancement_fail_streak = 0
     overlay_seen_fingerprints: set[str] = set()
-    for overlay_step_idx in range(1, OVERLAY_MAX_STEPS + 1):
-        if overlay_step_idx == 1 and isinstance(initial_overlay_step, dict):
-            overlay_row = dict(initial_overlay_step)
-            overlay_row["step_index"] = overlay_step_idx
-            overlay_row.setdefault("move_result", "post_click_probe")
-        else:
-            overlay_row = client.collect_focus_step(
-                dev=dev,
-                step_index=overlay_step_idx,
-                move=True,
-                direction="next",
-                wait_seconds=overlay_step_wait_seconds,
-                announcement_wait_seconds=overlay_announcement_wait_seconds,
-                announcement_idle_wait_seconds=overlay_announcement_idle_wait_seconds,
-                announcement_max_extra_wait_seconds=overlay_announcement_max_extra_wait_seconds,
-            )
-        overlay_row["tab_name"] = tab_cfg["tab_name"]
-        overlay_row["context_type"] = "overlay"
-        overlay_row["parent_step_index"] = parent_step_index
-        overlay_row["overlay_entry_label"] = entry_label
-        overlay_row["overlay_recovery_status"] = ""
-        overlay_row["status"] = "OK"
-        overlay_row["stop_reason"] = ""
-        overlay_row["crop_image"] = "IMAGE"
+    def _prepare_overlay_row(row: dict[str, Any], step_index: int) -> dict[str, Any]:
+        row["step_index"] = step_index
+        row["tab_name"] = tab_cfg["tab_name"]
+        row["context_type"] = "overlay"
+        row["parent_step_index"] = parent_step_index
+        row["overlay_entry_label"] = entry_label
+        row["overlay_recovery_status"] = ""
+        row["status"] = "OK"
+        row["stop_reason"] = ""
+        row["crop_image"] = "IMAGE"
+        return row
+
+    next_overlay_step_idx = 1
+    if isinstance(initial_overlay_step, dict):
+        initial_row = _prepare_overlay_row(dict(initial_overlay_step), next_overlay_step_idx)
+        initial_row.setdefault("move_result", "post_click_probe")
+        has_initial_payload = bool(
+            str(initial_row.get("visible_label", "") or "").strip()
+            or str(initial_row.get("merged_announcement", "") or "").strip()
+        )
+        if has_initial_payload and not is_placeholder_row(initial_row):
+            initial_row["_step_mono_start"] = time.monotonic() - float(initial_row.get("t_step_start", 0.0) or 0.0)
+            initial_row = maybe_capture_focus_crop(client, dev, initial_row, output_base_dir)
+            initial_row.pop("_step_mono_start", None)
+            overlay_rows.append(initial_row)
+            rows.append(initial_row)
+            all_rows.append(initial_row)
+            initial_overlay_fp = build_row_fingerprint(initial_row)
+            if initial_overlay_fp:
+                overlay_seen_fingerprints.add(initial_overlay_fp)
+            overlay_previous_row = initial_row
+            next_overlay_step_idx = 2
+
+    for overlay_step_idx in range(next_overlay_step_idx, OVERLAY_MAX_STEPS + 1):
+        overlay_row = client.collect_focus_step(
+            dev=dev,
+            step_index=overlay_step_idx,
+            move=True,
+            direction="next",
+            wait_seconds=overlay_step_wait_seconds,
+            announcement_wait_seconds=overlay_announcement_wait_seconds,
+            announcement_idle_wait_seconds=overlay_announcement_idle_wait_seconds,
+            announcement_max_extra_wait_seconds=overlay_announcement_max_extra_wait_seconds,
+        )
+        overlay_row = _prepare_overlay_row(overlay_row, overlay_step_idx)
 
         previous_overlay_fingerprint = build_row_fingerprint(overlay_previous_row or {})
         current_overlay_fingerprint = build_row_fingerprint(overlay_row)
@@ -523,6 +545,47 @@ def expand_overlay(
             str((overlay_previous_row or {}).get("focus_bounds", "") or "").strip()
             == str(overlay_row.get("focus_bounds", "") or "").strip()
         )
+        previous_class_name = str(
+            (overlay_previous_row or {}).get("focus_class_name", "")
+            or (overlay_previous_row or {}).get("class_name", "")
+            or (overlay_previous_row or {}).get("className", "")
+            or ""
+        ).strip()
+        current_class_name = str(
+            overlay_row.get("focus_class_name", "")
+            or overlay_row.get("class_name", "")
+            or overlay_row.get("className", "")
+            or ""
+        ).strip()
+        same_class_name = bool(overlay_previous_row) and (previous_class_name == current_class_name)
+        previous_clickable = str(
+            (overlay_previous_row or {}).get("focus_clickable", "")
+            or (overlay_previous_row or {}).get("clickable", "")
+            or ""
+        ).strip().lower() in {"1", "true", "t", "yes", "y"}
+        current_clickable = str(
+            overlay_row.get("focus_clickable", "")
+            or overlay_row.get("clickable", "")
+            or ""
+        ).strip().lower() in {"1", "true", "t", "yes", "y"}
+        title_like_focus = any(
+            token in str(overlay_row.get("focus_view_id", "") or "").strip().lower()
+            for token in ("tvheadertitle", "title", "label")
+        )
+        actionable_changed = bool(overlay_previous_row) and any(
+            [
+                not same_resource_id,
+                not same_bounds,
+                not same_class_name,
+                previous_clickable != current_clickable,
+            ]
+        )
+        strong_same_focus_detected = same_focus_triplet and same_resource_id and same_bounds
+        repeat_requires_stall = bool(
+            strong_same_focus_detected
+            and not actionable_changed
+            and (not title_like_focus or (same_resource_id and same_bounds and same_class_name))
+        )
         same_overlay_context = bool(overlay_previous_row) and (
             str((overlay_previous_row or {}).get("context_type", "") or "").strip()
             == str(overlay_row.get("context_type", "") or "").strip()
@@ -544,9 +607,10 @@ def expand_overlay(
         move_result = str(overlay_row.get("move_result", "") or "").strip().lower()
         overlay_row_fingerprint = build_row_fingerprint(overlay_row)
         seen_overlay_row = bool(overlay_row_fingerprint) and overlay_row_fingerprint in overlay_seen_fingerprints
-        strong_same_focus_detected = same_focus_triplet and same_resource_id and same_bounds
-        advancement_failed = move_result in {"failed", "no_progress"} or (
-            strong_same_focus_detected and len(overlay_rows) >= overlay_min_rows_before_stall
+        can_stall_overlay = len(overlay_rows) >= 2
+        advancement_failed = can_stall_overlay and (
+            (move_result in {"failed", "no_progress"} and not actionable_changed)
+            or (repeat_requires_stall and len(overlay_rows) >= overlay_min_rows_before_stall)
         )
         overlay_advancement_fail_streak = overlay_advancement_fail_streak + 1 if advancement_failed else 0
         overlay_same_fingerprint_streak = (

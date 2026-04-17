@@ -398,7 +398,7 @@ def test_expand_overlay_does_not_stall_on_repeated_label_only(monkeypatch):
     assert overlay_rows[-1]["visible_label"] == "Import QR code"
 
 
-def test_expand_overlay_breaks_on_repeated_fingerprint_with_no_progress(monkeypatch):
+def test_expand_overlay_keeps_trying_before_two_rows_even_with_no_progress(monkeypatch):
     first = _step(step_index=1, label="Delete", view_id="id/title", bounds="10,10,40,40")
     first["move_result"] = "ok"
     second = first.copy()
@@ -434,9 +434,38 @@ def test_expand_overlay_breaks_on_repeated_fingerprint_with_no_progress(monkeypa
     )
 
     assert len(overlay_rows) == 1
-    assert overlay_rows[-1]["stop_reason"] in {
-        "overlay_advancement_stalled",
-    }
+    assert overlay_rows[-1]["stop_reason"] == ""
+
+
+def test_expand_overlay_no_progress_with_actionable_change_is_not_stall(monkeypatch):
+    first = _step(step_index=1, label="Sort", view_id="id/title", bounds="10,10,40,40")
+    second = _step(step_index=2, label="Sort", view_id="id/title", bounds="10,50,40,80")
+    second["move_result"] = "no_progress"
+
+    client = _OverlayClient([first, second])
+    tab_cfg = {"tab_name": "Routines", "overlay_max_advancement_failures": 1}
+    entry_step = _step(step_index=3, label="More options", view_id="id/more")
+    rows: list[dict[str, str]] = []
+    all_rows: list[dict[str, str]] = []
+
+    monkeypatch.setattr(overlay_logic, "maybe_capture_focus_crop", lambda *_args, **_kwargs: _args[2])
+    monkeypatch.setattr(overlay_logic, "save_excel_with_perf", lambda *args, **kwargs: None)
+    monkeypatch.setattr(overlay_logic, "OVERLAY_MAX_STEPS", 2)
+
+    overlay_rows = overlay_logic.expand_overlay(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        entry_step=entry_step,
+        rows=rows,
+        all_rows=all_rows,
+        output_path="out.xlsx",
+        output_base_dir="output",
+        skip_entry_click=True,
+    )
+
+    assert len(overlay_rows) == 2
+    assert overlay_rows[-1]["focus_bounds"] == "10,50,40,80"
 
 
 def test_expand_overlay_keeps_initial_post_click_focus_as_first_row(monkeypatch):
