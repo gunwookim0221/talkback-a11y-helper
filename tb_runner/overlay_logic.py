@@ -23,7 +23,7 @@ from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 
 OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v3"
 OVERLAY_TRAVERSAL_CORE_VERSION = "pr70-overlay-traversal-core-v2"
-OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr70-overlay-first-row-debug-v4"
+OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr70-overlay-first-row-debug-v5"
 
 
 def _get_positive_int(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
@@ -651,9 +651,19 @@ def expand_overlay(
                 or str(entry_step.get("focus_bounds", "") or "").strip()
             )
             first_row.setdefault("move_result", "post_click_probe")
-            _save_overlay_row(first_row, next_overlay_step_idx)
-            overlay_previous_row = overlay_rows[-1]
+            first_row["_step_mono_start"] = time.monotonic() - float(first_row.get("t_step_start", 0.0) or 0.0)
+            first_row.pop("_step_mono_start", None)
+            first_row.setdefault("req_id", str(entry_step.get("req_id", "") or ""))
+            first_row.setdefault("scenario_id", str(entry_step.get("scenario_id", "") or ""))
+            first_row.setdefault("tab", str(entry_step.get("tab", "") or tab_cfg.get("tab_name", "")))
+            first_row.setdefault("debug", str(first_row.get("debug", "") or ""))
+            overlay_rows.append(first_row)
+            rows.append(first_row)
+            all_rows.append(first_row)
+            overlay_previous_row = first_row
             first_row_saved_fp = build_row_fingerprint(overlay_previous_row)
+            if first_row_saved_fp:
+                overlay_seen_fingerprints.add(first_row_saved_fp)
             first_row_saved_snapshot = {
                 "visible": str(overlay_previous_row.get("visible_label", "") or "").strip(),
                 "resource_id": str(overlay_previous_row.get("focus_view_id", "") or "").strip(),
