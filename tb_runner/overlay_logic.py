@@ -23,7 +23,7 @@ from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 
 OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v3"
 OVERLAY_TRAVERSAL_CORE_VERSION = "pr70-overlay-traversal-core-v2"
-OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr70-overlay-first-row-debug-v1"
+OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr70-overlay-first-row-debug-v2"
 
 
 def _get_positive_int(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
@@ -490,8 +490,10 @@ def expand_overlay(
         row_overlay_label = str(row.get("overlay_entry_label", "") or "").strip()
         return row_context == "overlay" and row_overlay_label == entry_label
 
-    def _pick_first_overlay_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
-        ranked_candidates: list[tuple[int, dict[str, Any]]] = []
+    def _pick_first_overlay_candidate(
+        candidates: list[dict[str, Any]],
+        post_click_row: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
         rejected_reasons: list[str] = []
         candidate_debug_parts: list[str] = []
         for idx, candidate in enumerate(candidates):
@@ -521,53 +523,62 @@ def expand_overlay(
                     "score=0,chosen=false,why='invalid')"
                 )
                 continue
-            has_view_id = bool(resource_id)
-            has_label = bool(visible_label)
-            has_speech = bool(merged_announcement)
-            rank = 0
-            rank_why: list[str] = []
-            if has_label:
-                rank += 4
-                rank_why.append("label+4")
-            if has_view_id:
-                rank += 2
-                rank_why.append("view_id+2")
-            if has_speech:
-                rank += 1
-                rank_why.append("speech+1")
-            order_bonus = max(0, 4 - idx)
-            rank += order_bonus
-            if order_bonus:
-                rank_why.append(f"order+{order_bonus}")
-            ranked_candidates.append((rank, prepared))
             candidate_debug_parts.append(
                 f"candidate#{idx}(visible='{visible_label}',speech='{merged_announcement}',resource_id='{resource_id}',"
                 f"bounds='{bounds}',class_name='{class_name}',clickable={str(clickable).lower()},"
                 f"overlay_context_match={str(overlay_context_match).lower()},placeholder={str(placeholder).lower()},"
-                f"score={rank},chosen=false,why='{'+'.join(rank_why)}')"
+                "chosen=false,why='valid_priority_candidate')"
             )
-        if not ranked_candidates:
+            selected_row = prepared
+            selected_fp = build_row_fingerprint(selected_row)
             log(
                 f"[OVERLAY][first_row_pick] scenario='{tab_cfg.get('tab_name', '')}' post_label='{entry_label}' "
-                f"candidate_count={len(candidates)} selected=false reason='no_valid_candidate' "
-                f"candidates=[{'; '.join(candidate_debug_parts)}] rejected=[{', '.join(rejected_reasons)}] "
+                f"candidate_count={len(candidates)} selected=true selected_visible='{selected_row.get('visible_label', '')}' "
+                f"selected_speech='{selected_row.get('merged_announcement', '')}' "
+                f"selected_resource_id='{selected_row.get('focus_view_id', '')}' "
+                f"selected_bounds='{selected_row.get('focus_bounds', '')}' selected_fp='{selected_fp}' "
+                f"selected_source='candidate#{idx}' candidates=[{'; '.join(candidate_debug_parts)}] "
                 f"debug='{OVERLAY_FIRST_ROW_DEBUG_VERSION}'",
                 level="DEBUG",
             )
-            return None
-        ranked_candidates.sort(key=lambda item: item[0], reverse=True)
-        selected_row = ranked_candidates[0][1]
-        selected_fp = build_row_fingerprint(selected_row)
+            return selected_row
+
+        if isinstance(post_click_row, dict):
+            post_label = str(post_click_row.get("visible_label", "") or "").strip()
+            post_speech = str(post_click_row.get("merged_announcement", "") or "").strip()
+            if post_label or post_speech:
+                synthetic_row = dict(post_click_row)
+                synthetic_row["visible_label"] = post_label or post_speech
+                synthetic_row["merged_announcement"] = post_speech or synthetic_row["visible_label"]
+                synthetic_row["focus_view_id"] = str(synthetic_row.get("focus_view_id", "") or "").strip() or "synthetic:post_label_only"
+                synthetic_row["focus_bounds"] = (
+                    str(synthetic_row.get("focus_bounds", "") or "").strip()
+                    or str(entry_step.get("focus_bounds", "") or "").strip()
+                )
+                synthetic_row = _prepare_overlay_row(synthetic_row, next_overlay_step_idx)
+                if _is_valid_first_overlay_row(synthetic_row):
+                    selected_fp = build_row_fingerprint(synthetic_row)
+                    log(
+                        f"[OVERLAY][first_row_pick] scenario='{tab_cfg.get('tab_name', '')}' post_label='{entry_label}' "
+                        f"candidate_count={len(candidates)} selected=true selected_visible='{synthetic_row.get('visible_label', '')}' "
+                        f"selected_speech='{synthetic_row.get('merged_announcement', '')}' "
+                        f"selected_resource_id='{synthetic_row.get('focus_view_id', '')}' "
+                        f"selected_bounds='{synthetic_row.get('focus_bounds', '')}' selected_fp='{selected_fp}' "
+                        "selected_source='synthetic_post_label_only' "
+                        f"candidates=[{'; '.join(candidate_debug_parts)}] rejected=[{', '.join(rejected_reasons)}] "
+                        f"debug='{OVERLAY_FIRST_ROW_DEBUG_VERSION}'",
+                        level="DEBUG",
+                    )
+                    return synthetic_row
+
         log(
             f"[OVERLAY][first_row_pick] scenario='{tab_cfg.get('tab_name', '')}' post_label='{entry_label}' "
-            f"candidate_count={len(candidates)} selected=true selected_visible='{selected_row.get('visible_label', '')}' "
-            f"selected_speech='{selected_row.get('merged_announcement', '')}' "
-            f"selected_resource_id='{selected_row.get('focus_view_id', '')}' "
-            f"selected_bounds='{selected_row.get('focus_bounds', '')}' selected_fp='{selected_fp}' "
-            f"candidates=[{'; '.join(candidate_debug_parts)}] debug='{OVERLAY_FIRST_ROW_DEBUG_VERSION}'",
+            f"candidate_count={len(candidates)} selected=false reason='no_valid_candidate' "
+            f"candidates=[{'; '.join(candidate_debug_parts)}] rejected=[{', '.join(rejected_reasons)}] "
+            f"debug='{OVERLAY_FIRST_ROW_DEBUG_VERSION}'",
             level="DEBUG",
         )
-        return selected_row
+        return None
 
     def _prepare_overlay_row(row: dict[str, Any], step_index: int) -> dict[str, Any]:
         row["step_index"] = step_index
@@ -599,6 +610,7 @@ def expand_overlay(
 
     next_overlay_step_idx = 1
     first_candidates: list[dict[str, Any]] = []
+    post_click_step: dict[str, Any] | None = None
     if isinstance(initial_overlay_step, dict):
         first_candidates.append(dict(initial_overlay_step))
     if not skip_entry_click:
@@ -617,7 +629,7 @@ def expand_overlay(
     first_selected = False
     first_row_saved_fp = ""
     first_row_saved_snapshot: dict[str, str] = {}
-    first_row = _pick_first_overlay_candidate(first_candidates)
+    first_row = _pick_first_overlay_candidate(first_candidates, post_click_step)
     first_selected = first_row is not None
     log(
         f"[OVERLAY][first_row_save_attempt] scenario='{tab_cfg.get('tab_name', '')}' "
