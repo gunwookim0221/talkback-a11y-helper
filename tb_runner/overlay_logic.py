@@ -23,7 +23,7 @@ from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 
 OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v3"
 OVERLAY_TRAVERSAL_CORE_VERSION = "pr70-overlay-traversal-core-v2"
-OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr70-overlay-first-row-debug-v5"
+OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr70-overlay-first-row-debug-v6"
 
 
 def _get_positive_int(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
@@ -556,11 +556,21 @@ def expand_overlay(
                 synthetic_row = dict(post_click_row)
                 synthetic_row["visible_label"] = post_label or post_speech
                 synthetic_row["merged_announcement"] = post_speech or synthetic_row["visible_label"]
-                synthetic_row["focus_view_id"] = str(synthetic_row.get("focus_view_id", "") or "").strip() or "synthetic:post_label_only"
+                synthetic_row["speech"] = synthetic_row["merged_announcement"]
+                synthetic_row["focus_view_id"] = _normalize_optional_id(synthetic_row.get("focus_view_id", ""))
                 synthetic_row["focus_bounds"] = (
                     str(synthetic_row.get("focus_bounds", "") or "").strip()
                     or str(entry_step.get("focus_bounds", "") or "").strip()
                 )
+                synthetic_row["req_id"] = str(
+                    synthetic_row.get("req_id", "") or entry_step.get("req_id", "") or ""
+                ).strip()
+                synthetic_row["scenario_id"] = str(
+                    synthetic_row.get("scenario_id", "") or entry_step.get("scenario_id", "") or ""
+                ).strip()
+                synthetic_row["tab"] = str(
+                    synthetic_row.get("tab", "") or entry_step.get("tab", "") or tab_cfg.get("tab_name", "")
+                ).strip()
                 synthetic_row = _prepare_overlay_row(synthetic_row, next_overlay_step_idx)
                 if _is_valid_first_overlay_row(synthetic_row):
                     selected_fp = build_row_fingerprint(synthetic_row)
@@ -645,25 +655,22 @@ def expand_overlay(
             first_row = _prepare_overlay_row(dict(post_click_step), next_overlay_step_idx)
             first_row["visible_label"] = post_label or post_speech
             first_row["merged_announcement"] = post_speech or first_row["visible_label"]
+            first_row["speech"] = first_row["merged_announcement"]
             first_row["focus_view_id"] = ""
             first_row["focus_bounds"] = (
                 str(first_row.get("focus_bounds", "") or "").strip()
                 or str(entry_step.get("focus_bounds", "") or "").strip()
             )
             first_row.setdefault("move_result", "post_click_probe")
-            first_row["_step_mono_start"] = time.monotonic() - float(first_row.get("t_step_start", 0.0) or 0.0)
-            first_row.pop("_step_mono_start", None)
-            first_row.setdefault("req_id", str(entry_step.get("req_id", "") or ""))
-            first_row.setdefault("scenario_id", str(entry_step.get("scenario_id", "") or ""))
-            first_row.setdefault("tab", str(entry_step.get("tab", "") or tab_cfg.get("tab_name", "")))
+            first_row["req_id"] = str(first_row.get("req_id", "") or entry_step.get("req_id", "") or "").strip()
+            first_row["scenario_id"] = str(
+                first_row.get("scenario_id", "") or entry_step.get("scenario_id", "") or ""
+            ).strip()
+            first_row["tab"] = str(first_row.get("tab", "") or entry_step.get("tab", "") or tab_cfg.get("tab_name", "")).strip()
             first_row.setdefault("debug", str(first_row.get("debug", "") or ""))
-            overlay_rows.append(first_row)
-            rows.append(first_row)
-            all_rows.append(first_row)
-            overlay_previous_row = first_row
+            _save_overlay_row(first_row, next_overlay_step_idx)
+            overlay_previous_row = overlay_rows[-1]
             first_row_saved_fp = build_row_fingerprint(overlay_previous_row)
-            if first_row_saved_fp:
-                overlay_seen_fingerprints.add(first_row_saved_fp)
             first_row_saved_snapshot = {
                 "visible": str(overlay_previous_row.get("visible_label", "") or "").strip(),
                 "resource_id": str(overlay_previous_row.get("focus_view_id", "") or "").strip(),
