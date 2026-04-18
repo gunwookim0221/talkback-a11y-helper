@@ -23,7 +23,7 @@ from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 
 OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v3"
 OVERLAY_TRAVERSAL_CORE_VERSION = "pr70-overlay-traversal-core-v2"
-OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr70-overlay-first-row-debug-v2"
+OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr70-overlay-first-row-debug-v3"
 
 
 def _get_positive_int(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
@@ -629,8 +629,48 @@ def expand_overlay(
     first_selected = False
     first_row_saved_fp = ""
     first_row_saved_snapshot: dict[str, str] = {}
-    first_row = _pick_first_overlay_candidate(first_candidates, post_click_step)
-    first_selected = first_row is not None
+    first_row: dict[str, Any] | None = None
+    if isinstance(post_click_step, dict):
+        post_label = str(post_click_step.get("visible_label", "") or "").strip()
+        post_speech = str(post_click_step.get("merged_announcement", "") or "").strip()
+        post_view_id = str(post_click_step.get("focus_view_id", "") or "").strip()
+        if (post_label or post_speech) and not post_view_id:
+            first_selected = True
+            first_row = _prepare_overlay_row(dict(post_click_step), next_overlay_step_idx)
+            first_row["visible_label"] = post_label or post_speech
+            first_row["merged_announcement"] = post_speech or first_row["visible_label"]
+            first_row["focus_view_id"] = ""
+            first_row["focus_bounds"] = (
+                str(first_row.get("focus_bounds", "") or "").strip()
+                or str(entry_step.get("focus_bounds", "") or "").strip()
+            )
+            first_row.setdefault("move_result", "post_click_probe")
+            _save_overlay_row(first_row, next_overlay_step_idx)
+            overlay_previous_row = overlay_rows[-1]
+            first_row_saved_fp = build_row_fingerprint(overlay_previous_row)
+            first_row_saved_snapshot = {
+                "visible": str(overlay_previous_row.get("visible_label", "") or "").strip(),
+                "resource_id": str(overlay_previous_row.get("focus_view_id", "") or "").strip(),
+                "bounds": str(overlay_previous_row.get("focus_bounds", "") or "").strip(),
+                "fingerprint": first_row_saved_fp,
+            }
+            next_overlay_step_idx += 1
+            first_saved = True
+            log(
+                f"[OVERLAY][first_row_pick] scenario='{tab_cfg.get('tab_name', '')}' post_label='{entry_label}' "
+                "candidate_count=0 selected=true selected_source='immediate_post_label_only_append' "
+                f"selected_visible='{first_row_saved_snapshot.get('visible', '')}' "
+                f"selected_speech='{str((overlay_previous_row or {}).get('merged_announcement', '') or '').strip()}' "
+                f"selected_resource_id='{first_row_saved_snapshot.get('resource_id', '')}' "
+                f"selected_bounds='{first_row_saved_snapshot.get('bounds', '')}' "
+                f"selected_fp='{first_row_saved_snapshot.get('fingerprint', '')}' "
+                f"debug='{OVERLAY_FIRST_ROW_DEBUG_VERSION}'",
+                level="DEBUG",
+            )
+
+    if not first_saved:
+        first_row = _pick_first_overlay_candidate(first_candidates, post_click_step)
+        first_selected = first_row is not None
     log(
         f"[OVERLAY][first_row_save_attempt] scenario='{tab_cfg.get('tab_name', '')}' "
         f"selected={str(first_selected).lower()} visible='{str((first_row or {}).get('visible_label', '') or '').strip()}' "
@@ -643,7 +683,7 @@ def expand_overlay(
         f"debug='{OVERLAY_FIRST_ROW_DEBUG_VERSION}'",
         level="DEBUG",
     )
-    if first_row is not None:
+    if first_row is not None and not first_saved:
         first_row.setdefault("move_result", "post_click_probe")
         _save_overlay_row(first_row, next_overlay_step_idx)
         overlay_previous_row = overlay_rows[-1]
