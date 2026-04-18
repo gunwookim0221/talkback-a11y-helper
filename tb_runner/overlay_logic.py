@@ -23,6 +23,7 @@ from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 
 OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v3"
 OVERLAY_TRAVERSAL_CORE_VERSION = "pr70-overlay-traversal-core-v2"
+OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr70-overlay-first-row-debug-v1"
 
 
 def _get_positive_int(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
@@ -462,6 +463,8 @@ def expand_overlay(
     overlay_previous_row: dict[str, Any] | None = None
     overlay_seen_fingerprints: set[str] = set()
     duplicate_streak = 0
+    loop_break_reason = ""
+    duplicate_break_reached = False
 
     def _to_boolish(value: Any) -> bool:
         return str(value or "").strip().lower() in {"1", "true", "t", "yes", "y"}
@@ -489,26 +492,82 @@ def expand_overlay(
 
     def _pick_first_overlay_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
         ranked_candidates: list[tuple[int, dict[str, Any]]] = []
+        rejected_reasons: list[str] = []
+        candidate_debug_parts: list[str] = []
         for idx, candidate in enumerate(candidates):
             prepared = _prepare_overlay_row(candidate, next_overlay_step_idx)
-            if not _is_valid_first_overlay_row(prepared):
+            visible_label = str(prepared.get("visible_label", "") or "").strip()
+            merged_announcement = str(prepared.get("merged_announcement", "") or "").strip()
+            resource_id = str(prepared.get("focus_view_id", "") or "").strip()
+            bounds = str(prepared.get("focus_bounds", "") or "").strip()
+            class_name = str(prepared.get("focus_class_name", "") or prepared.get("class_name", "") or "").strip()
+            clickable = _to_boolish(prepared.get("focus_clickable", "") or prepared.get("clickable", ""))
+            placeholder = is_placeholder_row(prepared)
+            row_context = str(prepared.get("context_type", "") or "").strip()
+            row_overlay_label = str(prepared.get("overlay_entry_label", "") or "").strip()
+            overlay_context_match = row_context == "overlay" and row_overlay_label == entry_label
+            has_payload = bool(visible_label or merged_announcement)
+            if not has_payload or placeholder or not overlay_context_match:
+                if not has_payload:
+                    rejected_reasons.append(f"candidate#{idx}:no_payload")
+                elif placeholder:
+                    rejected_reasons.append(f"candidate#{idx}:placeholder")
+                else:
+                    rejected_reasons.append(f"candidate#{idx}:overlay_context_mismatch")
+                candidate_debug_parts.append(
+                    f"candidate#{idx}(visible='{visible_label}',speech='{merged_announcement}',resource_id='{resource_id}',"
+                    f"bounds='{bounds}',class_name='{class_name}',clickable={str(clickable).lower()},"
+                    f"overlay_context_match={str(overlay_context_match).lower()},placeholder={str(placeholder).lower()},"
+                    "score=0,chosen=false,why='invalid')"
+                )
                 continue
-            has_view_id = bool(str(prepared.get("focus_view_id", "") or "").strip())
-            has_label = bool(str(prepared.get("visible_label", "") or "").strip())
-            has_speech = bool(str(prepared.get("merged_announcement", "") or "").strip())
+            has_view_id = bool(resource_id)
+            has_label = bool(visible_label)
+            has_speech = bool(merged_announcement)
             rank = 0
+            rank_why: list[str] = []
             if has_label:
                 rank += 4
+                rank_why.append("label+4")
             if has_view_id:
                 rank += 2
+                rank_why.append("view_id+2")
             if has_speech:
                 rank += 1
-            rank += max(0, 4 - idx)
+                rank_why.append("speech+1")
+            order_bonus = max(0, 4 - idx)
+            rank += order_bonus
+            if order_bonus:
+                rank_why.append(f"order+{order_bonus}")
             ranked_candidates.append((rank, prepared))
+            candidate_debug_parts.append(
+                f"candidate#{idx}(visible='{visible_label}',speech='{merged_announcement}',resource_id='{resource_id}',"
+                f"bounds='{bounds}',class_name='{class_name}',clickable={str(clickable).lower()},"
+                f"overlay_context_match={str(overlay_context_match).lower()},placeholder={str(placeholder).lower()},"
+                f"score={rank},chosen=false,why='{'+'.join(rank_why)}')"
+            )
         if not ranked_candidates:
+            log(
+                f"[OVERLAY][first_row_pick] scenario='{tab_cfg.get('tab_name', '')}' post_label='{entry_label}' "
+                f"candidate_count={len(candidates)} selected=false reason='no_valid_candidate' "
+                f"candidates=[{'; '.join(candidate_debug_parts)}] rejected=[{', '.join(rejected_reasons)}] "
+                f"debug='{OVERLAY_FIRST_ROW_DEBUG_VERSION}'",
+                level="DEBUG",
+            )
             return None
         ranked_candidates.sort(key=lambda item: item[0], reverse=True)
-        return ranked_candidates[0][1]
+        selected_row = ranked_candidates[0][1]
+        selected_fp = build_row_fingerprint(selected_row)
+        log(
+            f"[OVERLAY][first_row_pick] scenario='{tab_cfg.get('tab_name', '')}' post_label='{entry_label}' "
+            f"candidate_count={len(candidates)} selected=true selected_visible='{selected_row.get('visible_label', '')}' "
+            f"selected_speech='{selected_row.get('merged_announcement', '')}' "
+            f"selected_resource_id='{selected_row.get('focus_view_id', '')}' "
+            f"selected_bounds='{selected_row.get('focus_bounds', '')}' selected_fp='{selected_fp}' "
+            f"candidates=[{'; '.join(candidate_debug_parts)}] debug='{OVERLAY_FIRST_ROW_DEBUG_VERSION}'",
+            level="DEBUG",
+        )
+        return selected_row
 
     def _prepare_overlay_row(row: dict[str, Any], step_index: int) -> dict[str, Any]:
         row["step_index"] = step_index
@@ -555,13 +614,46 @@ def expand_overlay(
         first_candidates.append(post_click_step)
 
     first_saved = False
+    first_selected = False
+    first_row_saved_fp = ""
+    first_row_saved_snapshot: dict[str, str] = {}
     first_row = _pick_first_overlay_candidate(first_candidates)
+    first_selected = first_row is not None
+    log(
+        f"[OVERLAY][first_row_save_attempt] scenario='{tab_cfg.get('tab_name', '')}' "
+        f"selected={str(first_selected).lower()} visible='{str((first_row or {}).get('visible_label', '') or '').strip()}' "
+        f"speech='{str((first_row or {}).get('merged_announcement', '') or '').strip()}' "
+        f"resource_id='{str((first_row or {}).get('focus_view_id', '') or '').strip()}' "
+        f"bounds='{str((first_row or {}).get('focus_bounds', '') or '').strip()}' "
+        f"title_skip_applied=false dedup_applied=false append_attempted={str(first_selected).lower()} "
+        f"append_allowed={str(first_selected).lower()} "
+        f"save_block_reason='{'no_selected_candidate' if not first_selected else ''}' "
+        f"debug='{OVERLAY_FIRST_ROW_DEBUG_VERSION}'",
+        level="DEBUG",
+    )
     if first_row is not None:
         first_row.setdefault("move_result", "post_click_probe")
         _save_overlay_row(first_row, next_overlay_step_idx)
         overlay_previous_row = overlay_rows[-1]
+        first_row_saved_fp = build_row_fingerprint(overlay_previous_row)
+        first_row_saved_snapshot = {
+            "visible": str(overlay_previous_row.get("visible_label", "") or "").strip(),
+            "resource_id": str(overlay_previous_row.get("focus_view_id", "") or "").strip(),
+            "bounds": str(overlay_previous_row.get("focus_bounds", "") or "").strip(),
+            "fingerprint": first_row_saved_fp,
+        }
         next_overlay_step_idx += 1
         first_saved = True
+    log(
+        f"[OVERLAY][first_row_saved] scenario='{tab_cfg.get('tab_name', '')}' saved={str(first_saved).lower()} "
+        f"saved_step_index={next_overlay_step_idx - 1 if first_saved else 0} "
+        f"visible='{first_row_saved_snapshot.get('visible', '')}' "
+        f"speech='{str((overlay_previous_row or {}).get('merged_announcement', '') or '').strip() if first_saved else ''}' "
+        f"resource_id='{first_row_saved_snapshot.get('resource_id', '')}' bounds='{first_row_saved_snapshot.get('bounds', '')}' "
+        f"fingerprint='{first_row_saved_snapshot.get('fingerprint', '')}' total_overlay_rows_after_save={len(overlay_rows)} "
+        f"overlay_seen_fingerprints_size={len(overlay_seen_fingerprints)} debug='{OVERLAY_FIRST_ROW_DEBUG_VERSION}'",
+        level="DEBUG",
+    )
 
     log(
         f"[OVERLAY][first_row] scenario='{tab_cfg.get('tab_name', '')}' saved={str(first_saved).lower()} "
@@ -582,45 +674,76 @@ def expand_overlay(
         )
         overlay_row = _prepare_overlay_row(overlay_row, overlay_step_idx)
         move_result = str(overlay_row.get("move_result", "") or "").strip().lower()
+        current_overlay_fp = build_row_fingerprint(overlay_row)
+        skip_duplicate_row = False
+        title_node = False
         if move_result.startswith("failed"):
             log(f"[OVERLAY][break] reason='move_failed' step={overlay_step_idx}")
             if overlay_previous_row:
                 overlay_previous_row["status"] = "END"
                 overlay_previous_row["stop_reason"] = "overlay_move_failed"
+            loop_break_reason = "move_failed"
             save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
             break
 
         if _is_title_like_row(overlay_row):
+            title_node = True
             log(f"[OVERLAY][skip_title] step={overlay_step_idx} resource_id='{overlay_row.get('focus_view_id', '')}'", level="DEBUG")
-            continue
-
-        overlay_fp = build_row_fingerprint(overlay_row)
-        if not overlay_fp:
-            duplicate_streak += 1
-            if duplicate_streak >= 3 and overlay_previous_row:
-                overlay_previous_row["status"] = "END"
-                overlay_previous_row["stop_reason"] = "overlay_duplicate_streak"
-                save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
-                break
-            continue
-        if overlay_fp in overlay_seen_fingerprints:
-            duplicate_streak += 1
-            if duplicate_streak >= 3:
-                if overlay_previous_row:
+        else:
+            if not current_overlay_fp:
+                duplicate_streak += 1
+                if duplicate_streak >= 3 and overlay_previous_row:
                     overlay_previous_row["status"] = "END"
                     overlay_previous_row["stop_reason"] = "overlay_duplicate_streak"
-                log(f"[OVERLAY][break] reason='duplicate_streak' step={overlay_step_idx} streak={duplicate_streak}")
-                save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
-                break
+                    duplicate_break_reached = True
+                    loop_break_reason = "duplicate_streak_empty_fingerprint"
+                    save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
+                    break
+            elif current_overlay_fp in overlay_seen_fingerprints:
+                skip_duplicate_row = True
+                duplicate_streak += 1
+                if duplicate_streak >= 3:
+                    if overlay_previous_row:
+                        overlay_previous_row["status"] = "END"
+                        overlay_previous_row["stop_reason"] = "overlay_duplicate_streak"
+                    duplicate_break_reached = True
+                    loop_break_reason = "duplicate_streak"
+                    log(f"[OVERLAY][break] reason='duplicate_streak' step={overlay_step_idx} streak={duplicate_streak}")
+                    save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
+                    break
+                log(
+                    f"[OVERLAY][dedup] skip_duplicate_row=true step={overlay_step_idx} fp='{current_overlay_fp}' streak={duplicate_streak}",
+                    level="DEBUG",
+                )
+            else:
+                duplicate_streak = 0
+                _save_overlay_row(overlay_row, overlay_step_idx)
+                overlay_previous_row = overlay_rows[-1]
+
+        if first_saved and overlay_step_idx <= (next_overlay_step_idx + 1):
+            first_row_preserved = bool(
+                overlay_rows
+                and build_row_fingerprint(overlay_rows[0]) == first_row_saved_snapshot.get("fingerprint", "")
+            )
             log(
-                f"[OVERLAY][dedup] skip_duplicate_row=true step={overlay_step_idx} fp='{overlay_fp}' streak={duplicate_streak}",
+                f"[OVERLAY][post_first_loop_compare] scenario='{tab_cfg.get('tab_name', '')}' "
+                f"just_saved_first_row_visible='{first_row_saved_snapshot.get('visible', '')}' "
+                f"just_saved_first_row_resource_id='{first_row_saved_snapshot.get('resource_id', '')}' "
+                f"just_saved_first_row_bounds='{first_row_saved_snapshot.get('bounds', '')}' "
+                f"just_saved_first_row_fingerprint='{first_row_saved_snapshot.get('fingerprint', '')}' "
+                f"current_loop_row_visible='{overlay_row.get('visible_label', '')}' "
+                f"current_loop_row_resource_id='{overlay_row.get('focus_view_id', '')}' "
+                f"current_loop_row_bounds='{overlay_row.get('focus_bounds', '')}' "
+                f"current_loop_row_fingerprint='{current_overlay_fp}' "
+                f"same_fingerprint={str(first_row_saved_fp == current_overlay_fp and bool(current_overlay_fp)).lower()} "
+                f"skip_duplicate_row={str(skip_duplicate_row).lower()} title_node={str(title_node).lower()} "
+                f"duplicate_streak={duplicate_streak} first_row_preserved={str(first_row_preserved).lower()} "
+                f"debug='{OVERLAY_FIRST_ROW_DEBUG_VERSION}'",
                 level="DEBUG",
             )
-            continue
 
-        duplicate_streak = 0
-        _save_overlay_row(overlay_row, overlay_step_idx)
-        overlay_previous_row = overlay_rows[-1]
+        if title_node or skip_duplicate_row or not current_overlay_fp:
+            continue
 
         if overlay_step_idx % checkpoint_every == 0:
             save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
@@ -640,6 +763,16 @@ def expand_overlay(
 
     if checkpoint_every > 0 and overlay_rows and (len(overlay_rows) % checkpoint_every == 0):
         save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
+    if not loop_break_reason:
+        loop_break_reason = str((overlay_rows[-1].get("stop_reason", "") if overlay_rows else "") or "completed")
+    log(
+        f"[OVERLAY][first_row_summary] scenario='{tab_cfg.get('tab_name', '')}' "
+        f"first_row_selected={str(first_selected).lower()} first_row_saved={str(first_saved).lower()} "
+        f"first_row_visible='{first_row_saved_snapshot.get('visible', '')}' distinct_overlay_rows_saved={len(overlay_rows)} "
+        f"duplicate_break_reached={str(duplicate_break_reached).lower()} break_reason='{loop_break_reason}' "
+        f"debug='{OVERLAY_FIRST_ROW_DEBUG_VERSION}'",
+        level="DEBUG",
+    )
 
     recovery_anchor = str(entry_step.get("normalized_visible_label", "") or "").strip()
     scenario_anchor = str(tab_cfg.get("anchor_name", "") or "").strip()
