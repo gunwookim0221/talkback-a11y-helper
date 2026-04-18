@@ -22,7 +22,7 @@ from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 
 
 OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v3"
-OVERLAY_TRAVERSAL_CORE_VERSION = "pr70-overlay-traversal-core-v1"
+OVERLAY_TRAVERSAL_CORE_VERSION = "pr70-overlay-traversal-core-v2"
 
 
 def _get_positive_int(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
@@ -487,6 +487,29 @@ def expand_overlay(
         row_overlay_label = str(row.get("overlay_entry_label", "") or "").strip()
         return row_context == "overlay" and row_overlay_label == entry_label
 
+    def _pick_first_overlay_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
+        ranked_candidates: list[tuple[int, dict[str, Any]]] = []
+        for idx, candidate in enumerate(candidates):
+            prepared = _prepare_overlay_row(candidate, next_overlay_step_idx)
+            if not _is_valid_first_overlay_row(prepared):
+                continue
+            has_view_id = bool(str(prepared.get("focus_view_id", "") or "").strip())
+            has_label = bool(str(prepared.get("visible_label", "") or "").strip())
+            has_speech = bool(str(prepared.get("merged_announcement", "") or "").strip())
+            rank = 0
+            if has_label:
+                rank += 4
+            if has_view_id:
+                rank += 2
+            if has_speech:
+                rank += 1
+            rank += max(0, 4 - idx)
+            ranked_candidates.append((rank, prepared))
+        if not ranked_candidates:
+            return None
+        ranked_candidates.sort(key=lambda item: item[0], reverse=True)
+        return ranked_candidates[0][1]
+
     def _prepare_overlay_row(row: dict[str, Any], step_index: int) -> dict[str, Any]:
         row["step_index"] = step_index
         row["tab_name"] = tab_cfg["tab_name"]
@@ -532,19 +555,13 @@ def expand_overlay(
         first_candidates.append(post_click_step)
 
     first_saved = False
-    for candidate in first_candidates:
-        prepared = _prepare_overlay_row(candidate, next_overlay_step_idx)
-        prepared.setdefault("move_result", "post_click_probe")
-        if not _is_valid_first_overlay_row(prepared):
-            continue
-        first_fp = build_row_fingerprint(prepared)
-        if first_fp and first_fp in overlay_seen_fingerprints:
-            continue
-        _save_overlay_row(prepared, next_overlay_step_idx)
+    first_row = _pick_first_overlay_candidate(first_candidates)
+    if first_row is not None:
+        first_row.setdefault("move_result", "post_click_probe")
+        _save_overlay_row(first_row, next_overlay_step_idx)
         overlay_previous_row = overlay_rows[-1]
         next_overlay_step_idx += 1
         first_saved = True
-        break
 
     log(
         f"[OVERLAY][first_row] scenario='{tab_cfg.get('tab_name', '')}' saved={str(first_saved).lower()} "
