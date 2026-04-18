@@ -23,7 +23,7 @@ from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 
 OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v3"
 OVERLAY_TRAVERSAL_CORE_VERSION = "pr70-overlay-traversal-core-v2"
-OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr70-overlay-first-row-debug-v3"
+OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr70-overlay-first-row-debug-v4"
 
 
 def _get_positive_int(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
@@ -469,6 +469,12 @@ def expand_overlay(
     def _to_boolish(value: Any) -> bool:
         return str(value or "").strip().lower() in {"1", "true", "t", "yes", "y"}
 
+    def _normalize_optional_id(value: Any) -> str:
+        normalized = str(value or "").strip()
+        if normalized.lower() in {"none", "null"}:
+            return ""
+        return normalized
+
     def _is_title_like_row(row: dict[str, Any]) -> bool:
         view_id = str(row.get("focus_view_id", "") or "").strip().lower()
         class_name = str(
@@ -633,7 +639,7 @@ def expand_overlay(
     if isinstance(post_click_step, dict):
         post_label = str(post_click_step.get("visible_label", "") or "").strip()
         post_speech = str(post_click_step.get("merged_announcement", "") or "").strip()
-        post_view_id = str(post_click_step.get("focus_view_id", "") or "").strip()
+        post_view_id = _normalize_optional_id(post_click_step.get("focus_view_id", ""))
         if (post_label or post_speech) and not post_view_id:
             first_selected = True
             first_row = _prepare_overlay_row(dict(post_click_step), next_overlay_step_idx)
