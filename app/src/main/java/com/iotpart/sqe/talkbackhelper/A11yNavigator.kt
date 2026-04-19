@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.76.2"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.76.3"
     private const val SMART_NEXT_REPEAT_DEBUG = false
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
@@ -208,8 +208,9 @@ object A11yNavigator {
         focusNodes: List<FocusedNode>
     ): Pair<List<FocusedNode>, Map<Int, List<AccessibilityNodeInfo>>> {
         if (focusNodes.isEmpty()) return focusNodes to emptyMap()
+        val normalizedInputNodes = includeOverlayRowCandidates(focusNodes)
         val groups = mutableListOf<MutableList<FocusedNode>>()
-        focusNodes.forEach { candidate ->
+        normalizedInputNodes.forEach { candidate ->
             val candidateLabel = resolveFocusedNodeLabel(candidate)
             val matchingGroup = groups.firstOrNull { group ->
                 val representative = selectAliasGroupRepresentative(group)
@@ -258,6 +259,24 @@ object A11yNavigator {
             }
         }
         return normalizedNodes to aliasMembersByIndex
+    }
+
+    private fun includeOverlayRowCandidates(focusNodes: List<FocusedNode>): List<FocusedNode> {
+        if (focusNodes.isEmpty()) return focusNodes
+        val expanded = focusNodes.toMutableList()
+        focusNodes.forEach { focusedNode ->
+            val node = focusedNode.node
+            if (!isOverlayMenuLikeContext(node) || !isNonActionableTitleText(node)) return@forEach
+            val promoted = findOverlayRowContainer(node) ?: return@forEach
+            val alreadyIncluded = expanded.any { candidate -> isSameNode(candidate.node, promoted) }
+            if (alreadyIncluded) return@forEach
+            expanded += focusedNodeFromRepresentative(promoted)
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][overlay_candidate_promote] title=${node.viewIdResourceName.orEmpty()} promoted=${promoted.viewIdResourceName.orEmpty()}"
+            )
+        }
+        return expanded
     }
 
     private fun normalizeSmartNextInputs(
@@ -1678,7 +1697,7 @@ object A11yNavigator {
             val node = member.node
             isOverlayMenuLikeContext(node) &&
                 !isNonActionableTitleText(node) &&
-                isActionableTraversalCandidate(node)
+                isOverlayRowCandidateNode(node)
         }
         if (overlayRepresentative != null) return overlayRepresentative
 
@@ -1686,7 +1705,7 @@ object A11yNavigator {
             .mapNotNull { member ->
                 member.node.takeIf { isOverlayMenuLikeContext(it) && isNonActionableTitleText(it) }
             }
-            .mapNotNull(::promoteToRowContainerIfNeeded)
+            .mapNotNull(::findOverlayRowContainer)
             .firstOrNull()
         if (overlayPromotedNode != null) {
             Log.i("A11Y_HELPER", "[SMART_NEXT][overlay_row_promote] representative=${overlayPromotedNode.viewIdResourceName.orEmpty()}")
@@ -2188,12 +2207,16 @@ object A11yNavigator {
         return !screenReaderFocusable
     }
 
-    private fun promoteToRowContainerIfNeeded(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+    private fun findOverlayRowContainer(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         if (!isOverlayMenuLikeContext(node) || !isNonActionableTitleText(node)) return null
+        val titleBounds = Rect().also(node::getBoundsInScreen)
         var current = node.parent
         var depth = 0
         while (current != null && depth <= 6) {
-            if (isActionableTraversalCandidate(current)) return current
+            val currentBounds = Rect().also(current::getBoundsInScreen)
+            if (currentBounds.contains(titleBounds) && isOverlayRowCandidateNode(current)) {
+                return current
+            }
             current = current.parent
             depth += 1
         }
@@ -2201,13 +2224,22 @@ object A11yNavigator {
         for (i in 0 until parent.childCount) {
             val sibling = parent.getChild(i) ?: continue
             if (isSameNode(sibling, node)) continue
-            if (isActionableTraversalCandidate(sibling)) return sibling
+            if (isOverlayRowCandidateNode(sibling)) return sibling
         }
         return null
     }
 
+    private fun isOverlayRowCandidateNode(node: AccessibilityNodeInfo): Boolean {
+        if (!isOverlayMenuLikeContext(node) || !node.isVisibleToUser || isNonActionableTitleText(node)) return false
+        if (!hasValidBounds(node)) return false
+        if (isActionableTraversalCandidate(node)) return true
+        if (hasReadableLabel(node) && A11yTraversalAnalyzer.countClickableOrFocusableDescendants(node, limit = 1) > 0) return true
+        val metadata = A11yTraversalAnalyzer.collectActionableDescendantMetadata(node)
+        return metadata.hasClickableDescendant || metadata.hasFocusableDescendant
+    }
+
     private fun resolveCurrentTraversalNode(node: AccessibilityNodeInfo): AccessibilityNodeInfo {
-        promoteToRowContainerIfNeeded(node)?.let { promoted ->
+        findOverlayRowContainer(node)?.let { promoted ->
             Log.i(
                 "A11Y_HELPER",
                 "[SMART_NEXT][overlay_row_promote] current=${node.viewIdResourceName.orEmpty()} promoted=${promoted.viewIdResourceName.orEmpty()}"
@@ -2229,7 +2261,7 @@ object A11yNavigator {
         val candidate = traversalList[nextIndex]
         if (!isOverlayMenuLikeContext(candidate) || !isNonActionableTitleText(candidate)) return nextIndex
         Log.i("A11Y_HELPER", "[SMART_NEXT][overlay_title_demote] candidate=${candidate.viewIdResourceName.orEmpty()} index=$nextIndex")
-        val promoted = promoteToRowContainerIfNeeded(candidate)
+        val promoted = findOverlayRowContainer(candidate)
         if (promoted != null) {
             val promotedIndex = traversalList.indexOfFirst { node -> isSameNode(node, promoted) }
             if (promotedIndex in traversalList.indices) return promotedIndex
