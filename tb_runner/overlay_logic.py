@@ -29,7 +29,8 @@ OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr72-overlay-first-row-synthetic-nullid-guard
 
 
 def _overlay_first_row_debug_enabled() -> bool:
-    return str(os.getenv("TB_OVERLAY_FIRST_ROW_DEBUG", "") or "").strip().lower() in {"1", "true", "t", "yes", "y"}
+    # return str(os.getenv("TB_OVERLAY_FIRST_ROW_DEBUG", "") or "").strip().lower() in {"1", "true", "t", "yes", "y"}
+    return True
 
 
 def _build_overlay_first_row_key(
