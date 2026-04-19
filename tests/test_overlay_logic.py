@@ -31,6 +31,9 @@ class _OverlayClient:
     def press_back_and_recover_focus(self, **kwargs):
         return {"status": "ok"}
 
+    def touch(self, **kwargs):
+        return True
+
 
 def _step(step_index=1, label="add", view_id="id.add", bounds="0,0,10,10", nodes=None):
     return {
@@ -497,3 +500,33 @@ def test_expand_overlay_keeps_initial_post_click_focus_as_first_row(monkeypatch)
     assert len(overlay_rows) == 2
     assert overlay_rows[0]["visible_label"] == "Add favourites"
     assert overlay_rows[1]["visible_label"] == "Add service"
+
+
+def test_expand_overlay_treats_string_none_view_id_as_missing_for_first_row(monkeypatch):
+    post_click_row = _step(step_index=1, label="Add favourites", view_id="None", bounds="10,10,30,30")
+    next_row = _step(step_index=2, label="Add service", view_id="id/title", bounds="20,20,40,40")
+    client = _OverlayClient([post_click_row, next_row])
+    tab_cfg = {"tab_name": "Home"}
+    entry_step = _step(step_index=3, label="Add", view_id="id/add")
+    rows: list[dict[str, str]] = []
+    all_rows: list[dict[str, str]] = []
+
+    monkeypatch.setattr(overlay_logic, "maybe_capture_focus_crop", lambda *_args, **_kwargs: _args[2])
+    monkeypatch.setattr(overlay_logic, "save_excel_with_perf", lambda *args, **kwargs: None)
+    monkeypatch.setattr(overlay_logic, "OVERLAY_MAX_STEPS", 2)
+
+    overlay_rows = overlay_logic.expand_overlay(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        entry_step=entry_step,
+        rows=rows,
+        all_rows=all_rows,
+        output_path="out.xlsx",
+        output_base_dir="output",
+        skip_entry_click=False,
+    )
+
+    assert len(overlay_rows) == 2
+    assert overlay_rows[0]["visible_label"] == "Add favourites"
+    assert overlay_rows[0]["focus_view_id"] == ""

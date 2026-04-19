@@ -25,7 +25,7 @@ from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 
 OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v3"
 OVERLAY_TRAVERSAL_CORE_VERSION = "pr70-overlay-traversal-core-v2"
-OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr71-overlay-first-row-lifecycle-path-v1"
+OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr72-overlay-first-row-synthetic-nullid-guard-v1"
 
 
 def _overlay_first_row_debug_enabled() -> bool:
@@ -750,7 +750,7 @@ def expand_overlay(
         post_label = str(post_click_step.get("visible_label", "") or "").strip()
         post_speech = str(post_click_step.get("merged_announcement", "") or "").strip()
         post_view_id = _normalize_optional_id(post_click_step.get("focus_view_id", ""))
-        if (post_label or post_speech) and not post_view_id:
+        if post_label and (not post_view_id or str(post_view_id).strip().lower() in {"none", "null"}):
             first_selected = True
             first_row = _prepare_overlay_row(dict(post_click_step), next_overlay_step_idx)
             first_row["visible_label"] = post_label or post_speech
