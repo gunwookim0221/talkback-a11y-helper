@@ -25,7 +25,7 @@ from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 
 OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v3"
 OVERLAY_TRAVERSAL_CORE_VERSION = "pr70-overlay-traversal-core-v2"
-OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr73-overlay-first-row-lifecycle-debug-v1"
+OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr74-overlay-first-row-flag-source-v1"
 
 
 def _overlay_first_row_debug_enabled() -> bool:
@@ -658,9 +658,14 @@ def expand_overlay(
 
     def _save_overlay_row(row: dict[str, Any], step_index: int) -> None:
         row["_step_mono_start"] = time.monotonic() - float(row.get("t_step_start", 0.0) or 0.0)
+        row_is_first = _is_overlay_first_row(row)
+        row_trace_key = str(row.get("_overlay_first_row_key", "") or "").strip()
         row_with_crop = maybe_capture_focus_crop(client, dev, row, output_base_dir)
         row_with_crop.pop("_step_mono_start", None)
-        row_trace_key = str(row_with_crop.get("_overlay_first_row_key", "") or "").strip()
+        if row_is_first:
+            row_with_crop["_is_overlay_first_row"] = True
+        if row_trace_key:
+            row_with_crop["_overlay_first_row_key"] = row_trace_key
         overlay_len_before = len(overlay_rows)
         rows_len_before = len(rows)
         all_rows_len_before = len(all_rows)
@@ -678,6 +683,8 @@ def expand_overlay(
         fingerprint_collision = bool(overlay_fp and overlay_fp in overlay_seen_fingerprints)
         if overlay_fp:
             overlay_seen_fingerprints.add(overlay_fp)
+        if row_is_first and overlay_fp:
+            protected_first_row_fingerprints.add(overlay_fp)
         if overlay_first_row_debug_enabled and row_trace_key:
             append_success = bool(len(overlay_rows) == overlay_len_before + 1 and len(rows) == rows_len_before + 1 and len(all_rows) == all_rows_len_before + 1)
             log(
@@ -804,8 +811,6 @@ def expand_overlay(
             _save_overlay_row(first_row, next_overlay_step_idx)
             overlay_previous_row = overlay_rows[-1]
             first_row_saved_fp = build_row_fingerprint(overlay_previous_row)
-            if first_row_saved_fp and _is_overlay_first_row(overlay_previous_row):
-                protected_first_row_fingerprints.add(first_row_saved_fp)
             first_row_saved_snapshot = {
                 "visible": str(overlay_previous_row.get("visible_label", "") or "").strip(),
                 "resource_id": str(overlay_previous_row.get("focus_view_id", "") or "").strip(),
@@ -848,8 +853,6 @@ def expand_overlay(
         _save_overlay_row(first_row, next_overlay_step_idx)
         overlay_previous_row = overlay_rows[-1]
         first_row_saved_fp = build_row_fingerprint(overlay_previous_row)
-        if first_row_saved_fp and _is_overlay_first_row(overlay_previous_row):
-            protected_first_row_fingerprints.add(first_row_saved_fp)
         first_row_saved_snapshot = {
             "visible": str(overlay_previous_row.get("visible_label", "") or "").strip(),
             "resource_id": str(overlay_previous_row.get("focus_view_id", "") or "").strip(),
@@ -1017,15 +1020,8 @@ def expand_overlay(
         loop_break_reason = str((overlay_rows[-1].get("stop_reason", "") if overlay_rows else "") or "completed")
     if overlay_first_row_debug_enabled:
         overlay_row_labels = [str(row.get("visible_label", "") or "").strip() for row in overlay_rows[:5]]
-        first_row_index = -1
-        if first_row_trace_key:
-            for idx, row in enumerate(overlay_rows):
-                if str(row.get("_overlay_first_row_key", "") or "").strip() == first_row_trace_key:
-                    first_row_index = idx
-                    break
-        first_row_still_present = bool(
-            first_row_trace_key and any(str(row.get("_overlay_first_row_key", "") or "").strip() == first_row_trace_key for row in overlay_rows)
-        )
+        first_row_index = next((idx for idx, row in enumerate(overlay_rows) if _is_overlay_first_row(row)), -1)
+        first_row_still_present = first_row_index >= 0
         log(
             f"[OVERLAY][FIRSTROW][before_return] scenario='{tab_cfg.get('tab_name', '')}' "
             f"first_row_saved={str(first_saved).lower()} saved_row_key='{first_row_trace_key}' "
