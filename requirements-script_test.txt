@@ -1,0 +1,9 @@
+# script_test.py 실행용 Python 의존성
+# 권장 Python 버전: 3.10 ~ 3.12
+pandas>=2.1.4,<2.3
+openpyxl>=3.1.2,<3.2
+Pillow>=10.2.0,<12
+XlsxWriter>=3.1.9,<4
+
+# 단위 테스트 실행용(선택)
+pytest>=8.2.0,<9
