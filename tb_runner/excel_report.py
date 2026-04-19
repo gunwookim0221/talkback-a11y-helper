@@ -10,7 +10,7 @@ from tb_runner.image_utils import create_excel_thumbnail, insert_images_to_excel
 from tb_runner.logging_utils import get_recent_logs, log
 from tb_runner.utils import to_json_text
 
-EXCEL_REPORT_VERSION = "1.4.3"
+EXCEL_REPORT_VERSION = "1.4.4"
 
 _DEBUG_LOG_KEYWORDS = (
     "[STEP]",
@@ -1195,7 +1195,7 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
                 found_in_debug_logs = any(tracked_key in line for line in recent_logs)
                 sample_row = raw_matches[0] if raw_matches else {}
                 placeholder_eval = is_placeholder_row(sample_row) if sample_row else False
-                filter_skipped = found_in_raw_rows and not found_in_filtered_rows
+                filtered_out = found_in_raw_rows and not found_in_filtered_rows
                 drop_reason = ""
                 if found_in_raw_rows and not found_in_filtered_rows:
                     drop_reason = "dropped_before_filtered"
@@ -1211,7 +1211,7 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
                     f"found_in_result_rows={str(found_in_result_rows).lower()} "
                     f"found_in_debug_logs={str(found_in_debug_logs).lower()} "
                     f"drop_reason='{drop_reason}' placeholder_eval={str(placeholder_eval).lower()} "
-                    f"filter_skip={str(filter_skipped).lower()}",
+                    f"filtered_out={str(filtered_out).lower()}",
                     level="DEBUG",
                 )
 
