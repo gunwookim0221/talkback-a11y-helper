@@ -13,7 +13,8 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.76.0"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.76.1"
+    private const val SMART_NEXT_REPEAT_DEBUG = false
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
@@ -131,6 +132,19 @@ object A11yNavigator {
         val primaryLabel = (resolvePrimaryLabel(node) ?: "<none>").replace("\n", " ").take(72)
         val mergedLabel = (A11yTraversalAnalyzer.recoverDescendantLabel(node) ?: "<none>").replace("\n", " ").take(120)
         return "id=${node.viewIdResourceName.orEmpty()}|class=${node.className}|label=$primaryLabel|merged=$mergedLabel|pkg=${node.packageName}|bounds=${bounds.toShortString()}|clickable=${node.isClickable}|focusable=${node.isFocusable}|visible=${node.isVisibleToUser}|a11yFocused=${node.isAccessibilityFocused}"
+    }
+
+    private fun repeatDebugNodeIdentity(node: AccessibilityNodeInfo?): String {
+        if (node == null) {
+            return "viewId=<none>|class=<none>|text=<none>|contentDescription=<none>|bounds=<none>|clickable=false|focusable=false"
+        }
+        val bounds = Rect().also(node::getBoundsInScreen)
+        return "viewId=${node.viewIdResourceName.orEmpty()}|class=${node.className}|text=${node.text?.toString().orEmpty().replace("\n", " ").take(96)}|contentDescription=${node.contentDescription?.toString().orEmpty().replace("\n", " ").take(96)}|bounds=${bounds.toShortString()}|clickable=${node.isClickable}|focusable=${node.isFocusable}"
+    }
+
+    private fun repeatDebugLog(stage: String, message: String) {
+        if (!SMART_NEXT_REPEAT_DEBUG) return
+        Log.i("A11Y_HELPER", "[SMART_NEXT][repeat_debug][$stage] $message")
     }
 
     private fun isOneConnectBottomTabByViewId(viewId: String?): Boolean {
@@ -776,6 +790,34 @@ object A11yNavigator {
             ).replace("\n", " ").take(96)
         val identityMatched = intendedViewId.isNotBlank() && intendedViewId == actualViewId
         val commitStatus = if (finalizedOutcome.success) "committed" else "failed"
+        if (SMART_NEXT_REPEAT_DEBUG) {
+            val helperFinalCandidate = intendedNode
+            val actualFocusResult = finalizedOutcome.target
+            val helperBounds = helperFinalCandidate?.let { Rect().also(it::getBoundsInScreen) }
+            val actualBounds = actualFocusResult?.let { Rect().also(it::getBoundsInScreen) }
+            val sameViewId = helperFinalCandidate?.viewIdResourceName == actualFocusResult?.viewIdResourceName &&
+                !helperFinalCandidate?.viewIdResourceName.isNullOrBlank()
+            val sameBounds = helperBounds != null && actualBounds != null && helperBounds == actualBounds
+            val sameLogicalNode = helperFinalCandidate != null &&
+                actualFocusResult != null &&
+                isSameLogicalNode(helperFinalCandidate, actualFocusResult)
+            val expectedSameAsCurrent = currentNode != null &&
+                helperFinalCandidate != null &&
+                isSameLogicalNode(currentNode, helperFinalCandidate)
+            val mismatchReason = when {
+                helperFinalCandidate == null || actualFocusResult == null -> "unavailable_in_helper"
+                sameLogicalNode -> "matched"
+                !sameViewId -> "view_id_mismatch"
+                !sameBounds -> "bounds_mismatch"
+                else -> "logical_node_mismatch"
+            }
+            if (expectedSameAsCurrent || !sameLogicalNode || !identityMatched) {
+                repeatDebugLog(
+                    "final_vs_focus_result",
+                    "req_id='$reqId' helper_final='${repeatDebugNodeIdentity(helperFinalCandidate)}' actual_focus_result='${repeatDebugNodeIdentity(actualFocusResult)}' sameViewId=$sameViewId sameBounds=$sameBounds sameLogicalNode=$sameLogicalNode mismatchReason='$mismatchReason'"
+                )
+            }
+        }
         Log.i(
             "A11Y_HELPER",
             "[SMART_NEXT][focus_commit] req_id='$reqId' current_view_id='$currentViewId' current_label='$currentLabel' intended_target_view_id='$intendedViewId' intended_target_label='$intendedLabel' actual_focused_view_id='$actualViewId' actual_focused_label='$actualLabel' status='${if (finalizedOutcome.success) "moved" else "failed_single_target"}' detail='${finalizedOutcome.reason}' is_scroll_action=false intended_index=$intendedIndex intended_view_id='$intendedViewId' actual_candidate_index=-1 actual_view_id='$actualViewId' identity_matched=$identityMatched retarget_allowed=false commit_status='$commitStatus' reason='${finalizedOutcome.reason}' action_success=${finalizedOutcome.success}"
@@ -1368,8 +1410,11 @@ object A11yNavigator {
         val overlayRepeatSalvageIndex = findOverlayRepeatSalvageIndex(
             traversalList = traversalList,
             currentNode = currentNodeForRepeatGuard,
-            nextIndex = nextIndex
+            nextIndex = nextIndex,
+            reqId = reqId
         )
+        val repeatDebugInitialIndex = nextIndex
+        val repeatDebugInitialNode = traversalList.getOrNull(repeatDebugInitialIndex)
         if (overlayRepeatSalvageIndex != nextIndex) {
             Log.i(
                 "A11Y_HELPER",
@@ -1377,6 +1422,23 @@ object A11yNavigator {
             )
             nextIndex = overlayRepeatSalvageIndex
             targetDecisionReason = "overlay_repeat_salvage"
+        }
+        if (SMART_NEXT_REPEAT_DEBUG) {
+            val repeatDebugFinalNode = traversalList.getOrNull(nextIndex)
+            val changedBySalvage = overlayRepeatSalvageIndex != repeatDebugInitialIndex
+            val expectedSameAsCurrent = currentNodeForRepeatGuard != null &&
+                repeatDebugFinalNode != null &&
+                isSameLogicalNode(currentNodeForRepeatGuard, repeatDebugFinalNode)
+            val shouldLogFinalChoice = expectedSameAsCurrent ||
+                changedBySalvage ||
+                nearestMenuLikeContainer(repeatDebugInitialNode) != null ||
+                nearestMenuLikeContainer(repeatDebugFinalNode) != null
+            if (shouldLogFinalChoice) {
+                repeatDebugLog(
+                    "final_choice",
+                    "req_id='$reqId' initial='${repeatDebugNodeIdentity(repeatDebugInitialNode)}' final='${repeatDebugNodeIdentity(repeatDebugFinalNode)}' changedBySalvage=$changedBySalvage finalChoiceReason='$targetDecisionReason' expectedSameAsCurrent=$expectedSameAsCurrent"
+                )
+            }
         }
         if (debugAroundDecision) {
             Log.d("A11Y_HELPER", "[DEBUG][DECIDE] final_next=${summarizeTraversalCandidate(traversalList, nextIndex, state)}")
@@ -1865,13 +1927,142 @@ object A11yNavigator {
     private fun findOverlayRepeatSalvageIndex(
         traversalList: List<AccessibilityNodeInfo>,
         currentNode: AccessibilityNodeInfo?,
-        nextIndex: Int
+        nextIndex: Int,
+        reqId: String
     ): Int {
         val current = currentNode ?: return nextIndex
         if (nextIndex !in traversalList.indices) return nextIndex
         val candidate = traversalList[nextIndex]
-        if (!isOverlayRepeatGuardTarget(current, candidate)) return nextIndex
-        val anchorContainer = nearestMenuLikeContainer(candidate) ?: return nextIndex
+        val sameViewId = current.viewIdResourceName == candidate.viewIdResourceName
+        val sameClass = current.className?.toString() == candidate.className?.toString()
+        val currentBounds = Rect().also(current::getBoundsInScreen)
+        val candidateBounds = Rect().also(candidate::getBoundsInScreen)
+        val sameBounds = currentBounds == candidateBounds
+        val currentLabel = (resolvePrimaryLabel(current) ?: A11yTraversalAnalyzer.recoverDescendantLabel(current)).orEmpty()
+        val candidateLabel = (resolvePrimaryLabel(candidate) ?: A11yTraversalAnalyzer.recoverDescendantLabel(candidate)).orEmpty()
+        val sameLabel = currentLabel == candidateLabel
+        val sameLogicalNode = isSameLogicalNode(current, candidate)
+        val anchorContainer = nearestMenuLikeContainer(candidate)
+        val ancestorChain = mutableListOf<String>()
+        var ancestor: AccessibilityNodeInfo? = candidate
+        var depth = 0
+        var menuDetected = false
+        var popupDetected = false
+        var dialogDetected = false
+        var listDetected = false
+        var recyclerDetected = false
+        var overflowDetected = false
+        while (ancestor != null && depth < 5) {
+            val classToken = ancestor.className?.toString()?.lowercase().orEmpty()
+            val viewIdToken = ancestor.viewIdResourceName?.lowercase().orEmpty()
+            menuDetected = menuDetected || classToken.contains("menu") || viewIdToken.contains("menu")
+            popupDetected = popupDetected || classToken.contains("popup") || viewIdToken.contains("popup")
+            dialogDetected = dialogDetected || classToken.contains("dialog") || viewIdToken.contains("dialog")
+            listDetected = listDetected || classToken.contains("listview") || viewIdToken.contains("list")
+            recyclerDetected = recyclerDetected || classToken.contains("recyclerview") || viewIdToken.contains("recycler")
+            overflowDetected = overflowDetected || viewIdToken.contains("overflow")
+            ancestorChain += "depth=$depth(class=${ancestor.className}|viewId=${ancestor.viewIdResourceName.orEmpty()}|clickable=${ancestor.isClickable}|focusable=${ancestor.isFocusable})"
+            ancestor = ancestor.parent
+            depth += 1
+        }
+        val popupOrDialogDetected = popupDetected || dialogDetected
+        val menuLikeAncestorDetected = menuDetected || listDetected || recyclerDetected || overflowDetected
+        val overlayContextDetected = menuLikeAncestorDetected || popupOrDialogDetected
+        val titleLikeNodeDetected = candidate.viewIdResourceName?.contains("title", ignoreCase = true) == true ||
+            candidate.className?.toString()?.contains("TextView", ignoreCase = true) == true
+
+        val salvageTopCandidates = mutableListOf<String>()
+        var actionableSiblingExists = false
+        var acceptedCandidateCount = 0
+        var rejectedCandidateCount = 0
+        if (anchorContainer != null) {
+            for (index in (nextIndex + 1) until traversalList.size) {
+                val siblingCandidate = traversalList[index]
+                val inContainer = isNodeInsideAncestor(siblingCandidate, anchorContainer)
+                val actionable = isActionableTraversalCandidate(siblingCandidate)
+                val sameLogicalSibling = isSameLogicalNode(current, siblingCandidate)
+                val accepted = inContainer && actionable && !sameLogicalSibling
+                if (accepted) {
+                    actionableSiblingExists = true
+                    acceptedCandidateCount += 1
+                } else {
+                    rejectedCandidateCount += 1
+                }
+                if (salvageTopCandidates.size < 5) {
+                    val reason = when {
+                        !inContainer -> "outside_anchor_container"
+                        !actionable -> "not_actionable"
+                        sameLogicalSibling -> "same_logical_as_current"
+                        else -> "accepted"
+                    }
+                    salvageTopCandidates += "index=$index|candidate=${repeatDebugNodeIdentity(siblingCandidate)}|why${if (accepted) "Accepted" else "Rejected"}=$reason"
+                }
+            }
+        }
+        val shouldLogRepeatDebug = SMART_NEXT_REPEAT_DEBUG && (
+            sameLogicalNode ||
+                overlayContextDetected ||
+                anchorContainer != null ||
+                actionableSiblingExists
+            )
+        if (shouldLogRepeatDebug) {
+            repeatDebugLog(
+                "current_vs_initial",
+                "req_id='$reqId' current='${repeatDebugNodeIdentity(current)}' initial='${repeatDebugNodeIdentity(candidate)}' sameViewId=$sameViewId sameClass=$sameClass sameBounds=$sameBounds sameLabel=$sameLabel sameLogicalNode=$sameLogicalNode algorithmVersion=$NAVIGATOR_ALGORITHM_VERSION"
+            )
+            val matchedAncestorReason = buildList {
+                if (menuDetected) add("menu")
+                if (popupDetected) add("popup")
+                if (dialogDetected) add("dialog")
+                if (listDetected) add("list")
+                if (recyclerDetected) add("recycler")
+                if (overflowDetected) add("overflow")
+            }.joinToString("|").ifBlank { "none" }
+            repeatDebugLog(
+                "container_context",
+                "req_id='$reqId' ancestor_chain='${ancestorChain.joinToString(" -> ")}' menuDetected=$menuDetected popupDetected=$popupDetected dialogDetected=$dialogDetected listDetected=$listDetected recyclerDetected=$recyclerDetected overflowDetected=$overflowDetected matched_ancestor_reason='$matchedAncestorReason'"
+            )
+        }
+
+        val salvageGuardTriggered = isOverlayRepeatGuardTarget(current, candidate)
+        val notTriggeredReason = when {
+            salvageGuardTriggered -> "triggered"
+            !sameLogicalNode -> "same_logical_node_false"
+            !overlayContextDetected -> "overlay_context_false"
+            !titleLikeNodeDetected -> "candidate_not_title_like"
+            !actionableSiblingExists -> "no_actionable_sibling"
+            else -> "unknown"
+        }
+        if (shouldLogRepeatDebug) {
+            repeatDebugLog(
+                "guard_decision",
+                "req_id='$reqId' sameLogicalNode=$sameLogicalNode overlayContextDetected=$overlayContextDetected menuLikeAncestorDetected=$menuLikeAncestorDetected popupOrDialogDetected=$popupOrDialogDetected titleLikeNodeDetected=$titleLikeNodeDetected actionableSiblingExists=$actionableSiblingExists salvageGuardTriggered=$salvageGuardTriggered not_triggered_reason='$notTriggeredReason'"
+            )
+        }
+        if (!salvageGuardTriggered) {
+            if (shouldLogRepeatDebug) {
+                repeatDebugLog(
+                    "salvage_candidates",
+                    "req_id='$reqId' salvage_search_activated=false sibling_container_candidate_count=0 top_candidates='none'"
+                )
+            }
+            return nextIndex
+        }
+        if (anchorContainer == null) {
+            if (shouldLogRepeatDebug) {
+                repeatDebugLog(
+                    "salvage_candidates",
+                    "req_id='$reqId' salvage_search_activated=false sibling_container_candidate_count=0 top_candidates='none'"
+                )
+            }
+            return nextIndex
+        }
+        if (shouldLogRepeatDebug) {
+            repeatDebugLog(
+                "salvage_candidates",
+                "req_id='$reqId' salvage_search_activated=true sibling_container_candidate_count=$acceptedCandidateCount top_candidates='${if (salvageTopCandidates.isEmpty()) "none" else salvageTopCandidates.joinToString(" || ")}'"
+            )
+        }
         for (index in (nextIndex + 1) until traversalList.size) {
             val siblingCandidate = traversalList[index]
             if (!isNodeInsideAncestor(siblingCandidate, anchorContainer)) continue
@@ -1882,6 +2073,12 @@ object A11yNavigator {
                 "[SMART_NEXT][overlay_repeat_skip] req_id='${A11yHistoryManager.activeSmartNextReqId}' skipped='${smartNextDebugNodeSummary(candidate)}' replacement='${smartNextDebugNodeSummary(siblingCandidate)}'"
             )
             return index
+        }
+        if (shouldLogRepeatDebug) {
+            repeatDebugLog(
+                "salvage_candidates",
+                "req_id='$reqId' salvage_search_activated=true sibling_container_candidate_count=0 rejected_candidate_count=$rejectedCandidateCount top_candidates='${if (salvageTopCandidates.isEmpty()) "none" else salvageTopCandidates.joinToString(" || ")}'"
+            )
         }
         return nextIndex
     }
