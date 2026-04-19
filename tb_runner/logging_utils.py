@@ -15,7 +15,7 @@ def now_str() -> str:
 
 
 def _should_log(level: str = "NORMAL") -> bool:
-    current = LOG_LEVEL if LOG_LEVEL in LOG_LEVEL_ORDER else "NORMAL"
+    current = LOG_LEVEL if LOG_LEVEL in LOG_LEVEL_ORDER else "INFO"
     return LOG_LEVEL_ORDER.get(current, 1) >= LOG_LEVEL_ORDER.get(level, 1)
 
 
@@ -43,7 +43,7 @@ def configure_log_files(output_path: str) -> None:
     except Exception:
         return
 
-    current = LOG_LEVEL if LOG_LEVEL in LOG_LEVEL_ORDER else "NORMAL"
+    current = LOG_LEVEL if LOG_LEVEL in LOG_LEVEL_ORDER else "INFO"
     try:
         _normal_log_file = open(f"{base_prefix}.normal.log", "a", encoding="utf-8")
     except Exception:
