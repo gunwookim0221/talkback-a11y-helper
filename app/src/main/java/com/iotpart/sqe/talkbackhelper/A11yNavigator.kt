@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.75.9"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.76.0"
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
     private const val MAX_ONECONNECT_SETTINGS_ROW_ANCESTOR_DISTANCE = 3
@@ -1364,6 +1364,20 @@ object A11yNavigator {
         if (nextIndex != beforeNotificationsPrevention && targetDecisionReason == "unchanged") {
             targetDecisionReason = "prevent_same_row_notifications"
         }
+        val currentNodeForRepeatGuard = state.currentPosition.resolvedCurrent ?: traversalList.getOrNull(currentIndex)
+        val overlayRepeatSalvageIndex = findOverlayRepeatSalvageIndex(
+            traversalList = traversalList,
+            currentNode = currentNodeForRepeatGuard,
+            nextIndex = nextIndex
+        )
+        if (overlayRepeatSalvageIndex != nextIndex) {
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][overlay_repeat_salvage] req_id='$reqId' from=$nextIndex to=$overlayRepeatSalvageIndex current='${smartNextDebugNodeSummary(currentNodeForRepeatGuard)}' skipped='${smartNextDebugNodeSummary(traversalList.getOrNull(nextIndex))}' selected='${smartNextDebugNodeSummary(traversalList.getOrNull(overlayRepeatSalvageIndex))}'"
+            )
+            nextIndex = overlayRepeatSalvageIndex
+            targetDecisionReason = "overlay_repeat_salvage"
+        }
         if (debugAroundDecision) {
             Log.d("A11Y_HELPER", "[DEBUG][DECIDE] final_next=${summarizeTraversalCandidate(traversalList, nextIndex, state)}")
         }
@@ -1846,6 +1860,82 @@ object A11yNavigator {
             current = current.parent
         }
         return false
+    }
+
+    private fun findOverlayRepeatSalvageIndex(
+        traversalList: List<AccessibilityNodeInfo>,
+        currentNode: AccessibilityNodeInfo?,
+        nextIndex: Int
+    ): Int {
+        val current = currentNode ?: return nextIndex
+        if (nextIndex !in traversalList.indices) return nextIndex
+        val candidate = traversalList[nextIndex]
+        if (!isOverlayRepeatGuardTarget(current, candidate)) return nextIndex
+        val anchorContainer = nearestMenuLikeContainer(candidate) ?: return nextIndex
+        for (index in (nextIndex + 1) until traversalList.size) {
+            val siblingCandidate = traversalList[index]
+            if (!isNodeInsideAncestor(siblingCandidate, anchorContainer)) continue
+            if (!isActionableTraversalCandidate(siblingCandidate)) continue
+            if (isSameLogicalNode(current, siblingCandidate)) continue
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][overlay_repeat_skip] req_id='${A11yHistoryManager.activeSmartNextReqId}' skipped='${smartNextDebugNodeSummary(candidate)}' replacement='${smartNextDebugNodeSummary(siblingCandidate)}'"
+            )
+            return index
+        }
+        return nextIndex
+    }
+
+    private fun isOverlayRepeatGuardTarget(
+        currentNode: AccessibilityNodeInfo,
+        candidate: AccessibilityNodeInfo
+    ): Boolean {
+        if (!isSameLogicalNode(currentNode, candidate)) return false
+        val menuLikeContext = nearestMenuLikeContainer(candidate) != null || nearestMenuLikeContainer(currentNode) != null
+        if (!menuLikeContext) return false
+        return true
+    }
+
+    private fun isSameLogicalNode(
+        first: AccessibilityNodeInfo,
+        second: AccessibilityNodeInfo
+    ): Boolean {
+        if (!isSameNode(first, second)) return false
+        if (first.className?.toString() != second.className?.toString()) return false
+        val firstLabel = (resolvePrimaryLabel(first) ?: A11yTraversalAnalyzer.recoverDescendantLabel(first)).orEmpty()
+        val secondLabel = (resolvePrimaryLabel(second) ?: A11yTraversalAnalyzer.recoverDescendantLabel(second)).orEmpty()
+        return firstLabel == secondLabel
+    }
+
+    private fun nearestMenuLikeContainer(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        var current = node
+        var depth = 0
+        while (current != null && depth <= 5) {
+            if (isMenuLikeContainerNode(current)) return current
+            current = current.parent
+            depth += 1
+        }
+        return null
+    }
+
+    private fun isMenuLikeContainerNode(node: AccessibilityNodeInfo): Boolean {
+        val className = node.className?.toString()?.lowercase().orEmpty()
+        val viewId = node.viewIdResourceName?.lowercase().orEmpty()
+        return className.contains("menu") ||
+            className.contains("popup") ||
+            className.contains("dialog") ||
+            className.contains("listview") ||
+            className.contains("recyclerview") ||
+            viewId.contains("menu") ||
+            viewId.contains("popup") ||
+            viewId.contains("dialog") ||
+            viewId.contains("overflow")
+    }
+
+    private fun isActionableTraversalCandidate(node: AccessibilityNodeInfo): Boolean {
+        val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+            AccessibilityNodeInfoCompat.wrap(node).isScreenReaderFocusable
+        return node.isVisibleToUser && (node.isClickable || node.isFocusable || screenReaderFocusable)
     }
 
     private fun preventOneConnectSettingsSameRowReselection(
