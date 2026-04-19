@@ -25,12 +25,11 @@ from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 
 OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v3"
 OVERLAY_TRAVERSAL_CORE_VERSION = "pr70-overlay-traversal-core-v2"
-OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr72-overlay-first-row-synthetic-nullid-guard-v1"
+OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr73-overlay-first-row-lifecycle-debug-v1"
 
 
 def _overlay_first_row_debug_enabled() -> bool:
-    # return str(os.getenv("TB_OVERLAY_FIRST_ROW_DEBUG", "") or "").strip().lower() in {"1", "true", "t", "yes", "y"}
-    return True
+    return str(os.getenv("TB_OVERLAY_FIRST_ROW_DEBUG", "") or "").strip().lower() in {"1", "true", "t", "yes", "y"}
 
 
 def _build_overlay_first_row_key(
@@ -613,7 +612,8 @@ def expand_overlay(
                         f"req_id='{synthetic_row.get('req_id', '')}' step_index={next_overlay_step_idx} "
                         f"placeholder_eval={str(synthetic_placeholder_eval).lower()} "
                         f"title_skip_eval={str(synthetic_title_skip_eval).lower()} "
-                        f"dedup_eval={str(synthetic_dedup_eval).lower()}",
+                        f"dedup_eval={str(synthetic_dedup_eval).lower()} "
+                        "synthetic_source='post_label_only'",
                         level="DEBUG",
                     )
                 if _is_valid_first_overlay_row(synthetic_row):
@@ -732,8 +732,10 @@ def expand_overlay(
         log(
             f"[OVERLAY][FIRSTROW][post_label_detected] scenario='{tab_cfg.get('tab_name', '')}' "
             f"overlay_context='{entry_label}' post_label='{str(post_click_step.get('visible_label', '') or '').strip()}' "
-            f"post_view_id='{_normalize_optional_id(post_click_step.get('focus_view_id', ''))}' "
+            f"post_view_id_raw='{str(post_click_step.get('focus_view_id', '') or '').strip()}' "
+            f"post_view_id_normalized='{_normalize_optional_id(post_click_step.get('focus_view_id', ''))}' "
             f"post_click_bounds='{str(post_click_step.get('focus_bounds', '') or '').strip()}' "
+            f"req_id='{str(post_click_step.get('req_id', '') or '').strip()}' "
             f"overlay_step_index={next_overlay_step_idx} gate_enabled={str(overlay_first_row_debug_enabled).lower()} "
             f"focused_node_text='{str((focused_node or {}).get('text', '') if isinstance(focused_node, dict) else '')}' "
             f"focused_node_desc='{str((focused_node or {}).get('contentDescription', '') if isinstance(focused_node, dict) else '')}' "
@@ -789,7 +791,8 @@ def expand_overlay(
                     f"req_id='{first_row.get('req_id', '')}' step_index={next_overlay_step_idx} "
                     f"placeholder_eval={str(first_row_placeholder_eval).lower()} "
                     f"title_skip_eval={str(first_row_title_skip_eval).lower()} "
-                    f"dedup_eval={str(first_row_dedup_eval).lower()}",
+                    f"dedup_eval={str(first_row_dedup_eval).lower()} "
+                    "synthetic_source='post_label_only'",
                     level="DEBUG",
                 )
             _save_overlay_row(first_row, next_overlay_step_idx)
@@ -988,6 +991,12 @@ def expand_overlay(
         loop_break_reason = str((overlay_rows[-1].get("stop_reason", "") if overlay_rows else "") or "completed")
     if overlay_first_row_debug_enabled:
         overlay_row_labels = [str(row.get("visible_label", "") or "").strip() for row in overlay_rows[:5]]
+        first_row_index = -1
+        if first_row_trace_key:
+            for idx, row in enumerate(overlay_rows):
+                if str(row.get("_overlay_first_row_key", "") or "").strip() == first_row_trace_key:
+                    first_row_index = idx
+                    break
         first_row_still_present = bool(
             first_row_trace_key and any(str(row.get("_overlay_first_row_key", "") or "").strip() == first_row_trace_key for row in overlay_rows)
         )
@@ -996,6 +1005,7 @@ def expand_overlay(
             f"first_row_saved={str(first_saved).lower()} saved_row_key='{first_row_trace_key}' "
             f"overlay_row_count={len(overlay_rows)} overlay_row_labels='{overlay_row_labels}' "
             f"first_row_still_present={str(first_row_still_present).lower()} "
+            f"first_row_index={first_row_index} "
             f"break_reason='{loop_break_reason}' duplicate_streak={duplicate_streak}",
             level="DEBUG",
         )

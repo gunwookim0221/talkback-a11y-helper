@@ -72,6 +72,7 @@ COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr65-main-tab-special-state-scope-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
 COLLECTION_FLOW_LIFE_RESET_VERSION = "pr61-life-reset-strict-global-nav-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
+COLLECTION_FLOW_OVERLAY_FIRSTROW_DEBUG_VERSION = "pr73-overlay-first-row-lifecycle-debug-v1"
 SCROLLTOUCH_DEBUG_CAPTURE_ENABLED = False
 SCROLLTOUCH_DEBUG_VERBOSE_LOG_ENABLED = False
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -6642,6 +6643,13 @@ def _execute_overlay_for_candidate(
             merged_has_first_row = bool(
                 returned_row_key and any(str(saved_row.get("_overlay_first_row_key", "") or "").strip() == returned_row_key for saved_row in rows)
             )
+            merged_first_row_index = -1
+            if returned_row_key:
+                for idx, saved_row in enumerate(rows):
+                    if str(saved_row.get("_overlay_first_row_key", "") or "").strip() == returned_row_key:
+                        merged_first_row_index = idx
+                        break
+            merged_labels_preview = [str(saved_row.get("visible_label", "") or "").strip() for saved_row in rows[-5:]]
             log(
                 f"[OVERLAY][FIRSTROW][caller_received] scenario='{tab_cfg.get('tab_name', '')}' "
                 f"returned_overlay_row_count={returned_overlay_count} "
@@ -6651,7 +6659,11 @@ def _execute_overlay_for_candidate(
                 f"first_row_key='{returned_row_key}' "
                 f"caller_rows_before={before_overlay_len} caller_rows_after={len(rows)} "
                 f"caller_all_rows_before={before_all_rows_len} caller_all_rows_after={len(all_rows)} "
-                f"merge_target='rows/all_rows' merged_first_row_present={str(merged_has_first_row).lower()}",
+                "merge_target='rows/all_rows' "
+                f"merged_first_row_present={str(merged_has_first_row).lower()} "
+                f"merged_first_row_index={merged_first_row_index} "
+                f"merged_labels_preview='{merged_labels_preview}' "
+                f"debug='{COLLECTION_FLOW_OVERLAY_FIRSTROW_DEBUG_VERSION}'",
                 level="DEBUG",
             )
         if scenario_perf is not None:
