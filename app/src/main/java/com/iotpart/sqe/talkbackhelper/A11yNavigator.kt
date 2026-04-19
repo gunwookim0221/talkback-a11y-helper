@@ -13,7 +13,7 @@ typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
 typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
-    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.76.1"
+    const val NAVIGATOR_ALGORITHM_VERSION: String = "2.76.2"
     private const val SMART_NEXT_REPEAT_DEBUG = false
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
@@ -303,13 +303,7 @@ object A11yNavigator {
         aliasMembersByRepresentativeIndex: Map<Int, List<AccessibilityNodeInfo>> = emptyMap()
     ): CurrentPosition {
         val rawCurrentNode = currentNode
-        val resolvedCurrent = currentNode?.let {
-            resolveToClickableAncestor(
-                node = it,
-                parentOf = { node -> node.parent },
-                isClickable = { node -> node.isClickable }
-            )
-        }
+        val resolvedCurrent = currentNode?.let(::resolveCurrentTraversalNode)
         var currentIndex = findTraversalIndexForCurrentCandidate(
             traversalList = traversalList,
             resolvedCurrent = resolvedCurrent,
@@ -1423,6 +1417,15 @@ object A11yNavigator {
             nextIndex = overlayRepeatSalvageIndex
             targetDecisionReason = "overlay_repeat_salvage"
         }
+        val promotedOverlayTitleIndex = promoteOverlayTitleTargetIndex(traversalList, nextIndex)
+        if (promotedOverlayTitleIndex != nextIndex) {
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][overlay_row_promote] req_id='$reqId' from=$nextIndex to=$promotedOverlayTitleIndex"
+            )
+            nextIndex = promotedOverlayTitleIndex
+            targetDecisionReason = "overlay_row_promote"
+        }
         if (SMART_NEXT_REPEAT_DEBUG) {
             val repeatDebugFinalNode = traversalList.getOrNull(nextIndex)
             val changedBySalvage = overlayRepeatSalvageIndex != repeatDebugInitialIndex
@@ -1629,6 +1632,23 @@ object A11yNavigator {
             ?: ""
     }
 
+    private fun focusedNodeFromRepresentative(node: AccessibilityNodeInfo): FocusedNode {
+        val metadata = A11yTraversalAnalyzer.collectActionableDescendantMetadata(node)
+        val label = resolvePrimaryLabel(node) ?: A11yTraversalAnalyzer.recoverDescendantLabel(node)
+        return FocusedNode(
+            node = node,
+            text = label,
+            contentDescription = node.contentDescription?.toString(),
+            mergedLabel = label,
+            hasClickableDescendant = metadata.hasClickableDescendant,
+            hasFocusableDescendant = metadata.hasFocusableDescendant,
+            effectiveClickable = node.isClickable,
+            actionableDescendantResourceId = metadata.actionableDescendantResourceId,
+            actionableDescendantClassName = metadata.actionableDescendantClassName,
+            actionableDescendantContentDescription = metadata.actionableDescendantContentDescription
+        )
+    }
+
     private fun selectAliasGroupRepresentative(group: List<FocusedNode>): FocusedNode {
         selectOneConnectSettingsRowRepresentative(group)?.let { settingsRow ->
             Log.d(
@@ -1653,6 +1673,24 @@ object A11yNavigator {
                 )
                 return updateAppCard
             }
+        }
+        val overlayRepresentative = group.firstOrNull { member ->
+            val node = member.node
+            isOverlayMenuLikeContext(node) &&
+                !isNonActionableTitleText(node) &&
+                isActionableTraversalCandidate(node)
+        }
+        if (overlayRepresentative != null) return overlayRepresentative
+
+        val overlayPromotedNode = group.asSequence()
+            .mapNotNull { member ->
+                member.node.takeIf { isOverlayMenuLikeContext(it) && isNonActionableTitleText(it) }
+            }
+            .mapNotNull(::promoteToRowContainerIfNeeded)
+            .firstOrNull()
+        if (overlayPromotedNode != null) {
+            Log.i("A11Y_HELPER", "[SMART_NEXT][overlay_row_promote] representative=${overlayPromotedNode.viewIdResourceName.orEmpty()}")
+            return group.firstOrNull { isSameNode(it.node, overlayPromotedNode) } ?: focusedNodeFromRepresentative(overlayPromotedNode)
         }
         return group
             .sortedWith(
@@ -2133,6 +2171,79 @@ object A11yNavigator {
         val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
             AccessibilityNodeInfoCompat.wrap(node).isScreenReaderFocusable
         return node.isVisibleToUser && (node.isClickable || node.isFocusable || screenReaderFocusable)
+    }
+
+    private fun isOverlayMenuLikeContext(node: AccessibilityNodeInfo?): Boolean {
+        return nearestMenuLikeContainer(node) != null
+    }
+
+    private fun isNonActionableTitleText(node: AccessibilityNodeInfo): Boolean {
+        val className = node.className?.toString().orEmpty()
+        if (!className.contains("TextView", ignoreCase = true)) return false
+        val viewId = node.viewIdResourceName.orEmpty()
+        if (!viewId.contains("title", ignoreCase = true)) return false
+        if (node.isClickable || node.isFocusable) return false
+        val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+            AccessibilityNodeInfoCompat.wrap(node).isScreenReaderFocusable
+        return !screenReaderFocusable
+    }
+
+    private fun promoteToRowContainerIfNeeded(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        if (!isOverlayMenuLikeContext(node) || !isNonActionableTitleText(node)) return null
+        var current = node.parent
+        var depth = 0
+        while (current != null && depth <= 6) {
+            if (isActionableTraversalCandidate(current)) return current
+            current = current.parent
+            depth += 1
+        }
+        val parent = node.parent ?: return null
+        for (i in 0 until parent.childCount) {
+            val sibling = parent.getChild(i) ?: continue
+            if (isSameNode(sibling, node)) continue
+            if (isActionableTraversalCandidate(sibling)) return sibling
+        }
+        return null
+    }
+
+    private fun resolveCurrentTraversalNode(node: AccessibilityNodeInfo): AccessibilityNodeInfo {
+        promoteToRowContainerIfNeeded(node)?.let { promoted ->
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][overlay_row_promote] current=${node.viewIdResourceName.orEmpty()} promoted=${promoted.viewIdResourceName.orEmpty()}"
+            )
+            return promoted
+        }
+        return resolveToClickableAncestor(
+            node = node,
+            parentOf = { current -> current.parent },
+            isClickable = { current -> current.isClickable }
+        )
+    }
+
+    private fun promoteOverlayTitleTargetIndex(
+        traversalList: List<AccessibilityNodeInfo>,
+        nextIndex: Int
+    ): Int {
+        if (nextIndex !in traversalList.indices) return nextIndex
+        val candidate = traversalList[nextIndex]
+        if (!isOverlayMenuLikeContext(candidate) || !isNonActionableTitleText(candidate)) return nextIndex
+        Log.i("A11Y_HELPER", "[SMART_NEXT][overlay_title_demote] candidate=${candidate.viewIdResourceName.orEmpty()} index=$nextIndex")
+        val promoted = promoteToRowContainerIfNeeded(candidate)
+        if (promoted != null) {
+            val promotedIndex = traversalList.indexOfFirst { node -> isSameNode(node, promoted) }
+            if (promotedIndex in traversalList.indices) return promotedIndex
+        }
+        val parent = candidate.parent
+        if (parent != null) {
+            val siblingIndex = traversalList.indexOfFirst { node ->
+                !isSameNode(node, candidate) &&
+                    isNodeInsideAncestor(node, parent) &&
+                    isActionableTraversalCandidate(node)
+            }
+            if (siblingIndex in traversalList.indices) return siblingIndex
+        }
+        return nextIndex
     }
 
     private fun preventOneConnectSettingsSameRowReselection(
