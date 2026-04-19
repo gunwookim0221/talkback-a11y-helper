@@ -40,6 +40,10 @@ _KEY_VALUE_PATTERNS = {
 }
 
 
+def _overlay_first_row_debug_enabled() -> bool:
+    return str(os.getenv("TB_OVERLAY_FIRST_ROW_DEBUG", "") or "").strip().lower() in {"1", "true", "t", "yes", "y"}
+
+
 def _normalize_step_value(step_value: object) -> str:
     text = str(step_value or "").strip()
     if not text:
@@ -1169,6 +1173,47 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
     summary_df = make_summary_df(raw_df, filtered_df)
     result_df = make_result_df(filtered_df)
     result_df = _populate_result_debug_logs(result_df, output_path, source_df=filtered_df)
+    if _overlay_first_row_debug_enabled():
+        tracked_keys: list[str] = []
+        for row in rows:
+            row_key = str((row or {}).get("_overlay_first_row_key", "") or "").strip() if isinstance(row, dict) else ""
+            if row_key and row_key not in tracked_keys:
+                tracked_keys.append(row_key)
+        if tracked_keys:
+            recent_logs = get_recent_logs(limit=600)
+            for tracked_key in tracked_keys:
+                raw_matches = [row for row in rows if str((row or {}).get("_overlay_first_row_key", "") or "").strip() == tracked_key]
+                found_in_raw_rows = bool(raw_matches)
+                found_in_filtered_rows = (
+                    "_overlay_first_row_key" in filtered_df.columns
+                    and bool((filtered_df["_overlay_first_row_key"].astype(str) == tracked_key).any())
+                )
+                found_in_result_rows = (
+                    "_overlay_first_row_key" in result_df.columns
+                    and bool((result_df["_overlay_first_row_key"].astype(str) == tracked_key).any())
+                )
+                found_in_debug_logs = any(tracked_key in line for line in recent_logs)
+                sample_row = raw_matches[0] if raw_matches else {}
+                placeholder_eval = is_placeholder_row(sample_row) if sample_row else False
+                filter_skipped = found_in_raw_rows and not found_in_filtered_rows
+                drop_reason = ""
+                if found_in_raw_rows and not found_in_filtered_rows:
+                    drop_reason = "dropped_before_filtered"
+                elif found_in_filtered_rows and not found_in_result_rows:
+                    drop_reason = "dropped_before_result"
+                elif found_in_result_rows:
+                    drop_reason = "not_dropped"
+                else:
+                    drop_reason = "not_found_in_export_frames"
+                log(
+                    f"[OVERLAY][FIRSTROW][pre_result_export] row_key='{tracked_key}' "
+                    f"found_in_raw_rows={str(found_in_raw_rows).lower()} "
+                    f"found_in_result_rows={str(found_in_result_rows).lower()} "
+                    f"found_in_debug_logs={str(found_in_debug_logs).lower()} "
+                    f"drop_reason='{drop_reason}' placeholder_eval={str(placeholder_eval).lower()} "
+                    f"filter_skip={str(filter_skipped).lower()}",
+                    level="DEBUG",
+                )
 
     log("[SAVE] writing sheets raw/filtered/summary/result")
     log(f"[SAVE] filtered rows={len(filtered_df)}, raw rows={len(raw_df)}")

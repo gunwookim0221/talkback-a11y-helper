@@ -1,5 +1,7 @@
 import re
 import time
+import os
+import hashlib
 from typing import Any
 
 from talkback_lib import A11yAdbClient
@@ -23,7 +25,23 @@ from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
 
 OVERLAY_REALIGN_ROBUSTNESS_VERSION = "pr14-a-realign-robustness-v3"
 OVERLAY_TRAVERSAL_CORE_VERSION = "pr70-overlay-traversal-core-v2"
-OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr70-overlay-first-row-debug-v6"
+OVERLAY_FIRST_ROW_DEBUG_VERSION = "pr71-overlay-first-row-lifecycle-path-v1"
+
+
+def _overlay_first_row_debug_enabled() -> bool:
+    return str(os.getenv("TB_OVERLAY_FIRST_ROW_DEBUG", "") or "").strip().lower() in {"1", "true", "t", "yes", "y"}
+
+
+def _build_overlay_first_row_key(
+    *,
+    scenario: str,
+    post_label: str,
+    req_id: str,
+    step_index: int,
+) -> str:
+    normalized_label = re.sub(r"\s+", " ", str(post_label or "").strip().lower())[:80] or "empty"
+    label_hash = hashlib.sha1(normalized_label.encode("utf-8")).hexdigest()[:8]
+    return f"overlay_first::{scenario or 'unknown'}::{label_hash}::{req_id or 'no_req'}::s{step_index}"
 
 
 def _get_positive_int(tab_cfg: dict[str, Any], key: str, fallback: int) -> int:
@@ -413,6 +431,7 @@ def expand_overlay(
     initial_overlay_step: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     overlay_rows: list[dict[str, Any]] = []
+    overlay_first_row_debug_enabled = _overlay_first_row_debug_enabled()
     overlay_step_wait_seconds = _get_positive_float(tab_cfg, "overlay_step_wait_seconds", OVERLAY_STEP_WAIT_SECONDS)
     overlay_announcement_wait_seconds = _get_positive_float(
         tab_cfg,
@@ -465,6 +484,7 @@ def expand_overlay(
     duplicate_streak = 0
     loop_break_reason = ""
     duplicate_break_reached = False
+    first_row_trace_key = ""
 
     def _to_boolish(value: Any) -> bool:
         return str(value or "").strip().lower() in {"1", "true", "t", "yes", "y"}
@@ -572,6 +592,29 @@ def expand_overlay(
                     synthetic_row.get("tab", "") or entry_step.get("tab", "") or tab_cfg.get("tab_name", "")
                 ).strip()
                 synthetic_row = _prepare_overlay_row(synthetic_row, next_overlay_step_idx)
+                if overlay_first_row_debug_enabled:
+                    synthetic_row_key = _build_overlay_first_row_key(
+                        scenario=str(tab_cfg.get("tab_name", "") or ""),
+                        post_label=synthetic_row.get("visible_label", ""),
+                        req_id=str(synthetic_row.get("req_id", "") or ""),
+                        step_index=next_overlay_step_idx,
+                    )
+                    synthetic_row["_overlay_first_row_key"] = synthetic_row_key
+                    synthetic_placeholder_eval = is_placeholder_row(synthetic_row)
+                    synthetic_title_skip_eval = _is_title_like_row(synthetic_row)
+                    synthetic_fp_eval = build_row_fingerprint(synthetic_row)
+                    synthetic_dedup_eval = bool(synthetic_fp_eval and synthetic_fp_eval in overlay_seen_fingerprints)
+                    log(
+                        f"[OVERLAY][FIRSTROW][synthetic_built] row_key='{synthetic_row_key}' "
+                        f"scenario='{tab_cfg.get('tab_name', '')}' context_type='{synthetic_row.get('context_type', '')}' "
+                        f"visible_label='{synthetic_row.get('visible_label', '')}' speech='{synthetic_row.get('merged_announcement', '')}' "
+                        f"focus_view_id='{synthetic_row.get('focus_view_id', '')}' focus_bounds='{synthetic_row.get('focus_bounds', '')}' "
+                        f"req_id='{synthetic_row.get('req_id', '')}' step_index={next_overlay_step_idx} "
+                        f"placeholder_eval={str(synthetic_placeholder_eval).lower()} "
+                        f"title_skip_eval={str(synthetic_title_skip_eval).lower()} "
+                        f"dedup_eval={str(synthetic_dedup_eval).lower()}",
+                        level="DEBUG",
+                    )
                 if _is_valid_first_overlay_row(synthetic_row):
                     selected_fp = build_row_fingerprint(synthetic_row)
                     log(
@@ -612,12 +655,45 @@ def expand_overlay(
         row["_step_mono_start"] = time.monotonic() - float(row.get("t_step_start", 0.0) or 0.0)
         row_with_crop = maybe_capture_focus_crop(client, dev, row, output_base_dir)
         row_with_crop.pop("_step_mono_start", None)
+        row_trace_key = str(row_with_crop.get("_overlay_first_row_key", "") or "").strip()
+        overlay_len_before = len(overlay_rows)
+        rows_len_before = len(rows)
+        all_rows_len_before = len(all_rows)
+        if overlay_first_row_debug_enabled and row_trace_key:
+            log(
+                f"[OVERLAY][FIRSTROW][append_attempt] row_key='{row_trace_key}' append_target='overlay_rows|rows|all_rows' "
+                f"overlay_rows_before={overlay_len_before} rows_before={rows_len_before} all_rows_before={all_rows_len_before}",
+                level="DEBUG",
+            )
         overlay_rows.append(row_with_crop)
         rows.append(row_with_crop)
         all_rows.append(row_with_crop)
         overlay_fp = build_row_fingerprint(row_with_crop)
+        overlay_seen_before = len(overlay_seen_fingerprints)
+        fingerprint_collision = bool(overlay_fp and overlay_fp in overlay_seen_fingerprints)
         if overlay_fp:
             overlay_seen_fingerprints.add(overlay_fp)
+        if overlay_first_row_debug_enabled and row_trace_key:
+            append_success = bool(len(overlay_rows) == overlay_len_before + 1 and len(rows) == rows_len_before + 1 and len(all_rows) == all_rows_len_before + 1)
+            log(
+                f"[OVERLAY][FIRSTROW][append_done] row_key='{row_trace_key}' append_target='overlay_rows|rows|all_rows' "
+                f"overlay_rows_after={len(overlay_rows)} rows_after={len(rows)} all_rows_after={len(all_rows)} "
+                f"append_success={str(append_success).lower()} append_skipped_reason='' "
+                f"last_visible='{str((overlay_rows[-1] if overlay_rows else {}).get('visible_label', '') or '').strip()}' "
+                f"last_context='{str((overlay_rows[-1] if overlay_rows else {}).get('context_type', '') or '').strip()}' "
+                f"last_req_id='{str((overlay_rows[-1] if overlay_rows else {}).get('req_id', '') or '').strip()}' "
+                f"last_step='{str((overlay_rows[-1] if overlay_rows else {}).get('step_index', '') or '').strip()}' "
+                f"last_focus_view_id='{str((overlay_rows[-1] if overlay_rows else {}).get('focus_view_id', '') or '').strip()}'",
+                level="DEBUG",
+            )
+            log(
+                f"[OVERLAY][FIRSTROW][seen_sync] row_key='{row_trace_key}' fingerprint='{overlay_fp}' "
+                f"overlay_seen_fingerprints_before={overlay_seen_before} "
+                f"overlay_seen_fingerprints_after={len(overlay_seen_fingerprints)} "
+                f"fingerprint_empty={str(not bool(overlay_fp)).lower()} "
+                f"fingerprint_collision={str(fingerprint_collision).lower()}",
+                level="DEBUG",
+            )
         log(
             f"[OVERLAY][save] step={step_index} fp='{overlay_fp}' visible='{row_with_crop.get('visible_label', '')}' "
             f"resource_id='{row_with_crop.get('focus_view_id', '')}' core='{OVERLAY_TRAVERSAL_CORE_VERSION}'",
@@ -640,6 +716,30 @@ def expand_overlay(
             announcement_max_extra_wait_seconds=overlay_announcement_max_extra_wait_seconds,
         )
         first_candidates.append(post_click_step)
+    if overlay_first_row_debug_enabled and isinstance(post_click_step, dict):
+        focused_node = post_click_step.get("focus_node")
+        children = focused_node.get("children", []) if isinstance(focused_node, dict) else []
+        child_summaries: list[str] = []
+        for child in children[:3] if isinstance(children, list) else []:
+            if not isinstance(child, dict):
+                continue
+            child_summaries.append(
+                f"text='{str(child.get('text', '') or '').strip()}'"
+                f"|desc='{str(child.get('contentDescription', '') or '').strip()}'"
+                f"|id='{str(child.get('viewIdResourceName', '') or '').strip()}'"
+            )
+        log(
+            f"[OVERLAY][FIRSTROW][post_label_detected] scenario='{tab_cfg.get('tab_name', '')}' "
+            f"overlay_context='{entry_label}' post_label='{str(post_click_step.get('visible_label', '') or '').strip()}' "
+            f"post_view_id='{_normalize_optional_id(post_click_step.get('focus_view_id', ''))}' "
+            f"post_click_bounds='{str(post_click_step.get('focus_bounds', '') or '').strip()}' "
+            f"overlay_step_index={next_overlay_step_idx} gate_enabled={str(overlay_first_row_debug_enabled).lower()} "
+            f"focused_node_text='{str((focused_node or {}).get('text', '') if isinstance(focused_node, dict) else '')}' "
+            f"focused_node_desc='{str((focused_node or {}).get('contentDescription', '') if isinstance(focused_node, dict) else '')}' "
+            f"focused_node_id='{str((focused_node or {}).get('viewIdResourceName', '') if isinstance(focused_node, dict) else '')}' "
+            f"children_summary='{' ; '.join(child_summaries)}'",
+            level="DEBUG",
+        )
 
     first_saved = False
     first_selected = False
@@ -668,6 +768,29 @@ def expand_overlay(
             ).strip()
             first_row["tab"] = str(first_row.get("tab", "") or entry_step.get("tab", "") or tab_cfg.get("tab_name", "")).strip()
             first_row.setdefault("debug", str(first_row.get("debug", "") or ""))
+            if overlay_first_row_debug_enabled:
+                first_row_trace_key = _build_overlay_first_row_key(
+                    scenario=str(tab_cfg.get("tab_name", "") or ""),
+                    post_label=first_row.get("visible_label", ""),
+                    req_id=str(first_row.get("req_id", "") or ""),
+                    step_index=next_overlay_step_idx,
+                )
+                first_row["_overlay_first_row_key"] = first_row_trace_key
+                first_row_placeholder_eval = is_placeholder_row(first_row)
+                first_row_title_skip_eval = _is_title_like_row(first_row)
+                first_row_fp_eval = build_row_fingerprint(first_row)
+                first_row_dedup_eval = bool(first_row_fp_eval and first_row_fp_eval in overlay_seen_fingerprints)
+                log(
+                    f"[OVERLAY][FIRSTROW][synthetic_built] row_key='{first_row_trace_key}' "
+                    f"scenario='{tab_cfg.get('tab_name', '')}' context_type='{first_row.get('context_type', '')}' "
+                    f"visible_label='{first_row.get('visible_label', '')}' speech='{first_row.get('merged_announcement', '')}' "
+                    f"focus_view_id='{first_row.get('focus_view_id', '')}' focus_bounds='{first_row.get('focus_bounds', '')}' "
+                    f"req_id='{first_row.get('req_id', '')}' step_index={next_overlay_step_idx} "
+                    f"placeholder_eval={str(first_row_placeholder_eval).lower()} "
+                    f"title_skip_eval={str(first_row_title_skip_eval).lower()} "
+                    f"dedup_eval={str(first_row_dedup_eval).lower()}",
+                    level="DEBUG",
+                )
             _save_overlay_row(first_row, next_overlay_step_idx)
             overlay_previous_row = overlay_rows[-1]
             first_row_saved_fp = build_row_fingerprint(overlay_previous_row)
@@ -694,6 +817,8 @@ def expand_overlay(
     if not first_saved:
         first_row = _pick_first_overlay_candidate(first_candidates, post_click_step)
         first_selected = first_row is not None
+        if overlay_first_row_debug_enabled and isinstance(first_row, dict):
+            first_row_trace_key = str(first_row.get("_overlay_first_row_key", "") or "").strip()
     log(
         f"[OVERLAY][first_row_save_attempt] scenario='{tab_cfg.get('tab_name', '')}' "
         f"selected={str(first_selected).lower()} visible='{str((first_row or {}).get('visible_label', '') or '').strip()}' "
@@ -800,6 +925,26 @@ def expand_overlay(
                 overlay_rows
                 and build_row_fingerprint(overlay_rows[0]) == first_row_saved_snapshot.get("fingerprint", "")
             )
+            if overlay_first_row_debug_enabled and first_row_trace_key:
+                current_loop_visible = str(overlay_row.get("visible_label", "") or "").strip()
+                current_loop_speech = str(overlay_row.get("merged_announcement", "") or "").strip()
+                current_loop_resource_id = str(overlay_row.get("focus_view_id", "") or "").strip()
+                current_loop_bounds = str(overlay_row.get("focus_bounds", "") or "").strip()
+                same_as_first_row = bool(
+                    first_row_saved_snapshot.get("visible", "") == current_loop_visible
+                    and first_row_saved_snapshot.get("resource_id", "") == current_loop_resource_id
+                    and first_row_saved_snapshot.get("bounds", "") == current_loop_bounds
+                )
+                log(
+                    f"[OVERLAY][FIRSTROW][loop_compare] row_key='{first_row_trace_key}' "
+                    f"loop_step={overlay_step_idx} current_visible='{current_loop_visible}' "
+                    f"current_speech='{current_loop_speech}' current_resource_id='{current_loop_resource_id}' "
+                    f"current_bounds='{current_loop_bounds}' current_fingerprint='{current_overlay_fp}' "
+                    f"same_as_first_row={str(same_as_first_row).lower()} "
+                    f"skip_duplicate_row={str(skip_duplicate_row).lower()} duplicate_streak={duplicate_streak} "
+                    f"title_node={str(title_node).lower()}",
+                    level="DEBUG",
+                )
             log(
                 f"[OVERLAY][post_first_loop_compare] scenario='{tab_cfg.get('tab_name', '')}' "
                 f"just_saved_first_row_visible='{first_row_saved_snapshot.get('visible', '')}' "
@@ -840,6 +985,19 @@ def expand_overlay(
         save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
     if not loop_break_reason:
         loop_break_reason = str((overlay_rows[-1].get("stop_reason", "") if overlay_rows else "") or "completed")
+    if overlay_first_row_debug_enabled:
+        overlay_row_labels = [str(row.get("visible_label", "") or "").strip() for row in overlay_rows[:5]]
+        first_row_still_present = bool(
+            first_row_trace_key and any(str(row.get("_overlay_first_row_key", "") or "").strip() == first_row_trace_key for row in overlay_rows)
+        )
+        log(
+            f"[OVERLAY][FIRSTROW][before_return] scenario='{tab_cfg.get('tab_name', '')}' "
+            f"first_row_saved={str(first_saved).lower()} saved_row_key='{first_row_trace_key}' "
+            f"overlay_row_count={len(overlay_rows)} overlay_row_labels='{overlay_row_labels}' "
+            f"first_row_still_present={str(first_row_still_present).lower()} "
+            f"break_reason='{loop_break_reason}' duplicate_streak={duplicate_streak}",
+            level="DEBUG",
+        )
     log(
         f"[OVERLAY][first_row_summary] scenario='{tab_cfg.get('tab_name', '')}' "
         f"first_row_selected={str(first_selected).lower()} first_row_saved={str(first_saved).lower()} "

@@ -1,5 +1,6 @@
 import re
 import time
+import os
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -105,6 +106,10 @@ STRICT_PLUGIN_ENTRY_PHRASES: dict[str, dict[str, tuple[str, ...]]] = {
     "life_music_sync_plugin": {"strict": ("music sync",), "title_only": ("sync",)},
     "life_pet_care_plugin": {"strict": ("pet care", "펫 케어"), "title_only": ()},
 }
+
+
+def _overlay_first_row_debug_enabled() -> bool:
+    return str(os.getenv("TB_OVERLAY_FIRST_ROW_DEBUG", "") or "").strip().lower() in {"1", "true", "t", "yes", "y"}
 
 
 def _resolve_scrolltouch_debug_flags(tab_cfg: dict[str, Any]) -> tuple[bool, bool]:
@@ -6611,7 +6616,8 @@ def _execute_overlay_for_candidate(
         if scenario_perf is not None:
             scenario_perf.overlay_count += 1
         before_overlay_len = len(rows)
-        expand_overlay(
+        before_all_rows_len = len(all_rows)
+        overlay_rows_returned = expand_overlay(
             client=client,
             dev=dev,
             tab_cfg=tab_cfg,
@@ -6624,6 +6630,30 @@ def _execute_overlay_for_candidate(
             scenario_perf=scenario_perf,
             initial_overlay_step=post_click_step,
         )
+        if _overlay_first_row_debug_enabled():
+            returned_overlay_count = len(overlay_rows_returned)
+            returned_first_row = overlay_rows_returned[0] if overlay_rows_returned else {}
+            returned_row_key = str(returned_first_row.get("_overlay_first_row_key", "") or "").strip()
+            if not returned_row_key:
+                for overlay_candidate in overlay_rows_returned:
+                    returned_row_key = str(overlay_candidate.get("_overlay_first_row_key", "") or "").strip()
+                    if returned_row_key:
+                        break
+            merged_has_first_row = bool(
+                returned_row_key and any(str(saved_row.get("_overlay_first_row_key", "") or "").strip() == returned_row_key for saved_row in rows)
+            )
+            log(
+                f"[OVERLAY][FIRSTROW][caller_received] scenario='{tab_cfg.get('tab_name', '')}' "
+                f"returned_overlay_row_count={returned_overlay_count} "
+                f"first_row_visible='{str(returned_first_row.get('visible_label', '') or '').strip()}' "
+                f"first_row_context_type='{str(returned_first_row.get('context_type', '') or '').strip()}' "
+                f"first_row_req_id='{str(returned_first_row.get('req_id', '') or '').strip()}' "
+                f"first_row_key='{returned_row_key}' "
+                f"caller_rows_before={before_overlay_len} caller_rows_after={len(rows)} "
+                f"caller_all_rows_before={before_all_rows_len} caller_all_rows_after={len(all_rows)} "
+                f"merge_target='rows/all_rows' merged_first_row_present={str(merged_has_first_row).lower()}",
+                level="DEBUG",
+            )
         if scenario_perf is not None:
             for overlay_row in rows[before_overlay_len:]:
                 scenario_perf.record_row(overlay_row)
