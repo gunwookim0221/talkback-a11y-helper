@@ -592,6 +592,7 @@ def expand_overlay(
                     synthetic_row.get("tab", "") or entry_step.get("tab", "") or tab_cfg.get("tab_name", "")
                 ).strip()
                 synthetic_row = _prepare_overlay_row(synthetic_row, next_overlay_step_idx)
+                synthetic_row["_is_overlay_first_row"] = True
                 if overlay_first_row_debug_enabled:
                     synthetic_row_key = _build_overlay_first_row_key(
                         scenario=str(tab_cfg.get("tab_name", "") or ""),
@@ -651,6 +652,9 @@ def expand_overlay(
         row["stop_reason"] = ""
         row["crop_image"] = "IMAGE"
         return row
+
+    def _is_overlay_first_row(row: dict[str, Any] | None) -> bool:
+        return bool(isinstance(row, dict) and row.get("_is_overlay_first_row", False))
 
     def _save_overlay_row(row: dict[str, Any], step_index: int) -> None:
         row["_step_mono_start"] = time.monotonic() - float(row.get("t_step_start", 0.0) or 0.0)
@@ -746,6 +750,7 @@ def expand_overlay(
 
     first_saved = False
     first_selected = False
+    protected_first_row_fingerprints: set[str] = set()
     first_row_saved_fp = ""
     first_row_saved_snapshot: dict[str, str] = {}
     first_row: dict[str, Any] | None = None
@@ -771,6 +776,7 @@ def expand_overlay(
             ).strip()
             first_row["tab"] = str(first_row.get("tab", "") or entry_step.get("tab", "") or tab_cfg.get("tab_name", "")).strip()
             first_row.setdefault("debug", str(first_row.get("debug", "") or ""))
+            first_row["_is_overlay_first_row"] = True
             if overlay_first_row_debug_enabled:
                 first_row_trace_key = _build_overlay_first_row_key(
                     scenario=str(tab_cfg.get("tab_name", "") or ""),
@@ -798,6 +804,8 @@ def expand_overlay(
             _save_overlay_row(first_row, next_overlay_step_idx)
             overlay_previous_row = overlay_rows[-1]
             first_row_saved_fp = build_row_fingerprint(overlay_previous_row)
+            if first_row_saved_fp and _is_overlay_first_row(overlay_previous_row):
+                protected_first_row_fingerprints.add(first_row_saved_fp)
             first_row_saved_snapshot = {
                 "visible": str(overlay_previous_row.get("visible_label", "") or "").strip(),
                 "resource_id": str(overlay_previous_row.get("focus_view_id", "") or "").strip(),
@@ -840,6 +848,8 @@ def expand_overlay(
         _save_overlay_row(first_row, next_overlay_step_idx)
         overlay_previous_row = overlay_rows[-1]
         first_row_saved_fp = build_row_fingerprint(overlay_previous_row)
+        if first_row_saved_fp and _is_overlay_first_row(overlay_previous_row):
+            protected_first_row_fingerprints.add(first_row_saved_fp)
         first_row_saved_snapshot = {
             "visible": str(overlay_previous_row.get("visible_label", "") or "").strip(),
             "resource_id": str(overlay_previous_row.get("focus_view_id", "") or "").strip(),
@@ -890,11 +900,17 @@ def expand_overlay(
             save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
             break
 
+        bypass_dedup = _is_overlay_first_row(overlay_row)
+        protected_first_row_duplicate = bool(current_overlay_fp and current_overlay_fp in protected_first_row_fingerprints)
         if _is_title_like_row(overlay_row):
             title_node = True
             log(f"[OVERLAY][skip_title] step={overlay_step_idx} resource_id='{overlay_row.get('focus_view_id', '')}'", level="DEBUG")
         else:
-            if not current_overlay_fp:
+            if bypass_dedup:
+                duplicate_streak = 0
+                _save_overlay_row(overlay_row, overlay_step_idx)
+                overlay_previous_row = overlay_rows[-1]
+            elif not current_overlay_fp:
                 duplicate_streak += 1
                 if duplicate_streak >= 3 and overlay_previous_row:
                     overlay_previous_row["status"] = "END"
@@ -903,9 +919,18 @@ def expand_overlay(
                     loop_break_reason = "duplicate_streak_empty_fingerprint"
                     save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
                     break
+            elif protected_first_row_duplicate:
+                duplicate_streak = 0
+                log(
+                    f"[OVERLAY][dedup] protected_first_row_fp=true step={overlay_step_idx} fp='{current_overlay_fp}'",
+                    level="DEBUG",
+                )
             elif current_overlay_fp in overlay_seen_fingerprints:
                 skip_duplicate_row = True
-                duplicate_streak += 1
+                if len(overlay_rows) <= 1:
+                    duplicate_streak = 0
+                else:
+                    duplicate_streak += 1
                 if duplicate_streak >= 3:
                     if overlay_previous_row:
                         overlay_previous_row["status"] = "END"
@@ -982,8 +1007,9 @@ def expand_overlay(
             overlay_rows[-1]["status"] = "END"
             overlay_rows[-1]["stop_reason"] = "overlay_duplicate_streak"
         elif overlay_rows[-1].get("stop_reason", "") == "":
-            overlay_rows[-1]["status"] = "END"
-            overlay_rows[-1]["stop_reason"] = "overlay_max_steps"
+            if len(overlay_rows) > 1:
+                overlay_rows[-1]["status"] = "END"
+                overlay_rows[-1]["stop_reason"] = "overlay_max_steps"
 
     if checkpoint_every > 0 and overlay_rows and (len(overlay_rows) % checkpoint_every == 0):
         save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)

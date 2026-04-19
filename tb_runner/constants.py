@@ -2,7 +2,7 @@ import os
 
 
 DEV_SERIAL = "R3CX40QFDBP"
-SCRIPT_VERSION = "1.7.97"
+SCRIPT_VERSION = "1.7.98"
 _raw_log_level = os.getenv("LOG_LEVEL", os.getenv("TB_LOG_LEVEL", "INFO")).upper()
 LOG_LEVEL = "NORMAL" if _raw_log_level == "INFO" else _raw_log_level
 LOG_LEVEL_ORDER = {"QUIET": 0, "INFO": 1, "NORMAL": 1, "DEBUG": 2}
