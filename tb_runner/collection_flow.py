@@ -17,7 +17,7 @@ from tb_runner.constants import (
     MAIN_ANNOUNCEMENT_WAIT_SECONDS,
     MAIN_STEP_WAIT_SECONDS,
 )
-from tb_runner.diagnostics import classify_step_result, detect_step_mismatch, should_stop
+from tb_runner.diagnostics import classify_step_result, detect_step_mismatch, normalize_move_result, should_stop
 from tb_runner.diagnostics import is_global_nav_row
 from tb_runner.excel_report import save_excel
 from tb_runner.image_utils import maybe_capture_focus_crop
@@ -65,15 +65,17 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-alias-evidence-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr48-content-phase-chrome-guard-v1"
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr64-xml-entry-descendant-title-strict-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
-COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr66-special-state-grace-window-v2"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr67-special-state-grace-home-like-strict-v1"
+COLLECTION_FLOW_REPEAT_CTA_GRACE_VERSION = "pr78-repeat-cta-focus-align-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
 COLLECTION_FLOW_LIFE_RESET_VERSION = "pr61-life-reset-strict-global-nav-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
 COLLECTION_FLOW_OVERLAY_FIRSTROW_DEBUG_VERSION = "pr73-overlay-first-row-lifecycle-debug-v1"
 _SPECIAL_STATE_GRACE_MAX_STEPS = 3
+_CTA_DESCEND_GRACE_STEPS = 2
 _STRONG_ONBOARDING_TOKENS = (
     "agree",
     "consent",
@@ -158,6 +160,16 @@ class MainLoopState:
     stop_reason: str
     stop_step: int
     stall_escape_attempted: bool
+    cta_grace_signature: str
+    cta_descend_grace_remaining: int
+    cta_cluster_nodes_by_signature: dict[str, list[dict[str, Any]]]
+    cta_cluster_visited_rids: dict[str, set[str]]
+    cta_cluster_committed_rid: dict[str, str]
+    recent_representative_signatures: deque[str]
+    current_local_tab_signature: str
+    current_local_tab_active_rid: str
+    local_tab_candidates_by_signature: dict[str, list[dict[str, Any]]]
+    visited_local_tabs_by_signature: dict[str, set[str]]
 
 
 @dataclass
@@ -1419,6 +1431,38 @@ def _format_special_state_debug_values(values: list[str] | tuple[str, ...] | Non
     return ",".join(normalized) if normalized else "none"
 
 
+def _build_strict_token_pattern(token: str) -> re.Pattern[str] | None:
+    normalized_token = str(token or "").strip().lower()
+    if not normalized_token:
+        return None
+    parts = [re.escape(part) for part in normalized_token.split()]
+    if not parts:
+        return None
+    return re.compile(rf"(?<!\w){r'\s+'.join(parts)}(?!\w)")
+
+
+def _text_matches_token_strict(text: str, token: str) -> bool:
+    normalized_text = str(text or "").strip().lower()
+    if not normalized_text:
+        return False
+    pattern = _build_strict_token_pattern(token)
+    return bool(pattern and pattern.search(normalized_text))
+
+
+def _collect_strict_token_hits(tokens: list[str] | tuple[str, ...], texts: list[str] | tuple[str, ...]) -> list[str]:
+    hits: list[str] = []
+    seen_tokens: set[str] = set()
+    normalized_texts = [str(text or "").strip().lower() for text in texts if str(text or "").strip()]
+    for token in tokens:
+        normalized_token = str(token or "").strip().lower()
+        if not normalized_token or normalized_token in seen_tokens:
+            continue
+        if any(_text_matches_token_strict(text, normalized_token) for text in normalized_texts):
+            hits.append(normalized_token)
+            seen_tokens.add(normalized_token)
+    return hits
+
+
 def _find_first_token_source_match(
     token: str,
     source_candidates: list[tuple[str, list[str] | tuple[str, ...] | None]],
@@ -1431,7 +1475,7 @@ def _find_first_token_source_match(
             continue
         for candidate in candidates:
             text = str(candidate or "").strip()
-            if text and normalized_token in text.lower():
+            if text and _text_matches_token_strict(text, normalized_token):
                 return source_name, text
     return "", ""
 
@@ -1611,23 +1655,39 @@ def _classify_special_post_open_state(
     if not normalized_blob.strip() and not post_nodes:
         return False, "", {}
 
-    special_hits = [token for token in special_tokens if token in normalized_blob]
-    cta_hits = [token for token in cta_tokens if token in normalized_blob]
+    flat_nodes = _iter_tree_nodes_with_parent(post_nodes)
+    visible_texts: list[str] = []
+    top_visible: list[str] = []
+    descendant_texts: list[str] = []
+    for node, _ in flat_nodes:
+        if not _node_is_visible(node):
+            continue
+        text_blob = _node_label_blob(node).strip()
+        if not text_blob:
+            continue
+        lowered = text_blob.lower()
+        descendant_texts.append(lowered)
+        if len(top_visible) < 5:
+            top_visible.append(lowered)
+        if len(visible_texts) < 5:
+            visible_texts.append(lowered)
+    source_texts = [post_label, post_speech, *top_visible, *visible_texts, *descendant_texts]
+    special_hits = _collect_strict_token_hits(special_tokens, source_texts)
+    cta_hits = _collect_strict_token_hits(cta_tokens, source_texts)
     generic_cta_tokens = ("start", "get started", "connect", "set up", "setup", "continue", "next", "try")
-    generic_cta_hits = [token for token in generic_cta_tokens if token in normalized_blob]
+    generic_cta_hits = _collect_strict_token_hits(generic_cta_tokens, source_texts)
     if generic_cta_hits:
         cta_hits = sorted(set([*cta_hits, *generic_cta_hits]))
 
     verify_tokens_raw = tab_cfg.get("verify_tokens", [])
     verify_tokens = [str(token or "").strip().lower() for token in verify_tokens_raw if str(token or "").strip()]
-    verify_hit = bool(matches_verify or (verify_tokens and any(token in normalized_blob for token in verify_tokens)))
+    verify_hit = bool(matches_verify or (verify_tokens and any(_text_matches_token_strict(text, token) for text in source_texts for token in verify_tokens)))
     long_intro_like = len(visible_verify_text.strip()) >= intro_like_min_length or len(post_speech.strip()) >= intro_like_min_length
     if not long_intro_like and len(post_label.strip()) >= intro_like_min_length:
         long_intro_like = True
     special_hit_count = len(special_hits)
     cta_hit_count = len(cta_hits)
 
-    flat_nodes = _iter_tree_nodes_with_parent(post_nodes)
     meaningful_texts: list[str] = []
     short_cta_nodes = 0
     chrome_hits = 0
@@ -1643,7 +1703,7 @@ def _classify_special_post_open_state(
         lowered = text_blob.lower()
         meaningful_texts.append(lowered)
         token_len = len(lowered.split())
-        if token_len <= 4 and any(token in lowered for token in generic_cta_tokens):
+        if token_len <= 4 and any(_text_matches_token_strict(lowered, token) for token in generic_cta_tokens):
             short_cta_nodes += 1
     unique_text_count = len(set(meaningful_texts))
     low_content_diversity = bool(unique_text_count and unique_text_count <= 5)
@@ -1721,24 +1781,28 @@ def _collect_special_state_grace_evidence(
                 body_texts.append(text_blob)
         if bool(node.get("checkable", False)):
             has_checkable_visible = True
-    all_blob = " ".join([normalized_blob, *node_texts]).strip().lower()
-    strong_token_hits = [token for token in _STRONG_ONBOARDING_TOKENS if token in all_blob]
-    home_token_hits = [token for token in _HOME_LIKE_TOKENS if token in all_blob]
+    source_texts = [post_label, post_speech, *top_visible, *body_texts, *node_texts]
+    strong_token_hits = _collect_strict_token_hits(_STRONG_ONBOARDING_TOKENS, source_texts)
+    home_token_hits = _collect_strict_token_hits(_HOME_LIKE_TOKENS, source_texts)
 
     verify_tokens = [str(token or "").strip().lower() for token in tab_cfg.get("verify_tokens", []) if str(token or "").strip()]
     special_hits = [str(token or "").strip().lower() for token in special_state_meta.get("special_hits", []) if str(token or "").strip()]
     non_verify_special_hits = [token for token in special_hits if token and token not in verify_tokens]
-    checkbox_agree = bool(has_checkable_visible and any(token in all_blob for token in ("agree", "consent", "terms", "privacy")))
+    checkbox_agree = bool(
+        has_checkable_visible
+        and any(_text_matches_token_strict(text, token) for text in source_texts for token in ("agree", "consent", "terms", "privacy"))
+    )
     list_or_card_structure = bool(
         any(("recycler" in view_id or "list" in view_id or "card" in view_id) for view_id in view_ids)
     )
     cta_like = bool(special_state_meta.get("cta_hits") or special_state_meta.get("cta_pair", False))
     long_intro_like = bool(special_state_meta.get("long_intro_like", False))
+    home_like_seed = bool(home_token_hits)
     strong_onboarding = bool(
-        strong_token_hits
-        or checkbox_agree
-        or non_verify_special_hits
-        or (long_intro_like and cta_like and len(strong_token_hits) >= 2)
+        checkbox_agree
+        or (non_verify_special_hits and not home_like_seed)
+        or (len(strong_token_hits) >= 2)
+        or (len(strong_token_hits) == 1 and not home_like_seed)
     )
     home_like = bool(home_token_hits or (list_or_card_structure and not strong_onboarding))
     generic_intro_only = bool(long_intro_like and cta_like and not strong_onboarding and not home_like)
@@ -1760,7 +1824,6 @@ def _collect_special_state_grace_evidence(
     onboarding_hits = sorted(set([*strong_token_hits, *non_verify_special_hits]))
     source_candidates = [
         ("focus_label", [post_label]),
-        ("focus_visible", [visible_verify_text]),
         ("top_visible", top_visible),
         ("body_text", body_texts),
         ("descendant_text", node_texts),
@@ -4601,6 +4664,60 @@ def _select_visible_plugin_candidate(
 
     if not candidates:
         return None, "no_visible_candidate", stats, selected_meta
+    viewport_height = max(1, viewport_bottom - viewport_top)
+    bottom_band_top = viewport_top + int(viewport_height * 0.72)
+    bottom_band_candidate_indexes: list[int] = []
+    bottom_band_centers: list[int] = []
+    for index, (_, candidate_node, candidate_meta) in enumerate(candidates):
+        candidate_bounds = parse_bounds_str(str(candidate_node.get("boundsInScreen", "") or "").strip())
+        if not candidate_bounds:
+            candidate_meta["deferred_bottom_strip"] = False
+            continue
+        c_left, c_top, c_right, c_bottom = candidate_bounds
+        center_y = (c_top + c_bottom) // 2
+        width_ratio = (c_right - c_left) / max(1, viewport_right - viewport_left)
+        height_ratio = (c_bottom - c_top) / float(viewport_height)
+        candidate_label = _extract_cta_node_label(candidate_node) or _node_label_blob(candidate_node)
+        label_word_count = len([token for token in re.split(r"\s+", candidate_label) if token])
+        resource_id = str(candidate_node.get("viewIdResourceName", "") or candidate_node.get("resourceId", "") or "").strip().lower()
+        class_name = str(candidate_node.get("className", "") or "").strip().lower()
+        button_like = bool(
+            "button" in resource_id
+            or "button" in class_name
+            or "tab" in resource_id
+            or "segment" in resource_id
+            or "navigation" in resource_id
+        )
+        in_bottom_band = center_y >= bottom_band_top
+        short_tab_like = label_word_count <= 3 and len(candidate_label.strip()) <= 32
+        compact = width_ratio <= 0.45 and height_ratio <= 0.18
+        candidate_meta["bottom_band_candidate"] = bool(in_bottom_band and short_tab_like and compact)
+        candidate_meta["deferred_bottom_strip"] = False
+        if bool(candidate_meta["bottom_band_candidate"]):
+            bottom_band_candidate_indexes.append(index)
+            bottom_band_centers.append((c_left + c_right) // 2)
+            candidate_meta["bottom_band_button_like"] = button_like
+    persistent_bottom_strip_present = bool(
+        2 <= len(bottom_band_candidate_indexes) <= 5
+        and len(set(bottom_band_centers)) >= 2
+    )
+    if persistent_bottom_strip_present:
+        for index in bottom_band_candidate_indexes:
+            candidates[index][2]["deferred_bottom_strip"] = True
+    content_candidates = [item for item in candidates if not bool(item[2].get("deferred_bottom_strip", False))]
+    deferred_bottom_candidates = [item for item in candidates if bool(item[2].get("deferred_bottom_strip", False))]
+    if content_candidates and deferred_bottom_candidates:
+        content_labels = "|".join(_extract_cta_node_label(item[1]) or _node_label_blob(item[1]) for item in content_candidates[:3])
+        deferred_labels = "|".join(_extract_cta_node_label(item[1]) or _node_label_blob(item[1]) for item in deferred_bottom_candidates[:3])
+        log(
+            f"[SCROLL][realign_priority] reason='content_before_bottom_tabs' "
+            f"content_candidates='{_truncate_debug_text(content_labels, 120)}' "
+            f"deferred_bottom_tabs='{_truncate_debug_text(deferred_labels, 120)}'"
+        )
+        log("[SCROLL][bottom_tabs_deferred] reason='content_candidates_present'")
+        candidates = content_candidates
+    elif deferred_bottom_candidates:
+        log("[SCROLL][bottom_tabs_allowed] reason='no_content_candidates_remaining'")
     semantic_candidates = [item for item in candidates if bool(item[2].get("semantic_match", False))]
     rerank_enabled = bool(len(candidates) >= 2 and len(semantic_candidates) >= 1)
     log(
@@ -6781,6 +6898,1587 @@ def _format_stop_explain_log_fields(stop_eval_inputs: dict[str, Any], decision: 
     )
 
 
+def _truncate_debug_text(value: Any, limit: int = 120) -> str:
+    text = str(value or "").strip().replace("\n", " ")
+    if not text:
+        return "none"
+    text = " ".join(text.split())
+    return text if len(text) <= limit else f"{text[: max(0, limit - 3)]}..."
+
+
+def _summarize_move_debug_payload(row: dict[str, Any]) -> dict[str, str]:
+    raw_move_result = row.get("move_result", "")
+    if isinstance(raw_move_result, dict):
+        try:
+            raw_summary = json.dumps(raw_move_result, ensure_ascii=True, sort_keys=True)
+        except Exception:
+            raw_summary = str(raw_move_result)
+    else:
+        raw_summary = str(raw_move_result or "")
+    detail_candidates = (
+        row.get("move_detail", ""),
+        row.get("smart_nav_result", ""),
+        row.get("last_smart_nav_result", ""),
+        row.get("post_move_verdict_source", ""),
+        row.get("step_dump_tree_reason", ""),
+        row.get("get_focus_empty_reason", ""),
+    )
+    detail = next((str(value or "").strip() for value in detail_candidates if str(value or "").strip()), "")
+    target_candidates = (
+        row.get("smart_nav_requested_view_id", ""),
+        row.get("smart_nav_resolved_view_id", ""),
+        row.get("smart_nav_actual_view_id", ""),
+        row.get("focus_view_id", ""),
+    )
+    target = next((str(value or "").strip() for value in target_candidates if str(value or "").strip()), "")
+    terminal_flag = bool(
+        row.get("smart_nav_terminal", False)
+        or row.get("move_terminal", False)
+        or row.get("terminal", False)
+    )
+    return {
+        "status": _truncate_debug_text(normalize_move_result(row), 48),
+        "detail": _truncate_debug_text(detail, 96),
+        "target": _truncate_debug_text(target, 96),
+        "terminal": str(terminal_flag).lower(),
+        "raw": _truncate_debug_text(raw_summary, 160),
+    }
+
+
+def _collect_step_focus_debug_snapshot(row: dict[str, Any]) -> dict[str, str]:
+    focus_node = row.get("focus_node", {})
+    if not isinstance(focus_node, dict):
+        focus_node = {}
+    visible_candidates = [
+        str(row.get("visible_label", "") or "").strip(),
+        str(row.get("normalized_visible_label", "") or "").strip(),
+        str(row.get("merged_announcement", "") or "").strip(),
+        str(focus_node.get("text", "") or "").strip(),
+        str(focus_node.get("contentDescription", "") or "").strip(),
+        str(focus_node.get("talkbackLabel", "") or "").strip(),
+        str(focus_node.get("mergedLabel", "") or "").strip(),
+    ]
+    visible_labels: list[str] = []
+    seen_visible: set[str] = set()
+    for candidate in visible_candidates:
+        normalized = candidate.lower()
+        if not candidate or normalized in seen_visible:
+            continue
+        visible_labels.append(candidate)
+        seen_visible.add(normalized)
+        if len(visible_labels) >= 5:
+            break
+    body_texts = [label for label in visible_labels if len(label) >= 5][:5]
+    action_tokens = ("later", "set up now", "set up", "setup", "continue", "next")
+    action_hits = [token for token in action_tokens if any(_text_matches_token_strict(label, token) for label in visible_labels)]
+    class_name = str(
+        row.get("focus_class_name", "")
+        or focus_node.get("className", "")
+        or focus_node.get("class", "")
+        or ""
+    ).strip()
+    return {
+        "focus_label": _truncate_debug_text(row.get("visible_label", ""), 120),
+        "focus_visible": _truncate_debug_text(row.get("merged_announcement", ""), 160),
+        "visible_labels": _format_special_state_debug_values(visible_labels, max_len=48),
+        "top_visible": _format_special_state_debug_values(visible_labels[:3], max_len=48),
+        "body_texts": _format_special_state_debug_values(body_texts, max_len=48),
+        "action_hits": ",".join(action_hits) if action_hits else "none",
+        "rid": _truncate_debug_text(row.get("focus_view_id", ""), 96),
+        "class": _truncate_debug_text(class_name, 96),
+    }
+
+
+def _collect_cta_grace_text_candidates(row: dict[str, Any]) -> list[str]:
+    focus_node = row.get("focus_node", {})
+    if not isinstance(focus_node, dict):
+        focus_node = {}
+    text_candidates = [
+        str(row.get("visible_label", "") or "").strip(),
+        str(row.get("normalized_visible_label", "") or "").strip(),
+        str(row.get("merged_announcement", "") or "").strip(),
+        str(focus_node.get("text", "") or "").strip(),
+        str(focus_node.get("contentDescription", "") or "").strip(),
+        str(focus_node.get("talkbackLabel", "") or "").strip(),
+        str(focus_node.get("mergedLabel", "") or "").strip(),
+    ]
+    values: list[str] = []
+    seen: set[str] = set()
+    for candidate in text_candidates:
+        normalized = candidate.lower()
+        if not candidate or normalized in seen:
+            continue
+        values.append(candidate)
+        seen.add(normalized)
+    return values
+
+
+def _collect_cta_grace_action_hits(row: dict[str, Any]) -> list[str]:
+    action_tokens = (
+        "later",
+        "set up now",
+        "set up",
+        "setup",
+        "continue",
+        "next",
+        "allow",
+        "view information",
+        "learn more",
+        "not now",
+        "skip",
+        "try",
+        "start",
+        "open",
+    )
+    hits: list[str] = []
+    seen: set[str] = set()
+    for candidate in _collect_cta_grace_text_candidates(row):
+        for token in action_tokens:
+            if not _text_matches_token_strict(candidate, token):
+                continue
+            normalized = candidate.lower()
+            if normalized in seen:
+                break
+            hits.append(candidate)
+            seen.add(normalized)
+            break
+    return hits
+
+
+def _extract_cta_grace_focus_meta(row: dict[str, Any]) -> dict[str, Any]:
+    focus_node = row.get("focus_node", {})
+    if not isinstance(focus_node, dict):
+        focus_node = {}
+    resource_id = str(
+        row.get("focus_view_id", "")
+        or focus_node.get("viewIdResourceName", "")
+        or focus_node.get("resourceId", "")
+        or ""
+    ).strip()
+    class_name = str(
+        row.get("focus_class_name", "")
+        or focus_node.get("className", "")
+        or focus_node.get("class", "")
+        or ""
+    ).strip()
+    bounds = str(row.get("focus_bounds", "") or focus_node.get("bounds", "") or "").strip()
+    clickable = bool(row.get("focus_clickable", False) or focus_node.get("clickable"))
+    focusable = bool(row.get("focus_focusable", False) or focus_node.get("focusable"))
+    effective_clickable = bool(row.get("focus_effective_clickable", False) or focus_node.get("effectiveClickable"))
+    descendant_actionable = bool(focus_node.get("hasClickableDescendant") or focus_node.get("hasFocusableDescendant"))
+    actionable = clickable or focusable or effective_clickable
+    return {
+        "resource_id": resource_id,
+        "class_name": class_name,
+        "bounds": bounds,
+        "clickable": clickable,
+        "focusable": focusable,
+        "effective_clickable": effective_clickable,
+        "actionable": actionable,
+        "descendant_actionable": descendant_actionable,
+    }
+
+
+def _is_card_like_cta_context(row: dict[str, Any]) -> bool:
+    meta = _extract_cta_grace_focus_meta(row)
+    normalized_resource = str(meta["resource_id"]).lower()
+    normalized_class = str(meta["class_name"]).lower()
+    text_candidates = _collect_cta_grace_text_candidates(row)
+    long_text_count = sum(1 for value in text_candidates if len(value.strip()) >= 24)
+    has_body_text = any(len(value.strip()) >= 16 for value in text_candidates)
+    card_tokens = ("card", "title", "description", "desc", "tips", "text", "message", "layout", "frame")
+    structural_card_signal = any(token in normalized_resource or token in normalized_class for token in card_tokens)
+    return bool(meta["descendant_actionable"] or structural_card_signal or long_text_count >= 1 or (has_body_text and len(text_candidates) >= 2))
+
+
+def _is_actionable_cta_row(row: dict[str, Any]) -> bool:
+    meta = _extract_cta_grace_focus_meta(row)
+    normalized_resource = str(meta["resource_id"]).lower()
+    normalized_class = str(meta["class_name"]).lower()
+    if not meta["actionable"]:
+        return False
+    if _collect_cta_grace_action_hits(row):
+        return True
+    return bool(
+        "button" in normalized_resource
+        or "button" in normalized_class
+        or "cta" in normalized_resource
+        or "action" in normalized_resource
+    )
+
+
+def _normalize_cta_candidate_label(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip())
+
+
+def _extract_cta_node_label(node: dict[str, Any]) -> str:
+    return _normalize_cta_candidate_label(
+        str(node.get("text", "") or "").strip()
+        or str(node.get("contentDescription", "") or "").strip()
+        or str(node.get("talkbackLabel", "") or "").strip()
+        or str(node.get("label", "") or "").strip()
+    )
+
+
+def _is_cta_container_candidate(row: dict[str, Any]) -> bool:
+    meta = _extract_cta_grace_focus_meta(row)
+    normalized_resource = str(meta["resource_id"]).lower()
+    normalized_class = str(meta["class_name"]).lower()
+    return bool(
+        not meta["actionable"]
+        and (meta["descendant_actionable"] or _collect_cta_grace_action_hits(row))
+        and (
+            _is_card_like_cta_context(row)
+            or "viewgroup" in normalized_class
+            or "layout" in normalized_class
+            or "container" in normalized_resource
+            or "card" in normalized_resource
+        )
+    )
+
+
+def _select_actionable_cta_descendant(row: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
+    focus_node = row.get("focus_node", {})
+    if not isinstance(focus_node, dict):
+        return None, []
+    children = focus_node.get("children")
+    if not isinstance(children, list) or not children:
+        return None, []
+
+    candidates: list[tuple[tuple[int, int, int, int, int], dict[str, Any]]] = []
+    all_action_hits: list[str] = []
+    for index, (node, parent) in enumerate(_iter_tree_nodes_with_parent(children)):
+        _ = parent
+        if not isinstance(node, dict) or not _node_is_visible(node):
+            continue
+        node_meta = {
+            "resource_id": str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip(),
+            "class_name": str(node.get("className", "") or node.get("class", "") or "").strip(),
+            "bounds": str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip(),
+            "clickable": bool(node.get("clickable")),
+            "focusable": bool(node.get("focusable")),
+            "effective_clickable": bool(node.get("effectiveClickable")),
+        }
+        actionable = bool(node_meta["clickable"] or node_meta["focusable"] or node_meta["effective_clickable"])
+        if not actionable:
+            continue
+        node_label = _extract_cta_node_label(node)
+        node_text_candidates = [node_label]
+        node_action_hits: list[str] = []
+        for candidate in node_text_candidates:
+            if not candidate:
+                continue
+            for token in (
+                "later",
+                "set up now",
+                "set up",
+                "setup",
+                "continue",
+                "next",
+                "allow",
+                "view information",
+                "learn more",
+                "not now",
+                "skip",
+                "try",
+                "start",
+                "open",
+            ):
+                if _text_matches_token_strict(candidate, token):
+                    node_action_hits.append(candidate)
+                    break
+        for hit in node_action_hits:
+            if hit not in all_action_hits:
+                all_action_hits.append(hit)
+        normalized_resource = node_meta["resource_id"].lower()
+        normalized_class = node_meta["class_name"].lower()
+        button_like = bool(
+            "button" in normalized_resource
+            or "button" in normalized_class
+            or "cta" in normalized_resource
+            or "action" in normalized_resource
+        )
+        if not (node_action_hits or button_like):
+            continue
+        bounds = parse_bounds_str(node_meta["bounds"])
+        center_y = bounds[1] + bounds[3] if bounds else 999999
+        label_word_count = len([token for token in re.split(r"\s+", node_label) if token])
+        score = (
+            len(node_action_hits),
+            int(bool(node_meta["focusable"])),
+            int(bool(button_like)),
+            int(bool(node_meta["clickable"] or node_meta["effective_clickable"])),
+            -label_word_count,
+        )
+        candidates.append(((*score, -center_y, -index), node))
+    if not candidates:
+        return None, all_action_hits
+    candidates.sort(reverse=True)
+    return candidates[0][1], all_action_hits
+
+
+def _collect_actionable_cta_descendants(row: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    focus_node = row.get("focus_node", {})
+    if not isinstance(focus_node, dict):
+        return [], []
+    children = focus_node.get("children")
+    if not isinstance(children, list) or not children:
+        return [], []
+
+    candidates: list[tuple[tuple[int, int, int, int, int, int], dict[str, Any]]] = []
+    all_action_hits: list[str] = []
+    for index, (node, parent) in enumerate(_iter_tree_nodes_with_parent(children)):
+        _ = parent
+        if not isinstance(node, dict) or not _node_is_visible(node):
+            continue
+        node_label = _normalize_cta_candidate_label(_node_label_blob(node))
+        node_rid = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
+        node_class = str(node.get("className", "") or node.get("class", "") or "").strip()
+        node_clickable = bool(node.get("clickable"))
+        node_focusable = bool(node.get("focusable"))
+        node_effective_clickable = bool(node.get("effectiveClickable"))
+        if not (node_clickable or node_focusable or node_effective_clickable):
+            continue
+        node_action_hits: list[str] = []
+        if node_label:
+            for token in (
+                "later",
+                "set up now",
+                "set up",
+                "setup",
+                "continue",
+                "next",
+                "allow",
+                "view information",
+                "learn more",
+                "not now",
+                "skip",
+                "try",
+                "start",
+                "open",
+            ):
+                if _text_matches_token_strict(node_label, token):
+                    node_action_hits.append(node_label)
+                    break
+        for hit in node_action_hits:
+            if hit not in all_action_hits:
+                all_action_hits.append(hit)
+        normalized_resource = node_rid.lower()
+        normalized_class = node_class.lower()
+        button_like = bool(
+            "button" in normalized_resource
+            or "button" in normalized_class
+            or "cta" in normalized_resource
+            or "action" in normalized_resource
+        )
+        if not (node_action_hits or button_like):
+            continue
+        bounds = parse_bounds_str(str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip())
+        center_y = bounds[1] + bounds[3] if bounds else 999999
+        label_word_count = len([token for token in re.split(r"\s+", node_label) if token])
+        score = (
+            len(node_action_hits),
+            int(bool(node_focusable)),
+            int(bool(button_like)),
+            int(bool(node_clickable or node_effective_clickable)),
+            -label_word_count,
+            -center_y,
+        )
+        candidates.append(((*score, -index), node))
+    candidates.sort(reverse=True)
+    return [node for _, node in candidates], all_action_hits
+
+
+def _build_cta_cluster_signature(container_rid: str, cta_nodes: list[dict[str, Any]]) -> str:
+    candidate_rids = [
+        str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip().lower()
+        for node in cta_nodes
+        if isinstance(node, dict)
+    ]
+    return "||".join([str(container_rid or "").strip().lower(), *candidate_rids])
+
+
+def _apply_cta_node_to_row(
+    *,
+    row: dict[str, Any],
+    selected_node: dict[str, Any],
+    selected_rid: str,
+    selected_label: str,
+    selected_bounds: str,
+    selected_class: str,
+    normalized_label: str,
+) -> dict[str, Any]:
+    row["focus_node"] = selected_node
+    row["focus_view_id"] = selected_rid or str(row.get("focus_view_id", "") or "")
+    row["visible_label"] = selected_label or str(row.get("visible_label", "") or "")
+    row["normalized_visible_label"] = normalized_label
+    row["merged_announcement"] = selected_label or str(row.get("merged_announcement", "") or "")
+    row["normalized_announcement"] = normalized_label
+    row["focus_bounds"] = selected_bounds or str(row.get("focus_bounds", "") or "")
+    row["focus_class_name"] = selected_class
+    row["focus_clickable"] = bool(selected_node.get("clickable"))
+    row["focus_focusable"] = bool(selected_node.get("focusable"))
+    row["focus_effective_clickable"] = bool(selected_node.get("effectiveClickable")) or bool(selected_node.get("clickable"))
+    return row
+
+
+def _iter_visible_descendant_nodes(nodes: Any) -> list[dict[str, Any]]:
+    if not isinstance(nodes, list):
+        return []
+    visible_nodes: list[dict[str, Any]] = []
+    stack: list[Any] = list(reversed(nodes))
+    while stack:
+        current = stack.pop()
+        if not isinstance(current, dict):
+            continue
+        if current.get("visibleToUser", True) is False:
+            continue
+        visible_nodes.append(current)
+        children = current.get("children")
+        if isinstance(children, list) and children:
+            stack.extend(reversed(children))
+    return visible_nodes
+
+
+def _is_low_value_leaf_text(
+    label: str,
+    *,
+    actionable: bool,
+    descendant_actionable: bool,
+    width: int,
+    height: int,
+) -> bool:
+    normalized_label = re.sub(r"\s+", " ", str(label or "").strip()).lower()
+    token_count = len([token for token in re.split(r"\s+", normalized_label) if token])
+    if actionable or descendant_actionable or not normalized_label:
+        return False
+    if re.fullmatch(r"\d{1,2}:\d{2}", normalized_label):
+        return True
+    if normalized_label in {"am", "pm", "%", "m", "h", "hr", "min"}:
+        return True
+    if re.fullmatch(r"[\d\.\,\-%]+", normalized_label):
+        return True
+    if len(normalized_label) <= 2:
+        return True
+    return bool(token_count <= 1 and len(normalized_label) <= 5 and width <= 220 and height <= 140)
+
+
+def _build_candidate_object_signature(*, rid: str, bounds: str, label: str) -> str:
+    normalized_label = re.sub(r"\s+", " ", str(label or "").strip()).lower()
+    return "||".join([str(rid or "").strip().lower(), str(bounds or "").strip(), normalized_label])
+
+
+def _build_row_object_signature(row: dict[str, Any]) -> str:
+    return _build_candidate_object_signature(
+        rid=str(row.get("focus_view_id", "") or "").strip(),
+        bounds=str(row.get("focus_bounds", "") or "").strip(),
+        label=str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip(),
+    )
+
+
+def _record_recent_representative_signature(state: MainLoopState, row: dict[str, Any]) -> None:
+    signature = _build_row_object_signature(row)
+    if not signature:
+        return
+    state.recent_representative_signatures.append(signature)
+
+
+def _build_local_tab_strip_signature(tab_candidates: list[dict[str, Any]]) -> str:
+    candidate_rids = [
+        str(candidate.get("rid", "") or "").strip().lower()
+        for candidate in tab_candidates
+        if isinstance(candidate, dict)
+    ]
+    return "||".join(candidate_rids)
+
+
+def _select_active_local_tab_candidate(
+    *,
+    tab_candidates: list[dict[str, Any]],
+    row: dict[str, Any],
+) -> dict[str, Any] | None:
+    row_rid = str(row.get("focus_view_id", "") or "").strip().lower()
+    row_label = re.sub(r"\s+", " ", str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()).lower()
+    for candidate in tab_candidates:
+        node = candidate.get("node", {})
+        if isinstance(node, dict) and bool(node.get("selected")):
+            return candidate
+    for candidate in tab_candidates:
+        candidate_rid = str(candidate.get("rid", "") or "").strip().lower()
+        candidate_label = re.sub(r"\s+", " ", str(candidate.get("label", "") or "").strip()).lower()
+        if row_rid and candidate_rid and row_rid == candidate_rid:
+            return candidate
+        if row_label and candidate_label and row_label == candidate_label:
+            return candidate
+    return tab_candidates[0] if tab_candidates else None
+
+
+def _is_chrome_like_candidate(
+    *,
+    label: str,
+    resource_id: str,
+    class_name: str,
+    actionable: bool,
+    button_like: bool,
+    card_like: bool,
+    center_y: int,
+    top_header_band: int,
+    width_ratio: float,
+) -> bool:
+    normalized_label = re.sub(r"\s+", " ", str(label or "").strip()).lower()
+    if not normalized_label:
+        return False
+    chrome_tokens = ("navigate up", "more options", "toolbar", "app bar", "overflow", "profile", "back")
+    if any(token in normalized_label for token in chrome_tokens):
+        return True
+    chrome_resource_tokens = ("toolbar", "appbar", "action", "overflow", "navigate", "header", "menu")
+    resource_chrome = any(token in resource_id or token in class_name for token in chrome_resource_tokens)
+    if center_y > top_header_band:
+        return False
+    if resource_chrome:
+        return True
+    if actionable and (button_like or width_ratio <= 0.45):
+        return True
+    return bool(not card_like and len(normalized_label) <= 24)
+
+
+def _is_row_top_chrome_candidate(row: dict[str, Any]) -> bool:
+    label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
+    meta = _extract_cta_grace_focus_meta(row)
+    bounds = parse_bounds_str(str(meta["bounds"]).strip())
+    if not bounds or not label:
+        return False
+    left, top, right, bottom = bounds
+    width = max(1, right - left)
+    center_y = (top + bottom) // 2
+    resource_id = str(meta["resource_id"]).lower()
+    class_name = str(meta["class_name"]).lower()
+    actionable = bool(meta["actionable"])
+    button_like = bool(
+        "button" in resource_id
+        or "button" in class_name
+        or "tab" in resource_id
+        or "segment" in resource_id
+        or "navigation" in resource_id
+    )
+    card_like = bool(
+        "card" in resource_id
+        or "card" in class_name
+        or "item" in resource_id
+        or "item" in class_name
+        or "layout" in class_name
+        or "frame" in class_name
+        or bool(meta["descendant_actionable"])
+    )
+    return _is_chrome_like_candidate(
+        label=label,
+        resource_id=resource_id,
+        class_name=class_name,
+        actionable=actionable,
+        button_like=button_like,
+        card_like=card_like,
+        center_y=center_y,
+        top_header_band=220,
+        width_ratio=min(1.0, width / 1080.0),
+    )
+
+
+def _filter_local_tab_strip_candidates(
+    raw_candidates: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not (2 <= len(raw_candidates) <= 5):
+        return [], list(raw_candidates)
+    best_cluster_indexes: list[int] = []
+    for index, candidate in enumerate(raw_candidates):
+        center_y = int(candidate.get("center_y", 0) or 0)
+        height = max(1, int(candidate.get("height", 0) or 1))
+        cluster_indexes: list[int] = []
+        for other_index, other_candidate in enumerate(raw_candidates):
+            other_center_y = int(other_candidate.get("center_y", 0) or 0)
+            other_height = max(1, int(other_candidate.get("height", 0) or 1))
+            same_row = abs(center_y - other_center_y) <= max(36, min(height, other_height))
+            similar_height = 0.65 <= (height / float(max(1, other_height))) <= 1.6
+            if same_row and similar_height:
+                cluster_indexes.append(other_index)
+        cluster_key = (
+            len(cluster_indexes),
+            -abs(center_y - sum(int(raw_candidates[idx].get("center_y", 0) or 0) for idx in cluster_indexes) // max(1, len(cluster_indexes))),
+            -index,
+        )
+        best_key = (
+            len(best_cluster_indexes),
+            -999999,
+            -999999,
+        )
+        if best_cluster_indexes:
+            cluster_center = sum(int(raw_candidates[idx].get("center_y", 0) or 0) for idx in best_cluster_indexes) // max(1, len(best_cluster_indexes))
+            best_key = (len(best_cluster_indexes), -abs(center_y - cluster_center), -index)
+        if cluster_key > best_key:
+            best_cluster_indexes = cluster_indexes
+    accepted = [raw_candidates[index] for index in sorted(set(best_cluster_indexes))]
+    unique_centers = {int(candidate.get("center_x", 0) or 0) for candidate in accepted}
+    if not (2 <= len(accepted) <= 5 and len(unique_centers) >= 2):
+        return [], list(raw_candidates)
+    rejected = [candidate for idx, candidate in enumerate(raw_candidates) if idx not in set(best_cluster_indexes)]
+    return accepted, rejected
+
+
+def _collect_step_candidate_priority_groups(nodes: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[str]]]:
+    visible_nodes = _iter_visible_descendant_nodes(nodes)
+    bounds_candidates = [
+        parse_bounds_str(str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip())
+        for node in visible_nodes
+    ]
+    bounds_candidates = [bounds for bounds in bounds_candidates if bounds]
+    if not bounds_candidates:
+        return [], []
+    viewport_left = min(bounds[0] for bounds in bounds_candidates)
+    viewport_top = min(bounds[1] for bounds in bounds_candidates)
+    viewport_right = max(bounds[2] for bounds in bounds_candidates)
+    viewport_bottom = max(bounds[3] for bounds in bounds_candidates)
+    viewport_width = max(1, viewport_right - viewport_left)
+    viewport_height = max(1, viewport_bottom - viewport_top)
+    viewport_area = max(1, viewport_width * viewport_height)
+    bottom_band_top = viewport_top + int(viewport_height * 0.72)
+    top_header_band = viewport_top + int(viewport_height * 0.18)
+    raw_bottom_strip_candidates: list[dict[str, Any]] = []
+    content_candidates: list[dict[str, Any]] = []
+    chrome_excluded_candidates: list[str] = []
+
+    for node in visible_nodes:
+        bounds = parse_bounds_str(str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip())
+        if not bounds:
+            continue
+        left, top, right, bottom = bounds
+        width = max(1, right - left)
+        height = max(1, bottom - top)
+        area = width * height
+        area_ratio = area / float(viewport_area)
+        if area_ratio >= 0.82:
+            continue
+        label = _extract_cta_node_label(node) or _node_label_blob(node)
+        if not label:
+            continue
+        center_y = (top + bottom) // 2
+        center_x = (left + right) // 2
+        width_ratio = width / float(viewport_width)
+        height_ratio = height / float(viewport_height)
+        resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip().lower()
+        class_name = str(node.get("className", "") or node.get("class", "") or "").strip().lower()
+        label_word_count = len([token for token in re.split(r"\s+", label) if token])
+        actionable = bool(node.get("clickable") or node.get("focusable") or node.get("effectiveClickable"))
+        descendant_actionable = bool(node.get("hasClickableDescendant") or node.get("hasFocusableDescendant"))
+        button_like = bool(
+            "button" in resource_id
+            or "button" in class_name
+            or "tab" in resource_id
+            or "segment" in resource_id
+            or "navigation" in resource_id
+        )
+        card_like = bool(
+            "card" in resource_id
+            or "card" in class_name
+            or "item" in resource_id
+            or "item" in class_name
+            or "layout" in class_name
+            or "frame" in class_name
+            or descendant_actionable
+        )
+        short_tab_like = label_word_count <= 3 and len(label.strip()) <= 32
+        compact = width_ratio <= 0.45 and height_ratio <= 0.18
+        if center_y >= bottom_band_top and actionable and short_tab_like and compact and (button_like or label_word_count <= 2):
+            raw_bottom_strip_candidates.append(
+                {
+                    "node": node,
+                    "label": label,
+                    "rid": resource_id,
+                    "center_x": center_x,
+                    "center_y": center_y,
+                    "top": top,
+                    "bottom": bottom,
+                    "width": width,
+                    "height": height,
+                }
+            )
+            continue
+        title_like = bool(center_y <= top_header_band and not actionable and label_word_count <= 3 and not card_like)
+        low_value_leaf = _is_low_value_leaf_text(
+            label,
+            actionable=actionable,
+            descendant_actionable=descendant_actionable,
+            width=width,
+            height=height,
+        )
+        content_like = bool(
+            center_y < bottom_band_top
+            and (
+                actionable
+                or card_like
+                or len(label.strip()) >= 5
+            )
+        )
+        if _is_chrome_like_candidate(
+            label=label,
+            resource_id=resource_id,
+            class_name=class_name,
+            actionable=actionable,
+            button_like=button_like,
+            card_like=card_like,
+            center_y=center_y,
+            top_header_band=top_header_band,
+            width_ratio=width_ratio,
+        ):
+            chrome_excluded_candidates.append(label)
+            continue
+        if not content_like:
+            continue
+        representative = bool(
+            actionable
+            or descendant_actionable
+            or card_like
+            or ("title" in resource_id and len(label.strip()) >= 5)
+            or ("section" in resource_id and len(label.strip()) >= 5)
+            or len(label.strip()) >= 12
+        )
+        score = int(card_like) * 1000000
+        score += int(actionable) * 250000
+        score += int(descendant_actionable) * 200000
+        score += int(representative) * 120000
+        score += int(not title_like) * 30000
+        score += int(center_y > top_header_band) * 10000
+        score += min(int(area), 9999)
+        if low_value_leaf:
+            score -= 700000
+        content_candidates.append(
+            {
+                "node": node,
+                "label": label,
+                "rid": resource_id,
+                "score": int(score),
+                "top": int(top),
+                "left": int(left),
+                "bounds": str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip(),
+                "low_value_leaf": bool(low_value_leaf),
+                "representative": bool(representative),
+            }
+        )
+
+    bottom_strip_candidates, rejected_bottom_strip_candidates = _filter_local_tab_strip_candidates(raw_bottom_strip_candidates)
+    if not bottom_strip_candidates:
+        return sorted(
+            content_candidates,
+            key=lambda candidate: (
+                int(candidate.get("score", 0) or 0),
+                -int(candidate.get("top", 0) or 0),
+                -int(candidate.get("left", 0) or 0),
+                str(candidate.get("label", "") or ""),
+                str(candidate.get("rid", "") or ""),
+            ),
+            reverse=True,
+        ), [], {
+            "raw_bottom_strip_candidates": [str(candidate.get("label", "") or "").strip() for candidate in raw_bottom_strip_candidates],
+            "rejected_bottom_strip_candidates": [str(candidate.get("label", "") or "").strip() for candidate in rejected_bottom_strip_candidates],
+            "chrome_excluded_candidates": chrome_excluded_candidates,
+        }
+    sorted_content = sorted(
+        content_candidates,
+        key=lambda candidate: (
+            int(candidate.get("score", 0) or 0),
+            -int(candidate.get("top", 0) or 0),
+            -int(candidate.get("left", 0) or 0),
+            str(candidate.get("label", "") or ""),
+            str(candidate.get("rid", "") or ""),
+        ),
+        reverse=True,
+    )
+    return sorted_content, bottom_strip_candidates, {
+        "raw_bottom_strip_candidates": [str(candidate.get("label", "") or "").strip() for candidate in raw_bottom_strip_candidates],
+        "rejected_bottom_strip_candidates": [str(candidate.get("label", "") or "").strip() for candidate in rejected_bottom_strip_candidates],
+        "chrome_excluded_candidates": chrome_excluded_candidates,
+    }
+
+
+def _is_row_persistent_bottom_strip_candidate(row: dict[str, Any]) -> bool:
+    meta = _extract_cta_grace_focus_meta(row)
+    label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
+    resource_id = str(meta["resource_id"]).lower()
+    class_name = str(meta["class_name"]).lower()
+    label_word_count = len([token for token in re.split(r"\s+", label) if token])
+    bounds = parse_bounds_str(str(meta["bounds"]).strip())
+    if not meta["actionable"] or not bounds or not label:
+        return False
+    width = max(1, bounds[2] - bounds[0])
+    height = max(1, bounds[3] - bounds[1])
+    center_y = (bounds[1] + bounds[3]) // 2
+    compact = width <= 520 and height <= 220
+    button_like = bool(
+        "button" in resource_id
+        or "button" in class_name
+        or "tab" in resource_id
+        or "segment" in resource_id
+        or "navigation" in resource_id
+    )
+    return bool(center_y >= 900 and compact and label_word_count <= 3 and (button_like or len(label.strip()) <= 24))
+
+
+def _maybe_reprioritize_persistent_bottom_strip_row(
+    *,
+    row: dict[str, Any],
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict[str, Any],
+    state: MainLoopState,
+    step_idx: int,
+) -> dict[str, Any]:
+    scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower()
+    row_signature = _build_row_object_signature(row)
+    recent_signatures = set(state.recent_representative_signatures)
+    current_row_is_top_chrome = _is_row_top_chrome_candidate(row)
+    current_row_is_low_value_leaf = _is_low_value_leaf_text(
+        str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip(),
+        actionable=bool(row.get("focus_clickable") or row.get("focus_focusable") or row.get("focus_effective_clickable")),
+        descendant_actionable=bool(
+            isinstance(row.get("focus_node", {}), dict)
+            and (
+                row.get("focus_node", {}).get("hasClickableDescendant")
+                or row.get("focus_node", {}).get("hasFocusableDescendant")
+            )
+        ),
+        width=max(1, (parse_bounds_str(str(row.get("focus_bounds", "") or "").strip()) or (0, 0, 1, 1))[2] - (parse_bounds_str(str(row.get("focus_bounds", "") or "").strip()) or (0, 0, 1, 1))[0]),
+        height=max(1, (parse_bounds_str(str(row.get("focus_bounds", "") or "").strip()) or (0, 0, 1, 1))[3] - (parse_bounds_str(str(row.get("focus_bounds", "") or "").strip()) or (0, 0, 1, 1))[1]),
+    )
+    current_row_recent_revisit = bool(row_signature and row_signature in recent_signatures)
+    if scenario_type == "global_nav" or not (
+        _is_row_persistent_bottom_strip_candidate(row)
+        or current_row_is_low_value_leaf
+        or current_row_recent_revisit
+        or current_row_is_top_chrome
+    ):
+        needs_detection_only = True
+    else:
+        needs_detection_only = False
+    dump_tree_fn = getattr(client, "dump_tree", None)
+    if not callable(dump_tree_fn):
+        return row
+    try:
+        nodes = dump_tree_fn(dev=dev)
+    except Exception:
+        return row
+    content_candidates, bottom_strip_candidates, candidate_groups_meta = _collect_step_candidate_priority_groups(nodes)
+    local_tab_signature = ""
+    if content_candidates and bottom_strip_candidates:
+        local_tab_signature = _build_local_tab_strip_signature(bottom_strip_candidates)
+        if local_tab_signature:
+            state.local_tab_candidates_by_signature[local_tab_signature] = list(bottom_strip_candidates)
+            active_candidate = _select_active_local_tab_candidate(tab_candidates=bottom_strip_candidates, row=row)
+            active_rid = str(active_candidate.get("rid", "") or "").strip() if isinstance(active_candidate, dict) else ""
+            active_label = str(active_candidate.get("label", "") or "").strip() if isinstance(active_candidate, dict) else ""
+            if active_rid:
+                state.current_local_tab_signature = local_tab_signature
+                state.current_local_tab_active_rid = active_rid
+                visited_tabs = state.visited_local_tabs_by_signature.setdefault(local_tab_signature, set())
+                visited_tabs.add(active_rid)
+                if (
+                    local_tab_signature != str(row.get("local_tab_signature_logged", "") or "").strip()
+                    or bool(_is_row_persistent_bottom_strip_candidate(row))
+                ):
+                    raw_tab_labels = candidate_groups_meta.get("raw_bottom_strip_candidates", [])
+                    rejected_tab_labels = candidate_groups_meta.get("rejected_bottom_strip_candidates", [])
+                    accepted_tab_labels = [str(candidate.get("label", "") or "").strip() for candidate in bottom_strip_candidates]
+                    log(
+                        f"[STEP][local_tab_strip_members] raw_candidates='{_truncate_debug_text('|'.join(raw_tab_labels[:5]), 120)}' "
+                        f"accepted_tabs='{_truncate_debug_text('|'.join(accepted_tab_labels[:5]), 120)}' "
+                        f"rejected='{_truncate_debug_text('|'.join(rejected_tab_labels[:5]), 120)}' "
+                        "reason='non_tab_action_excluded'"
+                    )
+                    active_reason = "selected_or_focused_member" if isinstance(active_candidate, dict) and bool(active_candidate.get("node", {}).get("selected")) else "current_row_member_match"
+                    if not active_label and accepted_tab_labels:
+                        active_reason = "fallback_first_member"
+                    log(
+                        f"[STEP][local_tab_strip] tabs='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in bottom_strip_candidates[:4]), 120)}' "
+                        f"active='{_truncate_debug_text(active_label or active_rid, 96)}' "
+                        "deferred=true reason='local_tab_strip_separated_from_content'"
+                    )
+                    log(
+                        f"[STEP][local_tab_active] tabs='{_truncate_debug_text('|'.join(accepted_tab_labels[:4]), 120)}' "
+                        f"active='{_truncate_debug_text(active_label or active_rid, 96)}' "
+                        f"reason='{active_reason}'"
+                    )
+                    row["local_tab_signature_logged"] = local_tab_signature
+    if needs_detection_only:
+        return row
+    if not content_candidates:
+        return row
+    filtered_candidates = content_candidates
+    chrome_candidates = [str(value or "").strip() for value in candidate_groups_meta.get("chrome_excluded_candidates", []) if str(value or "").strip()]
+    if chrome_candidates and filtered_candidates:
+        log(
+            f"[STEP][chrome_penalty] deprioritized='{_truncate_debug_text('|'.join(chrome_candidates[:4]), 120)}' "
+            "reason='top_chrome_during_content_phase'"
+        )
+        log(
+            f"[STEP][content_phase_eval] content_present={str(bool(filtered_candidates)).lower()} "
+            f"chrome_present={str(bool(chrome_candidates)).lower()} chrome_excluded=true"
+        )
+    leaf_candidates = [candidate for candidate in content_candidates if bool(candidate.get("low_value_leaf", False))]
+    if len(content_candidates) >= 2 and leaf_candidates:
+        representative_candidates = [candidate for candidate in content_candidates if not bool(candidate.get("low_value_leaf", False))]
+        if representative_candidates:
+            filtered_candidates = representative_candidates
+            log(
+                f"[STEP][leaf_penalty] deprioritized='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in leaf_candidates[:4]), 120)}' "
+                f"reason='low_value_leaf_text'"
+            )
+    elif current_row_is_low_value_leaf:
+        current_leaf_label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
+        if current_leaf_label and filtered_candidates:
+            log(
+                f"[STEP][leaf_penalty] deprioritized='{_truncate_debug_text(current_leaf_label, 120)}' "
+                f"reason='low_value_leaf_text'"
+            )
+    revisit_rejected: list[dict[str, Any]] = []
+    preferred_candidates = [candidate for candidate in filtered_candidates if _build_candidate_object_signature(
+        rid=str(candidate.get('rid', '') or '').strip(),
+        bounds=str(candidate.get('bounds', '') or '').strip(),
+        label=str(candidate.get('label', '') or '').strip(),
+    ) not in recent_signatures]
+    if preferred_candidates:
+        revisit_rejected = [candidate for candidate in filtered_candidates if candidate not in preferred_candidates]
+        filtered_candidates = preferred_candidates
+    if revisit_rejected:
+        log(
+            f"[STEP][revisit_guard] rejected='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in revisit_rejected[:4]), 120)}' "
+            f"reason='recent_object_revisit'"
+        )
+    if not filtered_candidates:
+        return row
+    if not bottom_strip_candidates and not current_row_is_low_value_leaf and not current_row_recent_revisit and not current_row_is_top_chrome:
+        return row
+    selected_candidate = filtered_candidates[0]
+    selected_node = selected_candidate.get("node", {})
+    if not isinstance(selected_node, dict):
+        return row
+    selected_label = str(selected_candidate.get("label", "") or "").strip()
+    selected_rid = str(
+        selected_candidate.get("rid", "")
+        or selected_node.get("viewIdResourceName", "")
+        or selected_node.get("resourceId", "")
+        or ""
+    ).strip()
+    selected_bounds = str(selected_node.get("boundsInScreen", "") or selected_node.get("bounds", "") or "").strip()
+    selected_class = str(selected_node.get("className", "") or selected_node.get("class", "") or "").strip()
+    normalize_fn = getattr(client, "normalize_for_comparison", None)
+    if callable(normalize_fn):
+        normalized_label = normalize_fn(selected_label) if selected_label else ""
+    else:
+        normalized_label = re.sub(r"\s+", " ", str(selected_label or "").strip()).lower()
+    content_summary = "|".join(str(item.get("label", "") or "").strip() for item in content_candidates[:5])
+    bottom_summary = "|".join(str(item.get("label", "") or "").strip() for item in bottom_strip_candidates[:3])
+    chrome_summary = "|".join(chrome_candidates[:4])
+    selected_summary = selected_label or selected_rid or "none"
+    reason = "representative_content_preferred"
+    if _is_row_persistent_bottom_strip_candidate(row):
+        reason = "content_candidate_preferred_over_bottom_strip"
+    elif current_row_is_top_chrome:
+        reason = "content_candidate_preferred_over_chrome"
+    elif current_row_is_low_value_leaf:
+        reason = "representative_content_preferred_over_leaf"
+    elif current_row_recent_revisit:
+        reason = "representative_content_preferred_over_revisit"
+    if chrome_candidates:
+        log(
+            f"[STEP][candidate_priority] content_candidates='{_truncate_debug_text(content_summary, 120)}' "
+            f"chrome_candidates='{_truncate_debug_text(chrome_summary, 120)}' "
+            f"selected='{_truncate_debug_text(selected_summary, 96)}' "
+            f"reason='{reason}'"
+        )
+    else:
+        log(
+            f"[STEP][candidate_priority] content_candidates='{_truncate_debug_text(content_summary, 120)}' "
+            f"bottom_strip_candidates='{_truncate_debug_text(bottom_summary, 120)}' "
+            f"selected='{_truncate_debug_text(selected_summary, 96)}' "
+            f"reason='{reason}'"
+        )
+    if bottom_strip_candidates:
+        log("[STEP][bottom_strip_policy] content_present=true bottom_strip_deferred=true")
+    log(
+        f"[STEP][candidate_sort_key] selected='{_truncate_debug_text(selected_summary, 96)}' "
+        f"sort_key='score={int(selected_candidate.get('score', 0) or 0)},"
+        f"top={int(parse_bounds_str(selected_bounds)[1] if parse_bounds_str(selected_bounds) else 0)},"
+        f"left={int(parse_bounds_str(selected_bounds)[0] if parse_bounds_str(selected_bounds) else 0)}'"
+    )
+    row["bottom_strip_deferred"] = True
+    row["bottom_strip_deferred_step"] = step_idx
+    row["bottom_strip_deferred_reason"] = "content_candidate_preferred_over_bottom_strip"
+    row["focus_payload_source"] = str(row.get("focus_payload_source", "") or "get_focus")
+    return _apply_cta_node_to_row(
+        row=row,
+        selected_node=selected_node,
+        selected_rid=selected_rid,
+        selected_label=selected_label,
+        selected_bounds=selected_bounds,
+        selected_class=selected_class,
+        normalized_label=normalized_label,
+    )
+
+
+def _maybe_select_next_local_tab(
+    *,
+    client: A11yAdbClient,
+    dev: str,
+    state: MainLoopState,
+    row: dict[str, Any],
+    scenario_id: str,
+    step_idx: int,
+) -> bool:
+    local_tab_signature = str(state.current_local_tab_signature or "").strip()
+    if not local_tab_signature:
+        return False
+    dump_tree_fn = getattr(client, "dump_tree", None)
+    content_candidates: list[dict[str, Any]] = []
+    chrome_excluded: list[str] = []
+    if callable(dump_tree_fn):
+        try:
+            nodes = dump_tree_fn(dev=dev)
+            content_candidates, _, candidate_groups_meta = _collect_step_candidate_priority_groups(nodes)
+            chrome_excluded = [str(value or "").strip() for value in candidate_groups_meta.get("chrome_excluded_candidates", []) if str(value or "").strip()]
+        except Exception:
+            content_candidates = []
+            chrome_excluded = []
+    recent_signatures = set(state.recent_representative_signatures)
+    effective_content_candidates = [
+        candidate
+        for candidate in content_candidates
+        if not bool(candidate.get("low_value_leaf", False))
+        and _build_candidate_object_signature(
+            rid=str(candidate.get("rid", "") or "").strip(),
+            bounds=str(candidate.get("bounds", "") or "").strip(),
+            label=str(candidate.get("label", "") or "").strip(),
+        ) not in recent_signatures
+    ]
+    log(
+        f"[STEP][content_exhausted_eval] content_candidates='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in effective_content_candidates[:4]), 120)}' "
+        f"chrome_excluded='{_truncate_debug_text('|'.join(chrome_excluded[:4]), 120)}' "
+        f"exhausted={str(not effective_content_candidates).lower()}"
+    )
+    if effective_content_candidates:
+        return False
+    tab_candidates = state.local_tab_candidates_by_signature.get(local_tab_signature, [])
+    if not tab_candidates:
+        return False
+    visited_tabs = state.visited_local_tabs_by_signature.setdefault(local_tab_signature, set())
+    active_rid = str(state.current_local_tab_active_rid or "").strip().lower()
+    remaining_tabs = [
+        candidate
+        for candidate in tab_candidates
+        if str(candidate.get("rid", "") or "").strip().lower()
+        and str(candidate.get("rid", "") or "").strip().lower() not in {rid.lower() for rid in visited_tabs}
+        and str(candidate.get("rid", "") or "").strip().lower() != active_rid
+    ]
+    if not remaining_tabs:
+        return False
+    log(
+        f"[STEP][local_tab_allowed] tabs='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in remaining_tabs[:4]), 120)}' "
+        "reason='content_candidates_exhausted'"
+    )
+    next_tab = remaining_tabs[0]
+    target_rid = str(next_tab.get("rid", "") or "").strip()
+    target_label = str(next_tab.get("label", "") or "").strip()
+    select_ok = False
+    try:
+        select_ok = bool(client.select(dev=dev, name=target_rid, type_="r", wait_=_TRANSITION_FAST_ACTION_WAIT_SECONDS))
+    except Exception:
+        select_ok = False
+    if not select_ok and target_label:
+        try:
+            select_ok = bool(client.select(dev=dev, name=target_label, type_="a", wait_=_TRANSITION_FAST_ACTION_WAIT_SECONDS))
+        except Exception:
+            select_ok = False
+    if not select_ok:
+        return False
+    click_focused_fn = getattr(client, "click_focused", None)
+    if callable(click_focused_fn):
+        try:
+            click_focused_fn(dev=dev, wait_=_TRANSITION_FAST_ACTION_WAIT_SECONDS)
+        except Exception:
+            pass
+    visited_tabs.add(target_rid)
+    state.current_local_tab_active_rid = target_rid
+    state.fail_count = 0
+    state.same_count = 0
+    state.prev_fingerprint = ("", "", "")
+    state.previous_step_row = {}
+    state.recent_representative_signatures.clear()
+    row["local_tab_transition"] = True
+    row["local_tab_selected"] = target_label or target_rid
+    log(
+        f"[STEP][local_tab_select] selected='{_truncate_debug_text(target_label or target_rid, 96)}' "
+        "reason='next_unvisited_local_tab'"
+    )
+    return True
+
+
+def _commit_cta_cluster_selection(
+    *,
+    state: MainLoopState,
+    cluster_signature: str,
+    selected_rid: str,
+    step_idx: int,
+    scenario_id: str,
+) -> None:
+    if not cluster_signature or not selected_rid:
+        return
+    state.cta_cluster_committed_rid[cluster_signature] = selected_rid
+    visited_rids = state.cta_cluster_visited_rids.setdefault(cluster_signature, set())
+    visited_rids.add(selected_rid)
+    log(
+        f"[STEP][cta_sibling_visit] step={step_idx} scenario='{scenario_id}' "
+        f"cluster='{_truncate_debug_text(cluster_signature, 120)}' "
+        f"visited='{_truncate_debug_text('|'.join(sorted(visited_rids)), 120)}'"
+    )
+
+
+def _cta_focus_alignment_matches(
+    focus_node: Any,
+    *,
+    target_rid: str,
+    target_label: str,
+    target_bounds: str,
+) -> bool:
+    if not isinstance(focus_node, dict):
+        return False
+    focus_rid = str(focus_node.get("viewIdResourceName", "") or focus_node.get("resourceId", "") or "").strip()
+    if target_rid and focus_rid == target_rid:
+        return True
+    focus_label = _extract_cta_node_label(focus_node)
+    if target_label and focus_label and target_label == focus_label:
+        return True
+    focus_bounds = str(focus_node.get("boundsInScreen", "") or focus_node.get("bounds", "") or "").strip()
+    focus_bounds_tuple = parse_bounds_str(focus_bounds)
+    target_bounds_tuple = parse_bounds_str(target_bounds)
+    if not focus_bounds_tuple or not target_bounds_tuple:
+        return False
+    left = max(focus_bounds_tuple[0], target_bounds_tuple[0])
+    top = max(focus_bounds_tuple[1], target_bounds_tuple[1])
+    right = min(focus_bounds_tuple[2], target_bounds_tuple[2])
+    bottom = min(focus_bounds_tuple[3], target_bounds_tuple[3])
+    return right > left and bottom > top
+
+
+def _align_focus_to_committed_cta(
+    *,
+    client: A11yAdbClient,
+    dev: str,
+    target_rid: str,
+    target_label: str,
+    target_bounds: str,
+    scenario_id: str,
+    step_idx: int,
+) -> tuple[bool, str]:
+    get_focus_fn = getattr(client, "get_focus", None)
+    if not callable(get_focus_fn):
+        log(
+            f"[STEP][cta_focus_align_fail] step={step_idx} scenario='{scenario_id}' "
+            f"target_rid='{_truncate_debug_text(target_rid, 120)}' reason='get_focus_unavailable'"
+        )
+        return False, "get_focus_unavailable"
+    select_fn = getattr(client, "select", None)
+    attempts: list[tuple[str, str, str]] = []
+    if callable(select_fn) and target_rid:
+        attempts.append(("select", "r", target_rid))
+    if callable(select_fn) and target_label:
+        attempts.append(("select", "a", target_label))
+    if not attempts:
+        log(
+            f"[STEP][cta_focus_align_fail] step={step_idx} scenario='{scenario_id}' "
+            f"target_rid='{_truncate_debug_text(target_rid, 120)}' reason='no_align_method'"
+        )
+        return False, "no_align_method"
+    attempts = attempts[:2]
+    for attempt_index, (method, target_type, target_value) in enumerate(attempts, start=1):
+        log(
+            f"[STEP][cta_focus_align] step={step_idx} scenario='{scenario_id}' "
+            f"target_rid='{_truncate_debug_text(target_rid, 120)}' "
+            f"method='{method}' attempt={attempt_index}"
+        )
+        try:
+            if method == "select":
+                select_fn(dev=dev, name=target_value, type_=target_type, wait_=1.5)
+        except Exception:
+            pass
+        focus_node = get_focus_fn(
+            dev=dev,
+            wait_seconds=0.35,
+            allow_fallback_dump=False,
+            mode="fast",
+        )
+        if _cta_focus_alignment_matches(
+            focus_node,
+            target_rid=target_rid,
+            target_label=target_label,
+            target_bounds=target_bounds,
+        ):
+            log(
+                f"[STEP][cta_focus_align_success] step={step_idx} scenario='{scenario_id}' "
+                f"target_rid='{_truncate_debug_text(target_rid, 120)}'"
+            )
+            return True, "matched"
+    log(
+        f"[STEP][cta_focus_align_fail] step={step_idx} scenario='{scenario_id}' "
+        f"target_rid='{_truncate_debug_text(target_rid, 120)}' reason='no_match'"
+    )
+    return False, "no_match"
+
+
+def _maybe_promote_row_to_cta_child(
+    *,
+    row: dict[str, Any],
+    client: A11yAdbClient,
+    state: MainLoopState,
+    scenario_id: str,
+    step_idx: int,
+) -> dict[str, Any]:
+    row["cta_promoted_from_container"] = False
+    row["cta_promote_kept_committed"] = False
+    if not _is_cta_container_candidate(row):
+        return row
+    cta_nodes, action_hits = _collect_actionable_cta_descendants(row)
+    selected_node = cta_nodes[0] if cta_nodes else None
+    container_rid = str(row.get("focus_view_id", "") or "").strip()
+    if not isinstance(selected_node, dict):
+        log(
+            f"[STEP][cta_promote_skip] step={step_idx} scenario='{scenario_id}' "
+            f"container_rid='{_truncate_debug_text(container_rid, 120)}' "
+            "reason='no_actionable_child_found'"
+        )
+        return row
+
+    selected_rid = str(selected_node.get("viewIdResourceName", "") or selected_node.get("resourceId", "") or "").strip()
+    selected_label = _extract_cta_node_label(selected_node)
+    selected_bounds = str(selected_node.get("boundsInScreen", "") or selected_node.get("bounds", "") or "").strip()
+    selected_class = str(selected_node.get("className", "") or selected_node.get("class", "") or "").strip()
+    normalizer = getattr(client, "normalize_for_comparison", None)
+    normalized_label = normalizer(selected_label) if callable(normalizer) else selected_label.lower()
+    cluster_signature = _build_cta_cluster_signature(container_rid, cta_nodes)
+    state.cta_cluster_nodes_by_signature[cluster_signature] = cta_nodes
+    committed_rid = str(state.cta_cluster_committed_rid.get(cluster_signature, "") or "").strip()
+    if committed_rid:
+        committed_node = next(
+            (
+                node
+                for node in cta_nodes
+                if str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip() == committed_rid
+            ),
+            None,
+        )
+        if isinstance(committed_node, dict):
+            selected_node = committed_node
+            selected_rid = committed_rid
+            selected_label = _extract_cta_node_label(selected_node)
+            selected_bounds = str(selected_node.get("boundsInScreen", "") or selected_node.get("bounds", "") or "").strip()
+            selected_class = str(selected_node.get("className", "") or selected_node.get("class", "") or "").strip()
+            normalized_label = normalizer(selected_label) if callable(normalizer) else selected_label.lower()
+            log(
+                f"[STEP][cta_promote_keep] step={step_idx} scenario='{scenario_id}' "
+                f"cluster='{_truncate_debug_text(cluster_signature, 120)}' "
+                f"kept_rid='{_truncate_debug_text(committed_rid, 120)}' "
+                "reason='preserve_committed_cta_sibling'"
+            )
+            row["cta_promote_kept_committed"] = True
+
+    row["cta_promoted_from_container"] = True
+    row["cta_promote_source"] = "actionable_child_promoted"
+    row["cta_promoted_container_rid"] = container_rid
+    row["cta_promoted_selected_rid"] = selected_rid
+    row["cta_cluster_signature"] = cluster_signature
+    row["cta_candidate_rids"] = "|".join(
+        str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
+        for node in cta_nodes
+        if isinstance(node, dict)
+    )
+    row = _apply_cta_node_to_row(
+        row=row,
+        selected_node=selected_node,
+        selected_rid=selected_rid,
+        selected_label=selected_label,
+        selected_bounds=selected_bounds,
+        selected_class=selected_class,
+        normalized_label=normalized_label,
+    )
+    _commit_cta_cluster_selection(
+        state=state,
+        cluster_signature=cluster_signature,
+        selected_rid=selected_rid,
+        step_idx=step_idx,
+        scenario_id=scenario_id,
+    )
+    log(
+        f"[STEP][cta_promote] step={step_idx} scenario='{scenario_id}' "
+        f"container_rid='{_truncate_debug_text(container_rid, 120)}' "
+        f"selected_cta_rid='{_truncate_debug_text(selected_rid, 120)}' "
+        f"selected_cta_label='{_truncate_debug_text(selected_label, 120)}' "
+        f"cta_candidates='{_truncate_debug_text('|'.join(action_hits[:3]) if action_hits else selected_label, 120)}' "
+        "reason='actionable_child_promoted'"
+    )
+    return row
+
+
+def _maybe_progress_row_to_cta_sibling(
+    *,
+    row: dict[str, Any],
+    previous_row: dict[str, Any] | None,
+    state: MainLoopState,
+    client: A11yAdbClient,
+    scenario_id: str,
+    step_idx: int,
+) -> dict[str, Any]:
+    prev_row = previous_row or {}
+    cluster_signature = str(prev_row.get("cta_cluster_signature", "") or "").strip()
+    current_rid = str(row.get("focus_view_id", "") or "").strip()
+    prev_rid = str(prev_row.get("focus_view_id", "") or "").strip()
+    if not cluster_signature or not current_rid or current_rid != prev_rid:
+        return row
+    move_result = normalize_move_result(row)
+    if move_result not in {"failed", "no_progress"}:
+        return row
+    cta_nodes = state.cta_cluster_nodes_by_signature.get(cluster_signature, [])
+    if not cta_nodes:
+        log(
+            f"[STEP][cta_sibling_skip] step={step_idx} scenario='{scenario_id}' "
+            f"current_rid='{_truncate_debug_text(current_rid, 120)}' "
+            "reason='no_sibling_found'"
+        )
+        return row
+    visited_rids = state.cta_cluster_visited_rids.setdefault(cluster_signature, set())
+    next_node = None
+    for candidate in cta_nodes[:3]:
+        candidate_rid = str(candidate.get("viewIdResourceName", "") or candidate.get("resourceId", "") or "").strip()
+        if not candidate_rid or candidate_rid == current_rid or candidate_rid in visited_rids:
+            continue
+        next_node = candidate
+        break
+    if not isinstance(next_node, dict):
+        log(
+            f"[STEP][cta_sibling_skip] step={step_idx} scenario='{scenario_id}' "
+            f"current_rid='{_truncate_debug_text(current_rid, 120)}' "
+            "reason='no_sibling_found'"
+        )
+        return row
+    next_rid = str(next_node.get("viewIdResourceName", "") or next_node.get("resourceId", "") or "").strip()
+    next_label = _extract_cta_node_label(next_node)
+    next_bounds = str(next_node.get("boundsInScreen", "") or next_node.get("bounds", "") or "").strip()
+    next_class = str(next_node.get("className", "") or next_node.get("class", "") or "").strip()
+    normalizer = getattr(client, "normalize_for_comparison", None)
+    normalized_label = normalizer(next_label) if callable(normalizer) else next_label.lower()
+    row["cta_promoted_from_container"] = True
+    row["cta_sibling_progressed"] = True
+    row["cta_cluster_signature"] = cluster_signature
+    row["cta_promoted_container_rid"] = str(prev_row.get("cta_promoted_container_rid", "") or "")
+    row["cta_promoted_selected_rid"] = next_rid
+    row = _apply_cta_node_to_row(
+        row=row,
+        selected_node=next_node,
+        selected_rid=next_rid,
+        selected_label=next_label,
+        selected_bounds=next_bounds,
+        selected_class=next_class,
+        normalized_label=normalized_label,
+    )
+    row["cta_focus_align_requested"] = True
+    _commit_cta_cluster_selection(
+        state=state,
+        cluster_signature=cluster_signature,
+        selected_rid=next_rid,
+        step_idx=step_idx,
+        scenario_id=scenario_id,
+    )
+    log(
+        f"[STEP][cta_sibling_commit] step={step_idx} scenario='{scenario_id}' "
+        f"current_rid='{_truncate_debug_text(current_rid, 120)}' "
+        f"committed_rid='{_truncate_debug_text(next_rid, 120)}' "
+        "reason='cta_sibling_committed'"
+    )
+    log(
+        f"[STEP][cta_sibling] step={step_idx} scenario='{scenario_id}' "
+        f"current_rid='{_truncate_debug_text(current_rid, 120)}' "
+        f"next_candidate='{_truncate_debug_text(next_rid, 120)}' "
+        "reason='cta_sibling_progression'"
+    )
+    return row
+
+
+def _clear_cta_descend_grace(state: MainLoopState) -> None:
+    state.cta_grace_signature = ""
+    state.cta_descend_grace_remaining = 0
+
+
+def _maybe_apply_cta_pending_grace(
+    *,
+    row: dict[str, Any],
+    previous_row: dict[str, Any] | None,
+    stop: bool,
+    reason: str,
+    stop_eval_inputs: dict[str, Any],
+    state: MainLoopState,
+    step_idx: int,
+    scenario_id: str,
+) -> tuple[bool, str, bool]:
+    prev_row = previous_row or {}
+    prev_meta = _extract_cta_grace_focus_meta(prev_row)
+    curr_meta = _extract_cta_grace_focus_meta(row)
+    prev_card_like = _is_card_like_cta_context(prev_row)
+    curr_card_like = _is_card_like_cta_context(row)
+    curr_actionable_cta = _is_actionable_cta_row(row)
+    prev_actionable_cta = _is_actionable_cta_row(prev_row)
+    curr_action_hits = _collect_cta_grace_action_hits(row)
+    prev_action_hits = _collect_cta_grace_action_hits(prev_row)
+    cta_candidates = curr_action_hits or prev_action_hits
+    actionable_pending = bool(
+        cta_candidates
+        or curr_actionable_cta
+        or prev_actionable_cta
+        or curr_meta["descendant_actionable"]
+        or prev_meta["descendant_actionable"]
+    )
+    card_context = bool(prev_card_like or curr_card_like)
+    container_like = bool(card_context and actionable_pending and not curr_actionable_cta)
+    if not stop:
+        if curr_actionable_cta or not container_like:
+            _clear_cta_descend_grace(state)
+        return stop, reason, False
+    if reason not in {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall_after_escape"} and not (
+        bool(stop_eval_inputs.get("strict_duplicate", False)) or bool(stop_eval_inputs.get("no_progress", False))
+    ):
+        return stop, reason, False
+    if bool(stop_eval_inputs.get("terminal_signal", False)) or bool(stop_eval_inputs.get("is_global_nav", False)):
+        return stop, reason, False
+    if not container_like:
+        _clear_cta_descend_grace(state)
+        return stop, reason, False
+
+    cta_candidate = "|".join(cta_candidates[:3]) if cta_candidates else (
+        str(curr_meta["resource_id"] or prev_meta["resource_id"] or "actionable_cta")[:120]
+    )
+    container_rid = str(
+        curr_meta["resource_id"]
+        if curr_meta["descendant_actionable"] and not curr_meta["actionable"]
+        else prev_meta["resource_id"]
+        if prev_meta["descendant_actionable"] and not prev_meta["actionable"]
+        else curr_meta["resource_id"] or prev_meta["resource_id"] or "unknown_container"
+    )
+    grace_signature = "||".join(
+        [
+            container_rid.lower(),
+            str(curr_meta["class_name"] or prev_meta["class_name"] or "").lower(),
+            cta_candidate.lower(),
+        ]
+    )
+    if not state.cta_grace_signature:
+        state.cta_grace_signature = grace_signature
+        state.cta_descend_grace_remaining = _CTA_DESCEND_GRACE_STEPS
+    elif state.cta_grace_signature != grace_signature and state.cta_descend_grace_remaining <= 0:
+        state.cta_grace_signature = grace_signature
+        state.cta_descend_grace_remaining = _CTA_DESCEND_GRACE_STEPS
+    if state.cta_descend_grace_remaining <= 0:
+        return stop, reason, False
+
+    state.cta_descend_grace_remaining = max(state.cta_descend_grace_remaining - 1, 0)
+    log(
+        f"[STOP][cta_descend] step={step_idx} scenario='{scenario_id}' "
+        "reason='actionable_cta_descend_pending' "
+        f"container_rid='{_truncate_debug_text(container_rid, 120)}' "
+        f"strict_duplicate={str(bool(stop_eval_inputs.get('strict_duplicate', False))).lower()} "
+        f"no_progress={str(bool(stop_eval_inputs.get('no_progress', False))).lower()} "
+        f"cta_candidates='{_truncate_debug_text(cta_candidate, 120)}' "
+        "decision='continue_for_cta_descend' "
+        f"grace_remaining={state.cta_descend_grace_remaining} "
+        f"version='{COLLECTION_FLOW_REPEAT_CTA_GRACE_VERSION}'"
+    )
+    return False, "", True
+
+
+def _log_repeat_stop_debug(
+    *,
+    row: dict[str, Any],
+    previous_row: dict[str, Any] | None,
+    stop_eval_inputs: dict[str, Any],
+) -> None:
+    prev_row = previous_row or {}
+    curr_step_index = _normalize_step_index(row.get("step_index", -1))
+    prev_step_index = _normalize_step_index(prev_row.get("step_index", -1))
+    curr_move = _summarize_move_debug_payload(row)
+    prev_move = _summarize_move_debug_payload(prev_row) if prev_row else None
+    curr_focus = _collect_step_focus_debug_snapshot(row)
+    prev_focus = _collect_step_focus_debug_snapshot(prev_row) if prev_row else None
+    curr_fp = str(row.get("fingerprint", "") or "")
+    prev_fp = str(prev_row.get("fingerprint", "") or "")
+    curr_nfp = str(row.get("normalized_fingerprint", "") or "")
+    prev_nfp = str(prev_row.get("normalized_fingerprint", "") or "")
+    same_object = bool(
+        (curr_fp and prev_fp and curr_fp == prev_fp)
+        or (curr_nfp and prev_nfp and curr_nfp == prev_nfp)
+    )
+    log(
+        f"[STEP][move_debug] step={curr_step_index} attempted=true "
+        f"status='{curr_move['status']}' detail='{curr_move['detail']}' "
+        f"target='{curr_move['target']}' terminal={curr_move['terminal']} "
+        f"raw='{curr_move['raw']}'"
+    )
+    if prev_move is not None:
+        log(
+            f"[STEP][move_debug] step={prev_step_index} attempted=true "
+            f"status='{prev_move['status']}' detail='{prev_move['detail']}' "
+            f"target='{prev_move['target']}' terminal={prev_move['terminal']} "
+            f"raw='{prev_move['raw']}'"
+        )
+    log(
+        f"[STEP][focus_debug] step={curr_step_index} "
+        f"focus_label='{curr_focus['focus_label']}' focus_visible='{curr_focus['focus_visible']}' "
+        f"visible_labels='{curr_focus['visible_labels']}' top_visible='{curr_focus['top_visible']}' "
+        f"body_texts='{curr_focus['body_texts']}' action_hits='{curr_focus['action_hits']}' "
+        f"rid='{curr_focus['rid']}' class='{curr_focus['class']}'"
+    )
+    if prev_focus is not None:
+        log(
+            f"[STEP][focus_debug] step={prev_step_index} "
+            f"focus_label='{prev_focus['focus_label']}' focus_visible='{prev_focus['focus_visible']}' "
+            f"visible_labels='{prev_focus['visible_labels']}' top_visible='{prev_focus['top_visible']}' "
+            f"body_texts='{prev_focus['body_texts']}' action_hits='{prev_focus['action_hits']}' "
+            f"rid='{prev_focus['rid']}' class='{prev_focus['class']}'"
+        )
+    log(
+        f"[STOP][debug] curr_visible='{_truncate_debug_text(row.get('visible_label', ''), 160)}' "
+        f"prev_visible='{_truncate_debug_text(prev_row.get('visible_label', ''), 160)}' "
+        f"curr_speech='{_truncate_debug_text(row.get('merged_announcement', ''), 160)}' "
+        f"prev_speech='{_truncate_debug_text(prev_row.get('merged_announcement', ''), 160)}'"
+    )
+    log(
+        f"[STOP][debug] curr_fp='{_truncate_debug_text(curr_fp, 160)}' "
+        f"prev_fp='{_truncate_debug_text(prev_fp, 160)}' "
+        f"curr_nfp='{_truncate_debug_text(curr_nfp, 160)}' "
+        f"prev_nfp='{_truncate_debug_text(prev_nfp, 160)}'"
+    )
+    log(
+        f"[STOP][eval_debug] step={curr_step_index} prev_step={prev_step_index} "
+        f"same_like_count={int(stop_eval_inputs.get('same_like_count', 0) or 0)} "
+        f"recent_repeat={str(bool(stop_eval_inputs.get('recent_repeat', False))).lower()} "
+        f"strict_duplicate={str(bool(stop_eval_inputs.get('strict_duplicate', False))).lower()} "
+        f"semantic_same_like={str(bool(stop_eval_inputs.get('semantic_same_like', False))).lower()} "
+        f"semantic_distance={int(row.get('recent_semantic_duplicate_distance', 0) or 0)} "
+        f"recent_duplicate_distance={int(stop_eval_inputs.get('recent_duplicate_distance', 0) or 0)} "
+        f"recent_duplicate_semantic_distance={int(stop_eval_inputs.get('recent_semantic_duplicate_distance', 0) or 0)} "
+        f"bounded_two_card_loop={str(bool(stop_eval_inputs.get('bounded_two_card_loop', False))).lower()} "
+        f"no_progress={str(bool(stop_eval_inputs.get('no_progress', False))).lower()} "
+        f"hard_no_progress={str(bool(stop_eval_inputs.get('hard_no_progress', False))).lower()} "
+        f"terminal={str(bool(stop_eval_inputs.get('terminal_signal', False))).lower()}"
+    )
+    log(
+        f"[STOP][compare] prev_step={prev_step_index} prev_move='{str(prev_row.get('move_result', '') or 'none')}' "
+        f"curr_step={curr_step_index} curr_move='{str(row.get('move_result', '') or 'none')}' "
+        f"same_object={str(same_object).lower()}"
+    )
+
+
 def _annotate_row_quality(
     row: dict[str, Any],
     *,
@@ -7108,6 +8806,39 @@ def _main_loop_phase(
         row = maybe_capture_focus_crop(client, dev, row, phase_ctx.output_base_dir)
         row.pop("_step_mono_start", None)
         row["step_total_elapsed_sec"] = round(time.perf_counter() - step_start, 3)
+        row = _maybe_reprioritize_persistent_bottom_strip_row(
+            row=row,
+            client=client,
+            dev=dev,
+            tab_cfg=tab_cfg,
+            state=state,
+            step_idx=step_idx,
+        )
+        row = _maybe_promote_row_to_cta_child(
+            row=row,
+            client=client,
+            state=state,
+            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+            step_idx=step_idx,
+        )
+        row = _maybe_progress_row_to_cta_sibling(
+            row=row,
+            previous_row=state.previous_step_row,
+            state=state,
+            client=client,
+            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+            step_idx=step_idx,
+        )
+        if bool(row.get("cta_focus_align_requested", False)) or bool(row.get("cta_promote_kept_committed", False)):
+            _align_focus_to_committed_cta(
+                client=client,
+                dev=dev,
+                target_rid=str(row.get("focus_view_id", "") or "").strip(),
+                target_label=str(row.get("visible_label", "") or "").strip(),
+                target_bounds=str(row.get("focus_bounds", "") or "").strip(),
+                scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+                step_idx=step_idx,
+            )
         scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower()
         if scenario_type == "global_nav":
             expected_view_id = str(row.get("smart_nav_requested_view_id", "") or "").strip()
@@ -7131,6 +8862,7 @@ def _main_loop_phase(
                 row["post_move_verdict_source"] = "smart_nav_result_resource_match"
             elif smart_success:
                 row["post_move_verdict_source"] = "smart_nav_result"
+        _record_recent_representative_signature(state, row)
         state.last_fingerprint, state.fingerprint_repeat_count = _annotate_row_quality(
             row,
             last_fingerprint=state.last_fingerprint,
@@ -7234,12 +8966,44 @@ def _main_loop_phase(
         hard_no_progress = bool(stop_eval_inputs["hard_no_progress"])
         soft_no_progress = bool(stop_eval_inputs["soft_no_progress"])
         no_progress_class = str(stop_eval_inputs["no_progress_class"])
+        stop, reason, cta_descend_applied = _maybe_apply_cta_pending_grace(
+            row=row,
+            previous_row=state.previous_step_row,
+            stop=stop,
+            reason=reason,
+            stop_eval_inputs=stop_eval_inputs,
+            state=state,
+            step_idx=step_idx,
+            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+        )
+        local_tab_transition_applied = False
+        if (
+            stop
+            and scenario_type != "global_nav"
+            and not is_global_nav_only_scenario
+            and reason in {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall", "repeat_semantic_stall_after_escape"}
+        ):
+            local_tab_transition_applied = _maybe_select_next_local_tab(
+                client=client,
+                dev=dev,
+                state=state,
+                row=row,
+                scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+                step_idx=step_idx,
+            )
+            if local_tab_transition_applied:
+                stop = False
+                reason = ""
         overlay_realign_grace_active = bool(stop_eval_inputs["overlay_realign_grace_active"])
         min_step_gate_blocked = bool(stop_eval_inputs["min_step_gate_blocked"])
         realign_grace_suppressed = bool(stop_eval_inputs["realign_grace_suppressed"])
         repeat_stop_hit = bool(stop_eval_inputs["repeat_stop_hit"])
         decision = "stop" if stop else "continue"
         eval_reason = str(stop_eval_inputs["eval_reason"])
+        if cta_descend_applied:
+            eval_reason = "cta_descend_continue"
+        elif local_tab_transition_applied:
+            eval_reason = "local_tab_continue"
         explain_log_fields = _format_stop_explain_log_fields(stop_eval_inputs=stop_eval_inputs, decision=decision)
         row["is_global_nav"] = is_global_nav
         row["global_nav_reason"] = global_nav_reason
@@ -7270,12 +9034,28 @@ def _main_loop_phase(
             f"overlay_realign_grace_active={str(overlay_realign_grace_active).lower()} "
             f"min_step_gate_blocked={str(min_step_gate_blocked).lower()} "
             f"realign_grace_suppressed={str(realign_grace_suppressed).lower()} "
+            f"cta_descend_applied={str(cta_descend_applied).lower()} "
+            f"promoted_from_container={str(bool(row.get('cta_promoted_from_container', False))).lower()} "
             f"repeat_stop_hit={str(repeat_stop_hit).lower()} "
             f"decision='{decision}' reason='{eval_reason}' "
             f"traversal_result='{row.get('traversal_result', '')}' final_result='{row.get('final_result', '')}' "
             f"failure_reason='{row.get('failure_reason', '')}' "
             f"{explain_log_fields}"
         )
+        repeat_stop_debug_needed = bool(
+            stop
+            and (
+                reason in {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall", "repeat_semantic_stall_after_escape"}
+                or strict_duplicate
+                or no_progress
+            )
+        )
+        if repeat_stop_debug_needed:
+            _log_repeat_stop_debug(
+                row=row,
+                previous_row=state.previous_step_row,
+                stop_eval_inputs=stop_eval_inputs,
+            )
 
         if stop and reason == "repeat_semantic_stall":
             should_escape, escape_gate_reason = should_attempt_stall_escape(
@@ -7343,6 +9123,12 @@ def _main_loop_phase(
             continue
 
         if stop:
+            if reason in {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall", "repeat_semantic_stall_after_escape"}:
+                log(
+                    f"[STOP][cta_promote_state] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
+                    f"current_rid='{_truncate_debug_text(str(row.get('focus_view_id', '') or ''), 120)}' "
+                    f"promoted_from_container={str(bool(row.get('cta_promoted_from_container', False))).lower()}"
+                )
             state.stop_triggered = True
             state.stop_reason = reason
             state.stop_step = step_idx
@@ -7777,6 +9563,19 @@ def collect_tab_rows(
         stop_reason="",
         stop_step=-1,
         stall_escape_attempted=False,
+        cta_grace_signature="",
+        cta_descend_grace_remaining=0,
+        cta_cluster_nodes_by_signature={},
+        cta_cluster_visited_rids={},
+        cta_cluster_committed_rid={},
+        recent_representative_signatures=deque(
+            [_build_row_object_signature(anchor_row)] if _build_row_object_signature(anchor_row) else [],
+            maxlen=_RECENT_DUPLICATE_WINDOW,
+        ),
+        current_local_tab_signature="",
+        current_local_tab_active_rid="",
+        local_tab_candidates_by_signature={},
+        visited_local_tabs_by_signature={},
     )
     phase_ctx = CollectionPhaseContext(
         tab_cfg=tab_cfg,
