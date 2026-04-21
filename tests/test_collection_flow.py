@@ -2449,6 +2449,7 @@ def test_reprioritize_persistent_bottom_strip_row_prefers_content_candidates(mon
         tab_cfg={"scenario_type": "content"},
         state=SimpleNamespace(
             recent_representative_signatures=[],
+            consumed_representative_signatures=set(),
             local_tab_candidates_by_signature={},
             visited_local_tabs_by_signature={},
             current_local_tab_signature="",
@@ -2538,6 +2539,7 @@ def test_reprioritize_persistent_bottom_strip_row_allows_fallback_when_no_conten
         tab_cfg={"scenario_type": "content"},
         state=SimpleNamespace(
             recent_representative_signatures=[],
+            consumed_representative_signatures=set(),
             local_tab_candidates_by_signature={},
             visited_local_tabs_by_signature={},
             current_local_tab_signature="",
@@ -2696,6 +2698,7 @@ def test_reprioritize_persistent_bottom_strip_row_deprioritizes_leaf_text(monkey
         tab_cfg={"scenario_type": "content"},
         state=SimpleNamespace(
             recent_representative_signatures=[],
+            consumed_representative_signatures=set(),
             local_tab_candidates_by_signature={},
             visited_local_tabs_by_signature={},
             current_local_tab_signature="",
@@ -2776,6 +2779,7 @@ def test_reprioritize_persistent_bottom_strip_row_rejects_recent_revisit(monkeyp
         tab_cfg={"scenario_type": "content"},
         state=SimpleNamespace(
             recent_representative_signatures=[recent_signature],
+            consumed_representative_signatures={recent_signature},
             local_tab_candidates_by_signature={},
             visited_local_tabs_by_signature={},
             current_local_tab_signature="",
@@ -2871,6 +2875,7 @@ def test_reprioritize_persistent_bottom_strip_row_separates_local_tab_strip(monk
     client.dump_tree_sequence = [nodes]
     state = SimpleNamespace(
         recent_representative_signatures=[],
+        consumed_representative_signatures=set(),
         local_tab_candidates_by_signature={},
         visited_local_tabs_by_signature={},
         current_local_tab_signature="",
@@ -2984,6 +2989,7 @@ def test_local_tab_strip_members_exclude_view_information(monkeypatch):
     client.dump_tree_sequence = [nodes]
     state = SimpleNamespace(
         recent_representative_signatures=[],
+        consumed_representative_signatures=set(),
         local_tab_candidates_by_signature={},
         visited_local_tabs_by_signature={},
         current_local_tab_signature="",
@@ -3041,6 +3047,8 @@ def test_maybe_select_next_local_tab_only_after_content_exhausted(monkeypatch):
         prev_fingerprint=("a", "b", "c"),
         previous_step_row={"focus_view_id": "com.example:id/activity_button"},
         recent_representative_signatures=deque(["sig1"], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
     )
 
     advanced = collection_flow._maybe_select_next_local_tab(
@@ -3055,7 +3063,7 @@ def test_maybe_select_next_local_tab_only_after_content_exhausted(monkeypatch):
     assert advanced is True
     assert state.current_local_tab_active_rid == "com.example:id/location_button"
     assert client.select_calls[0]["name"] == "com.example:id/location_button"
-    assert any("[STEP][content_exhausted_eval]" in line and "exhausted=true" in line for line in logs)
+    assert any("[STEP][representative_exhausted_eval]" in line and "exhausted=true" in line for line in logs)
     assert any("[STEP][local_tab_allowed]" in line and "Location|Events" in line for line in logs)
     assert any("[STEP][local_tab_select]" in line and "Location" in line for line in logs)
 
@@ -3086,6 +3094,8 @@ def test_maybe_select_next_local_tab_blocked_when_content_candidates_remain(monk
         prev_fingerprint=("a", "b", "c"),
         previous_step_row={"focus_view_id": "com.example:id/activity_button"},
         recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
     )
 
     advanced = collection_flow._maybe_select_next_local_tab(
@@ -3099,7 +3109,7 @@ def test_maybe_select_next_local_tab_blocked_when_content_candidates_remain(monk
 
     assert advanced is False
     assert client.select_calls == []
-    assert any("[STEP][content_exhausted_eval]" in line and "Device usage" in line and "exhausted=false" in line for line in logs)
+    assert any("[STEP][representative_exhausted_eval]" in line and "Device usage" in line and "exhausted=false" in line for line in logs)
 
 
 def test_reprioritize_persistent_bottom_strip_row_prefers_content_over_top_chrome(monkeypatch):
@@ -3184,6 +3194,7 @@ def test_reprioritize_persistent_bottom_strip_row_prefers_content_over_top_chrom
     client.dump_tree_sequence = [nodes]
     state = SimpleNamespace(
         recent_representative_signatures=[],
+        consumed_representative_signatures=set(),
         local_tab_candidates_by_signature={},
         visited_local_tabs_by_signature={},
         current_local_tab_signature="",
@@ -3242,6 +3253,8 @@ def test_maybe_select_next_local_tab_treats_top_chrome_only_as_exhausted(monkeyp
         prev_fingerprint=("a", "b", "c"),
         previous_step_row={"focus_view_id": "com.example:id/activity_button"},
         recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
     )
 
     advanced = collection_flow._maybe_select_next_local_tab(
@@ -3254,7 +3267,105 @@ def test_maybe_select_next_local_tab_treats_top_chrome_only_as_exhausted(monkeyp
     )
 
     assert advanced is True
-    assert any("[STEP][content_exhausted_eval]" in line and "chrome_excluded='Navigate up|More options|Add family member'" in line and "exhausted=true" in line for line in logs)
+    assert any("[STEP][representative_exhausted_eval]" in line and "chrome_excluded='Navigate up|More options|Add family member'" in line and "exhausted=true" in line for line in logs)
+
+
+def test_maybe_select_next_local_tab_treats_consumed_cta_and_banner_as_exhausted(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[
+        {"text": "Weather information", "contentDescription": "", "viewIdResourceName": "com.example:id/weather_banner", "className": "android.widget.FrameLayout", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "40,420,1040,760", "children": []},
+        {"text": "Later", "contentDescription": "", "viewIdResourceName": "com.example:id/first_button", "className": "android.widget.Button", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "60,780,420,880", "children": []},
+        {"text": "Set up now", "contentDescription": "", "viewIdResourceName": "com.example:id/second_button", "className": "android.widget.Button", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "460,780,980,880", "children": []},
+        {"text": "Active now", "contentDescription": "", "viewIdResourceName": "com.example:id/status_text", "className": "android.widget.TextView", "clickable": False, "focusable": False, "effectiveClickable": False, "visibleToUser": True, "boundsInScreen": "40,920,300,980", "children": []},
+    ]]
+    banner_sig = collection_flow._build_candidate_object_signature(
+        rid="com.example:id/weather_banner",
+        bounds="40,420,1040,760",
+        label="Weather information",
+    )
+    state = SimpleNamespace(
+        current_local_tab_signature="com.example:id/activity_button||com.example:id/location_button||com.example:id/events_button",
+        current_local_tab_active_rid="com.example:id/activity_button",
+        local_tab_candidates_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button||com.example:id/events_button": [
+                {"rid": "com.example:id/activity_button", "label": "Activity", "node": {}},
+                {"rid": "com.example:id/location_button", "label": "Location", "node": {}},
+            ]
+        },
+        visited_local_tabs_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button||com.example:id/events_button": {"com.example:id/activity_button"}
+        },
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={"focus_view_id": "com.example:id/activity_button"},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures={banner_sig},
+        cta_cluster_visited_rids={"cluster": {"com.example:id/first_button", "com.example:id/second_button"}},
+    )
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={},
+        scenario_id="life_family_care_plugin",
+        step_idx=16,
+    )
+
+    assert advanced is True
+    assert any("[STEP][representative_exhausted_guard]" in line and "Weather information|Later|Set up now" in line for line in logs)
+    assert any("[STEP][status_exhausted_excluded]" in line and "Active now" in line for line in logs)
+    assert any("[STEP][representative_exhausted_eval]" in line and "exhausted=true" in line for line in logs)
+
+
+def test_maybe_select_next_local_tab_keeps_false_when_new_representative_content_remains(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[
+        {"text": "Weather information", "contentDescription": "", "viewIdResourceName": "com.example:id/weather_banner", "className": "android.widget.FrameLayout", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "40,420,1040,760", "children": []},
+        {"text": "Device usage", "contentDescription": "", "viewIdResourceName": "com.example:id/device_usage_card", "className": "android.widget.FrameLayout", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "40,820,1040,1180", "children": []},
+    ]]
+    banner_sig = collection_flow._build_candidate_object_signature(
+        rid="com.example:id/weather_banner",
+        bounds="40,420,1040,760",
+        label="Weather information",
+    )
+    state = SimpleNamespace(
+        current_local_tab_signature="com.example:id/activity_button||com.example:id/location_button||com.example:id/events_button",
+        current_local_tab_active_rid="com.example:id/activity_button",
+        local_tab_candidates_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button||com.example:id/events_button": [
+                {"rid": "com.example:id/activity_button", "label": "Activity", "node": {}},
+                {"rid": "com.example:id/location_button", "label": "Location", "node": {}},
+            ]
+        },
+        visited_local_tabs_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button||com.example:id/events_button": {"com.example:id/activity_button"}
+        },
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={"focus_view_id": "com.example:id/activity_button"},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures={banner_sig},
+        cta_cluster_visited_rids={},
+    )
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={},
+        scenario_id="life_family_care_plugin",
+        step_idx=17,
+    )
+
+    assert advanced is False
+    assert any("[STEP][representative_exhausted_eval]" in line and "Device usage" in line and "exhausted=false" in line for line in logs)
 
 
 def test_confirm_click_focused_transition_life_energy_rejects_weak_signal(monkeypatch):

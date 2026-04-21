@@ -65,7 +65,7 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr48-content-phase-chrome-guard-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr49-representative-content-exhaustion-v1"
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr64-xml-entry-descendant-title-strict-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr67-special-state-grace-home-like-strict-v1"
@@ -166,6 +166,7 @@ class MainLoopState:
     cta_cluster_visited_rids: dict[str, set[str]]
     cta_cluster_committed_rid: dict[str, str]
     recent_representative_signatures: deque[str]
+    consumed_representative_signatures: set[str]
     current_local_tab_signature: str
     current_local_tab_active_rid: str
     local_tab_candidates_by_signature: dict[str, list[dict[str, Any]]]
@@ -7381,6 +7382,7 @@ def _record_recent_representative_signature(state: MainLoopState, row: dict[str,
     if not signature:
         return
     state.recent_representative_signatures.append(signature)
+    state.consumed_representative_signatures.add(signature)
 
 
 def _build_local_tab_strip_signature(tab_candidates: list[dict[str, Any]]) -> str:
@@ -7481,6 +7483,27 @@ def _is_row_top_chrome_candidate(row: dict[str, Any]) -> bool:
         top_header_band=220,
         width_ratio=min(1.0, width / 1080.0),
     )
+
+
+def _is_passive_status_text(label: str) -> bool:
+    normalized_label = re.sub(r"\s+", " ", str(label or "").strip()).lower()
+    if not normalized_label:
+        return False
+    status_phrases = (
+        "active now",
+        "inactive",
+        "offline",
+        "online",
+        "connected",
+        "disconnected",
+        "available",
+        "unavailable",
+        "updated just now",
+        "just now",
+    )
+    if normalized_label in status_phrases:
+        return True
+    return bool(len(normalized_label) <= 18 and any(phrase in normalized_label for phrase in status_phrases))
 
 
 def _filter_local_tab_strip_candidates(
@@ -7946,18 +7969,46 @@ def _maybe_select_next_local_tab(
             content_candidates = []
             chrome_excluded = []
     recent_signatures = set(state.recent_representative_signatures)
-    effective_content_candidates = [
-        candidate
-        for candidate in content_candidates
-        if not bool(candidate.get("low_value_leaf", False))
-        and _build_candidate_object_signature(
+    consumed_signatures = set(state.consumed_representative_signatures)
+    consumed_cta_rids = {str(rid or "").strip().lower() for values in state.cta_cluster_visited_rids.values() for rid in values}
+    representative_candidates = [candidate for candidate in content_candidates if bool(candidate.get("representative", False))]
+    consumed_representatives: list[str] = []
+    status_excluded: list[str] = []
+    effective_content_candidates: list[dict[str, Any]] = []
+    for candidate in representative_candidates:
+        candidate_label = str(candidate.get("label", "") or "").strip()
+        candidate_signature = _build_candidate_object_signature(
             rid=str(candidate.get("rid", "") or "").strip(),
             bounds=str(candidate.get("bounds", "") or "").strip(),
-            label=str(candidate.get("label", "") or "").strip(),
-        ) not in recent_signatures
-    ]
+            label=candidate_label,
+        )
+        candidate_rid = str(candidate.get("rid", "") or "").strip().lower()
+        if bool(candidate.get("low_value_leaf", False)):
+            continue
+        if _is_passive_status_text(candidate_label):
+            status_excluded.append(candidate_label)
+            continue
+        if candidate_rid and candidate_rid in consumed_cta_rids:
+            consumed_representatives.append(candidate_label)
+            continue
+        if candidate_signature in recent_signatures or candidate_signature in consumed_signatures:
+            consumed_representatives.append(candidate_label)
+            continue
+        effective_content_candidates.append(candidate)
+    if consumed_representatives:
+        log(
+            f"[STEP][representative_exhausted_guard] rejected='{_truncate_debug_text('|'.join(consumed_representatives[:4]), 120)}' "
+            "reason='already_consumed_representative'"
+        )
+    if status_excluded:
+        log(
+            f"[STEP][status_exhausted_excluded] rejected='{_truncate_debug_text('|'.join(status_excluded[:4]), 120)}' "
+            "reason='passive_status_text'"
+        )
     log(
-        f"[STEP][content_exhausted_eval] content_candidates='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in effective_content_candidates[:4]), 120)}' "
+        f"[STEP][representative_exhausted_eval] representative_candidates='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in effective_content_candidates[:4]), 120)}' "
+        f"consumed_representatives='{_truncate_debug_text('|'.join(consumed_representatives[:4]), 120)}' "
+        f"status_excluded='{_truncate_debug_text('|'.join(status_excluded[:4]), 120)}' "
         f"chrome_excluded='{_truncate_debug_text('|'.join(chrome_excluded[:4]), 120)}' "
         f"exhausted={str(not effective_content_candidates).lower()}"
     )
@@ -8009,6 +8060,7 @@ def _maybe_select_next_local_tab(
     state.prev_fingerprint = ("", "", "")
     state.previous_step_row = {}
     state.recent_representative_signatures.clear()
+    state.consumed_representative_signatures.clear()
     row["local_tab_transition"] = True
     row["local_tab_selected"] = target_label or target_rid
     log(
@@ -9571,6 +9623,9 @@ def collect_tab_rows(
         recent_representative_signatures=deque(
             [_build_row_object_signature(anchor_row)] if _build_row_object_signature(anchor_row) else [],
             maxlen=_RECENT_DUPLICATE_WINDOW,
+        ),
+        consumed_representative_signatures=set(
+            [_build_row_object_signature(anchor_row)] if _build_row_object_signature(anchor_row) else []
         ),
         current_local_tab_signature="",
         current_local_tab_active_rid="",
