@@ -68,7 +68,7 @@ COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-alias-evidence-v1"
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr64-xml-entry-descendant-title-strict-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
-COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr66-special-state-grace-window-v1"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr66-special-state-grace-window-v2"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
 COLLECTION_FLOW_LIFE_RESET_VERSION = "pr61-life-reset-strict-global-nav-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
@@ -1407,6 +1407,35 @@ def _collect_post_open_identity_snapshot(
     }
 
 
+def _format_special_state_debug_values(values: list[str] | tuple[str, ...] | None, *, max_items: int = 5, max_len: int = 72) -> str:
+    if not isinstance(values, (list, tuple)):
+        return "none"
+    normalized: list[str] = []
+    for raw in values[:max_items]:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        normalized.append(text if len(text) <= max_len else f"{text[: max_len - 3]}...")
+    return ",".join(normalized) if normalized else "none"
+
+
+def _find_first_token_source_match(
+    token: str,
+    source_candidates: list[tuple[str, list[str] | tuple[str, ...] | None]],
+) -> tuple[str, str]:
+    normalized_token = str(token or "").strip().lower()
+    if not normalized_token:
+        return "", ""
+    for source_name, candidates in source_candidates:
+        if not isinstance(candidates, (list, tuple)):
+            continue
+        for candidate in candidates:
+            text = str(candidate or "").strip()
+            if text and normalized_token in text.lower():
+                return source_name, text
+    return "", ""
+
+
 def _build_direct_select_verify_candidates(
     *,
     stabilize_result: dict[str, Any],
@@ -1674,6 +1703,8 @@ def _collect_special_state_grace_evidence(
     flat_nodes = _iter_tree_nodes_with_parent(post_nodes)
     view_ids: list[str] = []
     node_texts: list[str] = []
+    top_visible: list[str] = []
+    body_texts: list[str] = []
     has_checkable_visible = False
     for node, _ in flat_nodes:
         if not _node_is_visible(node):
@@ -1684,6 +1715,10 @@ def _collect_special_state_grace_evidence(
         text_blob = _node_label_blob(node).strip().lower()
         if text_blob:
             node_texts.append(text_blob)
+            if len(top_visible) < 5:
+                top_visible.append(text_blob)
+            if len(body_texts) < 5 and len(text_blob) >= 5:
+                body_texts.append(text_blob)
         if bool(node.get("checkable", False)):
             has_checkable_visible = True
     all_blob = " ".join([normalized_blob, *node_texts]).strip().lower()
@@ -1722,11 +1757,39 @@ def _collect_special_state_grace_evidence(
             evidence = "home_like_list_or_card"
     elif generic_intro_only:
         evidence = "generic_intro_cta"
+    onboarding_hits = sorted(set([*strong_token_hits, *non_verify_special_hits]))
+    source_candidates = [
+        ("focus_label", [post_label]),
+        ("focus_visible", [visible_verify_text]),
+        ("top_visible", top_visible),
+        ("body_text", body_texts),
+        ("descendant_text", node_texts),
+        ("announcement", [post_speech]),
+    ]
+    onboarding_match_token = ""
+    onboarding_match_source = ""
+    onboarding_match_text = ""
+    for token in onboarding_hits:
+        source, matched_text = _find_first_token_source_match(token, source_candidates)
+        if source and matched_text:
+            onboarding_match_token = token
+            onboarding_match_source = source
+            onboarding_match_text = matched_text
+            break
     return {
         "strong_onboarding": strong_onboarding,
         "home_like": home_like,
         "generic_intro_only": generic_intro_only,
         "evidence": evidence,
+        "home_like_hits": home_token_hits,
+        "onboarding_hits": onboarding_hits,
+        "focus_label": str(post_label or "").strip(),
+        "focus_visible": str(visible_verify_text or "").strip(),
+        "top_visible": top_visible[:5],
+        "body_texts": body_texts[:5],
+        "onboarding_match_token": onboarding_match_token,
+        "onboarding_match_source": onboarding_match_source,
+        "onboarding_match_text": onboarding_match_text,
     }
 
 
@@ -6118,11 +6181,35 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         post_nodes=identity_nodes,
     )
     special_signals = ",".join(special_state_meta.get("signals", [])) if isinstance(special_state_meta, dict) else ""
+    special_hits_joined = ",".join(special_state_meta.get("special_hits", [])) if isinstance(special_state_meta, dict) else ""
+    cta_hits_joined = ",".join(special_state_meta.get("cta_hits", [])) if isinstance(special_state_meta, dict) else ""
     log(
         "[ENTRY][special_state_check] "
         f"detected={str(bool(special_state_detected)).lower()} "
         f"signals='{special_signals or 'none'}' "
         f"kind='{special_state_kind or 'none'}'"
+    )
+    log(
+        "[ENTRY][special_state_debug] "
+        "phase='pre_route' "
+        f"focus_label='{(post_label or '')[:120] or 'none'}' "
+        f"focus_visible='{(visible_verify_text or '')[:120] or 'none'}' "
+        f"verify_hit={str(bool(special_state_meta.get('verify_hit', False))).lower()} "
+        f"long_intro_like={str(bool(special_state_meta.get('long_intro_like', False))).lower()} "
+        f"intro_focus={str(bool(special_state_meta.get('intro_focus_like', False))).lower()} "
+        f"top_chrome_intro_cta={str(bool(special_state_meta.get('top_chrome_intro_cta', False))).lower()}"
+    )
+    log(
+        "[ENTRY][special_state_debug] "
+        f"top_visible='{_format_special_state_debug_values(post_open_identity.get('top_visible_labels', []), max_len=48)}' "
+        f"body_texts='{_format_special_state_debug_values(post_open_identity.get('body_texts', []), max_len=48)}'"
+    )
+    log(
+        "[ENTRY][special_state_debug] "
+        f"special_hits='{special_hits_joined or 'none'}' "
+        f"cta_hits='{cta_hits_joined or 'none'}' "
+        f"signals='{special_signals or 'none'}' "
+        f"verify_hit={str(bool(special_state_meta.get('verify_hit', False))).lower()}"
     )
     special_state_route_allowed = _is_special_state_route_allowed(
         tab_cfg,
@@ -6181,6 +6268,8 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         )
         grace_decision = "continue"
         for grace_step in range(1, grace_steps + 1):
+            move_attempted = grace_step > 1
+            move_result = "snapshot_reused" if not move_attempted else "post_move_snapshot"
             grace_evidence = _collect_special_state_grace_evidence(
                 tab_cfg,
                 post_view_id=post_view_id,
@@ -6201,8 +6290,25 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
                 grace_decision = "continue"
             log(
                 "[ENTRY][special_state_grace] "
-                f"step={grace_step} evidence='{evidence_label}' decision='{grace_decision}'"
+                f"step={grace_step} "
+                f"move_attempted={str(move_attempted).lower()} "
+                f"move_result='{move_result}' "
+                f"focus_label='{(str(grace_evidence.get('focus_label', '') or ''))[:96] or 'none'}' "
+                f"focus_visible='{(str(grace_evidence.get('focus_visible', '') or ''))[:96] or 'none'}' "
+                f"top_visible='{_format_special_state_debug_values(grace_evidence.get('top_visible', []), max_len=36)}' "
+                f"body_texts='{_format_special_state_debug_values(grace_evidence.get('body_texts', []), max_len=36)}' "
+                f"home_like_hits='{','.join(grace_evidence.get('home_like_hits', [])) or 'none'}' "
+                f"onboarding_hits='{','.join(grace_evidence.get('onboarding_hits', [])) or 'none'}' "
+                f"evidence='{evidence_label}' decision='{grace_decision}'"
             )
+            if evidence_label == "strong_onboarding_token":
+                log(
+                    "[ENTRY][special_state_grace_debug] "
+                    f"step={grace_step} "
+                    f"token='{str(grace_evidence.get('onboarding_match_token', '') or 'none')}' "
+                    f"source='{str(grace_evidence.get('onboarding_match_source', '') or 'unknown')}' "
+                    f"matched_text='{str(grace_evidence.get('onboarding_match_text', '') or 'none')[:120]}'"
+                )
             if grace_decision != "continue":
                 break
             time.sleep(min(main_step_wait_seconds, 0.16))
@@ -6246,6 +6352,14 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         cta_hits = ",".join(special_state_meta.get("cta_hits", []))
         verify_hit = bool(special_state_meta.get("verify_hit", False))
         long_intro_like = special_state_long_intro_like
+        log(
+            "[ENTRY][special_state_route_debug] "
+            f"verify_hit={str(verify_hit).lower()} "
+            f"detected={str(bool(special_state_detected)).lower()} "
+            f"pending_special_candidate={str(bool(special_state_route_allowed and special_state_detected)).lower()} "
+            f"final_decision='route_to_special_state' "
+            f"grace_final_decision='{special_state_route_reason}'"
+        )
         log(f"[ENTRY][special_state_route] handling='{handling}'")
         log("[ENTRY][special_state_route] main_traversal_skipped=true")
         log(
