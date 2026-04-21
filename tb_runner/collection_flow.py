@@ -68,11 +68,26 @@ COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
 COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr41-scrolltouch-semantic-alias-evidence-v1"
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr64-xml-entry-descendant-title-strict-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
-COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr65-main-tab-special-state-scope-v1"
+COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr66-special-state-grace-window-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
 COLLECTION_FLOW_LIFE_RESET_VERSION = "pr61-life-reset-strict-global-nav-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
 COLLECTION_FLOW_OVERLAY_FIRSTROW_DEBUG_VERSION = "pr73-overlay-first-row-lifecycle-debug-v1"
+_SPECIAL_STATE_GRACE_MAX_STEPS = 3
+_STRONG_ONBOARDING_TOKENS = (
+    "agree",
+    "consent",
+    "terms",
+    "privacy",
+    "allow",
+    "continue",
+    "get started",
+    "next",
+    "checkbox",
+    "set up",
+    "setup",
+)
+_HOME_LIKE_TOKENS = ("profile", "view profile", "member", "family member", "me")
 SCROLLTOUCH_DEBUG_CAPTURE_ENABLED = False
 SCROLLTOUCH_DEBUG_VERBOSE_LOG_ENABLED = False
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
@@ -1639,6 +1654,79 @@ def _classify_special_post_open_state(
         "top_chrome_intro_cta": top_chrome_intro_cta,
         "intro_focus_like": intro_focus_like,
         "handling": handling,
+    }
+
+
+def _collect_special_state_grace_evidence(
+    tab_cfg: dict[str, Any],
+    *,
+    post_view_id: str,
+    post_label: str,
+    post_speech: str,
+    visible_verify_text: str,
+    post_nodes: list[dict[str, Any]] | None,
+    special_state_meta: dict[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(post_nodes, list):
+        post_nodes = []
+    fields = [post_view_id, post_label, post_speech, visible_verify_text]
+    normalized_blob = " ".join(str(value or "") for value in fields).lower()
+    flat_nodes = _iter_tree_nodes_with_parent(post_nodes)
+    view_ids: list[str] = []
+    node_texts: list[str] = []
+    has_checkable_visible = False
+    for node, _ in flat_nodes:
+        if not _node_is_visible(node):
+            continue
+        view_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip().lower()
+        if view_id:
+            view_ids.append(view_id)
+        text_blob = _node_label_blob(node).strip().lower()
+        if text_blob:
+            node_texts.append(text_blob)
+        if bool(node.get("checkable", False)):
+            has_checkable_visible = True
+    all_blob = " ".join([normalized_blob, *node_texts]).strip().lower()
+    strong_token_hits = [token for token in _STRONG_ONBOARDING_TOKENS if token in all_blob]
+    home_token_hits = [token for token in _HOME_LIKE_TOKENS if token in all_blob]
+
+    verify_tokens = [str(token or "").strip().lower() for token in tab_cfg.get("verify_tokens", []) if str(token or "").strip()]
+    special_hits = [str(token or "").strip().lower() for token in special_state_meta.get("special_hits", []) if str(token or "").strip()]
+    non_verify_special_hits = [token for token in special_hits if token and token not in verify_tokens]
+    checkbox_agree = bool(has_checkable_visible and any(token in all_blob for token in ("agree", "consent", "terms", "privacy")))
+    list_or_card_structure = bool(
+        any(("recycler" in view_id or "list" in view_id or "card" in view_id) for view_id in view_ids)
+    )
+    cta_like = bool(special_state_meta.get("cta_hits") or special_state_meta.get("cta_pair", False))
+    long_intro_like = bool(special_state_meta.get("long_intro_like", False))
+    strong_onboarding = bool(
+        strong_token_hits
+        or checkbox_agree
+        or non_verify_special_hits
+        or (long_intro_like and cta_like and len(strong_token_hits) >= 2)
+    )
+    home_like = bool(home_token_hits or (list_or_card_structure and not strong_onboarding))
+    generic_intro_only = bool(long_intro_like and cta_like and not strong_onboarding and not home_like)
+    evidence = "ambiguous"
+    if strong_onboarding:
+        if checkbox_agree:
+            evidence = "agree_checkbox"
+        elif non_verify_special_hits:
+            evidence = "special_token_intro"
+        else:
+            evidence = "strong_onboarding_token"
+    elif home_like:
+        if home_token_hits:
+            evidence = f"home_like_{home_token_hits[0].replace(' ', '_')}"
+        else:
+            evidence = "home_like_list_or_card"
+    elif generic_intro_only:
+        evidence = "generic_intro_cta"
+    return {
+        "strong_onboarding": strong_onboarding,
+        "home_like": home_like,
+        "generic_intro_only": generic_intro_only,
+        "evidence": evidence,
     }
 
 
@@ -6081,16 +6169,73 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             or consistent_intro_special_state_evidence
         )
     )
+    special_state_grace_applied = False
     if route_to_special_state:
-        special_state_route_reason = (
-            "special_state_detected_verify_not_success"
-            if not entry_verify_candidate_success
-            else (
-                "special_state_detected_strong_generic_evidence"
-                if strong_generic_special_state_evidence
-                else "special_state_detected_consistent_intro_evidence"
-            )
+        grace_steps = int(tab_cfg.get("special_state_grace_max_steps", _SPECIAL_STATE_GRACE_MAX_STEPS) or _SPECIAL_STATE_GRACE_MAX_STEPS)
+        grace_steps = max(1, min(_SPECIAL_STATE_GRACE_MAX_STEPS, grace_steps))
+        special_state_grace_applied = True
+        log(
+            "[ENTRY][special_state_grace] "
+            f"start max_steps={grace_steps} verify_success={str(entry_verify_candidate_success).lower()} "
+            f"signals='{special_signals or 'none'}'"
         )
+        grace_decision = "continue"
+        for grace_step in range(1, grace_steps + 1):
+            grace_evidence = _collect_special_state_grace_evidence(
+                tab_cfg,
+                post_view_id=post_view_id,
+                post_label=post_label,
+                post_speech=post_speech,
+                visible_verify_text=visible_verify_text,
+                post_nodes=identity_nodes,
+                special_state_meta=special_state_meta if isinstance(special_state_meta, dict) else {},
+            )
+            evidence_label = str(grace_evidence.get("evidence", "ambiguous") or "ambiguous")
+            if bool(grace_evidence.get("strong_onboarding", False)):
+                grace_decision = "route_to_special_state"
+            elif bool(grace_evidence.get("home_like", False)):
+                grace_decision = "normal_traversal"
+            elif grace_step >= grace_steps:
+                grace_decision = "normal_traversal" if entry_verify_candidate_success else "route_to_special_state"
+            else:
+                grace_decision = "continue"
+            log(
+                "[ENTRY][special_state_grace] "
+                f"step={grace_step} evidence='{evidence_label}' decision='{grace_decision}'"
+            )
+            if grace_decision != "continue":
+                break
+            time.sleep(min(main_step_wait_seconds, 0.16))
+            next_focus = client.get_focus(
+                dev=dev,
+                wait_seconds=min(main_step_wait_seconds, 0.7),
+                allow_fallback_dump=False,
+                mode="fast",
+            )
+            post_view_id, post_label, post_speech = _extract_post_open_focus_fields(next_focus)
+            if callable(dump_tree_fn):
+                try:
+                    identity_nodes = dump_tree_fn(dev=dev)
+                except Exception:
+                    identity_nodes = []
+            if entry_type == _ENTRY_TYPE_CARD:
+                visible_verify_text = _collect_post_open_visible_text(client, dev)
+        route_to_special_state = grace_decision == "route_to_special_state"
+        if route_to_special_state:
+            special_state_route_reason = "special_state_grace_confirmed"
+        else:
+            special_state_route_reason = "special_state_grace_normal_traversal"
+    if route_to_special_state:
+        if not special_state_grace_applied:
+            special_state_route_reason = (
+                "special_state_detected_verify_not_success"
+                if not entry_verify_candidate_success
+                else (
+                    "special_state_detected_strong_generic_evidence"
+                    if strong_generic_special_state_evidence
+                    else "special_state_detected_consistent_intro_evidence"
+                )
+            )
         log(
             "[ENTRY][special_state_check] "
             "decision='route_to_special_state' "
@@ -6208,7 +6353,10 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         )
         return True
     if special_state_detected:
-        log("[ENTRY][special_state_check] decision='keep_success_path'")
+        if special_state_grace_applied:
+            log("[ENTRY][special_state_check] decision='normal_traversal_after_grace'")
+        else:
+            log("[ENTRY][special_state_check] decision='keep_success_path'")
     else:
         log("[ENTRY][special_state_check] decision='continue_verify'")
 
