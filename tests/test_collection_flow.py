@@ -2557,7 +2557,7 @@ def test_open_scenario_card_entry_handles_pet_care_onboarding_special_state(monk
     assert client.back_calls == 1
 
 
-def test_open_scenario_card_entry_routes_detected_intro_state_even_when_verify_matches(monkeypatch):
+def test_open_scenario_card_entry_keeps_normal_traversal_after_special_state_grace(monkeypatch):
     monkeypatch.setattr(collection_flow, "_verify_fresh_life_list_state", lambda *_args, **_kwargs: (True, "ready"))
     monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
@@ -2565,6 +2565,7 @@ def test_open_scenario_card_entry_routes_detected_intro_state_even_when_verify_m
         "_analyze_current_state",
         lambda *_args, **_kwargs: {"package_signature_present": True, "app_bar_hits": 1},
     )
+    monkeypatch.setattr(collection_flow, "_is_special_state_route_allowed", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(
         collection_flow,
@@ -2576,7 +2577,8 @@ def test_open_scenario_card_entry_routes_detected_intro_state_even_when_verify_m
     client = DummyClient([_anchor_row(), _anchor_row()])
     client.focus_sequence = [
         {"viewIdResourceName": "com.example:id/title", "text": "Family Care"},
-        {"viewIdResourceName": "com.samsung.android.oneconnect:id/menu_services", "text": "Life"},
+        {"viewIdResourceName": "com.example:id/member", "text": "Add family member"},
+        {"viewIdResourceName": "com.example:id/profile", "text": "View profile"},
     ]
     tab_cfg = {
         **_base_tab_cfg(),
@@ -2612,11 +2614,9 @@ def test_open_scenario_card_entry_routes_detected_intro_state_even_when_verify_m
 
     assert ok is True
     summary = getattr(client, "last_start_open_summary", {})
-    assert summary.get("entry_contract_reason") == "special_state_handled"
-    assert summary.get("special_state_detected") is True
-    assert summary.get("special_state_handling") == "back_after_read"
-    assert summary.get("special_state_back_status") == "back_sent_exit"
-    assert client.back_calls == 1
+    assert summary.get("entry_contract_reason") == "success_verified"
+    assert summary.get("special_state_detected") is not True
+    assert client.back_calls == 0
 
 
 def test_open_scenario_card_entry_does_not_misclassify_air_care_normal_content(monkeypatch):
