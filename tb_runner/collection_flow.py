@@ -65,11 +65,13 @@ _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
 COLLECTION_FLOW_DECISION_DATA_VERSION = "pr6-phase-context-v1"
 COLLECTION_FLOW_GUARD_VERSION = "life-plugin-entry-contract-v8"
 COLLECTION_FLOW_OVERLAY_SEAM_VERSION = "pr14-overlay-realign-robustness-v2"
-COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr49-representative-content-exhaustion-v1"
+COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION = "pr58-scroll-fallback-continuity-v1"
 COLLECTION_FLOW_XML_ENTRY_VERSION = "pr64-xml-entry-descendant-title-strict-v1"
 COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-capture-v2"
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr67-special-state-grace-home-like-strict-v1"
 COLLECTION_FLOW_REPEAT_CTA_GRACE_VERSION = "pr78-repeat-cta-focus-align-v1"
+COLLECTION_FLOW_SCROLL_READY_VERSION = "pr79-scroll-ready-move-smart-v1"
+COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION = "pr84-consumed-cluster-early-skip-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
 COLLECTION_FLOW_LIFE_RESET_VERSION = "pr61-life-reset-strict-global-nav-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
@@ -167,6 +169,15 @@ class MainLoopState:
     cta_cluster_committed_rid: dict[str, str]
     recent_representative_signatures: deque[str]
     consumed_representative_signatures: set[str]
+    visited_logical_signatures: set[str]
+    consumed_cluster_logical_signatures: set[str]
+    recent_focus_realign_signatures: set[str]
+    consumed_cluster_signatures: set[str]
+    recent_focus_realign_clusters: set[str]
+    cluster_title_fallback_applied: set[str]
+    recent_scroll_fallback_signatures: set[str]
+    scroll_ready_retry_counts: dict[str, int]
+    pending_scroll_ready_cluster_signature: str
     current_local_tab_signature: str
     current_local_tab_active_rid: str
     local_tab_candidates_by_signature: dict[str, list[dict[str, Any]]]
@@ -7341,6 +7352,164 @@ def _iter_visible_descendant_nodes(nodes: Any) -> list[dict[str, Any]]:
     return visible_nodes
 
 
+def _select_candidate_cluster_root(node: dict[str, Any], parent_by_node_id: dict[int, dict[str, Any]]) -> dict[str, Any]:
+    cursor: dict[str, Any] | None = node
+    best = node
+    hops = 0
+    while isinstance(cursor, dict) and hops < 6:
+        resource_id = str(cursor.get("viewIdResourceName", "") or cursor.get("resourceId", "") or "").strip().lower()
+        class_name = str(cursor.get("className", "") or cursor.get("class", "") or "").strip().lower()
+        bounds = parse_bounds_str(str(cursor.get("boundsInScreen", "") or cursor.get("bounds", "") or "").strip())
+        children = cursor.get("children")
+        child_count = len(children) if isinstance(children, list) else 0
+        descendant_actionable = bool(cursor.get("hasClickableDescendant") or cursor.get("hasFocusableDescendant"))
+        container_like = bool(
+            "card" in resource_id
+            or "container" in resource_id
+            or "item" in resource_id
+            or "section" in resource_id
+            or "banner" in resource_id
+            or (resource_id and "card" in class_name)
+            or (resource_id and "container" in class_name)
+            or (resource_id and "item" in class_name)
+            or (resource_id and "section" in class_name)
+            or (resource_id and "banner" in class_name)
+        )
+        actionable = bool(cursor.get("clickable") or cursor.get("focusable") or cursor.get("effectiveClickable"))
+        if bounds and (container_like or descendant_actionable):
+            best = cursor
+            if container_like or descendant_actionable:
+                break
+        cursor = parent_by_node_id.get(id(cursor))
+        hops += 1
+    return best
+
+
+def _build_candidate_cluster_signature_from_root(root_node: dict[str, Any]) -> str:
+    root_rid = str(root_node.get("viewIdResourceName", "") or root_node.get("resourceId", "") or "").strip()
+    root_bounds = str(root_node.get("boundsInScreen", "") or root_node.get("bounds", "") or "").strip()
+    root_label = _extract_cta_node_label(root_node) or _node_label_blob(root_node)
+    return _build_candidate_object_signature(rid=root_rid, bounds=root_bounds, label=root_label)
+
+
+def _cluster_display_name(candidate: dict[str, Any]) -> str:
+    cluster_label = str(candidate.get("cluster_label", "") or "").strip()
+    if cluster_label:
+        return cluster_label
+    cluster_rid = str(candidate.get("cluster_rid", "") or "").strip()
+    if cluster_rid:
+        return cluster_rid
+    cluster_signature = str(candidate.get("cluster_signature", "") or "").strip()
+    if cluster_signature:
+        return cluster_signature.split("||", 1)[0] or cluster_signature
+    return str(candidate.get("label", "") or candidate.get("rid", "") or "").strip() or "cluster"
+
+
+def _cluster_candidate_sort_key(candidate: dict[str, Any]) -> tuple[int, int, int, int, int, int, int, str, str]:
+    role = str(candidate.get("cluster_role", "") or "")
+    role_priority = {
+        "actionable": 5,
+        "descendant_actionable": 4,
+        "container": 3,
+        "title": 2,
+        "description": 1,
+        "leaf": 0,
+    }.get(role, 0)
+    return (
+        role_priority,
+        int(candidate.get("score", 0) or 0),
+        -int(candidate.get("top", 0) or 0),
+        -int(candidate.get("cluster_candidate_count", 0) or 0),
+        int(bool(candidate.get("representative", False))),
+        int(bool(candidate.get("passive_status", False))) * -1,
+        str(candidate.get("label", "") or ""),
+        str(candidate.get("rid", "") or ""),
+    )
+
+
+def _cluster_candidate_role(candidate: dict[str, Any]) -> str:
+    node = candidate.get("node", {}) if isinstance(candidate.get("node", {}), dict) else {}
+    resource_id = str(candidate.get("rid", "") or "").strip().lower()
+    class_name = str(node.get("className", "") or node.get("class", "") or "").strip().lower()
+    label = str(candidate.get("label", "") or "").strip()
+    if bool(node.get("clickable") or node.get("focusable") or node.get("effectiveClickable")):
+        return "actionable"
+    if bool(node.get("hasClickableDescendant") or node.get("hasFocusableDescendant")):
+        return "descendant_actionable"
+    if (
+        "card" in resource_id
+        or "container" in resource_id
+        or "item" in resource_id
+        or ("layout" in class_name and resource_id)
+        or ("frame" in class_name and resource_id)
+    ):
+        return "container"
+    if "title" in resource_id or "heading" in resource_id or "header" in resource_id or ("section" in resource_id and len(label) <= 64):
+        return "title"
+    if "description" in resource_id or "summary" in resource_id or "text" in resource_id or "desc" in resource_id:
+        return "description"
+    return "leaf"
+
+
+def _is_section_header_candidate(candidate: dict[str, Any]) -> bool:
+    if bool(candidate.get("section_header_like", False)):
+        return True
+    node = candidate.get("node", {}) if isinstance(candidate.get("node", {}), dict) else {}
+    resource_id = str(candidate.get("rid", "") or node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip().lower()
+    class_name = str(node.get("className", "") or node.get("class", "") or "").strip().lower()
+    role = str(candidate.get("cluster_role", "") or "").strip().lower()
+    label = str(candidate.get("label", "") or "").strip()
+    word_count = len([token for token in re.split(r"\s+", label) if token])
+    structural_header = bool(
+        any(token in resource_id for token in ("toolbar", "appbar", "actionbar", "action_bar", "header", "title", "section"))
+        or any(token in class_name for token in ("toolbar", "appbar", "actionbar", "header", "title"))
+    )
+    return bool(structural_header or (role == "title" and word_count <= 4))
+
+
+def _cluster_candidate_reason(candidate: dict[str, Any]) -> str:
+    role = str(candidate.get("cluster_role", "") or _cluster_candidate_role(candidate))
+    if role == "actionable":
+        return "actionable_preferred"
+    if role == "descendant_actionable":
+        return "descendant_actionable_preferred"
+    if role == "container":
+        return "container_preferred"
+    if role == "title":
+        return "title_preferred"
+    return "description_fallback"
+
+
+def _select_better_cluster_representative(
+    *,
+    selected_candidate: dict[str, Any],
+    state: MainLoopState,
+    row: dict[str, Any],
+) -> dict[str, Any] | None:
+    cluster_signature = _candidate_cluster_signature(selected_candidate)
+    if not cluster_signature:
+        return None
+    if cluster_signature in set(getattr(state, "cluster_title_fallback_applied", set()) or set()):
+        return None
+    if str(selected_candidate.get("cluster_role", "") or "") != "title":
+        return None
+    if normalize_move_result(row) not in {"failed", "no_progress"}:
+        return None
+    cluster_members = selected_candidate.get("cluster_members")
+    if not isinstance(cluster_members, list) or not cluster_members:
+        return None
+    selected_signature = _candidate_object_signature(selected_candidate)
+    fallback_candidates = [
+        candidate
+        for candidate in cluster_members
+        if _candidate_object_signature(candidate) != selected_signature
+        and str(candidate.get("cluster_role", "") or "") in {"actionable", "descendant_actionable", "container"}
+    ]
+    if not fallback_candidates:
+        return None
+    return max(fallback_candidates, key=_cluster_candidate_sort_key)
+
+
 def _is_low_value_leaf_text(
     label: str,
     *,
@@ -7379,10 +7548,557 @@ def _build_row_object_signature(row: dict[str, Any]) -> str:
 
 def _record_recent_representative_signature(state: MainLoopState, row: dict[str, Any]) -> None:
     signature = _build_row_object_signature(row)
+    move_result = normalize_move_result(row) or str(row.get("move_result", "") or "").strip().lower()
+    logical_signature = _row_logical_signature(row)
+    visited_logical_signatures = set(getattr(state, "visited_logical_signatures", set()) or set())
+    cluster_signature = str(row.get("focus_cluster_signature", "") or "").strip()
+    cluster_logical_signature = str(row.get("focus_cluster_logical_signature", "") or "").strip()
+    consumed_clusters = set(getattr(state, "consumed_cluster_signatures", set()) or set())
+    consumed_cluster_logical = set(getattr(state, "consumed_cluster_logical_signatures", set()) or set())
+    row["logical_signature"] = logical_signature
+    row["logical_signature_already_visited"] = bool(
+        logical_signature and logical_signature != "none||none||none" and logical_signature in visited_logical_signatures
+    )
+    row["cluster_already_consumed_before_record"] = bool(
+        (cluster_signature and cluster_signature in consumed_clusters)
+        or (cluster_logical_signature and cluster_logical_signature in consumed_cluster_logical)
+    )
     if not signature:
+        signature = ""
+    if signature:
+        state.recent_representative_signatures.append(signature)
+        state.consumed_representative_signatures.add(signature)
+    if move_result in {"moved", "scrolled", "edge_realign_then_moved"}:
+        if logical_signature and logical_signature != "none||none||none":
+            visited_logical_signatures.add(logical_signature)
+            state.visited_logical_signatures = visited_logical_signatures
+    if cluster_signature:
+        consumed_clusters.add(cluster_signature)
+        state.consumed_cluster_signatures = consumed_clusters
+        log(f"[STEP][cluster_consumed] cluster='{_truncate_debug_text(cluster_signature, 120)}'")
+    if cluster_logical_signature:
+        consumed_cluster_logical.add(cluster_logical_signature)
+        state.consumed_cluster_logical_signatures = consumed_cluster_logical
+
+
+def _candidate_object_signature(candidate: dict[str, Any]) -> str:
+    return _build_candidate_object_signature(
+        rid=str(candidate.get("rid", "") or "").strip(),
+        bounds=str(candidate.get("bounds", "") or "").strip(),
+        label=str(candidate.get("label", "") or "").strip(),
+    )
+
+
+def _candidate_cluster_signature(candidate: dict[str, Any]) -> str:
+    return str(candidate.get("cluster_signature", "") or "").strip()
+
+
+def _summarize_candidate_labels(candidates: list[dict[str, Any]], limit: int = 4) -> str:
+    labels = [
+        str(candidate.get("label", "") or candidate.get("rid", "") or "").strip()
+        for candidate in candidates[:limit]
+        if str(candidate.get("label", "") or candidate.get("rid", "") or "").strip()
+    ]
+    return "|".join(labels) or "none"
+
+
+def _normalize_logical_text(value: str) -> str:
+    normalized = re.sub(r"\s+", " ", str(value or "").strip()).lower()
+    normalized = re.sub(r"[^\w\s:/%-]+", "", normalized)
+    return normalized.strip()
+
+
+def _candidate_logical_signature(candidate: dict[str, Any]) -> str:
+    node = candidate.get("node", {}) if isinstance(candidate.get("node", {}), dict) else {}
+    cluster_rid = str(candidate.get("cluster_rid", "") or "").strip().lower()
+    rid = str(candidate.get("rid", "") or node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip().lower()
+    logical_owner = cluster_rid or rid
+    label = str(candidate.get("cluster_label", "") or candidate.get("label", "") or "").strip()
+    logical_label = _normalize_logical_text(label)
+    role_hint = str(candidate.get("cluster_role", "") or "").strip().lower()
+    if not role_hint:
+        role_hint = str(node.get("className", "") or node.get("class", "") or "").strip().lower().split(".")[-1]
+    return "||".join([logical_owner or "none", logical_label or "none", role_hint or "none"])
+
+
+def _candidate_cluster_logical_signature(candidate: dict[str, Any]) -> str:
+    cluster_rid = str(candidate.get("cluster_rid", "") or candidate.get("rid", "") or "").strip().lower()
+    label = str(candidate.get("cluster_label", "") or candidate.get("label", "") or "").strip()
+    logical_label = _normalize_logical_text(label)
+    return "||".join([cluster_rid or "none", logical_label or "none"])
+
+
+def _row_logical_signature(row: dict[str, Any]) -> str:
+    rid = str(row.get("focus_view_id", "") or "").strip().lower()
+    label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
+    logical_label = _normalize_logical_text(label)
+    class_hint = str(row.get("focus_class_name", "") or "").strip().lower().split(".")[-1]
+    return "||".join([rid or "none", logical_label or "none", class_hint or "none"])
+
+
+def _row_is_low_value_leaf(row: dict[str, Any]) -> bool:
+    label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
+    focus_node = row.get("focus_node", {}) if isinstance(row.get("focus_node", {}), dict) else {}
+    actionable = bool(focus_node.get("clickable") or focus_node.get("focusable") or focus_node.get("effectiveClickable"))
+    descendant_actionable = bool(focus_node.get("hasClickableDescendant") or focus_node.get("hasFocusableDescendant"))
+    bounds = parse_bounds_str(str(row.get("focus_bounds", "") or "").strip())
+    width = max(1, (bounds[2] - bounds[0]) if bounds else 1)
+    height = max(1, (bounds[3] - bounds[1]) if bounds else 1)
+    return _is_low_value_leaf_text(
+        label,
+        actionable=actionable,
+        descendant_actionable=descendant_actionable,
+        width=width,
+        height=height,
+    )
+
+
+def _should_suppress_row_persistence(*, row: dict[str, Any], state: MainLoopState, stop: bool) -> tuple[bool, str]:
+    if stop or bool(row.get("local_tab_transition", False)) or _is_current_focus_on_local_tab_strip(state, row):
+        return False, ""
+    low_value_leaf = bool(row.get("low_value_leaf_row", False) or _row_is_low_value_leaf(row))
+    logical_already_visited = bool(row.get("logical_signature_already_visited", False))
+    cluster_already_consumed = bool(row.get("cluster_already_consumed_before_record", False))
+    if low_value_leaf and (cluster_already_consumed or logical_already_visited):
+        return True, "low_value_leaf_or_parent_consumed"
+    if low_value_leaf:
+        return True, "low_value_leaf"
+    if logical_already_visited and not str(row.get("focus_view_id", "") or "").strip().lower().endswith("button"):
+        return True, "visited_logical_signature"
+    return False, ""
+
+
+def _filter_realign_target_candidates(
+    content_candidates: list[dict[str, Any]],
+    *,
+    state: MainLoopState,
+) -> dict[str, list[dict[str, Any]]]:
+    recent_signatures = set(getattr(state, "recent_representative_signatures", []) or [])
+    consumed_signatures = set(getattr(state, "consumed_representative_signatures", set()) or set())
+    visited_logical_signatures = set(getattr(state, "visited_logical_signatures", set()) or set())
+    resolved_signatures = set(getattr(state, "recent_focus_realign_signatures", set()) or set())
+    consumed_clusters = set(getattr(state, "consumed_cluster_signatures", set()) or set())
+    consumed_cluster_logical = set(getattr(state, "consumed_cluster_logical_signatures", set()) or set())
+    resolved_clusters = set(getattr(state, "recent_focus_realign_clusters", set()) or set())
+    consumed_cta_rids = {
+        str(rid or "").strip().lower()
+        for values in getattr(state, "cta_cluster_visited_rids", {}).values()
+        for rid in values
+    }
+    representative_all = [
+        candidate
+        for candidate in content_candidates
+        if bool(candidate.get("representative", False))
+        and not bool(candidate.get("passive_status", False))
+        and not bool(candidate.get("low_value_leaf", False))
+        and not _is_section_header_candidate(candidate)
+    ]
+    rejected_recent = [candidate for candidate in representative_all if _candidate_object_signature(candidate) in recent_signatures]
+    rejected_consumed = [
+        candidate
+        for candidate in representative_all
+        if _candidate_object_signature(candidate) in consumed_signatures
+        or _candidate_cluster_signature(candidate) in consumed_clusters
+        or str(candidate.get("rid", "") or "").strip().lower() in consumed_cta_rids
+    ]
+    rejected_visited = [
+        candidate for candidate in representative_all if _candidate_logical_signature(candidate) in visited_logical_signatures
+    ]
+    rejected_resolved = [
+        candidate
+        for candidate in representative_all
+        if _candidate_object_signature(candidate) in resolved_signatures
+        or _candidate_cluster_signature(candidate) in resolved_clusters
+    ]
+    eligible = [
+        candidate
+        for candidate in representative_all
+        if _candidate_object_signature(candidate) not in recent_signatures
+        and _candidate_object_signature(candidate) not in consumed_signatures
+        and _candidate_logical_signature(candidate) not in visited_logical_signatures
+        and _candidate_object_signature(candidate) not in resolved_signatures
+        and _candidate_cluster_signature(candidate) not in consumed_clusters
+        and _candidate_cluster_logical_signature(candidate) not in consumed_cluster_logical
+        and _candidate_cluster_signature(candidate) not in resolved_clusters
+        and str(candidate.get("rid", "") or "").strip().lower() not in consumed_cta_rids
+    ]
+    return {
+        "all": representative_all,
+        "eligible": eligible,
+        "rejected_recent": rejected_recent,
+        "rejected_consumed": rejected_consumed,
+        "rejected_visited": rejected_visited,
+        "rejected_resolved": rejected_resolved,
+    }
+
+
+def _representative_focus_matches(
+    *,
+    focus_node: Any,
+    target_rid: str,
+    target_label: str,
+    target_bounds: str,
+) -> bool:
+    if not isinstance(focus_node, dict):
+        return False
+    focus_rid = str(focus_node.get("viewIdResourceName", "") or focus_node.get("resourceId", "") or "").strip()
+    if target_rid and focus_rid == target_rid:
+        return True
+    focus_label = _extract_cta_node_label(focus_node) or _node_label_blob(focus_node)
+    if target_label and focus_label and target_label == focus_label:
+        return True
+    focus_bounds = str(focus_node.get("boundsInScreen", "") or focus_node.get("bounds", "") or "").strip()
+    focus_bounds_tuple = parse_bounds_str(focus_bounds)
+    target_bounds_tuple = parse_bounds_str(target_bounds)
+    if not focus_bounds_tuple or not target_bounds_tuple:
+        return False
+    left = max(focus_bounds_tuple[0], target_bounds_tuple[0])
+    top = max(focus_bounds_tuple[1], target_bounds_tuple[1])
+    right = min(focus_bounds_tuple[2], target_bounds_tuple[2])
+    bottom = min(focus_bounds_tuple[3], target_bounds_tuple[3])
+    return right > left and bottom > top
+
+
+def _maybe_realign_focus_to_representative(
+    *,
+    row: dict[str, Any],
+    client: A11yAdbClient,
+    dev: str,
+    selected_node: dict[str, Any],
+    selected_rid: str,
+    selected_label: str,
+    selected_bounds: str,
+    scenario_id: str,
+    step_idx: int,
+    mismatch_logged: bool = False,
+) -> tuple[bool, str, dict[str, Any] | None]:
+    current_rid = str(row.get("focus_view_id", "") or "").strip()
+    current_label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
+    current_bounds = str(row.get("focus_bounds", "") or "").strip()
+    if (
+        current_rid == selected_rid
+        or (current_label and selected_label and current_label == selected_label)
+        or (
+            current_bounds
+            and selected_bounds
+            and _representative_focus_matches(
+                focus_node={"boundsInScreen": current_bounds},
+                target_rid="",
+                target_label="",
+                target_bounds=selected_bounds,
+            )
+        )
+    ):
+        return False, "already_aligned", None
+    if not mismatch_logged:
+        log(
+            f"[STEP][focus_context_mismatch] selected='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
+            f"current_focus='{_truncate_debug_text(current_label or current_rid, 96)}' "
+            "reason='representative_differs_from_focus_context'"
+        )
+    get_focus_fn = getattr(client, "get_focus", None)
+    select_fn = getattr(client, "select", None)
+    if not callable(get_focus_fn) or not callable(select_fn):
+        log(
+            f"[STEP][focus_realign_fail] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
+            "reason='align_primitives_unavailable'"
+        )
+        return False, "align_primitives_unavailable", None
+    attempts: list[tuple[str, str, str]] = []
+    if selected_rid:
+        attempts.append(("rid", "r", selected_rid))
+    if selected_label:
+        attempts.append(("label", "a", selected_label))
+    attempts = attempts[:2]
+    for attempt_index, (method, target_type, target_value) in enumerate(attempts, start=1):
+        log(
+            f"[STEP][focus_realign] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
+            f"method='{method}' attempt={attempt_index}"
+        )
+        try:
+            select_fn(dev=dev, name=target_value, type_=target_type, wait_=1.2)
+        except Exception:
+            continue
+        focus_node = get_focus_fn(
+            dev=dev,
+            wait_seconds=0.35,
+            allow_fallback_dump=False,
+            mode="fast",
+        )
+        if _representative_focus_matches(
+            focus_node=focus_node,
+            target_rid=selected_rid,
+            target_label=selected_label,
+            target_bounds=selected_bounds,
+        ):
+            resolved_focus = _extract_cta_node_label(focus_node) or _node_label_blob(focus_node) or selected_label or selected_rid
+            log(
+                f"[STEP][focus_realign_success] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
+                f"resolved_focus='{_truncate_debug_text(resolved_focus, 96)}'"
+            )
+            return True, "matched", focus_node if isinstance(focus_node, dict) else selected_node
+    log(
+        f"[STEP][focus_realign_fail] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
+        "reason='no_match'"
+    )
+    return False, "no_match", None
+
+
+def _current_local_tab_phase_label(state: MainLoopState) -> str:
+    local_tab_signature = str(getattr(state, "current_local_tab_signature", "") or "").strip()
+    active_rid = str(getattr(state, "current_local_tab_active_rid", "") or "").strip().lower()
+    if not local_tab_signature or not active_rid:
+        return "content"
+    candidates = getattr(state, "local_tab_candidates_by_signature", {}).get(local_tab_signature, [])
+    for candidate in candidates:
+        candidate_rid = str(candidate.get("rid", "") or "").strip().lower()
+        if candidate_rid == active_rid:
+            return str(candidate.get("label", "") or candidate.get("rid", "") or "content").strip() or "content"
+    return str(getattr(state, "current_local_tab_active_rid", "") or "content").strip() or "content"
+
+
+def _filter_content_candidates_for_phase(
+    content_candidates: list[dict[str, Any]],
+    *,
+    state: MainLoopState,
+) -> dict[str, Any]:
+    recent_signatures = set(getattr(state, "recent_representative_signatures", []) or [])
+    consumed_signatures = set(getattr(state, "consumed_representative_signatures", set()) or set())
+    consumed_clusters = set(getattr(state, "consumed_cluster_signatures", set()) or set())
+    consumed_cluster_logical = set(getattr(state, "consumed_cluster_logical_signatures", set()) or set())
+    visited_logical_signatures = set(getattr(state, "visited_logical_signatures", set()) or set())
+    consumed_cta_rids = {
+        str(rid or "").strip().lower()
+        for values in getattr(state, "cta_cluster_visited_rids", {}).values()
+        for rid in values
+    }
+    status_candidates = [candidate for candidate in content_candidates if bool(candidate.get("passive_status", False))]
+    selection_candidates = [candidate for candidate in content_candidates if not bool(candidate.get("passive_status", False))]
+    leaf_rejected = [candidate for candidate in selection_candidates if bool(candidate.get("low_value_leaf", False))]
+    selection_candidates = [candidate for candidate in selection_candidates if not bool(candidate.get("low_value_leaf", False))]
+    section_header_deferred = [candidate for candidate in selection_candidates if _is_section_header_candidate(candidate)]
+    selection_candidates = [candidate for candidate in selection_candidates if not _is_section_header_candidate(candidate)]
+    selection_candidates_before_visited = list(selection_candidates)
+    visited_rejected = [
+        candidate for candidate in selection_candidates if _candidate_logical_signature(candidate) in visited_logical_signatures
+    ]
+    selection_candidates = [
+        candidate for candidate in selection_candidates if _candidate_logical_signature(candidate) not in visited_logical_signatures
+    ]
+    revisit_rejected = [candidate for candidate in selection_candidates if _candidate_object_signature(candidate) in recent_signatures]
+    selection_candidates = [candidate for candidate in selection_candidates if _candidate_object_signature(candidate) not in recent_signatures]
+    cluster_consumed_rejected = [
+        candidate
+        for candidate in selection_candidates
+        if _candidate_cluster_signature(candidate) in consumed_clusters
+        or _candidate_cluster_logical_signature(candidate) in consumed_cluster_logical
+    ]
+    selection_candidates = [
+        candidate
+        for candidate in selection_candidates
+        if _candidate_cluster_signature(candidate) not in consumed_clusters
+        and _candidate_cluster_logical_signature(candidate) not in consumed_cluster_logical
+    ]
+    consumed_rejected = [
+        candidate
+        for candidate in selection_candidates
+        if _candidate_object_signature(candidate) in consumed_signatures
+        or str(candidate.get("rid", "") or "").strip().lower() in consumed_cta_rids
+    ]
+    selection_candidates = [
+        candidate
+        for candidate in selection_candidates
+        if _candidate_object_signature(candidate) not in consumed_signatures
+        and str(candidate.get("rid", "") or "").strip().lower() not in consumed_cta_rids
+    ]
+    representative_candidates = [candidate for candidate in selection_candidates if bool(candidate.get("representative", False))]
+    exhausted_candidates = list(representative_candidates)
+    return {
+        "all_candidates": list(content_candidates),
+        "status_candidates": status_candidates,
+        "section_header_deferred": section_header_deferred,
+        "selection_candidates_before_visited": selection_candidates_before_visited,
+        "visited_rejected": visited_rejected,
+        "leaf_rejected": leaf_rejected,
+        "revisit_rejected": revisit_rejected,
+        "cluster_consumed_rejected": cluster_consumed_rejected,
+        "consumed_rejected": consumed_rejected,
+        "selection_candidates": selection_candidates,
+        "representative_candidates": representative_candidates,
+        "exhaustion_candidates": exhausted_candidates,
+    }
+
+
+def _build_scroll_fallback_signature(
+    *,
+    local_tab_signature: str,
+    active_rid: str,
+    content_candidates: list[dict[str, Any]],
+    chrome_excluded: list[str],
+    current_focus_signature: str = "",
+) -> str:
+    visible_content = "|".join(str(candidate.get("label", "") or "").strip() for candidate in content_candidates[:4]) or "none"
+    chrome = "|".join(chrome_excluded[:3]) or "none"
+    return "||".join(
+        [
+            str(local_tab_signature or "").strip().lower(),
+            str(active_rid or "").strip().lower(),
+            visible_content.lower(),
+            chrome.lower(),
+            str(current_focus_signature or "").strip().lower(),
+        ]
+    )
+
+
+def _describe_scrollable_content_phase(nodes: Any) -> tuple[bool, list[str], str]:
+    if not isinstance(nodes, list):
+        return False, [], ""
+    flat_nodes = _iter_tree_nodes_with_parent(nodes)
+    bounds_candidates = [
+        parse_bounds_str(str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip())
+        for node, _ in flat_nodes
+        if isinstance(node, dict)
+    ]
+    bounds_candidates = [bounds for bounds in bounds_candidates if bounds]
+    if not bounds_candidates:
+        return False, [], ""
+    viewport_top = min(bounds[1] for bounds in bounds_candidates)
+    viewport_bottom = max(bounds[3] for bounds in bounds_candidates)
+    viewport_height = max(1, viewport_bottom - viewport_top)
+    min_scroll_height = max(int(viewport_height * 0.24), 220)
+    max_scroll_center_y = viewport_bottom - int(viewport_height * 0.06)
+    scrollable_labels: list[str] = []
+    content_bounds = ""
+    for node, _ in flat_nodes:
+        if not isinstance(node, dict) or node.get("visibleToUser", True) is False:
+            continue
+        bounds = parse_bounds_str(str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip())
+        if not bounds:
+            continue
+        resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip().lower()
+        class_name = str(node.get("className", "") or node.get("class", "") or "").strip().lower()
+        scrollable = bool(node.get("scrollable"))
+        scroll_like = bool(
+            scrollable
+            or "recyclerview" in class_name
+            or "scrollview" in class_name
+            or "nestedscrollview" in class_name
+            or "listview" in class_name
+            or "recycler" in resource_id
+            or "scroll" in resource_id
+        )
+        if not scroll_like:
+            continue
+        height = max(1, bounds[3] - bounds[1])
+        center_y = (bounds[1] + bounds[3]) // 2
+        label = _extract_cta_node_label(node) or _node_label_blob(node) or str(node.get("viewIdResourceName", "") or node.get("className", "") or "").strip()
+        scrollable_labels.append(label or class_name or resource_id or "scrollable")
+        explicit_scrollable = bool(node.get("scrollable"))
+        if (
+            (explicit_scrollable and height >= max(int(viewport_height * 0.18), 160))
+            or (height >= min_scroll_height and center_y <= max_scroll_center_y)
+        ):
+            content_bounds = str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip()
+            return True, scrollable_labels[:4], content_bounds
+    return False, scrollable_labels[:4], content_bounds
+
+
+def _is_scrollable_content_phase(nodes: Any) -> bool:
+    result, _, _ = _describe_scrollable_content_phase(nodes)
+    return result
+
+
+def _record_pending_scroll_ready_move(
+    *,
+    row: dict[str, Any],
+    state: MainLoopState,
+    step_idx: int,
+    scenario_id: str,
+) -> None:
+    pending_cluster_signature = str(getattr(state, "pending_scroll_ready_cluster_signature", "") or "").strip()
+    if not pending_cluster_signature:
         return
-    state.recent_representative_signatures.append(signature)
-    state.consumed_representative_signatures.add(signature)
+    move_result = normalize_move_result(row) or str(row.get("move_result", "") or "").strip().lower() or "none"
+    log(
+        f"[STEP][scroll_ready_move] step={step_idx} scenario='{scenario_id}' "
+        f"cluster='{_truncate_debug_text(pending_cluster_signature, 120)}' "
+        f"result='{_truncate_debug_text(move_result, 48)}' "
+        f"visible='{_truncate_debug_text(row.get('visible_label', ''), 120)}' "
+        f"version='{COLLECTION_FLOW_SCROLL_READY_VERSION}'"
+    )
+    if move_result in {"moved", "scrolled", "edge_realign_then_moved"}:
+        retry_counts = dict(getattr(state, "scroll_ready_retry_counts", {}) or {})
+        retry_counts.pop(pending_cluster_signature, None)
+        state.scroll_ready_retry_counts = retry_counts
+        state.pending_scroll_ready_cluster_signature = ""
+
+
+def _apply_spatial_priority_to_candidates(
+    candidates: list[dict[str, Any]],
+    *,
+    row: dict[str, Any],
+    state: MainLoopState,
+) -> tuple[list[dict[str, Any]], str, str]:
+    if len(candidates) <= 1:
+        return list(candidates), "", ""
+
+    def _is_stable_anchor(anchor_row: dict[str, Any] | None) -> bool:
+        if not isinstance(anchor_row, dict):
+            return False
+        if _is_row_persistent_bottom_strip_candidate(anchor_row):
+            return False
+        if _is_row_top_chrome_candidate(anchor_row):
+            return False
+        anchor_label = str(anchor_row.get("visible_label", "") or anchor_row.get("merged_announcement", "") or "").strip()
+        if _is_passive_status_text(anchor_label):
+            return False
+        anchor_bounds = parse_bounds_str(str(anchor_row.get("focus_bounds", "") or "").strip())
+        return bool(anchor_bounds)
+
+    anchor_row = state.previous_step_row if _is_stable_anchor(getattr(state, "previous_step_row", None)) else None
+    if anchor_row is None and _is_stable_anchor(row):
+        anchor_row = row
+    anchor_bounds = parse_bounds_str(str((anchor_row or {}).get("focus_bounds", "") or "").strip()) if anchor_row else None
+    anchor_center_y = ((anchor_bounds[1] + anchor_bounds[3]) // 2) if anchor_bounds else 0
+    anchor_center_x = ((anchor_bounds[0] + anchor_bounds[2]) // 2) if anchor_bounds else 0
+    continuity_reason = ""
+
+    def _sort_key(candidate: dict[str, Any]) -> tuple[int, int, int, int, int, int, int, int, str, str]:
+        bounds = parse_bounds_str(str(candidate.get("bounds", "") or "").strip())
+        top = int(candidate.get("top", 0) or 0)
+        left = int(candidate.get("left", 0) or 0)
+        center_y = ((bounds[1] + bounds[3]) // 2) if bounds else top
+        center_x = ((bounds[0] + bounds[2]) // 2) if bounds else left
+        above_penalty = 1 if anchor_bounds and center_y < anchor_center_y - 24 else 0
+        vertical_bucket = top // 96
+        downward_progress = max(0, center_y - anchor_center_y) if anchor_bounds else top
+        continuity_penalty = abs(center_y - anchor_center_y) if anchor_bounds else 0
+        horizontal_tiebreaker = left
+        continuity_bucket = continuity_penalty // 160 if anchor_bounds else 0
+        jump_penalty = 1 if anchor_bounds and abs(center_x - anchor_center_x) > 420 and continuity_penalty > 220 else 0
+        return (
+            above_penalty,
+            vertical_bucket,
+            top,
+            downward_progress // 120 if anchor_bounds else vertical_bucket,
+            continuity_bucket,
+            jump_penalty,
+            horizontal_tiebreaker,
+            left,
+            -int(candidate.get("score", 0) or 0),
+            str(candidate.get("label", "") or ""),
+            str(candidate.get("rid", "") or ""),
+        )
+    ordered = sorted(candidates, key=_sort_key)
+    if anchor_row and ordered:
+        selected_bounds = parse_bounds_str(str(ordered[0].get("bounds", "") or "").strip())
+        if selected_bounds:
+            selected_center_y = (selected_bounds[1] + selected_bounds[3]) // 2
+            if selected_center_y >= anchor_center_y - 24:
+                continuity_reason = "closest_next_representative"
+            else:
+                continuity_reason = "jump_penalty_reduced_but_selected"
+    return ordered, "top_to_bottom_bias", continuity_reason
 
 
 def _build_local_tab_strip_signature(tab_candidates: list[dict[str, Any]]) -> str:
@@ -7413,6 +8129,25 @@ def _select_active_local_tab_candidate(
         if row_label and candidate_label and row_label == candidate_label:
             return candidate
     return tab_candidates[0] if tab_candidates else None
+
+
+def _is_current_focus_on_local_tab_strip(state: MainLoopState, row: dict[str, Any]) -> bool:
+    local_tab_signature = str(getattr(state, "current_local_tab_signature", "") or "").strip()
+    if not local_tab_signature:
+        return False
+    tab_candidates = getattr(state, "local_tab_candidates_by_signature", {}).get(local_tab_signature, [])
+    if not tab_candidates:
+        return False
+    row_rid = str(row.get("focus_view_id", "") or "").strip().lower()
+    row_label = re.sub(r"\s+", " ", str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()).lower()
+    for candidate in tab_candidates:
+        candidate_rid = str(candidate.get("rid", "") or "").strip().lower()
+        candidate_label = re.sub(r"\s+", " ", str(candidate.get("label", "") or "").strip()).lower()
+        if row_rid and candidate_rid and row_rid == candidate_rid:
+            return True
+        if row_label and candidate_label and row_label == candidate_label:
+            return True
+    return False
 
 
 def _is_chrome_like_candidate(
@@ -7489,7 +8224,7 @@ def _is_passive_status_text(label: str) -> bool:
     normalized_label = re.sub(r"\s+", " ", str(label or "").strip()).lower()
     if not normalized_label:
         return False
-    status_phrases = (
+    exact_status_phrases = (
         "active now",
         "inactive",
         "offline",
@@ -7500,10 +8235,32 @@ def _is_passive_status_text(label: str) -> bool:
         "unavailable",
         "updated just now",
         "just now",
+        "no activity",
+        "no data",
+        "no events",
+        "no history",
+        "nothing yet",
+        "not available",
+        "waiting",
+        "loading",
+        "pending",
     )
-    if normalized_label in status_phrases:
+    if normalized_label in exact_status_phrases:
         return True
-    return bool(len(normalized_label) <= 18 and any(phrase in normalized_label for phrase in status_phrases))
+    if re.fullmatch(r"no\s+[a-z0-9][a-z0-9\s\-]{0,24}", normalized_label):
+        return True
+    passive_explanation_patterns = (
+        r"\bwill be measured again after\b",
+        r"\bavailable after\b",
+        r"\bupdated later\b",
+        r"\btry again later\b",
+        r"\bwaiting for\b",
+        r"\bwill be available after\b",
+        r"\bmeasured again after\b",
+    )
+    if any(re.search(pattern, normalized_label) for pattern in passive_explanation_patterns):
+        return True
+    return bool(len(normalized_label) <= 18 and any(phrase in normalized_label for phrase in exact_status_phrases))
 
 
 def _filter_local_tab_strip_candidates(
@@ -7546,15 +8303,37 @@ def _filter_local_tab_strip_candidates(
     return accepted, rejected
 
 
-def _collect_step_candidate_priority_groups(nodes: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[str]]]:
-    visible_nodes = _iter_visible_descendant_nodes(nodes)
+def _collect_step_candidate_priority_groups(
+    nodes: Any,
+    *,
+    consumed_cluster_signatures: set[str] | None = None,
+    consumed_cluster_logical_signatures: set[str] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[str]]]:
+    consumed_cluster_signatures = set(consumed_cluster_signatures or set())
+    consumed_cluster_logical_signatures = set(consumed_cluster_logical_signatures or set())
+    flat_visible_nodes = [
+        (node, parent if isinstance(parent, dict) else None)
+        for node, parent in _iter_tree_nodes_with_parent(nodes if isinstance(nodes, list) else [])
+        if isinstance(node, dict) and node.get("visibleToUser", True) is not False
+    ]
+    visible_nodes = [node for node, _ in flat_visible_nodes]
+    parent_by_node_id = {
+        id(node): parent
+        for node, parent in flat_visible_nodes
+        if isinstance(parent, dict)
+    }
     bounds_candidates = [
         parse_bounds_str(str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip())
         for node in visible_nodes
     ]
     bounds_candidates = [bounds for bounds in bounds_candidates if bounds]
     if not bounds_candidates:
-        return [], []
+        return [], [], {
+            "raw_bottom_strip_candidates": [],
+            "rejected_bottom_strip_candidates": [],
+            "chrome_excluded_candidates": [],
+            "cluster_pre_filter_skipped": [],
+        }
     viewport_left = min(bounds[0] for bounds in bounds_candidates)
     viewport_top = min(bounds[1] for bounds in bounds_candidates)
     viewport_right = max(bounds[2] for bounds in bounds_candidates)
@@ -7567,6 +8346,8 @@ def _collect_step_candidate_priority_groups(nodes: Any) -> tuple[list[dict[str, 
     raw_bottom_strip_candidates: list[dict[str, Any]] = []
     content_candidates: list[dict[str, Any]] = []
     chrome_excluded_candidates: list[str] = []
+    section_header_candidates: list[str] = []
+    cluster_pre_filter_skipped: list[str] = []
 
     for node in visible_nodes:
         bounds = parse_bounds_str(str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip())
@@ -7625,6 +8406,18 @@ def _collect_step_candidate_priority_groups(nodes: Any) -> tuple[list[dict[str, 
             )
             continue
         title_like = bool(center_y <= top_header_band and not actionable and label_word_count <= 3 and not card_like)
+        structural_header = bool(
+            any(token in resource_id for token in ("toolbar", "appbar", "actionbar", "action_bar", "header", "title", "section"))
+            or any(token in class_name for token in ("toolbar", "appbar", "actionbar", "header", "title"))
+        )
+        wide_short_header = bool(
+            width_ratio >= 0.55
+            and height_ratio <= 0.14
+            and label_word_count <= 4
+            and not card_like
+            and not descendant_actionable
+        )
+        section_header_like = bool(title_like or structural_header or wide_short_header)
         low_value_leaf = _is_low_value_leaf_text(
             label,
             actionable=actionable,
@@ -7632,6 +8425,7 @@ def _collect_step_candidate_priority_groups(nodes: Any) -> tuple[list[dict[str, 
             width=width,
             height=height,
         )
+        passive_status = _is_passive_status_text(label)
         content_like = bool(
             center_y < bottom_band_top
             and (
@@ -7656,12 +8450,12 @@ def _collect_step_candidate_priority_groups(nodes: Any) -> tuple[list[dict[str, 
         if not content_like:
             continue
         representative = bool(
-            actionable
+            (actionable and not passive_status)
             or descendant_actionable
-            or card_like
+            or (card_like and not passive_status)
             or ("title" in resource_id and len(label.strip()) >= 5)
             or ("section" in resource_id and len(label.strip()) >= 5)
-            or len(label.strip()) >= 12
+            or (len(label.strip()) >= 12 and not passive_status)
         )
         score = int(card_like) * 1000000
         score += int(actionable) * 250000
@@ -7672,19 +8466,109 @@ def _collect_step_candidate_priority_groups(nodes: Any) -> tuple[list[dict[str, 
         score += min(int(area), 9999)
         if low_value_leaf:
             score -= 700000
-        content_candidates.append(
-            {
-                "node": node,
-                "label": label,
-                "rid": resource_id,
-                "score": int(score),
-                "top": int(top),
-                "left": int(left),
-                "bounds": str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip(),
-                "low_value_leaf": bool(low_value_leaf),
-                "representative": bool(representative),
-            }
+        if passive_status:
+            score -= 550000
+        cluster_root = _select_candidate_cluster_root(node, parent_by_node_id)
+        cluster_signature = _build_candidate_cluster_signature_from_root(cluster_root)
+        cluster_rid = str(cluster_root.get("viewIdResourceName", "") or cluster_root.get("resourceId", "") or "").strip()
+        cluster_label = _extract_cta_node_label(cluster_root) or _node_label_blob(cluster_root) or cluster_rid or label
+        candidate_cluster_logical_signature = "||".join(
+            [
+                str(cluster_rid or resource_id or "").strip().lower() or "none",
+                _normalize_logical_text(cluster_label or label) or "none",
+            ]
         )
+        if (
+            cluster_signature in consumed_cluster_signatures
+            or candidate_cluster_logical_signature in consumed_cluster_logical_signatures
+        ):
+            cluster_pre_filter_skipped.append(cluster_label or label)
+            continue
+        candidate = {
+            "node": node,
+            "label": label,
+            "rid": resource_id,
+            "score": int(score),
+            "top": int(top),
+            "left": int(left),
+            "bounds": str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip(),
+            "low_value_leaf": bool(low_value_leaf),
+            "representative": bool(representative),
+            "passive_status": bool(passive_status),
+            "section_header_like": bool(section_header_like),
+            "cluster_signature": cluster_signature,
+            "cluster_logical_signature": candidate_cluster_logical_signature,
+            "cluster_label": cluster_label,
+            "cluster_rid": cluster_rid,
+            "cluster_bounds": str(cluster_root.get("boundsInScreen", "") or cluster_root.get("bounds", "") or "").strip(),
+            "cluster_root_node": cluster_root,
+        }
+        candidate["cluster_role"] = _cluster_candidate_role(candidate)
+        if bool(candidate.get("section_header_like", False)):
+            section_header_candidates.append(label)
+        content_candidates.append(candidate)
+
+    raw_cluster_labels = [
+        f"{_cluster_display_name(candidate)}:{str(candidate.get('label', '') or '').strip()}"
+        for candidate in content_candidates
+    ]
+    clustered_content_candidates: list[dict[str, Any]] = []
+    cluster_representatives_meta: list[tuple[str, str, str]] = []
+    grouped_candidates: dict[str, list[dict[str, Any]]] = {}
+    for candidate in content_candidates:
+        cluster_signature = _candidate_cluster_signature(candidate) or _candidate_object_signature(candidate)
+        grouped_candidates.setdefault(cluster_signature, []).append(candidate)
+    for cluster_signature, cluster_candidates in grouped_candidates.items():
+        root_node = cluster_candidates[0].get("cluster_root_node", {})
+        synthetic_root_candidate = None
+        if isinstance(root_node, dict):
+            root_bounds = str(root_node.get("boundsInScreen", "") or root_node.get("bounds", "") or "").strip()
+            root_rid = str(root_node.get("viewIdResourceName", "") or root_node.get("resourceId", "") or "").strip().lower()
+            root_class = str(root_node.get("className", "") or root_node.get("class", "") or "").strip().lower()
+            root_actionable = bool(root_node.get("clickable") or root_node.get("focusable") or root_node.get("effectiveClickable"))
+            root_descendant_actionable = bool(root_node.get("hasClickableDescendant") or root_node.get("hasFocusableDescendant"))
+            root_container_like = bool(
+                "card" in root_rid
+                or "container" in root_rid
+                or "item" in root_rid
+                or ("layout" in root_class and root_rid)
+                or ("frame" in root_class and root_rid)
+            )
+            if root_bounds and (root_actionable or root_descendant_actionable or root_container_like):
+                base_score = max(int(candidate.get("score", 0) or 0) for candidate in cluster_candidates) + 180000
+                synthetic_root_candidate = {
+                    "node": root_node,
+                    "label": str(cluster_candidates[0].get("cluster_label", "") or "").strip(),
+                    "rid": str(cluster_candidates[0].get("cluster_rid", "") or "").strip(),
+                    "score": int(base_score),
+                    "top": parse_bounds_str(root_bounds)[1] if parse_bounds_str(root_bounds) else 0,
+                    "left": parse_bounds_str(root_bounds)[0] if parse_bounds_str(root_bounds) else 0,
+                    "bounds": root_bounds,
+                    "low_value_leaf": False,
+                    "representative": True,
+                    "passive_status": False,
+                    "section_header_like": False,
+                    "cluster_signature": cluster_signature,
+                    "cluster_label": str(cluster_candidates[0].get("cluster_label", "") or "").strip(),
+                    "cluster_rid": str(cluster_candidates[0].get("cluster_rid", "") or "").strip(),
+                    "cluster_bounds": root_bounds,
+                    "cluster_root_node": root_node,
+                    "cluster_role": "descendant_actionable" if root_descendant_actionable else "container",
+                }
+        ranking_candidates = list(cluster_candidates)
+        if synthetic_root_candidate is not None:
+            ranking_candidates.append(synthetic_root_candidate)
+        best_candidate = max(ranking_candidates, key=_cluster_candidate_sort_key)
+        cluster_label = _cluster_display_name(best_candidate)
+        selected_label = str(best_candidate.get("label", "") or best_candidate.get("rid", "") or "").strip()
+        cluster_representatives_meta.append((cluster_label, selected_label, _cluster_candidate_reason(best_candidate)))
+        collapsed_candidate = dict(best_candidate)
+        collapsed_candidate["cluster_signature"] = cluster_signature
+        collapsed_candidate["cluster_candidate_count"] = len(cluster_candidates)
+        collapsed_candidate["cluster_labels"] = [str(candidate.get("label", "") or "").strip() for candidate in cluster_candidates]
+        collapsed_candidate["cluster_members"] = ranking_candidates
+        clustered_content_candidates.append(collapsed_candidate)
+    content_candidates = clustered_content_candidates
 
     bottom_strip_candidates, rejected_bottom_strip_candidates = _filter_local_tab_strip_candidates(raw_bottom_strip_candidates)
     if not bottom_strip_candidates:
@@ -7702,6 +8586,11 @@ def _collect_step_candidate_priority_groups(nodes: Any) -> tuple[list[dict[str, 
             "raw_bottom_strip_candidates": [str(candidate.get("label", "") or "").strip() for candidate in raw_bottom_strip_candidates],
             "rejected_bottom_strip_candidates": [str(candidate.get("label", "") or "").strip() for candidate in rejected_bottom_strip_candidates],
             "chrome_excluded_candidates": chrome_excluded_candidates,
+            "section_header_candidates": section_header_candidates,
+            "raw_cluster_candidates": raw_cluster_labels,
+            "clustered_candidates": [_cluster_display_name(candidate) for candidate in content_candidates],
+            "cluster_representatives": cluster_representatives_meta,
+            "cluster_pre_filter_skipped": cluster_pre_filter_skipped,
         }
     sorted_content = sorted(
         content_candidates,
@@ -7718,6 +8607,11 @@ def _collect_step_candidate_priority_groups(nodes: Any) -> tuple[list[dict[str, 
         "raw_bottom_strip_candidates": [str(candidate.get("label", "") or "").strip() for candidate in raw_bottom_strip_candidates],
         "rejected_bottom_strip_candidates": [str(candidate.get("label", "") or "").strip() for candidate in rejected_bottom_strip_candidates],
         "chrome_excluded_candidates": chrome_excluded_candidates,
+        "section_header_candidates": section_header_candidates,
+        "raw_cluster_candidates": raw_cluster_labels,
+        "clustered_candidates": [_cluster_display_name(candidate) for candidate in sorted_content],
+        "cluster_representatives": cluster_representatives_meta,
+        "cluster_pre_filter_skipped": cluster_pre_filter_skipped,
     }
 
 
@@ -7755,7 +8649,9 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
 ) -> dict[str, Any]:
     scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower()
     row_signature = _build_row_object_signature(row)
-    recent_signatures = set(state.recent_representative_signatures)
+    current_row_is_passive_status = _is_passive_status_text(
+        str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
+    )
     current_row_is_top_chrome = _is_row_top_chrome_candidate(row)
     current_row_is_low_value_leaf = _is_low_value_leaf_text(
         str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip(),
@@ -7770,11 +8666,12 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         width=max(1, (parse_bounds_str(str(row.get("focus_bounds", "") or "").strip()) or (0, 0, 1, 1))[2] - (parse_bounds_str(str(row.get("focus_bounds", "") or "").strip()) or (0, 0, 1, 1))[0]),
         height=max(1, (parse_bounds_str(str(row.get("focus_bounds", "") or "").strip()) or (0, 0, 1, 1))[3] - (parse_bounds_str(str(row.get("focus_bounds", "") or "").strip()) or (0, 0, 1, 1))[1]),
     )
-    current_row_recent_revisit = bool(row_signature and row_signature in recent_signatures)
+    current_row_recent_revisit = bool(row_signature and row_signature in set(getattr(state, "recent_representative_signatures", []) or []))
     if scenario_type == "global_nav" or not (
         _is_row_persistent_bottom_strip_candidate(row)
         or current_row_is_low_value_leaf
         or current_row_recent_revisit
+        or current_row_is_passive_status
         or current_row_is_top_chrome
     ):
         needs_detection_only = True
@@ -7787,7 +8684,11 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         nodes = dump_tree_fn(dev=dev)
     except Exception:
         return row
-    content_candidates, bottom_strip_candidates, candidate_groups_meta = _collect_step_candidate_priority_groups(nodes)
+    content_candidates, bottom_strip_candidates, candidate_groups_meta = _collect_step_candidate_priority_groups(
+        nodes,
+        consumed_cluster_signatures=set(getattr(state, "consumed_cluster_signatures", set()) or set()),
+        consumed_cluster_logical_signatures=set(getattr(state, "consumed_cluster_logical_signatures", set()) or set()),
+    )
     local_tab_signature = ""
     if content_candidates and bottom_strip_candidates:
         local_tab_signature = _build_local_tab_strip_signature(bottom_strip_candidates)
@@ -7832,8 +8733,45 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         return row
     if not content_candidates:
         return row
-    filtered_candidates = content_candidates
+    raw_cluster_candidates = [str(value or "").strip() for value in candidate_groups_meta.get("raw_cluster_candidates", []) if str(value or "").strip()]
+    clustered_candidates = [str(value or "").strip() for value in candidate_groups_meta.get("clustered_candidates", []) if str(value or "").strip()]
+    cluster_representatives = candidate_groups_meta.get("cluster_representatives", [])
+    if raw_cluster_candidates and clustered_candidates and len(raw_cluster_candidates) > len(clustered_candidates):
+        log(
+            f"[STEP][cluster_candidates] all='{_truncate_debug_text('|'.join(raw_cluster_candidates[:5]), 120)}' "
+            f"clustered='{_truncate_debug_text('|'.join(clustered_candidates[:5]), 120)}'"
+        )
+        for cluster_label, selected_cluster_label, cluster_reason in cluster_representatives[:3]:
+            log(
+                f"[STEP][cluster_representative] cluster='{_truncate_debug_text(str(cluster_label or ''), 96)}' "
+                f"selected='{_truncate_debug_text(str(selected_cluster_label or ''), 96)}' "
+                f"reason='{cluster_reason}'"
+            )
+    cluster_pre_filter_skipped = [
+        str(value or "").strip()
+        for value in candidate_groups_meta.get("cluster_pre_filter_skipped", [])
+        if str(value or "").strip()
+    ]
+    if cluster_pre_filter_skipped:
+        log(
+            f"[STEP][cluster_pre_filter] skipped='{_truncate_debug_text('|'.join(cluster_pre_filter_skipped[:5]), 120)}' "
+            f"count={len(cluster_pre_filter_skipped)} reason='consumed_cluster_early_skip'"
+        )
     chrome_candidates = [str(value or "").strip() for value in candidate_groups_meta.get("chrome_excluded_candidates", []) if str(value or "").strip()]
+    filtered_meta = _filter_content_candidates_for_phase(content_candidates, state=state)
+    filtered_candidates = list(filtered_meta["selection_candidates"])
+    filtered_candidates, spatial_reason, continuity_reason = _apply_spatial_priority_to_candidates(
+        filtered_candidates,
+        row=row,
+        state=state,
+    )
+    passive_status_candidates = [str(candidate.get("label", "") or "").strip() for candidate in filtered_meta["status_candidates"]]
+    section_header_candidates = [str(candidate.get("label", "") or "").strip() for candidate in filtered_meta.get("section_header_deferred", [])]
+    visited_rejected = [candidate for candidate in filtered_meta.get("visited_rejected", [])]
+    leaf_candidates = [candidate for candidate in filtered_meta["leaf_rejected"]]
+    revisit_rejected = [candidate for candidate in filtered_meta["revisit_rejected"]]
+    cluster_consumed_rejected = [candidate for candidate in filtered_meta.get("cluster_consumed_rejected", [])]
+    consumed_rejected = [candidate for candidate in filtered_meta["consumed_rejected"]]
     if chrome_candidates and filtered_candidates:
         log(
             f"[STEP][chrome_penalty] deprioritized='{_truncate_debug_text('|'.join(chrome_candidates[:4]), 120)}' "
@@ -7843,39 +8781,152 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
             f"[STEP][content_phase_eval] content_present={str(bool(filtered_candidates)).lower()} "
             f"chrome_present={str(bool(chrome_candidates)).lower()} chrome_excluded=true"
         )
-    leaf_candidates = [candidate for candidate in content_candidates if bool(candidate.get("low_value_leaf", False))]
-    if len(content_candidates) >= 2 and leaf_candidates:
-        representative_candidates = [candidate for candidate in content_candidates if not bool(candidate.get("low_value_leaf", False))]
-        if representative_candidates:
-            filtered_candidates = representative_candidates
-            log(
-                f"[STEP][leaf_penalty] deprioritized='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in leaf_candidates[:4]), 120)}' "
-                f"reason='low_value_leaf_text'"
-            )
+    if passive_status_candidates and filtered_candidates:
+        log(
+            f"[STEP][status_exhausted_excluded] rejected='{_truncate_debug_text('|'.join(passive_status_candidates[:4]), 120)}' "
+            "reason='passive_status_or_empty_state'"
+        )
+    if section_header_candidates and filtered_candidates:
+        log(
+            f"[STEP][section_header_deferred] candidates='{_truncate_debug_text('|'.join(section_header_candidates[:4]), 120)}' "
+            "reason='content_candidates_present'"
+        )
+    if leaf_candidates and filtered_candidates:
+        log(
+            f"[STEP][leaf_hard_filter] rejected='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in leaf_candidates[:4]), 120)}' "
+            "reason='low_value_leaf'"
+        )
     elif current_row_is_low_value_leaf:
         current_leaf_label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
         if current_leaf_label and filtered_candidates:
             log(
                 f"[STEP][leaf_penalty] deprioritized='{_truncate_debug_text(current_leaf_label, 120)}' "
-                f"reason='low_value_leaf_text'"
+                f"reason='low_value_leaf_or_parent_consumed'"
             )
-    revisit_rejected: list[dict[str, Any]] = []
-    preferred_candidates = [candidate for candidate in filtered_candidates if _build_candidate_object_signature(
-        rid=str(candidate.get('rid', '') or '').strip(),
-        bounds=str(candidate.get('bounds', '') or '').strip(),
-        label=str(candidate.get('label', '') or '').strip(),
-    ) not in recent_signatures]
-    if preferred_candidates:
-        revisit_rejected = [candidate for candidate in filtered_candidates if candidate not in preferred_candidates]
-        filtered_candidates = preferred_candidates
     if revisit_rejected:
         log(
             f"[STEP][revisit_guard] rejected='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in revisit_rejected[:4]), 120)}' "
             f"reason='recent_object_revisit'"
         )
+    if visited_rejected:
+        log(
+            f"[STEP][visited_filter] rejected='{_truncate_debug_text(_summarize_candidate_labels(visited_rejected), 120)}' "
+            "reason='visited_logical_signature'"
+        )
+    if cluster_consumed_rejected:
+        cluster_signature = str(cluster_consumed_rejected[0].get("cluster_signature", "") or "").strip()
+        rejected_roles = "|".join(
+            str(candidate.get("cluster_role", "") or "leaf").strip() for candidate in cluster_consumed_rejected[:4]
+        ) or "none"
+        log(
+            f"[STEP][cluster_consumed_filter] cluster='{_truncate_debug_text(cluster_signature, 120)}' "
+            f"rejected='{_truncate_debug_text(rejected_roles, 120)}'"
+        )
+    if consumed_rejected:
+        log(
+            f"[STEP][representative_exhausted_guard] rejected='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in consumed_rejected[:4]), 120)}' "
+            "reason='already_consumed_representative'"
+        )
+    if content_candidates and (revisit_rejected or consumed_rejected):
+        all_selection_labels = "|".join(str(candidate.get('label', '') or '').strip() for candidate in content_candidates[:5]) or "none"
+        filtered_selection_labels = "|".join(str(candidate.get('label', '') or '').strip() for candidate in filtered_candidates[:5]) or "none"
+        revisit_labels = "|".join(str(candidate.get('label', '') or '').strip() for candidate in revisit_rejected[:5]) or "none"
+        log(
+            f"[STEP][selection_candidates] all='{_truncate_debug_text(all_selection_labels, 120)}' "
+            f"after_filter='{_truncate_debug_text(filtered_selection_labels, 120)}' "
+            f"rejected_by_revisit='{_truncate_debug_text(revisit_labels, 120)}'"
+        )
+    current_move_result = normalize_move_result(row) or str(row.get("move_result", "") or "").strip().lower()
+    viewport_exhausted = not bool(filtered_meta["representative_candidates"])
+    strip_focus_context = _is_current_focus_on_local_tab_strip(state, row)
+    row["strip_focus_context"] = strip_focus_context
+    if viewport_exhausted:
+        viewport_reason = "no_representative_candidates"
+    elif filtered_meta["representative_candidates"]:
+        viewport_reason = "representative_candidates_remaining"
+    elif filtered_meta["selection_candidates"]:
+        viewport_reason = "selection_without_representative"
+    elif filtered_meta["all_candidates"]:
+        viewport_reason = "filtered_by_guards"
+    else:
+        viewport_reason = "no_candidates"
+    row["viewport_exhausted_eval_result"] = viewport_exhausted
+    row["viewport_exhausted_eval_reason"] = viewport_reason
+    viewport_debug_needed = bool(
+        current_move_result in {"failed", "no_progress"}
+        or viewport_exhausted
+        or revisit_rejected
+        or consumed_rejected
+        or section_header_candidates
+    )
+    if viewport_debug_needed:
+        log(
+            f"[STEP][viewport_exhausted_eval] "
+            f"all_candidates='{_truncate_debug_text(_summarize_candidate_labels(filtered_meta['all_candidates']), 120)}' "
+            f"selection_candidates='{_truncate_debug_text(_summarize_candidate_labels(filtered_meta['selection_candidates']), 120)}' "
+            f"representative_candidates='{_truncate_debug_text(_summarize_candidate_labels(filtered_meta['representative_candidates']), 120)}' "
+            f"status_excluded='{_truncate_debug_text('|'.join(passive_status_candidates[:4]) or 'none', 120)}' "
+            f"chrome_excluded='{_truncate_debug_text('|'.join(chrome_candidates[:4]) or 'none', 120)}' "
+            f"leaf_excluded='{_truncate_debug_text(_summarize_candidate_labels(leaf_candidates), 120)}' "
+            f"revisit_rejected='{_truncate_debug_text(_summarize_candidate_labels(revisit_rejected), 120)}' "
+            f"visited_rejected='{_truncate_debug_text(_summarize_candidate_labels(visited_rejected), 120)}' "
+            f"cluster_consumed_rejected='{_truncate_debug_text(_summarize_candidate_labels(cluster_consumed_rejected), 120)}' "
+            f"consumed_rejected='{_truncate_debug_text(_summarize_candidate_labels(consumed_rejected), 120)}' "
+            f"result={str(viewport_exhausted).lower()} reason='{viewport_reason}' "
+            f"version='{COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION}'"
+        )
+    if strip_focus_context and (viewport_exhausted or not filtered_meta["representative_candidates"]):
+        current_focus_summary = str(row.get("visible_label", "") or row.get("focus_view_id", "") or "").strip()
+        log(
+            f"[STEP][strip_focus_phase_priority] current_focus='{_truncate_debug_text(current_focus_summary, 96)}' "
+            f"viewport_exhausted={str(viewport_exhausted).lower()} "
+            "action='skip_realign_evaluate_scroll_or_tab'"
+        )
+    if len(filtered_candidates) >= 2:
+        selected_spatial = filtered_candidates[0]
+        spatial_candidate_labels = "|".join(str(candidate.get("label", "") or "").strip() for candidate in filtered_candidates[:4]) or "none"
+        spatial_selected = str(selected_spatial.get("label", "") or selected_spatial.get("rid", "") or "").strip()
+        spatial_detail_reason = "higher_in_viewport"
+        if current_bounds := parse_bounds_str(str(row.get("focus_bounds", "") or "").strip()):
+            first_bounds = parse_bounds_str(str(filtered_candidates[0].get("bounds", "") or "").strip())
+            second_bounds = parse_bounds_str(str(filtered_candidates[1].get("bounds", "") or "").strip()) if len(filtered_candidates) > 1 else None
+            if first_bounds and second_bounds and abs(first_bounds[1] - second_bounds[1]) <= 120:
+                spatial_detail_reason = "same_band_tiebreaker_left_to_right"
+        log(
+            f"[STEP][spatial_priority] candidates='{_truncate_debug_text(spatial_candidate_labels, 120)}' "
+            f"selected='{_truncate_debug_text(spatial_selected, 96)}' "
+            f"reason='{spatial_detail_reason if spatial_reason else 'higher_in_viewport'}'"
+        )
+        if continuity_reason:
+            previous_label = str(
+                getattr(state, "previous_step_row", {}).get("visible_label", "")
+                or getattr(state, "previous_step_row", {}).get("merged_announcement", "")
+                or getattr(state, "previous_step_row", {}).get("focus_view_id", "")
+                or ""
+            ).strip()
+            log(
+                f"[STEP][continuity_priority] previous='{_truncate_debug_text(previous_label, 96)}' "
+                f"selected='{_truncate_debug_text(spatial_selected, 96)}' "
+                f"reason='{continuity_reason}'"
+            )
+    if len(filtered_meta.get("selection_candidates_before_visited", [])) >= 2 or visited_rejected:
+        traversal_selected = str(filtered_candidates[0].get("label", "") or filtered_candidates[0].get("rid", "") or "").strip() if filtered_candidates else "none"
+        log(
+            f"[STEP][traversal_order] "
+            f"candidates='{_truncate_debug_text(_summarize_candidate_labels(filtered_meta.get('selection_candidates_before_visited', []), limit=5), 120)}' "
+            f"after_visited_filter='{_truncate_debug_text(_summarize_candidate_labels(filtered_candidates, limit=5), 120)}' "
+            f"selected='{_truncate_debug_text(traversal_selected, 96)}' "
+            "reason='top_to_bottom_after_visited_filter'"
+        )
     if not filtered_candidates:
         return row
-    if not bottom_strip_candidates and not current_row_is_low_value_leaf and not current_row_recent_revisit and not current_row_is_top_chrome:
+    if (
+        not bottom_strip_candidates
+        and not current_row_is_low_value_leaf
+        and not current_row_recent_revisit
+        and not current_row_is_top_chrome
+        and not current_row_is_passive_status
+    ):
         return row
     selected_candidate = filtered_candidates[0]
     selected_node = selected_candidate.get("node", {})
@@ -7895,9 +8946,298 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         normalized_label = normalize_fn(selected_label) if selected_label else ""
     else:
         normalized_label = re.sub(r"\s+", " ", str(selected_label or "").strip()).lower()
+    if str(selected_candidate.get("cluster_role", "") or "") == "title":
+        log(
+            f"[STEP][cluster_representative_rank] cluster='{_truncate_debug_text(_cluster_display_name(selected_candidate), 96)}' "
+            f"candidates='{_truncate_debug_text('|'.join(str(candidate.get('cluster_role', '') or '') for candidate in selected_candidate.get('cluster_members', [])[:4]), 120)}' "
+            f"selected='{_truncate_debug_text(str(selected_candidate.get('cluster_role', '') or 'title'), 96)}' "
+            "reason='title_selected_after_cluster_ranking'"
+        )
+    title_fallback_candidate = _select_better_cluster_representative(
+        selected_candidate=selected_candidate,
+        state=state,
+        row=row,
+    )
+    selected_cluster_signature = _candidate_cluster_signature(selected_candidate)
+    selected_logical_signature = _candidate_logical_signature(selected_candidate)
+    if selected_logical_signature and selected_logical_signature != "none||none||none":
+        log(
+            f"[STEP][logical_signature] label='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
+            f"signature='{_truncate_debug_text(selected_logical_signature, 120)}'"
+        )
+    if len(filtered_candidates) >= 2 or visited_rejected:
+        log(
+            f"[STEP][duplicate_prevention] visited_count={len(set(getattr(state, 'visited_logical_signatures', set()) or set()))} "
+            f"cluster_visited_count={len(set(getattr(state, 'consumed_cluster_signatures', set()) or set()))} "
+            f"selected='{_truncate_debug_text(selected_label or selected_rid, 96)}'"
+        )
+    previous_cluster_signature = str(
+        getattr(state, "previous_step_row", {}).get("focus_cluster_signature", "")
+        or getattr(state, "previous_step_row", {}).get("scroll_ready_cluster_signature", "")
+        or ""
+    ).strip()
+    move_result = normalize_move_result(row) or str(row.get("move_result", "") or "").strip().lower()
+    cluster_candidates = [
+        candidate for candidate in filtered_candidates
+        if _candidate_cluster_signature(candidate) == selected_cluster_signature
+    ]
+    previous_representative = str(
+        getattr(state, "previous_step_row", {}).get("visible_label", "")
+        or getattr(state, "previous_step_row", {}).get("merged_announcement", "")
+        or getattr(state, "previous_step_row", {}).get("focus_view_id", "")
+        or ""
+    ).strip()
+    current_representative = selected_label or selected_rid
+    same_cluster = bool(
+        selected_cluster_signature
+        and previous_cluster_signature
+        and selected_cluster_signature == previous_cluster_signature
+    )
+    if same_cluster:
+        log(
+            f"[STEP][cluster_progress] previous_cluster='{_truncate_debug_text(previous_cluster_signature, 120)}' "
+            f"current_cluster='{_truncate_debug_text(selected_cluster_signature, 120)}' "
+            "same_cluster=true "
+            f"previous_representative='{_truncate_debug_text(previous_representative, 96)}' "
+            f"current_representative='{_truncate_debug_text(current_representative, 96)}' "
+            f"version='{COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION}'"
+        )
+    no_better_candidate_in_cluster = bool(
+        selected_cluster_signature
+        and not title_fallback_candidate
+        and len(cluster_candidates) <= 1
+    )
+    same_object_like = bool(
+        state.same_count > 0
+        or _build_row_object_signature(row) == _build_row_object_signature(getattr(state, "previous_step_row", {}))
+        or build_row_semantic_fingerprint(row) == build_row_semantic_fingerprint(getattr(state, "previous_step_row", {}))
+    )
+    scroll_ready_state = bool(
+        selected_cluster_signature
+        and previous_cluster_signature
+        and selected_cluster_signature == previous_cluster_signature
+        and move_result in {"failed", "no_progress"}
+        and same_object_like
+        and (
+            selected_cluster_signature in set(getattr(state, "cluster_title_fallback_applied", set()) or set())
+            or no_better_candidate_in_cluster
+        )
+    )
+    fallback_applied = bool(
+        selected_cluster_signature
+        and selected_cluster_signature in set(getattr(state, "cluster_title_fallback_applied", set()) or set())
+    )
+    representative_preview = _summarize_candidate_labels(filtered_meta["representative_candidates"])
+    recent_representative_count = len(list(getattr(state, "recent_representative_signatures", []) or []))
+    consumed_cluster = bool(
+        selected_cluster_signature
+        and selected_cluster_signature in set(getattr(state, "consumed_cluster_signatures", set()) or set())
+    )
+    if scroll_ready_state:
+        scroll_ready_eval_reason = "ready"
+    elif move_result not in {"failed", "no_progress"}:
+        scroll_ready_eval_reason = "move_not_failed"
+    elif not same_cluster:
+        scroll_ready_eval_reason = "cluster_not_stable"
+    elif not same_object_like:
+        scroll_ready_eval_reason = "same_like_count_too_low"
+    elif not (fallback_applied or no_better_candidate_in_cluster):
+        scroll_ready_eval_reason = (
+            "representative_candidates_remaining" if len(cluster_candidates) > 1 else "fallback_not_applied"
+        )
+    else:
+        scroll_ready_eval_reason = "blocked_by_unknown_condition"
+    row["scroll_ready_eval_result"] = scroll_ready_state
+    row["scroll_ready_eval_reason"] = scroll_ready_eval_reason
+    scroll_ready_eval_needed = bool(
+        move_result in {"failed", "no_progress"}
+        or same_cluster
+        or state.same_count > 0
+        or not filtered_meta["representative_candidates"]
+    )
+    if scroll_ready_eval_needed:
+        log(
+            f"[STEP][scroll_ready_eval] cluster='{_truncate_debug_text(selected_cluster_signature, 120)}' "
+            f"representative='{_truncate_debug_text(current_representative, 96)}' "
+            f"representative_candidates='{_truncate_debug_text(representative_preview, 120)}' "
+            f"move_result='{_truncate_debug_text(move_result or 'none', 48)}' "
+            f"same_like_count={int(getattr(state, 'same_count', 0) or 0)} "
+            f"same_object={str(same_object_like).lower()} "
+            f"cluster_title_fallback_applied={str(fallback_applied).lower()} "
+            f"recent_representative_count={recent_representative_count} "
+            f"consumed_cluster={str(consumed_cluster).lower()} "
+            f"result={str(scroll_ready_state).lower()} reason='{scroll_ready_eval_reason}' "
+            f"version='{COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION}'"
+        )
+    if scroll_ready_state:
+        row["scroll_ready_state"] = True
+        row["scroll_ready_cluster_signature"] = selected_cluster_signature
+        row["scroll_ready_reason"] = "no_more_representative_in_cluster_allow_move_smart_scroll"
+        row["focus_cluster_signature"] = selected_cluster_signature
+        log(
+            f"[STEP][scroll_ready] cluster='{_truncate_debug_text(selected_cluster_signature, 120)}' "
+            "reason='no_more_representative_in_cluster_allow_move_smart_scroll' "
+            f"move_result='{_truncate_debug_text(move_result, 48)}' "
+            f"representative_candidates='{_truncate_debug_text(representative_preview, 120)}' "
+            f"fallback_applied={str(fallback_applied).lower()} "
+            f"same_like_hint={str(same_object_like).lower()} "
+            f"version='{COLLECTION_FLOW_SCROLL_READY_VERSION}'"
+        )
+        return row
+    if title_fallback_candidate is not None:
+        cluster_signature = _candidate_cluster_signature(selected_candidate)
+        fallback_sets = set(getattr(state, "cluster_title_fallback_applied", set()) or set())
+        if cluster_signature:
+            fallback_sets.add(cluster_signature)
+            state.cluster_title_fallback_applied = fallback_sets
+        log(
+            f"[STEP][cluster_title_fallback] cluster='{_truncate_debug_text(_cluster_display_name(selected_candidate), 96)}' "
+            f"current='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
+            f"fallback='{_truncate_debug_text(str(title_fallback_candidate.get('label', '') or title_fallback_candidate.get('rid', '') or ''), 96)}' "
+            "reason='title_no_progress_fallback'"
+        )
+        selected_candidate = title_fallback_candidate
+        selected_node = selected_candidate.get("node", {})
+        if isinstance(selected_node, dict):
+            selected_label = str(selected_candidate.get("label", "") or "").strip()
+            selected_rid = str(
+                selected_candidate.get("rid", "")
+                or selected_node.get("viewIdResourceName", "")
+                or selected_node.get("resourceId", "")
+                or ""
+            ).strip()
+            selected_bounds = str(selected_node.get("boundsInScreen", "") or selected_node.get("bounds", "") or "").strip()
+            selected_class = str(selected_node.get("className", "") or selected_node.get("class", "") or "").strip()
+            if callable(normalize_fn):
+                normalized_label = normalize_fn(selected_label) if selected_label else ""
+            else:
+                normalized_label = re.sub(r"\s+", " ", str(selected_label or "").strip()).lower()
+    elif str(selected_candidate.get("cluster_role", "") or "") == "title" and normalize_move_result(row) in {"failed", "no_progress"}:
+        log(
+            f"[STEP][cluster_title_fallback_skip] cluster='{_truncate_debug_text(_cluster_display_name(selected_candidate), 96)}' "
+            "current='title' reason='no_better_cluster_representative'"
+        )
+    current_rid = str(row.get("focus_view_id", "") or "").strip()
+    current_label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
+    current_bounds = str(row.get("focus_bounds", "") or "").strip()
+    focus_context_matches_selected = bool(
+        current_rid == selected_rid
+        or (current_label and selected_label and current_label == selected_label)
+        or (
+            current_bounds
+            and selected_bounds
+            and _representative_focus_matches(
+                focus_node={"boundsInScreen": current_bounds},
+                target_rid="",
+                target_label="",
+                target_bounds=selected_bounds,
+            )
+        )
+    )
+    realign_ok = False
+    realigned_focus_node: dict[str, Any] | None = None
+    if not focus_context_matches_selected and not (strip_focus_context and viewport_exhausted):
+        log(
+            f"[STEP][focus_context_mismatch] selected='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
+            f"current_focus='{_truncate_debug_text(current_label or current_rid, 96)}' "
+            "reason='representative_differs_from_focus_context'"
+        )
+        realign_meta = _filter_realign_target_candidates(content_candidates, state=state)
+        all_realign_labels = "|".join(str(candidate.get("label", "") or "").strip() for candidate in realign_meta["all"][:5]) or "none"
+        eligible_realign_labels = "|".join(str(candidate.get("label", "") or "").strip() for candidate in realign_meta["eligible"][:5]) or "none"
+        rejected_recent_labels = "|".join(str(candidate.get("label", "") or "").strip() for candidate in realign_meta["rejected_recent"][:5]) or "none"
+        rejected_consumed_labels = "|".join(str(candidate.get("label", "") or "").strip() for candidate in realign_meta["rejected_consumed"][:5]) or "none"
+        log(
+            f"[STEP][focus_realign_candidates] all='{_truncate_debug_text(all_realign_labels, 120)}' "
+            f"eligible='{_truncate_debug_text(eligible_realign_labels, 120)}' "
+            f"rejected_recent='{_truncate_debug_text(rejected_recent_labels, 120)}' "
+            f"rejected_consumed='{_truncate_debug_text(rejected_consumed_labels, 120)}'"
+        )
+        selected_signature = _candidate_object_signature(selected_candidate)
+        selected_cluster_signature = _candidate_cluster_signature(selected_candidate)
+        eligible_candidates = list(realign_meta["eligible"])
+        if selected_cluster_signature and selected_cluster_signature in set(getattr(state, "recent_focus_realign_clusters", set()) or set()):
+            log(
+                f"[STEP][focus_realign_skip] cluster='{_truncate_debug_text(selected_cluster_signature, 120)}' "
+                "reason='cluster_already_realign_resolved'"
+            )
+        elif selected_signature in set(getattr(state, "recent_focus_realign_signatures", set()) or set()):
+            log(
+                f"[STEP][focus_realign_skip] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
+                "reason='already_realign_resolved_in_current_phase'"
+            )
+        if eligible_candidates:
+            realign_target_candidate = eligible_candidates[0]
+            selected_candidate = realign_target_candidate
+            selected_node = realign_target_candidate.get("node", {})
+            if isinstance(selected_node, dict):
+                selected_label = str(realign_target_candidate.get("label", "") or "").strip()
+                selected_rid = str(
+                    realign_target_candidate.get("rid", "")
+                    or selected_node.get("viewIdResourceName", "")
+                    or selected_node.get("resourceId", "")
+                    or ""
+                ).strip()
+                selected_bounds = str(selected_node.get("boundsInScreen", "") or selected_node.get("bounds", "") or "").strip()
+                selected_class = str(selected_node.get("className", "") or selected_node.get("class", "") or "").strip()
+                if callable(normalize_fn):
+                    normalized_label = normalize_fn(selected_label) if selected_label else ""
+                else:
+                    normalized_label = re.sub(r"\s+", " ", str(selected_label or "").strip()).lower()
+                realign_ok, _, realigned_focus_node = _maybe_realign_focus_to_representative(
+                    row=row,
+                    client=client,
+                    dev=dev,
+                    selected_node=selected_node,
+                    selected_rid=selected_rid,
+                    selected_label=selected_label,
+                    selected_bounds=selected_bounds,
+                    scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+                    step_idx=step_idx,
+                    mismatch_logged=True,
+                )
+                if realign_ok:
+                    realign_signature = _candidate_object_signature(selected_candidate)
+                    realign_cluster_signature = _candidate_cluster_signature(selected_candidate)
+                    if realign_signature:
+                        resolved_signatures = set(getattr(state, "recent_focus_realign_signatures", set()) or set())
+                        resolved_signatures.add(realign_signature)
+                        state.recent_focus_realign_signatures = resolved_signatures
+                    if realign_cluster_signature:
+                        resolved_clusters = set(getattr(state, "recent_focus_realign_clusters", set()) or set())
+                        resolved_clusters.add(realign_cluster_signature)
+                        state.recent_focus_realign_clusters = resolved_clusters
+                    log(
+                        f"[STEP][focus_realign_record] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
+                        f"signature='{_truncate_debug_text(realign_signature, 120)}' "
+                        f"phase='{_truncate_debug_text(_current_local_tab_phase_label(state), 48)}'"
+                    )
+        else:
+            log("[STEP][focus_realign_skip] target='none' reason='no_eligible_representative_target'")
+    elif not focus_context_matches_selected and strip_focus_context and viewport_exhausted:
+        log(
+            f"[STEP][focus_realign_skip] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
+            "reason='strip_focus_phase_priority'"
+        )
+    if realign_ok and isinstance(realigned_focus_node, dict):
+        selected_node = realigned_focus_node
+        selected_rid = str(
+            realigned_focus_node.get("viewIdResourceName", "")
+            or realigned_focus_node.get("resourceId", "")
+            or selected_rid
+        ).strip() or selected_rid
+        selected_label = _extract_cta_node_label(realigned_focus_node) or _node_label_blob(realigned_focus_node) or selected_label
+        selected_bounds = str(realigned_focus_node.get("boundsInScreen", "") or realigned_focus_node.get("bounds", "") or selected_bounds).strip() or selected_bounds
+        selected_class = str(realigned_focus_node.get("className", "") or realigned_focus_node.get("class", "") or selected_class).strip() or selected_class
+        if callable(normalize_fn):
+            normalized_label = normalize_fn(selected_label) if selected_label else ""
+        else:
+            normalized_label = re.sub(r"\s+", " ", str(selected_label or "").strip()).lower()
     content_summary = "|".join(str(item.get("label", "") or "").strip() for item in content_candidates[:5])
     bottom_summary = "|".join(str(item.get("label", "") or "").strip() for item in bottom_strip_candidates[:3])
     chrome_summary = "|".join(chrome_candidates[:4])
+    status_summary = "|".join(passive_status_candidates[:4])
+    section_header_summary = "|".join(section_header_candidates[:4])
     selected_summary = selected_label or selected_rid or "none"
     reason = "representative_content_preferred"
     if _is_row_persistent_bottom_strip_candidate(row):
@@ -7908,7 +9248,21 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         reason = "representative_content_preferred_over_leaf"
     elif current_row_recent_revisit:
         reason = "representative_content_preferred_over_revisit"
-    if chrome_candidates:
+    if passive_status_candidates:
+        log(
+            f"[STEP][candidate_priority] content_candidates='{_truncate_debug_text(content_summary, 120)}' "
+            f"status_candidates='{_truncate_debug_text(status_summary, 120)}' "
+            f"selected='{_truncate_debug_text(selected_summary, 96)}' "
+            "reason='representative_content_preferred_over_passive_status'"
+        )
+    elif section_header_candidates:
+        log(
+            f"[STEP][candidate_priority] content_candidates='{_truncate_debug_text(content_summary, 120)}' "
+            f"section_header_candidates='{_truncate_debug_text(section_header_summary, 120)}' "
+            f"selected='{_truncate_debug_text(selected_summary, 96)}' "
+            "reason='representative_content_preferred_over_section_header'"
+        )
+    elif chrome_candidates:
         log(
             f"[STEP][candidate_priority] content_candidates='{_truncate_debug_text(content_summary, 120)}' "
             f"chrome_candidates='{_truncate_debug_text(chrome_summary, 120)}' "
@@ -7934,7 +9288,7 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
     row["bottom_strip_deferred_step"] = step_idx
     row["bottom_strip_deferred_reason"] = "content_candidate_preferred_over_bottom_strip"
     row["focus_payload_source"] = str(row.get("focus_payload_source", "") or "get_focus")
-    return _apply_cta_node_to_row(
+    updated_row = _apply_cta_node_to_row(
         row=row,
         selected_node=selected_node,
         selected_rid=selected_rid,
@@ -7943,6 +9297,9 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         selected_class=selected_class,
         normalized_label=normalized_label,
     )
+    updated_row["focus_cluster_signature"] = str(selected_candidate.get("cluster_signature", "") or "").strip()
+    updated_row["focus_cluster_logical_signature"] = _candidate_cluster_logical_signature(selected_candidate)
+    return updated_row
 
 
 def _maybe_select_next_local_tab(
@@ -7955,67 +9312,210 @@ def _maybe_select_next_local_tab(
     step_idx: int,
 ) -> bool:
     local_tab_signature = str(state.current_local_tab_signature or "").strip()
-    if not local_tab_signature:
-        return False
     dump_tree_fn = getattr(client, "dump_tree", None)
     content_candidates: list[dict[str, Any]] = []
     chrome_excluded: list[str] = []
     if callable(dump_tree_fn):
         try:
             nodes = dump_tree_fn(dev=dev)
-            content_candidates, _, candidate_groups_meta = _collect_step_candidate_priority_groups(nodes)
+            content_candidates, _, candidate_groups_meta = _collect_step_candidate_priority_groups(
+                nodes,
+                consumed_cluster_signatures=set(getattr(state, "consumed_cluster_signatures", set()) or set()),
+                consumed_cluster_logical_signatures=set(getattr(state, "consumed_cluster_logical_signatures", set()) or set()),
+            )
             chrome_excluded = [str(value or "").strip() for value in candidate_groups_meta.get("chrome_excluded_candidates", []) if str(value or "").strip()]
         except Exception:
             content_candidates = []
             chrome_excluded = []
-    recent_signatures = set(state.recent_representative_signatures)
-    consumed_signatures = set(state.consumed_representative_signatures)
-    consumed_cta_rids = {str(rid or "").strip().lower() for values in state.cta_cluster_visited_rids.values() for rid in values}
-    representative_candidates = [candidate for candidate in content_candidates if bool(candidate.get("representative", False))]
-    consumed_representatives: list[str] = []
-    status_excluded: list[str] = []
-    effective_content_candidates: list[dict[str, Any]] = []
-    for candidate in representative_candidates:
-        candidate_label = str(candidate.get("label", "") or "").strip()
-        candidate_signature = _build_candidate_object_signature(
-            rid=str(candidate.get("rid", "") or "").strip(),
-            bounds=str(candidate.get("bounds", "") or "").strip(),
-            label=candidate_label,
-        )
-        candidate_rid = str(candidate.get("rid", "") or "").strip().lower()
-        if bool(candidate.get("low_value_leaf", False)):
-            continue
-        if _is_passive_status_text(candidate_label):
-            status_excluded.append(candidate_label)
-            continue
-        if candidate_rid and candidate_rid in consumed_cta_rids:
-            consumed_representatives.append(candidate_label)
-            continue
-        if candidate_signature in recent_signatures or candidate_signature in consumed_signatures:
-            consumed_representatives.append(candidate_label)
-            continue
-        effective_content_candidates.append(candidate)
+    filtered_meta = _filter_content_candidates_for_phase(content_candidates, state=state)
+    status_excluded = [str(candidate.get("label", "") or "").strip() for candidate in filtered_meta["status_candidates"]]
+    section_header_deferred = [str(candidate.get("label", "") or "").strip() for candidate in filtered_meta.get("section_header_deferred", [])]
+    consumed_representatives = [
+        str(candidate.get("label", "") or "").strip()
+        for candidate in [*filtered_meta["revisit_rejected"], *filtered_meta["consumed_rejected"]]
+    ]
+    effective_content_candidates = list(filtered_meta["exhaustion_candidates"])
     if consumed_representatives:
         log(
             f"[STEP][representative_exhausted_guard] rejected='{_truncate_debug_text('|'.join(consumed_representatives[:4]), 120)}' "
             "reason='already_consumed_representative'"
         )
+    if filtered_meta["all_candidates"] and (filtered_meta["revisit_rejected"] or filtered_meta["consumed_rejected"]):
+        log(
+            f"[STEP][selection_candidates] all='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in filtered_meta['all_candidates'][:5]) or 'none', 120)}' "
+            f"after_filter='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in filtered_meta['selection_candidates'][:5]) or 'none', 120)}' "
+            f"rejected_by_revisit='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in filtered_meta['revisit_rejected'][:5]) or 'none', 120)}'"
+        )
     if status_excluded:
         log(
             f"[STEP][status_exhausted_excluded] rejected='{_truncate_debug_text('|'.join(status_excluded[:4]), 120)}' "
-            "reason='passive_status_text'"
+            "reason='passive_status_or_empty_state'"
+        )
+    if section_header_deferred and effective_content_candidates:
+        log(
+            f"[STEP][section_header_deferred] candidates='{_truncate_debug_text('|'.join(section_header_deferred[:4]), 120)}' "
+            "reason='content_candidates_present'"
         )
     log(
         f"[STEP][representative_exhausted_eval] representative_candidates='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in effective_content_candidates[:4]), 120)}' "
         f"consumed_representatives='{_truncate_debug_text('|'.join(consumed_representatives[:4]), 120)}' "
         f"status_excluded='{_truncate_debug_text('|'.join(status_excluded[:4]), 120)}' "
+        f"section_header_deferred='{_truncate_debug_text('|'.join(section_header_deferred[:4]), 120)}' "
         f"chrome_excluded='{_truncate_debug_text('|'.join(chrome_excluded[:4]), 120)}' "
         f"exhausted={str(not effective_content_candidates).lower()}"
     )
+    log(
+        f"[STEP][exhaustion_candidates] from_selection='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in filtered_meta['selection_candidates'][:4]) or 'none', 120)}' "
+        f"after_consumed_filter='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in effective_content_candidates[:4]) or 'none', 120)}' "
+        f"exhausted={str(not effective_content_candidates).lower()}"
+    )
+    viewport_exhausted = not bool(effective_content_candidates)
+    viewport_reason = "no_representative_candidates" if viewport_exhausted else "representative_candidates_remaining"
+    row["viewport_exhausted_eval_result"] = viewport_exhausted
+    row["viewport_exhausted_eval_reason"] = viewport_reason
+    log(
+        f"[STEP][viewport_exhausted_eval] "
+        f"all_candidates='{_truncate_debug_text(_summarize_candidate_labels(filtered_meta['all_candidates']), 120)}' "
+        f"selection_candidates='{_truncate_debug_text(_summarize_candidate_labels(filtered_meta['selection_candidates']), 120)}' "
+        f"representative_candidates='{_truncate_debug_text(_summarize_candidate_labels(effective_content_candidates), 120)}' "
+        f"status_excluded='{_truncate_debug_text('|'.join(status_excluded[:4]) or 'none', 120)}' "
+        f"chrome_excluded='{_truncate_debug_text('|'.join(chrome_excluded[:4]) or 'none', 120)}' "
+        f"leaf_excluded='{_truncate_debug_text(_summarize_candidate_labels(filtered_meta['leaf_rejected']), 120)}' "
+        f"revisit_rejected='{_truncate_debug_text(_summarize_candidate_labels(filtered_meta['revisit_rejected']), 120)}' "
+        f"consumed_rejected='{_truncate_debug_text(_summarize_candidate_labels(filtered_meta['consumed_rejected']), 120)}' "
+        f"result={str(viewport_exhausted).lower()} reason='{viewport_reason}' "
+        f"version='{COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION}'"
+    )
+    mismatch_labels = {
+        str(candidate.get("label", "") or "").strip()
+        for candidate in [*filtered_meta["revisit_rejected"], *filtered_meta["consumed_rejected"]]
+    }.intersection({
+        str(candidate.get("label", "") or "").strip()
+        for candidate in effective_content_candidates
+    })
+    if mismatch_labels:
+        log(
+            f"[STEP][candidate_mismatch] selection_rejected_but_exhaustion_included='{_truncate_debug_text('|'.join(sorted(mismatch_labels)), 120)}'"
+        )
     if effective_content_candidates:
+        row["scroll_fallback_allowed"] = False
+        row["scroll_fallback_gate_evaluated"] = True
+        row["scroll_fallback_gate_reason"] = "representative_still_exists"
+        row["scroll_fallback_block_reason"] = "representative_still_exists"
+        row["local_tab_gate_evaluated"] = True
+        row["local_tab_block_reason"] = "content_not_exhausted"
+        log(
+            f"[STEP][scroll_fallback_gate] viewport_exhausted=false scrollable=false allowed=false "
+            "signature='' reason='representative_still_exists' "
+            f"version='{COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION}'"
+        )
+        log(
+            f"[STEP][local_tab_gate] allowed=false reason='content_not_exhausted' "
+            f"tabs='{_truncate_debug_text(_summarize_candidate_labels(state.local_tab_candidates_by_signature.get(local_tab_signature, [])), 120)}' "
+            f"active='{_truncate_debug_text(str(state.current_local_tab_active_rid or ''), 96)}' "
+            "unvisited='none'"
+        )
         return False
+    log("[STEP][viewport_exhausted] representative_candidates='' reason='no_representative_in_viewport'")
+    scroll_fallback_signature = _build_scroll_fallback_signature(
+        local_tab_signature=local_tab_signature,
+        active_rid=str(state.current_local_tab_active_rid or ""),
+        content_candidates=content_candidates,
+        chrome_excluded=chrome_excluded,
+        current_focus_signature=_build_row_object_signature(row),
+    )
+    scrollable_nodes: list[str] = []
+    content_area_bounds = ""
+    if 'nodes' in locals():
+        scrollable, scrollable_nodes, content_area_bounds = _describe_scrollable_content_phase(nodes)
+    else:
+        scrollable = False
+    attempted_signatures = set(getattr(state, "recent_scroll_fallback_signatures", set()) or set())
+    scroll_allowed = bool(scrollable and scroll_fallback_signature and scroll_fallback_signature not in attempted_signatures)
+    scroll_reason = "viewport_exhausted_direct_scroll"
+    if not scrollable:
+        scroll_reason = "not_scrollable"
+    elif not scroll_fallback_signature:
+        scroll_reason = "missing_signature"
+    elif scroll_fallback_signature in attempted_signatures:
+        scroll_reason = "already_attempted_same_signature"
+    row["scroll_fallback_allowed"] = scroll_allowed
+    row["scroll_fallback_gate_evaluated"] = True
+    row["scroll_fallback_gate_reason"] = scroll_reason
+    row["scroll_fallback_block_reason"] = "" if scroll_allowed else scroll_reason
+    log(
+        f"[STEP][scrollable_phase_debug] scrollable_nodes='{_truncate_debug_text('|'.join(scrollable_nodes[:4]), 120)}' "
+        f"content_area_bounds='{_truncate_debug_text(content_area_bounds, 96)}' result={str(scrollable).lower()}"
+    )
+    log(
+        f"[STEP][scroll_fallback_gate] viewport_exhausted=true "
+        f"scrollable={str(scrollable).lower()} allowed={str(scroll_allowed).lower()} "
+        f"signature='{_truncate_debug_text(scroll_fallback_signature, 120)}' reason='{scroll_reason}' "
+        f"version='{COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION}'"
+    )
+    log(
+        f"[STEP][scroll_fallback_eval] viewport_exhausted=true "
+        f"scrollable={str(scrollable).lower()} allowed={str(scroll_allowed).lower()} "
+        f"signature='{_truncate_debug_text(scroll_fallback_signature, 120)}' reason='{scroll_reason}'"
+    )
+    scroll_fn = getattr(client, "scroll", None)
+    if scroll_allowed and callable(scroll_fn):
+        attempted_signatures.add(scroll_fallback_signature)
+        state.recent_scroll_fallback_signatures = attempted_signatures
+        log("[STEP][scroll_fallback] reason='viewport_exhausted_before_local_tab' attempt=1")
+        try:
+            scrolled = bool(scroll_fn(dev=dev, direction="down"))
+        except Exception:
+            scrolled = False
+        if scrolled:
+            time.sleep(0.25)
+            refreshed_nodes = []
+            if callable(dump_tree_fn):
+                try:
+                    refreshed_nodes = dump_tree_fn(dev=dev)
+                except Exception:
+                    refreshed_nodes = []
+            refreshed_content, _, refreshed_meta = _collect_step_candidate_priority_groups(
+                refreshed_nodes,
+                consumed_cluster_signatures=set(getattr(state, "consumed_cluster_signatures", set()) or set()),
+                consumed_cluster_logical_signatures=set(getattr(state, "consumed_cluster_logical_signatures", set()) or set()),
+            )
+            refreshed_filtered = _filter_content_candidates_for_phase(refreshed_content, state=state)
+            refreshed_effective = list(refreshed_filtered["exhaustion_candidates"])
+            new_representative = str(refreshed_effective[0].get("label", "") or refreshed_effective[0].get("rid", "") or "").strip() if refreshed_effective else ""
+            resumed_content_phase = bool(refreshed_effective)
+            log(
+                f"[STEP][scroll_fallback_result] new_representative='{_truncate_debug_text(new_representative, 120)}' "
+                f"resumed_content_phase={str(resumed_content_phase).lower()}"
+            )
+            if resumed_content_phase:
+                row["scroll_fallback_resumed_content"] = True
+                row["scroll_fallback_representative"] = new_representative
+                return False
+    local_tab_gate_reason = "scroll_fallback_not_attempted"
+    if scroll_allowed and not callable(scroll_fn):
+        local_tab_gate_reason = "scroll_fallback_not_attempted"
+    elif scroll_allowed:
+        local_tab_gate_reason = "scroll_fallback_attempted_no_resume"
+    elif not local_tab_signature:
+        local_tab_gate_reason = "local_tab_state_missing"
+    elif scroll_reason in {"not_scrollable", "missing_signature", "already_attempted_same_signature"}:
+        local_tab_gate_reason = scroll_reason
+    if section_header_deferred:
+        log(
+            f"[STEP][section_header_allowed] candidates='{_truncate_debug_text('|'.join(section_header_deferred[:4]), 120)}' "
+            "reason='content_exhausted_after_scroll'"
+        )
     tab_candidates = state.local_tab_candidates_by_signature.get(local_tab_signature, [])
     if not tab_candidates:
+        row["local_tab_gate_evaluated"] = True
+        row["local_tab_block_reason"] = "local_tab_state_missing" if not local_tab_signature else "strip_not_detected"
+        log(
+            f"[STEP][local_tab_gate] allowed=false reason='{row['local_tab_block_reason']}' "
+            "tabs='none' "
+            f"active='{_truncate_debug_text(str(state.current_local_tab_active_rid or ''), 96)}' "
+            "unvisited='none'"
+        )
         return False
     visited_tabs = state.visited_local_tabs_by_signature.setdefault(local_tab_signature, set())
     active_rid = str(state.current_local_tab_active_rid or "").strip().lower()
@@ -8027,7 +9527,23 @@ def _maybe_select_next_local_tab(
         and str(candidate.get("rid", "") or "").strip().lower() != active_rid
     ]
     if not remaining_tabs:
+        row["local_tab_gate_evaluated"] = True
+        row["local_tab_block_reason"] = "no_unvisited_local_tab"
+        log(
+            f"[STEP][local_tab_gate] allowed=false reason='no_unvisited_local_tab' "
+            f"tabs='{_truncate_debug_text(_summarize_candidate_labels(tab_candidates), 120)}' "
+            f"active='{_truncate_debug_text(str(state.current_local_tab_active_rid or ''), 96)}' "
+            "unvisited='none'"
+        )
         return False
+    row["local_tab_gate_evaluated"] = True
+    row["local_tab_block_reason"] = ""
+    log(
+        f"[STEP][local_tab_gate] allowed=true reason='{local_tab_gate_reason}' "
+        f"tabs='{_truncate_debug_text(_summarize_candidate_labels(tab_candidates), 120)}' "
+        f"active='{_truncate_debug_text(str(state.current_local_tab_active_rid or ''), 96)}' "
+        f"unvisited='{_truncate_debug_text(_summarize_candidate_labels(remaining_tabs), 120)}'"
+    )
     log(
         f"[STEP][local_tab_allowed] tabs='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in remaining_tabs[:4]), 120)}' "
         "reason='content_candidates_exhausted'"
@@ -8061,6 +9577,15 @@ def _maybe_select_next_local_tab(
     state.previous_step_row = {}
     state.recent_representative_signatures.clear()
     state.consumed_representative_signatures.clear()
+    state.visited_logical_signatures = set()
+    state.recent_focus_realign_signatures = set()
+    state.consumed_cluster_signatures = set()
+    state.consumed_cluster_logical_signatures = set()
+    state.recent_focus_realign_clusters = set()
+    state.cluster_title_fallback_applied = set()
+    state.recent_scroll_fallback_signatures = set()
+    state.scroll_ready_retry_counts = {}
+    state.pending_scroll_ready_cluster_signature = ""
     row["local_tab_transition"] = True
     row["local_tab_selected"] = target_label or target_rid
     log(
@@ -8362,6 +9887,49 @@ def _maybe_progress_row_to_cta_sibling(
 def _clear_cta_descend_grace(state: MainLoopState) -> None:
     state.cta_grace_signature = ""
     state.cta_descend_grace_remaining = 0
+
+
+def _maybe_apply_scroll_ready_continue(
+    *,
+    row: dict[str, Any],
+    stop: bool,
+    reason: str,
+    stop_eval_inputs: dict[str, Any],
+    state: MainLoopState,
+    step_idx: int,
+    scenario_id: str,
+) -> tuple[bool, str, bool]:
+    cluster_signature = str(row.get("scroll_ready_cluster_signature", "") or "").strip()
+    if not stop or not bool(row.get("scroll_ready_state", False)) or not cluster_signature:
+        return stop, reason, False
+    if reason not in {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall", "repeat_semantic_stall_after_escape"}:
+        return stop, reason, False
+    if bool(stop_eval_inputs.get("terminal_signal", False)) or bool(stop_eval_inputs.get("is_global_nav", False)):
+        return stop, reason, False
+    retry_counts = dict(getattr(state, "scroll_ready_retry_counts", {}) or {})
+    attempt = int(retry_counts.get(cluster_signature, 0) or 0) + 1
+    max_attempts = 2
+    if attempt > max_attempts:
+        state.pending_scroll_ready_cluster_signature = ""
+        log(
+            f"[STEP][scroll_ready] cluster='{_truncate_debug_text(cluster_signature, 120)}' "
+            "reason='attempt_limit_reached' "
+            f"attempt={attempt - 1}/{max_attempts} "
+            f"version='{COLLECTION_FLOW_SCROLL_READY_VERSION}'"
+        )
+        return stop, reason, False
+    retry_counts[cluster_signature] = attempt
+    state.scroll_ready_retry_counts = retry_counts
+    state.pending_scroll_ready_cluster_signature = cluster_signature
+    move_result = normalize_move_result(row) or str(row.get("move_result", "") or "").strip().lower() or "none"
+    log(
+        f"[STEP][scroll_ready_move] step={step_idx} scenario='{scenario_id}' "
+        f"cluster='{_truncate_debug_text(cluster_signature, 120)}' "
+        f"result='{_truncate_debug_text(move_result, 48)}' "
+        f"attempt={attempt}/{max_attempts} "
+        f"version='{COLLECTION_FLOW_SCROLL_READY_VERSION}'"
+    )
+    return False, "", True
 
 
 def _maybe_apply_cta_pending_grace(
@@ -8858,6 +10426,12 @@ def _main_loop_phase(
         row = maybe_capture_focus_crop(client, dev, row, phase_ctx.output_base_dir)
         row.pop("_step_mono_start", None)
         row["step_total_elapsed_sec"] = round(time.perf_counter() - step_start, 3)
+        _record_pending_scroll_ready_move(
+            row=row,
+            state=state,
+            step_idx=step_idx,
+            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+        )
         row = _maybe_reprioritize_persistent_bottom_strip_row(
             row=row,
             client=client,
@@ -9028,12 +10602,45 @@ def _main_loop_phase(
             step_idx=step_idx,
             scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
         )
+        scroll_ready_continue_applied = False
+        stop, reason, scroll_ready_continue_applied = _maybe_apply_scroll_ready_continue(
+            row=row,
+            stop=stop,
+            reason=reason,
+            stop_eval_inputs=stop_eval_inputs,
+            state=state,
+            step_idx=step_idx,
+            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+        )
         local_tab_transition_applied = False
+        viewport_exhausted_direct_path = bool(
+            row.get("viewport_exhausted_eval_result", False)
+            and scenario_type != "global_nav"
+            and not is_global_nav_only_scenario
+            and not bool(row.get("scroll_fallback_resumed_content", False))
+        )
+        if viewport_exhausted_direct_path:
+            local_tab_transition_applied = _maybe_select_next_local_tab(
+                client=client,
+                dev=dev,
+                state=state,
+                row=row,
+                scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+                step_idx=step_idx,
+            )
+            if local_tab_transition_applied:
+                stop = False
+                reason = ""
+            elif bool(row.get("scroll_fallback_resumed_content", False)):
+                stop = False
+                reason = ""
+                state.pending_scroll_ready_cluster_signature = ""
         if (
             stop
             and scenario_type != "global_nav"
             and not is_global_nav_only_scenario
             and reason in {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall", "repeat_semantic_stall_after_escape"}
+            and not viewport_exhausted_direct_path
         ):
             local_tab_transition_applied = _maybe_select_next_local_tab(
                 client=client,
@@ -9046,6 +10653,10 @@ def _main_loop_phase(
             if local_tab_transition_applied:
                 stop = False
                 reason = ""
+            elif bool(row.get("scroll_fallback_resumed_content", False)):
+                stop = False
+                reason = ""
+                state.pending_scroll_ready_cluster_signature = ""
         overlay_realign_grace_active = bool(stop_eval_inputs["overlay_realign_grace_active"])
         min_step_gate_blocked = bool(stop_eval_inputs["min_step_gate_blocked"])
         realign_grace_suppressed = bool(stop_eval_inputs["realign_grace_suppressed"])
@@ -9054,8 +10665,12 @@ def _main_loop_phase(
         eval_reason = str(stop_eval_inputs["eval_reason"])
         if cta_descend_applied:
             eval_reason = "cta_descend_continue"
+        elif scroll_ready_continue_applied:
+            eval_reason = "scroll_ready_continue"
         elif local_tab_transition_applied:
             eval_reason = "local_tab_continue"
+        elif bool(row.get("scroll_fallback_resumed_content", False)):
+            eval_reason = "scroll_fallback_continue"
         explain_log_fields = _format_stop_explain_log_fields(stop_eval_inputs=stop_eval_inputs, decision=decision)
         row["is_global_nav"] = is_global_nav
         row["global_nav_reason"] = global_nav_reason
@@ -9067,6 +10682,51 @@ def _main_loop_phase(
             terminal_signal=terminal_signal,
         )
         row.update(result_summary)
+        pre_stop_summary_needed = bool(
+            stop
+            and (
+                reason in {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall", "repeat_semantic_stall_after_escape"}
+                or no_progress
+                or strict_duplicate
+            )
+        )
+        if pre_stop_summary_needed:
+            pre_stop_cluster = str(
+                row.get("scroll_ready_cluster_signature", "")
+                or row.get("focus_cluster_signature", "")
+                or row.get("cta_cluster_signature", "")
+                or ""
+            ).strip()
+            pre_stop_representative = str(
+                row.get("visible_label", "")
+                or row.get("merged_announcement", "")
+                or row.get("focus_view_id", "")
+                or ""
+            ).strip()
+            pre_stop_move_result = normalize_move_result(row) or str(row.get("move_result", "") or "").strip().lower() or "none"
+            pre_stop_reason_parts = [
+                f"scroll_ready:{row.get('scroll_ready_eval_reason', 'not_evaluated')}",
+                f"viewport:{row.get('viewport_exhausted_eval_reason', 'not_evaluated')}",
+                f"scroll_fallback:{row.get('scroll_fallback_gate_reason', 'not_evaluated')}",
+                f"local_tab:{row.get('local_tab_block_reason', 'not_evaluated')}",
+                f"stop:{reason or eval_reason}",
+            ]
+            log(
+                f"[STEP][pre_stop_summary] cluster='{_truncate_debug_text(pre_stop_cluster, 120)}' "
+                f"representative='{_truncate_debug_text(pre_stop_representative, 120)}' "
+                f"move_result='{_truncate_debug_text(pre_stop_move_result, 48)}' "
+                f"scroll_ready_result={str(bool(row.get('scroll_ready_eval_result', row.get('scroll_ready_state', False)))).lower()} "
+                f"viewport_exhausted={str(bool(row.get('viewport_exhausted_eval_result', False))).lower()} "
+                f"scroll_fallback_gate_evaluated={str(bool(row.get('scroll_fallback_gate_evaluated', False))).lower()} "
+                f"scroll_fallback_block_reason='{_truncate_debug_text(str(row.get('scroll_fallback_block_reason', '') or ''), 96)}' "
+                f"scroll_fallback_allowed={str(bool(row.get('scroll_fallback_allowed', False))).lower()} "
+                f"local_tab_gate_evaluated={str(bool(row.get('local_tab_gate_evaluated', False))).lower()} "
+                f"local_tab_block_reason='{_truncate_debug_text(str(row.get('local_tab_block_reason', '') or ''), 96)}' "
+                f"local_tab_allowed={str(bool(local_tab_transition_applied)).lower()} "
+                f"strip_focus_context={str(bool(row.get('strip_focus_context', False))).lower()} "
+                f"reason='{_truncate_debug_text('|'.join(pre_stop_reason_parts), 160)}' "
+                f"version='{COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION}'"
+            )
         log(
             f"[STOP][eval] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
             f"terminal={str(terminal_signal).lower()} same_like_count={same_like_count} "
@@ -9194,15 +10854,25 @@ def _main_loop_phase(
             row["stop_triggered"] = True
             row["stop_step"] = step_idx
 
-        rows.append(row)
-        all_rows.append(row)
-        if scenario_perf is not None:
-            scenario_perf.record_row(row)
-        row_fingerprint = make_main_fingerprint(row)
-        if all(row_fingerprint):
-            state.main_step_index_by_fingerprint[row_fingerprint] = step_idx
-        if stop or (step_idx % phase_ctx.checkpoint_every == 0):
-            save_excel_with_perf(save_excel, all_rows, phase_ctx.output_path, with_images=False, scenario_perf=scenario_perf)
+        row["low_value_leaf_row"] = _row_is_low_value_leaf(row)
+        suppress_row, suppress_reason = _should_suppress_row_persistence(row=row, state=state, stop=stop)
+        if suppress_row:
+            row["row_persist_suppressed"] = True
+            row["row_persist_suppressed_reason"] = suppress_reason
+            log(
+                f"[STEP][row_filter] label='{_truncate_debug_text(str(row.get('visible_label', '') or row.get('focus_view_id', '') or ''), 96)}' "
+                f"reason='{suppress_reason}'"
+            )
+        else:
+            rows.append(row)
+            all_rows.append(row)
+            if scenario_perf is not None:
+                scenario_perf.record_row(row)
+            row_fingerprint = make_main_fingerprint(row)
+            if all(row_fingerprint):
+                state.main_step_index_by_fingerprint[row_fingerprint] = step_idx
+            if stop or (step_idx % phase_ctx.checkpoint_every == 0):
+                save_excel_with_perf(save_excel, all_rows, phase_ctx.output_path, with_images=False, scenario_perf=scenario_perf)
 
         overlay_result = _overlay_phase(
             client=client,
@@ -9627,6 +11297,17 @@ def collect_tab_rows(
         consumed_representative_signatures=set(
             [_build_row_object_signature(anchor_row)] if _build_row_object_signature(anchor_row) else []
         ),
+        visited_logical_signatures=set(
+            [_row_logical_signature(anchor_row)] if _row_logical_signature(anchor_row) != "none||none||none" else []
+        ),
+        consumed_cluster_logical_signatures=set(),
+        recent_focus_realign_signatures=set(),
+        consumed_cluster_signatures=set([str(anchor_row.get("focus_cluster_signature", "") or "").strip()]) if str(anchor_row.get("focus_cluster_signature", "") or "").strip() else set(),
+        recent_focus_realign_clusters=set(),
+        cluster_title_fallback_applied=set(),
+        recent_scroll_fallback_signatures=set(),
+        scroll_ready_retry_counts={},
+        pending_scroll_ready_cluster_signature="",
         current_local_tab_signature="",
         current_local_tab_active_rid="",
         local_tab_candidates_by_signature={},

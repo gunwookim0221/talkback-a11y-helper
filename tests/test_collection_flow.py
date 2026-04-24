@@ -2876,6 +2876,7 @@ def test_reprioritize_persistent_bottom_strip_row_separates_local_tab_strip(monk
     state = SimpleNamespace(
         recent_representative_signatures=[],
         consumed_representative_signatures=set(),
+        recent_focus_realign_signatures=set(),
         local_tab_candidates_by_signature={},
         visited_local_tabs_by_signature={},
         current_local_tab_signature="",
@@ -2990,6 +2991,7 @@ def test_local_tab_strip_members_exclude_view_information(monkeypatch):
     state = SimpleNamespace(
         recent_representative_signatures=[],
         consumed_representative_signatures=set(),
+        recent_focus_realign_signatures=set(),
         local_tab_candidates_by_signature={},
         visited_local_tabs_by_signature={},
         current_local_tab_signature="",
@@ -3110,6 +3112,561 @@ def test_maybe_select_next_local_tab_blocked_when_content_candidates_remain(monk
     assert advanced is False
     assert client.select_calls == []
     assert any("[STEP][representative_exhausted_eval]" in line and "Device usage" in line and "exhausted=false" in line for line in logs)
+
+
+def test_maybe_select_next_local_tab_attempts_scroll_fallback_before_local_tab(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [
+        [
+            {"viewIdResourceName": "com.example:id/content_recycler", "className": "androidx.recyclerview.widget.RecyclerView", "scrollable": True, "visibleToUser": True, "boundsInScreen": "0,200,1080,1900", "children": []},
+            {"text": "Navigate up", "contentDescription": "Navigate up", "viewIdResourceName": "com.example:id/navigate_up", "className": "android.widget.ImageButton", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "0,0,120,120", "children": []},
+        ],
+        [
+            {"viewIdResourceName": "com.example:id/content_recycler", "className": "androidx.recyclerview.widget.RecyclerView", "scrollable": True, "visibleToUser": True, "boundsInScreen": "0,200,1080,1900", "children": []},
+            {"text": "Device usage", "contentDescription": "", "viewIdResourceName": "com.example:id/device_usage_card", "className": "android.widget.FrameLayout", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "40,420,1040,760", "children": []},
+        ],
+    ]
+    state = SimpleNamespace(
+        current_local_tab_signature="com.example:id/activity_button||com.example:id/location_button",
+        current_local_tab_active_rid="com.example:id/activity_button",
+        local_tab_candidates_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button": [
+                {"rid": "com.example:id/activity_button", "label": "Activity", "node": {}},
+                {"rid": "com.example:id/location_button", "label": "Location", "node": {}},
+            ]
+        },
+        visited_local_tabs_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button": {"com.example:id/activity_button"}
+        },
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={"focus_view_id": "com.example:id/activity_button"},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+        recent_scroll_fallback_signatures=set(),
+    )
+    row = {}
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row=row,
+        scenario_id="life_family_care_plugin",
+        step_idx=14,
+    )
+
+    assert advanced is False
+    assert row["scroll_fallback_resumed_content"] is True
+    assert client.scroll_calls[0] == "down"
+    assert client.select_calls == []
+    assert any("[STEP][viewport_exhausted]" in line for line in logs)
+    assert any("[STEP][scroll_fallback]" in line for line in logs)
+    assert any("[STEP][scroll_fallback_result]" in line and "resumed_content_phase=true" in line for line in logs)
+
+
+def test_maybe_select_next_local_tab_only_advances_after_scroll_fallback_finds_no_content(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [
+        [
+            {"viewIdResourceName": "com.example:id/content_recycler", "className": "androidx.recyclerview.widget.RecyclerView", "scrollable": True, "visibleToUser": True, "boundsInScreen": "0,200,1080,1900", "children": []},
+        ],
+        [
+            {"viewIdResourceName": "com.example:id/content_recycler", "className": "androidx.recyclerview.widget.RecyclerView", "scrollable": True, "visibleToUser": True, "boundsInScreen": "0,200,1080,1900", "children": []},
+        ],
+    ]
+    state = SimpleNamespace(
+        current_local_tab_signature="com.example:id/activity_button||com.example:id/location_button",
+        current_local_tab_active_rid="com.example:id/activity_button",
+        local_tab_candidates_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button": [
+                {"rid": "com.example:id/activity_button", "label": "Activity", "node": {}},
+                {"rid": "com.example:id/location_button", "label": "Location", "node": {}},
+            ]
+        },
+        visited_local_tabs_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button": {"com.example:id/activity_button"}
+        },
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={"focus_view_id": "com.example:id/activity_button"},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+        recent_scroll_fallback_signatures=set(),
+    )
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={},
+        scenario_id="life_family_care_plugin",
+        step_idx=15,
+    )
+
+    assert advanced is True
+    assert client.scroll_calls[0] == "down"
+    assert client.select_calls[0]["name"] == "com.example:id/location_button"
+    assert any("[STEP][scroll_fallback_result]" in line and "resumed_content_phase=false" in line for line in logs)
+    assert any("[STEP][local_tab_select]" in line and "Location" in line for line in logs)
+
+
+def test_maybe_select_next_local_tab_does_not_repeat_scroll_fallback_for_same_signature(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[
+        {"viewIdResourceName": "com.example:id/content_recycler", "className": "androidx.recyclerview.widget.RecyclerView", "scrollable": True, "visibleToUser": True, "boundsInScreen": "0,200,1080,1900", "children": []},
+    ]]
+    existing_signature = collection_flow._build_scroll_fallback_signature(
+        local_tab_signature="com.example:id/activity_button||com.example:id/location_button",
+        active_rid="com.example:id/activity_button",
+        content_candidates=[],
+        chrome_excluded=[],
+        current_focus_signature=collection_flow._build_row_object_signature({}),
+    )
+    state = SimpleNamespace(
+        current_local_tab_signature="com.example:id/activity_button||com.example:id/location_button",
+        current_local_tab_active_rid="com.example:id/activity_button",
+        local_tab_candidates_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button": [
+                {"rid": "com.example:id/activity_button", "label": "Activity", "node": {}},
+                {"rid": "com.example:id/location_button", "label": "Location", "node": {}},
+            ]
+        },
+        visited_local_tabs_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button": {"com.example:id/activity_button"}
+        },
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={"focus_view_id": "com.example:id/activity_button"},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+        recent_scroll_fallback_signatures={existing_signature},
+    )
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={},
+        scenario_id="life_family_care_plugin",
+        step_idx=16,
+    )
+
+    assert advanced is True
+    assert client.scroll_calls == []
+    assert client.select_calls[0]["name"] == "com.example:id/location_button"
+    assert any("[STEP][scroll_fallback_eval]" in line and "allowed=false" in line for line in logs)
+
+
+def test_apply_spatial_priority_to_candidates_prefers_higher_in_viewport():
+    candidates = [
+        {
+            "label": "Weather information",
+            "rid": "com.example:id/weather_card",
+            "bounds": "40,920,1040,1200",
+            "top": 920,
+            "left": 40,
+            "score": 900,
+        },
+        {
+            "label": "Latest activity",
+            "rid": "com.example:id/latest_activity_card",
+            "bounds": "40,420,1040,760",
+            "top": 420,
+            "left": 40,
+            "score": 500,
+        },
+        {
+            "label": "View information",
+            "rid": "com.example:id/view_information",
+            "bounds": "760,420,1040,520",
+            "top": 420,
+            "left": 760,
+            "score": 700,
+        },
+    ]
+
+    ordered, reason, continuity_reason = collection_flow._apply_spatial_priority_to_candidates(
+        candidates,
+        row={"focus_bounds": ""},
+        state=SimpleNamespace(previous_step_row={}),
+    )
+
+    assert reason == "top_to_bottom_bias"
+    assert continuity_reason == ""
+    assert [candidate["label"] for candidate in ordered] == [
+        "Latest activity",
+        "View information",
+        "Weather information",
+    ]
+
+
+def test_apply_spatial_priority_to_candidates_prefers_continuity_from_previous_representative():
+    candidates = [
+        {
+            "label": "Weather information",
+            "rid": "com.example:id/weather_card",
+            "bounds": "40,920,1040,1200",
+            "top": 920,
+            "left": 40,
+            "score": 900,
+        },
+        {
+            "label": "View information",
+            "rid": "com.example:id/view_information",
+            "bounds": "760,430,1040,520",
+            "top": 430,
+            "left": 760,
+            "score": 950,
+        },
+        {
+            "label": "Latest activity",
+            "rid": "com.example:id/latest_activity_card",
+            "bounds": "40,420,1040,760",
+            "top": 420,
+            "left": 40,
+            "score": 700,
+        },
+    ]
+
+    ordered, reason, continuity_reason = collection_flow._apply_spatial_priority_to_candidates(
+        candidates,
+        row={"focus_bounds": "400,1760,680,1860"},
+        state=SimpleNamespace(
+            previous_step_row={
+                "visible_label": "Summary",
+                "focus_bounds": "40,220,1040,360",
+            }
+        ),
+    )
+
+    assert reason == "top_to_bottom_bias"
+    assert continuity_reason == "closest_next_representative"
+    assert [candidate["label"] for candidate in ordered] == [
+        "Latest activity",
+        "View information",
+        "Weather information",
+    ]
+
+
+def test_candidate_logical_signature_ignores_bounds_for_same_logical_object():
+    candidate_a = {
+        "label": "Weather information",
+        "rid": "com.example:id/weather_card_title",
+        "cluster_rid": "com.example:id/weather_card",
+        "cluster_label": "Weather information",
+        "cluster_role": "title",
+        "bounds": "40,420,1040,760",
+    }
+    candidate_b = {
+        "label": "Weather information",
+        "rid": "com.example:id/weather_card_title",
+        "cluster_rid": "com.example:id/weather_card",
+        "cluster_label": "Weather information",
+        "cluster_role": "title",
+        "bounds": "40,920,1040,1260",
+    }
+
+    assert collection_flow._candidate_logical_signature(candidate_a) == collection_flow._candidate_logical_signature(candidate_b)
+
+
+def test_filter_content_candidates_for_phase_rejects_visited_logical_candidates_before_ranking():
+    visited_candidate = {
+        "label": "Weather information",
+        "rid": "com.example:id/weather_card",
+        "cluster_rid": "com.example:id/weather_card",
+        "cluster_label": "Weather information",
+        "cluster_role": "container",
+        "bounds": "40,420,1040,760",
+        "representative": True,
+        "passive_status": False,
+        "low_value_leaf": False,
+    }
+    next_candidate = {
+        "label": "Latest activity",
+        "rid": "com.example:id/latest_activity_card",
+        "cluster_rid": "com.example:id/latest_activity_card",
+        "cluster_label": "Latest activity",
+        "cluster_role": "container",
+        "bounds": "40,820,1040,1160",
+        "representative": True,
+        "passive_status": False,
+        "low_value_leaf": False,
+    }
+    state = SimpleNamespace(
+        recent_representative_signatures=[],
+        consumed_representative_signatures=set(),
+        consumed_cluster_signatures=set(),
+        visited_logical_signatures={collection_flow._candidate_logical_signature(visited_candidate)},
+        cta_cluster_visited_rids={},
+    )
+
+    filtered = collection_flow._filter_content_candidates_for_phase([visited_candidate, next_candidate], state=state)
+    ordered, reason, _ = collection_flow._apply_spatial_priority_to_candidates(
+        filtered["selection_candidates"],
+        row={"focus_bounds": ""},
+        state=SimpleNamespace(previous_step_row={}),
+    )
+
+    assert [candidate["label"] for candidate in filtered["visited_rejected"]] == ["Weather information"]
+    assert [candidate["label"] for candidate in ordered] == ["Latest activity"]
+
+
+def test_filter_content_candidates_for_phase_rejects_cluster_consumed_members():
+    consumed_candidate = {
+        "label": "Weather information",
+        "rid": "com.example:id/weather_card",
+        "cluster_rid": "com.example:id/weather_card",
+        "cluster_signature": "cluster-weather",
+        "cluster_label": "Weather information",
+        "cluster_role": "description",
+        "bounds": "40,420,1040,760",
+        "representative": True,
+        "passive_status": False,
+        "low_value_leaf": False,
+    }
+    next_candidate = {
+        "label": "Latest activity",
+        "rid": "com.example:id/latest_activity_card",
+        "cluster_rid": "com.example:id/latest_activity_card",
+        "cluster_signature": "cluster-latest",
+        "cluster_label": "Latest activity",
+        "cluster_role": "container",
+        "bounds": "40,820,1040,1160",
+        "representative": True,
+        "passive_status": False,
+        "low_value_leaf": False,
+    }
+    state = SimpleNamespace(
+        recent_representative_signatures=[],
+        consumed_representative_signatures=set(),
+        consumed_cluster_signatures={"cluster-weather"},
+        visited_logical_signatures=set(),
+        cta_cluster_visited_rids={},
+    )
+
+    filtered = collection_flow._filter_content_candidates_for_phase([consumed_candidate, next_candidate], state=state)
+
+    assert [candidate["label"] for candidate in filtered["cluster_consumed_rejected"]] == ["Weather information"]
+    assert [candidate["label"] for candidate in filtered["selection_candidates"]] == ["Latest activity"]
+
+
+def test_filter_content_candidates_for_phase_rejects_consumed_cluster_logical_child_with_new_bounds():
+    consumed_root = {
+        "label": "Weather information",
+        "rid": "com.example:id/weather_title",
+        "cluster_rid": "com.example:id/weather_card",
+        "cluster_label": "Weather information",
+        "cluster_role": "title",
+    }
+    child_candidate = {
+        "label": "Weather information",
+        "rid": "com.example:id/weather_description",
+        "cluster_rid": "com.example:id/weather_card",
+        "cluster_signature": "cluster-weather-new-bounds",
+        "cluster_label": "Weather information",
+        "cluster_role": "description",
+        "bounds": "40,920,1040,1260",
+        "representative": True,
+        "passive_status": False,
+        "low_value_leaf": False,
+    }
+    next_candidate = {
+        "label": "Latest activity",
+        "rid": "com.example:id/latest_activity_card",
+        "cluster_rid": "com.example:id/latest_activity_card",
+        "cluster_signature": "cluster-latest",
+        "cluster_label": "Latest activity",
+        "cluster_role": "container",
+        "bounds": "40,1280,1040,1560",
+        "representative": True,
+        "passive_status": False,
+        "low_value_leaf": False,
+    }
+    state = SimpleNamespace(
+        recent_representative_signatures=[],
+        consumed_representative_signatures=set(),
+        consumed_cluster_signatures=set(),
+        consumed_cluster_logical_signatures={collection_flow._candidate_cluster_logical_signature(consumed_root)},
+        visited_logical_signatures=set(),
+        cta_cluster_visited_rids={},
+    )
+
+    filtered = collection_flow._filter_content_candidates_for_phase([child_candidate, next_candidate], state=state)
+
+    assert [candidate["label"] for candidate in filtered["cluster_consumed_rejected"]] == ["Weather information"]
+    assert [candidate["label"] for candidate in filtered["selection_candidates"]] == ["Latest activity"]
+
+
+def test_filter_content_candidates_for_phase_hard_filters_low_value_leaf():
+    leaf_candidate = {
+        "label": "8:00",
+        "rid": "com.example:id/time_text",
+        "cluster_rid": "com.example:id/activity_card",
+        "cluster_label": "Activity",
+        "cluster_role": "leaf",
+        "bounds": "40,420,120,460",
+        "representative": True,
+        "passive_status": False,
+        "low_value_leaf": True,
+    }
+    next_candidate = {
+        "label": "Latest activity",
+        "rid": "com.example:id/latest_activity_card",
+        "cluster_rid": "com.example:id/latest_activity_card",
+        "cluster_label": "Latest activity",
+        "cluster_role": "container",
+        "bounds": "40,820,1040,1160",
+        "representative": True,
+        "passive_status": False,
+        "low_value_leaf": False,
+    }
+    state = SimpleNamespace(
+        recent_representative_signatures=[],
+        consumed_representative_signatures=set(),
+        consumed_cluster_signatures=set(),
+        consumed_cluster_logical_signatures=set(),
+        visited_logical_signatures=set(),
+        cta_cluster_visited_rids={},
+    )
+
+    filtered = collection_flow._filter_content_candidates_for_phase([leaf_candidate, next_candidate], state=state)
+
+    assert [candidate["label"] for candidate in filtered["leaf_rejected"]] == ["8:00"]
+    assert [candidate["label"] for candidate in filtered["selection_candidates"]] == ["Latest activity"]
+
+
+def test_collect_step_candidate_priority_groups_skips_consumed_cluster_logical_early():
+    nodes = [
+        {
+            "text": "",
+            "viewIdResourceName": "",
+            "className": "android.widget.FrameLayout",
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2200",
+            "children": [
+                {
+                    "text": "Weather information",
+                    "viewIdResourceName": "com.example:id/weather_card",
+                    "className": "android.widget.FrameLayout",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "40,420,1040,760",
+                    "children": [],
+                },
+                {
+                    "text": "Latest activity",
+                    "viewIdResourceName": "com.example:id/latest_activity_card",
+                    "className": "android.widget.FrameLayout",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "40,820,1040,1160",
+                    "children": [],
+                },
+                {
+                    "text": "Activity",
+                    "viewIdResourceName": "com.example:id/activity_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "40,1760,320,1860",
+                    "children": [],
+                },
+                {
+                    "text": "Location",
+                    "viewIdResourceName": "com.example:id/location_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "400,1760,680,1860",
+                    "children": [],
+                },
+            ],
+        }
+    ]
+
+    content_candidates, bottom_strip_candidates, meta = collection_flow._collect_step_candidate_priority_groups(
+        nodes,
+        consumed_cluster_logical_signatures={"com.example:id/weather_card||weather information"},
+    )
+
+    assert [candidate["label"] for candidate in content_candidates] == ["Latest activity"]
+    assert [candidate["label"] for candidate in bottom_strip_candidates] == ["Activity", "Location"]
+    assert meta["cluster_pre_filter_skipped"] == ["Weather information"]
+
+
+def test_should_suppress_row_persistence_for_low_value_leaf_when_parent_consumed():
+    state = SimpleNamespace(
+        current_local_tab_signature="",
+        local_tab_candidates_by_signature={},
+    )
+    row = {
+        "visible_label": "8:00",
+        "merged_announcement": "8:00",
+        "focus_view_id": "com.example:id/time_text",
+        "focus_bounds": "40,420,120,460",
+        "focus_node": {
+            "clickable": False,
+            "focusable": False,
+            "effectiveClickable": False,
+            "hasClickableDescendant": False,
+            "hasFocusableDescendant": False,
+        },
+        "logical_signature_already_visited": False,
+        "cluster_already_consumed_before_record": True,
+    }
+
+    suppress, reason = collection_flow._should_suppress_row_persistence(row=row, state=state, stop=False)
+
+    assert suppress is True
+    assert reason == "low_value_leaf_or_parent_consumed"
+
+
+def test_should_suppress_row_persistence_for_low_value_leaf_without_parent_consumed():
+    state = SimpleNamespace(
+        current_local_tab_signature="",
+        local_tab_candidates_by_signature={},
+    )
+    row = {
+        "visible_label": "%",
+        "merged_announcement": "%",
+        "focus_view_id": "com.example:id/percent_text",
+        "focus_bounds": "40,420,80,460",
+        "focus_node": {
+            "clickable": False,
+            "focusable": False,
+            "effectiveClickable": False,
+            "hasClickableDescendant": False,
+            "hasFocusableDescendant": False,
+        },
+        "logical_signature_already_visited": False,
+        "cluster_already_consumed_before_record": False,
+    }
+
+    suppress, reason = collection_flow._should_suppress_row_persistence(row=row, state=state, stop=False)
+
+    assert suppress is True
+    assert reason == "low_value_leaf"
 
 
 def test_reprioritize_persistent_bottom_strip_row_prefers_content_over_top_chrome(monkeypatch):
@@ -3366,6 +3923,1075 @@ def test_maybe_select_next_local_tab_keeps_false_when_new_representative_content
 
     assert advanced is False
     assert any("[STEP][representative_exhausted_eval]" in line and "Device usage" in line and "exhausted=false" in line for line in logs)
+    assert any("[STEP][exhaustion_candidates]" in line and "from_selection='Device usage'" in line for line in logs)
+
+
+def test_selection_and_exhaustion_share_revisit_filtered_candidates(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[
+        {"text": "", "contentDescription": "", "viewIdResourceName": "", "className": "android.widget.FrameLayout", "clickable": False, "focusable": False, "effectiveClickable": False, "visibleToUser": True, "boundsInScreen": "0,0,1080,2200", "children": [
+            {"text": "Device usage", "contentDescription": "", "viewIdResourceName": "com.example:id/device_usage_card", "className": "android.widget.FrameLayout", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "40,420,1040,760", "children": []},
+            {"text": "Steps", "contentDescription": "", "viewIdResourceName": "com.example:id/steps_card", "className": "android.widget.FrameLayout", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "40,820,1040,1180", "children": []},
+            {"text": "Mobile usage", "contentDescription": "", "viewIdResourceName": "com.example:id/mobile_usage_button", "className": "android.widget.Button", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "40,1240,1040,1440", "children": []},
+        ]},
+    ]]
+    sig1 = collection_flow._build_candidate_object_signature(rid="com.example:id/device_usage_card", bounds="40,420,1040,760", label="Device usage")
+    sig2 = collection_flow._build_candidate_object_signature(rid="com.example:id/steps_card", bounds="40,820,1040,1180", label="Steps")
+    sig3 = collection_flow._build_candidate_object_signature(rid="com.example:id/mobile_usage_button", bounds="40,1240,1040,1440", label="Mobile usage")
+    state = SimpleNamespace(
+        current_local_tab_signature="com.example:id/activity_button||com.example:id/location_button",
+        current_local_tab_active_rid="com.example:id/activity_button",
+        local_tab_candidates_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button": [
+                {"rid": "com.example:id/activity_button", "label": "Activity", "node": {}},
+                {"rid": "com.example:id/location_button", "label": "Location", "node": {}},
+            ]
+        },
+        visited_local_tabs_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button": {"com.example:id/activity_button"}
+        },
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={"focus_view_id": "com.example:id/activity_button"},
+        recent_representative_signatures=deque([sig1, sig2, sig3], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+    )
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={},
+        scenario_id="life_family_care_plugin",
+        step_idx=17,
+    )
+
+    assert advanced is True
+    assert any("[STEP][selection_candidates]" in line and "rejected_by_revisit='Device usage|Steps|Mobile usage'" in line for line in logs)
+    assert any("[STEP][exhaustion_candidates]" in line and "after_consumed_filter='none'" in line and "exhausted=true" in line for line in logs)
+    assert not any("[STEP][candidate_mismatch]" in line for line in logs)
+
+
+def test_maybe_select_next_local_tab_treats_passive_status_and_empty_state_as_exhausted(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[
+        {"text": "", "contentDescription": "", "viewIdResourceName": "", "className": "android.widget.FrameLayout", "clickable": False, "focusable": False, "effectiveClickable": False, "visibleToUser": True, "boundsInScreen": "0,0,1080,2200", "children": [
+            {"text": "No activity", "contentDescription": "", "viewIdResourceName": "com.example:id/no_activity", "className": "android.widget.TextView", "clickable": False, "focusable": False, "effectiveClickable": False, "visibleToUser": True, "boundsInScreen": "40,420,340,500", "children": []},
+            {"text": "Waiting", "contentDescription": "", "viewIdResourceName": "com.example:id/waiting_status", "className": "android.widget.TextView", "clickable": False, "focusable": False, "effectiveClickable": False, "visibleToUser": True, "boundsInScreen": "40,520,260,600", "children": []},
+            {"text": "Activity will be measured again after 4:00 AM.", "contentDescription": "", "viewIdResourceName": "com.example:id/waiting_explanation", "className": "android.widget.TextView", "clickable": False, "focusable": False, "effectiveClickable": False, "visibleToUser": True, "boundsInScreen": "40,620,1040,760", "children": []},
+        ]},
+    ]]
+    state = SimpleNamespace(
+        current_local_tab_signature="com.example:id/activity_button||com.example:id/location_button",
+        current_local_tab_active_rid="com.example:id/activity_button",
+        local_tab_candidates_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button": [
+                {"rid": "com.example:id/activity_button", "label": "Activity", "node": {}},
+                {"rid": "com.example:id/location_button", "label": "Location", "node": {}},
+            ]
+        },
+        visited_local_tabs_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button": {"com.example:id/activity_button"}
+        },
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={"focus_view_id": "com.example:id/activity_button"},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+    )
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={},
+        scenario_id="life_family_care_plugin",
+        step_idx=18,
+    )
+
+    assert advanced is True
+    assert any("[STEP][status_exhausted_excluded]" in line and "No activity" in line and "Waiting" in line for line in logs)
+    assert any("[STEP][representative_exhausted_eval]" in line and "exhausted=true" in line for line in logs)
+
+
+def test_reprioritize_prefers_representative_content_over_passive_status(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    nodes = [
+        {
+            "text": "",
+            "contentDescription": "",
+            "viewIdResourceName": "",
+            "className": "android.widget.FrameLayout",
+            "clickable": False,
+            "focusable": False,
+            "effectiveClickable": False,
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2200",
+            "children": [
+                {
+                    "text": "No activity",
+                    "contentDescription": "",
+                    "viewIdResourceName": "com.example:id/no_activity",
+                    "className": "android.widget.TextView",
+                    "clickable": False,
+                    "focusable": False,
+                    "effectiveClickable": False,
+                    "visibleToUser": True,
+                    "boundsInScreen": "40,420,340,500",
+                    "children": [],
+                },
+                {
+                    "text": "Waiting",
+                    "contentDescription": "",
+                    "viewIdResourceName": "com.example:id/waiting_status",
+                    "className": "android.widget.TextView",
+                    "clickable": False,
+                    "focusable": False,
+                    "effectiveClickable": False,
+                    "visibleToUser": True,
+                    "boundsInScreen": "40,520,260,600",
+                    "children": [],
+                },
+                {
+                    "text": "Latest activity View information",
+                    "contentDescription": "",
+                    "viewIdResourceName": "com.example:id/latest_activity_card",
+                    "className": "android.widget.FrameLayout",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "40,760,1040,1120",
+                    "children": [],
+                },
+            ],
+        }
+    ]
+    client = DummyClient([])
+    client.dump_tree_sequence = [nodes]
+    state = SimpleNamespace(
+        recent_representative_signatures=[],
+        consumed_representative_signatures=set(),
+        local_tab_candidates_by_signature={},
+        visited_local_tabs_by_signature={},
+        current_local_tab_signature="",
+        current_local_tab_active_rid="",
+    )
+    row = {
+        "focus_view_id": "com.example:id/waiting_status",
+        "visible_label": "Waiting",
+        "merged_announcement": "Waiting",
+        "focus_bounds": "40,520,260,600",
+        "focus_class_name": "android.widget.TextView",
+        "focus_clickable": False,
+        "focus_focusable": False,
+        "focus_effective_clickable": False,
+    }
+
+    updated = collection_flow._maybe_reprioritize_persistent_bottom_strip_row(
+        row=row,
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_type": "content"},
+        state=state,
+        step_idx=19,
+    )
+
+    assert updated["focus_view_id"] == "com.example:id/latest_activity_card"
+    assert any("[STEP][candidate_priority]" in line and "status_candidates='No activity|Waiting'" in line for line in logs)
+    assert any("reason='representative_content_preferred_over_passive_status'" in line for line in logs)
+
+
+def test_reprioritize_attempts_focus_realign_when_focus_context_differs(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    nodes = [
+        {
+            "text": "",
+            "contentDescription": "",
+            "viewIdResourceName": "",
+            "className": "android.widget.FrameLayout",
+            "clickable": False,
+            "focusable": False,
+            "effectiveClickable": False,
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2200",
+            "children": [
+                {
+                    "text": "Device usage",
+                    "contentDescription": "",
+                    "viewIdResourceName": "com.example:id/device_usage_card",
+                    "className": "android.widget.FrameLayout",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "40,420,1040,760",
+                    "children": [],
+                },
+                {
+                    "text": "Location",
+                    "contentDescription": "",
+                    "viewIdResourceName": "com.example:id/location_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "400,1760,680,1860",
+                    "children": [],
+                },
+                {
+                    "text": "Events",
+                    "contentDescription": "",
+                    "viewIdResourceName": "com.example:id/events_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "760,1760,1040,1860",
+                    "children": [],
+                },
+            ],
+        }
+    ]
+    client = DummyClient([])
+    client.dump_tree_sequence = [nodes]
+    client.focus_sequence = [
+        {
+            "text": "Device usage",
+            "contentDescription": "",
+            "viewIdResourceName": "com.example:id/device_usage_card",
+            "className": "android.widget.FrameLayout",
+            "boundsInScreen": "40,420,1040,760",
+        }
+    ]
+    state = SimpleNamespace(
+        recent_representative_signatures=[],
+        consumed_representative_signatures=set(),
+        local_tab_candidates_by_signature={},
+        visited_local_tabs_by_signature={},
+        current_local_tab_signature="",
+        current_local_tab_active_rid="",
+    )
+    row = {
+        "focus_view_id": "com.example:id/location_button",
+        "visible_label": "Location",
+        "merged_announcement": "Location",
+        "focus_bounds": "400,1760,680,1860",
+        "focus_class_name": "android.widget.Button",
+        "focus_clickable": True,
+        "focus_focusable": True,
+        "focus_effective_clickable": True,
+    }
+
+    updated = collection_flow._maybe_reprioritize_persistent_bottom_strip_row(
+        row=row,
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_type": "content", "scenario_id": "life_family_care_plugin"},
+        state=state,
+        step_idx=20,
+    )
+
+    assert updated["focus_view_id"] == "com.example:id/device_usage_card"
+    assert client.select_calls[0]["name"] == "com.example:id/device_usage_card"
+    assert any("[STEP][focus_context_mismatch]" in line and "selected='Device usage'" in line for line in logs)
+    assert any("[STEP][focus_realign]" in line and "method='rid'" in line for line in logs)
+    assert any("[STEP][focus_realign_success]" in line and "resolved_focus='Device usage'" in line for line in logs)
+
+
+def test_reprioritize_focus_realign_failure_falls_back_safely(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    nodes = [
+        {
+            "text": "",
+            "contentDescription": "",
+            "viewIdResourceName": "",
+            "className": "android.widget.FrameLayout",
+            "clickable": False,
+            "focusable": False,
+            "effectiveClickable": False,
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2200",
+            "children": [
+                {
+                    "text": "Steps",
+                    "contentDescription": "",
+                    "viewIdResourceName": "com.example:id/steps_card",
+                    "className": "android.widget.FrameLayout",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "40,420,1040,760",
+                    "children": [],
+                },
+                {
+                    "text": "Location",
+                    "contentDescription": "",
+                    "viewIdResourceName": "com.example:id/location_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "400,1760,680,1860",
+                    "children": [],
+                },
+                {
+                    "text": "Events",
+                    "contentDescription": "",
+                    "viewIdResourceName": "com.example:id/events_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "760,1760,1040,1860",
+                    "children": [],
+                },
+            ],
+        }
+    ]
+    client = DummyClient([])
+    client.dump_tree_sequence = [nodes]
+    client.focus_sequence = [
+        {
+            "text": "Location",
+            "contentDescription": "",
+            "viewIdResourceName": "com.example:id/location_button",
+            "className": "android.widget.Button",
+            "boundsInScreen": "400,1760,680,1860",
+        },
+        {
+            "text": "Location",
+            "contentDescription": "",
+            "viewIdResourceName": "com.example:id/location_button",
+            "className": "android.widget.Button",
+            "boundsInScreen": "400,1760,680,1860",
+        },
+    ]
+    state = SimpleNamespace(
+        recent_representative_signatures=[],
+        consumed_representative_signatures=set(),
+        local_tab_candidates_by_signature={},
+        visited_local_tabs_by_signature={},
+        current_local_tab_signature="",
+        current_local_tab_active_rid="",
+    )
+    row = {
+        "focus_view_id": "com.example:id/location_button",
+        "visible_label": "Location",
+        "merged_announcement": "Location",
+        "focus_bounds": "400,1760,680,1860",
+        "focus_class_name": "android.widget.Button",
+        "focus_clickable": True,
+        "focus_focusable": True,
+        "focus_effective_clickable": True,
+    }
+
+    updated = collection_flow._maybe_reprioritize_persistent_bottom_strip_row(
+        row=row,
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_type": "content", "scenario_id": "life_family_care_plugin"},
+        state=state,
+        step_idx=21,
+    )
+
+    assert updated["focus_view_id"] == "com.example:id/steps_card"
+    assert any("[STEP][focus_realign_fail]" in line and "reason='no_match'" in line for line in logs)
+
+
+def test_reprioritize_skips_consumed_representative_for_focus_realign(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    nodes = [
+        {
+            "className": "android.widget.FrameLayout",
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2200",
+            "children": [
+                {
+                    "text": "Weather information",
+                    "viewIdResourceName": "com.example:id/weather_banner",
+                    "className": "android.widget.FrameLayout",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "40,420,1040,760",
+                    "children": [],
+                },
+                {
+                    "text": "Device usage",
+                    "viewIdResourceName": "com.example:id/device_usage_card",
+                    "className": "android.widget.FrameLayout",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "40,800,1040,1140",
+                    "children": [],
+                },
+                {
+                    "text": "Location",
+                    "viewIdResourceName": "com.example:id/location_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "400,1760,680,1860",
+                    "children": [],
+                },
+                {
+                    "text": "Events",
+                    "viewIdResourceName": "com.example:id/events_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "760,1760,1040,1860",
+                    "children": [],
+                },
+            ],
+        }
+    ]
+    client = DummyClient([])
+    client.dump_tree_sequence = [nodes]
+    client.focus_sequence = [
+        {
+            "text": "Device usage",
+            "viewIdResourceName": "com.example:id/device_usage_card",
+            "className": "android.widget.FrameLayout",
+            "boundsInScreen": "40,800,1040,1140",
+        }
+    ]
+    weather_candidate = {
+        "label": "Weather information",
+        "rid": "com.example:id/weather_banner",
+        "bounds": "40,420,1040,760",
+    }
+    state = SimpleNamespace(
+        recent_representative_signatures=[],
+        consumed_representative_signatures={collection_flow._candidate_object_signature(weather_candidate)},
+        recent_focus_realign_signatures=set(),
+        cta_cluster_visited_rids={},
+        local_tab_candidates_by_signature={},
+        visited_local_tabs_by_signature={},
+        current_local_tab_signature="",
+        current_local_tab_active_rid="",
+    )
+    row = {
+        "focus_view_id": "com.example:id/location_button",
+        "visible_label": "Location",
+        "merged_announcement": "Location",
+        "focus_bounds": "400,1760,680,1860",
+        "focus_class_name": "android.widget.Button",
+        "focus_clickable": True,
+        "focus_focusable": True,
+        "focus_effective_clickable": True,
+    }
+
+    updated = collection_flow._maybe_reprioritize_persistent_bottom_strip_row(
+        row=row,
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_type": "content", "scenario_id": "life_family_care_plugin"},
+        state=state,
+        step_idx=22,
+    )
+
+    assert updated["focus_view_id"] == "com.example:id/device_usage_card"
+    assert client.select_calls[0]["name"] == "com.example:id/device_usage_card"
+    assert any("[STEP][focus_realign_candidates]" in line and "eligible='Device usage'" in line for line in logs)
+    assert any("[STEP][focus_realign_candidates]" in line and "rejected_consumed='Weather information'" in line for line in logs)
+
+
+def test_reprioritize_skips_already_resolved_focus_realign_target_in_same_phase(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    nodes = [
+        {
+            "className": "android.widget.FrameLayout",
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2200",
+            "children": [
+                {
+                    "text": "Weather information",
+                    "viewIdResourceName": "com.example:id/weather_banner",
+                    "className": "android.widget.FrameLayout",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "40,420,1040,760",
+                    "children": [],
+                },
+                {
+                    "text": "Location",
+                    "viewIdResourceName": "com.example:id/location_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "400,1760,680,1860",
+                    "children": [],
+                },
+                {
+                    "text": "Events",
+                    "viewIdResourceName": "com.example:id/events_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "760,1760,1040,1860",
+                    "children": [],
+                },
+            ],
+        }
+    ]
+    client = DummyClient([])
+    client.dump_tree_sequence = [nodes]
+    weather_signature = collection_flow._candidate_object_signature(
+        {
+            "label": "Weather information",
+            "rid": "com.example:id/weather_banner",
+            "bounds": "40,420,1040,760",
+        }
+    )
+    state = SimpleNamespace(
+        recent_representative_signatures=[],
+        consumed_representative_signatures=set(),
+        recent_focus_realign_signatures={weather_signature},
+        cta_cluster_visited_rids={},
+        local_tab_candidates_by_signature={},
+        visited_local_tabs_by_signature={},
+        current_local_tab_signature="",
+        current_local_tab_active_rid="",
+    )
+    row = {
+        "focus_view_id": "com.example:id/location_button",
+        "visible_label": "Location",
+        "merged_announcement": "Location",
+        "focus_bounds": "400,1760,680,1860",
+        "focus_class_name": "android.widget.Button",
+        "focus_clickable": True,
+        "focus_focusable": True,
+        "focus_effective_clickable": True,
+    }
+
+    updated = collection_flow._maybe_reprioritize_persistent_bottom_strip_row(
+        row=row,
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_type": "content", "scenario_id": "life_family_care_plugin"},
+        state=state,
+        step_idx=23,
+    )
+
+    assert updated["focus_view_id"] == "com.example:id/weather_banner"
+    assert not client.select_calls
+    assert any("[STEP][focus_realign_skip]" in line and "already_realign_resolved_in_current_phase" in line for line in logs)
+
+
+def test_reprioritize_skips_focus_realign_when_no_eligible_target_exists(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    nodes = [
+        {
+            "className": "android.widget.FrameLayout",
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2200",
+            "children": [
+                {
+                    "text": "Weather information",
+                    "viewIdResourceName": "com.example:id/weather_banner",
+                    "className": "android.widget.FrameLayout",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "40,420,1040,760",
+                    "children": [],
+                },
+                {
+                    "text": "Location",
+                    "viewIdResourceName": "com.example:id/location_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "400,1760,680,1860",
+                    "children": [],
+                },
+                {
+                    "text": "Events",
+                    "viewIdResourceName": "com.example:id/events_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "760,1760,1040,1860",
+                    "children": [],
+                },
+            ],
+        }
+    ]
+    client = DummyClient([])
+    client.dump_tree_sequence = [nodes]
+    weather_signature = collection_flow._candidate_object_signature(
+        {
+            "label": "Weather information",
+            "rid": "com.example:id/weather_banner",
+            "bounds": "40,420,1040,760",
+        }
+    )
+    state = SimpleNamespace(
+        recent_representative_signatures=[],
+        consumed_representative_signatures=set(),
+        recent_focus_realign_signatures={weather_signature},
+        cta_cluster_visited_rids={},
+        local_tab_candidates_by_signature={},
+        visited_local_tabs_by_signature={},
+        current_local_tab_signature="",
+        current_local_tab_active_rid="",
+    )
+    row = {
+        "focus_view_id": "com.example:id/location_button",
+        "visible_label": "Location",
+        "merged_announcement": "Location",
+        "focus_bounds": "400,1760,680,1860",
+        "focus_class_name": "android.widget.Button",
+        "focus_clickable": True,
+        "focus_focusable": True,
+        "focus_effective_clickable": True,
+    }
+
+    updated = collection_flow._maybe_reprioritize_persistent_bottom_strip_row(
+        row=row,
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_type": "content", "scenario_id": "life_family_care_plugin"},
+        state=state,
+        step_idx=24,
+    )
+
+    assert updated["focus_view_id"] == "com.example:id/weather_banner"
+    assert not client.select_calls
+    assert any("[STEP][focus_realign_skip] target='none' reason='no_eligible_representative_target'" in line for line in logs)
+
+
+def test_collect_step_candidate_priority_groups_collapses_same_card_cluster_nodes():
+    nodes = [
+        {
+            "className": "android.widget.FrameLayout",
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2200",
+            "children": [
+                {
+                    "viewIdResourceName": "com.example:id/suggestion_card_container",
+                    "className": "android.view.ViewGroup",
+                    "visibleToUser": True,
+                    "boundsInScreen": "40,420,1040,980",
+                    "children": [
+                        {
+                            "text": "Want better insight into your daily life?",
+                            "viewIdResourceName": "com.example:id/title",
+                            "className": "android.widget.TextView",
+                            "visibleToUser": True,
+                            "boundsInScreen": "80,460,980,560",
+                            "children": [],
+                        },
+                        {
+                            "text": "Set up the SmartThings devices that you use.",
+                            "viewIdResourceName": "com.example:id/tips_text",
+                            "className": "android.widget.TextView",
+                            "visibleToUser": True,
+                            "boundsInScreen": "80,570,980,700",
+                            "children": [],
+                        },
+                        {
+                            "text": "Set up now",
+                            "viewIdResourceName": "com.example:id/second_button",
+                            "className": "android.widget.Button",
+                            "clickable": True,
+                            "focusable": True,
+                            "effectiveClickable": True,
+                            "visibleToUser": True,
+                            "boundsInScreen": "620,820,980,920",
+                            "children": [],
+                        },
+                    ],
+                },
+                {
+                    "text": "Location",
+                    "viewIdResourceName": "com.example:id/location_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "400,1760,680,1860",
+                    "children": [],
+                },
+                {
+                    "text": "Events",
+                    "viewIdResourceName": "com.example:id/events_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "760,1760,1040,1860",
+                    "children": [],
+                },
+            ],
+        }
+    ]
+
+    content_candidates, bottom_strip_candidates, meta = collection_flow._collect_step_candidate_priority_groups(nodes)
+
+    assert len(content_candidates) == 1
+    assert content_candidates[0]["rid"] == "com.example:id/second_button"
+    assert content_candidates[0]["cluster_signature"]
+    assert any("suggestion_card_container" in value for value in meta["clustered_candidates"])
+    assert bottom_strip_candidates
+
+
+def test_filter_content_candidates_for_phase_excludes_consumed_cluster():
+    cluster_signature = "com.example:id/suggestion_card_container||40,420,1040,980||"
+    state = SimpleNamespace(
+        recent_representative_signatures=[],
+        consumed_representative_signatures=set(),
+        consumed_cluster_signatures={cluster_signature},
+        cta_cluster_visited_rids={},
+    )
+    candidates = [
+        {
+            "label": "Want better insight into your daily life?",
+            "rid": "com.example:id/title",
+            "bounds": "80,460,980,560",
+            "representative": True,
+            "passive_status": False,
+            "low_value_leaf": False,
+            "cluster_signature": cluster_signature,
+        },
+        {
+            "label": "Set up the SmartThings devices that you use.",
+            "rid": "com.example:id/tips_text",
+            "bounds": "80,570,980,700",
+            "representative": True,
+            "passive_status": False,
+            "low_value_leaf": False,
+            "cluster_signature": cluster_signature,
+        },
+    ]
+
+    filtered = collection_flow._filter_content_candidates_for_phase(candidates, state=state)
+
+    assert filtered["selection_candidates"] == []
+    assert filtered["exhaustion_candidates"] == []
+    assert len(filtered["cluster_consumed_rejected"]) == 1
+
+
+def test_reprioritize_skips_realign_for_already_resolved_cluster(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    nodes = [
+        {
+            "className": "android.widget.FrameLayout",
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2200",
+            "children": [
+                {
+                    "viewIdResourceName": "com.example:id/suggestion_card_container",
+                    "className": "android.view.ViewGroup",
+                    "visibleToUser": True,
+                    "boundsInScreen": "40,420,1040,980",
+                    "children": [
+                        {
+                            "text": "Want better insight into your daily life?",
+                            "viewIdResourceName": "com.example:id/title",
+                            "className": "android.widget.TextView",
+                            "visibleToUser": True,
+                            "boundsInScreen": "80,460,980,560",
+                            "children": [],
+                        },
+                        {
+                            "text": "Set up the SmartThings devices that you use.",
+                            "viewIdResourceName": "com.example:id/tips_text",
+                            "className": "android.widget.TextView",
+                            "visibleToUser": True,
+                            "boundsInScreen": "80,570,980,700",
+                            "children": [],
+                        },
+                        {
+                            "text": "Set up now",
+                            "viewIdResourceName": "com.example:id/second_button",
+                            "className": "android.widget.Button",
+                            "clickable": True,
+                            "focusable": True,
+                            "effectiveClickable": True,
+                            "visibleToUser": True,
+                            "boundsInScreen": "620,820,980,920",
+                            "children": [],
+                        },
+                    ],
+                },
+                {
+                    "text": "Location",
+                    "viewIdResourceName": "com.example:id/location_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "400,1760,680,1860",
+                    "children": [],
+                },
+                {
+                    "text": "Events",
+                    "viewIdResourceName": "com.example:id/events_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "760,1760,1040,1860",
+                    "children": [],
+                },
+            ],
+        }
+    ]
+    cluster_signature = collection_flow._build_candidate_object_signature(
+        rid="com.example:id/suggestion_card_container",
+        bounds="40,420,1040,980",
+        label="",
+    )
+    client = DummyClient([])
+    client.dump_tree_sequence = [nodes]
+    state = SimpleNamespace(
+        recent_representative_signatures=[],
+        consumed_representative_signatures=set(),
+        recent_focus_realign_signatures=set(),
+        consumed_cluster_signatures=set(),
+        recent_focus_realign_clusters={cluster_signature},
+        cta_cluster_visited_rids={},
+        local_tab_candidates_by_signature={},
+        visited_local_tabs_by_signature={},
+        current_local_tab_signature="",
+        current_local_tab_active_rid="",
+    )
+    row = {
+        "focus_view_id": "com.example:id/location_button",
+        "visible_label": "Location",
+        "merged_announcement": "Location",
+        "focus_bounds": "400,1760,680,1860",
+        "focus_class_name": "android.widget.Button",
+        "focus_clickable": True,
+        "focus_focusable": True,
+        "focus_effective_clickable": True,
+    }
+
+    updated = collection_flow._maybe_reprioritize_persistent_bottom_strip_row(
+        row=row,
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_type": "content", "scenario_id": "life_family_care_plugin"},
+        state=state,
+        step_idx=25,
+    )
+
+    assert updated["focus_view_id"] == "com.example:id/second_button"
+    assert not client.select_calls
+    assert any("[STEP][focus_realign_skip]" in line and "cluster_already_realign_resolved" in line for line in logs)
+
+
+def test_cluster_representative_prefers_container_over_title_when_actionable_missing(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    nodes = [
+        {
+            "className": "android.widget.FrameLayout",
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2200",
+            "children": [
+                {
+                    "viewIdResourceName": "com.example:id/info_card_container",
+                    "className": "android.widget.FrameLayout",
+                    "hasClickableDescendant": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "40,420,1040,980",
+                    "children": [
+                        {
+                            "text": "Device usage",
+                            "viewIdResourceName": "com.example:id/title",
+                            "className": "android.widget.TextView",
+                            "visibleToUser": True,
+                            "boundsInScreen": "80,460,980,560",
+                            "children": [],
+                        },
+                        {
+                            "text": "Usage this week",
+                            "viewIdResourceName": "com.example:id/description",
+                            "className": "android.widget.TextView",
+                            "visibleToUser": True,
+                            "boundsInScreen": "80,580,980,720",
+                            "children": [],
+                        },
+                    ],
+                },
+                {
+                    "text": "Location",
+                    "viewIdResourceName": "com.example:id/location_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "400,1760,680,1860",
+                    "children": [],
+                },
+                {
+                    "text": "Events",
+                    "viewIdResourceName": "com.example:id/events_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "760,1760,1040,1860",
+                    "children": [],
+                },
+            ],
+        }
+    ]
+    client = DummyClient([])
+    client.dump_tree_sequence = [nodes]
+    state = SimpleNamespace(
+        recent_representative_signatures=[],
+        consumed_representative_signatures=set(),
+        local_tab_candidates_by_signature={},
+        visited_local_tabs_by_signature={},
+        current_local_tab_signature="",
+        current_local_tab_active_rid="",
+    )
+    row = {
+        "focus_view_id": "com.example:id/location_button",
+        "visible_label": "Location",
+        "merged_announcement": "Location",
+        "focus_bounds": "400,1760,680,1860",
+        "focus_class_name": "android.widget.Button",
+        "focus_clickable": True,
+        "focus_focusable": True,
+        "focus_effective_clickable": True,
+    }
+
+    updated = collection_flow._maybe_reprioritize_persistent_bottom_strip_row(
+        row=row,
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_type": "content"},
+        state=state,
+        step_idx=26,
+    )
+
+    assert updated["focus_view_id"] == "com.example:id/info_card_container"
+    assert any(
+        "[STEP][cluster_representative]" in line
+        and ("container_preferred" in line or "descendant_actionable_preferred" in line)
+        for line in logs
+    )
+
+
+def test_select_better_cluster_representative_falls_back_from_title_to_container():
+    title_candidate = {
+        "label": "Steps",
+        "rid": "com.example:id/title",
+        "bounds": "80,460,980,560",
+        "cluster_signature": "com.example:id/info_card_container||40,420,1040,980||",
+        "cluster_role": "title",
+    }
+    container_candidate = {
+        "label": "Steps Overview of your steps",
+        "rid": "com.example:id/info_card_container",
+        "bounds": "40,420,1040,980",
+        "cluster_signature": "com.example:id/info_card_container||40,420,1040,980||",
+        "cluster_role": "container",
+        "representative": True,
+        "score": 500000,
+        "top": 420,
+    }
+    title_candidate["cluster_members"] = [
+        title_candidate,
+        {
+            "label": "Overview of your steps",
+            "rid": "com.example:id/description",
+            "bounds": "80,580,980,720",
+            "cluster_signature": title_candidate["cluster_signature"],
+            "cluster_role": "description",
+            "representative": True,
+            "score": 200000,
+            "top": 580,
+        },
+        container_candidate,
+    ]
+    state = SimpleNamespace(
+        cluster_title_fallback_applied=set(),
+    )
+    row = {
+        "move_result": "failed",
+    }
+
+    fallback = collection_flow._select_better_cluster_representative(
+        selected_candidate=title_candidate,
+        state=state,
+        row=row,
+    )
+
+    assert fallback is not None
+    assert fallback["rid"] == "com.example:id/info_card_container"
+
+
+def test_select_better_cluster_representative_returns_none_without_better_candidate():
+    title_candidate = {
+        "label": "Steps",
+        "rid": "com.example:id/title",
+        "bounds": "80,460,980,560",
+        "cluster_signature": "com.example:id/title||80,460,980,560||steps",
+        "cluster_role": "title",
+        "cluster_members": [],
+    }
+    title_candidate["cluster_members"] = [title_candidate]
+    state = SimpleNamespace(
+        cluster_title_fallback_applied=set(),
+    )
+    fallback = collection_flow._select_better_cluster_representative(
+        selected_candidate=title_candidate,
+        state=state,
+        row={"move_result": "failed"},
+    )
+
+    assert fallback is None
 
 
 def test_confirm_click_focused_transition_life_energy_rejects_weak_signal(monkeypatch):
