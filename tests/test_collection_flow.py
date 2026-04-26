@@ -21,9 +21,11 @@ class DummyClient:
         self.scroll_to_top_calls = []
         self.touch_bounds_center_calls = []
         self.tap_bounds_center_adb_calls = []
+        self.tap_xy_adb_calls = []
         self.select_calls = []
         self.click_focused_calls = []
         self.collect_focus_step_calls = []
+        self.move_focus_smart_calls = []
         self.get_focus_calls = []
         self.dump_tree_calls = []
         self.dump_tree_sequence = []
@@ -37,6 +39,10 @@ class DummyClient:
     def collect_focus_step(self, **kwargs):
         self.collect_focus_step_calls.append(kwargs)
         return dict(self.steps.pop(0))
+
+    def move_focus_smart(self, **kwargs):
+        self.move_focus_smart_calls.append(kwargs)
+        return {"status": "moved", "detail": "forced_test"}
 
     def touch(self, **kwargs):
         self.touch_calls.append(kwargs)
@@ -65,6 +71,14 @@ class DummyClient:
         self.last_target_action_result = {
             "reason": "adb_input_tap_sent",
             "target": {"bounds": "[100,200][300,500]", "center": {"x": 200, "y": 350}, "lazy_dump_used": False},
+        }
+        return True
+
+    def tap_xy_adb(self, **kwargs):
+        self.tap_xy_adb_calls.append(kwargs)
+        self.last_target_action_result = {
+            "reason": "adb_input_tap_sent",
+            "target": {"center": {"x": kwargs.get("x"), "y": kwargs.get("y")}},
         }
         return True
 
@@ -3253,6 +3267,7 @@ def test_maybe_select_next_local_tab_does_not_repeat_scroll_fallback_for_same_si
         consumed_representative_signatures=set(),
         cta_cluster_visited_rids={},
         recent_scroll_fallback_signatures={existing_signature},
+        last_scroll_fallback_attempted_signatures={existing_signature},
     )
 
     advanced = collection_flow._maybe_select_next_local_tab(
@@ -3268,6 +3283,1044 @@ def test_maybe_select_next_local_tab_does_not_repeat_scroll_fallback_for_same_si
     assert client.scroll_calls == []
     assert client.select_calls[0]["name"] == "com.example:id/location_button"
     assert any("[STEP][scroll_fallback_eval]" in line and "allowed=false" in line for line in logs)
+
+
+def _bottom_strip_focus_row():
+    return {
+        "visible_label": "Location",
+        "merged_announcement": "Location",
+        "focus_view_id": "com.example:id/location_button",
+        "focus_class_name": "android.widget.Button",
+        "focus_bounds": "780,1700,1040,1860",
+        "focus_clickable": True,
+        "focus_focusable": True,
+        "focus_effective_clickable": True,
+    }
+
+
+def _last_scroll_local_tab_state(existing_signature, *, last_attempted=False):
+    return SimpleNamespace(
+        current_local_tab_signature="com.example:id/activity_button||com.example:id/location_button||com.example:id/events_button",
+        current_local_tab_active_rid="com.example:id/location_button",
+        local_tab_candidates_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button||com.example:id/events_button": [
+                {"rid": "com.example:id/activity_button", "label": "Activity", "node": {}},
+                {"rid": "com.example:id/location_button", "label": "Location", "node": {}},
+                {"rid": "com.example:id/events_button", "label": "Events", "node": {}},
+            ]
+        },
+        visited_local_tabs_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button||com.example:id/events_button": {
+                "com.example:id/activity_button",
+                "com.example:id/location_button",
+                "com.example:id/events_button",
+            }
+        },
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={"focus_view_id": "com.example:id/location_button"},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+        consumed_cluster_signatures=set(),
+        consumed_cluster_logical_signatures=set(),
+        visited_logical_signatures=set(),
+        recent_scroll_fallback_signatures={existing_signature},
+        last_scroll_fallback_attempted_signatures={existing_signature} if last_attempted else set(),
+    )
+
+
+def test_maybe_select_next_local_tab_allows_one_last_scroll_when_bottom_strip_blocks_signature(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    row = _bottom_strip_focus_row()
+    existing_signature = collection_flow._build_scroll_fallback_signature(
+        local_tab_signature="com.example:id/activity_button||com.example:id/location_button||com.example:id/events_button",
+        active_rid="com.example:id/location_button",
+        content_candidates=[],
+        chrome_excluded=[],
+        current_focus_signature=collection_flow._build_row_object_signature(row),
+    )
+    client = DummyClient([])
+    client.dump_tree_sequence = [
+        [
+            {"viewIdResourceName": "com.example:id/content_recycler", "className": "androidx.recyclerview.widget.RecyclerView", "scrollable": True, "visibleToUser": True, "boundsInScreen": "0,200,1080,1900", "children": []},
+        ],
+        [
+            {"viewIdResourceName": "com.example:id/content_recycler", "className": "androidx.recyclerview.widget.RecyclerView", "scrollable": True, "visibleToUser": True, "boundsInScreen": "0,200,1080,1900", "children": []},
+            {"text": "Device usage", "viewIdResourceName": "com.example:id/device_usage_card", "className": "android.widget.FrameLayout", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "40,420,1040,760", "children": []},
+        ],
+    ]
+    state = _last_scroll_local_tab_state(existing_signature)
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row=row,
+        scenario_id="life_family_care_plugin",
+        step_idx=17,
+    )
+
+    assert advanced is False
+    assert client.scroll_calls == ["down"]
+    assert row["last_scroll_fallback_allowed"] is True
+    assert row["scroll_fallback_gate_reason"] == "last_scroll_before_global_exhausted"
+    assert row["last_scroll_fallback_resumed_content"] is True
+    assert existing_signature in state.last_scroll_fallback_attempted_signatures
+    assert any("[STEP][last_scroll_fallback_eval]" in line and "allowed=true" in line for line in logs)
+    assert any("[STEP][last_scroll_fallback]" in line for line in logs)
+    assert any("[STEP][last_scroll_fallback_result]" in line and "resumed_content_phase=true" in line for line in logs)
+
+
+def test_maybe_select_next_local_tab_last_scroll_is_bounded_per_signature(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    row = _bottom_strip_focus_row()
+    existing_signature = collection_flow._build_scroll_fallback_signature(
+        local_tab_signature="com.example:id/activity_button||com.example:id/location_button||com.example:id/events_button",
+        active_rid="com.example:id/location_button",
+        content_candidates=[],
+        chrome_excluded=[],
+        current_focus_signature=collection_flow._build_row_object_signature(row),
+    )
+    client = DummyClient([])
+    client.dump_tree_sequence = [[
+        {"viewIdResourceName": "com.example:id/content_recycler", "className": "androidx.recyclerview.widget.RecyclerView", "scrollable": True, "visibleToUser": True, "boundsInScreen": "0,200,1080,1900", "children": []},
+    ]]
+    state = _last_scroll_local_tab_state(existing_signature, last_attempted=True)
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row=row,
+        scenario_id="life_family_care_plugin",
+        step_idx=18,
+    )
+
+    assert advanced is True
+    assert client.scroll_calls == []
+    assert client.select_calls[0]["name"] == "com.example:id/events_button"
+    assert row["last_scroll_fallback_allowed"] is False
+    assert row["last_scroll_block_reason"] == "last_scroll_already_attempted"
+    assert any("[STEP][last_scroll_fallback_eval]" in line and "last_scroll_already_attempted" in line for line in logs)
+
+
+def test_maybe_select_next_local_tab_last_scroll_no_content_marks_global_exhausted(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    row = _bottom_strip_focus_row()
+    existing_signature = collection_flow._build_scroll_fallback_signature(
+        local_tab_signature="com.example:id/activity_button||com.example:id/location_button||com.example:id/events_button",
+        active_rid="com.example:id/location_button",
+        content_candidates=[],
+        chrome_excluded=[],
+        current_focus_signature=collection_flow._build_row_object_signature(row),
+    )
+    client = DummyClient([])
+    client.dump_tree_sequence = [
+        [
+            {"viewIdResourceName": "com.example:id/content_recycler", "className": "androidx.recyclerview.widget.RecyclerView", "scrollable": True, "visibleToUser": True, "boundsInScreen": "0,200,1080,1900", "children": []},
+        ],
+        [
+            {"viewIdResourceName": "com.example:id/content_recycler", "className": "androidx.recyclerview.widget.RecyclerView", "scrollable": True, "visibleToUser": True, "boundsInScreen": "0,200,1080,1900", "children": []},
+        ],
+    ]
+    state = _last_scroll_local_tab_state(existing_signature)
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row=row,
+        scenario_id="life_family_care_plugin",
+        step_idx=19,
+    )
+
+    assert advanced is True
+    assert client.scroll_calls == ["down"]
+    assert client.select_calls[0]["name"] == "com.example:id/events_button"
+    assert row["last_scroll_fallback_resumed_content"] is False
+    assert row["last_scroll_global_exhausted"] is True
+    assert any("[STEP][last_scroll_fallback_result]" in line and "global_exhausted=true" in line for line in logs)
+
+
+def test_maybe_select_next_local_tab_last_scroll_uses_dump_bottom_strip_evidence(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    row = {}
+    existing_signature = collection_flow._build_scroll_fallback_signature(
+        local_tab_signature="com.example:id/activity_button||com.example:id/location_button||com.example:id/events_button",
+        active_rid="com.example:id/location_button",
+        content_candidates=[],
+        chrome_excluded=[],
+        current_focus_signature=collection_flow._build_row_object_signature(row),
+    )
+    client = DummyClient([])
+    client.dump_tree_sequence = [
+        [
+            {"text": "Activity", "viewIdResourceName": "com.example:id/activity_button", "className": "android.widget.Button", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "40,1700,300,1860", "children": []},
+            {"text": "Location", "viewIdResourceName": "com.example:id/location_button", "className": "android.widget.Button", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "400,1700,660,1860", "children": []},
+            {"text": "Events", "viewIdResourceName": "com.example:id/events_button", "className": "android.widget.Button", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "760,1700,1040,1860", "children": []},
+        ],
+        [
+            {"text": "Device usage", "viewIdResourceName": "com.example:id/device_usage_card", "className": "android.widget.FrameLayout", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "40,420,1040,760", "children": []},
+        ],
+    ]
+    state = _last_scroll_local_tab_state(existing_signature)
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row=row,
+        scenario_id="life_family_care_plugin",
+        step_idx=20,
+    )
+
+    assert advanced is False
+    assert client.scroll_calls == ["down"]
+    assert row["last_scroll_fallback_allowed"] is True
+    assert row["last_scroll_fallback_resumed_content"] is True
+    assert any("[STEP][bottom_strip_context_eval]" in line and "dump_strip_seen=true" in line for line in logs)
+    assert any("[STEP][last_scroll_fallback_eval]" in line and "bottom_strip_context_scrollable_uncertain" in line for line in logs)
+
+
+def test_maybe_select_next_local_tab_prefers_rightward_progression_over_visited(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[]]
+    signature = "activity||location||events"
+    state = SimpleNamespace(
+        current_local_tab_signature=signature,
+        current_local_tab_active_rid="com.example:id/location_button",
+        local_tab_candidates_by_signature={
+            signature: [
+                {"rid": "com.example:id/activity_button", "label": "Activity", "left": 40, "node": {"boundsInScreen": "40,1700,300,1860"}},
+                {"rid": "com.example:id/location_button", "label": "Location", "left": 400, "node": {"boundsInScreen": "400,1700,660,1860"}},
+                {"rid": "com.example:id/events_button", "label": "Events", "left": 760, "node": {"boundsInScreen": "760,1700,1040,1860"}},
+            ]
+        },
+        visited_local_tabs_by_signature={
+            signature: {
+                "com.example:id/activity_button",
+                "com.example:id/location_button",
+                "com.example:id/events_button",
+            }
+        },
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={"focus_view_id": "com.example:id/location_button"},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+        recent_scroll_fallback_signatures=set(),
+        last_scroll_fallback_attempted_signatures=set(),
+    )
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={"focus_view_id": "com.example:id/location_button", "visible_label": "Location"},
+        scenario_id="life_family_care_plugin",
+        step_idx=21,
+    )
+
+    assert advanced is True
+    assert client.select_calls[0]["name"] == "com.example:id/events_button"
+    assert state.pending_local_tab_rid == "com.example:id/events_button"
+    assert any("[STEP][local_tab_pending]" in line and "Events" in line for line in logs)
+    assert any("[STEP][local_tab_sorted]" in line and "Activity|Location|Events" in line for line in logs)
+    assert any("[STEP][local_tab_progression]" in line and "current='Location'" in line and "next='Events'" in line for line in logs)
+    assert any("[STEP][local_tab_skip_reason]" in line and "visited_ignored_for_order_progression" in line for line in logs)
+
+
+def test_maybe_select_next_local_tab_recovers_missing_state_from_dump_strip(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[
+        {"text": "Activity", "viewIdResourceName": "com.example:id/activity_button", "className": "android.widget.Button", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "40,1700,300,1860", "children": []},
+        {"text": "Location", "viewIdResourceName": "com.example:id/location_button", "className": "android.widget.Button", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "400,1700,660,1860", "children": []},
+        {"text": "Events", "viewIdResourceName": "com.example:id/events_button", "className": "android.widget.Button", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "760,1700,1040,1860", "children": []},
+    ]]
+    state = SimpleNamespace(
+        current_local_tab_signature="",
+        current_local_tab_active_rid="",
+        local_tab_candidates_by_signature={},
+        visited_local_tabs_by_signature={},
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={"focus_view_id": "com.example:id/location_button", "visible_label": "Location", "focus_bounds": "400,1700,660,1860", "focus_class_name": "android.widget.Button", "focus_clickable": True, "focus_focusable": True},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+        recent_scroll_fallback_signatures=set(),
+        last_scroll_fallback_attempted_signatures=set(),
+    )
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={"focus_view_id": "com.example:id/location_button", "visible_label": "Location", "focus_bounds": "400,1700,660,1860", "focus_class_name": "android.widget.Button", "focus_clickable": True, "focus_focusable": True},
+        scenario_id="life_family_care_plugin",
+        step_idx=22,
+    )
+
+    assert advanced is True
+    assert client.select_calls[0]["name"] == "com.example:id/events_button"
+    assert state.current_local_tab_active_rid == "com.example:id/events_button"
+    assert any("[STEP][local_tab_recover]" in line and "Activity|Location|Events" in line and "active='Location'" in line for line in logs)
+    assert any("[STEP][local_tab_progression]" in line and "current='Location'" in line and "next='Events'" in line for line in logs)
+
+
+def test_maybe_select_next_local_tab_keeps_state_missing_without_strip_candidates(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[
+        {"text": "Navigate up", "viewIdResourceName": "com.example:id/navigate_up", "className": "android.widget.ImageButton", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "0,0,120,120", "children": []},
+    ]]
+    state = SimpleNamespace(
+        current_local_tab_signature="",
+        current_local_tab_active_rid="",
+        local_tab_candidates_by_signature={},
+        visited_local_tabs_by_signature={},
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+        recent_scroll_fallback_signatures=set(),
+        last_scroll_fallback_attempted_signatures=set(),
+    )
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={},
+        scenario_id="life_family_care_plugin",
+        step_idx=23,
+    )
+
+    assert advanced is False
+    assert client.select_calls == []
+    assert any("[STEP][local_tab_gate]" in line and "local_tab_state_missing" in line for line in logs)
+
+
+def test_maybe_select_next_local_tab_commits_pending_then_progresses_right(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[]]
+    signature = "activity||location||events"
+    state = SimpleNamespace(
+        current_local_tab_signature=signature,
+        current_local_tab_active_rid="com.example:id/activity_button",
+        local_tab_candidates_by_signature={
+            signature: [
+                {"rid": "com.example:id/activity_button", "label": "Activity", "left": 40, "node": {"boundsInScreen": "40,1700,300,1860"}},
+                {"rid": "com.example:id/location_button", "label": "Location", "left": 400, "node": {"boundsInScreen": "400,1700,660,1860"}},
+                {"rid": "com.example:id/events_button", "label": "Events", "left": 760, "node": {"boundsInScreen": "760,1700,1040,1860"}},
+            ]
+        },
+        visited_local_tabs_by_signature={
+            signature: {"com.example:id/activity_button", "com.example:id/location_button"}
+        },
+        pending_local_tab_signature=signature,
+        pending_local_tab_rid="com.example:id/location_button",
+        pending_local_tab_label="Location",
+        pending_local_tab_bounds="400,1700,660,1860",
+        pending_local_tab_age=0,
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={"focus_view_id": "com.example:id/location_button"},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+        recent_scroll_fallback_signatures=set(),
+        last_scroll_fallback_attempted_signatures=set(),
+    )
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={"focus_view_id": "com.example:id/location_button", "visible_label": "Location", "focus_bounds": "400,1700,660,1860"},
+        scenario_id="life_family_care_plugin",
+        step_idx=24,
+    )
+
+    assert advanced is True
+    assert client.select_calls[0]["name"] == "com.example:id/events_button"
+    assert state.current_local_tab_active_rid == "com.example:id/events_button"
+    assert state.pending_local_tab_rid == "com.example:id/events_button"
+    assert any("[STEP][local_tab_commit]" in line and "active='Location'" in line for line in logs)
+    assert any("[STEP][local_tab_progression]" in line and "current='Location'" in line and "next='Events'" in line for line in logs)
+
+
+def test_pending_local_tab_commit_matches_contained_label(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    state = SimpleNamespace(
+        current_local_tab_signature="activity||location||events",
+        current_local_tab_active_rid="com.example:id/activity_button",
+        visited_local_tabs_by_signature={},
+        pending_local_tab_signature="activity||location||events",
+        pending_local_tab_rid="",
+        pending_local_tab_label="LocationButton Location",
+        pending_local_tab_bounds="400,1700,660,1860",
+        pending_local_tab_age=0,
+        current_local_tab_active_label="Activity",
+    )
+
+    collection_flow._maybe_commit_pending_local_tab_progression(
+        state,
+        {"focus_view_id": "LocationButton", "visible_label": "LocationButton", "focus_bounds": "400,1700,660,1860"},
+    )
+
+    assert state.current_local_tab_active_label == "LocationButton Location"
+    assert state.pending_local_tab_label == ""
+    assert any("[STEP][local_tab_commit_match]" in line and "matched_by='label_contains'" in line for line in logs)
+    assert any("[STEP][local_tab_commit]" in line and "LocationButton Location" in line for line in logs)
+
+
+def test_committed_local_tab_active_overrides_current_row_inference(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[]]
+    signature = "activity||location||events"
+    state = SimpleNamespace(
+        current_local_tab_signature=signature,
+        current_local_tab_active_rid="com.example:id/location_button",
+        current_local_tab_active_label="Location",
+        current_local_tab_active_age=1,
+        local_tab_candidates_by_signature={
+            signature: [
+                {"rid": "com.example:id/activity_button", "label": "Activity", "left": 40, "node": {"boundsInScreen": "40,1700,300,1860"}},
+                {"rid": "com.example:id/location_button", "label": "Location", "left": 400, "node": {"boundsInScreen": "400,1700,660,1860"}},
+                {"rid": "com.example:id/events_button", "label": "Events", "left": 760, "node": {"boundsInScreen": "760,1700,1040,1860"}},
+            ]
+        },
+        visited_local_tabs_by_signature={signature: {"com.example:id/activity_button", "com.example:id/location_button"}},
+        pending_local_tab_signature="",
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        pending_local_tab_bounds="",
+        pending_local_tab_age=0,
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+        recent_scroll_fallback_signatures=set(),
+        last_scroll_fallback_attempted_signatures=set(),
+    )
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={"focus_view_id": "com.example:id/activity_button", "visible_label": "Activity"},
+        scenario_id="life_family_care_plugin",
+        step_idx=25,
+    )
+
+    assert advanced is True
+    assert client.select_calls[0]["name"] == "com.example:id/events_button"
+    assert any("[STEP][local_tab_active_resolved]" in line and "source='committed'" in line and "Location" in line for line in logs)
+    assert any("[STEP][local_tab_active_override]" in line and "committed_state_used_for_progression" in line for line in logs)
+    assert any("[STEP][local_tab_active_keep]" in line and "age=1" in line for line in logs)
+    assert any("[STEP][local_tab_progression]" in line and "current='Location'" in line and "next='Events'" in line for line in logs)
+
+
+def test_last_selected_local_tab_hint_overrides_content_row(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[]]
+    signature = "activity||location||events"
+    state = SimpleNamespace(
+        current_local_tab_signature=signature,
+        current_local_tab_active_rid="",
+        current_local_tab_active_label="",
+        current_local_tab_active_age=99,
+        last_selected_local_tab_signature=signature,
+        last_selected_local_tab_rid="com.example:id/location_button",
+        last_selected_local_tab_label="Location",
+        last_selected_local_tab_bounds="400,1700,660,1860",
+        local_tab_candidates_by_signature={
+            signature: [
+                {"rid": "com.example:id/activity_button", "label": "Activity", "left": 40, "bounds": "40,1700,300,1860", "node": {"boundsInScreen": "40,1700,300,1860"}},
+                {"rid": "com.example:id/location_button", "label": "Location", "left": 400, "bounds": "400,1700,660,1860", "node": {"boundsInScreen": "400,1700,660,1860"}},
+                {"rid": "com.example:id/events_button", "label": "Events", "left": 760, "bounds": "760,1700,1040,1860", "node": {"boundsInScreen": "760,1700,1040,1860"}},
+            ]
+        },
+        visited_local_tabs_by_signature={signature: {"com.example:id/activity_button", "com.example:id/location_button"}},
+        pending_local_tab_signature="",
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        pending_local_tab_bounds="",
+        pending_local_tab_age=0,
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+        recent_scroll_fallback_signatures=set(),
+        last_scroll_fallback_attempted_signatures=set(),
+    )
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={"focus_view_id": "com.example:id/place_row", "visible_label": "Some location content"},
+        scenario_id="life_family_care_plugin",
+        step_idx=26,
+    )
+
+    assert advanced is True
+    assert client.select_calls[0]["name"] == "com.example:id/events_button"
+    assert any("[STEP][local_tab_active_resolved]" in line and "source='last_selected_hint'" in line for line in logs)
+    assert any("[STEP][local_tab_progression]" in line and "current='Location'" in line and "next='Events'" in line for line in logs)
+
+
+def test_last_selected_hint_survives_committed_ttl_expiry_for_progression(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[]]
+    signature = "activity||location||events"
+    state = SimpleNamespace(
+        current_local_tab_signature=signature,
+        current_local_tab_active_rid="com.example:id/location_button",
+        current_local_tab_active_label="Location",
+        current_local_tab_active_age=4,
+        last_selected_local_tab_signature=signature,
+        last_selected_local_tab_rid="com.example:id/location_button",
+        last_selected_local_tab_label="Location",
+        last_selected_local_tab_bounds="400,1700,660,1860",
+        local_tab_candidates_by_signature={
+            signature: [
+                {"rid": "com.example:id/activity_button", "label": "Activity", "left": 40, "node": {"boundsInScreen": "40,1700,300,1860"}},
+                {"rid": "com.example:id/location_button", "label": "Location", "left": 400, "node": {"boundsInScreen": "400,1700,660,1860"}},
+                {"rid": "com.example:id/events_button", "label": "Events", "left": 760, "node": {"boundsInScreen": "760,1700,1040,1860"}},
+            ]
+        },
+        visited_local_tabs_by_signature={signature: {"com.example:id/activity_button"}},
+        pending_local_tab_signature="",
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        pending_local_tab_bounds="",
+        pending_local_tab_age=0,
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+        recent_scroll_fallback_signatures=set(),
+        last_scroll_fallback_attempted_signatures=set(),
+    )
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={"focus_view_id": "com.example:id/activity_button", "visible_label": "Activity"},
+        scenario_id="life_family_care_plugin",
+        step_idx=26,
+    )
+
+    assert advanced is True
+    assert client.select_calls[0]["name"] == "com.example:id/events_button"
+    assert any("[STEP][local_tab_active_clear]" in line and "ttl_expired" in line for line in logs)
+    assert any("[STEP][local_tab_active_resolved]" in line and "source='last_selected_hint'" in line and "Location" in line for line in logs)
+    assert any("[STEP][local_tab_progression]" in line and "current='Location'" in line and "next='Events'" in line for line in logs)
+
+
+def test_local_tab_progression_handles_four_tabs_with_committed_middle_active(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[]]
+    signature = "tab1||tab2||tab3||tab4"
+    state = SimpleNamespace(
+        current_local_tab_signature=signature,
+        current_local_tab_active_rid="com.example:id/tab3",
+        current_local_tab_active_label="Tab 3",
+        current_local_tab_active_age=0,
+        local_tab_candidates_by_signature={
+            signature: [
+                {"rid": "com.example:id/tab1", "label": "Tab 1", "left": 10, "node": {"boundsInScreen": "10,1700,250,1860"}},
+                {"rid": "com.example:id/tab2", "label": "Tab 2", "left": 280, "node": {"boundsInScreen": "280,1700,520,1860"}},
+                {"rid": "com.example:id/tab3", "label": "Tab 3", "left": 550, "node": {"boundsInScreen": "550,1700,790,1860"}},
+                {"rid": "com.example:id/tab4", "label": "Tab 4", "left": 820, "node": {"boundsInScreen": "820,1700,1060,1860"}},
+            ]
+        },
+        visited_local_tabs_by_signature={signature: {"com.example:id/tab1", "com.example:id/tab2", "com.example:id/tab3"}},
+        pending_local_tab_signature="",
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        pending_local_tab_bounds="",
+        pending_local_tab_age=0,
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+        recent_scroll_fallback_signatures=set(),
+        last_scroll_fallback_attempted_signatures=set(),
+    )
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={"focus_view_id": "com.example:id/tab1", "visible_label": "Tab 1"},
+        scenario_id="generic_plugin",
+        step_idx=27,
+    )
+
+    assert advanced is True
+    assert client.select_calls[0]["name"] == "com.example:id/tab4"
+    assert any("[STEP][local_tab_sorted]" in line and "Tab 1|Tab 2|Tab 3|Tab 4" in line for line in logs)
+    assert any("[STEP][local_tab_progression]" in line and "current='Tab 3'" in line and "next='Tab 4'" in line for line in logs)
+
+
+def test_committed_local_tab_active_resolves_by_label_contains_when_rid_differs(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[]]
+    signature = "activity||location||events"
+    state = SimpleNamespace(
+        current_local_tab_signature=signature,
+        current_local_tab_active_rid="",
+        current_local_tab_active_label="LocationButton Location",
+        current_local_tab_active_age=0,
+        local_tab_candidates_by_signature={
+            signature: [
+                {"rid": "com.example:id/activity_button", "label": "ActivityButton Activity", "left": 40, "node": {"boundsInScreen": "40,1700,300,1860"}},
+                {"rid": "com.example:id/location_button", "label": "LocationButton Location", "left": 400, "node": {"boundsInScreen": "400,1700,660,1860"}},
+                {"rid": "com.example:id/events_button", "label": "EventsButton Events", "left": 760, "node": {"boundsInScreen": "760,1700,1040,1860"}},
+            ]
+        },
+        visited_local_tabs_by_signature={signature: {"com.example:id/activity_button", "com.example:id/location_button"}},
+        pending_local_tab_signature="",
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        pending_local_tab_bounds="",
+        pending_local_tab_age=0,
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+        recent_scroll_fallback_signatures=set(),
+        last_scroll_fallback_attempted_signatures=set(),
+    )
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={"focus_view_id": "com.example:id/activity_button", "visible_label": "ActivityButton Activity"},
+        scenario_id="life_family_care_plugin",
+        step_idx=28,
+    )
+
+    assert advanced is True
+    assert client.select_calls[0]["name"] == "com.example:id/events_button"
+    assert any("[STEP][local_tab_active_resolved]" in line and "source='committed'" in line and "LocationButton Location" in line for line in logs)
+    assert any("[STEP][local_tab_progression]" in line and "current='LocationButton Location'" in line and "next='EventsButton Events'" in line for line in logs)
+
+
+def test_local_tab_progression_records_pending_before_select_result(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[]]
+
+    def fail_select(**kwargs):
+        client.select_calls.append(kwargs)
+        return False
+
+    client.select = fail_select
+    signature = "activity||location||events"
+    state = SimpleNamespace(
+        current_local_tab_signature=signature,
+        current_local_tab_active_rid="com.example:id/activity_button",
+        current_local_tab_active_label="ActivityButton Activity",
+        current_local_tab_active_age=0,
+        local_tab_candidates_by_signature={
+            signature: [
+                {"rid": "com.example:id/activity_button", "label": "ActivityButton Activity", "left": 40, "node": {"boundsInScreen": "40,1700,300,1860"}},
+                {"rid": "com.example:id/location_button", "label": "LocationButton Location", "left": 400, "node": {"boundsInScreen": "400,1700,660,1860"}},
+                {"rid": "com.example:id/events_button", "label": "EventsButton Events", "left": 760, "node": {"boundsInScreen": "760,1700,1040,1860"}},
+            ]
+        },
+        visited_local_tabs_by_signature={signature: {"com.example:id/activity_button"}},
+        pending_local_tab_signature="",
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        pending_local_tab_bounds="",
+        pending_local_tab_age=0,
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+        recent_scroll_fallback_signatures=set(),
+        last_scroll_fallback_attempted_signatures=set(),
+    )
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={"focus_view_id": "com.example:id/activity_button", "visible_label": "ActivityButton Activity"},
+        scenario_id="life_family_care_plugin",
+        step_idx=29,
+    )
+
+    assert advanced is False
+    assert state.pending_local_tab_rid == "com.example:id/location_button"
+    assert any("[STEP][local_tab_state_write]" in line and "kind='pending'" in line and "LocationButton Location" in line for line in logs)
+
+
+def test_record_pending_local_tab_progression_sets_forced_navigation(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    state = SimpleNamespace(
+        pending_local_tab_signature="",
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        pending_local_tab_bounds="",
+        pending_local_tab_age=3,
+        forced_local_tab_target_signature="",
+        forced_local_tab_target_rid="",
+        forced_local_tab_target_label="",
+        forced_local_tab_target_bounds="",
+        forced_local_tab_attempt_count=1,
+    )
+    candidate = {
+        "rid": "com.example:id/location_button",
+        "label": "LocationButton Location",
+        "bounds": "400,1700,660,1860",
+    }
+
+    rid, label, bounds = collection_flow._record_pending_local_tab_progression(
+        state=state,
+        signature="activity||location||events",
+        next_candidate=candidate,
+        reason="progression_selected",
+    )
+
+    assert (rid, label, bounds) == (
+        "com.example:id/location_button",
+        "LocationButton Location",
+        "400,1700,660,1860",
+    )
+    assert state.pending_local_tab_rid == "com.example:id/location_button"
+    assert state.forced_local_tab_target_rid == "com.example:id/location_button"
+    assert state.forced_local_tab_attempt_count == 0
+    assert any("[STEP][local_tab_force_navigation_set]" in line and "LocationButton Location" in line for line in logs)
+
+
+def test_activate_forced_local_tab_target_taps_before_move_smart(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([
+        {
+            "step_index": 30,
+            "visible_label": "EventsButton Events",
+            "merged_announcement": "EventsButton Events",
+            "focus_view_id": "com.example:id/events_button",
+            "focus_bounds": "760,1700,1040,1860",
+        }
+    ])
+    state = SimpleNamespace(
+        forced_local_tab_target_signature="activity||location||events",
+        forced_local_tab_target_rid="com.example:id/events_button",
+        forced_local_tab_target_label="EventsButton Events",
+        forced_local_tab_target_bounds="760,1700,1040,1860",
+        forced_local_tab_attempt_count=0,
+        current_local_tab_signature="activity||location||events",
+        current_local_tab_active_rid="com.example:id/location_button",
+        current_local_tab_active_label="LocationButton Location",
+        current_local_tab_active_age=0,
+        visited_local_tabs_by_signature={"activity||location||events": {"com.example:id/location_button"}},
+        pending_local_tab_signature="activity||location||events",
+        pending_local_tab_rid="com.example:id/events_button",
+        pending_local_tab_label="EventsButton Events",
+        pending_local_tab_bounds="760,1700,1040,1860",
+        pending_local_tab_age=0,
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("old", "old", "old"),
+        previous_step_row={"visible_label": "old"},
+        recent_representative_signatures=deque(["old"]),
+        consumed_representative_signatures={"old"},
+        visited_logical_signatures={"old"},
+        consumed_cluster_signatures={"old"},
+        consumed_cluster_logical_signatures={"old"},
+        recent_scroll_fallback_signatures={"old"},
+        last_scroll_fallback_attempted_signatures={"old"},
+        scroll_ready_retry_counts={"old": 1},
+        pending_scroll_ready_cluster_signature="old",
+    )
+
+    row = collection_flow._activate_forced_local_tab_target(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        step_idx=30,
+        wait_seconds=0.1,
+        announcement_wait_seconds=0.1,
+        announcement_idle_wait_seconds=0.0,
+        announcement_max_extra_wait_seconds=0.0,
+    )
+
+    assert row["focus_view_id"] == "com.example:id/events_button"
+    assert client.tap_xy_adb_calls[0]["x"] == 900
+    assert client.tap_xy_adb_calls[0]["y"] == 1780
+    assert client.tap_bounds_center_adb_calls == []
+    assert client.move_focus_smart_calls == []
+    assert state.current_local_tab_active_rid == "com.example:id/events_button"
+    assert state.visited_logical_signatures == set()
+    assert state.consumed_cluster_signatures == set()
+    assert state.recent_scroll_fallback_signatures == set()
+    assert state.fail_count == 0
+    assert state.same_count == 0
+    assert state.forced_local_tab_target_rid == ""
+    assert any("[STEP][local_tab_target_activate]" in line and "method='tap_bounds_center'" in line for line in logs)
+    assert any("[STEP][local_tab_target_activate_success]" in line and "matched_by='rid'" in line for line in logs)
+    assert any("[STEP][local_tab_content_phase_reset]" in line and "EventsButton Events" in line for line in logs)
+    assert any("[STEP][local_tab_commit]" in line and "target_activation_success" in line for line in logs)
+
+
+def test_activate_forced_local_tab_target_falls_back_to_move_smart(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([
+        {
+            "step_index": 31,
+            "visible_label": "EventsButton Events",
+            "merged_announcement": "EventsButton Events",
+            "focus_view_id": "com.example:id/events_button",
+            "focus_bounds": "760,1700,1040,1860",
+        }
+    ])
+    client.tap_xy_adb = lambda **kwargs: False
+    client.select = lambda **kwargs: False
+    state = SimpleNamespace(
+        forced_local_tab_target_signature="activity||location||events",
+        forced_local_tab_target_rid="com.example:id/events_button",
+        forced_local_tab_target_label="EventsButton Events",
+        forced_local_tab_target_bounds="760,1700,1040,1860",
+        forced_local_tab_attempt_count=0,
+        current_local_tab_signature="activity||location||events",
+        current_local_tab_active_rid="com.example:id/location_button",
+        current_local_tab_active_label="LocationButton Location",
+        current_local_tab_active_age=0,
+        visited_local_tabs_by_signature={"activity||location||events": {"com.example:id/location_button"}},
+        pending_local_tab_signature="activity||location||events",
+        pending_local_tab_rid="com.example:id/events_button",
+        pending_local_tab_label="EventsButton Events",
+        pending_local_tab_bounds="760,1700,1040,1860",
+        pending_local_tab_age=0,
+    )
+
+    row = collection_flow._activate_forced_local_tab_target(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        step_idx=31,
+        wait_seconds=0.1,
+        announcement_wait_seconds=0.1,
+        announcement_idle_wait_seconds=0.0,
+        announcement_max_extra_wait_seconds=0.0,
+    )
+
+    assert row["focus_view_id"] == "com.example:id/events_button"
+    assert client.move_focus_smart_calls[0]["direction"] == "next"
+    assert state.current_local_tab_active_rid == "com.example:id/events_button"
+    assert any("[STEP][local_tab_target_activate_fail]" in line and "fallback='move_smart_next'" in line for line in logs)
+
+
+def test_record_pending_local_tab_progression_normalizes_dict_bounds(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    state = SimpleNamespace(
+        pending_local_tab_signature="",
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        pending_local_tab_bounds="",
+        pending_local_tab_age=0,
+        forced_local_tab_target_signature="",
+        forced_local_tab_target_rid="",
+        forced_local_tab_target_label="",
+        forced_local_tab_target_bounds="",
+        forced_local_tab_attempt_count=0,
+    )
+
+    _rid, _label, bounds = collection_flow._record_pending_local_tab_progression(
+        state=state,
+        signature="tabs",
+        next_candidate={
+            "rid": "com.example:id/events_button",
+            "label": "EventsButton Events",
+            "bounds": {"left": 710, "top": 2316, "right": 1050, "bottom": 2496},
+        },
+        reason="progression_selected",
+    )
+
+    assert bounds == "710,2316,1050,2496"
+    assert state.forced_local_tab_target_bounds == "710,2316,1050,2496"
+
+
+def test_activate_forced_local_tab_target_parses_string_bounds_and_uses_device_height(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([
+        {
+            "step_index": 32,
+            "visible_label": "EventsButton Events",
+            "merged_announcement": "EventsButton Events",
+            "focus_view_id": "com.example:id/events_button",
+            "focus_bounds": "710,2316,1050,2496",
+        }
+    ])
+    client.dump_tree_sequence = [[{"boundsInScreen": "0,0,1080,2500"}]]
+    state = SimpleNamespace(
+        forced_local_tab_target_signature="tabs",
+        forced_local_tab_target_rid="com.example:id/events_button",
+        forced_local_tab_target_label="EventsButton Events",
+        forced_local_tab_target_bounds="710,2316,1050,2496",
+        forced_local_tab_attempt_count=0,
+        current_local_tab_signature="tabs",
+        current_local_tab_active_rid="com.example:id/location_button",
+        current_local_tab_active_label="LocationButton Location",
+        current_local_tab_active_age=0,
+        visited_local_tabs_by_signature={"tabs": {"com.example:id/location_button"}},
+        pending_local_tab_signature="tabs",
+        pending_local_tab_rid="com.example:id/events_button",
+        pending_local_tab_label="EventsButton Events",
+        pending_local_tab_bounds="710,2316,1050,2496",
+        pending_local_tab_age=0,
+    )
+
+    row = collection_flow._activate_forced_local_tab_target(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        step_idx=32,
+        wait_seconds=0.1,
+        announcement_wait_seconds=0.1,
+        announcement_idle_wait_seconds=0.0,
+        announcement_max_extra_wait_seconds=0.0,
+    )
+
+    assert row["focus_view_id"] == "com.example:id/events_button"
+    assert client.tap_xy_adb_calls[0]["x"] == 880
+    assert client.tap_xy_adb_calls[0]["y"] == 2406
+    assert any("method='tap_bounds_center'" in line and "tap='880,2406'" in line for line in logs)
+
+
+def test_activate_forced_local_tab_target_parse_failure_uses_select_label(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([
+        {
+            "step_index": 33,
+            "visible_label": "EventsButton Events",
+            "merged_announcement": "EventsButton Events",
+            "focus_view_id": "com.example:id/events_button",
+            "focus_bounds": "760,1700,1040,1860",
+        }
+    ])
+    client.select = lambda **kwargs: client.select_calls.append(kwargs) or (kwargs.get("type_") == "a")
+    state = SimpleNamespace(
+        forced_local_tab_target_signature="tabs",
+        forced_local_tab_target_rid="",
+        forced_local_tab_target_label="EventsButton Events",
+        forced_local_tab_target_bounds="not-a-bounds",
+        forced_local_tab_attempt_count=0,
+        current_local_tab_signature="tabs",
+        current_local_tab_active_rid="com.example:id/location_button",
+        current_local_tab_active_label="LocationButton Location",
+        current_local_tab_active_age=0,
+        visited_local_tabs_by_signature={"tabs": {"com.example:id/location_button"}},
+        pending_local_tab_signature="tabs",
+        pending_local_tab_rid="",
+        pending_local_tab_label="EventsButton Events",
+        pending_local_tab_bounds="not-a-bounds",
+        pending_local_tab_age=0,
+    )
+
+    row = collection_flow._activate_forced_local_tab_target(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        step_idx=33,
+        wait_seconds=0.1,
+        announcement_wait_seconds=0.1,
+        announcement_idle_wait_seconds=0.0,
+        announcement_max_extra_wait_seconds=0.0,
+    )
+
+    assert row["visible_label"] == "EventsButton Events"
+    assert client.tap_xy_adb_calls == []
+    assert client.select_calls[0]["name"] == "EventsButton Events"
+    assert any("reason='bounds_parse_failed'" in line for line in logs)
+
+
+def test_pending_local_tab_progression_expires_when_unresolved(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    state = SimpleNamespace(
+        current_local_tab_signature="activity||location",
+        current_local_tab_active_rid="com.example:id/activity_button",
+        visited_local_tabs_by_signature={},
+        pending_local_tab_signature="activity||location",
+        pending_local_tab_rid="com.example:id/location_button",
+        pending_local_tab_label="Location",
+        pending_local_tab_bounds="400,1700,660,1860",
+        pending_local_tab_age=2,
+    )
+
+    collection_flow._maybe_commit_pending_local_tab_progression(
+        state,
+        {"focus_view_id": "com.example:id/other_button", "visible_label": "Other"},
+    )
+
+    assert state.pending_local_tab_rid == ""
+    assert any("[STEP][local_tab_pending_clear]" in line and "expired" in line for line in logs)
 
 
 def test_apply_spatial_priority_to_candidates_prefers_higher_in_viewport():
@@ -4206,7 +5259,10 @@ def test_reprioritize_attempts_focus_realign_when_focus_context_differs(monkeypa
 
     assert updated["focus_view_id"] == "com.example:id/device_usage_card"
     assert client.select_calls[0]["name"] == "com.example:id/device_usage_card"
+    assert any("[STEP][focus_anchor]" in line and "matched=false" in line for line in logs)
     assert any("[STEP][focus_context_mismatch]" in line and "selected='Device usage'" in line for line in logs)
+    assert any("[STEP][focus_force_realign]" in line and "reason='strip_or_stale_focus_context'" in line for line in logs)
+    assert any("[STEP][focus_force_realign_success]" in line and "resolved_focus='Device usage'" in line for line in logs)
     assert any("[STEP][focus_realign]" in line and "method='rid'" in line for line in logs)
     assert any("[STEP][focus_realign_success]" in line and "resolved_focus='Device usage'" in line for line in logs)
 
@@ -4313,6 +5369,195 @@ def test_reprioritize_focus_realign_failure_falls_back_safely(monkeypatch):
 
     assert updated["focus_view_id"] == "com.example:id/steps_card"
     assert any("[STEP][focus_realign_fail]" in line and "reason='no_match'" in line for line in logs)
+    assert collection_flow._build_candidate_object_signature(
+        rid="com.example:id/steps_card",
+        bounds="40,420,1040,760",
+        label="Steps",
+    ) in state.failed_focus_realign_signatures
+
+
+def test_force_realign_falls_back_to_label_select_when_rid_probe_misses():
+    client = DummyClient([])
+    scenario_perf = collection_flow.ScenarioPerfStats(scenario_id="s1", tab_name="tab")
+    client.focus_sequence = [
+        {
+            "text": "Location",
+            "contentDescription": "",
+            "viewIdResourceName": "com.example:id/location_button",
+            "boundsInScreen": "400,1760,680,1860",
+        },
+        {
+            "text": "Mobile usage",
+            "contentDescription": "",
+            "viewIdResourceName": "com.example:id/generated_focus",
+            "boundsInScreen": "40,420,1040,760",
+        },
+    ]
+    ok, reason, focus_node = collection_flow._maybe_realign_focus_to_representative(
+        row={
+            "focus_view_id": "com.example:id/location_button",
+            "visible_label": "Location",
+            "focus_bounds": "400,1760,680,1860",
+        },
+        client=client,
+        dev="SERIAL",
+        selected_node={
+            "text": "Mobile usage",
+            "viewIdResourceName": "com.example:id/mobile_usage_card",
+            "boundsInScreen": "40,420,1040,760",
+        },
+        selected_rid="com.example:id/mobile_usage_card",
+        selected_label="Mobile usage",
+        selected_bounds="40,420,1040,760",
+        scenario_id="life_family_care_plugin",
+        step_idx=22,
+        mismatch_logged=True,
+        force_reason="anchor_mismatch",
+        scenario_perf=scenario_perf,
+    )
+
+    assert ok is True
+    assert reason == "matched"
+    assert focus_node["text"] == "Mobile usage"
+    assert [call["type_"] for call in client.select_calls] == ["r", "a"]
+    assert scenario_perf.realign_attempt_count == 2
+    assert scenario_perf.realign_success_count == 1
+
+
+def test_force_realign_fail_counts_attempt_but_not_success():
+    client = DummyClient([])
+    scenario_perf = collection_flow.ScenarioPerfStats(scenario_id="s1", tab_name="tab")
+    client.focus_sequence = [
+        {
+            "text": "Location",
+            "contentDescription": "",
+            "viewIdResourceName": "com.example:id/location_button",
+            "boundsInScreen": "400,1760,680,1860",
+        },
+        {
+            "text": "Location",
+            "contentDescription": "",
+            "viewIdResourceName": "com.example:id/location_button",
+            "boundsInScreen": "400,1760,680,1860",
+        },
+    ]
+
+    ok, reason, focus_node = collection_flow._maybe_realign_focus_to_representative(
+        row={
+            "focus_view_id": "com.example:id/location_button",
+            "visible_label": "Location",
+            "focus_bounds": "400,1760,680,1860",
+        },
+        client=client,
+        dev="SERIAL",
+        selected_node={
+            "text": "Mobile usage",
+            "viewIdResourceName": "com.example:id/mobile_usage_card",
+            "boundsInScreen": "40,420,1040,760",
+        },
+        selected_rid="com.example:id/mobile_usage_card",
+        selected_label="Mobile usage",
+        selected_bounds="40,420,1040,760",
+        scenario_id="life_family_care_plugin",
+        step_idx=22,
+        mismatch_logged=True,
+        force_reason="anchor_mismatch",
+        scenario_perf=scenario_perf,
+    )
+
+    assert ok is False
+    assert reason == "no_match"
+    assert focus_node is None
+    assert scenario_perf.realign_attempt_count == 2
+    assert scenario_perf.realign_success_count == 0
+
+
+def test_reprioritize_skips_recent_failed_focus_realign_target(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    nodes = [
+        {
+            "className": "android.widget.FrameLayout",
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2200",
+            "children": [
+                {
+                    "text": "Mobile usage",
+                    "viewIdResourceName": "com.example:id/mobile_usage_card",
+                    "className": "android.widget.FrameLayout",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "40,420,1040,760",
+                    "children": [],
+                },
+                {
+                    "text": "Location",
+                    "viewIdResourceName": "com.example:id/location_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "400,1760,680,1860",
+                    "children": [],
+                },
+                {
+                    "text": "Events",
+                    "viewIdResourceName": "com.example:id/events_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "760,1760,1040,1860",
+                    "children": [],
+                },
+            ],
+        }
+    ]
+    failed_signature = collection_flow._build_candidate_object_signature(
+        rid="com.example:id/mobile_usage_card",
+        bounds="40,420,1040,760",
+        label="Mobile usage",
+    )
+    client = DummyClient([])
+    client.dump_tree_sequence = [nodes]
+    state = SimpleNamespace(
+        recent_representative_signatures=[],
+        consumed_representative_signatures=set(),
+        recent_focus_realign_signatures=set(),
+        failed_focus_realign_signatures={failed_signature},
+        cta_cluster_visited_rids={},
+        local_tab_candidates_by_signature={},
+        visited_local_tabs_by_signature={},
+        current_local_tab_signature="",
+        current_local_tab_active_rid="",
+    )
+    row = {
+        "focus_view_id": "com.example:id/location_button",
+        "visible_label": "Location",
+        "merged_announcement": "Location",
+        "focus_bounds": "400,1760,680,1860",
+        "focus_class_name": "android.widget.Button",
+        "focus_clickable": True,
+        "focus_focusable": True,
+        "focus_effective_clickable": True,
+    }
+
+    updated = collection_flow._maybe_reprioritize_persistent_bottom_strip_row(
+        row=row,
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_type": "content", "scenario_id": "life_family_care_plugin"},
+        state=state,
+        step_idx=23,
+    )
+
+    assert updated["focus_view_id"] == "com.example:id/mobile_usage_card"
+    assert client.select_calls == []
+    assert any("[STEP][focus_realign_skip]" in line and "recent_realign_failed" in line for line in logs)
 
 
 def test_reprioritize_skips_consumed_representative_for_focus_realign(monkeypatch):
@@ -4597,7 +5842,7 @@ def test_reprioritize_skips_focus_realign_when_no_eligible_target_exists(monkeyp
 
     assert updated["focus_view_id"] == "com.example:id/weather_banner"
     assert not client.select_calls
-    assert any("[STEP][focus_realign_skip] target='none' reason='no_eligible_representative_target'" in line for line in logs)
+    assert any("[STEP][focus_realign_skip]" in line and "already_realign_resolved_in_current_phase" in line for line in logs)
 
 
 def test_collect_step_candidate_priority_groups_collapses_same_card_cluster_nodes():
@@ -4675,6 +5920,407 @@ def test_collect_step_candidate_priority_groups_collapses_same_card_cluster_node
     assert content_candidates[0]["cluster_signature"]
     assert any("suggestion_card_container" in value for value in meta["clustered_candidates"])
     assert bottom_strip_candidates
+
+
+def test_collect_step_candidate_priority_groups_prioritizes_clickable_containers():
+    nodes = [
+        {
+            "className": "android.widget.FrameLayout",
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2400",
+            "children": [
+                {
+                    "text": "",
+                    "contentDescription": "Medication icon",
+                    "viewIdResourceName": "com.example:id/medication_icon",
+                    "className": "android.widget.ImageView",
+                    "visibleToUser": True,
+                    "boundsInScreen": "80,500,160,580",
+                    "children": [],
+                },
+                {
+                    "text": "Medication description",
+                    "viewIdResourceName": "com.example:id/medication_desc",
+                    "className": "android.widget.TextView",
+                    "visibleToUser": True,
+                    "boundsInScreen": "180,500,980,580",
+                    "children": [],
+                },
+                {
+                    "text": "Medication",
+                    "viewIdResourceName": "com.example:id/medication_container",
+                    "className": "android.widget.LinearLayout",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "40,460,1040,660",
+                    "children": [],
+                },
+                {
+                    "text": "Location",
+                    "viewIdResourceName": "com.example:id/location_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "400,2180,680,2320",
+                    "children": [],
+                },
+                {
+                    "text": "Events",
+                    "viewIdResourceName": "com.example:id/events_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "760,2180,1040,2320",
+                    "children": [],
+                },
+            ],
+        }
+    ]
+
+    content_candidates, _bottom_strip_candidates, meta = collection_flow._collect_step_candidate_priority_groups(nodes)
+    filtered = collection_flow._filter_content_candidates_for_phase(
+        content_candidates,
+        state=SimpleNamespace(
+            recent_representative_signatures=[],
+            consumed_representative_signatures=set(),
+            consumed_cluster_signatures=set(),
+            consumed_cluster_logical_signatures=set(),
+            visited_logical_signatures=set(),
+            cta_cluster_visited_rids={},
+        ),
+    )
+
+    assert filtered["representative_candidates"][0]["rid"] == "com.example:id/medication_container"
+    assert "Medication" in meta["top_priority_container_candidates"]
+
+
+def test_filter_content_candidates_applies_container_priority_for_repeated_group():
+    candidates = [
+        {
+            "label": "Row one",
+            "rid": "row_one",
+            "bounds": "40,300,1040,480",
+            "representative": True,
+            "passive_status": False,
+            "low_value_leaf": False,
+            "top_priority_container": True,
+        },
+        {
+            "label": "Row two",
+            "rid": "row_two",
+            "bounds": "40,520,1040,700",
+            "representative": True,
+            "passive_status": False,
+            "low_value_leaf": False,
+            "top_priority_container": True,
+        },
+        {
+            "label": "Detail description remains lower priority",
+            "rid": "detail_text",
+            "bounds": "80,740,980,840",
+            "representative": True,
+            "passive_status": False,
+            "low_value_leaf": False,
+        },
+    ]
+
+    filtered = collection_flow._filter_content_candidates_for_phase(
+        candidates,
+        state=SimpleNamespace(
+            recent_representative_signatures=[],
+            consumed_representative_signatures=set(),
+            consumed_cluster_signatures=set(),
+            consumed_cluster_logical_signatures=set(),
+            visited_logical_signatures=set(),
+            cta_cluster_visited_rids={},
+        ),
+    )
+
+    assert filtered["container_priority_applied"] is True
+    assert [candidate["rid"] for candidate in filtered["representative_candidates"]] == ["row_one", "row_two"]
+
+
+def test_filter_content_candidates_orders_active_container_group_only(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    candidates = [
+        {
+            "label": "Event",
+            "rid": "event",
+            "bounds": "40,740,1040,920",
+            "score": 100,
+            "representative": True,
+            "passive_status": False,
+            "low_value_leaf": False,
+            "top_priority_container": True,
+        },
+        {
+            "label": "Hospital",
+            "rid": "hospital",
+            "bounds": "40,520,1040,700",
+            "score": 100,
+            "representative": True,
+            "passive_status": False,
+            "low_value_leaf": False,
+            "top_priority_container": True,
+        },
+        {
+            "label": "Medication",
+            "rid": "medication",
+            "bounds": "40,300,1040,480",
+            "score": 100,
+            "representative": True,
+            "passive_status": False,
+            "low_value_leaf": False,
+            "top_priority_container": True,
+        },
+    ]
+
+    filtered = collection_flow._filter_content_candidates_for_phase(
+        candidates,
+        state=SimpleNamespace(
+            recent_representative_signatures=[],
+            consumed_representative_signatures=set(),
+            consumed_cluster_signatures=set(),
+            consumed_cluster_logical_signatures=set(),
+            visited_logical_signatures=set(),
+            cta_cluster_visited_rids={},
+        ),
+    )
+
+    assert [candidate["rid"] for candidate in filtered["representative_candidates"]] == [
+        "medication",
+        "hospital",
+        "event",
+    ]
+    assert any("[STEP][container_group_visual_order]" in line and "ordered='Medication|Hospital|Event'" in line for line in logs)
+
+
+def test_filter_content_candidates_does_not_visual_sort_different_scores():
+    candidates = [
+        {
+            "label": "Lower visual",
+            "rid": "lower_visual",
+            "bounds": "40,740,1040,920",
+            "score": 200,
+            "representative": True,
+            "passive_status": False,
+            "low_value_leaf": False,
+        },
+        {
+            "label": "Higher visual",
+            "rid": "higher_visual",
+            "bounds": "40,300,1040,480",
+            "score": 100,
+            "representative": True,
+            "passive_status": False,
+            "low_value_leaf": False,
+        },
+    ]
+
+    filtered = collection_flow._filter_content_candidates_for_phase(
+        candidates,
+        state=SimpleNamespace(
+            recent_representative_signatures=[],
+            consumed_representative_signatures=set(),
+            consumed_cluster_signatures=set(),
+            consumed_cluster_logical_signatures=set(),
+            visited_logical_signatures=set(),
+            cta_cluster_visited_rids={},
+        ),
+    )
+
+    assert [candidate["rid"] for candidate in filtered["representative_candidates"]] == [
+        "lower_visual",
+        "higher_visual",
+    ]
+
+
+def test_filter_content_candidates_keeps_mixed_candidates_for_single_container():
+    candidates = [
+        {
+            "label": "Single action",
+            "rid": "single_container",
+            "bounds": "40,300,1040,500",
+            "representative": True,
+            "passive_status": False,
+            "low_value_leaf": False,
+            "top_priority_container": True,
+        },
+        {
+            "label": "Detailed explanatory text",
+            "rid": "detail_text",
+            "bounds": "80,540,980,700",
+            "representative": True,
+            "passive_status": False,
+            "low_value_leaf": False,
+        },
+    ]
+
+    filtered = collection_flow._filter_content_candidates_for_phase(
+        candidates,
+        state=SimpleNamespace(
+            recent_representative_signatures=[],
+            consumed_representative_signatures=set(),
+            consumed_cluster_signatures=set(),
+            consumed_cluster_logical_signatures=set(),
+            visited_logical_signatures=set(),
+            cta_cluster_visited_rids={},
+        ),
+    )
+
+    assert filtered["container_priority_applied"] is False
+    assert {candidate["rid"] for candidate in filtered["representative_candidates"]} == {
+        "single_container",
+        "detail_text",
+    }
+
+
+def test_filter_content_candidates_keeps_container_priority_for_active_group_single_remaining():
+    remaining_container = {
+        "label": "Remaining row",
+        "rid": "remaining_container",
+        "bounds": "40,520,1040,700",
+        "representative": True,
+        "passive_status": False,
+        "low_value_leaf": False,
+        "top_priority_container": True,
+    }
+    remaining_signature = collection_flow._candidate_object_signature(remaining_container)
+    candidates = [
+        remaining_container,
+        {
+            "label": "Detail text should not re-enter while group active",
+            "rid": "detail_text",
+            "bounds": "80,740,980,840",
+            "representative": True,
+            "passive_status": False,
+            "low_value_leaf": False,
+        },
+    ]
+
+    filtered = collection_flow._filter_content_candidates_for_phase(
+        candidates,
+        state=SimpleNamespace(
+            recent_representative_signatures=[],
+            consumed_representative_signatures=set(),
+            consumed_cluster_signatures=set(),
+            consumed_cluster_logical_signatures=set(),
+            visited_logical_signatures=set(),
+            cta_cluster_visited_rids={},
+            active_container_group_remaining={remaining_signature},
+            active_container_group_labels={remaining_signature: "Remaining row"},
+            active_container_group_signature="tabs",
+        ),
+    )
+
+    assert filtered["container_priority_applied"] is True
+    assert filtered["container_priority_reason"] == "active_group"
+    assert [candidate["rid"] for candidate in filtered["representative_candidates"]] == ["remaining_container"]
+
+
+def test_record_recent_representative_signature_updates_active_container_group(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    consumed_signature = collection_flow._build_candidate_object_signature(
+        rid="row_one",
+        bounds="40,300,1040,480",
+        label="Row one",
+    )
+    remaining_signature = collection_flow._build_candidate_object_signature(
+        rid="row_two",
+        bounds="40,520,1040,700",
+        label="Row two",
+    )
+    state = SimpleNamespace(
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        visited_logical_signatures=set(),
+        consumed_cluster_signatures=set(),
+        consumed_cluster_logical_signatures=set(),
+        active_container_group_remaining={consumed_signature, remaining_signature},
+        active_container_group_labels={
+            consumed_signature: "Row one",
+            remaining_signature: "Row two",
+        },
+        active_container_group_signature="tabs",
+    )
+
+    collection_flow._record_recent_representative_signature(
+        state,
+        {
+            "focus_view_id": "row_one",
+            "focus_bounds": "40,300,1040,480",
+            "visible_label": "Row one",
+            "move_result": "moved",
+        },
+    )
+
+    assert state.active_container_group_remaining == {remaining_signature}
+    assert any("[STEP][container_group_progress]" in line and "Row two" in line for line in logs)
+
+
+def test_filter_content_candidates_skips_completed_container_group(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    containers = [
+        {
+            "label": "Row one",
+            "rid": "row_one",
+            "bounds": "40,300,1040,480",
+            "representative": True,
+            "passive_status": False,
+            "low_value_leaf": False,
+            "top_priority_container": True,
+        },
+        {
+            "label": "Row two",
+            "rid": "row_two",
+            "bounds": "40,520,1040,700",
+            "representative": True,
+            "passive_status": False,
+            "low_value_leaf": False,
+            "top_priority_container": True,
+        },
+    ]
+    group_signature = collection_flow._container_group_signature(containers)
+    candidates = [
+        *containers,
+        {
+            "label": "Other content",
+            "rid": "other_content",
+            "bounds": "80,760,980,900",
+            "representative": True,
+            "passive_status": False,
+            "low_value_leaf": False,
+        },
+    ]
+
+    filtered = collection_flow._filter_content_candidates_for_phase(
+        candidates,
+        state=SimpleNamespace(
+            recent_representative_signatures=[],
+            consumed_representative_signatures=set(),
+            consumed_cluster_signatures=set(),
+            consumed_cluster_logical_signatures=set(),
+            visited_logical_signatures=set(),
+            cta_cluster_visited_rids={},
+            active_container_group_remaining=set(),
+            active_container_group_labels={},
+            active_container_group_signature="",
+            completed_container_groups={group_signature},
+        ),
+    )
+
+    assert [candidate["rid"] for candidate in filtered["representative_candidates"]] == ["other_content"]
+    assert len(filtered["completed_container_rejected"]) == 2
+    assert any("[STEP][container_group_skip]" in line and "group_already_consumed" in line for line in logs)
 
 
 def test_filter_content_candidates_for_phase_excludes_consumed_cluster():

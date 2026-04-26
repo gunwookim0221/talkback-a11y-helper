@@ -71,7 +71,7 @@ COLLECTION_FLOW_PRE_NAV_FAILURE_CAPTURE_VERSION = "pr16-life-air-care-failure-ca
 COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr67-special-state-grace-home-like-strict-v1"
 COLLECTION_FLOW_REPEAT_CTA_GRACE_VERSION = "pr78-repeat-cta-focus-align-v1"
 COLLECTION_FLOW_SCROLL_READY_VERSION = "pr79-scroll-ready-move-smart-v1"
-COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION = "pr84-consumed-cluster-early-skip-v1"
+COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION = "pr108-local-tab-last-selected-hint-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
 COLLECTION_FLOW_LIFE_RESET_VERSION = "pr61-life-reset-strict-global-nav-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
@@ -94,6 +94,7 @@ _STRONG_ONBOARDING_TOKENS = (
 _HOME_LIKE_TOKENS = ("profile", "view profile", "member", "family member", "me")
 SCROLLTOUCH_DEBUG_CAPTURE_ENABLED = False
 SCROLLTOUCH_DEBUG_VERBOSE_LOG_ENABLED = False
+LOCAL_TAB_ACTIVE_TTL_STEPS = 3
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _HOME_TAB_RESOURCE_ID = "com.samsung.android.oneconnect:id/menu_favorites"
@@ -172,16 +173,39 @@ class MainLoopState:
     visited_logical_signatures: set[str]
     consumed_cluster_logical_signatures: set[str]
     recent_focus_realign_signatures: set[str]
+    failed_focus_realign_signatures: set[str]
     consumed_cluster_signatures: set[str]
     recent_focus_realign_clusters: set[str]
     cluster_title_fallback_applied: set[str]
     recent_scroll_fallback_signatures: set[str]
+    last_scroll_fallback_attempted_signatures: set[str]
     scroll_ready_retry_counts: dict[str, int]
     pending_scroll_ready_cluster_signature: str
     current_local_tab_signature: str
     current_local_tab_active_rid: str
     local_tab_candidates_by_signature: dict[str, list[dict[str, Any]]]
     visited_local_tabs_by_signature: dict[str, set[str]]
+    pending_local_tab_signature: str
+    pending_local_tab_rid: str
+    pending_local_tab_label: str
+    pending_local_tab_bounds: str
+    pending_local_tab_age: int
+    current_local_tab_active_label: str
+    current_local_tab_active_age: int
+    forced_local_tab_target_signature: str
+    forced_local_tab_target_rid: str
+    forced_local_tab_target_label: str
+    forced_local_tab_target_bounds: str
+    forced_local_tab_attempt_count: int
+    content_phase_grace_steps: int
+    active_container_group_signature: str
+    active_container_group_remaining: set[str]
+    active_container_group_labels: dict[str, str]
+    completed_container_groups: set[str]
+    last_selected_local_tab_signature: str
+    last_selected_local_tab_rid: str
+    last_selected_local_tab_label: str
+    last_selected_local_tab_bounds: str
 
 
 @dataclass
@@ -7579,6 +7603,75 @@ def _record_recent_representative_signature(state: MainLoopState, row: dict[str,
     if cluster_logical_signature:
         consumed_cluster_logical.add(cluster_logical_signature)
         state.consumed_cluster_logical_signatures = consumed_cluster_logical
+    _record_active_container_group_progress(state, signature)
+
+
+def _clear_active_container_group(state: Any, *, reason: str) -> None:
+    active_signature = str(getattr(state, "active_container_group_signature", "") or "").strip()
+    remaining = set(getattr(state, "active_container_group_remaining", set()) or set())
+    if remaining:
+        log(f"[STEP][container_group_end] reason='{reason}'")
+    if reason == "consumed" and active_signature:
+        completed = set(getattr(state, "completed_container_groups", set()) or set())
+        completed.add(active_signature)
+        state.completed_container_groups = completed
+    state.active_container_group_signature = ""
+    state.active_container_group_remaining = set()
+    state.active_container_group_labels = {}
+
+
+def _record_active_container_group_progress(state: Any, consumed_signature: str) -> None:
+    if not consumed_signature:
+        return
+    remaining = set(getattr(state, "active_container_group_remaining", set()) or set())
+    if consumed_signature not in remaining:
+        return
+    remaining.remove(consumed_signature)
+    labels = dict(getattr(state, "active_container_group_labels", {}) or {})
+    state.active_container_group_remaining = remaining
+    remaining_labels = [labels.get(signature, signature) for signature in remaining]
+    if remaining:
+        log(
+            f"[STEP][container_group_progress] "
+            f"remaining='{_truncate_debug_text('|'.join(remaining_labels), 120)}'"
+        )
+    else:
+        _clear_active_container_group(state, reason="consumed")
+
+
+def _clear_last_selected_local_tab_hint(state: Any, *, reason: str) -> None:
+    active = _local_tab_state_display(
+        rid=str(getattr(state, "last_selected_local_tab_rid", "") or ""),
+        label=str(getattr(state, "last_selected_local_tab_label", "") or ""),
+    )
+    if active:
+        log(
+            f"[STEP][local_tab_hint_clear] active='{_truncate_debug_text(active, 96)}' "
+            f"reason='{reason}'"
+        )
+    state.last_selected_local_tab_signature = ""
+    state.last_selected_local_tab_rid = ""
+    state.last_selected_local_tab_label = ""
+    state.last_selected_local_tab_bounds = ""
+
+
+def _write_last_selected_local_tab_hint(
+    state: Any,
+    *,
+    signature: str,
+    rid: str,
+    label: str,
+    bounds: str,
+    reason: str,
+) -> None:
+    state.last_selected_local_tab_signature = str(signature or "").strip()
+    state.last_selected_local_tab_rid = str(rid or "").strip()
+    state.last_selected_local_tab_label = str(label or "").strip()
+    state.last_selected_local_tab_bounds = str(bounds or "").strip()
+    log(
+        f"[STEP][local_tab_hint_write] selected='{_truncate_debug_text(label or rid, 96)}' "
+        f"reason='{reason}'"
+    )
 
 
 def _candidate_object_signature(candidate: dict[str, Any]) -> str:
@@ -7626,6 +7719,42 @@ def _candidate_cluster_logical_signature(candidate: dict[str, Any]) -> str:
     label = str(candidate.get("cluster_label", "") or candidate.get("label", "") or "").strip()
     logical_label = _normalize_logical_text(label)
     return "||".join([cluster_rid or "none", logical_label or "none"])
+
+
+def _candidate_container_group_visual_order_key(candidate: dict[str, Any]) -> tuple[int, int]:
+    bounds = parse_bounds_str(str(candidate.get("bounds", "") or "").strip())
+    if bounds:
+        return (bounds[1] + bounds[3]) // 2, (bounds[0] + bounds[2]) // 2
+    return int(candidate.get("top", 0) or 0), int(candidate.get("left", 0) or 0)
+
+
+def _sort_active_container_group_candidates(
+    candidates: list[dict[str, Any]],
+    *,
+    state: Any,
+) -> list[dict[str, Any]]:
+    if len(candidates) <= 1:
+        return list(candidates)
+    if not str(getattr(state, "active_container_group_signature", "") or "").strip():
+        return list(candidates)
+    remaining = set(getattr(state, "active_container_group_remaining", set()) or set())
+    if not remaining:
+        return list(candidates)
+    group_candidates = [candidate for candidate in candidates if _candidate_object_signature(candidate) in remaining]
+    if len(group_candidates) <= 1:
+        return list(candidates)
+    if any(not parse_bounds_str(str(candidate.get("bounds", "") or "").strip()) for candidate in group_candidates):
+        return list(candidates)
+    ordered_group = sorted(group_candidates, key=_candidate_container_group_visual_order_key)
+    group_ids = {id(candidate) for candidate in group_candidates}
+    group_iter = iter(ordered_group)
+    ordered = [next(group_iter) if id(candidate) in group_ids else candidate for candidate in candidates]
+    log(
+        f"[STEP][container_group_visual_order] "
+        f"remaining='{_truncate_debug_text(_summarize_candidate_labels(group_candidates), 120)}' "
+        f"ordered='{_truncate_debug_text(_summarize_candidate_labels(ordered_group), 120)}'"
+    )
+    return ordered
 
 
 def _row_logical_signature(row: dict[str, Any]) -> str:
@@ -7759,6 +7888,36 @@ def _representative_focus_matches(
     return right > left and bottom > top
 
 
+def _focus_anchor_match_reason(
+    *,
+    row: dict[str, Any],
+    selected_rid: str,
+    selected_label: str,
+    selected_bounds: str,
+    selected_cluster_signature: str,
+) -> tuple[bool, str]:
+    current_rid = str(row.get("focus_view_id", "") or "").strip()
+    current_label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
+    current_bounds = str(row.get("focus_bounds", "") or "").strip()
+    current_cluster_signature = str(row.get("focus_cluster_signature", "") or "").strip()
+    if current_rid and selected_rid and current_rid == selected_rid:
+        return True, "resource_id_match"
+    normalized_current = _normalize_logical_text(current_label)
+    normalized_selected = _normalize_logical_text(selected_label)
+    if normalized_current and normalized_selected and normalized_current == normalized_selected:
+        return True, "normalized_label_match"
+    if current_bounds and selected_bounds and _representative_focus_matches(
+        focus_node={"boundsInScreen": current_bounds},
+        target_rid="",
+        target_label="",
+        target_bounds=selected_bounds,
+    ):
+        return True, "bounds_overlap"
+    if current_cluster_signature and selected_cluster_signature and current_cluster_signature == selected_cluster_signature:
+        return True, "cluster_signature_match"
+    return False, "representative_focus_mismatch"
+
+
 def _maybe_realign_focus_to_representative(
     *,
     row: dict[str, Any],
@@ -7771,6 +7930,8 @@ def _maybe_realign_focus_to_representative(
     scenario_id: str,
     step_idx: int,
     mismatch_logged: bool = False,
+    force_reason: str = "",
+    scenario_perf: ScenarioPerfStats | None = None,
 ) -> tuple[bool, str, dict[str, Any] | None]:
     current_rid = str(row.get("focus_view_id", "") or "").strip()
     current_label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
@@ -7811,6 +7972,13 @@ def _maybe_realign_focus_to_representative(
         attempts.append(("label", "a", selected_label))
     attempts = attempts[:2]
     for attempt_index, (method, target_type, target_value) in enumerate(attempts, start=1):
+        if force_reason:
+            if scenario_perf is not None:
+                scenario_perf.realign_attempt_count += 1
+            log(
+                f"[STEP][focus_force_realign] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
+                f"method='{method}' reason='{force_reason}'"
+            )
         log(
             f"[STEP][focus_realign] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
             f"method='{method}' attempt={attempt_index}"
@@ -7836,11 +8004,23 @@ def _maybe_realign_focus_to_representative(
                 f"[STEP][focus_realign_success] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
                 f"resolved_focus='{_truncate_debug_text(resolved_focus, 96)}'"
             )
+            if force_reason:
+                if scenario_perf is not None:
+                    scenario_perf.realign_success_count += 1
+                log(
+                    f"[STEP][focus_force_realign_success] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
+                    f"resolved_focus='{_truncate_debug_text(resolved_focus, 96)}'"
+                )
             return True, "matched", focus_node if isinstance(focus_node, dict) else selected_node
     log(
         f"[STEP][focus_realign_fail] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
         "reason='no_match'"
     )
+    if force_reason:
+        log(
+            f"[STEP][focus_force_realign_fail] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
+            "reason='no_match'"
+        )
     return False, "no_match", None
 
 
@@ -7911,6 +8091,70 @@ def _filter_content_candidates_for_phase(
         if _candidate_object_signature(candidate) not in consumed_signatures
         and str(candidate.get("rid", "") or "").strip().lower() not in consumed_cta_rids
     ]
+    top_priority_candidates = [candidate for candidate in selection_candidates if bool(candidate.get("top_priority_container", False))]
+    completed_groups = set(getattr(state, "completed_container_groups", set()) or set())
+    completed_container_candidates: list[dict[str, Any]] = []
+    candidate_group_signature = _container_group_signature(top_priority_candidates)
+    if candidate_group_signature and candidate_group_signature in completed_groups:
+        completed_container_candidates = list(top_priority_candidates)
+        completed_ids = {id(candidate) for candidate in completed_container_candidates}
+        selection_candidates = [candidate for candidate in selection_candidates if id(candidate) not in completed_ids]
+        top_priority_candidates = []
+        for candidate in completed_container_candidates[:5]:
+            log(
+                f"[STEP][container_group_skip] label='{_truncate_debug_text(str(candidate.get('label', '') or candidate.get('rid', '') or ''), 96)}' "
+                "reason='group_already_consumed'"
+            )
+    active_remaining = set(getattr(state, "active_container_group_remaining", set()) or set())
+    active_priority_candidates = [
+        candidate for candidate in top_priority_candidates if _candidate_object_signature(candidate) in active_remaining
+    ]
+    if active_remaining and active_priority_candidates:
+        top_priority_candidates = _sort_active_container_group_candidates(active_priority_candidates, state=state)
+        container_priority_applied, container_priority_reason = True, "active_group"
+    elif active_remaining and not active_priority_candidates:
+        _clear_active_container_group(state, reason="signature_mismatch")
+        container_priority_applied, container_priority_reason = _should_apply_container_priority_narrowing(
+            top_priority_candidates,
+            selection_candidates,
+        )
+    else:
+        container_priority_applied, container_priority_reason = _should_apply_container_priority_narrowing(
+            top_priority_candidates,
+            selection_candidates,
+        )
+    if container_priority_applied and container_priority_reason == "repeated_container_group":
+        group_signatures = {_candidate_object_signature(candidate) for candidate in top_priority_candidates}
+        candidate_group_signature = _container_group_signature(top_priority_candidates)
+        if candidate_group_signature and candidate_group_signature in completed_groups:
+            container_priority_applied = False
+            container_priority_reason = "group_already_consumed"
+            log("[STEP][container_group_start_skip] reason='already_consumed'")
+        else:
+            state.active_container_group_signature = candidate_group_signature or (str(getattr(state, "current_local_tab_signature", "") or "content").strip() or "content")
+            state.active_container_group_remaining = set(group_signatures)
+            state.active_container_group_labels = {
+                _candidate_object_signature(candidate): str(candidate.get("label", "") or candidate.get("rid", "") or "").strip()
+                for candidate in top_priority_candidates
+            }
+            top_priority_candidates = _sort_active_container_group_candidates(top_priority_candidates, state=state)
+            log(
+                f"[STEP][container_group_start] "
+                f"candidates='{_truncate_debug_text(_summarize_candidate_labels(top_priority_candidates), 120)}'"
+            )
+    if container_priority_applied:
+        selection_candidates = top_priority_candidates
+        log(
+            f"[STEP][container_priority_applied] "
+            f"candidates='{_truncate_debug_text(_summarize_candidate_labels(top_priority_candidates), 120)}' "
+            f"reason='{container_priority_reason}'"
+        )
+    elif top_priority_candidates:
+        log(
+            f"[STEP][container_priority_skip] "
+            f"candidates='{_truncate_debug_text(_summarize_candidate_labels(top_priority_candidates), 120)}' "
+            f"reason='{container_priority_reason}'"
+        )
     representative_candidates = [candidate for candidate in selection_candidates if bool(candidate.get("representative", False))]
     exhausted_candidates = list(representative_candidates)
     return {
@@ -7923,10 +8167,50 @@ def _filter_content_candidates_for_phase(
         "revisit_rejected": revisit_rejected,
         "cluster_consumed_rejected": cluster_consumed_rejected,
         "consumed_rejected": consumed_rejected,
+        "completed_container_rejected": completed_container_candidates,
         "selection_candidates": selection_candidates,
         "representative_candidates": representative_candidates,
         "exhaustion_candidates": exhausted_candidates,
+        "container_priority_applied": container_priority_applied,
+        "container_priority_reason": container_priority_reason,
     }
+
+
+def _should_apply_container_priority_narrowing(
+    container_candidates: list[dict[str, Any]],
+    all_candidates: list[dict[str, Any]],
+) -> tuple[bool, str]:
+    if not container_candidates:
+        return False, "no_container_candidates"
+    if len(container_candidates) < 2:
+        return False, "single_container_keep_mixed_candidates"
+    bounds_list = [
+        parse_bounds_str(str(candidate.get("bounds", "") or "").strip())
+        for candidate in container_candidates
+    ]
+    bounds_list = [bounds for bounds in bounds_list if bounds]
+    if len(bounds_list) < 2:
+        return True, "repeated_container_group"
+    widths = [bounds[2] - bounds[0] for bounds in bounds_list]
+    heights = [bounds[3] - bounds[1] for bounds in bounds_list]
+    tops = sorted(bounds[1] for bounds in bounds_list)
+    width_similar = max(widths) - min(widths) <= max(180, int(max(widths) * 0.35))
+    height_similar = max(heights) - min(heights) <= max(120, int(max(heights) * 0.45))
+    vertical_repeated = len(set(tops)) >= 2
+    if width_similar and height_similar and vertical_repeated:
+        return True, "repeated_container_group"
+    if len(container_candidates) >= 3 and vertical_repeated:
+        return True, "repeated_container_group"
+    return False, "container_group_not_repeated"
+
+
+def _container_group_signature(container_candidates: list[dict[str, Any]]) -> str:
+    signatures = sorted(
+        signature
+        for signature in (_candidate_object_signature(candidate) for candidate in container_candidates)
+        if signature
+    )
+    return "container_group:" + "##".join(signatures) if signatures else ""
 
 
 def _build_scroll_fallback_signature(
@@ -8129,6 +8413,769 @@ def _select_active_local_tab_candidate(
         if row_label and candidate_label and row_label == candidate_label:
             return candidate
     return tab_candidates[0] if tab_candidates else None
+
+
+def _sort_local_tab_candidates_left_to_right(tab_candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    indexed_candidates = list(enumerate(tab_candidates))
+
+    def sort_key(item: tuple[int, dict[str, Any]]) -> tuple[int, int, str]:
+        index, candidate = item
+        left = candidate.get("left", None)
+        if left is None:
+            node = candidate.get("node", {})
+            if isinstance(node, dict):
+                bounds = parse_bounds_str(str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip())
+                if bounds:
+                    left = bounds[0]
+        try:
+            left_value = int(left)
+        except Exception:
+            left_value = index * 10000
+        return (left_value, index, str(candidate.get("label", "") or candidate.get("rid", "") or ""))
+
+    return [candidate for _, candidate in sorted(indexed_candidates, key=sort_key)]
+
+
+def _local_tab_state_display(*, rid: str = "", label: str = "") -> str:
+    return str(label or rid or "").strip()
+
+
+def _local_tab_candidate_matches_identity(
+    candidate: dict[str, Any],
+    *,
+    rid: str,
+    label: str,
+    bounds: str = "",
+) -> tuple[bool, str]:
+    candidate_rid = str(candidate.get("rid", "") or "").strip().lower()
+    candidate_label = str(candidate.get("label", "") or "").strip()
+    normalized_candidate_label = _normalize_logical_text(candidate_label)
+    normalized_label = _normalize_logical_text(label)
+    rid = str(rid or "").strip().lower()
+    if candidate_rid and rid and candidate_rid == rid:
+        return True, "rid"
+    compact_candidate_rid = re.sub(r"[^a-z0-9]+", "", candidate_rid)
+    compact_rid = re.sub(r"[^a-z0-9]+", "", rid)
+    if compact_candidate_rid and compact_rid and (compact_candidate_rid in compact_rid or compact_rid in compact_candidate_rid):
+        return True, "rid"
+    if normalized_candidate_label and normalized_label and normalized_candidate_label == normalized_label:
+        return True, "label"
+    if normalized_candidate_label and normalized_label and (
+        normalized_candidate_label in normalized_label
+        or normalized_label in normalized_candidate_label
+    ):
+        return True, "label_contains"
+    candidate_bounds = str(candidate.get("bounds", "") or "").strip()
+    if not candidate_bounds:
+        node = candidate.get("node", {})
+        if isinstance(node, dict):
+            candidate_bounds = str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip()
+    if candidate_bounds and bounds and _representative_focus_matches(
+        focus_node={"boundsInScreen": bounds},
+        target_rid="",
+        target_label="",
+        target_bounds=candidate_bounds,
+    ):
+        return True, "bounds"
+    return False, "none"
+
+
+def _resolve_active_local_tab_candidate_for_progression(
+    *,
+    state: MainLoopState,
+    sorted_tab_candidates: list[dict[str, Any]],
+    row: dict[str, Any],
+    previous_row: dict[str, Any],
+) -> tuple[dict[str, Any] | None, str, str]:
+    active_rid = str(getattr(state, "current_local_tab_active_rid", "") or "").strip()
+    active_label = str(getattr(state, "current_local_tab_active_label", "") or "").strip()
+    committed_active_age = int(getattr(state, "current_local_tab_active_age", 0) or 0)
+    pending_rid = str(getattr(state, "pending_local_tab_rid", "") or "").strip()
+    pending_label = str(getattr(state, "pending_local_tab_label", "") or "").strip()
+    if len(sorted_tab_candidates) >= 2:
+        log(
+            f"[STEP][local_tab_active_state] committed='{_truncate_debug_text(_local_tab_state_display(rid=active_rid, label=active_label), 96)}' "
+            f"committed_age={committed_active_age} "
+            f"pending='{_truncate_debug_text(_local_tab_state_display(rid=pending_rid, label=pending_label), 96)}' "
+            f"pending_age={int(getattr(state, 'pending_local_tab_age', 0) or 0)} "
+            f"ttl={LOCAL_TAB_ACTIVE_TTL_STEPS} "
+            f"candidate_order='{_truncate_debug_text(_summarize_candidate_labels(sorted_tab_candidates), 120)}'"
+        )
+    if (active_rid or active_label) and committed_active_age <= LOCAL_TAB_ACTIVE_TTL_STEPS:
+        for candidate in sorted_tab_candidates:
+            matched, _ = _local_tab_candidate_matches_identity(candidate, rid=active_rid, label=active_label)
+            if matched:
+                resolved_label = str(candidate.get("label", "") or candidate.get("rid", "") or active_label or active_rid).strip()
+                log(
+                    f"[STEP][local_tab_active_override] active='{_truncate_debug_text(resolved_label, 96)}' "
+                    "reason='committed_state_used_for_progression'"
+                )
+                log(
+                    f"[STEP][local_tab_active_keep] active='{_truncate_debug_text(resolved_label, 96)}' "
+                    f"age={committed_active_age} reason='within_committed_ttl'"
+                )
+                state.current_local_tab_active_age = committed_active_age + 1
+                return candidate, "committed", resolved_label
+        log(
+            f"[STEP][local_tab_active_resolve_fail] committed='{_truncate_debug_text(active_label or active_rid, 96)}' "
+            "reason='not_found_in_sorted_candidates'"
+        )
+    elif active_rid or active_label:
+        log(
+            f"[STEP][local_tab_state_clear] target='committed' "
+            f"active_before='{_truncate_debug_text(_local_tab_state_display(rid=active_rid, label=active_label), 96)}' "
+            f"pending_before='{_truncate_debug_text(_local_tab_state_display(rid=pending_rid, label=pending_label), 96)}' "
+            "reason='ttl_expired' caller='_resolve_active_local_tab_candidate_for_progression'"
+        )
+        log(
+            f"[STEP][local_tab_active_clear] active='{_truncate_debug_text(active_label or active_rid, 96)}' "
+            "reason='ttl_expired'"
+        )
+        state.current_local_tab_active_rid = ""
+        state.current_local_tab_active_label = ""
+        state.current_local_tab_active_age = 0
+    hint_signature = str(getattr(state, "last_selected_local_tab_signature", "") or "").strip()
+    hint_rid = str(getattr(state, "last_selected_local_tab_rid", "") or "").strip()
+    hint_label = str(getattr(state, "last_selected_local_tab_label", "") or "").strip()
+    hint_bounds = str(getattr(state, "last_selected_local_tab_bounds", "") or "").strip()
+    current_signature = str(getattr(state, "current_local_tab_signature", "") or "").strip()
+    if hint_rid or hint_label:
+        if hint_signature and current_signature and hint_signature != current_signature:
+            _clear_last_selected_local_tab_hint(state, reason="candidate_set_changed")
+        else:
+            for candidate in sorted_tab_candidates:
+                matched, _ = _local_tab_candidate_matches_identity(
+                    candidate,
+                    rid=hint_rid,
+                    label=hint_label,
+                    bounds=hint_bounds,
+                )
+                if matched:
+                    resolved_label = str(candidate.get("label", "") or candidate.get("rid", "") or hint_label or hint_rid).strip()
+                    return candidate, "last_selected_hint", resolved_label
+            _clear_last_selected_local_tab_hint(state, reason="hint_not_in_candidates")
+    row_candidate = _select_active_local_tab_candidate(tab_candidates=sorted_tab_candidates, row=row)
+    if isinstance(row_candidate, dict):
+        return row_candidate, "current_row", str(row_candidate.get("label", "") or row_candidate.get("rid", "") or "").strip()
+    if isinstance(previous_row, dict):
+        previous_candidate = _select_active_local_tab_candidate(tab_candidates=sorted_tab_candidates, row=previous_row)
+        if isinstance(previous_candidate, dict):
+            return previous_candidate, "previous_row", str(previous_candidate.get("label", "") or previous_candidate.get("rid", "") or "").strip()
+    if sorted_tab_candidates:
+        return sorted_tab_candidates[0], "fallback", str(sorted_tab_candidates[0].get("label", "") or sorted_tab_candidates[0].get("rid", "") or "").strip()
+    return None, "none", ""
+
+
+def _recover_local_tab_state_from_bottom_strip(
+    *,
+    state: MainLoopState,
+    row: dict[str, Any],
+    previous_row: dict[str, Any],
+    bottom_strip_candidates: list[dict[str, Any]],
+    reason: str,
+) -> tuple[str, list[dict[str, Any]]]:
+    if not bottom_strip_candidates:
+        log("[STEP][local_tab_recover_fail] reason='no_horizontal_strip_candidates'")
+        return "", []
+    sorted_candidates = _sort_local_tab_candidates_left_to_right(bottom_strip_candidates)
+    local_tab_signature = _build_local_tab_strip_signature(sorted_candidates)
+    if not local_tab_signature:
+        log("[STEP][local_tab_recover_fail] reason='missing_signature'")
+        return "", []
+    active_candidate = _select_active_local_tab_candidate(tab_candidates=sorted_candidates, row=row)
+    if (
+        isinstance(active_candidate, dict)
+        and sorted_candidates
+        and active_candidate == sorted_candidates[0]
+        and isinstance(previous_row, dict)
+        and (str(previous_row.get("focus_view_id", "") or "") or str(previous_row.get("visible_label", "") or ""))
+    ):
+        previous_active = _select_active_local_tab_candidate(tab_candidates=sorted_candidates, row=previous_row)
+        if isinstance(previous_active, dict):
+            active_candidate = previous_active
+    active_rid = str(active_candidate.get("rid", "") or "").strip() if isinstance(active_candidate, dict) else ""
+    active_label = str(active_candidate.get("label", "") or "").strip() if isinstance(active_candidate, dict) else ""
+    state.current_local_tab_signature = local_tab_signature
+    state.local_tab_candidates_by_signature[local_tab_signature] = list(sorted_candidates)
+    if active_rid:
+        active_before = _local_tab_state_display(
+            rid=str(getattr(state, "current_local_tab_active_rid", "") or ""),
+            label=str(getattr(state, "current_local_tab_active_label", "") or ""),
+        )
+        pending_before = _local_tab_state_display(
+            rid=str(getattr(state, "pending_local_tab_rid", "") or ""),
+            label=str(getattr(state, "pending_local_tab_label", "") or ""),
+        )
+        if active_before and active_before != (active_label or active_rid):
+            log(
+                f"[STEP][local_tab_state_clear] target='committed' "
+                f"active_before='{_truncate_debug_text(active_before, 96)}' "
+                f"pending_before='{_truncate_debug_text(pending_before, 96)}' "
+                "reason='state_recovery' caller='_recover_local_tab_state_from_bottom_strip'"
+            )
+        state.current_local_tab_active_rid = active_rid
+        state.current_local_tab_active_label = active_label
+        state.current_local_tab_active_age = 0
+        state.visited_local_tabs_by_signature.setdefault(local_tab_signature, set()).add(active_rid)
+    log(
+        f"[STEP][local_tab_recover] reason='{reason}' "
+        f"candidates='{_truncate_debug_text(_summarize_candidate_labels(sorted_candidates), 120)}' "
+        f"active='{_truncate_debug_text(active_label or active_rid, 96)}'"
+    )
+    return local_tab_signature, sorted_candidates
+
+
+def _row_matches_pending_local_tab(
+    row: dict[str, Any],
+    *,
+    pending_rid: str,
+    pending_label: str,
+    pending_bounds: str,
+) -> tuple[bool, str]:
+    row_rid = str(row.get("focus_view_id", "") or "").strip().lower()
+    if row_rid and pending_rid and row_rid == pending_rid.strip().lower():
+        return True, "rid"
+    compact_row_rid = re.sub(r"[^a-z0-9]+", "", row_rid)
+    compact_pending_rid = re.sub(r"[^a-z0-9]+", "", pending_rid.strip().lower())
+    if compact_row_rid and compact_pending_rid and (compact_row_rid in compact_pending_rid or compact_pending_rid in compact_row_rid):
+        return True, "rid"
+    row_label = str(row.get("visible_label", "") or "").strip()
+    row_announcement = str(row.get("merged_announcement", "") or "").strip()
+    combined_label = " ".join(value for value in (row_label, row_announcement) if value).strip()
+    normalized_row_label = _normalize_logical_text(combined_label)
+    normalized_pending_label = _normalize_logical_text(pending_label)
+    if normalized_row_label and normalized_pending_label and normalized_row_label == normalized_pending_label:
+        return True, "label"
+    if normalized_row_label and normalized_pending_label and (
+        normalized_row_label in normalized_pending_label
+        or normalized_pending_label in normalized_row_label
+    ):
+        return True, "label_contains"
+    row_bounds = str(row.get("focus_bounds", "") or "").strip()
+    if row_bounds and pending_bounds and _representative_focus_matches(
+        focus_node={"boundsInScreen": row_bounds},
+        target_rid="",
+        target_label="",
+        target_bounds=pending_bounds,
+    ):
+        return True, "bounds"
+    return False, "none"
+
+
+def _maybe_commit_pending_local_tab_progression(state: MainLoopState, row: dict[str, Any]) -> None:
+    pending_rid = str(getattr(state, "pending_local_tab_rid", "") or "").strip()
+    pending_label = str(getattr(state, "pending_local_tab_label", "") or "").strip()
+    pending_signature = str(getattr(state, "pending_local_tab_signature", "") or "").strip()
+    if not pending_rid and not pending_label:
+        return
+    matched, matched_by = _row_matches_pending_local_tab(
+        row,
+        pending_rid=pending_rid,
+        pending_label=pending_label,
+        pending_bounds=str(getattr(state, "pending_local_tab_bounds", "") or "").strip(),
+    )
+    current_label_for_log = str(row.get("visible_label", "") or row.get("merged_announcement", "") or row.get("focus_view_id", "") or "").strip()
+    current_focus_for_log = str(row.get("focus_view_id", "") or "").strip()
+    log(
+        f"[STEP][local_tab_pending_eval] pending='{_truncate_debug_text(pending_label or pending_rid, 96)}' "
+        f"current_row='{_truncate_debug_text(current_label_for_log, 96)}' "
+        f"current_focus='{_truncate_debug_text(current_focus_for_log, 96)}' "
+        f"age={int(getattr(state, 'pending_local_tab_age', 0) or 0)} "
+        f"matched={str(matched).lower()} matched_by='{matched_by}'"
+    )
+    log(
+        f"[STEP][local_tab_commit_match] pending='{_truncate_debug_text(pending_label or pending_rid, 96)}' "
+        f"current='{_truncate_debug_text(current_label_for_log, 96)}' matched_by='{matched_by}'"
+    )
+    if matched:
+        if pending_signature:
+            state.current_local_tab_signature = pending_signature
+            state.visited_local_tabs_by_signature.setdefault(pending_signature, set()).add(pending_rid)
+        if pending_rid:
+            state.current_local_tab_active_rid = pending_rid
+        state.current_local_tab_active_label = pending_label
+        state.current_local_tab_active_age = 0
+        _write_last_selected_local_tab_hint(
+            state,
+            signature=pending_signature,
+            rid=pending_rid,
+            label=pending_label,
+            bounds=str(getattr(state, "pending_local_tab_bounds", "") or "").strip(),
+            reason="pending_resolved",
+        )
+        log(
+            f"[STEP][local_tab_state_write] kind='committed' "
+            f"active='{_truncate_debug_text(pending_label or pending_rid, 96)}' "
+            "reason='pending_resolved'"
+        )
+        log(
+            f"[STEP][local_tab_commit] active='{_truncate_debug_text(pending_label or pending_rid, 96)}' "
+            "reason='pending_progression_resolved'"
+        )
+        log(
+            f"[STEP][local_tab_state_clear] target='pending' "
+            f"active_before='{_truncate_debug_text(_local_tab_state_display(rid=str(getattr(state, 'current_local_tab_active_rid', '') or ''), label=str(getattr(state, 'current_local_tab_active_label', '') or '')), 96)}' "
+            f"pending_before='{_truncate_debug_text(pending_label or pending_rid, 96)}' "
+            "reason='pending_resolved' caller='_maybe_commit_pending_local_tab_progression'"
+        )
+        state.pending_local_tab_signature = ""
+        state.pending_local_tab_rid = ""
+        state.pending_local_tab_label = ""
+        state.pending_local_tab_bounds = ""
+        state.pending_local_tab_age = 0
+        _clear_forced_local_tab_navigation(state, reason="pending_resolved")
+        return
+    pending_age = int(getattr(state, "pending_local_tab_age", 0) or 0) + 1
+    state.pending_local_tab_age = pending_age
+    if pending_age > 2:
+        log(
+            f"[STEP][local_tab_state_clear] target='pending' "
+            f"active_before='{_truncate_debug_text(_local_tab_state_display(rid=str(getattr(state, 'current_local_tab_active_rid', '') or ''), label=str(getattr(state, 'current_local_tab_active_label', '') or '')), 96)}' "
+            f"pending_before='{_truncate_debug_text(pending_label or pending_rid, 96)}' "
+            "reason='ttl_expired' caller='_maybe_commit_pending_local_tab_progression'"
+        )
+        log(
+            f"[STEP][local_tab_pending_clear] pending='{_truncate_debug_text(pending_label or pending_rid, 96)}' "
+            "reason='expired'"
+        )
+        state.pending_local_tab_signature = ""
+        state.pending_local_tab_rid = ""
+        state.pending_local_tab_label = ""
+        state.pending_local_tab_bounds = ""
+        state.pending_local_tab_age = 0
+    else:
+        log(
+            f"[STEP][local_tab_pending_skip] pending='{_truncate_debug_text(pending_label or pending_rid, 96)}' "
+            f"current='{_truncate_debug_text(current_label_for_log, 96)}' reason='not_yet_resolved'"
+        )
+
+
+def _record_pending_local_tab_progression(
+    *,
+    state: MainLoopState,
+    signature: str,
+    next_candidate: dict[str, Any],
+    reason: str,
+) -> tuple[str, str, str]:
+    target_rid = str(next_candidate.get("rid", "") or "").strip()
+    target_label = str(next_candidate.get("label", "") or "").strip()
+    target_bounds = _format_bounds_for_log(_extract_local_tab_candidate_bounds(next_candidate))
+    if not target_bounds:
+        target_bounds = str(next_candidate.get("bounds", "") or "").strip()
+    if not target_bounds:
+        target_node = next_candidate.get("node", {})
+        if isinstance(target_node, dict):
+            target_bounds = _format_bounds_for_log(_extract_local_tab_candidate_bounds(target_node))
+            if not target_bounds:
+                target_bounds = str(target_node.get("boundsInScreen", "") or target_node.get("bounds", "") or "").strip()
+    if not (target_rid or target_label):
+        return target_rid, target_label, target_bounds
+    state.pending_local_tab_signature = str(signature or "").strip()
+    state.pending_local_tab_rid = target_rid
+    state.pending_local_tab_label = target_label
+    state.pending_local_tab_bounds = target_bounds
+    state.pending_local_tab_age = 0
+    state.forced_local_tab_target_signature = str(signature or "").strip()
+    state.forced_local_tab_target_rid = target_rid
+    state.forced_local_tab_target_label = target_label
+    state.forced_local_tab_target_bounds = target_bounds
+    state.forced_local_tab_attempt_count = 0
+    log(
+        f"[STEP][local_tab_state_write] kind='pending' "
+        f"selected='{_truncate_debug_text(target_label or target_rid, 96)}' "
+        f"signature='{_truncate_debug_text(str(signature or ''), 120)}' "
+        f"rid='{_truncate_debug_text(target_rid, 96)}' "
+        f"label='{_truncate_debug_text(target_label, 96)}' "
+        f"bounds='{_truncate_debug_text(target_bounds, 96)}' "
+        f"reason='{reason}'"
+    )
+    log(
+        f"[STEP][local_tab_force_navigation_set] target='{_truncate_debug_text(target_label or target_rid, 96)}' "
+        "reason='progression_next_tab'"
+    )
+    return target_rid, target_label, target_bounds
+
+
+def _format_bounds_for_log(bounds: tuple[int, int, int, int] | None) -> str:
+    if not bounds:
+        return ""
+    return ",".join(str(part) for part in bounds)
+
+
+def _extract_local_tab_candidate_bounds(candidate: Any) -> tuple[int, int, int, int] | None:
+    if not isinstance(candidate, dict):
+        return parse_bounds_str(candidate)
+    for key in ("focus_bounds", "bounds", "boundsInScreen"):
+        bounds = _parse_local_tab_bounds_value(candidate.get(key))
+        if bounds:
+            return bounds
+    nested_candidate = candidate.get("candidate")
+    if isinstance(nested_candidate, dict):
+        bounds = _extract_local_tab_candidate_bounds(nested_candidate)
+        if bounds:
+            return bounds
+    node = candidate.get("node")
+    if isinstance(node, dict) and node is not candidate:
+        bounds = _extract_local_tab_candidate_bounds(node)
+        if bounds:
+            return bounds
+    return None
+
+
+def _parse_local_tab_bounds_value(value: Any) -> tuple[int, int, int, int] | None:
+    if value is None:
+        return None
+    parsed = parse_bounds_str(value)
+    if parsed:
+        return parsed
+    if isinstance(value, dict):
+        for keys in (("left", "top", "right", "bottom"), ("x1", "y1", "x2", "y2")):
+            try:
+                l, t, r, b = (int(value.get(key)) for key in keys)
+            except Exception:
+                continue
+            if r > l and b > t:
+                return l, t, r, b
+        return None
+    value_text = str(value).strip()
+    if not value_text:
+        return None
+    numbers = [int(part) for part in re.findall(r"-?\d+", value_text)]
+    if len(numbers) >= 4:
+        l, t, r, b = numbers[:4]
+        if r > l and b > t:
+            return l, t, r, b
+    return None
+
+
+def _collect_local_tab_viewport_bounds(client: A11yAdbClient, dev: str, target_bounds: tuple[int, int, int, int]) -> tuple[int, int]:
+    max_right = max(target_bounds[2], 2)
+    max_bottom = max(target_bounds[3], 2)
+    dump_fn = getattr(client, "dump_tree", None)
+    if not callable(dump_fn):
+        return max_right, max_bottom
+    try:
+        nodes = dump_fn(dev=dev)
+    except Exception:
+        nodes = []
+    stack = list(nodes) if isinstance(nodes, list) else []
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, dict):
+            continue
+        bounds = _extract_local_tab_candidate_bounds(node)
+        if bounds:
+            max_right = max(max_right, bounds[2])
+            max_bottom = max(max_bottom, bounds[3])
+        children = node.get("children")
+        if isinstance(children, list):
+            stack.extend(children)
+    return max_right, max_bottom
+
+
+def _tap_local_tab_bounds_center(
+    *,
+    client: A11yAdbClient,
+    dev: str,
+    target: str,
+    target_bounds: tuple[int, int, int, int] | None,
+) -> bool | None:
+    if not target_bounds:
+        log(
+            f"[STEP][local_tab_target_activate_skip] method='tap_bounds_center' "
+            "reason='bounds_missing'"
+        )
+        return None
+    tap_xy_fn = getattr(client, "tap_xy_adb", None)
+    if not callable(tap_xy_fn):
+        log(
+            f"[STEP][local_tab_target_activate_skip] method='tap_bounds_center' "
+            "reason='tap_primitive_missing'"
+        )
+        return None
+    viewport_width, viewport_height = _collect_local_tab_viewport_bounds(client, dev, target_bounds)
+    if viewport_width <= 1 or viewport_height <= 1:
+        log(
+            f"[STEP][local_tab_target_activate_skip] method='tap_bounds_center' "
+            "reason='viewport_unknown'"
+        )
+        return None
+    l, t, r, b = target_bounds
+    center_x = (l + r) // 2
+    center_y = (t + b) // 2
+    tap_x = min(max(center_x, 1), max(viewport_width - 1, 1))
+    tap_y = min(max(center_y, 1), max(viewport_height - 1, 1))
+    log(
+        f"[STEP][local_tab_target_activate] target='{_truncate_debug_text(target, 96)}' "
+        f"method='tap_bounds_center' bounds='{_format_bounds_for_log(target_bounds)}' tap='{tap_x},{tap_y}'"
+    )
+    try:
+        return bool(tap_xy_fn(dev=dev, x=tap_x, y=tap_y))
+    except Exception:
+        return False
+
+
+def _clear_forced_local_tab_navigation(state: MainLoopState, *, reason: str) -> None:
+    target = _local_tab_state_display(
+        rid=str(getattr(state, "forced_local_tab_target_rid", "") or ""),
+        label=str(getattr(state, "forced_local_tab_target_label", "") or ""),
+    )
+    if target:
+        log(
+            f"[STEP][local_tab_force_navigation_clear] target='{_truncate_debug_text(target, 96)}' "
+            f"reason='{reason}'"
+        )
+    state.forced_local_tab_target_signature = ""
+    state.forced_local_tab_target_rid = ""
+    state.forced_local_tab_target_label = ""
+    state.forced_local_tab_target_bounds = ""
+    state.forced_local_tab_attempt_count = 0
+
+
+def _forced_local_tab_target_matches_row(state: MainLoopState, row: dict[str, Any]) -> bool:
+    matched, _ = _row_matches_pending_local_tab(
+        row,
+        pending_rid=str(getattr(state, "forced_local_tab_target_rid", "") or ""),
+        pending_label=str(getattr(state, "forced_local_tab_target_label", "") or ""),
+        pending_bounds=str(getattr(state, "forced_local_tab_target_bounds", "") or ""),
+    )
+    return matched
+
+
+def _reset_content_phase_after_tab_switch(
+    state: MainLoopState,
+    *,
+    active_label: str,
+    active_rid: str,
+    active_signature: str = "",
+    active_bounds: str = "",
+) -> None:
+    def clear_attr(name: str, default: Any) -> None:
+        value = getattr(state, name, None)
+        if hasattr(value, "clear"):
+            value.clear()
+        else:
+            setattr(state, name, default)
+
+    state.fail_count = 0
+    state.same_count = 0
+    state.prev_fingerprint = ("", "", "")
+    state.previous_step_row = {}
+    clear_attr("recent_representative_signatures", deque())
+    clear_attr("consumed_representative_signatures", set())
+    state.visited_logical_signatures = set()
+    clear_attr("recent_focus_realign_signatures", set())
+    clear_attr("failed_focus_realign_signatures", set())
+    state.consumed_cluster_signatures = set()
+    state.consumed_cluster_logical_signatures = set()
+    clear_attr("recent_focus_realign_clusters", set())
+    clear_attr("cluster_title_fallback_applied", set())
+    clear_attr("recent_scroll_fallback_signatures", set())
+    clear_attr("last_scroll_fallback_attempted_signatures", set())
+    _clear_active_container_group(state, reason="local_tab_transition")
+    state.completed_container_groups = set()
+    state.scroll_ready_retry_counts = {}
+    state.pending_scroll_ready_cluster_signature = ""
+    state.content_phase_grace_steps = 2
+    _write_last_selected_local_tab_hint(
+        state,
+        signature=active_signature or str(getattr(state, "current_local_tab_signature", "") or ""),
+        rid=active_rid,
+        label=active_label,
+        bounds=active_bounds,
+        reason="activation_success",
+    )
+    log(
+        f"[STEP][local_tab_content_phase_reset] "
+        f"active='{_truncate_debug_text(active_label or active_rid, 96)}' reason='tab_switch'"
+    )
+    log(
+        f"[STEP][content_phase_grace_start] steps=2 "
+        f"active='{_truncate_debug_text(active_label or active_rid, 96)}'"
+    )
+
+
+def _commit_forced_local_tab_target_success(state: MainLoopState) -> None:
+    target_signature = str(getattr(state, "forced_local_tab_target_signature", "") or "").strip()
+    target_rid = str(getattr(state, "forced_local_tab_target_rid", "") or "").strip()
+    target_label = str(getattr(state, "forced_local_tab_target_label", "") or "").strip()
+    if target_signature and target_rid:
+        state.visited_local_tabs_by_signature.setdefault(target_signature, set()).add(target_rid)
+    if target_signature:
+        state.current_local_tab_signature = target_signature
+    if target_rid:
+        state.current_local_tab_active_rid = target_rid
+    state.current_local_tab_active_label = target_label
+    state.current_local_tab_active_age = 0
+    _reset_content_phase_after_tab_switch(
+        state,
+        active_label=target_label,
+        active_rid=target_rid,
+        active_signature=target_signature,
+        active_bounds=str(getattr(state, "forced_local_tab_target_bounds", "") or "").strip(),
+    )
+    state.pending_local_tab_signature = ""
+    state.pending_local_tab_rid = ""
+    state.pending_local_tab_label = ""
+    state.pending_local_tab_bounds = ""
+    state.pending_local_tab_age = 0
+    log(
+        f"[STEP][local_tab_commit] active='{_truncate_debug_text(target_label or target_rid, 96)}' "
+        "reason='target_activation_success'"
+    )
+
+
+def _activate_forced_local_tab_target(
+    *,
+    client: A11yAdbClient,
+    dev: str,
+    state: MainLoopState,
+    step_idx: int,
+    wait_seconds: float,
+    announcement_wait_seconds: float,
+    announcement_idle_wait_seconds: float,
+    announcement_max_extra_wait_seconds: float,
+) -> dict[str, Any] | None:
+    target = _local_tab_state_display(
+        rid=str(getattr(state, "forced_local_tab_target_rid", "") or ""),
+        label=str(getattr(state, "forced_local_tab_target_label", "") or ""),
+    )
+    target_rid = str(getattr(state, "forced_local_tab_target_rid", "") or "").strip()
+    target_label = str(getattr(state, "forced_local_tab_target_label", "") or "").strip()
+    if not target:
+        return None
+    attempt = int(getattr(state, "forced_local_tab_attempt_count", 0) or 0) + 1
+    if attempt > 2:
+        _clear_forced_local_tab_navigation(state, reason="max_attempts_reached")
+        return None
+    state.forced_local_tab_attempt_count = attempt
+
+    def collect_after_action() -> dict[str, Any]:
+        return client.collect_focus_step(
+            dev=dev,
+            step_index=step_idx,
+            move=False,
+            direction="next",
+            wait_seconds=wait_seconds,
+            announcement_wait_seconds=announcement_wait_seconds,
+            announcement_idle_wait_seconds=announcement_idle_wait_seconds,
+            announcement_max_extra_wait_seconds=announcement_max_extra_wait_seconds,
+        )
+
+    last_row: dict[str, Any] | None = None
+    raw_target_bounds = getattr(state, "forced_local_tab_target_bounds", "") or ""
+    target_bounds = _parse_local_tab_bounds_value(raw_target_bounds)
+    if raw_target_bounds and not target_bounds:
+        log(
+            f"[STEP][local_tab_target_activate_skip] method='tap_bounds_center' "
+            "reason='bounds_parse_failed'"
+        )
+    tap_ok = _tap_local_tab_bounds_center(
+        client=client,
+        dev=dev,
+        target=target,
+        target_bounds=target_bounds,
+    ) if target_bounds else None
+    if tap_ok:
+        last_row = collect_after_action()
+        matched, matched_by = _row_matches_pending_local_tab(
+            last_row,
+            pending_rid=target_rid,
+            pending_label=target_label,
+            pending_bounds=str(getattr(state, "forced_local_tab_target_bounds", "") or ""),
+        )
+        if matched:
+            log(
+                f"[STEP][local_tab_target_activate_success] target='{_truncate_debug_text(target, 96)}' "
+                f"matched_by='{matched_by}'"
+            )
+            _commit_forced_local_tab_target_success(state)
+            log(
+                f"[STEP][local_tab_force_navigation_resolved] target='{_truncate_debug_text(target, 96)}'"
+            )
+            _clear_forced_local_tab_navigation(state, reason="resolved")
+            return last_row
+        log(
+            f"[STEP][local_tab_target_activate_no_match] target='{_truncate_debug_text(target, 96)}' "
+            "method='tap_bounds_center' reason='focus_not_target_after_tap'"
+        )
+    elif not raw_target_bounds:
+        log(
+            f"[STEP][local_tab_target_activate_skip] method='tap_bounds_center' "
+            "reason='bounds_missing'"
+        )
+    action_attempts: list[tuple[str, Callable[[], bool]]] = []
+    select_fn = getattr(client, "select", None)
+    if callable(select_fn) and target_rid:
+        action_attempts.append(("select_rid", lambda: bool(select_fn(dev=dev, name=target_rid, type_="r", wait_=_TRANSITION_FAST_ACTION_WAIT_SECONDS))))
+    if callable(select_fn) and target_label:
+        action_attempts.append(("select_label", lambda: bool(select_fn(dev=dev, name=target_label, type_="a", wait_=_TRANSITION_FAST_ACTION_WAIT_SECONDS))))
+
+    for method, action_fn in action_attempts:
+        log(
+            f"[STEP][local_tab_target_activate] target='{_truncate_debug_text(target, 96)}' "
+            f"method='{method}'"
+        )
+        try:
+            action_ok = bool(action_fn())
+        except Exception:
+            action_ok = False
+        if not action_ok:
+            continue
+        last_row = collect_after_action()
+        matched, matched_by = _row_matches_pending_local_tab(
+            last_row,
+            pending_rid=target_rid,
+            pending_label=target_label,
+            pending_bounds=str(getattr(state, "forced_local_tab_target_bounds", "") or ""),
+        )
+        if matched:
+            log(
+                f"[STEP][local_tab_target_activate_success] target='{_truncate_debug_text(target, 96)}' "
+                f"matched_by='{matched_by}'"
+            )
+            _commit_forced_local_tab_target_success(state)
+            log(
+                f"[STEP][local_tab_force_navigation_resolved] target='{_truncate_debug_text(target, 96)}'"
+            )
+            _clear_forced_local_tab_navigation(state, reason="resolved")
+            return last_row
+
+    log(
+        f"[STEP][local_tab_target_activate_fail] target='{_truncate_debug_text(target, 96)}' "
+        "reason='no_match_after_all_methods' fallback='move_smart_next'"
+    )
+    move_fn = getattr(client, "move_focus_smart", None)
+    if callable(move_fn):
+        log(
+            f"[STEP][local_tab_force_navigation_retry] target='{_truncate_debug_text(target, 96)}' "
+            f"attempt={attempt}"
+        )
+        try:
+            move_fn(dev=dev, direction="next")
+        except Exception:
+            pass
+        last_row = collect_after_action()
+        matched, matched_by = _row_matches_pending_local_tab(
+            last_row,
+            pending_rid=target_rid,
+            pending_label=target_label,
+            pending_bounds=str(getattr(state, "forced_local_tab_target_bounds", "") or ""),
+        )
+        if matched:
+            log(
+                f"[STEP][local_tab_target_activate_success] target='{_truncate_debug_text(target, 96)}' "
+                f"matched_by='{matched_by}'"
+            )
+            _commit_forced_local_tab_target_success(state)
+            log(
+                f"[STEP][local_tab_force_navigation_resolved] target='{_truncate_debug_text(target, 96)}'"
+            )
+            _clear_forced_local_tab_navigation(state, reason="resolved")
+            return last_row
+    if attempt >= 2:
+        _clear_forced_local_tab_navigation(state, reason="max_attempts_reached")
+    return last_row
 
 
 def _is_current_focus_on_local_tab_strip(state: MainLoopState, row: dict[str, Any]) -> bool:
@@ -8338,6 +9385,9 @@ def _collect_step_candidate_priority_groups(
     viewport_top = min(bounds[1] for bounds in bounds_candidates)
     viewport_right = max(bounds[2] for bounds in bounds_candidates)
     viewport_bottom = max(bounds[3] for bounds in bounds_candidates)
+    if viewport_right - viewport_left >= 800 and viewport_bottom - viewport_top < 1200:
+        viewport_top = min(viewport_top, 0)
+        viewport_bottom = max(viewport_bottom, 1920)
     viewport_width = max(1, viewport_right - viewport_left)
     viewport_height = max(1, viewport_bottom - viewport_top)
     viewport_area = max(1, viewport_width * viewport_height)
@@ -8348,6 +9398,8 @@ def _collect_step_candidate_priority_groups(
     chrome_excluded_candidates: list[str] = []
     section_header_candidates: list[str] = []
     cluster_pre_filter_skipped: list[str] = []
+    container_promoted_candidates: list[str] = []
+    top_priority_container_candidates: list[str] = []
 
     for node in visible_nodes:
         bounds = parse_bounds_str(str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip())
@@ -8447,12 +9499,39 @@ def _collect_step_candidate_priority_groups(
         ):
             chrome_excluded_candidates.append(label)
             continue
+        clickable_container_promoted = bool(
+            actionable
+            and height >= 100
+            and (
+                "linearlayout" in class_name
+                or "viewgroup" in class_name
+                or ("layout" in class_name and width_ratio >= 0.25)
+            )
+            and not passive_status
+            and center_y > top_header_band
+            and center_y < bottom_band_top
+        )
+        top_priority_container = bool(
+            bool(node.get("clickable"))
+            and bool(node.get("focusable") or node.get("effectiveClickable"))
+            and height >= 100
+            and (
+                "linearlayout" in class_name
+                or "viewgroup" in class_name
+                or ("layout" in class_name and width_ratio >= 0.25)
+            )
+            and not passive_status
+            and not section_header_like
+            and center_y > top_header_band
+            and center_y < bottom_band_top
+        )
         if not content_like:
             continue
         representative = bool(
             (actionable and not passive_status)
             or descendant_actionable
             or (card_like and not passive_status)
+            or clickable_container_promoted
             or ("title" in resource_id and len(label.strip()) >= 5)
             or ("section" in resource_id and len(label.strip()) >= 5)
             or (len(label.strip()) >= 12 and not passive_status)
@@ -8468,6 +9547,12 @@ def _collect_step_candidate_priority_groups(
             score -= 700000
         if passive_status:
             score -= 550000
+        if clickable_container_promoted:
+            score += 220000
+            container_promoted_candidates.append(label)
+        if top_priority_container:
+            score += 900000
+            top_priority_container_candidates.append(label)
         cluster_root = _select_candidate_cluster_root(node, parent_by_node_id)
         cluster_signature = _build_candidate_cluster_signature_from_root(cluster_root)
         cluster_rid = str(cluster_root.get("viewIdResourceName", "") or cluster_root.get("resourceId", "") or "").strip()
@@ -8502,6 +9587,8 @@ def _collect_step_candidate_priority_groups(
             "cluster_rid": cluster_rid,
             "cluster_bounds": str(cluster_root.get("boundsInScreen", "") or cluster_root.get("bounds", "") or "").strip(),
             "cluster_root_node": cluster_root,
+            "clickable_container_promoted": bool(clickable_container_promoted),
+            "top_priority_container": bool(top_priority_container),
         }
         candidate["cluster_role"] = _cluster_candidate_role(candidate)
         if bool(candidate.get("section_header_like", False)):
@@ -8591,6 +9678,8 @@ def _collect_step_candidate_priority_groups(
             "clustered_candidates": [_cluster_display_name(candidate) for candidate in content_candidates],
             "cluster_representatives": cluster_representatives_meta,
             "cluster_pre_filter_skipped": cluster_pre_filter_skipped,
+            "container_promoted_candidates": container_promoted_candidates,
+            "top_priority_container_candidates": top_priority_container_candidates,
         }
     sorted_content = sorted(
         content_candidates,
@@ -8612,6 +9701,8 @@ def _collect_step_candidate_priority_groups(
         "clustered_candidates": [_cluster_display_name(candidate) for candidate in sorted_content],
         "cluster_representatives": cluster_representatives_meta,
         "cluster_pre_filter_skipped": cluster_pre_filter_skipped,
+        "container_promoted_candidates": container_promoted_candidates,
+        "top_priority_container_candidates": top_priority_container_candidates,
     }
 
 
@@ -8646,7 +9737,9 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
     tab_cfg: dict[str, Any],
     state: MainLoopState,
     step_idx: int,
+    scenario_perf: ScenarioPerfStats | None = None,
 ) -> dict[str, Any]:
+    _maybe_commit_pending_local_tab_progression(state, row)
     scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower()
     row_signature = _build_row_object_signature(row)
     current_row_is_passive_status = _is_passive_status_text(
@@ -8699,7 +9792,30 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
             active_label = str(active_candidate.get("label", "") or "").strip() if isinstance(active_candidate, dict) else ""
             if active_rid:
                 state.current_local_tab_signature = local_tab_signature
-                state.current_local_tab_active_rid = active_rid
+                committed_active_rid = str(getattr(state, "current_local_tab_active_rid", "") or "").strip()
+                committed_active_age = int(getattr(state, "current_local_tab_active_age", 0) or 0)
+                if committed_active_rid and committed_active_age <= LOCAL_TAB_ACTIVE_TTL_STEPS:
+                    active_rid = committed_active_rid
+                    active_label = str(getattr(state, "current_local_tab_active_label", "") or active_label)
+                    log(
+                        f"[STEP][local_tab_active_override] active='{_truncate_debug_text(active_label or active_rid, 96)}' "
+                        "reason='committed_state_priority'"
+                    )
+                else:
+                    active_before = _local_tab_state_display(
+                        rid=str(getattr(state, "current_local_tab_active_rid", "") or ""),
+                        label=str(getattr(state, "current_local_tab_active_label", "") or ""),
+                    )
+                    if active_before and active_before != (active_label or active_rid):
+                        log(
+                            f"[STEP][local_tab_state_clear] target='committed' "
+                            f"active_before='{_truncate_debug_text(active_before, 96)}' "
+                            f"pending_before='{_truncate_debug_text(_local_tab_state_display(rid=str(getattr(state, 'pending_local_tab_rid', '') or ''), label=str(getattr(state, 'pending_local_tab_label', '') or '')), 96)}' "
+                            "reason='state_recovery' caller='_maybe_reprioritize_persistent_bottom_strip_row'"
+                        )
+                    state.current_local_tab_active_rid = active_rid
+                    state.current_local_tab_active_label = active_label
+                    state.current_local_tab_active_age = 0
                 visited_tabs = state.visited_local_tabs_by_signature.setdefault(local_tab_signature, set())
                 visited_tabs.add(active_rid)
                 if (
@@ -8758,6 +9874,8 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
             f"count={len(cluster_pre_filter_skipped)} reason='consumed_cluster_early_skip'"
         )
     chrome_candidates = [str(value or "").strip() for value in candidate_groups_meta.get("chrome_excluded_candidates", []) if str(value or "").strip()]
+    container_promoted = [str(value or "").strip() for value in candidate_groups_meta.get("container_promoted_candidates", []) if str(value or "").strip()]
+    priority_containers = [str(value or "").strip() for value in candidate_groups_meta.get("top_priority_container_candidates", []) if str(value or "").strip()]
     filtered_meta = _filter_content_candidates_for_phase(content_candidates, state=state)
     filtered_candidates = list(filtered_meta["selection_candidates"])
     filtered_candidates, spatial_reason, continuity_reason = _apply_spatial_priority_to_candidates(
@@ -8780,6 +9898,16 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         log(
             f"[STEP][content_phase_eval] content_present={str(bool(filtered_candidates)).lower()} "
             f"chrome_present={str(bool(chrome_candidates)).lower()} chrome_excluded=true"
+        )
+    for promoted_label in container_promoted[:5]:
+        log(
+            f"[STEP][container_candidate_promoted] label='{_truncate_debug_text(promoted_label, 96)}' "
+            f"reason='{'top_priority_container' if promoted_label in set(priority_containers) else 'clickable_container'}'"
+        )
+    if bool(row.get("content_phase_grace_active", False)):
+        log(
+            f"[STEP][content_candidates_after_grace] "
+            f"candidates='{_truncate_debug_text(_summarize_candidate_labels(filtered_candidates), 120)}'"
         )
     if passive_status_candidates and filtered_candidates:
         log(
@@ -9008,7 +10136,7 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         and len(cluster_candidates) <= 1
     )
     same_object_like = bool(
-        state.same_count > 0
+        int(getattr(state, "same_count", 0) or 0) > 0
         or _build_row_object_signature(row) == _build_row_object_signature(getattr(state, "previous_step_row", {}))
         or build_row_semantic_fingerprint(row) == build_row_semantic_fingerprint(getattr(state, "previous_step_row", {}))
     )
@@ -9052,7 +10180,7 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
     scroll_ready_eval_needed = bool(
         move_result in {"failed", "no_progress"}
         or same_cluster
-        or state.same_count > 0
+        or int(getattr(state, "same_count", 0) or 0) > 0
         or not filtered_meta["representative_candidates"]
     )
     if scroll_ready_eval_needed:
@@ -9120,23 +10248,21 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
     current_rid = str(row.get("focus_view_id", "") or "").strip()
     current_label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
     current_bounds = str(row.get("focus_bounds", "") or "").strip()
-    focus_context_matches_selected = bool(
-        current_rid == selected_rid
-        or (current_label and selected_label and current_label == selected_label)
-        or (
-            current_bounds
-            and selected_bounds
-            and _representative_focus_matches(
-                focus_node={"boundsInScreen": current_bounds},
-                target_rid="",
-                target_label="",
-                target_bounds=selected_bounds,
-            )
-        )
+    focus_context_matches_selected, focus_anchor_reason = _focus_anchor_match_reason(
+        row=row,
+        selected_rid=selected_rid,
+        selected_label=selected_label,
+        selected_bounds=selected_bounds,
+        selected_cluster_signature=selected_cluster_signature,
+    )
+    log(
+        f"[STEP][focus_anchor] selected='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
+        f"current='{_truncate_debug_text(current_label or current_rid, 96)}' "
+        f"matched={str(focus_context_matches_selected).lower()} reason='{focus_anchor_reason}'"
     )
     realign_ok = False
     realigned_focus_node: dict[str, Any] | None = None
-    if not focus_context_matches_selected and not (strip_focus_context and viewport_exhausted):
+    if not focus_context_matches_selected:
         log(
             f"[STEP][focus_context_mismatch] selected='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
             f"current_focus='{_truncate_debug_text(current_label or current_rid, 96)}' "
@@ -9155,8 +10281,16 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         )
         selected_signature = _candidate_object_signature(selected_candidate)
         selected_cluster_signature = _candidate_cluster_signature(selected_candidate)
-        eligible_candidates = list(realign_meta["eligible"])
-        if selected_cluster_signature and selected_cluster_signature in set(getattr(state, "recent_focus_realign_clusters", set()) or set()):
+        failed_realign_signatures = set(getattr(state, "failed_focus_realign_signatures", set()) or set())
+        force_reason = "anchor_mismatch"
+        if strip_focus_context or current_row_is_low_value_leaf or current_row_recent_revisit:
+            force_reason = "strip_or_stale_focus_context"
+        if selected_signature in failed_realign_signatures:
+            log(
+                f"[STEP][focus_realign_skip] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
+                "reason='recent_realign_failed'"
+            )
+        elif selected_cluster_signature and selected_cluster_signature in set(getattr(state, "recent_focus_realign_clusters", set()) or set()):
             log(
                 f"[STEP][focus_realign_skip] cluster='{_truncate_debug_text(selected_cluster_signature, 120)}' "
                 "reason='cluster_already_realign_resolved'"
@@ -9166,59 +10300,42 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
                 f"[STEP][focus_realign_skip] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
                 "reason='already_realign_resolved_in_current_phase'"
             )
-        if eligible_candidates:
-            realign_target_candidate = eligible_candidates[0]
-            selected_candidate = realign_target_candidate
-            selected_node = realign_target_candidate.get("node", {})
-            if isinstance(selected_node, dict):
-                selected_label = str(realign_target_candidate.get("label", "") or "").strip()
-                selected_rid = str(
-                    realign_target_candidate.get("rid", "")
-                    or selected_node.get("viewIdResourceName", "")
-                    or selected_node.get("resourceId", "")
-                    or ""
-                ).strip()
-                selected_bounds = str(selected_node.get("boundsInScreen", "") or selected_node.get("bounds", "") or "").strip()
-                selected_class = str(selected_node.get("className", "") or selected_node.get("class", "") or "").strip()
-                if callable(normalize_fn):
-                    normalized_label = normalize_fn(selected_label) if selected_label else ""
-                else:
-                    normalized_label = re.sub(r"\s+", " ", str(selected_label or "").strip()).lower()
-                realign_ok, _, realigned_focus_node = _maybe_realign_focus_to_representative(
-                    row=row,
-                    client=client,
-                    dev=dev,
-                    selected_node=selected_node,
-                    selected_rid=selected_rid,
-                    selected_label=selected_label,
-                    selected_bounds=selected_bounds,
-                    scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
-                    step_idx=step_idx,
-                    mismatch_logged=True,
-                )
-                if realign_ok:
-                    realign_signature = _candidate_object_signature(selected_candidate)
-                    realign_cluster_signature = _candidate_cluster_signature(selected_candidate)
-                    if realign_signature:
-                        resolved_signatures = set(getattr(state, "recent_focus_realign_signatures", set()) or set())
-                        resolved_signatures.add(realign_signature)
-                        state.recent_focus_realign_signatures = resolved_signatures
-                    if realign_cluster_signature:
-                        resolved_clusters = set(getattr(state, "recent_focus_realign_clusters", set()) or set())
-                        resolved_clusters.add(realign_cluster_signature)
-                        state.recent_focus_realign_clusters = resolved_clusters
-                    log(
-                        f"[STEP][focus_realign_record] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
-                        f"signature='{_truncate_debug_text(realign_signature, 120)}' "
-                        f"phase='{_truncate_debug_text(_current_local_tab_phase_label(state), 48)}'"
-                    )
         else:
-            log("[STEP][focus_realign_skip] target='none' reason='no_eligible_representative_target'")
-    elif not focus_context_matches_selected and strip_focus_context and viewport_exhausted:
-        log(
-            f"[STEP][focus_realign_skip] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
-            "reason='strip_focus_phase_priority'"
-        )
+            realign_ok, _, realigned_focus_node = _maybe_realign_focus_to_representative(
+                row=row,
+                client=client,
+                dev=dev,
+                selected_node=selected_node,
+                selected_rid=selected_rid,
+                selected_label=selected_label,
+                selected_bounds=selected_bounds,
+                scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+                step_idx=step_idx,
+                mismatch_logged=True,
+                force_reason=force_reason,
+                scenario_perf=scenario_perf,
+            )
+            realign_signature = _candidate_object_signature(selected_candidate)
+            realign_cluster_signature = _candidate_cluster_signature(selected_candidate)
+            if realign_ok:
+                if realign_signature:
+                    resolved_signatures = set(getattr(state, "recent_focus_realign_signatures", set()) or set())
+                    resolved_signatures.add(realign_signature)
+                    state.recent_focus_realign_signatures = resolved_signatures
+                    failed_realign_signatures.discard(realign_signature)
+                    state.failed_focus_realign_signatures = failed_realign_signatures
+                if realign_cluster_signature:
+                    resolved_clusters = set(getattr(state, "recent_focus_realign_clusters", set()) or set())
+                    resolved_clusters.add(realign_cluster_signature)
+                    state.recent_focus_realign_clusters = resolved_clusters
+                log(
+                    f"[STEP][focus_realign_record] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
+                    f"signature='{_truncate_debug_text(realign_signature, 120)}' "
+                    f"phase='{_truncate_debug_text(_current_local_tab_phase_label(state), 48)}'"
+                )
+            elif realign_signature:
+                failed_realign_signatures.add(realign_signature)
+                state.failed_focus_realign_signatures = failed_realign_signatures
     if realign_ok and isinstance(realigned_focus_node, dict):
         selected_node = realigned_focus_node
         selected_rid = str(
@@ -9311,22 +10428,45 @@ def _maybe_select_next_local_tab(
     scenario_id: str,
     step_idx: int,
 ) -> bool:
+    _maybe_commit_pending_local_tab_progression(state, row)
     local_tab_signature = str(state.current_local_tab_signature or "").strip()
     dump_tree_fn = getattr(client, "dump_tree", None)
     content_candidates: list[dict[str, Any]] = []
     chrome_excluded: list[str] = []
+    container_promoted: list[str] = []
+    dump_bottom_strip_candidates: list[str] = []
+    current_bottom_strip_candidates: list[dict[str, Any]] = []
     if callable(dump_tree_fn):
         try:
             nodes = dump_tree_fn(dev=dev)
-            content_candidates, _, candidate_groups_meta = _collect_step_candidate_priority_groups(
+            content_candidates, current_bottom_strip_candidates, candidate_groups_meta = _collect_step_candidate_priority_groups(
                 nodes,
                 consumed_cluster_signatures=set(getattr(state, "consumed_cluster_signatures", set()) or set()),
                 consumed_cluster_logical_signatures=set(getattr(state, "consumed_cluster_logical_signatures", set()) or set()),
             )
             chrome_excluded = [str(value or "").strip() for value in candidate_groups_meta.get("chrome_excluded_candidates", []) if str(value or "").strip()]
+            container_promoted = [
+                str(value or "").strip()
+                for value in candidate_groups_meta.get("container_promoted_candidates", [])
+                if str(value or "").strip()
+            ]
+            priority_containers = [
+                str(value or "").strip()
+                for value in candidate_groups_meta.get("top_priority_container_candidates", [])
+                if str(value or "").strip()
+            ]
+            dump_bottom_strip_candidates = [
+                str(value or "").strip()
+                for value in candidate_groups_meta.get("raw_bottom_strip_candidates", [])
+                if str(value or "").strip()
+            ]
         except Exception:
             content_candidates = []
             chrome_excluded = []
+            container_promoted = []
+            priority_containers = []
+            dump_bottom_strip_candidates = []
+            current_bottom_strip_candidates = []
     filtered_meta = _filter_content_candidates_for_phase(content_candidates, state=state)
     status_excluded = [str(candidate.get("label", "") or "").strip() for candidate in filtered_meta["status_candidates"]]
     section_header_deferred = [str(candidate.get("label", "") or "").strip() for candidate in filtered_meta.get("section_header_deferred", [])]
@@ -9350,6 +10490,11 @@ def _maybe_select_next_local_tab(
         log(
             f"[STEP][status_exhausted_excluded] rejected='{_truncate_debug_text('|'.join(status_excluded[:4]), 120)}' "
             "reason='passive_status_or_empty_state'"
+        )
+    for promoted_label in container_promoted[:5]:
+        log(
+            f"[STEP][container_candidate_promoted] label='{_truncate_debug_text(promoted_label, 96)}' "
+            f"reason='{'top_priority_container' if promoted_label in set(priority_containers) else 'clickable_container'}'"
         )
     if section_header_deferred and effective_content_candidates:
         log(
@@ -9397,6 +10542,20 @@ def _maybe_select_next_local_tab(
         log(
             f"[STEP][candidate_mismatch] selection_rejected_but_exhaustion_included='{_truncate_debug_text('|'.join(sorted(mismatch_labels)), 120)}'"
         )
+    grace_active = bool(row.get("content_phase_grace_active", False) or int(getattr(state, "content_phase_grace_steps", 0) or 0) > 0)
+    if grace_active:
+        row["local_tab_gate_evaluated"] = True
+        row["local_tab_block_reason"] = "content_phase_grace_active"
+        log(
+            f"[STEP][content_candidates_after_grace] "
+            f"candidates='{_truncate_debug_text(_summarize_candidate_labels(effective_content_candidates), 120)}'"
+        )
+        if not effective_content_candidates:
+            log(
+                f"[STEP][content_phase_grace_block] reason='within_grace_window' "
+                f"remaining={int(getattr(state, 'content_phase_grace_steps', 0) or 0)}"
+            )
+            return False
     if effective_content_candidates:
         row["scroll_fallback_allowed"] = False
         row["scroll_fallback_gate_evaluated"] = True
@@ -9415,8 +10574,25 @@ def _maybe_select_next_local_tab(
             f"active='{_truncate_debug_text(str(state.current_local_tab_active_rid or ''), 96)}' "
             "unvisited='none'"
         )
+        active_display = _local_tab_state_display(
+            rid=str(getattr(state, "current_local_tab_active_rid", "") or ""),
+            label=str(getattr(state, "current_local_tab_active_label", "") or ""),
+        )
+        if active_display:
+            log(
+                f"[STEP][local_tab_progression_block] reason='content_not_exhausted_after_tab_switch' "
+                f"active='{_truncate_debug_text(active_display, 96)}'"
+            )
         return False
     log("[STEP][viewport_exhausted] representative_candidates='' reason='no_representative_in_viewport'")
+    active_display = _local_tab_state_display(
+        rid=str(getattr(state, "current_local_tab_active_rid", "") or ""),
+        label=str(getattr(state, "current_local_tab_active_label", "") or ""),
+    )
+    if active_display:
+        log(
+            f"[STEP][content_phase_exhausted] active='{_truncate_debug_text(active_display, 96)}'"
+        )
     scroll_fallback_signature = _build_scroll_fallback_signature(
         local_tab_signature=local_tab_signature,
         active_rid=str(state.current_local_tab_active_rid or ""),
@@ -9439,6 +10615,69 @@ def _maybe_select_next_local_tab(
         scroll_reason = "missing_signature"
     elif scroll_fallback_signature in attempted_signatures:
         scroll_reason = "already_attempted_same_signature"
+    normal_scroll_allowed = scroll_allowed
+    previous_row = getattr(state, "previous_step_row", {}) or {}
+    current_focus_strip = _is_current_focus_on_local_tab_strip(state, row)
+    current_row_strip = _is_row_persistent_bottom_strip_candidate(row)
+    previous_row_strip = bool(
+        isinstance(previous_row, dict)
+        and (
+            _is_current_focus_on_local_tab_strip(state, previous_row)
+            or _is_row_persistent_bottom_strip_candidate(previous_row)
+        )
+    )
+    recent_strip_seen = bool(current_focus_strip or previous_row_strip)
+    dump_strip_seen = bool(dump_bottom_strip_candidates)
+    bottom_strip_context = bool(current_focus_strip or current_row_strip or previous_row_strip or dump_strip_seen)
+    row["strip_focus_context"] = bool(row.get("strip_focus_context", False) or bottom_strip_context)
+    log(
+        f"[STEP][bottom_strip_context_eval] current_focus_strip={str(current_focus_strip).lower()} "
+        f"current_row_strip={str(current_row_strip).lower()} previous_row_strip={str(previous_row_strip).lower()} "
+        f"recent_strip_seen={str(recent_strip_seen).lower()} dump_strip_seen={str(dump_strip_seen).lower()} "
+        f"result={str(bottom_strip_context).lower()}"
+    )
+    last_attempted_signatures = set(getattr(state, "last_scroll_fallback_attempted_signatures", set()) or set())
+    last_scroll_signature = scroll_fallback_signature or _build_row_object_signature(row) or local_tab_signature or "viewport_exhausted"
+    last_scroll_evaluated = bool(viewport_exhausted and bottom_strip_context)
+    scrollable_uncertain = bool(last_scroll_evaluated and not scrollable and (content_area_bounds or dump_strip_seen or previous_row_strip))
+    last_scroll_allowed = bool(
+        last_scroll_evaluated
+        and last_scroll_signature
+        and (scrollable or scrollable_uncertain)
+        and scroll_reason in {"already_attempted_same_signature", "not_scrollable", "missing_signature"}
+        and last_scroll_signature not in last_attempted_signatures
+    )
+    last_scroll_reason = "not_evaluated"
+    if last_scroll_evaluated:
+        if last_scroll_allowed:
+            last_scroll_reason = (
+                "bottom_strip_context_scrollable_uncertain"
+                if scrollable_uncertain and not scrollable
+                else "last_scroll_before_global_exhausted"
+            )
+        elif not bottom_strip_context:
+            last_scroll_reason = "not_bottom_strip_context"
+        elif not scrollable:
+            last_scroll_reason = "not_scrollable"
+        elif not scroll_fallback_signature:
+            last_scroll_reason = "missing_signature"
+        elif last_scroll_signature in last_attempted_signatures:
+            last_scroll_reason = "last_scroll_already_attempted"
+        else:
+            last_scroll_reason = scroll_reason or "normal_scroll_available"
+    row["last_scroll_fallback_evaluated"] = last_scroll_evaluated
+    row["last_scroll_fallback_allowed"] = last_scroll_allowed
+    row["last_scroll_block_reason"] = "" if last_scroll_allowed else last_scroll_reason
+    if last_scroll_evaluated:
+        log(
+            f"[STEP][last_scroll_fallback_eval] viewport_exhausted=true "
+            f"bottom_strip_context={str(bottom_strip_context).lower()} "
+            f"normal_block_reason='{scroll_reason}' allowed={str(last_scroll_allowed).lower()} "
+            f"scrollable_uncertain={str(scrollable_uncertain).lower()} reason='{last_scroll_reason}'"
+        )
+    if last_scroll_allowed:
+        scroll_allowed = True
+        scroll_reason = last_scroll_reason
     row["scroll_fallback_allowed"] = scroll_allowed
     row["scroll_fallback_gate_evaluated"] = True
     row["scroll_fallback_gate_reason"] = scroll_reason
@@ -9460,14 +10699,21 @@ def _maybe_select_next_local_tab(
     )
     scroll_fn = getattr(client, "scroll", None)
     if scroll_allowed and callable(scroll_fn):
-        attempted_signatures.add(scroll_fallback_signature)
-        state.recent_scroll_fallback_signatures = attempted_signatures
-        log("[STEP][scroll_fallback] reason='viewport_exhausted_before_local_tab' attempt=1")
+        if last_scroll_allowed:
+            last_attempted_signatures.add(last_scroll_signature)
+            state.last_scroll_fallback_attempted_signatures = last_attempted_signatures
+            log("[STEP][last_scroll_fallback] attempt=1 reason='bottom_strip_viewport_exhausted'")
+        else:
+            attempted_signatures.add(scroll_fallback_signature)
+            state.recent_scroll_fallback_signatures = attempted_signatures
+            log("[STEP][scroll_fallback] reason='viewport_exhausted_before_local_tab' attempt=1")
         try:
             scrolled = bool(scroll_fn(dev=dev, direction="down"))
         except Exception:
             scrolled = False
         if scrolled:
+            _clear_active_container_group(state, reason="scroll")
+            state.completed_container_groups = set()
             time.sleep(0.25)
             refreshed_nodes = []
             if callable(dump_tree_fn):
@@ -9484,6 +10730,15 @@ def _maybe_select_next_local_tab(
             refreshed_effective = list(refreshed_filtered["exhaustion_candidates"])
             new_representative = str(refreshed_effective[0].get("label", "") or refreshed_effective[0].get("rid", "") or "").strip() if refreshed_effective else ""
             resumed_content_phase = bool(refreshed_effective)
+            if last_scroll_allowed:
+                row["last_scroll_fallback_resumed_content"] = resumed_content_phase
+                row["last_scroll_fallback_representative"] = new_representative
+                row["last_scroll_global_exhausted"] = not resumed_content_phase
+                log(
+                    f"[STEP][last_scroll_fallback_result] new_representative='{_truncate_debug_text(new_representative, 120)}' "
+                    f"resumed_content_phase={str(resumed_content_phase).lower()} "
+                    f"global_exhausted={str(not resumed_content_phase).lower()}"
+                )
             log(
                 f"[STEP][scroll_fallback_result] new_representative='{_truncate_debug_text(new_representative, 120)}' "
                 f"resumed_content_phase={str(resumed_content_phase).lower()}"
@@ -9495,7 +10750,7 @@ def _maybe_select_next_local_tab(
     local_tab_gate_reason = "scroll_fallback_not_attempted"
     if scroll_allowed and not callable(scroll_fn):
         local_tab_gate_reason = "scroll_fallback_not_attempted"
-    elif scroll_allowed:
+    elif normal_scroll_allowed or last_scroll_allowed:
         local_tab_gate_reason = "scroll_fallback_attempted_no_resume"
     elif not local_tab_signature:
         local_tab_gate_reason = "local_tab_state_missing"
@@ -9507,7 +10762,20 @@ def _maybe_select_next_local_tab(
             "reason='content_exhausted_after_scroll'"
         )
     tab_candidates = state.local_tab_candidates_by_signature.get(local_tab_signature, [])
+    if not tab_candidates and bottom_strip_context:
+        recovered_signature, recovered_candidates = _recover_local_tab_state_from_bottom_strip(
+            state=state,
+            row=row,
+            previous_row=previous_row if isinstance(previous_row, dict) else {},
+            bottom_strip_candidates=current_bottom_strip_candidates,
+            reason="state_missing_but_dump_strip_seen" if dump_strip_seen else "state_missing_but_strip_context",
+        )
+        if recovered_signature:
+            local_tab_signature = recovered_signature
+            tab_candidates = recovered_candidates
+            local_tab_gate_reason = "recovered_local_tab_state"
     if not tab_candidates:
+        _clear_last_selected_local_tab_hint(state, reason="local_tab_state_missing")
         row["local_tab_gate_evaluated"] = True
         row["local_tab_block_reason"] = "local_tab_state_missing" if not local_tab_signature else "strip_not_detected"
         log(
@@ -9517,18 +10785,87 @@ def _maybe_select_next_local_tab(
             "unvisited='none'"
         )
         return False
+    sorted_tab_candidates = _sort_local_tab_candidates_left_to_right(tab_candidates)
+    log(
+        f"[STEP][local_tab_candidates] candidates='{_truncate_debug_text(_summarize_candidate_labels(tab_candidates), 120)}'"
+    )
+    log(
+        f"[STEP][local_tab_sorted] order='{_truncate_debug_text(_summarize_candidate_labels(sorted_tab_candidates), 120)}'"
+    )
     visited_tabs = state.visited_local_tabs_by_signature.setdefault(local_tab_signature, set())
-    active_rid = str(state.current_local_tab_active_rid or "").strip().lower()
-    remaining_tabs = [
+    if len(sorted_tab_candidates) > 5:
+        row["local_tab_gate_evaluated"] = True
+        row["local_tab_block_reason"] = "too_many_local_tab_candidates"
+        log(
+            f"[STEP][local_tab_gate] allowed=false reason='too_many_local_tab_candidates' "
+            f"tabs='{_truncate_debug_text(_summarize_candidate_labels(tab_candidates), 120)}' "
+            f"active='{_truncate_debug_text(str(state.current_local_tab_active_rid or ''), 96)}' "
+            "unvisited='none'"
+        )
+        return False
+    if len(sorted_tab_candidates) < 2:
+        active_candidate, _active_source, _active_label = _resolve_active_local_tab_candidate_for_progression(
+            state=state,
+            sorted_tab_candidates=sorted_tab_candidates,
+            row=row,
+            previous_row=previous_row if isinstance(previous_row, dict) else {},
+        )
+        if isinstance(active_candidate, dict):
+            state.current_local_tab_signature = local_tab_signature
+            state.current_local_tab_active_rid = str(active_candidate.get("rid", "") or "").strip()
+            state.current_local_tab_active_label = str(active_candidate.get("label", "") or "").strip()
+            state.current_local_tab_active_age = 0
+        row["local_tab_gate_evaluated"] = True
+        row["local_tab_block_reason"] = "single_local_tab_no_progression"
+        log(
+            f"[STEP][local_tab_gate] allowed=false reason='single_local_tab_no_progression' "
+            f"tabs='{_truncate_debug_text(_summarize_candidate_labels(tab_candidates), 120)}' "
+            f"active='{_truncate_debug_text(str(state.current_local_tab_active_rid or ''), 96)}' "
+            "unvisited='none'"
+        )
+        return False
+    active_candidate, active_source, active_label = _resolve_active_local_tab_candidate_for_progression(
+        state=state,
+        sorted_tab_candidates=sorted_tab_candidates,
+        row=row,
+        previous_row=previous_row if isinstance(previous_row, dict) else {},
+    )
+    log(
+        f"[STEP][local_tab_active_resolved] source='{active_source}' "
+        f"active='{_truncate_debug_text(active_label, 96)}'"
+    )
+    active_index = sorted_tab_candidates.index(active_candidate) if active_candidate in sorted_tab_candidates else -1
+    active_rid = str(active_candidate.get("rid", "") or "").strip().lower() if isinstance(active_candidate, dict) else ""
+    if active_source not in {"committed", "last_selected_hint"} and active_rid:
+        state.current_local_tab_active_rid = active_rid
+        state.current_local_tab_active_label = str(active_candidate.get("label", "") or "").strip()
+        state.current_local_tab_active_age = 0
+    progression_tab = sorted_tab_candidates[active_index + 1] if 0 <= active_index < len(sorted_tab_candidates) - 1 else None
+    remaining_tabs_by_visit = [
         candidate
-        for candidate in tab_candidates
+        for candidate in sorted_tab_candidates
         if str(candidate.get("rid", "") or "").strip().lower()
         and str(candidate.get("rid", "") or "").strip().lower() not in {rid.lower() for rid in visited_tabs}
         and str(candidate.get("rid", "") or "").strip().lower() != active_rid
     ]
-    if not remaining_tabs:
+    remaining_tabs = list(remaining_tabs_by_visit)
+    if progression_tab is not None:
+        current_label = ""
+        if 0 <= active_index < len(sorted_tab_candidates):
+            current_label = str(sorted_tab_candidates[active_index].get("label", "") or sorted_tab_candidates[active_index].get("rid", "") or "").strip()
+        next_label = str(progression_tab.get("label", "") or progression_tab.get("rid", "") or "").strip()
+        next_rid = str(progression_tab.get("rid", "") or "").strip().lower()
+        if next_rid and next_rid in {rid.lower() for rid in visited_tabs}:
+            log("[STEP][local_tab_skip_reason] reason='visited_ignored_for_order_progression'")
+        log(
+            f"[STEP][local_tab_progression] current='{_truncate_debug_text(current_label or active_rid, 96)}' "
+            f"next='{_truncate_debug_text(next_label, 96)}'"
+        )
+        remaining_tabs = [progression_tab]
+    elif not remaining_tabs:
         row["local_tab_gate_evaluated"] = True
         row["local_tab_block_reason"] = "no_unvisited_local_tab"
+        log("[STEP][local_tab_skip_reason] reason='none'")
         log(
             f"[STEP][local_tab_gate] allowed=false reason='no_unvisited_local_tab' "
             f"tabs='{_truncate_debug_text(_summarize_candidate_labels(tab_candidates), 120)}' "
@@ -9542,15 +10879,19 @@ def _maybe_select_next_local_tab(
         f"[STEP][local_tab_gate] allowed=true reason='{local_tab_gate_reason}' "
         f"tabs='{_truncate_debug_text(_summarize_candidate_labels(tab_candidates), 120)}' "
         f"active='{_truncate_debug_text(str(state.current_local_tab_active_rid or ''), 96)}' "
-        f"unvisited='{_truncate_debug_text(_summarize_candidate_labels(remaining_tabs), 120)}'"
+        f"unvisited='{_truncate_debug_text(_summarize_candidate_labels(remaining_tabs_by_visit), 120)}'"
     )
     log(
-        f"[STEP][local_tab_allowed] tabs='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in remaining_tabs[:4]), 120)}' "
+        f"[STEP][local_tab_allowed] tabs='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in (remaining_tabs_by_visit or remaining_tabs)[:4]), 120)}' "
         "reason='content_candidates_exhausted'"
     )
     next_tab = remaining_tabs[0]
-    target_rid = str(next_tab.get("rid", "") or "").strip()
-    target_label = str(next_tab.get("label", "") or "").strip()
+    target_rid, target_label, target_bounds = _record_pending_local_tab_progression(
+        state=state,
+        signature=local_tab_signature,
+        next_candidate=next_tab,
+        reason="progression_selected",
+    )
     select_ok = False
     try:
         select_ok = bool(client.select(dev=dev, name=target_rid, type_="r", wait_=_TRANSITION_FAST_ACTION_WAIT_SECONDS))
@@ -9571,23 +10912,21 @@ def _maybe_select_next_local_tab(
             pass
     visited_tabs.add(target_rid)
     state.current_local_tab_active_rid = target_rid
-    state.fail_count = 0
-    state.same_count = 0
-    state.prev_fingerprint = ("", "", "")
-    state.previous_step_row = {}
-    state.recent_representative_signatures.clear()
-    state.consumed_representative_signatures.clear()
-    state.visited_logical_signatures = set()
-    state.recent_focus_realign_signatures = set()
-    state.consumed_cluster_signatures = set()
-    state.consumed_cluster_logical_signatures = set()
-    state.recent_focus_realign_clusters = set()
-    state.cluster_title_fallback_applied = set()
-    state.recent_scroll_fallback_signatures = set()
-    state.scroll_ready_retry_counts = {}
-    state.pending_scroll_ready_cluster_signature = ""
+    state.current_local_tab_active_label = target_label
+    state.current_local_tab_active_age = 0
+    _reset_content_phase_after_tab_switch(
+        state,
+        active_label=target_label,
+        active_rid=target_rid,
+        active_signature=local_tab_signature,
+        active_bounds=target_bounds,
+    )
     row["local_tab_transition"] = True
     row["local_tab_selected"] = target_label or target_rid
+    log(
+        f"[STEP][local_tab_pending] selected='{_truncate_debug_text(target_label or target_rid, 96)}' "
+        "reason='progression_selected'"
+    )
     log(
         f"[STEP][local_tab_select] selected='{_truncate_debug_text(target_label or target_rid, 96)}' "
         "reason='next_unvisited_local_tab'"
@@ -10400,16 +11739,36 @@ def _main_loop_phase(
         log(f"[STEP] START tab='{tab_cfg['tab_name']}' step={step_idx}")
         step_start = time.perf_counter()
 
-        row = client.collect_focus_step(
-            dev=dev,
-            step_index=step_idx,
-            move=True,
-            direction="next",
-            wait_seconds=phase_ctx.main_step_wait_seconds,
-            announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
-            announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
-            announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
+        forced_target = _local_tab_state_display(
+            rid=str(getattr(state, "forced_local_tab_target_rid", "") or ""),
+            label=str(getattr(state, "forced_local_tab_target_label", "") or ""),
         )
+        row = None
+        if forced_target:
+            row = _activate_forced_local_tab_target(
+                client=client,
+                dev=dev,
+                state=state,
+                step_idx=step_idx,
+                wait_seconds=phase_ctx.main_step_wait_seconds,
+                announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
+                announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
+                announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
+            )
+            if row is not None:
+                row["forced_local_tab_navigation"] = True
+                row["forced_local_tab_target"] = forced_target
+        if row is None:
+            row = client.collect_focus_step(
+                dev=dev,
+                step_index=step_idx,
+                move=True,
+                direction="next",
+                wait_seconds=phase_ctx.main_step_wait_seconds,
+                announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
+                announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
+                announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
+            )
         step_elapsed = time.perf_counter() - step_start
 
         row["tab_name"] = tab_cfg["tab_name"]
@@ -10439,6 +11798,7 @@ def _main_loop_phase(
             tab_cfg=tab_cfg,
             state=state,
             step_idx=step_idx,
+            scenario_perf=scenario_perf,
         )
         row = _maybe_promote_row_to_cta_child(
             row=row,
@@ -10612,6 +11972,17 @@ def _main_loop_phase(
             step_idx=step_idx,
             scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
         )
+        content_phase_grace_remaining = int(getattr(state, "content_phase_grace_steps", 0) or 0)
+        if content_phase_grace_remaining > 0:
+            row["content_phase_grace_active"] = True
+            log(
+                f"[STEP][content_phase_grace_block] reason='within_grace_window' "
+                f"remaining={content_phase_grace_remaining}"
+            )
+            state.content_phase_grace_steps = max(0, content_phase_grace_remaining - 1)
+            if stop:
+                stop = False
+                reason = ""
         local_tab_transition_applied = False
         viewport_exhausted_direct_path = bool(
             row.get("viewport_exhausted_eval_result", False)
@@ -10708,6 +12079,7 @@ def _main_loop_phase(
                 f"scroll_ready:{row.get('scroll_ready_eval_reason', 'not_evaluated')}",
                 f"viewport:{row.get('viewport_exhausted_eval_reason', 'not_evaluated')}",
                 f"scroll_fallback:{row.get('scroll_fallback_gate_reason', 'not_evaluated')}",
+                f"last_scroll:{row.get('last_scroll_block_reason', 'not_evaluated')}",
                 f"local_tab:{row.get('local_tab_block_reason', 'not_evaluated')}",
                 f"stop:{reason or eval_reason}",
             ]
@@ -10720,6 +12092,9 @@ def _main_loop_phase(
                 f"scroll_fallback_gate_evaluated={str(bool(row.get('scroll_fallback_gate_evaluated', False))).lower()} "
                 f"scroll_fallback_block_reason='{_truncate_debug_text(str(row.get('scroll_fallback_block_reason', '') or ''), 96)}' "
                 f"scroll_fallback_allowed={str(bool(row.get('scroll_fallback_allowed', False))).lower()} "
+                f"last_scroll_fallback_evaluated={str(bool(row.get('last_scroll_fallback_evaluated', False))).lower()} "
+                f"last_scroll_fallback_allowed={str(bool(row.get('last_scroll_fallback_allowed', False))).lower()} "
+                f"last_scroll_block_reason='{_truncate_debug_text(str(row.get('last_scroll_block_reason', '') or ''), 96)}' "
                 f"local_tab_gate_evaluated={str(bool(row.get('local_tab_gate_evaluated', False))).lower()} "
                 f"local_tab_block_reason='{_truncate_debug_text(str(row.get('local_tab_block_reason', '') or ''), 96)}' "
                 f"local_tab_allowed={str(bool(local_tab_transition_applied)).lower()} "
@@ -11302,16 +12677,39 @@ def collect_tab_rows(
         ),
         consumed_cluster_logical_signatures=set(),
         recent_focus_realign_signatures=set(),
+        failed_focus_realign_signatures=set(),
         consumed_cluster_signatures=set([str(anchor_row.get("focus_cluster_signature", "") or "").strip()]) if str(anchor_row.get("focus_cluster_signature", "") or "").strip() else set(),
         recent_focus_realign_clusters=set(),
         cluster_title_fallback_applied=set(),
         recent_scroll_fallback_signatures=set(),
+        last_scroll_fallback_attempted_signatures=set(),
         scroll_ready_retry_counts={},
         pending_scroll_ready_cluster_signature="",
         current_local_tab_signature="",
         current_local_tab_active_rid="",
         local_tab_candidates_by_signature={},
         visited_local_tabs_by_signature={},
+        pending_local_tab_signature="",
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        pending_local_tab_bounds="",
+        pending_local_tab_age=0,
+        current_local_tab_active_label="",
+        current_local_tab_active_age=0,
+        forced_local_tab_target_signature="",
+        forced_local_tab_target_rid="",
+        forced_local_tab_target_label="",
+        forced_local_tab_target_bounds="",
+        forced_local_tab_attempt_count=0,
+        content_phase_grace_steps=0,
+        active_container_group_signature="",
+        active_container_group_remaining=set(),
+        active_container_group_labels={},
+        completed_container_groups=set(),
+        last_selected_local_tab_signature="",
+        last_selected_local_tab_rid="",
+        last_selected_local_tab_label="",
+        last_selected_local_tab_bounds="",
     )
     phase_ctx = CollectionPhaseContext(
         tab_cfg=tab_cfg,
