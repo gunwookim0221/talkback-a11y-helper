@@ -76,6 +76,7 @@ COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
 COLLECTION_FLOW_LIFE_RESET_VERSION = "pr61-life-reset-strict-global-nav-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
 COLLECTION_FLOW_OVERLAY_FIRSTROW_DEBUG_VERSION = "pr73-overlay-first-row-lifecycle-debug-v1"
+COLLECTION_FLOW_SYNTAX_FIX_VERSION = "pr110-strict-token-pattern-syntax-fix-v1"
 _SPECIAL_STATE_GRACE_MAX_STEPS = 3
 _CTA_DESCEND_GRACE_STEPS = 2
 _STRONG_ONBOARDING_TOKENS = (
@@ -1474,7 +1475,8 @@ def _build_strict_token_pattern(token: str) -> re.Pattern[str] | None:
     parts = [re.escape(part) for part in normalized_token.split()]
     if not parts:
         return None
-    return re.compile(rf"(?<!\w){r'\s+'.join(parts)}(?!\w)")
+    whitespace_pattern = r"\s+".join(parts)
+    return re.compile(rf"(?<!\w){whitespace_pattern}(?!\w)")
 
 
 def _text_matches_token_strict(text: str, token: str) -> bool:
