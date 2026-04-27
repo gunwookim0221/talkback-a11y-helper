@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Callable
 
 from tb_runner.utils import parse_bounds_str
 
@@ -78,3 +78,24 @@ def _container_group_signature(container_candidates: list[dict[str, Any]]) -> st
         if signature
     )
     return "container_group:" + "##".join(signatures) if signatures else ""
+
+
+def _record_active_container_group_progress_impl(
+    state: Any,
+    consumed_signature: str,
+    on_continue: Callable[[list[str]], None],
+    on_consumed: Callable[[Any], None],
+) -> None:
+    if not consumed_signature:
+        return
+    remaining = set(getattr(state, "active_container_group_remaining", set()) or set())
+    if consumed_signature not in remaining:
+        return
+    remaining.remove(consumed_signature)
+    labels = dict(getattr(state, "active_container_group_labels", {}) or {})
+    state.active_container_group_remaining = remaining
+    remaining_labels = [labels.get(signature, signature) for signature in remaining]
+    if remaining:
+        on_continue(remaining_labels)
+    else:
+        on_consumed(state)

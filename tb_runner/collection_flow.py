@@ -7648,23 +7648,24 @@ def _clear_active_container_group(state: Any, *, reason: str) -> None:
     state.active_container_group_labels = {}
 
 
+def _update_active_group_on_progress_continue(remaining_labels: list[str]) -> None:
+    log(
+        f"[STEP][container_group_progress] "
+        f"remaining='{_truncate_debug_text('|'.join(remaining_labels), 120)}'"
+    )
+
+
+def _complete_active_group_on_progress_consumed(state: Any) -> None:
+    return _clear_active_container_group(state, reason="consumed")
+
+
 def _record_active_container_group_progress(state: Any, consumed_signature: str) -> None:
-    if not consumed_signature:
-        return
-    remaining = set(getattr(state, "active_container_group_remaining", set()) or set())
-    if consumed_signature not in remaining:
-        return
-    remaining.remove(consumed_signature)
-    labels = dict(getattr(state, "active_container_group_labels", {}) or {})
-    state.active_container_group_remaining = remaining
-    remaining_labels = [labels.get(signature, signature) for signature in remaining]
-    if remaining:
-        log(
-            f"[STEP][container_group_progress] "
-            f"remaining='{_truncate_debug_text('|'.join(remaining_labels), 120)}'"
-        )
-    else:
-        _clear_active_container_group(state, reason="consumed")
+    return container_group_logic._record_active_container_group_progress_impl(
+        state,
+        consumed_signature,
+        on_continue=_update_active_group_on_progress_continue,
+        on_consumed=_complete_active_group_on_progress_consumed,
+    )
 
 
 def _clear_last_selected_local_tab_hint(state: Any, *, reason: str) -> None:
