@@ -2,7 +2,7 @@ import re
 import time
 import os
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
 import xml.etree.ElementTree as ET
@@ -40,7 +40,9 @@ from tb_runner.utils import (
     parse_bounds_str,
 )
 from tb_runner import container_group_logic
+from tb_runner import focus_realign_logic
 from tb_runner import local_tab_logic
+from tb_runner import scroll_exhaustion_logic
 
 _VALID_SCREEN_CONTEXT_MODES = {"bottom_tab", "new_screen"}
 _VALID_STABILIZATION_MODES = {"tab_context", "anchor_only", "anchor_then_context"}
@@ -190,6 +192,32 @@ def _sync_local_tab_logic_dependencies() -> None:
     local_tab_logic._build_scroll_fallback_signature = _build_scroll_fallback_signature
     local_tab_logic._describe_scrollable_content_phase = _describe_scrollable_content_phase
 
+def _focus_realign_state(state: Any) -> Any:
+    if hasattr(state, "focus_realign_state"):
+        return state.focus_realign_state
+    return state
+
+def _cta_state(state: Any) -> Any:
+    if hasattr(state, "cta_state"):
+        return state.cta_state
+    return state
+
+@dataclass
+class ScrollState:
+    recent_scroll_fallback_signatures: set[str] = field(default_factory=set)
+    last_scroll_fallback_attempted_signatures: set[str] = field(default_factory=set)
+    scroll_ready_retry_counts: dict[str, int] = field(default_factory=dict)
+    pending_scroll_ready_cluster_signature: str = ""
+
+
+@dataclass
+class FocusRealignState:
+    recent_focus_realign_signatures: set[str] = field(default_factory=set)
+    failed_focus_realign_signatures: set[str] = field(default_factory=set)
+    recent_focus_realign_clusters: set[str] = field(default_factory=set)
+    cluster_title_fallback_applied: set[str] = field(default_factory=set)
+
+
 @dataclass
 class MainLoopState:
     last_fingerprint: str
@@ -207,24 +235,11 @@ class MainLoopState:
     stop_reason: str
     stop_step: int
     stall_escape_attempted: bool
-    cta_grace_signature: str
-    cta_descend_grace_remaining: int
-    cta_cluster_nodes_by_signature: dict[str, list[dict[str, Any]]]
-    cta_cluster_visited_rids: dict[str, set[str]]
-    cta_cluster_committed_rid: dict[str, str]
     recent_representative_signatures: deque[str]
     consumed_representative_signatures: set[str]
     visited_logical_signatures: set[str]
     consumed_cluster_logical_signatures: set[str]
-    recent_focus_realign_signatures: set[str]
-    failed_focus_realign_signatures: set[str]
     consumed_cluster_signatures: set[str]
-    recent_focus_realign_clusters: set[str]
-    cluster_title_fallback_applied: set[str]
-    recent_scroll_fallback_signatures: set[str]
-    last_scroll_fallback_attempted_signatures: set[str]
-    scroll_ready_retry_counts: dict[str, int]
-    pending_scroll_ready_cluster_signature: str
     current_local_tab_signature: str
     current_local_tab_active_rid: str
     local_tab_candidates_by_signature: dict[str, list[dict[str, Any]]]
@@ -250,6 +265,13 @@ class MainLoopState:
     last_selected_local_tab_rid: str
     last_selected_local_tab_label: str
     last_selected_local_tab_bounds: str
+    cta_grace_signature: str
+    cta_descend_grace_remaining: int
+    cta_cluster_nodes_by_signature: dict[str, list[dict[str, Any]]]
+    cta_cluster_visited_rids: dict[str, set[str]]
+    cta_cluster_committed_rid: dict[str, str]
+    scroll_state: ScrollState = field(default_factory=ScrollState)
+    focus_realign_state: FocusRealignState = field(default_factory=FocusRealignState)
 
 
 @dataclass
@@ -7802,16 +7824,18 @@ def _filter_realign_target_candidates(
     *,
     state: MainLoopState,
 ) -> dict[str, list[dict[str, Any]]]:
+    focus_state = _focus_realign_state(state)
+    cta_state = _cta_state(state)
     recent_signatures = set(getattr(state, "recent_representative_signatures", []) or [])
     consumed_signatures = set(getattr(state, "consumed_representative_signatures", set()) or set())
     visited_logical_signatures = set(getattr(state, "visited_logical_signatures", set()) or set())
-    resolved_signatures = set(getattr(state, "recent_focus_realign_signatures", set()) or set())
+    resolved_signatures = set(getattr(focus_state, "recent_focus_realign_signatures", set()) or set())
     consumed_clusters = set(getattr(state, "consumed_cluster_signatures", set()) or set())
     consumed_cluster_logical = set(getattr(state, "consumed_cluster_logical_signatures", set()) or set())
-    resolved_clusters = set(getattr(state, "recent_focus_realign_clusters", set()) or set())
+    resolved_clusters = set(getattr(focus_state, "recent_focus_realign_clusters", set()) or set())
     consumed_cta_rids = {
         str(rid or "").strip().lower()
-        for values in getattr(state, "cta_cluster_visited_rids", {}).values()
+        for values in getattr(cta_state, "cta_cluster_visited_rids", {}).values()
         for rid in values
     }
     representative_all = [
@@ -7868,24 +7892,12 @@ def _representative_focus_matches(
     target_label: str,
     target_bounds: str,
 ) -> bool:
-    if not isinstance(focus_node, dict):
-        return False
-    focus_rid = str(focus_node.get("viewIdResourceName", "") or focus_node.get("resourceId", "") or "").strip()
-    if target_rid and focus_rid == target_rid:
-        return True
-    focus_label = _extract_cta_node_label(focus_node) or _node_label_blob(focus_node)
-    if target_label and focus_label and target_label == focus_label:
-        return True
-    focus_bounds = str(focus_node.get("boundsInScreen", "") or focus_node.get("bounds", "") or "").strip()
-    focus_bounds_tuple = parse_bounds_str(focus_bounds)
-    target_bounds_tuple = parse_bounds_str(target_bounds)
-    if not focus_bounds_tuple or not target_bounds_tuple:
-        return False
-    left = max(focus_bounds_tuple[0], target_bounds_tuple[0])
-    top = max(focus_bounds_tuple[1], target_bounds_tuple[1])
-    right = min(focus_bounds_tuple[2], target_bounds_tuple[2])
-    bottom = min(focus_bounds_tuple[3], target_bounds_tuple[3])
-    return right > left and bottom > top
+    return focus_realign_logic._representative_focus_matches(
+        focus_node=focus_node,
+        target_rid=target_rid,
+        target_label=target_label,
+        target_bounds=target_bounds,
+    )
 
 
 def _focus_anchor_match_reason(
@@ -7896,26 +7908,13 @@ def _focus_anchor_match_reason(
     selected_bounds: str,
     selected_cluster_signature: str,
 ) -> tuple[bool, str]:
-    current_rid = str(row.get("focus_view_id", "") or "").strip()
-    current_label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
-    current_bounds = str(row.get("focus_bounds", "") or "").strip()
-    current_cluster_signature = str(row.get("focus_cluster_signature", "") or "").strip()
-    if current_rid and selected_rid and current_rid == selected_rid:
-        return True, "resource_id_match"
-    normalized_current = _normalize_logical_text(current_label)
-    normalized_selected = _normalize_logical_text(selected_label)
-    if normalized_current and normalized_selected and normalized_current == normalized_selected:
-        return True, "normalized_label_match"
-    if current_bounds and selected_bounds and _representative_focus_matches(
-        focus_node={"boundsInScreen": current_bounds},
-        target_rid="",
-        target_label="",
-        target_bounds=selected_bounds,
-    ):
-        return True, "bounds_overlap"
-    if current_cluster_signature and selected_cluster_signature and current_cluster_signature == selected_cluster_signature:
-        return True, "cluster_signature_match"
-    return False, "representative_focus_mismatch"
+    return focus_realign_logic._focus_anchor_match_reason(
+        row=row,
+        selected_rid=selected_rid,
+        selected_label=selected_label,
+        selected_bounds=selected_bounds,
+        selected_cluster_signature=selected_cluster_signature,
+    )
 
 
 def _maybe_realign_focus_to_representative(
@@ -7933,95 +7932,25 @@ def _maybe_realign_focus_to_representative(
     force_reason: str = "",
     scenario_perf: ScenarioPerfStats | None = None,
 ) -> tuple[bool, str, dict[str, Any] | None]:
-    current_rid = str(row.get("focus_view_id", "") or "").strip()
-    current_label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
-    current_bounds = str(row.get("focus_bounds", "") or "").strip()
-    if (
-        current_rid == selected_rid
-        or (current_label and selected_label and current_label == selected_label)
-        or (
-            current_bounds
-            and selected_bounds
-            and _representative_focus_matches(
-                focus_node={"boundsInScreen": current_bounds},
-                target_rid="",
-                target_label="",
-                target_bounds=selected_bounds,
-            )
-        )
-    ):
-        return False, "already_aligned", None
-    if not mismatch_logged:
-        log(
-            f"[STEP][focus_context_mismatch] selected='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
-            f"current_focus='{_truncate_debug_text(current_label or current_rid, 96)}' "
-            "reason='representative_differs_from_focus_context'"
-        )
-    get_focus_fn = getattr(client, "get_focus", None)
-    select_fn = getattr(client, "select", None)
-    if not callable(get_focus_fn) or not callable(select_fn):
-        log(
-            f"[STEP][focus_realign_fail] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
-            "reason='align_primitives_unavailable'"
-        )
-        return False, "align_primitives_unavailable", None
-    attempts: list[tuple[str, str, str]] = []
-    if selected_rid:
-        attempts.append(("rid", "r", selected_rid))
-    if selected_label:
-        attempts.append(("label", "a", selected_label))
-    attempts = attempts[:2]
-    for attempt_index, (method, target_type, target_value) in enumerate(attempts, start=1):
-        if force_reason:
-            if scenario_perf is not None:
-                scenario_perf.realign_attempt_count += 1
-            log(
-                f"[STEP][focus_force_realign] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
-                f"method='{method}' reason='{force_reason}'"
-            )
-        log(
-            f"[STEP][focus_realign] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
-            f"method='{method}' attempt={attempt_index}"
-        )
-        try:
-            select_fn(dev=dev, name=target_value, type_=target_type, wait_=1.2)
-        except Exception:
-            continue
-        focus_node = get_focus_fn(
-            dev=dev,
-            wait_seconds=0.35,
-            allow_fallback_dump=False,
-            mode="fast",
-        )
-        if _representative_focus_matches(
-            focus_node=focus_node,
-            target_rid=selected_rid,
-            target_label=selected_label,
-            target_bounds=selected_bounds,
-        ):
-            resolved_focus = _extract_cta_node_label(focus_node) or _node_label_blob(focus_node) or selected_label or selected_rid
-            log(
-                f"[STEP][focus_realign_success] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
-                f"resolved_focus='{_truncate_debug_text(resolved_focus, 96)}'"
-            )
-            if force_reason:
-                if scenario_perf is not None:
-                    scenario_perf.realign_success_count += 1
-                log(
-                    f"[STEP][focus_force_realign_success] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
-                    f"resolved_focus='{_truncate_debug_text(resolved_focus, 96)}'"
-                )
-            return True, "matched", focus_node if isinstance(focus_node, dict) else selected_node
-    log(
-        f"[STEP][focus_realign_fail] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
-        "reason='no_match'"
+    return focus_realign_logic._maybe_realign_focus_to_representative_impl(
+        client=client,
+        dev=dev,
+        row=row,
+        selected_node=selected_node,
+        selected_rid=selected_rid,
+        selected_label=selected_label,
+        selected_bounds=selected_bounds,
+        scenario_id=scenario_id,
+        step_idx=step_idx,
+        mismatch_logged=mismatch_logged,
+        force_reason=force_reason,
+        scenario_perf=scenario_perf,
+        focus_matches_fn=_representative_focus_matches,
+        extract_label_fn=_extract_cta_node_label,
+        label_blob_fn=_node_label_blob,
+        truncate_fn=_truncate_debug_text,
+        log_fn=log,
     )
-    if force_reason:
-        log(
-            f"[STEP][focus_force_realign_fail] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
-            "reason='no_match'"
-        )
-    return False, "no_match", None
 
 
 def _current_local_tab_phase_label(state: MainLoopState) -> str:
@@ -8042,6 +7971,7 @@ def _filter_content_candidates_for_phase(
     *,
     state: MainLoopState,
 ) -> dict[str, Any]:
+    cta_state = _cta_state(state)
     recent_signatures = set(getattr(state, "recent_representative_signatures", []) or [])
     consumed_signatures = set(getattr(state, "consumed_representative_signatures", set()) or set())
     consumed_clusters = set(getattr(state, "consumed_cluster_signatures", set()) or set())
@@ -8049,7 +7979,7 @@ def _filter_content_candidates_for_phase(
     visited_logical_signatures = set(getattr(state, "visited_logical_signatures", set()) or set())
     consumed_cta_rids = {
         str(rid or "").strip().lower()
-        for values in getattr(state, "cta_cluster_visited_rids", {}).values()
+        for values in getattr(cta_state, "cta_cluster_visited_rids", {}).values()
         for rid in values
     }
     status_candidates = [candidate for candidate in content_candidates if bool(candidate.get("passive_status", False))]
@@ -8198,70 +8128,17 @@ def _build_scroll_fallback_signature(
     chrome_excluded: list[str],
     current_focus_signature: str = "",
 ) -> str:
-    visible_content = "|".join(str(candidate.get("label", "") or "").strip() for candidate in content_candidates[:4]) or "none"
-    chrome = "|".join(chrome_excluded[:3]) or "none"
-    return "||".join(
-        [
-            str(local_tab_signature or "").strip().lower(),
-            str(active_rid or "").strip().lower(),
-            visible_content.lower(),
-            chrome.lower(),
-            str(current_focus_signature or "").strip().lower(),
-        ]
+    return scroll_exhaustion_logic._build_scroll_fallback_signature(
+        local_tab_signature=local_tab_signature,
+        active_rid=active_rid,
+        content_candidates=content_candidates,
+        chrome_excluded=chrome_excluded,
+        current_focus_signature=current_focus_signature,
     )
 
 
 def _describe_scrollable_content_phase(nodes: Any) -> tuple[bool, list[str], str]:
-    if not isinstance(nodes, list):
-        return False, [], ""
-    flat_nodes = _iter_tree_nodes_with_parent(nodes)
-    bounds_candidates = [
-        parse_bounds_str(str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip())
-        for node, _ in flat_nodes
-        if isinstance(node, dict)
-    ]
-    bounds_candidates = [bounds for bounds in bounds_candidates if bounds]
-    if not bounds_candidates:
-        return False, [], ""
-    viewport_top = min(bounds[1] for bounds in bounds_candidates)
-    viewport_bottom = max(bounds[3] for bounds in bounds_candidates)
-    viewport_height = max(1, viewport_bottom - viewport_top)
-    min_scroll_height = max(int(viewport_height * 0.24), 220)
-    max_scroll_center_y = viewport_bottom - int(viewport_height * 0.06)
-    scrollable_labels: list[str] = []
-    content_bounds = ""
-    for node, _ in flat_nodes:
-        if not isinstance(node, dict) or node.get("visibleToUser", True) is False:
-            continue
-        bounds = parse_bounds_str(str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip())
-        if not bounds:
-            continue
-        resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip().lower()
-        class_name = str(node.get("className", "") or node.get("class", "") or "").strip().lower()
-        scrollable = bool(node.get("scrollable"))
-        scroll_like = bool(
-            scrollable
-            or "recyclerview" in class_name
-            or "scrollview" in class_name
-            or "nestedscrollview" in class_name
-            or "listview" in class_name
-            or "recycler" in resource_id
-            or "scroll" in resource_id
-        )
-        if not scroll_like:
-            continue
-        height = max(1, bounds[3] - bounds[1])
-        center_y = (bounds[1] + bounds[3]) // 2
-        label = _extract_cta_node_label(node) or _node_label_blob(node) or str(node.get("viewIdResourceName", "") or node.get("className", "") or "").strip()
-        scrollable_labels.append(label or class_name or resource_id or "scrollable")
-        explicit_scrollable = bool(node.get("scrollable"))
-        if (
-            (explicit_scrollable and height >= max(int(viewport_height * 0.18), 160))
-            or (height >= min_scroll_height and center_y <= max_scroll_center_y)
-        ):
-            content_bounds = str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip()
-            return True, scrollable_labels[:4], content_bounds
-    return False, scrollable_labels[:4], content_bounds
+    return scroll_exhaustion_logic._describe_scrollable_content_phase(nodes)
 
 
 def _is_scrollable_content_phase(nodes: Any) -> bool:
@@ -8276,22 +8153,16 @@ def _record_pending_scroll_ready_move(
     step_idx: int,
     scenario_id: str,
 ) -> None:
-    pending_cluster_signature = str(getattr(state, "pending_scroll_ready_cluster_signature", "") or "").strip()
-    if not pending_cluster_signature:
-        return
-    move_result = normalize_move_result(row) or str(row.get("move_result", "") or "").strip().lower() or "none"
-    log(
-        f"[STEP][scroll_ready_move] step={step_idx} scenario='{scenario_id}' "
-        f"cluster='{_truncate_debug_text(pending_cluster_signature, 120)}' "
-        f"result='{_truncate_debug_text(move_result, 48)}' "
-        f"visible='{_truncate_debug_text(row.get('visible_label', ''), 120)}' "
-        f"version='{COLLECTION_FLOW_SCROLL_READY_VERSION}'"
+    return scroll_exhaustion_logic._record_pending_scroll_ready_move_impl(
+        row=row,
+        state=state,
+        step_idx=step_idx,
+        scenario_id=scenario_id,
+        log_fn=log,
+        truncate_fn=_truncate_debug_text,
+        normalize_move_result_fn=normalize_move_result,
+        scroll_ready_version=COLLECTION_FLOW_SCROLL_READY_VERSION,
     )
-    if move_result in {"moved", "scrolled", "edge_realign_then_moved"}:
-        retry_counts = dict(getattr(state, "scroll_ready_retry_counts", {}) or {})
-        retry_counts.pop(pending_cluster_signature, None)
-        state.scroll_ready_retry_counts = retry_counts
-        state.pending_scroll_ready_cluster_signature = ""
 
 
 def _apply_spatial_priority_to_candidates(
@@ -8956,8 +8827,9 @@ def _commit_cta_cluster_selection(
 ) -> None:
     if not cluster_signature or not selected_rid:
         return
-    state.cta_cluster_committed_rid[cluster_signature] = selected_rid
-    visited_rids = state.cta_cluster_visited_rids.setdefault(cluster_signature, set())
+    cta_state = _cta_state(state)
+    cta_state.cta_cluster_committed_rid[cluster_signature] = selected_rid
+    visited_rids = cta_state.cta_cluster_visited_rids.setdefault(cluster_signature, set())
     visited_rids.add(selected_rid)
     log(
         f"[STEP][cta_sibling_visit] step={step_idx} scenario='{scenario_id}' "
@@ -9088,8 +8960,9 @@ def _maybe_promote_row_to_cta_child(
     normalizer = getattr(client, "normalize_for_comparison", None)
     normalized_label = normalizer(selected_label) if callable(normalizer) else selected_label.lower()
     cluster_signature = _build_cta_cluster_signature(container_rid, cta_nodes)
-    state.cta_cluster_nodes_by_signature[cluster_signature] = cta_nodes
-    committed_rid = str(state.cta_cluster_committed_rid.get(cluster_signature, "") or "").strip()
+    cta_state = _cta_state(state)
+    cta_state.cta_cluster_nodes_by_signature[cluster_signature] = cta_nodes
+    committed_rid = str(cta_state.cta_cluster_committed_rid.get(cluster_signature, "") or "").strip()
     if committed_rid:
         committed_node = next(
             (
@@ -9169,7 +9042,8 @@ def _maybe_progress_row_to_cta_sibling(
     move_result = normalize_move_result(row)
     if move_result not in {"failed", "no_progress"}:
         return row
-    cta_nodes = state.cta_cluster_nodes_by_signature.get(cluster_signature, [])
+    cta_state = _cta_state(state)
+    cta_nodes = cta_state.cta_cluster_nodes_by_signature.get(cluster_signature, [])
     if not cta_nodes:
         log(
             f"[STEP][cta_sibling_skip] step={step_idx} scenario='{scenario_id}' "
@@ -9177,7 +9051,7 @@ def _maybe_progress_row_to_cta_sibling(
             "reason='no_sibling_found'"
         )
         return row
-    visited_rids = state.cta_cluster_visited_rids.setdefault(cluster_signature, set())
+    visited_rids = cta_state.cta_cluster_visited_rids.setdefault(cluster_signature, set())
     next_node = None
     for candidate in cta_nodes[:3]:
         candidate_rid = str(candidate.get("viewIdResourceName", "") or candidate.get("resourceId", "") or "").strip()
@@ -9236,8 +9110,9 @@ def _maybe_progress_row_to_cta_sibling(
 
 
 def _clear_cta_descend_grace(state: MainLoopState) -> None:
-    state.cta_grace_signature = ""
-    state.cta_descend_grace_remaining = 0
+    cta_state = _cta_state(state)
+    cta_state.cta_grace_signature = ""
+    cta_state.cta_descend_grace_remaining = 0
 
 
 def _maybe_apply_scroll_ready_continue(
@@ -9250,37 +9125,19 @@ def _maybe_apply_scroll_ready_continue(
     step_idx: int,
     scenario_id: str,
 ) -> tuple[bool, str, bool]:
-    cluster_signature = str(row.get("scroll_ready_cluster_signature", "") or "").strip()
-    if not stop or not bool(row.get("scroll_ready_state", False)) or not cluster_signature:
-        return stop, reason, False
-    if reason not in {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall", "repeat_semantic_stall_after_escape"}:
-        return stop, reason, False
-    if bool(stop_eval_inputs.get("terminal_signal", False)) or bool(stop_eval_inputs.get("is_global_nav", False)):
-        return stop, reason, False
-    retry_counts = dict(getattr(state, "scroll_ready_retry_counts", {}) or {})
-    attempt = int(retry_counts.get(cluster_signature, 0) or 0) + 1
-    max_attempts = 2
-    if attempt > max_attempts:
-        state.pending_scroll_ready_cluster_signature = ""
-        log(
-            f"[STEP][scroll_ready] cluster='{_truncate_debug_text(cluster_signature, 120)}' "
-            "reason='attempt_limit_reached' "
-            f"attempt={attempt - 1}/{max_attempts} "
-            f"version='{COLLECTION_FLOW_SCROLL_READY_VERSION}'"
-        )
-        return stop, reason, False
-    retry_counts[cluster_signature] = attempt
-    state.scroll_ready_retry_counts = retry_counts
-    state.pending_scroll_ready_cluster_signature = cluster_signature
-    move_result = normalize_move_result(row) or str(row.get("move_result", "") or "").strip().lower() or "none"
-    log(
-        f"[STEP][scroll_ready_move] step={step_idx} scenario='{scenario_id}' "
-        f"cluster='{_truncate_debug_text(cluster_signature, 120)}' "
-        f"result='{_truncate_debug_text(move_result, 48)}' "
-        f"attempt={attempt}/{max_attempts} "
-        f"version='{COLLECTION_FLOW_SCROLL_READY_VERSION}'"
+    return scroll_exhaustion_logic._maybe_apply_scroll_ready_continue_impl(
+        row=row,
+        stop=stop,
+        reason=reason,
+        stop_eval_inputs=stop_eval_inputs,
+        state=state,
+        step_idx=step_idx,
+        scenario_id=scenario_id,
+        log_fn=log,
+        truncate_fn=_truncate_debug_text,
+        normalize_move_result_fn=normalize_move_result,
+        scroll_ready_version=COLLECTION_FLOW_SCROLL_READY_VERSION,
     )
-    return False, "", True
 
 
 def _maybe_apply_cta_pending_grace(
@@ -9294,6 +9151,7 @@ def _maybe_apply_cta_pending_grace(
     step_idx: int,
     scenario_id: str,
 ) -> tuple[bool, str, bool]:
+    cta_state = _cta_state(state)
     prev_row = previous_row or {}
     prev_meta = _extract_cta_grace_focus_meta(prev_row)
     curr_meta = _extract_cta_grace_focus_meta(row)
@@ -9344,16 +9202,16 @@ def _maybe_apply_cta_pending_grace(
             cta_candidate.lower(),
         ]
     )
-    if not state.cta_grace_signature:
-        state.cta_grace_signature = grace_signature
-        state.cta_descend_grace_remaining = _CTA_DESCEND_GRACE_STEPS
-    elif state.cta_grace_signature != grace_signature and state.cta_descend_grace_remaining <= 0:
-        state.cta_grace_signature = grace_signature
-        state.cta_descend_grace_remaining = _CTA_DESCEND_GRACE_STEPS
-    if state.cta_descend_grace_remaining <= 0:
+    if not cta_state.cta_grace_signature:
+        cta_state.cta_grace_signature = grace_signature
+        cta_state.cta_descend_grace_remaining = _CTA_DESCEND_GRACE_STEPS
+    elif cta_state.cta_grace_signature != grace_signature and cta_state.cta_descend_grace_remaining <= 0:
+        cta_state.cta_grace_signature = grace_signature
+        cta_state.cta_descend_grace_remaining = _CTA_DESCEND_GRACE_STEPS
+    if cta_state.cta_descend_grace_remaining <= 0:
         return stop, reason, False
 
-    state.cta_descend_grace_remaining = max(state.cta_descend_grace_remaining - 1, 0)
+    cta_state.cta_descend_grace_remaining = max(cta_state.cta_descend_grace_remaining - 1, 0)
     log(
         f"[STOP][cta_descend] step={step_idx} scenario='{scenario_id}' "
         "reason='actionable_cta_descend_pending' "
@@ -9362,7 +9220,7 @@ def _maybe_apply_cta_pending_grace(
         f"no_progress={str(bool(stop_eval_inputs.get('no_progress', False))).lower()} "
         f"cta_candidates='{_truncate_debug_text(cta_candidate, 120)}' "
         "decision='continue_for_cta_descend' "
-        f"grace_remaining={state.cta_descend_grace_remaining} "
+        f"grace_remaining={cta_state.cta_descend_grace_remaining} "
         f"version='{COLLECTION_FLOW_REPEAT_CTA_GRACE_VERSION}'"
     )
     return False, "", True
@@ -10017,7 +9875,7 @@ def _main_loop_phase(
             elif bool(row.get("scroll_fallback_resumed_content", False)):
                 stop = False
                 reason = ""
-                state.pending_scroll_ready_cluster_signature = ""
+                state.scroll_state.pending_scroll_ready_cluster_signature = ""
         if (
             stop
             and scenario_type != "global_nav"
@@ -10039,7 +9897,7 @@ def _main_loop_phase(
             elif bool(row.get("scroll_fallback_resumed_content", False)):
                 stop = False
                 reason = ""
-                state.pending_scroll_ready_cluster_signature = ""
+                state.scroll_state.pending_scroll_ready_cluster_signature = ""
         overlay_realign_grace_active = bool(stop_eval_inputs["overlay_realign_grace_active"])
         min_step_gate_blocked = bool(stop_eval_inputs["min_step_gate_blocked"])
         realign_grace_suppressed = bool(stop_eval_inputs["realign_grace_suppressed"])
@@ -10672,11 +10530,6 @@ def collect_tab_rows(
         stop_reason="",
         stop_step=-1,
         stall_escape_attempted=False,
-        cta_grace_signature="",
-        cta_descend_grace_remaining=0,
-        cta_cluster_nodes_by_signature={},
-        cta_cluster_visited_rids={},
-        cta_cluster_committed_rid={},
         recent_representative_signatures=deque(
             [_build_row_object_signature(anchor_row)] if _build_row_object_signature(anchor_row) else [],
             maxlen=_RECENT_DUPLICATE_WINDOW,
@@ -10688,15 +10541,7 @@ def collect_tab_rows(
             [_row_logical_signature(anchor_row)] if _row_logical_signature(anchor_row) != "none||none||none" else []
         ),
         consumed_cluster_logical_signatures=set(),
-        recent_focus_realign_signatures=set(),
-        failed_focus_realign_signatures=set(),
         consumed_cluster_signatures=set([str(anchor_row.get("focus_cluster_signature", "") or "").strip()]) if str(anchor_row.get("focus_cluster_signature", "") or "").strip() else set(),
-        recent_focus_realign_clusters=set(),
-        cluster_title_fallback_applied=set(),
-        recent_scroll_fallback_signatures=set(),
-        last_scroll_fallback_attempted_signatures=set(),
-        scroll_ready_retry_counts={},
-        pending_scroll_ready_cluster_signature="",
         current_local_tab_signature="",
         current_local_tab_active_rid="",
         local_tab_candidates_by_signature={},
@@ -10722,6 +10567,13 @@ def collect_tab_rows(
         last_selected_local_tab_rid="",
         last_selected_local_tab_label="",
         last_selected_local_tab_bounds="",
+        cta_grace_signature="",
+        cta_descend_grace_remaining=0,
+        cta_cluster_nodes_by_signature={},
+        cta_cluster_visited_rids={},
+        cta_cluster_committed_rid={},
+        scroll_state=ScrollState(),
+        focus_realign_state=FocusRealignState(),
     )
     phase_ctx = CollectionPhaseContext(
         tab_cfg=tab_cfg,

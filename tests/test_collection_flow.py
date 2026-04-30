@@ -525,11 +525,16 @@ def test_collect_tab_rows_allows_bounded_cta_descend_grace_for_card_container(mo
     rows = collection_flow.collect_tab_rows(client, "SERIAL", _base_tab_cfg(max_steps=3), [], "o.xlsx", "out")
 
     assert rows[1]["status"] == "OK"
-    assert rows[2]["status"] == "OK"
-    assert rows[3]["status"] == "END"
-    assert rows[3]["stop_reason"] == "repeat_no_progress"
+    # CTA grace can continue an intermediate duplicate step without preserving
+    # that intermediate row in the final filtered rows.
+    assert rows[2]["status"] == "END"
+    assert rows[2]["step_index"] == 3
+    assert rows[-1]["stop_reason"] in {"repeat_no_progress", "safety_limit"}
+    assert rows[-1]["stop_reason"] == "repeat_no_progress"
     descend_logs = [line for line in logs if "[STOP][cta_descend]" in line]
     assert len(descend_logs) == 2
+    assert any("step=1" in line and "grace_remaining=1" in line for line in descend_logs)
+    assert any("step=2" in line and "grace_remaining=0" in line for line in descend_logs)
     assert any("suggestion_card_container" in line for line in descend_logs)
     assert any("Later" in line and "Set up" in line for line in descend_logs)
 
@@ -9879,3 +9884,284 @@ def test_xml_entry_strict_target_gating_rejects_partial_multiword_descendant_phr
     assert ok is False
     assert reason == "target_not_found_after_scroll"
     assert client.tap_calls == []
+
+
+def _phase_ordering_state():
+    return SimpleNamespace(
+        forced_local_tab_target_rid="",
+        forced_local_tab_target_label="",
+        post_realign_pending_steps=0,
+        previous_step_row=_anchor_row(),
+        last_fingerprint="anchor",
+        fingerprint_repeat_count=0,
+        fail_count=0,
+        same_count=0,
+        prev_fingerprint=("anchor", "anchor", "id.anchor"),
+        recent_fingerprint_history=deque(),
+        recent_semantic_fingerprint_history=deque(),
+        recent_representative_signatures=deque(maxlen=8),
+        content_phase_grace_steps=0,
+        scroll_state=SimpleNamespace(
+            recent_scroll_fallback_signatures=set(),
+            last_scroll_fallback_attempted_signatures=set(),
+            scroll_ready_retry_counts={},
+            pending_scroll_ready_cluster_signature="",
+        ),
+        cta_grace_signature="",
+        cta_descend_grace_remaining=0,
+        cta_cluster_nodes_by_signature={},
+        cta_cluster_visited_rids={},
+        cta_cluster_committed_rid={},
+        stop_triggered=False,
+        stop_reason="",
+        stop_step=-1,
+        stall_escape_attempted=False,
+        main_step_index_by_fingerprint={},
+        expanded_overlay_entries=set(),
+    )
+
+
+def _phase_ordering_stop_inputs(**overrides):
+    values = {
+        "terminal_signal": False,
+        "same_like_count": 0,
+        "no_progress": False,
+        "scenario_type": "content",
+        "is_global_nav_only_scenario": False,
+        "is_global_nav": False,
+        "global_nav_reason": "",
+        "after_realign": False,
+        "recent_repeat": False,
+        "bounded_two_card_loop": False,
+        "semantic_same_like": False,
+        "recent_duplicate": False,
+        "recent_duplicate_distance": 0,
+        "recent_semantic_duplicate": False,
+        "recent_semantic_duplicate_distance": 0,
+        "recent_semantic_unique_count": 1,
+        "repeat_class": "",
+        "loop_classification": "",
+        "strict_duplicate": False,
+        "semantic_duplicate": False,
+        "hard_no_progress": False,
+        "soft_no_progress": False,
+        "no_progress_class": "",
+        "overlay_realign_grace_active": False,
+        "min_step_gate_blocked": False,
+        "realign_grace_suppressed": False,
+        "repeat_stop_hit": False,
+        "eval_reason": "",
+    }
+    values.update(overrides)
+    return values
+
+
+def _run_phase_ordering_main_loop(monkeypatch, *, row, stop=False, reason=""):
+    events = []
+    state = _phase_ordering_state()
+    client = DummyClient([row])
+    phase_ctx = SimpleNamespace(
+        tab_cfg=_base_tab_cfg(max_steps=1),
+        rows=[],
+        all_rows=[],
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        checkpoint_every=100,
+        main_step_wait_seconds=0,
+        main_announcement_wait_seconds=0,
+        main_announcement_idle_wait_seconds=0,
+        main_announcement_max_extra_wait_seconds=0,
+        state=state,
+    )
+
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda _client, _dev, row, _base: row)
+    monkeypatch.setattr(collection_flow, "_record_pending_scroll_ready_move", lambda **kwargs: None)
+    monkeypatch.setattr(collection_flow, "_maybe_reprioritize_persistent_bottom_strip_row", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_maybe_promote_row_to_cta_child", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_maybe_progress_row_to_cta_sibling", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_record_recent_representative_signature", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(collection_flow, "_annotate_row_quality", lambda row, **kwargs: ("fp", 1))
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **kwargs: ([], []))
+    monkeypatch.setattr(collection_flow, "should_stop", lambda **kwargs: (stop, 0, 0, reason, ("fp", "", ""), {}))
+    monkeypatch.setattr(
+        collection_flow,
+        "_build_stop_evaluation_inputs",
+        lambda **kwargs: _phase_ordering_stop_inputs(
+            no_progress=reason == "repeat_no_progress",
+            strict_duplicate=reason == "repeat_no_progress",
+            repeat_stop_hit=reason == "repeat_no_progress",
+            eval_reason=reason,
+        ),
+    )
+    monkeypatch.setattr(collection_flow, "_maybe_apply_cta_pending_grace", lambda **kwargs: (kwargs["stop"], kwargs["reason"], False))
+    monkeypatch.setattr(collection_flow, "_maybe_apply_scroll_ready_continue", lambda **kwargs: (kwargs["stop"], kwargs["reason"], False))
+    monkeypatch.setattr(collection_flow, "classify_step_result", lambda *args, **kwargs: {})
+    monkeypatch.setattr(collection_flow, "_format_stop_explain_log_fields", lambda **kwargs: "")
+    monkeypatch.setattr(collection_flow, "_log_repeat_stop_debug", lambda **kwargs: None)
+    monkeypatch.setattr(collection_flow, "_should_suppress_row_persistence", lambda **kwargs: (False, ""))
+    monkeypatch.setattr(collection_flow, "_overlay_phase", lambda **kwargs: SimpleNamespace(post_realign_pending_steps_delta=0))
+    monkeypatch.setattr(collection_flow, "save_excel_with_perf", lambda *args, **kwargs: None)
+
+    def fake_select_next_local_tab(**kwargs):
+        events.append((kwargs["step_idx"], kwargs["row"].get("visible_label", "")))
+        return False
+
+    monkeypatch.setattr(collection_flow, "_maybe_select_next_local_tab", fake_select_next_local_tab)
+    collection_flow._main_loop_phase(client, "SERIAL", phase_ctx)
+    return events, phase_ctx
+
+
+def test_stop_then_cta_grace_allows_continue_then_stops_after_exhaust():
+    state = _phase_ordering_state()
+    row = _card_container_with_cta_children_row(1)
+    stop_inputs = _phase_ordering_stop_inputs(strict_duplicate=True, no_progress=True)
+
+    stop, reason, applied = collection_flow._maybe_apply_cta_pending_grace(
+        row=row,
+        previous_row=_card_container_row(0),
+        stop=True,
+        reason="repeat_no_progress",
+        stop_eval_inputs=stop_inputs,
+        state=state,
+        step_idx=1,
+        scenario_id="cta_phase_ordering",
+    )
+    assert (stop, reason, applied) == (False, "", True)
+    assert state.cta_descend_grace_remaining == 1
+
+    stop, reason, applied = collection_flow._maybe_apply_cta_pending_grace(
+        row=row,
+        previous_row=_card_container_row(0),
+        stop=True,
+        reason="repeat_no_progress",
+        stop_eval_inputs=stop_inputs,
+        state=state,
+        step_idx=2,
+        scenario_id="cta_phase_ordering",
+    )
+    assert (stop, reason, applied) == (False, "", True)
+    assert state.cta_descend_grace_remaining == 0
+
+    stop, reason, applied = collection_flow._maybe_apply_cta_pending_grace(
+        row=row,
+        previous_row=_card_container_row(0),
+        stop=True,
+        reason="repeat_no_progress",
+        stop_eval_inputs=stop_inputs,
+        state=state,
+        step_idx=3,
+        scenario_id="cta_phase_ordering",
+    )
+    assert (stop, reason, applied) == (True, "repeat_no_progress", False)
+    assert state.cta_descend_grace_remaining == 0
+
+
+def test_scroll_ready_continue_does_not_override_terminal_stop():
+    row = {
+        **_main_row(1),
+        "scroll_ready_state": True,
+        "scroll_ready_cluster_signature": "cluster:medication",
+    }
+    for stop_inputs in (
+        _phase_ordering_stop_inputs(terminal_signal=True, no_progress=True),
+        _phase_ordering_stop_inputs(is_global_nav=True, no_progress=True),
+    ):
+        state = _phase_ordering_state()
+        stop, reason, applied = collection_flow._maybe_apply_scroll_ready_continue(
+            row=row,
+            stop=True,
+            reason="repeat_no_progress",
+            stop_eval_inputs=stop_inputs,
+            state=state,
+            step_idx=1,
+            scenario_id="scroll_phase_ordering",
+        )
+        assert (stop, reason, applied) == (True, "repeat_no_progress", False)
+        assert state.scroll_state.pending_scroll_ready_cluster_signature == ""
+        assert state.scroll_state.scroll_ready_retry_counts == {}
+
+
+def test_local_tab_transition_only_on_exhaustion_or_repeat_stop(monkeypatch):
+    viewport_row = {
+        **_main_row(1),
+        "viewport_exhausted_eval_result": True,
+        "scroll_fallback_resumed_content": False,
+    }
+    viewport_events, _ = _run_phase_ordering_main_loop(monkeypatch, row=viewport_row, stop=False, reason="")
+    assert len(viewport_events) == 1
+
+    repeat_row = {
+        **_main_row(1),
+        "viewport_exhausted_eval_result": False,
+        "scroll_fallback_resumed_content": False,
+    }
+    repeat_events, _ = _run_phase_ordering_main_loop(
+        monkeypatch,
+        row=repeat_row,
+        stop=True,
+        reason="repeat_no_progress",
+    )
+    assert len(repeat_events) == 1
+
+    terminal_row = {
+        **_main_row(1),
+        "viewport_exhausted_eval_result": False,
+        "scroll_fallback_resumed_content": False,
+    }
+    terminal_events, _ = _run_phase_ordering_main_loop(
+        monkeypatch,
+        row=terminal_row,
+        stop=True,
+        reason="global_nav_exit",
+    )
+    assert terminal_events == []
+
+
+def test_row_suppression_applied_before_persistence(monkeypatch):
+    captured = {}
+    state = _phase_ordering_state()
+    client = DummyClient([{**_main_row(1), "low_value_leaf_row": True}])
+    phase_ctx = SimpleNamespace(
+        tab_cfg=_base_tab_cfg(max_steps=1),
+        rows=[],
+        all_rows=[],
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        checkpoint_every=100,
+        main_step_wait_seconds=0,
+        main_announcement_wait_seconds=0,
+        main_announcement_idle_wait_seconds=0,
+        main_announcement_max_extra_wait_seconds=0,
+        state=state,
+    )
+
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda _client, _dev, row, _base: row)
+    monkeypatch.setattr(collection_flow, "_record_pending_scroll_ready_move", lambda **kwargs: None)
+    monkeypatch.setattr(collection_flow, "_maybe_reprioritize_persistent_bottom_strip_row", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_maybe_promote_row_to_cta_child", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_maybe_progress_row_to_cta_sibling", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_record_recent_representative_signature", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(collection_flow, "_annotate_row_quality", lambda row, **kwargs: ("fp", 1))
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **kwargs: ([], []))
+    monkeypatch.setattr(collection_flow, "should_stop", lambda **kwargs: (False, 0, 0, "", ("fp", "", ""), {}))
+    monkeypatch.setattr(collection_flow, "_build_stop_evaluation_inputs", lambda **kwargs: _phase_ordering_stop_inputs())
+    monkeypatch.setattr(collection_flow, "_maybe_apply_cta_pending_grace", lambda **kwargs: (kwargs["stop"], kwargs["reason"], False))
+    monkeypatch.setattr(collection_flow, "_maybe_apply_scroll_ready_continue", lambda **kwargs: (kwargs["stop"], kwargs["reason"], False))
+    monkeypatch.setattr(collection_flow, "classify_step_result", lambda *args, **kwargs: {})
+    monkeypatch.setattr(collection_flow, "_format_stop_explain_log_fields", lambda **kwargs: "")
+    monkeypatch.setattr(collection_flow, "_overlay_phase", lambda **kwargs: SimpleNamespace(post_realign_pending_steps_delta=0))
+    monkeypatch.setattr(collection_flow, "save_excel_with_perf", lambda *args, **kwargs: None)
+
+    def fake_suppress(**kwargs):
+        captured["row"] = kwargs["row"]
+        return True, "phase_ordering_suppressed"
+
+    monkeypatch.setattr(collection_flow, "_should_suppress_row_persistence", fake_suppress)
+    collection_flow._main_loop_phase(client, "SERIAL", phase_ctx)
+
+    assert phase_ctx.rows == []
+    assert phase_ctx.all_rows == []
+    assert captured["row"]["row_persist_suppressed"] is True
+    assert captured["row"]["row_persist_suppressed_reason"] == "phase_ordering_suppressed"

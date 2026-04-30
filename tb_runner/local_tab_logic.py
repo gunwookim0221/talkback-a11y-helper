@@ -15,6 +15,14 @@ _TRANSITION_FAST_ACTION_WAIT_SECONDS = 2
 COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION = "pr108-local-tab-last-selected-hint-v1"
 COLLECTION_FLOW_SCROLL_READY_VERSION = "pr79-scroll-ready-move-smart-v1"
 
+def _scroll_state(state: Any) -> Any:
+    return getattr(state, "scroll_state", state)
+
+def _focus_realign_state(state: Any) -> Any:
+    if hasattr(state, "focus_realign_state"):
+        return state.focus_realign_state
+    return state
+
 def _clear_last_selected_local_tab_hint(state: Any, *, reason: str) -> None:
     active = _local_tab_state_display(
         rid=str(getattr(state, "last_selected_local_tab_rid", "") or ""),
@@ -98,6 +106,13 @@ def _sort_local_tab_candidates_left_to_right(tab_candidates: list[dict[str, Any]
 
 def _local_tab_state_display(*, rid: str = "", label: str = "") -> str:
     return str(label or rid or "").strip()
+
+def _is_viewport_exhausted_for_scroll_fallback(
+    *,
+    candidates: list[dict],
+    representative_exists: bool,
+) -> bool:
+    return not bool(representative_exists)
 
 def _local_tab_candidate_matches_identity(
     candidate: dict[str, Any],
@@ -610,18 +625,30 @@ def _reset_content_phase_after_tab_switch(
     clear_attr("recent_representative_signatures", deque())
     clear_attr("consumed_representative_signatures", set())
     state.visited_logical_signatures = set()
-    clear_attr("recent_focus_realign_signatures", set())
-    clear_attr("failed_focus_realign_signatures", set())
     state.consumed_cluster_signatures = set()
     state.consumed_cluster_logical_signatures = set()
-    clear_attr("recent_focus_realign_clusters", set())
-    clear_attr("cluster_title_fallback_applied", set())
-    clear_attr("recent_scroll_fallback_signatures", set())
-    clear_attr("last_scroll_fallback_attempted_signatures", set())
+    focus_state = _focus_realign_state(state)
+    if focus_state is state:
+        clear_attr("recent_focus_realign_signatures", set())
+        clear_attr("failed_focus_realign_signatures", set())
+        clear_attr("recent_focus_realign_clusters", set())
+        clear_attr("cluster_title_fallback_applied", set())
+    else:
+        focus_state.recent_focus_realign_signatures = set()
+        focus_state.failed_focus_realign_signatures = set()
+        focus_state.recent_focus_realign_clusters = set()
+        focus_state.cluster_title_fallback_applied = set()
+    scroll_state = _scroll_state(state)
+    if scroll_state is state:
+        clear_attr("recent_scroll_fallback_signatures", set())
+        clear_attr("last_scroll_fallback_attempted_signatures", set())
+    else:
+        scroll_state.recent_scroll_fallback_signatures = set()
+        scroll_state.last_scroll_fallback_attempted_signatures = set()
     _clear_active_container_group(state, reason="local_tab_transition")
     state.completed_container_groups = set()
-    state.scroll_ready_retry_counts = {}
-    state.pending_scroll_ready_cluster_signature = ""
+    scroll_state.scroll_ready_retry_counts = {}
+    scroll_state.pending_scroll_ready_cluster_signature = ""
     state.content_phase_grace_steps = 2
     _write_last_selected_local_tab_hint(
         state,
@@ -958,7 +985,8 @@ def _select_better_cluster_representative(
     cluster_signature = _candidate_cluster_signature(selected_candidate)
     if not cluster_signature:
         return None
-    if cluster_signature in set(getattr(state, "cluster_title_fallback_applied", set()) or set()):
+    focus_state = _focus_realign_state(state)
+    if cluster_signature in set(getattr(focus_state, "cluster_title_fallback_applied", set()) or set()):
         return None
     if str(selected_candidate.get("cluster_role", "") or "") != "title":
         return None
@@ -1450,6 +1478,7 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         or _build_row_object_signature(row) == _build_row_object_signature(getattr(state, "previous_step_row", {}))
         or build_row_semantic_fingerprint(row) == build_row_semantic_fingerprint(getattr(state, "previous_step_row", {}))
     )
+    focus_state = _focus_realign_state(state)
     scroll_ready_state = bool(
         selected_cluster_signature
         and previous_cluster_signature
@@ -1457,13 +1486,13 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         and move_result in {"failed", "no_progress"}
         and same_object_like
         and (
-            selected_cluster_signature in set(getattr(state, "cluster_title_fallback_applied", set()) or set())
+            selected_cluster_signature in set(getattr(focus_state, "cluster_title_fallback_applied", set()) or set())
             or no_better_candidate_in_cluster
         )
     )
     fallback_applied = bool(
         selected_cluster_signature
-        and selected_cluster_signature in set(getattr(state, "cluster_title_fallback_applied", set()) or set())
+        and selected_cluster_signature in set(getattr(focus_state, "cluster_title_fallback_applied", set()) or set())
     )
     representative_preview = _summarize_candidate_labels(filtered_meta["representative_candidates"])
     recent_representative_count = len(list(getattr(state, "recent_representative_signatures", []) or []))
@@ -1524,10 +1553,10 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         return row
     if title_fallback_candidate is not None:
         cluster_signature = _candidate_cluster_signature(selected_candidate)
-        fallback_sets = set(getattr(state, "cluster_title_fallback_applied", set()) or set())
+        fallback_sets = set(getattr(focus_state, "cluster_title_fallback_applied", set()) or set())
         if cluster_signature:
             fallback_sets.add(cluster_signature)
-            state.cluster_title_fallback_applied = fallback_sets
+            focus_state.cluster_title_fallback_applied = fallback_sets
         log(
             f"[STEP][cluster_title_fallback] cluster='{_truncate_debug_text(_cluster_display_name(selected_candidate), 96)}' "
             f"current='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
@@ -1591,7 +1620,7 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         )
         selected_signature = _candidate_object_signature(selected_candidate)
         selected_cluster_signature = _candidate_cluster_signature(selected_candidate)
-        failed_realign_signatures = set(getattr(state, "failed_focus_realign_signatures", set()) or set())
+        failed_realign_signatures = set(getattr(focus_state, "failed_focus_realign_signatures", set()) or set())
         force_reason = "anchor_mismatch"
         if strip_focus_context or current_row_is_low_value_leaf or current_row_recent_revisit:
             force_reason = "strip_or_stale_focus_context"
@@ -1600,12 +1629,12 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
                 f"[STEP][focus_realign_skip] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
                 "reason='recent_realign_failed'"
             )
-        elif selected_cluster_signature and selected_cluster_signature in set(getattr(state, "recent_focus_realign_clusters", set()) or set()):
+        elif selected_cluster_signature and selected_cluster_signature in set(getattr(focus_state, "recent_focus_realign_clusters", set()) or set()):
             log(
                 f"[STEP][focus_realign_skip] cluster='{_truncate_debug_text(selected_cluster_signature, 120)}' "
                 "reason='cluster_already_realign_resolved'"
             )
-        elif selected_signature in set(getattr(state, "recent_focus_realign_signatures", set()) or set()):
+        elif selected_signature in set(getattr(focus_state, "recent_focus_realign_signatures", set()) or set()):
             log(
                 f"[STEP][focus_realign_skip] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
                 "reason='already_realign_resolved_in_current_phase'"
@@ -1629,15 +1658,15 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
             realign_cluster_signature = _candidate_cluster_signature(selected_candidate)
             if realign_ok:
                 if realign_signature:
-                    resolved_signatures = set(getattr(state, "recent_focus_realign_signatures", set()) or set())
+                    resolved_signatures = set(getattr(focus_state, "recent_focus_realign_signatures", set()) or set())
                     resolved_signatures.add(realign_signature)
-                    state.recent_focus_realign_signatures = resolved_signatures
+                    focus_state.recent_focus_realign_signatures = resolved_signatures
                     failed_realign_signatures.discard(realign_signature)
-                    state.failed_focus_realign_signatures = failed_realign_signatures
+                    focus_state.failed_focus_realign_signatures = failed_realign_signatures
                 if realign_cluster_signature:
-                    resolved_clusters = set(getattr(state, "recent_focus_realign_clusters", set()) or set())
+                    resolved_clusters = set(getattr(focus_state, "recent_focus_realign_clusters", set()) or set())
                     resolved_clusters.add(realign_cluster_signature)
-                    state.recent_focus_realign_clusters = resolved_clusters
+                    focus_state.recent_focus_realign_clusters = resolved_clusters
                 log(
                     f"[STEP][focus_realign_record] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
                     f"signature='{_truncate_debug_text(realign_signature, 120)}' "
@@ -1645,7 +1674,7 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
                 )
             elif realign_signature:
                 failed_realign_signatures.add(realign_signature)
-                state.failed_focus_realign_signatures = failed_realign_signatures
+                focus_state.failed_focus_realign_signatures = failed_realign_signatures
     if realign_ok and isinstance(realigned_focus_node, dict):
         selected_node = realigned_focus_node
         selected_rid = str(
@@ -1823,7 +1852,10 @@ def _maybe_select_next_local_tab(
         f"after_consumed_filter='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in effective_content_candidates[:4]) or 'none', 120)}' "
         f"exhausted={str(not effective_content_candidates).lower()}"
     )
-    viewport_exhausted = not bool(effective_content_candidates)
+    viewport_exhausted = _is_viewport_exhausted_for_scroll_fallback(
+        candidates=effective_content_candidates,
+        representative_exists=bool(effective_content_candidates),
+    )
     viewport_reason = "no_representative_candidates" if viewport_exhausted else "representative_candidates_remaining"
     row["viewport_exhausted_eval_result"] = viewport_exhausted
     row["viewport_exhausted_eval_reason"] = viewport_reason
@@ -1915,7 +1947,8 @@ def _maybe_select_next_local_tab(
         scrollable, scrollable_nodes, content_area_bounds = _describe_scrollable_content_phase(nodes)
     else:
         scrollable = False
-    attempted_signatures = set(getattr(state, "recent_scroll_fallback_signatures", set()) or set())
+    scroll_state = _scroll_state(state)
+    attempted_signatures = set(getattr(scroll_state, "recent_scroll_fallback_signatures", set()) or set())
     scroll_allowed = bool(scrollable and scroll_fallback_signature and scroll_fallback_signature not in attempted_signatures)
     scroll_reason = "viewport_exhausted_direct_scroll"
     if not scrollable:
@@ -1945,7 +1978,7 @@ def _maybe_select_next_local_tab(
         f"recent_strip_seen={str(recent_strip_seen).lower()} dump_strip_seen={str(dump_strip_seen).lower()} "
         f"result={str(bottom_strip_context).lower()}"
     )
-    last_attempted_signatures = set(getattr(state, "last_scroll_fallback_attempted_signatures", set()) or set())
+    last_attempted_signatures = set(getattr(scroll_state, "last_scroll_fallback_attempted_signatures", set()) or set())
     last_scroll_signature = scroll_fallback_signature or _build_row_object_signature(row) or local_tab_signature or "viewport_exhausted"
     last_scroll_evaluated = bool(viewport_exhausted and bottom_strip_context)
     scrollable_uncertain = bool(last_scroll_evaluated and not scrollable and (content_area_bounds or dump_strip_seen or previous_row_strip))
@@ -2010,11 +2043,11 @@ def _maybe_select_next_local_tab(
     if scroll_allowed and callable(scroll_fn):
         if last_scroll_allowed:
             last_attempted_signatures.add(last_scroll_signature)
-            state.last_scroll_fallback_attempted_signatures = last_attempted_signatures
+            scroll_state.last_scroll_fallback_attempted_signatures = last_attempted_signatures
             log("[STEP][last_scroll_fallback] attempt=1 reason='bottom_strip_viewport_exhausted'")
         else:
             attempted_signatures.add(scroll_fallback_signature)
-            state.recent_scroll_fallback_signatures = attempted_signatures
+            scroll_state.recent_scroll_fallback_signatures = attempted_signatures
             log("[STEP][scroll_fallback] reason='viewport_exhausted_before_local_tab' attempt=1")
         try:
             scrolled = bool(scroll_fn(dev=dev, direction="down"))

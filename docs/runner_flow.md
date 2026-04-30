@@ -109,6 +109,13 @@ start pipeline 내부에서 `open_scenario(...)`를 먼저 실행한 뒤, post-o
 - `collect_tab_rows`는 main/persist 단계의 공유 상태를 `MainLoopState`, `CollectionPhaseContext`로 묶어 전달한다.
 - 이 변경은 **상태 전달 정리 목적**이며, 실행 순서(`open -> main -> overlay -> realign -> stop -> persist`)와 정책 의미는 유지한다.
 
+### State refactoring hold note
+
+- ScrollState and FocusRealignState separation are runtime-validated.
+- CTAState dataclass separation was attempted in stage 7-Z, but is on hold because unit tests passed while runtime traversal regressed: Medication/Hospital were not reached and `local_tab_force_navigation_set` dropped in failing runs.
+- The current stable contract for CTA behavior is to keep direct CTA fields on `MainLoopState` while preserving the `_cta_state(state)` adapter seam. Nested CTA tests remain as future seam protection, but production state stays on the direct fields until full runtime parity is re-established.
+- Runtime acceptance for this flow should be judged by traversal health rather than a fixed `total_steps` value. `FATAL`/Traceback must be absent, `stop_reason=safety_limit` is preferred, and Medication/Hospital/Event must all be reached for a successful baseline run. `total_steps` can vary around 37-42 on a real device, but a run that misses Medication or Hospital is not considered a baseline success. `local_tab_force_navigation_set=3` is a strong signal that the expected traversal path was available.
+
 ## 5-1) step 수집 (focus / announcement / crop / fallback)
 
 각 step에서:
