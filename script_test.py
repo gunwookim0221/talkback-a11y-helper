@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from talkback_lib import A11yAdbClient
@@ -24,6 +25,19 @@ from tb_runner.perf_stats import RunPerfStats, format_perf_summary, save_excel_w
 from tb_runner.scenario_config import TAB_CONFIGS
 from tb_runner.runtime_config import load_runtime_bundle
 from tb_runner.utils import configure_process_temp_dir, generate_output_path
+
+
+def _force_utf8_stdio():
+    try:
+        if sys.stdout and sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+            sys.stdout.reconfigure(encoding="utf-8")
+        if sys.stderr and sys.stderr.encoding and sys.stderr.encoding.lower() != "utf-8":
+            sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+
+_force_utf8_stdio()
 
 
 def main():
