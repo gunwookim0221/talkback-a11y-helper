@@ -9989,6 +9989,92 @@ def _overlay_phase(
     )
 
 
+def _apply_step_collection_phase_impl(
+    *,
+    state: MainLoopState,
+    client: A11yAdbClient,
+    dev: str,
+    phase_ctx: CollectionPhaseContext,
+    step_idx: int,
+    tab_cfg: dict[str, Any],
+    step_start: float,
+    capture_fn: Callable[..., dict[str, Any]],
+    perf_time_fn: Callable[[], float],
+    mono_time_fn: Callable[[], float],
+) -> tuple[dict[str, Any], float]:
+    forced_target = _local_tab_state_display(
+        rid=str(getattr(state, "forced_local_tab_target_rid", "") or ""),
+        label=str(getattr(state, "forced_local_tab_target_label", "") or ""),
+    )
+    row = None
+    if forced_target:
+        row = _activate_forced_local_tab_target(
+            client=client,
+            dev=dev,
+            state=state,
+            step_idx=step_idx,
+            wait_seconds=phase_ctx.main_step_wait_seconds,
+            announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
+            announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
+            announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
+        )
+        if row is not None:
+            row["forced_local_tab_navigation"] = True
+            row["forced_local_tab_target"] = forced_target
+    if row is None:
+        row = client.collect_focus_step(
+            dev=dev,
+            step_index=step_idx,
+            move=True,
+            direction="next",
+            wait_seconds=phase_ctx.main_step_wait_seconds,
+            announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
+            announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
+            announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
+        )
+    step_elapsed = perf_time_fn() - step_start
+
+    row["tab_name"] = tab_cfg["tab_name"]
+    row["context_type"] = "main"
+    row["parent_step_index"] = ""
+    row["overlay_entry_label"] = ""
+    row["overlay_recovery_status"] = "after_realign" if state.post_realign_pending_steps > 0 else ""
+    row["status"] = "OK"
+    row["stop_reason"] = ""
+    row["scenario_type"] = str(tab_cfg.get("scenario_type", "content") or "content")
+    row["step_elapsed_sec"] = round(step_elapsed, 3)
+    row["crop_image"] = "IMAGE"
+    row["_step_mono_start"] = mono_time_fn() - float(row.get("t_step_start", 0.0) or 0.0)
+    row = capture_fn(client, dev, row, phase_ctx.output_base_dir)
+    row.pop("_step_mono_start", None)
+    row["step_total_elapsed_sec"] = round(perf_time_fn() - step_start, 3)
+    return row, step_elapsed
+
+
+def _apply_step_collection_phase(
+    *,
+    state: MainLoopState,
+    client: A11yAdbClient,
+    dev: str,
+    phase_ctx: CollectionPhaseContext,
+    step_idx: int,
+    tab_cfg: dict[str, Any],
+    step_start: float,
+) -> tuple[dict[str, Any], float]:
+    return _apply_step_collection_phase_impl(
+        state=state,
+        client=client,
+        dev=dev,
+        phase_ctx=phase_ctx,
+        step_idx=step_idx,
+        tab_cfg=tab_cfg,
+        step_start=step_start,
+        capture_fn=maybe_capture_focus_crop,
+        perf_time_fn=time.perf_counter,
+        mono_time_fn=time.monotonic,
+    )
+
+
 def _main_loop_phase(
     client: A11yAdbClient,
     dev: str,
@@ -10003,52 +10089,15 @@ def _main_loop_phase(
         log(f"[STEP] START tab='{tab_cfg['tab_name']}' step={step_idx}")
         step_start = time.perf_counter()
 
-        forced_target = _local_tab_state_display(
-            rid=str(getattr(state, "forced_local_tab_target_rid", "") or ""),
-            label=str(getattr(state, "forced_local_tab_target_label", "") or ""),
+        row, step_elapsed = _apply_step_collection_phase(
+            state=state,
+            client=client,
+            dev=dev,
+            phase_ctx=phase_ctx,
+            step_idx=step_idx,
+            tab_cfg=tab_cfg,
+            step_start=step_start,
         )
-        row = None
-        if forced_target:
-            row = _activate_forced_local_tab_target(
-                client=client,
-                dev=dev,
-                state=state,
-                step_idx=step_idx,
-                wait_seconds=phase_ctx.main_step_wait_seconds,
-                announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
-                announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
-                announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
-            )
-            if row is not None:
-                row["forced_local_tab_navigation"] = True
-                row["forced_local_tab_target"] = forced_target
-        if row is None:
-            row = client.collect_focus_step(
-                dev=dev,
-                step_index=step_idx,
-                move=True,
-                direction="next",
-                wait_seconds=phase_ctx.main_step_wait_seconds,
-                announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
-                announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
-                announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
-            )
-        step_elapsed = time.perf_counter() - step_start
-
-        row["tab_name"] = tab_cfg["tab_name"]
-        row["context_type"] = "main"
-        row["parent_step_index"] = ""
-        row["overlay_entry_label"] = ""
-        row["overlay_recovery_status"] = "after_realign" if state.post_realign_pending_steps > 0 else ""
-        row["status"] = "OK"
-        row["stop_reason"] = ""
-        row["scenario_type"] = str(tab_cfg.get("scenario_type", "content") or "content")
-        row["step_elapsed_sec"] = round(step_elapsed, 3)
-        row["crop_image"] = "IMAGE"
-        row["_step_mono_start"] = time.monotonic() - float(row.get("t_step_start", 0.0) or 0.0)
-        row = maybe_capture_focus_crop(client, dev, row, phase_ctx.output_base_dir)
-        row.pop("_step_mono_start", None)
-        row["step_total_elapsed_sec"] = round(time.perf_counter() - step_start, 3)
         _apply_scroll_ready_record_phase(
             row=row,
             state=state,
