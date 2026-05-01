@@ -348,3 +348,199 @@ def test_maybe_select_next_local_tab_prefers_rightward_progression_over_visited_
     assert any("[STEP][local_tab_sorted]" in line and "Activity|Location|Events" in line for line in logs)
     assert any("[STEP][local_tab_progression]" in line and "current='Location'" in line and "next='Events'" in line for line in logs)
     assert any("[STEP][local_tab_skip_reason]" in line and "visited_ignored_for_order_progression" in line for line in logs)
+
+
+def _location_progression_state(*, active_label="LocationButton Location"):
+    signature = "activity||location||events"
+    return SimpleNamespace(
+        current_local_tab_signature=signature,
+        current_local_tab_active_rid="com.example:id/location_button",
+        current_local_tab_active_label=active_label,
+        current_local_tab_active_age=0,
+        local_tab_candidates_by_signature={
+            signature: [
+                {"rid": "com.example:id/activity_button", "label": "ActivityButton Activity", "left": 40, "node": {"boundsInScreen": "40,1700,300,1860"}},
+                {"rid": "com.example:id/location_button", "label": active_label, "left": 400, "node": {"boundsInScreen": "400,1700,660,1860"}},
+                {"rid": "com.example:id/events_button", "label": "EventsButton Events", "left": 760, "node": {"boundsInScreen": "760,1700,1040,1860"}},
+            ]
+        },
+        visited_local_tabs_by_signature={signature: {"com.example:id/activity_button", "com.example:id/location_button"}},
+        previous_step_row={"focus_view_id": "com.example:id/location_button", "visible_label": active_label},
+        content_phase_grace_steps=0,
+        last_selected_local_tab_signature=signature,
+        last_selected_local_tab_rid="com.example:id/location_button",
+        last_selected_local_tab_label=active_label,
+        last_selected_local_tab_bounds="400,1700,660,1860",
+        pending_local_tab_signature="",
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        pending_local_tab_bounds="",
+        pending_local_tab_age=0,
+        forced_local_tab_target_signature="",
+        forced_local_tab_target_rid="",
+        forced_local_tab_target_label="",
+        forced_local_tab_target_bounds="",
+        forced_local_tab_attempt_count=0,
+        fail_count=0,
+        same_count=0,
+        prev_fingerprint=("", "", ""),
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        visited_logical_signatures=set(),
+        consumed_cluster_signatures=set(),
+        consumed_cluster_logical_signatures=set(),
+        recent_focus_realign_signatures=set(),
+        failed_focus_realign_signatures=set(),
+        recent_focus_realign_clusters=set(),
+        cluster_title_fallback_applied=set(),
+        recent_scroll_fallback_signatures=set(),
+        last_scroll_fallback_attempted_signatures=set(),
+        scroll_ready_retry_counts={},
+        pending_scroll_ready_cluster_signature="",
+        completed_container_groups=set(),
+    )
+
+
+def _patch_content_candidates(monkeypatch, candidates):
+    def fake_collect(_nodes, **_kwargs):
+        return list(candidates), [], {
+            "chrome_excluded_candidates": ["Navigate up", "Family Care", "Add family member", "More options"],
+            "container_promoted_candidates": [],
+            "top_priority_container_candidates": [],
+            "raw_bottom_strip_candidates": [],
+        }
+
+    def fake_filter(content_candidates, **_kwargs):
+        return {
+            "all_candidates": list(content_candidates),
+            "selection_candidates": list(content_candidates),
+            "exhaustion_candidates": list(content_candidates),
+            "representative_candidates": list(content_candidates),
+            "status_candidates": [],
+            "section_header_deferred": [],
+            "revisit_rejected": [],
+            "consumed_rejected": [],
+            "leaf_rejected": [],
+        }
+
+    monkeypatch.setattr(local_tab_logic, "_collect_step_candidate_priority_groups", fake_collect)
+    monkeypatch.setattr(local_tab_logic, "_filter_content_candidates_for_phase", fake_filter)
+    monkeypatch.setattr(local_tab_logic, "_clear_active_container_group", lambda *_args, **_kwargs: None)
+
+
+def test_location_map_utility_candidates_do_not_block_local_tab_progression(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    _patch_content_candidates(monkeypatch, [
+        {"label": "Place Place", "rid": "com.samsung.android.plugin.care:id/refresh_button", "node": {"boundsInScreen": "540,1699,1008,1867"}},
+        {"label": "Current location Current location", "rid": "", "node": {"boundsInScreen": "100,1500,500,1660"}},
+        {"label": "Change view", "rid": "com.samsung.android.plugin.care:id/layerButton", "node": {"boundsInScreen": "800,1500,1000,1660"}},
+        {"label": "Map", "rid": "", "node": {"boundsInScreen": "100,1200,1000,1490"}},
+    ])
+    client = DummyClient([])
+    client.dump_tree_sequence = [[]]
+    state = _location_progression_state()
+
+    advanced = local_tab_logic._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={"focus_view_id": "com.example:id/location_button", "visible_label": "LocationButton Location"},
+        scenario_id="life_family_care_plugin",
+        step_idx=48,
+    )
+
+    assert advanced is True
+    assert state.pending_local_tab_rid == "com.example:id/events_button"
+    assert client.select_calls[0]["name"] == "com.example:id/events_button"
+    assert not any("content_not_exhausted" in line for line in logs)
+    assert any("[STEP][local_tab_progression]" in line and "EventsButton Events" in line for line in logs)
+
+
+def test_location_real_content_still_blocks_local_tab_progression(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    _patch_content_candidates(monkeypatch, [
+        {"label": "Medication", "rid": "com.example:id/medication_card", "node": {"boundsInScreen": "80,900,1000,1100"}},
+        {"label": "Place Place", "rid": "com.samsung.android.plugin.care:id/refresh_button", "node": {"boundsInScreen": "540,1699,1008,1867"}},
+    ])
+    client = DummyClient([])
+    client.dump_tree_sequence = [[]]
+    state = _location_progression_state()
+
+    advanced = local_tab_logic._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={"focus_view_id": "com.example:id/location_button", "visible_label": "LocationButton Location"},
+        scenario_id="life_family_care_plugin",
+        step_idx=48,
+    )
+
+    assert advanced is False
+    assert state.pending_local_tab_rid == ""
+    assert client.select_calls == []
+    assert any("content_not_exhausted" in line for line in logs)
+
+
+def test_map_utility_filter_is_scoped_to_location_tab(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    _patch_content_candidates(monkeypatch, [
+        {"label": "Place Place", "rid": "com.samsung.android.plugin.care:id/refresh_button", "node": {"boundsInScreen": "540,1699,1008,1867"}},
+        {"label": "Map", "rid": "", "node": {"boundsInScreen": "100,1200,1000,1490"}},
+    ])
+    client = DummyClient([])
+    client.dump_tree_sequence = [[]]
+    state = _location_progression_state(active_label="ActivityButton Activity")
+    state.current_local_tab_active_rid = "com.example:id/activity_button"
+    state.last_selected_local_tab_rid = "com.example:id/activity_button"
+    state.last_selected_local_tab_label = "ActivityButton Activity"
+
+    advanced = local_tab_logic._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={"focus_view_id": "com.example:id/activity_button", "visible_label": "ActivityButton Activity"},
+        scenario_id="life_family_care_plugin",
+        step_idx=48,
+    )
+
+    assert advanced is False
+    assert state.pending_local_tab_rid == ""
+    assert client.select_calls == []
+    assert any("content_not_exhausted" in line for line in logs)
+
+
+def test_location_map_utility_candidates_mark_viewport_exhausted_before_continuation(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    _patch_content_candidates(monkeypatch, [
+        {"label": "Place Place", "rid": "com.samsung.android.plugin.care:id/refresh_button", "node": {"boundsInScreen": "540,1699,1008,1867"}},
+        {"label": "Current location Current location", "rid": "", "node": {"boundsInScreen": "100,1500,500,1660"}},
+        {"label": "Change view", "rid": "com.samsung.android.plugin.care:id/layerButton", "node": {"boundsInScreen": "800,1500,1000,1660"}},
+    ])
+    client = DummyClient([])
+    client.dump_tree_sequence = [[]]
+    state = _location_progression_state()
+
+    row = local_tab_logic._maybe_reprioritize_persistent_bottom_strip_row(
+        row={
+            "focus_view_id": "com.example:id/location_button",
+            "visible_label": "LocationButton Location",
+            "merged_announcement": "LocationButton Location",
+            "focus_bounds": "400,1700,660,1860",
+            "focus_class_name": "android.widget.Button",
+            "focus_clickable": True,
+            "focus_focusable": True,
+            "move_result": "moved",
+        },
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_type": "content", "scenario_id": "life_family_care_plugin"},
+        state=state,
+        step_idx=48,
+    )
+
+    assert row["viewport_exhausted_eval_result"] is True
+    assert row["viewport_exhausted_eval_reason"] == "no_representative_candidates"

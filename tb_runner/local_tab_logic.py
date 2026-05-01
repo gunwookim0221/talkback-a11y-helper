@@ -114,6 +114,68 @@ def _is_viewport_exhausted_for_scroll_fallback(
 ) -> bool:
     return not bool(representative_exists)
 
+def _normalize_local_tab_utility_text(value: str) -> str:
+    try:
+        normalized = _normalize_logical_text(value)
+    except Exception:
+        normalized = re.sub(r"\s+", " ", str(value or "").strip()).lower()
+    return normalized
+
+def _is_active_location_local_tab(state: MainLoopState) -> bool:
+    active_text = " ".join(
+        str(value or "")
+        for value in (
+            getattr(state, "current_local_tab_active_rid", ""),
+            getattr(state, "current_local_tab_active_label", ""),
+            getattr(state, "last_selected_local_tab_rid", ""),
+            getattr(state, "last_selected_local_tab_label", ""),
+        )
+    )
+    return "location" in _normalize_local_tab_utility_text(active_text)
+
+def _is_location_map_utility_candidate(candidate: dict[str, Any]) -> bool:
+    label = str(candidate.get("label", "") or "").strip()
+    node = candidate.get("node", {})
+    rid = str(candidate.get("rid", "") or "").strip()
+    if isinstance(node, dict):
+        rid = str(rid or node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
+        label = str(
+            label
+            or node.get("text", "")
+            or node.get("contentDescription", "")
+            or node.get("mergedLabel", "")
+            or node.get("talkbackLabel", "")
+            or ""
+        ).strip()
+    normalized_label = _normalize_local_tab_utility_text(label)
+    normalized_rid = rid.lower()
+    if normalized_label in {
+        "place",
+        "place place",
+        "current location",
+        "current location current location",
+        "map",
+        "change view",
+        "naver",
+    }:
+        return True
+    if normalized_label.startswith("last updated") or normalized_label.startswith("near "):
+        return True
+    if any(token in normalized_rid for token in (":id/time", ":id/position", ":id/layerbutton")):
+        return True
+    return False
+
+def _filter_location_map_utility_exhaustion_candidates(
+    *,
+    state: MainLoopState,
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not candidates or not _is_active_location_local_tab(state):
+        return candidates
+    if all(_is_location_map_utility_candidate(candidate) for candidate in candidates):
+        return []
+    return candidates
+
 def _local_tab_candidate_matches_identity(
     candidate: dict[str, Any],
     *,
@@ -1300,9 +1362,14 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         log(
             f"[STEP][selection_candidates] all='{_truncate_debug_text(all_selection_labels, 120)}' "
             f"after_filter='{_truncate_debug_text(filtered_selection_labels, 120)}' "
-            f"rejected_by_revisit='{_truncate_debug_text(revisit_labels, 120)}'"
+                f"rejected_by_revisit='{_truncate_debug_text(revisit_labels, 120)}'"
         )
     current_move_result = normalize_move_result(row) or str(row.get("move_result", "") or "").strip().lower()
+    filtered_meta = dict(filtered_meta)
+    filtered_meta["representative_candidates"] = _filter_location_map_utility_exhaustion_candidates(
+        state=state,
+        candidates=list(filtered_meta["representative_candidates"]),
+    )
     viewport_exhausted = not bool(filtered_meta["representative_candidates"])
     strip_focus_context = _is_current_focus_on_local_tab_strip(state, row)
     row["strip_focus_context"] = strip_focus_context
@@ -1839,6 +1906,10 @@ def _maybe_select_next_local_tab(
             f"[STEP][section_header_deferred] candidates='{_truncate_debug_text('|'.join(section_header_deferred[:4]), 120)}' "
             "reason='content_candidates_present'"
         )
+    effective_content_candidates = _filter_location_map_utility_exhaustion_candidates(
+        state=state,
+        candidates=effective_content_candidates,
+    )
     log(
         f"[STEP][representative_exhausted_eval] representative_candidates='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in effective_content_candidates[:4]), 120)}' "
         f"consumed_representatives='{_truncate_debug_text('|'.join(consumed_representatives[:4]), 120)}' "
