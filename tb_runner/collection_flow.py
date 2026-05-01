@@ -10075,6 +10075,46 @@ def _apply_step_collection_phase(
     )
 
 
+def _apply_stop_evaluation_phase_impl(
+    *,
+    row: dict[str, Any],
+    state: MainLoopState,
+    previous_row: dict[str, Any] | None,
+    tab_cfg: dict[str, Any],
+    should_stop_fn,
+    build_inputs_fn,
+) -> tuple[bool, str, dict[str, Any], dict[str, Any]]:
+    stop, state.fail_count, state.same_count, reason, state.prev_fingerprint, stop_details = should_stop_fn(
+        row=row,
+        prev_fingerprint=state.prev_fingerprint,
+        fail_count=state.fail_count,
+        same_count=state.same_count,
+        previous_row=previous_row,
+        scenario_type=str(tab_cfg.get("scenario_type", "content") or "content"),
+        stop_policy=tab_cfg.get("stop_policy", {}),
+        scenario_cfg=tab_cfg,
+    )
+    stop_eval_inputs = build_inputs_fn(stop_details=stop_details, row=row, tab_cfg=tab_cfg)
+    return stop, reason, stop_details, stop_eval_inputs
+
+
+def _apply_stop_evaluation_phase(
+    *,
+    row: dict[str, Any],
+    state: MainLoopState,
+    previous_row: dict[str, Any] | None,
+    tab_cfg: dict[str, Any],
+) -> tuple[bool, str, dict[str, Any], dict[str, Any]]:
+    return _apply_stop_evaluation_phase_impl(
+        row=row,
+        state=state,
+        previous_row=previous_row,
+        tab_cfg=tab_cfg,
+        should_stop_fn=should_stop,
+        build_inputs_fn=_build_stop_evaluation_inputs,
+    )
+
+
 def _main_loop_phase(
     client: A11yAdbClient,
     dev: str,
@@ -10169,17 +10209,12 @@ def _main_loop_phase(
             step_elapsed=step_elapsed,
         )
 
-        stop, state.fail_count, state.same_count, reason, state.prev_fingerprint, stop_details = should_stop(
+        stop, reason, stop_details, stop_eval_inputs = _apply_stop_evaluation_phase(
             row=row,
-            prev_fingerprint=state.prev_fingerprint,
-            fail_count=state.fail_count,
-            same_count=state.same_count,
             previous_row=state.previous_step_row,
-            scenario_type=str(tab_cfg.get("scenario_type", "content") or "content"),
-            stop_policy=tab_cfg.get("stop_policy", {}),
-            scenario_cfg=tab_cfg,
+            state=state,
+            tab_cfg=tab_cfg,
         )
-        stop_eval_inputs = _build_stop_evaluation_inputs(stop_details=stop_details, row=row, tab_cfg=tab_cfg)
         terminal_signal = bool(stop_eval_inputs["terminal_signal"])
         same_like_count = int(stop_eval_inputs["same_like_count"])
         no_progress = bool(stop_eval_inputs["no_progress"])
@@ -10280,19 +10315,6 @@ def _main_loop_phase(
                 reason = ""
                 state.scroll_state.pending_scroll_ready_cluster_signature = ""
         repeat_stop_hit = bool(stop_eval_inputs["repeat_stop_hit"])
-        _apply_stop_explain_phase(
-            row=row,
-            previous_row=state.previous_step_row,
-            tab_cfg=tab_cfg,
-            stop=stop,
-            reason=reason,
-            stop_eval_inputs=stop_eval_inputs,
-            mismatch_reasons=mismatch_reasons,
-            cta_descend_applied=cta_descend_applied,
-            scroll_ready_continue_applied=scroll_ready_continue_applied,
-            local_tab_transition_applied=local_tab_transition_applied,
-            step_idx=step_idx,
-        )
 
         if stop and reason == "repeat_semantic_stall":
             should_escape, escape_gate_reason = should_attempt_stall_escape(
@@ -10346,6 +10368,20 @@ def _main_loop_phase(
                     f"escape_gate_reason='{escape_gate_reason}'"
                 )
 
+        _apply_stop_explain_phase(
+            row=row,
+            previous_row=state.previous_step_row,
+            tab_cfg=tab_cfg,
+            stop=stop,
+            reason=reason,
+            stop_eval_inputs=stop_eval_inputs,
+            mismatch_reasons=mismatch_reasons,
+            cta_descend_applied=cta_descend_applied,
+            scroll_ready_continue_applied=scroll_ready_continue_applied,
+            local_tab_transition_applied=local_tab_transition_applied,
+            step_idx=step_idx,
+        )
+
         if is_global_nav_only_scenario and not is_global_nav:
             log(
                 f"[GLOBAL_NAV][skip] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
@@ -10379,6 +10415,9 @@ def _main_loop_phase(
             row["stop_triggered"] = True
             row["stop_step"] = step_idx
 
+        persistence_stop = bool(
+            stop or (row.get("stall_escape_attempted") is True and row.get("stall_escape_result") == "success")
+        )
         _apply_row_persistence_phase(
             row=row,
             state=state,
@@ -10386,7 +10425,7 @@ def _main_loop_phase(
             all_rows=all_rows,
             scenario_perf=scenario_perf,
             step_idx=step_idx,
-            stop=stop,
+            stop=persistence_stop,
             checkpoint_every=phase_ctx.checkpoint_every,
             output_path=phase_ctx.output_path,
         )
