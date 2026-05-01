@@ -10165,3 +10165,1394 @@ def test_row_suppression_applied_before_persistence(monkeypatch):
     assert phase_ctx.all_rows == []
     assert captured["row"]["row_persist_suppressed"] is True
     assert captured["row"]["row_persist_suppressed_reason"] == "phase_ordering_suppressed"
+
+
+def _row_quality_state():
+    return SimpleNamespace(
+        recent_representative_signatures=deque(maxlen=8),
+        consumed_representative_signatures=set(),
+        visited_logical_signatures=set(),
+        consumed_cluster_signatures=set(),
+        consumed_cluster_logical_signatures=set(),
+        active_container_group_remaining=set(),
+        active_container_group_labels={},
+        active_container_group_signature="",
+        completed_container_groups=set(),
+    )
+
+
+def _row_quality_row(idx=1, **overrides):
+    row = {
+        **_main_row(idx),
+        "visible_label": "Medication",
+        "normalized_visible_label": "medication",
+        "merged_announcement": "Medication",
+        "focus_view_id": "id.medication",
+        "focus_bounds": "10,20,110,120",
+        "focus_cluster_signature": "cluster:medication",
+        "focus_cluster_logical_signature": "cluster:logical:medication",
+    }
+    row.update(overrides)
+    return row
+
+
+def test_row_quality_records_successful_representative_signature():
+    state = _row_quality_state()
+    row = _row_quality_row(move_result="moved")
+    object_signature = collection_flow._build_row_object_signature(row)
+    logical_signature = collection_flow._row_logical_signature(row)
+
+    collection_flow._record_recent_representative_signature(state, row)
+
+    assert object_signature in state.recent_representative_signatures
+    assert object_signature in state.consumed_representative_signatures
+    assert logical_signature in state.visited_logical_signatures
+    assert "cluster:medication" in state.consumed_cluster_signatures
+    assert "cluster:logical:medication" in state.consumed_cluster_logical_signatures
+    assert row["logical_signature"] == logical_signature
+    assert row["logical_signature_already_visited"] is False
+    assert row["cluster_already_consumed_before_record"] is False
+
+
+def test_row_quality_does_not_record_failed_or_no_progress_row():
+    for move_result in ("failed", "no_progress"):
+        state = _row_quality_state()
+        row = _row_quality_row(move_result=move_result)
+        logical_signature = collection_flow._row_logical_signature(row)
+
+        collection_flow._record_recent_representative_signature(state, row)
+
+        assert logical_signature not in state.visited_logical_signatures
+        assert row["logical_signature"] == logical_signature
+        assert row["logical_signature_already_visited"] is False
+
+
+def test_row_quality_updates_fingerprint_repeat_count():
+    recent_history = deque()
+    recent_semantic_history = deque()
+    first = _row_quality_row(idx=1)
+    last_fingerprint, repeat_count = collection_flow._annotate_row_quality(
+        first,
+        last_fingerprint="",
+        fingerprint_repeat_count=0,
+        recent_fingerprint_history=recent_history,
+        recent_semantic_fingerprint_history=recent_semantic_history,
+    )
+    second = _row_quality_row(idx=2)
+    last_fingerprint, repeat_count = collection_flow._annotate_row_quality(
+        second,
+        last_fingerprint=last_fingerprint,
+        fingerprint_repeat_count=repeat_count,
+        recent_fingerprint_history=recent_history,
+        recent_semantic_fingerprint_history=recent_semantic_history,
+    )
+    third = _row_quality_row(idx=3, visible_label="Hospital", normalized_visible_label="hospital", merged_announcement="Hospital")
+    _last_fingerprint, reset_count = collection_flow._annotate_row_quality(
+        third,
+        last_fingerprint=last_fingerprint,
+        fingerprint_repeat_count=repeat_count,
+        recent_fingerprint_history=recent_history,
+        recent_semantic_fingerprint_history=recent_semantic_history,
+    )
+
+    assert first["fingerprint_repeat_count"] == 0
+    assert second["fingerprint_repeat_count"] == 1
+    assert second["is_duplicate_step"] is True
+    assert reset_count == 0
+    assert third["fingerprint_repeat_count"] == 0
+    assert third["is_duplicate_step"] is False
+
+
+def test_row_quality_marks_recent_duplicate_before_stop_inputs():
+    row = _row_quality_row(idx=5)
+    fingerprint = collection_flow.build_row_fingerprint(row)
+    recent_history = deque([(2, fingerprint)])
+
+    collection_flow._annotate_row_quality(
+        row,
+        last_fingerprint="different",
+        fingerprint_repeat_count=0,
+        recent_fingerprint_history=recent_history,
+        recent_semantic_fingerprint_history=deque(),
+    )
+    stop_inputs = collection_flow._build_stop_evaluation_inputs(
+        stop_details={
+            "reason": "repeat_no_progress",
+            "recent_duplicate": row["is_recent_duplicate_step"],
+            "recent_duplicate_distance": row["recent_duplicate_distance"],
+        },
+        row=row,
+        tab_cfg=_base_tab_cfg(),
+    )
+
+    assert row["is_recent_duplicate_step"] is True
+    assert row["recent_duplicate_distance"] == 3
+    assert stop_inputs["recent_duplicate"] is True
+    assert stop_inputs["recent_duplicate_distance"] == 3
+
+
+def test_row_quality_marks_semantic_duplicate():
+    row = _row_quality_row(
+        idx=8,
+        focus_view_id="id.changed",
+        focus_bounds="20,30,120,130",
+    )
+    semantic_fingerprint = collection_flow.build_row_semantic_fingerprint(row)
+    recent_semantic_history = deque([(4, semantic_fingerprint)])
+
+    collection_flow._annotate_row_quality(
+        row,
+        last_fingerprint="different",
+        fingerprint_repeat_count=0,
+        recent_fingerprint_history=deque(),
+        recent_semantic_fingerprint_history=recent_semantic_history,
+    )
+
+    assert row["is_recent_semantic_duplicate_step"] is True
+    assert row["recent_semantic_duplicate_distance"] == 4
+    assert row["recent_semantic_duplicate_of_step"] == 4
+
+
+def test_row_quality_sets_low_value_leaf_flag_before_persistence(monkeypatch):
+    captured = {}
+    row = _main_row(9)
+    row.update(
+        {
+            "visible_label": "%",
+            "normalized_visible_label": "%",
+            "merged_announcement": "%",
+            "focus_bounds": "0,0,20,20",
+            "focus_node": {
+                "clickable": False,
+                "focusable": False,
+                "effectiveClickable": False,
+                "hasClickableDescendant": False,
+                "hasFocusableDescendant": False,
+            },
+        }
+    )
+
+    def fake_suppress(**kwargs):
+        captured["low_value_leaf_row"] = kwargs["row"].get("low_value_leaf_row")
+        return False, ""
+
+    monkeypatch.setattr(collection_flow, "_should_suppress_row_persistence", fake_suppress)
+    collection_flow._apply_row_persistence_phase_impl(
+        row=row,
+        state=_phase_ordering_state(),
+        rows=[],
+        all_rows=[],
+        scenario_perf=None,
+        step_idx=9,
+        stop=False,
+        checkpoint_every=100,
+        output_path="unused.xlsx",
+        log_fn=lambda _message: None,
+        make_fingerprint_fn=lambda _row: ("fingerprint", "label", "rid"),
+        save_fn=lambda *args, **kwargs: None,
+    )
+
+    assert captured["low_value_leaf_row"] is True
+    assert row["low_value_leaf_row"] is True
+
+
+def test_row_quality_mismatch_detection_runs_after_quality_annotation(monkeypatch):
+    events = []
+    row = _main_row(10)
+    state = _phase_ordering_state()
+    phase_ctx = SimpleNamespace(
+        tab_cfg=_base_tab_cfg(max_steps=1),
+        rows=[],
+        all_rows=[],
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        checkpoint_every=100,
+        main_step_wait_seconds=0,
+        main_announcement_wait_seconds=0,
+        main_announcement_idle_wait_seconds=0,
+        main_announcement_max_extra_wait_seconds=0,
+        state=state,
+    )
+
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda _client, _dev, row, _base: row)
+    monkeypatch.setattr(collection_flow, "_apply_scroll_ready_record_phase", lambda **kwargs: None)
+    monkeypatch.setattr(collection_flow, "_maybe_reprioritize_persistent_bottom_strip_row", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_maybe_promote_row_to_cta_child", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_maybe_progress_row_to_cta_sibling", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_record_recent_representative_signature", lambda *_args, **_kwargs: None)
+
+    def fake_annotate(row, **kwargs):
+        events.append("annotate")
+        row["fingerprint"] = "fp"
+        row["normalized_fingerprint"] = "nfp"
+        row["quality_ready"] = True
+        return "fp", 0
+
+    def fake_detect(**kwargs):
+        events.append(("detect", kwargs["row"].get("quality_ready", False)))
+        return [], []
+
+    monkeypatch.setattr(collection_flow, "_annotate_row_quality", fake_annotate)
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", fake_detect)
+    monkeypatch.setattr(collection_flow, "should_stop", lambda **kwargs: (False, 0, 0, "", ("fp", "", ""), {}))
+    monkeypatch.setattr(collection_flow, "_build_stop_evaluation_inputs", lambda **kwargs: _phase_ordering_stop_inputs())
+    monkeypatch.setattr(collection_flow, "_maybe_apply_cta_pending_grace", lambda **kwargs: (kwargs["stop"], kwargs["reason"], False))
+    monkeypatch.setattr(collection_flow, "_maybe_apply_scroll_ready_continue", lambda **kwargs: (kwargs["stop"], kwargs["reason"], False))
+    monkeypatch.setattr(collection_flow, "_maybe_select_next_local_tab", lambda **kwargs: False)
+    monkeypatch.setattr(collection_flow, "classify_step_result", lambda *args, **kwargs: {})
+    monkeypatch.setattr(collection_flow, "_format_stop_explain_log_fields", lambda **kwargs: "")
+    monkeypatch.setattr(collection_flow, "_log_repeat_stop_debug", lambda **kwargs: None)
+    monkeypatch.setattr(collection_flow, "_should_suppress_row_persistence", lambda **kwargs: (False, ""))
+    monkeypatch.setattr(collection_flow, "_overlay_phase", lambda **kwargs: SimpleNamespace(post_realign_pending_steps_delta=0))
+    monkeypatch.setattr(collection_flow, "save_excel_with_perf", lambda *args, **kwargs: None)
+
+    collection_flow._main_loop_phase(DummyClient([row]), "SERIAL", phase_ctx)
+
+    assert events == ["annotate", ("detect", True)]
+
+
+def _run_step_collection_main_loop(
+    monkeypatch,
+    *,
+    collect_row=None,
+    forced_rid="",
+    forced_label="",
+    forced_activation_row=None,
+    post_realign_pending_steps=0,
+    capture_fn=None,
+):
+    captured = {}
+    state = _phase_ordering_state()
+    state.forced_local_tab_target_rid = forced_rid
+    state.forced_local_tab_target_label = forced_label
+    state.post_realign_pending_steps = post_realign_pending_steps
+    client = DummyClient([collect_row or _main_row(31)])
+    phase_ctx = SimpleNamespace(
+        tab_cfg=_base_tab_cfg(max_steps=1),
+        rows=[],
+        all_rows=[],
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        checkpoint_every=100,
+        main_step_wait_seconds=0,
+        main_announcement_wait_seconds=0,
+        main_announcement_idle_wait_seconds=0,
+        main_announcement_max_extra_wait_seconds=0,
+        state=state,
+    )
+
+    if forced_rid or forced_label:
+        monkeypatch.setattr(collection_flow, "_activate_forced_local_tab_target", lambda **kwargs: forced_activation_row)
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", capture_fn or (lambda _client, _dev, row, _base: row))
+    monkeypatch.setattr(collection_flow, "_apply_scroll_ready_record_phase", lambda **kwargs: None)
+    monkeypatch.setattr(collection_flow, "_maybe_reprioritize_persistent_bottom_strip_row", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_maybe_promote_row_to_cta_child", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_maybe_progress_row_to_cta_sibling", lambda **kwargs: kwargs["row"])
+
+    def capture_quality(**kwargs):
+        captured["row"] = dict(kwargs["row"])
+        captured["row_ref"] = kwargs["row"]
+        return [], []
+
+    monkeypatch.setattr(collection_flow, "_apply_row_quality_phase", capture_quality)
+    monkeypatch.setattr(collection_flow, "should_stop", lambda **kwargs: (False, 0, 0, "", ("fp", "", ""), {}))
+    monkeypatch.setattr(collection_flow, "_build_stop_evaluation_inputs", lambda **kwargs: _phase_ordering_stop_inputs())
+    monkeypatch.setattr(collection_flow, "_maybe_apply_cta_pending_grace", lambda **kwargs: (kwargs["stop"], kwargs["reason"], False))
+    monkeypatch.setattr(collection_flow, "_maybe_apply_scroll_ready_continue", lambda **kwargs: (kwargs["stop"], kwargs["reason"], False))
+    monkeypatch.setattr(collection_flow, "_maybe_select_next_local_tab", lambda **kwargs: False)
+    monkeypatch.setattr(collection_flow, "_apply_stop_explain_phase", lambda **kwargs: None)
+    monkeypatch.setattr(collection_flow, "_apply_row_persistence_phase", lambda **kwargs: None)
+    monkeypatch.setattr(collection_flow, "_overlay_phase", lambda **kwargs: SimpleNamespace(post_realign_pending_steps_delta=0))
+
+    collection_flow._main_loop_phase(client, "SERIAL", phase_ctx)
+    return captured, client, phase_ctx
+
+
+def test_step_collection_uses_forced_local_tab_activation_before_collect_focus(monkeypatch):
+    forced_row = _main_row(31)
+    forced_row.update({"visible_label": "Forced tab", "focus_view_id": "id.forced"})
+
+    captured, client, _phase_ctx = _run_step_collection_main_loop(
+        monkeypatch,
+        collect_row=_main_row(32),
+        forced_rid="id.forced",
+        forced_label="Forced tab",
+        forced_activation_row=forced_row,
+    )
+
+    assert client.collect_focus_step_calls == []
+    assert captured["row"]["visible_label"] == "Forced tab"
+    assert captured["row"]["focus_view_id"] == "id.forced"
+
+
+def test_step_collection_sets_forced_local_tab_row_fields(monkeypatch):
+    forced_row = _main_row(33)
+    forced_row.update({"visible_label": "EventsButton Events", "focus_view_id": "id.events"})
+
+    captured, _client, _phase_ctx = _run_step_collection_main_loop(
+        monkeypatch,
+        forced_rid="id.events",
+        forced_label="EventsButton Events",
+        forced_activation_row=forced_row,
+    )
+    row = captured["row"]
+
+    assert row["forced_local_tab_navigation"] is True
+    assert row["forced_local_tab_target"] == "EventsButton Events"
+    assert row["tab_name"] == "홈"
+    assert row["context_type"] == "main"
+    assert row["status"] == "OK"
+    assert row["stop_reason"] == ""
+
+
+def test_step_collection_falls_back_to_collect_focus_when_forced_activation_returns_none(monkeypatch):
+    fallback_row = _main_row(34)
+    fallback_row.update({"visible_label": "Fallback row", "focus_view_id": "id.fallback"})
+
+    captured, client, _phase_ctx = _run_step_collection_main_loop(
+        monkeypatch,
+        collect_row=fallback_row,
+        forced_rid="id.events",
+        forced_label="EventsButton Events",
+        forced_activation_row=None,
+    )
+
+    assert len(client.collect_focus_step_calls) == 1
+    assert captured["row"]["visible_label"] == "Fallback row"
+    assert "forced_local_tab_navigation" not in captured["row"]
+
+
+def test_step_collection_sets_base_fields_on_normal_row(monkeypatch):
+    captured, client, _phase_ctx = _run_step_collection_main_loop(
+        monkeypatch,
+        collect_row=_main_row(35),
+    )
+    row = captured["row"]
+
+    assert len(client.collect_focus_step_calls) == 1
+    assert row["tab_name"] == "홈"
+    assert row["context_type"] == "main"
+    assert row["parent_step_index"] == ""
+    assert row["overlay_entry_label"] == ""
+    assert row["status"] == "OK"
+    assert row["stop_reason"] == ""
+    assert row["scenario_type"] == "content"
+    assert isinstance(row["step_elapsed_sec"], float)
+    assert row["step_elapsed_sec"] >= 0
+
+
+def test_step_collection_sets_overlay_recovery_status_when_pending(monkeypatch):
+    pending, _client, _phase_ctx = _run_step_collection_main_loop(
+        monkeypatch,
+        collect_row=_main_row(36),
+        post_realign_pending_steps=2,
+    )
+    not_pending, _client, _phase_ctx = _run_step_collection_main_loop(
+        monkeypatch,
+        collect_row=_main_row(37),
+        post_realign_pending_steps=0,
+    )
+
+    assert pending["row"]["overlay_recovery_status"] == "after_realign"
+    assert not_pending["row"]["overlay_recovery_status"] == ""
+
+
+def test_step_collection_crop_timing_sentinel_removed_after_capture(monkeypatch):
+    crop_seen = {}
+
+    def capture_fn(_client, _dev, row, _base):
+        crop_seen["sentinel_present"] = "_step_mono_start" in row
+        crop_seen["sentinel_value"] = row.get("_step_mono_start")
+        row["crop_image_path"] = "crop.png"
+        return row
+
+    captured, _client, _phase_ctx = _run_step_collection_main_loop(
+        monkeypatch,
+        collect_row=_main_row(38),
+        capture_fn=capture_fn,
+    )
+    row = captured["row"]
+
+    assert crop_seen["sentinel_present"] is True
+    assert isinstance(crop_seen["sentinel_value"], float)
+    assert "_step_mono_start" not in row
+    assert isinstance(row["step_total_elapsed_sec"], float)
+    assert row["step_total_elapsed_sec"] >= row["step_elapsed_sec"]
+
+
+def test_step_collection_sets_crop_image_from_capture(monkeypatch):
+    def capture_fn(_client, _dev, row, _base):
+        row["crop_image"] = "CAPTURED"
+        row["crop_image_path"] = "captured.png"
+        return row
+
+    captured, _client, _phase_ctx = _run_step_collection_main_loop(
+        monkeypatch,
+        collect_row=_main_row(39),
+        capture_fn=capture_fn,
+    )
+
+    assert captured["row"]["crop_image"] == "CAPTURED"
+    assert captured["row"]["crop_image_path"] == "captured.png"
+
+
+def _stop_explain_row(**overrides):
+    row = {
+        **_main_row(7),
+        "move_result": "moved",
+        "scroll_ready_cluster_signature": "cluster:medication",
+        "focus_cluster_signature": "cluster:focus",
+        "scroll_ready_state": False,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_stop_explain_phase_sets_result_fields(monkeypatch):
+    debug_calls = []
+    monkeypatch.setattr(collection_flow, "_log_repeat_stop_debug", lambda **kwargs: debug_calls.append(kwargs))
+    row = _stop_explain_row()
+
+    collection_flow._apply_stop_explain_phase(
+        row=row,
+        previous_row=_anchor_row(),
+        tab_cfg={"scenario_id": "stop_explain"},
+        stop=True,
+        reason="repeat_no_progress",
+        stop_eval_inputs=_phase_ordering_stop_inputs(no_progress=True, strict_duplicate=True, eval_reason="repeat_no_progress"),
+        mismatch_reasons=[],
+        cta_descend_applied=False,
+        scroll_ready_continue_applied=False,
+        local_tab_transition_applied=False,
+        step_idx=7,
+    )
+
+    assert row["final_result"]
+    assert "failure_reason" in row
+    assert "traversal_result" in row
+    assert row["is_global_nav"] is False
+    assert row["global_nav_reason"] == ""
+    assert len(debug_calls) == 1
+
+
+def test_stop_explain_phase_handles_non_stop_row(monkeypatch):
+    debug_calls = []
+    monkeypatch.setattr(collection_flow, "_log_repeat_stop_debug", lambda **kwargs: debug_calls.append(kwargs))
+    row = _stop_explain_row()
+
+    collection_flow._apply_stop_explain_phase(
+        row=row,
+        previous_row=_anchor_row(),
+        tab_cfg={"scenario_id": "stop_explain"},
+        stop=False,
+        reason="",
+        stop_eval_inputs=_phase_ordering_stop_inputs(eval_reason=""),
+        mismatch_reasons=[],
+        cta_descend_applied=False,
+        scroll_ready_continue_applied=False,
+        local_tab_transition_applied=False,
+        step_idx=7,
+    )
+
+    assert row["traversal_result"].startswith("PASS")
+    assert row["failure_reason"] == ""
+    assert row["is_global_nav"] is False
+    assert debug_calls == []
+
+
+def test_stop_explain_phase_preserves_global_nav_reason():
+    row = _stop_explain_row()
+
+    collection_flow._apply_stop_explain_phase(
+        row=row,
+        previous_row=_anchor_row(),
+        tab_cfg={"scenario_id": "stop_explain"},
+        stop=True,
+        reason="global_nav_exit",
+        stop_eval_inputs=_phase_ordering_stop_inputs(
+            is_global_nav=True,
+            global_nav_reason="matched_bottom_tab",
+            terminal_signal=True,
+            eval_reason="global_nav_exit",
+        ),
+        mismatch_reasons=[],
+        cta_descend_applied=False,
+        scroll_ready_continue_applied=False,
+        local_tab_transition_applied=False,
+        step_idx=7,
+    )
+
+    assert row["is_global_nav"] is True
+    assert row["global_nav_reason"] == "matched_bottom_tab"
+    assert "traversal_result" in row
+
+
+def test_stop_explain_phase_calls_repeat_debug_only_for_repeat_reason(monkeypatch):
+    debug_calls = []
+    monkeypatch.setattr(collection_flow, "_log_repeat_stop_debug", lambda **kwargs: debug_calls.append(kwargs))
+
+    collection_flow._apply_stop_explain_phase(
+        row=_stop_explain_row(),
+        previous_row=_anchor_row(),
+        tab_cfg={"scenario_id": "stop_explain"},
+        stop=True,
+        reason="repeat_no_progress",
+        stop_eval_inputs=_phase_ordering_stop_inputs(no_progress=True, eval_reason="repeat_no_progress"),
+        mismatch_reasons=[],
+        cta_descend_applied=False,
+        scroll_ready_continue_applied=False,
+        local_tab_transition_applied=False,
+        step_idx=7,
+    )
+    collection_flow._apply_stop_explain_phase(
+        row=_stop_explain_row(),
+        previous_row=_anchor_row(),
+        tab_cfg={"scenario_id": "stop_explain"},
+        stop=True,
+        reason="terminal",
+        stop_eval_inputs=_phase_ordering_stop_inputs(terminal_signal=True, eval_reason="terminal"),
+        mismatch_reasons=[],
+        cta_descend_applied=False,
+        scroll_ready_continue_applied=False,
+        local_tab_transition_applied=False,
+        step_idx=8,
+    )
+
+    assert len(debug_calls) == 1
+    assert debug_calls[0]["stop_eval_inputs"]["no_progress"] is True
+
+
+def test_stop_explain_phase_uses_injected_log_and_format_functions(monkeypatch):
+    logs = []
+    format_calls = []
+    debug_calls = []
+    monkeypatch.setattr(collection_flow, "_log_repeat_stop_debug", lambda **kwargs: debug_calls.append(kwargs))
+
+    def format_fn(**kwargs):
+        format_calls.append(kwargs)
+        return "formatted_fields"
+
+    row = _stop_explain_row(scroll_ready_state=True)
+    collection_flow._apply_stop_explain_phase_impl(
+        row=row,
+        previous_row=_anchor_row(),
+        tab_cfg={"scenario_id": "stop_explain"},
+        stop=True,
+        reason="repeat_no_progress",
+        stop_eval_inputs=_phase_ordering_stop_inputs(no_progress=True, strict_duplicate=True, eval_reason="repeat_no_progress"),
+        mismatch_reasons=[],
+        cta_descend_applied=False,
+        scroll_ready_continue_applied=False,
+        local_tab_transition_applied=False,
+        step_idx=7,
+        log_fn=lambda message: logs.append(message),
+        format_fn=format_fn,
+    )
+
+    assert format_calls == [
+        {
+            "stop_eval_inputs": _phase_ordering_stop_inputs(
+                no_progress=True,
+                strict_duplicate=True,
+                eval_reason="repeat_no_progress",
+            ),
+            "decision": "stop",
+        }
+    ]
+    assert len(logs) == 2
+    assert len(debug_calls) == 1
+
+
+def _scroll_ready_record_state(*, pending="", retry_counts=None):
+    return SimpleNamespace(
+        scroll_state=SimpleNamespace(
+            pending_scroll_ready_cluster_signature=pending,
+            scroll_ready_retry_counts=dict(retry_counts or {}),
+        )
+    )
+
+
+def _scroll_ready_record_callbacks(*, normalized_result="moved"):
+    calls = {"log": [], "truncate": [], "normalize": []}
+
+    def log_fn(message):
+        calls["log"].append(message)
+
+    def truncate_fn(value, limit):
+        calls["truncate"].append((value, limit))
+        return str(value)
+
+    def normalize_move_result_fn(row):
+        calls["normalize"].append(row)
+        return normalized_result
+
+    return calls, log_fn, truncate_fn, normalize_move_result_fn
+
+
+def test_scroll_ready_record_phase_records_pending_cluster():
+    state = _scroll_ready_record_state(
+        pending="cluster:medication",
+        retry_counts={"cluster:medication": 1, "cluster:hospital": 1},
+    )
+    row = {"move_result": "moved", "visible_label": "Medication"}
+    calls, log_fn, truncate_fn, normalize_fn = _scroll_ready_record_callbacks(normalized_result="moved")
+
+    collection_flow._apply_scroll_ready_record_phase_impl(
+        row=row,
+        state=state,
+        scenario_id="life_family_care_plugin",
+        step_idx=18,
+        log_fn=log_fn,
+        truncate_fn=truncate_fn,
+        normalize_move_result_fn=normalize_fn,
+        scroll_ready_version="test-version",
+    )
+
+    assert state.scroll_state.pending_scroll_ready_cluster_signature == ""
+    assert state.scroll_state.scroll_ready_retry_counts == {"cluster:hospital": 1}
+    assert calls["normalize"] == [row]
+    assert len(calls["log"]) == 1
+    assert ("cluster:medication", 120) in calls["truncate"]
+
+
+def test_scroll_ready_record_phase_ignores_non_scroll_ready_row():
+    state = _scroll_ready_record_state(pending="", retry_counts={"cluster:medication": 1})
+    row = {"move_result": "moved", "visible_label": "Medication", "scroll_ready_state": False}
+    calls, log_fn, truncate_fn, normalize_fn = _scroll_ready_record_callbacks(normalized_result="moved")
+
+    collection_flow._apply_scroll_ready_record_phase_impl(
+        row=row,
+        state=state,
+        scenario_id="life_family_care_plugin",
+        step_idx=19,
+        log_fn=log_fn,
+        truncate_fn=truncate_fn,
+        normalize_move_result_fn=normalize_fn,
+        scroll_ready_version="test-version",
+    )
+
+    assert state.scroll_state.pending_scroll_ready_cluster_signature == ""
+    assert state.scroll_state.scroll_ready_retry_counts == {"cluster:medication": 1}
+    assert calls == {"log": [], "truncate": [], "normalize": []}
+
+
+def test_scroll_ready_record_phase_preserves_existing_retry_state():
+    state = _scroll_ready_record_state(
+        pending="cluster:medication",
+        retry_counts={"cluster:medication": 2, "cluster:hospital": 1},
+    )
+    row = {"move_result": "failed", "visible_label": "Medication"}
+
+    collection_flow._apply_scroll_ready_record_phase(
+        row=row,
+        state=state,
+        scenario_id="life_family_care_plugin",
+        step_idx=20,
+    )
+
+    assert state.scroll_state.pending_scroll_ready_cluster_signature == "cluster:medication"
+    assert state.scroll_state.scroll_ready_retry_counts == {
+        "cluster:medication": 2,
+        "cluster:hospital": 1,
+    }
+
+
+def test_scroll_ready_record_phase_wrapper_delegates_to_impl(monkeypatch):
+    calls = []
+
+    def fake_impl(**kwargs):
+        calls.append(kwargs)
+        return "sentinel"
+
+    monkeypatch.setattr(collection_flow, "_apply_scroll_ready_record_phase_impl", fake_impl)
+    state = _scroll_ready_record_state()
+    row = {"move_result": "moved"}
+
+    result = collection_flow._apply_scroll_ready_record_phase(
+        row=row,
+        state=state,
+        scenario_id="life_family_care_plugin",
+        step_idx=21,
+    )
+
+    assert result == "sentinel"
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["row"] is row
+    assert call["state"] is state
+    assert call["scenario_id"] == "life_family_care_plugin"
+    assert call["step_idx"] == 21
+    assert call["log_fn"] is collection_flow.log
+    assert call["truncate_fn"] is collection_flow._truncate_debug_text
+    assert call["normalize_move_result_fn"] is collection_flow.normalize_move_result
+    assert call["scroll_ready_version"] == collection_flow.COLLECTION_FLOW_SCROLL_READY_VERSION
+
+
+class _PersistencePerf:
+    def __init__(self):
+        self.rows = []
+
+    def record_row(self, row):
+        self.rows.append(row)
+
+
+class _OverlayPerf(_PersistencePerf):
+    def __init__(self):
+        super().__init__()
+        self.overlay_count = 0
+        self.realign_attempt_count = 0
+        self.realign_success_count = 0
+
+
+class _TrackingList(list):
+    def __init__(self, name, events):
+        super().__init__()
+        self.name = name
+        self.events = events
+
+    def append(self, item):
+        self.events.append((f"{self.name}.append", item.get("step_index")))
+        super().append(item)
+
+
+def _run_persistence_main_loop(
+    monkeypatch,
+    *,
+    row,
+    stop=False,
+    reason="",
+    suppress=False,
+    suppress_reason="",
+    checkpoint_every=100,
+    scenario_perf=None,
+    overlay_fn=None,
+    rows=None,
+    all_rows=None,
+):
+    state = _phase_ordering_state()
+    phase_ctx = SimpleNamespace(
+        tab_cfg=_base_tab_cfg(max_steps=1),
+        rows=[] if rows is None else rows,
+        all_rows=[] if all_rows is None else all_rows,
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=scenario_perf,
+        checkpoint_every=checkpoint_every,
+        main_step_wait_seconds=0,
+        main_announcement_wait_seconds=0,
+        main_announcement_idle_wait_seconds=0,
+        main_announcement_max_extra_wait_seconds=0,
+        state=state,
+    )
+    save_calls = []
+    overlay_calls = []
+
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda _client, _dev, row, _base: row)
+    monkeypatch.setattr(collection_flow, "_apply_scroll_ready_record_phase", lambda **kwargs: None)
+    monkeypatch.setattr(collection_flow, "_maybe_reprioritize_persistent_bottom_strip_row", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_maybe_promote_row_to_cta_child", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_maybe_progress_row_to_cta_sibling", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_record_recent_representative_signature", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(collection_flow, "_annotate_row_quality", lambda row, **kwargs: ("fp", 1))
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **kwargs: ([], []))
+    monkeypatch.setattr(collection_flow, "should_stop", lambda **kwargs: (stop, 0, 0, reason, ("fp", "", ""), {}))
+    monkeypatch.setattr(collection_flow, "_build_stop_evaluation_inputs", lambda **kwargs: _phase_ordering_stop_inputs(eval_reason=reason))
+    monkeypatch.setattr(collection_flow, "_maybe_apply_cta_pending_grace", lambda **kwargs: (kwargs["stop"], kwargs["reason"], False))
+    monkeypatch.setattr(collection_flow, "_maybe_apply_scroll_ready_continue", lambda **kwargs: (kwargs["stop"], kwargs["reason"], False))
+    monkeypatch.setattr(collection_flow, "_maybe_select_next_local_tab", lambda **kwargs: False)
+    monkeypatch.setattr(collection_flow, "classify_step_result", lambda *args, **kwargs: {})
+    monkeypatch.setattr(collection_flow, "_format_stop_explain_log_fields", lambda **kwargs: "")
+    monkeypatch.setattr(collection_flow, "_log_repeat_stop_debug", lambda **kwargs: None)
+    monkeypatch.setattr(collection_flow, "_should_suppress_row_persistence", lambda **kwargs: (suppress, suppress_reason))
+
+    def fake_save(*args, **kwargs):
+        save_calls.append((args, kwargs))
+
+    monkeypatch.setattr(collection_flow, "save_excel_with_perf", fake_save)
+
+    def default_overlay(**kwargs):
+        overlay_calls.append(
+            {
+                "rows_len": len(kwargs["rows"]),
+                "all_rows_len": len(kwargs["all_rows"]),
+                "row": kwargs["row"],
+            }
+        )
+        return SimpleNamespace(post_realign_pending_steps_delta=0)
+
+    monkeypatch.setattr(collection_flow, "_overlay_phase", overlay_fn or default_overlay)
+    collection_flow._main_loop_phase(DummyClient([row]), "SERIAL", phase_ctx)
+    return phase_ctx, save_calls, overlay_calls
+
+
+def test_row_persistence_suppressed_row_does_not_update_anything(monkeypatch):
+    perf = _PersistencePerf()
+    row = _main_row(1)
+
+    phase_ctx, save_calls, _overlay_calls = _run_persistence_main_loop(
+        monkeypatch,
+        row=row,
+        suppress=True,
+        suppress_reason="phase_test_suppressed",
+        scenario_perf=perf,
+    )
+
+    assert phase_ctx.rows == []
+    assert phase_ctx.all_rows == []
+    assert perf.rows == []
+    assert phase_ctx.state.main_step_index_by_fingerprint == {}
+    assert save_calls == []
+
+
+def test_row_persistence_non_suppressed_row_updates_all_targets(monkeypatch):
+    perf = _PersistencePerf()
+    row = _main_row(2)
+
+    phase_ctx, _save_calls, _overlay_calls = _run_persistence_main_loop(
+        monkeypatch,
+        row=row,
+        scenario_perf=perf,
+    )
+
+    assert len(phase_ctx.rows) == 1
+    assert phase_ctx.all_rows == phase_ctx.rows
+    assert perf.rows == phase_ctx.rows
+    assert phase_ctx.rows[0]["visible_label"] == "item2"
+    assert phase_ctx.state.main_step_index_by_fingerprint == {
+        collection_flow.make_main_fingerprint(phase_ctx.rows[0]): 1
+    }
+
+
+def test_row_persistence_stop_row_not_suppressed():
+    row = {
+        **_main_row(3),
+        "low_value_leaf_row": True,
+        "logical_signature_already_visited": True,
+        "cluster_already_consumed_before_record": True,
+    }
+
+    suppress, reason = collection_flow._should_suppress_row_persistence(
+        row=row,
+        state=_phase_ordering_state(),
+        stop=True,
+    )
+
+    assert (suppress, reason) == (False, "")
+
+
+def test_row_persistence_records_fingerprint_index_after_append(monkeypatch):
+    events = []
+    rows = _TrackingList("rows", events)
+    all_rows = _TrackingList("all_rows", events)
+    row = _main_row(4)
+
+    def fake_fingerprint(saved_row):
+        events.append(("fingerprint", len(rows), len(all_rows)))
+        return ("fingerprint", "label", "rid")
+
+    monkeypatch.setattr(collection_flow, "make_main_fingerprint", fake_fingerprint)
+    phase_ctx, _save_calls, _overlay_calls = _run_persistence_main_loop(
+        monkeypatch,
+        row=row,
+        rows=rows,
+        all_rows=all_rows,
+    )
+
+    assert events[:3] == [
+        ("rows.append", 4),
+        ("all_rows.append", 4),
+        ("fingerprint", 1, 1),
+    ]
+    assert phase_ctx.state.main_step_index_by_fingerprint == {
+        ("fingerprint", "label", "rid"): 1
+    }
+
+
+def test_row_persistence_checkpoint_save_only_on_conditions(monkeypatch):
+    _, no_save_calls, _ = _run_persistence_main_loop(
+        monkeypatch,
+        row=_main_row(5),
+        checkpoint_every=100,
+    )
+    assert no_save_calls == []
+
+    _, interval_save_calls, _ = _run_persistence_main_loop(
+        monkeypatch,
+        row=_main_row(6),
+        checkpoint_every=1,
+    )
+    assert len(interval_save_calls) == 1
+
+    _, stop_save_calls, _ = _run_persistence_main_loop(
+        monkeypatch,
+        row=_main_row(7),
+        stop=True,
+        reason="terminal",
+        checkpoint_every=100,
+    )
+    assert len(stop_save_calls) == 1
+
+
+def test_overlay_called_after_row_persistence(monkeypatch):
+    row = _main_row(8)
+    phase_ctx, _save_calls, overlay_calls = _run_persistence_main_loop(monkeypatch, row=row)
+
+    assert len(phase_ctx.rows) == 1
+    assert phase_ctx.all_rows == phase_ctx.rows
+    assert phase_ctx.rows[0]["visible_label"] == "item8"
+    assert overlay_calls == [{"rows_len": 1, "all_rows_len": 1, "row": phase_ctx.rows[0]}]
+
+
+def test_overlay_runs_even_when_stop_triggered(monkeypatch):
+    row = _main_row(16)
+    phase_ctx, _save_calls, overlay_calls = _run_persistence_main_loop(
+        monkeypatch,
+        row=row,
+        stop=True,
+        reason="terminal",
+    )
+
+    assert phase_ctx.state.stop_triggered is True
+    assert phase_ctx.rows[0]["status"] == "END"
+    assert overlay_calls == [{"rows_len": 1, "all_rows_len": 1, "row": phase_ctx.rows[0]}]
+
+
+def test_overlay_skips_already_expanded_entry(monkeypatch):
+    row = _main_row(17)
+    tab_cfg = _base_tab_cfg(max_steps=1)
+    fingerprint = collection_flow.make_overlay_entry_fingerprint(tab_cfg["tab_name"], row)
+    expanded = {fingerprint}
+    calls = []
+
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda row, tab_cfg: (True, "test_overlay"))
+    monkeypatch.setattr(collection_flow, "_execute_overlay_for_candidate", lambda **kwargs: calls.append(kwargs))
+
+    result = collection_flow._overlay_phase(
+        client=DummyClient([]),
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        row=row,
+        rows=[],
+        all_rows=[],
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        main_step_index_by_fingerprint={},
+        expanded_overlay_entries=expanded,
+    )
+
+    assert calls == []
+    assert result.candidate_checked is True
+    assert result.classification == "unchanged"
+    assert expanded == {fingerprint}
+
+
+def test_overlay_success_adds_to_expanded_entries(monkeypatch):
+    rows = []
+    all_rows = []
+    row = _main_row(18)
+    tab_cfg = _base_tab_cfg(max_steps=1)
+    expanded = set()
+    overlay_row = {**_main_row(180), "context_type": "overlay"}
+
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda row, tab_cfg: (True, "test_overlay"))
+    monkeypatch.setattr(collection_flow, "classify_post_click_result", lambda **kwargs: ("overlay", _main_row(181)))
+
+    def fake_expand_overlay(**kwargs):
+        kwargs["rows"].append(overlay_row)
+        kwargs["all_rows"].append(overlay_row)
+        return [overlay_row]
+
+    monkeypatch.setattr(collection_flow, "expand_overlay", fake_expand_overlay)
+    monkeypatch.setattr(collection_flow, "realign_focus_after_overlay", lambda **kwargs: {"entry_reached": False})
+
+    result = collection_flow._overlay_phase(
+        client=DummyClient([]),
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        row=row,
+        rows=rows,
+        all_rows=all_rows,
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        main_step_index_by_fingerprint={},
+        expanded_overlay_entries=expanded,
+    )
+
+    assert result.classification == "overlay"
+    assert expanded == {collection_flow.make_overlay_entry_fingerprint(tab_cfg["tab_name"], row)}
+
+
+def test_overlay_touch_failure_skips_expand_and_realign(monkeypatch):
+    class TouchFailClient(DummyClient):
+        def touch(self, **kwargs):
+            self.touch_calls.append(kwargs)
+            return False
+
+    calls = {"expand": 0, "realign": 0}
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda row, tab_cfg: (True, "test_overlay"))
+    monkeypatch.setattr(collection_flow, "expand_overlay", lambda **kwargs: calls.__setitem__("expand", calls["expand"] + 1))
+    monkeypatch.setattr(collection_flow, "realign_focus_after_overlay", lambda **kwargs: calls.__setitem__("realign", calls["realign"] + 1))
+
+    result = collection_flow._overlay_phase(
+        client=TouchFailClient([]),
+        dev="SERIAL",
+        tab_cfg=_base_tab_cfg(max_steps=1),
+        row=_main_row(19),
+        rows=[],
+        all_rows=[],
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        main_step_index_by_fingerprint={},
+        expanded_overlay_entries=set(),
+    )
+
+    assert result.classification == "unchanged"
+    assert calls == {"expand": 0, "realign": 0}
+
+
+def test_overlay_realign_delta_applied_and_decremented(monkeypatch):
+    row = _main_row(20)
+    tab_cfg = _base_tab_cfg(max_steps=1)
+    overlay_row = {**_main_row(200), "context_type": "overlay"}
+
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda row, tab_cfg: (True, "test_overlay"))
+    monkeypatch.setattr(collection_flow, "classify_post_click_result", lambda **kwargs: ("overlay", _main_row(201)))
+
+    def fake_expand_overlay(**kwargs):
+        kwargs["rows"].append(overlay_row)
+        kwargs["all_rows"].append(overlay_row)
+        return [overlay_row]
+
+    monkeypatch.setattr(collection_flow, "expand_overlay", fake_expand_overlay)
+    monkeypatch.setattr(collection_flow, "realign_focus_after_overlay", lambda **kwargs: {"entry_reached": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+
+    result = collection_flow._overlay_phase(
+        client=DummyClient([]),
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        row=row,
+        rows=[],
+        all_rows=[],
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        main_step_index_by_fingerprint={},
+        expanded_overlay_entries=set(),
+    )
+    assert result.post_realign_pending_steps_delta == 2
+
+    phase_ctx, _save_calls, _overlay_calls = _run_persistence_main_loop(
+        monkeypatch,
+        row=_main_row(21),
+        overlay_fn=lambda **kwargs: result,
+    )
+    assert phase_ctx.state.post_realign_pending_steps == 1
+
+
+def test_overlay_perf_counters_updated_correctly(monkeypatch):
+    rows = []
+    all_rows = []
+    perf = _OverlayPerf()
+    overlay_row = {**_main_row(220), "context_type": "overlay"}
+
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda row, tab_cfg: (True, "test_overlay"))
+    monkeypatch.setattr(collection_flow, "classify_post_click_result", lambda **kwargs: ("overlay", _main_row(221)))
+
+    def fake_expand_overlay(**kwargs):
+        kwargs["rows"].append(overlay_row)
+        kwargs["all_rows"].append(overlay_row)
+        return [overlay_row]
+
+    monkeypatch.setattr(collection_flow, "expand_overlay", fake_expand_overlay)
+    monkeypatch.setattr(collection_flow, "realign_focus_after_overlay", lambda **kwargs: {"entry_reached": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+
+    result = collection_flow._overlay_phase(
+        client=DummyClient([]),
+        dev="SERIAL",
+        tab_cfg=_base_tab_cfg(max_steps=1),
+        row=_main_row(22),
+        rows=rows,
+        all_rows=all_rows,
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=perf,
+        main_step_index_by_fingerprint={},
+        expanded_overlay_entries=set(),
+    )
+
+    assert result.classification == "overlay"
+    assert perf.overlay_count == 1
+    assert perf.realign_attempt_count == 1
+    assert perf.realign_success_count == 1
+    assert perf.rows == [overlay_row]
+
+
+def test_overlay_blocked_in_global_nav_only_scenario(monkeypatch):
+    calls = []
+    tab_cfg = _global_nav_tab_cfg(max_steps=1)
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda row, tab_cfg: calls.append((row, tab_cfg)) or (True, "test_overlay"))
+
+    result = collection_flow._overlay_phase(
+        client=DummyClient([]),
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        row=_main_row(23),
+        rows=[],
+        all_rows=[],
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        main_step_index_by_fingerprint={},
+        expanded_overlay_entries=set(),
+    )
+
+    assert calls == []
+    assert result.candidate_checked is False
+    assert result.candidate_reason == "blocked_by_global_nav_only"
+
+
+def test_overlay_rows_added_to_both_rows_and_all_rows(monkeypatch):
+    rows = []
+    all_rows = []
+    entry_row = _main_row(9)
+    overlay_row = {**_main_row(90), "context_type": "overlay"}
+
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda row, tab_cfg: (True, "test_overlay"))
+    monkeypatch.setattr(collection_flow, "classify_post_click_result", lambda **kwargs: ("overlay", _main_row(91)))
+
+    def fake_expand_overlay(**kwargs):
+        kwargs["rows"].append(overlay_row)
+        kwargs["all_rows"].append(overlay_row)
+        return [overlay_row]
+
+    monkeypatch.setattr(collection_flow, "expand_overlay", fake_expand_overlay)
+    monkeypatch.setattr(collection_flow, "realign_focus_after_overlay", lambda **kwargs: {"entry_reached": False})
+
+    result = collection_flow._overlay_phase(
+        client=DummyClient([]),
+        dev="SERIAL",
+        tab_cfg=_base_tab_cfg(max_steps=1),
+        row=entry_row,
+        rows=rows,
+        all_rows=all_rows,
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        main_step_index_by_fingerprint={},
+        expanded_overlay_entries=set(),
+    )
+
+    assert result.classification == "overlay"
+    assert rows == [overlay_row]
+    assert all_rows == [overlay_row]
+
+
+def test_overlay_rows_added_to_rows_and_all_rows(monkeypatch):
+    rows = []
+    all_rows = []
+    entry_row = _main_row(24)
+    overlay_row = {**_main_row(240), "context_type": "overlay"}
+
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda row, tab_cfg: (True, "test_overlay"))
+    monkeypatch.setattr(collection_flow, "classify_post_click_result", lambda **kwargs: ("overlay", _main_row(241)))
+
+    def fake_expand_overlay(**kwargs):
+        kwargs["rows"].append(overlay_row)
+        kwargs["all_rows"].append(overlay_row)
+        return [overlay_row]
+
+    monkeypatch.setattr(collection_flow, "expand_overlay", fake_expand_overlay)
+    monkeypatch.setattr(collection_flow, "realign_focus_after_overlay", lambda **kwargs: {"entry_reached": False})
+
+    result = collection_flow._overlay_phase(
+        client=DummyClient([]),
+        dev="SERIAL",
+        tab_cfg=_base_tab_cfg(max_steps=1),
+        row=entry_row,
+        rows=rows,
+        all_rows=all_rows,
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        main_step_index_by_fingerprint={},
+        expanded_overlay_entries=set(),
+    )
+
+    assert result.classification == "overlay"
+    assert rows == [overlay_row]
+    assert all_rows == [overlay_row]
+
+
+def test_overlay_still_runs_even_if_row_suppressed(monkeypatch):
+    row = _main_row(10)
+    phase_ctx, _save_calls, overlay_calls = _run_persistence_main_loop(
+        monkeypatch,
+        row=row,
+        suppress=True,
+        suppress_reason="phase_test_suppressed",
+    )
+
+    assert phase_ctx.rows == []
+    assert phase_ctx.all_rows == []
+    assert len(overlay_calls) == 1
+    assert overlay_calls[0]["rows_len"] == 0
+    assert overlay_calls[0]["all_rows_len"] == 0
+    assert overlay_calls[0]["row"]["visible_label"] == "item10"
+    assert overlay_calls[0]["row"]["row_persist_suppressed"] is True
+    assert overlay_calls[0]["row"]["row_persist_suppressed_reason"] == "phase_test_suppressed"
+
+
+def test_row_persistence_phase_impl_suppressed_returns_not_persisted(monkeypatch):
+    monkeypatch.setattr(collection_flow, "_should_suppress_row_persistence", lambda **kwargs: (True, "phase_suppressed"))
+    state = _phase_ordering_state()
+    rows = []
+    all_rows = []
+    perf = _PersistencePerf()
+    save_calls = []
+
+    persisted, reason = collection_flow._apply_row_persistence_phase_impl(
+        row=_main_row(11),
+        state=state,
+        rows=rows,
+        all_rows=all_rows,
+        scenario_perf=perf,
+        step_idx=11,
+        stop=False,
+        checkpoint_every=1,
+        output_path="unused.xlsx",
+        log_fn=lambda _message: None,
+        make_fingerprint_fn=lambda _row: ("fingerprint", "label", "rid"),
+        save_fn=lambda *args, **kwargs: save_calls.append((args, kwargs)),
+    )
+
+    assert (persisted, reason) == (True, "phase_suppressed")
+    assert rows == []
+    assert all_rows == []
+    assert perf.rows == []
+    assert state.main_step_index_by_fingerprint == {}
+    assert save_calls == []
+
+
+def test_row_persistence_phase_impl_non_suppressed_records_all_targets(monkeypatch):
+    monkeypatch.setattr(collection_flow, "_should_suppress_row_persistence", lambda **kwargs: (False, ""))
+    state = _phase_ordering_state()
+    rows = []
+    all_rows = []
+    perf = _PersistencePerf()
+    row = _main_row(12)
+
+    persisted, reason = collection_flow._apply_row_persistence_phase_impl(
+        row=row,
+        state=state,
+        rows=rows,
+        all_rows=all_rows,
+        scenario_perf=perf,
+        step_idx=12,
+        stop=False,
+        checkpoint_every=100,
+        output_path="unused.xlsx",
+        log_fn=lambda _message: None,
+        make_fingerprint_fn=lambda _row: ("fingerprint", "label", "rid"),
+        save_fn=lambda *args, **kwargs: None,
+    )
+
+    assert (persisted, reason) == (False, "")
+    assert rows == [row]
+    assert all_rows == [row]
+    assert perf.rows == [row]
+    assert state.main_step_index_by_fingerprint == {("fingerprint", "label", "rid"): 12}
+
+
+def test_row_persistence_phase_impl_saves_on_stop(monkeypatch):
+    monkeypatch.setattr(collection_flow, "_should_suppress_row_persistence", lambda **kwargs: (False, ""))
+    save_calls = []
+
+    collection_flow._apply_row_persistence_phase_impl(
+        row=_main_row(13),
+        state=_phase_ordering_state(),
+        rows=[],
+        all_rows=[],
+        scenario_perf=None,
+        step_idx=13,
+        stop=True,
+        checkpoint_every=100,
+        output_path="unused.xlsx",
+        log_fn=lambda _message: None,
+        make_fingerprint_fn=lambda _row: ("fingerprint", "label", "rid"),
+        save_fn=lambda *args, **kwargs: save_calls.append((args, kwargs)),
+    )
+
+    assert len(save_calls) == 1
+
+
+def test_row_persistence_phase_impl_saves_on_checkpoint_interval(monkeypatch):
+    monkeypatch.setattr(collection_flow, "_should_suppress_row_persistence", lambda **kwargs: (False, ""))
+    save_calls = []
+
+    collection_flow._apply_row_persistence_phase_impl(
+        row=_main_row(14),
+        state=_phase_ordering_state(),
+        rows=[],
+        all_rows=[],
+        scenario_perf=None,
+        step_idx=14,
+        stop=False,
+        checkpoint_every=7,
+        output_path="unused.xlsx",
+        log_fn=lambda _message: None,
+        make_fingerprint_fn=lambda _row: ("fingerprint", "label", "rid"),
+        save_fn=lambda *args, **kwargs: save_calls.append((args, kwargs)),
+    )
+
+    assert len(save_calls) == 1
+
+
+def test_row_persistence_phase_wrapper_injects_log_and_save(monkeypatch):
+    calls = []
+
+    def fake_impl(**kwargs):
+        calls.append(kwargs)
+        return "sentinel"
+
+    monkeypatch.setattr(collection_flow, "_apply_row_persistence_phase_impl", fake_impl)
+    state = _phase_ordering_state()
+    rows = []
+    all_rows = []
+    row = _main_row(15)
+
+    result = collection_flow._apply_row_persistence_phase(
+        row=row,
+        state=state,
+        rows=rows,
+        all_rows=all_rows,
+        scenario_perf=None,
+        step_idx=15,
+        stop=False,
+        checkpoint_every=100,
+        output_path="unused.xlsx",
+    )
+
+    assert result == "sentinel"
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["row"] is row
+    assert call["state"] is state
+    assert call["rows"] is rows
+    assert call["all_rows"] is all_rows
+    assert call["step_idx"] == 15
+    assert call["checkpoint_every"] == 100
+    assert call["output_path"] == "unused.xlsx"
+    assert call["log_fn"] is collection_flow.log
+    assert call["make_fingerprint_fn"] is collection_flow.make_main_fingerprint
+    assert call["save_fn"] is collection_flow.save_excel_with_perf

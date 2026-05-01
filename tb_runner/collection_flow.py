@@ -8165,6 +8165,48 @@ def _record_pending_scroll_ready_move(
     )
 
 
+def _apply_scroll_ready_record_phase_impl(
+    *,
+    row: dict[str, Any],
+    state: MainLoopState,
+    scenario_id: str,
+    step_idx: int,
+    log_fn,
+    truncate_fn,
+    normalize_move_result_fn,
+    scroll_ready_version: str,
+) -> None:
+    return scroll_exhaustion_logic._record_pending_scroll_ready_move_impl(
+        row=row,
+        state=state,
+        step_idx=step_idx,
+        scenario_id=scenario_id,
+        log_fn=log_fn,
+        truncate_fn=truncate_fn,
+        normalize_move_result_fn=normalize_move_result_fn,
+        scroll_ready_version=scroll_ready_version,
+    )
+
+
+def _apply_scroll_ready_record_phase(
+    *,
+    row: dict[str, Any],
+    state: MainLoopState,
+    scenario_id: str,
+    step_idx: int,
+) -> None:
+    return _apply_scroll_ready_record_phase_impl(
+        row=row,
+        state=state,
+        scenario_id=scenario_id,
+        step_idx=step_idx,
+        log_fn=log,
+        truncate_fn=_truncate_debug_text,
+        normalize_move_result_fn=normalize_move_result,
+        scroll_ready_version=COLLECTION_FLOW_SCROLL_READY_VERSION,
+    )
+
+
 def _apply_spatial_priority_to_candidates(
     candidates: list[dict[str, Any]],
     *,
@@ -9226,6 +9268,358 @@ def _maybe_apply_cta_pending_grace(
     return False, "", True
 
 
+def _apply_stop_explain_phase_impl(
+    *,
+    row: dict[str, Any],
+    previous_row: dict[str, Any] | None,
+    tab_cfg: dict[str, Any],
+    stop: bool,
+    reason: str,
+    stop_eval_inputs: dict[str, Any],
+    mismatch_reasons: list[str],
+    cta_descend_applied: bool,
+    scroll_ready_continue_applied: bool,
+    local_tab_transition_applied: bool,
+    step_idx: int,
+    log_fn,
+    format_fn,
+) -> None:
+    terminal_signal = bool(stop_eval_inputs["terminal_signal"])
+    same_like_count = int(stop_eval_inputs["same_like_count"])
+    no_progress = bool(stop_eval_inputs["no_progress"])
+    scenario_type = str(stop_eval_inputs["scenario_type"])
+    is_global_nav = bool(stop_eval_inputs["is_global_nav"])
+    global_nav_reason = str(stop_eval_inputs["global_nav_reason"])
+    after_realign = bool(stop_eval_inputs["after_realign"])
+    recent_repeat = bool(stop_eval_inputs["recent_repeat"])
+    bounded_two_card_loop = bool(stop_eval_inputs["bounded_two_card_loop"])
+    semantic_same_like = bool(stop_eval_inputs["semantic_same_like"])
+    recent_duplicate = bool(stop_eval_inputs["recent_duplicate"])
+    recent_duplicate_distance = int(stop_eval_inputs["recent_duplicate_distance"])
+    recent_semantic_duplicate = bool(stop_eval_inputs["recent_semantic_duplicate"])
+    recent_semantic_duplicate_distance = int(stop_eval_inputs["recent_semantic_duplicate_distance"])
+    recent_semantic_unique_count = int(stop_eval_inputs["recent_semantic_unique_count"])
+    repeat_class = str(stop_eval_inputs["repeat_class"])
+    loop_classification = str(stop_eval_inputs["loop_classification"])
+    strict_duplicate = bool(stop_eval_inputs["strict_duplicate"])
+    semantic_duplicate = bool(stop_eval_inputs["semantic_duplicate"])
+    hard_no_progress = bool(stop_eval_inputs["hard_no_progress"])
+    soft_no_progress = bool(stop_eval_inputs["soft_no_progress"])
+    no_progress_class = str(stop_eval_inputs["no_progress_class"])
+    overlay_realign_grace_active = bool(stop_eval_inputs["overlay_realign_grace_active"])
+    min_step_gate_blocked = bool(stop_eval_inputs["min_step_gate_blocked"])
+    realign_grace_suppressed = bool(stop_eval_inputs["realign_grace_suppressed"])
+    repeat_stop_hit = bool(stop_eval_inputs["repeat_stop_hit"])
+    decision = "stop" if stop else "continue"
+    eval_reason = str(stop_eval_inputs["eval_reason"])
+    if cta_descend_applied:
+        eval_reason = "cta_descend_continue"
+    elif scroll_ready_continue_applied:
+        eval_reason = "scroll_ready_continue"
+    elif local_tab_transition_applied:
+        eval_reason = "local_tab_continue"
+    elif bool(row.get("scroll_fallback_resumed_content", False)):
+        eval_reason = "scroll_fallback_continue"
+    explain_log_fields = format_fn(stop_eval_inputs=stop_eval_inputs, decision=decision)
+    row["is_global_nav"] = is_global_nav
+    row["global_nav_reason"] = global_nav_reason
+    result_summary = classify_step_result(
+        row,
+        mismatch_reasons=mismatch_reasons,
+        no_progress=no_progress,
+        stop_reason=reason,
+        terminal_signal=terminal_signal,
+    )
+    row.update(result_summary)
+    pre_stop_summary_needed = bool(
+        stop
+        and (
+            reason in {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall", "repeat_semantic_stall_after_escape"}
+            or no_progress
+            or strict_duplicate
+        )
+    )
+    if pre_stop_summary_needed:
+        pre_stop_cluster = str(
+            row.get("scroll_ready_cluster_signature", "")
+            or row.get("focus_cluster_signature", "")
+            or row.get("cta_cluster_signature", "")
+            or ""
+        ).strip()
+        pre_stop_representative = str(
+            row.get("visible_label", "")
+            or row.get("merged_announcement", "")
+            or row.get("focus_view_id", "")
+            or ""
+        ).strip()
+        pre_stop_move_result = normalize_move_result(row) or str(row.get("move_result", "") or "").strip().lower() or "none"
+        pre_stop_reason_parts = [
+            f"scroll_ready:{row.get('scroll_ready_eval_reason', 'not_evaluated')}",
+            f"viewport:{row.get('viewport_exhausted_eval_reason', 'not_evaluated')}",
+            f"scroll_fallback:{row.get('scroll_fallback_gate_reason', 'not_evaluated')}",
+            f"last_scroll:{row.get('last_scroll_block_reason', 'not_evaluated')}",
+            f"local_tab:{row.get('local_tab_block_reason', 'not_evaluated')}",
+            f"stop:{reason or eval_reason}",
+        ]
+        log_fn(
+            f"[STEP][pre_stop_summary] cluster='{_truncate_debug_text(pre_stop_cluster, 120)}' "
+            f"representative='{_truncate_debug_text(pre_stop_representative, 120)}' "
+            f"move_result='{_truncate_debug_text(pre_stop_move_result, 48)}' "
+            f"scroll_ready_result={str(bool(row.get('scroll_ready_eval_result', row.get('scroll_ready_state', False)))).lower()} "
+            f"viewport_exhausted={str(bool(row.get('viewport_exhausted_eval_result', False))).lower()} "
+            f"scroll_fallback_gate_evaluated={str(bool(row.get('scroll_fallback_gate_evaluated', False))).lower()} "
+            f"scroll_fallback_block_reason='{_truncate_debug_text(str(row.get('scroll_fallback_block_reason', '') or ''), 96)}' "
+            f"scroll_fallback_allowed={str(bool(row.get('scroll_fallback_allowed', False))).lower()} "
+            f"last_scroll_fallback_evaluated={str(bool(row.get('last_scroll_fallback_evaluated', False))).lower()} "
+            f"last_scroll_fallback_allowed={str(bool(row.get('last_scroll_fallback_allowed', False))).lower()} "
+            f"last_scroll_block_reason='{_truncate_debug_text(str(row.get('last_scroll_block_reason', '') or ''), 96)}' "
+            f"local_tab_gate_evaluated={str(bool(row.get('local_tab_gate_evaluated', False))).lower()} "
+            f"local_tab_block_reason='{_truncate_debug_text(str(row.get('local_tab_block_reason', '') or ''), 96)}' "
+            f"local_tab_allowed={str(bool(local_tab_transition_applied)).lower()} "
+            f"strip_focus_context={str(bool(row.get('strip_focus_context', False))).lower()} "
+            f"reason='{_truncate_debug_text('|'.join(pre_stop_reason_parts), 160)}' "
+            f"version='{COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION}'"
+        )
+    log_fn(
+        f"[STOP][eval] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
+        f"terminal={str(terminal_signal).lower()} same_like_count={same_like_count} "
+        f"no_progress={str(no_progress).lower()} scenario_type='{scenario_type}' "
+        f"is_global_nav={str(is_global_nav).lower()} after_realign={str(after_realign).lower()} "
+        f"recent_repeat={str(recent_repeat).lower()} bounded_two_card_loop={str(bounded_two_card_loop).lower()} "
+        f"semantic_same_like={str(semantic_same_like).lower()} recent_duplicate={str(recent_duplicate).lower()} "
+        f"recent_duplicate_distance={recent_duplicate_distance} "
+        f"recent_semantic_duplicate={str(recent_semantic_duplicate).lower()} "
+        f"recent_semantic_duplicate_distance={recent_semantic_duplicate_distance} "
+        f"recent_semantic_unique_count={recent_semantic_unique_count} "
+        f"strict_duplicate={str(strict_duplicate).lower()} "
+        f"semantic_duplicate={str(semantic_duplicate).lower()} "
+        f"repeat_class='{repeat_class}' loop_classification='{loop_classification}' "
+        f"hard_no_progress={str(hard_no_progress).lower()} soft_no_progress={str(soft_no_progress).lower()} "
+        f"no_progress_class='{no_progress_class}' "
+        f"overlay_realign_grace_active={str(overlay_realign_grace_active).lower()} "
+        f"min_step_gate_blocked={str(min_step_gate_blocked).lower()} "
+        f"realign_grace_suppressed={str(realign_grace_suppressed).lower()} "
+        f"cta_descend_applied={str(cta_descend_applied).lower()} "
+        f"promoted_from_container={str(bool(row.get('cta_promoted_from_container', False))).lower()} "
+        f"repeat_stop_hit={str(repeat_stop_hit).lower()} "
+        f"decision='{decision}' reason='{eval_reason}' "
+        f"traversal_result='{row.get('traversal_result', '')}' final_result='{row.get('final_result', '')}' "
+        f"failure_reason='{row.get('failure_reason', '')}' "
+        f"{explain_log_fields}"
+    )
+    repeat_stop_debug_needed = bool(
+        stop
+        and (
+            reason in {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall", "repeat_semantic_stall_after_escape"}
+            or strict_duplicate
+            or no_progress
+        )
+    )
+    if repeat_stop_debug_needed:
+        _log_repeat_stop_debug(
+            row=row,
+            previous_row=previous_row,
+            stop_eval_inputs=stop_eval_inputs,
+        )
+
+
+def _apply_stop_explain_phase(
+    *,
+    row: dict[str, Any],
+    previous_row: dict[str, Any] | None,
+    tab_cfg: dict[str, Any],
+    stop: bool,
+    reason: str,
+    stop_eval_inputs: dict[str, Any],
+    mismatch_reasons: list[str],
+    cta_descend_applied: bool,
+    scroll_ready_continue_applied: bool,
+    local_tab_transition_applied: bool,
+    step_idx: int,
+) -> None:
+    return _apply_stop_explain_phase_impl(
+        row=row,
+        previous_row=previous_row,
+        tab_cfg=tab_cfg,
+        stop=stop,
+        reason=reason,
+        stop_eval_inputs=stop_eval_inputs,
+        mismatch_reasons=mismatch_reasons,
+        cta_descend_applied=cta_descend_applied,
+        scroll_ready_continue_applied=scroll_ready_continue_applied,
+        local_tab_transition_applied=local_tab_transition_applied,
+        step_idx=step_idx,
+        log_fn=log,
+        format_fn=_format_stop_explain_log_fields,
+    )
+
+
+def _apply_row_quality_phase_impl(
+    *,
+    row: dict[str, Any],
+    state: MainLoopState,
+    tab_cfg: dict[str, Any],
+    step_idx: int,
+    step_elapsed: float,
+    log_fn,
+    detect_mismatch_fn,
+) -> tuple[list[str], list[str]]:
+    _record_recent_representative_signature(state, row)
+    state.last_fingerprint, state.fingerprint_repeat_count = _annotate_row_quality(
+        row,
+        last_fingerprint=state.last_fingerprint,
+        fingerprint_repeat_count=state.fingerprint_repeat_count,
+        recent_fingerprint_history=state.recent_fingerprint_history,
+        recent_semantic_fingerprint_history=state.recent_semantic_fingerprint_history,
+    )
+    log_fn(
+        f"[ROW] fingerprint='{row.get('fingerprint', '')}' "
+        f"normalized_fingerprint='{row.get('normalized_fingerprint', '')}' "
+        f"duplicate={str(bool(row.get('is_duplicate_step', False))).lower()} "
+        f"recent_duplicate={str(bool(row.get('is_recent_duplicate_step', False))).lower()} "
+        f"distance={int(row.get('recent_duplicate_distance', 0) or 0)} "
+        f"recent_semantic_duplicate={str(bool(row.get('is_recent_semantic_duplicate_step', False))).lower()} "
+        f"semantic_distance={int(row.get('recent_semantic_duplicate_distance', 0) or 0)} "
+        f"semantic_window_unique={int(row.get('recent_semantic_unique_count', 0) or 0)} "
+        f"noise={str(bool(row.get('is_noise_step', False))).lower()}"
+    )
+
+    move_result = str(row.get("move_result", "") or "")
+    visible_label = str(row.get("visible_label", "") or "").strip()
+    merged_announcement = str(row.get("merged_announcement", "") or "").strip()
+
+    log_fn(
+        f"[STEP] END tab='{tab_cfg['tab_name']}' step={step_idx} "
+        f"elapsed={step_elapsed:.2f}s move_result='{move_result}' "
+        f"visible='{visible_label}' speech='{merged_announcement}' "
+        f"crop='{row.get('crop_image_path', '')}' "
+        f"timing(move={row.get('move_elapsed_sec', 0):.3f}s "
+        f"ann={row.get('announcement_elapsed_sec', 0):.3f}s "
+        f"get_focus={row.get('get_focus_elapsed_sec', 0):.3f}s "
+        f"get_focus_fallback_dump={row.get('get_focus_fallback_dump_elapsed_sec', 0):.3f}s "
+        f"step_dump={row.get('step_dump_tree_elapsed_sec', 0):.3f}s "
+        f"crop={row.get('crop_elapsed_sec', 0):.3f}s total={row.get('step_total_elapsed_sec', 0):.3f}s) "
+        f"focus_reason='{row.get('get_focus_empty_reason', '')}' "
+        f"fallback_used={row.get('get_focus_fallback_used', False)} "
+        f"fallback_found={row.get('get_focus_fallback_found', False)} "
+        f"step_dump_used={row.get('step_dump_tree_used', False)} "
+        f"step_dump_reason='{row.get('step_dump_tree_reason', '')}' "
+        f"req_id='{row.get('get_focus_req_id', '')}'"
+    )
+    mismatch_reasons, low_confidence_reasons = detect_mismatch_fn(row=row, previous_step=state.previous_step_row)
+    if mismatch_reasons:
+        log_fn(
+            f"[MISMATCH] step={step_idx} tab='{tab_cfg['tab_name']}' "
+            f"reason='{','.join(mismatch_reasons)}' "
+            f"speech='{merged_announcement}' visible='{visible_label}' "
+            f"focus_bounds='{row.get('focus_bounds', '')}' source='{row.get('focus_payload_source', '')}'"
+        )
+    elif low_confidence_reasons:
+        log_fn(
+            f"[LOW_CONFIDENCE] step={step_idx} tab='{tab_cfg['tab_name']}' "
+            f"reason='{','.join(low_confidence_reasons)}' "
+            f"speech='{merged_announcement}' visible='{visible_label}' "
+            f"focus_bounds='{row.get('focus_bounds', '')}' source='{row.get('focus_payload_source', '')}'"
+        )
+    elif _should_log("DEBUG"):
+        log_fn(
+            f"[DEBUG][diag] step={step_idx} speech_count={row.get('announcement_count', 0)} "
+            f"window={row.get('announcement_window_sec', 0)} "
+            f"focus_source='{row.get('focus_payload_source', '')}' "
+            f"response_success={row.get('get_focus_response_success', False)} "
+            f"t(after_move={row.get('t_after_move', 0)} "
+            f"after_ann={row.get('t_after_ann', 0)} "
+            f"after_focus={row.get('t_after_get_focus', 0)} "
+            f"before_crop={row.get('t_before_crop', 0)} after_crop={row.get('t_after_crop', 0)})",
+            level="DEBUG",
+        )
+    return mismatch_reasons, low_confidence_reasons
+
+
+def _apply_row_quality_phase(
+    *,
+    row: dict[str, Any],
+    state: MainLoopState,
+    tab_cfg: dict[str, Any],
+    step_idx: int,
+    step_elapsed: float,
+) -> tuple[list[str], list[str]]:
+    return _apply_row_quality_phase_impl(
+        row=row,
+        state=state,
+        tab_cfg=tab_cfg,
+        step_idx=step_idx,
+        step_elapsed=step_elapsed,
+        log_fn=log,
+        detect_mismatch_fn=detect_step_mismatch,
+    )
+
+
+def _apply_row_persistence_phase_impl(
+    *,
+    row: dict[str, Any],
+    state: MainLoopState,
+    rows: list[dict[str, Any]],
+    all_rows: list[dict[str, Any]],
+    scenario_perf: ScenarioPerfStats | None,
+    step_idx: int,
+    stop: bool,
+    checkpoint_every: int,
+    output_path: str,
+    log_fn,
+    make_fingerprint_fn,
+    save_fn,
+) -> tuple[bool, str]:
+    row["low_value_leaf_row"] = _row_is_low_value_leaf(row)
+    suppress_row, suppress_reason = _should_suppress_row_persistence(row=row, state=state, stop=stop)
+    if suppress_row:
+        row["row_persist_suppressed"] = True
+        row["row_persist_suppressed_reason"] = suppress_reason
+        log_fn(
+            f"[STEP][row_filter] label='{_truncate_debug_text(str(row.get('visible_label', '') or row.get('focus_view_id', '') or ''), 96)}' "
+            f"reason='{suppress_reason}'"
+        )
+    else:
+        rows.append(row)
+        all_rows.append(row)
+        if scenario_perf is not None:
+            scenario_perf.record_row(row)
+        row_fingerprint = make_fingerprint_fn(row)
+        if all(row_fingerprint):
+            state.main_step_index_by_fingerprint[row_fingerprint] = step_idx
+        if stop or (step_idx % checkpoint_every == 0):
+            save_fn(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
+    return suppress_row, suppress_reason
+
+
+def _apply_row_persistence_phase(
+    *,
+    row: dict[str, Any],
+    state: MainLoopState,
+    rows: list[dict[str, Any]],
+    all_rows: list[dict[str, Any]],
+    scenario_perf: ScenarioPerfStats | None,
+    step_idx: int,
+    stop: bool,
+    checkpoint_every: int,
+    output_path: str,
+) -> tuple[bool, str]:
+    return _apply_row_persistence_phase_impl(
+        row=row,
+        state=state,
+        rows=rows,
+        all_rows=all_rows,
+        scenario_perf=scenario_perf,
+        step_idx=step_idx,
+        stop=stop,
+        checkpoint_every=checkpoint_every,
+        output_path=output_path,
+        log_fn=log,
+        make_fingerprint_fn=make_main_fingerprint,
+        save_fn=save_excel_with_perf,
+    )
+
+
 def _log_repeat_stop_debug(
     *,
     row: dict[str, Any],
@@ -9655,7 +10049,7 @@ def _main_loop_phase(
         row = maybe_capture_focus_crop(client, dev, row, phase_ctx.output_base_dir)
         row.pop("_step_mono_start", None)
         row["step_total_elapsed_sec"] = round(time.perf_counter() - step_start, 3)
-        _record_pending_scroll_ready_move(
+        _apply_scroll_ready_record_phase(
             row=row,
             state=state,
             step_idx=step_idx,
@@ -9718,75 +10112,13 @@ def _main_loop_phase(
                 row["post_move_verdict_source"] = "smart_nav_result_resource_match"
             elif smart_success:
                 row["post_move_verdict_source"] = "smart_nav_result"
-        _record_recent_representative_signature(state, row)
-        state.last_fingerprint, state.fingerprint_repeat_count = _annotate_row_quality(
-            row,
-            last_fingerprint=state.last_fingerprint,
-            fingerprint_repeat_count=state.fingerprint_repeat_count,
-            recent_fingerprint_history=state.recent_fingerprint_history,
-            recent_semantic_fingerprint_history=state.recent_semantic_fingerprint_history,
+        mismatch_reasons, low_confidence_reasons = _apply_row_quality_phase(
+            row=row,
+            state=state,
+            tab_cfg=tab_cfg,
+            step_idx=step_idx,
+            step_elapsed=step_elapsed,
         )
-        log(
-            f"[ROW] fingerprint='{row.get('fingerprint', '')}' "
-            f"normalized_fingerprint='{row.get('normalized_fingerprint', '')}' "
-            f"duplicate={str(bool(row.get('is_duplicate_step', False))).lower()} "
-            f"recent_duplicate={str(bool(row.get('is_recent_duplicate_step', False))).lower()} "
-            f"distance={int(row.get('recent_duplicate_distance', 0) or 0)} "
-            f"recent_semantic_duplicate={str(bool(row.get('is_recent_semantic_duplicate_step', False))).lower()} "
-            f"semantic_distance={int(row.get('recent_semantic_duplicate_distance', 0) or 0)} "
-            f"semantic_window_unique={int(row.get('recent_semantic_unique_count', 0) or 0)} "
-            f"noise={str(bool(row.get('is_noise_step', False))).lower()}"
-        )
-
-        move_result = str(row.get("move_result", "") or "")
-        visible_label = str(row.get("visible_label", "") or "").strip()
-        merged_announcement = str(row.get("merged_announcement", "") or "").strip()
-
-        log(
-            f"[STEP] END tab='{tab_cfg['tab_name']}' step={step_idx} "
-            f"elapsed={step_elapsed:.2f}s move_result='{move_result}' "
-            f"visible='{visible_label}' speech='{merged_announcement}' "
-            f"crop='{row.get('crop_image_path', '')}' "
-            f"timing(move={row.get('move_elapsed_sec', 0):.3f}s "
-            f"ann={row.get('announcement_elapsed_sec', 0):.3f}s "
-            f"get_focus={row.get('get_focus_elapsed_sec', 0):.3f}s "
-            f"get_focus_fallback_dump={row.get('get_focus_fallback_dump_elapsed_sec', 0):.3f}s "
-            f"step_dump={row.get('step_dump_tree_elapsed_sec', 0):.3f}s "
-            f"crop={row.get('crop_elapsed_sec', 0):.3f}s total={row.get('step_total_elapsed_sec', 0):.3f}s) "
-            f"focus_reason='{row.get('get_focus_empty_reason', '')}' "
-            f"fallback_used={row.get('get_focus_fallback_used', False)} "
-            f"fallback_found={row.get('get_focus_fallback_found', False)} "
-            f"step_dump_used={row.get('step_dump_tree_used', False)} "
-            f"step_dump_reason='{row.get('step_dump_tree_reason', '')}' "
-            f"req_id='{row.get('get_focus_req_id', '')}'"
-        )
-        mismatch_reasons, low_confidence_reasons = detect_step_mismatch(row=row, previous_step=state.previous_step_row)
-        if mismatch_reasons:
-            log(
-                f"[MISMATCH] step={step_idx} tab='{tab_cfg['tab_name']}' "
-                f"reason='{','.join(mismatch_reasons)}' "
-                f"speech='{merged_announcement}' visible='{visible_label}' "
-                f"focus_bounds='{row.get('focus_bounds', '')}' source='{row.get('focus_payload_source', '')}'"
-            )
-        elif low_confidence_reasons:
-            log(
-                f"[LOW_CONFIDENCE] step={step_idx} tab='{tab_cfg['tab_name']}' "
-                f"reason='{','.join(low_confidence_reasons)}' "
-                f"speech='{merged_announcement}' visible='{visible_label}' "
-                f"focus_bounds='{row.get('focus_bounds', '')}' source='{row.get('focus_payload_source', '')}'"
-            )
-        elif _should_log("DEBUG"):
-            log(
-                f"[DEBUG][diag] step={step_idx} speech_count={row.get('announcement_count', 0)} "
-                f"window={row.get('announcement_window_sec', 0)} "
-                f"focus_source='{row.get('focus_payload_source', '')}' "
-                f"response_success={row.get('get_focus_response_success', False)} "
-                f"t(after_move={row.get('t_after_move', 0)} "
-                f"after_ann={row.get('t_after_ann', 0)} "
-                f"after_focus={row.get('t_after_get_focus', 0)} "
-                f"before_crop={row.get('t_before_crop', 0)} after_crop={row.get('t_after_crop', 0)})",
-                level="DEBUG",
-            )
 
         stop, state.fail_count, state.same_count, reason, state.prev_fingerprint, stop_details = should_stop(
             row=row,
@@ -9898,121 +10230,20 @@ def _main_loop_phase(
                 stop = False
                 reason = ""
                 state.scroll_state.pending_scroll_ready_cluster_signature = ""
-        overlay_realign_grace_active = bool(stop_eval_inputs["overlay_realign_grace_active"])
-        min_step_gate_blocked = bool(stop_eval_inputs["min_step_gate_blocked"])
-        realign_grace_suppressed = bool(stop_eval_inputs["realign_grace_suppressed"])
         repeat_stop_hit = bool(stop_eval_inputs["repeat_stop_hit"])
-        decision = "stop" if stop else "continue"
-        eval_reason = str(stop_eval_inputs["eval_reason"])
-        if cta_descend_applied:
-            eval_reason = "cta_descend_continue"
-        elif scroll_ready_continue_applied:
-            eval_reason = "scroll_ready_continue"
-        elif local_tab_transition_applied:
-            eval_reason = "local_tab_continue"
-        elif bool(row.get("scroll_fallback_resumed_content", False)):
-            eval_reason = "scroll_fallback_continue"
-        explain_log_fields = _format_stop_explain_log_fields(stop_eval_inputs=stop_eval_inputs, decision=decision)
-        row["is_global_nav"] = is_global_nav
-        row["global_nav_reason"] = global_nav_reason
-        result_summary = classify_step_result(
-            row,
+        _apply_stop_explain_phase(
+            row=row,
+            previous_row=state.previous_step_row,
+            tab_cfg=tab_cfg,
+            stop=stop,
+            reason=reason,
+            stop_eval_inputs=stop_eval_inputs,
             mismatch_reasons=mismatch_reasons,
-            no_progress=no_progress,
-            stop_reason=reason,
-            terminal_signal=terminal_signal,
+            cta_descend_applied=cta_descend_applied,
+            scroll_ready_continue_applied=scroll_ready_continue_applied,
+            local_tab_transition_applied=local_tab_transition_applied,
+            step_idx=step_idx,
         )
-        row.update(result_summary)
-        pre_stop_summary_needed = bool(
-            stop
-            and (
-                reason in {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall", "repeat_semantic_stall_after_escape"}
-                or no_progress
-                or strict_duplicate
-            )
-        )
-        if pre_stop_summary_needed:
-            pre_stop_cluster = str(
-                row.get("scroll_ready_cluster_signature", "")
-                or row.get("focus_cluster_signature", "")
-                or row.get("cta_cluster_signature", "")
-                or ""
-            ).strip()
-            pre_stop_representative = str(
-                row.get("visible_label", "")
-                or row.get("merged_announcement", "")
-                or row.get("focus_view_id", "")
-                or ""
-            ).strip()
-            pre_stop_move_result = normalize_move_result(row) or str(row.get("move_result", "") or "").strip().lower() or "none"
-            pre_stop_reason_parts = [
-                f"scroll_ready:{row.get('scroll_ready_eval_reason', 'not_evaluated')}",
-                f"viewport:{row.get('viewport_exhausted_eval_reason', 'not_evaluated')}",
-                f"scroll_fallback:{row.get('scroll_fallback_gate_reason', 'not_evaluated')}",
-                f"last_scroll:{row.get('last_scroll_block_reason', 'not_evaluated')}",
-                f"local_tab:{row.get('local_tab_block_reason', 'not_evaluated')}",
-                f"stop:{reason or eval_reason}",
-            ]
-            log(
-                f"[STEP][pre_stop_summary] cluster='{_truncate_debug_text(pre_stop_cluster, 120)}' "
-                f"representative='{_truncate_debug_text(pre_stop_representative, 120)}' "
-                f"move_result='{_truncate_debug_text(pre_stop_move_result, 48)}' "
-                f"scroll_ready_result={str(bool(row.get('scroll_ready_eval_result', row.get('scroll_ready_state', False)))).lower()} "
-                f"viewport_exhausted={str(bool(row.get('viewport_exhausted_eval_result', False))).lower()} "
-                f"scroll_fallback_gate_evaluated={str(bool(row.get('scroll_fallback_gate_evaluated', False))).lower()} "
-                f"scroll_fallback_block_reason='{_truncate_debug_text(str(row.get('scroll_fallback_block_reason', '') or ''), 96)}' "
-                f"scroll_fallback_allowed={str(bool(row.get('scroll_fallback_allowed', False))).lower()} "
-                f"last_scroll_fallback_evaluated={str(bool(row.get('last_scroll_fallback_evaluated', False))).lower()} "
-                f"last_scroll_fallback_allowed={str(bool(row.get('last_scroll_fallback_allowed', False))).lower()} "
-                f"last_scroll_block_reason='{_truncate_debug_text(str(row.get('last_scroll_block_reason', '') or ''), 96)}' "
-                f"local_tab_gate_evaluated={str(bool(row.get('local_tab_gate_evaluated', False))).lower()} "
-                f"local_tab_block_reason='{_truncate_debug_text(str(row.get('local_tab_block_reason', '') or ''), 96)}' "
-                f"local_tab_allowed={str(bool(local_tab_transition_applied)).lower()} "
-                f"strip_focus_context={str(bool(row.get('strip_focus_context', False))).lower()} "
-                f"reason='{_truncate_debug_text('|'.join(pre_stop_reason_parts), 160)}' "
-                f"version='{COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION}'"
-            )
-        log(
-            f"[STOP][eval] step={step_idx} scenario='{tab_cfg.get('scenario_id', '')}' "
-            f"terminal={str(terminal_signal).lower()} same_like_count={same_like_count} "
-            f"no_progress={str(no_progress).lower()} scenario_type='{scenario_type}' "
-            f"is_global_nav={str(is_global_nav).lower()} after_realign={str(after_realign).lower()} "
-            f"recent_repeat={str(recent_repeat).lower()} bounded_two_card_loop={str(bounded_two_card_loop).lower()} "
-            f"semantic_same_like={str(semantic_same_like).lower()} recent_duplicate={str(recent_duplicate).lower()} "
-            f"recent_duplicate_distance={recent_duplicate_distance} "
-            f"recent_semantic_duplicate={str(recent_semantic_duplicate).lower()} "
-            f"recent_semantic_duplicate_distance={recent_semantic_duplicate_distance} "
-            f"recent_semantic_unique_count={recent_semantic_unique_count} "
-            f"strict_duplicate={str(strict_duplicate).lower()} "
-            f"semantic_duplicate={str(semantic_duplicate).lower()} "
-            f"repeat_class='{repeat_class}' loop_classification='{loop_classification}' "
-            f"hard_no_progress={str(hard_no_progress).lower()} soft_no_progress={str(soft_no_progress).lower()} "
-            f"no_progress_class='{no_progress_class}' "
-            f"overlay_realign_grace_active={str(overlay_realign_grace_active).lower()} "
-            f"min_step_gate_blocked={str(min_step_gate_blocked).lower()} "
-            f"realign_grace_suppressed={str(realign_grace_suppressed).lower()} "
-            f"cta_descend_applied={str(cta_descend_applied).lower()} "
-            f"promoted_from_container={str(bool(row.get('cta_promoted_from_container', False))).lower()} "
-            f"repeat_stop_hit={str(repeat_stop_hit).lower()} "
-            f"decision='{decision}' reason='{eval_reason}' "
-            f"traversal_result='{row.get('traversal_result', '')}' final_result='{row.get('final_result', '')}' "
-            f"failure_reason='{row.get('failure_reason', '')}' "
-            f"{explain_log_fields}"
-        )
-        repeat_stop_debug_needed = bool(
-            stop
-            and (
-                reason in {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall", "repeat_semantic_stall_after_escape"}
-                or strict_duplicate
-                or no_progress
-            )
-        )
-        if repeat_stop_debug_needed:
-            _log_repeat_stop_debug(
-                row=row,
-                previous_row=state.previous_step_row,
-                stop_eval_inputs=stop_eval_inputs,
-            )
 
         if stop and reason == "repeat_semantic_stall":
             should_escape, escape_gate_reason = should_attempt_stall_escape(
@@ -10099,25 +10330,17 @@ def _main_loop_phase(
             row["stop_triggered"] = True
             row["stop_step"] = step_idx
 
-        row["low_value_leaf_row"] = _row_is_low_value_leaf(row)
-        suppress_row, suppress_reason = _should_suppress_row_persistence(row=row, state=state, stop=stop)
-        if suppress_row:
-            row["row_persist_suppressed"] = True
-            row["row_persist_suppressed_reason"] = suppress_reason
-            log(
-                f"[STEP][row_filter] label='{_truncate_debug_text(str(row.get('visible_label', '') or row.get('focus_view_id', '') or ''), 96)}' "
-                f"reason='{suppress_reason}'"
-            )
-        else:
-            rows.append(row)
-            all_rows.append(row)
-            if scenario_perf is not None:
-                scenario_perf.record_row(row)
-            row_fingerprint = make_main_fingerprint(row)
-            if all(row_fingerprint):
-                state.main_step_index_by_fingerprint[row_fingerprint] = step_idx
-            if stop or (step_idx % phase_ctx.checkpoint_every == 0):
-                save_excel_with_perf(save_excel, all_rows, phase_ctx.output_path, with_images=False, scenario_perf=scenario_perf)
+        _apply_row_persistence_phase(
+            row=row,
+            state=state,
+            rows=rows,
+            all_rows=all_rows,
+            scenario_perf=scenario_perf,
+            step_idx=step_idx,
+            stop=stop,
+            checkpoint_every=phase_ctx.checkpoint_every,
+            output_path=phase_ctx.output_path,
+        )
 
         overlay_result = _overlay_phase(
             client=client,
