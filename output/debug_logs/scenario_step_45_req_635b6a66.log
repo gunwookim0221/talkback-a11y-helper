@@ -1,0 +1,44 @@
+[ROW_CONTEXT]
+scenario=
+tab=(?i).*life.*
+step=45
+req_id=635b6a66
+visible=Device usage Device usage
+speech=Device usage Device usage
+final_result=FAIL
+failure_reason=move_failed
+
+review_note=이동/발화 결과 재검토 필요
+noise=
+move_result=failed
+debug_source_row_found=false
+
+[ANN_TRACE]
+[ANN][baseline] req_id=635b6a66 text='' source='source_row_missing' empty_reason='no_prev_step_row'
+[ANN][poll] req_id=635b6a66 idx=0 raw='Device usage Device usage' normalized='device usage device usage' changed=true differs_from_baseline=true source='row_snapshot' observed_at='' count=0
+[ANN][trim] req_id=635b6a66 considered=false applied=false before='Device usage Device usage' after='Device usage Device usage' reject_reason='' reason='trim_stage_not_reached'
+[ANN][stable] req_id=635b6a66 selected='Device usage Device usage' reason='result_row_snapshot' source='result_row'
+[ANN][select] req_id=635b6a66 used_snapshot=true snapshot_reason='no_better_recent_poll_candidate' previous='' current='Device usage Device usage' final='Device usage Device usage'
+
+[STEP_TRACE]
+[07:57:37] [STEP] END tab='(?i).*life.*' step=45 elapsed=5.50s move_result='' visible='Device usage Device usage' speech='Device usage Device usage' crop='output\talkback_compare_20260422_075233\crops\i_._life._step_45_LocationButton.png' timing(move=0.402s ann=3.934s get_focus=1.167s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.553s total=6.057s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='635b6a66'
+[STEP][summary] req_id=635b6a66 tab='(?i).*life.*' step=45 move_result='failed' terminal=false no_progress=false
+
+[SCROLL_TRACE]
+[SCROLL] req_id=635b6a66 scroll_related_log_found=false move_result='failed' smart_result='' detail='' inferred_scroll=false inference_reason='no_scroll_signal_found'
+
+[FOCUS_TRACE]
+[07:57:37] [STEP] END tab='(?i).*life.*' step=45 elapsed=5.50s move_result='' visible='Device usage Device usage' speech='Device usage Device usage' crop='output\talkback_compare_20260422_075233\crops\i_._life._step_45_LocationButton.png' timing(move=0.402s ann=3.934s get_focus=1.167s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.553s total=6.057s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='635b6a66'
+[FOCUS] req_id=635b6a66 get_focus_req_id='' response_success=false payload_source='' payload_sufficient=false fallback_used=false fallback_found=false dump_attempted=false final_payload_source='' focus_reason='' missing_reason=''
+
+[DECISION_TRACE]
+baseline_empty=true
+first_candidate_contaminated=true
+trim_considered=false
+trim_applied=false
+stable_reason='result_row_snapshot'
+used_snapshot=true
+snapshot_reason='no_better_recent_poll_candidate'
+scroll_evidence='weak'
+focus_evidence='strong'
+notes='final speech appears to come from snapshot candidate path'

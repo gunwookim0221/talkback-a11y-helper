@@ -1,0 +1,44 @@
+[ROW_CONTEXT]
+scenario=
+tab=(?i).*life.*
+step=29
+req_id=603b269c
+visible=LocationButton
+speech=LocationButton
+final_result=PASS
+failure_reason=terminal_not_handled
+
+review_note=정상 이동 및 발화 일치
+noise=
+move_result=moved
+debug_source_row_found=false
+
+[ANN_TRACE]
+[ANN][baseline] req_id=603b269c text='' source='source_row_missing' empty_reason='no_prev_step_row'
+[ANN][poll] req_id=603b269c idx=0 raw='LocationButton' normalized='locationbutton' changed=true differs_from_baseline=true source='row_snapshot' observed_at='' count=0
+[ANN][trim] req_id=603b269c considered=false applied=false before='LocationButton' after='LocationButton' reject_reason='' reason='trim_stage_not_reached'
+[ANN][stable] req_id=603b269c selected='LocationButton' reason='result_row_snapshot' source='result_row'
+[ANN][select] req_id=603b269c used_snapshot=true snapshot_reason='no_better_recent_poll_candidate' previous='' current='LocationButton' final='LocationButton'
+
+[STEP_TRACE]
+[01:07:05] [STEP] END tab='(?i).*life.*' step=29 elapsed=4.44s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776960421112, 'reqId': '7532894f', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='LocationButton' speech='LocationButton' crop='output\talkback_compare_20260424_010346\crops\i_._life._step_29_LocationButton.png' timing(move=0.494s ann=3.033s get_focus=0.913s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.459s total=4.901s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='603b269c'
+[STEP][summary] req_id=603b269c tab='(?i).*life.*' step=29 move_result='moved' terminal=false no_progress=false
+
+[SCROLL_TRACE]
+[SCROLL] req_id=603b269c scroll_related_log_found=false move_result='moved' smart_result='' detail='' inferred_scroll=false inference_reason='no_scroll_signal_found'
+
+[FOCUS_TRACE]
+[01:07:05] [STEP] END tab='(?i).*life.*' step=29 elapsed=4.44s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776960421112, 'reqId': '7532894f', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='LocationButton' speech='LocationButton' crop='output\talkback_compare_20260424_010346\crops\i_._life._step_29_LocationButton.png' timing(move=0.494s ann=3.033s get_focus=0.913s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.459s total=4.901s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='603b269c'
+[FOCUS] req_id=603b269c get_focus_req_id='' response_success=false payload_source='' payload_sufficient=false fallback_used=false fallback_found=false dump_attempted=false final_payload_source='' focus_reason='' missing_reason=''
+
+[DECISION_TRACE]
+baseline_empty=true
+first_candidate_contaminated=true
+trim_considered=false
+trim_applied=false
+stable_reason='result_row_snapshot'
+used_snapshot=true
+snapshot_reason='no_better_recent_poll_candidate'
+scroll_evidence='weak'
+focus_evidence='strong'
+notes='final speech appears to come from snapshot candidate path'

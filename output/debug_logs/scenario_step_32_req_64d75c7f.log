@@ -1,0 +1,44 @@
+[ROW_CONTEXT]
+scenario=
+tab=(?i).*life.*
+step=32
+req_id=64d75c7f
+visible=Add family member
+speech=Add family member
+final_result=FAIL
+failure_reason=move_failed
+
+review_note=이동/발화 결과 재검토 필요
+noise=
+move_result=failed
+debug_source_row_found=false
+
+[ANN_TRACE]
+[ANN][baseline] req_id=64d75c7f text='' source='source_row_missing' empty_reason='no_prev_step_row'
+[ANN][poll] req_id=64d75c7f idx=0 raw='Add family member' normalized='add family member' changed=true differs_from_baseline=true source='row_snapshot' observed_at='' count=0
+[ANN][trim] req_id=64d75c7f considered=false applied=false before='Add family member' after='Add family member' reject_reason='' reason='trim_stage_not_reached'
+[ANN][stable] req_id=64d75c7f selected='Add family member' reason='result_row_snapshot' source='result_row'
+[ANN][select] req_id=64d75c7f used_snapshot=true snapshot_reason='no_better_recent_poll_candidate' previous='' current='Add family member' final='Add family member'
+
+[STEP_TRACE]
+[23:20:56] [STEP] END tab='(?i).*life.*' step=32 elapsed=5.26s move_result='' visible='Add family member' speech='Add family member' crop='output\talkback_compare_20260421_231725\crops\i_._life._step_32_LocationButton.png' timing(move=0.341s ann=3.807s get_focus=1.113s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.504s total=5.765s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='64d75c7f'
+[STEP][summary] req_id=64d75c7f tab='(?i).*life.*' step=32 move_result='failed' terminal=false no_progress=false
+
+[SCROLL_TRACE]
+[SCROLL] req_id=64d75c7f scroll_related_log_found=false move_result='failed' smart_result='' detail='' inferred_scroll=false inference_reason='no_scroll_signal_found'
+
+[FOCUS_TRACE]
+[23:20:56] [STEP] END tab='(?i).*life.*' step=32 elapsed=5.26s move_result='' visible='Add family member' speech='Add family member' crop='output\talkback_compare_20260421_231725\crops\i_._life._step_32_LocationButton.png' timing(move=0.341s ann=3.807s get_focus=1.113s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.504s total=5.765s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='64d75c7f'
+[FOCUS] req_id=64d75c7f get_focus_req_id='' response_success=false payload_source='' payload_sufficient=false fallback_used=false fallback_found=false dump_attempted=false final_payload_source='' focus_reason='' missing_reason=''
+
+[DECISION_TRACE]
+baseline_empty=true
+first_candidate_contaminated=true
+trim_considered=false
+trim_applied=false
+stable_reason='result_row_snapshot'
+used_snapshot=true
+snapshot_reason='no_better_recent_poll_candidate'
+scroll_evidence='weak'
+focus_evidence='strong'
+notes='final speech appears to come from snapshot candidate path'

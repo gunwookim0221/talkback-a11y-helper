@@ -1,0 +1,10 @@
+{
+  "version": "pr16-life-air-care-failure-capture-v2",
+  "scenario_id": "life_air_care_plugin",
+  "failure_phase": "focus_align_recheck",
+  "failure_reason": "life_root_not_stable",
+  "step_index": 1,
+  "target_regex": "",
+  "timestamp": "2026-04-11T12:45:15.419194+00:00",
+  "device_serial": "R3CX40QFDBP"
+}

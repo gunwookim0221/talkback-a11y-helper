@@ -1,0 +1,40 @@
+{
+  "meta": {
+    "script_version": "1.0.3",
+    "captured_at": "2026-04-05T22:05:00",
+    "base_name": "20260405_220458__st__setting__add",
+    "serial": "R3CX40QFDBP",
+    "cwd": "D:\\Python test\\talkback-a11y-helper",
+    "window_focus_info": "unknown_focus",
+    "image_format_requested": "jpg",
+    "jpg_quality": 85,
+    "pillow_available": true
+  },
+  "reset_focus_history": {
+    "ok": true
+  },
+  "helper_dump": {
+    "available": true,
+    "type": "list",
+    "nodes_count": 28
+  },
+  "get_focus": {
+    "available": true,
+    "type": "dict"
+  },
+  "uiautomator_xml": {
+    "ok": true,
+    "path": "capture_bundles\\20260405_220458__st__setting__add\\window_dump.xml"
+  },
+  "screenshot": {
+    "ok": true,
+    "path": "capture_bundles\\20260405_220458__st__setting__add\\screenshot.jpg"
+  },
+  "logcat": {
+    "ok": true,
+    "full_lines": 3145,
+    "filtered_lines": 8,
+    "full_path": "capture_bundles\\20260405_220458__st__setting__add\\logcat_full.txt",
+    "filtered_path": "capture_bundles\\20260405_220458__st__setting__add\\logcat_a11y_helper.txt"
+  }
+}

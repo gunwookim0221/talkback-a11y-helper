@@ -1,0 +1,52 @@
+[
+  {
+    "text": "Always manage your home appliances optimally, Home Care constantly monitors devices that support AI diagnosis and informs you when they need cleaning, replacing, or other maintenance.",
+    "contentDescription": "Always manage your home appliances optimally, Home Care constantly monitors devices that support AI diagnosis and informs you when they need cleaning, replacing, or other maintenance.",
+    "className": "android.widget.TextView",
+    "viewIdResourceName": null,
+    "boundsInScreen": {
+      "l": 72,
+      "t": 94,
+      "r": 1008,
+      "b": 2074
+    },
+    "clickable": false,
+    "focusable": true,
+    "isVisibleToUser": true,
+    "focused": true,
+    "accessibilityFocused": false,
+    "isTopAppBar": false,
+    "isBottomNavigationBar": false,
+    "hasClickableDescendant": false,
+    "hasFocusableDescendant": false,
+    "effectiveClickable": false,
+    "actionableDescendantResourceId": null,
+    "actionableDescendantClassName": null,
+    "actionableDescendantContentDescription": null
+  },
+  {
+    "text": "Start , Button",
+    "contentDescription": "Start , Button",
+    "className": "android.view.View",
+    "viewIdResourceName": null,
+    "boundsInScreen": {
+      "l": 216,
+      "t": 2290,
+      "r": 864,
+      "b": 2425
+    },
+    "clickable": true,
+    "focusable": true,
+    "isVisibleToUser": true,
+    "focused": false,
+    "accessibilityFocused": false,
+    "isTopAppBar": false,
+    "isBottomNavigationBar": false,
+    "hasClickableDescendant": false,
+    "hasFocusableDescendant": false,
+    "effectiveClickable": true,
+    "actionableDescendantResourceId": null,
+    "actionableDescendantClassName": null,
+    "actionableDescendantContentDescription": null
+  }
+]

@@ -1,0 +1,44 @@
+[ROW_CONTEXT]
+scenario=
+tab=(?i).*life.*
+step=23
+req_id=50052d86
+visible=Home Monitor
+speech=Home Monitor
+final_result=PASS
+failure_reason=move_failed
+
+review_note=정상 이동 및 발화 일치
+noise=
+move_result=scrolled
+debug_source_row_found=false
+
+[ANN_TRACE]
+[ANN][baseline] req_id=50052d86 text='' source='source_row_missing' empty_reason='no_prev_step_row'
+[ANN][poll] req_id=50052d86 idx=0 raw='Home Monitor' normalized='home monitor' changed=true differs_from_baseline=true source='row_snapshot' observed_at='' count=0
+[ANN][trim] req_id=50052d86 considered=false applied=false before='Home Monitor' after='Home Monitor' reject_reason='' reason='trim_stage_not_reached'
+[ANN][stable] req_id=50052d86 selected='Home Monitor' reason='result_row_snapshot' source='result_row'
+[ANN][select] req_id=50052d86 used_snapshot=true snapshot_reason='no_better_recent_poll_candidate' previous='' current='Home Monitor' final='Home Monitor'
+
+[STEP_TRACE]
+[22:01:37] [STEP] END tab='(?i).*life.*' step=23 elapsed=6.72s move_result='{'success': True, 'status': 'scrolled', 'detail': 'scrolled', 'raw': {'timestamp': 1776603692757, 'reqId': 'e8009de2', 'success': True, 'status': 'scrolled', 'detail': 'scrolled', 'flags': []}}' visible='Home Monitor' speech='Home Monitor' crop='output\talkback_compare_20260419_215316\crops\i_._life._step_23_Home_Monitor.png' timing(move=1.836s ann=3.159s get_focus=1.728s get_focus_fallback_dump=0.550s step_dump=0.000s crop=1.337s total=8.061s) focus_reason='parse_error' fallback_used=True fallback_found=True step_dump_used=False step_dump_reason='fallback_nodes_reused' req_id='50052d86'
+[STEP][summary] req_id=50052d86 tab='(?i).*life.*' step=23 move_result='scrolled' terminal=false no_progress=false
+
+[SCROLL_TRACE]
+[SCROLL] req_id=50052d86 scroll_related_log_found=false move_result='scrolled' smart_result='' detail='' inferred_scroll=true inference_reason='move_result_is_scrolled'
+
+[FOCUS_TRACE]
+[22:01:37] [STEP] END tab='(?i).*life.*' step=23 elapsed=6.72s move_result='{'success': True, 'status': 'scrolled', 'detail': 'scrolled', 'raw': {'timestamp': 1776603692757, 'reqId': 'e8009de2', 'success': True, 'status': 'scrolled', 'detail': 'scrolled', 'flags': []}}' visible='Home Monitor' speech='Home Monitor' crop='output\talkback_compare_20260419_215316\crops\i_._life._step_23_Home_Monitor.png' timing(move=1.836s ann=3.159s get_focus=1.728s get_focus_fallback_dump=0.550s step_dump=0.000s crop=1.337s total=8.061s) focus_reason='parse_error' fallback_used=True fallback_found=True step_dump_used=False step_dump_reason='fallback_nodes_reused' req_id='50052d86'
+[FOCUS] req_id=50052d86 get_focus_req_id='' response_success=false payload_source='' payload_sufficient=false fallback_used=false fallback_found=false dump_attempted=false final_payload_source='' focus_reason='' missing_reason=''
+
+[DECISION_TRACE]
+baseline_empty=true
+first_candidate_contaminated=true
+trim_considered=false
+trim_applied=false
+stable_reason='result_row_snapshot'
+used_snapshot=true
+snapshot_reason='no_better_recent_poll_candidate'
+scroll_evidence='weak'
+focus_evidence='strong'
+notes='final speech appears to come from snapshot candidate path'

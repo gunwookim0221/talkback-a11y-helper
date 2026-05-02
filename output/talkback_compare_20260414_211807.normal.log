@@ -1,0 +1,477 @@
+[21:18:07] [SAVE][temp] override tmp='D:\Python test\talkback-a11y-helper\output\.tmp' temp='D:\Python test\talkback-a11y-helper\output\.tmp' applied=true
+[21:18:07] [MAIN] script start (version=1.7.81, log_level=NORMAL)
+[21:18:08] [PREFLIGHT] talkback status='enabled'
+[21:18:08] [MAIN] output file: output/talkback_compare_20260414_211807.xlsx
+[21:18:08] [MAIN] image dir base: output\talkback_compare_20260414_211807
+[21:18:08] [CONFIG] runtime config loaded path='config\runtime_config.json'
+[21:18:08] [GLOBAL_NAV][guard] forcing stabilization_mode='tab_context' scenario='global_nav_main' requested='anchor_then_context'
+[21:18:08] [CONFIG] scenario resolved scenario='global_nav_main' group='main_tabs' max_steps=10 enabled=False
+[21:18:08] [CONFIG] applied shared_navigation='default_global_nav'
+[21:18:08] [CONFIG] scenario enabled scenario='global_nav_main' source='runtime' enabled=False base_enabled=False
+[21:18:08] [CONFIG] scenario resolved scenario='home_main' group='main_tabs' max_steps=5 enabled=False
+[21:18:08] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[21:18:08] [CONFIG] scenario enabled scenario='home_main' source='runtime' enabled=False base_enabled=False
+[21:18:08] [CONFIG] scenario resolved scenario='life_food_plugin' group='plugin_screen' max_steps=5 enabled=False
+[21:18:08] [CONFIG] applied pre_navigation_ref='enter_food_plugin'
+[21:18:08] [CONFIG] scenario enabled scenario='life_food_plugin' source='runtime' enabled=False base_enabled=False
+[21:18:08] [CONFIG] scenario resolved scenario='life_air_care_plugin' group='-' max_steps=5 enabled=True
+[21:18:08] [CONFIG] scenario enabled scenario='life_air_care_plugin' source='runtime' enabled=True base_enabled=False
+[21:18:08] [CONFIG] scenario resolved scenario='life_home_care_plugin' group='-' max_steps=5 enabled=True
+[21:18:08] [CONFIG] scenario enabled scenario='life_home_care_plugin' source='runtime' enabled=True base_enabled=False
+[21:18:08] [CONFIG] scenario resolved scenario='life_energy_plugin' group='-' max_steps=5 enabled=True
+[21:18:08] [CONFIG] scenario enabled scenario='life_energy_plugin' source='runtime' enabled=True base_enabled=False
+[21:18:08] [CONFIG] scenario resolved scenario='devices_main' group='main_tabs' max_steps=10 enabled=False
+[21:18:08] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[21:18:08] [CONFIG] applied anchor_ref='home_tab_anchor'
+[21:18:08] [CONFIG] scenario enabled scenario='devices_main' source='runtime' enabled=False base_enabled=False
+[21:18:08] [CONFIG] scenario resolved scenario='life_main' group='main_tabs' max_steps=30 enabled=False
+[21:18:08] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[21:18:08] [CONFIG] scenario enabled scenario='life_main' source='runtime' enabled=False base_enabled=False
+[21:18:08] [CONFIG] scenario resolved scenario='routines_main' group='main_tabs' max_steps=30 enabled=False
+[21:18:08] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[21:18:08] [CONFIG] scenario enabled scenario='routines_main' source='runtime' enabled=False base_enabled=False
+[21:18:08] [CONFIG] scenario resolved scenario='menu_main' group='main_tabs' max_steps=30 enabled=False
+[21:18:08] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[21:18:08] [CONFIG] scenario enabled scenario='menu_main' source='runtime' enabled=False base_enabled=False
+[21:18:08] [CONFIG] scenario resolved scenario='settings_entry_example' group='plugin_screen' max_steps=5 enabled=False
+[21:18:08] [CONFIG] applied anchor_ref='settings_button_anchor'
+[21:18:08] [CONFIG] applied pre_navigation_ref='enter_settings'
+[21:18:08] [CONFIG] scenario enabled scenario='settings_entry_example' source='runtime' enabled=False base_enabled=False
+[21:18:08] [CONFIG] scenario resolved scenario='life_pet_care_plugin' group='-' max_steps=5 enabled=True
+[21:18:08] [CONFIG] scenario enabled scenario='life_pet_care_plugin' source='runtime' enabled=True base_enabled=False
+[21:18:08] [CONFIG] scenario resolved scenario='life_family_care_plugin' group='-' max_steps=5 enabled=True
+[21:18:08] [CONFIG] scenario enabled scenario='life_family_care_plugin' source='runtime' enabled=True base_enabled=False
+[21:18:08] [CONFIG] scenario resolved scenario='life_plant_care_plugin' group='-' max_steps=5 enabled=True
+[21:18:08] [CONFIG] scenario enabled scenario='life_plant_care_plugin' source='runtime' enabled=True base_enabled=False
+[21:18:08] [CONFIG] scenario resolved scenario='life_clothing_care_plugin' group='-' max_steps=5 enabled=True
+[21:18:08] [CONFIG] scenario enabled scenario='life_clothing_care_plugin' source='runtime' enabled=True base_enabled=False
+[21:18:08] [CONFIG] scenario resolved scenario='life_find_plugin' group='-' max_steps=5 enabled=True
+[21:18:08] [CONFIG] scenario enabled scenario='life_find_plugin' source='runtime' enabled=True base_enabled=False
+[21:18:08] [CONFIG] scenario resolved scenario='life_video_plugin' group='-' max_steps=5 enabled=True
+[21:18:08] [CONFIG] scenario enabled scenario='life_video_plugin' source='runtime' enabled=True base_enabled=False
+[21:18:08] [CONFIG] scenario resolved scenario='life_home_monitor_plugin' group='-' max_steps=5 enabled=True
+[21:18:08] [CONFIG] scenario enabled scenario='life_home_monitor_plugin' source='runtime' enabled=True base_enabled=False
+[21:18:08] [CONFIG] scenario resolved scenario='life_music_sync_plugin' group='-' max_steps=5 enabled=True
+[21:18:08] [CONFIG] scenario enabled scenario='life_music_sync_plugin' source='runtime' enabled=True base_enabled=False
+[21:18:08] [MAIN] skip disabled scenario_id='global_nav_main' tab='(?i).*(home|devices|life|routines|menu).*'
+[21:18:08] [MAIN] skip disabled scenario_id='home_main' tab='(?i).*home.*'
+[21:18:08] [MAIN] skip disabled scenario_id='life_food_plugin' tab='(?i).*life.*'
+[21:18:08] [SCENARIO][stabilization] scenario='life_air_care_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[21:18:09] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=1/2 life_selected=false app_bar_hits=5 visible_card_hits=1 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=3 ok=true pass_reason='life_root_signature_and_structure_confirmed' fail_reason=''
+[21:18:09] [PLUGIN_START][life_list_check] ok=true reason='root_state_stable'
+[21:18:09] [PLUGIN_START][recover_before_entry] triggered=false
+[21:18:09] [PLUGIN_START][recover_before_entry] success=true
+[21:18:09] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[21:18:09] [TAB][select] fallback_to_legacy=True scenario='life_air_care_plugin'
+[21:18:17] [TRACE][open_scenario] scenario='life_air_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=True focus_align_reason='' context_ok=False anchor_matched=False anchor_stable=False
+[21:18:17] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^smart\s*air\s*care$|^air\s*care$|air\s*care\.|\baircare\b|에어\s*케어)'
+[21:18:17] [XMLENTRY][search] pre_reset scroll_to_top=true
+[21:18:22] [XMLENTRY][search] step=0/5 visible_candidates=69 target_candidates=0
+[21:18:22] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[21:18:22] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='180,118,810,310' area_ratio='0.0583' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[21:18:22] [XMLENTRY][search][top] rank=3 reason='actionable_container' text='' rid='' class='android.widget.RelativeLayout' bounds='42,310,1038,1042' area_ratio='0.3516' target_match=false match_source='' matched_phrase='' negative_plugin_phrase='family care'
+[21:18:24] [XMLENTRY][scroll] step=0/5 performed=true reason='no_strict_target_candidate'
+[21:18:27] [XMLENTRY][search] step=1/5 visible_candidates=61 target_candidates=0
+[21:18:27] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[21:18:27] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='180,118,810,310' area_ratio='0.0583' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[21:18:27] [XMLENTRY][search][top] rank=3 reason='actionable_container' text='' rid='' class='android.widget.RelativeLayout' bounds='42,310,1038,602' area_ratio='0.1403' target_match=false match_source='' matched_phrase='' negative_plugin_phrase='home care'
+[21:18:30] [XMLENTRY][scroll] step=1/5 performed=true reason='no_strict_target_candidate'
+[21:18:33] [XMLENTRY][search] step=2/5 visible_candidates=59 target_candidates=3
+[21:18:33] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/llCard' class='android.widget.LinearLayout' bounds='42,1752,1038,2316' area_ratio='0.2709' target_match=true match_source='descendant' matched_phrase='air care' negative_plugin_phrase=''
+[21:18:33] [XMLENTRY][search][top] rank=2 reason='actionable_container' text='' rid='com.samsung.android.oneconnect:id/containerNameLayout' class='android.widget.RelativeLayout' bounds='42,1752,1038,1884' area_ratio='0.0634' target_match=true match_source='descendant' matched_phrase='air care' negative_plugin_phrase=''
+[21:18:33] [XMLENTRY][search][top] rank=3 reason='actionable_container' text='Air Care' rid='com.samsung.android.oneconnect:id/containerNameLayout' class='android.widget.RelativeLayout' bounds='42,1752,1038,1884' area_ratio='0.0634' target_match=true match_source='title' matched_phrase='air care' negative_plugin_phrase=''
+[21:18:33] [XMLENTRY][select] reason='card_like_container' resource='com.samsung.android.oneconnect:id/llCard' bounds='42,1752,1038,2316' text='Air Care' target_match=true match_source='descendant' matched_phrase='air care'
+[21:18:40] [VERIFY][air][probe] probe_index=1/2 same_screen=false signal='air_care_verify' has_home_button=false has_change_location=false has_add_button=false has_more_options=false has_other_plugin_cards=false has_air_text=true has_air_content_signal=true has_plugin_body_focus=false decision='candidate_air_success'
+[21:18:40] [XMLENTRY][result] success=true reason='transition_confirmed'
+[21:18:40] [SCENARIO][pre_nav] success step=1 reason='ACTION_ACCESSIBILITY_FOCUS success'
+[21:18:41] [SCENARIO][pre_nav] success
+[21:18:45] [CONTEXT] skipped reason='anchor_only_mode'
+[21:18:45] [CONTEXT] skipped reason='anchor_only_mode'
+[21:18:45] [CONTEXT] scenario='life_air_care_plugin' type='skipped' expected='' actual='' ok=True
+[21:18:45] [CONTEXT] verification passed scenario='life_air_care_plugin'
+[21:18:45] [ANCHOR][scenario_start] success scenario='life_air_care_plugin' selected=True matched=True stable=True context_ok=True reason='selected_and_verified'
+[21:18:45] [ENTRY][air][fallback_acceptance] fallback_source='none' fallback_candidate_view_id='none' fallback_candidate_label='none' fallback_candidate_bounds='none' accepted=false accepted_reason='none' rejected_reason='fallback_source_not_allowed'
+[21:18:45] [TRACE][open_scenario] scenario='life_air_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=True focus_align_reason='' context_ok=False anchor_matched=False anchor_stable=True
+[21:18:47] [ENTRY][air][verdict_inputs] scenario_id='life_air_care_plugin' post_click_success_seen=true air_verify_success_seen=false air_verify_reject_seen=false anchor_fallback_accepted=false anchor_fallback_source='none' post_open_focus_view_id='back' post_open_focus_label='Navigate up  Navigate up' is_top_chrome_focus=false is_list_screen_focus=false final_allow_success=true final_fail_reason='none'
+[21:18:47] [ENTRY][air][preserve] keep success despite fallback_not_accepted
+[21:18:47] [ENTRY][air][verdict_priority] applied_rule='accept_air_internal_content_signal' previous_state='candidate_success' new_state='success_verified'
+[21:18:47] [ENTRY][air][verdict_inputs] scenario_id='life_air_care_plugin' post_click_success_seen=true air_verify_success_seen=false air_verify_reject_seen=false anchor_fallback_accepted=false anchor_fallback_source='none' post_open_focus_view_id='back' post_open_focus_label='Navigate up  Navigate up' is_top_chrome_focus=false is_list_screen_focus=false final_allow_success=true final_fail_reason='none'
+[21:18:47] [SCENARIO][entry_contract] success scenario='life_air_care_plugin' entry_type='card' reason='success_verified' detail='plugin_open_verified'
+[21:18:47] [TRACE][post_open_focus] scenario='life_air_care_plugin' view_id='back' label='Navigate up' speech='Navigate up' bounds='{'l': 72, 't': 118, 'r': 144, 'b': 310, 'left': 72, 'top': 118, 'right': 144, 'bottom': 310}' source='top_level' top_level=True
+[21:18:52] [TRACE][anchor_row] scenario='life_air_care_plugin' step=0 view_id='back' visible='Navigate up' speech='Navigate up' normalized_visible='navigate up' is_global_nav=False
+[21:18:53] [ROW] fingerprint='back|navigate up|navigate up|108,214' normalized_fingerprint='back|navigate up|navigate up' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=1 noise=false
+[21:18:53] [RESULT] skipped anchor rows count=1
+[21:18:53] [SAVE] writing sheets raw/filtered/summary/result
+[21:18:53] [SAVE] filtered rows=1, raw rows=1
+[21:18:53] [SAVE] saved excel: output/talkback_compare_20260414_211807.xlsx rows=1 with_images=False
+[21:18:53] [STEP] START tab='(?i).*life.*' step=1
+[21:18:58] [ROW] fingerprint='|air care|air care|552,214' normalized_fingerprint='|air care|air care' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=2 noise=false
+[21:18:58] [STEP] END tab='(?i).*life.*' step=1 elapsed=4.60s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776169135182, 'reqId': 'd001f8f3', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Air Care' speech='Air Care' crop='output\talkback_compare_20260414_211807\crops\i_._life._step_1_Air_Care.png' timing(move=0.556s ann=3.035s get_focus=1.012s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.615s total=5.219s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='3bf5f842'
+[21:18:58] [STOP][eval] step=1 scenario='life_air_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=2 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:1|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776169135182, 'reqid': 'd001f8f3', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[21:18:58] [STEP] START tab='(?i).*life.*' step=2
+[21:19:03] [ROW] fingerprint='more|more options|more options|972,214' normalized_fingerprint='more|more options|more options' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=3 noise=false
+[21:19:03] [STEP] END tab='(?i).*life.*' step=2 elapsed=4.53s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776169140340, 'reqId': '9a752e88', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='More options' speech='More options' crop='output\talkback_compare_20260414_211807\crops\i_._life._step_2_More_options.png' timing(move=0.480s ann=3.052s get_focus=0.997s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.580s total=5.110s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='6c77e487'
+[21:19:03] [STOP][eval] step=2 scenario='life_air_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=3 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:2|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776169140340, 'reqid': '9a752e88', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[21:19:03] [OVERLAY] candidate matched scenario='life_air_care_plugin' tab='(?i).*life.*' step=2 view_id='more' label='More options' reason='matched_scenario_policy'
+[21:19:14] [OVERLAY] post_click classification='overlay' scenario='life_air_care_plugin' tab='(?i).*life.*' entry_view_id='more' entry_label='More options' post_view_id='addToHomescreen' post_label='Add to Home screen'
+[21:19:27] [RESULT] skipped anchor rows count=1
+[21:19:27] [SAVE] writing sheets raw/filtered/summary/result
+[21:19:27] [SAVE] filtered rows=6, raw rows=6
+[21:19:27] [SAVE] saved excel: output/talkback_compare_20260414_211807.xlsx rows=6 with_images=False
+[21:19:31] [OVERLAY][repeat] same_focus_detected=true step=4 view_id='info' bounds='462,556,1053,706' normalized_visible_label='information' move_result=''
+[21:19:31] [OVERLAY][break] reason='same_overlay_fingerprint' step=4
+[21:19:31] [RESULT] skipped anchor rows count=1
+[21:19:31] [SAVE] writing sheets raw/filtered/summary/result
+[21:19:31] [SAVE] filtered rows=6, raw rows=6
+[21:19:31] [SAVE] saved excel: output/talkback_compare_20260414_211807.xlsx rows=6 with_images=False
+[21:19:35] [RESULT] skipped anchor rows count=1
+[21:19:35] [SAVE] writing sheets raw/filtered/summary/result
+[21:19:35] [SAVE] filtered rows=6, raw rows=6
+[21:19:35] [SAVE] saved excel: output/talkback_compare_20260414_211807.xlsx rows=6 with_images=False
+[21:19:37] [OVERLAY] realign status='realign_entry_reached' entry_reached=True steps_taken=2 match_by='view_id'
+[21:19:43] [CONTEXT] skipped reason='anchor_only_mode'
+[21:19:43] [CONTEXT] skipped reason='anchor_only_mode'
+[21:19:43] [CONTEXT] scenario='life_air_care_plugin' type='skipped' expected='' actual='' ok=True
+[21:19:43] [CONTEXT] verification passed scenario='life_air_care_plugin'
+[21:19:43] [ANCHOR][overlay_realign] success scenario='life_air_care_plugin' selected=True matched=True stable=True context_ok=True reason='selected_and_verified'
+[21:19:43] [ANCHOR][overlay_realign] success scenario='life_air_care_plugin' reason='overlay_realign_verified'
+[21:19:43] [STEP] START tab='(?i).*life.*' step=3
+[21:19:48] [ROW] fingerprint='|air care|air care|552,214' normalized_fingerprint='|air care|air care' duplicate=false recent_duplicate=true distance=2 recent_semantic_duplicate=true semantic_distance=2 semantic_window_unique=3 noise=false
+[21:19:48] [STEP] END tab='(?i).*life.*' step=3 elapsed=4.58s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776169185463, 'reqId': 'd56b0f35', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Air Care' speech='Air Care' crop='output\talkback_compare_20260414_211807\crops\i_._life._step_3_Air_Care.png' timing(move=0.508s ann=3.051s get_focus=1.021s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.628s total=5.210s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='1043a7ca'
+[21:19:48] [STOP][eval] step=3 scenario='life_air_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=true recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=true recent_duplicate_distance=2 recent_semantic_duplicate=true recent_semantic_duplicate_distance=2 recent_semantic_unique_count=3 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:3|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776169185463, 'reqid': 'd56b0f35', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[21:19:48] [RESULT] skipped anchor rows count=1
+[21:19:48] [SAVE] writing sheets raw/filtered/summary/result
+[21:19:48] [SAVE] filtered rows=6, raw rows=7
+[21:19:49] [SAVE] saved excel: output/talkback_compare_20260414_211807.xlsx rows=7 with_images=False
+[21:19:49] [STEP] START tab='(?i).*life.*' step=4
+[21:19:54] [ROW] fingerprint='more|more options|more options|972,214' normalized_fingerprint='more|more options|more options' duplicate=false recent_duplicate=true distance=2 recent_semantic_duplicate=true semantic_distance=2 semantic_window_unique=3 noise=false
+[21:19:54] [STEP] END tab='(?i).*life.*' step=4 elapsed=4.52s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776169190743, 'reqId': 'fcb574b7', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='More options' speech='More options' crop='output\talkback_compare_20260414_211807\crops\i_._life._step_4_More_options.png' timing(move=0.481s ann=3.017s get_focus=1.020s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.609s total=5.128s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='ffe86f94'
+[21:19:54] [STOP][eval] step=4 scenario='life_air_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=true recent_duplicate_distance=2 recent_semantic_duplicate=true recent_semantic_duplicate_distance=2 recent_semantic_unique_count=3 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:4|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776169190743, 'reqid': 'fcb574b7', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[21:19:54] [OVERLAY] skip already expanded entry fingerprint='(?i).*life.*|more|more options'
+[21:19:54] [STEP] START tab='(?i).*life.*' step=5
+[21:19:59] [ROW] fingerprint='|set geolocation to monitor outdoor air quality|set geolocation to monitor outdoor air quality|516,418' normalized_fingerprint='|set geolocation to monitor outdoor air quality|set geolocation to monitor outdoor air quality' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=4 noise=false
+[21:19:59] [STEP] END tab='(?i).*life.*' step=5 elapsed=4.52s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776169195913, 'reqId': '76941757', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Set geolocation to monitor outdoor air quality' speech='Set geolocation to monitor outdoor air quality' crop='output\talkback_compare_20260414_211807\crops\i_._life._step_5_Set_geolocation_to_monitor_outdoor_air_q.png' timing(move=0.511s ann=3.010s get_focus=1.001s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.626s total=5.149s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='19d8b3eb'
+[21:19:59] [STOP][eval] step=5 scenario='life_air_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=4 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:5|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776169195913, 'reqid': '76941757', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[21:19:59] [STOP][summary] scenario='life_air_care_plugin' stop_triggered=false stop_step=5 reason='safety_limit'
+[21:19:59] [PERF][scenario_summary] scenario=life_air_care_plugin tab=(?i).*life.* total_runtime=110.6 total_steps=9 main_step_count=6 overlay_step_count=3 overlay_count=1 avg_get_focus=0.882 avg_move=0.482 avg_crop=0.618 avg_step_total=5.106 step_total_sample_count=6 avg_get_focus_main=1.01 avg_get_focus_overlay=0.626 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=9 get_focus_strong_skip_rate=100.0 step_dump_used_count=0 save_excel_count=5 realign_attempt_count=1 realign_success_count=1 realign_success_rate=100.0
+[21:19:59] [RECOVER] start
+[21:19:59] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:00] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:00] [RECOVER][fallback] entering_select_fallback
+[21:20:02] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:20:02] [RECOVER] failed reason='life_root_not_reached'
+[21:20:02] [MAIN] recovery failed but continuing scenario_id='life_home_care_plugin' tab='(?i).*life.*'
+[21:20:02] [SCENARIO][stabilization] scenario='life_home_care_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[21:20:03] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:04] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:04] [PLUGIN_START][life_list_check] ok=false reason='life_root_not_stable'
+[21:20:04] [PLUGIN_START][recover_before_entry] triggered=true
+[21:20:04] [RECOVER] start
+[21:20:04] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:05] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:05] [RECOVER][fallback] entering_select_fallback
+[21:20:07] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:20:07] [RECOVER] failed reason='life_root_not_reached'
+[21:20:07] [PLUGIN_START][recover_before_entry] retry=1/2 reason='recover_to_start_state_failed'
+[21:20:07] [RECOVER] start
+[21:20:08] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:09] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:09] [RECOVER][fallback] entering_select_fallback
+[21:20:11] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:20:11] [RECOVER] failed reason='life_root_not_reached'
+[21:20:11] [PLUGIN_START][recover_before_entry] success=false
+[21:20:11] [PERF][scenario_summary] scenario=life_home_care_plugin tab=(?i).*life.* total_runtime=8.9 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[21:20:11] [RESULT] skipped anchor rows count=1
+[21:20:11] [SAVE] writing sheets raw/filtered/summary/result
+[21:20:11] [SAVE] filtered rows=8, raw rows=10
+[21:20:11] [SAVE] saved excel: output/talkback_compare_20260414_211807.xlsx rows=10 with_images=False
+[21:20:11] [RECOVER] start
+[21:20:12] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:13] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:13] [RECOVER][fallback] entering_select_fallback
+[21:20:15] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:20:15] [RECOVER] failed reason='life_root_not_reached'
+[21:20:15] [MAIN] recovery failed but continuing scenario_id='life_energy_plugin' tab='(?i).*life.*'
+[21:20:15] [SCENARIO][stabilization] scenario='life_energy_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[21:20:16] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:16] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:16] [PLUGIN_START][life_list_check] ok=false reason='life_root_not_stable'
+[21:20:16] [PLUGIN_START][recover_before_entry] triggered=true
+[21:20:16] [RECOVER] start
+[21:20:17] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:18] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:18] [RECOVER][fallback] entering_select_fallback
+[21:20:20] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:20:20] [RECOVER] failed reason='life_root_not_reached'
+[21:20:20] [PLUGIN_START][recover_before_entry] retry=1/2 reason='recover_to_start_state_failed'
+[21:20:20] [RECOVER] start
+[21:20:21] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:21] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:22] [RECOVER][fallback] entering_select_fallback
+[21:20:24] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:20:24] [RECOVER] failed reason='life_root_not_reached'
+[21:20:24] [PLUGIN_START][recover_before_entry] success=false
+[21:20:24] [PERF][scenario_summary] scenario=life_energy_plugin tab=(?i).*life.* total_runtime=8.9 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[21:20:24] [RESULT] skipped anchor rows count=1
+[21:20:24] [SAVE] writing sheets raw/filtered/summary/result
+[21:20:24] [SAVE] filtered rows=9, raw rows=11
+[21:20:24] [SAVE] saved excel: output/talkback_compare_20260414_211807.xlsx rows=11 with_images=False
+[21:20:24] [MAIN] skip disabled scenario_id='devices_main' tab='(?i).*devices.*'
+[21:20:24] [MAIN] skip disabled scenario_id='life_main' tab='(?i).*life.*'
+[21:20:24] [MAIN] skip disabled scenario_id='routines_main' tab='(?i).*routines.*'
+[21:20:24] [MAIN] skip disabled scenario_id='menu_main' tab='(?i).*(menu|more).*'
+[21:20:24] [MAIN] skip disabled scenario_id='settings_entry_example' tab='(?i).*menu.*'
+[21:20:24] [RECOVER] start
+[21:20:25] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:25] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:26] [RECOVER][fallback] entering_select_fallback
+[21:20:28] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:20:28] [RECOVER] failed reason='life_root_not_reached'
+[21:20:28] [MAIN] recovery failed but continuing scenario_id='life_pet_care_plugin' tab='(?i).*life.*'
+[21:20:28] [SCENARIO][stabilization] scenario='life_pet_care_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[21:20:29] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:29] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:29] [PLUGIN_START][life_list_check] ok=false reason='life_root_not_stable'
+[21:20:29] [PLUGIN_START][recover_before_entry] triggered=true
+[21:20:29] [RECOVER] start
+[21:20:30] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:30] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:31] [RECOVER][fallback] entering_select_fallback
+[21:20:33] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:20:33] [RECOVER] failed reason='life_root_not_reached'
+[21:20:33] [PLUGIN_START][recover_before_entry] retry=1/2 reason='recover_to_start_state_failed'
+[21:20:33] [RECOVER] start
+[21:20:34] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:34] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:35] [RECOVER][fallback] entering_select_fallback
+[21:20:37] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:20:37] [RECOVER] failed reason='life_root_not_reached'
+[21:20:37] [PLUGIN_START][recover_before_entry] success=false
+[21:20:37] [PERF][scenario_summary] scenario=life_pet_care_plugin tab=(?i).*life.* total_runtime=8.5 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[21:20:37] [RESULT] skipped anchor rows count=1
+[21:20:37] [SAVE] writing sheets raw/filtered/summary/result
+[21:20:37] [SAVE] filtered rows=10, raw rows=12
+[21:20:37] [SAVE] saved excel: output/talkback_compare_20260414_211807.xlsx rows=12 with_images=False
+[21:20:37] [RECOVER] start
+[21:20:38] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:38] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:39] [RECOVER][fallback] entering_select_fallback
+[21:20:41] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:20:41] [RECOVER] failed reason='life_root_not_reached'
+[21:20:41] [MAIN] recovery failed but continuing scenario_id='life_family_care_plugin' tab='(?i).*life.*'
+[21:20:41] [SCENARIO][stabilization] scenario='life_family_care_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[21:20:41] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:42] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:42] [PLUGIN_START][life_list_check] ok=false reason='life_root_not_stable'
+[21:20:42] [PLUGIN_START][recover_before_entry] triggered=true
+[21:20:42] [RECOVER] start
+[21:20:43] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:43] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:44] [RECOVER][fallback] entering_select_fallback
+[21:20:46] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:20:46] [RECOVER] failed reason='life_root_not_reached'
+[21:20:46] [PLUGIN_START][recover_before_entry] retry=1/2 reason='recover_to_start_state_failed'
+[21:20:46] [RECOVER] start
+[21:20:46] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:47] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:48] [RECOVER][fallback] entering_select_fallback
+[21:20:50] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:20:50] [RECOVER] failed reason='life_root_not_reached'
+[21:20:50] [PLUGIN_START][recover_before_entry] success=false
+[21:20:50] [PERF][scenario_summary] scenario=life_family_care_plugin tab=(?i).*life.* total_runtime=9.0 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[21:20:50] [RESULT] skipped anchor rows count=1
+[21:20:50] [SAVE] writing sheets raw/filtered/summary/result
+[21:20:50] [SAVE] filtered rows=11, raw rows=13
+[21:20:50] [SAVE] saved excel: output/talkback_compare_20260414_211807.xlsx rows=13 with_images=False
+[21:20:50] [RECOVER] start
+[21:20:50] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:51] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:51] [RECOVER][fallback] entering_select_fallback
+[21:20:54] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:20:54] [RECOVER] failed reason='life_root_not_reached'
+[21:20:54] [MAIN] recovery failed but continuing scenario_id='life_plant_care_plugin' tab='(?i).*life.*'
+[21:20:54] [SCENARIO][stabilization] scenario='life_plant_care_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[21:20:54] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:55] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:55] [PLUGIN_START][life_list_check] ok=false reason='life_root_not_stable'
+[21:20:55] [PLUGIN_START][recover_before_entry] triggered=true
+[21:20:55] [RECOVER] start
+[21:20:55] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:56] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:20:57] [RECOVER][fallback] entering_select_fallback
+[21:20:59] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:20:59] [RECOVER] failed reason='life_root_not_reached'
+[21:20:59] [PLUGIN_START][recover_before_entry] retry=1/2 reason='recover_to_start_state_failed'
+[21:20:59] [RECOVER] start
+[21:20:59] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:00] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:00] [RECOVER][fallback] entering_select_fallback
+[21:21:03] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:21:03] [RECOVER] failed reason='life_root_not_reached'
+[21:21:03] [PLUGIN_START][recover_before_entry] success=false
+[21:21:03] [PERF][scenario_summary] scenario=life_plant_care_plugin tab=(?i).*life.* total_runtime=9.2 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[21:21:03] [RESULT] skipped anchor rows count=1
+[21:21:03] [SAVE] writing sheets raw/filtered/summary/result
+[21:21:03] [SAVE] filtered rows=12, raw rows=14
+[21:21:03] [SAVE] saved excel: output/talkback_compare_20260414_211807.xlsx rows=14 with_images=False
+[21:21:03] [RECOVER] start
+[21:21:03] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:04] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:05] [RECOVER][fallback] entering_select_fallback
+[21:21:06] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:21:06] [RECOVER] failed reason='life_root_not_reached'
+[21:21:06] [MAIN] recovery failed but continuing scenario_id='life_clothing_care_plugin' tab='(?i).*life.*'
+[21:21:06] [SCENARIO][stabilization] scenario='life_clothing_care_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[21:21:08] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:08] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:08] [PLUGIN_START][life_list_check] ok=false reason='life_root_not_stable'
+[21:21:08] [PLUGIN_START][recover_before_entry] triggered=true
+[21:21:08] [RECOVER] start
+[21:21:09] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:09] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:10] [RECOVER][fallback] entering_select_fallback
+[21:21:12] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:21:12] [RECOVER] failed reason='life_root_not_reached'
+[21:21:12] [PLUGIN_START][recover_before_entry] retry=1/2 reason='recover_to_start_state_failed'
+[21:21:12] [RECOVER] start
+[21:21:13] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:13] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:14] [RECOVER][fallback] entering_select_fallback
+[21:21:16] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:21:16] [RECOVER] failed reason='life_root_not_reached'
+[21:21:16] [PLUGIN_START][recover_before_entry] success=false
+[21:21:16] [PERF][scenario_summary] scenario=life_clothing_care_plugin tab=(?i).*life.* total_runtime=9.2 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[21:21:16] [RESULT] skipped anchor rows count=1
+[21:21:16] [SAVE] writing sheets raw/filtered/summary/result
+[21:21:16] [SAVE] filtered rows=13, raw rows=15
+[21:21:16] [SAVE] saved excel: output/talkback_compare_20260414_211807.xlsx rows=15 with_images=False
+[21:21:16] [RECOVER] start
+[21:21:16] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:17] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:18] [RECOVER][fallback] entering_select_fallback
+[21:21:20] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:21:20] [RECOVER] failed reason='life_root_not_reached'
+[21:21:20] [MAIN] recovery failed but continuing scenario_id='life_find_plugin' tab='(?i).*life.*'
+[21:21:20] [SCENARIO][stabilization] scenario='life_find_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[21:21:20] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:21] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:21] [PLUGIN_START][life_list_check] ok=false reason='life_root_not_stable'
+[21:21:21] [PLUGIN_START][recover_before_entry] triggered=true
+[21:21:21] [RECOVER] start
+[21:21:21] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:23] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:23] [RECOVER][fallback] entering_select_fallback
+[21:21:25] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:21:25] [RECOVER] failed reason='life_root_not_reached'
+[21:21:25] [PLUGIN_START][recover_before_entry] retry=1/2 reason='recover_to_start_state_failed'
+[21:21:25] [RECOVER] start
+[21:21:25] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:26] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:26] [RECOVER][fallback] entering_select_fallback
+[21:21:29] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:21:29] [RECOVER] failed reason='life_root_not_reached'
+[21:21:29] [PLUGIN_START][recover_before_entry] success=false
+[21:21:29] [PERF][scenario_summary] scenario=life_find_plugin tab=(?i).*life.* total_runtime=9.0 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[21:21:29] [RESULT] skipped anchor rows count=1
+[21:21:29] [SAVE] writing sheets raw/filtered/summary/result
+[21:21:29] [SAVE] filtered rows=14, raw rows=16
+[21:21:29] [SAVE] saved excel: output/talkback_compare_20260414_211807.xlsx rows=16 with_images=False
+[21:21:29] [RECOVER] start
+[21:21:29] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:30] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:30] [RECOVER][fallback] entering_select_fallback
+[21:21:33] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:21:33] [RECOVER] failed reason='life_root_not_reached'
+[21:21:33] [MAIN] recovery failed but continuing scenario_id='life_video_plugin' tab='(?i).*life.*'
+[21:21:33] [SCENARIO][stabilization] scenario='life_video_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[21:21:33] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:34] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:34] [PLUGIN_START][life_list_check] ok=false reason='life_root_not_stable'
+[21:21:34] [PLUGIN_START][recover_before_entry] triggered=true
+[21:21:34] [RECOVER] start
+[21:21:34] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:35] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:36] [RECOVER][fallback] entering_select_fallback
+[21:21:38] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:21:38] [RECOVER] failed reason='life_root_not_reached'
+[21:21:38] [PLUGIN_START][recover_before_entry] retry=1/2 reason='recover_to_start_state_failed'
+[21:21:38] [RECOVER] start
+[21:21:38] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:39] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:40] [RECOVER][fallback] entering_select_fallback
+[21:21:41] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:21:41] [RECOVER] failed reason='life_root_not_reached'
+[21:21:41] [PLUGIN_START][recover_before_entry] success=false
+[21:21:41] [PERF][scenario_summary] scenario=life_video_plugin tab=(?i).*life.* total_runtime=8.5 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[21:21:41] [RESULT] skipped anchor rows count=1
+[21:21:41] [SAVE] writing sheets raw/filtered/summary/result
+[21:21:41] [SAVE] filtered rows=15, raw rows=17
+[21:21:42] [SAVE] saved excel: output/talkback_compare_20260414_211807.xlsx rows=17 with_images=False
+[21:21:42] [RECOVER] start
+[21:21:43] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:43] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:44] [RECOVER][fallback] entering_select_fallback
+[21:21:46] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:21:46] [RECOVER] failed reason='life_root_not_reached'
+[21:21:46] [MAIN] recovery failed but continuing scenario_id='life_home_monitor_plugin' tab='(?i).*life.*'
+[21:21:46] [SCENARIO][stabilization] scenario='life_home_monitor_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[21:21:46] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:47] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:47] [PLUGIN_START][life_list_check] ok=false reason='life_root_not_stable'
+[21:21:47] [PLUGIN_START][recover_before_entry] triggered=true
+[21:21:47] [RECOVER] start
+[21:21:48] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:48] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:49] [RECOVER][fallback] entering_select_fallback
+[21:21:51] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:21:51] [RECOVER] failed reason='life_root_not_reached'
+[21:21:51] [PLUGIN_START][recover_before_entry] retry=1/2 reason='recover_to_start_state_failed'
+[21:21:51] [RECOVER] start
+[21:21:51] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:52] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:53] [RECOVER][fallback] entering_select_fallback
+[21:21:55] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:21:55] [RECOVER] failed reason='life_root_not_reached'
+[21:21:55] [PLUGIN_START][recover_before_entry] success=false
+[21:21:55] [PERF][scenario_summary] scenario=life_home_monitor_plugin tab=(?i).*life.* total_runtime=9.1 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[21:21:55] [RESULT] skipped anchor rows count=1
+[21:21:55] [SAVE] writing sheets raw/filtered/summary/result
+[21:21:55] [SAVE] filtered rows=16, raw rows=18
+[21:21:55] [SAVE] saved excel: output/talkback_compare_20260414_211807.xlsx rows=18 with_images=False
+[21:21:55] [RECOVER] start
+[21:21:55] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:56] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:21:57] [RECOVER][fallback] entering_select_fallback
+[21:21:59] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:21:59] [RECOVER] failed reason='life_root_not_reached'
+[21:21:59] [MAIN] recovery failed but continuing scenario_id='life_music_sync_plugin' tab='(?i).*life.*'
+[21:21:59] [SCENARIO][stabilization] scenario='life_music_sync_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[21:21:59] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:22:00] [SCENARIO][pre_nav][stabilization] phase='plugin_start' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:22:00] [PLUGIN_START][life_list_check] ok=false reason='life_root_not_stable'
+[21:22:00] [PLUGIN_START][recover_before_entry] triggered=true
+[21:22:00] [RECOVER] start
+[21:22:00] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:22:02] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:22:02] [RECOVER][fallback] entering_select_fallback
+[21:22:04] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:22:04] [RECOVER] failed reason='life_root_not_reached'
+[21:22:04] [PLUGIN_START][recover_before_entry] retry=1/2 reason='recover_to_start_state_failed'
+[21:22:04] [RECOVER] start
+[21:22:04] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=1/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:22:05] [SCENARIO][pre_nav][stabilization] phase='recover_initial_verify' attempt=2/2 life_selected=false app_bar_hits=1 visible_card_hits=0 life_root_signature_present=true navigate_up_hits=0 family_care_signature_seen=false final_score=1 ok=false pass_reason='' fail_reason='life_root_not_stable'
+[21:22:05] [RECOVER][fallback] entering_select_fallback
+[21:22:08] [RECOVER][fallback] resource_select_success=false label_select_success=false
+[21:22:08] [RECOVER] failed reason='life_root_not_reached'
+[21:22:08] [PLUGIN_START][recover_before_entry] success=false
+[21:22:08] [PERF][scenario_summary] scenario=life_music_sync_plugin tab=(?i).*life.* total_runtime=9.1 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[21:22:08] [RESULT] skipped anchor rows count=1
+[21:22:08] [SAVE] writing sheets raw/filtered/summary/result
+[21:22:08] [SAVE] filtered rows=17, raw rows=19
+[21:22:08] [SAVE] saved excel: output/talkback_compare_20260414_211807.xlsx rows=19 with_images=False
+[21:22:08] [RESULT] skipped anchor rows count=1
+[21:22:08] [SAVE] writing sheets raw/filtered/summary/result
+[21:22:08] [SAVE] filtered rows=17, raw rows=19
+[21:22:08] [SAVE] saved excel: output/talkback_compare_20260414_211807.xlsx rows=19 with_images=True
+[21:22:08] [MAIN] final save complete
+[21:22:08] [PERF][run_summary] total_runtime=240.1 total_scenarios=11 total_steps=19 total_overlay_count=1 avg_get_focus=0.418 avg_move=0.228 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_rate=47.4 realign_success_rate=100.0 save_excel_count=16

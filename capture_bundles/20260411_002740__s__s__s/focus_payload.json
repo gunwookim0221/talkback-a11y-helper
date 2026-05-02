@@ -1,0 +1,69 @@
+{
+  "timestamp": 1775834863917,
+  "schemaVersion": "1.2.0",
+  "snapshotBuilderVersion": "1.2.0",
+  "packageName": "com.samsung.android.oneconnect",
+  "className": "android.widget.LinearLayout",
+  "viewIdResourceName": "com.samsung.android.oneconnect:id/llCard",
+  "text": "Plant Care",
+  "contentDescription": null,
+  "mergedLabel": "Plant Care",
+  "talkbackLabel": "Plant Care",
+  "clickable": false,
+  "focusable": false,
+  "focused": false,
+  "accessibilityFocused": true,
+  "visibleToUser": true,
+  "isVisibleToUser": true,
+  "selected": false,
+  "checkable": false,
+  "checked": false,
+  "enabled": true,
+  "boundsInScreen": {
+    "l": 42,
+    "t": 310,
+    "r": 1038,
+    "b": 833,
+    "left": 42,
+    "top": 310,
+    "right": 1038,
+    "bottom": 833
+  },
+  "children": [
+    {
+      "text": "Labs",
+      "contentDescription": "Labs",
+      "className": "android.widget.TextView",
+      "viewIdResourceName": "com.samsung.android.oneconnect:id/cardBadge",
+      "clickable": false,
+      "focusable": false,
+      "accessibilityFocused": false,
+      "visibleToUser": false,
+      "boundsInScreen": {
+        "l": 341,
+        "t": 310,
+        "r": 450,
+        "b": 203
+      },
+      "children": []
+    },
+    {
+      "text": "Caring for your plants is now easier and more enjoyable",
+      "contentDescription": "Caring for your plants is now easier and more enjoyable",
+      "className": "android.widget.TextView",
+      "viewIdResourceName": "com.samsung.android.oneconnect:id/tvHeaderTitle",
+      "clickable": false,
+      "focusable": false,
+      "accessibilityFocused": false,
+      "visibleToUser": true,
+      "boundsInScreen": {
+        "l": 84,
+        "t": 310,
+        "r": 996,
+        "b": 425
+      },
+      "children": []
+    }
+  ],
+  "reqId": "58e2c9be"
+}

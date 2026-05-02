@@ -1,0 +1,76 @@
+[07:54:57] [SAVE][temp] override tmp='D:\Python test\talkback-a11y-helper\output\.tmp' temp='D:\Python test\talkback-a11y-helper\output\.tmp' applied=true
+[07:54:57] [MAIN] script start (version=1.7.99, log_level=DEBUG)
+[07:54:59] [PREFLIGHT] talkback status='enabled'
+[07:54:59] [MAIN] output file: output/talkback_compare_20260420_075457.xlsx
+[07:54:59] [MAIN] image dir base: output\talkback_compare_20260420_075457
+[07:54:59] [CONFIG] runtime config loaded path='config\runtime_config.json'
+[07:54:59] [GLOBAL_NAV][guard] forcing stabilization_mode='tab_context' scenario='global_nav_main' requested='anchor_then_context'
+[07:54:59] [CONFIG] scenario resolved scenario='global_nav_main' group='main_tabs' max_steps=10 enabled=False
+[07:54:59] [CONFIG] applied shared_navigation='default_global_nav'
+[07:54:59] [CONFIG] scenario enabled scenario='global_nav_main' source='runtime' enabled=False base_enabled=False
+[07:54:59] [CONFIG] scenario resolved scenario='home_main' group='main_tabs' max_steps=10 enabled=False
+[07:54:59] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[07:54:59] [CONFIG] scenario enabled scenario='home_main' source='runtime' enabled=False base_enabled=False
+[07:54:59] [CONFIG] scenario resolved scenario='life_food_plugin' group='plugin_screen' max_steps=50 enabled=False
+[07:54:59] [CONFIG] applied pre_navigation_ref='enter_food_plugin'
+[07:54:59] [CONFIG] scenario enabled scenario='life_food_plugin' source='runtime' enabled=False base_enabled=False
+[07:54:59] [CONFIG] scenario resolved scenario='life_air_care_plugin' group='-' max_steps=50 enabled=False
+[07:54:59] [CONFIG] scenario enabled scenario='life_air_care_plugin' source='runtime' enabled=False base_enabled=False
+[07:54:59] [CONFIG] scenario resolved scenario='life_home_care_plugin' group='-' max_steps=50 enabled=False
+[07:54:59] [CONFIG] scenario enabled scenario='life_home_care_plugin' source='runtime' enabled=False base_enabled=False
+[07:54:59] [CONFIG] scenario resolved scenario='life_energy_plugin' group='-' max_steps=50 enabled=False
+[07:54:59] [CONFIG] scenario enabled scenario='life_energy_plugin' source='runtime' enabled=False base_enabled=False
+[07:54:59] [CONFIG] scenario resolved scenario='devices_main' group='main_tabs' max_steps=10 enabled=False
+[07:54:59] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[07:54:59] [CONFIG] applied anchor_ref='home_tab_anchor'
+[07:54:59] [CONFIG] scenario enabled scenario='devices_main' source='runtime' enabled=False base_enabled=False
+[07:54:59] [CONFIG] scenario resolved scenario='life_main' group='main_tabs' max_steps=50 enabled=False
+[07:54:59] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[07:54:59] [CONFIG] scenario enabled scenario='life_main' source='runtime' enabled=False base_enabled=False
+[07:54:59] [CONFIG] scenario resolved scenario='routines_main' group='main_tabs' max_steps=10 enabled=False
+[07:54:59] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[07:54:59] [CONFIG] scenario enabled scenario='routines_main' source='runtime' enabled=False base_enabled=False
+[07:54:59] [CONFIG] scenario resolved scenario='menu_main' group='main_tabs' max_steps=50 enabled=False
+[07:54:59] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[07:54:59] [CONFIG] scenario enabled scenario='menu_main' source='runtime' enabled=False base_enabled=False
+[07:54:59] [CONFIG] scenario resolved scenario='settings_entry_example' group='plugin_screen' max_steps=50 enabled=False
+[07:54:59] [CONFIG] applied anchor_ref='settings_button_anchor'
+[07:54:59] [CONFIG] applied pre_navigation_ref='enter_settings'
+[07:54:59] [CONFIG] scenario enabled scenario='settings_entry_example' source='runtime' enabled=False base_enabled=False
+[07:54:59] [CONFIG] scenario resolved scenario='life_pet_care_plugin' group='-' max_steps=50 enabled=False
+[07:54:59] [CONFIG] scenario enabled scenario='life_pet_care_plugin' source='runtime' enabled=False base_enabled=False
+[07:54:59] [CONFIG] scenario resolved scenario='life_family_care_plugin' group='-' max_steps=50 enabled=True
+[07:54:59] [CONFIG] scenario enabled scenario='life_family_care_plugin' source='runtime' enabled=True base_enabled=False
+[07:54:59] [CONFIG] scenario resolved scenario='life_plant_care_plugin' group='-' max_steps=50 enabled=False
+[07:54:59] [CONFIG] scenario enabled scenario='life_plant_care_plugin' source='runtime' enabled=False base_enabled=False
+[07:54:59] [CONFIG] scenario resolved scenario='life_clothing_care_plugin' group='-' max_steps=50 enabled=False
+[07:54:59] [CONFIG] scenario enabled scenario='life_clothing_care_plugin' source='runtime' enabled=False base_enabled=False
+[07:54:59] [CONFIG] scenario resolved scenario='life_find_plugin' group='-' max_steps=50 enabled=False
+[07:54:59] [CONFIG] scenario enabled scenario='life_find_plugin' source='runtime' enabled=False base_enabled=False
+[07:54:59] [CONFIG] scenario resolved scenario='life_video_plugin' group='-' max_steps=50 enabled=False
+[07:54:59] [CONFIG] scenario enabled scenario='life_video_plugin' source='runtime' enabled=False base_enabled=False
+[07:54:59] [CONFIG] scenario resolved scenario='life_home_monitor_plugin' group='-' max_steps=50 enabled=False
+[07:54:59] [CONFIG] scenario enabled scenario='life_home_monitor_plugin' source='runtime' enabled=False base_enabled=False
+[07:54:59] [CONFIG] scenario resolved scenario='life_music_sync_plugin' group='-' max_steps=10 enabled=False
+[07:54:59] [CONFIG] scenario enabled scenario='life_music_sync_plugin' source='runtime' enabled=False base_enabled=False
+[07:54:59] [MAIN] skip disabled scenario_id='global_nav_main' tab='(?i).*(home|devices|life|routines|menu).*'
+[07:54:59] [MAIN] skip disabled scenario_id='home_main' tab='(?i).*home.*'
+[07:54:59] [MAIN] skip disabled scenario_id='life_food_plugin' tab='(?i).*life.*'
+[07:54:59] [MAIN] skip disabled scenario_id='life_air_care_plugin' tab='(?i).*life.*'
+[07:54:59] [MAIN] skip disabled scenario_id='life_home_care_plugin' tab='(?i).*life.*'
+[07:54:59] [MAIN] skip disabled scenario_id='life_energy_plugin' tab='(?i).*life.*'
+[07:54:59] [MAIN] skip disabled scenario_id='devices_main' tab='(?i).*devices.*'
+[07:54:59] [MAIN] skip disabled scenario_id='life_main' tab='(?i).*life.*'
+[07:54:59] [MAIN] skip disabled scenario_id='routines_main' tab='(?i).*routines.*'
+[07:54:59] [MAIN] skip disabled scenario_id='menu_main' tab='(?i).*(menu|more).*'
+[07:54:59] [MAIN] skip disabled scenario_id='settings_entry_example' tab='(?i).*menu.*'
+[07:54:59] [MAIN] skip disabled scenario_id='life_pet_care_plugin' tab='(?i).*life.*'
+[07:54:59] [SCENARIO][stabilization] scenario='life_family_care_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[07:55:05] [LIFE_RESET] verify phase='plugin_start_initial' attempt=1/2 global_nav_visible=false life_tab_selected=false plugin_card_list_visible=false life_list_ready=false
+[07:55:12] [LIFE_RESET] verify phase='plugin_start_initial' attempt=2/2 global_nav_visible=false life_tab_selected=false plugin_card_list_visible=false life_list_ready=false
+[07:55:12] [PLUGIN_START][recover_before_entry] triggered=true mode='life_reset'
+[07:55:12] [LIFE_RESET] start
+[07:55:19] [LIFE_RESET] app_inside=true
+[07:55:20] [SAVE] skip: no rows
+[07:55:20] [MAIN] final save complete
+[07:55:20] [PERF][run_summary] total_runtime=20.5 total_scenarios=1 total_steps=0 total_overlay_count=0 avg_get_focus=0.0 avg_move=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_rate=0.0 realign_success_rate=0.0 save_excel_count=1

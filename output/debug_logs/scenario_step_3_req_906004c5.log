@@ -1,0 +1,44 @@
+[ROW_CONTEXT]
+scenario=
+tab=(?i).*life.*
+step=3
+req_id=906004c5
+visible=Start
+speech=Start
+final_result=FAIL
+failure_reason=move_failed
+
+review_note=이동/발화 결과 재검토 필요
+noise=
+move_result={'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775962346671, 'reqid': '00e9bb37', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}
+debug_source_row_found=false
+
+[ANN_TRACE]
+[ANN][baseline] req_id=906004c5 text='' source='source_row_missing' empty_reason='no_prev_step_row'
+[ANN][poll] req_id=906004c5 idx=0 raw='Start' normalized='start' changed=true differs_from_baseline=true source='row_snapshot' observed_at='' count=0
+[ANN][trim] req_id=906004c5 considered=false applied=false before='Start' after='Start' reject_reason='' reason='trim_stage_not_reached'
+[ANN][stable] req_id=906004c5 selected='Start' reason='result_row_snapshot' source='result_row'
+[ANN][select] req_id=906004c5 used_snapshot=true snapshot_reason='no_better_recent_poll_candidate' previous='' current='Start' final='Start'
+
+[STEP_TRACE]
+[11:52:31] [STEP] END tab='(?i).*life.*' step=3 elapsed=5.13s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775962346671, 'reqId': '00e9bb37', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Start' speech='Start' crop='output\talkback_compare_20260412_115120\crops\i_._life._step_3_Start.png' timing(move=1.099s ann=3.026s get_focus=1.001s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.488s total=5.614s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='906004c5'
+[STEP][summary] req_id=906004c5 tab='(?i).*life.*' step=3 move_result='{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775962346671, 'reqid': '00e9bb37', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}' terminal=false no_progress=false
+
+[SCROLL_TRACE]
+[SCROLL] req_id=906004c5 scroll_related_log_found=false move_result='{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775962346671, 'reqid': '00e9bb37', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}' smart_result='' detail='' inferred_scroll=false inference_reason='no_scroll_signal_found'
+
+[FOCUS_TRACE]
+[11:52:31] [STEP] END tab='(?i).*life.*' step=3 elapsed=5.13s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775962346671, 'reqId': '00e9bb37', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Start' speech='Start' crop='output\talkback_compare_20260412_115120\crops\i_._life._step_3_Start.png' timing(move=1.099s ann=3.026s get_focus=1.001s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.488s total=5.614s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='906004c5'
+[FOCUS] req_id=906004c5 get_focus_req_id='' response_success=false payload_source='' payload_sufficient=false fallback_used=false fallback_found=false dump_attempted=false final_payload_source='' focus_reason='' missing_reason=''
+
+[DECISION_TRACE]
+baseline_empty=true
+first_candidate_contaminated=true
+trim_considered=false
+trim_applied=false
+stable_reason='result_row_snapshot'
+used_snapshot=true
+snapshot_reason='no_better_recent_poll_candidate'
+scroll_evidence='weak'
+focus_evidence='strong'
+notes='final speech appears to come from snapshot candidate path'

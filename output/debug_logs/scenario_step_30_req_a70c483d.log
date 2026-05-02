@@ -1,0 +1,44 @@
+[ROW_CONTEXT]
+scenario=
+tab=(?i).*life.*
+step=30
+req_id=a70c483d
+visible=Activity
+speech=Activity
+final_result=FAIL
+failure_reason=move_failed
+
+review_note=이동/발화 결과 재검토 필요
+noise=
+move_result=failed
+debug_source_row_found=false
+
+[ANN_TRACE]
+[ANN][baseline] req_id=a70c483d text='' source='source_row_missing' empty_reason='no_prev_step_row'
+[ANN][poll] req_id=a70c483d idx=0 raw='Activity' normalized='activity' changed=true differs_from_baseline=true source='row_snapshot' observed_at='' count=0
+[ANN][trim] req_id=a70c483d considered=false applied=false before='Activity' after='Activity' reject_reason='' reason='trim_stage_not_reached'
+[ANN][stable] req_id=a70c483d selected='Activity' reason='result_row_snapshot' source='result_row'
+[ANN][select] req_id=a70c483d used_snapshot=true snapshot_reason='no_better_recent_poll_candidate' previous='' current='Activity' final='Activity'
+
+[STEP_TRACE]
+[22:55:56] [STEP] END tab='(?i).*life.*' step=30 elapsed=5.58s move_result='' visible='Activity' speech='Activity' crop='output\talkback_compare_20260422_225217\crops\i_._life._step_30_Want_better_insight_into_your_daily_life.png' timing(move=0.419s ann=4.044s get_focus=1.119s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.537s total=6.119s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='a70c483d'
+[STEP][summary] req_id=a70c483d tab='(?i).*life.*' step=30 move_result='failed' terminal=false no_progress=false
+
+[SCROLL_TRACE]
+[SCROLL] req_id=a70c483d scroll_related_log_found=false move_result='failed' smart_result='' detail='' inferred_scroll=false inference_reason='no_scroll_signal_found'
+
+[FOCUS_TRACE]
+[22:55:56] [STEP] END tab='(?i).*life.*' step=30 elapsed=5.58s move_result='' visible='Activity' speech='Activity' crop='output\talkback_compare_20260422_225217\crops\i_._life._step_30_Want_better_insight_into_your_daily_life.png' timing(move=0.419s ann=4.044s get_focus=1.119s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.537s total=6.119s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='a70c483d'
+[FOCUS] req_id=a70c483d get_focus_req_id='' response_success=false payload_source='' payload_sufficient=false fallback_used=false fallback_found=false dump_attempted=false final_payload_source='' focus_reason='' missing_reason=''
+
+[DECISION_TRACE]
+baseline_empty=true
+first_candidate_contaminated=true
+trim_considered=false
+trim_applied=false
+stable_reason='result_row_snapshot'
+used_snapshot=true
+snapshot_reason='no_better_recent_poll_candidate'
+scroll_evidence='weak'
+focus_evidence='strong'
+notes='final speech appears to come from snapshot candidate path'

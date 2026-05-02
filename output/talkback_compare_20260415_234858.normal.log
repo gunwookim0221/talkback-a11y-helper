@@ -1,0 +1,913 @@
+[23:48:58] [SAVE][temp] override tmp='D:\Python test\talkback-a11y-helper\output\.tmp' temp='D:\Python test\talkback-a11y-helper\output\.tmp' applied=true
+[23:48:58] [MAIN] script start (version=1.7.82, log_level=NORMAL)
+[23:49:00] [PREFLIGHT] talkback status='enabled'
+[23:49:00] [MAIN] output file: output/talkback_compare_20260415_234858.xlsx
+[23:49:00] [MAIN] image dir base: output\talkback_compare_20260415_234858
+[23:49:00] [CONFIG] runtime config loaded path='config\runtime_config.json'
+[23:49:00] [GLOBAL_NAV][guard] forcing stabilization_mode='tab_context' scenario='global_nav_main' requested='anchor_then_context'
+[23:49:00] [CONFIG] scenario resolved scenario='global_nav_main' group='main_tabs' max_steps=10 enabled=False
+[23:49:00] [CONFIG] applied shared_navigation='default_global_nav'
+[23:49:00] [CONFIG] scenario enabled scenario='global_nav_main' source='runtime' enabled=False base_enabled=False
+[23:49:00] [CONFIG] scenario resolved scenario='home_main' group='main_tabs' max_steps=5 enabled=False
+[23:49:00] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[23:49:00] [CONFIG] scenario enabled scenario='home_main' source='runtime' enabled=False base_enabled=False
+[23:49:00] [CONFIG] scenario resolved scenario='life_food_plugin' group='plugin_screen' max_steps=5 enabled=False
+[23:49:00] [CONFIG] applied pre_navigation_ref='enter_food_plugin'
+[23:49:00] [CONFIG] scenario enabled scenario='life_food_plugin' source='runtime' enabled=False base_enabled=False
+[23:49:00] [CONFIG] scenario resolved scenario='life_air_care_plugin' group='-' max_steps=3 enabled=True
+[23:49:00] [CONFIG] scenario enabled scenario='life_air_care_plugin' source='runtime' enabled=True base_enabled=False
+[23:49:00] [CONFIG] scenario resolved scenario='life_home_care_plugin' group='-' max_steps=3 enabled=True
+[23:49:00] [CONFIG] scenario enabled scenario='life_home_care_plugin' source='runtime' enabled=True base_enabled=False
+[23:49:00] [CONFIG] scenario resolved scenario='life_energy_plugin' group='-' max_steps=1 enabled=True
+[23:49:00] [CONFIG] scenario enabled scenario='life_energy_plugin' source='runtime' enabled=True base_enabled=False
+[23:49:00] [CONFIG] scenario resolved scenario='devices_main' group='main_tabs' max_steps=10 enabled=False
+[23:49:00] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[23:49:00] [CONFIG] applied anchor_ref='home_tab_anchor'
+[23:49:00] [CONFIG] scenario enabled scenario='devices_main' source='runtime' enabled=False base_enabled=False
+[23:49:00] [CONFIG] scenario resolved scenario='life_main' group='main_tabs' max_steps=30 enabled=False
+[23:49:00] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[23:49:00] [CONFIG] scenario enabled scenario='life_main' source='runtime' enabled=False base_enabled=False
+[23:49:00] [CONFIG] scenario resolved scenario='routines_main' group='main_tabs' max_steps=30 enabled=False
+[23:49:00] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[23:49:00] [CONFIG] scenario enabled scenario='routines_main' source='runtime' enabled=False base_enabled=False
+[23:49:00] [CONFIG] scenario resolved scenario='menu_main' group='main_tabs' max_steps=30 enabled=False
+[23:49:00] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[23:49:00] [CONFIG] scenario enabled scenario='menu_main' source='runtime' enabled=False base_enabled=False
+[23:49:00] [CONFIG] scenario resolved scenario='settings_entry_example' group='plugin_screen' max_steps=5 enabled=False
+[23:49:00] [CONFIG] applied anchor_ref='settings_button_anchor'
+[23:49:00] [CONFIG] applied pre_navigation_ref='enter_settings'
+[23:49:00] [CONFIG] scenario enabled scenario='settings_entry_example' source='runtime' enabled=False base_enabled=False
+[23:49:00] [CONFIG] scenario resolved scenario='life_pet_care_plugin' group='-' max_steps=1 enabled=True
+[23:49:00] [CONFIG] scenario enabled scenario='life_pet_care_plugin' source='runtime' enabled=True base_enabled=False
+[23:49:00] [CONFIG] scenario resolved scenario='life_family_care_plugin' group='-' max_steps=1 enabled=True
+[23:49:00] [CONFIG] scenario enabled scenario='life_family_care_plugin' source='runtime' enabled=True base_enabled=False
+[23:49:00] [CONFIG] scenario resolved scenario='life_plant_care_plugin' group='-' max_steps=1 enabled=True
+[23:49:00] [CONFIG] scenario enabled scenario='life_plant_care_plugin' source='runtime' enabled=True base_enabled=False
+[23:49:00] [CONFIG] scenario resolved scenario='life_clothing_care_plugin' group='-' max_steps=1 enabled=True
+[23:49:00] [CONFIG] scenario enabled scenario='life_clothing_care_plugin' source='runtime' enabled=True base_enabled=False
+[23:49:00] [CONFIG] scenario resolved scenario='life_find_plugin' group='-' max_steps=1 enabled=True
+[23:49:00] [CONFIG] scenario enabled scenario='life_find_plugin' source='runtime' enabled=True base_enabled=False
+[23:49:00] [CONFIG] scenario resolved scenario='life_video_plugin' group='-' max_steps=1 enabled=True
+[23:49:00] [CONFIG] scenario enabled scenario='life_video_plugin' source='runtime' enabled=True base_enabled=False
+[23:49:00] [CONFIG] scenario resolved scenario='life_home_monitor_plugin' group='-' max_steps=5 enabled=True
+[23:49:00] [CONFIG] scenario enabled scenario='life_home_monitor_plugin' source='runtime' enabled=True base_enabled=False
+[23:49:00] [CONFIG] scenario resolved scenario='life_music_sync_plugin' group='-' max_steps=1 enabled=True
+[23:49:00] [CONFIG] scenario enabled scenario='life_music_sync_plugin' source='runtime' enabled=True base_enabled=False
+[23:49:00] [MAIN] skip disabled scenario_id='global_nav_main' tab='(?i).*(home|devices|life|routines|menu).*'
+[23:49:00] [MAIN] skip disabled scenario_id='home_main' tab='(?i).*home.*'
+[23:49:00] [MAIN] skip disabled scenario_id='life_food_plugin' tab='(?i).*life.*'
+[23:49:00] [SCENARIO][stabilization] scenario='life_air_care_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[23:49:00] [LIFE_RESET] verify phase='plugin_start_initial' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:49:00] [PLUGIN_START][recover_before_entry] triggered=false
+[23:49:00] [PLUGIN_START][life_list_check] ok=true reason='life_tab_ready_with_card_evidence'
+[23:49:00] [PLUGIN_START][recover_before_entry] success=true
+[23:49:00] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[23:49:00] [TAB][select] fallback_to_legacy=True scenario='life_air_care_plugin'
+[23:49:07] [TAB][focus_align_fast] failed scenario='life_air_care_plugin' attempt=2/2 focus_label='' focus_resource=''
+[23:49:08] [TAB][select] scenario='life_air_care_plugin' selected=True matched_fields=['text'] score=40
+[23:49:08] [TAB][verify] selected_bottom_tab ok=True actual=''
+[23:49:08] [TRACE][open_scenario] scenario='life_air_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=False
+[23:49:08] [TAB][focus_align_fast] scenario='life_air_care_plugin' main_tab=false transition_scenario=true result='failed'
+[23:49:08] [TAB][focus_align_fast] failed but proceeding (transition scenario) scenario='life_air_care_plugin'
+[23:49:09] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^smart\s*air\s*care$|^air\s*care$|air\s*care\.|\baircare\b|에어\s*케어)'
+[23:49:09] [XMLENTRY][search] pre_reset scroll_to_top=true
+[23:49:15] [XMLENTRY][search] step=0/5 visible_candidates=70 target_candidates=0
+[23:49:15] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:49:15] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:49:15] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='162,118,810,310' area_ratio='0.0600' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:49:17] [XMLENTRY][scroll] step=0/5 performed=true reason='no_strict_target_candidate'
+[23:49:20] [XMLENTRY][search] step=1/5 visible_candidates=62 target_candidates=0
+[23:49:20] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:49:20] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:49:20] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='162,118,810,310' area_ratio='0.0600' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:49:23] [XMLENTRY][scroll] step=1/5 performed=true reason='no_strict_target_candidate'
+[23:49:26] [XMLENTRY][search] step=2/5 visible_candidates=60 target_candidates=3
+[23:49:26] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/llCard' class='android.widget.LinearLayout' bounds='42,1752,1038,2316' area_ratio='0.2709' target_match=true match_source='descendant' matched_phrase='air care' negative_plugin_phrase=''
+[23:49:26] [XMLENTRY][search][top] rank=2 reason='actionable_container' text='' rid='com.samsung.android.oneconnect:id/containerNameLayout' class='android.widget.RelativeLayout' bounds='42,1752,1038,1884' area_ratio='0.0634' target_match=true match_source='descendant' matched_phrase='air care' negative_plugin_phrase=''
+[23:49:26] [XMLENTRY][search][top] rank=3 reason='actionable_container' text='Air Care' rid='com.samsung.android.oneconnect:id/containerNameLayout' class='android.widget.RelativeLayout' bounds='42,1752,1038,1884' area_ratio='0.0634' target_match=true match_source='title' matched_phrase='air care' negative_plugin_phrase=''
+[23:49:26] [XMLENTRY][candidate_compare] scenario_id='life_air_care_plugin' rank=1 rid='com.samsung.android.oneconnect:id/llCard' class='android.widget.LinearLayout' bounds='42,1752,1038,2316' own_text='Air Care' descendant_text_summary='Air Care,Monitor air quality and ' matched_phrase='air care' match_source='descendant' selected_priority='240:card_like_container' negative_plugin_phrase='' selected=true
+[23:49:26] [XMLENTRY][candidate_compare] scenario_id='life_air_care_plugin' rank=2 rid='com.samsung.android.oneconnect:id/containerNameLayout' class='android.widget.RelativeLayout' bounds='42,1752,1038,1884' own_text='' descendant_text_summary='Air Care' matched_phrase='air care' match_source='descendant' selected_priority='240:actionable_container' negative_plugin_phrase='' selected=false
+[23:49:26] [XMLENTRY][candidate_compare] scenario_id='life_air_care_plugin' rank=3 rid='com.samsung.android.oneconnect:id/containerNameLayout' class='android.widget.RelativeLayout' bounds='42,1752,1038,1884' own_text='' descendant_text_summary='Air Care' matched_phrase='air care' match_source='title' selected_priority='240:actionable_container' negative_plugin_phrase='' selected=false
+[23:49:26] [XMLENTRY][select] reason='card_like_container' resource='com.samsung.android.oneconnect:id/llCard' bounds='42,1752,1038,2316' text='Air Care' target_match=true match_source='descendant' matched_phrase='air care'
+[23:49:26] [XMLENTRY][select_debug] scenario_id='life_air_care_plugin' class='android.widget.LinearLayout' rid='com.samsung.android.oneconnect:id/llCard' bounds='42,1752,1038,2316' own_text='Air Care' own_content_desc='' normalized_own_text='air care' descendant_text_summary='Air Care,Monitor air quality and ' matched_phrase='air care' match_source='descendant' selected_reason='card_like_container' candidate_rank=1 title_descendant_disagree=false representative_visible_label='Air Care' representative_label_source='own_text'
+[23:49:27] [VERIFY][air][probe] probe_index=1/2 same_screen=false signal='air_care_verify' has_home_button=false has_change_location=false has_add_button=false has_more_options=false has_other_plugin_cards=false has_air_text=true has_air_content_signal=true has_plugin_body_focus=false decision='candidate_air_success'
+[23:49:27] [XMLENTRY][result] success=true reason='transition_confirmed'
+[23:49:27] [SCENARIO][pre_nav] success step=1 reason='Target node not found'
+[23:49:29] [SCENARIO][pre_nav] success
+[23:49:33] [CONTEXT] skipped reason='anchor_only_mode'
+[23:49:33] [CONTEXT] skipped reason='anchor_only_mode'
+[23:49:33] [CONTEXT] scenario='life_air_care_plugin' type='skipped' expected='' actual='' ok=True
+[23:49:33] [CONTEXT] verification passed scenario='life_air_care_plugin'
+[23:49:33] [ANCHOR][scenario_start] success scenario='life_air_care_plugin' selected=True matched=True stable=True context_ok=True reason='selected_and_verified'
+[23:49:33] [ENTRY][air][fallback_acceptance] fallback_source='none' fallback_candidate_view_id='none' fallback_candidate_label='none' fallback_candidate_bounds='none' accepted=false accepted_reason='none' rejected_reason='fallback_source_not_allowed'
+[23:49:33] [TRACE][open_scenario] scenario='life_air_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=True
+[23:49:35] [ENTRY][air][verdict_inputs] scenario_id='life_air_care_plugin' post_click_success_seen=true air_verify_success_seen=false air_verify_reject_seen=false anchor_fallback_accepted=false anchor_fallback_source='none' post_open_focus_view_id='back' post_open_focus_label='Navigate up  Navigate up' is_top_chrome_focus=false is_list_screen_focus=false final_allow_success=true final_fail_reason='none'
+[23:49:35] [ENTRY][air][preserve] keep success despite fallback_not_accepted
+[23:49:35] [ENTRY][post_open_identity] scenario_id='life_air_care_plugin' top_visible_labels='Navigate up Navigate up,Air Care Air Care,More options More option,Set geolocation to monit,Dismiss Dismiss' top_focus_label='Navigate up  Navigate up' back_button_present=true body_texts='Navigate up Navigate up,Air Care Air Care,More options More option,Set geolocation to monit,Dismiss Dismiss' plugin_title_candidates='Navigate up Navigate up,Air Care Air Care,More options More option' verify_hit=true special_token_hit=false
+[23:49:35] [ENTRY][special_state_check] detected=true signals='long_intro,cta,intro_focus' kind='setup_needed_or_empty_state'
+[23:49:35] [ENTRY][special_state_check] decision='route_to_special_state' reason='special_state_detected_consistent_intro_evidence'
+[23:49:35] [ENTRY][special_state_route] handling='back_after_read'
+[23:49:35] [ENTRY][special_state_route] main_traversal_skipped=true
+[23:49:35] [SCENARIO][special_state] detected scenario='life_air_care_plugin' entry_type='card' kind='setup_needed_or_empty_state' handling='back_after_read' verify_hit=true long_intro_like=true special_hits='' cta_hits='next'
+[23:49:37] [SPECIAL_STATE][recover] start
+[23:49:37] [LIFE_RESET] start
+[23:49:37] [LIFE_RESET] app_inside=true
+[23:49:37] [LIFE_RESET] bottom_nav_ready=true
+[23:49:39] [LIFE_RESET][tab_reselect_attempt] scenario='life_air_care_plugin' phase='special_state_post_back' attempt=1/2 package_inside=true global_nav_visible=true select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services'
+[23:49:39] [LIFE_RESET][tab_reselect_result] scenario='life_air_care_plugin' phase='special_state_post_back' attempt=1/2 select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services' select_raw='{'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776264581893, 'reqId': '9d346b74', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': 'com.samsung.android.oneconnect:id/menu_services', 'targetType': 'r', 'targetIndex': 0, 'attemptedResourceId': 'com.samsung.android.oneconnect:id/menu_services', 'attemptedClassName': 'android.widget.Button', 'target': {'timestamp': 1776264581893, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.Button', 'viewIdResourceName': 'com.samsung.android.oneconnect:id/menu_services', 'text': None, 'contentDescription': 'Selected, Life, Tab 3 of 5', 'mergedLabel': 'Selected, Life, Tab 3 of 5', 'talkbackLabel': 'Selected, Life, Tab 3 of 5', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': False, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 443, 't': 2316, 'r': 637, 'b': 2496, 'left': 443, 'top': 2316, 'right': 637, 'bottom': 2496}, 'children': []}}}' select_success=true verify_selected_bottom_tab_ok=true verify_actual='' verify_source='pre_select_snapshot' life_tab_reselected=true basis='select_success_only'
+[23:49:39] [LIFE_RESET] life_tab_reselected=true
+[23:49:41] [LIFE_RESET] verify phase='life_reset' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:49:41] [LIFE_RESET] life_list_ready=true
+[23:49:41] [LIFE_RESET] success=true reason='life_tab_ready_with_card_evidence'
+[23:49:41] [RECOVER] success reason='life_reset_ready'
+[23:49:42] [SPECIAL_STATE][post_recover_check] inside_smartthings=true package=true app_bar_hits=4
+[23:49:42] [SPECIAL_STATE][recover] success=true target='life_plugin_list' reason='life_plugin_list_recovered'
+[23:49:42] [SCENARIO][entry_contract] handled scenario='life_air_care_plugin' entry_type='card' reason='special_state_handled' detail='onboarding_back_exit_recovered' back_status='back_sent_exit'
+[23:49:42] [PERF][scenario_summary] scenario=life_air_care_plugin tab=(?i).*life.* total_runtime=42.2 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[23:49:42] [SAVE] writing sheets raw/filtered/summary/result
+[23:49:42] [SAVE] filtered rows=1, raw rows=1
+[23:49:42] [SAVE] saved excel: output/talkback_compare_20260415_234858.xlsx rows=1 with_images=False
+[23:49:42] [LIFE_RESET] start
+[23:49:42] [LIFE_RESET] app_inside=true
+[23:49:42] [LIFE_RESET] bottom_nav_ready=true
+[23:49:43] [LIFE_RESET][tab_reselect_attempt] scenario='life_home_care_plugin' phase='default' attempt=1/2 package_inside=true global_nav_visible=true select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services'
+[23:49:44] [LIFE_RESET][tab_reselect_result] scenario='life_home_care_plugin' phase='default' attempt=1/2 select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services' select_raw='{'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776264586874, 'reqId': '46a51abc', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': 'com.samsung.android.oneconnect:id/menu_services', 'targetType': 'r', 'targetIndex': 0, 'attemptedResourceId': 'com.samsung.android.oneconnect:id/menu_services', 'attemptedClassName': 'android.widget.Button', 'target': {'timestamp': 1776264586874, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.Button', 'viewIdResourceName': 'com.samsung.android.oneconnect:id/menu_services', 'text': None, 'contentDescription': 'Selected, Life, Tab 3 of 5', 'mergedLabel': 'Selected, Life, Tab 3 of 5', 'talkbackLabel': 'Selected, Life, Tab 3 of 5', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': False, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 443, 't': 2316, 'r': 637, 'b': 2496, 'left': 443, 'top': 2316, 'right': 637, 'bottom': 2496}, 'children': []}}}' select_success=true verify_selected_bottom_tab_ok=true verify_actual='' verify_source='pre_select_snapshot' life_tab_reselected=true basis='select_success_only'
+[23:49:44] [LIFE_RESET] life_tab_reselected=true
+[23:49:46] [LIFE_RESET] verify phase='life_reset' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:49:46] [LIFE_RESET] life_list_ready=true
+[23:49:46] [LIFE_RESET] success=true reason='life_tab_ready_with_card_evidence'
+[23:49:46] [RECOVER] success reason='life_reset_ready'
+[23:49:46] [SCENARIO][stabilization] scenario='life_home_care_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[23:49:47] [LIFE_RESET] verify phase='plugin_start_initial' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:49:47] [PLUGIN_START][recover_before_entry] triggered=false
+[23:49:47] [PLUGIN_START][life_list_check] ok=true reason='life_tab_ready_with_card_evidence'
+[23:49:47] [PLUGIN_START][recover_before_entry] success=true
+[23:49:47] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[23:49:47] [TAB][select] fallback_to_legacy=True scenario='life_home_care_plugin'
+[23:49:54] [TAB][focus_align_fast] failed scenario='life_home_care_plugin' attempt=2/2 focus_label='' focus_resource=''
+[23:49:55] [TAB][select] scenario='life_home_care_plugin' selected=True matched_fields=['text'] score=40
+[23:49:55] [TAB][verify] selected_bottom_tab ok=True actual=''
+[23:49:55] [TRACE][open_scenario] scenario='life_home_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=False
+[23:49:55] [TAB][focus_align_fast] scenario='life_home_care_plugin' main_tab=false transition_scenario=true result='failed'
+[23:49:55] [TAB][focus_align_fast] failed but proceeding (transition scenario) scenario='life_home_care_plugin'
+[23:49:55] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^home\s*care$|home\s*care\.|\bhomecare\b|홈\s*케어)'
+[23:49:55] [XMLENTRY][search] pre_reset scroll_to_top=true
+[23:50:01] [XMLENTRY][search] step=0/5 visible_candidates=70 target_candidates=5
+[23:50:01] [XMLENTRY][search][top] rank=1 reason='actionable_container' text='' rid='' class='android.widget.RelativeLayout' bounds='42,1858,1038,2316' area_ratio='0.2200' target_match=true match_source='descendant' matched_phrase='home care' negative_plugin_phrase=''
+[23:50:01] [XMLENTRY][search][top] rank=2 reason='actionable_container' text='Home Care' rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,1858,1038,2316' area_ratio='0.2200' target_match=true match_source='title' matched_phrase='home care' negative_plugin_phrase=''
+[23:50:01] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/llCard' class='android.widget.LinearLayout' bounds='42,1858,1038,2316' area_ratio='0.2200' target_match=true match_source='descendant' matched_phrase='home care' negative_plugin_phrase=''
+[23:50:01] [XMLENTRY][candidate_compare] scenario_id='life_home_care_plugin' rank=1 rid='' class='android.widget.RelativeLayout' bounds='42,1858,1038,2316' own_text='' descendant_text_summary='Home Care,Home Care,Connect Samsung home app' matched_phrase='home care' match_source='descendant' selected_priority='240:actionable_container' negative_plugin_phrase='' selected=true
+[23:50:01] [XMLENTRY][candidate_compare] scenario_id='life_home_care_plugin' rank=2 rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,1858,1038,2316' own_text='' descendant_text_summary='Home Care,Home Care,Connect Samsung home app' matched_phrase='home care' match_source='title' selected_priority='240:actionable_container' negative_plugin_phrase='' selected=false
+[23:50:01] [XMLENTRY][candidate_compare] scenario_id='life_home_care_plugin' rank=3 rid='com.samsung.android.oneconnect:id/llCard' class='android.widget.LinearLayout' bounds='42,1858,1038,2316' own_text='Home Care' descendant_text_summary='Home Care,Connect Samsung home app,Picture' matched_phrase='home care' match_source='descendant' selected_priority='240:card_like_container' negative_plugin_phrase='' selected=false
+[23:50:01] [XMLENTRY][select] reason='actionable_container' resource='' bounds='42,1858,1038,2316' text='' target_match=true match_source='descendant' matched_phrase='home care'
+[23:50:01] [XMLENTRY][select_debug] scenario_id='life_home_care_plugin' class='android.widget.RelativeLayout' rid='' bounds='42,1858,1038,2316' own_text='' own_content_desc='' normalized_own_text='' descendant_text_summary='Home Care,Home Care,Connect Samsung home app' matched_phrase='home care' match_source='descendant' selected_reason='actionable_container' candidate_rank=1 title_descendant_disagree=false representative_visible_label='' representative_label_source='descendant'
+[23:50:15] [XMLENTRY][result] success=true reason='transition_confirmed'
+[23:50:15] [SCENARIO][pre_nav] success step=1 reason='Target node not found'
+[23:50:16] [SCENARIO][pre_nav] success
+[23:50:22] [ANCHOR][fallback] explicit anchor not matched, trying top content fallback
+[23:50:22] [ANCHOR][fallback] selected candidate label='Always manage your home appliances optimally, Home Care constantly monitors devices that support AI diagnosis and informs you when they need cleaning, replacing, or other maintenance. Always manage your home appliances optimally, Home Care constantly monitors devices that support AI diagnosis and informs you when they need cleaning, replacing, or other maintenance.' position='top_center'
+[23:50:22] [ANCHOR][plugin_fallback] using_top_start_candidate position='top_center'
+[23:50:32] [CONTEXT] skipped reason='anchor_only_mode'
+[23:50:32] [CONTEXT] skipped reason='anchor_only_mode'
+[23:50:32] [CONTEXT] scenario='life_home_care_plugin' type='skipped' expected='' actual='' ok=True
+[23:50:32] [ANCHOR][scenario_start] anchor mismatch scenario='life_home_care_plugin'
+[23:50:32] [ANCHOR][scenario_start] anchor not stable scenario='life_home_care_plugin'
+[23:50:38] [ANCHOR][fallback] explicit anchor not matched, trying top content fallback
+[23:50:38] [ANCHOR][fallback] selected candidate label='Always manage your home appliances optimally, Home Care constantly monitors devices that support AI diagnosis and informs you when they need cleaning, replacing, or other maintenance. Always manage your home appliances optimally, Home Care constantly monitors devices that support AI diagnosis and informs you when they need cleaning, replacing, or other maintenance.' position='top_center'
+[23:50:38] [ANCHOR][plugin_fallback] using_top_start_candidate position='top_center'
+[23:50:48] [CONTEXT] skipped reason='anchor_only_mode'
+[23:50:48] [CONTEXT] skipped reason='anchor_only_mode'
+[23:50:48] [CONTEXT] scenario='life_home_care_plugin' type='skipped' expected='' actual='' ok=True
+[23:50:48] [ANCHOR][scenario_start] anchor mismatch scenario='life_home_care_plugin'
+[23:50:48] [ANCHOR][scenario_start] anchor not stable scenario='life_home_care_plugin'
+[23:50:48] [TRACE][open_scenario] scenario='life_home_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=False
+[23:50:48] [ANCHOR][scenario_start] stabilization failed but proceeding with low-confidence fallback start scenario='life_home_care_plugin' source='fallback_top_center' reason='fallback_candidate_and_focus_evidence'
+[23:50:48] [ANCHOR][plugin_fallback] candidate_label='Always manage your home appliances optimally, Home Care constantly monitors devices that support AI diagnosis and informs you when they need cleaning, replacing, or other maintenance. Always manage your home appliances optimally, Home Care constantly monitors devices that support AI diagnosis and informs you when they need cleaning, replacing, or other maintenance.' candidate_view_id='' reason='new_screen_evidence_confirmed'
+[23:50:48] [ANCHOR][plugin_fallback] stabilized_by='post_focus_verified'
+[23:50:48] [SCENARIO][start_mode] scenario='life_home_care_plugin' mode='low_confidence_fallback'
+[23:51:01] [ENTRY][post_open_identity] scenario_id='life_home_care_plugin' top_visible_labels='Always manage your home ,Start , Button Start , B' top_focus_label='SmartThings Home Care  SmartThings Home Care' back_button_present=false body_texts='Always manage your home ,Start , Button Start , B' plugin_title_candidates='Start , Button Start , B' verify_hit=true special_token_hit=true
+[23:51:01] [ENTRY][special_state_check] detected=true signals='long_intro,cta,low_content_diversity,intro_focus,verify_and_special_token' kind='setup_needed_or_empty_state'
+[23:51:01] [ENTRY][special_state_check] decision='route_to_special_state' reason='special_state_detected_strong_generic_evidence'
+[23:51:01] [ENTRY][special_state_route] handling='back_after_read'
+[23:51:01] [ENTRY][special_state_route] main_traversal_skipped=true
+[23:51:01] [SCENARIO][special_state] detected scenario='life_home_care_plugin' entry_type='card' kind='setup_needed_or_empty_state' handling='back_after_read' verify_hit=true long_intro_like=true special_hits='smartthings home care,always manage your home appliances optimally,home care constantly monitors devices,ai diagnosis,maintenance' cta_hits='start'
+[23:51:03] [SPECIAL_STATE][recover] start
+[23:51:03] [LIFE_RESET] start
+[23:51:03] [LIFE_RESET] app_inside=true
+[23:51:03] [LIFE_RESET] bottom_nav_ready=true
+[23:51:04] [LIFE_RESET][tab_reselect_attempt] scenario='life_home_care_plugin' phase='special_state_post_back' attempt=1/2 package_inside=true global_nav_visible=true select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services'
+[23:51:05] [LIFE_RESET][tab_reselect_result] scenario='life_home_care_plugin' phase='special_state_post_back' attempt=1/2 select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services' select_raw='{'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776264667857, 'reqId': '280f39e2', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': 'com.samsung.android.oneconnect:id/menu_services', 'targetType': 'r', 'targetIndex': 0, 'attemptedResourceId': 'com.samsung.android.oneconnect:id/menu_services', 'attemptedClassName': 'android.widget.Button', 'target': {'timestamp': 1776264667858, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.Button', 'viewIdResourceName': 'com.samsung.android.oneconnect:id/menu_services', 'text': None, 'contentDescription': 'Selected, Life, Tab 3 of 5', 'mergedLabel': 'Selected, Life, Tab 3 of 5', 'talkbackLabel': 'Selected, Life, Tab 3 of 5', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': False, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 443, 't': 2316, 'r': 637, 'b': 2496, 'left': 443, 'top': 2316, 'right': 637, 'bottom': 2496}, 'children': []}}}' select_success=true verify_selected_bottom_tab_ok=true verify_actual='' verify_source='pre_select_snapshot' life_tab_reselected=true basis='select_success_only'
+[23:51:05] [LIFE_RESET] life_tab_reselected=true
+[23:51:07] [LIFE_RESET] verify phase='life_reset' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=false life_list_ready=true
+[23:51:07] [LIFE_RESET] plugin_card_list_visible=false (soft_only=true)
+[23:51:07] [LIFE_RESET] life_list_ready=true
+[23:51:07] [LIFE_RESET] success=true reason='life_tab_ready'
+[23:51:07] [RECOVER] success reason='life_reset_ready'
+[23:51:08] [SPECIAL_STATE][post_recover_check] inside_smartthings=true package=true app_bar_hits=4
+[23:51:08] [SPECIAL_STATE][recover] success=true target='life_plugin_list' reason='life_plugin_list_recovered'
+[23:51:08] [SCENARIO][entry_contract] handled scenario='life_home_care_plugin' entry_type='card' reason='special_state_handled' detail='onboarding_back_exit_recovered' back_status='back_sent_exit'
+[23:51:08] [PERF][scenario_summary] scenario=life_home_care_plugin tab=(?i).*life.* total_runtime=82.1 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[23:51:08] [SAVE] writing sheets raw/filtered/summary/result
+[23:51:08] [SAVE] filtered rows=2, raw rows=2
+[23:51:08] [SAVE] saved excel: output/talkback_compare_20260415_234858.xlsx rows=2 with_images=False
+[23:51:08] [LIFE_RESET] start
+[23:51:08] [LIFE_RESET] app_inside=true
+[23:51:08] [LIFE_RESET] bottom_nav_ready=true
+[23:51:10] [LIFE_RESET][tab_reselect_attempt] scenario='life_energy_plugin' phase='default' attempt=1/2 package_inside=true global_nav_visible=true select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services'
+[23:51:11] [LIFE_RESET][tab_reselect_result] scenario='life_energy_plugin' phase='default' attempt=1/2 select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services' select_raw='{'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776264672944, 'reqId': '6e7f5e2f', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': 'com.samsung.android.oneconnect:id/menu_services', 'targetType': 'r', 'targetIndex': 0, 'attemptedResourceId': 'com.samsung.android.oneconnect:id/menu_services', 'attemptedClassName': 'android.widget.Button', 'target': {'timestamp': 1776264672944, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.Button', 'viewIdResourceName': 'com.samsung.android.oneconnect:id/menu_services', 'text': None, 'contentDescription': 'Selected, Life, Tab 3 of 5', 'mergedLabel': 'Selected, Life, Tab 3 of 5', 'talkbackLabel': 'Selected, Life, Tab 3 of 5', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': False, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 443, 't': 2316, 'r': 637, 'b': 2496, 'left': 443, 'top': 2316, 'right': 637, 'bottom': 2496}, 'children': []}}}' select_success=true verify_selected_bottom_tab_ok=true verify_actual='' verify_source='pre_select_snapshot' life_tab_reselected=true basis='select_success_only'
+[23:51:11] [LIFE_RESET] life_tab_reselected=true
+[23:51:12] [LIFE_RESET] verify phase='life_reset' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=false life_list_ready=true
+[23:51:12] [LIFE_RESET] plugin_card_list_visible=false (soft_only=true)
+[23:51:12] [LIFE_RESET] life_list_ready=true
+[23:51:12] [LIFE_RESET] success=true reason='life_tab_ready'
+[23:51:12] [RECOVER] success reason='life_reset_ready'
+[23:51:12] [SCENARIO][stabilization] scenario='life_energy_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[23:51:13] [LIFE_RESET] verify phase='plugin_start_initial' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=false life_list_ready=true
+[23:51:13] [LIFE_RESET] plugin_card_list_visible=false (soft_only=true)
+[23:51:13] [PLUGIN_START][recover_before_entry] triggered=false
+[23:51:13] [PLUGIN_START][life_list_check] ok=true reason='life_tab_ready'
+[23:51:13] [PLUGIN_START][recover_before_entry] success=true
+[23:51:13] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[23:51:13] [TAB][select] fallback_to_legacy=True scenario='life_energy_plugin'
+[23:51:20] [TAB][focus_align_fast] failed scenario='life_energy_plugin' attempt=2/2 focus_label='' focus_resource=''
+[23:51:21] [TAB][select] scenario='life_energy_plugin' selected=True matched_fields=['text'] score=40
+[23:51:21] [TAB][verify] selected_bottom_tab ok=True actual=''
+[23:51:21] [TRACE][open_scenario] scenario='life_energy_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=False
+[23:51:21] [TAB][focus_align_fast] scenario='life_energy_plugin' main_tab=false transition_scenario=true result='failed'
+[23:51:21] [TAB][focus_align_fast] failed but proceeding (transition scenario) scenario='life_energy_plugin'
+[23:51:21] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^energy$|energy\.|\bsmart\s*energy\b|\benergy\b)'
+[23:51:21] [XMLENTRY][search] pre_reset scroll_to_top=true
+[23:51:27] [XMLENTRY][search] step=0/5 visible_candidates=70 target_candidates=0
+[23:51:27] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:51:27] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:51:27] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='162,118,810,310' area_ratio='0.0600' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:51:30] [XMLENTRY][scroll] step=0/5 performed=true reason='no_target_candidate'
+[23:51:32] [XMLENTRY][search] step=1/5 visible_candidates=62 target_candidates=8
+[23:51:32] [XMLENTRY][search][top] rank=1 reason='actionable_container' text='' rid='' class='android.widget.RelativeLayout' bounds='42,644,1038,1376' area_ratio='0.3516' target_match=true match_source='descendant' matched_phrase='Energy Add an appliance to start measuring energy usage. Add an appliance to sta' negative_plugin_phrase=''
+[23:51:32] [XMLENTRY][search][top] rank=2 reason='actionable_container' text='Energy' rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,644,1038,1376' area_ratio='0.3516' target_match=true match_source='title' matched_phrase='Energy' negative_plugin_phrase=''
+[23:51:32] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/llCard' class='android.widget.LinearLayout' bounds='42,644,1038,1376' area_ratio='0.3516' target_match=true match_source='descendant' matched_phrase='Energy' negative_plugin_phrase=''
+[23:51:32] [XMLENTRY][candidate_compare] scenario_id='life_energy_plugin' rank=1 rid='' class='android.widget.RelativeLayout' bounds='42,644,1038,1376' own_text='' descendant_text_summary='Energy,Energy,Add an appliance to star' matched_phrase='Energy Add an appliance to start measuring energy usage. Add an ' match_source='descendant' selected_priority='240:actionable_container' negative_plugin_phrase='' selected=true
+[23:51:32] [XMLENTRY][candidate_compare] scenario_id='life_energy_plugin' rank=2 rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,644,1038,1376' own_text='' descendant_text_summary='Energy,Energy,Add an appliance to star' matched_phrase='Energy' match_source='title' selected_priority='240:actionable_container' negative_plugin_phrase='' selected=false
+[23:51:32] [XMLENTRY][candidate_compare] scenario_id='life_energy_plugin' rank=3 rid='com.samsung.android.oneconnect:id/llCard' class='android.widget.LinearLayout' bounds='42,644,1038,1376' own_text='Energy' descendant_text_summary='Energy,Add an appliance to star' matched_phrase='Energy' match_source='descendant' selected_priority='240:card_like_container' negative_plugin_phrase='' selected=false
+[23:51:32] [XMLENTRY][select] reason='actionable_container' resource='' bounds='42,644,1038,1376' text='' target_match=true match_source='descendant' matched_phrase='Energy Add an appliance to start measuring energy usage. Add an appliance to sta'
+[23:51:32] [XMLENTRY][select_debug] scenario_id='life_energy_plugin' class='android.widget.RelativeLayout' rid='' bounds='42,644,1038,1376' own_text='' own_content_desc='' normalized_own_text='' descendant_text_summary='Energy,Energy,Add an appliance to star' matched_phrase='Energy Add an appliance to start measuring energy usage. Add an appliance to sta' match_source='descendant' selected_reason='actionable_container' candidate_rank=1 title_descendant_disagree=false representative_visible_label='' representative_label_source='descendant'
+[23:51:40] [XMLENTRY][result] success=true reason='transition_confirmed'
+[23:51:40] [SCENARIO][pre_nav] success step=1 reason='Target node not found'
+[23:51:42] [SCENARIO][pre_nav] success
+[23:51:46] [CONTEXT] skipped reason='anchor_only_mode'
+[23:51:46] [CONTEXT] skipped reason='anchor_only_mode'
+[23:51:46] [CONTEXT] scenario='life_energy_plugin' type='skipped' expected='' actual='' ok=True
+[23:51:46] [CONTEXT] verification passed scenario='life_energy_plugin'
+[23:51:46] [ANCHOR][scenario_start] success scenario='life_energy_plugin' selected=True matched=True stable=True context_ok=True reason='selected_and_verified'
+[23:51:46] [TRACE][open_scenario] scenario='life_energy_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=True
+[23:51:48] [ENTRY][post_open_identity] scenario_id='life_energy_plugin' top_visible_labels='Navigate up Navigate up,Energy Energy,More options More option,Save energy with AI Ener,Dismiss Dismiss' top_focus_label='Navigate up  Navigate up' back_button_present=true body_texts='Navigate up Navigate up,Energy Energy,More options More option,Save energy with AI Ener,Dismiss Dismiss' plugin_title_candidates='Navigate up Navigate up,Energy Energy,More options More option' verify_hit=true special_token_hit=false
+[23:51:48] [ENTRY][special_state_check] detected=false signals='long_intro,intro_focus' kind='none'
+[23:51:48] [ENTRY][special_state_check] decision='continue_verify'
+[23:51:48] [SCENARIO][entry_contract] success scenario='life_energy_plugin' entry_type='card' reason='success_verified' detail='plugin_open_verified'
+[23:51:49] [TRACE][post_open_focus] scenario='life_energy_plugin' view_id='back' label='Navigate up' speech='Navigate up' bounds='{'l': 72, 't': 118, 'r': 144, 'b': 310, 'left': 72, 'top': 118, 'right': 144, 'bottom': 310}' source='top_level' top_level=True
+[23:51:54] [TRACE][anchor_row] scenario='life_energy_plugin' step=0 view_id='back' visible='Navigate up' speech='Navigate up' normalized_visible='navigate up' is_global_nav=False
+[23:51:54] [ROW] fingerprint='back|navigate up|navigate up|108,214' normalized_fingerprint='back|navigate up|navigate up' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=1 noise=false
+[23:51:54] [RESULT] skipped anchor rows count=1
+[23:51:54] [SAVE] writing sheets raw/filtered/summary/result
+[23:51:54] [SAVE] filtered rows=3, raw rows=3
+[23:51:54] [SAVE] saved excel: output/talkback_compare_20260415_234858.xlsx rows=3 with_images=False
+[23:51:54] [STEP] START tab='(?i).*life.*' step=1
+[23:52:00] [ROW] fingerprint='|energy|energy|552,214' normalized_fingerprint='|energy|energy' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=2 noise=false
+[23:52:00] [STEP] END tab='(?i).*life.*' step=1 elapsed=4.76s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776264717359, 'reqId': 'cd1e2e47', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Energy' speech='Energy' crop='output\talkback_compare_20260415_234858\crops\i_._life._step_1_Energy.png' timing(move=0.500s ann=3.161s get_focus=1.095s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.567s total=5.325s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='078ce197'
+[23:52:00] [STOP][eval] step=1 scenario='life_energy_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=2 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:1|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776264717359, 'reqid': 'cd1e2e47', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[23:52:00] [STOP][summary] scenario='life_energy_plugin' stop_triggered=false stop_step=1 reason='safety_limit'
+[23:52:00] [PERF][scenario_summary] scenario=life_energy_plugin tab=(?i).*life.* total_runtime=47.9 total_steps=2 main_step_count=2 overlay_step_count=0 overlay_count=0 avg_get_focus=1.093 avg_move=0.25 avg_crop=0.547 avg_step_total=5.2 step_total_sample_count=2 avg_get_focus_main=1.093 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=2 get_focus_strong_skip_rate=100.0 step_dump_used_count=0 save_excel_count=1 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[23:52:00] [MAIN] skip disabled scenario_id='devices_main' tab='(?i).*devices.*'
+[23:52:00] [MAIN] skip disabled scenario_id='life_main' tab='(?i).*life.*'
+[23:52:00] [MAIN] skip disabled scenario_id='routines_main' tab='(?i).*routines.*'
+[23:52:00] [MAIN] skip disabled scenario_id='menu_main' tab='(?i).*(menu|more).*'
+[23:52:00] [MAIN] skip disabled scenario_id='settings_entry_example' tab='(?i).*menu.*'
+[23:52:00] [LIFE_RESET] start
+[23:52:00] [LIFE_RESET] app_inside=true
+[23:52:02] [LIFE_RESET] bottom_nav_ready=true
+[23:52:03] [LIFE_RESET][tab_reselect_attempt] scenario='life_pet_care_plugin' phase='default' attempt=1/2 package_inside=true global_nav_visible=true select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services'
+[23:52:04] [LIFE_RESET][tab_reselect_result] scenario='life_pet_care_plugin' phase='default' attempt=1/2 select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services' select_raw='{'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776264726791, 'reqId': '0e83e6e9', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': 'com.samsung.android.oneconnect:id/menu_services', 'targetType': 'r', 'targetIndex': 0, 'attemptedResourceId': 'com.samsung.android.oneconnect:id/menu_services', 'attemptedClassName': 'android.widget.Button', 'target': {'timestamp': 1776264726791, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.Button', 'viewIdResourceName': 'com.samsung.android.oneconnect:id/menu_services', 'text': None, 'contentDescription': 'Selected, Life, Tab 3 of 5', 'mergedLabel': 'Selected, Life, Tab 3 of 5', 'talkbackLabel': 'Selected, Life, Tab 3 of 5', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': False, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 443, 't': 2316, 'r': 637, 'b': 2496, 'left': 443, 'top': 2316, 'right': 637, 'bottom': 2496}, 'children': []}}}' select_success=true verify_selected_bottom_tab_ok=true verify_actual='' verify_source='pre_select_snapshot' life_tab_reselected=true basis='select_success_only'
+[23:52:04] [LIFE_RESET] life_tab_reselected=true
+[23:52:06] [LIFE_RESET] verify phase='life_reset' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:52:06] [LIFE_RESET] life_list_ready=true
+[23:52:06] [LIFE_RESET] success=true reason='life_tab_ready_with_card_evidence'
+[23:52:06] [RECOVER] success reason='life_reset_ready'
+[23:52:06] [SCENARIO][stabilization] scenario='life_pet_care_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[23:52:06] [LIFE_RESET] verify phase='plugin_start_initial' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:52:06] [PLUGIN_START][recover_before_entry] triggered=false
+[23:52:06] [PLUGIN_START][life_list_check] ok=true reason='life_tab_ready_with_card_evidence'
+[23:52:06] [PLUGIN_START][recover_before_entry] success=true
+[23:52:06] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[23:52:06] [TAB][select] fallback_to_legacy=True scenario='life_pet_care_plugin'
+[23:52:13] [TAB][focus_align_fast] failed scenario='life_pet_care_plugin' attempt=2/2 focus_label='' focus_resource=''
+[23:52:14] [TAB][select] scenario='life_pet_care_plugin' selected=True matched_fields=['text'] score=40
+[23:52:14] [TAB][verify] selected_bottom_tab ok=True actual=''
+[23:52:14] [TRACE][open_scenario] scenario='life_pet_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=False
+[23:52:14] [TAB][focus_align_fast] scenario='life_pet_care_plugin' main_tab=false transition_scenario=true result='failed'
+[23:52:14] [TAB][focus_align_fast] failed but proceeding (transition scenario) scenario='life_pet_care_plugin'
+[23:52:14] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^pet\s*care$|.*pet\s*care.*|.*펫\s*케어.*)'
+[23:52:14] [XMLENTRY][search] pre_reset scroll_to_top=true
+[23:52:20] [XMLENTRY][search] step=0/5 visible_candidates=70 target_candidates=0
+[23:52:20] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:52:20] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:52:20] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='162,118,810,310' area_ratio='0.0600' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:52:23] [XMLENTRY][scroll] step=0/5 performed=true reason='no_strict_target_candidate'
+[23:52:26] [XMLENTRY][search] step=1/5 visible_candidates=62 target_candidates=5
+[23:52:26] [XMLENTRY][search][top] rank=1 reason='actionable_container' text='' rid='' class='android.widget.RelativeLayout' bounds='42,1418,1038,2150' area_ratio='0.3516' target_match=true match_source='descendant' matched_phrase='pet care' negative_plugin_phrase=''
+[23:52:26] [XMLENTRY][search][top] rank=2 reason='actionable_container' text='Pet Care' rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,1418,1038,2150' area_ratio='0.3516' target_match=true match_source='title' matched_phrase='pet care' negative_plugin_phrase=''
+[23:52:26] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/llCard' class='android.widget.LinearLayout' bounds='42,1418,1038,2150' area_ratio='0.3516' target_match=true match_source='descendant' matched_phrase='pet care' negative_plugin_phrase=''
+[23:52:26] [XMLENTRY][candidate_compare] scenario_id='life_pet_care_plugin' rank=1 rid='' class='android.widget.RelativeLayout' bounds='42,1418,1038,2150' own_text='' descendant_text_summary='Pet Care,Pet Care,You can take care of you' matched_phrase='pet care' match_source='descendant' selected_priority='240:actionable_container' negative_plugin_phrase='' selected=true
+[23:52:26] [XMLENTRY][candidate_compare] scenario_id='life_pet_care_plugin' rank=2 rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,1418,1038,2150' own_text='' descendant_text_summary='Pet Care,Pet Care,You can take care of you' matched_phrase='pet care' match_source='title' selected_priority='240:actionable_container' negative_plugin_phrase='' selected=false
+[23:52:26] [XMLENTRY][candidate_compare] scenario_id='life_pet_care_plugin' rank=3 rid='com.samsung.android.oneconnect:id/llCard' class='android.widget.LinearLayout' bounds='42,1418,1038,2150' own_text='Pet Care' descendant_text_summary='Pet Care,You can take care of you' matched_phrase='pet care' match_source='descendant' selected_priority='240:card_like_container' negative_plugin_phrase='' selected=false
+[23:52:26] [XMLENTRY][select] reason='actionable_container' resource='' bounds='42,1418,1038,2150' text='' target_match=true match_source='descendant' matched_phrase='pet care'
+[23:52:26] [XMLENTRY][select_debug] scenario_id='life_pet_care_plugin' class='android.widget.RelativeLayout' rid='' bounds='42,1418,1038,2150' own_text='' own_content_desc='' normalized_own_text='' descendant_text_summary='Pet Care,Pet Care,You can take care of you' matched_phrase='pet care' match_source='descendant' selected_reason='actionable_container' candidate_rank=1 title_descendant_disagree=false representative_visible_label='' representative_label_source='descendant'
+[23:52:39] [XMLENTRY][result] success=true reason='transition_confirmed'
+[23:52:39] [SCENARIO][pre_nav] success step=1 reason='Target node not found'
+[23:52:41] [SCENARIO][pre_nav] success
+[23:53:04] [CONTEXT] skipped reason='anchor_only_mode'
+[23:53:04] [CONTEXT] skipped reason='anchor_only_mode'
+[23:53:04] [CONTEXT] scenario='life_pet_care_plugin' type='skipped' expected='' actual='' ok=True
+[23:53:04] [CONTEXT] verification passed scenario='life_pet_care_plugin'
+[23:53:04] [ANCHOR][scenario_start] success scenario='life_pet_care_plugin' selected={'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776264783497, 'reqId': '530f3e97', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': '(?i).*pet\\s*care.*|.*펫\\s*케어.*', 'targetType': 'a', 'targetIndex': 0, 'attemptedClassName': 'android.webkit.WebView', 'target': {'timestamp': 1776264783498, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.webkit.WebView', 'viewIdResourceName': None, 'text': 'PetCare Service Plugin', 'contentDescription': None, 'mergedLabel': 'PetCare Service Plugin', 'talkbackLabel': 'PetCare Service Plugin', 'clickable': False, 'focusable': True, 'focused': True, 'accessibilityFocused': True, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 0, 't': 94, 'r': 1080, 'b': 2496, 'left': 0, 'top': 94, 'right': 1080, 'bottom': 2496}, 'children': [{'text': '', 'contentDescription': None, 'className': 'android.view.View', 'viewIdResourceName': None, 'clickable': False, 'focusable': False, 'accessibilityFocused': False, 'visibleToUser': True, 'boundsInScreen': {'l': 0, 't': 94, 'r': 1080, 'b': 2496}, 'children': [{'text': '', 'contentDescription': None, 'className': 'android.view.View', 'viewIdResourceName': 'primary', 'clickable': True, 'focusable': False, 'accessibilityFocused': False, 'visibleToUser': True, 'boundsInScreen': {'l': 0, 't': 94, 'r': 1080, 'b': 2496}, 'children': [{'text': '', 'contentDescription': None, 'className': 'android.view.View', 'viewIdResourceName': 'main', 'clickable': False, 'focusable': False, 'accessibilityFocused': False, 'visibleToUser': True, 'boundsInScreen': {'l': 0, 't': 94, 'r': 1080, 'b': 2496}, 'children': [{'text': '', 'contentDescription': None, 'className': 'android.view.View', 'viewIdResourceName': 'welcome-page', 'clickable': False, 'focusable': False, 'accessibilityFocused': False, 'visibleToUser': True, 'boundsInScreen': {'l': 0, 't': 94, 'r': 1080, 'b': 2496}, 'children': []}]}]}]}]}}} matched=True stable=True context_ok=True reason='selected_and_verified'
+[23:53:04] [TRACE][open_scenario] scenario='life_pet_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=True
+[23:53:17] [ENTRY][post_open_identity] scenario_id='life_pet_care_plugin' top_visible_labels='PetCare Service Plugin P,Care for your pet, even ,Leaving your pet alone? ,Start Start' top_focus_label='PetCare Service Plugin  PetCare Service Plugin' back_button_present=false body_texts='PetCare Service Plugin P,Care for your pet, even ,Leaving your pet alone? ,Start Start' plugin_title_candidates='Start Start' verify_hit=true special_token_hit=true
+[23:53:17] [ENTRY][special_state_check] detected=true signals='long_intro,cta,low_content_diversity,intro_focus,verify_and_special_token' kind='setup_needed_or_empty_state'
+[23:53:17] [ENTRY][special_state_check] decision='route_to_special_state' reason='special_state_detected_strong_generic_evidence'
+[23:53:17] [ENTRY][special_state_route] handling='back_after_read'
+[23:53:17] [ENTRY][special_state_route] main_traversal_skipped=true
+[23:53:17] [SCENARIO][special_state] detected scenario='life_pet_care_plugin' entry_type='card' kind='setup_needed_or_empty_state' handling='back_after_read' verify_hit=true long_intro_like=true special_hits='petcare service plugin,care for your pet,leaving your pet alone,keep them safe and entertained' cta_hits='start'
+[23:53:19] [SPECIAL_STATE][recover] start
+[23:53:19] [LIFE_RESET] start
+[23:53:20] [LIFE_RESET] app_inside=true
+[23:53:20] [LIFE_RESET] bottom_nav_ready=true
+[23:53:21] [LIFE_RESET][tab_reselect_attempt] scenario='life_pet_care_plugin' phase='special_state_post_back' attempt=1/2 package_inside=true global_nav_visible=true select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services'
+[23:53:22] [LIFE_RESET][tab_reselect_result] scenario='life_pet_care_plugin' phase='special_state_post_back' attempt=1/2 select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services' select_raw='{'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776264804341, 'reqId': 'b5faf494', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': 'com.samsung.android.oneconnect:id/menu_services', 'targetType': 'r', 'targetIndex': 0, 'attemptedResourceId': 'com.samsung.android.oneconnect:id/menu_services', 'attemptedClassName': 'android.widget.Button', 'target': {'timestamp': 1776264804341, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.Button', 'viewIdResourceName': 'com.samsung.android.oneconnect:id/menu_services', 'text': None, 'contentDescription': 'Selected, Life, Tab 3 of 5', 'mergedLabel': 'Selected, Life, Tab 3 of 5', 'talkbackLabel': 'Selected, Life, Tab 3 of 5', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': False, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 443, 't': 2316, 'r': 637, 'b': 2496, 'left': 443, 'top': 2316, 'right': 637, 'bottom': 2496}, 'children': []}}}' select_success=true verify_selected_bottom_tab_ok=true verify_actual='' verify_source='pre_select_snapshot' life_tab_reselected=true basis='select_success_only'
+[23:53:22] [LIFE_RESET] life_tab_reselected=true
+[23:53:24] [LIFE_RESET] verify phase='life_reset' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:53:24] [LIFE_RESET] life_list_ready=true
+[23:53:24] [LIFE_RESET] success=true reason='life_tab_ready_with_card_evidence'
+[23:53:24] [RECOVER] success reason='life_reset_ready'
+[23:53:24] [SPECIAL_STATE][post_recover_check] inside_smartthings=true package=true app_bar_hits=5
+[23:53:24] [SPECIAL_STATE][recover] success=true target='life_plugin_list' reason='life_plugin_list_recovered'
+[23:53:24] [SCENARIO][entry_contract] handled scenario='life_pet_care_plugin' entry_type='card' reason='special_state_handled' detail='onboarding_back_exit_recovered' back_status='back_sent_exit'
+[23:53:24] [PERF][scenario_summary] scenario=life_pet_care_plugin tab=(?i).*life.* total_runtime=78.7 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[23:53:24] [RESULT] skipped anchor rows count=1
+[23:53:24] [SAVE] writing sheets raw/filtered/summary/result
+[23:53:24] [SAVE] filtered rows=5, raw rows=5
+[23:53:24] [SAVE] saved excel: output/talkback_compare_20260415_234858.xlsx rows=5 with_images=False
+[23:53:24] [LIFE_RESET] start
+[23:53:25] [LIFE_RESET] app_inside=true
+[23:53:25] [LIFE_RESET] bottom_nav_ready=true
+[23:53:26] [LIFE_RESET][tab_reselect_attempt] scenario='life_family_care_plugin' phase='default' attempt=1/2 package_inside=true global_nav_visible=true select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services'
+[23:53:27] [LIFE_RESET][tab_reselect_result] scenario='life_family_care_plugin' phase='default' attempt=1/2 select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services' select_raw='{'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776264809445, 'reqId': '4a4249cd', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': 'com.samsung.android.oneconnect:id/menu_services', 'targetType': 'r', 'targetIndex': 0, 'attemptedResourceId': 'com.samsung.android.oneconnect:id/menu_services', 'attemptedClassName': 'android.widget.Button', 'target': {'timestamp': 1776264809445, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.Button', 'viewIdResourceName': 'com.samsung.android.oneconnect:id/menu_services', 'text': None, 'contentDescription': 'Selected, Life, Tab 3 of 5', 'mergedLabel': 'Selected, Life, Tab 3 of 5', 'talkbackLabel': 'Selected, Life, Tab 3 of 5', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': False, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 443, 't': 2316, 'r': 637, 'b': 2496, 'left': 443, 'top': 2316, 'right': 637, 'bottom': 2496}, 'children': []}}}' select_success=true verify_selected_bottom_tab_ok=true verify_actual='' verify_source='pre_select_snapshot' life_tab_reselected=true basis='select_success_only'
+[23:53:27] [LIFE_RESET] life_tab_reselected=true
+[23:53:31] [LIFE_RESET] verify phase='life_reset' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:53:31] [LIFE_RESET] life_list_ready=true
+[23:53:31] [LIFE_RESET] success=true reason='life_tab_ready_with_card_evidence'
+[23:53:31] [RECOVER] success reason='life_reset_ready'
+[23:53:31] [SCENARIO][stabilization] scenario='life_family_care_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[23:53:31] [LIFE_RESET] verify phase='plugin_start_initial' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:53:31] [PLUGIN_START][recover_before_entry] triggered=false
+[23:53:31] [PLUGIN_START][life_list_check] ok=true reason='life_tab_ready_with_card_evidence'
+[23:53:31] [PLUGIN_START][recover_before_entry] success=true
+[23:53:31] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[23:53:31] [TAB][select] fallback_to_legacy=True scenario='life_family_care_plugin'
+[23:53:38] [TAB][focus_align_fast] failed scenario='life_family_care_plugin' attempt=2/2 focus_label='' focus_resource=''
+[23:53:39] [TAB][select] scenario='life_family_care_plugin' selected=True matched_fields=['text'] score=40
+[23:53:39] [TAB][verify] selected_bottom_tab ok=True actual=''
+[23:53:39] [TRACE][open_scenario] scenario='life_family_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=False
+[23:53:39] [TAB][focus_align_fast] scenario='life_family_care_plugin' main_tab=false transition_scenario=true result='failed'
+[23:53:39] [TAB][focus_align_fast] failed but proceeding (transition scenario) scenario='life_family_care_plugin'
+[23:53:40] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^family\s*care$|.*family\s*care.*|.*패밀리\s*케어.*)'
+[23:53:40] [XMLENTRY][search] pre_reset scroll_to_top=true
+[23:53:45] [XMLENTRY][search] step=0/5 visible_candidates=70 target_candidates=5
+[23:53:45] [XMLENTRY][search][top] rank=1 reason='actionable_container' text='' rid='' class='android.widget.RelativeLayout' bounds='42,310,1038,1042' area_ratio='0.3516' target_match=true match_source='descendant' matched_phrase='family care' negative_plugin_phrase=''
+[23:53:45] [XMLENTRY][search][top] rank=2 reason='actionable_container' text='Family Care' rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,310,1038,1042' area_ratio='0.3516' target_match=true match_source='title' matched_phrase='family care' negative_plugin_phrase=''
+[23:53:45] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/llCard' class='android.widget.LinearLayout' bounds='42,310,1038,1042' area_ratio='0.3516' target_match=true match_source='descendant' matched_phrase='family care' negative_plugin_phrase=''
+[23:53:45] [XMLENTRY][candidate_compare] scenario_id='life_family_care_plugin' rank=1 rid='' class='android.widget.RelativeLayout' bounds='42,310,1038,1042' own_text='' descendant_text_summary='Family Care,Family Care,Take care of yourself an' matched_phrase='family care' match_source='descendant' selected_priority='240:actionable_container' negative_plugin_phrase='' selected=true
+[23:53:45] [XMLENTRY][candidate_compare] scenario_id='life_family_care_plugin' rank=2 rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,310,1038,1042' own_text='' descendant_text_summary='Family Care,Family Care,Take care of yourself an' matched_phrase='family care' match_source='title' selected_priority='240:actionable_container' negative_plugin_phrase='' selected=false
+[23:53:45] [XMLENTRY][candidate_compare] scenario_id='life_family_care_plugin' rank=3 rid='com.samsung.android.oneconnect:id/llCard' class='android.widget.LinearLayout' bounds='42,310,1038,1042' own_text='Family Care' descendant_text_summary='Family Care,Take care of yourself an,안 창준 (Me)
+Active' matched_phrase='family care' match_source='descendant' selected_priority='240:card_like_container' negative_plugin_phrase='' selected=false
+[23:53:45] [XMLENTRY][select] reason='actionable_container' resource='' bounds='42,310,1038,1042' text='' target_match=true match_source='descendant' matched_phrase='family care'
+[23:53:45] [XMLENTRY][select_debug] scenario_id='life_family_care_plugin' class='android.widget.RelativeLayout' rid='' bounds='42,310,1038,1042' own_text='' own_content_desc='' normalized_own_text='' descendant_text_summary='Family Care,Family Care,Take care of yourself an' matched_phrase='family care' match_source='descendant' selected_reason='actionable_container' candidate_rank=1 title_descendant_disagree=false representative_visible_label='' representative_label_source='descendant'
+[23:53:47] [XMLENTRY][result] success=true reason='transition_confirmed'
+[23:53:47] [SCENARIO][pre_nav] success step=1 reason='Target node not found'
+[23:53:48] [SCENARIO][pre_nav] success
+[23:53:53] [CONTEXT] skipped reason='anchor_only_mode'
+[23:53:53] [CONTEXT] skipped reason='anchor_only_mode'
+[23:53:53] [CONTEXT] scenario='life_family_care_plugin' type='skipped' expected='' actual='' ok=True
+[23:53:53] [CONTEXT] verification passed scenario='life_family_care_plugin'
+[23:53:53] [ANCHOR][scenario_start] success scenario='life_family_care_plugin' selected={'success': False, 'status': 'failed', 'detail': 'ACTION_ACCESSIBILITY_FOCUS failed (resourceId=null, class=android.widget.ImageButton)', 'raw': {'timestamp': 1776264831394, 'reqId': 'ca152f36', 'success': False, 'reason': 'ACTION_ACCESSIBILITY_FOCUS failed (resourceId=null, class=android.widget.ImageButton)', 'action': 'FOCUS', 'targetName': '(?i).*navigate\\s*up.*', 'targetType': 'a', 'targetIndex': 0, 'attemptedClassName': 'android.widget.ImageButton', 'target': {'timestamp': 1776264831394, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.ImageButton', 'viewIdResourceName': None, 'text': None, 'contentDescription': 'Navigate up', 'mergedLabel': 'Navigate up', 'talkbackLabel': 'Navigate up', 'clickable': True, 'focusable': True, 'focused': True, 'accessibilityFocused': True, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 0, 't': 118, 'r': 180, 'b': 310, 'left': 0, 'top': 118, 'right': 180, 'bottom': 310}, 'children': []}}} matched=True stable=True context_ok=True reason='verified_without_select'
+[23:53:53] [TRACE][open_scenario] scenario='life_family_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=True
+[23:53:55] [ENTRY][post_open_identity] scenario_id='life_family_care_plugin' top_visible_labels='Navigate up Navigate up,Family Care,Add family member Add fa,More options More option,Me' top_focus_label='Navigate up Navigate up' back_button_present=true body_texts='Navigate up Navigate up,Family Care,Add family member Add fa,More options More option,View profile View profil' plugin_title_candidates='Navigate up Navigate up,Family Care,Add family member Add fa' verify_hit=true special_token_hit=false
+[23:53:55] [ENTRY][special_state_check] detected=true signals='long_intro,cta,top_chrome_intro_cta' kind='setup_needed_or_empty_state'
+[23:53:55] [ENTRY][special_state_check] decision='route_to_special_state' reason='special_state_detected_consistent_intro_evidence'
+[23:53:55] [ENTRY][special_state_route] handling='back_after_read'
+[23:53:55] [ENTRY][special_state_route] main_traversal_skipped=true
+[23:53:55] [SCENARIO][special_state] detected scenario='life_family_care_plugin' entry_type='card' kind='setup_needed_or_empty_state' handling='back_after_read' verify_hit=true long_intro_like=true special_hits='' cta_hits='set up'
+[23:53:57] [SPECIAL_STATE][recover] start
+[23:53:57] [LIFE_RESET] start
+[23:53:58] [LIFE_RESET] app_inside=true
+[23:53:58] [LIFE_RESET] bottom_nav_ready=true
+[23:53:59] [LIFE_RESET][tab_reselect_attempt] scenario='life_family_care_plugin' phase='special_state_post_back' attempt=1/2 package_inside=true global_nav_visible=true select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services'
+[23:54:00] [LIFE_RESET][tab_reselect_result] scenario='life_family_care_plugin' phase='special_state_post_back' attempt=1/2 select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services' select_raw='{'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776264840591, 'reqId': 'c5d3edfb', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': 'com.samsung.android.oneconnect:id/menu_services', 'targetType': 'r', 'targetIndex': 0, 'attemptedResourceId': 'com.samsung.android.oneconnect:id/menu_services', 'attemptedClassName': 'android.widget.Button', 'target': {'timestamp': 1776264840592, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.Button', 'viewIdResourceName': 'com.samsung.android.oneconnect:id/menu_services', 'text': None, 'contentDescription': 'Selected, Life, Tab 3 of 5', 'mergedLabel': 'Selected, Life, Tab 3 of 5', 'talkbackLabel': 'Selected, Life, Tab 3 of 5', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': False, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 443, 't': 2316, 'r': 637, 'b': 2496, 'left': 443, 'top': 2316, 'right': 637, 'bottom': 2496}, 'children': []}}}' select_success=true verify_selected_bottom_tab_ok=true verify_actual='' verify_source='pre_select_snapshot' life_tab_reselected=true basis='select_success_only'
+[23:54:00] [LIFE_RESET] life_tab_reselected=true
+[23:54:01] [LIFE_RESET] verify phase='life_reset' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=false life_list_ready=true
+[23:54:01] [LIFE_RESET] plugin_card_list_visible=false (soft_only=true)
+[23:54:01] [LIFE_RESET] life_list_ready=true
+[23:54:01] [LIFE_RESET] success=true reason='life_tab_ready'
+[23:54:01] [RECOVER] success reason='life_reset_ready'
+[23:54:02] [SPECIAL_STATE][post_recover_check] inside_smartthings=true package=true app_bar_hits=4
+[23:54:02] [SPECIAL_STATE][recover] success=true target='life_plugin_list' reason='life_plugin_list_recovered'
+[23:54:02] [SCENARIO][entry_contract] handled scenario='life_family_care_plugin' entry_type='card' reason='special_state_handled' detail='onboarding_back_exit_recovered' back_status='back_sent_exit'
+[23:54:02] [PERF][scenario_summary] scenario=life_family_care_plugin tab=(?i).*life.* total_runtime=31.7 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[23:54:02] [RESULT] skipped anchor rows count=1
+[23:54:02] [SAVE] writing sheets raw/filtered/summary/result
+[23:54:02] [SAVE] filtered rows=6, raw rows=6
+[23:54:03] [SAVE] saved excel: output/talkback_compare_20260415_234858.xlsx rows=6 with_images=False
+[23:54:03] [LIFE_RESET] start
+[23:54:03] [RECOVER][pre_life_reset_state] scenario='life_plant_care_plugin' focus_view_id='com.samsung.android.oneconnect:id/menu_services' focus_label='Selected, Life, Tab 3 of 5' is_global_nav=true back_button_visible=false bottom_nav_candidates=5 life_tab_candidate_present=true life_tab_selected_candidate_present=false
+[23:54:03] [LIFE_RESET] app_inside=true
+[23:54:03] [LIFE_RESET] bottom_nav_ready=true
+[23:54:04] [LIFE_RESET][tab_reselect_attempt] scenario='life_plant_care_plugin' phase='default' attempt=1/2 package_inside=true global_nav_visible=true select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services'
+[23:54:05] [LIFE_RESET][tab_reselect_result] scenario='life_plant_care_plugin' phase='default' attempt=1/2 select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services' select_raw='{'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776264845876, 'reqId': 'd278b327', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': 'com.samsung.android.oneconnect:id/menu_services', 'targetType': 'r', 'targetIndex': 0, 'attemptedResourceId': 'com.samsung.android.oneconnect:id/menu_services', 'attemptedClassName': 'android.widget.Button', 'target': {'timestamp': 1776264845876, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.Button', 'viewIdResourceName': 'com.samsung.android.oneconnect:id/menu_services', 'text': None, 'contentDescription': 'Selected, Life, Tab 3 of 5', 'mergedLabel': 'Selected, Life, Tab 3 of 5', 'talkbackLabel': 'Selected, Life, Tab 3 of 5', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': False, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 443, 't': 2316, 'r': 637, 'b': 2496, 'left': 443, 'top': 2316, 'right': 637, 'bottom': 2496}, 'children': []}}}' select_success=true verify_selected_bottom_tab_ok=true verify_actual='' verify_source='pre_select_snapshot' life_tab_reselected=true basis='select_success_only'
+[23:54:05] [LIFE_RESET] life_tab_reselected=true
+[23:54:07] [LIFE_RESET] verify phase='life_reset' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=false life_list_ready=true
+[23:54:07] [LIFE_RESET] plugin_card_list_visible=false (soft_only=true)
+[23:54:07] [LIFE_RESET] life_list_ready=true
+[23:54:07] [LIFE_RESET] success=true reason='life_tab_ready'
+[23:54:07] [RECOVER] success reason='life_reset_ready'
+[23:54:07] [SCENARIO][stabilization] scenario='life_plant_care_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[23:54:08] [LIFE_RESET] verify phase='plugin_start_initial' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=false life_list_ready=true
+[23:54:08] [LIFE_RESET] plugin_card_list_visible=false (soft_only=true)
+[23:54:08] [PLUGIN_START][recover_before_entry] triggered=false
+[23:54:08] [PLUGIN_START][life_list_check] ok=true reason='life_tab_ready'
+[23:54:08] [PLUGIN_START][recover_before_entry] success=true
+[23:54:08] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[23:54:08] [TAB][select] fallback_to_legacy=True scenario='life_plant_care_plugin'
+[23:54:15] [TAB][focus_align_fast] failed scenario='life_plant_care_plugin' attempt=2/2 focus_label='' focus_resource=''
+[23:54:16] [TAB][select] scenario='life_plant_care_plugin' selected=True matched_fields=['text'] score=40
+[23:54:16] [TAB][verify] selected_bottom_tab ok=True actual=''
+[23:54:16] [TRACE][open_scenario] scenario='life_plant_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=False
+[23:54:16] [TAB][focus_align_fast] scenario='life_plant_care_plugin' main_tab=false transition_scenario=true result='failed'
+[23:54:16] [TAB][focus_align_fast] failed but proceeding (transition scenario) scenario='life_plant_care_plugin'
+[23:54:16] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^plant\s*care$|.*plant\s*care.*|.*플랜트\s*케어.*|.*식물.*)'
+[23:54:16] [XMLENTRY][search] pre_reset scroll_to_top=true
+[23:54:22] [XMLENTRY][search] step=0/5 visible_candidates=70 target_candidates=0
+[23:54:22] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:54:22] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:54:22] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='162,118,810,310' area_ratio='0.0600' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:54:25] [XMLENTRY][scroll] step=0/5 performed=true reason='no_strict_target_candidate'
+[23:54:27] [XMLENTRY][search] step=1/5 visible_candidates=62 target_candidates=5
+[23:54:27] [XMLENTRY][search][top] rank=1 reason='actionable_container' text='' rid='' class='android.widget.RelativeLayout' bounds='42,2192,1038,2316' area_ratio='0.0596' target_match=true match_source='descendant' matched_phrase='plant care' negative_plugin_phrase=''
+[23:54:27] [XMLENTRY][search][top] rank=2 reason='actionable_container' text='Plant Care' rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,2192,1038,2316' area_ratio='0.0596' target_match=true match_source='title' matched_phrase='plant care' negative_plugin_phrase=''
+[23:54:27] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/llCard' class='android.widget.LinearLayout' bounds='42,2192,1038,2316' area_ratio='0.0596' target_match=true match_source='descendant' matched_phrase='plant care' negative_plugin_phrase=''
+[23:54:27] [XMLENTRY][candidate_compare] scenario_id='life_plant_care_plugin' rank=1 rid='' class='android.widget.RelativeLayout' bounds='42,2192,1038,2316' own_text='' descendant_text_summary='Plant Care,Plant Care,Labs' matched_phrase='plant care' match_source='descendant' selected_priority='240:actionable_container' negative_plugin_phrase='' selected=true
+[23:54:27] [XMLENTRY][candidate_compare] scenario_id='life_plant_care_plugin' rank=2 rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,2192,1038,2316' own_text='' descendant_text_summary='Plant Care,Plant Care,Labs' matched_phrase='plant care' match_source='title' selected_priority='240:actionable_container' negative_plugin_phrase='' selected=false
+[23:54:27] [XMLENTRY][candidate_compare] scenario_id='life_plant_care_plugin' rank=3 rid='com.samsung.android.oneconnect:id/llCard' class='android.widget.LinearLayout' bounds='42,2192,1038,2316' own_text='Plant Care' descendant_text_summary='Plant Care,Labs' matched_phrase='plant care' match_source='descendant' selected_priority='240:card_like_container' negative_plugin_phrase='' selected=false
+[23:54:27] [XMLENTRY][select] reason='actionable_container' resource='' bounds='42,2192,1038,2316' text='' target_match=true match_source='descendant' matched_phrase='plant care'
+[23:54:27] [XMLENTRY][select_debug] scenario_id='life_plant_care_plugin' class='android.widget.RelativeLayout' rid='' bounds='42,2192,1038,2316' own_text='' own_content_desc='' normalized_own_text='' descendant_text_summary='Plant Care,Plant Care,Labs' matched_phrase='plant care' match_source='descendant' selected_reason='actionable_container' candidate_rank=1 title_descendant_disagree=false representative_visible_label='' representative_label_source='descendant'
+[23:54:35] [XMLENTRY][result] success=true reason='transition_confirmed'
+[23:54:35] [SCENARIO][pre_nav] success step=1 reason='Target node not found'
+[23:54:36] [SCENARIO][pre_nav] success
+[23:54:41] [CONTEXT] skipped reason='anchor_only_mode'
+[23:54:41] [CONTEXT] skipped reason='anchor_only_mode'
+[23:54:41] [CONTEXT] scenario='life_plant_care_plugin' type='skipped' expected='' actual='' ok=True
+[23:54:41] [CONTEXT] verification passed scenario='life_plant_care_plugin'
+[23:54:41] [ANCHOR][scenario_start] success scenario='life_plant_care_plugin' selected=True matched=True stable=True context_ok=True reason='selected_and_verified'
+[23:54:41] [TRACE][open_scenario] scenario='life_plant_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=True
+[23:54:42] [ENTRY][post_open_identity] scenario_id='life_plant_care_plugin' top_visible_labels='Navigate up Navigate up,Plant Care Plant Care,Add Add,More options More option,All All' top_focus_label='Navigate up  Navigate up' back_button_present=true body_texts='Navigate up Navigate up,Plant Care Plant Care,Add Add,More options More option,All All' plugin_title_candidates='Navigate up Navigate up,Plant Care Plant Care,Add Add' verify_hit=true special_token_hit=false
+[23:54:42] [ENTRY][special_state_check] detected=false signals='long_intro,intro_focus' kind='none'
+[23:54:42] [ENTRY][special_state_check] decision='continue_verify'
+[23:54:42] [SCENARIO][entry_contract] success scenario='life_plant_care_plugin' entry_type='card' reason='success_verified' detail='plugin_open_verified'
+[23:54:43] [TRACE][post_open_focus] scenario='life_plant_care_plugin' view_id='back' label='Navigate up' speech='Navigate up' bounds='{'l': 72, 't': 118, 'r': 144, 'b': 310, 'left': 72, 'top': 118, 'right': 144, 'bottom': 310}' source='top_level' top_level=True
+[23:54:48] [TRACE][anchor_row] scenario='life_plant_care_plugin' step=0 view_id='back' visible='Navigate up' speech='Navigate up' normalized_visible='navigate up' is_global_nav=False
+[23:54:49] [ROW] fingerprint='back|navigate up|navigate up|108,214' normalized_fingerprint='back|navigate up|navigate up' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=1 noise=false
+[23:54:49] [RESULT] skipped anchor rows count=2
+[23:54:49] [SAVE] writing sheets raw/filtered/summary/result
+[23:54:49] [SAVE] filtered rows=7, raw rows=7
+[23:54:49] [SAVE] saved excel: output/talkback_compare_20260415_234858.xlsx rows=7 with_images=False
+[23:54:49] [STEP] START tab='(?i).*life.*' step=1
+[23:54:54] [ROW] fingerprint='|plant care|plant care|498,214' normalized_fingerprint='|plant care|plant care' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=2 noise=false
+[23:54:54] [STEP] END tab='(?i).*life.*' step=1 elapsed=4.56s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776264889959, 'reqId': 'ffcc5b51', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Plant Care' speech='Plant Care' crop='output\talkback_compare_20260415_234858\crops\i_._life._step_1_Plant_Care.png' timing(move=0.535s ann=2.874s get_focus=1.148s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.737s total=5.296s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='1856a3bc'
+[23:54:54] [STOP][eval] step=1 scenario='life_plant_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=2 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:1|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776264889959, 'reqid': 'ffcc5b51', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[23:54:54] [OVERLAY] blocked no_overlay_policy scenario='life_plant_care_plugin' tab='(?i).*life.*' step=1
+[23:54:54] [STOP][summary] scenario='life_plant_care_plugin' stop_triggered=false stop_step=1 reason='safety_limit'
+[23:54:54] [PERF][scenario_summary] scenario=life_plant_care_plugin tab=(?i).*life.* total_runtime=46.9 total_steps=2 main_step_count=2 overlay_step_count=0 overlay_count=0 avg_get_focus=1.115 avg_move=0.268 avg_crop=0.732 avg_step_total=5.191 step_total_sample_count=2 avg_get_focus_main=1.115 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=2 get_focus_strong_skip_rate=100.0 step_dump_used_count=0 save_excel_count=1 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[23:54:54] [LIFE_RESET] start
+[23:54:55] [LIFE_RESET] app_inside=true
+[23:54:56] [LIFE_RESET] bottom_nav_ready=true
+[23:54:57] [LIFE_RESET][tab_reselect_attempt] scenario='life_clothing_care_plugin' phase='default' attempt=1/2 package_inside=true global_nav_visible=true select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services'
+[23:54:59] [LIFE_RESET][tab_reselect_result] scenario='life_clothing_care_plugin' phase='default' attempt=1/2 select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services' select_raw='{'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776264899365, 'reqId': 'cbafed3c', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': 'com.samsung.android.oneconnect:id/menu_services', 'targetType': 'r', 'targetIndex': 0, 'attemptedResourceId': 'com.samsung.android.oneconnect:id/menu_services', 'attemptedClassName': 'android.widget.Button', 'target': {'timestamp': 1776264899366, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.Button', 'viewIdResourceName': 'com.samsung.android.oneconnect:id/menu_services', 'text': None, 'contentDescription': 'Selected, Life, Tab 3 of 5', 'mergedLabel': 'Selected, Life, Tab 3 of 5', 'talkbackLabel': 'Selected, Life, Tab 3 of 5', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': False, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 443, 't': 2316, 'r': 637, 'b': 2496, 'left': 443, 'top': 2316, 'right': 637, 'bottom': 2496}, 'children': []}}}' select_success=true verify_selected_bottom_tab_ok=true verify_actual='' verify_source='pre_select_snapshot' life_tab_reselected=true basis='select_success_only'
+[23:54:59] [LIFE_RESET] life_tab_reselected=true
+[23:55:00] [LIFE_RESET] verify phase='life_reset' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:55:00] [LIFE_RESET] life_list_ready=true
+[23:55:00] [LIFE_RESET] success=true reason='life_tab_ready_with_card_evidence'
+[23:55:00] [RECOVER] success reason='life_reset_ready'
+[23:55:00] [SCENARIO][stabilization] scenario='life_clothing_care_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[23:55:01] [LIFE_RESET] verify phase='plugin_start_initial' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:55:01] [PLUGIN_START][recover_before_entry] triggered=false
+[23:55:01] [PLUGIN_START][life_list_check] ok=true reason='life_tab_ready_with_card_evidence'
+[23:55:01] [PLUGIN_START][recover_before_entry] success=true
+[23:55:01] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[23:55:01] [TAB][select] fallback_to_legacy=True scenario='life_clothing_care_plugin'
+[23:55:07] [TAB][focus_align_fast] failed scenario='life_clothing_care_plugin' attempt=2/2 focus_label='' focus_resource=''
+[23:55:08] [TAB][select] scenario='life_clothing_care_plugin' selected=True matched_fields=['text'] score=40
+[23:55:08] [TAB][verify] selected_bottom_tab ok=True actual=''
+[23:55:08] [TRACE][open_scenario] scenario='life_clothing_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=False
+[23:55:08] [TAB][focus_align_fast] scenario='life_clothing_care_plugin' main_tab=false transition_scenario=true result='failed'
+[23:55:08] [TAB][focus_align_fast] failed but proceeding (transition scenario) scenario='life_clothing_care_plugin'
+[23:55:09] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^clothing\s*care$|.*clothing\s*care.*|.*shoe\s*care.*|.*의류.*)'
+[23:55:09] [XMLENTRY][search] pre_reset scroll_to_top=true
+[23:55:15] [XMLENTRY][search] step=0/5 visible_candidates=70 target_candidates=0
+[23:55:15] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:55:15] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:55:15] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='162,118,810,310' area_ratio='0.0600' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:55:17] [XMLENTRY][scroll] step=0/5 performed=true reason='no_strict_target_candidate'
+[23:55:20] [XMLENTRY][search] step=1/5 visible_candidates=62 target_candidates=0
+[23:55:20] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:55:20] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:55:20] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='162,118,810,310' area_ratio='0.0600' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:55:23] [XMLENTRY][scroll] step=1/5 performed=true reason='no_strict_target_candidate'
+[23:55:25] [XMLENTRY][search] step=2/5 visible_candidates=60 target_candidates=8
+[23:55:25] [XMLENTRY][search][top] rank=1 reason='actionable_container' text='' rid='' class='android.widget.RelativeLayout' bounds='42,978,1038,1710' area_ratio='0.3516' target_match=true match_source='descendant' matched_phrase='clothing care' negative_plugin_phrase=''
+[23:55:25] [XMLENTRY][search][top] rank=2 reason='actionable_container' text='Clothing Care' rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,978,1038,1710' area_ratio='0.3516' target_match=true match_source='title' matched_phrase='clothing care' negative_plugin_phrase=''
+[23:55:25] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/llCard' class='android.widget.LinearLayout' bounds='42,978,1038,1710' area_ratio='0.3516' target_match=true match_source='descendant' matched_phrase='clothing care' negative_plugin_phrase=''
+[23:55:25] [XMLENTRY][candidate_compare] scenario_id='life_clothing_care_plugin' rank=1 rid='' class='android.widget.RelativeLayout' bounds='42,978,1038,1710' own_text='' descendant_text_summary='Clothing Care,Clothing Care,To use the clothing and ' matched_phrase='clothing care' match_source='descendant' selected_priority='240:actionable_container' negative_plugin_phrase='' selected=true
+[23:55:25] [XMLENTRY][candidate_compare] scenario_id='life_clothing_care_plugin' rank=2 rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,978,1038,1710' own_text='' descendant_text_summary='Clothing Care,Clothing Care,To use the clothing and ' matched_phrase='clothing care' match_source='title' selected_priority='240:actionable_container' negative_plugin_phrase='' selected=false
+[23:55:25] [XMLENTRY][candidate_compare] scenario_id='life_clothing_care_plugin' rank=3 rid='com.samsung.android.oneconnect:id/llCard' class='android.widget.LinearLayout' bounds='42,978,1038,1710' own_text='Clothing Care' descendant_text_summary='Clothing Care,To use the clothing and ' matched_phrase='clothing care' match_source='descendant' selected_priority='240:card_like_container' negative_plugin_phrase='' selected=false
+[23:55:25] [XMLENTRY][select] reason='actionable_container' resource='' bounds='42,978,1038,1710' text='' target_match=true match_source='descendant' matched_phrase='clothing care'
+[23:55:25] [XMLENTRY][select_debug] scenario_id='life_clothing_care_plugin' class='android.widget.RelativeLayout' rid='' bounds='42,978,1038,1710' own_text='' own_content_desc='' normalized_own_text='' descendant_text_summary='Clothing Care,Clothing Care,To use the clothing and ' matched_phrase='clothing care' match_source='descendant' selected_reason='actionable_container' candidate_rank=1 title_descendant_disagree=false representative_visible_label='' representative_label_source='descendant'
+[23:55:27] [XMLENTRY][result] success=true reason='transition_confirmed'
+[23:55:27] [SCENARIO][pre_nav] success step=1 reason='Target node not found'
+[23:55:28] [SCENARIO][pre_nav] success
+[23:55:33] [CONTEXT] skipped reason='anchor_only_mode'
+[23:55:33] [CONTEXT] skipped reason='anchor_only_mode'
+[23:55:33] [CONTEXT] scenario='life_clothing_care_plugin' type='skipped' expected='' actual='' ok=True
+[23:55:33] [CONTEXT] verification passed scenario='life_clothing_care_plugin'
+[23:55:33] [ANCHOR][scenario_start] success scenario='life_clothing_care_plugin' selected={'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776264931415, 'reqId': '2a6af77a', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': '(?i).*navigate\\s*up.*', 'targetType': 'a', 'targetIndex': 0, 'attemptedClassName': 'android.view.View', 'target': {'timestamp': 1776264931416, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.view.View', 'viewIdResourceName': None, 'text': 'Navigate up , Button', 'contentDescription': None, 'mergedLabel': 'Navigate up , Button', 'talkbackLabel': 'Navigate up , Button', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': False, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 72, 't': 202, 'r': 144, 'b': 274, 'left': 72, 'top': 202, 'right': 144, 'bottom': 274}, 'children': []}}} matched=True stable=True context_ok=True reason='selected_and_verified'
+[23:55:33] [TRACE][open_scenario] scenario='life_clothing_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=True
+[23:55:35] [ENTRY][post_open_identity] scenario_id='life_clothing_care_plugin' top_visible_labels='Navigate up , Button Nav,Clothing Care Clothing C,More options , Button Mo,Information , Button Inf,Information , Button Inf' top_focus_label='Navigate up , Button  Navigate up , Button' back_button_present=true body_texts='Navigate up , Button Nav,Clothing Care Clothing C,More options , Button Mo,Information , Button Inf,Information , Button Inf' plugin_title_candidates='Clothing Care Clothing C,Start , Button Start , B,Schedule , Button Schedu' verify_hit=true special_token_hit=false
+[23:55:35] [ENTRY][special_state_check] detected=true signals='long_intro,cta,intro_focus' kind='setup_needed_or_empty_state'
+[23:55:35] [ENTRY][special_state_check] decision='route_to_special_state' reason='special_state_detected_consistent_intro_evidence'
+[23:55:35] [ENTRY][special_state_route] handling='back_after_read'
+[23:55:35] [ENTRY][special_state_route] main_traversal_skipped=true
+[23:55:35] [SCENARIO][special_state] detected scenario='life_clothing_care_plugin' entry_type='card' kind='setup_needed_or_empty_state' handling='back_after_read' verify_hit=true long_intro_like=true special_hits='' cta_hits='start,try'
+[23:55:37] [SPECIAL_STATE][recover] start
+[23:55:37] [LIFE_RESET] start
+[23:55:38] [LIFE_RESET] app_inside=true
+[23:55:38] [LIFE_RESET] bottom_nav_ready=true
+[23:55:39] [LIFE_RESET][tab_reselect_attempt] scenario='life_clothing_care_plugin' phase='special_state_post_back' attempt=1/2 package_inside=true global_nav_visible=true select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services'
+[23:55:40] [LIFE_RESET][tab_reselect_result] scenario='life_clothing_care_plugin' phase='special_state_post_back' attempt=1/2 select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services' select_raw='{'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776264940464, 'reqId': '55052293', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': 'com.samsung.android.oneconnect:id/menu_services', 'targetType': 'r', 'targetIndex': 0, 'attemptedResourceId': 'com.samsung.android.oneconnect:id/menu_services', 'attemptedClassName': 'android.widget.Button', 'target': {'timestamp': 1776264940464, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.Button', 'viewIdResourceName': 'com.samsung.android.oneconnect:id/menu_services', 'text': None, 'contentDescription': 'Selected, Life, Tab 3 of 5', 'mergedLabel': 'Selected, Life, Tab 3 of 5', 'talkbackLabel': 'Selected, Life, Tab 3 of 5', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': False, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 443, 't': 2316, 'r': 637, 'b': 2496, 'left': 443, 'top': 2316, 'right': 637, 'bottom': 2496}, 'children': []}}}' select_success=true verify_selected_bottom_tab_ok=true verify_actual='' verify_source='pre_select_snapshot' life_tab_reselected=true basis='select_success_only'
+[23:55:40] [LIFE_RESET] life_tab_reselected=true
+[23:55:41] [LIFE_RESET] verify phase='life_reset' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:55:41] [LIFE_RESET] life_list_ready=true
+[23:55:41] [LIFE_RESET] success=true reason='life_tab_ready_with_card_evidence'
+[23:55:41] [RECOVER] success reason='life_reset_ready'
+[23:55:42] [SPECIAL_STATE][post_recover_check] inside_smartthings=true package=true app_bar_hits=4
+[23:55:42] [SPECIAL_STATE][recover] success=true target='life_plugin_list' reason='life_plugin_list_recovered'
+[23:55:42] [SCENARIO][entry_contract] handled scenario='life_clothing_care_plugin' entry_type='card' reason='special_state_handled' detail='onboarding_back_exit_recovered' back_status='back_sent_exit'
+[23:55:42] [PERF][scenario_summary] scenario=life_clothing_care_plugin tab=(?i).*life.* total_runtime=42.3 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[23:55:42] [RESULT] skipped anchor rows count=2
+[23:55:42] [SAVE] writing sheets raw/filtered/summary/result
+[23:55:42] [SAVE] filtered rows=9, raw rows=9
+[23:55:42] [SAVE] saved excel: output/talkback_compare_20260415_234858.xlsx rows=9 with_images=False
+[23:55:42] [LIFE_RESET] start
+[23:55:43] [LIFE_RESET] app_inside=true
+[23:55:43] [LIFE_RESET] bottom_nav_ready=true
+[23:55:44] [LIFE_RESET][tab_reselect_attempt] scenario='life_find_plugin' phase='default' attempt=1/2 package_inside=true global_nav_visible=true select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services'
+[23:55:45] [LIFE_RESET][tab_reselect_result] scenario='life_find_plugin' phase='default' attempt=1/2 select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services' select_raw='{'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776264945818, 'reqId': '462d1369', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': 'com.samsung.android.oneconnect:id/menu_services', 'targetType': 'r', 'targetIndex': 0, 'attemptedResourceId': 'com.samsung.android.oneconnect:id/menu_services', 'attemptedClassName': 'android.widget.Button', 'target': {'timestamp': 1776264945818, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.Button', 'viewIdResourceName': 'com.samsung.android.oneconnect:id/menu_services', 'text': None, 'contentDescription': 'Selected, Life, Tab 3 of 5', 'mergedLabel': 'Selected, Life, Tab 3 of 5', 'talkbackLabel': 'Selected, Life, Tab 3 of 5', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': False, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 443, 't': 2316, 'r': 637, 'b': 2496, 'left': 443, 'top': 2316, 'right': 637, 'bottom': 2496}, 'children': []}}}' select_success=true verify_selected_bottom_tab_ok=true verify_actual='' verify_source='pre_select_snapshot' life_tab_reselected=true basis='select_success_only'
+[23:55:45] [LIFE_RESET] life_tab_reselected=true
+[23:55:47] [LIFE_RESET] verify phase='life_reset' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:55:47] [LIFE_RESET] life_list_ready=true
+[23:55:47] [LIFE_RESET] success=true reason='life_tab_ready_with_card_evidence'
+[23:55:47] [RECOVER] success reason='life_reset_ready'
+[23:55:47] [SCENARIO][stabilization] scenario='life_find_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[23:55:48] [LIFE_RESET] verify phase='plugin_start_initial' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:55:48] [PLUGIN_START][recover_before_entry] triggered=false
+[23:55:48] [PLUGIN_START][life_list_check] ok=true reason='life_tab_ready_with_card_evidence'
+[23:55:48] [PLUGIN_START][recover_before_entry] success=true
+[23:55:48] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[23:55:48] [TAB][select] fallback_to_legacy=True scenario='life_find_plugin'
+[23:55:54] [TAB][focus_align_fast] failed scenario='life_find_plugin' attempt=2/2 focus_label='' focus_resource=''
+[23:55:55] [TAB][select] scenario='life_find_plugin' selected=True matched_fields=['text'] score=40
+[23:55:55] [TAB][verify] selected_bottom_tab ok=True actual=''
+[23:55:55] [TRACE][open_scenario] scenario='life_find_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=False
+[23:55:55] [TAB][focus_align_fast] scenario='life_find_plugin' main_tab=false transition_scenario=true result='failed'
+[23:55:55] [TAB][focus_align_fast] failed but proceeding (transition scenario) scenario='life_find_plugin'
+[23:55:56] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^smart\s*find$|^find$|smart\s*find\.|.*smart\s*find.*)'
+[23:55:56] [XMLENTRY][search] pre_reset scroll_to_top=true
+[23:56:02] [XMLENTRY][search] step=0/5 visible_candidates=70 target_candidates=0
+[23:56:02] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:56:02] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:56:02] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='162,118,810,310' area_ratio='0.0600' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:56:04] [XMLENTRY][scroll] step=0/5 performed=true reason='no_strict_target_candidate'
+[23:56:07] [XMLENTRY][search] step=1/5 visible_candidates=62 target_candidates=0
+[23:56:07] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:56:07] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:56:07] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='162,118,810,310' area_ratio='0.0600' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:56:10] [XMLENTRY][scroll] step=1/5 performed=true reason='no_strict_target_candidate'
+[23:56:13] [XMLENTRY][search] step=2/5 visible_candidates=60 target_candidates=0
+[23:56:13] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:56:13] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:56:13] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='162,118,810,310' area_ratio='0.0600' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:56:15] [XMLENTRY][scroll] step=2/5 performed=true reason='no_strict_target_candidate'
+[23:56:18] [XMLENTRY][search] step=3/5 visible_candidates=59 target_candidates=1
+[23:56:18] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='Find' rid='com.samsung.android.oneconnect:id/fme_container_name' class='android.widget.LinearLayout' bounds='42,538,882,670' area_ratio='0.0535' target_match=true match_source='title' matched_phrase='find' negative_plugin_phrase=''
+[23:56:18] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:56:18] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:56:18] [XMLENTRY][candidate_compare] scenario_id='life_find_plugin' rank=1 rid='com.samsung.android.oneconnect:id/fme_container_name' class='android.widget.LinearLayout' bounds='42,538,882,670' own_text='' descendant_text_summary='Find' matched_phrase='find' match_source='title' selected_priority='240:card_like_container' negative_plugin_phrase='' selected=true
+[23:56:18] [XMLENTRY][candidate_compare] scenario_id='life_find_plugin' rank=2 rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' own_text='' descendant_text_summary='Location QR code,Add,More options' matched_phrase='' match_source='' selected_priority='40:card_like_container' negative_plugin_phrase='' selected=false
+[23:56:18] [XMLENTRY][candidate_compare] scenario_id='life_find_plugin' rank=3 rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' own_text='' descendant_text_summary='Location QR code,Add,More options' matched_phrase='' match_source='' selected_priority='40:card_like_container' negative_plugin_phrase='' selected=false
+[23:56:18] [XMLENTRY][select] reason='card_like_container' resource='com.samsung.android.oneconnect:id/fme_container_name' bounds='42,538,882,670' text='' target_match=true match_source='title' matched_phrase='find'
+[23:56:18] [XMLENTRY][select_debug] scenario_id='life_find_plugin' class='android.widget.LinearLayout' rid='com.samsung.android.oneconnect:id/fme_container_name' bounds='42,538,882,670' own_text='' own_content_desc='' normalized_own_text='' descendant_text_summary='Find' matched_phrase='find' match_source='title' selected_reason='card_like_container' candidate_rank=1 title_descendant_disagree=false representative_visible_label='' representative_label_source='descendant'
+[23:56:40] [XMLENTRY][result] success=true reason='transition_confirmed'
+[23:56:40] [SCENARIO][pre_nav] success step=1 reason='Target node not found'
+[23:56:42] [SCENARIO][pre_nav] success
+[23:56:48] [ANCHOR][fallback] explicit anchor not matched, trying top content fallback
+[23:56:48] [ANCHOR][fallback] selected candidate label='Agree Agree' position='top_center'
+[23:56:48] [ANCHOR][plugin_fallback] using_top_start_candidate position='top_center'
+[23:56:58] [CONTEXT] skipped reason='anchor_only_mode'
+[23:56:58] [CONTEXT] skipped reason='anchor_only_mode'
+[23:56:58] [CONTEXT] scenario='life_find_plugin' type='skipped' expected='' actual='' ok=True
+[23:56:58] [CONTEXT] verification passed scenario='life_find_plugin'
+[23:56:58] [ANCHOR][scenario_start] success scenario='life_find_plugin' selected=True matched=True stable=True context_ok=True reason='selected_and_verified'
+[23:56:58] [ANCHOR][plugin_fallback] stabilized_by='selected'
+[23:56:58] [TRACE][open_scenario] scenario='life_find_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=True
+[23:57:26] [ENTRY][post_open_identity] scenario_id='life_find_plugin' top_visible_labels='Locate your devices anyt,To continue, agree to th,Agree Agree' top_focus_label='Agree' back_button_present=false body_texts='Locate your devices anyt,To continue, agree to th,Agree Agree' plugin_title_candidates='Locate your devices anyt,To continue, agree to th,Agree Agree' verify_hit=false special_token_hit=false
+[23:57:26] [ENTRY][special_state_check] detected=true signals='long_intro,cta,low_content_diversity' kind='setup_needed_or_empty_state'
+[23:57:26] [ENTRY][special_state_check] decision='route_to_special_state' reason='special_state_detected_verify_not_success'
+[23:57:26] [ENTRY][special_state_route] handling='back_after_read'
+[23:57:26] [ENTRY][special_state_route] main_traversal_skipped=true
+[23:57:26] [SCENARIO][special_state] detected scenario='life_find_plugin' entry_type='card' kind='setup_needed_or_empty_state' handling='back_after_read' verify_hit=false long_intro_like=true special_hits='' cta_hits='continue'
+[23:57:28] [SPECIAL_STATE][recover] start
+[23:57:28] [LIFE_RESET] start
+[23:57:28] [LIFE_RESET] app_inside=true
+[23:57:28] [LIFE_RESET] bottom_nav_ready=true
+[23:57:29] [LIFE_RESET][tab_reselect_attempt] scenario='life_find_plugin' phase='special_state_post_back' attempt=1/2 package_inside=true global_nav_visible=true select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services'
+[23:57:30] [LIFE_RESET][tab_reselect_result] scenario='life_find_plugin' phase='special_state_post_back' attempt=1/2 select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services' select_raw='{'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776265051083, 'reqId': 'fc8a1e2b', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': 'com.samsung.android.oneconnect:id/menu_services', 'targetType': 'r', 'targetIndex': 0, 'attemptedResourceId': 'com.samsung.android.oneconnect:id/menu_services', 'attemptedClassName': 'android.widget.Button', 'target': {'timestamp': 1776265051084, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.Button', 'viewIdResourceName': 'com.samsung.android.oneconnect:id/menu_services', 'text': None, 'contentDescription': 'Selected, Life, Tab 3 of 5', 'mergedLabel': 'Selected, Life, Tab 3 of 5', 'talkbackLabel': 'Selected, Life, Tab 3 of 5', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': False, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 443, 't': 2316, 'r': 637, 'b': 2496, 'left': 443, 'top': 2316, 'right': 637, 'bottom': 2496}, 'children': []}}}' select_success=true verify_selected_bottom_tab_ok=true verify_actual='' verify_source='pre_select_snapshot' life_tab_reselected=true basis='select_success_only'
+[23:57:30] [LIFE_RESET] life_tab_reselected=true
+[23:57:32] [LIFE_RESET] verify phase='life_reset' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:57:32] [LIFE_RESET] life_list_ready=true
+[23:57:32] [LIFE_RESET] success=true reason='life_tab_ready_with_card_evidence'
+[23:57:32] [RECOVER] success reason='life_reset_ready'
+[23:57:33] [SPECIAL_STATE][post_recover_check] inside_smartthings=true package=true app_bar_hits=4
+[23:57:33] [SPECIAL_STATE][recover] success=true target='life_plugin_list' reason='life_plugin_list_recovered'
+[23:57:33] [SCENARIO][entry_contract] handled scenario='life_find_plugin' entry_type='card' reason='special_state_handled' detail='onboarding_back_exit_recovered' back_status='back_sent_exit'
+[23:57:33] [PERF][scenario_summary] scenario=life_find_plugin tab=(?i).*life.* total_runtime=105.7 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[23:57:33] [RESULT] skipped anchor rows count=2
+[23:57:33] [SAVE] writing sheets raw/filtered/summary/result
+[23:57:33] [SAVE] filtered rows=10, raw rows=10
+[23:57:33] [SAVE] saved excel: output/talkback_compare_20260415_234858.xlsx rows=10 with_images=False
+[23:57:33] [LIFE_RESET] start
+[23:57:33] [LIFE_RESET] app_inside=true
+[23:57:33] [LIFE_RESET] bottom_nav_ready=true
+[23:57:35] [LIFE_RESET][tab_reselect_attempt] scenario='life_video_plugin' phase='default' attempt=1/2 package_inside=true global_nav_visible=true select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services'
+[23:57:36] [LIFE_RESET][tab_reselect_result] scenario='life_video_plugin' phase='default' attempt=1/2 select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services' select_raw='{'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776265056214, 'reqId': 'bbb24778', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': 'com.samsung.android.oneconnect:id/menu_services', 'targetType': 'r', 'targetIndex': 0, 'attemptedResourceId': 'com.samsung.android.oneconnect:id/menu_services', 'attemptedClassName': 'android.widget.Button', 'target': {'timestamp': 1776265056215, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.Button', 'viewIdResourceName': 'com.samsung.android.oneconnect:id/menu_services', 'text': None, 'contentDescription': 'Selected, Life, Tab 3 of 5', 'mergedLabel': 'Selected, Life, Tab 3 of 5', 'talkbackLabel': 'Selected, Life, Tab 3 of 5', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': False, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 443, 't': 2316, 'r': 637, 'b': 2496, 'left': 443, 'top': 2316, 'right': 637, 'bottom': 2496}, 'children': []}}}' select_success=true verify_selected_bottom_tab_ok=true verify_actual='' verify_source='pre_select_snapshot' life_tab_reselected=true basis='select_success_only'
+[23:57:36] [LIFE_RESET] life_tab_reselected=true
+[23:57:38] [LIFE_RESET] verify phase='life_reset' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:57:38] [LIFE_RESET] life_list_ready=true
+[23:57:38] [LIFE_RESET] success=true reason='life_tab_ready_with_card_evidence'
+[23:57:38] [RECOVER] success reason='life_reset_ready'
+[23:57:38] [SCENARIO][stabilization] scenario='life_video_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[23:57:38] [LIFE_RESET] verify phase='plugin_start_initial' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:57:38] [PLUGIN_START][recover_before_entry] triggered=false
+[23:57:38] [PLUGIN_START][life_list_check] ok=true reason='life_tab_ready_with_card_evidence'
+[23:57:38] [PLUGIN_START][recover_before_entry] success=true
+[23:57:38] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[23:57:38] [TAB][select] fallback_to_legacy=True scenario='life_video_plugin'
+[23:57:45] [TAB][focus_align_fast] failed scenario='life_video_plugin' attempt=2/2 focus_label='' focus_resource=''
+[23:57:46] [TAB][select] scenario='life_video_plugin' selected=True matched_fields=['text'] score=40
+[23:57:46] [TAB][verify] selected_bottom_tab ok=True actual=''
+[23:57:46] [TRACE][open_scenario] scenario='life_video_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=False
+[23:57:46] [TAB][focus_align_fast] scenario='life_video_plugin' main_tab=false transition_scenario=true result='failed'
+[23:57:46] [TAB][focus_align_fast] failed but proceeding (transition scenario) scenario='life_video_plugin'
+[23:57:46] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^video$|^smart\s*video$|smart\s*video\.|.*smart\s*video.*)'
+[23:57:46] [XMLENTRY][search] pre_reset scroll_to_top=true
+[23:57:52] [XMLENTRY][search] step=0/5 visible_candidates=70 target_candidates=0
+[23:57:52] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:57:52] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:57:52] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='162,118,810,310' area_ratio='0.0600' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:57:55] [XMLENTRY][scroll] step=0/5 performed=true reason='no_strict_target_candidate'
+[23:57:58] [XMLENTRY][search] step=1/5 visible_candidates=62 target_candidates=0
+[23:57:58] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:57:58] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:57:58] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='162,118,810,310' area_ratio='0.0600' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:58:00] [XMLENTRY][scroll] step=1/5 performed=true reason='no_strict_target_candidate'
+[23:58:03] [XMLENTRY][search] step=2/5 visible_candidates=60 target_candidates=0
+[23:58:03] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:58:03] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:58:03] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='162,118,810,310' area_ratio='0.0600' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:58:06] [XMLENTRY][scroll] step=2/5 performed=true reason='no_strict_target_candidate'
+[23:58:09] [XMLENTRY][search] step=3/5 visible_candidates=59 target_candidates=1
+[23:58:09] [XMLENTRY][search][top] rank=1 reason='actionable_container' text='Video' rid='com.samsung.android.oneconnect:id/title_view' class='android.widget.LinearLayout' bounds='84,1354,996,1444' area_ratio='0.0396' target_match=true match_source='title' matched_phrase='video' negative_plugin_phrase=''
+[23:58:09] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:58:09] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:58:09] [XMLENTRY][candidate_compare] scenario_id='life_video_plugin' rank=1 rid='com.samsung.android.oneconnect:id/title_view' class='android.widget.LinearLayout' bounds='84,1354,996,1444' own_text='' descendant_text_summary='Video' matched_phrase='video' match_source='title' selected_priority='240:actionable_container' negative_plugin_phrase='' selected=true
+[23:58:09] [XMLENTRY][candidate_compare] scenario_id='life_video_plugin' rank=2 rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' own_text='' descendant_text_summary='Location QR code,Add,More options' matched_phrase='' match_source='' selected_priority='40:card_like_container' negative_plugin_phrase='' selected=false
+[23:58:09] [XMLENTRY][candidate_compare] scenario_id='life_video_plugin' rank=3 rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' own_text='' descendant_text_summary='Location QR code,Add,More options' matched_phrase='' match_source='' selected_priority='40:card_like_container' negative_plugin_phrase='' selected=false
+[23:58:09] [XMLENTRY][select] reason='actionable_container' resource='com.samsung.android.oneconnect:id/title_view' bounds='84,1354,996,1444' text='' target_match=true match_source='title' matched_phrase='video'
+[23:58:09] [XMLENTRY][select_debug] scenario_id='life_video_plugin' class='android.widget.LinearLayout' rid='com.samsung.android.oneconnect:id/title_view' bounds='84,1354,996,1444' own_text='' own_content_desc='' normalized_own_text='' descendant_text_summary='Video' matched_phrase='video' match_source='title' selected_reason='actionable_container' candidate_rank=1 title_descendant_disagree=false representative_visible_label='' representative_label_source='descendant'
+[23:58:17] [XMLENTRY][result] success=true reason='transition_confirmed'
+[23:58:17] [SCENARIO][pre_nav] success step=1 reason='Target node not found'
+[23:58:19] [SCENARIO][pre_nav] success
+[23:58:23] [CONTEXT] skipped reason='anchor_only_mode'
+[23:58:23] [CONTEXT] skipped reason='anchor_only_mode'
+[23:58:23] [CONTEXT] scenario='life_video_plugin' type='skipped' expected='' actual='' ok=True
+[23:58:23] [CONTEXT] verification passed scenario='life_video_plugin'
+[23:58:23] [ANCHOR][scenario_start] success scenario='life_video_plugin' selected=True matched=True stable=True context_ok=True reason='selected_and_verified'
+[23:58:23] [TRACE][open_scenario] scenario='life_video_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=True
+[23:58:28] [ENTRY][post_open_identity] scenario_id='life_video_plugin' top_visible_labels='Navigate up Navigate up,홈카메라 360 홈카메라 360,Live view Live view,More options More option,Daily clips' top_focus_label='Navigate up  Navigate up' back_button_present=true body_texts='Navigate up Navigate up,홈카메라 360 홈카메라 360,Live view Live view,More options More option,Daily clips' plugin_title_candidates='Navigate up Navigate up,홈카메라 360 홈카메라 360,Live view Live view' verify_hit=false special_token_hit=false
+[23:58:28] [ENTRY][special_state_check] detected=false signals='long_intro,intro_focus' kind='none'
+[23:58:28] [ENTRY][special_state_check] decision='continue_verify'
+[23:58:28] [SCENARIO][entry_contract] success scenario='life_video_plugin' entry_type='card' reason='success_verified' detail='plugin_open_verified'
+[23:58:29] [TRACE][post_open_focus] scenario='life_video_plugin' view_id='back' label='Navigate up' speech='Navigate up' bounds='{'l': 48, 't': 118, 'r': 168, 'b': 286, 'left': 48, 'top': 118, 'right': 168, 'bottom': 286}' source='top_level' top_level=True
+[23:58:34] [TRACE][anchor_row] scenario='life_video_plugin' step=0 view_id='back' visible='Navigate up' speech='Navigate up' normalized_visible='navigate up' is_global_nav=False
+[23:58:34] [ROW] fingerprint='back|navigate up|navigate up|108,202' normalized_fingerprint='back|navigate up|navigate up' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=1 noise=false
+[23:58:34] [RESULT] skipped anchor rows count=3
+[23:58:34] [SAVE] writing sheets raw/filtered/summary/result
+[23:58:34] [SAVE] filtered rows=11, raw rows=11
+[23:58:34] [SAVE] saved excel: output/talkback_compare_20260415_234858.xlsx rows=11 with_images=False
+[23:58:34] [STEP] START tab='(?i).*life.*' step=1
+[23:58:40] [ROW] fingerprint='|홈카메라 360|홈카메라 360|411,202' normalized_fingerprint='|홈카메라 360|홈카메라 360' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=2 noise=false
+[23:58:40] [STEP] END tab='(?i).*life.*' step=1 elapsed=4.82s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776265115537, 'reqId': '01e1c9e5', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='홈카메라 360' speech='홈카메라 360' crop='output\talkback_compare_20260415_234858\crops\i_._life._step_1_홈카메라_360.png' timing(move=0.511s ann=3.121s get_focus=1.189s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.650s total=5.473s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='221e65d0'
+[23:58:40] [STOP][eval] step=1 scenario='life_video_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=2 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:1|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776265115537, 'reqid': '01e1c9e5', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[23:58:40] [OVERLAY] blocked no_overlay_policy scenario='life_video_plugin' tab='(?i).*life.*' step=1
+[23:58:40] [STOP][summary] scenario='life_video_plugin' stop_triggered=false stop_step=1 reason='safety_limit'
+[23:58:40] [PERF][scenario_summary] scenario=life_video_plugin tab=(?i).*life.* total_runtime=62.3 total_steps=2 main_step_count=2 overlay_step_count=0 overlay_count=0 avg_get_focus=1.165 avg_move=0.256 avg_crop=0.645 avg_step_total=5.277 step_total_sample_count=2 avg_get_focus_main=1.165 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=2 get_focus_strong_skip_rate=100.0 step_dump_used_count=0 save_excel_count=1 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[23:58:40] [LIFE_RESET] start
+[23:58:40] [LIFE_RESET] app_inside=true
+[23:58:42] [LIFE_RESET] bottom_nav_ready=true
+[23:58:43] [LIFE_RESET][tab_reselect_attempt] scenario='life_home_monitor_plugin' phase='default' attempt=1/2 package_inside=true global_nav_visible=true select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services'
+[23:58:45] [LIFE_RESET][tab_reselect_result] scenario='life_home_monitor_plugin' phase='default' attempt=1/2 select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services' select_raw='{'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776265125601, 'reqId': '0b81f264', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': 'com.samsung.android.oneconnect:id/menu_services', 'targetType': 'r', 'targetIndex': 0, 'attemptedResourceId': 'com.samsung.android.oneconnect:id/menu_services', 'attemptedClassName': 'android.widget.Button', 'target': {'timestamp': 1776265125601, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.Button', 'viewIdResourceName': 'com.samsung.android.oneconnect:id/menu_services', 'text': None, 'contentDescription': 'Selected, Life, Tab 3 of 5', 'mergedLabel': 'Selected, Life, Tab 3 of 5', 'talkbackLabel': 'Selected, Life, Tab 3 of 5', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': False, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 443, 't': 2316, 'r': 637, 'b': 2496, 'left': 443, 'top': 2316, 'right': 637, 'bottom': 2496}, 'children': []}}}' select_success=true verify_selected_bottom_tab_ok=true verify_actual='' verify_source='pre_select_snapshot' life_tab_reselected=true basis='select_success_only'
+[23:58:45] [LIFE_RESET] life_tab_reselected=true
+[23:58:46] [LIFE_RESET] verify phase='life_reset' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:58:46] [LIFE_RESET] life_list_ready=true
+[23:58:46] [LIFE_RESET] success=true reason='life_tab_ready_with_card_evidence'
+[23:58:46] [RECOVER] success reason='life_reset_ready'
+[23:58:46] [SCENARIO][stabilization] scenario='life_home_monitor_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[23:58:47] [LIFE_RESET] verify phase='plugin_start_initial' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:58:47] [PLUGIN_START][recover_before_entry] triggered=false
+[23:58:47] [PLUGIN_START][life_list_check] ok=true reason='life_tab_ready_with_card_evidence'
+[23:58:47] [PLUGIN_START][recover_before_entry] success=true
+[23:58:47] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[23:58:47] [TAB][select] fallback_to_legacy=True scenario='life_home_monitor_plugin'
+[23:58:53] [TAB][focus_align_fast] failed scenario='life_home_monitor_plugin' attempt=2/2 focus_label='' focus_resource=''
+[23:58:54] [TAB][select] scenario='life_home_monitor_plugin' selected=True matched_fields=['text'] score=40
+[23:58:54] [TAB][verify] selected_bottom_tab ok=True actual=''
+[23:58:54] [TRACE][open_scenario] scenario='life_home_monitor_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=False
+[23:58:54] [TAB][focus_align_fast] scenario='life_home_monitor_plugin' main_tab=false transition_scenario=true result='failed'
+[23:58:54] [TAB][focus_align_fast] failed but proceeding (transition scenario) scenario='life_home_monitor_plugin'
+[23:58:55] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^home\s*monitor$|.*home\s*monitor.*)'
+[23:58:55] [XMLENTRY][search] pre_reset scroll_to_top=true
+[23:59:01] [XMLENTRY][search] step=0/5 visible_candidates=70 target_candidates=0
+[23:59:01] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:59:01] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:59:01] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='162,118,810,310' area_ratio='0.0600' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:59:03] [XMLENTRY][scroll] step=0/5 performed=true reason='no_strict_target_candidate'
+[23:59:06] [XMLENTRY][search] step=1/5 visible_candidates=62 target_candidates=0
+[23:59:06] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:59:06] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:59:06] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='162,118,810,310' area_ratio='0.0600' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:59:09] [XMLENTRY][scroll] step=1/5 performed=true reason='no_strict_target_candidate'
+[23:59:12] [XMLENTRY][search] step=2/5 visible_candidates=60 target_candidates=3
+[23:59:12] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/llCard' class='android.widget.LinearLayout' bounds='42,1752,1038,2316' area_ratio='0.2709' target_match=true match_source='descendant' matched_phrase='home monitor' negative_plugin_phrase=''
+[23:59:12] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/containerHeaderLayout' class='android.widget.RelativeLayout' bounds='42,1884,1038,2076' area_ratio='0.0922' target_match=true match_source='descendant' matched_phrase='home monitor' negative_plugin_phrase=''
+[23:59:12] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='Monitor air quality and air comfort in each room' rid='' class='android.widget.RelativeLayout' bounds='42,1884,1038,2076' area_ratio='0.0922' target_match=true match_source='title' matched_phrase='monitor' negative_plugin_phrase=''
+[23:59:12] [XMLENTRY][candidate_compare] scenario_id='life_home_monitor_plugin' rank=1 rid='com.samsung.android.oneconnect:id/llCard' class='android.widget.LinearLayout' bounds='42,1752,1038,2316' own_text='Air Care' descendant_text_summary='Air Care,Monitor air quality and ' matched_phrase='home monitor' match_source='descendant' selected_priority='240:card_like_container' negative_plugin_phrase='' selected=true
+[23:59:12] [XMLENTRY][candidate_compare] scenario_id='life_home_monitor_plugin' rank=2 rid='com.samsung.android.oneconnect:id/containerHeaderLayout' class='android.widget.RelativeLayout' bounds='42,1884,1038,2076' own_text='' descendant_text_summary='Monitor air quality and ' matched_phrase='home monitor' match_source='descendant' selected_priority='240:card_like_container' negative_plugin_phrase='' selected=false
+[23:59:12] [XMLENTRY][candidate_compare] scenario_id='life_home_monitor_plugin' rank=3 rid='' class='android.widget.RelativeLayout' bounds='42,1884,1038,2076' own_text='' descendant_text_summary='Monitor air quality and ' matched_phrase='monitor' match_source='title' selected_priority='240:card_like_container' negative_plugin_phrase='' selected=false
+[23:59:12] [XMLENTRY][select] reason='card_like_container' resource='com.samsung.android.oneconnect:id/llCard' bounds='42,1752,1038,2316' text='Air Care' target_match=true match_source='descendant' matched_phrase='home monitor'
+[23:59:12] [XMLENTRY][select_debug] scenario_id='life_home_monitor_plugin' class='android.widget.LinearLayout' rid='com.samsung.android.oneconnect:id/llCard' bounds='42,1752,1038,2316' own_text='Air Care' own_content_desc='' normalized_own_text='air care' descendant_text_summary='Air Care,Monitor air quality and ' matched_phrase='home monitor' match_source='descendant' selected_reason='card_like_container' candidate_rank=1 title_descendant_disagree=false representative_visible_label='Air Care' representative_label_source='own_text'
+[23:59:19] [XMLENTRY][result] success=true reason='transition_confirmed'
+[23:59:19] [SCENARIO][pre_nav] success step=1 reason='Target node not found'
+[23:59:21] [SCENARIO][pre_nav] success
+[23:59:25] [CONTEXT] skipped reason='anchor_only_mode'
+[23:59:25] [CONTEXT] skipped reason='anchor_only_mode'
+[23:59:25] [CONTEXT] scenario='life_home_monitor_plugin' type='skipped' expected='' actual='' ok=True
+[23:59:25] [CONTEXT] verification passed scenario='life_home_monitor_plugin'
+[23:59:25] [ANCHOR][scenario_start] success scenario='life_home_monitor_plugin' selected=True matched=True stable=True context_ok=True reason='selected_and_verified'
+[23:59:25] [TRACE][open_scenario] scenario='life_home_monitor_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=True
+[23:59:29] [ENTRY][post_open_identity] scenario_id='life_home_monitor_plugin' top_visible_labels='Navigate up Navigate up,Air Care Air Care,More options More option,Set geolocation to monit,Dismiss Dismiss' top_focus_label='Navigate up  Navigate up' back_button_present=true body_texts='Navigate up Navigate up,Air Care Air Care,More options More option,Set geolocation to monit,Dismiss Dismiss' plugin_title_candidates='Navigate up Navigate up,Air Care Air Care,More options More option' verify_hit=false special_token_hit=false
+[23:59:29] [ENTRY][special_state_check] detected=true signals='long_intro,cta,intro_focus' kind='setup_needed_or_empty_state'
+[23:59:29] [ENTRY][special_state_check] decision='route_to_special_state' reason='special_state_detected_verify_not_success'
+[23:59:29] [ENTRY][special_state_route] handling='back_after_read'
+[23:59:29] [ENTRY][special_state_route] main_traversal_skipped=true
+[23:59:29] [SCENARIO][special_state] detected scenario='life_home_monitor_plugin' entry_type='card' kind='setup_needed_or_empty_state' handling='back_after_read' verify_hit=false long_intro_like=true special_hits='' cta_hits='next'
+[23:59:31] [SPECIAL_STATE][recover] start
+[23:59:31] [LIFE_RESET] start
+[23:59:32] [LIFE_RESET] app_inside=true
+[23:59:32] [LIFE_RESET] bottom_nav_ready=true
+[23:59:33] [LIFE_RESET][tab_reselect_attempt] scenario='life_home_monitor_plugin' phase='special_state_post_back' attempt=1/2 package_inside=true global_nav_visible=true select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services'
+[23:59:34] [LIFE_RESET][tab_reselect_result] scenario='life_home_monitor_plugin' phase='special_state_post_back' attempt=1/2 select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services' select_raw='{'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776265174576, 'reqId': '2d8a633c', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': 'com.samsung.android.oneconnect:id/menu_services', 'targetType': 'r', 'targetIndex': 0, 'attemptedResourceId': 'com.samsung.android.oneconnect:id/menu_services', 'attemptedClassName': 'android.widget.Button', 'target': {'timestamp': 1776265174576, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.Button', 'viewIdResourceName': 'com.samsung.android.oneconnect:id/menu_services', 'text': None, 'contentDescription': 'Selected, Life, Tab 3 of 5', 'mergedLabel': 'Selected, Life, Tab 3 of 5', 'talkbackLabel': 'Selected, Life, Tab 3 of 5', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': False, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 443, 't': 2316, 'r': 637, 'b': 2496, 'left': 443, 'top': 2316, 'right': 637, 'bottom': 2496}, 'children': []}}}' select_success=true verify_selected_bottom_tab_ok=true verify_actual='' verify_source='pre_select_snapshot' life_tab_reselected=true basis='select_success_only'
+[23:59:34] [LIFE_RESET] life_tab_reselected=true
+[23:59:35] [LIFE_RESET] verify phase='life_reset' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:59:35] [LIFE_RESET] life_list_ready=true
+[23:59:35] [LIFE_RESET] success=true reason='life_tab_ready_with_card_evidence'
+[23:59:35] [RECOVER] success reason='life_reset_ready'
+[23:59:36] [SPECIAL_STATE][post_recover_check] inside_smartthings=true package=true app_bar_hits=4
+[23:59:36] [SPECIAL_STATE][recover] success=true target='life_plugin_list' reason='life_plugin_list_recovered'
+[23:59:36] [SCENARIO][entry_contract] handled scenario='life_home_monitor_plugin' entry_type='card' reason='special_state_handled' detail='onboarding_back_exit_recovered' back_status='back_sent_exit'
+[23:59:36] [PERF][scenario_summary] scenario=life_home_monitor_plugin tab=(?i).*life.* total_runtime=50.0 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[23:59:36] [RESULT] skipped anchor rows count=3
+[23:59:36] [SAVE] writing sheets raw/filtered/summary/result
+[23:59:36] [SAVE] filtered rows=13, raw rows=13
+[23:59:36] [SAVE] saved excel: output/talkback_compare_20260415_234858.xlsx rows=13 with_images=False
+[23:59:36] [LIFE_RESET] start
+[23:59:37] [LIFE_RESET] app_inside=true
+[23:59:37] [LIFE_RESET] bottom_nav_ready=true
+[23:59:38] [LIFE_RESET][tab_reselect_attempt] scenario='life_music_sync_plugin' phase='default' attempt=1/2 package_inside=true global_nav_visible=true select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services'
+[23:59:39] [LIFE_RESET][tab_reselect_result] scenario='life_music_sync_plugin' phase='default' attempt=1/2 select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services' select_raw='{'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776265179708, 'reqId': 'e4691d75', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': 'com.samsung.android.oneconnect:id/menu_services', 'targetType': 'r', 'targetIndex': 0, 'attemptedResourceId': 'com.samsung.android.oneconnect:id/menu_services', 'attemptedClassName': 'android.widget.Button', 'target': {'timestamp': 1776265179709, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.Button', 'viewIdResourceName': 'com.samsung.android.oneconnect:id/menu_services', 'text': None, 'contentDescription': 'Selected, Life, Tab 3 of 5', 'mergedLabel': 'Selected, Life, Tab 3 of 5', 'talkbackLabel': 'Selected, Life, Tab 3 of 5', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': False, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 443, 't': 2316, 'r': 637, 'b': 2496, 'left': 443, 'top': 2316, 'right': 637, 'bottom': 2496}, 'children': []}}}' select_success=true verify_selected_bottom_tab_ok=true verify_actual='' verify_source='pre_select_snapshot' life_tab_reselected=true basis='select_success_only'
+[23:59:39] [LIFE_RESET] life_tab_reselected=true
+[23:59:41] [LIFE_RESET] verify phase='life_reset' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:59:41] [LIFE_RESET] life_list_ready=true
+[23:59:41] [LIFE_RESET] success=true reason='life_tab_ready_with_card_evidence'
+[23:59:41] [RECOVER] success reason='life_reset_ready'
+[23:59:41] [SCENARIO][stabilization] scenario='life_music_sync_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[23:59:42] [LIFE_RESET] verify phase='plugin_start_initial' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[23:59:42] [PLUGIN_START][recover_before_entry] triggered=false
+[23:59:42] [PLUGIN_START][life_list_check] ok=true reason='life_tab_ready_with_card_evidence'
+[23:59:42] [PLUGIN_START][recover_before_entry] success=true
+[23:59:42] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[23:59:42] [TAB][select] fallback_to_legacy=True scenario='life_music_sync_plugin'
+[23:59:48] [TAB][focus_align_fast] failed scenario='life_music_sync_plugin' attempt=2/2 focus_label='' focus_resource=''
+[23:59:49] [TAB][select] scenario='life_music_sync_plugin' selected=True matched_fields=['text'] score=40
+[23:59:49] [TAB][verify] selected_bottom_tab ok=True actual=''
+[23:59:49] [TRACE][open_scenario] scenario='life_music_sync_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=False
+[23:59:49] [TAB][focus_align_fast] scenario='life_music_sync_plugin' main_tab=false transition_scenario=true result='failed'
+[23:59:49] [TAB][focus_align_fast] failed but proceeding (transition scenario) scenario='life_music_sync_plugin'
+[23:59:50] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^music\s*sync$|.*music\s*sync.*)'
+[23:59:50] [XMLENTRY][search] pre_reset scroll_to_top=true
+[23:59:56] [XMLENTRY][search] step=0/5 visible_candidates=70 target_candidates=0
+[23:59:56] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:59:56] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:59:56] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='162,118,810,310' area_ratio='0.0600' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[23:59:59] [XMLENTRY][scroll] step=0/5 performed=true reason='no_strict_target_candidate'
+[00:00:01] [XMLENTRY][search] step=1/5 visible_candidates=62 target_candidates=0
+[00:00:01] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[00:00:01] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[00:00:01] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='162,118,810,310' area_ratio='0.0600' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[00:00:04] [XMLENTRY][scroll] step=1/5 performed=true reason='no_strict_target_candidate'
+[00:00:07] [XMLENTRY][search] step=2/5 visible_candidates=60 target_candidates=0
+[00:00:07] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[00:00:07] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[00:00:07] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='162,118,810,310' area_ratio='0.0600' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[00:00:10] [XMLENTRY][scroll] step=2/5 performed=true reason='no_strict_target_candidate'
+[00:00:13] [XMLENTRY][search] step=3/5 visible_candidates=59 target_candidates=0
+[00:00:13] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[00:00:13] [XMLENTRY][search][top] rank=2 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/app_bar' class='android.widget.LinearLayout' bounds='0,94,1080,310' area_ratio='0.1125' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[00:00:13] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='우리 집, Change location' rid='com.samsung.android.oneconnect:id/small_title_bar' class='android.widget.RelativeLayout' bounds='162,118,810,310' area_ratio='0.0600' target_match=false match_source='' matched_phrase='' negative_plugin_phrase=''
+[00:00:15] [XMLENTRY][scroll] step=3/5 performed=true reason='no_strict_target_candidate'
+[00:00:18] [XMLENTRY][search] step=4/5 visible_candidates=62 target_candidates=6
+[00:00:18] [XMLENTRY][search][top] rank=1 reason='actionable_container' text='' rid='' class='android.widget.RelativeLayout' bounds='42,1068,1038,1800' area_ratio='0.3516' target_match=true match_source='descendant' matched_phrase='music sync' negative_plugin_phrase=''
+[00:00:18] [XMLENTRY][search][top] rank=2 reason='actionable_container' text='Music Sync' rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,1068,1038,1800' area_ratio='0.3516' target_match=true match_source='title' matched_phrase='music sync' negative_plugin_phrase=''
+[00:00:18] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='' rid='com.samsung.android.oneconnect:id/llCard' class='android.widget.LinearLayout' bounds='42,1068,1038,1800' area_ratio='0.3516' target_match=true match_source='descendant' matched_phrase='music sync' negative_plugin_phrase=''
+[00:00:18] [XMLENTRY][candidate_compare] scenario_id='life_music_sync_plugin' rank=1 rid='' class='android.widget.RelativeLayout' bounds='42,1068,1038,1800' own_text='' descendant_text_summary='Music Sync,Music Sync,Sync music with lights f' matched_phrase='music sync' match_source='descendant' selected_priority='240:actionable_container' negative_plugin_phrase='' selected=true
+[00:00:18] [XMLENTRY][candidate_compare] scenario_id='life_music_sync_plugin' rank=2 rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,1068,1038,1800' own_text='' descendant_text_summary='Music Sync,Music Sync,Sync music with lights f' matched_phrase='music sync' match_source='title' selected_priority='240:actionable_container' negative_plugin_phrase='' selected=false
+[00:00:18] [XMLENTRY][candidate_compare] scenario_id='life_music_sync_plugin' rank=3 rid='com.samsung.android.oneconnect:id/llCard' class='android.widget.LinearLayout' bounds='42,1068,1038,1800' own_text='Music Sync' descendant_text_summary='Music Sync,Sync music with lights f' matched_phrase='music sync' match_source='descendant' selected_priority='240:card_like_container' negative_plugin_phrase='' selected=false
+[00:00:18] [XMLENTRY][select] reason='actionable_container' resource='' bounds='42,1068,1038,1800' text='' target_match=true match_source='descendant' matched_phrase='music sync'
+[00:00:18] [XMLENTRY][select_debug] scenario_id='life_music_sync_plugin' class='android.widget.RelativeLayout' rid='' bounds='42,1068,1038,1800' own_text='' own_content_desc='' normalized_own_text='' descendant_text_summary='Music Sync,Music Sync,Sync music with lights f' matched_phrase='music sync' match_source='descendant' selected_reason='actionable_container' candidate_rank=1 title_descendant_disagree=false representative_visible_label='' representative_label_source='descendant'
+[00:00:21] [XMLENTRY][result] success=true reason='transition_confirmed'
+[00:00:21] [SCENARIO][pre_nav] success step=1 reason='Target node not found'
+[00:00:22] [SCENARIO][pre_nav] success
+[00:00:22] [ANCHOR][fallback] explicit anchor not matched, trying top content fallback
+[00:00:22] [ANCHOR][fallback] selected candidate label='Start Start' position='top_center'
+[00:00:22] [ANCHOR][plugin_fallback] using_top_start_candidate position='top_center'
+[00:00:26] [CONTEXT] skipped reason='anchor_only_mode'
+[00:00:26] [CONTEXT] skipped reason='anchor_only_mode'
+[00:00:26] [CONTEXT] scenario='life_music_sync_plugin' type='skipped' expected='' actual='' ok=True
+[00:00:26] [CONTEXT] verification passed scenario='life_music_sync_plugin'
+[00:00:26] [ANCHOR][scenario_start] success scenario='life_music_sync_plugin' selected=True matched=True stable=True context_ok=True reason='selected_and_verified'
+[00:00:26] [ANCHOR][plugin_fallback] stabilized_by='selected'
+[00:00:26] [TRACE][open_scenario] scenario='life_music_sync_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=False focus_align_reason='selector_not_focused' context_ok=False anchor_matched=False anchor_stable=True
+[00:00:30] [ENTRY][post_open_identity] scenario_id='life_music_sync_plugin' top_visible_labels='Sync your lights with mu,When you play music on t,A phone playing music an,Certain audio content ma,Start Start' top_focus_label='Start  Start' back_button_present=false body_texts='Sync your lights with mu,When you play music on t,A phone playing music an,Certain audio content ma,Start Start' plugin_title_candidates='Sync your lights with mu,When you play music on t,A phone playing music an' verify_hit=false special_token_hit=false
+[00:00:30] [ENTRY][special_state_check] detected=true signals='long_intro,cta,low_content_diversity' kind='setup_needed_or_empty_state'
+[00:00:30] [ENTRY][special_state_check] decision='route_to_special_state' reason='special_state_detected_verify_not_success'
+[00:00:30] [ENTRY][special_state_route] handling='back_after_read'
+[00:00:30] [ENTRY][special_state_route] main_traversal_skipped=true
+[00:00:30] [SCENARIO][special_state] detected scenario='life_music_sync_plugin' entry_type='card' kind='setup_needed_or_empty_state' handling='back_after_read' verify_hit=false long_intro_like=true special_hits='' cta_hits='start'
+[00:00:32] [SPECIAL_STATE][recover] start
+[00:00:32] [LIFE_RESET] start
+[00:00:33] [LIFE_RESET] app_inside=true
+[00:00:33] [LIFE_RESET] bottom_nav_ready=true
+[00:00:34] [LIFE_RESET][tab_reselect_attempt] scenario='life_music_sync_plugin' phase='special_state_post_back' attempt=1/2 package_inside=true global_nav_visible=true select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services'
+[00:00:35] [LIFE_RESET][tab_reselect_result] scenario='life_music_sync_plugin' phase='special_state_post_back' attempt=1/2 select_mode='resource_id' target='com.samsung.android.oneconnect:id/menu_services' select_raw='{'success': True, 'status': 'moved', 'detail': 'ACTION_ACCESSIBILITY_FOCUS success', 'raw': {'timestamp': 1776265235961, 'reqId': '0cc7b264', 'success': True, 'reason': 'ACTION_ACCESSIBILITY_FOCUS success', 'action': 'FOCUS', 'targetName': 'com.samsung.android.oneconnect:id/menu_services', 'targetType': 'r', 'targetIndex': 0, 'attemptedResourceId': 'com.samsung.android.oneconnect:id/menu_services', 'attemptedClassName': 'android.widget.Button', 'target': {'timestamp': 1776265235961, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.Button', 'viewIdResourceName': 'com.samsung.android.oneconnect:id/menu_services', 'text': None, 'contentDescription': 'Selected, Life, Tab 3 of 5', 'mergedLabel': 'Selected, Life, Tab 3 of 5', 'talkbackLabel': 'Selected, Life, Tab 3 of 5', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': False, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 443, 't': 2316, 'r': 637, 'b': 2496, 'left': 443, 'top': 2316, 'right': 637, 'bottom': 2496}, 'children': []}}}' select_success=true verify_selected_bottom_tab_ok=true verify_actual='' verify_source='pre_select_snapshot' life_tab_reselected=true basis='select_success_only'
+[00:00:35] [LIFE_RESET] life_tab_reselected=true
+[00:00:37] [LIFE_RESET] verify phase='life_reset' attempt=1/2 global_nav_visible=true life_tab_selected=true plugin_card_list_visible=true life_list_ready=true
+[00:00:37] [LIFE_RESET] life_list_ready=true
+[00:00:37] [LIFE_RESET] success=true reason='life_tab_ready_with_card_evidence'
+[00:00:37] [RECOVER] success reason='life_reset_ready'
+[00:00:37] [SPECIAL_STATE][post_recover_check] inside_smartthings=true package=true app_bar_hits=4
+[00:00:37] [SPECIAL_STATE][recover] success=true target='life_plugin_list' reason='life_plugin_list_recovered'
+[00:00:37] [SCENARIO][entry_contract] handled scenario='life_music_sync_plugin' entry_type='card' reason='special_state_handled' detail='onboarding_back_exit_recovered' back_status='back_sent_exit'
+[00:00:37] [PERF][scenario_summary] scenario=life_music_sync_plugin tab=(?i).*life.* total_runtime=56.2 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[00:00:37] [RESULT] skipped anchor rows count=3
+[00:00:37] [SAVE] writing sheets raw/filtered/summary/result
+[00:00:37] [SAVE] filtered rows=14, raw rows=14
+[00:00:37] [SAVE] saved excel: output/talkback_compare_20260415_234858.xlsx rows=14 with_images=False
+[00:00:37] [RESULT] skipped anchor rows count=3
+[00:00:37] [SAVE] writing sheets raw/filtered/summary/result
+[00:00:37] [SAVE] filtered rows=14, raw rows=14
+[00:00:38] [SAVE] saved excel: output/talkback_compare_20260415_234858.xlsx rows=14 with_images=True
+[00:00:38] [MAIN] final save complete
+[00:00:38] [PERF][run_summary] total_runtime=696.4 total_scenarios=11 total_steps=14 total_overlay_count=0 avg_get_focus=0.482 avg_move=0.11 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_rate=42.9 realign_success_rate=0.0 save_excel_count=12

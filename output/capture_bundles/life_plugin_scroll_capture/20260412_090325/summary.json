@@ -1,0 +1,196 @@
+{
+  "script_version": "2.2.0",
+  "capture_mode": "scroll_capture",
+  "serial": "R3CX40QFDBP",
+  "run_id": "20260412_090325",
+  "max_steps": 10,
+  "save_xml": true,
+  "screenshot_format": "jpg",
+  "screenshot_quality": 85,
+  "started_at": "2026-04-12T09:03:25",
+  "finished_at": "2026-04-12T09:03:52",
+  "captured_steps": 1,
+  "same_screen_repeat_count": 0,
+  "reached_end_guess": true,
+  "life_tab_entry": {
+    "ok": false,
+    "result": {
+      "success": false,
+      "status": "failed",
+      "detail": "timeout",
+      "raw": {
+        "success": false,
+        "reason": "timeout"
+      }
+    }
+  },
+  "scroll_to_top": {
+    "ok": true,
+    "reached_top": true,
+    "attempts": 1,
+    "reason": "scroll_failed"
+  },
+  "steps": [
+    {
+      "script_version": "2.2.0",
+      "capture_mode": "scroll_capture",
+      "step_index": 1,
+      "timestamp": "2026-04-12T09:03:50",
+      "scroll_performed": false,
+      "scroll_result": "scroll_not_performed_or_end_reached",
+      "helper_node_count": 4,
+      "xml_saved": true,
+      "screenshot_saved": true,
+      "visible_labels_top_n": [
+        "PetCare Service Plugin",
+        "Care for your pet, even when you're not home",
+        "Leaving your pet alone? Keep them safe and entertained even when you're away.",
+        "Start"
+      ],
+      "resource_ids_top_n": [
+        "WelcomePageStartButton",
+        "com.samsung.android.oneconnect:id/action_bar_root",
+        "android:id/content",
+        "com.samsung.android.oneconnect:id/activity_plugin_web",
+        "primary",
+        "main",
+        "welcome-page",
+        "WelcomePage_title"
+      ],
+      "resource_id_counts": {
+        "WelcomePageStartButton": 5,
+        "com.samsung.android.oneconnect:id/action_bar_root": 2,
+        "android:id/content": 2,
+        "com.samsung.android.oneconnect:id/activity_plugin_web": 2,
+        "primary": 2,
+        "main": 2,
+        "welcome-page": 2,
+        "WelcomePage_title": 2
+      },
+      "resource_id_sources": {
+        "WelcomePageStartButton": "helper+xml",
+        "com.samsung.android.oneconnect:id/action_bar_root": "xml_only",
+        "android:id/content": "xml_only",
+        "com.samsung.android.oneconnect:id/activity_plugin_web": "xml_only",
+        "primary": "xml_only",
+        "main": "xml_only",
+        "welcome-page": "xml_only",
+        "WelcomePage_title": "xml_only"
+      },
+      "resource_ids_card_like_top_n": [
+        "com.samsung.android.oneconnect:id/action_bar_root",
+        "WelcomePage_title"
+      ],
+      "resource_id_extract_summary": {
+        "helper_count": 3,
+        "xml_count": 18,
+        "merged_count": 9,
+        "dropped_empty_count": 40
+      },
+      "class_names_top_n": [
+        "android.view.View",
+        "android.widget.TextView",
+        "android.webkit.WebView",
+        "android.widget.FrameLayout",
+        "android.widget.Button",
+        "android.widget.LinearLayout",
+        "android.widget.RelativeLayout",
+        "android.widget.Image"
+      ],
+      "maybe_card_like_nodes_top_n": [
+        {
+          "resource_id": "",
+          "class_name": "android.widget.FrameLayout",
+          "bounds": "[0,0][1080,2640]",
+          "text": "",
+          "score": 3
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "bounds": "[0,94][1080,2496]",
+          "text": "",
+          "score": 3
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.FrameLayout",
+          "bounds": "[0,94][1080,2496]",
+          "text": "",
+          "score": 3
+        },
+        {
+          "resource_id": "com.samsung.android.oneconnect:id/action_bar_root",
+          "class_name": "android.widget.LinearLayout",
+          "bounds": "[0,94][1080,2496]",
+          "text": "",
+          "score": 3
+        },
+        {
+          "resource_id": "android:id/content",
+          "class_name": "android.widget.FrameLayout",
+          "bounds": "[0,94][1080,2496]",
+          "text": "",
+          "score": 3
+        },
+        {
+          "resource_id": "com.samsung.android.oneconnect:id/activity_plugin_web",
+          "class_name": "android.widget.RelativeLayout",
+          "bounds": "[0,94][1080,2496]",
+          "text": "",
+          "score": 3
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.webkit.WebView",
+          "bounds": "[0,94][1080,2496]",
+          "text": "PetCare Service Plugin",
+          "score": 2
+        },
+        {
+          "resource_id": "WelcomePage_title",
+          "class_name": "android.view.View",
+          "bounds": "[72,412][1008,904]",
+          "text": "",
+          "score": 2
+        }
+      ],
+      "duplicate_summary_hash": "cb5701cc624f",
+      "reached_end_guess": true,
+      "top_bar_present": true,
+      "bottom_tab_present": false,
+      "top_bar_labels": [
+        "Care for your pet, even when you're not home"
+      ],
+      "bottom_tab_labels": [],
+      "chrome_filtered_labels": [
+        "Care for your pet, even when you're not home"
+      ],
+      "content_candidate_labels": [
+        "PetCare Service Plugin",
+        "Leaving your pet alone? Keep them safe and entertained even when you're away.",
+        "Start"
+      ],
+      "notes": "scroll_not_performed_or_end_reached",
+      "screenshot_path": "screenshot.jpg",
+      "xml_path": "window_dump.xml"
+    }
+  ],
+  "resource_ids_union_top_n": [
+    "WelcomePageStartButton",
+    "com.samsung.android.oneconnect:id/action_bar_root",
+    "android:id/content",
+    "com.samsung.android.oneconnect:id/activity_plugin_web",
+    "primary",
+    "main",
+    "welcome-page",
+    "WelcomePage_title"
+  ],
+  "resource_ids_card_like_union_top_n": [
+    "com.samsung.android.oneconnect:id/action_bar_root",
+    "WelcomePage_title"
+  ],
+  "steps_with_no_resource_ids": [],
+  "steps_with_helper_only_ids": [],
+  "steps_with_xml_only_ids": []
+}

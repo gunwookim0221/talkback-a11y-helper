@@ -1,0 +1,59 @@
+{
+  "version": "pr29-scrolltouch-xml-ancestor-fallback-v3",
+  "scroll_step": 4,
+  "partial_match_count": 0,
+  "candidate_stats": {
+    "visible_candidate_count": 0,
+    "partial_match_count": 0,
+    "exact_match_count": 0,
+    "rejected_large_container_count": 0,
+    "rejected_list_like_container_count": 0,
+    "visible_samples": [],
+    "partial_samples": [],
+    "inspect_samples": [
+      "label='우리 집 QR code 우리 집 QR code' rid='com.samsung.android.oneconnect:id/home_button' cls='android.widget.ImageButton' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/home_button' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='우리 집, Change location 우리 집, Change location' rid='com.samsung.android.oneconnect:id/tab_title' cls='android.widget.LinearLayout' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/tab_title' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='Add Add' rid='com.samsung.android.oneconnect:id/add_menu_butto' cls='android.widget.ImageButton' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/add_menu_button' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='More options More options' rid='com.samsung.android.oneconnect:id/more_menu_butt' cls='android.widget.ImageButton' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/more_menu_button' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='Find Find Find Find' rid='com.samsung.android.oneconnect:id/fme_title_layo' cls='android.widget.LinearLayout' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/fme_title_layout' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='Find' rid='com.samsung.android.oneconnect:id/container_name' cls='android.widget.TextView' visible=true clickable=false focusable=false effectiveClickable=false matched_text_node='com.samsung.android.oneconnect:id/container_name' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='Find, Locate your devices anytime, anywhere.\nTap here to start Find, Loc' rid='com.samsung.android.oneconnect:id/fme_not_config' cls='android.widget.LinearLayout' visible=true clickable=false focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/fme_not_configured_layout' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='Video Video' rid='com.samsung.android.oneconnect:id/title_view' cls='android.widget.LinearLayout' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/title_view' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='Video' rid='com.samsung.android.oneconnect:id/title_service_' cls='android.widget.TextView' visible=true clickable=false focusable=false effectiveClickable=false matched_text_node='com.samsung.android.oneconnect:id/title_service_name' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='No new recordings' rid='com.samsung.android.oneconnect:id/camera_descrip' cls='android.widget.TextView' visible=true clickable=false focusable=false effectiveClickable=false matched_text_node='com.samsung.android.oneconnect:id/camera_description' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'"
+    ],
+    "pre_candidate_fail_samples": [],
+    "rejection_counts": {
+      "filtered_before_candidate": 21
+    },
+    "promotion_attempted": false,
+    "matched_text_found": false,
+    "xml_node_found": false,
+    "xml_match_strategy": "none",
+    "ancestor_chain_depth": 0,
+    "actionable_ancestor_found": false,
+    "candidate_committed": false,
+    "last_promotion_result_reason": "none"
+  },
+  "selected_meta": {
+    "promoted_container": false,
+    "promotion_attempted": false,
+    "promotion_source": "none",
+    "promotion_reason": "none",
+    "promoted_from": "",
+    "promoted_to": "",
+    "promotion_candidate_count": 0,
+    "promotion_debug_summary": "",
+    "selected_area": 0,
+    "matched_text_area": 0,
+    "selected_to_text_area_ratio": 0.0,
+    "ancestor_distance": -1,
+    "selected_ancestor_distance": -1,
+    "selected_container_class": "",
+    "selected_container_view_id": "",
+    "tap_point": "",
+    "tap_strategy": "center",
+    "rank_summary_top3": ""
+  },
+  "xml_snapshot_saved": false
+}

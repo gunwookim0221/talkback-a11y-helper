@@ -91,7 +91,7 @@
   "scenarios": {
     "global_nav_main": {
       "group": "main_tabs",
-      "enabled": true,
+      "enabled": false,
       "scenario_type": "global_nav",
       "max_steps": 10,
       "use_shared_navigation": "default_global_nav",
@@ -102,8 +102,8 @@
 
     "home_main": {
       "group": "main_tabs",      
-      "enabled": true,
-      "max_steps": 5,
+      "enabled": false,
+      "max_steps": 10,
       "stop_policy": {
         "stop_on_global_nav_entry": true
       }
@@ -121,78 +121,77 @@
     
     "life_main": {
       "group": "main_tabs",
-      "enabled": false
+      "enabled": false,
+      "max_steps": 50
     },
     "routines_main": {
       "group": "main_tabs",
-      "enabled": false
+      "enabled": false,
+      "max_steps": 10
     },
     "menu_main": {
       "group": "main_tabs",
-      "enabled": false
-    },
-    "life_food_plugin": {
-      "group": "plugin_screen",
-      "pre_navigation_ref": "enter_food_plugin",
       "enabled": false,
-      "max_steps": 5,
-      "main_step_wait_seconds": 1.5,
-      "main_announcement_wait_seconds": 2.0,
-      "main_announcement_idle_wait_seconds": 0.7,
-      "main_announcement_max_extra_wait_seconds": 1.8,
-      "pre_navigation_wait_seconds": 1.5
+      "max_steps": 50
     },
     "settings_entry_example": {
       "group": "plugin_screen",
       "pre_navigation_ref": "enter_settings",
       "anchor_ref": "settings_button_anchor",
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 50
     },
+
+    "life_food_plugin": {
+      "group": "plugin_screen",
+      "pre_navigation_ref": "enter_food_plugin",
+      "enabled": false,
+      "max_steps": 50
+    },    
 
     "life_air_care_plugin": {
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 50
     },
     "life_home_care_plugin": {
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 50
     },
     "life_energy_plugin": {
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 50
     },
     "life_pet_care_plugin": {
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 50
     },
     "life_family_care_plugin": {
-      "enabled": false,
-      "max_steps": 40
+      "enabled": true,
+      "max_steps": 50
     },
     "life_plant_care_plugin": {
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 50
     },
     "life_clothing_care_plugin": {
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 50
     },
     "life_find_plugin": {
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 50
     },
     "life_video_plugin": {
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 50
     },
     "life_home_monitor_plugin": {
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 50
     },
     "life_music_sync_plugin": {
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 10
     }
   }
 }

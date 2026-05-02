@@ -7789,7 +7789,9 @@ def _row_logical_signature(row: dict[str, Any]) -> str:
 
 def _row_is_low_value_leaf(row: dict[str, Any]) -> bool:
     label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
-    focus_node = row.get("focus_node", {}) if isinstance(row.get("focus_node", {}), dict) else {}
+    if "focus_node" not in row or not isinstance(row.get("focus_node"), dict):
+        return False
+    focus_node = row.get("focus_node", {})
     actionable = bool(focus_node.get("clickable") or focus_node.get("focusable") or focus_node.get("effectiveClickable"))
     descendant_actionable = bool(focus_node.get("hasClickableDescendant") or focus_node.get("hasFocusableDescendant"))
     bounds = parse_bounds_str(str(row.get("focus_bounds", "") or "").strip())
@@ -7807,6 +7809,7 @@ def _row_is_low_value_leaf(row: dict[str, Any]) -> bool:
 def _should_suppress_row_persistence(*, row: dict[str, Any], state: MainLoopState, stop: bool) -> tuple[bool, str]:
     if stop or bool(row.get("local_tab_transition", False)) or _is_current_focus_on_local_tab_strip(state, row):
         return False, ""
+    has_focus_node = isinstance(row.get("focus_node"), dict)
     low_value_leaf = bool(row.get("low_value_leaf_row", False) or _row_is_low_value_leaf(row))
     logical_already_visited = bool(row.get("logical_signature_already_visited", False))
     cluster_already_consumed = bool(row.get("cluster_already_consumed_before_record", False))
@@ -7814,7 +7817,11 @@ def _should_suppress_row_persistence(*, row: dict[str, Any], state: MainLoopStat
         return True, "low_value_leaf_or_parent_consumed"
     if low_value_leaf:
         return True, "low_value_leaf"
-    if logical_already_visited and not str(row.get("focus_view_id", "") or "").strip().lower().endswith("button"):
+    if (
+        has_focus_node
+        and logical_already_visited
+        and not str(row.get("focus_view_id", "") or "").strip().lower().endswith("button")
+    ):
         return True, "visited_logical_signature"
     return False, ""
 
@@ -9570,7 +9577,10 @@ def _apply_row_persistence_phase_impl(
     make_fingerprint_fn,
     save_fn,
 ) -> tuple[bool, str]:
-    row["low_value_leaf_row"] = _row_is_low_value_leaf(row)
+    if "low_value_leaf_row" not in row:
+        row["low_value_leaf_row"] = _row_is_low_value_leaf(row)
+    else:
+        row["low_value_leaf_row"] = bool(row.get("low_value_leaf_row", False))
     suppress_row, suppress_reason = _should_suppress_row_persistence(row=row, state=state, stop=stop)
     if suppress_row:
         row["row_persist_suppressed"] = True
@@ -9997,15 +10007,17 @@ def _apply_step_collection_phase_impl(
     phase_ctx: CollectionPhaseContext,
     step_idx: int,
     tab_cfg: dict[str, Any],
-    step_start: float,
+    scenario_id: str,
+    log_fn,
     capture_fn: Callable[..., dict[str, Any]],
-    perf_time_fn: Callable[[], float],
     mono_time_fn: Callable[[], float],
-) -> tuple[dict[str, Any], float]:
+) -> dict[str, Any]:
+    phase_start_mono = mono_time_fn()
     forced_target = _local_tab_state_display(
         rid=str(getattr(state, "forced_local_tab_target_rid", "") or ""),
         label=str(getattr(state, "forced_local_tab_target_label", "") or ""),
     )
+    _ = (scenario_id, log_fn)
     row = None
     if forced_target:
         row = _activate_forced_local_tab_target(
@@ -10032,7 +10044,7 @@ def _apply_step_collection_phase_impl(
             announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
             announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
         )
-    step_elapsed = perf_time_fn() - step_start
+    step_elapsed = mono_time_fn() - phase_start_mono
 
     row["tab_name"] = tab_cfg["tab_name"]
     row["context_type"] = "main"
@@ -10047,8 +10059,8 @@ def _apply_step_collection_phase_impl(
     row["_step_mono_start"] = mono_time_fn() - float(row.get("t_step_start", 0.0) or 0.0)
     row = capture_fn(client, dev, row, phase_ctx.output_base_dir)
     row.pop("_step_mono_start", None)
-    row["step_total_elapsed_sec"] = round(perf_time_fn() - step_start, 3)
-    return row, step_elapsed
+    row["step_total_elapsed_sec"] = round(mono_time_fn() - phase_start_mono, 3)
+    return row
 
 
 def _apply_step_collection_phase(
@@ -10059,8 +10071,8 @@ def _apply_step_collection_phase(
     phase_ctx: CollectionPhaseContext,
     step_idx: int,
     tab_cfg: dict[str, Any],
-    step_start: float,
-) -> tuple[dict[str, Any], float]:
+    scenario_id: str,
+) -> dict[str, Any]:
     return _apply_step_collection_phase_impl(
         state=state,
         client=client,
@@ -10068,9 +10080,9 @@ def _apply_step_collection_phase(
         phase_ctx=phase_ctx,
         step_idx=step_idx,
         tab_cfg=tab_cfg,
-        step_start=step_start,
+        scenario_id=scenario_id,
+        log_fn=log,
         capture_fn=maybe_capture_focus_crop,
-        perf_time_fn=time.perf_counter,
         mono_time_fn=time.monotonic,
     )
 
@@ -10127,17 +10139,17 @@ def _main_loop_phase(
     state = phase_ctx.state
     for step_idx in range(1, tab_cfg["max_steps"] + 1):
         log(f"[STEP] START tab='{tab_cfg['tab_name']}' step={step_idx}")
-        step_start = time.perf_counter()
 
-        row, step_elapsed = _apply_step_collection_phase(
+        row = _apply_step_collection_phase(
             state=state,
             client=client,
             dev=dev,
             phase_ctx=phase_ctx,
             step_idx=step_idx,
             tab_cfg=tab_cfg,
-            step_start=step_start,
+            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
         )
+        step_elapsed = float(row.get("step_elapsed_sec", 0.0) or 0.0)
         _apply_scroll_ready_record_phase(
             row=row,
             state=state,

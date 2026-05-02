@@ -1,0 +1,45 @@
+[ROW_CONTEXT]
+scenario=
+tab=(?i).*life.*
+step=1
+req_id=af6768eb
+visible=Plant Care
+speech=Plant Care
+final_result=FAIL
+failure_reason=move_failed
+
+review_note=이동/발화 결과 재검토 필요
+noise=
+move_result={'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776261539418, 'reqid': 'accaf2fb', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}
+debug_source_row_found=false
+
+[ANN_TRACE]
+[ANN][baseline] req_id=af6768eb text='' source='source_row_missing' empty_reason='no_prev_step_row'
+[ANN][poll] req_id=af6768eb idx=0 raw='Plant Care' normalized='plant care' changed=true differs_from_baseline=true source='row_snapshot' observed_at='' count=0
+[ANN][trim] req_id=af6768eb considered=false applied=false before='Plant Care' after='Plant Care' reject_reason='' reason='trim_stage_not_reached'
+[ANN][stable] req_id=af6768eb selected='Plant Care' reason='result_row_snapshot' source='result_row'
+[ANN][select] req_id=af6768eb used_snapshot=true snapshot_reason='no_better_recent_poll_candidate' previous='' current='Plant Care' final='Plant Care'
+
+[STEP_TRACE]
+[STEP] START scenario='' tab='(?i).*life.*' step=1 req_id='af6768eb'
+[STEP] END scenario='' tab='(?i).*life.*' step=1 req_id='af6768eb' move_result='{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776261539418, 'reqid': 'accaf2fb', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}'
+[STOP][eval] scenario='' step=1 reason='move_failed'
+[STEP][summary] req_id=af6768eb tab='(?i).*life.*' step=1 move_result='{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776261539418, 'reqid': 'accaf2fb', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}' terminal=false no_progress=false
+
+[SCROLL_TRACE]
+[SCROLL] req_id=af6768eb scroll_related_log_found=false move_result='{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776261539418, 'reqid': 'accaf2fb', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}' smart_result='' detail='' inferred_scroll=false inference_reason='no_scroll_signal_found'
+
+[FOCUS_TRACE]
+[FOCUS] req_id=af6768eb get_focus_req_id='' response_success=false payload_source='inferred_from_step_end' payload_sufficient=false fallback_used=false fallback_found=false dump_attempted=false final_payload_source='' focus_reason='' missing_reason='no_direct_get_focus_trace_found'
+
+[DECISION_TRACE]
+baseline_empty=true
+first_candidate_contaminated=true
+trim_considered=false
+trim_applied=false
+stable_reason='result_row_snapshot'
+used_snapshot=true
+snapshot_reason='no_better_recent_poll_candidate'
+scroll_evidence='weak'
+focus_evidence='weak'
+notes='final speech appears to come from snapshot candidate path'

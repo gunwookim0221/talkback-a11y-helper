@@ -1,0 +1,4 @@
+{
+  "type": "list",
+  "preview": "[{'text': 'Navigate up', 'contentDescription': 'Navigate up', 'className': 'android.widget.ImageButton', 'viewIdResourceName': None, 'boundsInScreen': {'l': 0, 't': 118, 'r': 180, 'b': 310}, 'clickable': True, 'focusable': True, 'isVisibleToUser': True, 'focused': False, 'accessibilityFocused': False, 'isTopAppBar': False, 'isBottomNavigationBar': False, 'hasClickableDescendant': False, 'hasFocusableDescendant': False, 'effectiveClickable': True, 'actionableDescendantResourceId': None, 'actionab...(truncated)"
+}

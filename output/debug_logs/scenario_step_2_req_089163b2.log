@@ -1,0 +1,44 @@
+[ROW_CONTEXT]
+scenario=
+tab=(?i).*life.*
+step=2
+req_id=089163b2
+visible=Want better insight into your daily life? Set up the SmartThings devices that you use to better understand your daily life. Later Set up now
+speech=Later Want better insight into your daily life? Set up the SmartThings devices that you use to better understand your daily life. Later Set up now
+final_result=PASS
+failure_reason=terminal_not_handled
+
+review_note=정상 이동 및 발화 일치
+noise=
+move_result=moved
+debug_source_row_found=false
+
+[ANN_TRACE]
+[ANN][baseline] req_id=089163b2 text='' source='source_row_missing' empty_reason='no_prev_step_row'
+[ANN][poll] req_id=089163b2 idx=0 raw='Later Want better insight into your daily life? Set up the SmartThings devices that you use to better understand your daily life. Later Set up now' normalized='later want better insight into your daily life? set up the smartthings devices that you use to better understand your daily life. later set up now' changed=true differs_from_baseline=true source='row_snapshot' observed_at='' count=0
+[ANN][trim] req_id=089163b2 considered=false applied=false before='Later Want better insight into your daily life? Set up the SmartThings devices that you use to better understand your daily life. Later Set up now' after='Later Want better insight into your daily life? Set up the SmartThings devices that you use to better understand your daily life. Later Set up now' reject_reason='' reason='trim_stage_not_reached'
+[ANN][stable] req_id=089163b2 selected='Later Want better insight into your daily life? Set up the SmartThings devices that you use to better understand your daily life. Later Set up now' reason='result_row_snapshot' source='result_row'
+[ANN][select] req_id=089163b2 used_snapshot=true snapshot_reason='no_better_recent_poll_candidate' previous='' current='Later Want better insight into your daily life? Set up the SmartThings devices that you use to better understand your daily life. Later Set up now' final='Later Want better insight into your daily life? Set up the SmartThings devices that you use to better understand your daily life. Later Set up now'
+
+[STEP_TRACE]
+[16:35:53] [STEP] END tab='(?i).*life.*' step=2 elapsed=5.19s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1777102547797, 'reqId': '280fb029', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Want better insight into your daily life? Set up the SmartThings devices that you use to better understand your daily life. Later Set up now' speech='Later Want better insight into your daily life? Set up the SmartThings devices that you use to better understand your daily life. Later Set up now' crop='output\talkback_compare_20260425_163513\crops\i_._life._step_2_Want_better_insight_into_your_daily_life.png' timing(move=1.137s ann=3.061s get_focus=0.988s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.494s total=5.682s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='089163b2'
+[STEP][summary] req_id=089163b2 tab='(?i).*life.*' step=2 move_result='moved' terminal=false no_progress=false
+
+[SCROLL_TRACE]
+[SCROLL] req_id=089163b2 scroll_related_log_found=false move_result='moved' smart_result='' detail='' inferred_scroll=false inference_reason='no_scroll_signal_found'
+
+[FOCUS_TRACE]
+[16:35:53] [STEP] END tab='(?i).*life.*' step=2 elapsed=5.19s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1777102547797, 'reqId': '280fb029', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Want better insight into your daily life? Set up the SmartThings devices that you use to better understand your daily life. Later Set up now' speech='Later Want better insight into your daily life? Set up the SmartThings devices that you use to better understand your daily life. Later Set up now' crop='output\talkback_compare_20260425_163513\crops\i_._life._step_2_Want_better_insight_into_your_daily_life.png' timing(move=1.137s ann=3.061s get_focus=0.988s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.494s total=5.682s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='089163b2'
+[FOCUS] req_id=089163b2 get_focus_req_id='' response_success=false payload_source='' payload_sufficient=false fallback_used=false fallback_found=false dump_attempted=false final_payload_source='' focus_reason='' missing_reason=''
+
+[DECISION_TRACE]
+baseline_empty=true
+first_candidate_contaminated=true
+trim_considered=false
+trim_applied=false
+stable_reason='result_row_snapshot'
+used_snapshot=true
+snapshot_reason='no_better_recent_poll_candidate'
+scroll_evidence='weak'
+focus_evidence='strong'
+notes='final speech appears to come from snapshot candidate path'

@@ -1,0 +1,102 @@
+[
+  {
+    "text": "PetCare Service Plugin",
+    "contentDescription": "PetCare Service Plugin",
+    "className": "android.webkit.WebView",
+    "viewIdResourceName": null,
+    "boundsInScreen": {
+      "l": 0,
+      "t": 94,
+      "r": 1080,
+      "b": 2496
+    },
+    "clickable": false,
+    "focusable": true,
+    "isVisibleToUser": true,
+    "focused": true,
+    "accessibilityFocused": true,
+    "isTopAppBar": false,
+    "isBottomNavigationBar": false,
+    "hasClickableDescendant": true,
+    "hasFocusableDescendant": true,
+    "effectiveClickable": true,
+    "actionableDescendantResourceId": "WelcomePageStartButton",
+    "actionableDescendantClassName": "android.widget.Button",
+    "actionableDescendantContentDescription": null
+  },
+  {
+    "text": "Care for your pet, even when you're not home",
+    "contentDescription": null,
+    "className": "android.widget.TextView",
+    "viewIdResourceName": null,
+    "boundsInScreen": {
+      "l": 72,
+      "t": 403,
+      "r": 990,
+      "b": 763
+    },
+    "clickable": false,
+    "focusable": false,
+    "isVisibleToUser": true,
+    "focused": false,
+    "accessibilityFocused": false,
+    "isTopAppBar": false,
+    "isBottomNavigationBar": false,
+    "hasClickableDescendant": false,
+    "hasFocusableDescendant": false,
+    "effectiveClickable": false,
+    "actionableDescendantResourceId": null,
+    "actionableDescendantClassName": null,
+    "actionableDescendantContentDescription": null
+  },
+  {
+    "text": "Leaving your pet alone? Keep them safe and entertained even when you're away.",
+    "contentDescription": null,
+    "className": "android.widget.TextView",
+    "viewIdResourceName": null,
+    "boundsInScreen": {
+      "l": 72,
+      "t": 778,
+      "r": 1008,
+      "b": 904
+    },
+    "clickable": false,
+    "focusable": false,
+    "isVisibleToUser": true,
+    "focused": false,
+    "accessibilityFocused": false,
+    "isTopAppBar": false,
+    "isBottomNavigationBar": false,
+    "hasClickableDescendant": false,
+    "hasFocusableDescendant": false,
+    "effectiveClickable": false,
+    "actionableDescendantResourceId": null,
+    "actionableDescendantClassName": null,
+    "actionableDescendantContentDescription": null
+  },
+  {
+    "text": "Start",
+    "contentDescription": "Start",
+    "className": "android.widget.Button",
+    "viewIdResourceName": "WelcomePageStartButton",
+    "boundsInScreen": {
+      "l": 180,
+      "t": 2269,
+      "r": 900,
+      "b": 2425
+    },
+    "clickable": true,
+    "focusable": true,
+    "isVisibleToUser": true,
+    "focused": false,
+    "accessibilityFocused": false,
+    "isTopAppBar": false,
+    "isBottomNavigationBar": false,
+    "hasClickableDescendant": false,
+    "hasFocusableDescendant": false,
+    "effectiveClickable": true,
+    "actionableDescendantResourceId": null,
+    "actionableDescendantClassName": null,
+    "actionableDescendantContentDescription": null
+  }
+]

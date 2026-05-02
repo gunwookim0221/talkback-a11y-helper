@@ -1,0 +1,70 @@
+{
+  "version": "pr38-scrolltouch-normalized-semantic-gate-v2",
+  "scroll_step": 3,
+  "partial_match_count": 1,
+  "candidate_stats": {
+    "visible_candidate_count": 1,
+    "partial_match_count": 1,
+    "exact_match_count": 0,
+    "relaxed_semantic_match_count": 0,
+    "generic_guard_block_count": 0,
+    "fallback_applied_count": 0,
+    "relaxed_semantic_samples": [],
+    "rejected_large_container_count": 0,
+    "rejected_list_like_container_count": 3,
+    "visible_samples": [
+      "label='Monitor air quality and air comfort in each room of your hom' rid='com.samsung.android.oneconnect:id/frameL' cls='android.widget.FrameLayout' bounds='42,1752,1038,2316'"
+    ],
+    "partial_samples": [
+      "label='Monitor air quality and air comfort in each room of your hom' rid='com.samsung.android.oneconnect:id/frameL' cls='android.widget.FrameLayout' bounds='42,1752,1038,2316'"
+    ],
+    "inspect_samples": [
+      "label='우리 집 QR code 우리 집 QR code' rid='com.samsung.android.oneconnect:id/home_button' cls='android.widget.ImageButton' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/home_button' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='우리 집, Change location 우리 집, Change location' rid='com.samsung.android.oneconnect:id/tab_title' cls='android.widget.LinearLayout' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/tab_title' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='Add Add' rid='com.samsung.android.oneconnect:id/add_menu_butto' cls='android.widget.ImageButton' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/add_menu_button' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='More options More options' rid='com.samsung.android.oneconnect:id/more_menu_butt' cls='android.widget.ImageButton' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/more_menu_button' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='Caring for your plants is now easier and more enjoyable Caring for your ' rid='com.samsung.android.oneconnect:id/tvHeaderTitle' cls='android.widget.TextView' visible=true clickable=false focusable=false effectiveClickable=false matched_text_node='com.samsung.android.oneconnect:id/tvHeaderTitle' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='To use the clothing and shoe care service, connect your phone to your Sa' rid='com.samsung.android.oneconnect:id/tvHeaderTitle' cls='android.widget.TextView' visible=true clickable=false focusable=false effectiveClickable=false matched_text_node='com.samsung.android.oneconnect:id/tvHeaderTitle' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='Monitor air quality and air comfort in each room of your home. Monitor a' rid='com.samsung.android.oneconnect:id/tvHeaderTitle' cls='android.widget.TextView' visible=true clickable=false focusable=false effectiveClickable=false matched_text_node='com.samsung.android.oneconnect:id/tvHeaderTitle' promoted_container=true promotion_reason='xml_live_containment_container' promoted_from='com.samsung.android.oneconnect:id/tvHeaderTitle' promoted_to='com.samsung.android.oneconnect:id/frameLayout' stage='candidate_ready' reason='survive_candidate'",
+      "label='Home, Tab 1 of 5 Home, Tab 1 of 5' rid='com.samsung.android.oneconnect:id/menu_favorites' cls='android.widget.Button' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/menu_favorites' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='Devices, Tab 2 of 5, New content available Devices, Tab 2 of 5, New cont' rid='com.samsung.android.oneconnect:id/menu_devices' cls='android.widget.Button' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/menu_devices' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='Selected, Life, Tab 3 of 5 Selected, Life, Tab 3 of 5' rid='com.samsung.android.oneconnect:id/menu_services' cls='android.widget.Button' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/menu_services' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'"
+    ],
+    "pre_candidate_fail_samples": [],
+    "rejection_counts": {
+      "filtered_before_candidate": 11
+    },
+    "promotion_attempted": true,
+    "matched_text_found": true,
+    "xml_node_found": true,
+    "xml_match_strategy": "mixed",
+    "ancestor_chain_depth": 1,
+    "actionable_ancestor_found": false,
+    "candidate_committed": true,
+    "last_promotion_result_reason": "xml_live_containment_container",
+    "will_try_xml_live_fallback": true
+  },
+  "selected_meta": {
+    "promoted_container": true,
+    "promotion_attempted": true,
+    "promotion_source": "xml_live",
+    "promotion_reason": "xml_live_containment_container",
+    "promoted_from": "com.samsung.android.oneconnect:id/tvHeaderTitle",
+    "promoted_to": "com.samsung.android.oneconnect:id/frameLayout",
+    "promotion_candidate_count": 2,
+    "promotion_debug_summary": "helper:no_candidate:rejected_large=0:rejected_list_like=0;xml_live:containment_candidate_count=2:rejected_large=0:rejected_list_like=3",
+    "matched_text_node": "com.samsung.android.oneconnect:id/tvHeaderTitle",
+    "matched_text_bounds": "84,1899,996,2076",
+    "selected_area": 561744,
+    "matched_text_area": 161424,
+    "selected_to_text_area_ratio": 3.48,
+    "ancestor_distance": 999,
+    "selected_ancestor_distance": 999,
+    "selected_container_class": "android.widget.FrameLayout",
+    "selected_container_view_id": "com.samsung.android.oneconnect:id/frameLayout",
+    "tap_point": "540,2034",
+    "tap_strategy": "center",
+    "rank_summary_top3": "com.samsung.android.oneconnect:id/frameLayout:xml_live_containment_container:ov=1000:ar=3.48:sp=5:ad=999 | android.widget.RelativeLayout:xml_live_containment_container:ov=1000:ar=3.48:sp=1:ad=999"
+  },
+  "xml_snapshot_saved": true
+}

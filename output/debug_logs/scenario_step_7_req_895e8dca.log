@@ -1,0 +1,47 @@
+[ROW_CONTEXT]
+scenario=
+tab=(?i).*life.*
+step=7
+req_id=895e8dca
+visible=Upcoming meal
+단호박샌드위치 만드는 법
+speech=Upcoming meal
+final_result=FAIL
+failure_reason=move_failed
+
+review_note=이동/발화 결과 재검토 필요
+noise=
+move_result={'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775899394005, 'reqid': '1c2a8591', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}
+debug_source_row_found=false
+
+[ANN_TRACE]
+[ANN][baseline] req_id=895e8dca text='' source='source_row_missing' empty_reason='no_prev_step_row'
+[ANN][poll] req_id=895e8dca idx=0 raw='Upcoming meal' normalized='upcoming meal' changed=true differs_from_baseline=true source='row_snapshot' observed_at='' count=0
+[ANN][trim] req_id=895e8dca considered=false applied=false before='Upcoming meal' after='Upcoming meal' reject_reason='' reason='trim_stage_not_reached'
+[ANN][stable] req_id=895e8dca selected='Upcoming meal' reason='result_row_snapshot' source='result_row'
+[ANN][select] req_id=895e8dca used_snapshot=true snapshot_reason='no_better_recent_poll_candidate' previous='' current='Upcoming meal' final='Upcoming meal'
+
+[STEP_TRACE]
+[18:23:18] [STEP] END tab='(?i).*life.*' step=7 elapsed=4.40s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775899394005, 'reqId': '1c2a8591', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Upcoming meal
+단호박샌드위치 만드는 법' speech='Upcoming meal' crop='output\talkback_compare_20260411_182109\crops\i_._life._step_7_Upcoming_meal_단호박샌드위치_만드는_법.png' timing(move=0.439s ann=2.993s get_focus=0.971s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.905s total=5.308s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='895e8dca'
+[STEP][summary] req_id=895e8dca tab='(?i).*life.*' step=7 move_result='{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775899394005, 'reqid': '1c2a8591', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}' terminal=false no_progress=false
+
+[SCROLL_TRACE]
+[SCROLL] req_id=895e8dca scroll_related_log_found=false move_result='{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775899394005, 'reqid': '1c2a8591', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}' smart_result='' detail='' inferred_scroll=false inference_reason='no_scroll_signal_found'
+
+[FOCUS_TRACE]
+[18:23:18] [STEP] END tab='(?i).*life.*' step=7 elapsed=4.40s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775899394005, 'reqId': '1c2a8591', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Upcoming meal
+단호박샌드위치 만드는 법' speech='Upcoming meal' crop='output\talkback_compare_20260411_182109\crops\i_._life._step_7_Upcoming_meal_단호박샌드위치_만드는_법.png' timing(move=0.439s ann=2.993s get_focus=0.971s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.905s total=5.308s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='895e8dca'
+[FOCUS] req_id=895e8dca get_focus_req_id='' response_success=false payload_source='' payload_sufficient=false fallback_used=false fallback_found=false dump_attempted=false final_payload_source='' focus_reason='' missing_reason=''
+
+[DECISION_TRACE]
+baseline_empty=true
+first_candidate_contaminated=true
+trim_considered=false
+trim_applied=false
+stable_reason='result_row_snapshot'
+used_snapshot=true
+snapshot_reason='no_better_recent_poll_candidate'
+scroll_evidence='weak'
+focus_evidence='strong'
+notes='final speech appears to come from snapshot candidate path'

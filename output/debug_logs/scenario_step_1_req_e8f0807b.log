@@ -1,0 +1,44 @@
+[ROW_CONTEXT]
+scenario=
+tab=(?i).*life.*
+step=1
+req_id=e8f0807b
+visible=Cook like an expert with customized recipes.
+speech=Cook like an expert with customized recipes.
+final_result=FAIL
+failure_reason=move_failed
+
+review_note=이동/발화 결과 재검토 필요
+noise=
+move_result={'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775962336111, 'reqid': '33e028f9', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}
+debug_source_row_found=false
+
+[ANN_TRACE]
+[ANN][baseline] req_id=e8f0807b text='' source='source_row_missing' empty_reason='no_prev_step_row'
+[ANN][poll] req_id=e8f0807b idx=0 raw='Cook like an expert with customized recipes.' normalized='cook like an expert with customized recipes.' changed=true differs_from_baseline=true source='row_snapshot' observed_at='' count=0
+[ANN][trim] req_id=e8f0807b considered=false applied=false before='Cook like an expert with customized recipes.' after='Cook like an expert with customized recipes.' reject_reason='' reason='trim_stage_not_reached'
+[ANN][stable] req_id=e8f0807b selected='Cook like an expert with customized recipes.' reason='result_row_snapshot' source='result_row'
+[ANN][select] req_id=e8f0807b used_snapshot=true snapshot_reason='no_better_recent_poll_candidate' previous='' current='Cook like an expert with customized recipes.' final='Cook like an expert with customized recipes.'
+
+[STEP_TRACE]
+[11:52:20] [STEP] END tab='(?i).*life.*' step=1 elapsed=5.19s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775962336111, 'reqId': '33e028f9', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Cook like an expert with customized recipes.' speech='Cook like an expert with customized recipes.' crop='output\talkback_compare_20260412_115120\crops\i_._life._step_1_Cook_like_an_expert_with_customized_reci.png' timing(move=1.142s ann=3.047s get_focus=1.002s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.471s total=5.662s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='e8f0807b'
+[STEP][summary] req_id=e8f0807b tab='(?i).*life.*' step=1 move_result='{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775962336111, 'reqid': '33e028f9', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}' terminal=false no_progress=false
+
+[SCROLL_TRACE]
+[SCROLL] req_id=e8f0807b scroll_related_log_found=false move_result='{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775962336111, 'reqid': '33e028f9', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}' smart_result='' detail='' inferred_scroll=false inference_reason='no_scroll_signal_found'
+
+[FOCUS_TRACE]
+[11:52:20] [STEP] END tab='(?i).*life.*' step=1 elapsed=5.19s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775962336111, 'reqId': '33e028f9', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Cook like an expert with customized recipes.' speech='Cook like an expert with customized recipes.' crop='output\talkback_compare_20260412_115120\crops\i_._life._step_1_Cook_like_an_expert_with_customized_reci.png' timing(move=1.142s ann=3.047s get_focus=1.002s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.471s total=5.662s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='e8f0807b'
+[FOCUS] req_id=e8f0807b get_focus_req_id='' response_success=false payload_source='' payload_sufficient=false fallback_used=false fallback_found=false dump_attempted=false final_payload_source='' focus_reason='' missing_reason=''
+
+[DECISION_TRACE]
+baseline_empty=true
+first_candidate_contaminated=true
+trim_considered=false
+trim_applied=false
+stable_reason='result_row_snapshot'
+used_snapshot=true
+snapshot_reason='no_better_recent_poll_candidate'
+scroll_evidence='weak'
+focus_evidence='strong'
+notes='final speech appears to come from snapshot candidate path'

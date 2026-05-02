@@ -1,0 +1,44 @@
+[ROW_CONTEXT]
+scenario=
+tab=(?i).*life.*
+step=8
+req_id=e779e42f
+visible=Device energy usage, Loading… Loading… Usage No data Savings 0 watt-hours
+speech=Device energy usage, Loading… Loading… Usage No data Savings 0 watt-hours
+final_result=FAIL
+failure_reason=move_failed
+
+review_note=이동/발화 결과 재검토 필요
+noise=
+move_result={'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775957203781, 'reqid': '31b975cf', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}
+debug_source_row_found=false
+
+[ANN_TRACE]
+[ANN][baseline] req_id=e779e42f text='' source='source_row_missing' empty_reason='no_prev_step_row'
+[ANN][poll] req_id=e779e42f idx=0 raw='Device energy usage, Loading… Loading… Usage No data Savings 0 watt-hours' normalized='device energy usage, loading… loading… usage no data savings 0 watt-hours' changed=true differs_from_baseline=true source='row_snapshot' observed_at='' count=0
+[ANN][trim] req_id=e779e42f considered=false applied=false before='Device energy usage, Loading… Loading… Usage No data Savings 0 watt-hours' after='Device energy usage, Loading… Loading… Usage No data Savings 0 watt-hours' reject_reason='' reason='trim_stage_not_reached'
+[ANN][stable] req_id=e779e42f selected='Device energy usage, Loading… Loading… Usage No data Savings 0 watt-hours' reason='result_row_snapshot' source='result_row'
+[ANN][select] req_id=e779e42f used_snapshot=true snapshot_reason='no_better_recent_poll_candidate' previous='' current='Device energy usage, Loading… Loading… Usage No data Savings 0 watt-hours' final='Device energy usage, Loading… Loading… Usage No data Savings 0 watt-hours'
+
+[STEP_TRACE]
+[10:26:48] [STEP] END tab='(?i).*life.*' step=8 elapsed=4.72s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775957203781, 'reqId': '31b975cf', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Device energy usage, Loading… Loading… Usage No data Savings 0 watt-hours' speech='Device energy usage, Loading… Loading… Usage No data Savings 0 watt-hours' crop='output\talkback_compare_20260412_102108\crops\i_._life._step_8_Device_energy_usage__Loading__Loading__U.png' timing(move=0.508s ann=3.094s get_focus=1.119s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.573s total=5.295s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='e779e42f'
+[STEP][summary] req_id=e779e42f tab='(?i).*life.*' step=8 move_result='{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775957203781, 'reqid': '31b975cf', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}' terminal=false no_progress=false
+
+[SCROLL_TRACE]
+[SCROLL] req_id=e779e42f scroll_related_log_found=false move_result='{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775957203781, 'reqid': '31b975cf', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}' smart_result='' detail='' inferred_scroll=false inference_reason='no_scroll_signal_found'
+
+[FOCUS_TRACE]
+[10:26:48] [STEP] END tab='(?i).*life.*' step=8 elapsed=4.72s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1775957203781, 'reqId': '31b975cf', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Device energy usage, Loading… Loading… Usage No data Savings 0 watt-hours' speech='Device energy usage, Loading… Loading… Usage No data Savings 0 watt-hours' crop='output\talkback_compare_20260412_102108\crops\i_._life._step_8_Device_energy_usage__Loading__Loading__U.png' timing(move=0.508s ann=3.094s get_focus=1.119s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.573s total=5.295s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='e779e42f'
+[FOCUS] req_id=e779e42f get_focus_req_id='' response_success=false payload_source='' payload_sufficient=false fallback_used=false fallback_found=false dump_attempted=false final_payload_source='' focus_reason='' missing_reason=''
+
+[DECISION_TRACE]
+baseline_empty=true
+first_candidate_contaminated=true
+trim_considered=false
+trim_applied=false
+stable_reason='result_row_snapshot'
+used_snapshot=true
+snapshot_reason='no_better_recent_poll_candidate'
+scroll_evidence='weak'
+focus_evidence='strong'
+notes='final speech appears to come from snapshot candidate path'

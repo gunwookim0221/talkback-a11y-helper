@@ -1,0 +1,44 @@
+[ROW_CONTEXT]
+scenario=
+tab=(?i).*life.*
+step=25
+req_id=cf9947cf
+visible=LocationButton
+speech=LocationButton
+final_result=FAIL
+failure_reason=repeat_no_progress
+
+review_note=동일 항목 반복 후 종료
+noise=
+move_result=failed
+debug_source_row_found=false
+
+[ANN_TRACE]
+[ANN][baseline] req_id=cf9947cf text='' source='source_row_missing' empty_reason='no_prev_step_row'
+[ANN][poll] req_id=cf9947cf idx=0 raw='LocationButton' normalized='locationbutton' changed=true differs_from_baseline=true source='row_snapshot' observed_at='' count=0
+[ANN][trim] req_id=cf9947cf considered=false applied=false before='LocationButton' after='LocationButton' reject_reason='' reason='trim_stage_not_reached'
+[ANN][stable] req_id=cf9947cf selected='LocationButton' reason='result_row_snapshot' source='result_row'
+[ANN][select] req_id=cf9947cf used_snapshot=true snapshot_reason='no_better_recent_poll_candidate' previous='' current='LocationButton' final='LocationButton'
+
+[STEP_TRACE]
+[00:29:33] [STEP] END tab='(?i).*life.*' step=25 elapsed=5.35s move_result='' visible='LocationButton' speech='LocationButton' crop='output\talkback_compare_20260425_002605\crops\i_._life._step_25_LocationButton.png' timing(move=0.403s ann=3.769s get_focus=1.181s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.551s total=5.906s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='cf9947cf'
+[STEP][summary] req_id=cf9947cf tab='(?i).*life.*' step=25 move_result='failed' terminal=false no_progress=true
+
+[SCROLL_TRACE]
+[SCROLL] req_id=cf9947cf scroll_related_log_found=false move_result='failed' smart_result='' detail='' inferred_scroll=false inference_reason='no_scroll_signal_found'
+
+[FOCUS_TRACE]
+[00:29:33] [STEP] END tab='(?i).*life.*' step=25 elapsed=5.35s move_result='' visible='LocationButton' speech='LocationButton' crop='output\talkback_compare_20260425_002605\crops\i_._life._step_25_LocationButton.png' timing(move=0.403s ann=3.769s get_focus=1.181s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.551s total=5.906s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='cf9947cf'
+[FOCUS] req_id=cf9947cf get_focus_req_id='' response_success=false payload_source='' payload_sufficient=false fallback_used=false fallback_found=false dump_attempted=false final_payload_source='' focus_reason='' missing_reason=''
+
+[DECISION_TRACE]
+baseline_empty=true
+first_candidate_contaminated=true
+trim_considered=false
+trim_applied=false
+stable_reason='result_row_snapshot'
+used_snapshot=true
+snapshot_reason='no_better_recent_poll_candidate'
+scroll_evidence='weak'
+focus_evidence='strong'
+notes='final speech appears to come from snapshot candidate path'

@@ -1,0 +1,512 @@
+[19:55:40] [SAVE][temp] override tmp='D:\Python test\talkback-a11y-helper\output\.tmp' temp='D:\Python test\talkback-a11y-helper\output\.tmp' applied=true
+[19:55:40] [MAIN] script start (version=1.7.81, log_level=NORMAL)
+[19:55:41] [PREFLIGHT] talkback status='enabled'
+[19:55:41] [MAIN] output file: output/talkback_compare_20260414_195540.xlsx
+[19:55:41] [MAIN] image dir base: output\talkback_compare_20260414_195540
+[19:55:41] [CONFIG] runtime config loaded path='config\runtime_config.json'
+[19:55:41] [GLOBAL_NAV][guard] forcing stabilization_mode='tab_context' scenario='global_nav_main' requested='anchor_then_context'
+[19:55:41] [CONFIG] scenario resolved scenario='global_nav_main' group='main_tabs' max_steps=10 enabled=False
+[19:55:41] [CONFIG] applied shared_navigation='default_global_nav'
+[19:55:41] [CONFIG] scenario enabled scenario='global_nav_main' source='runtime' enabled=False base_enabled=False
+[19:55:41] [CONFIG] scenario resolved scenario='home_main' group='main_tabs' max_steps=5 enabled=False
+[19:55:41] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[19:55:41] [CONFIG] scenario enabled scenario='home_main' source='runtime' enabled=False base_enabled=False
+[19:55:41] [CONFIG] scenario resolved scenario='life_food_plugin' group='plugin_screen' max_steps=5 enabled=False
+[19:55:41] [CONFIG] applied pre_navigation_ref='enter_food_plugin'
+[19:55:41] [CONFIG] scenario enabled scenario='life_food_plugin' source='runtime' enabled=False base_enabled=False
+[19:55:41] [CONFIG] scenario resolved scenario='life_air_care_plugin' group='-' max_steps=5 enabled=True
+[19:55:41] [CONFIG] scenario enabled scenario='life_air_care_plugin' source='runtime' enabled=True base_enabled=False
+[19:55:41] [CONFIG] scenario resolved scenario='life_home_care_plugin' group='-' max_steps=5 enabled=True
+[19:55:41] [CONFIG] scenario enabled scenario='life_home_care_plugin' source='runtime' enabled=True base_enabled=False
+[19:55:41] [CONFIG] scenario resolved scenario='life_energy_plugin' group='-' max_steps=5 enabled=True
+[19:55:41] [CONFIG] scenario enabled scenario='life_energy_plugin' source='runtime' enabled=True base_enabled=False
+[19:55:41] [CONFIG] scenario resolved scenario='devices_main' group='main_tabs' max_steps=10 enabled=False
+[19:55:41] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[19:55:41] [CONFIG] applied anchor_ref='home_tab_anchor'
+[19:55:41] [CONFIG] scenario enabled scenario='devices_main' source='runtime' enabled=False base_enabled=False
+[19:55:41] [CONFIG] scenario resolved scenario='life_main' group='main_tabs' max_steps=30 enabled=False
+[19:55:41] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[19:55:41] [CONFIG] scenario enabled scenario='life_main' source='runtime' enabled=False base_enabled=False
+[19:55:41] [CONFIG] scenario resolved scenario='routines_main' group='main_tabs' max_steps=30 enabled=False
+[19:55:41] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[19:55:41] [CONFIG] scenario enabled scenario='routines_main' source='runtime' enabled=False base_enabled=False
+[19:55:41] [CONFIG] scenario resolved scenario='menu_main' group='main_tabs' max_steps=30 enabled=False
+[19:55:41] [CONFIG] applied shared_navigation='bottom_tab_global_nav'
+[19:55:41] [CONFIG] scenario enabled scenario='menu_main' source='runtime' enabled=False base_enabled=False
+[19:55:41] [CONFIG] scenario resolved scenario='settings_entry_example' group='plugin_screen' max_steps=5 enabled=False
+[19:55:41] [CONFIG] applied anchor_ref='settings_button_anchor'
+[19:55:41] [CONFIG] applied pre_navigation_ref='enter_settings'
+[19:55:41] [CONFIG] scenario enabled scenario='settings_entry_example' source='runtime' enabled=False base_enabled=False
+[19:55:41] [CONFIG] scenario resolved scenario='life_pet_care_plugin' group='-' max_steps=5 enabled=True
+[19:55:41] [CONFIG] scenario enabled scenario='life_pet_care_plugin' source='runtime' enabled=True base_enabled=False
+[19:55:41] [CONFIG] scenario resolved scenario='life_family_care_plugin' group='-' max_steps=5 enabled=True
+[19:55:41] [CONFIG] scenario enabled scenario='life_family_care_plugin' source='runtime' enabled=True base_enabled=False
+[19:55:41] [CONFIG] scenario resolved scenario='life_plant_care_plugin' group='-' max_steps=5 enabled=True
+[19:55:41] [CONFIG] scenario enabled scenario='life_plant_care_plugin' source='runtime' enabled=True base_enabled=False
+[19:55:41] [CONFIG] scenario resolved scenario='life_clothing_care_plugin' group='-' max_steps=5 enabled=True
+[19:55:41] [CONFIG] scenario enabled scenario='life_clothing_care_plugin' source='runtime' enabled=True base_enabled=False
+[19:55:41] [CONFIG] scenario resolved scenario='life_find_plugin' group='-' max_steps=5 enabled=True
+[19:55:41] [CONFIG] scenario enabled scenario='life_find_plugin' source='runtime' enabled=True base_enabled=False
+[19:55:41] [CONFIG] scenario resolved scenario='life_video_plugin' group='-' max_steps=5 enabled=True
+[19:55:41] [CONFIG] scenario enabled scenario='life_video_plugin' source='runtime' enabled=True base_enabled=False
+[19:55:41] [CONFIG] scenario resolved scenario='life_home_monitor_plugin' group='-' max_steps=5 enabled=True
+[19:55:41] [CONFIG] scenario enabled scenario='life_home_monitor_plugin' source='runtime' enabled=True base_enabled=False
+[19:55:41] [CONFIG] scenario resolved scenario='life_music_sync_plugin' group='-' max_steps=5 enabled=True
+[19:55:41] [CONFIG] scenario enabled scenario='life_music_sync_plugin' source='runtime' enabled=True base_enabled=False
+[19:55:41] [MAIN] skip disabled scenario_id='global_nav_main' tab='(?i).*(home|devices|life|routines|menu).*'
+[19:55:41] [MAIN] skip disabled scenario_id='home_main' tab='(?i).*home.*'
+[19:55:41] [MAIN] skip disabled scenario_id='life_food_plugin' tab='(?i).*life.*'
+[19:55:41] [SCENARIO][stabilization] scenario='life_air_care_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[19:55:41] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[19:55:41] [TAB][select] fallback_to_legacy=True scenario='life_air_care_plugin'
+[19:55:49] [TRACE][open_scenario] scenario='life_air_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=True focus_align_reason='' context_ok=False anchor_matched=False anchor_stable=False
+[19:55:50] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^smart\s*air\s*care$|^air\s*care$|air\s*care\.|\baircare\b|에어\s*케어)'
+[19:55:50] [XMLENTRY][search] pre_reset scroll_to_top=true
+[19:55:55] [XMLENTRY][search] step=0/5 candidate_count=6
+[19:55:55] [XMLENTRY][search][top] rank=1 reason='actionable_container' text='Family Care' rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,310,1038,1042' area_ratio='0.3516'
+[19:55:55] [XMLENTRY][search][top] rank=2 reason='actionable_container' text='Family Care' rid='com.samsung.android.oneconnect:id/containerNameLayout' class='android.widget.RelativeLayout' bounds='42,310,1038,442' area_ratio='0.0634'
+[19:55:55] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='Take care of yourself and handle your day by che' rid='' class='android.widget.RelativeLayout' bounds='42,442,1038,634' area_ratio='0.0922'
+[19:55:55] [XMLENTRY][select] reason='actionable_container' resource='com.samsung.android.oneconnect:id/frameLayout' bounds='42,310,1038,1042' text=''
+[19:55:57] [XMLENTRY][result] success=false reason='tap_dispatched_but_no_transition' signal='air_care_verify_missing' scenario='life_air_care_plugin' type='a'
+[19:55:57] [XMLENTRY][result] success=false reason='tap_dispatched_but_no_transition'
+[19:55:57] [SCENARIO][pre_nav][xmlentry] fallback='helper_scrollTouch' reason='xml_entry_failed:tap_dispatched_but_no_transition'
+[19:56:04] [SCENARIO][pre_nav] retry step=1 attempt=1/2 reason='ACTION_ACCESSIBILITY_FOCUS success'
+[19:56:06] [XMLENTRY][search] step=0/5 candidate_count=0
+[19:56:09] [XMLENTRY][scroll] step=0/5 performed=false
+[19:56:09] [XMLENTRY][result] success=false reason='only_root_candidates'
+[19:56:09] [SCENARIO][pre_nav][xmlentry] fallback='helper_scrollTouch' reason='xml_entry_failed:only_root_candidates'
+[19:56:15] [CAPTURE][pre_nav_failure] start scenario='life_air_care_plugin' phase='pre_navigation' reason='no_local_match' step=1
+[19:56:19] [CAPTURE][pre_nav_failure] saved path='output\capture_bundles\life_air_care_plugin\20260414_105550\final_failure' files='screenshot.png,window_dump.xml,helper_dump.json,focus_payload.json,meta.json'
+[19:56:19] [SCENARIO][pre_nav] failed reason='action_failed' step=1
+[19:56:19] [SCENARIO][pre_nav] failed reason='action_failed' detail='ACTION_ACCESSIBILITY_FOCUS success' step=1
+[19:56:19] [PERF][scenario_summary] scenario=life_air_care_plugin tab=(?i).*life.* total_runtime=38.0 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[19:56:19] [SAVE] writing sheets raw/filtered/summary/result
+[19:56:19] [SAVE] filtered rows=1, raw rows=1
+[19:56:19] [SAVE] saved excel: output/talkback_compare_20260414_195540.xlsx rows=1 with_images=False
+[19:56:19] [RECOVER] start
+[19:56:25] [RECOVER] success
+[19:56:25] [SCENARIO][stabilization] scenario='life_home_care_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[19:56:25] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[19:56:25] [TAB][select] fallback_to_legacy=True scenario='life_home_care_plugin'
+[19:56:29] [TRACE][open_scenario] scenario='life_home_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=True focus_align_reason='' context_ok=False anchor_matched=False anchor_stable=False
+[19:56:30] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^home\s*care$|home\s*care\.|\bhomecare\b|홈\s*케어)'
+[19:56:30] [XMLENTRY][search] pre_reset scroll_to_top=true
+[19:56:35] [XMLENTRY][search] step=0/5 candidate_count=8
+[19:56:35] [XMLENTRY][search][top] rank=1 reason='actionable_container' text='Home Care' rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,1858,1038,2316' area_ratio='0.2200'
+[19:56:35] [XMLENTRY][search][top] rank=2 reason='actionable_container' text='Home Care' rid='com.samsung.android.oneconnect:id/containerNameLayout' class='android.widget.RelativeLayout' bounds='42,1858,1038,1990' area_ratio='0.0634'
+[19:56:35] [XMLENTRY][search][top] rank=3 reason='actionable_container' text='Family Care' rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,310,1038,1042' area_ratio='0.3516'
+[19:56:35] [XMLENTRY][select] reason='actionable_container' resource='com.samsung.android.oneconnect:id/frameLayout' bounds='42,1858,1038,2316' text=''
+[19:56:48] [XMLENTRY][result] success=true reason='transition_confirmed'
+[19:56:48] [SCENARIO][pre_nav] success step=1 reason='ACTION_ACCESSIBILITY_FOCUS success'
+[19:56:49] [SCENARIO][pre_nav] success
+[19:56:55] [ANCHOR][fallback] explicit anchor not matched, trying top content fallback
+[19:56:55] [ANCHOR][fallback] selected candidate label='Always manage your home appliances optimally, Home Care constantly monitors devices that support AI diagnosis and informs you when they need cleaning, replacing, or other maintenance. Always manage your home appliances optimally, Home Care constantly monitors devices that support AI diagnosis and informs you when they need cleaning, replacing, or other maintenance.' position='top_center'
+[19:56:55] [ANCHOR][plugin_fallback] using_top_start_candidate position='top_center'
+[19:57:04] [CONTEXT] skipped reason='anchor_only_mode'
+[19:57:04] [CONTEXT] skipped reason='anchor_only_mode'
+[19:57:04] [CONTEXT] scenario='life_home_care_plugin' type='skipped' expected='' actual='' ok=True
+[19:57:04] [ANCHOR][scenario_start] anchor mismatch scenario='life_home_care_plugin'
+[19:57:04] [ANCHOR][scenario_start] anchor not stable scenario='life_home_care_plugin'
+[19:57:10] [ANCHOR][fallback] explicit anchor not matched, trying top content fallback
+[19:57:10] [ANCHOR][fallback] selected candidate label='Always manage your home appliances optimally, Home Care constantly monitors devices that support AI diagnosis and informs you when they need cleaning, replacing, or other maintenance. Always manage your home appliances optimally, Home Care constantly monitors devices that support AI diagnosis and informs you when they need cleaning, replacing, or other maintenance.' position='top_center'
+[19:57:10] [ANCHOR][plugin_fallback] using_top_start_candidate position='top_center'
+[19:57:19] [CONTEXT] skipped reason='anchor_only_mode'
+[19:57:19] [CONTEXT] skipped reason='anchor_only_mode'
+[19:57:19] [CONTEXT] scenario='life_home_care_plugin' type='skipped' expected='' actual='' ok=True
+[19:57:19] [ANCHOR][scenario_start] anchor mismatch scenario='life_home_care_plugin'
+[19:57:19] [ANCHOR][scenario_start] anchor not stable scenario='life_home_care_plugin'
+[19:57:19] [TRACE][open_scenario] scenario='life_home_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=True focus_align_reason='' context_ok=False anchor_matched=False anchor_stable=False
+[19:57:19] [ANCHOR][scenario_start] stabilization failed but proceeding with low-confidence fallback start scenario='life_home_care_plugin' source='fallback_top_center' reason='fallback_candidate_and_focus_evidence'
+[19:57:19] [ANCHOR][plugin_fallback] candidate_label='Always manage your home appliances optimally, Home Care constantly monitors devices that support AI diagnosis and informs you when they need cleaning, replacing, or other maintenance. Always manage your home appliances optimally, Home Care constantly monitors devices that support AI diagnosis and informs you when they need cleaning, replacing, or other maintenance.' candidate_view_id='' reason='new_screen_evidence_confirmed'
+[19:57:19] [ANCHOR][plugin_fallback] stabilized_by='post_focus_verified'
+[19:57:19] [SCENARIO][start_mode] scenario='life_home_care_plugin' mode='low_confidence_fallback'
+[19:57:26] [SCENARIO][special_state] detected scenario='life_home_care_plugin' entry_type='card' kind='onboarding_or_empty_state' handling='back_after_read' verify_hit=true long_intro_like=true special_hits='smartthings home care,always manage your home appliances optimally,home care constantly monitors devices,ai diagnosis,maintenance' cta_hits='start'
+[19:57:28] [SCENARIO][entry_contract] handled scenario='life_home_care_plugin' entry_type='card' reason='special_state_handled' detail='onboarding_back_exit' back_status='back_sent_exit'
+[19:57:28] [PERF][scenario_summary] scenario=life_home_care_plugin tab=(?i).*life.* total_runtime=63.0 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[19:57:28] [SAVE] writing sheets raw/filtered/summary/result
+[19:57:28] [SAVE] filtered rows=2, raw rows=2
+[19:57:28] [SAVE] saved excel: output/talkback_compare_20260414_195540.xlsx rows=2 with_images=False
+[19:57:28] [RECOVER] start
+[19:57:31] [RECOVER] success
+[19:57:31] [SCENARIO][stabilization] scenario='life_energy_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[19:57:31] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[19:57:31] [TAB][select] fallback_to_legacy=True scenario='life_energy_plugin'
+[19:57:36] [TRACE][open_scenario] scenario='life_energy_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=True focus_align_reason='' context_ok=False anchor_matched=False anchor_stable=False
+[19:57:36] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^energy$|energy\.|\bsmart\s*energy\b|\benergy\b)'
+[19:57:36] [XMLENTRY][search] pre_reset scroll_to_top=true
+[19:57:42] [XMLENTRY][search] step=0/5 candidate_count=0
+[19:57:44] [XMLENTRY][scroll] step=0/5 performed=true
+[19:57:47] [XMLENTRY][search] step=1/5 candidate_count=3
+[19:57:47] [XMLENTRY][search][top] rank=1 reason='actionable_container' text='Energy' rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,644,1038,1376' area_ratio='0.3516'
+[19:57:47] [XMLENTRY][search][top] rank=2 reason='actionable_container' text='Energy' rid='com.samsung.android.oneconnect:id/containerNameLayout' class='android.widget.RelativeLayout' bounds='42,644,1038,776' area_ratio='0.0634'
+[19:57:47] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='Add an appliance to start measuring energy usage' rid='' class='android.widget.RelativeLayout' bounds='42,776,1038,968' area_ratio='0.0922'
+[19:57:47] [XMLENTRY][select] reason='actionable_container' resource='com.samsung.android.oneconnect:id/frameLayout' bounds='42,644,1038,1376' text=''
+[19:57:55] [XMLENTRY][result] success=true reason='transition_confirmed'
+[19:57:55] [SCENARIO][pre_nav] success step=1 reason='ACTION_ACCESSIBILITY_FOCUS success'
+[19:57:56] [SCENARIO][pre_nav] success
+[19:57:59] [CONTEXT] skipped reason='anchor_only_mode'
+[19:57:59] [CONTEXT] skipped reason='anchor_only_mode'
+[19:57:59] [CONTEXT] scenario='life_energy_plugin' type='skipped' expected='' actual='' ok=True
+[19:57:59] [CONTEXT] verification passed scenario='life_energy_plugin'
+[19:57:59] [ANCHOR][scenario_start] success scenario='life_energy_plugin' selected=True matched=True stable=True context_ok=True reason='selected_and_verified'
+[19:57:59] [TRACE][open_scenario] scenario='life_energy_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=True focus_align_reason='' context_ok=False anchor_matched=False anchor_stable=True
+[19:58:01] [SCENARIO][entry_contract] success scenario='life_energy_plugin' entry_type='card' reason='success_verified' detail='plugin_open_verified'
+[19:58:02] [TRACE][post_open_focus] scenario='life_energy_plugin' view_id='back' label='Navigate up' speech='Navigate up' bounds='{'l': 72, 't': 118, 'r': 144, 'b': 310, 'left': 72, 'top': 118, 'right': 144, 'bottom': 310}' source='top_level' top_level=True
+[19:58:07] [TRACE][anchor_row] scenario='life_energy_plugin' step=0 view_id='back' visible='Navigate up' speech='Navigate up' normalized_visible='navigate up' is_global_nav=False
+[19:58:07] [ROW] fingerprint='back|navigate up|navigate up|108,214' normalized_fingerprint='back|navigate up|navigate up' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=1 noise=false
+[19:58:07] [RESULT] skipped anchor rows count=1
+[19:58:07] [SAVE] writing sheets raw/filtered/summary/result
+[19:58:07] [SAVE] filtered rows=3, raw rows=3
+[19:58:07] [SAVE] saved excel: output/talkback_compare_20260414_195540.xlsx rows=3 with_images=False
+[19:58:07] [STEP] START tab='(?i).*life.*' step=1
+[19:58:12] [ROW] fingerprint='|energy|energy|552,214' normalized_fingerprint='|energy|energy' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=2 noise=false
+[19:58:12] [STEP] END tab='(?i).*life.*' step=1 elapsed=4.58s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164289487, 'reqId': 'bb1c8ef8', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Energy' speech='Energy' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_1_Energy.png' timing(move=0.574s ann=3.005s get_focus=0.999s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.588s total=5.167s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='88da4c85'
+[19:58:12] [STOP][eval] step=1 scenario='life_energy_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=2 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:1|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164289487, 'reqid': 'bb1c8ef8', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[19:58:12] [STEP] START tab='(?i).*life.*' step=2
+[19:58:18] [ROW] fingerprint='more|more options|more options|972,214' normalized_fingerprint='more|more options|more options' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=3 noise=false
+[19:58:18] [STEP] END tab='(?i).*life.*' step=2 elapsed=4.57s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164294599, 'reqId': '6a8965d4', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='More options' speech='More options' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_2_More_options.png' timing(move=0.531s ann=3.027s get_focus=1.016s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.597s total=5.172s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='b9dcaf2e'
+[19:58:18] [STOP][eval] step=2 scenario='life_energy_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=3 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:2|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164294599, 'reqid': '6a8965d4', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[19:58:18] [OVERLAY] candidate matched scenario='life_energy_plugin' tab='(?i).*life.*' step=2 view_id='more' label='More options' reason='matched_scenario_policy'
+[19:58:28] [OVERLAY] post_click classification='overlay' scenario='life_energy_plugin' tab='(?i).*life.*' entry_view_id='more' entry_label='More options' post_view_id='addToHomeScreen' post_label='Add to Home screen'
+[19:58:40] [RESULT] skipped anchor rows count=1
+[19:58:41] [SAVE] writing sheets raw/filtered/summary/result
+[19:58:41] [SAVE] filtered rows=8, raw rows=8
+[19:58:41] [SAVE] saved excel: output/talkback_compare_20260414_195540.xlsx rows=8 with_images=False
+[19:58:54] [OVERLAY][repeat] same_focus_detected=true step=6 view_id='moreInformation' bounds='396,820,1053,970' normalized_visible_label='information' move_result=''
+[19:58:54] [OVERLAY][break] reason='same_overlay_fingerprint' step=6
+[19:58:54] [RESULT] skipped anchor rows count=1
+[19:58:54] [SAVE] writing sheets raw/filtered/summary/result
+[19:58:54] [SAVE] filtered rows=10, raw rows=10
+[19:58:54] [SAVE] saved excel: output/talkback_compare_20260414_195540.xlsx rows=10 with_images=False
+[19:58:57] [RESULT] skipped anchor rows count=1
+[19:58:57] [SAVE] writing sheets raw/filtered/summary/result
+[19:58:57] [SAVE] filtered rows=10, raw rows=10
+[19:58:57] [SAVE] saved excel: output/talkback_compare_20260414_195540.xlsx rows=10 with_images=False
+[19:59:00] [OVERLAY] realign status='realign_entry_reached' entry_reached=True steps_taken=2 match_by='view_id'
+[19:59:06] [CONTEXT] skipped reason='anchor_only_mode'
+[19:59:06] [CONTEXT] skipped reason='anchor_only_mode'
+[19:59:06] [CONTEXT] scenario='life_energy_plugin' type='skipped' expected='' actual='' ok=True
+[19:59:06] [CONTEXT] verification passed scenario='life_energy_plugin'
+[19:59:06] [ANCHOR][overlay_realign] success scenario='life_energy_plugin' selected=True matched=True stable=True context_ok=True reason='selected_and_verified'
+[19:59:06] [ANCHOR][overlay_realign] success scenario='life_energy_plugin' reason='overlay_realign_verified'
+[19:59:06] [STEP] START tab='(?i).*life.*' step=3
+[19:59:11] [ROW] fingerprint='|energy|energy|552,214' normalized_fingerprint='|energy|energy' duplicate=false recent_duplicate=true distance=2 recent_semantic_duplicate=true semantic_distance=2 semantic_window_unique=3 noise=false
+[19:59:11] [STEP] END tab='(?i).*life.*' step=3 elapsed=4.62s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164348021, 'reqId': '4e55a062', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Energy' speech='Energy' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_3_Energy.png' timing(move=0.548s ann=3.065s get_focus=1.009s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.619s total=5.241s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='2152e2a3'
+[19:59:11] [STOP][eval] step=3 scenario='life_energy_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=true recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=true recent_duplicate_distance=2 recent_semantic_duplicate=true recent_semantic_duplicate_distance=2 recent_semantic_unique_count=3 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:3|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164348021, 'reqid': '4e55a062', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[19:59:11] [RESULT] skipped anchor rows count=1
+[19:59:11] [SAVE] writing sheets raw/filtered/summary/result
+[19:59:11] [SAVE] filtered rows=10, raw rows=11
+[19:59:11] [SAVE] saved excel: output/talkback_compare_20260414_195540.xlsx rows=11 with_images=False
+[19:59:11] [STEP] START tab='(?i).*life.*' step=4
+[19:59:16] [ROW] fingerprint='more|more options|more options|972,214' normalized_fingerprint='more|more options|more options' duplicate=false recent_duplicate=true distance=2 recent_semantic_duplicate=true semantic_distance=2 semantic_window_unique=3 noise=false
+[19:59:16] [STEP] END tab='(?i).*life.*' step=4 elapsed=4.54s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164353323, 'reqId': 'e35562df', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='More options' speech='More options' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_4_More_options.png' timing(move=0.508s ann=3.027s get_focus=1.003s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.613s total=5.152s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='54df9f84'
+[19:59:16] [STOP][eval] step=4 scenario='life_energy_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=true recent_duplicate_distance=2 recent_semantic_duplicate=true recent_semantic_duplicate_distance=2 recent_semantic_unique_count=3 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:4|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164353323, 'reqid': 'e35562df', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[19:59:16] [OVERLAY] skip already expanded entry fingerprint='(?i).*life.*|more|more options'
+[19:59:16] [STEP] START tab='(?i).*life.*' step=5
+[19:59:21] [ROW] fingerprint='|save energy with ai energy mode and earn reward points|save energy with ai energy mode and earn reward points|642,461' normalized_fingerprint='|save energy with ai energy mode and earn reward points|save energy with ai energy mode and earn reward points' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=4 noise=false
+[19:59:21] [STEP] END tab='(?i).*life.*' step=5 elapsed=4.50s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164358506, 'reqId': 'b2a11331', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Save energy with AI Energy Mode and earn reward points' speech='Save energy with AI Energy Mode and earn reward points' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_5_Save_energy_with_AI_Energy_Mode_and_earn.png' timing(move=0.523s ann=3.011s get_focus=0.966s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.606s total=5.107s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='8186b940'
+[19:59:21] [STOP][eval] step=5 scenario='life_energy_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=4 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:5|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164358506, 'reqid': 'b2a11331', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[19:59:21] [STOP][summary] scenario='life_energy_plugin' stop_triggered=false stop_step=5 reason='safety_limit'
+[19:59:21] [PERF][scenario_summary] scenario=life_energy_plugin tab=(?i).*life.* total_runtime=110.0 total_steps=11 main_step_count=6 overlay_step_count=5 overlay_count=1 avg_get_focus=0.907 avg_move=0.486 avg_crop=0.62 avg_step_total=5.103 step_total_sample_count=6 avg_get_focus_main=0.996 avg_get_focus_overlay=0.799 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=11 get_focus_strong_skip_rate=100.0 step_dump_used_count=0 save_excel_count=5 realign_attempt_count=1 realign_success_count=1 realign_success_rate=100.0
+[19:59:21] [MAIN] skip disabled scenario_id='devices_main' tab='(?i).*devices.*'
+[19:59:21] [MAIN] skip disabled scenario_id='life_main' tab='(?i).*life.*'
+[19:59:21] [MAIN] skip disabled scenario_id='routines_main' tab='(?i).*routines.*'
+[19:59:21] [MAIN] skip disabled scenario_id='menu_main' tab='(?i).*(menu|more).*'
+[19:59:21] [MAIN] skip disabled scenario_id='settings_entry_example' tab='(?i).*menu.*'
+[19:59:21] [RECOVER] start
+[19:59:27] [RECOVER] success
+[19:59:27] [SCENARIO][stabilization] scenario='life_pet_care_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[19:59:27] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[19:59:27] [TAB][select] fallback_to_legacy=True scenario='life_pet_care_plugin'
+[19:59:31] [TRACE][open_scenario] scenario='life_pet_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=True focus_align_reason='' context_ok=False anchor_matched=False anchor_stable=False
+[19:59:32] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^pet\s*care$|.*pet\s*care.*|.*펫\s*케어.*)'
+[19:59:32] [XMLENTRY][search] pre_reset scroll_to_top=true
+[19:59:36] [XMLENTRY][search] step=0/5 candidate_count=6
+[19:59:36] [XMLENTRY][search][top] rank=1 reason='actionable_container' text='Family Care' rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,310,1038,1042' area_ratio='0.3516'
+[19:59:36] [XMLENTRY][search][top] rank=2 reason='actionable_container' text='Family Care' rid='com.samsung.android.oneconnect:id/containerNameLayout' class='android.widget.RelativeLayout' bounds='42,310,1038,442' area_ratio='0.0634'
+[19:59:36] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='Take care of yourself and handle your day by che' rid='' class='android.widget.RelativeLayout' bounds='42,442,1038,634' area_ratio='0.0922'
+[19:59:36] [XMLENTRY][select] reason='actionable_container' resource='com.samsung.android.oneconnect:id/frameLayout' bounds='42,310,1038,1042' text=''
+[19:59:40] [XMLENTRY][result] success=false reason='tap_dispatched_but_no_transition' signal='none' scenario='life_pet_care_plugin' type='a'
+[19:59:40] [XMLENTRY][result] success=false reason='tap_dispatched_but_no_transition'
+[19:59:40] [SCENARIO][pre_nav][xmlentry] fallback='helper_scrollTouch' reason='xml_entry_failed:tap_dispatched_but_no_transition'
+[19:59:46] [SCENARIO][pre_nav] retry step=1 attempt=1/2 reason='ACTION_ACCESSIBILITY_FOCUS success'
+[19:59:49] [XMLENTRY][search] step=0/5 candidate_count=0
+[19:59:51] [XMLENTRY][scroll] step=0/5 performed=false
+[19:59:51] [XMLENTRY][result] success=false reason='only_root_candidates'
+[19:59:51] [SCENARIO][pre_nav][xmlentry] fallback='helper_scrollTouch' reason='xml_entry_failed:only_root_candidates'
+[19:59:57] [SCENARIO][pre_nav] failed reason='action_failed' step=1
+[19:59:57] [SCENARIO][pre_nav] failed reason='action_failed' detail='ACTION_ACCESSIBILITY_FOCUS success' step=1
+[19:59:57] [PERF][scenario_summary] scenario=life_pet_care_plugin tab=(?i).*life.* total_runtime=30.2 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[19:59:57] [RESULT] skipped anchor rows count=1
+[19:59:57] [SAVE] writing sheets raw/filtered/summary/result
+[19:59:57] [SAVE] filtered rows=12, raw rows=14
+[19:59:57] [SAVE] saved excel: output/talkback_compare_20260414_195540.xlsx rows=14 with_images=False
+[19:59:57] [RECOVER] start
+[20:00:02] [RECOVER] success
+[20:00:02] [SCENARIO][stabilization] scenario='life_family_care_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[20:00:02] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[20:00:02] [TAB][select] fallback_to_legacy=True scenario='life_family_care_plugin'
+[20:00:07] [TRACE][open_scenario] scenario='life_family_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=True focus_align_reason='' context_ok=False anchor_matched=False anchor_stable=False
+[20:00:07] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^family\s*care$|.*family\s*care.*|.*패밀리\s*케어.*)'
+[20:00:07] [XMLENTRY][search] pre_reset scroll_to_top=true
+[20:00:12] [XMLENTRY][search] step=0/5 candidate_count=6
+[20:00:12] [XMLENTRY][search][top] rank=1 reason='actionable_container' text='Family Care' rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,310,1038,1042' area_ratio='0.3516'
+[20:00:12] [XMLENTRY][search][top] rank=2 reason='actionable_container' text='Family Care' rid='com.samsung.android.oneconnect:id/containerNameLayout' class='android.widget.RelativeLayout' bounds='42,310,1038,442' area_ratio='0.0634'
+[20:00:12] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='Take care of yourself and handle your day by che' rid='' class='android.widget.RelativeLayout' bounds='42,442,1038,634' area_ratio='0.0922'
+[20:00:12] [XMLENTRY][select] reason='actionable_container' resource='com.samsung.android.oneconnect:id/frameLayout' bounds='42,310,1038,1042' text=''
+[20:00:14] [XMLENTRY][result] success=true reason='transition_confirmed'
+[20:00:14] [SCENARIO][pre_nav] success step=1 reason='ACTION_ACCESSIBILITY_FOCUS success'
+[20:00:15] [SCENARIO][pre_nav] success
+[20:00:19] [CONTEXT] skipped reason='anchor_only_mode'
+[20:00:19] [CONTEXT] skipped reason='anchor_only_mode'
+[20:00:19] [CONTEXT] scenario='life_family_care_plugin' type='skipped' expected='' actual='' ok=True
+[20:00:19] [CONTEXT] verification passed scenario='life_family_care_plugin'
+[20:00:19] [ANCHOR][scenario_start] success scenario='life_family_care_plugin' selected={'success': False, 'status': 'failed', 'detail': 'ACTION_ACCESSIBILITY_FOCUS failed (resourceId=null, class=android.widget.ImageButton)', 'raw': {'timestamp': 1776164418387, 'reqId': '2960cbee', 'success': False, 'reason': 'ACTION_ACCESSIBILITY_FOCUS failed (resourceId=null, class=android.widget.ImageButton)', 'action': 'FOCUS', 'targetName': '(?i).*navigate\\s*up.*', 'targetType': 'a', 'targetIndex': 0, 'attemptedClassName': 'android.widget.ImageButton', 'target': {'timestamp': 1776164418387, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.ImageButton', 'viewIdResourceName': None, 'text': None, 'contentDescription': 'Navigate up', 'mergedLabel': 'Navigate up', 'talkbackLabel': 'Navigate up', 'clickable': True, 'focusable': True, 'focused': False, 'accessibilityFocused': True, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 0, 't': 118, 'r': 180, 'b': 310, 'left': 0, 'top': 118, 'right': 180, 'bottom': 310}, 'children': []}}} matched=True stable=True context_ok=True reason='verified_without_select'
+[20:00:19] [TRACE][open_scenario] scenario='life_family_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=True focus_align_reason='' context_ok=False anchor_matched=False anchor_stable=True
+[20:00:20] [SCENARIO][entry_contract] success scenario='life_family_care_plugin' entry_type='card' reason='success_verified' detail='plugin_open_verified'
+[20:00:21] [TRACE][post_open_focus] scenario='life_family_care_plugin' view_id='' label='Navigate up' speech='Navigate up' bounds='{'l': 0, 't': 118, 'r': 180, 'b': 310, 'left': 0, 'top': 118, 'right': 180, 'bottom': 310}' source='top_level' top_level=True
+[20:00:26] [TRACE][anchor_row] scenario='life_family_care_plugin' step=0 view_id='' visible='Navigate up' speech='Navigate up' normalized_visible='navigate up' is_global_nav=False
+[20:00:26] [ROW] fingerprint='|navigate up|navigate up|90,214' normalized_fingerprint='|navigate up|navigate up' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=1 noise=false
+[20:00:26] [RESULT] skipped anchor rows count=2
+[20:00:26] [SAVE] writing sheets raw/filtered/summary/result
+[20:00:26] [SAVE] filtered rows=13, raw rows=15
+[20:00:26] [SAVE] saved excel: output/talkback_compare_20260414_195540.xlsx rows=15 with_images=False
+[20:00:26] [STEP] START tab='(?i).*life.*' step=1
+[20:00:32] [ROW] fingerprint='|family care|family care|357,213' normalized_fingerprint='|family care|family care' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=2 noise=false
+[20:00:32] [STEP] END tab='(?i).*life.*' step=1 elapsed=5.28s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164429077, 'reqId': '4e1d7bef', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Family Care' speech='Family Care' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_1_Family_Care.png' timing(move=1.203s ann=3.072s get_focus=1.003s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.578s total=5.857s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='2443ce7a'
+[20:00:32] [STOP][eval] step=1 scenario='life_family_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=2 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:1|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164429077, 'reqid': '4e1d7bef', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[20:00:32] [OVERLAY] blocked no_overlay_policy scenario='life_family_care_plugin' tab='(?i).*life.*' step=1
+[20:00:32] [STEP] START tab='(?i).*life.*' step=2
+[20:00:37] [ROW] fingerprint='com.samsung.android.plugin.care:id/menu_main_invite_member|add family member|add family member|864,214' normalized_fingerprint='com samsung android plugin care id menu main invite member|add family member|add family member' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=3 noise=false
+[20:00:37] [STEP] END tab='(?i).*life.*' step=2 elapsed=4.45s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164434256, 'reqId': 'fcf3069a', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Add family member' speech='Add family member' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_2_Add_family_member.png' timing(move=0.517s ann=2.975s get_focus=0.955s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.607s total=5.055s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='9402cd71'
+[20:00:37] [STOP][eval] step=2 scenario='life_family_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=3 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:2|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164434256, 'reqid': 'fcf3069a', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[20:00:37] [OVERLAY] blocked no_overlay_policy scenario='life_family_care_plugin' tab='(?i).*life.*' step=2
+[20:00:37] [STEP] START tab='(?i).*life.*' step=3
+[20:00:42] [ROW] fingerprint='|more options|more options|1002,214' normalized_fingerprint='|more options|more options' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=4 noise=false
+[20:00:42] [STEP] END tab='(?i).*life.*' step=3 elapsed=4.41s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164439256, 'reqId': '931b2365', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='More options' speech='More options' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_3_More_options.png' timing(move=0.464s ann=2.972s get_focus=0.974s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.604s total=5.016s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='8eb0b09a'
+[20:00:42] [STOP][eval] step=3 scenario='life_family_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=4 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:3|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164439256, 'reqid': '931b2365', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[20:00:42] [RESULT] skipped anchor rows count=2
+[20:00:42] [SAVE] writing sheets raw/filtered/summary/result
+[20:00:42] [SAVE] filtered rows=16, raw rows=18
+[20:00:42] [SAVE] saved excel: output/talkback_compare_20260414_195540.xlsx rows=18 with_images=False
+[20:00:42] [OVERLAY] blocked no_overlay_policy scenario='life_family_care_plugin' tab='(?i).*life.*' step=3
+[20:00:42] [STEP] START tab='(?i).*life.*' step=4
+[20:00:48] [ROW] fingerprint='com.samsung.android.plugin.care:id/profile_text|me|me|141,394' normalized_fingerprint='com samsung android plugin care id profile text|me|me' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=5 noise=false
+[20:00:48] [STEP] END tab='(?i).*life.*' step=4 elapsed=4.61s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164444490, 'reqId': 'd6c28af6', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Me' speech='Me' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_4_Me.png' timing(move=0.541s ann=3.073s get_focus=0.998s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.613s total=5.225s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='e9035502'
+[20:00:48] [STOP][eval] step=4 scenario='life_family_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=5 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:4|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164444490, 'reqid': 'd6c28af6', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[20:00:48] [OVERLAY] blocked no_overlay_policy scenario='life_family_care_plugin' tab='(?i).*life.*' step=4
+[20:00:48] [STEP] START tab='(?i).*life.*' step=5
+[20:00:53] [ROW] fingerprint='com.samsung.android.plugin.care:id/profile_icon|view profile|view profile|903,451' normalized_fingerprint='com samsung android plugin care id profile icon|view profile|view profile' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=6 noise=false
+[20:00:53] [STEP] END tab='(?i).*life.*' step=5 elapsed=4.53s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164449686, 'reqId': '131da616', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='View profile' speech='View profile' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_5_View_profile.png' timing(move=0.512s ann=3.000s get_focus=1.016s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.595s total=5.124s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='856d9b1e'
+[20:00:53] [STOP][eval] step=5 scenario='life_family_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=6 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:5|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164449686, 'reqid': '131da616', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[20:00:53] [OVERLAY] blocked no_overlay_policy scenario='life_family_care_plugin' tab='(?i).*life.*' step=5
+[20:00:53] [STOP][summary] scenario='life_family_care_plugin' stop_triggered=false stop_step=5 reason='safety_limit'
+[20:00:53] [PERF][scenario_summary] scenario=life_family_care_plugin tab=(?i).*life.* total_runtime=50.4 total_steps=6 main_step_count=6 overlay_step_count=0 overlay_count=0 avg_get_focus=0.993 avg_move=0.539 avg_crop=0.6 avg_step_total=5.184 step_total_sample_count=6 avg_get_focus_main=0.993 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=6 get_focus_strong_skip_rate=100.0 step_dump_used_count=0 save_excel_count=2 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[20:00:53] [RECOVER] start
+[20:00:58] [RECOVER] success
+[20:00:58] [SCENARIO][stabilization] scenario='life_plant_care_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[20:00:58] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[20:00:58] [TAB][select] fallback_to_legacy=True scenario='life_plant_care_plugin'
+[20:01:02] [TRACE][open_scenario] scenario='life_plant_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=True focus_align_reason='' context_ok=False anchor_matched=False anchor_stable=False
+[20:01:03] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^plant\s*care$|.*plant\s*care.*|.*플랜트\s*케어.*|.*식물.*)'
+[20:01:03] [XMLENTRY][search] pre_reset scroll_to_top=true
+[20:01:08] [XMLENTRY][search] step=0/5 candidate_count=6
+[20:01:08] [XMLENTRY][search][top] rank=1 reason='actionable_container' text='Family Care' rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,310,1038,1042' area_ratio='0.3516'
+[20:01:08] [XMLENTRY][search][top] rank=2 reason='actionable_container' text='Family Care' rid='com.samsung.android.oneconnect:id/containerNameLayout' class='android.widget.RelativeLayout' bounds='42,310,1038,442' area_ratio='0.0634'
+[20:01:08] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='Take care of yourself and handle your day by che' rid='' class='android.widget.RelativeLayout' bounds='42,442,1038,634' area_ratio='0.0922'
+[20:01:08] [XMLENTRY][select] reason='actionable_container' resource='com.samsung.android.oneconnect:id/frameLayout' bounds='42,310,1038,1042' text=''
+[20:01:09] [XMLENTRY][result] success=true reason='transition_confirmed'
+[20:01:09] [SCENARIO][pre_nav] success step=1 reason='ACTION_ACCESSIBILITY_FOCUS success'
+[20:01:10] [SCENARIO][pre_nav] success
+[20:01:15] [CONTEXT] skipped reason='anchor_only_mode'
+[20:01:15] [CONTEXT] skipped reason='anchor_only_mode'
+[20:01:15] [CONTEXT] scenario='life_plant_care_plugin' type='skipped' expected='' actual='' ok=True
+[20:01:15] [CONTEXT] verification passed scenario='life_plant_care_plugin'
+[20:01:15] [ANCHOR][scenario_start] success scenario='life_plant_care_plugin' selected={'success': False, 'status': 'failed', 'detail': 'ACTION_ACCESSIBILITY_FOCUS failed (resourceId=null, class=android.widget.ImageButton)', 'raw': {'timestamp': 1776164474102, 'reqId': 'f8b3cbef', 'success': False, 'reason': 'ACTION_ACCESSIBILITY_FOCUS failed (resourceId=null, class=android.widget.ImageButton)', 'action': 'FOCUS', 'targetName': '(?i).*navigate\\s*up.*', 'targetType': 'a', 'targetIndex': 0, 'attemptedClassName': 'android.widget.ImageButton', 'target': {'timestamp': 1776164474103, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.ImageButton', 'viewIdResourceName': None, 'text': None, 'contentDescription': 'Navigate up', 'mergedLabel': 'Navigate up', 'talkbackLabel': 'Navigate up', 'clickable': True, 'focusable': True, 'focused': True, 'accessibilityFocused': True, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 0, 't': 118, 'r': 180, 'b': 310, 'left': 0, 'top': 118, 'right': 180, 'bottom': 310}, 'children': []}}} matched=True stable=True context_ok=True reason='verified_without_select'
+[20:01:15] [TRACE][open_scenario] scenario='life_plant_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=True focus_align_reason='' context_ok=False anchor_matched=False anchor_stable=True
+[20:01:18] [SCENARIO][entry_contract] success scenario='life_plant_care_plugin' entry_type='card' reason='success_verified' detail='plugin_open_verified'
+[20:01:19] [TRACE][post_open_focus] scenario='life_plant_care_plugin' view_id='' label='Navigate up' speech='Navigate up' bounds='{'l': 0, 't': 118, 'r': 180, 'b': 310, 'left': 0, 'top': 118, 'right': 180, 'bottom': 310}' source='top_level' top_level=True
+[20:01:24] [TRACE][anchor_row] scenario='life_plant_care_plugin' step=0 view_id='' visible='Navigate up' speech='Navigate up' normalized_visible='navigate up' is_global_nav=False
+[20:01:24] [ROW] fingerprint='|navigate up|navigate up|90,214' normalized_fingerprint='|navigate up|navigate up' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=1 noise=false
+[20:01:24] [RESULT] skipped anchor rows count=3
+[20:01:25] [SAVE] writing sheets raw/filtered/summary/result
+[20:01:25] [SAVE] filtered rows=19, raw rows=21
+[20:01:25] [SAVE] saved excel: output/talkback_compare_20260414_195540.xlsx rows=21 with_images=False
+[20:01:25] [STEP] START tab='(?i).*life.*' step=1
+[20:01:30] [ROW] fingerprint='|family care|family care|357,213' normalized_fingerprint='|family care|family care' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=2 noise=false
+[20:01:30] [STEP] END tab='(?i).*life.*' step=1 elapsed=4.58s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164486763, 'reqId': '85f1dff2', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Family Care' speech='Family Care' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_1_Family_Care.png' timing(move=0.540s ann=3.038s get_focus=0.999s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.596s total=5.174s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='dee2bad1'
+[20:01:30] [STOP][eval] step=1 scenario='life_plant_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=2 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:1|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164486763, 'reqid': '85f1dff2', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[20:01:30] [OVERLAY] blocked no_overlay_policy scenario='life_plant_care_plugin' tab='(?i).*life.*' step=1
+[20:01:30] [STEP] START tab='(?i).*life.*' step=2
+[20:01:35] [ROW] fingerprint='com.samsung.android.plugin.care:id/menu_main_invite_member|add family member|add family member|864,214' normalized_fingerprint='com samsung android plugin care id menu main invite member|add family member|add family member' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=3 noise=false
+[20:01:35] [STEP] END tab='(?i).*life.*' step=2 elapsed=4.48s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164491931, 'reqId': 'd263cffe', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Add family member' speech='Add family member' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_2_Add_family_member.png' timing(move=0.496s ann=2.991s get_focus=0.990s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.602s total=5.080s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='64ee76a3'
+[20:01:35] [STOP][eval] step=2 scenario='life_plant_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=3 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:2|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164491931, 'reqid': 'd263cffe', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[20:01:35] [OVERLAY] blocked no_overlay_policy scenario='life_plant_care_plugin' tab='(?i).*life.*' step=2
+[20:01:35] [STEP] START tab='(?i).*life.*' step=3
+[20:01:40] [ROW] fingerprint='|more options|more options|1002,214' normalized_fingerprint='|more options|more options' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=4 noise=false
+[20:01:40] [STEP] END tab='(?i).*life.*' step=3 elapsed=4.64s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164497082, 'reqId': 'dc914ea0', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='More options' speech='More options' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_3_More_options.png' timing(move=0.582s ann=2.959s get_focus=1.101s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.630s total=5.273s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='840d6864'
+[20:01:40] [STOP][eval] step=3 scenario='life_plant_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=4 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:3|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164497082, 'reqid': 'dc914ea0', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[20:01:40] [RESULT] skipped anchor rows count=3
+[20:01:40] [SAVE] writing sheets raw/filtered/summary/result
+[20:01:40] [SAVE] filtered rows=22, raw rows=24
+[20:01:40] [SAVE] saved excel: output/talkback_compare_20260414_195540.xlsx rows=24 with_images=False
+[20:01:40] [OVERLAY] blocked no_overlay_policy scenario='life_plant_care_plugin' tab='(?i).*life.*' step=3
+[20:01:40] [STEP] START tab='(?i).*life.*' step=4
+[20:01:46] [ROW] fingerprint='com.samsung.android.plugin.care:id/profile_text|me|me|141,394' normalized_fingerprint='com samsung android plugin care id profile text|me|me' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=5 noise=false
+[20:01:46] [STEP] END tab='(?i).*life.*' step=4 elapsed=4.54s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164502494, 'reqId': 'af8d4996', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Me' speech='Me' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_4_Me.png' timing(move=0.529s ann=3.009s get_focus=0.999s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.601s total=5.140s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='b5089c7c'
+[20:01:46] [STOP][eval] step=4 scenario='life_plant_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=5 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:4|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164502494, 'reqid': 'af8d4996', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[20:01:46] [OVERLAY] blocked no_overlay_policy scenario='life_plant_care_plugin' tab='(?i).*life.*' step=4
+[20:01:46] [STEP] START tab='(?i).*life.*' step=5
+[20:01:51] [ROW] fingerprint='com.samsung.android.plugin.care:id/profile_icon|view profile|view profile|903,451' normalized_fingerprint='com samsung android plugin care id profile icon|view profile|view profile' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=6 noise=false
+[20:01:51] [STEP] END tab='(?i).*life.*' step=5 elapsed=4.53s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164507637, 'reqId': '5c4c317d', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='View profile' speech='View profile' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_5_View_profile.png' timing(move=0.514s ann=2.994s get_focus=1.017s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.607s total=5.133s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='c479b398'
+[20:01:51] [STOP][eval] step=5 scenario='life_plant_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=6 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:5|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164507637, 'reqid': '5c4c317d', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[20:01:51] [OVERLAY] blocked no_overlay_policy scenario='life_plant_care_plugin' tab='(?i).*life.*' step=5
+[20:01:51] [STOP][summary] scenario='life_plant_care_plugin' stop_triggered=false stop_step=5 reason='safety_limit'
+[20:01:51] [PERF][scenario_summary] scenario=life_plant_care_plugin tab=(?i).*life.* total_runtime=52.7 total_steps=6 main_step_count=6 overlay_step_count=0 overlay_count=0 avg_get_focus=1.013 avg_move=0.443 avg_crop=0.608 avg_step_total=5.094 step_total_sample_count=6 avg_get_focus_main=1.013 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=6 get_focus_strong_skip_rate=100.0 step_dump_used_count=0 save_excel_count=2 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[20:01:51] [RECOVER] start
+[20:01:56] [RECOVER] success
+[20:01:56] [SCENARIO][stabilization] scenario='life_clothing_care_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[20:01:56] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[20:01:56] [TAB][select] fallback_to_legacy=True scenario='life_clothing_care_plugin'
+[20:02:00] [TRACE][open_scenario] scenario='life_clothing_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=True focus_align_reason='' context_ok=False anchor_matched=False anchor_stable=False
+[20:02:01] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^clothing\s*care$|.*clothing\s*care.*|.*shoe\s*care.*|.*의류.*)'
+[20:02:01] [XMLENTRY][search] pre_reset scroll_to_top=true
+[20:02:06] [XMLENTRY][search] step=0/5 candidate_count=6
+[20:02:06] [XMLENTRY][search][top] rank=1 reason='actionable_container' text='Family Care' rid='com.samsung.android.oneconnect:id/frameLayout' class='android.widget.FrameLayout' bounds='42,310,1038,1042' area_ratio='0.3516'
+[20:02:06] [XMLENTRY][search][top] rank=2 reason='actionable_container' text='Family Care' rid='com.samsung.android.oneconnect:id/containerNameLayout' class='android.widget.RelativeLayout' bounds='42,310,1038,442' area_ratio='0.0634'
+[20:02:06] [XMLENTRY][search][top] rank=3 reason='card_like_container' text='Take care of yourself and handle your day by che' rid='' class='android.widget.RelativeLayout' bounds='42,442,1038,634' area_ratio='0.0922'
+[20:02:06] [XMLENTRY][select] reason='actionable_container' resource='com.samsung.android.oneconnect:id/frameLayout' bounds='42,310,1038,1042' text=''
+[20:02:07] [XMLENTRY][result] success=true reason='transition_confirmed'
+[20:02:07] [SCENARIO][pre_nav] success step=1 reason='ACTION_ACCESSIBILITY_FOCUS success'
+[20:02:08] [SCENARIO][pre_nav] success
+[20:02:13] [CONTEXT] skipped reason='anchor_only_mode'
+[20:02:13] [CONTEXT] skipped reason='anchor_only_mode'
+[20:02:13] [CONTEXT] scenario='life_clothing_care_plugin' type='skipped' expected='' actual='' ok=True
+[20:02:13] [CONTEXT] verification passed scenario='life_clothing_care_plugin'
+[20:02:13] [ANCHOR][scenario_start] success scenario='life_clothing_care_plugin' selected={'success': False, 'status': 'failed', 'detail': 'ACTION_ACCESSIBILITY_FOCUS failed (resourceId=null, class=android.widget.ImageButton)', 'raw': {'timestamp': 1776164532232, 'reqId': '70a867fd', 'success': False, 'reason': 'ACTION_ACCESSIBILITY_FOCUS failed (resourceId=null, class=android.widget.ImageButton)', 'action': 'FOCUS', 'targetName': '(?i).*navigate\\s*up.*', 'targetType': 'a', 'targetIndex': 0, 'attemptedClassName': 'android.widget.ImageButton', 'target': {'timestamp': 1776164532232, 'schemaVersion': '1.2.0', 'snapshotBuilderVersion': '1.2.0', 'packageName': 'com.samsung.android.oneconnect', 'className': 'android.widget.ImageButton', 'viewIdResourceName': None, 'text': None, 'contentDescription': 'Navigate up', 'mergedLabel': 'Navigate up', 'talkbackLabel': 'Navigate up', 'clickable': True, 'focusable': True, 'focused': True, 'accessibilityFocused': True, 'visibleToUser': True, 'isVisibleToUser': True, 'selected': False, 'checkable': False, 'checked': False, 'enabled': True, 'boundsInScreen': {'l': 0, 't': 118, 'r': 180, 'b': 310, 'left': 0, 'top': 118, 'right': 180, 'bottom': 310}, 'children': []}}} matched=True stable=True context_ok=True reason='verified_without_select'
+[20:02:13] [TRACE][open_scenario] scenario='life_clothing_care_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=True focus_align_reason='' context_ok=False anchor_matched=False anchor_stable=True
+[20:02:17] [SCENARIO][entry_contract] success scenario='life_clothing_care_plugin' entry_type='card' reason='success_verified' detail='plugin_open_verified'
+[20:02:17] [TRACE][post_open_focus] scenario='life_clothing_care_plugin' view_id='' label='Navigate up' speech='Navigate up' bounds='{'l': 0, 't': 118, 'r': 180, 'b': 310, 'left': 0, 'top': 118, 'right': 180, 'bottom': 310}' source='top_level' top_level=True
+[20:02:22] [TRACE][anchor_row] scenario='life_clothing_care_plugin' step=0 view_id='' visible='Navigate up' speech='Navigate up' normalized_visible='navigate up' is_global_nav=False
+[20:02:23] [ROW] fingerprint='|navigate up|navigate up|90,214' normalized_fingerprint='|navigate up|navigate up' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=1 noise=false
+[20:02:23] [RESULT] skipped anchor rows count=4
+[20:02:23] [SAVE] writing sheets raw/filtered/summary/result
+[20:02:23] [SAVE] filtered rows=25, raw rows=27
+[20:02:23] [SAVE] saved excel: output/talkback_compare_20260414_195540.xlsx rows=27 with_images=False
+[20:02:23] [STEP] START tab='(?i).*life.*' step=1
+[20:02:28] [ROW] fingerprint='|family care|family care|357,213' normalized_fingerprint='|family care|family care' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=2 noise=false
+[20:02:28] [STEP] END tab='(?i).*life.*' step=1 elapsed=4.60s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164545068, 'reqId': '222fc353', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Family Care' speech='Family Care' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_1_Family_Care.png' timing(move=0.503s ann=3.081s get_focus=1.014s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.583s total=5.182s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='0d6b7a44'
+[20:02:28] [STOP][eval] step=1 scenario='life_clothing_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=2 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:1|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164545068, 'reqid': '222fc353', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[20:02:28] [OVERLAY] blocked no_overlay_policy scenario='life_clothing_care_plugin' tab='(?i).*life.*' step=1
+[20:02:28] [STEP] START tab='(?i).*life.*' step=2
+[20:02:33] [ROW] fingerprint='com.samsung.android.plugin.care:id/menu_main_invite_member|add family member|add family member|864,214' normalized_fingerprint='com samsung android plugin care id menu main invite member|add family member|add family member' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=3 noise=false
+[20:02:33] [STEP] END tab='(?i).*life.*' step=2 elapsed=4.53s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164550272, 'reqId': 'f328eb86', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Add family member' speech='Add family member' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_2_Add_family_member.png' timing(move=0.517s ann=3.018s get_focus=0.993s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.605s total=5.134s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='d284e54e'
+[20:02:33] [STOP][eval] step=2 scenario='life_clothing_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=3 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:2|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164550272, 'reqid': 'f328eb86', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[20:02:33] [OVERLAY] blocked no_overlay_policy scenario='life_clothing_care_plugin' tab='(?i).*life.*' step=2
+[20:02:33] [STEP] START tab='(?i).*life.*' step=3
+[20:02:38] [ROW] fingerprint='|more options|more options|1002,214' normalized_fingerprint='|more options|more options' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=4 noise=false
+[20:02:38] [STEP] END tab='(?i).*life.*' step=3 elapsed=4.43s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164555356, 'reqId': 'f21be96f', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='More options' speech='More options' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_3_More_options.png' timing(move=0.466s ann=2.977s get_focus=0.987s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.585s total=5.016s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='24f65106'
+[20:02:38] [STOP][eval] step=3 scenario='life_clothing_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=4 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:3|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164555356, 'reqid': 'f21be96f', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[20:02:38] [RESULT] skipped anchor rows count=4
+[20:02:38] [SAVE] writing sheets raw/filtered/summary/result
+[20:02:38] [SAVE] filtered rows=28, raw rows=30
+[20:02:38] [SAVE] saved excel: output/talkback_compare_20260414_195540.xlsx rows=30 with_images=False
+[20:02:38] [OVERLAY] blocked no_overlay_policy scenario='life_clothing_care_plugin' tab='(?i).*life.*' step=3
+[20:02:38] [STEP] START tab='(?i).*life.*' step=4
+[20:02:44] [ROW] fingerprint='|more options|me accessibility|1002,214' normalized_fingerprint='|more options|me accessibility' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=5 noise=false
+[20:02:44] [STEP] END tab='(?i).*life.*' step=4 elapsed=4.44s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164560646, 'reqId': '3b4d64ce', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='More options' speech='Me Accessibility' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_4_More_options.png' timing(move=0.562s ann=2.916s get_focus=0.963s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.599s total=5.041s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='6ab4a285'
+[20:02:44] [STOP][eval] step=4 scenario='life_clothing_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=5 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:4|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164560646, 'reqid': '3b4d64ce', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[20:02:44] [OVERLAY] blocked no_overlay_policy scenario='life_clothing_care_plugin' tab='(?i).*life.*' step=4
+[20:02:44] [STEP] START tab='(?i).*life.*' step=5
+[20:02:49] [ROW] fingerprint='com.samsung.android.plugin.care:id/profile_text|me|me|141,394' normalized_fingerprint='com samsung android plugin care id profile text|me|me' duplicate=false recent_duplicate=false distance=0 recent_semantic_duplicate=false semantic_distance=0 semantic_window_unique=6 noise=false
+[20:02:49] [STEP] END tab='(?i).*life.*' step=5 elapsed=4.39s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164565568, 'reqId': '5958b16f', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Me' speech='Me' crop='output\talkback_compare_20260414_195540\crops\i_._life._step_5_Me.png' timing(move=0.440s ann=2.900s get_focus=1.051s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.588s total=4.980s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='13f62091'
+[20:02:49] [STOP][eval] step=5 scenario='life_clothing_care_plugin' terminal=false same_like_count=0 no_progress=false scenario_type='content' is_global_nav=false after_realign=false recent_repeat=false bounded_two_card_loop=false semantic_same_like=false recent_duplicate=false recent_duplicate_distance=0 recent_semantic_duplicate=false recent_semantic_duplicate_distance=0 recent_semantic_unique_count=6 strict_duplicate=false semantic_duplicate=false repeat_class='none' loop_classification='none' hard_no_progress=false soft_no_progress=false no_progress_class='none' overlay_realign_grace_active=false min_step_gate_blocked=false realign_grace_suppressed=false repeat_stop_hit=false decision='continue' reason='none' stop_explain_version='pr7_explain_v1' stop_explain_input='step:5|move:{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776164565568, 'reqid': '5958b16f', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}|smart:moved|same:0|fail:0' stop_explain_repeat='recent:false|class:none|strict:false|semantic:false|loop:none|two_card:false' stop_explain_no_progress='hit:false|class:none|hard:false|soft:false' stop_explain_gate='candidate:false|min_block:false|realign_suppress:false|realign_active:false|decision:continue'
+[20:02:49] [OVERLAY] blocked no_overlay_policy scenario='life_clothing_care_plugin' tab='(?i).*life.*' step=5
+[20:02:49] [STOP][summary] scenario='life_clothing_care_plugin' stop_triggered=false stop_step=5 reason='safety_limit'
+[20:02:49] [PERF][scenario_summary] scenario=life_clothing_care_plugin tab=(?i).*life.* total_runtime=52.5 total_steps=6 main_step_count=6 overlay_step_count=0 overlay_count=0 avg_get_focus=1.0 avg_move=0.415 avg_crop=0.596 avg_step_total=5.021 step_total_sample_count=6 avg_get_focus_main=1.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=6 get_focus_strong_skip_rate=100.0 step_dump_used_count=0 save_excel_count=2 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[20:02:49] [RECOVER] start
+[20:02:54] [RECOVER] success
+[20:02:54] [SCENARIO][stabilization] scenario='life_find_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[20:02:54] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[20:02:54] [TAB][select] fallback_to_legacy=True scenario='life_find_plugin'
+[20:02:58] [TRACE][open_scenario] scenario='life_find_plugin' stabilization_mode='anchor_only' focus_align_attempted=True focus_align_ok=True focus_align_reason='' context_ok=False anchor_matched=False anchor_stable=False
+[20:02:59] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^smart\s*find$|^find$|smart\s*find\.|.*smart\s*find.*)'
+[20:02:59] [XMLENTRY][search] pre_reset scroll_to_top=true
+[20:03:04] [XMLENTRY][search] step=0/5 candidate_count=1
+[20:03:04] [XMLENTRY][search][top] rank=1 reason='card_like_container' text='Connect Samsung home appliances and get smart ca' rid='' class='android.widget.RelativeLayout' bounds='42,1990,1038,2182' area_ratio='0.0922'
+[20:03:04] [XMLENTRY][select] reason='card_like_container' resource='' bounds='42,1990,1038,2182' text=''
+[20:03:25] [XMLENTRY][result] success=false reason='tap_dispatched_but_no_transition' signal='none' scenario='life_find_plugin' type='a'
+[20:03:25] [XMLENTRY][result] success=false reason='tap_dispatched_but_no_transition'
+[20:03:25] [SCENARIO][pre_nav][xmlentry] fallback='helper_scrollTouch' reason='xml_entry_failed:tap_dispatched_but_no_transition'
+[20:03:59] [SCENARIO][pre_nav] retry step=1 attempt=1/2 reason='ACTION_ACCESSIBILITY_FOCUS success'
+[20:04:02] [XMLENTRY][search] step=0/5 candidate_count=0
+[20:04:04] [XMLENTRY][scroll] step=0/5 performed=false
+[20:04:04] [XMLENTRY][result] success=false reason='only_root_candidates'
+[20:04:04] [SCENARIO][pre_nav][xmlentry] fallback='helper_scrollTouch' reason='xml_entry_failed:only_root_candidates'
+[20:04:39] [SCENARIO][pre_nav] failed reason='action_failed' step=1
+[20:04:39] [SCENARIO][pre_nav] failed reason='action_failed' detail='ACTION_ACCESSIBILITY_FOCUS success' step=1
+[20:04:39] [PERF][scenario_summary] scenario=life_find_plugin tab=(?i).*life.* total_runtime=104.9 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[20:04:39] [RESULT] skipped anchor rows count=4
+[20:04:39] [SAVE] writing sheets raw/filtered/summary/result
+[20:04:39] [SAVE] filtered rows=31, raw rows=33
+[20:04:39] [SAVE] saved excel: output/talkback_compare_20260414_195540.xlsx rows=33 with_images=False
+[20:04:39] [RECOVER] start
+[20:04:52] [RECOVER] resource select failed, trying label fallback
+[20:04:59] [RECOVER] select fallback succeeded
+[20:05:13] [RECOVER] success
+[20:05:13] [SCENARIO][stabilization] scenario='life_video_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[20:05:13] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[20:05:13] [TAB][select] fallback_to_legacy=True scenario='life_video_plugin'
+[20:05:29] [TAB][select] scenario='life_video_plugin' selected={'success': False, 'status': 'failed', 'detail': 'timeout', 'raw': {'success': False, 'reason': 'timeout'}} matched_fields=[] score=0
+[20:05:29] [TAB][verify] selected_bottom_tab ok=True actual=''
+[20:05:43] [TAB][select] scenario='life_video_plugin' selected={'success': False, 'status': 'failed', 'detail': 'timeout', 'raw': {'success': False, 'reason': 'timeout'}} matched_fields=[] score=0
+[20:05:43] [TAB][verify] selected_bottom_tab ok=True actual=''
+[20:05:43] [TRACE][open_scenario] scenario='life_video_plugin' stabilization_mode='anchor_only' focus_align_attempted=False focus_align_ok=False focus_align_reason='not_selected' context_ok=False anchor_matched=False anchor_stable=False
+[20:05:43] [TAB][select] stabilization failed scenario='life_video_plugin'
+[20:05:43] [PERF][scenario_summary] scenario=life_video_plugin tab=(?i).*life.* total_runtime=29.9 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[20:05:43] [RESULT] skipped anchor rows count=4
+[20:05:43] [SAVE] writing sheets raw/filtered/summary/result
+[20:05:43] [SAVE] filtered rows=32, raw rows=34
+[20:05:43] [SAVE] saved excel: output/talkback_compare_20260414_195540.xlsx rows=34 with_images=False
+[20:05:43] [RECOVER] start
+[20:05:56] [RECOVER] resource select failed, trying label fallback
+[20:06:03] [RECOVER] select fallback succeeded
+[20:06:17] [RECOVER] success
+[20:06:17] [SCENARIO][stabilization] scenario='life_home_monitor_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[20:06:17] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[20:06:17] [TAB][select] fallback_to_legacy=True scenario='life_home_monitor_plugin'
+[20:06:33] [TAB][select] scenario='life_home_monitor_plugin' selected={'success': False, 'status': 'failed', 'detail': 'timeout', 'raw': {'success': False, 'reason': 'timeout'}} matched_fields=[] score=0
+[20:06:33] [TAB][verify] selected_bottom_tab ok=True actual=''
+[20:06:47] [TAB][select] scenario='life_home_monitor_plugin' selected={'success': False, 'status': 'failed', 'detail': 'timeout', 'raw': {'success': False, 'reason': 'timeout'}} matched_fields=[] score=0
+[20:06:47] [TAB][verify] selected_bottom_tab ok=True actual=''
+[20:06:47] [TRACE][open_scenario] scenario='life_home_monitor_plugin' stabilization_mode='anchor_only' focus_align_attempted=False focus_align_ok=False focus_align_reason='not_selected' context_ok=False anchor_matched=False anchor_stable=False
+[20:06:47] [TAB][select] stabilization failed scenario='life_home_monitor_plugin'
+[20:06:47] [PERF][scenario_summary] scenario=life_home_monitor_plugin tab=(?i).*life.* total_runtime=29.9 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[20:06:47] [RESULT] skipped anchor rows count=4
+[20:06:47] [SAVE] writing sheets raw/filtered/summary/result
+[20:06:47] [SAVE] filtered rows=33, raw rows=35
+[20:06:47] [SAVE] saved excel: output/talkback_compare_20260414_195540.xlsx rows=35 with_images=False
+[20:06:47] [RECOVER] start
+[20:07:00] [RECOVER] resource select failed, trying label fallback
+[20:07:07] [RECOVER] select fallback succeeded
+[20:07:21] [RECOVER] success
+[20:07:21] [SCENARIO][stabilization] scenario='life_music_sync_plugin' screen_context_mode='new_screen' stabilization_mode='anchor_only'
+[20:07:21] [CONTEXT] skipped reason='new_screen_mode' phase='tab_select'
+[20:07:21] [TAB][select] fallback_to_legacy=True scenario='life_music_sync_plugin'
+[20:07:36] [TAB][select] scenario='life_music_sync_plugin' selected={'success': False, 'status': 'failed', 'detail': 'timeout', 'raw': {'success': False, 'reason': 'timeout'}} matched_fields=[] score=0
+[20:07:36] [TAB][verify] selected_bottom_tab ok=True actual=''
+[20:07:51] [TAB][select] scenario='life_music_sync_plugin' selected={'success': False, 'status': 'failed', 'detail': 'timeout', 'raw': {'success': False, 'reason': 'timeout'}} matched_fields=[] score=0
+[20:07:51] [TAB][verify] selected_bottom_tab ok=True actual=''
+[20:07:51] [TRACE][open_scenario] scenario='life_music_sync_plugin' stabilization_mode='anchor_only' focus_align_attempted=False focus_align_ok=False focus_align_reason='not_selected' context_ok=False anchor_matched=False anchor_stable=False
+[20:07:51] [TAB][select] stabilization failed scenario='life_music_sync_plugin'
+[20:07:51] [PERF][scenario_summary] scenario=life_music_sync_plugin tab=(?i).*life.* total_runtime=29.9 total_steps=1 main_step_count=1 overlay_step_count=0 overlay_count=0 avg_get_focus=0.0 avg_move=0.0 avg_crop=0.0 avg_step_total=0.0 step_total_sample_count=0 avg_get_focus_main=0.0 avg_get_focus_overlay=0.0 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_count=0 get_focus_strong_skip_rate=0.0 step_dump_used_count=0 save_excel_count=0 realign_attempt_count=0 realign_success_count=0 realign_success_rate=0.0
+[20:07:51] [RESULT] skipped anchor rows count=4
+[20:07:51] [SAVE] writing sheets raw/filtered/summary/result
+[20:07:51] [SAVE] filtered rows=34, raw rows=36
+[20:07:51] [SAVE] saved excel: output/talkback_compare_20260414_195540.xlsx rows=36 with_images=False
+[20:07:51] [RESULT] skipped anchor rows count=4
+[20:07:51] [SAVE] writing sheets raw/filtered/summary/result
+[20:07:51] [SAVE] filtered rows=34, raw rows=36
+[20:07:52] [SAVE] saved excel: output/talkback_compare_20260414_195540.xlsx rows=36 with_images=True
+[20:07:52] [MAIN] final save complete
+[20:07:52] [PERF][run_summary] total_runtime=730.5 total_scenarios=11 total_steps=36 total_overlay_count=1 avg_get_focus=0.778 avg_move=0.381 fallback_dump_count=0 success_false_top_level_dump_attempt_count=0 success_false_top_level_dump_found_count=0 fallback_dump_rate=0.0 get_focus_strong_skip_rate=80.6 realign_success_rate=100.0 save_excel_count=19

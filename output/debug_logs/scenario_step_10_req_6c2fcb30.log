@@ -1,0 +1,45 @@
+[ROW_CONTEXT]
+scenario=
+tab=(?i).*life.*
+step=10
+req_id=6c2fcb30
+visible=Labs
+speech=QR code Labs
+final_result=FAIL
+failure_reason=move_failed
+
+review_note=이동/발화 결과 재검토 필요
+noise=
+move_result=scrolled
+debug_source_row_found=false
+
+[ANN_TRACE]
+[ANN][baseline] req_id=6c2fcb30 text='' source='source_row_missing' empty_reason='no_prev_step_row'
+[ANN][poll] req_id=6c2fcb30 idx=0 raw='QR code Labs' normalized='qr code labs' changed=true differs_from_baseline=true source='row_snapshot' observed_at='' count=0
+[ANN][trim] req_id=6c2fcb30 considered=false applied=false before='QR code Labs' after='QR code Labs' reject_reason='' reason='trim_stage_not_reached'
+[ANN][stable] req_id=6c2fcb30 selected='QR code Labs' reason='result_row_snapshot' source='result_row'
+[ANN][select] req_id=6c2fcb30 used_snapshot=true snapshot_reason='no_better_recent_poll_candidate' previous='' current='QR code Labs' final='QR code Labs'
+
+[STEP_TRACE]
+[STEP] START scenario='' tab='(?i).*life.*' step=10 req_id='6c2fcb30'
+[STEP] END scenario='' tab='(?i).*life.*' step=10 req_id='6c2fcb30' move_result='scrolled'
+[STOP][eval] scenario='' step=10 reason='move_failed'
+[STEP][summary] req_id=6c2fcb30 tab='(?i).*life.*' step=10 move_result='scrolled' terminal=false no_progress=false
+
+[SCROLL_TRACE]
+[SCROLL] req_id=6c2fcb30 scroll_related_log_found=false move_result='scrolled' smart_result='' detail='' inferred_scroll=true inference_reason='move_result_is_scrolled'
+
+[FOCUS_TRACE]
+[FOCUS] req_id=6c2fcb30 get_focus_req_id='' response_success=false payload_source='inferred_from_step_end' payload_sufficient=false fallback_used=false fallback_found=false dump_attempted=false final_payload_source='' focus_reason='' missing_reason='no_direct_get_focus_trace_found'
+
+[DECISION_TRACE]
+baseline_empty=true
+first_candidate_contaminated=true
+trim_considered=false
+trim_applied=false
+stable_reason='result_row_snapshot'
+used_snapshot=true
+snapshot_reason='no_better_recent_poll_candidate'
+scroll_evidence='weak'
+focus_evidence='weak'
+notes='final speech appears to come from snapshot candidate path'

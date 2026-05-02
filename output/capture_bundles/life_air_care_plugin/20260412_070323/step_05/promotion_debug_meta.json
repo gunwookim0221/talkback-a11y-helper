@@ -1,0 +1,60 @@
+{
+  "version": "pr30-scrolltouch-fallback-order-fix-v1",
+  "scroll_step": 5,
+  "partial_match_count": 0,
+  "candidate_stats": {
+    "visible_candidate_count": 0,
+    "partial_match_count": 0,
+    "exact_match_count": 0,
+    "rejected_large_container_count": 0,
+    "rejected_list_like_container_count": 0,
+    "visible_samples": [],
+    "partial_samples": [],
+    "inspect_samples": [
+      "label='우리 집 QR code 우리 집 QR code' rid='com.samsung.android.oneconnect:id/home_button' cls='android.widget.ImageButton' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/home_button' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='우리 집, Change location 우리 집, Change location' rid='com.samsung.android.oneconnect:id/tab_title' cls='android.widget.LinearLayout' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/tab_title' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='Add Add' rid='com.samsung.android.oneconnect:id/add_menu_butto' cls='android.widget.ImageButton' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/add_menu_button' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='More options More options' rid='com.samsung.android.oneconnect:id/more_menu_butt' cls='android.widget.ImageButton' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/more_menu_button' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='Home Monitor Home Monitor' rid='com.samsung.android.oneconnect:id/serviceCardBod' cls='android.view.ViewGroup' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/serviceCardBody' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='Home Monitor Home Monitor Home Monitor Home Monitor' rid='com.samsung.android.oneconnect:id/inflated_heade' cls='android.view.ViewGroup' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/inflated_header_group' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='Home Monitor' rid='com.samsung.android.oneconnect:id/containerName' cls='android.widget.TextView' visible=true clickable=false focusable=false effectiveClickable=false matched_text_node='com.samsung.android.oneconnect:id/containerName' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='Security Security' rid='com.samsung.android.oneconnect:id/securityMainTa' cls='android.view.ViewGroup' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/securityMainTab' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='Smoke Smoke' rid='com.samsung.android.oneconnect:id/smokeMainTab' cls='android.view.ViewGroup' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/smokeMainTab' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'",
+      "label='Leaks Leaks' rid='com.samsung.android.oneconnect:id/leakMainTab' cls='android.view.ViewGroup' visible=true clickable=true focusable=true effectiveClickable=true matched_text_node='com.samsung.android.oneconnect:id/leakMainTab' promoted_container=false promotion_reason='none' promoted_from='' promoted_to='' stage='label_filter' reason='filtered_before_candidate'"
+    ],
+    "pre_candidate_fail_samples": [],
+    "rejection_counts": {
+      "filtered_before_candidate": 29
+    },
+    "promotion_attempted": false,
+    "matched_text_found": false,
+    "xml_node_found": false,
+    "xml_match_strategy": "none",
+    "ancestor_chain_depth": 0,
+    "actionable_ancestor_found": false,
+    "candidate_committed": false,
+    "last_promotion_result_reason": "none",
+    "will_try_xml_live_fallback": false
+  },
+  "selected_meta": {
+    "promoted_container": false,
+    "promotion_attempted": false,
+    "promotion_source": "none",
+    "promotion_reason": "none",
+    "promoted_from": "",
+    "promoted_to": "",
+    "promotion_candidate_count": 0,
+    "promotion_debug_summary": "",
+    "selected_area": 0,
+    "matched_text_area": 0,
+    "selected_to_text_area_ratio": 0.0,
+    "ancestor_distance": -1,
+    "selected_ancestor_distance": -1,
+    "selected_container_class": "",
+    "selected_container_view_id": "",
+    "tap_point": "",
+    "tap_strategy": "center",
+    "rank_summary_top3": ""
+  },
+  "xml_snapshot_saved": false
+}

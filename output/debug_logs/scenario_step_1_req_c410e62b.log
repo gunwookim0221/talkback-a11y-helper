@@ -1,0 +1,44 @@
+[ROW_CONTEXT]
+scenario=
+tab=(?i).*life.*
+step=1
+req_id=c410e62b
+visible=Clip history is now shared with all members in this location. Members can view clips from the device card for cameras they can access. Playback permission can be managed by the location admin for all cameras at once in Member permissions. For more details, go to Location settings > Members > Member permissions.
+speech=Clip history is now shared with all members in this location. Members can view clips from the device card for cameras they can access. Playback permission can be managed by the location admin for all cameras at once in Member permissions. For more details, go to Location settings > Members > Member permissions.
+final_result=FAIL
+failure_reason=move_failed
+
+review_note=이동/발화 결과 재검토 필요
+noise=
+move_result={'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776208108990, 'reqid': 'b4bdb93e', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}
+debug_source_row_found=false
+
+[ANN_TRACE]
+[ANN][baseline] req_id=c410e62b text='' source='source_row_missing' empty_reason='no_prev_step_row'
+[ANN][poll] req_id=c410e62b idx=0 raw='Clip history is now shared with all members in this location. Members can view clips from the device card for cameras they can access. Playback permission can be managed by the location admin for all cameras at once in Member permissions. For more details, go to Location settings > Members > Member permissions.' normalized='clip history is now shared with all members in this location. members can view clips from the device card for cameras they can access. playback permission can be managed by the location admin for all cameras at once in member permissions. for more details, go to location settings > members > member permissions.' changed=true differs_from_baseline=true source='row_snapshot' observed_at='' count=0
+[ANN][trim] req_id=c410e62b considered=false applied=false before='Clip history is now shared with all members in this location. Members can view clips from the device card for cameras they can access. Playback permission can be managed by the location admin for all cameras at once in Member permissions. For more details, go to Location settings > Members > Member permissions.' after='Clip history is now shared with all members in this location. Members can view clips from the device card for cameras they can access. Playback permission can be managed by the location admin for all cameras at once in Member permissions. For more details, go to Location settings > Members > Member permissions.' reject_reason='' reason='trim_stage_not_reached'
+[ANN][stable] req_id=c410e62b selected='Clip history is now shared with all members in this location. Members can view clips from the device card for cameras they can access. Playback permission can be managed by the location admin for all cameras at once in Member permissions. For more details, go to Location settings > Members > Member permissions.' reason='result_row_snapshot' source='result_row'
+[ANN][select] req_id=c410e62b used_snapshot=true snapshot_reason='no_better_recent_poll_candidate' previous='' current='Clip history is now shared with all members in this location. Members can view clips from the device card for cameras they can access. Playback permission can be managed by the location admin for all cameras at once in Member permissions. For more details, go to Location settings > Members > Member permissions.' final='Clip history is now shared with all members in this location. Members can view clips from the device card for cameras they can access. Playback permission can be managed by the location admin for all cameras at once in Member permissions. For more details, go to Location settings > Members > Member permissions.'
+
+[STEP_TRACE]
+[08:08:32] [STEP] END tab='(?i).*life.*' step=1 elapsed=5.61s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776208108990, 'reqId': 'b4bdb93e', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Clip history is now shared with all members in this location. Members can view clips from the device card for cameras they can access. Playback permission can be managed by the location admin for all cameras at once in Member permissions. For more details, go to Location settings > Members > Member permissions.' speech='Clip history is now shared with all members in this location. Members can view clips from the device card for cameras they can access. Playback permission can be managed by the location admin for all cameras at once in Member permissions. For more details, go to Location settings > Members > Member permissions.' crop='output\talkback_compare_20260415_075611\crops\i_._life._step_1_Clip_history_is_now_shared_with_all_memb.png' timing(move=1.186s ann=3.152s get_focus=1.269s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.595s total=6.205s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='c410e62b'
+[STEP][summary] req_id=c410e62b tab='(?i).*life.*' step=1 move_result='{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776208108990, 'reqid': 'b4bdb93e', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}' terminal=false no_progress=false
+
+[SCROLL_TRACE]
+[SCROLL] req_id=c410e62b scroll_related_log_found=false move_result='{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776208108990, 'reqid': 'b4bdb93e', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}' smart_result='' detail='' inferred_scroll=false inference_reason='no_scroll_signal_found'
+
+[FOCUS_TRACE]
+[08:08:32] [STEP] END tab='(?i).*life.*' step=1 elapsed=5.61s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776208108990, 'reqId': 'b4bdb93e', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Clip history is now shared with all members in this location. Members can view clips from the device card for cameras they can access. Playback permission can be managed by the location admin for all cameras at once in Member permissions. For more details, go to Location settings > Members > Member permissions.' speech='Clip history is now shared with all members in this location. Members can view clips from the device card for cameras they can access. Playback permission can be managed by the location admin for all cameras at once in Member permissions. For more details, go to Location settings > Members > Member permissions.' crop='output\talkback_compare_20260415_075611\crops\i_._life._step_1_Clip_history_is_now_shared_with_all_memb.png' timing(move=1.186s ann=3.152s get_focus=1.269s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.595s total=6.205s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='c410e62b'
+[FOCUS] req_id=c410e62b get_focus_req_id='' response_success=false payload_source='' payload_sufficient=false fallback_used=false fallback_found=false dump_attempted=false final_payload_source='' focus_reason='' missing_reason=''
+
+[DECISION_TRACE]
+baseline_empty=true
+first_candidate_contaminated=true
+trim_considered=false
+trim_applied=false
+stable_reason='result_row_snapshot'
+used_snapshot=true
+snapshot_reason='no_better_recent_poll_candidate'
+scroll_evidence='weak'
+focus_evidence='strong'
+notes='final speech appears to come from snapshot candidate path'

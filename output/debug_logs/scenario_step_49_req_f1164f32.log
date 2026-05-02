@@ -1,0 +1,44 @@
+[ROW_CONTEXT]
+scenario=
+tab=(?i).*life.*
+step=49
+req_id=f1164f32
+visible=Latest activity Waiting 건우의 Z Flip6 View information
+speech=Latest activity Waiting 건우의 Z Flip6 View information
+final_result=FAIL
+failure_reason=move_failed
+
+review_note=이동/발화 결과 재검토 필요
+noise=
+move_result=failed
+debug_source_row_found=false
+
+[ANN_TRACE]
+[ANN][baseline] req_id=f1164f32 text='' source='source_row_missing' empty_reason='no_prev_step_row'
+[ANN][poll] req_id=f1164f32 idx=0 raw='Latest activity Waiting 건우의 Z Flip6 View information' normalized='latest activity waiting 건우의 z flip6 view information' changed=true differs_from_baseline=true source='row_snapshot' observed_at='' count=0
+[ANN][trim] req_id=f1164f32 considered=false applied=false before='Latest activity Waiting 건우의 Z Flip6 View information' after='Latest activity Waiting 건우의 Z Flip6 View information' reject_reason='' reason='trim_stage_not_reached'
+[ANN][stable] req_id=f1164f32 selected='Latest activity Waiting 건우의 Z Flip6 View information' reason='result_row_snapshot' source='result_row'
+[ANN][select] req_id=f1164f32 used_snapshot=true snapshot_reason='no_better_recent_poll_candidate' previous='' current='Latest activity Waiting 건우의 Z Flip6 View information' final='Latest activity Waiting 건우의 Z Flip6 View information'
+
+[STEP_TRACE]
+[00:44:49] [STEP] END tab='(?i).*life.*' step=49 elapsed=5.60s move_result='' visible='Latest activity Waiting 건우의 Z Flip6 View information' speech='Latest activity Waiting 건우의 Z Flip6 View information' crop='output\talkback_compare_20260422_003914\crops\i_._life._step_49_LocationButton.png' timing(move=0.429s ann=4.053s get_focus=1.119s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.536s total=6.138s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='f1164f32'
+[STEP][summary] req_id=f1164f32 tab='(?i).*life.*' step=49 move_result='failed' terminal=false no_progress=false
+
+[SCROLL_TRACE]
+[SCROLL] req_id=f1164f32 scroll_related_log_found=false move_result='failed' smart_result='' detail='' inferred_scroll=false inference_reason='no_scroll_signal_found'
+
+[FOCUS_TRACE]
+[00:44:49] [STEP] END tab='(?i).*life.*' step=49 elapsed=5.60s move_result='' visible='Latest activity Waiting 건우의 Z Flip6 View information' speech='Latest activity Waiting 건우의 Z Flip6 View information' crop='output\talkback_compare_20260422_003914\crops\i_._life._step_49_LocationButton.png' timing(move=0.429s ann=4.053s get_focus=1.119s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.536s total=6.138s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='f1164f32'
+[FOCUS] req_id=f1164f32 get_focus_req_id='' response_success=false payload_source='' payload_sufficient=false fallback_used=false fallback_found=false dump_attempted=false final_payload_source='' focus_reason='' missing_reason=''
+
+[DECISION_TRACE]
+baseline_empty=true
+first_candidate_contaminated=true
+trim_considered=false
+trim_applied=false
+stable_reason='result_row_snapshot'
+used_snapshot=true
+snapshot_reason='no_better_recent_poll_candidate'
+scroll_evidence='weak'
+focus_evidence='strong'
+notes='final speech appears to come from snapshot candidate path'

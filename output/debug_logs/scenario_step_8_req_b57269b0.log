@@ -1,0 +1,44 @@
+[ROW_CONTEXT]
+scenario=
+tab=(?i).*life.*
+step=8
+req_id=b57269b0
+visible=Pause monitoring Can't be used during Disarmed mode.
+speech=Pause monitoring Can't be used during Disarmed mode.
+final_result=FAIL
+failure_reason=move_failed
+
+review_note=이동/발화 결과 재검토 필요
+noise=
+move_result={'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776350957230, 'reqid': '9483d1eb', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}
+debug_source_row_found=false
+
+[ANN_TRACE]
+[ANN][baseline] req_id=b57269b0 text='' source='source_row_missing' empty_reason='no_prev_step_row'
+[ANN][poll] req_id=b57269b0 idx=0 raw='Pause monitoring Can't be used during Disarmed mode.' normalized='pause monitoring can't be used during disarmed mode.' changed=true differs_from_baseline=true source='row_snapshot' observed_at='' count=0
+[ANN][trim] req_id=b57269b0 considered=false applied=false before='Pause monitoring Can't be used during Disarmed mode.' after='Pause monitoring Can't be used during Disarmed mode.' reject_reason='' reason='trim_stage_not_reached'
+[ANN][stable] req_id=b57269b0 selected='Pause monitoring Can't be used during Disarmed mode.' reason='result_row_snapshot' source='result_row'
+[ANN][select] req_id=b57269b0 used_snapshot=true snapshot_reason='no_better_recent_poll_candidate' previous='' current='Pause monitoring Can't be used during Disarmed mode.' final='Pause monitoring Can't be used during Disarmed mode.'
+
+[STEP_TRACE]
+[23:49:21] [STEP] END tab='(?i).*life.*' step=8 elapsed=4.54s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776350957230, 'reqId': '9483d1eb', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Pause monitoring Can't be used during Disarmed mode.' speech='Pause monitoring Can't be used during Disarmed mode.' crop='output\talkback_compare_20260416_231624\crops\i_._life._step_8_Pause_monitoring_Can_t_be_used_during_Di.png' timing(move=0.456s ann=3.061s get_focus=1.021s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.514s total=5.053s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='b57269b0'
+[STEP][summary] req_id=b57269b0 tab='(?i).*life.*' step=8 move_result='{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776350957230, 'reqid': '9483d1eb', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}' terminal=false no_progress=false
+
+[SCROLL_TRACE]
+[SCROLL] req_id=b57269b0 scroll_related_log_found=false move_result='{'success': true, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776350957230, 'reqid': '9483d1eb', 'success': true, 'status': 'moved', 'detail': 'moved', 'flags': []}}' smart_result='' detail='' inferred_scroll=false inference_reason='no_scroll_signal_found'
+
+[FOCUS_TRACE]
+[23:49:21] [STEP] END tab='(?i).*life.*' step=8 elapsed=4.54s move_result='{'success': True, 'status': 'moved', 'detail': 'moved', 'raw': {'timestamp': 1776350957230, 'reqId': '9483d1eb', 'success': True, 'status': 'moved', 'detail': 'moved', 'flags': []}}' visible='Pause monitoring Can't be used during Disarmed mode.' speech='Pause monitoring Can't be used during Disarmed mode.' crop='output\talkback_compare_20260416_231624\crops\i_._life._step_8_Pause_monitoring_Can_t_be_used_during_Di.png' timing(move=0.456s ann=3.061s get_focus=1.021s get_focus_fallback_dump=0.000s step_dump=0.000s crop=0.514s total=5.053s) focus_reason='' fallback_used=False fallback_found=False step_dump_used=False step_dump_reason='focus_payload_sufficient' req_id='b57269b0'
+[FOCUS] req_id=b57269b0 get_focus_req_id='' response_success=false payload_source='' payload_sufficient=false fallback_used=false fallback_found=false dump_attempted=false final_payload_source='' focus_reason='' missing_reason=''
+
+[DECISION_TRACE]
+baseline_empty=true
+first_candidate_contaminated=true
+trim_considered=false
+trim_applied=false
+stable_reason='result_row_snapshot'
+used_snapshot=true
+snapshot_reason='no_better_recent_poll_candidate'
+scroll_evidence='weak'
+focus_evidence='strong'
+notes='final speech appears to come from snapshot candidate path'

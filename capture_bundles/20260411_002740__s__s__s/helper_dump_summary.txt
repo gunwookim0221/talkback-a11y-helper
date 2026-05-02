@@ -1,0 +1,2 @@
+type=list
+nodes_count=12
