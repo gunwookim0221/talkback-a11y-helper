@@ -1,5 +1,0 @@
-[15:56:23] [SAVE][temp] override tmp='D:\Python test\talkback-a11y-helper\output\.tmp' temp='D:\Python test\talkback-a11y-helper\output\.tmp' applied=true
-[15:56:23] [MAIN] script start (version=1.7.97, log_level=DEBUG)
-[15:56:26] [PREFLIGHT] talkback status='disabled'
-[15:56:26] [PREFLIGHT] abort run reason='talkback_off'
-[15:56:26] TalkBack is OFF. Enable TalkBack and retry.

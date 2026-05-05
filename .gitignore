@@ -8,3 +8,5 @@
 .cxx/
 *.iml
 app/build/
+/output/
+adb.log

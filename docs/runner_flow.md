@@ -116,6 +116,73 @@ start pipeline 내부에서 `open_scenario(...)`를 먼저 실행한 뒤, post-o
 - The current stable contract for CTA behavior is to keep direct CTA fields on `MainLoopState` while preserving the `_cta_state(state)` adapter seam. Nested CTA tests remain as future seam protection, but production state stays on the direct fields until full runtime parity is re-established.
 - Runtime acceptance for this flow should be judged by traversal health rather than a fixed `total_steps` value. `FATAL`/Traceback must be absent, `stop_reason=safety_limit` is preferred, and Medication/Hospital/Event must all be reached for a successful baseline run. `total_steps` can vary around 37-42 on a real device, but a run that misses Medication or Hospital is not considered a baseline success. `local_tab_force_navigation_set=3` is a strong signal that the expected traversal path was available.
 
+### Phase 8 stabilization baseline
+
+Phase 8 completed the main-loop phase extraction work that is considered safe under the current runtime baseline.
+
+Wrapper/impl extraction is complete for:
+- StepCollectionPhase
+- RowQualityPhase
+- StopExplainPhase
+- ScrollReadyRecordPhase
+- RowPersistencePhase
+
+The following areas have test coverage or contract coverage but intentionally remain in their current structure:
+- OverlayPhase remains as the current helper structure. The orchestration contract is covered by tests, but additional extraction is on hold because overlay execution is side-effect-heavy and tied to realign/recovery timing.
+- CTAState behavior, nested CTA seam behavior, ScrollState behavior, FocusRealignState behavior, and core MainLoopState behavior have regression tests, but state shape changes are still restricted.
+
+The following high-risk areas are intentionally not refactored in Phase 8:
+- CTAState dataclass separation: unit tests passed in an earlier attempt, but runtime drift occurred. The stable contract is direct CTA fields on `MainLoopState` plus the `_cta_state(state)` seam.
+- ContinuationPhase: CTA grace, scroll-ready continue, content phase grace, and local tab transition directly rewrite `stop` and `reason`.
+- StopEvaluationPhase: `fail_count`, `same_count`, `prev_fingerprint`, `should_stop`, and `stop_details` are the core termination contract.
+- LocalTabState: forced navigation, pending target, commit, scroll reset, and visited reset are tightly coupled to navigation success.
+- visited/consumed core: this is the loop prevention and candidate pruning core; changes can create duplicate traversal, early exhaustion, or missed content.
+
+#### Runtime acceptance
+
+A baseline runtime is accepted only when all of the following are true:
+- No `FATAL` or Traceback appears in the run log.
+- `stop_reason=safety_limit` is preferred for the current Family Care traversal baseline.
+- Medication, Hospital, and Event are all reached.
+- `local_tab_force_navigation_set=3` is a strong signal that the expected local-tab traversal path was available.
+- `total_steps` may vary with device and UI timing. A normal range is roughly 37-43.
+
+Do not classify a run by `total_steps` alone:
+- A run that misses Medication or Hospital is not a baseline success.
+- A run with ADB timeout should be excluded from baseline judgment.
+- `total_steps` outside the usual range is diagnostic context, not an automatic failure by itself.
+
+#### Minimum regression test set
+
+Run this set before accepting further orchestration or flow changes:
+
+```bash
+python -m py_compile tb_runner/collection_flow.py
+
+python -m pytest tests/test_collection_flow.py -q -k "phase or row_quality or persistence or step_collection"
+python -m pytest tests/test_collection_flow.py -q -k "cta or local_tab or container_priority"
+python -m pytest tests/test_focus_realign_logic.py -q
+python -m pytest tests/test_scroll_exhaustion_logic.py -q
+python -m pytest tests/test_main_loop_state_behavior.py -q
+python -m pytest tests/test_cta_state_logic.py -q
+python -m pytest tests/test_overlay_logic.py -q
+```
+
+Optional runtime validation:
+
+```powershell
+$env:PYTHONIOENCODING='utf-8'; python script_test.py
+```
+
+#### Next-change rules
+
+- Add or update tests before new refactoring.
+- Run the minimum regression set before accepting the change.
+- Validate runtime once or twice for changes that touch traversal, stop/continue behavior, local tabs, CTA behavior, or visited/consumed logic.
+- Confirm Medication, Hospital, and Event reachability from runtime logs.
+- Do not pin success to a single `total_steps` number.
+- For high-risk areas, use the sequence: analysis -> tests -> implementation. Do not extract first and test afterward.
+
 ## 5-1) step 수집 (focus / announcement / crop / fallback)
 
 각 step에서:
