@@ -152,6 +152,41 @@ Do not classify a run by `total_steps` alone:
 - A run with ADB timeout should be excluded from baseline judgment.
 - `total_steps` outside the usual range is diagnostic context, not an automatic failure by itself.
 
+#### Runtime report parser
+
+`tools/runtime_report_parser.py` parses existing runner log files and prints a baseline summary so runtime acceptance does not rely on manual log inspection.
+
+Basic usage:
+
+```bash
+python tools/runtime_report_parser.py output/log.normal.log
+```
+
+Scenario-aware usage:
+
+```bash
+python tools/runtime_report_parser.py output/log.normal.log --scenario life_family_care_plugin
+python tools/runtime_report_parser.py output/log.normal.log --scenario life_air_care_plugin
+```
+
+Custom expected labels can override the scenario mapping:
+
+```bash
+python tools/runtime_report_parser.py output/log.normal.log --expected-label Medication --expected-label Hospital --expected-label Event
+python tools/runtime_report_parser.py output/log.normal.log --expected-labels "Medication,Hospital,Event"
+```
+
+Expected label suggestions can be printed from visible/speech fields in existing logs:
+
+```bash
+python tools/runtime_report_parser.py output/log.normal.log --suggest-labels
+python tools/runtime_report_parser.py output/log.normal.log --suggest-labels --suggest-label-limit 15
+```
+
+Suggestion output is only a candidate list. It does not automatically confirm or register expected labels. Repeated runtime noise such as View information, device names, and Location/Map-related labels can appear in the suggestions, so final expected labels must be chosen by a person based on the plugin's purpose.
+
+`baseline_pass` is judged from fatal signals, `stop_reason`, and expected-label reachability. For non-family plugins whose expected-label list is currently empty, label reachability is not used as a failure condition; fatal signals and wrong stop reasons still fail the baseline.
+
 #### Minimum regression test set
 
 Run this set before accepting further orchestration or flow changes:
