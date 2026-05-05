@@ -104,7 +104,7 @@ TAB_CONFIGS = [
         "stabilization_mode": "anchor_only",
         "pre_navigation": [
             {
-                "action": "scrolltouch",
+                "action": "xml_scroll_search_tap",
                 "target": "(?i)(^food$|food\\.|smart\\s*things\\s*cooking|\\bcooking\\b)",
                 "type": "a",
             }
@@ -121,6 +121,7 @@ TAB_CONFIGS = [
             ],
             "allow_description_match": True,
         },
+        "verify_tokens": ["smartthings cooking", "ingredients"],
         "anchor_name": "(?i).*navigate\\s*up.*",
         "anchor_type": "a",
         "anchor": {

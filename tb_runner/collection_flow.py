@@ -121,6 +121,7 @@ _DIRECT_SELECT_VERIFY_RECHECK_SLEEP_SECONDS = 0.16
 _DIRECT_SELECT_NEGATIVE_VERIFY_PERSIST_THRESHOLD = 2
 _DIRECT_SELECT_DIAGNOSTIC_SCENARIOS = {"life_pet_care_plugin"}
 STRICT_PLUGIN_ENTRY_PHRASES: dict[str, dict[str, tuple[str, ...]]] = {
+    "life_food_plugin": {"strict": ("food", "smartthings cooking"), "title_only": ("cooking",)},
     "life_air_care_plugin": {"strict": ("air care", "smart air care", "에어 케어"), "title_only": ()},
     "life_home_care_plugin": {"strict": ("home care", "smartthings home care", "홈 케어"), "title_only": ()},
     "life_family_care_plugin": {"strict": ("family care", "패밀리 케어"), "title_only": ()},
@@ -1519,6 +1520,31 @@ def _collect_post_open_identity_snapshot(
         "verify_hit": bool(matches_verify),
         "special_token_hit": special_token_hit,
     }
+
+
+def _has_life_list_post_open_evidence(post_open_identity: dict[str, Any]) -> bool:
+    if not isinstance(post_open_identity, dict):
+        return False
+    if bool(post_open_identity.get("verify_hit")) or bool(post_open_identity.get("back_button_present")):
+        return False
+    values: list[str] = []
+    for key in ("top_visible_labels", "body_texts", "title_candidates"):
+        raw_values = post_open_identity.get(key, [])
+        if isinstance(raw_values, (list, tuple)):
+            values.extend(str(value or "") for value in raw_values)
+    blob = " ".join(values).lower()
+    if not blob:
+        return False
+    top_chrome_hit = bool(
+        _safe_regex_search(r"(?i)(location\s*qr\s*code|change\s*location|more\s*options|\badd\b)", blob)
+    )
+    card_content_hit = bool(
+        _safe_regex_search(
+            r"(?i)(preinstalledservicecard|servicecard|\bfood\b|barcode|바코드|just\s*for\s*you|picture)",
+            blob,
+        )
+    )
+    return bool(top_chrome_hit and card_content_hit)
 
 
 def _format_special_state_debug_values(values: list[str] | tuple[str, ...] | None, *, max_items: int = 5, max_len: int = 72) -> str:
@@ -6391,6 +6417,17 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         f"verify_hit={str(bool(post_open_identity.get('verify_hit'))).lower()} "
         f"special_token_hit={str(bool(post_open_identity.get('special_token_hit'))).lower()}"
     )
+    if entry_type == _ENTRY_TYPE_CARD and _has_life_list_post_open_evidence(post_open_identity):
+        log(
+            f"[SCENARIO][entry_contract] failed scenario='{scenario_id}' entry_type='{entry_type}' "
+            f"reason='{_ENTRY_REASON_VERIFY_FAILED}' detail='life_list_post_open_evidence'"
+        )
+        start_open_summary = getattr(client, "last_start_open_summary", {})
+        if isinstance(start_open_summary, dict):
+            start_open_summary["entry_contract_reason"] = _ENTRY_REASON_VERIFY_FAILED
+            start_open_summary["entry_contract_detail"] = "life_list_post_open_evidence"
+            setattr(client, "last_start_open_summary", start_open_summary)
+        return False
     special_state_detected, special_state_kind, special_state_meta = _classify_special_post_open_state(
         tab_cfg,
         post_view_id=post_view_id,
@@ -8550,6 +8587,8 @@ def _collect_step_candidate_priority_groups(
         resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip().lower()
         class_name = str(node.get("className", "") or node.get("class", "") or "").strip().lower()
         label_word_count = len([token for token in re.split(r"\s+", label) if token])
+        local_tab_canonical_label = local_tab_logic._canonicalize_local_tab_label(label)
+        local_tab_canonical_word_count = len([token for token in re.split(r"\s+", local_tab_canonical_label) if token])
         actionable = bool(node.get("clickable") or node.get("focusable") or node.get("effectiveClickable"))
         descendant_actionable = bool(node.get("hasClickableDescendant") or node.get("hasFocusableDescendant"))
         button_like = bool(
@@ -8568,8 +8607,6 @@ def _collect_step_candidate_priority_groups(
             or "frame" in class_name
             or descendant_actionable
         )
-        local_tab_canonical_label = local_tab_logic._canonicalize_local_tab_label(label)
-        local_tab_canonical_word_count = len([token for token in re.split(r"\s+", local_tab_canonical_label) if token])
         short_tab_like = local_tab_canonical_word_count <= 3 and len(local_tab_canonical_label.strip()) <= 32
         badged_tab_like = bool(local_tab_canonical_label and local_tab_canonical_label != label.strip())
         compact = width_ratio <= 0.52 and height_ratio <= 0.18
