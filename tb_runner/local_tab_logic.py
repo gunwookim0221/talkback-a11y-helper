@@ -57,12 +57,26 @@ def _write_last_selected_local_tab_hint(
     )
 
 def _build_local_tab_strip_signature(tab_candidates: list[dict[str, Any]]) -> str:
-    candidate_rids = [
-        str(candidate.get("rid", "") or "").strip().lower()
-        for candidate in tab_candidates
-        if isinstance(candidate, dict)
-    ]
-    return "||".join(candidate_rids)
+    candidate_keys: list[str] = []
+    for candidate in tab_candidates:
+        if not isinstance(candidate, dict):
+            continue
+        rid = str(candidate.get("rid", "") or "").strip().lower()
+        if rid:
+            candidate_keys.append(rid)
+            continue
+        label = _normalize_logical_text(str(candidate.get("label", "") or "").strip())
+        bounds = str(candidate.get("bounds", "") or "").strip()
+        candidate_keys.append(label or bounds)
+    return "||".join(candidate_keys)
+
+def _canonicalize_local_tab_label(label: str) -> str:
+    value = re.sub(r"\s+", " ", str(label or "").strip())
+    if not value:
+        return ""
+    stripped = re.sub(r"\s+\d+\s+new notifications?$", "", value, flags=re.IGNORECASE).strip()
+    stripped = re.sub(r"\s+new notifications?$", "", stripped, flags=re.IGNORECASE).strip()
+    return stripped or value
 
 def _select_active_local_tab_candidate(
     *,
@@ -70,14 +84,16 @@ def _select_active_local_tab_candidate(
     row: dict[str, Any],
 ) -> dict[str, Any] | None:
     row_rid = str(row.get("focus_view_id", "") or "").strip().lower()
-    row_label = re.sub(r"\s+", " ", str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()).lower()
+    row_label = _canonicalize_local_tab_label(
+        str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
+    ).lower()
     for candidate in tab_candidates:
         node = candidate.get("node", {})
         if isinstance(node, dict) and bool(node.get("selected")):
             return candidate
     for candidate in tab_candidates:
         candidate_rid = str(candidate.get("rid", "") or "").strip().lower()
-        candidate_label = re.sub(r"\s+", " ", str(candidate.get("label", "") or "").strip()).lower()
+        candidate_label = _canonicalize_local_tab_label(str(candidate.get("label", "") or "").strip()).lower()
         if row_rid and candidate_rid and row_rid == candidate_rid:
             return candidate
         if row_label and candidate_label and row_label == candidate_label:
@@ -185,8 +201,8 @@ def _local_tab_candidate_matches_identity(
 ) -> tuple[bool, str]:
     candidate_rid = str(candidate.get("rid", "") or "").strip().lower()
     candidate_label = str(candidate.get("label", "") or "").strip()
-    normalized_candidate_label = _normalize_logical_text(candidate_label)
-    normalized_label = _normalize_logical_text(label)
+    normalized_candidate_label = _normalize_logical_text(_canonicalize_local_tab_label(candidate_label))
+    normalized_label = _normalize_logical_text(_canonicalize_local_tab_label(label))
     rid = str(rid or "").strip().lower()
     if candidate_rid and rid and candidate_rid == rid:
         return True, "rid"
@@ -350,7 +366,6 @@ def _recover_local_tab_state_from_bottom_strip(
         state.current_local_tab_active_rid = active_rid
         state.current_local_tab_active_label = active_label
         state.current_local_tab_active_age = 0
-        state.visited_local_tabs_by_signature.setdefault(local_tab_signature, set()).add(active_rid)
     log(
         f"[STEP][local_tab_recover] reason='{reason}' "
         f"candidates='{_truncate_debug_text(_summarize_candidate_labels(sorted_candidates), 120)}' "
@@ -918,10 +933,12 @@ def _is_current_focus_on_local_tab_strip(state: MainLoopState, row: dict[str, An
     if not tab_candidates:
         return False
     row_rid = str(row.get("focus_view_id", "") or "").strip().lower()
-    row_label = re.sub(r"\s+", " ", str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()).lower()
+    row_label = _canonicalize_local_tab_label(
+        str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
+    ).lower()
     for candidate in tab_candidates:
         candidate_rid = str(candidate.get("rid", "") or "").strip().lower()
-        candidate_label = re.sub(r"\s+", " ", str(candidate.get("label", "") or "").strip()).lower()
+        candidate_label = _canonicalize_local_tab_label(str(candidate.get("label", "") or "").strip()).lower()
         if row_rid and candidate_rid and row_rid == candidate_rid:
             return True
         if row_label and candidate_label and row_label == candidate_label:
@@ -1068,43 +1085,204 @@ def _select_better_cluster_representative(
         return None
     return max(fallback_candidates, key=_cluster_candidate_sort_key)
 
+def _local_tab_candidate_label(candidate: dict[str, Any]) -> str:
+    label = str(candidate.get("label", "") or "").strip()
+    if label:
+        return label
+    node = candidate.get("node", {})
+    if isinstance(node, dict):
+        for key in ("text", "contentDescription", "content_desc", "merged_announcement"):
+            label = str(node.get(key, "") or "").strip()
+            if label:
+                return label
+    return ""
+
+def _local_tab_candidate_bool(candidate: dict[str, Any], keys: tuple[str, ...], default: bool = False) -> bool:
+    values: list[Any] = [candidate.get(key) for key in keys]
+    node = candidate.get("node", {})
+    if isinstance(node, dict):
+        values.extend(node.get(key) for key in keys)
+    for value in values:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"true", "1", "yes"}:
+                return True
+            if lowered in {"false", "0", "no"}:
+                return False
+        if isinstance(value, (int, float)):
+            return bool(value)
+    return default
+
+def _is_global_bottom_nav_label(label: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(label or "").strip()).lower()
+    normalized = re.sub(r"\bselected\b", "", normalized).strip()
+    return normalized in {"home", "devices", "life", "routines", "menu"}
+
+def _prepare_local_tab_strip_candidate(
+    candidate: dict[str, Any],
+    index: int,
+) -> dict[str, Any] | None:
+    if not isinstance(candidate, dict):
+        return None
+    bounds = _extract_local_tab_candidate_bounds(candidate)
+    if not bounds:
+        return None
+    left, top, right, bottom = bounds
+    if right <= left or bottom <= top:
+        return None
+    label = _local_tab_candidate_label(candidate)
+    visible = _local_tab_candidate_bool(
+        candidate,
+        keys=("isVisibleToUser", "visibleToUser", "visible"),
+        default=True,
+    )
+    clickable = _local_tab_candidate_bool(candidate, keys=("clickable", "effectiveClickable"), default=False)
+    focusable = _local_tab_candidate_bool(candidate, keys=("focusable",), default=False)
+    if not visible or not clickable:
+        return None
+    return {
+        "index": index,
+        "candidate": candidate,
+        "label": label,
+        "canonical_label": _canonicalize_local_tab_label(label),
+        "left": left,
+        "top": top,
+        "right": right,
+        "bottom": bottom,
+        "width": max(1, right - left),
+        "height": max(1, bottom - top),
+        "center_x": (left + right) // 2,
+        "center_y": (top + bottom) // 2,
+        "focusable": focusable,
+    }
+
+def _local_tab_strip_group_is_structural(
+    group: list[dict[str, Any]],
+    *,
+    viewport_width: int,
+    viewport_bottom: int,
+) -> bool:
+    if not (2 <= len(group) <= 4):
+        return False
+    labels = [str(item.get("canonical_label", "") or item.get("label", "") or "").strip() for item in group]
+    if labels and all(_is_global_bottom_nav_label(label) for label in labels):
+        return False
+    heights = [int(item["height"]) for item in group]
+    widths = [int(item["width"]) for item in group]
+    centers_y = [int(item["center_y"]) for item in group]
+    tops = [int(item["top"]) for item in group]
+    bottoms = [int(item["bottom"]) for item in group]
+    avg_height = sum(heights) / float(max(1, len(heights)))
+    if max(heights) > 240 or min(heights) < 36:
+        return False
+    if min(heights) and max(heights) / float(min(heights)) > 1.35:
+        return False
+    if max(centers_y) - min(centers_y) > max(32, int(avg_height * 0.30)):
+        return False
+    if min(tops) < max(880, int(viewport_bottom * 0.72)):
+        return False
+    if max(bottoms) < int(viewport_bottom * 0.88):
+        return False
+    if min(widths) and max(widths) / float(min(widths)) > 1.45:
+        return False
+    ordered = sorted(group, key=lambda item: (int(item["left"]), int(item["center_x"])))
+    for previous, current in zip(ordered, ordered[1:]):
+        overlap = int(previous["right"]) - int(current["left"])
+        if overlap > max(12, int(min(previous["width"], current["width"]) * 0.08)):
+            return False
+    strip_left = min(int(item["left"]) for item in ordered)
+    strip_right = max(int(item["right"]) for item in ordered)
+    strip_width = max(1, strip_right - strip_left)
+    if strip_width < int(max(1, viewport_width) * 0.55):
+        return False
+    center_gaps = [
+        int(current["center_x"]) - int(previous["center_x"])
+        for previous, current in zip(ordered, ordered[1:])
+    ]
+    if center_gaps and min(center_gaps) <= 0:
+        return False
+    if len(center_gaps) >= 2 and min(center_gaps) and max(center_gaps) / float(min(center_gaps)) > 1.55:
+        return False
+    identities = {
+        (
+            str(item["candidate"].get("rid", "") or "").strip().lower()
+            or _normalize_logical_text(str(item.get("canonical_label", "") or item.get("label", "") or ""))
+            or f"{item['left']},{item['top']},{item['right']},{item['bottom']}"
+        )
+        for item in ordered
+    }
+    if len(identities) < len(ordered):
+        return False
+    return True
+
 def _filter_local_tab_strip_candidates(
     raw_candidates: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    if not (2 <= len(raw_candidates) <= 5):
+    prepared = [
+        prepared_candidate
+        for index, candidate in enumerate(raw_candidates)
+        if (prepared_candidate := _prepare_local_tab_strip_candidate(candidate, index)) is not None
+    ]
+    if len(prepared) < 2:
         return [], list(raw_candidates)
-    best_cluster_indexes: list[int] = []
-    for index, candidate in enumerate(raw_candidates):
-        center_y = int(candidate.get("center_y", 0) or 0)
-        height = max(1, int(candidate.get("height", 0) or 1))
-        cluster_indexes: list[int] = []
-        for other_index, other_candidate in enumerate(raw_candidates):
-            other_center_y = int(other_candidate.get("center_y", 0) or 0)
-            other_height = max(1, int(other_candidate.get("height", 0) or 1))
-            same_row = abs(center_y - other_center_y) <= max(36, min(height, other_height))
-            similar_height = 0.65 <= (height / float(max(1, other_height))) <= 1.6
-            if same_row and similar_height:
-                cluster_indexes.append(other_index)
-        cluster_key = (
-            len(cluster_indexes),
-            -abs(center_y - sum(int(raw_candidates[idx].get("center_y", 0) or 0) for idx in cluster_indexes) // max(1, len(cluster_indexes))),
-            -index,
-        )
-        best_key = (
-            len(best_cluster_indexes),
-            -999999,
-            -999999,
-        )
-        if best_cluster_indexes:
-            cluster_center = sum(int(raw_candidates[idx].get("center_y", 0) or 0) for idx in best_cluster_indexes) // max(1, len(best_cluster_indexes))
-            best_key = (len(best_cluster_indexes), -abs(center_y - cluster_center), -index)
-        if cluster_key > best_key:
-            best_cluster_indexes = cluster_indexes
-    accepted = [raw_candidates[index] for index in sorted(set(best_cluster_indexes))]
-    unique_centers = {int(candidate.get("center_x", 0) or 0) for candidate in accepted}
-    if not (2 <= len(accepted) <= 5 and len(unique_centers) >= 2):
+    if (
+        len(prepared) >= 5
+        and sum(1 for candidate in prepared if _is_global_bottom_nav_label(str(candidate.get("label", "") or ""))) >= 4
+    ):
         return [], list(raw_candidates)
-    rejected = [candidate for idx, candidate in enumerate(raw_candidates) if idx not in set(best_cluster_indexes)]
+    viewport_width = max(1080, *(int(candidate["right"]) for candidate in prepared))
+    viewport_bottom = max(1200, *(int(candidate["bottom"]) for candidate in prepared))
+    best_group: list[dict[str, Any]] = []
+    best_key: tuple[int, int, int, int] = (-1, -1, -1, -1)
+    for anchor in prepared:
+        anchor_height = max(1, int(anchor["height"]))
+        anchor_center_y = int(anchor["center_y"])
+        group = [
+            candidate
+            for candidate in prepared
+            if abs(int(candidate["center_y"]) - anchor_center_y) <= max(32, int(anchor_height * 0.30))
+            and 0.74 <= (int(candidate["height"]) / float(anchor_height)) <= 1.35
+        ]
+        if len(group) > 4:
+            group = sorted(group, key=lambda item: int(item["bottom"]), reverse=True)[:4]
+        group = sorted(group, key=lambda item: int(item["left"]))
+        if not _local_tab_strip_group_is_structural(
+            group,
+            viewport_width=viewport_width,
+            viewport_bottom=viewport_bottom,
+        ):
+            continue
+        strip_width = max(int(item["right"]) for item in group) - min(int(item["left"]) for item in group)
+        focusable_count = sum(1 for item in group if bool(item.get("focusable")))
+        bottom = max(int(item["bottom"]) for item in group)
+        key = (len(group), strip_width, focusable_count, bottom)
+        if key > best_key:
+            best_key = key
+            best_group = group
+    if not best_group:
+        return [], list(raw_candidates)
+    accepted_indexes = {int(item["index"]) for item in best_group}
+    accepted: list[dict[str, Any]] = []
+    for item in sorted(best_group, key=lambda value: int(value["left"])):
+        candidate = dict(item["candidate"])
+        original_label = str(candidate.get("label", "") or item.get("label", "") or "").strip()
+        canonical_label = str(item.get("canonical_label", "") or original_label).strip()
+        candidate["label"] = canonical_label
+        candidate["original_label"] = original_label
+        if canonical_label != original_label:
+            candidate["label_canonicalized"] = True
+        candidate.setdefault("left", int(item["left"]))
+        candidate.setdefault("right", int(item["right"]))
+        candidate.setdefault("top", int(item["top"]))
+        candidate.setdefault("bottom", int(item["bottom"]))
+        candidate.setdefault("center_x", int(item["center_x"]))
+        candidate.setdefault("center_y", int(item["center_y"]))
+        candidate.setdefault("width", int(item["width"]))
+        candidate.setdefault("height", int(item["height"]))
+        accepted.append(candidate)
+    rejected = [candidate for index, candidate in enumerate(raw_candidates) if index not in accepted_indexes]
     return accepted, rejected
 
 def _is_row_persistent_bottom_strip_candidate(row: dict[str, Any]) -> bool:
@@ -1112,7 +1290,7 @@ def _is_row_persistent_bottom_strip_candidate(row: dict[str, Any]) -> bool:
     label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
     resource_id = str(meta["resource_id"]).lower()
     class_name = str(meta["class_name"]).lower()
-    label_word_count = len([token for token in re.split(r"\s+", label) if token])
+    label_word_count = len([token for token in re.split(r"\s+", _canonicalize_local_tab_label(label)) if token])
     bounds = parse_bounds_str(str(meta["bounds"]).strip())
     if not meta["actionable"] or not bounds or not label:
         return False
@@ -1216,8 +1394,6 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
                     state.current_local_tab_active_rid = active_rid
                     state.current_local_tab_active_label = active_label
                     state.current_local_tab_active_age = 0
-                visited_tabs = state.visited_local_tabs_by_signature.setdefault(local_tab_signature, set())
-                visited_tabs.add(active_rid)
                 if (
                     local_tab_signature != str(row.get("local_tab_signature_logged", "") or "").strip()
                     or bool(_is_row_persistent_bottom_strip_candidate(row))
@@ -2268,17 +2444,34 @@ def _maybe_select_next_local_tab(
             current_label = str(sorted_tab_candidates[active_index].get("label", "") or sorted_tab_candidates[active_index].get("rid", "") or "").strip()
         next_label = str(progression_tab.get("label", "") or progression_tab.get("rid", "") or "").strip()
         next_rid = str(progression_tab.get("rid", "") or "").strip().lower()
-        if next_rid and next_rid in {rid.lower() for rid in visited_tabs}:
-            log("[STEP][local_tab_skip_reason] reason='visited_ignored_for_order_progression'")
+        if not (next_rid and next_rid in {rid.lower() for rid in visited_tabs}):
+            log(
+                f"[STEP][local_tab_progression] current='{_truncate_debug_text(current_label or active_rid, 96)}' "
+                f"next='{_truncate_debug_text(next_label, 96)}'"
+            )
+            remaining_tabs = [progression_tab]
+        elif remaining_tabs:
+            fallback_label = str(remaining_tabs[0].get("label", "") or remaining_tabs[0].get("rid", "") or "").strip()
+            log(
+                f"[STEP][local_tab_progression] current='{_truncate_debug_text(current_label or active_rid, 96)}' "
+                f"next='{_truncate_debug_text(fallback_label, 96)}' reason='skip_visited_progression'"
+            )
+        else:
+            log("[STEP][local_tab_skip_reason] reason='visited_progression_tab'")
+    elif remaining_tabs:
+        current_label = active_label
+        if 0 <= active_index < len(sorted_tab_candidates):
+            current_label = str(sorted_tab_candidates[active_index].get("label", "") or sorted_tab_candidates[active_index].get("rid", "") or active_label).strip()
+        next_label = str(remaining_tabs[0].get("label", "") or remaining_tabs[0].get("rid", "") or "").strip()
         log(
             f"[STEP][local_tab_progression] current='{_truncate_debug_text(current_label or active_rid, 96)}' "
-            f"next='{_truncate_debug_text(next_label, 96)}'"
+            f"next='{_truncate_debug_text(next_label, 96)}' reason='wrap_to_unvisited'"
         )
-        remaining_tabs = [progression_tab]
-    elif not remaining_tabs:
+    if not remaining_tabs:
         row["local_tab_gate_evaluated"] = True
         row["local_tab_block_reason"] = "no_unvisited_local_tab"
-        log("[STEP][local_tab_skip_reason] reason='none'")
+        if progression_tab is None:
+            log("[STEP][local_tab_skip_reason] reason='none'")
         log(
             f"[STEP][local_tab_gate] allowed=false reason='no_unvisited_local_tab' "
             f"tabs='{_truncate_debug_text(_summarize_candidate_labels(tab_candidates), 120)}' "

@@ -8568,9 +8568,12 @@ def _collect_step_candidate_priority_groups(
             or "frame" in class_name
             or descendant_actionable
         )
-        short_tab_like = label_word_count <= 3 and len(label.strip()) <= 32
-        compact = width_ratio <= 0.45 and height_ratio <= 0.18
-        if center_y >= bottom_band_top and actionable and short_tab_like and compact and (button_like or label_word_count <= 2):
+        local_tab_canonical_label = local_tab_logic._canonicalize_local_tab_label(label)
+        local_tab_canonical_word_count = len([token for token in re.split(r"\s+", local_tab_canonical_label) if token])
+        short_tab_like = local_tab_canonical_word_count <= 3 and len(local_tab_canonical_label.strip()) <= 32
+        badged_tab_like = bool(local_tab_canonical_label and local_tab_canonical_label != label.strip())
+        compact = width_ratio <= 0.52 and height_ratio <= 0.18
+        if center_y >= bottom_band_top and actionable and short_tab_like and compact and (button_like or local_tab_canonical_word_count <= 2 or badged_tab_like):
             raw_bottom_strip_candidates.append(
                 {
                     "node": node,

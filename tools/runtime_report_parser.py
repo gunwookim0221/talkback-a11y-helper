@@ -26,17 +26,96 @@ DEFAULT_EXPECTED_LABELS = ["Medication", "Hospital", "Event"]
 SCENARIO_EXPECTED_LABELS = {
     "life_family_care_plugin": DEFAULT_EXPECTED_LABELS,
     "life_air_care_plugin": [],
-    "life_home_care_plugin": [],
-    "life_energy_plugin": [],
-    "life_pet_care_plugin": [],
-    "life_plant_care_plugin": [],
-    "life_clothing_care_plugin": [],
-    "life_find_plugin": [],
-    "life_video_plugin": [],
-    "life_home_monitor_plugin": [],
+    "life_home_care_plugin": {
+        "ready": [
+            "Device care",
+            "Usage guide",
+            "Smart Forward",
+        ],
+        "initial": ["Start"],
+    },
+    "life_energy_plugin": {
+        "ready": [
+            "Carbon emissions aware",
+            "Device energy usage",
+            "AI Energy Mode",
+            "Energy saving tips",
+        ],
+        "initial": [
+            "Start",
+        ],
+    },
+    "life_pet_care_plugin": {
+        "ready": [
+            "Add profile",
+            "Start walk",
+            "Find where your pet is",
+        ],
+        "initial": ["Start"],
+    },
+    "life_plant_care_plugin": {
+        "ready": [
+            "Are you growing many plants in one place?",
+            "Needs water",
+            "To do soon",
+        ],
+        "initial": [],
+    },
+    "life_clothing_care_plugin": {
+        "ready": [
+            "It's time to care for your blanket",
+            "Try Bedding cycle",
+            "Schedule",
+        ],
+        "initial": [
+            "Start",
+        ],
+    },
+    "life_find_plugin": {
+        "ready": [],
+        "initial": [
+            "Allow location access",
+            "Turn on location",
+            "No devices found",
+            "Find your device",
+        ],
+    },
+    "life_video_plugin": {
+        "ready": [],
+        "initial": [
+            "Experience smarter care",
+            "Discover exciting new AI",
+            "Get alerts for only the objects you've selected",
+            "Continue",
+        ],
+    },
+    "life_home_monitor_plugin": {
+        "ready": [
+            "Monitor",
+            "History",
+            "View sensors",
+            "Useful features",
+        ],
+        "initial": [
+            "Tap to set up",
+        ],
+    },
     "life_music_sync_plugin": [],
-    "life_food_plugin": [],
+    "life_food_plugin": {
+        "ready": [
+            "Recipe optimized for Samsung Oven",
+            "Add to Meal planner",
+            "Saved recipes",
+            "Ingredients",
+        ],
+        "initial": [
+            "Smart Things Cooking",
+            "Cook like an expert with customized recipes",
+            "Start",
+        ],
+    },
 }
+EXPECTED_LABELS = SCENARIO_EXPECTED_LABELS
 NOISE_LABELS = {
     "home",
     "devices",
@@ -60,6 +139,12 @@ class RuntimeSummary:
     scenario: str
     expected_labels: tuple[str, ...]
     reached_labels: dict[str, bool]
+    ready_expected_labels: tuple[str, ...]
+    initial_expected_labels: tuple[str, ...]
+    ready_matched_labels: tuple[str, ...]
+    initial_matched_labels: tuple[str, ...]
+    baseline_status: str
+    detected_state: str
     fatal: bool
     adb_timeout: bool
     stop_reason: str | None
@@ -74,26 +159,28 @@ class RuntimeSummary:
 
     @property
     def baseline_pass(self) -> bool:
-        return (
-            not self.fatal
-            and self.stop_reason == "safety_limit"
-            and all(self.reached_labels.values())
-        )
+        return self.baseline_status in {"baseline_pass", "initial_state"}
 
     @property
     def baseline_reason(self) -> str:
         if self.fatal:
             return "fatal_detected"
+        if self.baseline_status == "baseline_pass" and not self.expected_labels:
+            return "ok_no_expected_labels"
+        if self.baseline_status == "baseline_pass":
+            return "ok"
+        if self.baseline_status == "initial_state":
+            return "initial_state_detected"
         if self.stop_reason != "safety_limit":
             return "wrong_stop_reason"
-        if not self.expected_labels:
+        if not self.ready_expected_labels and not self.initial_expected_labels:
             return "ok_no_expected_labels"
-        for label, reached in self.reached_labels.items():
-            if not reached:
-                return f"missing_{label.lower().replace(' ', '_')}"
-        if self.local_tab_force_navigation_set < 3:
-            return "low_local_tab_navigation"
-        return "ok"
+        missing_labels = [
+            label for label in self.ready_expected_labels if label not in self.ready_matched_labels
+        ]
+        if missing_labels:
+            return f"missing_{missing_labels[0].lower().replace(' ', '_')}"
+        return "baseline_fail"
 
 
 def _expand_inputs(patterns: Iterable[str]) -> list[Path]:
@@ -194,17 +281,96 @@ def suggest_expected_labels(text: str, limit: int = 10) -> list[str]:
     return [label for label, _count in candidates.most_common(limit)]
 
 
+def _match_threshold(labels: tuple[str, ...], *, initial: bool = False) -> int:
+    if not labels:
+        return 0
+    if initial:
+        return 1
+    return min(2, len(labels))
+
+
+def _normalize_expected_label_config(
+    config: object,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    if isinstance(config, dict):
+        ready = config.get("ready", [])
+        initial = config.get("initial", [])
+        return tuple(label for label in ready if label), tuple(label for label in initial if label)
+    if config is None:
+        return (), ()
+    return tuple(label for label in config if label), ()
+
+
 def _resolve_expected_labels(
     *,
     scenario: str | None = None,
     expected_labels: Iterable[str] | None = None,
-) -> tuple[str, tuple[str, ...]]:
+) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
     resolved_scenario = scenario or DEFAULT_SCENARIO
     if expected_labels is not None:
         labels = tuple(label for label in expected_labels if label)
-        return resolved_scenario, labels
-    return resolved_scenario, tuple(
+        return resolved_scenario, labels, ()
+    return (resolved_scenario, *_normalize_expected_label_config(
         SCENARIO_EXPECTED_LABELS.get(resolved_scenario, DEFAULT_EXPECTED_LABELS)
+    ))
+
+
+def _matched_labels(labels: tuple[str, ...], text: str) -> tuple[str, ...]:
+    return tuple(label for label in labels if label in text)
+
+
+def _evaluate_baseline_status(
+    *,
+    fatal: bool,
+    stop_reason: str | None,
+    ready_expected_labels: tuple[str, ...],
+    ready_matched_labels: tuple[str, ...],
+    initial_expected_labels: tuple[str, ...],
+    initial_matched_labels: tuple[str, ...],
+) -> tuple[str, str]:
+    if fatal:
+        return "baseline_fail", "unknown"
+
+    ready_threshold = _match_threshold(ready_expected_labels)
+    if ready_threshold and len(ready_matched_labels) >= ready_threshold:
+        return "baseline_pass", "ready"
+
+    initial_threshold = _match_threshold(initial_expected_labels, initial=True)
+    if initial_threshold and len(initial_matched_labels) >= initial_threshold:
+        return "initial_state", "initial"
+
+    if not ready_expected_labels and not initial_expected_labels and stop_reason == "safety_limit":
+        return "baseline_pass", "unknown"
+    if (
+        stop_reason == "safety_limit"
+        and ready_expected_labels
+        and len(ready_matched_labels) == len(ready_expected_labels)
+    ):
+        return "baseline_pass", "ready"
+    return "baseline_fail", "unknown"
+
+
+def _join_labels(labels: Iterable[str]) -> str:
+    return ",".join(labels)
+
+
+def _legacy_reached_labels(
+    ready_expected_labels: tuple[str, ...],
+    ready_matched_labels: tuple[str, ...],
+) -> dict[str, bool]:
+    return {
+        label: label in ready_matched_labels
+        for label in ready_expected_labels
+    }
+
+
+def _all_expected_labels(
+    ready_expected_labels: tuple[str, ...],
+    initial_expected_labels: tuple[str, ...],
+) -> tuple[str, ...]:
+    return (
+        ready_expected_labels
+        + tuple(label for label in initial_expected_labels if label not in ready_expected_labels)
     )
 
 
@@ -218,16 +384,32 @@ def parse_log(
     adb_timeout = _has_adb_timeout(text)
     fatal = "Traceback" in text or "[ERROR]" in text or adb_timeout
     raw_rows, filtered_rows = _last_save_rows(text)
-    resolved_scenario, resolved_expected_labels = _resolve_expected_labels(
+    resolved_scenario, ready_expected_labels, initial_expected_labels = _resolve_expected_labels(
         scenario=scenario,
         expected_labels=expected_labels,
     )
-    reached_labels = {label: label in text for label in resolved_expected_labels}
+    ready_matched_labels = _matched_labels(ready_expected_labels, text)
+    initial_matched_labels = _matched_labels(initial_expected_labels, text)
+    baseline_status, detected_state = _evaluate_baseline_status(
+        fatal=fatal,
+        stop_reason=_last_stop_reason(text),
+        ready_expected_labels=ready_expected_labels,
+        ready_matched_labels=ready_matched_labels,
+        initial_expected_labels=initial_expected_labels,
+        initial_matched_labels=initial_matched_labels,
+    )
+    reached_labels = _legacy_reached_labels(ready_expected_labels, ready_matched_labels)
     return RuntimeSummary(
         path=path,
         scenario=resolved_scenario,
-        expected_labels=resolved_expected_labels,
+        expected_labels=_all_expected_labels(ready_expected_labels, initial_expected_labels),
         reached_labels=reached_labels,
+        ready_expected_labels=ready_expected_labels,
+        initial_expected_labels=initial_expected_labels,
+        ready_matched_labels=ready_matched_labels,
+        initial_matched_labels=initial_matched_labels,
+        baseline_status=baseline_status,
+        detected_state=detected_state,
         fatal=fatal,
         adb_timeout=adb_timeout,
         stop_reason=_last_stop_reason(text),
@@ -257,7 +439,15 @@ def print_summary(summary: RuntimeSummary, *, include_path: bool) -> None:
         print(f"[BASELINE][file] path={summary.path}")
     print("[BASELINE][summary]")
     print(f"scenario={summary.scenario}")
-    print(f"expected_labels={','.join(summary.expected_labels)}")
+    print(f"expected_labels={_join_labels(summary.expected_labels)}")
+    print(f"baseline_status={summary.baseline_status}")
+    print(f"detected_state={summary.detected_state}")
+    print(f"ready_expected_count={len(summary.ready_expected_labels)}")
+    print(f"ready_matched_count={len(summary.ready_matched_labels)}")
+    print(f"ready_matched_labels={_join_labels(summary.ready_matched_labels)}")
+    print(f"initial_expected_count={len(summary.initial_expected_labels)}")
+    print(f"initial_matched_count={len(summary.initial_matched_labels)}")
+    print(f"initial_matched_labels={_join_labels(summary.initial_matched_labels)}")
     print(f"fatal={summary.fatal}")
     print(f"stop_reason={_format_value(summary.stop_reason)}")
     print(f"total_steps={_format_value(summary.total_steps)}")

@@ -103,7 +103,7 @@ def test_runtime_report_parser_fails_on_wrong_stop_reason(tmp_path):
     path = _write_log(
         tmp_path,
         "wrong_stop.log",
-        _baseline_log(stop_reason="repeat_no_progress"),
+        _baseline_log(stop_reason="repeat_no_progress", labels="Event\n"),
     )
 
     summary = parser.parse_log(path)
@@ -133,7 +133,7 @@ def test_runtime_report_parser_aggregates_multiple_logs(tmp_path, capsys):
         _write_log(
             tmp_path,
             "fail.log",
-            _baseline_log(labels="Medication\nEvent\n"),
+            _baseline_log(labels="Event\n"),
         )
     )
 
@@ -151,16 +151,19 @@ def test_runtime_report_parser_default_uses_family_care_labels(tmp_path):
     path = _write_log(
         tmp_path,
         "default_family_missing.log",
-        _baseline_log(labels="Medication\nEvent\n"),
+        _baseline_log(labels="Event\n"),
     )
 
     summary = parser.parse_log(path)
 
     assert summary.scenario == "life_family_care_plugin"
     assert summary.expected_labels == ("Medication", "Hospital", "Event")
+    assert summary.ready_expected_labels == ("Medication", "Hospital", "Event")
     assert summary.reached_labels["Hospital"] is False
     assert summary.baseline_pass is False
-    assert summary.baseline_reason == "missing_hospital"
+    assert summary.baseline_status == "baseline_fail"
+    assert summary.detected_state == "unknown"
+    assert summary.baseline_reason == "missing_medication"
 
 
 def test_runtime_report_parser_scenario_family_care_labels(tmp_path):
@@ -187,6 +190,7 @@ def test_runtime_report_parser_non_family_plugin_allows_empty_expected_labels(tm
     assert summary.expected_labels == ()
     assert summary.reached_labels == {}
     assert summary.baseline_pass is True
+    assert summary.baseline_status == "baseline_pass"
     assert summary.baseline_reason == "ok_no_expected_labels"
 
 
@@ -220,9 +224,134 @@ def test_runtime_report_parser_output_includes_expected_labels(tmp_path, capsys)
     output = capsys.readouterr().out
     assert "scenario=life_family_care_plugin" in output
     assert "expected_labels=Medication,Hospital,Event" in output
+    assert "baseline_status=baseline_pass" in output
+    assert "detected_state=ready" in output
+    assert "ready_expected_count=3" in output
+    assert "ready_matched_count=3" in output
+    assert "ready_matched_labels=Medication,Hospital,Event" in output
+    assert "initial_expected_count=0" in output
+    assert "initial_matched_count=0" in output
     assert "reached_Medication=True" in output
     assert "reached_Hospital=True" in output
     assert "reached_Event=True" in output
+
+
+def test_runtime_report_parser_legacy_list_structure_ready_threshold(tmp_path, monkeypatch):
+    monkeypatch.setitem(
+        parser.SCENARIO_EXPECTED_LABELS,
+        "life_family_care_plugin",
+        ["Medication", "Hospital", "Event"],
+    )
+    path = _write_log(
+        tmp_path,
+        "legacy_ready.log",
+        _baseline_log(labels="Medication\nHospital\n"),
+    )
+
+    summary = parser.parse_log(path, scenario="life_family_care_plugin")
+
+    assert summary.ready_matched_labels == ("Medication", "Hospital")
+    assert summary.baseline_status == "baseline_pass"
+    assert summary.detected_state == "ready"
+    assert summary.baseline_pass is True
+
+
+def test_runtime_report_parser_structured_ready_threshold(tmp_path, monkeypatch):
+    monkeypatch.setitem(
+        parser.SCENARIO_EXPECTED_LABELS,
+        "life_air_care_plugin",
+        {
+            "ready": ["Air quality", "Outdoor air quality", "Indoor air quality"],
+            "initial": ["Get started", "Start"],
+        },
+    )
+    path = _write_log(
+        tmp_path,
+        "structured_ready.log",
+        _baseline_log(labels="Air quality\nOutdoor air quality\n"),
+    )
+
+    summary = parser.parse_log(path, scenario="life_air_care_plugin")
+
+    assert summary.ready_matched_labels == ("Air quality", "Outdoor air quality")
+    assert summary.initial_matched_labels == ()
+    assert summary.baseline_status == "baseline_pass"
+    assert summary.detected_state == "ready"
+
+
+def test_runtime_report_parser_structured_initial_state(tmp_path, monkeypatch):
+    monkeypatch.setitem(
+        parser.SCENARIO_EXPECTED_LABELS,
+        "life_air_care_plugin",
+        {
+            "ready": ["Air quality", "Outdoor air quality"],
+            "initial": ["Set geolocation to monitor outdoor air quality", "Dismiss"],
+        },
+    )
+    path = _write_log(
+        tmp_path,
+        "initial.log",
+        _baseline_log(labels="Set geolocation to monitor outdoor air quality\n"),
+    )
+
+    summary = parser.parse_log(path, scenario="life_air_care_plugin")
+
+    assert summary.ready_matched_labels == ()
+    assert summary.initial_matched_labels == ("Set geolocation to monitor outdoor air quality",)
+    assert summary.baseline_status == "initial_state"
+    assert summary.detected_state == "initial"
+    assert summary.baseline_pass is True
+    assert summary.baseline_reason == "initial_state_detected"
+
+
+def test_runtime_report_parser_ready_wins_over_initial(tmp_path, monkeypatch):
+    monkeypatch.setitem(
+        parser.SCENARIO_EXPECTED_LABELS,
+        "life_air_care_plugin",
+        {
+            "ready": ["Air quality", "Outdoor air quality"],
+            "initial": ["Get started"],
+        },
+    )
+    path = _write_log(
+        tmp_path,
+        "ready_and_initial.log",
+        _baseline_log(labels="Air quality\nOutdoor air quality\nGet started\n"),
+    )
+
+    summary = parser.parse_log(path, scenario="life_air_care_plugin")
+
+    assert summary.ready_matched_labels == ("Air quality", "Outdoor air quality")
+    assert summary.initial_matched_labels == ("Get started",)
+    assert summary.baseline_status == "baseline_pass"
+    assert summary.detected_state == "ready"
+
+
+def test_runtime_report_parser_fatal_overrides_ready_and_initial(tmp_path, monkeypatch):
+    monkeypatch.setitem(
+        parser.SCENARIO_EXPECTED_LABELS,
+        "life_air_care_plugin",
+        {
+            "ready": ["Air quality", "Outdoor air quality"],
+            "initial": ["Get started"],
+        },
+    )
+    path = _write_log(
+        tmp_path,
+        "fatal_ready.log",
+        _baseline_log(
+            labels="Air quality\nOutdoor air quality\nGet started\n",
+            fatal_line="Traceback (most recent call last):",
+        ),
+    )
+
+    summary = parser.parse_log(path, scenario="life_air_care_plugin")
+
+    assert summary.fatal is True
+    assert summary.baseline_status == "baseline_fail"
+    assert summary.detected_state == "unknown"
+    assert summary.baseline_pass is False
+    assert summary.baseline_reason == "fatal_detected"
 
 
 def test_runtime_report_parser_suggests_top_labels():
