@@ -9796,12 +9796,30 @@ def _execute_overlay_for_candidate(
     fingerprint: str,
     candidate_reason: str,
 ) -> OverlayPhaseResult:
+    is_plugin_more_entry = candidate_reason == "plugin_more_options"
+    classify_tab_cfg = tab_cfg
+    if is_plugin_more_entry:
+        allow_entry = {
+            "resource_id": str(row.get("focus_view_id", "") or "").strip(),
+            "label": str(row.get("normalized_visible_label", "") or row.get("visible_label", "") or "").strip().lower(),
+            "class_name": str(row.get("focus_class_name", "") or row.get("class_name", "") or "").strip(),
+        }
+        classify_tab_cfg = {
+            **tab_cfg,
+            "overlay_policy": {"allow_candidates": [allow_entry], "block_candidates": []},
+        }
     log(
         f"[OVERLAY] candidate matched scenario='{tab_cfg.get('scenario_id', '')}' "
         f"tab='{tab_cfg.get('tab_name', '')}' step={row.get('step_index')} "
         f"view_id='{row.get('focus_view_id', '')}' label='{row.get('visible_label', '')}' "
         f"reason='{candidate_reason}'"
     )
+    if is_plugin_more_entry:
+        log(
+            f"[MORE][plugin] open scenario='{tab_cfg.get('scenario_id', '')}' "
+            f"step={row.get('step_index')} view_id='{row.get('focus_view_id', '')}' "
+            f"label='{row.get('visible_label', '')}'"
+        )
     clicked = False
     row_view_id = str(row.get("focus_view_id", "") or "").strip()
     row_label = str(row.get("visible_label", "") or "").strip()
@@ -9836,7 +9854,7 @@ def _execute_overlay_for_candidate(
     classification, post_click_step = classify_post_click_result(
         client=client,
         dev=dev,
-        tab_cfg=tab_cfg,
+        tab_cfg=classify_tab_cfg,
         pre_click_step=row,
     )
     log(
@@ -9903,6 +9921,8 @@ def _execute_overlay_for_candidate(
             for overlay_row in rows[before_overlay_len:]:
                 scenario_perf.record_row(overlay_row)
         expanded_overlay_entries.add(fingerprint)
+        if is_plugin_more_entry:
+            expanded_overlay_entries.add(f"plugin_more_done::{tab_cfg.get('scenario_id', '')}")
 
         if scenario_perf is not None:
             scenario_perf.realign_attempt_count += 1
@@ -9921,6 +9941,12 @@ def _execute_overlay_for_candidate(
             f"steps_taken={realign_result.get('steps_taken')} "
             f"match_by='{realign_result.get('match_by', '')}'"
         )
+        if is_plugin_more_entry and realign_result.get("entry_reached"):
+            log(
+                f"[MORE][plugin] back_recovered scenario='{tab_cfg.get('scenario_id', '')}' "
+                f"step={row.get('step_index')} status='{realign_result.get('status')}' "
+                f"steps_taken={realign_result.get('steps_taken')}"
+            )
         if realign_result.get("entry_reached"):
             post_overlay_stabilized = stabilize_anchor(
                 client=client,
@@ -9971,6 +9997,121 @@ def _execute_overlay_for_candidate(
     )
 
 
+def _is_plugin_screen_top_bar_more_options(row: dict[str, Any], tab_cfg: dict[str, Any]) -> bool:
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    if not scenario_id.startswith("life_"):
+        return False
+    if str(tab_cfg.get("scenario_type", "content") or "content").strip().lower() == "global_nav":
+        return False
+    label_blob = " ".join(
+        str(value or "")
+        for value in (
+            row.get("visible_label", ""),
+            row.get("normalized_visible_label", ""),
+            row.get("merged_announcement", ""),
+        )
+    ).strip().lower()
+    focus_node = row.get("focus_node")
+    if isinstance(focus_node, dict):
+        label_blob = " ".join(
+            (
+                label_blob,
+                str(focus_node.get("text", "") or "").strip().lower(),
+                str(focus_node.get("contentDescription", "") or "").strip().lower(),
+            )
+        )
+        if focus_node.get("visibleToUser") is False or focus_node.get("isVisibleToUser") is False:
+            return False
+        if not bool(focus_node.get("clickable") or focus_node.get("effectiveClickable") or focus_node.get("focusable")):
+            return False
+    view_id = str(
+        row.get("focus_view_id", "")
+        or row.get("viewIdResourceName", "")
+        or (focus_node.get("viewIdResourceName", "") if isinstance(focus_node, dict) else "")
+        or ""
+    ).strip().lower()
+    if "menu_more" in view_id:
+        return False
+    label_hit = bool(
+        _safe_regex_search(r"(?i)(^more options$|^more$|^\u22ee$|\bmore options\b)", label_blob)
+    )
+    rid_hit = bool(_safe_regex_search(r"(?i)(^|[_./:-])more($|[_./:-]|options|menu|button)", view_id))
+    if not (label_hit or rid_hit):
+        return False
+    bounds = str(row.get("focus_bounds", "") or "")
+    if not bounds and isinstance(focus_node, dict):
+        bounds = str(focus_node.get("boundsInScreen", "") or focus_node.get("bounds", "") or "")
+    parsed_bounds = parse_bounds_str(bounds)
+    if parsed_bounds is None:
+        return False
+    left, top, right, bottom = parsed_bounds
+    if right <= left or bottom <= top:
+        return False
+    height = bottom - top
+    width = right - left
+    top_bar_like = top <= 360 and bottom <= 520 and height <= 220
+    right_action_like = left >= 720 or width <= 220
+    return bool(top_bar_like and right_action_like)
+
+
+def _iter_row_nodes(row: dict[str, Any]):
+    stack: list[Any] = []
+    focus_node = row.get("focus_node")
+    if isinstance(focus_node, dict):
+        stack.append(focus_node)
+    dump_nodes = row.get("dump_tree_nodes", [])
+    if isinstance(dump_nodes, list):
+        stack.extend(node for node in dump_nodes if isinstance(node, dict))
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, dict):
+            continue
+        yield node
+        children = node.get("children", [])
+        if isinstance(children, list):
+            stack.extend(child for child in reversed(children) if isinstance(child, dict))
+
+
+def _plugin_more_node_to_row_from_nodes(
+    nodes: Any,
+    *,
+    row: dict[str, Any],
+    tab_cfg: dict[str, Any],
+) -> dict[str, Any] | None:
+    iterable_nodes = []
+    if isinstance(nodes, list):
+        iterable_nodes = nodes
+    elif isinstance(nodes, dict):
+        iterable_nodes = [nodes]
+    for node, _parent in _iter_tree_nodes_with_parent(iterable_nodes):
+        node_label = str(
+            node.get("mergedLabel", "")
+            or node.get("text", "")
+            or node.get("contentDescription", "")
+            or node.get("talkbackLabel", "")
+            or ""
+        ).strip()
+        node_row = {
+            "step_index": row.get("step_index", ""),
+            "move_result": row.get("move_result", ""),
+            "visible_label": node_label,
+            "normalized_visible_label": node_label.strip().lower(),
+            "merged_announcement": node_label,
+            "focus_view_id": str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip(),
+            "focus_bounds": str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip(),
+            "focus_class_name": str(node.get("className", "") or node.get("class", "") or "").strip(),
+            "focus_node": node,
+        }
+        if _is_plugin_screen_top_bar_more_options(node_row, tab_cfg):
+            return node_row
+    return None
+
+
+def _plugin_more_node_to_row(row: dict[str, Any], tab_cfg: dict[str, Any]) -> dict[str, Any] | None:
+    row_nodes = list(_iter_row_nodes(row))
+    return _plugin_more_node_to_row_from_nodes(row_nodes, row=row, tab_cfg=tab_cfg)
+
+
 def _overlay_phase(
     client: A11yAdbClient,
     dev: str,
@@ -9986,6 +10127,82 @@ def _overlay_phase(
     expanded_overlay_entries: set[str],
 ) -> OverlayPhaseResult:
     is_global_nav_only_scenario = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower() == "global_nav"
+    plugin_more_done_marker = f"plugin_more_done::{tab_cfg.get('scenario_id', '')}"
+    plugin_more_row = row
+    plugin_more_enabled = bool(
+        not is_global_nav_only_scenario
+        and str(tab_cfg.get("scenario_id", "") or "").startswith("life_")
+        and plugin_more_done_marker not in expanded_overlay_entries
+    )
+    if plugin_more_enabled and not _is_plugin_screen_top_bar_more_options(plugin_more_row, tab_cfg):
+        plugin_more_row = _plugin_more_node_to_row(row, tab_cfg) or row
+    if plugin_more_enabled and _is_plugin_screen_top_bar_more_options(plugin_more_row, tab_cfg):
+        fingerprint = "plugin_more::" + make_overlay_entry_fingerprint(tab_cfg["tab_name"], plugin_more_row)
+        log(
+            f"[MORE][plugin] detected scenario='{tab_cfg.get('scenario_id', '')}' "
+            f"step={plugin_more_row.get('step_index')} view_id='{plugin_more_row.get('focus_view_id', '')}' "
+            f"label='{plugin_more_row.get('visible_label', '')}' fingerprint='{fingerprint}'"
+        )
+        if fingerprint not in expanded_overlay_entries:
+            return _execute_overlay_for_candidate(
+                client=client,
+                dev=dev,
+                tab_cfg=tab_cfg,
+                row=plugin_more_row,
+                rows=rows,
+                all_rows=all_rows,
+                output_path=output_path,
+                output_base_dir=output_base_dir,
+                scenario_perf=scenario_perf,
+                main_step_index_by_fingerprint=main_step_index_by_fingerprint,
+                expanded_overlay_entries=expanded_overlay_entries,
+                fingerprint=fingerprint,
+                candidate_reason="plugin_more_options",
+            )
+        log(f"[MORE][plugin] skip already expanded fingerprint='{fingerprint}'")
+        return OverlayPhaseResult(
+            candidate_checked=True,
+            candidate_reason="plugin_more_options_already_expanded",
+            classification="unchanged",
+            post_realign_pending_steps_delta=0,
+        )
+    if plugin_more_enabled:
+        dump_tree_fn = getattr(client, "dump_tree", None)
+        if callable(dump_tree_fn):
+            try:
+                plugin_more_row = _plugin_more_node_to_row_from_nodes(dump_tree_fn(dev=dev), row=row, tab_cfg=tab_cfg) or row
+            except Exception:
+                plugin_more_row = row
+            if _is_plugin_screen_top_bar_more_options(plugin_more_row, tab_cfg):
+                fingerprint = "plugin_more::" + make_overlay_entry_fingerprint(tab_cfg["tab_name"], plugin_more_row)
+                log(
+                    f"[MORE][plugin] detected scenario='{tab_cfg.get('scenario_id', '')}' "
+                    f"step={plugin_more_row.get('step_index')} view_id='{plugin_more_row.get('focus_view_id', '')}' "
+                    f"label='{plugin_more_row.get('visible_label', '')}' fingerprint='{fingerprint}' source='dump_tree'"
+                )
+                if fingerprint not in expanded_overlay_entries:
+                    return _execute_overlay_for_candidate(
+                        client=client,
+                        dev=dev,
+                        tab_cfg=tab_cfg,
+                        row=plugin_more_row,
+                        rows=rows,
+                        all_rows=all_rows,
+                        output_path=output_path,
+                        output_base_dir=output_base_dir,
+                        scenario_perf=scenario_perf,
+                        main_step_index_by_fingerprint=main_step_index_by_fingerprint,
+                        expanded_overlay_entries=expanded_overlay_entries,
+                        fingerprint=fingerprint,
+                        candidate_reason="plugin_more_options",
+                    )
+                log(f"[MORE][plugin] skip already expanded fingerprint='{fingerprint}'")
+                return OverlayPhaseResult(
+                    candidate_checked=True,
+                    candidate_reason="plugin_more_options_already_expanded",
+                    classification="unchanged",
+                    post_realign_pending_steps_delta=0,
+                )
     is_candidate, candidate_reason = (False, "blocked_by_global_nav_only")
     if not is_global_nav_only_scenario:
         is_candidate, candidate_reason = is_overlay_candidate(row, tab_cfg)

@@ -11224,6 +11224,264 @@ def test_overlay_success_adds_to_expanded_entries(monkeypatch):
     assert expanded == {collection_flow.make_overlay_entry_fingerprint(tab_cfg["tab_name"], row)}
 
 
+def test_plugin_more_options_opens_overlay_once_and_recovers(monkeypatch):
+    rows = []
+    all_rows = []
+    expanded = set()
+    logs = []
+    more_row = {
+        **_main_row(230),
+        "visible_label": "More options",
+        "normalized_visible_label": "more options",
+        "merged_announcement": "More options",
+        "focus_view_id": "com.example.plugin:id/more",
+        "focus_bounds": "920,24,1050,160",
+        "focus_class_name": "android.widget.ImageButton",
+    }
+    post_click_row = {**_main_row(231), "visible_label": "Settings", "focus_view_id": "com.example:id/menu_settings"}
+    overlay_row = {**_main_row(232), "visible_label": "Settings", "context_type": "overlay"}
+    tab_cfg = {**_base_tab_cfg(max_steps=1), "scenario_id": "life_energy_plugin", "screen_context_mode": "new_screen"}
+
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "log", lambda message, **_kwargs: logs.append(message))
+
+    def fake_expand_overlay(**kwargs):
+        kwargs["rows"].append(overlay_row)
+        kwargs["all_rows"].append(overlay_row)
+        return [overlay_row]
+
+    monkeypatch.setattr(collection_flow, "expand_overlay", fake_expand_overlay)
+    monkeypatch.setattr(collection_flow, "realign_focus_after_overlay", lambda **kwargs: {"entry_reached": True, "status": "ok", "steps_taken": 1})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    client = DummyClient([post_click_row])
+
+    result = collection_flow._overlay_phase(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        row=more_row,
+        rows=rows,
+        all_rows=all_rows,
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        main_step_index_by_fingerprint={},
+        expanded_overlay_entries=expanded,
+    )
+
+    assert result.classification == "overlay"
+    assert rows == [overlay_row]
+    assert all_rows == [overlay_row]
+    assert len(client.touch_calls) == 1
+    assert any("[MORE][plugin] detected" in line for line in logs)
+    assert any("[MORE][plugin] open" in line for line in logs)
+    assert any("[MORE][plugin] back_recovered" in line for line in logs)
+
+    second = collection_flow._overlay_phase(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        row=more_row,
+        rows=rows,
+        all_rows=all_rows,
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        main_step_index_by_fingerprint={},
+        expanded_overlay_entries=expanded,
+    )
+
+    assert second.classification == "unchanged"
+    assert len(client.touch_calls) == 1
+
+
+def test_plugin_more_options_rejects_body_more_button(monkeypatch):
+    row = {
+        **_main_row(233),
+        "visible_label": "More",
+        "normalized_visible_label": "more",
+        "focus_view_id": "com.example.plugin:id/card_more",
+        "focus_bounds": "840,1200,1010,1360",
+    }
+    tab_cfg = {**_base_tab_cfg(max_steps=1), "scenario_id": "life_energy_plugin"}
+
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda row, tab_cfg: (False, "not_in_policy"))
+
+    result = collection_flow._overlay_phase(
+        client=DummyClient([]),
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        row=row,
+        rows=[],
+        all_rows=[],
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        main_step_index_by_fingerprint={},
+        expanded_overlay_entries=set(),
+    )
+
+    assert result.candidate_reason == "not_in_policy"
+
+
+def test_plugin_more_options_detects_top_bar_node_when_focus_is_content(monkeypatch):
+    rows = []
+    all_rows = []
+    expanded = set()
+    row = {
+        **_main_row(235),
+        "visible_label": "Usage this month",
+        "normalized_visible_label": "usage this month",
+        "focus_view_id": "com.example.plugin:id/content",
+        "focus_bounds": "50,700,1030,900",
+        "focus_node": {
+            "text": "Smart Energy",
+            "className": "android.webkit.WebView",
+            "boundsInScreen": {"l": 0, "t": 94, "r": 1080, "b": 2496},
+            "children": [
+                {
+                    "text": "More options",
+                    "contentDescription": "",
+                    "viewIdResourceName": "com.example.plugin:id/more",
+                    "className": "android.widget.ImageButton",
+                    "clickable": True,
+                    "focusable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": {"l": 930, "t": 118, "r": 1050, "b": 250},
+                    "children": [],
+                }
+            ],
+        },
+    }
+    post_click_row = {**_main_row(236), "visible_label": "Settings", "focus_view_id": "com.example:id/menu_settings"}
+    overlay_row = {**_main_row(237), "visible_label": "Settings", "context_type": "overlay"}
+    tab_cfg = {**_base_tab_cfg(max_steps=1), "scenario_id": "life_energy_plugin"}
+
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "expand_overlay", lambda **kwargs: (kwargs["rows"].append(overlay_row), kwargs["all_rows"].append(overlay_row), [overlay_row])[-1])
+    monkeypatch.setattr(collection_flow, "realign_focus_after_overlay", lambda **kwargs: {"entry_reached": False})
+    client = DummyClient([post_click_row])
+
+    result = collection_flow._overlay_phase(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        row=row,
+        rows=rows,
+        all_rows=all_rows,
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        main_step_index_by_fingerprint={},
+        expanded_overlay_entries=expanded,
+    )
+
+    assert result.candidate_reason == "plugin_more_options"
+    assert result.classification == "overlay"
+    assert client.touch_calls[0]["name"] == "^com\\.example\\.plugin:id/more$"
+    assert rows == [overlay_row]
+
+
+def test_plugin_more_options_detects_top_bar_node_from_dump_tree(monkeypatch):
+    rows = []
+    all_rows = []
+    expanded = set()
+    row = {
+        **_main_row(238),
+        "visible_label": "Usage this month",
+        "normalized_visible_label": "usage this month",
+        "focus_view_id": "com.example.plugin:id/content",
+        "focus_bounds": "50,700,1030,900",
+    }
+    post_click_row = {**_main_row(239), "visible_label": "Settings", "focus_view_id": "com.example:id/menu_settings"}
+    overlay_row = {**_main_row(240), "visible_label": "Settings", "context_type": "overlay"}
+    tab_cfg = {**_base_tab_cfg(max_steps=1), "scenario_id": "life_energy_plugin"}
+    client = DummyClient([post_click_row])
+    client.dump_tree_sequence = [
+        [
+            {
+                "text": "More options",
+                "viewIdResourceName": "com.example.plugin:id/more",
+                "className": "android.widget.ImageButton",
+                "clickable": True,
+                "focusable": True,
+                "visibleToUser": True,
+                "boundsInScreen": "930,118,1050,250",
+            }
+        ]
+    ]
+
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "expand_overlay", lambda **kwargs: (kwargs["rows"].append(overlay_row), kwargs["all_rows"].append(overlay_row), [overlay_row])[-1])
+    monkeypatch.setattr(collection_flow, "realign_focus_after_overlay", lambda **kwargs: {"entry_reached": False})
+
+    result = collection_flow._overlay_phase(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        row=row,
+        rows=rows,
+        all_rows=all_rows,
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        main_step_index_by_fingerprint={},
+        expanded_overlay_entries=expanded,
+    )
+
+    assert result.candidate_reason == "plugin_more_options"
+    assert result.classification == "overlay"
+    assert len(client.dump_tree_calls) == 1
+    assert rows == [overlay_row]
+
+    second = collection_flow._overlay_phase(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        row=row,
+        rows=rows,
+        all_rows=all_rows,
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        main_step_index_by_fingerprint={},
+        expanded_overlay_entries=expanded,
+    )
+
+    assert second.classification == "unchanged"
+    assert len(client.dump_tree_calls) == 1
+
+
+def test_plugin_more_options_rejects_global_bottom_nav_more(monkeypatch):
+    row = {
+        **_main_row(234),
+        "visible_label": "Menu",
+        "normalized_visible_label": "menu",
+        "merged_announcement": "More",
+        "focus_view_id": "com.samsung.android.oneconnect:id/menu_more",
+        "focus_bounds": "864,2200,1080,2400",
+    }
+    tab_cfg = {**_base_tab_cfg(max_steps=1), "scenario_id": "life_energy_plugin"}
+
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda row, tab_cfg: (False, "not_in_policy"))
+
+    result = collection_flow._overlay_phase(
+        client=DummyClient([]),
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        row=row,
+        rows=[],
+        all_rows=[],
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        main_step_index_by_fingerprint={},
+        expanded_overlay_entries=set(),
+    )
+
+    assert result.candidate_reason == "not_in_policy"
+
+
 def test_overlay_touch_failure_skips_expand_and_realign(monkeypatch):
     class TouchFailClient(DummyClient):
         def touch(self, **kwargs):
