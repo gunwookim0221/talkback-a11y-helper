@@ -7476,6 +7476,138 @@ def test_open_scenario_card_entry_does_not_misclassify_air_care_normal_content(m
     assert client.back_calls == 0
 
 
+def test_special_state_air_care_cta_with_body_content_keeps_ready_traversal():
+    nodes = [
+        {"text": "Set geolocation to monitor outdoor air quality", "className": "android.widget.TextView"},
+        {"text": "Dismiss", "className": "android.widget.Button", "clickable": True},
+        {"text": "Set geolocation", "className": "android.widget.Button", "clickable": True},
+        {"text": "Outdoor air quality (fine dust)", "className": "android.widget.TextView"},
+        {"text": "PM 10", "className": "android.widget.TextView"},
+        {"text": "PM 2.5", "className": "android.widget.TextView"},
+        {"text": "Graph", "className": "android.view.View", "viewIdResourceName": "com.example:id/air_chart"},
+        {"text": "Find out more about air control", "className": "android.widget.TextView"},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_air_care_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["air care", "air quality"],
+        "special_state_tokens": ["outdoor air quality", "set geolocation to monitor outdoor air quality"],
+        "special_state_cta_tokens": ["dismiss", "set geolocation"],
+        "special_state_handling": "back_after_read",
+    }
+
+    detected, kind, meta = collection_flow._classify_special_post_open_state(
+        tab_cfg,
+        post_view_id="com.example:id/title",
+        post_label="Set geolocation to monitor outdoor air quality",
+        post_speech="Set geolocation to monitor outdoor air quality",
+        visible_verify_text=(
+            "Set geolocation to monitor outdoor air quality Dismiss Set geolocation "
+            "Outdoor air quality (fine dust) PM 10 PM 2.5 Graph Find out more about air control"
+        ),
+        matches_verify=True,
+        post_nodes=nodes,
+    )
+
+    assert detected is False
+    assert kind == ""
+    assert meta["ready_content_cluster"] is True
+    assert "ready_content_cluster" in meta["signals"]
+
+
+def test_special_state_initial_only_screen_still_routes_special_state():
+    nodes = [
+        {"text": "Set up", "className": "android.widget.TextView"},
+        {"text": "Get started", "className": "android.widget.Button", "clickable": True},
+        {"text": "Start", "className": "android.widget.Button", "clickable": True},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_home_care_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["home care"],
+        "special_state_tokens": ["set up"],
+        "special_state_cta_tokens": ["start", "get started"],
+        "special_state_handling": "back_after_read",
+    }
+
+    detected, kind, meta = collection_flow._classify_special_post_open_state(
+        tab_cfg,
+        post_view_id="com.example:id/title",
+        post_label="Set up",
+        post_speech="Set up Get started Start",
+        visible_verify_text="Set up Get started Start",
+        matches_verify=True,
+        post_nodes=nodes,
+    )
+
+    assert detected is True
+    assert kind == "setup_needed_or_empty_state"
+    assert meta["ready_content_cluster"] is False
+
+
+def test_special_state_cta_with_two_content_cards_uses_ready_override():
+    nodes = [
+        {"text": "Get started", "className": "android.widget.Button", "clickable": True},
+        {"text": "Usage history", "className": "android.widget.TextView", "viewIdResourceName": "com.example:id/card_title"},
+        {"text": "Activity summary", "className": "android.widget.TextView", "viewIdResourceName": "com.example:id/card_body"},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_energy_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["energy"],
+        "special_state_tokens": ["usage"],
+        "special_state_cta_tokens": ["get started"],
+        "special_state_handling": "back_after_read",
+    }
+
+    detected, kind, meta = collection_flow._classify_special_post_open_state(
+        tab_cfg,
+        post_view_id="com.example:id/title",
+        post_label="Get started",
+        post_speech="Get started Usage history Activity summary",
+        visible_verify_text="Get started Usage history Activity summary",
+        matches_verify=True,
+        post_nodes=nodes,
+    )
+
+    assert detected is False
+    assert kind == ""
+    assert meta["ready_content_cluster"] is True
+
+
+def test_special_state_cta_only_with_insufficient_content_stays_special_state():
+    nodes = [
+        {"text": "Set up your service to continue", "className": "android.widget.TextView"},
+        {"text": "Dismiss", "className": "android.widget.Button", "clickable": True},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_air_care_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["air care"],
+        "special_state_tokens": ["set up your service to continue"],
+        "special_state_cta_tokens": ["dismiss"],
+        "special_state_handling": "back_after_read",
+    }
+
+    detected, kind, meta = collection_flow._classify_special_post_open_state(
+        tab_cfg,
+        post_view_id="com.example:id/title",
+        post_label="Set up your service to continue",
+        post_speech="Set up your service to continue Dismiss",
+        visible_verify_text="Set up your service to continue Dismiss",
+        matches_verify=True,
+        post_nodes=nodes,
+    )
+
+    assert detected is True
+    assert kind == "setup_needed_or_empty_state"
+    assert meta["ready_content_cluster"] is False
+
+
 def test_collect_tab_rows_adds_special_state_handled_row_and_skips_main_loop(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(

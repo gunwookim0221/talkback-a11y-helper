@@ -1592,6 +1592,64 @@ def _collect_strict_token_hits(tokens: list[str] | tuple[str, ...], texts: list[
     return hits
 
 
+def _collect_ready_content_cluster_signals(
+    *,
+    post_nodes: list[dict[str, Any]],
+    visible_verify_text: str,
+    source_texts: list[str],
+    cta_tokens: list[str],
+) -> list[str]:
+    generic_cta_tokens = ("start", "get started", "connect", "set up", "setup", "continue", "next", "try", "dismiss")
+    cta_like_tokens = tuple(sorted(set([*cta_tokens, *generic_cta_tokens])))
+    signals: list[str] = []
+    seen: set[str] = set()
+
+    def add_signal(signal: str) -> None:
+        normalized = str(signal or "").strip().lower()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            signals.append(normalized)
+
+    def is_cta_like_text(text: str) -> bool:
+        lowered = str(text or "").strip().lower()
+        if not lowered:
+            return False
+        return any(_text_matches_token_strict(lowered, token) for token in cta_like_tokens)
+
+    content_text_patterns = (
+        r"\bpm\s*(?:10|2\.?5)\b",
+        r"\b(outdoor\s+air\s+quality|air\s+quality|fine\s+dust)\b",
+        r"\b(find\s+out\s+more|temperature|humidity|usage|history|activity|routine|monitor)\b",
+    )
+    visible_blob = " ".join(str(value or "") for value in [visible_verify_text, *source_texts]).strip().lower()
+    for pattern in content_text_patterns:
+        if _safe_regex_search(pattern, visible_blob):
+            add_signal(pattern)
+
+    text_view_count = 0
+    for node, _ in _iter_tree_nodes_with_parent(post_nodes):
+        if not _node_is_visible(node):
+            continue
+        view_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip().lower()
+        class_name = str(node.get("className", "") or node.get("class", "") or "").strip().lower()
+        text_blob = _node_label_blob(node).strip().lower()
+        structural_blob = " ".join([view_id, class_name, text_blob]).strip()
+        if _safe_regex_search(r"\b(chart|graph)\b", structural_blob):
+            add_signal("chart_or_graph")
+        if _safe_regex_search(r"\b(card|list|item|section|content)\b", structural_blob) and text_blob and not is_cta_like_text(text_blob):
+            add_signal(f"content_structure:{text_blob[:32]}")
+        if (
+            text_blob
+            and not is_cta_like_text(text_blob)
+            and not _safe_regex_search(r"(?i)\b(more options|navigate up|back|menu)\b", text_blob)
+            and ("textview" in class_name or "text" in view_id or "title" in view_id or "body" in view_id)
+        ):
+            text_view_count += 1
+    if text_view_count >= 2:
+        add_signal("plugin_body_text_cluster")
+    return signals
+
+
 def _find_first_token_source_match(
     token: str,
     source_candidates: list[tuple[str, list[str] | tuple[str, ...] | None]],
@@ -1807,6 +1865,13 @@ def _classify_special_post_open_state(
     generic_cta_hits = _collect_strict_token_hits(generic_cta_tokens, source_texts)
     if generic_cta_hits:
         cta_hits = sorted(set([*cta_hits, *generic_cta_hits]))
+    ready_content_signals = _collect_ready_content_cluster_signals(
+        post_nodes=post_nodes,
+        visible_verify_text=visible_verify_text,
+        source_texts=source_texts,
+        cta_tokens=cta_tokens,
+    )
+    ready_content_cluster = len(ready_content_signals) >= 2
 
     verify_tokens_raw = tab_cfg.get("verify_tokens", [])
     verify_tokens = [str(token or "").strip().lower() for token in verify_tokens_raw if str(token or "").strip()]
@@ -1841,11 +1906,15 @@ def _classify_special_post_open_state(
     top_chrome_intro_cta = bool(chrome_hits >= 1 and (cta_hit_count >= 1 or cta_pair) and long_intro_like)
 
     detected = bool(
-        ((verify_hit and cta_hit_count >= 1 and special_hit_count >= 1 and (long_intro_like or special_hit_count >= 2)))
-        or (
-            (cta_hit_count >= 1 or cta_pair)
-            and long_intro_like
-            and (low_content_diversity or top_chrome_intro_cta or intro_focus_like)
+        not ready_content_cluster
+        and (
+            ((verify_hit and cta_hit_count >= 1 and special_hit_count >= 1 and (long_intro_like or special_hit_count >= 2)))
+            or (verify_hit and cta_hit_count >= 1 and special_hit_count >= 1 and low_content_diversity)
+            or (
+                (cta_hit_count >= 1 or cta_pair)
+                and long_intro_like
+                and (low_content_diversity or top_chrome_intro_cta or intro_focus_like)
+            )
         )
     )
     signals: list[str] = []
@@ -1861,6 +1930,8 @@ def _classify_special_post_open_state(
         signals.append("intro_focus")
     if verify_hit and special_hit_count >= 1:
         signals.append("verify_and_special_token")
+    if ready_content_cluster:
+        signals.append("ready_content_cluster")
     return detected, "setup_needed_or_empty_state" if detected else "", {
         "signals": signals,
         "special_hits": special_hits,
@@ -1871,6 +1942,8 @@ def _classify_special_post_open_state(
         "cta_pair": cta_pair,
         "top_chrome_intro_cta": top_chrome_intro_cta,
         "intro_focus_like": intro_focus_like,
+        "ready_content_cluster": ready_content_cluster,
+        "ready_content_signals": ready_content_signals,
         "handling": handling,
     }
 
