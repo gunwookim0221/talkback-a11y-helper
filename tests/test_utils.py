@@ -34,7 +34,7 @@ def test_life_food_plugin_uses_xml_card_entry_spec():
     assert "(?i)(smart\\s*things\\s*cooking|\\bcooking\\b|\\bmeal\\b|\\brecipe\\b|barcode\\s*scan|kitchen\\s*appliance)" in food_cfg[
         "entry_match"
     ]["description_patterns"]
-    assert "(?i)(^food$|food\\.|smart\\s*things\\s*cooking|\\bcooking\\b)" in food_cfg["entry_match"]["title_patterns"]
+    assert "(?i)(^food$|food\\.|smart\\s*things\\s*cooking|\\bcooking\\b|^푸드$)" in food_cfg["entry_match"]["title_patterns"]
 
 
 def test_configure_process_temp_dir_sets_tmp_and_temp(tmp_path):

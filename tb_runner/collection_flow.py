@@ -21,6 +21,7 @@ from tb_runner.diagnostics import classify_step_result, detect_step_mismatch, no
 from tb_runner.diagnostics import is_global_nav_row
 from tb_runner.excel_report import save_excel
 from tb_runner.image_utils import maybe_capture_focus_crop
+from tb_runner.label_matcher import expand_verify_token_aliases, matches_alias
 from tb_runner.logging_utils import _should_log, log
 from tb_runner.overlay_logic import (
     classify_post_click_result,
@@ -121,16 +122,24 @@ _DIRECT_SELECT_VERIFY_RECHECK_SLEEP_SECONDS = 0.16
 _DIRECT_SELECT_NEGATIVE_VERIFY_PERSIST_THRESHOLD = 2
 _DIRECT_SELECT_DIAGNOSTIC_SCENARIOS = {"life_pet_care_plugin"}
 STRICT_PLUGIN_ENTRY_PHRASES: dict[str, dict[str, tuple[str, ...]]] = {
-    "life_food_plugin": {"strict": ("food", "smartthings cooking"), "title_only": ("cooking",)},
+    "life_food_plugin": {"strict": ("food", "smartthings cooking", "푸드"), "title_only": ("cooking",)},
     "life_air_care_plugin": {"strict": ("air care", "smart air care", "에어 케어"), "title_only": ()},
     "life_home_care_plugin": {"strict": ("home care", "smartthings home care", "홈 케어"), "title_only": ()},
     "life_family_care_plugin": {"strict": ("family care", "패밀리 케어"), "title_only": ()},
     "life_plant_care_plugin": {"strict": ("plant care", "plants", "식물"), "title_only": ()},
-    "life_clothing_care_plugin": {"strict": ("clothing care", "shoe care", "의류"), "title_only": ()},
-    "life_find_plugin": {"strict": ("smart find",), "title_only": ("find",)},
-    "life_video_plugin": {"strict": ("smart video",), "title_only": ("video",)},
-    "life_home_monitor_plugin": {"strict": ("home monitor",), "title_only": ()},
-    "life_music_sync_plugin": {"strict": ("music sync",), "title_only": ("sync",)},
+    "life_clothing_care_plugin": {"strict": ("clothing care", "shoe care", "의류 관리", "클로딩 케어"), "title_only": ()},
+    "life_find_plugin": {"strict": ("smart find", "파인드"), "title_only": ("find",)},
+    "life_video_plugin": {"strict": ("smart video", "live view", "daily clips", "비디오"), "title_only": ("video",)},
+    "life_home_monitor_plugin": {"strict": ("home monitor", "홈 모니터"), "title_only": ()},
+    "life_music_sync_plugin": {
+        "strict": (
+            "music sync",
+            "sync your lights with music",
+            "조명과 음악을 동기화",
+            "조명을 음악에 어울리도록",
+        ),
+        "title_only": ("sync", "음악 동기화"),
+    },
     "life_pet_care_plugin": {"strict": ("pet care", "펫 케어"), "title_only": ()},
 }
 
@@ -1395,7 +1404,7 @@ def _matches_post_open_verify(
     verify_tokens = tab_cfg.get("verify_tokens", [])
     if isinstance(verify_tokens, list):
         normalized_blob = " ".join(candidates).lower()
-        normalized_tokens = [str(token or "").strip().lower() for token in verify_tokens if str(token or "").strip()]
+        normalized_tokens = list(expand_verify_token_aliases(verify_tokens))
         if normalized_tokens and any(token in normalized_blob for token in normalized_tokens):
             return True
     text_regex = str(context_verify.get("text_regex", "") or "").strip()
@@ -1437,7 +1446,7 @@ def _has_post_open_negative_verify_token(
     if isinstance(extra_candidates, list):
         candidates.extend(str(value or "") for value in extra_candidates if str(value or "").strip())
     normalized_blob = " ".join(candidates).lower()
-    normalized_tokens = [str(token or "").strip().lower() for token in negative_tokens if str(token or "").strip()]
+    normalized_tokens = list(expand_verify_token_aliases(negative_tokens))
     return bool(normalized_tokens and any(token in normalized_blob for token in normalized_tokens))
 
 
@@ -1874,7 +1883,7 @@ def _classify_special_post_open_state(
     ready_content_cluster = len(ready_content_signals) >= 2
 
     verify_tokens_raw = tab_cfg.get("verify_tokens", [])
-    verify_tokens = [str(token or "").strip().lower() for token in verify_tokens_raw if str(token or "").strip()]
+    verify_tokens = list(expand_verify_token_aliases(verify_tokens_raw if isinstance(verify_tokens_raw, list) else []))
     verify_hit = bool(matches_verify or (verify_tokens and any(_text_matches_token_strict(text, token) for text in source_texts for token in verify_tokens)))
     long_intro_like = len(visible_verify_text.strip()) >= intro_like_min_length or len(post_speech.strip()) >= intro_like_min_length
     if not long_intro_like and len(post_label.strip()) >= intro_like_min_length:
@@ -1987,7 +1996,7 @@ def _collect_special_state_grace_evidence(
     strong_token_hits = _collect_strict_token_hits(_STRONG_ONBOARDING_TOKENS, source_texts)
     home_token_hits = _collect_strict_token_hits(_HOME_LIKE_TOKENS, source_texts)
 
-    verify_tokens = [str(token or "").strip().lower() for token in tab_cfg.get("verify_tokens", []) if str(token or "").strip()]
+    verify_tokens = list(expand_verify_token_aliases(tab_cfg.get("verify_tokens", [])))
     special_hits = [str(token or "").strip().lower() for token in special_state_meta.get("special_hits", []) if str(token or "").strip()]
     non_verify_special_hits = [token for token in special_hits if token and token not in verify_tokens]
     checkbox_agree = bool(
@@ -6141,12 +6150,8 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         entry_type == _ENTRY_TYPE_DIRECT_SELECT
         and str(scenario_id or "").strip().lower() in _DIRECT_SELECT_DIAGNOSTIC_SCENARIOS
     )
-    normalized_verify_tokens = [
-        str(token or "").strip().lower() for token in tab_cfg.get("verify_tokens", []) if str(token or "").strip()
-    ]
-    normalized_negative_tokens = [
-        str(token or "").strip().lower() for token in tab_cfg.get("negative_verify_tokens", []) if str(token or "").strip()
-    ]
+    normalized_verify_tokens = list(expand_verify_token_aliases(tab_cfg.get("verify_tokens", [])))
+    normalized_negative_tokens = list(expand_verify_token_aliases(tab_cfg.get("negative_verify_tokens", [])))
     if entry_type == _ENTRY_TYPE_DIRECT_SELECT and not matches_verify:
         visible_verify_text = _collect_post_open_visible_text(client, dev)
         extra_verify_candidates = _build_direct_select_verify_candidates(
@@ -10076,16 +10081,22 @@ def _is_plugin_screen_top_bar_more_options(row: dict[str, Any], tab_cfg: dict[st
         return False
     if str(tab_cfg.get("scenario_type", "content") or "content").strip().lower() == "global_nav":
         return False
-    label_blob = " ".join(
-        str(value or "")
-        for value in (
-            row.get("visible_label", ""),
-            row.get("normalized_visible_label", ""),
-            row.get("merged_announcement", ""),
-        )
-    ).strip().lower()
+    label_values = [
+        str(row.get("visible_label", "") or "").strip(),
+        str(row.get("normalized_visible_label", "") or "").strip(),
+        str(row.get("merged_announcement", "") or "").strip(),
+    ]
+    label_blob = " ".join(value for value in label_values if value).strip().lower()
     focus_node = row.get("focus_node")
     if isinstance(focus_node, dict):
+        label_values.extend(
+            [
+                str(focus_node.get("text", "") or "").strip(),
+                str(focus_node.get("contentDescription", "") or "").strip(),
+                str(focus_node.get("mergedLabel", "") or "").strip(),
+                str(focus_node.get("talkbackLabel", "") or "").strip(),
+            ]
+        )
         label_blob = " ".join(
             (
                 label_blob,
@@ -10107,6 +10118,10 @@ def _is_plugin_screen_top_bar_more_options(row: dict[str, Any], tab_cfg: dict[st
         return False
     label_hit = bool(
         _safe_regex_search(r"(?i)(^more options$|^more$|^\u22ee$|\bmore options\b)", label_blob)
+        or any(
+            matches_alias(value, "more_options", mode="exact") or matches_alias(value, "more_options", mode="token")
+            for value in label_values
+        )
     )
     rid_hit = bool(_safe_regex_search(r"(?i)(^|[_./:-])more($|[_./:-]|options|menu|button)", view_id))
     if not (label_hit or rid_hit):

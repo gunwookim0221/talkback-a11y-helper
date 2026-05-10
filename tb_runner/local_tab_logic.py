@@ -6,6 +6,7 @@ from collections import deque
 from typing import Any, Callable
 
 from talkback_lib import A11yAdbClient
+from tb_runner.label_matcher import canonicalize_label
 from tb_runner.logging_utils import log
 from tb_runner.perf_stats import ScenarioPerfStats
 from tb_runner.utils import parse_bounds_str
@@ -65,7 +66,9 @@ def _build_local_tab_strip_signature(tab_candidates: list[dict[str, Any]]) -> st
         if rid:
             candidate_keys.append(rid)
             continue
-        label = _normalize_logical_text(str(candidate.get("label", "") or "").strip())
+        label = _normalize_logical_text(
+            str(candidate.get("canonical_label", "") or candidate.get("label", "") or "").strip()
+        )
         bounds = str(candidate.get("bounds", "") or "").strip()
         candidate_keys.append(label or bounds)
     return "||".join(candidate_keys)
@@ -74,8 +77,24 @@ def _canonicalize_local_tab_label(label: str) -> str:
     value = re.sub(r"\s+", " ", str(label or "").strip())
     if not value:
         return ""
+    canonical = canonicalize_label(value, domain="local_tab")
+    if canonical:
+        return canonical
     stripped = re.sub(r"\s+\d+\s+new notifications?$", "", value, flags=re.IGNORECASE).strip()
     stripped = re.sub(r"\s+new notifications?$", "", stripped, flags=re.IGNORECASE).strip()
+    return stripped or value
+
+def _display_local_tab_label(label: str) -> str:
+    value = re.sub(r"\s+", " ", str(label or "").strip())
+    if not value:
+        return ""
+    stripped = re.sub(r"\s+\d+\s+new notifications?$", "", value, flags=re.IGNORECASE).strip()
+    stripped = re.sub(r"\s+new notifications?$", "", stripped, flags=re.IGNORECASE).strip()
+    stripped = re.sub(r"\s+new notification$", "", stripped, flags=re.IGNORECASE).strip()
+    stripped = re.sub(r"\s+\d+\s+새\s+알림$", "", stripped).strip()
+    stripped = re.sub(r"\s+새\s+알림$", "", stripped).strip()
+    stripped = re.sub(r"\s+알림$", "", stripped).strip()
+    stripped = re.sub(r"\s+새\s+콘텐츠\s+사용\s+가능$", "", stripped).strip()
     return stripped or value
 
 def _select_active_local_tab_candidate(
@@ -93,7 +112,9 @@ def _select_active_local_tab_candidate(
             return candidate
     for candidate in tab_candidates:
         candidate_rid = str(candidate.get("rid", "") or "").strip().lower()
-        candidate_label = _canonicalize_local_tab_label(str(candidate.get("label", "") or "").strip()).lower()
+        candidate_label = str(candidate.get("canonical_label", "") or "").strip().lower()
+        if not candidate_label:
+            candidate_label = _canonicalize_local_tab_label(str(candidate.get("label", "") or "").strip()).lower()
         if row_rid and candidate_rid and row_rid == candidate_rid:
             return candidate
         if row_label and candidate_label and row_label == candidate_label:
@@ -201,7 +222,9 @@ def _local_tab_candidate_matches_identity(
 ) -> tuple[bool, str]:
     candidate_rid = str(candidate.get("rid", "") or "").strip().lower()
     candidate_label = str(candidate.get("label", "") or "").strip()
-    normalized_candidate_label = _normalize_logical_text(_canonicalize_local_tab_label(candidate_label))
+    normalized_candidate_label = _normalize_logical_text(
+        str(candidate.get("canonical_label", "") or _canonicalize_local_tab_label(candidate_label))
+    )
     normalized_label = _normalize_logical_text(_canonicalize_local_tab_label(label))
     rid = str(rid or "").strip().lower()
     if candidate_rid and rid and candidate_rid == rid:
@@ -938,7 +961,9 @@ def _is_current_focus_on_local_tab_strip(state: MainLoopState, row: dict[str, An
     ).lower()
     for candidate in tab_candidates:
         candidate_rid = str(candidate.get("rid", "") or "").strip().lower()
-        candidate_label = _canonicalize_local_tab_label(str(candidate.get("label", "") or "").strip()).lower()
+        candidate_label = str(candidate.get("canonical_label", "") or "").strip().lower()
+        if not candidate_label:
+            candidate_label = _canonicalize_local_tab_label(str(candidate.get("label", "") or "").strip()).lower()
         if row_rid and candidate_rid and row_rid == candidate_rid:
             return True
         if row_label and candidate_label and row_label == candidate_label:
@@ -1118,7 +1143,14 @@ def _local_tab_candidate_bool(candidate: dict[str, Any], keys: tuple[str, ...], 
 def _is_global_bottom_nav_label(label: str) -> bool:
     normalized = re.sub(r"\s+", " ", str(label or "").strip()).lower()
     normalized = re.sub(r"\bselected\b", "", normalized).strip()
-    return normalized in {"home", "devices", "life", "routines", "menu"}
+    canonical = canonicalize_label(normalized, domain="bottom_tab")
+    return normalized in {"home", "devices", "life", "routines", "menu"} or canonical in {
+        "home",
+        "devices",
+        "life",
+        "routines",
+        "menu",
+    }
 
 def _prepare_local_tab_strip_candidate(
     candidate: dict[str, Any],
@@ -1147,6 +1179,7 @@ def _prepare_local_tab_strip_candidate(
         "candidate": candidate,
         "label": label,
         "canonical_label": _canonicalize_local_tab_label(label),
+        "display_label": _display_local_tab_label(label),
         "left": left,
         "top": top,
         "right": right,
@@ -1269,9 +1302,11 @@ def _filter_local_tab_strip_candidates(
         candidate = dict(item["candidate"])
         original_label = str(candidate.get("label", "") or item.get("label", "") or "").strip()
         canonical_label = str(item.get("canonical_label", "") or original_label).strip()
-        candidate["label"] = canonical_label
+        display_label = str(item.get("display_label", "") or original_label).strip()
+        candidate["label"] = display_label
+        candidate["canonical_label"] = canonical_label
         candidate["original_label"] = original_label
-        if canonical_label != original_label:
+        if display_label != original_label:
             candidate["label_canonicalized"] = True
         candidate.setdefault("left", int(item["left"]))
         candidate.setdefault("right", int(item["right"]))

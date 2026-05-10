@@ -28,6 +28,30 @@ def test_verify_context_screen_text_type():
     assert result["ok"] is True
 
 
+def test_verify_context_screen_text_accepts_korean_settings_alias():
+    result = verify_context(
+        _step(visible_label="스마트싱스 설정"),
+        {"context_verify": {"type": "screen_text", "text_regex": "(?i).*settings.*"}},
+    )
+
+    assert result["ok"] is True
+
+
+def test_verify_context_focused_anchor_accepts_korean_monitor_alias():
+    result = verify_context(
+        _step(visible_label="모니터링", focus_view_id="com.test:id/plugin_title"),
+        {
+            "context_verify": {
+                "type": "focused_anchor",
+                "text_regex": "(?i).*monitor.*",
+                "view_id_regex": ".*plugin_title",
+            }
+        },
+    )
+
+    assert result["ok"] is True
+
+
 def test_verify_context_screen_announcement_type():
     result = verify_context(
         _step(),
@@ -74,6 +98,174 @@ def test_verify_context_selected_bottom_tab_accepts_korean_tab_alias_for_english
     result = verify_context(step, scenario_cfg)
 
     assert result["ok"] is True
+
+
+def test_verify_context_selected_bottom_tab_accepts_english_selected_after_label():
+    step = _step(
+        dump_tree_nodes=[
+            {
+                "text": "Home",
+                "contentDescription": "Home, Selected",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/bottom_favorites",
+                "selected": False,
+                "boundsInScreen": "0,0,100,100",
+            }
+        ]
+    )
+    scenario_cfg = {
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": r"(?i).*(selected|선택됨).*(home).*",
+        }
+    }
+
+    result = verify_context(step, scenario_cfg)
+
+    assert result["ok"] is True
+
+
+def test_verify_context_selected_bottom_tab_accepts_korean_selected_after_label():
+    step = _step(
+        dump_tree_nodes=[
+            {
+                "text": "홈",
+                "contentDescription": "홈, 선택됨",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/bottom_favorites",
+                "selected": False,
+                "boundsInScreen": "0,0,100,100",
+            }
+        ]
+    )
+    scenario_cfg = {
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": r"(?i).*(selected|선택됨).*(home).*",
+        }
+    }
+
+    result = verify_context(step, scenario_cfg)
+
+    assert result["ok"] is True
+
+
+def test_verify_context_selected_bottom_tab_accepts_korean_selected_before_label():
+    step = _step(
+        dump_tree_nodes=[
+            {
+                "text": "기기",
+                "contentDescription": "선택됨, 기기, 탭 1/5",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/bottom_devices",
+                "selected": False,
+                "boundsInScreen": "0,0,100,100",
+            }
+        ]
+    )
+    scenario_cfg = {
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": r"(?i).*(selected|선택됨).*(devices).*",
+        }
+    }
+
+    result = verify_context(step, scenario_cfg)
+
+    assert result["ok"] is True
+
+
+def test_verify_context_selected_bottom_tab_accepts_node_selected_label_only():
+    step = _step(
+        dump_tree_nodes=[
+            {
+                "text": "Home",
+                "contentDescription": "Home, Tab 1 of 5",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/bottom_favorites",
+                "selected": True,
+                "boundsInScreen": "0,0,100,100",
+            }
+        ]
+    )
+    scenario_cfg = {
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": r"(?i).*(selected|선택됨).*(home).*",
+        }
+    }
+
+    result = verify_context(step, scenario_cfg)
+
+    assert result["ok"] is True
+
+
+def test_verify_context_selected_bottom_tab_accepts_selected_resource_id_without_label():
+    step = _step(
+        dump_tree_nodes=[
+            {
+                "text": "",
+                "contentDescription": "",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/bottom_devices",
+                "selected": True,
+                "boundsInScreen": "0,0,100,100",
+            }
+        ]
+    )
+    scenario_cfg = {
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": r"(?i).*(selected|선택됨).*(devices).*",
+        }
+    }
+
+    result = verify_context(step, scenario_cfg)
+
+    assert result["ok"] is True
+
+
+def test_verify_context_selected_bottom_tab_rejects_non_bottom_home_row():
+    step = _step(
+        dump_tree_nodes=[
+            {
+                "text": "홈",
+                "contentDescription": "홈, 선택됨",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/settings_home_row",
+                "selected": True,
+                "boundsInScreen": "0,0,100,100",
+            }
+        ]
+    )
+    scenario_cfg = {
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": r"(?i).*(selected|선택됨).*(home).*",
+        }
+    }
+
+    result = verify_context(step, scenario_cfg)
+
+    assert result["ok"] is False
+
+
+def test_verify_context_selected_bottom_tab_rejects_menu_open_button():
+    step = _step(
+        dump_tree_nodes=[
+            {
+                "text": "메뉴 열기",
+                "contentDescription": "메뉴 열기",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_open_button",
+                "selected": False,
+                "boundsInScreen": "0,0,100,100",
+            }
+        ]
+    )
+    scenario_cfg = {
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": r"(?i).*(selected|선택됨).*(menu).*",
+        }
+    }
+
+    result = verify_context(step, scenario_cfg)
+
+    assert result["ok"] is False
 
 
 def test_verify_context_selected_bottom_tab_prefers_smart_nav_result_on_resource_match():

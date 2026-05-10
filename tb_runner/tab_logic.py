@@ -6,8 +6,72 @@ from talkback_lib import A11yAdbClient
 from tb_runner.anchor_logic import _extract_candidate_from_node, _match_composite_candidate
 from tb_runner.constants import MAIN_ANNOUNCEMENT_WAIT_SECONDS, MAIN_STEP_WAIT_SECONDS
 from tb_runner.context_verifier import verify_context
+from tb_runner.label_matcher import LABEL_ALIASES, canonicalize_label, normalize_label
 from tb_runner.logging_utils import _should_log, log
 from tb_runner.utils import parse_bounds_str
+
+_BOTTOM_GLOBAL_NAV_RESOURCE_REGEX = re.compile(
+    r"com\.samsung\.android\.oneconnect:id/"
+    r"(menu_(favorites|devices|services|automations|more)|"
+    r"bottom_(favorites|home|devices|services|life|automations|routines|more|menu))",
+    flags=re.IGNORECASE,
+)
+_BOTTOM_TAB_RESOURCE_CANONICAL = {
+    "favorites": "home",
+    "home": "home",
+    "devices": "devices",
+    "services": "life",
+    "life": "life",
+    "automations": "routines",
+    "routines": "routines",
+    "more": "menu",
+    "menu": "menu",
+}
+_BOTTOM_TAB_ALIAS_KEYS = {
+    "home": "bottom_home",
+    "devices": "bottom_devices",
+    "life": "bottom_life",
+    "routines": "bottom_routines",
+    "menu": "bottom_menu",
+}
+
+
+def _canonicalize_bottom_tab_resource_id(resource_id: str | None) -> str | None:
+    match = re.search(r"(?:menu|bottom)_([a-z_]+)", str(resource_id or ""), flags=re.IGNORECASE)
+    if not match:
+        return None
+    return _BOTTOM_TAB_RESOURCE_CANONICAL.get(match.group(1).strip().lower())
+
+
+def _is_bottom_nav_resource_id(resource_id: str | None) -> bool:
+    return bool(_BOTTOM_GLOBAL_NAV_RESOURCE_REGEX.search(str(resource_id or "").strip()))
+
+
+def _expected_bottom_tab_from_tab_pattern(tab_pattern: str | None) -> str | None:
+    normalized = normalize_label(tab_pattern)
+    if not normalized:
+        return None
+    for canonical, alias_key in _BOTTOM_TAB_ALIAS_KEYS.items():
+        if canonical in normalized:
+            return canonical
+        for alias in LABEL_ALIASES.get(alias_key, ()):
+            normalized_alias = normalize_label(alias)
+            if normalized_alias and normalized_alias in normalized:
+                return canonical
+    if "more" in normalized:
+        return "menu"
+    return None
+
+
+def _canonicalize_bottom_tab_candidate(candidate: dict[str, Any]) -> str | None:
+    resource_canonical = _canonicalize_bottom_tab_resource_id(candidate.get("resource_id", ""))
+    if resource_canonical:
+        return resource_canonical
+    for key in ("text", "announcement"):
+        canonical = canonicalize_label(candidate.get(key, ""), domain="bottom_tab")
+        if canonical:
+            return canonical
+    return None
 
 
 def normalize_tab_config(tab_cfg: dict[str, Any]) -> dict[str, Any]:
@@ -23,12 +87,44 @@ def normalize_tab_config(tab_cfg: dict[str, Any]) -> dict[str, Any]:
     if "tie_breaker" not in normalized_tab_cfg:
         normalized_tab_cfg["tie_breaker"] = "bottom_nav_left_to_right"
     normalized_tab_cfg["allow_resource_id_only"] = bool(normalized_tab_cfg.get("allow_resource_id_only", False))
+    expected_parts = [
+        normalized_tab_cfg.get("text_regex", ""),
+        normalized_tab_cfg.get("announcement_regex", ""),
+        tab_cfg.get("tab_name", ""),
+    ]
+    context_cfg = tab_cfg.get("context_verify", {})
+    if isinstance(context_cfg, dict):
+        expected_parts.extend([context_cfg.get("text_regex", ""), context_cfg.get("announcement_regex", "")])
+    normalized_tab_cfg["_expected_bottom_tab"] = _expected_bottom_tab_from_tab_pattern(
+        " ".join(str(part or "") for part in expected_parts)
+    )
     normalized_tab_cfg["_fallback_to_legacy"] = fallback_to_legacy
     return normalized_tab_cfg
 
 def match_tab_candidate(node: dict[str, Any], tab_cfg: dict[str, Any]) -> dict[str, Any]:
     candidate = _extract_candidate_from_node(node)
-    return _match_composite_candidate(candidate, tab_cfg)
+    matched = _match_composite_candidate(candidate, tab_cfg)
+    if matched.get("matched"):
+        return matched
+
+    expected_tab = str(tab_cfg.get("_expected_bottom_tab", "") or "").strip()
+    if not expected_tab or not _is_bottom_nav_resource_id(candidate.get("resource_id", "")):
+        return matched
+    candidate_tab = _canonicalize_bottom_tab_candidate(candidate)
+    if candidate_tab != expected_tab:
+        return matched
+
+    matched_fields = list(matched.get("matched_fields", []))
+    if "resource_id" not in matched_fields:
+        matched_fields.append("resource_id")
+    matched_fields.append("bottom_tab_alias")
+    return {
+        **matched,
+        "matched": True,
+        "score": max(int(matched.get("score", 0)), 110),
+        "matched_fields": matched_fields,
+        "candidate": candidate,
+    }
 
 def choose_best_tab_candidate(matches: list[dict[str, Any]], tie_breaker: str = "first_match") -> dict[str, Any] | None:
     if not matches:

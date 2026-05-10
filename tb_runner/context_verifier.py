@@ -2,24 +2,36 @@ import re
 from typing import Any
 
 from talkback_lib import A11yAdbClient
+from tb_runner.label_matcher import LABEL_ALIASES, canonicalize_label, expand_verify_token_aliases, matches_alias, normalize_label
 from tb_runner.logging_utils import _should_log, log
 from tb_runner.utils import _safe_regex_search
 
 
-_TAB_ALIAS_TO_CANONICAL = {
-    "홈": "home",
-    "기기": "devices",
-    "라이프": "life",
-    "자동화": "routines",
-    "메뉴": "menu",
-    "선택됨": "selected",
-    "새 콘텐츠 사용 가능": "new content available",
+_TAB_ALIAS_TO_CANONICAL = {"새 콘텐츠 사용 가능": "new content available"}
+_BOTTOM_TAB_ALIAS_KEYS = {
+    "home": "bottom_home",
+    "devices": "bottom_devices",
+    "life": "bottom_life",
+    "routines": "bottom_routines",
+    "menu": "bottom_menu",
 }
 
 _BOTTOM_GLOBAL_NAV_RESOURCE_REGEX = re.compile(
-    r"com\.samsung\.android\.oneconnect:id/(menu_(favorites|devices|services|automations|more)|bottom_(favorites|devices|services|automations|more))",
+    r"com\.samsung\.android\.oneconnect:id/(menu_(favorites|devices|services|automations|more)|bottom_(favorites|home|devices|services|life|automations|routines|more|menu))",
     flags=re.IGNORECASE,
 )
+_BOTTOM_TAB_RESOURCE_CANONICAL = {
+    "favorites": "home",
+    "home": "home",
+    "devices": "devices",
+    "services": "life",
+    "life": "life",
+    "automations": "routines",
+    "routines": "routines",
+    "more": "menu",
+    "menu": "menu",
+}
+_CONTEXT_VERIFY_ALIAS_TOKENS = ("smartthings settings", "settings", "monitor", "my plants")
 
 
 def _expand_bottom_tab_aliases(value: str) -> str:
@@ -28,12 +40,93 @@ def _expand_bottom_tab_aliases(value: str) -> str:
         return text
     lowered = text.lower()
     normalized_additions: list[str] = []
+    canonical_tab = _canonicalize_bottom_tab_label(text)
+    if canonical_tab and canonical_tab not in lowered:
+        normalized_additions.append(canonical_tab)
+    if _has_selected_signal(text) and "selected" not in lowered:
+        normalized_additions.append("selected")
     for alias, canonical in _TAB_ALIAS_TO_CANONICAL.items():
         if alias in text and canonical not in lowered:
             normalized_additions.append(canonical)
     if not normalized_additions:
         return text
     return f"{text}, {', '.join(normalized_additions)}"
+
+
+def _canonicalize_bottom_tab_label(value: str | None) -> str | None:
+    text = str(value or "")
+    resource_match = re.search(r"(?:menu|bottom)_([a-z_]+)", text, flags=re.IGNORECASE)
+    if resource_match:
+        resource_key = resource_match.group(1).strip().lower()
+        if resource_key in _BOTTOM_TAB_RESOURCE_CANONICAL:
+            return _BOTTOM_TAB_RESOURCE_CANONICAL[resource_key]
+    return canonicalize_label(text, domain="bottom_tab")
+
+
+def _has_selected_signal(value: str | None) -> bool:
+    text = str(value or "")
+    return bool(re.search(r"(selected|선택됨)", text, flags=re.IGNORECASE)) or matches_alias(
+        text, "selected", mode="token"
+    )
+
+
+def _expected_bottom_tab_from_context(text_regex: str, announcement_regex: str) -> str | None:
+    pattern_text = normalize_label(" ".join(part for part in [text_regex, announcement_regex] if part))
+    if not pattern_text:
+        return None
+    for canonical, alias_key in _BOTTOM_TAB_ALIAS_KEYS.items():
+        if canonical in pattern_text:
+            return canonical
+        normalized_aliases = [normalize_label(alias) for alias in LABEL_ALIASES.get(alias_key, ())]
+        if any(alias and alias in pattern_text for alias in normalized_aliases):
+            return canonical
+    return None
+
+
+def _matches_bottom_tab_expectation(value: str | None, expected_tab: str | None) -> bool:
+    if not expected_tab:
+        return False
+    return _canonicalize_bottom_tab_label(value) == expected_tab
+
+
+def _expand_context_verify_aliases(value: str | None, text_regex: str, announcement_regex: str) -> str:
+    text = str(value or "")
+    if not text:
+        return text
+    expected_source = normalize_label(" ".join(part for part in [text_regex, announcement_regex] if part))
+    if not expected_source:
+        return text
+    normalized_value = text.casefold()
+    additions: list[str] = []
+    for token in _CONTEXT_VERIFY_ALIAS_TOKENS:
+        if normalize_label(token) not in expected_source:
+            continue
+        aliases = expand_verify_token_aliases([token])
+        if any(alias != token and alias in normalized_value for alias in aliases):
+            additions.append(token)
+    if not additions:
+        return text
+    return f"{text}, {', '.join(additions)}"
+
+
+def _bottom_tab_context_matches(
+    value: str | None,
+    *,
+    text_regex: str,
+    announcement_regex: str,
+    expected_tab: str | None,
+    require_selected: bool = False,
+) -> bool:
+    text_for_match = _expand_bottom_tab_aliases(str(value or ""))
+    text_ok = True if not text_regex else _safe_regex_search(text_regex, text_for_match)
+    announcement_ok = True if not announcement_regex else _safe_regex_search(announcement_regex, text_for_match)
+    regex_ok = bool(text_ok and announcement_ok)
+    if regex_ok:
+        return True
+    if expected_tab and _matches_bottom_tab_expectation(text_for_match, expected_tab):
+        if not require_selected or _has_selected_signal(text_for_match):
+            return True
+    return False
 
 
 def _is_bottom_nav_resource_id(view_id: str, scenario_cfg: dict[str, Any]) -> bool:
@@ -96,6 +189,7 @@ def verify_context(
 
     text_regex = str(context_cfg.get("text_regex", "") or "").strip()
     announcement_regex = str(context_cfg.get("announcement_regex", "") or "").strip()
+    expected_bottom_tab = _expected_bottom_tab_from_context(text_regex, announcement_regex)
 
     if context_type == "selected_bottom_tab":
         smart_requested_view_id = str(step.get("smart_nav_requested_view_id", "") or "").strip()
@@ -114,13 +208,15 @@ def verify_context(
         )
         if smart_view_id_matched:
             smart_actual_selected_text = smart_resolved_label or smart_actual_label
-            smart_text_for_match = _expand_bottom_tab_aliases(smart_actual_selected_text)
-            text_ok = True if not text_regex else _safe_regex_search(text_regex, smart_text_for_match)
-            announcement_ok = (
-                True if not announcement_regex else _safe_regex_search(announcement_regex, smart_text_for_match)
+            context_ok = _bottom_tab_context_matches(
+                smart_actual_selected_text,
+                text_regex=text_regex,
+                announcement_regex=announcement_regex,
+                expected_tab=expected_bottom_tab,
+                require_selected=False,
             )
             return {
-                "ok": text_ok and announcement_ok,
+                "ok": context_ok,
                 "type": context_type,
                 "expected": " | ".join(part for part in [f"text={text_regex}" if text_regex else "", f"announcement={announcement_regex}" if announcement_regex else ""] if part),
                 "actual_text": smart_actual_selected_text,
@@ -141,22 +237,23 @@ def verify_context(
             or ""
         ).strip()
         focus_selected_text = _build_focus_selected_text(step)
-        focus_selected_text_for_match = _expand_bottom_tab_aliases(focus_selected_text)
-        focus_has_selected_signal = bool(re.search(r"(selected|선택됨)", focus_selected_text_for_match, flags=re.IGNORECASE))
+        focus_has_selected_signal = _has_selected_signal(focus_selected_text)
         focus_payload_strong = bool(step.get("get_focus_top_level_payload_sufficient", False)) or str(
             step.get("get_focus_final_payload_source", "") or ""
         ).strip().lower() in {"top_level", "fallback_dump"}
         focus_bottom_nav_hit = _is_bottom_nav_resource_id(focus_view_id, scenario_cfg)
-        focus_text_ok = True if not text_regex else _safe_regex_search(text_regex, focus_selected_text_for_match)
-        focus_announcement_ok = (
-            True if not announcement_regex else _safe_regex_search(announcement_regex, focus_selected_text_for_match)
+        focus_context_ok = _bottom_tab_context_matches(
+            focus_selected_text,
+            text_regex=text_regex,
+            announcement_regex=announcement_regex,
+            expected_tab=expected_bottom_tab,
+            require_selected=True,
         )
         if (
             focus_payload_strong
             and focus_bottom_nav_hit
             and focus_has_selected_signal
-            and focus_text_ok
-            and focus_announcement_ok
+            and focus_context_ok
         ):
             expected_parts = []
             if text_regex:
@@ -225,8 +322,13 @@ def verify_context(
                 fallback_values.append(combined)
             if is_main_bottom_nav_candidate:
                 eval_text = _expand_bottom_tab_aliases(combined or marker)
-                text_matched = True if not text_regex else _safe_regex_search(text_regex, eval_text)
-                announcement_matched = True if not announcement_regex else _safe_regex_search(announcement_regex, eval_text)
+                context_matched = _bottom_tab_context_matches(
+                    eval_text,
+                    text_regex=text_regex,
+                    announcement_regex=announcement_regex,
+                    expected_tab=expected_bottom_tab,
+                    require_selected=False,
+                )
                 tab_like_candidate_debug_rows.append(
                     {
                         "text": text,
@@ -239,13 +341,13 @@ def verify_context(
                         "text": text,
                         "resource_id": view_id,
                         "selected": selected_state,
-                        "matched": bool(text_matched and announcement_matched),
+                        "matched": bool(context_matched),
                     }
                 )
                 if combined:
                     tab_like_fallback_values.append(combined)
             if is_main_bottom_nav_candidate and (
-                selected_state or re.search(r"(selected|선택됨)", combined or "", flags=re.IGNORECASE)
+                selected_state or _has_selected_signal(combined)
             ):
                 selected_values.append(combined or marker)
                 selected_candidate_debug_rows.append(
@@ -265,11 +367,15 @@ def verify_context(
         actual_announcement = actual_selected_text
 
         # selected_bottom_tab은 dump 기반 selected 후보에서만 판정한다.
-        text_ok = True if not text_regex else _safe_regex_search(text_regex, actual_selected_text_for_match)
-        announcement_ok = (
-            True if not announcement_regex else _safe_regex_search(announcement_regex, actual_selected_text_for_match)
+        ok = _bottom_tab_context_matches(
+            actual_selected_text_for_match,
+            text_regex=text_regex,
+            announcement_regex=announcement_regex,
+            expected_tab=expected_bottom_tab,
+            require_selected=False,
         )
-        ok = text_ok and announcement_ok
+        text_ok = bool(ok or (True if not text_regex else _safe_regex_search(text_regex, actual_selected_text_for_match)))
+        announcement_ok = bool(ok or (True if not announcement_regex else _safe_regex_search(announcement_regex, actual_selected_text_for_match)))
 
         if not actual_selected_text and fallback_values:
             actual_selected_text = fallback_values[0]
@@ -280,11 +386,7 @@ def verify_context(
             if tab_like_fallback_values and fallback_values[0] == tab_like_fallback_values[0]:
                 actual_source = "tab_like_candidate"
             text_ok = True if not text_regex else _safe_regex_search(text_regex, actual_selected_text_for_match)
-            announcement_ok = (
-                True
-                if not announcement_regex
-                else _safe_regex_search(announcement_regex, actual_selected_text_for_match)
-            )
+            announcement_ok = True if not announcement_regex else _safe_regex_search(announcement_regex, actual_selected_text_for_match)
             ok = text_ok and announcement_ok
 
         dump_node_count = len(nodes) if isinstance(nodes, list) else 0
@@ -390,17 +492,19 @@ def verify_context(
 
     actual_text = str(step.get("visible_label", "") or "").strip()
     actual_announcement = str(step.get("merged_announcement", "") or "").strip()
+    match_text = _expand_context_verify_aliases(actual_text, text_regex, announcement_regex)
+    match_announcement = _expand_context_verify_aliases(actual_announcement, text_regex, announcement_regex)
     if context_type == "screen_text":
-        text_ok = True if not text_regex else _safe_regex_search(text_regex, actual_text)
+        text_ok = True if not text_regex else _safe_regex_search(text_regex, match_text)
         announcement_ok = True
     elif context_type == "screen_announcement":
         text_ok = True
-        announcement_ok = True if not announcement_regex else _safe_regex_search(announcement_regex, actual_announcement)
+        announcement_ok = True if not announcement_regex else _safe_regex_search(announcement_regex, match_announcement)
     elif context_type == "focused_anchor":
         focus_view_id = str(step.get("focus_view_id", "") or "").strip()
         view_id_regex = str(context_cfg.get("view_id_regex", "") or "").strip()
-        text_ok = True if not text_regex else _safe_regex_search(text_regex, actual_text)
-        announcement_ok = True if not announcement_regex else _safe_regex_search(announcement_regex, actual_announcement)
+        text_ok = True if not text_regex else _safe_regex_search(text_regex, match_text)
+        announcement_ok = True if not announcement_regex else _safe_regex_search(announcement_regex, match_announcement)
         view_id_ok = True if not view_id_regex else _safe_regex_search(view_id_regex, focus_view_id)
         ok = text_ok and announcement_ok and view_id_ok
         expected_parts = []
@@ -419,8 +523,8 @@ def verify_context(
             "actual_view_id": focus_view_id,
         }
     else:
-        text_ok = True if not text_regex else _safe_regex_search(text_regex, actual_text)
-        announcement_ok = True if not announcement_regex else _safe_regex_search(announcement_regex, actual_announcement)
+        text_ok = True if not text_regex else _safe_regex_search(text_regex, match_text)
+        announcement_ok = True if not announcement_regex else _safe_regex_search(announcement_regex, match_announcement)
     ok = text_ok and announcement_ok
 
     expected_parts = []

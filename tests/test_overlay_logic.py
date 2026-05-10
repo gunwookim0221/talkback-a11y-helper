@@ -65,6 +65,77 @@ def test_classify_post_click_result_navigation_with_explicit_cue():
     assert classification == "navigation"
 
 
+def test_classify_post_click_result_navigation_with_korean_navigate_up():
+    pre = _step(nodes=[{"viewIdResourceName": "id.a", "text": "A", "contentDescription": ""}])
+    post = _step(label="위로 이동", view_id="id.back", nodes=[{"viewIdResourceName": "id.b", "text": "B", "contentDescription": ""}])
+
+    classification, _ = overlay_logic.classify_post_click_result(_Client(post), "SERIAL", {}, pre)
+
+    assert classification == "navigation"
+
+
+def test_classify_post_click_result_does_not_treat_korean_back_as_navigate_up():
+    pre = _step(nodes=[{"viewIdResourceName": "id.a", "text": "A", "contentDescription": ""}])
+    post = _step(label="뒤로", view_id="id.back", nodes=[{"viewIdResourceName": "id.b", "text": "B", "contentDescription": ""}])
+
+    classification, _ = overlay_logic.classify_post_click_result(_Client(post), "SERIAL", {}, pre)
+
+    assert classification == "navigation"
+
+
+def _overlay_step(label, *, view_id="id.more", class_name="android.widget.Button"):
+    step = _step(label=label, view_id=view_id)
+    step["focus_class_name"] = class_name
+    return step
+
+
+def _overlay_policy(label, *, resource_id="", class_name="android.widget.Button"):
+    entry = {"label": label, "class_name": class_name}
+    if resource_id:
+        entry["resource_id"] = resource_id
+    return {"overlay_policy": {"allow_candidates": [entry], "block_candidates": []}}
+
+
+def test_is_overlay_candidate_matches_more_options_aliases():
+    cfg = _overlay_policy("More options")
+
+    assert overlay_logic.is_overlay_candidate(_overlay_step("More options"), cfg)[0] is True
+    assert overlay_logic.is_overlay_candidate(_overlay_step("More options, Button"), cfg)[0] is True
+    assert overlay_logic.is_overlay_candidate(_overlay_step("더보기"), cfg)[0] is True
+    assert overlay_logic.is_overlay_candidate(_overlay_step("더보기 버튼"), cfg)[0] is True
+
+
+def test_is_overlay_candidate_matches_dismiss_aliases():
+    cfg = _overlay_policy("Dismiss")
+
+    assert overlay_logic.is_overlay_candidate(_overlay_step("Dismiss"), cfg)[0] is True
+    assert overlay_logic.is_overlay_candidate(_overlay_step("닫기"), cfg)[0] is True
+
+
+def test_is_overlay_candidate_matches_navigate_up_aliases():
+    cfg = _overlay_policy("Navigate up")
+
+    assert overlay_logic.is_overlay_candidate(_overlay_step("Navigate up"), cfg)[0] is True
+    assert overlay_logic.is_overlay_candidate(_overlay_step("위로 이동"), cfg)[0] is True
+
+
+def test_is_overlay_candidate_resource_id_only_still_matches():
+    cfg = {"overlay_policy": {"allow_candidates": [{"resource_id": "id.more"}], "block_candidates": []}}
+
+    assert overlay_logic.is_overlay_candidate(_overlay_step("메뉴 열기", view_id="id.more"), cfg)[0] is True
+
+
+def test_is_overlay_candidate_alias_false_positives_are_rejected():
+    more_cfg = _overlay_policy("More options")
+    dismiss_cfg = _overlay_policy("Dismiss")
+    navigate_cfg = _overlay_policy("Navigate up")
+
+    assert overlay_logic.is_overlay_candidate(_overlay_step("메뉴 열기"), more_cfg)[0] is False
+    assert overlay_logic.is_overlay_candidate(_overlay_step("더보기", class_name="android.widget.TextView"), more_cfg)[0] is False
+    assert overlay_logic.is_overlay_candidate(_overlay_step("닫기", class_name="android.widget.TextView"), dismiss_cfg)[0] is False
+    assert overlay_logic.is_overlay_candidate(_overlay_step("뒤로"), navigate_cfg)[0] is False
+
+
 def test_classify_post_click_result_navigation_with_low_overlap_not_guarded():
     pre = _step(label="menu", view_id="id.pre", nodes=[{"viewIdResourceName": "id.a", "text": "A", "contentDescription": ""}])
     post = _step(label="post", view_id="id.post", nodes=[{"viewIdResourceName": "id.b", "text": "B", "contentDescription": ""}])

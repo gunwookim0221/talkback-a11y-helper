@@ -139,6 +139,66 @@ def test_structural_local_tab_filter_accepts_energy_badged_activity(monkeypatch)
     assert rejected == []
 
 
+def test_structural_local_tab_filter_accepts_korean_energy_tabs_with_canonical_identity(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    candidates = [
+        _bottom_strip_candidate("모니터링", 30, 540, rid="monitor"),
+        _bottom_strip_candidate("절약", 540, 1050, rid="save"),
+    ]
+
+    accepted, rejected = local_tab_logic._filter_local_tab_strip_candidates(candidates)
+
+    assert [candidate["label"] for candidate in accepted] == ["모니터링", "절약"]
+    assert [candidate["canonical_label"] for candidate in accepted] == ["monitor", "save"]
+    assert rejected == []
+
+
+def test_structural_local_tab_filter_accepts_korean_plant_tabs_with_canonical_identity(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    candidates = [
+        _bottom_strip_candidate("내 식물", 30, 540, top=2341, bottom=2473, rid="myPlants"),
+        _bottom_strip_candidate("자동화", 540, 1050, top=2341, bottom=2473, rid="routines"),
+    ]
+
+    accepted, rejected = local_tab_logic._filter_local_tab_strip_candidates(candidates)
+
+    assert [candidate["label"] for candidate in accepted] == ["내 식물", "자동화"]
+    assert [candidate["canonical_label"] for candidate in accepted] == ["my_plants", "routines"]
+    assert rejected == []
+
+
+def test_structural_local_tab_filter_rejects_duplicate_canonical_aliases(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    candidates = [
+        _bottom_strip_candidate("Monitor", 30, 370, rid=""),
+        _bottom_strip_candidate("모니터링", 370, 710, rid=""),
+        _bottom_strip_candidate("Save", 710, 1050, rid=""),
+    ]
+
+    accepted, rejected = local_tab_logic._filter_local_tab_strip_candidates(candidates)
+
+    assert accepted == []
+    assert rejected == candidates
+
+
+def test_structural_local_tab_filter_rejects_korean_global_bottom_nav(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    labels = ["홈", "기기", "라이프", "자동화", "메뉴"]
+    candidates = [
+        _bottom_strip_candidate(label, index * 216, (index + 1) * 216, rid="")
+        for index, label in enumerate(labels)
+    ]
+
+    accepted, rejected = local_tab_logic._filter_local_tab_strip_candidates(candidates)
+
+    assert accepted == []
+    assert rejected == candidates
+
+
 def test_collect_groups_keeps_badged_activity_as_local_tab(monkeypatch):
     logs = []
     _bind_local_tab_logic(monkeypatch, logs)

@@ -9,6 +9,16 @@ sys.modules.setdefault("openpyxl", SimpleNamespace(load_workbook=lambda *_args, 
 sys.modules.setdefault("openpyxl.drawing.image", SimpleNamespace(Image=object))
 
 from tb_runner import collection_flow
+from tb_runner.scenario_config import TAB_CONFIGS
+from tb_runner.tab_logic import (
+    _expected_bottom_tab_from_tab_pattern,
+    match_tab_candidate,
+    normalize_tab_config,
+)
+
+
+def _scenario_config(scenario_id):
+    return next(cfg for cfg in TAB_CONFIGS if cfg.get("scenario_id") == scenario_id)
 
 
 class DummyClient:
@@ -151,6 +161,66 @@ def _anchor_row():
         "focus_view_id": "id.anchor",
         "focus_bounds": "0,0,10,10",
     }
+
+
+def _bottom_tab_node(label, resource_id):
+    return {
+        "text": "",
+        "contentDescription": label,
+        "talkbackLabel": label,
+        "viewIdResourceName": resource_id,
+        "className": "android.widget.Button",
+        "boundsInScreen": "0,1800,200,1910",
+        "clickable": True,
+        "focusable": True,
+    }
+
+
+def test_bottom_tab_candidate_matches_korean_aliases_with_bottom_nav_resource():
+    cases = [
+        ("(?i).*home.*", "홈, 탭 5개 중 1번째 탭", "com.samsung.android.oneconnect:id/menu_favorites", "home"),
+        ("(?i).*devices.*", "기기, 탭 5개 중 2번째 탭", "com.samsung.android.oneconnect:id/menu_devices", "devices"),
+        ("(?i).*life.*", "선택됨, 라이프, 탭 5개 중 3번째 탭", "com.samsung.android.oneconnect:id/menu_services", "life"),
+        ("(?i).*routines.*", "루틴, 탭 5개 중 4번째 탭", "com.samsung.android.oneconnect:id/menu_automations", "routines"),
+        ("(?i).*routines.*", "자동화, 탭 5개 중 4번째 탭", "com.samsung.android.oneconnect:id/menu_automations", "routines"),
+        ("(?i).*(menu|more).*", "선택됨, 메뉴, 탭 5개 중 5번째 탭, 새 콘텐츠 사용 가능", "com.samsung.android.oneconnect:id/menu_more", "menu"),
+    ]
+    for tab_name, label, resource_id, expected in cases:
+        tab_cfg = normalize_tab_config({"tab_name": tab_name, "tab_type": "b"})
+
+        result = match_tab_candidate(_bottom_tab_node(label, resource_id), tab_cfg)
+
+        assert tab_cfg["_expected_bottom_tab"] == expected
+        assert result["matched"] is True
+        assert "bottom_tab_alias" in result["matched_fields"]
+
+
+def test_bottom_tab_candidate_keeps_english_regex_path():
+    cases = [
+        ("(?i).*home.*", "Home, Tab 1 of 5", "com.samsung.android.oneconnect:id/menu_favorites"),
+        ("(?i).*life.*", "Selected, Life, Tab 3 of 5", "com.samsung.android.oneconnect:id/menu_services"),
+    ]
+    for tab_name, label, resource_id in cases:
+        tab_cfg = normalize_tab_config({"tab_name": tab_name, "tab_type": "b"})
+
+        result = match_tab_candidate(_bottom_tab_node(label, resource_id), tab_cfg)
+
+        assert result["matched"] is True
+
+
+def test_bottom_tab_candidate_rejects_korean_alias_without_bottom_nav_resource():
+    tab_cfg = normalize_tab_config({"tab_name": "(?i).*life.*", "tab_type": "b"})
+    for label in ("홈", "메뉴 열기", "라이프 스타일"):
+        node = _bottom_tab_node(label, "com.samsung.android.oneconnect:id/content_row")
+
+        result = match_tab_candidate(node, tab_cfg)
+
+        assert result["matched"] is False
+
+
+def test_expected_bottom_tab_from_tab_pattern_handles_legacy_regexes():
+    assert _expected_bottom_tab_from_tab_pattern("(?i).*life.*") == "life"
+    assert _expected_bottom_tab_from_tab_pattern("(?i).*(menu|more).*") == "menu"
 
 
 def _main_row(idx=1):
@@ -1811,6 +1881,187 @@ def test_select_visible_plugin_candidate_card_entry_spec_description_match_promo
     assert "candidate_count=" in reason
     assert selected_meta.get("promotion_source") == "xml_live"
     assert stats.get("partial_match_count", 0) >= 1
+
+
+def test_select_visible_plugin_candidate_matches_stable_korean_find_and_video_titles():
+    for scenario_id, label in (("life_find_plugin", "파인드"), ("life_video_plugin", "비디오")):
+        cfg = _scenario_config(scenario_id)
+        nodes = [
+            {
+                "text": label,
+                "contentDescription": "",
+                "boundsInScreen": "60,640,1020,940",
+                "visibleToUser": True,
+                "clickable": True,
+                "focusable": True,
+                "effectiveClickable": True,
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/serviceCardBody",
+                "className": "android.view.ViewGroup",
+            }
+        ]
+
+        selected, reason, stats, selected_meta = collection_flow._select_visible_plugin_candidate(
+            nodes=nodes,
+            target=cfg["pre_navigation"][0]["target"],
+            scenario_id=scenario_id,
+            entry_spec=collection_flow._get_card_entry_spec(cfg, cfg["pre_navigation"][0]["target"]),
+        )
+
+        assert selected is not None, scenario_id
+        assert reason in {"immediate_strong_single", "reranked"} or "candidate_count=" in reason
+        assert stats.get("alias_hit_count", 0) >= 1
+        assert selected_meta.get("selected_container_view_id", "").endswith("serviceCardBody")
+
+
+def test_select_visible_plugin_candidate_matches_stable_korean_food_and_energy_titles():
+    for scenario_id, label in (("life_food_plugin", "푸드"), ("life_energy_plugin", "에너지")):
+        cfg = _scenario_config(scenario_id)
+        nodes = [
+            {
+                "text": label,
+                "contentDescription": "",
+                "boundsInScreen": "60,640,1020,940",
+                "visibleToUser": True,
+                "clickable": True,
+                "focusable": True,
+                "effectiveClickable": True,
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/serviceCardBody",
+                "className": "android.view.ViewGroup",
+            }
+        ]
+
+        selected, reason, stats, selected_meta = collection_flow._select_visible_plugin_candidate(
+            nodes=nodes,
+            target=cfg["pre_navigation"][0]["target"],
+            scenario_id=scenario_id,
+            entry_spec=collection_flow._get_card_entry_spec(cfg, cfg["pre_navigation"][0]["target"]),
+        )
+
+        assert selected is not None, scenario_id
+        assert reason in {"immediate_strong_single", "reranked"} or "candidate_count=" in reason
+        assert stats.get("alias_hit_count", 0) >= 1
+        assert selected_meta.get("selected_container_view_id", "").endswith("serviceCardBody")
+
+
+def test_select_visible_plugin_candidate_rejects_dynamic_food_and_energy_labels():
+    cases = (
+        ("life_food_plugin", "추천 레시피 오늘의 메뉴"),
+        ("life_energy_plugin", "현재 사용량 0 Wh"),
+    )
+    for scenario_id, label in cases:
+        cfg = _scenario_config(scenario_id)
+        nodes = [
+            {
+                "text": label,
+                "contentDescription": label,
+                "boundsInScreen": "60,640,1020,940",
+                "visibleToUser": True,
+                "clickable": True,
+                "focusable": True,
+                "effectiveClickable": True,
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/serviceCardBody",
+                "className": "android.view.ViewGroup",
+            }
+        ]
+
+        selected, _reason, stats, _selected_meta = collection_flow._select_visible_plugin_candidate(
+            nodes=nodes,
+            target=cfg["pre_navigation"][0]["target"],
+            scenario_id=scenario_id,
+            entry_spec=collection_flow._get_card_entry_spec(cfg, cfg["pre_navigation"][0]["target"]),
+        )
+
+        assert selected is None, scenario_id
+        assert stats.get("target_candidate_count", 0) == 0
+
+
+def test_select_visible_plugin_candidate_rejects_dynamic_find_and_video_labels():
+    cases = (
+        ("life_find_plugin", "새로고침, 버튼 현재 폰 최근 위치 확인: 4분 전"),
+        ("life_video_plugin", "오늘은 녹화된 클립이 없습니다"),
+    )
+    for scenario_id, label in cases:
+        cfg = _scenario_config(scenario_id)
+        nodes = [
+            {
+                "text": label,
+                "contentDescription": label,
+                "boundsInScreen": "60,640,1020,940",
+                "visibleToUser": True,
+                "clickable": True,
+                "focusable": True,
+                "effectiveClickable": True,
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/serviceCardBody",
+                "className": "android.view.ViewGroup",
+            }
+        ]
+
+        selected, _reason, stats, _selected_meta = collection_flow._select_visible_plugin_candidate(
+            nodes=nodes,
+            target=cfg["pre_navigation"][0]["target"],
+            scenario_id=scenario_id,
+            entry_spec=collection_flow._get_card_entry_spec(cfg, cfg["pre_navigation"][0]["target"]),
+        )
+
+        assert selected is None, scenario_id
+        assert stats.get("target_candidate_count", 0) == 0
+
+
+def test_music_sync_and_clothing_runtime_aliases_avoid_body_copy_and_generic_terms():
+    music_cfg = _scenario_config("life_music_sync_plugin")
+    music_blob = json.dumps(music_cfg, ensure_ascii=False)
+    assert "몰입감 넘치는 경험" not in music_blob
+    assert "sync your lights with music" in music_blob
+    assert "조명과 음악을 동기화" in music_blob
+
+    clothing_cfg = _scenario_config("life_clothing_care_plugin")
+    clothing_blob = json.dumps(clothing_cfg, ensure_ascii=False)
+    assert "의류\\\\s*관리" in clothing_blob
+    assert "클로딩\\\\s*케어" in clothing_blob
+    assert ".*의류.*" not in clothing_blob
+    assert ".*세탁.*" not in clothing_blob
+    assert ".*건조.*" not in clothing_blob
+
+
+def test_video_english_post_open_verify_uses_stable_feature_evidence_not_generic_video():
+    cfg = _scenario_config("life_video_plugin")
+    blob = json.dumps(cfg, ensure_ascii=False)
+
+    assert "live view" in blob.lower()
+    assert "daily clips" in blob.lower()
+    assert collection_flow._matches_post_open_verify(
+        cfg,
+        "",
+        "Navigate up",
+        "Navigate up",
+        extra_candidates=["Live view", "Daily clips"],
+    )
+    assert not collection_flow._matches_post_open_verify(
+        cfg,
+        "",
+        "Navigate up",
+        "Navigate up",
+        extra_candidates=["Generic video tips"],
+    )
+
+
+def test_music_sync_english_post_open_verify_uses_stable_title_not_generic_music():
+    cfg = _scenario_config("life_music_sync_plugin")
+
+    assert collection_flow._matches_post_open_verify(
+        cfg,
+        "",
+        "Start",
+        "Start",
+        extra_candidates=["Sync your lights with music"],
+    )
+    assert not collection_flow._matches_post_open_verify(
+        cfg,
+        "",
+        "Start",
+        "Start",
+        extra_candidates=["Generic music and lighting tips"],
+    )
 
 
 def test_run_pre_navigation_steps_forces_xml_live_fallback_when_visible_candidate_count_zero(monkeypatch):
@@ -7174,6 +7425,81 @@ def test_open_scenario_card_entry_verify_tokens_miss_maps_verify_failed(monkeypa
     assert summary.get("entry_contract_reason") == "verify_failed"
 
 
+def test_post_open_verify_matches_korean_plugin_scoped_aliases():
+    assert collection_flow._matches_post_open_verify(
+        {"verify_tokens": ["outdoor air quality"]},
+        "",
+        "실외 공기(미세먼지)",
+        "",
+    )
+    assert collection_flow._matches_post_open_verify(
+        {"verify_tokens": ["smartthings settings"]},
+        "",
+        "스마트싱스 설정",
+        "",
+    )
+    assert collection_flow._matches_post_open_verify(
+        {"verify_tokens": ["monitor"]},
+        "",
+        "모니터링",
+        "",
+    )
+    assert collection_flow._matches_post_open_verify(
+        {"verify_tokens": ["my plants"]},
+        "",
+        "내 식물",
+        "",
+    )
+
+
+def test_post_open_negative_verify_matches_korean_aliases():
+    assert collection_flow._has_post_open_negative_verify_token(
+        {"negative_verify_tokens": ["add device"]},
+        "",
+        "기기 추가",
+        "",
+    )
+    assert collection_flow._has_post_open_negative_verify_token(
+        {"negative_verify_tokens": ["not now"]},
+        "",
+        "다음에",
+        "",
+    )
+    assert collection_flow._has_post_open_negative_verify_token(
+        {"negative_verify_tokens": ["next time"]},
+        "",
+        "나중에",
+        "",
+    )
+    assert collection_flow._has_post_open_negative_verify_token(
+        {"negative_verify_tokens": ["dismiss"]},
+        "",
+        "닫기",
+        "",
+    )
+
+
+def test_post_open_verify_aliases_avoid_generic_false_positives():
+    assert not collection_flow._matches_post_open_verify(
+        {"verify_tokens": ["smartthings settings"]},
+        "",
+        "설정",
+        "",
+    )
+    assert not collection_flow._matches_post_open_verify(
+        {"verify_tokens": ["air care"]},
+        "",
+        "닫기",
+        "",
+    )
+    assert not collection_flow._matches_post_open_verify(
+        {"verify_tokens": ["my plants"]},
+        "",
+        "닫기",
+        "",
+    )
+
+
 def test_open_scenario_card_entry_recovers_when_initial_focus_is_navigate_up(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(
@@ -8543,6 +8869,70 @@ def test_open_scenario_new_screen_anchor_fail_without_evidence_aborts(monkeypatc
     ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
 
     assert ok is False
+
+
+def test_home_care_korean_verify_evidence_matches_scoped_tokens():
+    tab_cfg = {
+        "scenario_id": "life_home_care_plugin",
+        "verify_tokens": ["home care", "home appliances"],
+        "context_verify": {"type": "screen_text", "text_regex": "(?i).*home\\s*care.*|.*홈\\s*케어.*"},
+    }
+
+    assert collection_flow._matches_post_open_verify(
+        tab_cfg,
+        "",
+        "상위 메뉴로 이동",
+        "상위 메뉴로 이동",
+        extra_candidates=["삼성 가전 기기를 연결하고 똑똑한 관리를 받"],
+    ) is True
+
+
+def test_clothing_care_korean_verify_evidence_matches_scoped_tokens():
+    tab_cfg = {
+        "scenario_id": "life_clothing_care_plugin",
+        "verify_tokens": ["clothing care", "shoe care"],
+        "context_verify": {"type": "screen_text", "text_regex": "(?i).*clothing\\s*care.*|.*의류.*"},
+    }
+
+    assert collection_flow._matches_post_open_verify(
+        tab_cfg,
+        "",
+        "상위 메뉴로 이동",
+        "상위 메뉴로 이동",
+        extra_candidates=["삼성 세탁기, 건조기, 에어드레서, 슈드레서"],
+    ) is True
+
+
+def test_top_chrome_only_does_not_verify_home_care_open():
+    tab_cfg = {
+        "scenario_id": "life_home_care_plugin",
+        "verify_tokens": ["home care", "home appliances"],
+        "context_verify": {"type": "screen_text", "text_regex": "(?i).*home\\s*care.*|.*홈\\s*케어.*"},
+    }
+
+    assert collection_flow._matches_post_open_verify(
+        tab_cfg,
+        "",
+        "상위 메뉴로 이동",
+        "상위 메뉴로 이동",
+        extra_candidates=["닫기"],
+    ) is False
+
+
+def test_overlay_dismiss_only_does_not_verify_clothing_care_open():
+    tab_cfg = {
+        "scenario_id": "life_clothing_care_plugin",
+        "verify_tokens": ["clothing care", "shoe care"],
+        "context_verify": {"type": "screen_text", "text_regex": "(?i).*clothing\\s*care.*|.*의류.*"},
+    }
+
+    assert collection_flow._matches_post_open_verify(
+        tab_cfg,
+        "",
+        "닫기",
+        "닫기",
+        extra_candidates=["상위 메뉴로 이동"],
+    ) is False
 
 
 def test_open_scenario_plugin_new_screen_boilerplate_only_candidate_aborts(monkeypatch):
@@ -9941,6 +10331,247 @@ def test_xml_entry_strict_target_gating_accepts_short_descendant_title_phrase(mo
     assert reason == "xml_entry_success"
     assert client.tap_calls
     assert any("matched_phrase='home monitor'" in line for line in logs if "[XMLENTRY][select" in line)
+
+
+def test_xml_entry_strict_target_gating_accepts_ko_home_monitor_title(monkeypatch):
+    class XmlClient:
+        def __init__(self):
+            self.tap_calls = []
+
+        def tap_xy_adb(self, dev, x, y):
+            self.tap_calls.append((dev, x, y))
+            return True
+
+    nodes = [
+        {
+            "text": "",
+            "contentDescription": "",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/service_card",
+            "className": "android.widget.FrameLayout",
+            "clickable": True,
+            "focusable": False,
+            "effectiveClickable": True,
+            "visibleToUser": True,
+            "boundsInScreen": "0,260,1080,840",
+            "children": [
+                {
+                    "text": "홈 모니터",
+                    "contentDescription": "",
+                    "viewIdResourceName": "",
+                    "className": "android.widget.TextView",
+                    "clickable": False,
+                    "focusable": False,
+                    "effectiveClickable": False,
+                    "visibleToUser": True,
+                    "boundsInScreen": "48,320,540,380",
+                    "children": [],
+                }
+            ],
+        }
+    ]
+    logs = []
+    monkeypatch.setattr(collection_flow, "_load_scrolltouch_xml_nodes", lambda **kwargs: (nodes, "ok"))
+    monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **kwargs: (True, "transition_confirmed"))
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    tab_cfg = _scenario_config("life_home_monitor_plugin")
+    client = XmlClient()
+    ok, reason = collection_flow._run_xml_scroll_search_tap(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        target=tab_cfg["pre_navigation"][0]["target"],
+        type_="card",
+        max_scroll_search_steps=0,
+        step_wait_seconds=0.2,
+        transition_fast_path=False,
+    )
+
+    assert ok is True
+    assert reason == "xml_entry_success"
+    assert client.tap_calls
+    assert any("matched_phrase='홈 모니터'" in line for line in logs if "[XMLENTRY][select" in line)
+
+
+def test_xml_entry_strict_target_gating_rejects_generic_ko_home_monitor_content(monkeypatch):
+    class XmlClient:
+        def __init__(self):
+            self.tap_calls = []
+
+        def tap_xy_adb(self, dev, x, y):
+            self.tap_calls.append((dev, x, y))
+            return True
+
+    nodes = [
+        {
+            "text": "보안",
+            "contentDescription": "",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/service_card",
+            "className": "android.widget.FrameLayout",
+            "clickable": True,
+            "focusable": False,
+            "effectiveClickable": True,
+            "visibleToUser": True,
+            "boundsInScreen": "0,260,1080,840",
+            "children": [],
+        }
+    ]
+    monkeypatch.setattr(collection_flow, "_load_scrolltouch_xml_nodes", lambda **kwargs: (nodes, "ok"))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    tab_cfg = _scenario_config("life_home_monitor_plugin")
+    client = XmlClient()
+    ok, reason = collection_flow._run_xml_scroll_search_tap(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        target=tab_cfg["pre_navigation"][0]["target"],
+        type_="card",
+        max_scroll_search_steps=0,
+        step_wait_seconds=0.2,
+        transition_fast_path=False,
+    )
+
+    assert ok is False
+    assert reason == "target_not_found_after_scroll"
+    assert client.tap_calls == []
+
+
+def test_xml_entry_strict_target_gating_accepts_stable_ko_music_sync_title(monkeypatch):
+    class XmlClient:
+        def __init__(self):
+            self.tap_calls = []
+
+        def tap_xy_adb(self, dev, x, y):
+            self.tap_calls.append((dev, x, y))
+            return True
+
+    nodes = [
+        {
+            "text": "조명과 음악을 동기화",
+            "contentDescription": "",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/service_card",
+            "className": "android.widget.FrameLayout",
+            "clickable": True,
+            "focusable": False,
+            "effectiveClickable": True,
+            "visibleToUser": True,
+            "boundsInScreen": "0,260,1080,840",
+            "children": [],
+        }
+    ]
+    logs = []
+    monkeypatch.setattr(collection_flow, "_load_scrolltouch_xml_nodes", lambda **kwargs: (nodes, "ok"))
+    monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **kwargs: (True, "transition_confirmed"))
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    tab_cfg = _scenario_config("life_music_sync_plugin")
+    client = XmlClient()
+    ok, reason = collection_flow._run_xml_scroll_search_tap(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        target=tab_cfg["pre_navigation"][0]["target"],
+        type_="card",
+        max_scroll_search_steps=0,
+        step_wait_seconds=0.2,
+        transition_fast_path=False,
+    )
+
+    assert ok is True
+    assert reason == "xml_entry_success"
+    assert client.tap_calls
+    assert any("matched_phrase='조명과 음악을 동기화'" in line for line in logs if "[XMLENTRY][select" in line)
+
+
+def test_xml_entry_strict_target_gating_rejects_ko_music_sync_body_copy(monkeypatch):
+    class XmlClient:
+        def __init__(self):
+            self.tap_calls = []
+
+        def tap_xy_adb(self, dev, x, y):
+            self.tap_calls.append((dev, x, y))
+            return True
+
+    nodes = [
+        {
+            "text": "몰입감 넘치는 경험을 할 수 있도록 조명과 음악을 동기화하세요.",
+            "contentDescription": "",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/service_card",
+            "className": "android.widget.FrameLayout",
+            "clickable": True,
+            "focusable": False,
+            "effectiveClickable": True,
+            "visibleToUser": True,
+            "boundsInScreen": "0,260,1080,840",
+            "children": [],
+        }
+    ]
+    monkeypatch.setattr(collection_flow, "_load_scrolltouch_xml_nodes", lambda **kwargs: (nodes, "ok"))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    tab_cfg = _scenario_config("life_music_sync_plugin")
+    client = XmlClient()
+    ok, reason = collection_flow._run_xml_scroll_search_tap(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        target=tab_cfg["pre_navigation"][0]["target"],
+        type_="card",
+        max_scroll_search_steps=0,
+        step_wait_seconds=0.2,
+        transition_fast_path=False,
+    )
+
+    assert ok is False
+    assert reason == "target_not_found_after_scroll"
+    assert client.tap_calls == []
+
+
+def test_xml_entry_strict_target_gating_rejects_generic_ko_music_sync_cta(monkeypatch):
+    class XmlClient:
+        def __init__(self):
+            self.tap_calls = []
+
+        def tap_xy_adb(self, dev, x, y):
+            self.tap_calls.append((dev, x, y))
+            return True
+
+    nodes = [
+        {
+            "text": "확인",
+            "contentDescription": "",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/service_card",
+            "className": "android.widget.FrameLayout",
+            "clickable": True,
+            "focusable": False,
+            "effectiveClickable": True,
+            "visibleToUser": True,
+            "boundsInScreen": "0,260,1080,840",
+            "children": [],
+        }
+    ]
+    monkeypatch.setattr(collection_flow, "_load_scrolltouch_xml_nodes", lambda **kwargs: (nodes, "ok"))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    tab_cfg = _scenario_config("life_music_sync_plugin")
+    client = XmlClient()
+    ok, reason = collection_flow._run_xml_scroll_search_tap(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        target=tab_cfg["pre_navigation"][0]["target"],
+        type_="card",
+        max_scroll_search_steps=0,
+        step_wait_seconds=0.2,
+        transition_fast_path=False,
+    )
+
+    assert ok is False
+    assert reason == "target_not_found_after_scroll"
+    assert client.tap_calls == []
 
 
 def test_xml_entry_strict_target_gating_rejects_descendant_match_when_own_text_conflicts(monkeypatch):
@@ -11487,6 +12118,64 @@ def test_plugin_more_options_detects_top_bar_node_when_focus_is_content(monkeypa
     }
     post_click_row = {**_main_row(236), "visible_label": "Settings", "focus_view_id": "com.example:id/menu_settings"}
     overlay_row = {**_main_row(237), "visible_label": "Settings", "context_type": "overlay"}
+    tab_cfg = {**_base_tab_cfg(max_steps=1), "scenario_id": "life_energy_plugin"}
+
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "expand_overlay", lambda **kwargs: (kwargs["rows"].append(overlay_row), kwargs["all_rows"].append(overlay_row), [overlay_row])[-1])
+    monkeypatch.setattr(collection_flow, "realign_focus_after_overlay", lambda **kwargs: {"entry_reached": False})
+    client = DummyClient([post_click_row])
+
+    result = collection_flow._overlay_phase(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=tab_cfg,
+        row=row,
+        rows=rows,
+        all_rows=all_rows,
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        main_step_index_by_fingerprint={},
+        expanded_overlay_entries=expanded,
+    )
+
+    assert result.candidate_reason == "plugin_more_options"
+    assert result.classification == "overlay"
+    assert client.touch_calls[0]["name"] == "^com\\.example\\.plugin:id/more$"
+    assert rows == [overlay_row]
+
+
+def test_plugin_more_options_detects_korean_top_bar_node_when_focus_is_content(monkeypatch):
+    rows = []
+    all_rows = []
+    expanded = set()
+    row = {
+        **_main_row(241),
+        "visible_label": "Usage this month",
+        "normalized_visible_label": "usage this month",
+        "focus_view_id": "com.example.plugin:id/content",
+        "focus_bounds": "50,700,1030,900",
+        "focus_node": {
+            "text": "Smart Energy",
+            "className": "android.webkit.WebView",
+            "boundsInScreen": {"l": 0, "t": 94, "r": 1080, "b": 2496},
+            "children": [
+                {
+                    "text": "더보기 버튼",
+                    "contentDescription": "",
+                    "viewIdResourceName": "com.example.plugin:id/more",
+                    "className": "android.widget.ImageButton",
+                    "clickable": True,
+                    "focusable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": {"l": 930, "t": 118, "r": 1050, "b": 250},
+                    "children": [],
+                }
+            ],
+        },
+    }
+    post_click_row = {**_main_row(242), "visible_label": "Settings", "focus_view_id": "com.example:id/menu_settings"}
+    overlay_row = {**_main_row(243), "visible_label": "Settings", "context_type": "overlay"}
     tab_cfg = {**_base_tab_cfg(max_steps=1), "scenario_id": "life_energy_plugin"}
 
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)

@@ -5,6 +5,7 @@ from typing import Any
 from talkback_lib import A11yAdbClient
 from tb_runner.context_verifier import verify_context
 from tb_runner.constants import MAIN_ANNOUNCEMENT_WAIT_SECONDS, MAIN_STEP_WAIT_SECONDS
+from tb_runner.label_matcher import expand_verify_token_aliases
 from tb_runner.logging_utils import log
 from tb_runner.utils import _safe_regex_search, parse_bounds_str
 
@@ -339,12 +340,8 @@ def _pick_top_content_fallback_candidate(
         identity_candidates = non_oversized_readable_candidates
 
     normalized_entry_type = str(entry_type or "").strip().lower()
-    normalized_verify_tokens = [
-        str(token or "").strip().lower() for token in (verify_tokens or []) if str(token or "").strip()
-    ]
-    normalized_negative_tokens = [
-        str(token or "").strip().lower() for token in (negative_verify_tokens or []) if str(token or "").strip()
-    ]
+    normalized_verify_tokens = list(expand_verify_token_aliases(verify_tokens or []))
+    normalized_negative_tokens = list(expand_verify_token_aliases(negative_verify_tokens or []))
     prioritize_verify_tokens = normalized_entry_type == "direct_select" and bool(normalized_verify_tokens)
     if prioritize_verify_tokens:
         token_hit_candidates = []

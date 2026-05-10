@@ -10,10 +10,18 @@ import argparse
 import glob
 import re
 import sys
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 
 STOP_REASON_RE = re.compile(r"\[STOP\]\[summary\].*?\breason=(?:'([^']*)'|(\S+))")
@@ -24,55 +32,192 @@ LABEL_FIELD_RE = re.compile(r"\b(visible|visible_label|speech|merged_announcemen
 DEFAULT_SCENARIO = "life_family_care_plugin"
 DEFAULT_EXPECTED_LABELS = ["Medication", "Hospital", "Event"]
 SCENARIO_EXPECTED_LABELS = {
-    "life_family_care_plugin": DEFAULT_EXPECTED_LABELS,
-    "life_air_care_plugin": [],
+    "life_family_care_plugin": {
+        "ready": {
+            "add_family_member": [
+                "Add family member",
+                "가족 구성원 추가",
+            ],
+            "profile": [
+                "Profile",
+                "View profile",
+                "프로필 보기",
+            ],
+            "active_now": [
+                "Active now",
+                "지금 활동 중",
+            ],
+            "me": [
+                "Me",
+                "나",
+            ],
+        },
+        "initial": [],
+    },
+    "life_air_care_plugin": {
+        "ready": {
+            "outdoor_air_quality": [
+                "Outdoor air quality",
+                "실외 공기질",
+                "실외 공기(미세먼지)",
+            ],
+            "set_geolocation": [
+                "Set geolocation to monitor outdoor air quality",
+                "실외 공기질 모니터링을 위해 위치를 설정하세요",
+                "위치 설정",
+            ],
+        },
+        "initial": {
+            "dismiss": [
+                "Dismiss",
+                "닫기",
+                "지우기",
+            ],
+        },
+    },
     "life_home_care_plugin": {
-        "ready": [
-            "Device care",
-            "Usage guide",
-            "Smart Forward",
-        ],
+        "ready": {
+            "home_care": [
+                "Home Care",
+                "홈 케어",
+                "홈케어",
+            ],
+            "samsung_appliances": [
+                "Samsung appliances",
+                "삼성 가전 기기",
+                "가전 기기",
+            ],
+            "smart_management": [
+                "Smart management",
+                "똑똑한 관리",
+            ],
+            "device_care": ["Device care"],
+            "usage_guide": ["Usage guide"],
+            "smart_forward": ["Smart Forward"],
+        },
         "initial": ["Start"],
     },
     "life_energy_plugin": {
-        "ready": [
-            "Carbon emissions aware",
-            "Device energy usage",
-            "AI Energy Mode",
-            "Energy saving tips",
-        ],
+        "ready": {
+            "energy_title": [
+                "SmartThings Energy",
+                "Smart Energy",
+                "Energy",
+                "에너지",
+            ],
+            "carbon_emissions": [
+                "Carbon emissions aware",
+                "Carbon emissions",
+                "탄소 배출량",
+                "탄소 배출량 인사이트",
+            ],
+            "device_energy_usage": [
+                "Device energy usage",
+                "Energy usage",
+                "기기 에너지 사용량",
+            ],
+            "ai_energy_mode": ["AI Energy Mode"],
+            "energy_saving_tips": ["Energy saving tips"],
+            "monitor": ["Monitor", "모니터링"],
+            "save": ["Save", "절약"],
+            "activity": ["Activity", "활동"],
+        },
         "initial": [
             "Start",
         ],
     },
     "life_pet_care_plugin": {
-        "ready": [
-            "Add profile",
-            "Start walk",
-            "Find where your pet is",
-        ],
+        "ready": {
+            "add_profile": [
+                "Add profile",
+                "프로필 추가",
+            ],
+            "enter_pet_info": [
+                "Enter your pet information",
+                "반려동물 정보를 입력하세요",
+            ],
+            "pet_location": [
+                "Pet location",
+                "Find where your pet is",
+                "반려동물 위치 확인",
+            ],
+            "activity": [
+                "Activity",
+                "활동",
+            ],
+            "care": [
+                "Care",
+                "케어",
+            ],
+            "start_walk": ["Start walk"],
+        },
         "initial": ["Start"],
     },
     "life_plant_care_plugin": {
-        "ready": [
-            "Are you growing many plants in one place?",
-            "Needs water",
-            "To do soon",
-        ],
+        "ready": {
+            "many_plants": [
+                "Are you growing many plants in one place?",
+                "한 장소에서 많은 식물을 키우고 있나요?",
+            ],
+            "needs_water": [
+                "Needs water",
+                "물 필요",
+                "물 주기 필요",
+            ],
+            "to_do_soon": [
+                "To do soon",
+                "곧 할 일",
+            ],
+            "my_plants": [
+                "My plants",
+                "내 식물",
+            ],
+            "routines": [
+                "Routines",
+                "자동화",
+            ],
+        },
         "initial": [],
     },
     "life_clothing_care_plugin": {
-        "ready": [
-            "It's time to care for your blanket",
-            "Try Bedding cycle",
-            "Schedule",
-        ],
+        "ready": {
+            "clothing_care": [
+                "Clothing Care",
+                "의류 관리",
+                "클로딩 케어",
+            ],
+            "washing": [
+                "Washing",
+                "세탁",
+            ],
+            "drying": [
+                "Drying",
+                "건조",
+            ],
+            "airdresser": [
+                "AirDresser",
+                "에어드레서",
+            ],
+            "shoedresser": [
+                "ShoeDresser",
+                "슈드레서",
+            ],
+            "blanket_care": ["It's time to care for your blanket"],
+            "bedding_cycle": ["Try Bedding cycle"],
+            "schedule": ["Schedule"],
+        },
         "initial": [
             "Start",
         ],
     },
     "life_find_plugin": {
-        "ready": [],
+        "ready": {
+            "find_title": [
+                "Smart Find",
+                "Find",
+                "파인드",
+            ],
+        },
         "initial": [
             "Allow location access",
             "Turn on location",
@@ -81,7 +226,13 @@ SCENARIO_EXPECTED_LABELS = {
         ],
     },
     "life_video_plugin": {
-        "ready": [],
+        "ready": {
+            "video_title": [
+                "Smart Video",
+                "Video",
+                "비디오",
+            ],
+        },
         "initial": [
             "Experience smarter care",
             "Discover exciting new AI",
@@ -90,29 +241,83 @@ SCENARIO_EXPECTED_LABELS = {
         ],
     },
     "life_home_monitor_plugin": {
-        "ready": [
-            "Monitor",
-            "History",
-            "View sensors",
-            "Useful features",
-        ],
-        "initial": [
-            "Tap to set up",
-        ],
+        "ready": {
+            "home_monitor_title": [
+                "Home Monitor",
+                "홈 모니터",
+            ],
+            "security": [
+                "Security",
+                "보안",
+            ],
+            "smoke": [
+                "Smoke",
+                "연기",
+            ],
+            "water_leak": [
+                "Water leak",
+                "누수",
+            ],
+        },
+        "initial": {
+            "tap_to_set_up": [
+                "Tap to set up",
+            ],
+        },
     },
-    "life_music_sync_plugin": [],
+    "life_music_sync_plugin": {
+        "ready": {
+            "music_sync_title": [
+                "Music Sync",
+                "조명을 음악에 어울리도록 동기화",
+                "조명과 음악을 동기화",
+                "음악 동기화",
+            ],
+        },
+        "initial": {},
+    },
     "life_food_plugin": {
-        "ready": [
-            "Recipe optimized for Samsung Oven",
-            "Add to Meal planner",
-            "Saved recipes",
-            "Ingredients",
-        ],
-        "initial": [
-            "Smart Things Cooking",
-            "Cook like an expert with customized recipes",
-            "Start",
-        ],
+        "ready": {
+            "food_title": [
+                "Smart Things Cooking",
+                "SmartThings Cooking",
+                "Food",
+                "푸드",
+            ],
+            "recipe_optimized": ["Recipe optimized for Samsung Oven"],
+            "meal_planner": ["Add to Meal planner"],
+            "saved_recipes": ["Saved recipes"],
+            "ingredients": ["Ingredients"],
+        },
+        "initial": {
+            "food_title": [
+                "Smart Things Cooking",
+                "SmartThings Cooking",
+                "Food",
+                "푸드",
+            ],
+            "expert_recipes": ["Cook like an expert with customized recipes"],
+            "start": ["Start"],
+        },
+    },
+    "settings_entry_example": {
+        "ready": {
+            "smartthings_settings": [
+                "SmartThings settings",
+                "스마트싱스 설정",
+            ],
+            "app_update": [
+                "App update",
+                "Update app",
+                "App updates",
+                "앱 업데이트",
+            ],
+            "location_sharing": [
+                "Location sharing notification",
+                "위치정보 공유 알림",
+            ],
+        },
+        "initial": [],
     },
 }
 EXPECTED_LABELS = SCENARIO_EXPECTED_LABELS
@@ -143,6 +348,10 @@ class RuntimeSummary:
     initial_expected_labels: tuple[str, ...]
     ready_matched_labels: tuple[str, ...]
     initial_matched_labels: tuple[str, ...]
+    ready_matched_groups: tuple[str, ...]
+    initial_matched_groups: tuple[str, ...]
+    ready_match_details: tuple[str, ...]
+    initial_match_details: tuple[str, ...]
     baseline_status: str
     detected_state: str
     fatal: bool
@@ -291,32 +500,89 @@ def _match_threshold(labels: tuple[str, ...], *, initial: bool = False) -> int:
 
 def _normalize_expected_label_config(
     config: object,
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
+) -> tuple[tuple[str, ...], tuple[str, ...], dict[str, tuple[str, ...]], dict[str, tuple[str, ...]]]:
     if isinstance(config, dict):
         ready = config.get("ready", [])
         initial = config.get("initial", [])
-        return tuple(label for label in ready if label), tuple(label for label in initial if label)
+        ready_labels, ready_groups = _normalize_expected_label_section(ready)
+        initial_labels, initial_groups = _normalize_expected_label_section(initial)
+        return ready_labels, initial_labels, ready_groups, initial_groups
     if config is None:
-        return (), ()
-    return tuple(label for label in config if label), ()
+        return (), (), {}, {}
+    ready_labels, ready_groups = _normalize_expected_label_section(config)
+    return ready_labels, (), ready_groups, {}
+
+
+def _normalize_expected_label_section(section: object) -> tuple[tuple[str, ...], dict[str, tuple[str, ...]]]:
+    if isinstance(section, dict):
+        groups: dict[str, tuple[str, ...]] = {}
+        for group, aliases in section.items():
+            group_name = str(group or "").strip()
+            if not group_name:
+                continue
+            if isinstance(aliases, str):
+                alias_values = (aliases,)
+            else:
+                alias_values = tuple(str(alias or "").strip() for alias in aliases or ())
+            alias_values = tuple(alias for alias in alias_values if alias)
+            if alias_values:
+                groups[group_name] = alias_values
+        return tuple(groups.keys()), groups
+    if isinstance(section, str):
+        return ((section,) if section else ()), {}
+    return tuple(str(label or "").strip() for label in section or () if str(label or "").strip()), {}
 
 
 def _resolve_expected_labels(
     *,
     scenario: str | None = None,
     expected_labels: Iterable[str] | None = None,
-) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
+) -> tuple[str, tuple[str, ...], tuple[str, ...], dict[str, tuple[str, ...]], dict[str, tuple[str, ...]]]:
     resolved_scenario = scenario or DEFAULT_SCENARIO
     if expected_labels is not None:
         labels = tuple(label for label in expected_labels if label)
-        return resolved_scenario, labels, ()
+        return resolved_scenario, labels, (), {}, {}
     return (resolved_scenario, *_normalize_expected_label_config(
         SCENARIO_EXPECTED_LABELS.get(resolved_scenario, DEFAULT_EXPECTED_LABELS)
     ))
 
 
+def _normalize_match_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKC", str(text or "")).casefold()
+    normalized = normalized.replace("\u00a0", " ")
+    normalized = re.sub(r"[\r\n\t]+", " ", normalized)
+    normalized = re.sub(r"[\"'`]+", "", normalized)
+    normalized = re.sub(r"[,:;.!?()\[\]{}<>/\\|_-]+", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _alias_matches_text(alias: str, text: str, normalized_text: str) -> bool:
+    alias_value = str(alias or "").strip()
+    if not alias_value:
+        return False
+    if alias_value in text:
+        return True
+    normalized_alias = _normalize_match_text(alias_value)
+    if not normalized_alias:
+        return False
+    if len(normalized_alias) <= 2:
+        return normalized_text == normalized_alias or f" {normalized_alias} " in f" {normalized_text} "
+    return normalized_alias in normalized_text
+
+
 def _matched_labels(labels: tuple[str, ...], text: str) -> tuple[str, ...]:
     return tuple(label for label in labels if label in text)
+
+
+def _matched_label_groups(groups: dict[str, tuple[str, ...]], text: str) -> tuple[tuple[str, str, str], ...]:
+    normalized_text = _normalize_match_text(text)
+    matches: list[tuple[str, str, str]] = []
+    for group, aliases in groups.items():
+        for alias in aliases:
+            if _alias_matches_text(alias, text, normalized_text):
+                matches.append((group, alias, alias))
+                break
+    return tuple(matches)
 
 
 def _evaluate_baseline_status(
@@ -384,12 +650,28 @@ def parse_log(
     adb_timeout = _has_adb_timeout(text)
     fatal = "Traceback" in text or "[ERROR]" in text or adb_timeout
     raw_rows, filtered_rows = _last_save_rows(text)
-    resolved_scenario, ready_expected_labels, initial_expected_labels = _resolve_expected_labels(
+    (
+        resolved_scenario,
+        ready_expected_labels,
+        initial_expected_labels,
+        ready_expected_groups,
+        initial_expected_groups,
+    ) = _resolve_expected_labels(
         scenario=scenario,
         expected_labels=expected_labels,
     )
-    ready_matched_labels = _matched_labels(ready_expected_labels, text)
-    initial_matched_labels = _matched_labels(initial_expected_labels, text)
+    ready_group_matches = _matched_label_groups(ready_expected_groups, text)
+    initial_group_matches = _matched_label_groups(initial_expected_groups, text)
+    ready_matched_labels = (
+        tuple(group for group, _alias, _source in ready_group_matches)
+        if ready_expected_groups
+        else _matched_labels(ready_expected_labels, text)
+    )
+    initial_matched_labels = (
+        tuple(group for group, _alias, _source in initial_group_matches)
+        if initial_expected_groups
+        else _matched_labels(initial_expected_labels, text)
+    )
     baseline_status, detected_state = _evaluate_baseline_status(
         fatal=fatal,
         stop_reason=_last_stop_reason(text),
@@ -408,6 +690,10 @@ def parse_log(
         initial_expected_labels=initial_expected_labels,
         ready_matched_labels=ready_matched_labels,
         initial_matched_labels=initial_matched_labels,
+        ready_matched_groups=tuple(group for group, _alias, _source in ready_group_matches),
+        initial_matched_groups=tuple(group for group, _alias, _source in initial_group_matches),
+        ready_match_details=tuple(f"{group}:{alias}" for group, alias, _source in ready_group_matches),
+        initial_match_details=tuple(f"{group}:{alias}" for group, alias, _source in initial_group_matches),
         baseline_status=baseline_status,
         detected_state=detected_state,
         fatal=fatal,
@@ -445,9 +731,13 @@ def print_summary(summary: RuntimeSummary, *, include_path: bool) -> None:
     print(f"ready_expected_count={len(summary.ready_expected_labels)}")
     print(f"ready_matched_count={len(summary.ready_matched_labels)}")
     print(f"ready_matched_labels={_join_labels(summary.ready_matched_labels)}")
+    print(f"ready_matched_groups={_join_labels(summary.ready_matched_groups)}")
+    print(f"ready_match_details={_join_labels(summary.ready_match_details)}")
     print(f"initial_expected_count={len(summary.initial_expected_labels)}")
     print(f"initial_matched_count={len(summary.initial_matched_labels)}")
     print(f"initial_matched_labels={_join_labels(summary.initial_matched_labels)}")
+    print(f"initial_matched_groups={_join_labels(summary.initial_matched_groups)}")
+    print(f"initial_match_details={_join_labels(summary.initial_match_details)}")
     print(f"fatal={summary.fatal}")
     print(f"stop_reason={_format_value(summary.stop_reason)}")
     print(f"total_steps={_format_value(summary.total_steps)}")

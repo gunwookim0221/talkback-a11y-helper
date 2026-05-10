@@ -105,13 +105,13 @@ TAB_CONFIGS = [
         "pre_navigation": [
             {
                 "action": "xml_scroll_search_tap",
-                "target": "(?i)(^food$|food\\.|smart\\s*things\\s*cooking|\\bcooking\\b)",
+                "target": "(?i)(^food$|food\\.|smart\\s*things\\s*cooking|\\bcooking\\b|^푸드$)",
                 "type": "a",
             }
         ],
         "entry_match": {
             "title_patterns": [
-                "(?i)(^food$|food\\.|smart\\s*things\\s*cooking|\\bcooking\\b)",
+                "(?i)(^food$|food\\.|smart\\s*things\\s*cooking|\\bcooking\\b|^푸드$)",
             ],
             "description_patterns": [
                 "(?i)(smart\\s*things\\s*cooking|\\bcooking\\b|\\bmeal\\b|\\brecipe\\b|barcode\\s*scan|kitchen\\s*appliance)",
@@ -120,6 +120,11 @@ TAB_CONFIGS = [
                 "(?i)(preinstalledservicecard|servicecard|food|cook|card|container|item)",
             ],
             "allow_description_match": True,
+            "semantic_probe": {
+                "aliases": ["smart things cooking", "smartthings cooking", "food", "푸드"],
+                "hint_tokens": [],
+                "generic_weak_tokens": [],
+            },
         },
         "verify_tokens": ["smartthings cooking", "ingredients"],
         "anchor_name": "(?i).*navigate\\s*up.*",
@@ -131,7 +136,7 @@ TAB_CONFIGS = [
         },
         "context_verify": {
             "type": "screen_text",
-            "text_regex": "(?i).*smart\\s*things\\s*cooking.*|.*ingredients.*|.*모닝빵양배추샌드위치.*",
+            "text_regex": "(?i).*smart\\s*things\\s*cooking.*|.*ingredients.*|.*푸드.*|.*모닝빵양배추샌드위치.*",
         },
         "overlay_policy": {
             "allow_candidates": [
@@ -244,17 +249,17 @@ TAB_CONFIGS = [
         "special_state_cta_tokens": ["start"],
         "special_state_handling": "back_after_read",
 
-        "anchor_name": "(?i).*navigate\\s*up.*",
+        "anchor_name": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
         "anchor_type": "a",
         "anchor": {
-            "text_regex": "(?i).*navigate\\s*up.*",
-            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "text_regex": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
+            "announcement_regex": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
             "tie_breaker": "top_left",
         },
 
         "context_verify": {
             "type": "screen_text",
-            "text_regex": "(?i).*home\\s*care.*|.*homecare.*|.*홈\\s*케어.*",
+            "text_regex": "(?i).*home\\s*care.*|.*homecare.*|.*홈\\s*케어.*|.*홈케어.*|.*삼성\\s*가전.*|.*가전\\s*기기.*",
         },
         "overlay_policy": {
             "allow_candidates": [
@@ -283,13 +288,13 @@ TAB_CONFIGS = [
         "pre_navigation": [
             {
                 "action": "xml_scroll_search_tap",
-                "target": "(?i)(^energy$|energy\\.|\\bsmart\\s*energy\\b|\\benergy\\b)",
+                "target": "(?i)(^energy$|energy\\.|\\bsmart\\s*energy\\b|\\benergy\\b|^에너지$)",
                 "type": "a",
             }
         ],
         "entry_match": {
             "title_patterns": [
-                "(?i)(^energy$|energy\\.|\\bsmart\\s*energy\\b|\\benergy\\b)",
+                "(?i)(^energy$|energy\\.|\\bsmart\\s*energy\\b|\\benergy\\b|^에너지$)",
             ],
             "description_patterns": [
                 "(?i)(energy\\s*usage|measuring\\s*energy\\s*usage|add\\s*an\\s*appliance|appliance)",
@@ -298,6 +303,11 @@ TAB_CONFIGS = [
                 "(?i)(preinstalledservicecard|servicecard|energy|card|container|item)",
             ],
             "allow_description_match": True,
+            "semantic_probe": {
+                "aliases": ["smartthings energy", "smart energy", "energy", "에너지"],
+                "hint_tokens": [],
+                "generic_weak_tokens": [],
+            },
         },
         "verify_tokens": ["energy", "smartthings energy", "energy usage", "measuring energy usage", "appliance"],
 
@@ -311,7 +321,7 @@ TAB_CONFIGS = [
 
         "context_verify": {
             "type": "screen_text",
-            "text_regex": "(?i).*energy.*",
+            "text_regex": "(?i).*energy.*|.*에너지.*",
         },
         "overlay_policy": {
             "allow_candidates": [
@@ -706,28 +716,29 @@ TAB_CONFIGS = [
         "pre_navigation": [
             {
                 "action": "xml_scroll_search_tap",
-                "target": "(?i)(^clothing\\s*care$|.*clothing\\s*care.*|.*shoe\\s*care.*|.*의류.*)",
+                "target": "(?i)(^clothing\\s*care$|.*clothing\\s*care.*|.*shoe\\s*care.*|.*의류\\s*관리.*|.*클로딩\\s*케어.*|.*에어드레서.*|.*슈드레서.*)",
                 "type": "a",
             }
         ],
         "entry_match": {
             "title_patterns": [
-                "(?i)(^clothing\\s*care$|.*clothing\\s*care.*|.*shoe\\s*care.*|.*의류.*)",
+                "(?i)(^clothing\\s*care$|.*clothing\\s*care.*|.*shoe\\s*care.*|.*의류\\s*관리.*|.*클로딩\\s*케어.*|.*에어드레서.*|.*슈드레서.*)",
             ],
             "description_patterns": [],
             "resource_patterns": [],
             "allow_description_match": True,
         },
-        "anchor_name": "(?i).*navigate\\s*up.*",
+        "verify_tokens": ["clothing care", "shoe care"],
+        "anchor_name": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
         "anchor_type": "a",
         "anchor": {
-            "text_regex": "(?i).*navigate\\s*up.*",
-            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "text_regex": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
+            "announcement_regex": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
             "type": "screen_text",
-            "text_regex": "(?i).*clothing\\s*care.*|.*shoe\\s*care.*|.*의류.*",
+            "text_regex": "(?i).*clothing\\s*care.*|.*shoe\\s*care.*|.*의류\\s*관리.*|.*클로딩\\s*케어.*|.*에어드레서.*|.*슈드레서.*",
         },
         "enabled": False,
         "max_steps": 20,
@@ -743,23 +754,24 @@ TAB_CONFIGS = [
         "pre_navigation": [
             {
                 "action": "xml_scroll_search_tap",
-                "target": "(?i)(^smart\\s*find$|^find$|smart\\s*find\\.|.*smart\\s*find.*)",
+                "target": "(?i)(^smart\\s*find$|^find$|smart\\s*find\\.|.*smart\\s*find.*|^파인드$)",
                 "type": "a",
             }
         ],
         "entry_match": {
             "title_patterns": [
-                "(?i)(^smart\\s*find$|^find$|smart\\s*find\\.|.*smart\\s*find.*)",
+                "(?i)(^smart\\s*find$|^find$|smart\\s*find\\.|.*smart\\s*find.*|^파인드$)",
             ],
             "description_patterns": [],
             "resource_patterns": [],
             "allow_description_match": True,
             "semantic_probe": {
-                "aliases": ["smart find", "find", "location", "tracker", "tag"],
+                "aliases": ["smart find", "find", "파인드", "location", "tracker", "tag"],
                 "hint_tokens": [],
                 "generic_weak_tokens": ["find"],
             },
         },
+        "verify_tokens": ["smart find", "find"],
         "anchor_name": "(?i).*navigate\\s*up.*",
         "anchor_type": "a",
         "anchor": {
@@ -769,7 +781,7 @@ TAB_CONFIGS = [
         },
         "context_verify": {
             "type": "screen_text",
-            "text_regex": "(?i).*smart\\s*find.*|^find$|.*find\\s*my\\s*(mobile|device|tag).*$",
+            "text_regex": "(?i).*smart\\s*find.*|^find$|^파인드$|.*내\\s*기기.*|.*find\\s*my\\s*(mobile|device|tag).*$",
         },
         "enabled": False,
         "max_steps": 20,
@@ -785,23 +797,24 @@ TAB_CONFIGS = [
         "pre_navigation": [
             {
                 "action": "xml_scroll_search_tap",
-                "target": "(?i)(^video$|^smart\\s*video$|smart\\s*video\\.|.*smart\\s*video.*)",
+                "target": "(?i)(^video$|^smart\\s*video$|smart\\s*video\\.|.*smart\\s*video.*|^비디오$)",
                 "type": "a",
             }
         ],
         "entry_match": {
             "title_patterns": [
-                "(?i)(^video$|^smart\\s*video$|smart\\s*video\\.|.*smart\\s*video.*)",
+                "(?i)(^video$|^smart\\s*video$|smart\\s*video\\.|.*smart\\s*video.*|^비디오$)",
             ],
             "description_patterns": [],
             "resource_patterns": [],
             "allow_description_match": True,
             "semantic_probe": {
-                "aliases": ["smart video", "video", "camera", "live view", "recording"],
+                "aliases": ["smart video", "video", "비디오", "camera", "live view", "recording"],
                 "hint_tokens": [],
                 "generic_weak_tokens": ["video"],
             },
         },
+        "verify_tokens": ["smart video", "live view", "daily clips", "recorded clips"],
         "anchor_name": "(?i).*navigate\\s*up.*",
         "anchor_type": "a",
         "anchor": {
@@ -811,7 +824,7 @@ TAB_CONFIGS = [
         },
         "context_verify": {
             "type": "screen_text",
-            "text_regex": "(?i).*video.*",
+            "text_regex": "(?i)(^video$|.*smart\\s*video.*|.*live\\s*view.*|.*daily\\s*clips.*|.*recorded\\s*clips.*|^비디오$)",
         },
         "enabled": False,
         "max_steps": 20,
@@ -827,28 +840,29 @@ TAB_CONFIGS = [
         "pre_navigation": [
             {
                 "action": "xml_scroll_search_tap",
-                "target": "(?i)\\bhome\\s*monitor\\b",
+                "target": "(?i)(\\bhome\\s*monitor\\b|홈\\s*모니터)",
                 "type": "a",
             }
         ],
         "entry_match": {
             "title_patterns": [
-                "(?i)\\bhome\\s*monitor\\b",
+                "(?i)(\\bhome\\s*monitor\\b|홈\\s*모니터)",
             ],
             "description_patterns": [],
             "resource_patterns": [],
             "allow_description_match": True,
         },
-        "anchor_name": "(?i).*navigate\\s*up.*",
+        "verify_tokens": ["home monitor", "홈 모니터"],
+        "anchor_name": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
         "anchor_type": "a",
         "anchor": {
-            "text_regex": "(?i).*navigate\\s*up.*",
-            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "text_regex": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
+            "announcement_regex": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
             "type": "screen_text",
-            "text_regex": "(?i)\\bhome\\s*monitor\\b",
+            "text_regex": "(?i)(\\bhome\\s*monitor\\b|홈\\s*모니터)",
         },
         "enabled": False,
         "max_steps": 20,
@@ -864,28 +878,36 @@ TAB_CONFIGS = [
         "pre_navigation": [
             {
                 "action": "xml_scroll_search_tap",
-                "target": "(?i)(^music\\s*sync$|.*music\\s*sync.*)",
+                "target": "(?i)(^music\\s*sync$|.*music\\s*sync.*|.*조명과\\s*음악을\\s*동기화.*|.*음악\\s*동기화.*|.*조명을\\s*음악에\\s*어울리도록\\s*동기화.*)",
                 "type": "a",
             }
         ],
         "entry_match": {
             "title_patterns": [
-                "(?i)(^music\\s*sync$|.*music\\s*sync.*)",
+                "(?i)(^music\\s*sync$|.*music\\s*sync.*|.*조명과\\s*음악을\\s*동기화.*|.*음악\\s*동기화.*|.*조명을\\s*음악에\\s*어울리도록\\s*동기화.*)",
             ],
             "description_patterns": [],
             "resource_patterns": [],
             "allow_description_match": True,
         },
-        "anchor_name": "(?i).*navigate\\s*up.*",
+        "verify_tokens": [
+            "music sync",
+            "sync your lights with music",
+            "sync your lights to music",
+            "sync music and lights",
+            "조명과 음악을 동기화",
+            "조명을 음악에 어울리도록 동기화",
+        ],
+        "anchor_name": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
         "anchor_type": "a",
         "anchor": {
-            "text_regex": "(?i).*navigate\\s*up.*",
-            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "text_regex": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
+            "announcement_regex": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
             "type": "screen_text",
-            "text_regex": "(?i).*music\\s*sync.*",
+            "text_regex": "(?i)(.*music\\s*sync.*|.*sync\\s+your\\s+lights\\s+(with|to)\\s+music.*|.*sync\\s+music\\s+and\\s+lights.*|.*조명과\\s*음악을\\s*동기화.*|.*음악\\s*동기화.*|.*조명을\\s*음악에\\s*어울리도록\\s*동기화.*)",
         },
         "enabled": False,
         "max_steps": 20,

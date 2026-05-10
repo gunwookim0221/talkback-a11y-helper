@@ -18,6 +18,7 @@ from tb_runner.constants import (
 from tb_runner.diagnostics import is_placeholder_row
 from tb_runner.excel_report import save_excel
 from tb_runner.image_utils import maybe_capture_focus_crop
+from tb_runner.label_matcher import matches_alias, normalize_label
 from tb_runner.logging_utils import log
 from tb_runner.perf_stats import ScenarioPerfStats, save_excel_with_perf
 from tb_runner.utils import build_row_fingerprint, make_main_fingerprint
@@ -79,7 +80,7 @@ def _matches_overlay_candidate(step: dict[str, Any], entry: dict[str, Any]) -> b
         or ""
     ).strip()
     entry_view_id = str(entry.get("resource_id", "") or "").strip()
-    entry_label = str(entry.get("label", "") or "").strip().lower()
+    entry_label = str(entry.get("label", "") or "").strip()
     entry_class_name = str(entry.get("class_name", "") or entry.get("className", "") or "").strip()
 
     has_condition = bool(entry_view_id or entry_label or entry_class_name)
@@ -87,11 +88,59 @@ def _matches_overlay_candidate(step: dict[str, Any], entry: dict[str, Any]) -> b
         return False
     if entry_view_id and focus_view_id != entry_view_id:
         return False
-    if entry_label and normalized_visible_label != entry_label:
+    if entry_label and not _matches_overlay_label(step, entry_label):
         return False
     if entry_class_name and focus_class_name != entry_class_name:
         return False
     return True
+
+
+def _overlay_alias_key_for_label(label: str) -> str:
+    for key in ("more_options", "dismiss", "navigate_up"):
+        if matches_alias(label, key, mode="exact") or matches_alias(label, key, mode="token"):
+            return key
+    return ""
+
+
+def _overlay_label_values(step: dict[str, Any]) -> list[str]:
+    focus_node = step.get("focus_node")
+    values = [
+        step.get("visible_label", ""),
+        step.get("normalized_visible_label", ""),
+        step.get("merged_announcement", ""),
+    ]
+    if isinstance(focus_node, dict):
+        values.extend(
+            [
+                focus_node.get("text", ""),
+                focus_node.get("contentDescription", ""),
+                focus_node.get("mergedLabel", ""),
+                focus_node.get("talkbackLabel", ""),
+            ]
+        )
+    result: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
+def _matches_overlay_label(step: dict[str, Any], entry_label: str) -> bool:
+    expected = normalize_label(entry_label)
+    if not expected:
+        return False
+    values = _overlay_label_values(step)
+    if any(normalize_label(value) == expected for value in values):
+        return True
+    alias_key = _overlay_alias_key_for_label(entry_label)
+    if not alias_key:
+        return False
+    return any(matches_alias(value, alias_key, mode="exact") or matches_alias(value, alias_key, mode="token") for value in values)
+
+
+def _has_navigate_up_signal(value: str) -> bool:
+    return matches_alias(value, "navigate_up", mode="exact") or matches_alias(value, "navigate_up", mode="token")
 
 
 def _get_overlay_policy_entries(tab_cfg: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
@@ -177,6 +226,8 @@ def classify_post_click_result(
     explicit_navigation_cue = (
         any(cue in post_label for cue in navigation_cues)
         or any(cue in post_announcement for cue in navigation_cues)
+        or _has_navigate_up_signal(post_label)
+        or _has_navigate_up_signal(post_announcement)
     )
     toolbar_navigation_cue = any(cue in post_view_id for cue in toolbar_cues)
     navigation_cue = bool(explicit_navigation_cue or (toolbar_navigation_cue and not entry_is_overlay_candidate))
