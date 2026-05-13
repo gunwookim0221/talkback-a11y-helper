@@ -151,6 +151,21 @@
       "enabled": false,
       "max_steps": 40
     },
+    "device_motion_sensor_plugin": {
+      "group": "plugin_screen",
+      "enabled": false,
+      "max_steps": 40
+    },
+    "device_door_lock_plugin": {
+      "group": "plugin_screen",
+      "enabled": false,
+      "max_steps": 40
+    },
+    "device_air_purifier_plugin": {
+      "group": "plugin_screen",
+      "enabled": false,
+      "max_steps": 40
+    },
 
     "life_food_plugin": {
       "group": "plugin_screen",
