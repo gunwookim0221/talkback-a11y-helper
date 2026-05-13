@@ -37,6 +37,18 @@ def test_life_food_plugin_uses_xml_card_entry_spec():
     assert "(?i)(^food$|food\\.|smart\\s*things\\s*cooking|\\bcooking\\b|^푸드$)" in food_cfg["entry_match"]["title_patterns"]
 
 
+def test_device_smoke_and_water_leak_plugins_use_device_pre_navigation():
+    smoke_cfg = next(cfg for cfg in TAB_CONFIGS if cfg.get("scenario_id") == "device_smoke_sensor_plugin")
+    leak_cfg = next(cfg for cfg in TAB_CONFIGS if cfg.get("scenario_id") == "device_water_leak_sensor_plugin")
+
+    assert smoke_cfg["tab"]["resource_id_regex"] == "com\\.samsung\\.android\\.oneconnect:id/menu_devices"
+    assert leak_cfg["tab"]["resource_id_regex"] == "com\\.samsung\\.android\\.oneconnect:id/menu_devices"
+    assert smoke_cfg["pre_navigation"][0]["action"] == "enter_device_card_plugin"
+    assert leak_cfg["pre_navigation"][0]["action"] == "enter_device_card_plugin"
+    assert smoke_cfg["pre_navigation"][0]["target_stable_labels"] == ["연기", "Smoke sensor"]
+    assert leak_cfg["pre_navigation"][0]["target_stable_labels"] == ["누수", "Water leak sensor"]
+
+
 def test_configure_process_temp_dir_sets_tmp_and_temp(tmp_path):
     applied, path_text = configure_process_temp_dir(str(tmp_path / ".tmp"))
 

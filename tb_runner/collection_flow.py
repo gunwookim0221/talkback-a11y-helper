@@ -41,6 +41,7 @@ from tb_runner.utils import (
     parse_bounds_str,
 )
 from tb_runner import container_group_logic
+from tb_runner import device_tab_logic
 from tb_runner import focus_realign_logic
 from tb_runner import local_tab_logic
 from tb_runner import scroll_exhaustion_logic
@@ -3301,6 +3302,144 @@ def _run_xml_scroll_search_tap(
     return False, failure_reason
 
 
+def _candidate_center(candidate: dict[str, Any]) -> tuple[int, int] | None:
+    bounds = parse_bounds_str(str(candidate.get("bounds", "") or ""))
+    if not bounds:
+        node = candidate.get("node", {}) if isinstance(candidate, dict) else {}
+        if isinstance(node, dict):
+            bounds = parse_bounds_str(node.get("boundsInScreen", node.get("bounds", "")))
+    if not bounds:
+        return None
+    left, top, right, bottom = bounds
+    return (left + right) // 2, (top + bottom) // 2
+
+
+def _tap_device_candidate_center(client: A11yAdbClient, dev: str, candidate: dict[str, Any], *, reason: str) -> bool:
+    center = _candidate_center(candidate)
+    if center is None:
+        return False
+    x, y = center
+    log(
+        f"[DEVICE_ENTRY][tap] reason='{reason}' label='{candidate.get('label', '')}' "
+        f"stable='{candidate.get('stable_label', '')}' rid='{candidate.get('rid', '')}' "
+        f"bounds='{candidate.get('bounds', '')}' center='{x},{y}'"
+    )
+    tap_xy_adb = getattr(client, "tap_xy_adb", None)
+    if callable(tap_xy_adb):
+        return bool(tap_xy_adb(dev=dev, x=x, y=y))
+    touch_point = getattr(client, "touch_point", None)
+    if callable(touch_point):
+        return bool(touch_point(dev=dev, x=x, y=y))
+    return False
+
+
+def _run_enter_device_card_plugin(
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict[str, Any],
+    step: dict[str, Any],
+    *,
+    target: str,
+    max_scroll_search_steps: int,
+    step_wait_seconds: float,
+    transition_fast_path: bool,
+) -> tuple[bool, str]:
+    target_labels = step.get("target_stable_labels")
+    if isinstance(target_labels, str):
+        labels = [target_labels]
+    elif isinstance(target_labels, list):
+        labels = [str(label) for label in target_labels if str(label).strip()]
+    else:
+        labels = []
+    if target and target not in labels:
+        labels.append(target)
+    labels = [label for label in labels if str(label).strip()]
+    if not labels:
+        return False, "missing_target_stable_labels"
+
+    dump_tree_fn = getattr(client, "dump_tree", None)
+    if not callable(dump_tree_fn):
+        return False, "dump_tree_unavailable"
+
+    scroll_to_top_fn = getattr(client, "scroll_to_top", None)
+    if callable(scroll_to_top_fn) and bool(step.get("scroll_to_top", True)):
+        try:
+            scroll_to_top_fn(dev=dev, max_swipes=int(step.get("scroll_to_top_max_swipes", 5) or 5), pause=0.6)
+        except Exception as exc:
+            log(f"[DEVICE_ENTRY][normalize] scroll_to_top_failed reason='{exc}'")
+
+    expanded_sections: set[str] = set()
+    last_reason = "target_not_found"
+    for search_step in range(1, max_scroll_search_steps + 1):
+        try:
+            nodes = dump_tree_fn(dev=dev)
+        except Exception as exc:
+            nodes = []
+            last_reason = f"dump_tree_failed:{exc}"
+        nodes = nodes if isinstance(nodes, list) else []
+
+        all_devices_candidate = device_tab_logic.select_all_devices_candidate_for_action(nodes)
+        if all_devices_candidate is not None:
+            if _tap_device_candidate_center(client, dev, all_devices_candidate, reason="select_all_devices"):
+                time.sleep(step_wait_seconds)
+                try:
+                    nodes = dump_tree_fn(dev=dev)
+                except Exception:
+                    nodes = []
+                nodes = nodes if isinstance(nodes, list) else []
+            else:
+                last_reason = "all_devices_select_failed"
+
+        for section in device_tab_logic.collect_high_confidence_collapsed_room_sections(nodes):
+            section_key = f"{section.get('rid', '')}|{section.get('bounds', '')}|{section.get('label', '')}"
+            if section_key in expanded_sections:
+                continue
+            if _tap_device_candidate_center(client, dev, section, reason="expand_collapsed_room"):
+                expanded_sections.add(section_key)
+                time.sleep(step_wait_seconds)
+                try:
+                    nodes = dump_tree_fn(dev=dev)
+                except Exception:
+                    nodes = []
+                nodes = nodes if isinstance(nodes, list) else []
+            else:
+                last_reason = "collapsed_room_expand_failed"
+
+        card = device_tab_logic.find_device_card_by_stable_label(nodes, labels)
+        if card is not None:
+            if not _tap_device_candidate_center(client, dev, card, reason="open_device_card"):
+                return False, "device_card_tap_failed"
+            confirm_ok, confirm_signal = _confirm_click_focused_transition(
+                client=client,
+                dev=dev,
+                tab_cfg=tab_cfg,
+                transition_fast_path=transition_fast_path,
+            )
+            setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
+            setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
+            if confirm_ok:
+                return True, "device_card_opened"
+            return False, f"transition_not_confirmed:{confirm_signal}"
+
+        if search_step >= max_scroll_search_steps:
+            break
+        scroll_fn = getattr(client, "scroll", None)
+        if not callable(scroll_fn):
+            last_reason = "scroll_unavailable"
+            break
+        try:
+            scrolled = bool(scroll_fn(dev=dev, direction="down"))
+        except Exception as exc:
+            scrolled = False
+            last_reason = f"scroll_failed:{exc}"
+        if not scrolled:
+            last_reason = "bounded_scroll_exhausted"
+            break
+        time.sleep(step_wait_seconds)
+
+    return False, last_reason
+
+
 def _select_visible_plugin_candidate(
     *,
     nodes: list[dict[str, Any]],
@@ -5038,6 +5177,8 @@ def _run_pre_navigation_steps(
             action = "scrolltouch"
         if action in {"xmlscrollsearchtap", "xml_scroll_search_tap", "dump_scroll_search_tap"}:
             action = "xml_scroll_search_tap"
+        if action in {"enter_device_plugin", "enter_device_card_plugin", "shared_pre_navigation.enter_device_plugin"}:
+            action = "enter_device_card_plugin"
         target = str(step.get("target", "") or "").strip()
         type_ = str(step.get("type", "a") or "a").strip()
         if not action or not target:
@@ -5053,6 +5194,7 @@ def _run_pre_navigation_steps(
             "tap_bounds_center_adb",
             "select_and_tap_bounds_center_adb",
             "select_and_click_focused_or_tap_bounds_center_adb",
+            "enter_device_card_plugin",
         }:
             log(f"[SCENARIO][pre_nav] failed reason='unsupported_action' step={index} action='{action}'")
             return False
@@ -5114,6 +5256,23 @@ def _run_pre_navigation_steps(
                         setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
                         setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
                         step_ok = bool(confirm_ok)
+                local_match_failed = not step_ok
+            elif action == "enter_device_card_plugin":
+                max_scroll_search_steps = max(
+                    1,
+                    int(step.get("max_scroll_search_steps", tab_cfg.get("max_scroll_search_steps", _PLUGIN_SCROLL_SEARCH_MAX_STEPS)) or _PLUGIN_SCROLL_SEARCH_MAX_STEPS),
+                )
+                step_ok, device_reason = _run_enter_device_card_plugin(
+                    client=client,
+                    dev=dev,
+                    tab_cfg=tab_cfg,
+                    step=step,
+                    target=target,
+                    max_scroll_search_steps=max_scroll_search_steps,
+                    step_wait_seconds=step_wait_seconds,
+                    transition_fast_path=transition_fast_path,
+                )
+                actual_reason = device_reason
                 local_match_failed = not step_ok
             elif action == "scrolltouch":
                 screen_context_mode = _resolve_screen_context_mode(tab_cfg)
@@ -5640,9 +5799,9 @@ def _run_pre_navigation_steps(
 
             result = getattr(client, "last_target_action_result", {})
             if isinstance(result, dict):
-                actual_reason = str(result.get("reason", "unknown") or "unknown")
+                actual_reason = str(result.get("reason", actual_reason or "unknown") or actual_reason or "unknown")
             else:
-                actual_reason = "unknown"
+                actual_reason = actual_reason or "unknown"
 
             if step_ok:
                 log(f"[SCENARIO][pre_nav] success step={index} reason='{actual_reason}'")

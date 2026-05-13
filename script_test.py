@@ -24,6 +24,7 @@ from tb_runner.logging_utils import close_log_files, configure_log_files, log
 from tb_runner.perf_stats import RunPerfStats, format_perf_summary, save_excel_with_perf
 from tb_runner.scenario_config import TAB_CONFIGS
 from tb_runner.runtime_config import load_runtime_bundle
+from tb_runner.accessibility_preflight import HELPER_SERVICE_COMPONENT, ensure_accessibility_service_enabled
 from tb_runner.utils import configure_process_temp_dir, generate_output_path
 
 
@@ -52,6 +53,23 @@ def main():
 
     log(f"[MAIN] script start (version={SCRIPT_VERSION}, log_level={LOG_LEVEL})")
     client = A11yAdbClient(dev_serial=DEV_SERIAL)
+    accessibility_preflight = ensure_accessibility_service_enabled(
+        serial=DEV_SERIAL,
+        component=HELPER_SERVICE_COMPONENT,
+        helper_ready_check=lambda: client.ping(dev=DEV_SERIAL, wait_=3.0),
+        log_fn=log,
+    )
+    log(
+        "[PREFLIGHT][accessibility] "
+        f"component='{HELPER_SERVICE_COMPONENT}' "
+        f"before_enabled='{accessibility_preflight.before.enabled_accessibility_services}' "
+        f"before_accessibility_enabled='{accessibility_preflight.before.accessibility_enabled}' "
+        f"after_enabled='{accessibility_preflight.after.enabled_accessibility_services}' "
+        f"after_accessibility_enabled='{accessibility_preflight.after.accessibility_enabled}' "
+        f"enable_attempted={str(accessibility_preflight.enable_attempted).lower()} "
+        f"helper_ready={str(accessibility_preflight.helper_ready).lower()} "
+        f"result='{accessibility_preflight.reason}'"
+    )
     preflight = client.check_talkback_ready(dev=DEV_SERIAL)
     talkback_status = preflight.get("status", "disabled")
     talkback_reason = preflight.get("reason", "")

@@ -141,6 +141,16 @@
       "enabled": false,
       "max_steps": 50
     },
+    "device_smoke_sensor_plugin": {
+      "group": "plugin_screen",
+      "enabled": false,
+      "max_steps": 40
+    },
+    "device_water_leak_sensor_plugin": {
+      "group": "plugin_screen",
+      "enabled": false,
+      "max_steps": 40
+    },
 
     "life_food_plugin": {
       "group": "plugin_screen",
