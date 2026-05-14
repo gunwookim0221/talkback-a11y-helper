@@ -3395,6 +3395,106 @@ def _device_location_label(state: dict[str, Any]) -> str:
     return ""
 
 
+def _device_inventory_signature(nodes: list[dict[str, Any]]) -> str:
+    cards = device_tab_logic.collect_visible_device_cards(nodes)
+    parts = [
+        f"{card.get('stable_label', '')}@{card.get('bounds', '')}"
+        for card in cards
+        if str(card.get("stable_label", "")).strip()
+    ]
+    return "|".join(parts)
+
+
+def _perform_device_list_adb_swipe(
+    client: A11yAdbClient,
+    dev: str,
+    *,
+    nodes: list[dict[str, Any]],
+) -> tuple[bool, dict[str, Any]]:
+    adb_device = getattr(client, "_adb_device", None)
+    swipe_fn = getattr(adb_device, "_swipe", None)
+    if not callable(swipe_fn):
+        return False, {
+            "method": "adb_swipe",
+            "reason": "adb_swipe_unavailable",
+        }
+
+    max_right = 0
+    max_bottom = 0
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        bounds = parse_bounds_str(node.get("boundsInScreen", node.get("bounds", "")))
+        if not bounds:
+            continue
+        _left, _top, right, bottom = bounds
+        max_right = max(max_right, int(right))
+        max_bottom = max(max_bottom, int(bottom))
+
+    width = max(max_right, 1080)
+    height = max(max_bottom, 2400)
+    x = int(width * 0.5)
+    y_start = int(height * 0.78)
+    y_end = int(height * 0.30)
+    duration_ms = 500
+    result = swipe_fn(dev=dev, x1=x, y1=y_start, x2=x, y2=y_end, duration_ms=duration_ms)
+    return True, {
+        "method": "adb_swipe",
+        "x": x,
+        "y_start": y_start,
+        "y_end": y_end,
+        "duration_ms": duration_ms,
+        "raw_result": result,
+    }
+
+
+def _scroll_device_list_for_card_search(
+    client: A11yAdbClient,
+    dev: str,
+    *,
+    nodes_before: list[dict[str, Any]],
+    dump_tree_fn: Any,
+    step_wait_seconds: float,
+) -> tuple[bool, list[dict[str, Any]], str, bool]:
+    state_before = device_tab_logic.detect_selected_device_location(nodes_before)
+    selected_before = _device_location_label(state_before)
+    log(f"[DEVICE][scroll] selected_before='{selected_before}'")
+    if not bool(state_before.get("selected")):
+        log(f"[DEVICE][scroll] filter_drift detected actual='{selected_before}' phase='before_scroll'")
+        return False, nodes_before, "device_list_scroll_filter_drift", False
+
+    inventory_before = _device_inventory_signature(nodes_before)
+    swipe_ok, swipe_meta = _perform_device_list_adb_swipe(client, dev, nodes=nodes_before)
+    if not swipe_ok:
+        return False, nodes_before, str(swipe_meta.get("reason", "device_list_adb_swipe_unavailable")), False
+    log(
+        "[DEVICE][scroll] "
+        f"method='{swipe_meta.get('method', 'adb_swipe')}' "
+        f"start='{swipe_meta.get('x', '')},{swipe_meta.get('y_start', '')}' "
+        f"end='{swipe_meta.get('x', '')},{swipe_meta.get('y_end', '')}' "
+        f"duration_ms={int(swipe_meta.get('duration_ms', 0) or 0)}"
+    )
+    time.sleep(step_wait_seconds)
+
+    try:
+        nodes_after = dump_tree_fn(dev=dev)
+    except Exception as exc:
+        return False, nodes_before, f"device_list_post_scroll_dump_failed:{exc}", False
+    nodes_after = nodes_after if isinstance(nodes_after, list) else []
+
+    state_after = device_tab_logic.detect_selected_device_location(nodes_after)
+    selected_after = _device_location_label(state_after)
+    log(f"[DEVICE][scroll] selected_after='{selected_after}'")
+    if not bool(state_after.get("selected")):
+        log(f"[DEVICE][scroll] filter_drift detected actual='{selected_after}'")
+        return False, nodes_after, "device_list_scroll_filter_drift", False
+
+    inventory_after = _device_inventory_signature(nodes_after)
+    signature_changed = inventory_after != inventory_before
+    log(f"[DEVICE][scroll] inventory_signature_changed={str(signature_changed).lower()}")
+    return True, nodes_after, "device_list_scrolled", signature_changed
+
+
 def _ensure_all_devices_location_selected(
     client: A11yAdbClient,
     dev: str,
@@ -3496,6 +3596,7 @@ def _run_enter_device_card_plugin(
     expanded_sections: set[str] = set()
     location_normalized = False
     last_reason = "target_not_found"
+    repeated_inventory_signature_count = 0
     for search_step in range(1, max_scroll_search_steps + 1):
         try:
             nodes = dump_tree_fn(dev=dev)
@@ -3550,19 +3651,23 @@ def _run_enter_device_card_plugin(
 
         if search_step >= max_scroll_search_steps:
             break
-        scroll_fn = getattr(client, "scroll", None)
-        if not callable(scroll_fn):
-            last_reason = "scroll_unavailable"
-            break
-        try:
-            scrolled = bool(scroll_fn(dev=dev, direction="down"))
-        except Exception as exc:
-            scrolled = False
-            last_reason = f"scroll_failed:{exc}"
+        scrolled, nodes, scroll_reason, inventory_changed = _scroll_device_list_for_card_search(
+            client,
+            dev,
+            nodes_before=nodes,
+            dump_tree_fn=dump_tree_fn,
+            step_wait_seconds=step_wait_seconds,
+        )
         if not scrolled:
-            last_reason = "bounded_scroll_exhausted"
+            last_reason = scroll_reason
             break
-        time.sleep(step_wait_seconds)
+        if inventory_changed:
+            repeated_inventory_signature_count = 0
+        else:
+            repeated_inventory_signature_count += 1
+            if repeated_inventory_signature_count >= 2:
+                last_reason = "bounded_scroll_exhausted"
+                break
 
     return False, last_reason
 

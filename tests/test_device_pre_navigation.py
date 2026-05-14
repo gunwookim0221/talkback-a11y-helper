@@ -13,8 +13,10 @@ class DummyDeviceClient:
         self.dump_tree_sequence = list(dump_tree_sequence)
         self.tap_xy_adb_calls = []
         self.scroll_calls = []
+        self.swipe_calls = []
         self.scroll_to_top_calls = []
         self.last_target_action_result = {}
+        self._adb_device = SimpleNamespace(_swipe=self._swipe)
 
     def dump_tree(self, **_kwargs):
         if self.dump_tree_sequence:
@@ -28,6 +30,10 @@ class DummyDeviceClient:
     def scroll(self, **kwargs):
         self.scroll_calls.append(kwargs)
         return True
+
+    def _swipe(self, **kwargs):
+        self.swipe_calls.append(kwargs)
+        return ""
 
     def scroll_to_top(self, **kwargs):
         self.scroll_to_top_calls.append(kwargs)
@@ -125,9 +131,11 @@ def test_enter_device_card_plugin_opens_smoke_card_by_stable_label(monkeypatch):
 
 
 def test_enter_device_card_plugin_opens_water_leak_after_bounded_scroll(monkeypatch):
+    scrolled_nodes = [_all_devices(), _room_none(focusable=False), _device_card("누수 물기 없음", 561, 628)]
     client = DummyDeviceClient([
         [_all_devices(), _device_card("연기 감지 안 됨", 42, 628)],
-        [_device_card("누수 물기 없음", 561, 628)],
+        scrolled_nodes,
+        scrolled_nodes,
     ])
     monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **_kwargs: (True, "screen_text"))
     monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
@@ -145,13 +153,14 @@ def test_enter_device_card_plugin_opens_water_leak_after_bounded_scroll(monkeypa
 
     assert ok is True
     assert reason == "device_card_opened"
-    assert len(client.scroll_calls) == 1
+    assert len(client.scroll_calls) == 0
+    assert len(client.swipe_calls) == 1
     assert client.tap_xy_adb_calls[-1]["x"] == 799
 
 
 def test_enter_device_card_plugin_returns_failure_for_missing_target_after_bound(monkeypatch):
-    client = DummyDeviceClient([[_all_devices(), _device_card("연기 감지 안 됨", 42, 628)]])
-    client.scroll = lambda **kwargs: False
+    repeated_nodes = [_all_devices(), _room_none(focusable=False), _device_card("연기 감지 안 됨", 42, 628)]
+    client = DummyDeviceClient([repeated_nodes, repeated_nodes, repeated_nodes])
     monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
 
     ok, reason = collection_flow._run_enter_device_card_plugin(
@@ -166,7 +175,86 @@ def test_enter_device_card_plugin_returns_failure_for_missing_target_after_bound
     )
 
     assert ok is False
+    assert reason == "target_not_found"
+
+
+def test_enter_device_card_plugin_uses_adb_swipe_for_bounded_device_search(monkeypatch):
+    scrolled_nodes = [_all_devices(), _room_none(focusable=False), _device_card("누수 물기 없음", 561, 628)]
+    client = DummyDeviceClient([
+        [_all_devices(), _device_card("연기 감지 안 됨", 42, 628)],
+        scrolled_nodes,
+        scrolled_nodes,
+    ])
+    monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **_kwargs: (True, "screen_text"))
+    monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
+
+    ok, reason = collection_flow._run_enter_device_card_plugin(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_id": "device_water_leak_sensor_plugin"},
+        step={"target_stable_labels": ["누수"]},
+        target="누수",
+        max_scroll_search_steps=2,
+        step_wait_seconds=0,
+        transition_fast_path=True,
+    )
+
+    assert ok is True
+    assert reason == "device_card_opened"
+    assert len(client.swipe_calls) == 1
+    assert client.scroll_calls == []
+
+
+def test_enter_device_card_plugin_fails_when_device_list_scroll_drift_detected(monkeypatch):
+    client = DummyDeviceClient([
+        [_all_devices(), _device_card("연기 감지 안 됨", 42, 628)],
+        [_room_none(), _device_card("누수 물기 없음", 561, 628), _assign_room_cta()],
+    ])
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, *_args, **_kwargs: logs.append(str(message)))
+
+    ok, reason = collection_flow._run_enter_device_card_plugin(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_id": "device_water_leak_sensor_plugin"},
+        step={"target_stable_labels": ["누수"]},
+        target="누수",
+        max_scroll_search_steps=2,
+        step_wait_seconds=0,
+        transition_fast_path=True,
+    )
+
+    assert ok is False
+    assert reason == "device_list_scroll_filter_drift"
+    assert len(client.swipe_calls) == 1
+    assert any("filter_drift detected" in line for line in logs)
+
+
+def test_enter_device_card_plugin_marks_exhaustion_after_repeated_inventory_signature(monkeypatch):
+    repeated_nodes = [_all_devices(), _room_none(focusable=False), _device_card("연기 감지 안 됨", 42, 628)]
+    client = DummyDeviceClient([
+        repeated_nodes,
+        repeated_nodes,
+        repeated_nodes,
+        repeated_nodes,
+        repeated_nodes,
+    ])
+    monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
+
+    ok, reason = collection_flow._run_enter_device_card_plugin(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_id": "device_water_leak_sensor_plugin"},
+        step={"target_stable_labels": ["누수"]},
+        target="누수",
+        max_scroll_search_steps=3,
+        step_wait_seconds=0,
+        transition_fast_path=True,
+    )
+
+    assert ok is False
     assert reason == "bounded_scroll_exhausted"
+    assert len(client.swipe_calls) == 2
 
 
 def test_enter_device_card_plugin_taps_all_devices_and_high_confidence_collapsed_room(monkeypatch):
