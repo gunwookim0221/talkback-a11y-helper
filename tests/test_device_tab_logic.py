@@ -11,6 +11,10 @@ def _node(
     focusable=True,
     effective_clickable=True,
     selected=False,
+    checked=False,
+    accessibility_focused=False,
+    focused=False,
+    state_description=None,
     visible=True,
     has_clickable_descendant=False,
     actionable_descendant_resource_id=None,
@@ -27,6 +31,10 @@ def _node(
         "focusable": focusable,
         "effectiveClickable": effective_clickable,
         "selected": selected,
+        "checked": checked,
+        "accessibilityFocused": accessibility_focused,
+        "focused": focused,
+        "stateDescription": state_description,
         "isVisibleToUser": visible,
         "hasClickableDescendant": has_clickable_descendant,
         "actionableDescendantResourceId": actionable_descendant_resource_id,
@@ -322,6 +330,119 @@ def test_detect_selected_device_location_does_not_treat_room_filter_as_all_devic
     assert result["selected_label"] == "지정된 방 없음"
     assert candidate is not None
     assert candidate["stable_label"] == "모든 기기"
+
+
+def test_detect_selected_device_location_does_not_treat_visible_clickable_all_devices_as_selected():
+    nodes = [
+        _node(
+            "모든 기기 모든 기기",
+            "",
+            {"l": 171, "t": 319, "r": 410, "b": 469},
+            class_name="android.widget.LinearLayout",
+            clickable=True,
+            focusable=True,
+            effective_clickable=True,
+            accessibility_focused=False,
+        ),
+        _node(
+            "지정된 방 없음 지정된 방 없음",
+            "",
+            {"l": 560, "t": 319, "r": 888, "b": 469},
+            class_name="android.widget.LinearLayout",
+            clickable=False,
+            focusable=True,
+            effective_clickable=False,
+            accessibility_focused=True,
+        ),
+    ]
+
+    result = device_tab_logic.detect_selected_device_location(nodes)
+    candidate = device_tab_logic.find_all_devices_location_candidate(nodes)
+
+    assert result["selected"] is False
+    assert result["selected_label"] == "지정된 방 없음"
+    assert result["reason"] == "all_devices_candidate_not_selected"
+    assert result["selected_location"]["selection_reason"] == "non_clickable_selected_chip"
+    assert candidate is not None
+    assert candidate["clickable"] is True
+
+
+def test_detect_selected_device_location_uses_non_clickable_all_devices_as_selected():
+    nodes = [
+        _node(
+            "모든 기기 모든 기기",
+            "",
+            {"l": 171, "t": 319, "r": 410, "b": 469},
+            class_name="android.widget.LinearLayout",
+            clickable=False,
+            focusable=True,
+            effective_clickable=False,
+        ),
+        _node(
+            "지정된 방 없음 지정된 방 없음",
+            "",
+            {"l": 560, "t": 319, "r": 888, "b": 469},
+            class_name="android.widget.LinearLayout",
+            clickable=True,
+            focusable=True,
+        ),
+    ]
+
+    result = device_tab_logic.detect_selected_device_location(nodes)
+
+    assert result["selected"] is True
+    assert result["selected_label"] == "모든 기기"
+    assert result["reason"] == "non_clickable_selected_chip"
+
+
+def test_accessibility_focus_alone_does_not_select_location_chip():
+    nodes = [
+        _node(
+            "모든 기기 모든 기기",
+            "",
+            {"l": 171, "t": 319, "r": 410, "b": 469},
+            class_name="android.widget.LinearLayout",
+            clickable=True,
+            focusable=True,
+            effective_clickable=True,
+            accessibility_focused=True,
+        ),
+        _node(
+            "지정된 방 없음 지정된 방 없음",
+            "",
+            {"l": 560, "t": 319, "r": 888, "b": 469},
+            class_name="android.widget.LinearLayout",
+            clickable=True,
+            focusable=True,
+            effective_clickable=True,
+        ),
+    ]
+
+    result = device_tab_logic.detect_selected_device_location(nodes)
+
+    assert result["selected"] is False
+    assert result["selected_location"] is None
+
+
+def test_detect_selected_device_location_accepts_state_description_selected():
+    nodes = [
+        _node(
+            "All devices All devices",
+            "",
+            {"l": 171, "t": 319, "r": 410, "b": 469},
+            class_name="android.widget.LinearLayout",
+            clickable=True,
+            focusable=True,
+            effective_clickable=True,
+            state_description="Selected",
+        )
+    ]
+
+    result = device_tab_logic.detect_selected_device_location(nodes)
+
+    assert result["selected"] is True
+    assert result["selected_label"] == "All devices"
+    assert result["reason"] == "state_description_selected"
 
 
 def test_find_all_devices_location_candidate_supports_english_label():

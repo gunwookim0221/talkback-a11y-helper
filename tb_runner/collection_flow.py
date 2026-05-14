@@ -3406,6 +3406,14 @@ def _ensure_all_devices_location_selected(
     state = device_tab_logic.detect_selected_device_location(nodes)
     selected_before = _device_location_label(state)
     log(f"[DEVICE][location] selected_before='{selected_before}' reason='{state.get('reason', '')}'")
+    candidate = state.get("candidate")
+    if not bool(state.get("selected")) and isinstance(candidate, dict):
+        log(
+            "[DEVICE][location] all_devices_visible_but_not_selected "
+            f"clickable={str(bool(candidate.get('clickable'))).lower()} "
+            f"effective_clickable={str(bool(candidate.get('effective_clickable'))).lower()} "
+            f"bounds='{candidate.get('bounds', '')}'"
+        )
     if bool(state.get("selected")):
         return True, nodes, "all_devices_already_selected"
 

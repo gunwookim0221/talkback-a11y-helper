@@ -222,13 +222,51 @@ def _is_location_filter_candidate(node: dict[str, Any]) -> bool:
     return bool(_bool_value(node.get("focusable")) or _bool_value(node.get("selected")))
 
 
-def _is_selected_location_node(node: dict[str, Any]) -> bool:
-    return bool(
-        _bool_value(node.get("selected"))
-        or _bool_value(node.get("focusable"))
-        or _bool_value(node.get("accessibilityFocused"))
-        or _bool_value(node.get("focused"))
-    )
+def _selected_state_description(node: dict[str, Any]) -> str:
+    for key in ("stateDescription", "state_description", "state-description"):
+        value = _text(node.get(key))
+        if value:
+            return value
+    return ""
+
+
+def _has_selected_state_description(node: dict[str, Any]) -> bool:
+    normalized = _normalized_label(_selected_state_description(node))
+    return bool(normalized and ("선택" in normalized or "selected" in normalized or "checked" in normalized))
+
+
+def _location_candidate_selection_signal(
+    candidate: dict[str, Any],
+    candidates: list[dict[str, Any]],
+) -> tuple[bool, str, int]:
+    node = candidate.get("node", {})
+    if not isinstance(node, dict):
+        return False, "", 0
+    if _bool_value(node.get("selected")):
+        return True, "explicit_selected", 100
+    if _bool_value(node.get("checked")):
+        return True, "explicit_checked", 95
+    if _has_selected_state_description(node):
+        return True, "state_description_selected", 90
+
+    actionable_candidates = [
+        item
+        for item in candidates
+        if bool(item.get("clickable")) or bool(item.get("effective_clickable"))
+    ]
+    if (
+        not bool(candidate.get("clickable"))
+        and not bool(candidate.get("effective_clickable"))
+        and actionable_candidates
+    ):
+        return True, "non_clickable_selected_chip", 80
+    if (
+        not bool(candidate.get("clickable"))
+        and not bool(candidate.get("effective_clickable"))
+        and len(candidates) == 1
+    ):
+        return True, "non_clickable_selected_chip", 75
+    return False, "", 0
 
 
 def _make_candidate(node: dict[str, Any], *, role: str) -> dict[str, Any]:
@@ -252,6 +290,10 @@ def _make_candidate(node: dict[str, Any], *, role: str) -> dict[str, Any]:
         "clickable": _bool_value(node.get("clickable")),
         "focusable": _bool_value(node.get("focusable")),
         "selected": _bool_value(node.get("selected")),
+        "checked": _bool_value(node.get("checked")),
+        "accessibility_focused": _bool_value(node.get("accessibilityFocused")),
+        "focused": _bool_value(node.get("focused")),
+        "state_description": _selected_state_description(node),
         "effective_clickable": _bool_value(node.get("effectiveClickable")) or _bool_value(node.get("clickable")),
         "has_clickable_descendant": _bool_value(node.get("hasClickableDescendant")),
         "actionable_descendant_resource_id": _text(node.get("actionableDescendantResourceId")),
@@ -271,16 +313,11 @@ def detect_selected_device_location(nodes: list[dict[str, Any]]) -> dict[str, An
             "selected_label": selected_label,
             "reason": "all_devices_not_found",
         }
-    node = candidate["node"]
-    label = candidate.get("label", "")
-    all_devices_selected = _is_all_devices_label(label) and (
-        bool(candidate.get("selected"))
-        or _bool_value(node.get("focusable"))
-        or _bool_value(node.get("accessibilityFocused"))
-        or _bool_value(node.get("focused"))
-    )
+    all_devices_selected = False
+    all_devices_reason = "all_devices_candidate_not_selected"
     if isinstance(selected_location, dict) and _is_all_devices_label(selected_location.get("label", "")):
         all_devices_selected = True
+        all_devices_reason = str(selected_location.get("selection_reason", "") or "selected_location_match")
         selected_label = selected_location.get("stable_label", "") or selected_location.get("label", "")
     if all_devices_selected:
         return {
@@ -288,14 +325,14 @@ def detect_selected_device_location(nodes: list[dict[str, Any]]) -> dict[str, An
             "candidate": candidate,
             "selected_location": selected_location or candidate,
             "selected_label": selected_label or candidate.get("stable_label", "") or candidate.get("label", ""),
-            "reason": "all_devices_visible",
+            "reason": all_devices_reason,
         }
     return {
         "selected": False,
         "candidate": candidate,
         "selected_location": selected_location,
         "selected_label": selected_label,
-        "reason": "all_devices_candidate_not_selected",
+        "reason": all_devices_reason,
     }
 
 
@@ -405,19 +442,23 @@ def find_selected_device_location_candidate(nodes: list[dict[str, Any]]) -> dict
             continue
         if not _is_location_filter_candidate(node):
             continue
-        if not _is_selected_location_node(node):
-            continue
         candidate = _make_candidate(node, role="selected_device_location")
-        score = 0
-        score += 30 if candidate["selected"] else 0
-        score += 20 if _bool_value(node.get("accessibilityFocused")) or _bool_value(node.get("focused")) else 0
-        score += 10 if candidate["focusable"] else 0
-        score += 5 if _is_all_devices_label(candidate["label"]) else 0
-        candidate["score"] = score
         candidates.append(candidate)
     if not candidates:
         return None
-    return sorted(candidates, key=lambda item: (-int(item["score"]), item["top"], item["left"]))[0]
+    selected_candidates: list[dict[str, Any]] = []
+    for candidate in candidates:
+        selected, reason, score = _location_candidate_selection_signal(candidate, candidates)
+        if not selected:
+            continue
+        candidate = dict(candidate)
+        candidate["selection_reason"] = reason
+        candidate["score"] = score
+        candidate["score"] += 5 if candidate["accessibility_focused"] or candidate["focused"] else 0
+        selected_candidates.append(candidate)
+    if not selected_candidates:
+        return None
+    return sorted(selected_candidates, key=lambda item: (-int(item["score"]), item["top"], item["left"]))[0]
 
 
 def find_collapsed_room_sections(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
