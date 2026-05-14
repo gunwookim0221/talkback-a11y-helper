@@ -138,17 +138,63 @@ def test_promote_door_lock_action_descendant_uses_ancestor_card():
     assert promoted["stable_label"] == "Door Lock"
 
 
+def test_promote_generic_media_action_descendant_uses_ancestor_card():
+    card = _device_card(
+        "Media device 일시중지",
+        42,
+        1911,
+        has_clickable_descendant=True,
+        actionable_descendant_resource_id="com.samsung.android.oneconnect:id/image_button",
+    )
+    action_button = _node(
+        "재생",
+        "com.samsung.android.oneconnect:id/image_button",
+        {"l": 385, "t": 1990, "r": 500, "b": 2105},
+        class_name="android.widget.ImageButton",
+        clickable=True,
+        focusable=True,
+    )
+
+    promoted = device_tab_logic.promote_device_card_target(action_button, [card, action_button])
+
+    assert promoted is not None
+    assert promoted["rid"] == "com.samsung.android.oneconnect:id/device_card"
+    assert promoted["stable_label"] == "Media device"
+
+
+def test_promote_washer_action_descendant_uses_ancestor_card():
+    card = _device_card(
+        "세탁기 꺼짐",
+        42,
+        1479,
+        has_clickable_descendant=True,
+        actionable_descendant_resource_id="com.samsung.android.oneconnect:id/image_button",
+    )
+    action_button = _node(
+        "전원",
+        "com.samsung.android.oneconnect:id/image_button",
+        {"l": 385, "t": 1550, "r": 500, "b": 1665},
+        class_name="android.widget.ImageButton",
+        clickable=True,
+        focusable=True,
+    )
+
+    promoted = device_tab_logic.promote_device_card_target(action_button, [card, action_button])
+
+    assert promoted is not None
+    assert promoted["rid"] == "com.samsung.android.oneconnect:id/device_card"
+    assert promoted["stable_label"] == "세탁기"
+
+
 def test_observed_state_suffix_is_removed_from_stable_target_label():
     cards = device_tab_logic.collect_visible_device_cards(
         [
             _device_card("세탁기 꺼짐", 42, 1479),
-            _device_card("Audio 일시중지", 42, 1911),
         ]
     )
 
-    assert [card["stable_label"] for card in cards] == ["세탁기", "Audio"]
+    assert [card["stable_label"] for card in cards] == ["세탁기"]
     assert all("꺼짐" not in card["stable_label"] for card in cards)
-    assert all("일시중지" not in card["stable_label"] for card in cards)
 
 
 def test_second_wave_observed_state_suffixes_are_removed_from_stable_labels():
@@ -161,6 +207,19 @@ def test_second_wave_observed_state_suffixes_are_removed_from_stable_labels():
     )
 
     assert [card["stable_label"] for card in cards] == ["모션센서", "Door Lock", "공기청정기"]
+    assert all(card["target_label_allowed"] is True for card in cards)
+    assert all(not device_tab_logic.label_contains_state_text(card["stable_label"]) for card in cards)
+
+
+def test_third_wave_observed_state_suffixes_are_removed_from_stable_labels():
+    cards = device_tab_logic.collect_visible_device_cards(
+        [
+            _device_card("TV 꺼짐", 42, 1866),
+            _device_card("세탁기 꺼짐", 42, 1479),
+        ]
+    )
+
+    assert [card["stable_label"] for card in cards] == ["세탁기", "TV"]
     assert all(card["target_label_allowed"] is True for card in cards)
     assert all(not device_tab_logic.label_contains_state_text(card["stable_label"]) for card in cards)
 
@@ -199,6 +258,57 @@ def test_detect_selected_device_location_accepts_all_devices_filter():
 
     assert result["selected"] is True
     assert result["candidate"]["label"] == "모든 기기 모든 기기"
+    assert result["selected_label"] == "모든 기기"
+
+
+def test_detect_selected_device_location_accepts_english_all_devices_filter():
+    nodes = [
+        _node(
+            "All devices All devices",
+            "",
+            {"l": 171, "t": 319, "r": 410, "b": 469},
+            class_name="android.widget.LinearLayout",
+            clickable=False,
+            focusable=True,
+            effective_clickable=False,
+        )
+    ]
+
+    result = device_tab_logic.detect_selected_device_location(nodes)
+
+    assert result["selected"] is True
+    assert result["selected_label"] == "All devices"
+
+
+def test_detect_selected_device_location_does_not_treat_room_filter_as_all_devices():
+    nodes = [
+        _node(
+            "모든 기기 모든 기기",
+            "",
+            {"l": 171, "t": 319, "r": 410, "b": 469},
+            class_name="android.widget.LinearLayout",
+            clickable=True,
+            focusable=False,
+            effective_clickable=True,
+        ),
+        _node(
+            "지정된 방 없음 지정된 방 없음",
+            "",
+            {"l": 560, "t": 319, "r": 888, "b": 469},
+            class_name="android.widget.LinearLayout",
+            clickable=False,
+            focusable=True,
+            effective_clickable=False,
+        ),
+    ]
+
+    result = device_tab_logic.detect_selected_device_location(nodes)
+    candidate = device_tab_logic.select_all_devices_candidate_for_action(nodes)
+
+    assert result["selected"] is False
+    assert result["selected_label"] == "지정된 방 없음"
+    assert candidate is not None
+    assert candidate["stable_label"] == "모든 기기"
 
 
 def test_find_all_devices_location_candidate_supports_english_label():
@@ -265,6 +375,8 @@ def test_find_device_card_by_stable_label_matches_observed_device_labels():
         _device_card("모션센서 움직임 감지됨", 42, 1015),
         _device_card("Door Lock 잠김", 561, 1015),
         _device_card("공기청정기 켜짐", 42, 1479),
+        _device_card("TV 꺼짐", 42, 1866),
+        _device_card("세탁기 꺼짐", 42, 1479),
     ]
 
     smoke = device_tab_logic.find_device_card_by_stable_label(nodes, ["연기", "Smoke sensor"])
@@ -272,6 +384,8 @@ def test_find_device_card_by_stable_label_matches_observed_device_labels():
     motion = device_tab_logic.find_device_card_by_stable_label(nodes, ["모션센서", "Motion sensor"])
     door_lock = device_tab_logic.find_device_card_by_stable_label(nodes, ["Door Lock"])
     air_purifier = device_tab_logic.find_device_card_by_stable_label(nodes, ["공기청정기", "Air purifier"])
+    tv = device_tab_logic.find_device_card_by_stable_label(nodes, ["TV"])
+    washer = device_tab_logic.find_device_card_by_stable_label(nodes, ["세탁기", "Washer"])
 
     assert smoke is not None
     assert smoke["stable_label"] == "연기"
@@ -283,6 +397,10 @@ def test_find_device_card_by_stable_label_matches_observed_device_labels():
     assert door_lock["stable_label"] == "Door Lock"
     assert air_purifier is not None
     assert air_purifier["stable_label"] == "공기청정기"
+    assert tv is not None
+    assert tv["stable_label"] == "TV"
+    assert washer is not None
+    assert washer["stable_label"] == "세탁기"
 
 
 def test_find_device_card_by_stable_label_returns_none_for_missing_target():

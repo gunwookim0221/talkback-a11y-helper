@@ -166,6 +166,16 @@
       "enabled": false,
       "max_steps": 40
     },
+    "device_tv_plugin": {
+      "group": "plugin_screen",
+      "enabled": false,
+      "max_steps": 40
+    },
+    "device_washer_plugin": {
+      "group": "plugin_screen",
+      "enabled": false,
+      "max_steps": 40
+    },
 
     "life_food_plugin": {
       "group": "plugin_screen",

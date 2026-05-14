@@ -3333,6 +3333,74 @@ def _tap_device_candidate_center(client: A11yAdbClient, dev: str, candidate: dic
     return False
 
 
+def _device_location_label(state: dict[str, Any]) -> str:
+    selected_label = str(state.get("selected_label", "") or "").strip()
+    if selected_label:
+        return selected_label
+    selected_location = state.get("selected_location")
+    if isinstance(selected_location, dict):
+        return str(selected_location.get("stable_label") or selected_location.get("label") or "").strip()
+    candidate = state.get("candidate")
+    if bool(state.get("selected")) and isinstance(candidate, dict):
+        return str(candidate.get("stable_label") or candidate.get("label") or "").strip()
+    return ""
+
+
+def _ensure_all_devices_location_selected(
+    client: A11yAdbClient,
+    dev: str,
+    nodes: list[dict[str, Any]],
+    dump_tree_fn: Any,
+    *,
+    step_wait_seconds: float,
+) -> tuple[bool, list[dict[str, Any]], str]:
+    state = device_tab_logic.detect_selected_device_location(nodes)
+    selected_before = _device_location_label(state)
+    log(f"[DEVICE][location] selected_before='{selected_before}' reason='{state.get('reason', '')}'")
+    if bool(state.get("selected")):
+        return True, nodes, "all_devices_already_selected"
+
+    last_actual = selected_before
+    for attempt in range(1, 3):
+        candidate = device_tab_logic.find_all_devices_location_candidate(nodes)
+        if not candidate:
+            log(
+                "[DEVICE][location] selection_verify_failed "
+                f"expected='모든 기기|All devices' actual='{last_actual}' reason='all_devices_candidate_not_found'"
+            )
+            return False, nodes, "all_devices_candidate_not_found"
+
+        log(
+            f"[DEVICE][location] tap_candidate='{candidate.get('stable_label') or candidate.get('label', '')}' "
+            f"bounds='{candidate.get('bounds', '')}' attempt={attempt}"
+        )
+        if not _tap_device_candidate_center(client, dev, candidate, reason="select_all_devices"):
+            return False, nodes, "all_devices_select_failed"
+
+        time.sleep(step_wait_seconds)
+        try:
+            refreshed = dump_tree_fn(dev=dev)
+        except Exception as exc:
+            return False, nodes, f"all_devices_verify_dump_failed:{exc}"
+        nodes = refreshed if isinstance(refreshed, list) else []
+        state = device_tab_logic.detect_selected_device_location(nodes)
+        selected_after = _device_location_label(state)
+        last_actual = selected_after
+        log(f"[DEVICE][location] selected_after='{selected_after}' reason='{state.get('reason', '')}' attempt={attempt}")
+        if bool(state.get("selected")):
+            return True, nodes, "all_devices_selected"
+        if attempt == 1:
+            log(
+                f"[DEVICE][location] retry=1 expected='모든 기기|All devices' actual='{selected_after}'"
+            )
+
+    log(
+        "[DEVICE][location] selection_verify_failed "
+        f"expected='모든 기기|All devices' actual='{last_actual}'"
+    )
+    return False, nodes, "all_devices_selection_verify_failed"
+
+
 def _run_enter_device_card_plugin(
     client: A11yAdbClient,
     dev: str,
@@ -3369,6 +3437,7 @@ def _run_enter_device_card_plugin(
             log(f"[DEVICE_ENTRY][normalize] scroll_to_top_failed reason='{exc}'")
 
     expanded_sections: set[str] = set()
+    location_normalized = False
     last_reason = "target_not_found"
     for search_step in range(1, max_scroll_search_steps + 1):
         try:
@@ -3378,17 +3447,17 @@ def _run_enter_device_card_plugin(
             last_reason = f"dump_tree_failed:{exc}"
         nodes = nodes if isinstance(nodes, list) else []
 
-        all_devices_candidate = device_tab_logic.select_all_devices_candidate_for_action(nodes)
-        if all_devices_candidate is not None:
-            if _tap_device_candidate_center(client, dev, all_devices_candidate, reason="select_all_devices"):
-                time.sleep(step_wait_seconds)
-                try:
-                    nodes = dump_tree_fn(dev=dev)
-                except Exception:
-                    nodes = []
-                nodes = nodes if isinstance(nodes, list) else []
-            else:
-                last_reason = "all_devices_select_failed"
+        if not location_normalized:
+            location_ok, nodes, location_reason = _ensure_all_devices_location_selected(
+                client,
+                dev,
+                nodes,
+                dump_tree_fn,
+                step_wait_seconds=step_wait_seconds,
+            )
+            if not location_ok:
+                return False, location_reason
+            location_normalized = True
 
         for section in device_tab_logic.collect_high_confidence_collapsed_room_sections(nodes):
             section_key = f"{section.get('rid', '')}|{section.get('bounds', '')}|{section.get('label', '')}"

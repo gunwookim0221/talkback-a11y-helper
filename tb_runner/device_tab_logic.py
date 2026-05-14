@@ -72,6 +72,8 @@ ROOM_SECTION_RESOURCE_HINTS = (
     "header",
 )
 
+LOCATION_FILTER_MAX_TOP = 560
+
 
 def _text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip())
@@ -165,6 +167,34 @@ def _is_all_devices_label(label: str) -> bool:
     return normalized in {_normalized_label(value) for value in ALL_DEVICES_LABELS}
 
 
+def _is_location_filter_candidate(node: dict[str, Any]) -> bool:
+    label = _node_label(node)
+    if not label:
+        return False
+    rid = _resource_id(node)
+    if rid in DEVICE_CARD_RESOURCE_IDS:
+        return False
+    bounds = _bounds_tuple(node)
+    if not bounds:
+        return False
+    _left, top, _right, bottom = bounds
+    if top > LOCATION_FILTER_MAX_TOP:
+        return False
+    class_name = _text(node.get("className")).lower()
+    if "linearlayout" in class_name or "viewgroup" in class_name or "textview" in class_name:
+        return True
+    return bool(_bool_value(node.get("focusable")) or _bool_value(node.get("selected")))
+
+
+def _is_selected_location_node(node: dict[str, Any]) -> bool:
+    return bool(
+        _bool_value(node.get("selected"))
+        or _bool_value(node.get("focusable"))
+        or _bool_value(node.get("accessibilityFocused"))
+        or _bool_value(node.get("focused"))
+    )
+
+
 def _make_candidate(node: dict[str, Any], *, role: str) -> dict[str, Any]:
     bounds = _bounds_tuple(node)
     left, top, right, bottom = bounds if bounds else (0, 0, 0, 0)
@@ -195,19 +225,42 @@ def _make_candidate(node: dict[str, Any], *, role: str) -> dict[str, Any]:
 
 def detect_selected_device_location(nodes: list[dict[str, Any]]) -> dict[str, Any]:
     candidate = find_all_devices_location_candidate(nodes)
+    selected_location = find_selected_device_location_candidate(nodes)
+    selected_label = selected_location.get("stable_label", "") if isinstance(selected_location, dict) else ""
     if not candidate:
-        return {"selected": False, "candidate": None, "reason": "all_devices_not_found"}
+        return {
+            "selected": False,
+            "candidate": None,
+            "selected_location": selected_location,
+            "selected_label": selected_label,
+            "reason": "all_devices_not_found",
+        }
     node = candidate["node"]
-    selected = bool(candidate.get("selected"))
     label = candidate.get("label", "")
-    if _is_all_devices_label(label) and (
-        selected
+    all_devices_selected = _is_all_devices_label(label) and (
+        bool(candidate.get("selected"))
         or _bool_value(node.get("focusable"))
         or _bool_value(node.get("accessibilityFocused"))
         or _bool_value(node.get("focused"))
-    ):
-        return {"selected": True, "candidate": candidate, "reason": "all_devices_visible"}
-    return {"selected": False, "candidate": candidate, "reason": "all_devices_candidate_not_selected"}
+    )
+    if isinstance(selected_location, dict) and _is_all_devices_label(selected_location.get("label", "")):
+        all_devices_selected = True
+        selected_label = selected_location.get("stable_label", "") or selected_location.get("label", "")
+    if all_devices_selected:
+        return {
+            "selected": True,
+            "candidate": candidate,
+            "selected_location": selected_location or candidate,
+            "selected_label": selected_label or candidate.get("stable_label", "") or candidate.get("label", ""),
+            "reason": "all_devices_visible",
+        }
+    return {
+        "selected": False,
+        "candidate": candidate,
+        "selected_location": selected_location,
+        "selected_label": selected_label,
+        "reason": "all_devices_candidate_not_selected",
+    }
 
 
 def find_all_devices_location_candidate(nodes: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -224,6 +277,28 @@ def find_all_devices_location_candidate(nodes: list[dict[str, Any]]) -> dict[str
         score += 30 if candidate["clickable"] or candidate["effective_clickable"] else 0
         score += 20 if candidate["selected"] else 0
         score += 10 if "title" not in candidate["rid"].lower() else 0
+        candidate["score"] = score
+        candidates.append(candidate)
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda item: (-int(item["score"]), item["top"], item["left"]))[0]
+
+
+def find_selected_device_location_candidate(nodes: list[dict[str, Any]]) -> dict[str, Any] | None:
+    candidates: list[dict[str, Any]] = []
+    for node in nodes:
+        if not isinstance(node, dict) or not _visible(node):
+            continue
+        if not _is_location_filter_candidate(node):
+            continue
+        if not _is_selected_location_node(node):
+            continue
+        candidate = _make_candidate(node, role="selected_device_location")
+        score = 0
+        score += 30 if candidate["selected"] else 0
+        score += 20 if _bool_value(node.get("accessibilityFocused")) or _bool_value(node.get("focused")) else 0
+        score += 10 if candidate["focusable"] else 0
+        score += 5 if _is_all_devices_label(candidate["label"]) else 0
         candidate["score"] = score
         candidates.append(candidate)
     if not candidates:
