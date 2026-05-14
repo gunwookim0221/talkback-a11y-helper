@@ -153,7 +153,7 @@ def label_contains_state_text(label: str) -> bool:
         normalized_token = _normalized_label(token)
         if not normalized_token:
             continue
-        if re.fullmatch(r"[a-z]+", normalized_token):
+        if " " not in normalized_token:
             if normalized_token in words:
                 return True
             continue

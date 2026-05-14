@@ -224,6 +224,19 @@ def test_third_wave_observed_state_suffixes_are_removed_from_stable_labels():
     assert all(not device_tab_logic.label_contains_state_text(card["stable_label"]) for card in cards)
 
 
+def test_fourth_wave_humidity_state_suffixes_are_removed_from_stable_labels():
+    cards = device_tab_logic.collect_visible_device_cards(
+        [
+            _device_card("습도센서 진동 감지됨", 42, 1681),
+            _device_card("온습도 센서 진동 감지됨", 42, 2068),
+        ]
+    )
+
+    assert [card["stable_label"] for card in cards] == ["습도센서", "온습도 센서"]
+    assert all(card["target_label_allowed"] is True for card in cards)
+    assert all(not device_tab_logic.label_contains_state_text(card["stable_label"]) for card in cards)
+
+
 def test_short_english_state_tokens_do_not_match_inside_words():
     card = device_tab_logic.collect_visible_device_cards(
         [_device_card("Motion sensor detected", 42, 1789)]
@@ -377,6 +390,8 @@ def test_find_device_card_by_stable_label_matches_observed_device_labels():
         _device_card("공기청정기 켜짐", 42, 1479),
         _device_card("TV 꺼짐", 42, 1866),
         _device_card("세탁기 꺼짐", 42, 1479),
+        _device_card("습도센서 진동 감지됨", 42, 1681),
+        _device_card("온습도 센서 진동 감지됨", 42, 2068),
     ]
 
     smoke = device_tab_logic.find_device_card_by_stable_label(nodes, ["연기", "Smoke sensor"])
@@ -386,6 +401,11 @@ def test_find_device_card_by_stable_label_matches_observed_device_labels():
     air_purifier = device_tab_logic.find_device_card_by_stable_label(nodes, ["공기청정기", "Air purifier"])
     tv = device_tab_logic.find_device_card_by_stable_label(nodes, ["TV"])
     washer = device_tab_logic.find_device_card_by_stable_label(nodes, ["세탁기", "Washer"])
+    humidity = device_tab_logic.find_device_card_by_stable_label(nodes, ["습도센서", "Humidity sensor"])
+    temp_humidity = device_tab_logic.find_device_card_by_stable_label(
+        nodes,
+        ["온습도 센서", "Temperature humidity sensor"],
+    )
 
     assert smoke is not None
     assert smoke["stable_label"] == "연기"
@@ -401,6 +421,27 @@ def test_find_device_card_by_stable_label_matches_observed_device_labels():
     assert tv["stable_label"] == "TV"
     assert washer is not None
     assert washer["stable_label"] == "세탁기"
+    assert humidity is not None
+    assert humidity["stable_label"] == "습도센서"
+    assert temp_humidity is not None
+    assert temp_humidity["stable_label"] == "온습도 센서"
+
+
+def test_humidity_matching_uses_exact_normalized_label_not_substring():
+    nodes = [
+        _device_card("습도센서 진동 감지됨", 42, 1681),
+        _device_card("온습도 센서 진동 감지됨", 42, 2068),
+    ]
+
+    humidity = device_tab_logic.find_device_card_by_stable_label(nodes, ["습도센서"])
+    temp_humidity = device_tab_logic.find_device_card_by_stable_label(nodes, ["온습도 센서"])
+    compact_temp_humidity = device_tab_logic.find_device_card_by_stable_label(nodes, ["온습도센서"])
+
+    assert humidity is not None
+    assert humidity["stable_label"] == "습도센서"
+    assert temp_humidity is not None
+    assert temp_humidity["stable_label"] == "온습도 센서"
+    assert compact_temp_humidity is None
 
 
 def test_find_device_card_by_stable_label_returns_none_for_missing_target():
