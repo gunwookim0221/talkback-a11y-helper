@@ -48,6 +48,8 @@ def test_device_plugins_use_device_pre_navigation():
         "device_washer_plugin": ["세탁기", "Washer"],
         "device_humidity_sensor_plugin": ["습도센서", "Humidity sensor"],
         "device_temperature_humidity_sensor_plugin": ["온습도 센서", "Temperature & humidity sensor"],
+        "device_camera_plugin": ["Camera"],
+        "device_home_camera_plugin": ["홈카메라 360"],
     }
 
     for scenario_id, target_stable_labels in expected_targets.items():

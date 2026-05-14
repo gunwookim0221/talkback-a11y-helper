@@ -717,6 +717,80 @@ TAB_CONFIGS = [
         "max_steps": 40,
     },
     {
+        "scenario_id": "device_camera_plugin",
+        "scenario_type": "content",
+        "entry_type": "card",
+        "tab_name": "(?i).*devices.*",
+        "tab_type": "b",
+        "tab": {
+            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_devices",
+            "text_regex": "(?i).*devices.*",
+            "announcement_regex": "(?i).*(selected|선택됨)?.*devices.*",
+            "tie_breaker": "bottom_nav_left_to_right",
+            "allow_resource_id_only": True,
+        },
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "pre_navigation": [
+            {
+                "action": "enter_device_card_plugin",
+                "target": "Camera",
+                "target_stable_labels": ["Camera"],
+                "max_scroll_search_steps": 4,
+            }
+        ],
+        "anchor_name": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
+        "anchor_type": "a",
+        "anchor": {
+            "text_regex": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
+            "announcement_regex": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
+            "tie_breaker": "top_left",
+        },
+        "context_verify": {
+            "type": "screen_text",
+            "text_regex": "(?i)^camera$|.*\\bcamera\\b.*",
+        },
+        "enabled": False,
+        "max_steps": 40,
+    },
+    {
+        "scenario_id": "device_home_camera_plugin",
+        "scenario_type": "content",
+        "entry_type": "card",
+        "tab_name": "(?i).*devices.*",
+        "tab_type": "b",
+        "tab": {
+            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_devices",
+            "text_regex": "(?i).*devices.*",
+            "announcement_regex": "(?i).*(selected|선택됨)?.*devices.*",
+            "tie_breaker": "bottom_nav_left_to_right",
+            "allow_resource_id_only": True,
+        },
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "pre_navigation": [
+            {
+                "action": "enter_device_card_plugin",
+                "target": "홈카메라 360",
+                "target_stable_labels": ["홈카메라 360"],
+                "max_scroll_search_steps": 4,
+            }
+        ],
+        "anchor_name": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
+        "anchor_type": "a",
+        "anchor": {
+            "text_regex": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
+            "announcement_regex": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
+            "tie_breaker": "top_left",
+        },
+        "context_verify": {
+            "type": "screen_text",
+            "text_regex": "(?i).*홈카메라\\s*360.*|.*home\\s*camera\\s*360.*",
+        },
+        "enabled": False,
+        "max_steps": 40,
+    },
+    {
         "scenario_id": "life_main",
         "scenario_type": "content",
         "tab_name": "(?i).*life.*",
