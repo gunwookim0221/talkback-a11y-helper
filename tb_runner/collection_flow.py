@@ -3333,6 +3333,55 @@ def _tap_device_candidate_center(client: A11yAdbClient, dev: str, candidate: dic
     return False
 
 
+def _tap_device_card_safe(
+    client: A11yAdbClient,
+    dev: str,
+    card: dict[str, Any],
+    *,
+    nodes: list[dict[str, Any]],
+) -> tuple[bool, str]:
+    bounds = parse_bounds_str(str(card.get("bounds", "") or ""))
+    if not bounds:
+        return False, "device_card_tap_failed"
+    avoid_candidates = device_tab_logic.collect_device_card_tap_avoid_bounds(nodes)
+    avoid_bounds = [candidate.get("bounds", "") for candidate in avoid_candidates]
+    tap_point = device_tab_logic.compute_safe_device_card_tap_point(bounds, avoid_bounds)
+    center_x, center_y = (bounds[0] + bounds[2]) // 2, (bounds[1] + bounds[3]) // 2
+    if tap_point is None:
+        log(
+            f"[DEVICE_ENTRY][safe_tap] unavailable label='{card.get('label', '')}' "
+            f"stable='{card.get('stable_label', '')}' bounds='{card.get('bounds', '')}' "
+            f"center='{center_x},{center_y}' avoid_count={len(avoid_candidates)}"
+        )
+        return False, "device_card_safe_tap_point_unavailable"
+
+    x = int(tap_point["x"])
+    y = int(tap_point["y"])
+    strategy = str(tap_point.get("strategy", "center") or "center")
+    avoid_hit = str(tap_point.get("avoid_bounds", "") or "")
+    if strategy != "center":
+        avoid_label = ""
+        for candidate in avoid_candidates:
+            if candidate.get("bounds") == avoid_hit:
+                avoid_label = str(candidate.get("rid") or candidate.get("label") or "")
+                break
+        log(
+            f"[DEVICE_ENTRY][safe_tap] center='{center_x},{center_y}' avoid_hit='{avoid_label or avoid_hit}'"
+        )
+    log(
+        f"[DEVICE_ENTRY][safe_tap] selected='{x},{y}' strategy='{strategy}' "
+        f"label='{card.get('label', '')}' stable='{card.get('stable_label', '')}' "
+        f"rid='{card.get('rid', '')}' bounds='{card.get('bounds', '')}'"
+    )
+    tap_xy_adb = getattr(client, "tap_xy_adb", None)
+    if callable(tap_xy_adb):
+        return bool(tap_xy_adb(dev=dev, x=x, y=y)), "device_card_tapped"
+    touch_point = getattr(client, "touch_point", None)
+    if callable(touch_point):
+        return bool(touch_point(dev=dev, x=x, y=y)), "device_card_tapped"
+    return False, "device_card_tap_failed"
+
+
 def _device_location_label(state: dict[str, Any]) -> str:
     selected_label = str(state.get("selected_label", "") or "").strip()
     if selected_label:
@@ -3476,8 +3525,9 @@ def _run_enter_device_card_plugin(
 
         card = device_tab_logic.find_device_card_by_stable_label(nodes, labels)
         if card is not None:
-            if not _tap_device_candidate_center(client, dev, card, reason="open_device_card"):
-                return False, "device_card_tap_failed"
+            tap_ok, tap_reason = _tap_device_card_safe(client, dev, card, nodes=nodes)
+            if not tap_ok:
+                return False, tap_reason
             confirm_ok, confirm_signal = _confirm_click_focused_transition(
                 client=client,
                 dev=dev,

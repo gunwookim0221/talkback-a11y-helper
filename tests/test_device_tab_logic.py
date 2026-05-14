@@ -450,6 +450,64 @@ def test_find_device_card_by_stable_label_returns_none_for_missing_target():
     assert device_tab_logic.find_device_card_by_stable_label(nodes, ["누수"]) is None
 
 
+def test_compute_safe_device_card_tap_point_returns_center_when_no_avoid_hit():
+    result = device_tab_logic.compute_safe_device_card_tap_point(
+        (42, 628, 519, 973),
+        [(216, 2112, 864, 2268)],
+    )
+
+    assert result is not None
+    assert result["point"] == (280, 800)
+    assert result["strategy"] == "center"
+
+
+def test_compute_safe_device_card_tap_point_avoids_assign_room_cta_overlap():
+    result = device_tab_logic.compute_safe_device_card_tap_point(
+        (42, 2068, 519, 2316),
+        [(216, 2112, 864, 2268)],
+    )
+
+    assert result is not None
+    x, y = result["point"]
+    assert 42 < x < 519
+    assert 2068 < y < 2316
+    assert not (216 <= x <= 864 and 2112 <= y <= 2268)
+    assert result["strategy"] != "center"
+
+
+def test_compute_safe_device_card_tap_point_returns_none_when_card_is_covered():
+    result = device_tab_logic.compute_safe_device_card_tap_point(
+        (42, 2068, 519, 2316),
+        [(0, 2000, 1080, 2400)],
+    )
+
+    assert result is None
+
+
+def test_collect_device_card_tap_avoid_bounds_detects_assign_room_cta_only():
+    nodes = [
+        _node(
+            "방 지정하기",
+            "com.samsung.android.oneconnect:id/move_devices_button",
+            {"l": 216, "t": 2112, "r": 864, "b": 2268},
+            class_name="android.widget.TextView",
+        ),
+        _node(
+            "방 지정하기",
+            "com.samsung.android.oneconnect:id/plain_text",
+            {"l": 216, "t": 100, "r": 864, "b": 200},
+            class_name="android.widget.TextView",
+        ),
+        _device_card("온습도 센서 진동 감지됨", 42, 2068),
+    ]
+
+    candidates = device_tab_logic.collect_device_card_tap_avoid_bounds(nodes)
+
+    assert len(candidates) == 2
+    assert candidates[0]["role"] == "device_card_tap_avoid"
+    assert {candidate["avoid_reason"] for candidate in candidates} == {"move_devices_button", "assign_room_cta"}
+
+
 def test_select_all_devices_candidate_for_action_returns_candidate_when_not_selected():
     nodes = [
         _node(

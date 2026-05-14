@@ -69,6 +69,15 @@ def _device_card(label, left, top):
     )
 
 
+def _assign_room_cta():
+    return _node(
+        "방 지정하기",
+        "com.samsung.android.oneconnect:id/move_devices_button",
+        {"l": 216, "t": 2112, "r": 864, "b": 2268},
+        class_name="android.widget.TextView",
+    )
+
+
 def _all_devices(label="모든 기기 모든 기기", *, focusable=True):
     return _node(
         label,
@@ -255,3 +264,66 @@ def test_enter_device_card_plugin_fails_when_all_devices_selection_retry_does_no
     assert len(client.tap_xy_adb_calls) == 2
     assert client.scroll_calls == []
     assert any("selection_verify_failed" in line for line in logs)
+
+
+def test_enter_device_card_plugin_uses_safe_tap_when_card_center_overlaps_cta(monkeypatch):
+    card = _node(
+        "온습도 센서 진동 감지됨",
+        "com.samsung.android.oneconnect:id/device_card",
+        {"l": 42, "t": 2068, "r": 519, "b": 2316},
+    )
+    client = DummyDeviceClient([[_all_devices(), card, _assign_room_cta()]])
+    logs = []
+    monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **_kwargs: (True, "screen_text"))
+    monkeypatch.setattr(collection_flow, "log", lambda message, *_args, **_kwargs: logs.append(str(message)))
+
+    ok, reason = collection_flow._run_enter_device_card_plugin(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_id": "device_temperature_humidity_sensor_plugin"},
+        step={"target_stable_labels": ["온습도 센서"]},
+        target="온습도 센서",
+        max_scroll_search_steps=1,
+        step_wait_seconds=0,
+        transition_fast_path=True,
+    )
+
+    assert ok is True
+    assert reason == "device_card_opened"
+    tap = client.tap_xy_adb_calls[-1]
+    assert tap["x"] != 280 or tap["y"] != 2192
+    assert 42 < tap["x"] < 519
+    assert 2068 < tap["y"] < 2316
+    assert not (216 <= tap["x"] <= 864 and 2112 <= tap["y"] <= 2268)
+    assert any("[DEVICE_ENTRY][safe_tap]" in line and "strategy='upper" in line for line in logs)
+
+
+def test_enter_device_card_plugin_fails_when_safe_tap_point_unavailable(monkeypatch):
+    card = _node(
+        "온습도 센서 진동 감지됨",
+        "com.samsung.android.oneconnect:id/device_card",
+        {"l": 42, "t": 2068, "r": 519, "b": 2316},
+    )
+    covered_cta = _node(
+        "방 지정하기",
+        "com.samsung.android.oneconnect:id/move_devices_button",
+        {"l": 0, "t": 2000, "r": 1080, "b": 2400},
+        class_name="android.widget.TextView",
+    )
+    client = DummyDeviceClient([[_all_devices(), card, covered_cta]])
+    monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
+
+    ok, reason = collection_flow._run_enter_device_card_plugin(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_id": "device_temperature_humidity_sensor_plugin"},
+        step={"target_stable_labels": ["온습도 센서"]},
+        target="온습도 센서",
+        max_scroll_search_steps=1,
+        step_wait_seconds=0,
+        transition_fast_path=True,
+    )
+
+    assert ok is False
+    assert reason == "device_card_safe_tap_point_unavailable"
+    assert client.tap_xy_adb_calls == []

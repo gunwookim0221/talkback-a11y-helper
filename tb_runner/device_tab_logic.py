@@ -73,6 +73,9 @@ ROOM_SECTION_RESOURCE_HINTS = (
 )
 
 LOCATION_FILTER_MAX_TOP = 560
+DEVICE_CARD_TAP_AVOID_RESOURCE_IDS = {
+    "com.samsung.android.oneconnect:id/move_devices_button",
+}
 
 
 def _text(value: Any) -> str:
@@ -165,6 +168,39 @@ def label_contains_state_text(label: str) -> bool:
 def _is_all_devices_label(label: str) -> bool:
     normalized = _normalized_label(_dedupe_repeated_words(label))
     return normalized in {_normalized_label(value) for value in ALL_DEVICES_LABELS}
+
+
+def _bounds_center(bounds: tuple[int, int, int, int]) -> tuple[int, int]:
+    left, top, right, bottom = bounds
+    return (left + right) // 2, (top + bottom) // 2
+
+
+def _point_in_bounds(point: tuple[int, int], bounds: tuple[int, int, int, int]) -> bool:
+    x, y = point
+    left, top, right, bottom = bounds
+    return left <= x <= right and top <= y <= bottom
+
+
+def _point_hits_any_bounds(
+    point: tuple[int, int],
+    bounds_list: list[tuple[int, int, int, int]] | tuple[tuple[int, int, int, int], ...],
+) -> tuple[int, int, int, int] | None:
+    for bounds in bounds_list:
+        if _point_in_bounds(point, bounds):
+            return bounds
+    return None
+
+
+def _parse_any_bounds(value: Any) -> tuple[int, int, int, int] | None:
+    if isinstance(value, tuple) and len(value) == 4:
+        try:
+            left, top, right, bottom = (int(part) for part in value)
+        except Exception:
+            return None
+        if right <= left or bottom <= top:
+            return None
+        return left, top, right, bottom
+    return parse_bounds_str(value)
 
 
 def _is_location_filter_candidate(node: dict[str, Any]) -> bool:
@@ -282,6 +318,84 @@ def find_all_devices_location_candidate(nodes: list[dict[str, Any]]) -> dict[str
     if not candidates:
         return None
     return sorted(candidates, key=lambda item: (-int(item["score"]), item["top"], item["left"]))[0]
+
+
+def is_device_card_tap_avoid_node(node: dict[str, Any]) -> bool:
+    if not isinstance(node, dict) or not _visible(node):
+        return False
+    rid = _resource_id(node)
+    if rid in DEVICE_CARD_TAP_AVOID_RESOURCE_IDS:
+        return bool(_bounds_tuple(node))
+    label = _normalized_label(_node_label(node))
+    if label == _normalized_label("방 지정하기"):
+        return bool(_bounds_tuple(node))
+    return False
+
+
+def collect_device_card_tap_avoid_bounds(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for node in nodes:
+        if not is_device_card_tap_avoid_node(node):
+            continue
+        candidate = _make_candidate(node, role="device_card_tap_avoid")
+        candidate["avoid_reason"] = "move_devices_button" if candidate["rid"] in DEVICE_CARD_TAP_AVOID_RESOURCE_IDS else "assign_room_cta"
+        candidates.append(candidate)
+    return sorted(candidates, key=lambda item: (item["top"], item["left"], item["rid"], item["label"]))
+
+
+def compute_safe_device_card_tap_point(
+    card_bounds: tuple[int, int, int, int] | str | dict[str, Any] | None,
+    avoid_bounds_list: list[tuple[int, int, int, int] | str | dict[str, Any]]
+    | tuple[tuple[int, int, int, int] | str | dict[str, Any], ...],
+) -> dict[str, Any] | None:
+    bounds = _parse_any_bounds(card_bounds)
+    if not bounds:
+        return None
+    left, top, right, bottom = bounds
+    width = right - left
+    height = bottom - top
+    if width <= 2 or height <= 2:
+        return None
+
+    avoid_bounds = [parsed for raw in avoid_bounds_list if (parsed := _parse_any_bounds(raw))]
+    center = _bounds_center(bounds)
+    center_hit = _point_hits_any_bounds(center, avoid_bounds)
+    if center_hit is None:
+        return {
+            "point": center,
+            "x": center[0],
+            "y": center[1],
+            "strategy": "center",
+            "avoid_hit": None,
+            "avoid_bounds": "",
+        }
+
+    x_mid = center[0]
+    y_upper = top + max(12, int(height * 0.15))
+    x_left = left + max(12, int(width * 0.25))
+    x_right = right - max(12, int(width * 0.25))
+    y_mid_upper = top + max(12, int(height * 0.30))
+    candidates = [
+        ("upper_inset", (x_mid, y_upper)),
+        ("upper_left_inset", (x_left, y_upper)),
+        ("upper_right_inset", (x_right, y_upper)),
+        ("mid_upper_left_inset", (x_left, y_mid_upper)),
+        ("mid_upper_right_inset", (x_right, y_mid_upper)),
+    ]
+    for strategy, point in candidates:
+        x, y = point
+        if not (left < x < right and top < y < bottom):
+            continue
+        if _point_hits_any_bounds(point, avoid_bounds) is None:
+            return {
+                "point": point,
+                "x": x,
+                "y": y,
+                "strategy": strategy,
+                "avoid_hit": center_hit,
+                "avoid_bounds": f"{center_hit[0]},{center_hit[1]},{center_hit[2]},{center_hit[3]}",
+            }
+    return None
 
 
 def find_selected_device_location_candidate(nodes: list[dict[str, Any]]) -> dict[str, Any] | None:
