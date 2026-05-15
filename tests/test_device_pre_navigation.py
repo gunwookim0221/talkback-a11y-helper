@@ -130,6 +130,40 @@ def test_enter_device_card_plugin_opens_smoke_card_by_stable_label(monkeypatch):
     assert client.tap_xy_adb_calls[-1]["y"] == 800
 
 
+def test_enter_device_card_plugin_matches_visible_target_before_room_expand(monkeypatch):
+    collapsed_room = _node(
+        "접힘 거실 거실",
+        "com.samsung.android.oneconnect:id/subheader_card",
+        {"l": 42, "t": 520, "r": 1038, "b": 628},
+    )
+    smoke = _device_card("연기 Clear", 42, 628)
+    client = DummyDeviceClient([[_all_devices(), collapsed_room, smoke]])
+    logs = []
+    monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **_kwargs: (True, "screen_text"))
+    monkeypatch.setattr(collection_flow, "log", lambda message, *_args, **_kwargs: logs.append(str(message)))
+
+    ok, reason = collection_flow._run_enter_device_card_plugin(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_id": "device_smoke_sensor_plugin"},
+        step={"target_stable_labels": ["연기", "Smoke sensor"]},
+        target="연기",
+        max_scroll_search_steps=2,
+        step_wait_seconds=0,
+        transition_fast_path=True,
+    )
+
+    assert ok is True
+    assert reason == "device_card_opened"
+    assert len(client.tap_xy_adb_calls) == 1
+    assert client.tap_xy_adb_calls[0]["x"] == 280
+    assert client.tap_xy_adb_calls[0]["y"] == 800
+    assert client.swipe_calls == []
+    assert any("phase='before_expand'" in line and "count=1" in line for line in logs)
+    assert any("phase='before_expand'" in line and "stable='연기'" in line for line in logs)
+    assert any("skipped reason='target_already_visible'" in line for line in logs)
+
+
 def test_enter_device_card_plugin_opens_water_leak_after_bounded_scroll(monkeypatch):
     scrolled_nodes = [_all_devices(), _room_none(focusable=False), _device_card("누수 물기 없음", 561, 628)]
     client = DummyDeviceClient([
@@ -290,6 +324,7 @@ def test_enter_device_card_plugin_taps_all_devices_and_high_confidence_collapsed
     assert len(client.tap_xy_adb_calls) == 3
     assert client.tap_xy_adb_calls[0]["x"] == 290
     assert client.tap_xy_adb_calls[1]["x"] == 540
+    assert client.tap_xy_adb_calls[2]["x"] == 280
 
 
 def test_enter_device_card_plugin_retries_all_devices_selection_once(monkeypatch):

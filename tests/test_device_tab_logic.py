@@ -245,6 +245,42 @@ def test_fourth_wave_humidity_state_suffixes_are_removed_from_stable_labels():
     assert all(not device_tab_logic.label_contains_state_text(card["stable_label"]) for card in cards)
 
 
+def test_english_state_suffixes_are_removed_from_stable_labels():
+    cards = device_tab_logic.collect_visible_device_cards(
+        [
+            _device_card("연기 Clear", 42, 628),
+            _device_card("누수 Dry", 561, 628),
+            _device_card("Audio Pause", 42, 1911),
+            _device_card("Audio Paused", 42, 1911),
+            _device_card("온습도 센서 Vibration detected", 42, 2068),
+            _device_card("습도센서 Vibration detected", 42, 1681),
+            _device_card("Camera Connected", 42, 742),
+            _device_card("Door Lock Locked", 561, 1015),
+            _device_card("TV Off", 42, 1866),
+            _device_card("세탁기 Off", 42, 1479),
+            _device_card("공기청정기 On", 42, 1479),
+            _device_card("Security System Armed (away)", 42, 1015),
+        ]
+    )
+
+    assert [card["stable_label"] for card in cards] == [
+        "연기",
+        "누수",
+        "Camera",
+        "Security System",
+        "Door Lock",
+        "공기청정기",
+        "세탁기",
+        "습도센서",
+        "TV",
+        "Audio",
+        "Audio",
+        "온습도 센서",
+    ]
+    assert all(card["target_label_allowed"] is True for card in cards)
+    assert all(not device_tab_logic.label_contains_state_text(card["stable_label"]) for card in cards)
+
+
 def test_short_english_state_tokens_do_not_match_inside_words():
     card = device_tab_logic.collect_visible_device_cards(
         [_device_card("Motion sensor detected", 42, 1789)]
@@ -252,6 +288,27 @@ def test_short_english_state_tokens_do_not_match_inside_words():
 
     assert card["stable_label"] == "Motion sensor"
     assert card["target_label_allowed"] is True
+
+
+def test_english_state_suffixes_do_not_remove_device_base_words():
+    cards = device_tab_logic.collect_visible_device_cards(
+        [
+            _device_card("Smoke sensor Clear", 42, 628),
+            _device_card("Water leak sensor Dry", 561, 628),
+            _device_card("Motion sensor", 42, 1789),
+            _device_card("Smoke sensor", 42, 628),
+            _device_card("Water leak sensor", 561, 628),
+        ]
+    )
+
+    assert [card["stable_label"] for card in cards] == [
+        "Smoke sensor",
+        "Smoke sensor",
+        "Water leak sensor",
+        "Water leak sensor",
+        "Motion sensor",
+    ]
+    assert all(card["target_label_allowed"] is True for card in cards)
 
 
 def test_detect_selected_device_location_accepts_all_devices_filter():
@@ -546,6 +603,57 @@ def test_find_device_card_by_stable_label_matches_observed_device_labels():
     assert humidity["stable_label"] == "습도센서"
     assert temp_humidity is not None
     assert temp_humidity["stable_label"] == "온습도 센서"
+
+
+def test_find_device_card_by_stable_label_matches_english_observed_state_suffix_labels():
+    nodes = [
+        _device_card("연기 Clear", 42, 628),
+        _device_card("누수 Dry", 561, 628),
+        _device_card("Audio Pause", 42, 1911),
+        _device_card("온습도 센서 Vibration detected", 42, 2068),
+        _device_card("Camera Connected", 42, 742),
+        _device_card("Door Lock Locked", 561, 1015),
+        _device_card("TV Off", 42, 1866),
+        _device_card("세탁기 Off", 42, 1479),
+        _device_card("공기청정기 On", 42, 1479),
+        _device_card("Security System Armed (away)", 42, 1015),
+    ]
+
+    smoke = device_tab_logic.find_device_card_by_stable_label(nodes, ["연기", "Smoke sensor"])
+    leak = device_tab_logic.find_device_card_by_stable_label(nodes, ["누수", "Water leak sensor"])
+    audio = device_tab_logic.find_device_card_by_stable_label(nodes, ["Audio", "오디오"])
+    temp_humidity = device_tab_logic.find_device_card_by_stable_label(nodes, ["온습도 센서", "Temperature humidity sensor"])
+    camera = device_tab_logic.find_device_card_by_stable_label(nodes, ["Camera"])
+    door_lock = device_tab_logic.find_device_card_by_stable_label(nodes, ["Door Lock"])
+    tv = device_tab_logic.find_device_card_by_stable_label(nodes, ["TV"])
+    washer = device_tab_logic.find_device_card_by_stable_label(nodes, ["세탁기", "Washer"])
+    air_purifier = device_tab_logic.find_device_card_by_stable_label(nodes, ["공기청정기", "Air purifier"])
+
+    assert smoke is not None
+    assert smoke["stable_label"] == "연기"
+    assert leak is not None
+    assert leak["stable_label"] == "누수"
+    assert audio is not None
+    assert audio["stable_label"] == "Audio"
+    assert temp_humidity is not None
+    assert temp_humidity["stable_label"] == "온습도 센서"
+    assert camera is not None
+    assert camera["stable_label"] == "Camera"
+    assert door_lock is not None
+    assert door_lock["stable_label"] == "Door Lock"
+    assert tv is not None
+    assert tv["stable_label"] == "TV"
+    assert washer is not None
+    assert washer["stable_label"] == "세탁기"
+    assert air_purifier is not None
+    assert air_purifier["stable_label"] == "공기청정기"
+
+
+def test_label_contains_state_text_detects_clear_and_dry_suffixes():
+    assert device_tab_logic.label_contains_state_text("Clear") is True
+    assert device_tab_logic.label_contains_state_text("Dry") is True
+    assert device_tab_logic.label_contains_state_text("연기 Clear") is True
+    assert device_tab_logic.label_contains_state_text("누수 Dry") is True
 
 
 def test_humidity_matching_uses_exact_normalized_label_not_substring():

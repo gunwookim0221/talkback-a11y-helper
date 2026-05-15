@@ -33,6 +33,18 @@ DEVICE_STATE_SUFFIXES = (
     "습도",
     "배터리",
     "전력량",
+    "vibration detected",
+    "motion detected",
+    "no smoke detected",
+    "no leak detected",
+    "water leak detected",
+    "no motion detected",
+    "clear",
+    "dry",
+    "armed (away)",
+    "armed",
+    "disarmed",
+    "pause",
     "connected",
     "paused",
     "offline",
@@ -142,27 +154,31 @@ def _dedupe_repeated_words(value: str) -> str:
     return value
 
 
+def _strip_device_state_suffixes(label: str) -> str:
+    stable = label
+    while True:
+        updated = stable
+        for suffix in sorted(DEVICE_STATE_SUFFIXES, key=len, reverse=True):
+            updated = re.sub(rf"\s+{re.escape(suffix)}$", "", updated, flags=re.IGNORECASE).strip()
+        if updated == stable:
+            return updated
+        stable = updated
+
+
 def normalize_device_stable_label(label: str) -> str:
     stable = _dedupe_repeated_words(_text(label))
-    for suffix in sorted(DEVICE_STATE_SUFFIXES, key=len, reverse=True):
-        stable = re.sub(rf"\s+{re.escape(suffix)}$", "", stable, flags=re.IGNORECASE).strip()
-    return stable
+    return _strip_device_state_suffixes(stable)
 
 
 def label_contains_state_text(label: str) -> bool:
-    normalized = _normalized_label(label)
-    words = set(normalized.split())
-    for token in DEVICE_STATE_SUFFIXES:
-        normalized_token = _normalized_label(token)
-        if not normalized_token:
-            continue
-        if " " not in normalized_token:
-            if normalized_token in words:
-                return True
-            continue
-        if normalized_token in normalized:
-            return True
-    return False
+    stable = _dedupe_repeated_words(_text(label))
+    if not stable:
+        return False
+    normalized = _normalized_label(stable)
+    suffix_tokens = {_normalized_label(token) for token in DEVICE_STATE_SUFFIXES if _normalized_label(token)}
+    if normalized in suffix_tokens:
+        return True
+    return _strip_device_state_suffixes(stable) != stable
 
 
 def _is_all_devices_label(label: str) -> bool:

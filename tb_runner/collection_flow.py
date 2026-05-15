@@ -3617,6 +3617,34 @@ def _run_enter_device_card_plugin(
                 return False, location_reason
             location_normalized = True
 
+        visible_cards = device_tab_logic.collect_visible_device_cards(nodes)
+        log(
+            f"[DEVICE_ENTRY][inventory] phase='before_expand' count={len(visible_cards)} "
+            f"labels='{ '|'.join(str(card.get('label', '') or '') for card in visible_cards[:10]) }'"
+        )
+        card = device_tab_logic.find_device_card_by_stable_label(nodes, labels)
+        if card is not None:
+            log(
+                f"[DEVICE_ENTRY][match] phase='before_expand' label='{card.get('label', '')}' "
+                f"stable='{card.get('stable_label', '')}'"
+            )
+            log("[DEVICE_ENTRY][expand] skipped reason='target_already_visible'")
+            tap_ok, tap_reason = _tap_device_card_safe(client, dev, card, nodes=nodes)
+            if not tap_ok:
+                return False, tap_reason
+            confirm_ok, confirm_signal = _confirm_click_focused_transition(
+                client=client,
+                dev=dev,
+                tab_cfg=tab_cfg,
+                transition_fast_path=transition_fast_path,
+            )
+            setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
+            setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
+            if confirm_ok:
+                return True, "device_card_opened"
+            return False, f"transition_not_confirmed:{confirm_signal}"
+
+        log("[DEVICE_ENTRY][expand] running reason='target_not_visible'")
         for section in device_tab_logic.collect_high_confidence_collapsed_room_sections(nodes):
             section_key = f"{section.get('rid', '')}|{section.get('bounds', '')}|{section.get('label', '')}"
             if section_key in expanded_sections:
@@ -3634,6 +3662,10 @@ def _run_enter_device_card_plugin(
 
         card = device_tab_logic.find_device_card_by_stable_label(nodes, labels)
         if card is not None:
+            log(
+                f"[DEVICE_ENTRY][match] phase='after_expand' label='{card.get('label', '')}' "
+                f"stable='{card.get('stable_label', '')}'"
+            )
             tap_ok, tap_reason = _tap_device_card_safe(client, dev, card, nodes=nodes)
             if not tap_ok:
                 return False, tap_reason
