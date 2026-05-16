@@ -12672,3 +12672,45 @@ def test_row_persistence_phase_wrapper_injects_log_and_save(monkeypatch):
     assert call["log_fn"] is collection_flow.log
     assert call["make_fingerprint_fn"] is collection_flow.make_main_fingerprint
     assert call["save_fn"] is collection_flow.save_excel_with_perf
+
+
+def test_apply_cta_node_to_row_preserves_actual_focus_metadata():
+    row = {
+        "visible_label": "누수",
+        "merged_announcement": "누수, 우리 집 - 거실",
+        "focus_view_id": "WaterSensorCapabilityCardView_header_title",
+        "focus_bounds": "84,460,822,529",
+        "focus_payload_source": "top_level",
+        "crop_source": "actual_focus",
+        "row_source": "actual_focus",
+    }
+    selected_node = {
+        "viewIdResourceName": "WaterSensorCapabilityCardView",
+        "boundsInScreen": "{'l': 30, 't': 412, 'r': 1050, 'b': 727}",
+        "className": "android.view.ViewGroup",
+        "clickable": True,
+        "focusable": True,
+        "effectiveClickable": True,
+    }
+
+    updated = collection_flow._apply_cta_node_to_row(
+        row=row,
+        selected_node=selected_node,
+        selected_rid="WaterSensorCapabilityCardView",
+        selected_label="Water sensor History",
+        selected_bounds="30,412,1050,727",
+        selected_class="android.view.ViewGroup",
+        normalized_label="water sensor history",
+    )
+
+    assert updated["visible_label"] == "Water sensor History"
+    assert updated["merged_announcement"] == "Water sensor History"
+    assert updated["focus_view_id"] == "WaterSensorCapabilityCardView"
+    assert updated["focus_bounds"] == "30,412,1050,727"
+    assert updated["actual_focus_visible"] == "누수"
+    assert updated["actual_focus_speech"] == "누수, 우리 집 - 거실"
+    assert updated["actual_focus_resource_id"] == "WaterSensorCapabilityCardView_header_title"
+    assert updated["actual_focus_bounds"] == "84,460,822,529"
+    assert updated["actual_focus_payload_source"] == "top_level"
+    assert updated["row_source"] == "representative"
+    assert updated["crop_source"] == "actual_focus"

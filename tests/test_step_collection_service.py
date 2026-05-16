@@ -45,3 +45,23 @@ def test_focus_affinity_score_prefers_exact_or_embedded_focus_label():
 
     assert service._focus_affinity_score("Settings", ["Settings"]) == 4
     assert service._focus_affinity_score("Edge panels Settings", ["Settings"]) >= 2
+
+
+def test_snapshot_actual_focus_fields_preserves_focus_metadata():
+    step = {
+        "visible_label": "누수",
+        "merged_announcement": "누수, 우리 집 - 거실",
+        "focus_view_id": "WaterSensorCapabilityCardView_header_title",
+        "focus_bounds": "84,460,822,529",
+        "focus_payload_source": "top_level",
+    }
+
+    StepCollectionService._snapshot_actual_focus_fields(step)
+
+    assert step["actual_focus_visible"] == "누수"
+    assert step["actual_focus_speech"] == "누수, 우리 집 - 거실"
+    assert step["actual_focus_resource_id"] == "WaterSensorCapabilityCardView_header_title"
+    assert step["actual_focus_bounds"] == "84,460,822,529"
+    assert step["actual_focus_payload_source"] == "top_level"
+    assert step["row_source"] == "actual_focus"
+    assert step["crop_source"] == "actual_focus"

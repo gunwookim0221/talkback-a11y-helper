@@ -17,6 +17,16 @@ class StepCollectionService:
     def __init__(self, client: Any) -> None:
         self.client = client
 
+    @staticmethod
+    def _snapshot_actual_focus_fields(step: dict[str, Any]) -> None:
+        step["actual_focus_visible"] = str(step.get("visible_label", "") or "").strip()
+        step["actual_focus_speech"] = str(step.get("merged_announcement", "") or "").strip()
+        step["actual_focus_resource_id"] = str(step.get("focus_view_id", "") or "").strip()
+        step["actual_focus_bounds"] = str(step.get("focus_bounds", "") or "").strip()
+        step["actual_focus_payload_source"] = str(step.get("focus_payload_source", "none") or "none")
+        step["row_source"] = str(step.get("row_source", "") or "actual_focus")
+        step["crop_source"] = str(step.get("crop_source", "") or "actual_focus")
+
     def _collect_focus_anchor_labels(self, safe_focus_node: dict[str, Any], visible_label: str) -> list[str]:
         anchors: list[str] = []
         for value in (
@@ -519,6 +529,7 @@ class StepCollectionService:
             curr_norm=curr_norm,
         )
         self.client._prev_step_merged_announcement = curr_merged
+        self._snapshot_actual_focus_fields(step)
 
         self.client._debug_print(
             f"[DEBUG][collect_focus_step] step={step_index} move={step['move_elapsed_sec']:.3f}s "

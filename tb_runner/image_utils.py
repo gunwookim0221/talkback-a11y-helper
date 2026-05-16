@@ -88,7 +88,7 @@ def maybe_capture_focus_crop(
     row["crop_image_path"] = ""
     row["crop_image_saved"] = False
     row["crop_bounds"] = str(row.get("focus_bounds", "") or "").strip()
-    row["crop_source"] = "focus_bounds"
+    row["crop_source"] = str(row.get("crop_source", "") or "focus_bounds")
     row["crop_focus_confidence_low"] = False
 
     if not ENABLE_IMAGE_CROP:

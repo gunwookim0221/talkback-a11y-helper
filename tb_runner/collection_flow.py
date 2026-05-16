@@ -7949,6 +7949,16 @@ def _apply_cta_node_to_row(
     selected_class: str,
     normalized_label: str,
 ) -> dict[str, Any]:
+    if not str(row.get("actual_focus_visible", "") or "").strip():
+        row["actual_focus_visible"] = str(row.get("visible_label", "") or "").strip()
+    if not str(row.get("actual_focus_speech", "") or "").strip():
+        row["actual_focus_speech"] = str(row.get("merged_announcement", "") or "").strip()
+    if not str(row.get("actual_focus_resource_id", "") or "").strip():
+        row["actual_focus_resource_id"] = str(row.get("focus_view_id", "") or "").strip()
+    if not str(row.get("actual_focus_bounds", "") or "").strip():
+        row["actual_focus_bounds"] = str(row.get("focus_bounds", "") or "").strip()
+    if not str(row.get("actual_focus_payload_source", "") or "").strip():
+        row["actual_focus_payload_source"] = str(row.get("focus_payload_source", "none") or "none")
     row["focus_node"] = selected_node
     row["focus_view_id"] = selected_rid or str(row.get("focus_view_id", "") or "")
     row["visible_label"] = selected_label or str(row.get("visible_label", "") or "")
@@ -7960,6 +7970,8 @@ def _apply_cta_node_to_row(
     row["focus_clickable"] = bool(selected_node.get("clickable"))
     row["focus_focusable"] = bool(selected_node.get("focusable"))
     row["focus_effective_clickable"] = bool(selected_node.get("effectiveClickable")) or bool(selected_node.get("clickable"))
+    row["row_source"] = "representative"
+    row["crop_source"] = str(row.get("crop_source", "") or "actual_focus")
     return row
 
 
