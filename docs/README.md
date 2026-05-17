@@ -13,6 +13,7 @@
 - runtime 설정: [runtime-config.md](runtime-config.md)
 - helper/client API: [api-reference.md](api-reference.md)
 - Devices plugin 운영: [device-plugin-guide.md](device-plugin-guide.md)
+- 신규 plugin onboarding: [plugin-onboarding-guide.md](plugin-onboarding-guide.md)
 - report row schema: [report-schema.md](report-schema.md)
 - i18n / locale matching: [i18n_locale_matching.md](i18n_locale_matching.md)
 
