@@ -1,61 +1,71 @@
 # Architecture (현재 운영 기준)
 
-[System Overview](system-overview.md) | [Testing Pipeline](testing-pipeline.md) | [Current Client Architecture](current-client-architecture.md)
-
----
+[System Overview](system-overview.md) | [Current Client Architecture](current-client-architecture.md) | [Device Plugin Guide](device-plugin-guide.md)
 
 ## 1) 상위 구조
 
 ```text
-Python Runner (script_test.py, tb_runner/*)
-  -> A11yAdbClient (talkback_lib/__init__.py, façade)
-    -> HelperBridge / AdbExecutor / LogcatReader / ActionResultParser
-    -> FocusService / StepCollectionService / StepRowBuilder
-  -> adb broadcast
-Android Helper (app/*)
-  -> AccessibilityService
-  -> UI tree dump / target action
+Python Runner
+  script_test.py
+  tb_runner/*
+  talkback_lib/*
+    -> A11yAdbClient façade
+    -> focus / step / row assembly
+    -> runtime log parsing and report save
+
+Android Helper
+  app/*
+    -> AccessibilityService
+    -> target action / dump_tree / SMART_NEXT bridge
 ```
 
----
+## 2) 운영 계층
 
-## 2) Python client 계층 책임
+### Client 계층
+- `A11yAdbClient`
+- `FocusService`
+- `StepCollectionService`
+- `StepRowBuilder`
 
-### Façade
-- `A11yAdbClient` (`talkback_lib/__init__.py`)
-- 외부 public API 유지 및 내부 서비스 조합
+### Runner 계층
+- `collection_flow.py`: scenario open, main loop, persist
+- `anchor_logic.py`, `tab_logic.py`: start stabilization
+- `overlay_logic.py`: overlay branch and recovery
+- `excel_report.py`: workbook export
 
-### Low-level
-- `AdbExecutor`: adb 실행
-- `LogcatReader`: logcat marker/req_id 기반 결과 수집
-- `ActionResultParser`: payload 파싱/정규화
-- `HelperBridge`: helper action 요청 라우팅
+### Scenario 계층
+- Global / main tabs
+- Life plugins
+- Device plugins
 
-### Focus/Step 조립
-- `FocusService`: `get_focus` 오케스트레이션 + fallback dump
-- `FocusTraceBuilder`: get_focus trace 생성/후보 추출
-- `StepCollectionService`: `collect_focus_step` 단계 실행
-- `StepRowBuilder`: row dict 필드 조립
+## 3) Devices plugin 운영 추가점
 
----
+Devices plugin은 일반 Life plugin과 다르게 Devices list normalization을 먼저
+수행한다.
 
-## 3) Runner 계층 책임
+- `enter_device_card_plugin` pre-navigation 사용
+- `All devices` selected 보장
+- visible inventory 우선 매칭
+- 필요할 때만 room expand
+- safe tap 적용
+- bounded search는 helper scroll이 아니라 **ADB swipe** 사용
 
-- `script_test.py`: run 진입점, 시나리오 반복, final 저장
-- `tb_runner/collection_flow.py`: open/main/overlay/persist 오케스트레이션
-- `tb_runner/anchor_logic.py`, `tab_logic.py`: 시작 안정화
-- `tb_runner/diagnostics.py`: stop 평가/중복/품질 판단
-- `tb_runner/overlay_logic.py`: overlay 확장/복귀
-- `tb_runner/excel_report.py`, `perf_stats.py`: 저장/리포트
+자세한 흐름은 [device-plugin-guide.md](device-plugin-guide.md)를 따른다.
 
----
+## 4) Report row semantics
 
-## 4) 현재 불변 계약
+현재 raw/result 기본 visible 계열은 representative가 아니라 **actual TalkBack
+focus 기준**이다.
 
-- `collect_focus_step` row dict schema 유지
-- `get_focus` fallback semantics 유지
-- overlay realign 후 main loop 복귀 semantics 유지
-- stop reason/top-level status 해석 유지
-- 운영 파이프라인이 의존하는 핵심 로그 키 유지
+- 기본 컬럼: actual focus
+- `representative_*`: traversal representative
 
-세부는 `docs/current-client-architecture.md`를 기준으로 확인합니다.
+자세한 스키마는 [report-schema.md](report-schema.md)를 본다.
+
+## 5) 불변 계약
+
+- helper protocol unchanged
+- traversal / scoring / representative selection unchanged
+- stop reason 해석 유지
+- 운영 로그 키 유지
+- row schema는 additive change를 우선
