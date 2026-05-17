@@ -7975,6 +7975,43 @@ def _apply_cta_node_to_row(
     return row
 
 
+def _build_persisted_row_semantics(row: dict[str, Any]) -> dict[str, Any]:
+    persisted = dict(row)
+    current_row_source = str(row.get("row_source", "") or "").strip() or "actual_focus"
+    current_visible = str(row.get("visible_label", "") or "").strip()
+    current_speech = str(row.get("merged_announcement", "") or "").strip()
+    current_resource_id = str(row.get("focus_view_id", "") or "").strip()
+    current_bounds = str(row.get("focus_bounds", "") or "").strip()
+
+    actual_visible = str(row.get("actual_focus_visible", "") or "").strip()
+    actual_speech = str(row.get("actual_focus_speech", "") or "").strip()
+    actual_resource_id = str(row.get("actual_focus_resource_id", "") or "").strip()
+    actual_bounds = str(row.get("actual_focus_bounds", "") or "").strip()
+    has_actual_focus_snapshot = any((actual_visible, actual_speech, actual_resource_id, actual_bounds))
+
+    if current_row_source == "representative":
+        persisted["representative_visible"] = current_visible
+        persisted["representative_speech"] = current_speech
+        persisted["representative_resource_id"] = current_resource_id
+        persisted["representative_bounds"] = current_bounds
+        persisted["representative_row_source"] = "representative"
+        if has_actual_focus_snapshot:
+            actual_visible_value = actual_visible or actual_speech or ""
+            actual_speech_value = actual_speech or actual_visible or ""
+            actual_resource_value = actual_resource_id
+            actual_bounds_value = actual_bounds
+            persisted["visible_label"] = actual_visible_value
+            persisted["merged_announcement"] = actual_speech_value
+            persisted["focus_view_id"] = actual_resource_value
+            persisted["focus_bounds"] = actual_bounds_value
+            persisted["normalized_visible_label"] = A11yAdbClient.normalize_for_comparison(actual_visible_value)
+            persisted["normalized_announcement"] = A11yAdbClient.normalize_for_comparison(actual_speech_value)
+            persisted["row_source"] = "actual_focus"
+        else:
+            persisted["row_source"] = "representative_fallback"
+    return persisted
+
+
 def _iter_visible_descendant_nodes(nodes: Any) -> list[dict[str, Any]]:
     if not isinstance(nodes, list):
         return []
@@ -10143,10 +10180,11 @@ def _apply_row_persistence_phase_impl(
             f"reason='{suppress_reason}'"
         )
     else:
-        rows.append(row)
-        all_rows.append(row)
+        persisted_row = _build_persisted_row_semantics(row)
+        rows.append(persisted_row)
+        all_rows.append(persisted_row)
         if scenario_perf is not None:
-            scenario_perf.record_row(row)
+            scenario_perf.record_row(persisted_row)
         row_fingerprint = make_fingerprint_fn(row)
         if all(row_fingerprint):
             state.main_step_index_by_fingerprint[row_fingerprint] = step_idx
@@ -11580,10 +11618,11 @@ def collect_tab_rows(
             tab_cfg,
             stop_reason=start_result.failure_reason or "tab_or_anchor_failed",
         )
-        rows.append(failed_row)
-        all_rows.append(failed_row)
+        persisted_failed_row = _build_persisted_row_semantics(failed_row)
+        rows.append(persisted_failed_row)
+        all_rows.append(persisted_failed_row)
         if scenario_perf is not None:
-            scenario_perf.record_row(failed_row)
+            scenario_perf.record_row(persisted_failed_row)
             scenario_perf.finalize()
             log(format_perf_summary("scenario_summary", scenario_perf.summary_dict()))
         save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
@@ -11600,10 +11639,11 @@ def collect_tab_rows(
             handled_row["special_state_kind"] = str(start_result.special_state_kind or "onboarding_or_empty_state")
             handled_row["special_state_handling"] = str(start_result.special_state_handling or "back_after_read")
             handled_row["special_state_back_status"] = str(start_result.special_state_back_status or "")
-            rows.append(handled_row)
-            all_rows.append(handled_row)
+            persisted_handled_row = _build_persisted_row_semantics(handled_row)
+            rows.append(persisted_handled_row)
+            all_rows.append(persisted_handled_row)
             if scenario_perf is not None:
-                scenario_perf.record_row(handled_row)
+                scenario_perf.record_row(persisted_handled_row)
                 scenario_perf.finalize()
                 log(format_perf_summary("scenario_summary", scenario_perf.summary_dict()))
             save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
@@ -11612,10 +11652,11 @@ def collect_tab_rows(
         return rows
 
     anchor_row = start_result.start_row
-    rows.append(anchor_row)
-    all_rows.append(anchor_row)
+    persisted_anchor_row = _build_persisted_row_semantics(anchor_row)
+    rows.append(persisted_anchor_row)
+    all_rows.append(persisted_anchor_row)
     if scenario_perf is not None:
-        scenario_perf.record_row(anchor_row)
+        scenario_perf.record_row(persisted_anchor_row)
     save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
     state = MainLoopState(
         last_fingerprint=start_result.anchor_fingerprint,

@@ -12584,9 +12584,12 @@ def test_row_persistence_phase_impl_non_suppressed_records_all_targets(monkeypat
     )
 
     assert (persisted, reason) == (False, "")
-    assert rows == [row]
-    assert all_rows == [row]
-    assert perf.rows == [row]
+    assert rows[0] is not row
+    assert all_rows[0] is not row
+    assert perf.rows[0] is not row
+    assert rows[0]["visible_label"] == row["visible_label"]
+    assert all_rows[0]["visible_label"] == row["visible_label"]
+    assert perf.rows[0]["visible_label"] == row["visible_label"]
     assert state.main_step_index_by_fingerprint == {("fingerprint", "label", "rid"): 12}
 
 
@@ -12714,3 +12717,59 @@ def test_apply_cta_node_to_row_preserves_actual_focus_metadata():
     assert updated["actual_focus_payload_source"] == "top_level"
     assert updated["row_source"] == "representative"
     assert updated["crop_source"] == "actual_focus"
+
+
+def test_build_persisted_row_semantics_prefers_actual_focus_and_preserves_representative():
+    row = {
+        "visible_label": "Water sensor History",
+        "normalized_visible_label": "water sensor history",
+        "merged_announcement": "Water sensor History",
+        "normalized_announcement": "water sensor history",
+        "focus_view_id": "WaterSensorCapabilityCardView",
+        "focus_bounds": "30,412,1050,727",
+        "actual_focus_visible": "누수, 우리 집 - 거실",
+        "actual_focus_speech": "누수, 우리 집 - 거실",
+        "actual_focus_resource_id": "WaterSensorCapabilityCardView_header_title",
+        "actual_focus_bounds": "180,118,924,310",
+        "row_source": "representative",
+        "crop_source": "actual_focus",
+    }
+
+    persisted = collection_flow._build_persisted_row_semantics(row)
+
+    assert persisted["visible_label"] == "누수, 우리 집 - 거실"
+    assert persisted["merged_announcement"] == "누수, 우리 집 - 거실"
+    assert persisted["focus_view_id"] == "WaterSensorCapabilityCardView_header_title"
+    assert persisted["focus_bounds"] == "180,118,924,310"
+    assert persisted["representative_visible"] == "Water sensor History"
+    assert persisted["representative_speech"] == "Water sensor History"
+    assert persisted["representative_resource_id"] == "WaterSensorCapabilityCardView"
+    assert persisted["representative_bounds"] == "30,412,1050,727"
+    assert persisted["representative_row_source"] == "representative"
+    assert persisted["row_source"] == "actual_focus"
+    assert persisted["crop_source"] == "actual_focus"
+
+
+def test_build_persisted_row_semantics_keeps_representative_when_actual_focus_missing():
+    row = {
+        "visible_label": "Water sensor History",
+        "normalized_visible_label": "water sensor history",
+        "merged_announcement": "Water sensor History",
+        "normalized_announcement": "water sensor history",
+        "focus_view_id": "WaterSensorCapabilityCardView",
+        "focus_bounds": "30,412,1050,727",
+        "row_source": "representative",
+        "crop_source": "actual_focus",
+    }
+
+    persisted = collection_flow._build_persisted_row_semantics(row)
+
+    assert persisted["visible_label"] == "Water sensor History"
+    assert persisted["merged_announcement"] == "Water sensor History"
+    assert persisted["focus_view_id"] == "WaterSensorCapabilityCardView"
+    assert persisted["focus_bounds"] == "30,412,1050,727"
+    assert persisted["representative_visible"] == "Water sensor History"
+    assert persisted["representative_speech"] == "Water sensor History"
+    assert persisted["representative_resource_id"] == "WaterSensorCapabilityCardView"
+    assert persisted["representative_bounds"] == "30,412,1050,727"
+    assert persisted["row_source"] == "representative_fallback"
