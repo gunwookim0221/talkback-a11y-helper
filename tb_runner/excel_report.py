@@ -32,6 +32,58 @@ _DEBUG_LOG_FAILURE_REASONS = {
 }
 _ANN_REQUIRED_TAGS = ("[ANN][baseline]", "[ANN][poll]", "[ANN][stable]", "[ANN][select]")
 
+RESULT_SHEET_COLUMNS = [
+    "plugin_group",
+    "plugin_name",
+    "scenario_id",
+    "step",
+    "context_type",
+    "visible_label",
+    "merged_announcement",
+    "representative_visible",
+    "mismatch_type",
+    "final_result",
+    "failure_reason",
+    "review_note",
+    "focus_view_id",
+    "focus_confidence",
+    "result_crop_thumbnail",
+]
+
+PLUGIN_REPORT_METADATA: dict[str, dict[str, str]] = {
+    "global_nav_main": {"group": "Global", "name": "Global Navigation"},
+    "home_main": {"group": "Global", "name": "Home"},
+    "devices_main": {"group": "Global", "name": "Devices"},
+    "life_main": {"group": "Global", "name": "Life"},
+    "routines_main": {"group": "Global", "name": "Routines"},
+    "menu_main": {"group": "Global", "name": "Menu"},
+    "settings_entry_example": {"group": "Settings", "name": "Settings"},
+    "life_food_plugin": {"group": "Life", "name": "Food"},
+    "life_air_care_plugin": {"group": "Life", "name": "Air Care"},
+    "life_home_care_plugin": {"group": "Life", "name": "Home Care"},
+    "life_energy_plugin": {"group": "Life", "name": "Energy"},
+    "life_pet_care_plugin": {"group": "Life", "name": "Pet Care"},
+    "life_family_care_plugin": {"group": "Life", "name": "Family Care"},
+    "life_plant_care_plugin": {"group": "Life", "name": "Plant Care"},
+    "life_clothing_care_plugin": {"group": "Life", "name": "Clothing Care"},
+    "life_find_plugin": {"group": "Life", "name": "Find"},
+    "life_video_plugin": {"group": "Life", "name": "Video"},
+    "life_home_monitor_plugin": {"group": "Life", "name": "Home Monitor"},
+    "life_music_sync_plugin": {"group": "Life", "name": "Music Sync"},
+    "device_smoke_sensor_plugin": {"group": "Devices", "name": "연기센서"},
+    "device_water_leak_sensor_plugin": {"group": "Devices", "name": "누수센서"},
+    "device_motion_sensor_plugin": {"group": "Devices", "name": "모션센서"},
+    "device_door_lock_plugin": {"group": "Devices", "name": "도어락"},
+    "device_air_purifier_plugin": {"group": "Devices", "name": "공기청정기"},
+    "device_humidity_sensor_plugin": {"group": "Devices", "name": "습도센서"},
+    "device_temperature_humidity_sensor_plugin": {"group": "Devices", "name": "온습도센서"},
+    "device_tv_plugin": {"group": "Devices", "name": "TV"},
+    "device_washer_plugin": {"group": "Devices", "name": "세탁기"},
+    "device_audio_plugin": {"group": "Devices", "name": "Audio"},
+    "device_camera_plugin": {"group": "Devices", "name": "Camera"},
+    "device_home_camera_plugin": {"group": "Devices", "name": "홈카메라 360"},
+}
+
 _KEY_VALUE_PATTERNS = {
     "req_id": (r"req_id='([^']*)'", r'req_id="([^"]*)"', r"req_id=([^\s,]+)"),
     "tab": (r"tab='([^']*)'", r'tab="([^"]*)"', r"tab=([^\s,]+)", r"tab_name='([^']*)'", r'tab_name="([^"]*)"', r"tab_name=([^\s,]+)"),
@@ -64,9 +116,24 @@ def _sanitize_filename_part(value: object, default: str) -> str:
     return re.sub(r"[^0-9a-zA-Z._-]+", "_", text)[:80] or default
 
 
+def _display_name_for_path(path_text: object) -> str:
+    normalized = str(path_text or "").replace("\\", "/").rstrip("/")
+    return os.path.basename(normalized) or str(path_text or "")
+
+
 def _is_debug_log_target(row) -> bool:
-    final_result = str(getattr(row, "final_result", "") or "").strip().upper()
-    failure_reason = str(getattr(row, "failure_reason", "") or "").strip().lower()
+    def _row_get(key: str, default: object = "") -> object:
+        if isinstance(row, dict):
+            return row.get(key, default)
+        if hasattr(row, "get"):
+            try:
+                return row.get(key, default)
+            except Exception:
+                pass
+        return getattr(row, key, default)
+
+    final_result = str(_row_get("final_result", "") or "").strip().upper()
+    failure_reason = str(_row_get("failure_reason", "") or "").strip().lower()
     mismatch_reason = "speech_visible_diverged" in failure_reason
     if final_result in {"WARN", "FAIL"}:
         return True
@@ -74,7 +141,7 @@ def _is_debug_log_target(row) -> bool:
         return True
     if any(reason in failure_reason for reason in _DEBUG_LOG_FAILURE_REASONS):
         return True
-    focus_confidence = str(getattr(row, "focus_confidence", "") or "").strip().upper()
+    focus_confidence = str(_row_get("focus_confidence", "") or "").strip().upper()
     return final_result == "WARN" and focus_confidence == "LOW"
 
 
@@ -162,10 +229,20 @@ def _build_debug_log_sections(
     source_row: dict[str, object] | None,
     prev_source_row: dict[str, object] | None,
 ) -> dict[str, str]:
-    req_id = str(getattr(row, "req_id", "") or "").strip()
-    scenario_id = str(getattr(row, "scenario_id", "") or source_row.get("scenario_id", "") if source_row else "").strip()
-    tab_name = str(getattr(row, "tab", "") or (source_row or {}).get("tab_name", "") or (source_row or {}).get("tab", "")).strip()
-    step_str = _normalize_step_value(getattr(row, "step", "") or (source_row or {}).get("step_index", ""))
+    def _row_get(key: str, default: object = "") -> object:
+        if isinstance(row, dict):
+            return row.get(key, default)
+        if hasattr(row, "get"):
+            try:
+                return row.get(key, default)
+            except Exception:
+                pass
+        return getattr(row, key, default)
+
+    req_id = str(_row_get("_req_id", "") or _row_get("req_id", "") or "").strip()
+    scenario_id = str(_row_get("scenario_id", "") or (source_row.get("scenario_id", "") if source_row else "") or "").strip()
+    tab_name = str(_row_get("_tab", "") or _row_get("tab", "") or (source_row or {}).get("tab_name", "") or (source_row or {}).get("tab", "")).strip()
+    step_str = _normalize_step_value(_row_get("step", "") or (source_row or {}).get("step_index", ""))
     recent_logs = get_recent_logs(limit=260)
     scoped_logs = _extract_debug_lines_for_row(
         recent_logs,
@@ -213,7 +290,7 @@ def _build_debug_log_sections(
     if not baseline_empty_reason and not baseline_text:
         baseline_empty_reason = "baseline_not_available"
 
-    current_speech = str(source.get("merged_announcement", "") or getattr(row, "speech", "") or "")
+    current_speech = str(source.get("merged_announcement", "") or _row_get("merged_announcement", "") or _row_get("speech", "") or "")
     partial_ann = source.get("partial_announcements", [])
     ann_count = int(source.get("announcement_count", 0) or 0)
     poll_source = "row_snapshot"
@@ -259,8 +336,8 @@ def _build_debug_log_sections(
         step_lines.extend(
             [
                 f"[STEP] START scenario='{scenario_id}' tab='{tab_name}' step={step_str} req_id='{req_id}'",
-                f"[STEP] END scenario='{scenario_id}' tab='{tab_name}' step={step_str} req_id='{req_id}' move_result='{getattr(row, 'move_result', '')}'",
-                f"[STOP][eval] scenario='{scenario_id}' step={step_str} reason='{getattr(row, 'failure_reason', '')}'",
+                f"[STEP] END scenario='{scenario_id}' tab='{tab_name}' step={step_str} req_id='{req_id}' move_result='{_row_get('_move_result', '') or _row_get('move_result', '')}'",
+                f"[STOP][eval] scenario='{scenario_id}' step={step_str} reason='{_row_get('failure_reason', '')}'",
             ]
         )
 
@@ -282,11 +359,11 @@ def _build_debug_log_sections(
             f"post_move_verdict_source='{post_move_verdict_source}'"
         )
     step_lines.append(
-        f"[STEP][summary] req_id={req_id} tab='{tab_name}' step={step_str} move_result='{getattr(row, 'move_result', '')}' terminal={str(smart_terminal).lower()} no_progress={str('repeat_no_progress' in str(getattr(row, 'failure_reason', '') or '')).lower()}"
+        f"[STEP][summary] req_id={req_id} tab='{tab_name}' step={step_str} move_result='{_row_get('_move_result', '') or _row_get('move_result', '')}' terminal={str(smart_terminal).lower()} no_progress={str('repeat_no_progress' in str(_row_get('failure_reason', '') or '')).lower()}"
     )
     if not scroll_lines:
-        move_result = str(source.get("move_result", "") or getattr(row, "move_result", "") or "")
-    move_result = str(source.get("move_result", "") or getattr(row, "move_result", "") or "")
+        move_result = str(source.get("move_result", "") or _row_get("_move_result", "") or _row_get("move_result", "") or "")
+    move_result = str(source.get("move_result", "") or _row_get("_move_result", "") or _row_get("move_result", "") or "")
     scroll_related_log_found = bool(scroll_lines)
     inferred_scroll = move_result in {"scrolled"} or "scrolled" in smart_detail.lower()
     inference_reason = "no_scroll_signal_found"
@@ -345,8 +422,8 @@ def _populate_result_debug_logs(
     output_path: str,
     source_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    result_df["debug_log_path"] = ""
-    result_df["debug_log_name"] = ""
+    result_df["_debug_log_path"] = ""
+    result_df["_debug_log_name"] = ""
     if result_df.empty:
         return result_df
 
@@ -357,18 +434,18 @@ def _populate_result_debug_logs(
 
     source_row_index = _build_source_row_index(source_df)
 
-    for row in result_df.itertuples(index=True):
+    for row_index, row in result_df.iterrows():
         if not _is_debug_log_target(row):
             continue
-        req_id = str(getattr(row, "req_id", "") or "").strip()
-        scenario_id = _sanitize_filename_part(getattr(row, "scenario_id", ""), "scenario")
-        step_normalized = _normalize_step_value(getattr(row, "step", ""))
+        req_id = str(row.get("_req_id", "") or "").strip()
+        scenario_id = _sanitize_filename_part(row.get("scenario_id", ""), "scenario")
+        step_normalized = _normalize_step_value(row.get("step", ""))
         step_part = _sanitize_filename_part(step_normalized, "na")
         req_part = _sanitize_filename_part(req_id, "no_req")
         file_name = f"{scenario_id}_step_{step_part}_req_{req_part}.log"
         file_path = debug_dir / file_name
-        scenario_raw = str(getattr(row, "scenario_id", "") or "").strip()
-        tab_raw = str(getattr(row, "tab", "") or "").strip()
+        scenario_raw = str(row.get("scenario_id", "") or "").strip()
+        tab_raw = str(row.get("_tab", "") or "").strip()
         source_row = source_row_index.get((scenario_raw, tab_raw, step_normalized), {})
         prev_step = ""
         try:
@@ -384,15 +461,15 @@ def _populate_result_debug_logs(
             "[ROW_CONTEXT]\n"
             f"scenario={scenario_fallback}\n"
             f"tab={tab_raw}\n"
-            f"step={getattr(row, 'step', '')}\n"
+            f"step={row.get('step', '')}\n"
             f"req_id={req_id}\n"
-            f"visible={getattr(row, 'visible', '')}\n"
-            f"speech={getattr(row, 'speech', '')}\n"
-            f"final_result={getattr(row, 'final_result', '')}\n"
-            f"failure_reason={getattr(row, 'failure_reason', '')}\n\n"
-            f"review_note={getattr(row, 'review_note', '')}\n"
+            f"visible={row.get('visible_label', '')}\n"
+            f"speech={row.get('merged_announcement', '')}\n"
+            f"final_result={row.get('final_result', '')}\n"
+            f"failure_reason={row.get('failure_reason', '')}\n\n"
+            f"review_note={row.get('review_note', '')}\n"
             f"noise={str(source_row.get('is_noise_step', ''))}\n"
-            f"move_result={getattr(row, 'move_result', '')}\n"
+            f"move_result={row.get('_move_result', '')}\n"
             f"debug_source_row_found={str(bool(source_row)).lower()}\n\n"
             "[ANN_TRACE]\n"
         )
@@ -409,8 +486,8 @@ def _populate_result_debug_logs(
                 f"{sections.get('decision', '')}\n"
             )
             file_path.write_text(content, encoding="utf-8")
-            result_df.at[row.Index, "debug_log_path"] = str(file_path)
-            result_df.at[row.Index, "debug_log_name"] = file_name
+            result_df.at[row_index, "_debug_log_path"] = str(file_path)
+            result_df.at[row_index, "_debug_log_name"] = file_name
         except Exception as exc:
             write_failures += 1
             if not write_fail_reason:
@@ -458,6 +535,47 @@ def stringify_complex_columns(df: pd.DataFrame) -> pd.DataFrame:
             lambda x: to_json_text(x) if isinstance(x, (list, dict)) else x
         )
     return df
+
+
+def _fallback_plugin_group(scenario_type: object) -> str:
+    normalized = str(scenario_type or "").strip().lower()
+    if normalized == "global_nav":
+        return "Global"
+    if normalized == "content":
+        return "Unknown"
+    return str(scenario_type or "").strip() or "Unknown"
+
+
+def annotate_plugin_metadata(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        if "plugin_group" not in df.columns:
+            df["plugin_group"] = pd.Series(dtype=object)
+        if "plugin_name" not in df.columns:
+            df["plugin_name"] = pd.Series(dtype=object)
+        return df
+
+    result = df.copy()
+    scenario_ids = (
+        result["scenario_id"].fillna("").astype(str).str.strip()
+        if "scenario_id" in result.columns
+        else pd.Series([""] * len(result), index=result.index, dtype=object)
+    )
+    scenario_types = (
+        result["scenario_type"].fillna("").astype(str).str.strip()
+        if "scenario_type" in result.columns
+        else pd.Series([""] * len(result), index=result.index, dtype=object)
+    )
+
+    plugin_groups: list[str] = []
+    plugin_names: list[str] = []
+    for scenario_id, scenario_type in zip(scenario_ids.tolist(), scenario_types.tolist()):
+        metadata = PLUGIN_REPORT_METADATA.get(scenario_id, {})
+        plugin_groups.append(metadata.get("group", _fallback_plugin_group(scenario_type)))
+        plugin_names.append(metadata.get("name", scenario_id or "Unknown"))
+
+    result["plugin_group"] = plugin_groups
+    result["plugin_name"] = plugin_names
+    return result
 
 
 def _normalize_text(value: object) -> str:
@@ -608,6 +726,44 @@ def _normalize_compare_text(value: object) -> str:
     return " ".join(text.split())
 
 
+def _normalize_result_match_text(value: object) -> str:
+    text = _normalize_compare_text(value)
+    if not text:
+        return ""
+    suffixes = (
+        " clear",
+        " dry",
+        " pause",
+        " paused",
+        " connected",
+        " offline",
+        " locked",
+        " unlocked",
+        " off",
+        " on",
+        " vibration detected",
+        " motion detected",
+        " no smoke detected",
+        " no leak detected",
+        " water leak detected",
+        " no motion detected",
+        " open",
+        " closed",
+        " armed",
+        " armed away",
+        " disarmed",
+    )
+    changed = True
+    while changed:
+        changed = False
+        for suffix in suffixes:
+            if text.endswith(suffix):
+                text = text[: -len(suffix)].strip()
+                changed = True
+                break
+    return text
+
+
 def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     status_series = (
         filtered_df["status"].fillna("").astype(str).str.strip().str.upper()
@@ -640,36 +796,20 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
 
     if result_source_df.empty:
         return pd.DataFrame(
-            columns=[
-                "scenario_id",
-                "tab",
-                "step",
-                "context_type",
-                "visible",
-                "speech",
-                "move_result",
-                "resource_id",
-                "bounds",
-                "fallback_used",
-                "step_dump_used",
-                "req_id",
-                "smart_nav_requested_view_id",
-                "smart_nav_resolved_view_id",
-                "smart_nav_actual_view_id",
-                "post_move_verdict_source",
-                "timing_move",
-                "timing_get_focus",
-                "timing_total",
-                "traversal_result",
-                "speech_match_result",
-                "focus_confidence",
-                "final_result",
-                "failure_reason",
-                "review_note",
-                "debug_log_path",
-                "debug_log_name",
-                "crop_image_path",
-                "result_crop_thumbnail",
+            columns=RESULT_SHEET_COLUMNS
+            + [
+                "_tab",
+                "_req_id",
+                "_move_result",
+                "_fallback_used",
+                "_step_dump_used",
+                "_crop_image_path",
+                "_debug_log_path",
+                "_debug_log_name",
+                "_traversal_result",
+                "_speech_match_result",
+                "_row_source",
+                "_representative_row_source",
             ]
         )
 
@@ -682,44 +822,57 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
                 return
         result[target] = default
 
+    _pick_col("plugin_group", ["plugin_group"])
+    _pick_col("plugin_name", ["plugin_name"])
     _pick_col("scenario_id", ["scenario_id"])
-    _pick_col("tab", ["tab", "tab_name"])
+    _pick_col("_tab", ["tab", "tab_name"])
     _pick_col("step", ["step", "step_index"])
     _pick_col("context_type", ["context_type"])
 
-    _pick_col("visible", ["visible_label", "normalized_visible_label", "text"])
+    _pick_col("visible_label", ["visible_label", "normalized_visible_label", "text"])
     _pick_col(
-        "speech",
+        "merged_announcement",
         ["merged_announcement", "speech", "announcement", "normalized_announcement"],
     )
-    _pick_col("move_result", ["move_result"])
-    _pick_col("resource_id", ["focus_view_id", "resource_id"])
-    _pick_col("bounds", ["focus_bounds", "bounds"])
-    _pick_col("fallback_used", ["fallback_used"], default=False)
-    _pick_col("step_dump_used", ["step_dump_used"], default=False)
-    _pick_col("req_id", ["req_id", "get_focus_req_id"])
+    _pick_col("representative_visible", ["representative_visible"], default="")
+    _pick_col("_move_result", ["move_result"])
+    _pick_col("focus_view_id", ["focus_view_id", "resource_id"])
+    _pick_col("focus_bounds", ["focus_bounds", "bounds"])
+    _pick_col("_fallback_used", ["fallback_used"], default=False)
+    _pick_col("_step_dump_used", ["step_dump_used"], default=False)
+    _pick_col("_req_id", ["req_id", "get_focus_req_id"])
     _pick_col("last_smart_nav_result", ["last_smart_nav_result"])
     _pick_col("smart_nav_success", ["smart_nav_success"], default=False)
     _pick_col("smart_nav_requested_view_id", ["smart_nav_requested_view_id"])
     _pick_col("smart_nav_resolved_view_id", ["smart_nav_resolved_view_id"])
     _pick_col("smart_nav_actual_view_id", ["smart_nav_actual_view_id"])
     _pick_col("post_move_verdict_source", ["post_move_verdict_source"])
-
-    _pick_col("timing_move", ["timing_move", "move_elapsed_sec"])
-    _pick_col("timing_get_focus", ["timing_get_focus", "step_elapsed_sec"])
-    _pick_col("timing_total", ["timing_total", "step_elapsed_sec"])
-    _pick_col("crop_image_path", ["crop_image_path", "crop_path", "result_crop"])
-    _pick_col("traversal_result", ["traversal_result"])
-    _pick_col("speech_match_result", ["speech_match_result"])
-    _pick_col("final_result", ["final_result"])
+    _pick_col("_crop_image_path", ["crop_image_path", "crop_path", "result_crop"])
+    _pick_col("_traversal_result", ["traversal_result"])
+    _pick_col("_speech_match_result", ["speech_match_result"])
+    _pick_col("_raw_final_result", ["final_result"])
     _pick_col("failure_reason", ["failure_reason"])
+    _pick_col("_row_source", ["row_source"], default="")
+    _pick_col("_representative_row_source", ["representative_row_source"], default="")
 
-    result["move_result"] = result.apply(normalize_move_result, axis=1)
-    result["fallback_used"] = result["fallback_used"].fillna(False).astype(bool)
-    result["step_dump_used"] = result["step_dump_used"].fillna(False).astype(bool)
+    result["_move_result"] = result.apply(
+        lambda row: normalize_move_result(
+            {
+                "move_result": row["_move_result"],
+                "last_smart_nav_result": row["last_smart_nav_result"],
+                "smart_nav_success": row["smart_nav_success"],
+            }
+        ),
+        axis=1,
+    )
+    result["_fallback_used"] = result["_fallback_used"].fillna(False).astype(bool)
+    result["_step_dump_used"] = result["_step_dump_used"].fillna(False).astype(bool)
 
-    result["_norm_visible"] = result["visible"].apply(_normalize_compare_text)
-    result["_norm_speech"] = result["speech"].apply(_normalize_compare_text)
+    result["_norm_visible"] = result["visible_label"].apply(_normalize_compare_text)
+    result["_norm_speech"] = result["merged_announcement"].apply(_normalize_compare_text)
+    result["_norm_visible_match"] = result["visible_label"].apply(_normalize_result_match_text)
+    result["_norm_speech_match"] = result["merged_announcement"].apply(_normalize_result_match_text)
+    result["_norm_representative"] = result["representative_visible"].apply(_normalize_result_match_text)
     if "mismatch_reasons" in result_source_df.columns:
         result["_mismatch_reasons"] = result_source_df["mismatch_reasons"]
     else:
@@ -756,30 +909,30 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
         return "FAIL_MISMATCH"
 
     computed_speech_match = result.apply(_speech_match, axis=1)
-    existing_speech_match = result["speech_match_result"].fillna("").astype(str).str.strip()
-    result["speech_match_result"] = existing_speech_match.where(existing_speech_match != "", computed_speech_match)
+    existing_speech_match = result["_speech_match_result"].fillna("").astype(str).str.strip()
+    result["_speech_match_result"] = existing_speech_match.where(existing_speech_match != "", computed_speech_match)
 
-    group_keys = [k for k in ["scenario_id", "tab", "context_type"] if k in result.columns]
+    group_keys = [k for k in ["scenario_id", "_tab", "context_type"] if k in result.columns]
     if not group_keys:
         group_keys = [result.index]
 
     for _, group in result.groupby(group_keys, dropna=False, sort=False):
         group_idx = group.index.tolist()
-        moved_idx = [idx for idx in group_idx if result.at[idx, "move_result"] == "moved"]
+        moved_idx = [idx for idx in group_idx if result.at[idx, "_move_result"] == "moved"]
         last_moved_idx = moved_idx[-1] if moved_idx else None
 
         traversal = []
         failure = []
         for idx in group_idx:
-            move_result = result.at[idx, "move_result"]
+            move_result = result.at[idx, "_move_result"]
             is_followup_noise = False
             if last_moved_idx is not None and idx > last_moved_idx:
                 same_visible = result.at[idx, "_norm_visible"] == result.at[last_moved_idx, "_norm_visible"]
                 same_speech = result.at[idx, "_norm_speech"] == result.at[last_moved_idx, "_norm_speech"]
-                is_repeat_stop = "repeat_no_progress" in str(result.at[idx, "req_id"] or "")
+                is_repeat_stop = "repeat_no_progress" in str(result.at[idx, "_req_id"] or "")
                 is_followup_noise = move_result == "failed" and (same_visible or same_speech or is_repeat_stop)
 
-            if idx == last_moved_idx and any(i > last_moved_idx for i in group_idx if result.at[i, "move_result"] == "failed"):
+            if idx == last_moved_idx and any(i > last_moved_idx for i in group_idx if result.at[i, "_move_result"] == "failed"):
                 traversal.append("WARN_TERMINAL_BY_REPEAT_STOP")
                 failure.append("terminal_not_handled")
             elif move_result == "moved":
@@ -799,105 +952,148 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
                 traversal.append("FAIL_MOVE")
                 failure.append("move_failed")
 
-        existing_traversal = result.loc[group_idx, "traversal_result"].fillna("").astype(str).str.strip()
+        existing_traversal = result.loc[group_idx, "_traversal_result"].fillna("").astype(str).str.strip()
         existing_failure = result.loc[group_idx, "failure_reason"].fillna("").astype(str).str.strip()
         computed_traversal = pd.Series(traversal, index=group_idx, dtype=object)
         computed_failure = pd.Series(failure, index=group_idx, dtype=object)
-        result.loc[group_idx, "traversal_result"] = existing_traversal.where(existing_traversal != "", computed_traversal)
+        result.loc[group_idx, "_traversal_result"] = existing_traversal.where(existing_traversal != "", computed_traversal)
         result.loc[group_idx, "failure_reason"] = existing_failure.where(existing_failure != "", computed_failure)
 
     def _focus_confidence(row) -> str:
-        if row["fallback_used"] or row["step_dump_used"]:
+        if row["_fallback_used"] or row["_step_dump_used"]:
             return "LOW"
-        if row["speech_match_result"] in {"PASS_EXACT", "PASS_CONTAINS"} and row["traversal_result"] == "PASS_MOVED":
+        if row["_speech_match_result"] in {"PASS_EXACT", "PASS_CONTAINS"} and row["_traversal_result"] == "PASS_MOVED":
             return "HIGH"
-        if row["speech_match_result"] == "PASS_SMART_NAV" and row["traversal_result"] == "PASS_MOVED":
+        if row["_speech_match_result"] == "PASS_SMART_NAV" and row["_traversal_result"] == "PASS_MOVED":
             return "HIGH"
-        if row["speech_match_result"] == "FAIL_MISMATCH" or row["traversal_result"].startswith("FAIL"):
+        if row["_speech_match_result"] == "FAIL_MISMATCH" or row["_traversal_result"].startswith("FAIL"):
             return "LOW"
         return "MEDIUM"
 
     result["focus_confidence"] = result.apply(_focus_confidence, axis=1)
 
+    def _mismatch_type(row) -> str:
+        visible_raw = str(row.get("visible_label", "") or "").strip()
+        speech_raw = str(row.get("merged_announcement", "") or "").strip()
+        visible = row["_norm_visible"]
+        speech = row["_norm_speech"]
+        visible_match = row["_norm_visible_match"]
+        speech_match = row["_norm_speech_match"]
+        representative = row["_norm_representative"]
+        if not visible_raw:
+            return "EMPTY_VISIBLE"
+        if not speech_raw:
+            return "EMPTY_SPEECH"
+        if row.get("_row_source", "") == "actual_focus" and representative and representative != visible_match:
+            return "REPRESENTATIVE_CONTEXT"
+        if visible == speech:
+            return "EXACT_MATCH"
+        if visible_match and speech_match and visible_match == speech_match:
+            return "NORMALIZED_MATCH"
+        if visible and speech and (visible in speech or speech in visible):
+            return "PARTIAL_MATCH"
+        state_diff_markers = ("clear", "dry", "pause", "connected", "offline", "locked", "off", "on", "detected")
+        if visible_match == speech_match and any(token in (visible + " " + speech) for token in state_diff_markers):
+            return "SPEECH_ONLY_STATE_DIFF"
+        if row["_speech_match_result"] == "FAIL_MISMATCH":
+            return "LABEL_MISMATCH"
+        return "UNKNOWN"
+
+    result["mismatch_type"] = result.apply(_mismatch_type, axis=1)
+
+    _ACCESSIBILITY_PASS_MATCH_TYPES = {
+        "EXACT_MATCH",
+        "NORMALIZED_MATCH",
+        "PARTIAL_MATCH",
+        "REPRESENTATIVE_CONTEXT",
+    }
+    _TERMINAL_PRESENTATION_REASONS = {
+        "repeat_no_progress",
+        "terminal_not_handled",
+        "terminal_followup_noise",
+        "move_terminal",
+    }
+
     def _final_result(row) -> str:
-        if row["traversal_result"] in {"FAIL_MOVE", "FAIL_STUCK"} or row["speech_match_result"] == "FAIL_MISMATCH":
+        mismatch_type = str(row.get("mismatch_type", "") or "").strip().upper()
+        failure_reason = str(row.get("failure_reason", "") or "").strip().lower()
+        traversal_result = str(row.get("_traversal_result", "") or "").strip().upper()
+        speech_match_result = str(row.get("_speech_match_result", "") or "").strip().upper()
+        focus_confidence = str(row.get("focus_confidence", "") or "").strip().upper()
+        accessibility_match_ok = mismatch_type in _ACCESSIBILITY_PASS_MATCH_TYPES
+
+        if mismatch_type in {"LABEL_MISMATCH", "EMPTY_SPEECH", "EMPTY_VISIBLE"} or speech_match_result == "FAIL_MISMATCH":
             return "FAIL"
-        if (
-            row["traversal_result"] == "WARN_TERMINAL_BY_REPEAT_STOP"
-            or row["speech_match_result"] == "WARN_CONTEXT_ADDED"
-            or row["focus_confidence"] == "LOW"
-        ):
+        if traversal_result in {"FAIL_MOVE", "FAIL_STUCK"}:
+            return "WARN" if accessibility_match_ok else "FAIL"
+        if traversal_result == "WARN_TERMINAL_BY_REPEAT_STOP":
             return "WARN"
-        if row["traversal_result"] == "PASS_MOVED" and row["speech_match_result"] in {"PASS_EXACT", "PASS_CONTAINS"}:
+        if speech_match_result == "WARN_CONTEXT_ADDED" or focus_confidence == "LOW":
+            return "WARN"
+        if accessibility_match_ok and traversal_result in {"PASS_MOVED", "PASS_SCROLLED"}:
             return "PASS"
-        if row["traversal_result"] == "PASS_MOVED" and row["speech_match_result"] == "PASS_SMART_NAV":
+        if accessibility_match_ok and failure_reason in _TERMINAL_PRESENTATION_REASONS:
+            return "WARN"
+        if traversal_result in {"PASS_MOVED", "PASS_SCROLLED"} and speech_match_result == "PASS_SMART_NAV":
             return "PASS"
         return "WARN"
 
-    def _review_note(row) -> str:
-        if row["final_result"] == "PASS":
-            return "정상 이동 및 발화 일치"
-        if row["traversal_result"] == "WARN_TERMINAL_BY_REPEAT_STOP":
-            return "실제 마지막 항목으로 보이나 종료 판정 미흡"
-        if row["speech_match_result"] == "WARN_CONTEXT_ADDED":
-            return "정상 이동, speech에 상위 문맥 포함"
-        if row["traversal_result"] == "FAIL_STUCK":
-            return "동일 항목 반복 후 종료"
-        if row["speech_match_result"] == "FAIL_MISMATCH":
-            return "speech와 visible 불일치"
-        return "이동/발화 결과 재검토 필요"
-
     computed_final_result = result.apply(_final_result, axis=1)
-    existing_final_result = result["final_result"].fillna("").astype(str).str.strip().str.upper()
-    result["final_result"] = existing_final_result.where(existing_final_result != "", computed_final_result)
-    result["review_note"] = result.apply(_review_note, axis=1)
+    result["final_result"] = computed_final_result
     result["failure_reason"] = result.apply(
         lambda row: row["failure_reason"]
         if row["failure_reason"]
-        else ("speech_visible_diverged" if row["speech_match_result"] == "FAIL_MISMATCH" else ("fallback_dependent" if row["focus_confidence"] == "LOW" and row["final_result"] != "FAIL" else "")),
+        else ("speech_visible_diverged" if row["_speech_match_result"] == "FAIL_MISMATCH" else ("fallback_dependent" if row["focus_confidence"] == "LOW" and row["final_result"] != "FAIL" else "")),
         axis=1,
     )
-    result["debug_log_path"] = ""
-    result["debug_log_name"] = ""
+
+    def _review_note(row) -> str:
+        final_result = str(row.get("final_result", "") or "").strip().upper()
+        mismatch_type = str(row.get("mismatch_type", "") or "").strip().upper()
+        failure_reason = str(row.get("failure_reason", "") or "").strip().lower()
+        traversal_result = str(row.get("_traversal_result", "") or "").strip().upper()
+        speech_match_result = str(row.get("_speech_match_result", "") or "").strip().upper()
+
+        if final_result == "PASS":
+            return "정상 이동 및 발화 일치"
+        if mismatch_type in _ACCESSIBILITY_PASS_MATCH_TYPES and (
+            traversal_result == "WARN_TERMINAL_BY_REPEAT_STOP" or failure_reason in _TERMINAL_PRESENTATION_REASONS
+        ):
+            return "발화 일치, 탐색 종료 reason 있음"
+        if speech_match_result == "WARN_CONTEXT_ADDED":
+            return "정상 이동, speech에 상위 문맥 포함"
+        if traversal_result == "FAIL_STUCK":
+            return "동일 항목 반복 후 종료"
+        if speech_match_result == "FAIL_MISMATCH":
+            return "speech와 visible 불일치"
+        return "이동/발화 결과 재검토 필요"
+
+    result["review_note"] = result.apply(_review_note, axis=1)
+    result["_debug_log_path"] = ""
+    result["_debug_log_name"] = ""
     result["result_crop_thumbnail"] = ""
 
-    return result[
-        [
-            "scenario_id",
-            "tab",
-            "step",
-            "context_type",
-            "visible",
-            "speech",
-            "move_result",
-            "resource_id",
-            "bounds",
-            "fallback_used",
-            "step_dump_used",
-            "req_id",
-            "smart_nav_requested_view_id",
-            "smart_nav_resolved_view_id",
-            "smart_nav_actual_view_id",
-            "post_move_verdict_source",
-            "timing_move",
-            "timing_get_focus",
-            "timing_total",
-            "traversal_result",
-            "speech_match_result",
-            "focus_confidence",
-            "final_result",
-            "failure_reason",
-            "review_note",
-            "debug_log_path",
-            "debug_log_name",
-            "crop_image_path",
-            "result_crop_thumbnail",
-        ]
+    public_columns = RESULT_SHEET_COLUMNS
+    helper_columns = [
+        "_tab",
+        "_req_id",
+        "_move_result",
+        "_fallback_used",
+        "_step_dump_used",
+        "_crop_image_path",
+        "_debug_log_path",
+        "_debug_log_name",
+        "_traversal_result",
+        "_speech_match_result",
+        "_row_source",
+        "_representative_row_source",
+        "_mismatch_reasons",
     ]
+    return result[[*public_columns, *helper_columns]]
 
 
 def _apply_result_crop_hyperlinks(writer: pd.ExcelWriter, result_df: pd.DataFrame) -> None:
-    if "result" not in writer.sheets or "crop_image_path" not in result_df.columns:
+    if "result" not in writer.sheets or "_crop_image_path" not in result_df.columns:
         return
 
     valid_exts = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
@@ -926,16 +1122,18 @@ def _apply_result_crop_hyperlinks(writer: pd.ExcelWriter, result_df: pd.DataFram
         return f"external:{safe_path}", None
 
     ws = writer.sheets["result"]
-    crop_col_idx = result_df.columns.get_loc("crop_image_path")
+    if "result_crop_thumbnail" not in result_df.columns:
+        return
+    crop_col_idx = result_df.columns.get_loc("result_crop_thumbnail")
     is_openpyxl_sheet = hasattr(ws, "cell")
     is_xlsxwriter_sheet = hasattr(ws, "write_url")
     skipped_reasons: dict[str, int] = {}
 
-    for row_idx, crop_path in enumerate(result_df["crop_image_path"].tolist(), start=2):
+    for row_idx, crop_path in enumerate(result_df["_crop_image_path"].tolist(), start=2):
         path_text = str(crop_path or "").strip()
         if not path_text:
             continue
-        display_text = Path(path_text).name or path_text
+        display_text = _display_name_for_path(path_text)
         target, skip_reason = _to_hyperlink_target(path_text, xlsxwriter_mode=is_xlsxwriter_sheet)
         if skip_reason:
             skipped_reasons[skip_reason] = skipped_reasons.get(skip_reason, 0) + 1
@@ -975,53 +1173,7 @@ def _apply_result_crop_hyperlinks(writer: pd.ExcelWriter, result_df: pd.DataFram
 
 
 def _apply_result_debug_log_hyperlinks(writer: pd.ExcelWriter, result_df: pd.DataFrame) -> None:
-    if "result" not in writer.sheets or "debug_log_path" not in result_df.columns:
-        return
-
-    ws = writer.sheets["result"]
-    debug_col_idx = result_df.columns.get_loc("debug_log_path")
-    name_col_idx = result_df.columns.get_loc("debug_log_name") if "debug_log_name" in result_df.columns else -1
-    is_openpyxl_sheet = hasattr(ws, "cell")
-    is_xlsxwriter_sheet = hasattr(ws, "write_url")
-    skipped_reasons: dict[str, int] = {}
-
-    for row_idx, debug_path in enumerate(result_df["debug_log_path"].tolist(), start=2):
-        path_text = str(debug_path or "").strip()
-        if not path_text:
-            continue
-        display_name = str(result_df.iloc[row_idx - 2]["debug_log_name"] if name_col_idx >= 0 else "").strip()
-        display_text = display_name or Path(path_text).name or path_text
-        abs_path = os.path.abspath(os.path.normpath(path_text))
-        target = abs_path
-        if is_xlsxwriter_sheet:
-            safe_path = abs_path.replace("\\", "/")
-            target = f"external:{safe_path}"
-        try:
-            if is_openpyxl_sheet:
-                cell = ws.cell(row=row_idx, column=debug_col_idx + 1)
-                cell.value = display_text
-                cell.hyperlink = target
-                cell.style = "Hyperlink"
-            elif is_xlsxwriter_sheet:
-                ws.write_url(row_idx - 1, debug_col_idx, target, string=display_text)
-            elif hasattr(ws, "write"):
-                ws.write(row_idx - 1, debug_col_idx, display_text)
-        except Exception as exc:
-            skipped_reasons[str(exc)] = skipped_reasons.get(str(exc), 0) + 1
-            try:
-                if is_openpyxl_sheet:
-                    ws.cell(row=row_idx, column=debug_col_idx + 1).value = display_text
-                elif hasattr(ws, "write"):
-                    ws.write(row_idx - 1, debug_col_idx, display_text)
-            except Exception:
-                continue
-
-    skipped_total = sum(skipped_reasons.values())
-    if skipped_total:
-        top_reason = max(skipped_reasons.items(), key=lambda item: item[1])[0]
-        log(
-            f"[WARN][excel] debug log hyperlink skipped count={skipped_total} reason='{top_reason}'"
-        )
+    return
 
 
 def _apply_result_visual_enhancements(
@@ -1036,8 +1188,9 @@ def _apply_result_visual_enhancements(
     ws = writer.sheets["result"]
     is_openpyxl_sheet = hasattr(ws, "cell")
     is_xlsxwriter_sheet = hasattr(ws, "conditional_format")
-    final_col_idx = result_df.columns.get_loc("final_result")
-    thumb_col_idx = result_df.columns.get_loc("result_crop_thumbnail") if "result_crop_thumbnail" in result_df.columns else -1
+    display_columns = RESULT_SHEET_COLUMNS
+    final_col_idx = display_columns.index("final_result")
+    thumb_col_idx = display_columns.index("result_crop_thumbnail") if "result_crop_thumbnail" in display_columns else -1
     color_map = {
         "PASS": "C6EFCE",
         "WARN": "FFEB9C",
@@ -1045,18 +1198,18 @@ def _apply_result_visual_enhancements(
     }
 
     def _has_mismatch(row_obj) -> bool:
-        reason = str(getattr(row_obj, "failure_reason", "") or "")
-        return "speech_visible_diverged" in reason
+        mismatch = str(getattr(row_obj, "mismatch_type", "") or "").strip().upper()
+        return mismatch not in {"", "EXACT_MATCH"}
 
     if is_openpyxl_sheet:
         from openpyxl.drawing.image import Image as XLImage
         from openpyxl.styles import PatternFill
 
-        max_col = len(result_df.columns)
+        max_col = len(display_columns)
         thumb_failures = 0
         thumb_fail_reasons: dict[str, int] = {}
-        for row_idx, row in enumerate(result_df.itertuples(index=False), start=2):
-            final_result = str(getattr(row, "final_result", "") or "").upper()
+        for row_idx, (_, row) in enumerate(result_df.iterrows(), start=2):
+            final_result = str(row.get("final_result", "") or "").upper()
             fill_color = color_map.get(final_result)
             if fill_color:
                 fill = PatternFill(fill_type="solid", start_color=fill_color, end_color=fill_color)
@@ -1066,20 +1219,23 @@ def _apply_result_visual_enhancements(
             if thumb_col_idx < 0:
                 continue
             if not with_images:
-                ws.cell(row=row_idx, column=thumb_col_idx + 1).value = ""
+                thumb_cell = ws.cell(row=row_idx, column=thumb_col_idx + 1)
+                thumb_cell.value = ""
+                thumb_cell.hyperlink = None
                 continue
 
             mismatch_exists = _has_mismatch(row)
             needs_thumb = final_result in {"WARN", "FAIL"} or mismatch_exists
-            crop_path = str(getattr(row, "crop_image_path", "") or "").strip()
+            crop_path = str(row.get("_crop_image_path", "") or "").strip()
             thumb_cell = ws.cell(row=row_idx, column=thumb_col_idx + 1)
             if not needs_thumb:
                 thumb_cell.value = ""
+                thumb_cell.hyperlink = None
                 continue
             if not crop_path or not Path(crop_path).exists():
-                thumb_cell.value = Path(crop_path).name if crop_path else ""
+                thumb_cell.value = _display_name_for_path(crop_path) if crop_path else ""
                 continue
-            thumb_cell.value = Path(crop_path).name
+            thumb_cell.value = _display_name_for_path(crop_path)
             try:
                 thumb_data = create_excel_thumbnail(crop_path, as_bytes=True)
                 if not thumb_data:
@@ -1106,7 +1262,7 @@ def _apply_result_visual_enhancements(
     if is_xlsxwriter_sheet:
         workbook = writer.book
         max_row = len(result_df)
-        max_col = len(result_df.columns) - 1
+        max_col = len(display_columns) - 1
         row_range = f"A2:{_excel_col_to_name(max_col)}{max_row + 1}"
         pass_fmt = workbook.add_format({"bg_color": "#C6EFCE"})
         warn_fmt = workbook.add_format({"bg_color": "#FFEB9C"})
@@ -1120,12 +1276,12 @@ def _apply_result_visual_enhancements(
 
         thumb_failures = 0
         thumb_fail_reasons: dict[str, int] = {}
-        for row_number, row in enumerate(result_df.itertuples(index=False), start=2):
-            final_result = str(getattr(row, "final_result", "") or "").upper()
+        for row_number, (_, row) in enumerate(result_df.iterrows(), start=2):
+            final_result = str(row.get("final_result", "") or "").upper()
             mismatch_exists = _has_mismatch(row)
             needs_thumb = final_result in {"WARN", "FAIL"} or mismatch_exists
-            crop_path = str(getattr(row, "crop_image_path", "") or "").strip()
-            display_name = Path(crop_path).name if crop_path else ""
+            crop_path = str(row.get("_crop_image_path", "") or "").strip()
+            display_name = _display_name_for_path(crop_path) if crop_path else ""
             if not needs_thumb:
                 ws.write(row_number - 1, thumb_col_idx, "")
                 continue
@@ -1166,6 +1322,7 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
         log("[SAVE] skip: no rows")
         return
 
+    df = annotate_plugin_metadata(df)
     df = add_rule_compare(df)
     df = add_status_columns(df)
     raw_df = df.copy()
@@ -1219,6 +1376,9 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
     log(f"[SAVE] filtered rows={len(filtered_df)}, raw rows={len(raw_df)}")
 
     ordered_cols = [
+        "plugin_group",
+        "plugin_name",
+        "scenario_id",
         "tab_name",
         "context_type",
         "parent_step_index",
@@ -1276,13 +1436,14 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
     filtered_df = stringify_complex_columns(filtered_df)
     summary_df = stringify_complex_columns(summary_df)
     result_df = stringify_complex_columns(result_df)
+    result_export_df = result_df[RESULT_SHEET_COLUMNS].copy()
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(output_path) as writer:
         raw_df.to_excel(writer, sheet_name="raw", index=False)
         filtered_df.to_excel(writer, sheet_name="filtered", index=False)
         summary_df.to_excel(writer, sheet_name="summary", index=False)
-        result_df.to_excel(writer, sheet_name="result", index=False)
+        result_export_df.to_excel(writer, sheet_name="result", index=False)
         _apply_result_crop_hyperlinks(writer, result_df)
         _apply_result_debug_log_hyperlinks(writer, result_df)
         _apply_result_visual_enhancements(writer, result_df, with_images=with_images)

@@ -10155,6 +10155,7 @@ def _apply_row_quality_phase(
 def _apply_row_persistence_phase_impl(
     *,
     row: dict[str, Any],
+    tab_cfg: dict[str, Any],
     state: MainLoopState,
     rows: list[dict[str, Any]],
     all_rows: list[dict[str, Any]],
@@ -10167,6 +10168,7 @@ def _apply_row_persistence_phase_impl(
     make_fingerprint_fn,
     save_fn,
 ) -> tuple[bool, str]:
+    row = _annotate_report_row_context(row, tab_cfg)
     if "low_value_leaf_row" not in row:
         row["low_value_leaf_row"] = _row_is_low_value_leaf(row)
     else:
@@ -10196,6 +10198,7 @@ def _apply_row_persistence_phase_impl(
 def _apply_row_persistence_phase(
     *,
     row: dict[str, Any],
+    tab_cfg: dict[str, Any],
     state: MainLoopState,
     rows: list[dict[str, Any]],
     all_rows: list[dict[str, Any]],
@@ -10207,6 +10210,7 @@ def _apply_row_persistence_phase(
 ) -> tuple[bool, str]:
     return _apply_row_persistence_phase_impl(
         row=row,
+        tab_cfg=tab_cfg,
         state=state,
         rows=rows,
         all_rows=all_rows,
@@ -10872,6 +10876,7 @@ def _apply_step_collection_phase_impl(
     row["status"] = "OK"
     row["stop_reason"] = ""
     row["scenario_type"] = str(tab_cfg.get("scenario_type", "content") or "content")
+    row["scenario_id"] = str(tab_cfg.get("scenario_id", "") or "")
     row["step_elapsed_sec"] = round(step_elapsed, 3)
     row["crop_image"] = "IMAGE"
     row["_step_mono_start"] = mono_time_fn() - float(row.get("t_step_start", 0.0) or 0.0)
@@ -11250,6 +11255,7 @@ def _main_loop_phase(
         )
         _apply_row_persistence_phase(
             row=row,
+            tab_cfg=tab_cfg,
             state=state,
             rows=rows,
             all_rows=all_rows,
@@ -11315,6 +11321,8 @@ def _persist_phase(phase_ctx: CollectionPhaseContext) -> None:
 def _build_terminal_row(tab_cfg: dict[str, Any], *, stop_reason: str, status: str = "TAB_OPEN_FAILED") -> dict[str, Any]:
     row = {
         "tab_name": tab_cfg["tab_name"],
+        "scenario_id": str(tab_cfg.get("scenario_id", "") or ""),
+        "scenario_type": str(tab_cfg.get("scenario_type", "content") or "content"),
         "step_index": -1,
         "status": status,
         "stop_reason": stop_reason,
@@ -11335,6 +11343,20 @@ def _build_terminal_row(tab_cfg: dict[str, Any], *, stop_reason: str, status: st
     row["recent_semantic_unique_count"] = 0
     row["is_noise_step"] = False
     row["noise_reason"] = ""
+    return row
+
+
+def _annotate_report_row_context(row: dict[str, Any], tab_cfg: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(row, dict):
+        return row
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip()
+    scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip()
+    if scenario_id and not str(row.get("scenario_id", "") or "").strip():
+        row["scenario_id"] = scenario_id
+    if scenario_type and not str(row.get("scenario_type", "") or "").strip():
+        row["scenario_type"] = scenario_type
+    if not str(row.get("tab_name", "") or "").strip():
+        row["tab_name"] = tab_cfg.get("tab_name", "")
     return row
 
 
@@ -11370,6 +11392,8 @@ def _collect_start_anchor_row(
     anchor_row["stop_reason"] = ""
     anchor_row["step_elapsed_sec"] = round(anchor_elapsed, 3)
     anchor_row["crop_image"] = "IMAGE"
+    anchor_row["scenario_id"] = str(tab_cfg.get("scenario_id", "") or "")
+    anchor_row["scenario_type"] = str(tab_cfg.get("scenario_type", "content") or "content")
     anchor_row["scenario_start_mode"] = str(tab_cfg.get("_scenario_start_mode", "anchor_stable") or "anchor_stable")
     anchor_row["scenario_start_source"] = str(tab_cfg.get("_scenario_start_source", "explicit_anchor") or "explicit_anchor")
     anchor_row["anchor_stable"] = bool(tab_cfg.get("_scenario_anchor_stable", True))
@@ -11618,6 +11642,7 @@ def collect_tab_rows(
             tab_cfg,
             stop_reason=start_result.failure_reason or "tab_or_anchor_failed",
         )
+        failed_row = _annotate_report_row_context(failed_row, tab_cfg)
         persisted_failed_row = _build_persisted_row_semantics(failed_row)
         rows.append(persisted_failed_row)
         all_rows.append(persisted_failed_row)
@@ -11639,6 +11664,7 @@ def collect_tab_rows(
             handled_row["special_state_kind"] = str(start_result.special_state_kind or "onboarding_or_empty_state")
             handled_row["special_state_handling"] = str(start_result.special_state_handling or "back_after_read")
             handled_row["special_state_back_status"] = str(start_result.special_state_back_status or "")
+            handled_row = _annotate_report_row_context(handled_row, tab_cfg)
             persisted_handled_row = _build_persisted_row_semantics(handled_row)
             rows.append(persisted_handled_row)
             all_rows.append(persisted_handled_row)
@@ -11652,6 +11678,7 @@ def collect_tab_rows(
         return rows
 
     anchor_row = start_result.start_row
+    anchor_row = _annotate_report_row_context(anchor_row, tab_cfg)
     persisted_anchor_row = _build_persisted_row_semantics(anchor_row)
     rows.append(persisted_anchor_row)
     all_rows.append(persisted_anchor_row)

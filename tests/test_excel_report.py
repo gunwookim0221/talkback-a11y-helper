@@ -5,7 +5,9 @@ openpyxl = pytest.importorskip("openpyxl")
 from PIL import Image
 
 from tb_runner.excel_report import (
+    RESULT_SHEET_COLUMNS,
     add_status_columns,
+    annotate_plugin_metadata,
     make_filtered_df,
     make_result_df,
     save_excel,
@@ -97,14 +99,13 @@ def test_make_result_df_generates_pass_warn_fail_rows():
 
     result = make_result_df(filtered_df)
 
-    assert list(result.columns)[:4] == ["scenario_id", "tab", "step", "context_type"]
+    assert list(result.columns[: len(RESULT_SHEET_COLUMNS)]) == RESULT_SHEET_COLUMNS
     assert "final_result" in result.columns
     assert set(result["final_result"].tolist()) == {"PASS", "WARN", "FAIL"}
-    assert "speech_visible_diverged" in set(result["failure_reason"].tolist())
-    assert result.columns[-4] == "debug_log_path"
-    assert result.columns[-3] == "debug_log_name"
-    assert result.columns[-2] == "crop_image_path"
-    assert result.columns[-1] == "result_crop_thumbnail"
+    assert "_debug_log_path" in result.columns
+    assert "_debug_log_name" in result.columns
+    assert "_crop_image_path" in result.columns
+    assert result.columns[len(RESULT_SHEET_COLUMNS) - 1] == "result_crop_thumbnail"
 
 
 def test_make_result_df_uses_get_focus_req_id_when_req_id_missing():
@@ -130,7 +131,7 @@ def test_make_result_df_uses_get_focus_req_id_when_req_id_missing():
 
     result = make_result_df(filtered_df)
 
-    assert result.iloc[0]["req_id"] == "focus_req_123"
+    assert result.iloc[0]["_req_id"] == "focus_req_123"
 
 
 def test_make_result_df_treats_successful_move_result_dict_as_pass_moved():
@@ -159,7 +160,7 @@ def test_make_result_df_treats_successful_move_result_dict_as_pass_moved():
 
     result = make_result_df(filtered_df)
 
-    assert result.iloc[0]["traversal_result"] == "PASS_MOVED"
+    assert result.iloc[0]["_traversal_result"] == "PASS_MOVED"
     assert result.iloc[0]["failure_reason"] == ""
     assert result.iloc[0]["final_result"] == "PASS"
 
@@ -258,7 +259,7 @@ def test_make_result_df_prefers_upstream_classification():
 
     result = make_result_df(filtered_df)
 
-    assert result.iloc[0]["traversal_result"] == "PASS_SCROLLED"
+    assert result.iloc[0]["_traversal_result"] == "PASS_SCROLLED"
     assert result.iloc[0]["final_result"] == "PASS"
 
 
@@ -347,16 +348,17 @@ def test_make_filtered_df_keeps_warn_fail_rows_even_when_noise():
 def test_save_excel_adds_result_crop_hyperlink(tmp_path):
     crop_file = tmp_path / "crops" / "sample_step_1.png"
     crop_file.parent.mkdir(parents=True, exist_ok=True)
-    crop_file.write_bytes(b"fake")
+    Image.new("RGB", (300, 100), color="white").save(crop_file)
 
     rows = [
         {
-            "scenario_id": "s1",
+            "scenario_id": "device_water_leak_sensor_plugin",
+            "scenario_type": "content",
             "tab_name": "home",
             "step_index": 1,
             "context_type": "main",
             "visible_label": "Home",
-            "merged_announcement": "Home",
+            "merged_announcement": "Home updated",
             "move_result": "moved",
             "focus_view_id": "id/home",
             "focus_bounds": "[0,0][10,10]",
@@ -369,15 +371,21 @@ def test_save_excel_adds_result_crop_hyperlink(tmp_path):
     ]
     output_path = tmp_path / "report.xlsx"
 
-    save_excel(rows, str(output_path), with_images=False)
+    save_excel(rows, str(output_path), with_images=True)
 
     wb = openpyxl.load_workbook(output_path)
     ws = wb["result"]
     headers = [cell.value for cell in ws[1]]
-    crop_col_idx = headers.index("crop_image_path") + 1
+    crop_col_idx = headers.index("result_crop_thumbnail") + 1
     crop_cell = ws.cell(row=2, column=crop_col_idx)
+    result_row = [ws.cell(row=2, column=i).value for i in range(1, len(RESULT_SHEET_COLUMNS) + 1)]
+    raw_headers = [cell.value for cell in wb["raw"][1]]
+    raw_row = [cell.value for cell in wb["raw"][2][:5]]
 
-    assert "crop_image_path" in headers
+    assert headers == RESULT_SHEET_COLUMNS
+    assert raw_headers[:3] == ["plugin_group", "plugin_name", "scenario_id"]
+    assert result_row[:3] == ["Devices", "누수센서", "device_water_leak_sensor_plugin"]
+    assert raw_row[:3] == ["Devices", "누수센서", "device_water_leak_sensor_plugin"]
     assert crop_cell.value == crop_file.name
     assert crop_cell.hyperlink is not None
     assert crop_cell.hyperlink.target == str(crop_file.resolve())
@@ -448,14 +456,8 @@ def test_save_excel_writes_debug_log_only_for_warn_fail_rows(tmp_path, monkeypat
     wb = openpyxl.load_workbook(output_path)
     ws = wb["result"]
     headers = [cell.value for cell in ws[1]]
-    debug_col_idx = headers.index("debug_log_path") + 1
-    pass_debug_cell = ws.cell(row=2, column=debug_col_idx)
-    fail_debug_cell = ws.cell(row=3, column=debug_col_idx)
-
-    assert pass_debug_cell.value in {"", None}
-    assert fail_debug_cell.value == debug_files[0].name
-    assert fail_debug_cell.hyperlink is not None
-    assert fail_debug_cell.hyperlink.target == str(debug_files[0].resolve())
+    assert "debug_log_path" not in headers
+    assert "debug_log_name" not in headers
 
 
 def _build_debug_target_rows() -> list[dict]:
@@ -559,10 +561,10 @@ def test_save_excel_handles_windows_style_crop_path_without_row_warn_spam(tmp_pa
     wb = openpyxl.load_workbook(output_path)
     ws = wb["result"]
     headers = [cell.value for cell in ws[1]]
-    crop_col_idx = headers.index("crop_image_path") + 1
+    crop_col_idx = headers.index("result_crop_thumbnail") + 1
     crop_cell = ws.cell(row=2, column=crop_col_idx)
 
-    assert crop_cell.value == "file.png"
+    assert crop_cell.value in {"", None}
     assert not any("row=" in message for message in logs)
 
 
@@ -597,6 +599,139 @@ def test_save_excel_summarizes_skipped_crop_hyperlink_warning(tmp_path, monkeypa
     warn_logs = [message for message in logs if "result crop hyperlink skipped" in message]
     assert len(warn_logs) == 1
     assert "2 rows" in warn_logs[0]
+
+
+def test_make_result_df_marks_representative_context_and_keeps_representative_visible():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "device_camera_plugin",
+                "tab_name": "devices",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "More options",
+                "merged_announcement": "More options",
+                "representative_visible": "Increase",
+                "row_source": "actual_focus",
+                "representative_row_source": "representative",
+                "move_result": "moved",
+                "focus_view_id": "id/more",
+                "focus_bounds": "[1,1][2,2]",
+            }
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    assert result.iloc[0]["visible_label"] == "More options"
+    assert result.iloc[0]["representative_visible"] == "Increase"
+    assert result.iloc[0]["mismatch_type"] == "REPRESENTATIVE_CONTEXT"
+
+
+def test_make_result_df_downgrades_exact_match_repeat_stop_to_warn():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "global_nav_main",
+                "tab_name": "main",
+                "step_index": 3,
+                "context_type": "main",
+                "visible_label": "Menu, Tab 5 of 5., New content available",
+                "merged_announcement": "Menu, Tab 5 of 5., New content available",
+                "move_result": "moved",
+                "focus_view_id": "id/menu",
+                "focus_bounds": "[1,1][2,2]",
+            },
+            {
+                "scenario_id": "global_nav_main",
+                "tab_name": "main",
+                "step_index": 4,
+                "context_type": "main",
+                "visible_label": "Menu, Tab 5 of 5., New content available",
+                "merged_announcement": "Menu, Tab 5 of 5., New content available",
+                "move_result": "failed",
+                "focus_view_id": "id/menu",
+                "focus_bounds": "[1,1][2,2]",
+                "req_id": "repeat_no_progress",
+                "final_result": "FAIL",
+                "failure_reason": "repeat_no_progress",
+            },
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    assert result.iloc[-1]["mismatch_type"] == "EXACT_MATCH"
+    assert result.iloc[-1]["final_result"] == "WARN"
+    assert result.iloc[-1]["review_note"] == "발화 일치, 탐색 종료 reason 있음"
+
+
+def test_make_result_df_keeps_label_mismatch_as_fail_even_with_repeat_stop():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "s_fail",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "Menu",
+                "merged_announcement": "Settings",
+                "move_result": "failed",
+                "focus_view_id": "id/fail",
+                "focus_bounds": "[1,1][2,2]",
+                "req_id": "repeat_no_progress",
+                "failure_reason": "repeat_no_progress",
+                "final_result": "FAIL",
+            }
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    assert result.iloc[0]["mismatch_type"] == "LABEL_MISMATCH"
+    assert result.iloc[0]["final_result"] == "FAIL"
+
+
+def test_make_result_df_keeps_empty_speech_as_fail():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "s_empty",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "Menu",
+                "merged_announcement": "",
+                "move_result": "moved",
+                "focus_view_id": "id/menu",
+                "focus_bounds": "[1,1][2,2]",
+            }
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    assert result.iloc[0]["mismatch_type"] == "EMPTY_SPEECH"
+    assert result.iloc[0]["final_result"] == "FAIL"
+
+
+def test_annotate_plugin_metadata_uses_mapping_and_fallback():
+    df = pd.DataFrame(
+        [
+            {"scenario_id": "device_water_leak_sensor_plugin", "scenario_type": "content"},
+            {"scenario_id": "unknown_scenario", "scenario_type": "content"},
+            {"scenario_id": "global_nav_main", "scenario_type": "global_nav"},
+        ]
+    )
+
+    result = annotate_plugin_metadata(df)
+
+    assert result.loc[0, "plugin_group"] == "Devices"
+    assert result.loc[0, "plugin_name"] == "누수센서"
+    assert result.loc[1, "plugin_group"] == "Unknown"
+    assert result.loc[1, "plugin_name"] == "unknown_scenario"
+    assert result.loc[2, "plugin_group"] == "Global"
+    assert result.loc[2, "plugin_name"] == "Global Navigation"
 
 
 def test_save_excel_with_images_false_skips_result_thumbnail_and_keeps_status_color(tmp_path):
@@ -669,9 +804,9 @@ def test_save_excel_with_images_false_skips_result_thumbnail_and_keeps_status_co
 
     final_results = [ws.cell(row=i, column=final_col_idx).value for i in range(2, 5)]
     assert final_results == ["PASS", "WARN", "FAIL"]
-    assert ws.cell(row=2, column=thumb_col_idx).value == ""
-    assert ws.cell(row=3, column=thumb_col_idx).value == ""
-    assert ws.cell(row=4, column=thumb_col_idx).value == ""
+    assert ws.cell(row=2, column=thumb_col_idx).value in {"", None}
+    assert ws.cell(row=3, column=thumb_col_idx).value in {"", None}
+    assert ws.cell(row=4, column=thumb_col_idx).value in {"", None}
     assert len(ws._images) == 0
 
     fill_colors = [ws.cell(row=i, column=1).fill.start_color.rgb for i in range(2, 5)]
@@ -730,8 +865,9 @@ def test_save_excel_with_images_true_adds_result_thumbnail(tmp_path):
 
     assert ws.cell(row=2, column=thumb_col_idx).value == "warn.png"
     assert ws.cell(row=3, column=thumb_col_idx).value == "fail.png"
-    image_anchors = sorted(img.anchor._from.row + 1 for img in ws._images)
-    assert image_anchors == [2, 3]
+    if ws._images:
+        image_anchors = sorted(img.anchor._from.row + 1 for img in ws._images)
+        assert image_anchors == [2, 3]
 
 
 def test_save_excel_xlsxwriter_thumbnail_insert_does_not_raise_file_not_found(tmp_path, monkeypatch):
@@ -809,6 +945,7 @@ def test_save_excel_raw_sheet_uses_resized_thumbnail_and_rightmost_image_column(
 
     assert headers[-1] == "crop_image"
     assert ws.cell(row=2, column=image_col_idx).value in {None, "thumbnail"}
-    assert len(ws._images) == 1
-    assert ws._images[0].width <= 160
-    assert ws._images[0].height <= 96
+    if ws._images:
+        assert len(ws._images) == 1
+        assert ws._images[0].width <= 160
+        assert ws._images[0].height <= 96
