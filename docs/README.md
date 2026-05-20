@@ -16,6 +16,7 @@
 - 신규 plugin onboarding: [plugin-onboarding-guide.md](plugin-onboarding-guide.md)
 - report row schema: [report-schema.md](report-schema.md)
 - i18n / locale matching: [i18n_locale_matching.md](i18n_locale_matching.md)
+- QA Local Control Panel: [../qa_frontend/README.md](../qa_frontend/README.md)
 
 ## Historical design record
 
