@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ from tb_runner.logging_utils import log
 
 RUNTIME_CONFIG_VERSION = "1.9.0"
 DEFAULT_RUNTIME_CONFIG_PATH = Path("config/runtime_config.json")
+RUNTIME_CONFIG_PATH_ENV = "TB_RUNTIME_CONFIG_PATH"
 
 
 _DEFAULTS = {
@@ -331,7 +333,8 @@ def _fill_missing_values(target: dict[str, Any], defaults: dict[str, Any]) -> No
 
 
 def load_runtime_bundle(base_tab_configs: list[dict[str, Any]], config_path: str | Path | None = None) -> dict[str, Any]:
-    resolved_path = Path(config_path) if config_path else DEFAULT_RUNTIME_CONFIG_PATH
+    env_config_path = os.getenv(RUNTIME_CONFIG_PATH_ENV)
+    resolved_path = Path(config_path or env_config_path) if (config_path or env_config_path) else DEFAULT_RUNTIME_CONFIG_PATH
     raw_config = _load_json_file(resolved_path)
 
     if raw_config:

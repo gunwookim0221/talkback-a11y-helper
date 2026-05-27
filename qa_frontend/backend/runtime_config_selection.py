@@ -1,0 +1,115 @@
+from __future__ import annotations
+
+import copy
+import json
+from pathlib import Path
+from typing import Any
+
+
+SMOKE_EXACT_STEP_OVERRIDES: dict[str, int] = {
+    "global_nav_main": 6,
+    "home_main": 6,
+    "devices_main": 6,
+    "life_main": 6,
+    "routines_main": 6,
+    "menu_main": 6,
+    "settings_entry_example": 6,
+}
+SMOKE_PREFIX_STEP_OVERRIDES: tuple[tuple[str, int], ...] = (
+    ("life_", 8),
+    ("device_", 8),
+)
+SMOKE_FALLBACK_MAX_STEPS = 8
+
+
+def _normalize_mode(mode: str) -> str:
+    return "full" if str(mode).lower() == "full" else "smoke"
+
+
+def _resolve_effective_max_steps(scenario_id: str, original_max_steps: Any, mode: str) -> Any:
+    normalized_mode = _normalize_mode(mode)
+    if normalized_mode == "full":
+        return original_max_steps
+    if scenario_id in SMOKE_EXACT_STEP_OVERRIDES:
+        return SMOKE_EXACT_STEP_OVERRIDES[scenario_id]
+    for prefix, steps in SMOKE_PREFIX_STEP_OVERRIDES:
+        if scenario_id.startswith(prefix):
+            return steps
+    return SMOKE_FALLBACK_MAX_STEPS
+
+
+def build_selected_runtime_config(
+    source_config: dict[str, Any],
+    scenario_ids: list[str],
+    *,
+    mode: str,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    selected = {scenario_id for scenario_id in scenario_ids if scenario_id}
+    normalized_mode = _normalize_mode(mode)
+    selected_policy = "source_preserved" if normalized_mode == "full" else "smoke_override"
+    next_config = copy.deepcopy(source_config)
+    scenarios = next_config.get("scenarios")
+    if not isinstance(scenarios, dict):
+        scenarios = {}
+        next_config["scenarios"] = scenarios
+
+    scenario_steps: list[dict[str, Any]] = []
+    for scenario_id, raw_cfg in list(scenarios.items()):
+        cfg = raw_cfg if isinstance(raw_cfg, dict) else {}
+        if cfg is not raw_cfg:
+            scenarios[scenario_id] = cfg
+        scenario_key = str(scenario_id)
+        is_selected = scenario_key in selected
+        original_max_steps = cfg.get("max_steps")
+        cfg["enabled"] = is_selected
+        effective_max_steps = original_max_steps
+        policy = "source_preserved"
+        if is_selected:
+            effective_max_steps = _resolve_effective_max_steps(scenario_key, original_max_steps, normalized_mode)
+            cfg["max_steps"] = effective_max_steps
+            policy = selected_policy
+        scenario_steps.append(
+            {
+                "scenario": scenario_key,
+                "selected": is_selected,
+                "original_max_steps": original_max_steps,
+                "effective_max_steps": effective_max_steps,
+                "policy": policy,
+            }
+        )
+
+    return next_config, scenario_steps
+
+
+def write_selected_runtime_config(
+    *,
+    source_path: Path,
+    output_path: Path,
+    scenario_ids: list[str],
+    mode: str,
+) -> dict[str, object]:
+    source_text = source_path.read_text(encoding="utf-8")
+    source_config = json.loads(source_text)
+    if not isinstance(source_config, dict):
+        raise ValueError("runtime_config root must be an object")
+
+    selected_config, scenario_steps = build_selected_runtime_config(source_config, scenario_ids, mode=mode)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(selected_config, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    scenarios = selected_config.get("scenarios", {})
+    enabled_ids = [
+        str(scenario_id)
+        for scenario_id, cfg in scenarios.items()
+        if isinstance(cfg, dict) and cfg.get("enabled") is True
+    ] if isinstance(scenarios, dict) else []
+    return {
+        "path": str(output_path),
+        "enabled_ids": enabled_ids,
+        "max_steps_policy": "source_preserved" if _normalize_mode(mode) == "full" else "smoke_override",
+        "scenario_steps": scenario_steps,
+        "source_unchanged": source_path.read_text(encoding="utf-8") == source_text,
+    }

@@ -10,6 +10,10 @@ from tb_runner.accessibility_preflight import HELPER_SERVICE_COMPONENT
 from .paths import ROOT_DIR
 
 
+HELPER_PACKAGE_NAME = "com.iotpart.sqe.talkbackhelper"
+HELPER_SERVICE_SHORT_COMPONENT = "com.iotpart.sqe.talkbackhelper/.A11yHelperService"
+
+
 def run_adb(args: list[str], timeout: float = 10.0) -> dict[str, object]:
     command = [DEFAULT_ADB_PATH, *args]
     try:
@@ -60,15 +64,64 @@ def get_adb_status() -> dict[str, object]:
 
 
 def get_helper_status() -> dict[str, object]:
-    result = run_adb(["shell", "settings", "get", "secure", "enabled_accessibility_services"], timeout=8.0)
-    enabled_services = str(result.get("stdout", "")).strip() if result.get("ok") else ""
-    enabled = HELPER_SERVICE_COMPONENT in enabled_services
+    package_result = run_adb(["shell", "pm", "list", "packages"], timeout=8.0)
+    if not package_result.get("ok"):
+        return {
+            **package_result,
+            "status": "adb_error",
+            "component": HELPER_SERVICE_COMPONENT,
+            "package": HELPER_PACKAGE_NAME,
+            "package_installed": False,
+            "enabled": False,
+            "enabled_accessibility_services": "",
+        }
+
+    services_result = run_adb(["shell", "settings", "get", "secure", "enabled_accessibility_services"], timeout=8.0)
+    if not services_result.get("ok"):
+        return {
+            **services_result,
+            "status": "adb_error",
+            "component": HELPER_SERVICE_COMPONENT,
+            "package": HELPER_PACKAGE_NAME,
+            "package_installed": False,
+            "enabled": False,
+            "enabled_accessibility_services": "",
+        }
+
+    installed_packages = str(package_result.get("stdout", "")).splitlines()
+    package_installed = any(line.strip() == f"package:{HELPER_PACKAGE_NAME}" for line in installed_packages)
+    enabled_services = str(services_result.get("stdout", "")).strip()
+    enabled = _has_enabled_helper_service(enabled_services)
+    if package_installed and enabled:
+        status = "ok"
+    elif package_installed:
+        status = "installed_but_disabled"
+    else:
+        status = "not_installed"
     return {
-        **result,
+        **services_result,
+        "status": status,
         "component": HELPER_SERVICE_COMPONENT,
+        "package": HELPER_PACKAGE_NAME,
+        "package_installed": package_installed,
         "enabled": enabled,
         "enabled_accessibility_services": enabled_services,
     }
+
+
+def _split_enabled_accessibility_services(value: str | None) -> list[str]:
+    raw = str(value or "").strip()
+    if not raw or raw.lower() in {"null", "none"}:
+        return []
+    return [item.strip().lower() for item in raw.split(":") if item.strip()]
+
+
+def _has_enabled_helper_service(enabled_services: str | None) -> bool:
+    services = set(_split_enabled_accessibility_services(enabled_services))
+    return (
+        HELPER_SERVICE_COMPONENT.lower() in services
+        or HELPER_SERVICE_SHORT_COMPONENT.lower() in services
+    )
 
 
 def _find_helper_apk() -> Path | None:

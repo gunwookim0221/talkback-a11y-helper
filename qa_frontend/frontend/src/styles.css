@@ -22,6 +22,13 @@ button {
   padding: 8px 12px;
 }
 
+button small {
+  color: #5e6c78;
+  display: block;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
@@ -80,6 +87,11 @@ p {
   margin-top: 14px;
 }
 
+.stack {
+  display: grid;
+  gap: 14px;
+}
+
 .panel {
   background: #ffffff;
   border: 1px solid #d9e0e7;
@@ -123,6 +135,46 @@ p {
   margin-bottom: 12px;
 }
 
+.runDescription,
+.scenarioHint {
+  margin-bottom: 12px;
+}
+
+.modeSummary {
+  background: #f4f7fa;
+  border: 1px solid #d9e0e7;
+  border-radius: 6px;
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+}
+
+.modeSummary span,
+.modeSummary small {
+  color: #5f6d79;
+}
+
+.launchMode {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.launchMode label {
+  align-items: center;
+  border: 1px solid #dce3e9;
+  border-radius: 6px;
+  display: grid;
+  gap: 6px 8px;
+  grid-template-columns: auto 1fr;
+  padding: 8px;
+}
+
+.launchMode small {
+  grid-column: 2;
+}
+
 dl {
   display: grid;
   gap: 6px 12px;
@@ -136,6 +188,7 @@ dt {
 
 dd {
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 pre {
@@ -154,6 +207,20 @@ pre {
   margin-top: 12px;
   max-height: 360px;
   overflow: auto;
+}
+
+.scenarioActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.presetActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .scenarioList label {
@@ -176,6 +243,17 @@ small {
   overflow: auto;
 }
 
+.downloadActions,
+.recentRunActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.downloadActions {
+  margin-bottom: 12px;
+}
+
 .outputList a {
   border: 1px solid #dce3e9;
   border-radius: 6px;
@@ -186,7 +264,48 @@ small {
   text-decoration: none;
 }
 
+.downloadButton {
+  border: 1px solid #b8c2cc;
+  border-radius: 6px;
+  color: #1e4e7a;
+  display: inline-flex;
+  justify-content: center;
+  min-width: 96px;
+  padding: 8px 12px;
+  text-decoration: none;
+}
+
+.downloadButton.disabled {
+  color: #8a97a3;
+  cursor: not-allowed;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.recentRuns {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.recentRunRow {
+  border: 1px solid #dce3e9;
+  border-radius: 6px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.recentRunRow strong {
+  display: block;
+}
+
 .logPanel {
+  margin-top: 14px;
+}
+
+.preflightPanel {
   margin-top: 14px;
 }
 
@@ -200,6 +319,15 @@ small {
   border-radius: 8px;
   color: #8d1e1e;
   margin-bottom: 14px;
+  padding: 10px 12px;
+}
+
+.notice {
+  background: #fff4cf;
+  border: 1px solid #e3c46b;
+  border-radius: 6px;
+  color: #674d00;
+  margin-bottom: 12px;
   padding: 10px 12px;
 }
 

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from .adb import get_adb_status, get_helper_status, install_helper
 from .outputs import list_outputs, safe_output_path
+from .recent_runs import list_recent_runs, safe_recent_run_log_path
 from .runner import RunManager
 from .scenarios import list_scenarios
 
@@ -26,6 +27,7 @@ runner = RunManager()
 class StartRunRequest(BaseModel):
     mode: str = "full"
     scenario_ids: list[str] | None = None
+    launch_mode: str = "clean"
 
 
 @app.get("/api/health")
@@ -62,7 +64,7 @@ def run_start(request: StartRunRequest) -> dict[str, object]:
     if mode not in {"smoke", "full"}:
         raise HTTPException(status_code=400, detail="mode must be smoke or full")
     try:
-        return runner.start_run(mode=mode, scenario_ids=request.scenario_ids)
+        return runner.start_run(mode=mode, scenario_ids=request.scenario_ids, launch_mode=request.launch_mode)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
@@ -82,6 +84,30 @@ def run_status() -> dict[str, object]:
 @app.get("/api/run/log")
 def run_log() -> dict[str, object]:
     return runner.get_log_tail()
+
+
+@app.get("/api/run/log/download")
+def run_log_download() -> FileResponse:
+    path = runner.get_log_path()
+    if not path:
+        raise HTTPException(status_code=404, detail="run log not found")
+    return FileResponse(path, filename=path.name)
+
+
+@app.get("/api/runs/recent")
+def recent_runs() -> dict[str, object]:
+    return {"runs": list_recent_runs(current_status=runner.get_status())}
+
+
+@app.get("/api/runs/recent/{run_id}/log")
+def recent_run_log_download(run_id: str) -> FileResponse:
+    try:
+        path = safe_recent_run_log_path(run_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="run log not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return FileResponse(path, filename=path.name)
 
 
 @app.get("/api/outputs")

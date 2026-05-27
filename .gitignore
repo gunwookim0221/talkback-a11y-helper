@@ -13,3 +13,8 @@ adb.log
 /qa_frontend_runs/
 /qa_frontend/frontend/node_modules/
 /qa_frontend/frontend/dist/
+__pycache__/
+*.pyc
+.tmp/
+debug_window.xml
+qa_frontend_debug.png
