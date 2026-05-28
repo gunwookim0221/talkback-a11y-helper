@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, OutputFile, RecentRun, RunStatus, Scenario } from './api';
+import { api, OutputFile, RecentRun, RunStatus, Scenario, RuntimeDashboard } from './api';
 import { applyPresetSelection, PRESETS, ScenarioPresetId } from './presets';
 import { DEFAULT_SCENARIO_ID, initialScenarioSelection } from './selection';
 
@@ -17,6 +17,43 @@ function formatDuration(seconds: number) {
     return `${remaining}s`;
   }
   return `${minutes}m ${remaining}s`;
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  if (value < 1024 * 1024) {
+    return `${Math.round(value / 1024)} KB`;
+  }
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function healthClass(value: string | null | undefined) {
+  const normalized = String(value ?? '').toLowerCase();
+  if (['finished', 'passed', 'success', 'ok', 'enabled', 'cleared', 'completed'].includes(normalized)) {
+    return 'healthOk';
+  }
+  if (['running', 'queued', 'unknown', 'dismissed_unverified', 'partial', 'stopped'].includes(normalized)) {
+    return 'healthWarn';
+  }
+  if (['failed', 'error', 'blocked', 'adb_error', 'helper_error', 'uncleared'].includes(normalized)) {
+    return 'healthBad';
+  }
+  return 'healthNeutral';
+}
+
+function scenarioRunText(run: RecentRun) {
+  if (run.scenario_result_status === 'failed') {
+    return `Scenarios failed (${run.failed_scenarios})`;
+  }
+  if (run.scenario_result_status === 'passed') {
+    return 'Scenarios passed';
+  }
+  if (run.scenario_result_status === 'partial') {
+    return `Partial (${run.completed_scenarios}/${run.total_scenarios})`;
+  }
+  return `Scenarios ${run.scenario_result_status}`;
 }
 
 function resolveSmokeSteps(scenarioId: string) {
@@ -52,9 +89,11 @@ export default function App() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<RunStatus | null>(null);
+  const [dashboard, setDashboard] = useState<RuntimeDashboard | null>(null);
   const [log, setLog] = useState('');
   const [outputs, setOutputs] = useState<OutputFile[]>([]);
   const [recentRuns, setRecentRuns] = useState<RecentRun[]>([]);
+  const [pollingLatencyMs, setPollingLatencyMs] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [launchMode, setLaunchMode] = useState<'warm' | 'clean'>('clean');
   const [plannedMode, setPlannedMode] = useState<'smoke' | 'full'>('smoke');
@@ -88,16 +127,20 @@ export default function App() {
   }
 
   async function refreshRun() {
-    const [runStatus, runLog, outputResponse, recentRunsResponse] = await Promise.all([
+    const started = performance.now();
+    const [runStatus, runDashboard, runLog, outputResponse, recentRunsResponse] = await Promise.all([
       api.runStatus(),
+      api.runDashboard(),
       api.runLog(),
       api.outputs(),
       api.recentRuns(),
     ]);
     setStatus(runStatus);
+    setDashboard(runDashboard);
     setLog(runLog.text);
     setOutputs(outputResponse.outputs);
     setRecentRuns(recentRunsResponse.runs);
+    setPollingLatencyMs(Math.round(performance.now() - started));
   }
 
   useEffect(() => {
@@ -271,6 +314,112 @@ export default function App() {
         </dl>
       </section>
 
+      <section className="panel dashboardPanel">
+        <div className="panelHeader">
+          <h2>Runtime Dashboard</h2>
+          <div className={`statusBadge ${healthClass(status?.state)}`}>{status?.state ?? 'idle'}</div>
+        </div>
+        {dashboard?.parse_error && <div className="notice">Dashboard parse warning: {dashboard.parse_error}</div>}
+        <div className="metricGrid">
+          <div>
+            <span>Elapsed</span>
+            <strong>{formatDuration(dashboard?.elapsed_seconds ?? 0)}</strong>
+          </div>
+          <div>
+            <span>Scenarios</span>
+            <strong>{dashboard?.completed_scenarios ?? 0}/{dashboard?.scenario_progress.length ?? selectedCount}</strong>
+          </div>
+          <div>
+            <span>Failed</span>
+            <strong>{dashboard?.failed_scenarios ?? 0}</strong>
+          </div>
+          <div>
+            <span>Steps</span>
+            <strong>{dashboard?.total_step_count ?? 0}</strong>
+          </div>
+          <div>
+            <span>Overlays</span>
+            <strong>{dashboard?.overlay_count ?? 0}</strong>
+          </div>
+          <div>
+            <span>Excel Saves</span>
+            <strong>{dashboard?.save_excel_count ?? 0}</strong>
+          </div>
+          <div>
+            <span>Log Size</span>
+            <strong>{formatBytes(dashboard?.log_size ?? 0)}</strong>
+          </div>
+          <div>
+            <span>Poll</span>
+            <strong>{pollingLatencyMs ?? '-'} ms</strong>
+          </div>
+        </div>
+        <div className="dashboardGrid">
+          <div>
+            <h3>Run State</h3>
+            <dl>
+              <dt>Run</dt>
+              <dd>{dashboard?.run_id ?? '-'}</dd>
+              <dt>Mode</dt>
+              <dd>{dashboard?.mode ?? status?.mode ?? '-'}</dd>
+              <dt>Launch</dt>
+              <dd>{dashboard?.launch_mode ?? status?.launch_mode ?? '-'}</dd>
+              <dt>Started</dt>
+              <dd>{dashboard?.started_at ?? status?.started_at ?? '-'}</dd>
+              <dt>Scenario</dt>
+              <dd>{dashboard?.current_scenario ?? '-'}</dd>
+              <dt>Current Step</dt>
+              <dd>{dashboard?.current_step ?? '-'}</dd>
+              <dt>Traversal</dt>
+              <dd>{dashboard?.traversal_result ?? '-'}</dd>
+              <dt>Stop Reason</dt>
+              <dd>{dashboard?.stop_reason ?? '-'}</dd>
+            </dl>
+          </div>
+          <div>
+            <h3>Health</h3>
+            <div className="healthList">
+              <span className={`statusBadge ${healthClass(dashboard?.preflight_state)}`}>preflight {dashboard?.preflight_state ?? '-'}</span>
+              <span className={`statusBadge ${healthClass(dashboard?.popup_result)}`}>popup {dashboard?.popup_result ?? '-'}</span>
+              <span className={`statusBadge ${healthClass(dashboard?.helper_status ?? helper?.status as string)}`}>helper {dashboard?.helper_status ?? String(helper?.status ?? '-')}</span>
+              <span className={`statusBadge ${healthClass(dashboard?.adb_status ?? adb?.status as string)}`}>adb {dashboard?.adb_status ?? String(adb?.status ?? '-')}</span>
+            </div>
+            <dl>
+              <dt>Focus Pkg</dt>
+              <dd>{dashboard?.last_focus_package ?? '-'}</dd>
+              <dt>Focus Label</dt>
+              <dd>{dashboard?.last_focus_label ?? '-'}</dd>
+            </dl>
+          </div>
+        </div>
+        <div className="dashboardGrid">
+          <div>
+            <h3>Scenario Progress</h3>
+            <div className="progressList">
+              {(dashboard?.scenario_progress ?? []).map((item) => (
+                <div key={item.id} className="progressRow">
+                  <span className={`statusDot ${healthClass(item.status)}`}></span>
+                  <strong>{item.id}</strong>
+                  <small>{item.status} · {item.steps} steps</small>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <h3>Event Feed</h3>
+            <div className="eventFeed">
+              {(dashboard?.event_feed ?? []).slice().reverse().map((event) => (
+                <div key={`${event.line}-${event.type}`} className="eventRow">
+                  <span>{event.type}</span>
+                  <small>{event.scenario ?? 'run'} · line {event.line}</small>
+                  <p>{event.message}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section className="split">
         <article className="panel scenarios">
           <h2>Scenarios</h2>
@@ -350,7 +499,16 @@ export default function App() {
                 <div key={run.run_id} className="recentRunRow">
                   <div>
                     <strong>{run.run_id}</strong>
-                    <small>{run.mode} · {run.status} · {formatTime(Date.parse(run.started_at) / 1000)} · {formatDuration(run.duration_seconds)}</small>
+                    <div className="recentStatusLine">
+                      <span className={`statusBadge ${healthClass(run.process_status)}`}>Run {run.process_status}</span>
+                      <span className={`statusBadge ${healthClass(run.scenario_result_status)}`}>
+                        {scenarioRunText(run)}
+                      </span>
+                    </div>
+                    <small>
+                      {run.mode} · {formatTime(Date.parse(run.started_at) / 1000)} · {formatDuration(run.duration_seconds)}
+                      {run.event_warning_count ? ` · ${run.event_warning_count} events` : ''}
+                    </small>
                   </div>
                   <div className="recentRunActions">
                     <a

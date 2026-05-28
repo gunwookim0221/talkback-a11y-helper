@@ -99,6 +99,13 @@ p {
   padding: 16px;
 }
 
+.panelHeader {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
 .state,
 .metric {
   border-radius: 999px;
@@ -301,12 +308,140 @@ small {
   display: block;
 }
 
+.recentStatusLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+
 .logPanel {
   margin-top: 14px;
 }
 
 .preflightPanel {
   margin-top: 14px;
+}
+
+.dashboardPanel {
+  margin-top: 14px;
+}
+
+.metricGrid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 12px 0;
+}
+
+.metricGrid div {
+  background: #f6f8fa;
+  border: 1px solid #dce3e9;
+  border-radius: 6px;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.metricGrid span,
+.progressRow small,
+.eventRow small {
+  color: #667480;
+}
+
+.metricGrid strong {
+  font-size: 18px;
+}
+
+.dashboardGrid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  margin-top: 12px;
+}
+
+h3 {
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+
+.healthList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.statusBadge {
+  border-radius: 999px;
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 8px;
+  text-transform: uppercase;
+}
+
+.healthOk {
+  background: #d8f4df;
+  color: #215a2f;
+}
+
+.healthWarn {
+  background: #fff2bf;
+  color: #725a00;
+}
+
+.healthBad {
+  background: #ffd8d8;
+  color: #8d1e1e;
+}
+
+.healthNeutral {
+  background: #e7edf3;
+  color: #43515c;
+}
+
+.progressList,
+.eventFeed {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.progressRow {
+  align-items: center;
+  border-bottom: 1px solid #edf1f4;
+  display: grid;
+  gap: 4px 8px;
+  grid-template-columns: auto 1fr auto;
+  padding: 6px 0;
+}
+
+.statusDot {
+  border-radius: 999px;
+  display: inline-block;
+  height: 10px;
+  width: 10px;
+}
+
+.eventRow {
+  border: 1px solid #dce3e9;
+  border-radius: 6px;
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+}
+
+.eventRow span {
+  font-weight: 700;
+}
+
+.eventRow p {
+  color: #34424d;
+  font-size: 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .logPanel pre {
@@ -333,7 +468,9 @@ small {
 
 @media (max-width: 900px) {
   .grid,
-  .split {
+  .split,
+  .dashboardGrid,
+  .metricGrid {
     grid-template-columns: 1fr;
   }
 

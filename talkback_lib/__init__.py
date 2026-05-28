@@ -329,6 +329,14 @@ class A11yAdbClient:
     def _parse_json_payload(payload: str, label: str) -> dict[str, Any]:
         return safe_parse_json_payload(payload=payload, label=label)
 
+    @staticmethod
+    def _target_action_parse_error_result(req_id: str, payload: str, exc: Exception) -> dict[str, Any]:
+        return ActionResultParser.target_action_parse_error_result(
+            req_id=req_id,
+            raw_payload=payload,
+            error=exc,
+        )
+
     def _read_log_result(
         self,
         dev: Any,
@@ -353,7 +361,22 @@ class A11yAdbClient:
             logs = self._logcat_reader.dump_filtered(dev=dev)
             payloads = self._extract_all_payloads(logs, prefix)
             for payload in reversed(payloads):
-                parsed = self._parse_json_payload(payload, prefix)
+                try:
+                    parsed = self._parse_json_payload(payload, prefix)
+                except Exception as exc:
+                    if prefix == "TARGET_ACTION_RESULT" and (req_id in payload or len(payloads) == 1):
+                        parsed = self._target_action_parse_error_result(req_id, payload, exc)
+                        raw_snippet = str(payload).replace("\n", "\\n")[:240]
+                        print(
+                            f"[SMART_NEXT_TRACE] parse_error prefix={prefix} req_id={req_id} "
+                            f"reason=json_parse_failed error={exc} raw='{raw_snippet}'"
+                        )
+                        return parsed
+                    print(
+                        f"[SMART_NEXT_TRACE] parse_error prefix={prefix} req_id={req_id} "
+                        f"reason=json_parse_failed error={exc}"
+                    )
+                    continue
                 if parsed.get("reqId") == req_id:
                     if prefix == "TARGET_ACTION_RESULT" and bool(parsed.get("success")):
                         self._last_action_payload = parsed

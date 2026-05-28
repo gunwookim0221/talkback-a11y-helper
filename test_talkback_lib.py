@@ -455,6 +455,45 @@ class TouchIsinTest(unittest.TestCase):
         self.assertFalse(client.last_target_action_result.get("success"))
         self.assertEqual(client.last_target_action_result.get("target", {}).get("accessibilityFocused"), True)
 
+    def test_target_action_result_with_trailing_garbage_parses_json_object(self):
+        client = FakeA11yClient()
+        client.logcat_payload = (
+            'I/A11Y_HELPER: TARGET_ACTION_RESULT '
+            '{"success":true,"reason":"ok","reqId":"REQTRAIL"} trailing transport noise'
+        )
+
+        result = client._read_log_result("SER", "TARGET_ACTION_RESULT", "REQTRAIL", wait_seconds=0.1)
+
+        self.assertTrue(result.get("success"))
+        self.assertEqual(result.get("reqId"), "REQTRAIL")
+        self.assertEqual(result.get("reason"), "ok")
+
+    def test_malformed_target_action_result_returns_parse_error_without_exception(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {success:false,"reqId":"REQBAD"}'
+
+        with patch("builtins.print") as print_mock:
+            result = client._read_log_result("SER", "TARGET_ACTION_RESULT", "REQBAD", wait_seconds=0.1)
+
+        self.assertFalse(result.get("success"))
+        self.assertEqual(result.get("status"), "parse_error")
+        self.assertEqual(result.get("reason"), "json_parse_failed")
+        self.assertEqual(result.get("reqId"), "REQBAD")
+        self.assertIn("rawSnippet", result)
+        printed = [c.args[0] for c in print_mock.call_args_list if c.args]
+        self.assertTrue(any("[SMART_NEXT_TRACE] parse_error prefix=TARGET_ACTION_RESULT" in msg for msg in printed))
+
+    def test_truncated_target_action_result_returns_parse_error_without_exception(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":false,"reqId":"REQCUT"'
+
+        result = client._read_log_result("SER", "TARGET_ACTION_RESULT", "REQCUT", wait_seconds=0.1)
+
+        self.assertFalse(result.get("success"))
+        self.assertEqual(result.get("status"), "parse_error")
+        self.assertEqual(result.get("reason"), "json_parse_failed")
+        self.assertEqual(result.get("reqId"), "REQCUT")
+
     def test_select_uses_timeout_fallback_only_when_result_payload_missing(self):
         client = FakeA11yClient()
         client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":false,"reason":"other","reqId":"OTHER001"}'

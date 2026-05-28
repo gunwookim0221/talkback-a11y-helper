@@ -36,6 +36,7 @@ APIs:
 - `POST /api/run/start`
 - `POST /api/run/stop`
 - `GET /api/run/status`
+- `GET /api/run/dashboard`
 - `GET /api/run/log`
 - `GET /api/run/log/download`
 - `GET /api/runs/recent`
@@ -46,6 +47,8 @@ APIs:
 Run logs are written under `qa_frontend_runs/`. Runner output files continue to be written under `output/`.
 
 Recent Runs is read-only. It exposes the latest run summaries plus log/xlsx downloads without rewriting source config or adding rerun behavior.
+Runtime Dashboard is read-only. It parses the current run log for best-effort progress, metrics, and event feed data while keeping the log as the source of truth.
+Run history separates process status from scenario result status. `process_status` describes execution (`success`, `failed`, `stopped`, `running`), while `scenario_result_status` describes parsed validation results (`passed`, `failed`, `partial`, `unknown`).
 
 ## Frontend
 

@@ -150,6 +150,8 @@ FAIL logs:
 PASS:
 
 - `/api/run/status` includes `preflight_state`, `talkback_state`, `helper_state`, and `foreground_package`
+- `/api/run/dashboard` includes parsed runtime metrics, scenario progress, and event feed data without backend crash
+- `/api/runs/recent` separates `process_status` from `scenario_result_status`
 - `qa_frontend_runs/<run_id>_<mode>.log` contains `[QA_FRONTEND][preflight]` lines
 - Foreground verification failure is logged as unknown/non-matching and does not block by itself
 
@@ -158,6 +160,7 @@ FAIL logs:
 - `qa_frontend_runs/*.log`
 - `/api/run/start` response payload
 - `/api/run/status` response payload
+- `/api/run/dashboard` response payload
 
 ### 6. SmartThings 미실행 상태에서 Warm launch smoke
 
@@ -410,6 +413,7 @@ FAIL logs:
 PASS:
 
 - `/api/run/log` continues returning recent lines during a long run
+- `/api/run/dashboard` continues returning normalized summary data during a long run
 - UI stays responsive during repeated polling
 - Tail text matches current `qa_frontend_runs` file contents
 
@@ -427,3 +431,4 @@ FAIL logs:
 - Source `enabled` flags are display-only in the UI. The actual run selection comes from the current checkbox state, which defaults to `global_nav_main`.
 - Launch mode defaults to `Clean launch` so SmartThings starts from a more stable baseline. `Warm launch` is retained for advanced/debug runs that intentionally preserve the current app state.
 - Presets (`Global Nav Smoke`, `Life Smoke`, `Device Smoke`, `Full Regression Selected`, `Clear All`) only change frontend selection state and recommended mode. They do not modify the source runtime config.
+- Run status is process execution status. Scenario status is validation result status parsed from the run log and may be `failed` even when the process exits successfully.

@@ -16,6 +16,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from qa_frontend.backend import outputs, runner, scenarios
 from qa_frontend.backend.main import app
+from qa_frontend.backend.runtime_dashboard import parse_runtime_log
 
 
 def _record(results: list[tuple[str, bool, str]], name: str, ok: bool, detail: str) -> None:
@@ -32,6 +33,7 @@ def check_fastapi_import(results: list[tuple[str, bool, str]]) -> None:
         "/api/run/start",
         "/api/run/stop",
         "/api/run/status",
+        "/api/run/dashboard",
         "/api/run/log",
         "/api/run/log/download",
         "/api/runs/recent",
@@ -90,6 +92,17 @@ def check_runner_initial_state(results: list[tuple[str, bool, str]]) -> None:
     _record(results, "runner_initial_state", ok, json.dumps(state, ensure_ascii=True, sort_keys=True))
 
 
+def check_runtime_dashboard_parser(results: list[tuple[str, bool, str]]) -> None:
+    summary = parse_runtime_log(
+        "[QA_FRONTEND][scenario_selection] enabled_ids=['global_nav_main']\n"
+        "[QA_FRONTEND][preflight] final_result='passed' reason='ok'\n"
+        "[STEP] START scenario='global_nav_main' step=0\n"
+        "[PERF][scenario_summary] scenario=global_nav_main total_steps=1\n"
+    )
+    ok = summary.get("preflight_state") == "passed" and summary.get("completed_scenarios") == 1
+    _record(results, "runtime_dashboard_parser", ok, json.dumps(summary, ensure_ascii=True, sort_keys=True))
+
+
 def check_frontend_package(results: list[tuple[str, bool, str]]) -> None:
     package_json = FRONTEND_DIR / "package.json"
     if not package_json.is_file():
@@ -121,6 +134,7 @@ def main() -> int:
     check_scenarios(results)
     check_output_safe_path(results)
     check_runner_initial_state(results)
+    check_runtime_dashboard_parser(results)
     check_frontend_package(results)
     check_backend_requirements(results)
     check_optional_adb(results)

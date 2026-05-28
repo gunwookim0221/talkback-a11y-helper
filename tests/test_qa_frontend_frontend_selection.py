@@ -20,6 +20,12 @@ def test_frontend_initial_selection_defaults_to_global_nav_not_source_enabled():
     assert "Recommended. Restarts SmartThings before running." in app_tsx
     assert "Download Log" in app_tsx
     assert "Recent Runs" in app_tsx
+    assert "Runtime Dashboard" in app_tsx
+    assert "Scenario Progress" in app_tsx
+    assert "Event Feed" in app_tsx
+    assert "process_status" in app_tsx
+    assert "scenario_result_status" in app_tsx
+    assert "Scenarios failed" in app_tsx
     assert "Global Nav Smoke" in presets_ts
     assert "Life Smoke" in presets_ts
     assert "Device Smoke" in presets_ts

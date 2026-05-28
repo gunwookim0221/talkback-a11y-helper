@@ -25,7 +25,7 @@ class LogcatReader:
         for line in log_text.splitlines():
             match = pattern.search(line)
             if match:
-                payloads.append(match.group(1).strip())
+                payloads.append(LogcatReader.extract_json_object_candidate(match.group(1).strip()))
         return payloads
 
     @staticmethod
@@ -37,6 +37,43 @@ class LogcatReader:
             if match:
                 payloads.append(match.group(1).strip())
         return payloads
+
+    @staticmethod
+    def extract_json_object_candidate(payload: str) -> str:
+        """Return the first complete JSON object after a log prefix.
+
+        logcat lines can contain transport noise after the helper JSON.  Keep
+        malformed/truncated payloads intact so the caller can return a
+        parse_error result with useful raw context.
+        """
+        start = payload.find("{")
+        if start < 0:
+            return payload.strip()
+
+        depth = 0
+        in_string = False
+        escaped = False
+        for index in range(start, len(payload)):
+            char = payload[index]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return payload[start : index + 1].strip()
+
+        return payload[start:].strip()
 
     @staticmethod
     def has_req_marker(log_text: str, prefix: str, req_id: str) -> bool:

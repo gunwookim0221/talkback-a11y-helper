@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .paths import RUN_LOG_DIR
+from .runtime_dashboard import parse_runtime_log
 
 RUN_LOG_PATTERN = re.compile(r"^(?P<run_id>\d{8}_\d{6})_(?P<mode>smoke|full)\.log$")
 SAVED_EXCEL_PATTERN = re.compile(r"saved excel:\s+output/(?P<filename>[^/\s]+\.xlsx)", re.IGNORECASE)
@@ -54,12 +55,24 @@ def parse_recent_run(path: Path, *, current_status: dict[str, object] | None = N
     log_text = path.read_text(encoding="utf-8", errors="replace")
     duration_seconds = max(0, int((modified_at - started_at).total_seconds()))
     xlsx_filename = _extract_saved_excel_filename(log_text)
-    status = _resolve_status(log_text, run_id=run_id, current_status=current_status)
+    process_status = _resolve_process_status(log_text, run_id=run_id, current_status=current_status)
+    runtime_summary = parse_runtime_log(log_text)
+    scenario_result_status = _resolve_scenario_result_status(process_status, runtime_summary)
+    completed_scenarios = int(runtime_summary.get("completed_scenarios") or 0)
+    failed_scenarios = int(runtime_summary.get("failed_scenarios") or 0)
+    total_scenarios = len(runtime_summary.get("scenario_progress") or [])
+    event_warning_count = _count_warning_events(runtime_summary)
 
     return {
         "run_id": run_id,
         "mode": mode,
-        "status": status,
+        "status": process_status,
+        "process_status": process_status,
+        "scenario_result_status": scenario_result_status,
+        "completed_scenarios": completed_scenarios,
+        "failed_scenarios": failed_scenarios,
+        "total_scenarios": total_scenarios,
+        "event_warning_count": event_warning_count,
         "started_at": started_at.isoformat(timespec="seconds"),
         "duration_seconds": duration_seconds,
         "log_exists": True,
@@ -80,7 +93,7 @@ def _extract_saved_excel_filename(log_text: str) -> str | None:
     return matches[-1]
 
 
-def _resolve_status(log_text: str, *, run_id: str, current_status: dict[str, object] | None) -> str:
+def _resolve_process_status(log_text: str, *, run_id: str, current_status: dict[str, object] | None) -> str:
     current = current_status or {}
     if current.get("run_id") == run_id:
         state = str(current.get("state") or "")
@@ -100,8 +113,41 @@ def _resolve_status(log_text: str, *, run_id: str, current_status: dict[str, obj
         return "failed"
     if "reason='talkback_disabled'" in lowered or "reason='helper_not_ready'" in lowered or "reason='external_popup_uncleared'" in lowered:
         return "failed"
-    if "final_result='fail'" in lowered or "reason='no_scenario_selected'" in lowered:
+    if "reason='no_scenario_selected'" in lowered:
         return "failed"
     if "[main] script end" in lowered:
         return "success"
     return "unknown"
+
+
+def _resolve_scenario_result_status(process_status: str, runtime_summary: dict[str, object]) -> str:
+    if process_status == "running":
+        return "running"
+
+    completed_scenarios = int(runtime_summary.get("completed_scenarios") or 0)
+    failed_scenarios = int(runtime_summary.get("failed_scenarios") or 0)
+    total_scenarios = len(runtime_summary.get("scenario_progress") or [])
+
+    if failed_scenarios > 0:
+        return "failed"
+    if process_status == "stopped" and completed_scenarios > 0:
+        return "partial"
+    if process_status == "stopped" and completed_scenarios == 0:
+        return "stopped"
+    if completed_scenarios > 0 and failed_scenarios == 0:
+        return "passed"
+    if process_status == "failed" and total_scenarios > 0:
+        return "failed"
+    return "unknown"
+
+
+def _count_warning_events(runtime_summary: dict[str, object]) -> int:
+    events = runtime_summary.get("event_feed")
+    if not isinstance(events, list):
+        return 0
+    warning_types = {"scenario_failed", "traversal_terminal", "popup_uncleared", "stop_requested"}
+    return sum(
+        1
+        for event in events
+        if isinstance(event, dict) and str(event.get("type") or "") in warning_types
+    )

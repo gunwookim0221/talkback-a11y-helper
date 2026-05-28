@@ -19,6 +19,22 @@ class ActionResultParser:
     """action result 저수준 판정/정규화 보조 래퍼."""
 
     @staticmethod
+    def target_action_parse_error_result(
+        req_id: str,
+        raw_payload: str,
+        error: Exception | str,
+    ) -> dict[str, Any]:
+        raw_snippet = str(raw_payload).replace("\n", "\\n")[:240]
+        return {
+            "success": False,
+            "status": "parse_error",
+            "reason": "json_parse_failed",
+            "reqId": req_id,
+            "rawSnippet": raw_snippet,
+            "parseError": str(error),
+        }
+
+    @staticmethod
     def normalize_action_result(
         success: bool,
         status: str | None = None,

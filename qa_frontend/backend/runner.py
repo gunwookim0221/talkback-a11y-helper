@@ -12,6 +12,7 @@ from tb_runner.runtime_config import RUNTIME_CONFIG_PATH_ENV
 
 from .paths import ROOT_DIR, RUN_LOG_DIR, SCRIPT_PATH, RUNTIME_CONFIG_PATH
 from .preflight import format_preflight_log_lines, normalize_launch_mode, run_runtime_preflight
+from .runtime_dashboard import build_runtime_dashboard
 from .runtime_config_selection import write_selected_runtime_config
 
 RunState = Literal["idle", "running", "stopped", "finished", "error"]
@@ -189,6 +190,14 @@ class RunManager:
         with self._lock:
             self._refresh_locked()
             return self._status_locked()
+
+    def get_dashboard(self) -> dict[str, object]:
+        with self._lock:
+            self._refresh_locked()
+            status = self._status_locked()
+            log_path = self._log_path
+            scenario_ids = list(self._scenario_ids)
+        return build_runtime_dashboard(status=status, log_path=log_path, scenario_ids=scenario_ids)
 
     def get_log_tail(self, max_lines: int = 300) -> dict[str, object]:
         path = self._log_path

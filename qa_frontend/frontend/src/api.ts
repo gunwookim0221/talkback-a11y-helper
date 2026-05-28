@@ -49,12 +49,60 @@ export type RecentRun = {
   run_id: string;
   mode: 'smoke' | 'full';
   status: string;
+  process_status: string;
+  scenario_result_status: string;
+  completed_scenarios: number;
+  failed_scenarios: number;
+  total_scenarios: number;
+  event_warning_count: number;
   started_at: string;
   duration_seconds: number;
   log_exists: boolean;
   log_filename: string | null;
   xlsx_exists: boolean;
   xlsx_filename: string | null;
+};
+
+export type RuntimeEvent = {
+  line: number;
+  type: string;
+  scenario: string | null;
+  message: string;
+};
+
+export type ScenarioProgress = {
+  id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'skipped' | string;
+  steps: number;
+};
+
+export type RuntimeDashboard = {
+  run_id: string | null;
+  mode: string | null;
+  launch_mode: string | null;
+  state: string | null;
+  started_at: string | null;
+  elapsed_seconds: number;
+  current_scenario: string | null;
+  completed_scenarios: number;
+  remaining_scenarios: number;
+  failed_scenarios: number;
+  scenario_progress: ScenarioProgress[];
+  current_step: number | null;
+  total_step_count: number;
+  overlay_count: number;
+  save_excel_count: number;
+  popup_result: string | null;
+  preflight_state: string | null;
+  helper_status: string | null;
+  adb_status: string | null;
+  last_focus_label: string | null;
+  last_focus_package: string | null;
+  stop_reason: string | null;
+  traversal_result: string | null;
+  event_feed: RuntimeEvent[];
+  log_size: number;
+  parse_error: string | null;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -81,6 +129,7 @@ export const api = {
     }),
   stopRun: () => request<RunStatus>('/api/run/stop', { method: 'POST' }),
   runStatus: () => request<RunStatus>('/api/run/status'),
+  runDashboard: () => request<RuntimeDashboard>('/api/run/dashboard'),
   runLog: () => request<{ text: string }>('/api/run/log'),
   recentRuns: () => request<{ runs: RecentRun[] }>('/api/runs/recent'),
   outputs: () => request<{ outputs: OutputFile[] }>('/api/outputs'),

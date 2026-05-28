@@ -81,6 +81,11 @@ def run_status() -> dict[str, object]:
     return runner.get_status()
 
 
+@app.get("/api/run/dashboard")
+def run_dashboard() -> dict[str, object]:
+    return runner.get_dashboard()
+
+
 @app.get("/api/run/log")
 def run_log() -> dict[str, object]:
     return runner.get_log_tail()
