@@ -152,6 +152,9 @@ PASS:
 - `/api/run/status` includes `preflight_state`, `talkback_state`, `helper_state`, and `foreground_package`
 - `/api/run/dashboard` includes parsed runtime metrics, scenario progress, and event feed data without backend crash
 - `/api/runs/recent` separates `process_status` from `scenario_result_status`
+- Run completion writes `qa_frontend_runs/<run_id>_summary.json`
+- `summary.json` is a cache/index; the run log remains the source of truth
+- Recent Runs uses valid `summary.json` as a fast path and falls back to log parsing when the summary is missing or malformed
 - `qa_frontend_runs/<run_id>_<mode>.log` contains `[QA_FRONTEND][preflight]` lines
 - Foreground verification failure is logged as unknown/non-matching and does not block by itself
 
@@ -161,6 +164,7 @@ FAIL logs:
 - `/api/run/start` response payload
 - `/api/run/status` response payload
 - `/api/run/dashboard` response payload
+- `qa_frontend_runs/<run_id>_summary.json`
 
 ### 6. SmartThings 미실행 상태에서 Warm launch smoke
 

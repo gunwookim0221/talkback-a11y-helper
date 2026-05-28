@@ -6,10 +6,16 @@ from pathlib import Path
 from typing import Any
 
 from .paths import RUN_LOG_DIR
+from .run_summary import (
+    extract_saved_excel_filename,
+    read_summary_file,
+    resolve_process_status,
+    resolve_scenario_result_status,
+    summary_path_for_log,
+)
 from .runtime_dashboard import parse_runtime_log
 
 RUN_LOG_PATTERN = re.compile(r"^(?P<run_id>\d{8}_\d{6})_(?P<mode>smoke|full)\.log$")
-SAVED_EXCEL_PATTERN = re.compile(r"saved excel:\s+output/(?P<filename>[^/\s]+\.xlsx)", re.IGNORECASE)
 START_PATTERN = "%Y%m%d_%H%M%S"
 
 
@@ -52,12 +58,24 @@ def parse_recent_run(path: Path, *, current_status: dict[str, object] | None = N
     mode = match.group("mode")
     started_at = _parse_started_at(run_id)
     modified_at = datetime.fromtimestamp(path.stat().st_mtime)
+    summary = read_summary_file(summary_path_for_log(path))
+    if summary is not None:
+        return _recent_run_from_summary(
+            summary=summary,
+            path=path,
+            run_id=run_id,
+            mode=mode,
+            started_at=started_at,
+            modified_at=modified_at,
+            current_status=current_status,
+        )
+
     log_text = path.read_text(encoding="utf-8", errors="replace")
     duration_seconds = max(0, int((modified_at - started_at).total_seconds()))
-    xlsx_filename = _extract_saved_excel_filename(log_text)
-    process_status = _resolve_process_status(log_text, run_id=run_id, current_status=current_status)
+    xlsx_filename = extract_saved_excel_filename(log_text)
+    process_status = _resolve_recent_process_status(log_text, run_id=run_id, current_status=current_status)
     runtime_summary = parse_runtime_log(log_text)
-    scenario_result_status = _resolve_scenario_result_status(process_status, runtime_summary)
+    scenario_result_status = resolve_scenario_result_status(process_status, runtime_summary)
     completed_scenarios = int(runtime_summary.get("completed_scenarios") or 0)
     failed_scenarios = int(runtime_summary.get("failed_scenarios") or 0)
     total_scenarios = len(runtime_summary.get("scenario_progress") or [])
@@ -79,6 +97,8 @@ def parse_recent_run(path: Path, *, current_status: dict[str, object] | None = N
         "log_filename": path.name,
         "xlsx_exists": bool(xlsx_filename),
         "xlsx_filename": xlsx_filename,
+        "summary_exists": False,
+        "summary_source": "log_parse",
     }
 
 
@@ -86,59 +106,49 @@ def _parse_started_at(run_id: str) -> datetime:
     return datetime.strptime(run_id, START_PATTERN)
 
 
-def _extract_saved_excel_filename(log_text: str) -> str | None:
-    matches = SAVED_EXCEL_PATTERN.findall(log_text)
-    if not matches:
-        return None
-    return matches[-1]
+def _recent_run_from_summary(
+    *,
+    summary: dict[str, object],
+    path: Path,
+    run_id: str,
+    mode: str,
+    started_at: datetime,
+    modified_at: datetime,
+    current_status: dict[str, object] | None,
+) -> dict[str, object]:
+    process_status = str(summary.get("process_status") or "unknown")
+    if current_status and current_status.get("run_id") == run_id:
+        process_status = _resolve_recent_process_status("", run_id=run_id, current_status=current_status)
+    xlsx_filename = _string_or_none(summary.get("xlsx_filename"))
+    started_text = _string_or_none(summary.get("started_at")) or started_at.isoformat(timespec="seconds")
+    duration_seconds = int(summary.get("elapsed_seconds") or max(0, int((modified_at - started_at).total_seconds())))
+
+    return {
+        "run_id": _string_or_none(summary.get("run_id")) or run_id,
+        "mode": _string_or_none(summary.get("mode")) or mode,
+        "status": process_status,
+        "process_status": process_status,
+        "scenario_result_status": str(summary.get("scenario_result_status") or "unknown"),
+        "completed_scenarios": int(summary.get("completed_scenarios") or 0),
+        "failed_scenarios": int(summary.get("failed_scenarios") or 0),
+        "total_scenarios": int(summary.get("total_scenarios") or 0),
+        "event_warning_count": int(summary.get("event_warning_count") or summary.get("warning_count") or 0),
+        "started_at": started_text,
+        "duration_seconds": duration_seconds,
+        "log_exists": path.exists(),
+        "log_filename": path.name,
+        "xlsx_exists": bool(xlsx_filename),
+        "xlsx_filename": xlsx_filename,
+        "summary_exists": True,
+        "summary_source": "summary_json",
+    }
 
 
-def _resolve_process_status(log_text: str, *, run_id: str, current_status: dict[str, object] | None) -> str:
+def _resolve_recent_process_status(log_text: str, *, run_id: str, current_status: dict[str, object] | None) -> str:
     current = current_status or {}
     if current.get("run_id") == run_id:
-        state = str(current.get("state") or "")
-        if state == "running":
-            return "running"
-        if state == "stopped":
-            return "stopped"
-        if state == "finished":
-            return "success"
-        if state == "error":
-            return "failed"
-
-    lowered = log_text.lower()
-    if "[qa_frontend][run] final_state='stopped'" in lowered or "[qa_frontend][run] stop_requested=true" in lowered:
-        return "stopped"
-    if "script_test.py exited with code" in lowered:
-        return "failed"
-    if "reason='talkback_disabled'" in lowered or "reason='helper_not_ready'" in lowered or "reason='external_popup_uncleared'" in lowered:
-        return "failed"
-    if "reason='no_scenario_selected'" in lowered:
-        return "failed"
-    if "[main] script end" in lowered:
-        return "success"
-    return "unknown"
-
-
-def _resolve_scenario_result_status(process_status: str, runtime_summary: dict[str, object]) -> str:
-    if process_status == "running":
-        return "running"
-
-    completed_scenarios = int(runtime_summary.get("completed_scenarios") or 0)
-    failed_scenarios = int(runtime_summary.get("failed_scenarios") or 0)
-    total_scenarios = len(runtime_summary.get("scenario_progress") or [])
-
-    if failed_scenarios > 0:
-        return "failed"
-    if process_status == "stopped" and completed_scenarios > 0:
-        return "partial"
-    if process_status == "stopped" and completed_scenarios == 0:
-        return "stopped"
-    if completed_scenarios > 0 and failed_scenarios == 0:
-        return "passed"
-    if process_status == "failed" and total_scenarios > 0:
-        return "failed"
-    return "unknown"
+        return resolve_process_status(status=current, log_text=log_text)
+    return resolve_process_status(status=None, log_text=log_text)
 
 
 def _count_warning_events(runtime_summary: dict[str, object]) -> int:
@@ -151,3 +161,7 @@ def _count_warning_events(runtime_summary: dict[str, object]) -> int:
         for event in events
         if isinstance(event, dict) and str(event.get("type") or "") in warning_types
     )
+
+
+def _string_or_none(value: object) -> str | None:
+    return str(value) if value else None

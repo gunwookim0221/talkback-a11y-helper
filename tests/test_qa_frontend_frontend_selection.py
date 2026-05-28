@@ -26,6 +26,7 @@ def test_frontend_initial_selection_defaults_to_global_nav_not_source_enabled():
     assert "process_status" in app_tsx
     assert "scenario_result_status" in app_tsx
     assert "Scenarios failed" in app_tsx
+    assert "summary cached" in app_tsx
     assert "Global Nav Smoke" in presets_ts
     assert "Life Smoke" in presets_ts
     assert "Device Smoke" in presets_ts

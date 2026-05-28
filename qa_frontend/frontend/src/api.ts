@@ -61,6 +61,8 @@ export type RecentRun = {
   log_filename: string | null;
   xlsx_exists: boolean;
   xlsx_filename: string | null;
+  summary_exists?: boolean;
+  summary_source?: string;
 };
 
 export type RuntimeEvent = {

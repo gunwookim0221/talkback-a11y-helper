@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from qa_frontend.backend.main import app, runner
 from qa_frontend.backend.recent_runs import list_recent_runs, safe_recent_run_log_path
+from qa_frontend.backend.run_summary import build_run_summary, summary_path_for_log, write_summary_file
 
 
 def _write_log(path: Path, *, body: str) -> None:
@@ -126,6 +127,165 @@ def test_recent_run_scenario_result_unknown_when_log_has_no_parseable_scenarios(
     assert run["process_status"] == "success"
     assert run["scenario_result_status"] == "unknown"
     assert run["total_scenarios"] == 0
+
+
+def test_build_run_summary_contains_sidecar_schema(tmp_path):
+    log_path = tmp_path / "20260528_120000_smoke.log"
+    _write_log(
+        log_path,
+        body="\n".join(
+            [
+                "[QA_FRONTEND] start mode='smoke' scenario_selection_applied=true scenario_ids=['global_nav_main'] runtime_config_path='x' launch_mode='clean'",
+                "[QA_FRONTEND][scenario_selection] enabled_ids=['global_nav_main']",
+                "[QA_FRONTEND][preflight][popup] foreground_after='com.samsung.android.oneconnect' result='cleared'",
+                "[QA_FRONTEND][preflight] final_result='passed' reason='ok'",
+                "[21:04:10] [GLOBAL_NAV][start_gate] passed scenario='global_nav_main'",
+                "[21:04:48] [STEP] END scenario='global_nav_main' step=5 visible='Menu, Tab 5 of 5., New content available'",
+                "[21:04:48] [STOP][eval] step=5 scenario='global_nav_main' scenario_type='global_nav' decision='stop' reason='smart_nav_terminal' traversal_result='FAIL_STUCK' final_result='FAIL'",
+                "[21:04:49] [PERF][scenario_summary] scenario=global_nav_main total_steps=6",
+                "[SAVE] saved excel: output/talkback_compare_20260528_120000.xlsx rows=6",
+                "[MAIN] script end",
+            ]
+        ),
+    )
+
+    summary = build_run_summary(
+        status={
+            "state": "finished",
+            "run_id": "20260528_120000",
+            "mode": "smoke",
+            "launch_mode": "clean",
+            "started_at": "2026-05-28T12:00:00",
+            "finished_at": "2026-05-28T12:01:26",
+        },
+        log_path=log_path,
+        scenario_ids=["global_nav_main"],
+    )
+
+    assert summary["schema_version"] == 1
+    assert summary["process_status"] == "success"
+    assert summary["scenario_result_status"] == "passed"
+    assert summary["completed_scenarios"] == 1
+    assert summary["failed_scenarios"] == 0
+    assert summary["total_steps"] == 6
+    assert summary["popup_result"] == "cleared"
+    assert summary["xlsx_filename"] == "talkback_compare_20260528_120000.xlsx"
+    assert summary["event_counts"]["popup_cleared"] == 1
+    assert summary["scenarios"][0]["id"] == "global_nav_main"
+    assert summary["scenarios"][0]["status"] == "completed"
+    assert summary["scenarios"][0]["steps"] == 6
+
+
+def test_recent_runs_uses_summary_fast_path_when_available(tmp_path):
+    log_path = tmp_path / "20260528_120100_smoke.log"
+    _write_log(log_path, body="unstructured log only\n")
+    summary_path_for_log(log_path).write_text(
+        """{
+  "schema_version": 1,
+  "run_id": "20260528_120100",
+  "mode": "smoke",
+  "started_at": "2026-05-28T12:01:00",
+  "elapsed_seconds": 42,
+  "process_status": "success",
+  "scenario_result_status": "passed",
+  "completed_scenarios": 1,
+  "failed_scenarios": 0,
+  "total_scenarios": 1,
+  "event_warning_count": 0,
+  "xlsx_filename": "talkback_compare_cached.xlsx"
+}""",
+        encoding="utf-8",
+    )
+
+    run = list_recent_runs(run_log_dir=tmp_path)[0]
+
+    assert run["summary_exists"] is True
+    assert run["summary_source"] == "summary_json"
+    assert run["scenario_result_status"] == "passed"
+    assert run["completed_scenarios"] == 1
+    assert run["duration_seconds"] == 42
+    assert run["xlsx_filename"] == "talkback_compare_cached.xlsx"
+
+
+def test_recent_runs_falls_back_to_log_parse_when_summary_is_malformed(tmp_path):
+    log_path = tmp_path / "20260528_120200_smoke.log"
+    _write_log(
+        log_path,
+        body="\n".join(
+            [
+                "[QA_FRONTEND][scenario_selection] enabled_ids=['global_nav_main']",
+                "[PERF][scenario_summary] scenario=global_nav_main total_steps=2",
+                "[MAIN] script end",
+            ]
+        ),
+    )
+    summary_path_for_log(log_path).write_text("{broken json", encoding="utf-8")
+
+    run = list_recent_runs(run_log_dir=tmp_path)[0]
+
+    assert run["summary_exists"] is False
+    assert run["summary_source"] == "log_parse"
+    assert run["process_status"] == "success"
+    assert run["scenario_result_status"] == "passed"
+    assert run["completed_scenarios"] == 1
+
+
+def test_write_summary_file_handles_stopped_partial_run(tmp_path):
+    log_path = tmp_path / "20260528_120300_smoke.log"
+    _write_log(
+        log_path,
+        body="\n".join(
+            [
+                "[QA_FRONTEND][scenario_selection] enabled_ids=['global_nav_main', 'life_air_care_plugin']",
+                "[PERF][scenario_summary] scenario=global_nav_main total_steps=6",
+                "[QA_FRONTEND][run] final_state='stopped' returncode=0",
+            ]
+        ),
+    )
+
+    summary = write_summary_file(
+        status={
+            "state": "stopped",
+            "run_id": "20260528_120300",
+            "mode": "smoke",
+            "started_at": "2026-05-28T12:03:00",
+            "finished_at": "2026-05-28T12:03:20",
+        },
+        log_path=log_path,
+        scenario_ids=["global_nav_main", "life_air_care_plugin"],
+    )
+
+    assert summary_path_for_log(log_path).exists()
+    assert summary["process_status"] == "stopped"
+    assert summary["scenario_result_status"] == "partial"
+    assert summary["completed_scenarios"] == 1
+    assert summary["total_scenarios"] == 2
+
+
+def test_write_summary_file_marks_failed_scenario(tmp_path):
+    log_path = tmp_path / "20260528_120400_smoke.log"
+    _write_log(
+        log_path,
+        body="\n".join(
+            [
+                "[QA_FRONTEND][scenario_selection] enabled_ids=['global_nav_main']",
+                "[TAB][select] stabilization failed scenario='global_nav_main'",
+                "[PERF][scenario_summary] scenario=global_nav_main total_steps=1",
+                "[MAIN] script end",
+            ]
+        ),
+    )
+
+    summary = write_summary_file(
+        status={"state": "finished", "run_id": "20260528_120400", "mode": "smoke"},
+        log_path=log_path,
+        scenario_ids=["global_nav_main"],
+    )
+
+    assert summary["process_status"] == "success"
+    assert summary["scenario_result_status"] == "failed"
+    assert summary["failed_scenarios"] == 1
+    assert summary["scenarios"][0]["status"] == "failed"
 
 
 def test_safe_recent_run_log_path_returns_matching_log(tmp_path):

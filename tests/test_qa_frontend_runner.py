@@ -93,6 +93,11 @@ def test_run_manager_blocks_when_no_scenario_selected(tmp_path, monkeypatch):
     assert state["state"] == "error"
     assert state["error"] == "No scenario selected"
     assert state["scenario_selection_applied"] is False
+    summary_path = tmp_path / "runs" / f"{state['run_id']}_summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["schema_version"] == 1
+    assert summary["process_status"] == "failed"
+    assert summary["scenario_result_status"] == "unknown"
 
 
 def test_run_manager_writes_selected_runtime_config_and_env_without_mutating_source(tmp_path, monkeypatch):

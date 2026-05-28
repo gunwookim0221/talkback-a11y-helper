@@ -12,6 +12,7 @@ from tb_runner.runtime_config import RUNTIME_CONFIG_PATH_ENV
 
 from .paths import ROOT_DIR, RUN_LOG_DIR, SCRIPT_PATH, RUNTIME_CONFIG_PATH
 from .preflight import format_preflight_log_lines, normalize_launch_mode, run_runtime_preflight
+from .run_summary import write_summary_file
 from .runtime_dashboard import build_runtime_dashboard
 from .runtime_config_selection import write_selected_runtime_config
 
@@ -82,6 +83,7 @@ class RunManager:
                     )
                     log_file.write("[QA_FRONTEND][scenario_selection] result='blocked' reason='no_scenario_selected'\n")
                     log_file.close()
+                    self._write_summary_safe()
                     return self._status_locked()
 
                 runtime_config = write_selected_runtime_config(
@@ -136,6 +138,7 @@ class RunManager:
                     self._process = None
                     self._finished_at = datetime.now().isoformat(timespec="seconds")
                     log_file.close()
+                    self._write_summary_safe()
                     return self._status_locked()
 
                 env = os.environ.copy()
@@ -226,6 +229,7 @@ class RunManager:
             self._finished_at = datetime.now().isoformat(timespec="seconds")
             if self._state == "stopped":
                 self._append_log_line("[QA_FRONTEND][run] final_state='stopped' returncode=0")
+                self._write_summary_safe()
                 return
             self._state = "finished" if returncode == 0 else "error"
             if returncode != 0:
@@ -233,6 +237,7 @@ class RunManager:
             self._append_log_line(
                 f"[QA_FRONTEND][run] final_state='{self._state}' returncode={returncode}"
             )
+            self._write_summary_safe()
 
     def _refresh_locked(self) -> None:
         process = self._process
@@ -255,6 +260,18 @@ class RunManager:
                 log_file.write(f"{line}\n")
         except OSError:
             return
+
+    def _write_summary_safe(self) -> None:
+        if not self._log_path:
+            return
+        try:
+            write_summary_file(
+                status=self._status_locked(),
+                log_path=self._log_path,
+                scenario_ids=list(self._scenario_ids),
+            )
+        except Exception as exc:
+            self._append_log_line(f"[QA_FRONTEND][summary] write_failed error='{exc}'")
 
     def _status_locked(self) -> dict[str, object]:
         return {

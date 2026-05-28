@@ -16,6 +16,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from qa_frontend.backend import outputs, runner, scenarios
 from qa_frontend.backend.main import app
+from qa_frontend.backend.run_summary import build_run_summary
 from qa_frontend.backend.runtime_dashboard import parse_runtime_log
 
 
@@ -103,6 +104,34 @@ def check_runtime_dashboard_parser(results: list[tuple[str, bool, str]]) -> None
     _record(results, "runtime_dashboard_parser", ok, json.dumps(summary, ensure_ascii=True, sort_keys=True))
 
 
+def check_run_summary_sidecar(results: list[tuple[str, bool, str]]) -> None:
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        log_path = Path(tmp_dir) / "20260528_090000_smoke.log"
+        log_path.write_text(
+            "[QA_FRONTEND][scenario_selection] enabled_ids=['global_nav_main']\n"
+            "[PERF][scenario_summary] scenario=global_nav_main total_steps=1\n"
+            "[MAIN] script end\n",
+            encoding="utf-8",
+        )
+        summary = build_run_summary(
+            status={
+                "state": "finished",
+                "run_id": "20260528_090000",
+                "mode": "smoke",
+                "started_at": "2026-05-28T09:00:00",
+                "finished_at": "2026-05-28T09:00:10",
+            },
+            log_path=log_path,
+            scenario_ids=["global_nav_main"],
+        )
+    ok = (
+        summary.get("schema_version") == 1
+        and summary.get("process_status") == "success"
+        and summary.get("scenario_result_status") == "passed"
+    )
+    _record(results, "run_summary_sidecar", ok, json.dumps(summary, ensure_ascii=True, sort_keys=True))
+
+
 def check_frontend_package(results: list[tuple[str, bool, str]]) -> None:
     package_json = FRONTEND_DIR / "package.json"
     if not package_json.is_file():
@@ -135,6 +164,7 @@ def main() -> int:
     check_output_safe_path(results)
     check_runner_initial_state(results)
     check_runtime_dashboard_parser(results)
+    check_run_summary_sidecar(results)
     check_frontend_package(results)
     check_backend_requirements(results)
     check_optional_adb(results)

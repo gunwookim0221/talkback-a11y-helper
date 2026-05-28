@@ -45,10 +45,12 @@ APIs:
 - `GET /api/outputs/{filename}`
 
 Run logs are written under `qa_frontend_runs/`. Runner output files continue to be written under `output/`.
+When a run reaches a terminal state, the backend writes `qa_frontend_runs/<run_id>_summary.json` as a structured sidecar. The log remains the source of truth; the summary is a secondary cache/index for Recent Runs, dashboards, and future queue/statistics work.
 
 Recent Runs is read-only. It exposes the latest run summaries plus log/xlsx downloads without rewriting source config or adding rerun behavior.
 Runtime Dashboard is read-only. It parses the current run log for best-effort progress, metrics, and event feed data while keeping the log as the source of truth.
 Run history separates process status from scenario result status. `process_status` describes execution (`success`, `failed`, `stopped`, `running`), while `scenario_result_status` describes parsed validation results (`passed`, `failed`, `partial`, `unknown`).
+Recent Runs uses `summary.json` as a fast path when present and valid. If the summary is missing or malformed, it falls back to parsing the log.
 
 ## Frontend
 

@@ -508,6 +508,7 @@ export default function App() {
                     <small>
                       {run.mode} · {formatTime(Date.parse(run.started_at) / 1000)} · {formatDuration(run.duration_seconds)}
                       {run.event_warning_count ? ` · ${run.event_warning_count} events` : ''}
+                      {run.summary_source === 'summary_json' ? ' · summary cached' : ''}
                     </small>
                   </div>
                   <div className="recentRunActions">
