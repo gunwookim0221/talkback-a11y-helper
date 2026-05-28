@@ -4,7 +4,7 @@ export type ScenarioPresetId =
   | 'global_nav_smoke'
   | 'life_smoke'
   | 'device_smoke'
-  | 'full_regression_selected'
+  | 'select_all'
   | 'clear_all';
 
 type ScenarioPreset = {
@@ -12,7 +12,6 @@ type ScenarioPreset = {
   label: string;
   description: string;
   scenarioIds: string[];
-  recommendedMode: 'smoke' | 'full';
 };
 
 export const PRESETS: ScenarioPreset[] = [
@@ -21,7 +20,6 @@ export const PRESETS: ScenarioPreset[] = [
     label: 'Global Nav Smoke',
     description: 'global_nav_main quick sanity check',
     scenarioIds: ['global_nav_main'],
-    recommendedMode: 'smoke',
   },
   {
     id: 'life_smoke',
@@ -33,7 +31,6 @@ export const PRESETS: ScenarioPreset[] = [
       'life_family_care_plugin',
       'life_clothing_care_plugin',
     ],
-    recommendedMode: 'smoke',
   },
   {
     id: 'device_smoke',
@@ -45,30 +42,27 @@ export const PRESETS: ScenarioPreset[] = [
       'device_door_lock_plugin',
       'device_tv_plugin',
     ],
-    recommendedMode: 'smoke',
   },
   {
-    id: 'full_regression_selected',
-    label: 'Full Regression Selected',
-    description: 'keep current selection and recommend full mode',
+    id: 'select_all',
+    label: 'Select All Scenarios',
+    description: 'select every available scenario',
     scenarioIds: [],
-    recommendedMode: 'full',
   },
   {
     id: 'clear_all',
     label: 'Clear All',
     description: 'clear every scenario checkbox',
     scenarioIds: [],
-    recommendedMode: 'smoke',
   },
 ];
 
 export function applyPresetSelection(presetId: ScenarioPresetId, scenarios: Scenario[], currentSelected: Set<string>): Set<string> {
-  if (presetId === 'full_regression_selected') {
-    return new Set(currentSelected);
-  }
   if (presetId === 'clear_all') {
     return new Set();
+  }
+  if (presetId === 'select_all') {
+    return new Set(scenarios.map((scenario) => scenario.id));
   }
 
   const available = new Set(scenarios.map((scenario) => scenario.id));

@@ -434,5 +434,5 @@ FAIL logs:
 - Smoke means a reduced-step sanity check for the currently selected scenarios. Full means a regression run that keeps source `runtime_config.json` `max_steps`.
 - Source `enabled` flags are display-only in the UI. The actual run selection comes from the current checkbox state, which defaults to `global_nav_main`.
 - Launch mode defaults to `Clean launch` so SmartThings starts from a more stable baseline. `Warm launch` is retained for advanced/debug runs that intentionally preserve the current app state.
-- Presets (`Global Nav Smoke`, `Life Smoke`, `Device Smoke`, `Full Regression Selected`, `Clear All`) only change frontend selection state and recommended mode. They do not modify the source runtime config.
+- Presets (`Global Nav Smoke`, `Life Smoke`, `Device Smoke`, `Select All Scenarios`, `Clear All`) only change frontend checkbox selection state. Smoke/Full buttons choose execution mode. Presets do not modify the source runtime config.
 - Run status is process execution status. Scenario status is validation result status parsed from the run log and may be `failed` even when the process exits successfully.

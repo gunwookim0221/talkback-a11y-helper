@@ -193,10 +193,6 @@ export default function App() {
 
   function applyPreset(presetId: ScenarioPresetId) {
     setSelected(applyPresetSelection(presetId, scenarios, selected));
-    const preset = PRESETS.find((item) => item.id === presetId);
-    if (preset) {
-      setPlannedMode(preset.recommendedMode);
-    }
   }
 
   return (
@@ -430,6 +426,9 @@ export default function App() {
           <p className="scenarioHint">
             global_nav_main is selected by default for a predictable sanity check. The source enabled flags are display-only;
             this run uses your current checkbox selection.
+          </p>
+          <p className="scenarioHint">
+            Presets only change scenario checkboxes. Use the Smoke or Full buttons above to choose the execution mode.
           </p>
           <div className="presetActions">
             {PRESETS.map((preset) => (

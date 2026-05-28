@@ -30,4 +30,10 @@ def test_frontend_initial_selection_defaults_to_global_nav_not_source_enabled():
     assert "Global Nav Smoke" in presets_ts
     assert "Life Smoke" in presets_ts
     assert "Device Smoke" in presets_ts
-    assert "Full Regression Selected" in presets_ts
+    assert "Select All Scenarios" in presets_ts
+    assert "select every available scenario" in presets_ts
+    assert "presetId === 'select_all'" in presets_ts
+    assert "new Set(scenarios.map((scenario) => scenario.id))" in presets_ts
+    assert "Full Regression Selected" not in presets_ts
+    assert "full_regression_selected" not in presets_ts
+    assert "recommendedMode" not in presets_ts
