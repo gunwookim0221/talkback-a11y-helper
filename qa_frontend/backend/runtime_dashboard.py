@@ -6,8 +6,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .paths import OUTPUT_DIR
 
-SCENARIO_RE = re.compile(r"scenario='([^']+)'|scenario=([A-Za-z0-9_]+)")
+
+SCENARIO_RE = re.compile(r"scenario='([^']+)'|scenario=([A-Za-z0-9_]+)|scenario_id='([^']+)'|scenario_id=([A-Za-z0-9_]+)")
 STEP_RE = re.compile(r"step=(\d+)")
 TOTAL_STEPS_RE = re.compile(r"total_steps=(\d+)")
 ENABLED_IDS_RE = re.compile(r"enabled_ids=(\[[^\]]*\])")
@@ -20,6 +22,25 @@ POPUP_RESULT_RE = re.compile(r"\[QA_FRONTEND\]\[preflight\]\[popup\].*result='([
 PREFLIGHT_FINAL_RE = re.compile(r"\[QA_FRONTEND\]\[preflight\] final_result='([^']*)'")
 PRE_STATUS_RE = re.compile(r"\[QA_FRONTEND\]\[preflight\]\[(adb|helper)\] status='([^']*)'")
 RUN_START_RE = re.compile(r"\[QA_FRONTEND\] start mode='([^']*)'.*launch_mode='([^']*)'")
+SAVED_EXCEL_RE = re.compile(r"saved excel:\s+output/(?P<filename>[^/\s]+\.xlsx)", re.IGNORECASE)
+ACCESSIBILITY_PASS_MISMATCH_TYPES = {
+    "EXACT_MATCH",
+    "NORMALIZED_MATCH",
+    "PARTIAL_MATCH",
+    "REPRESENTATIVE_CONTEXT",
+}
+SCENARIO_HARD_MISMATCH_TYPES = {
+    "EMPTY_VISIBLE",
+    "EMPTY_SPEECH",
+    "LABEL_MISMATCH",
+}
+TRANSIENT_PRESENTATION_FAILURE_REASONS = {
+    "move_failed",
+    "repeat_no_progress",
+    "terminal_not_handled",
+    "no_unvisited_local_tab",
+    "viewport_exhausted",
+}
 
 
 def build_runtime_dashboard(
@@ -35,7 +56,13 @@ def build_runtime_dashboard(
 
     try:
         log_text = log_path.read_text(encoding="utf-8", errors="replace")
-        parsed = parse_runtime_log(log_text, scenario_ids=scenario_ids or [])
+        validation_failed_scenarios, validation_warning_scenarios = extract_validation_scenario_evidence_from_log(log_text)
+        parsed = parse_runtime_log(
+            log_text,
+            scenario_ids=scenario_ids or [],
+            validation_failed_scenarios=validation_failed_scenarios,
+            validation_warning_scenarios=validation_warning_scenarios,
+        )
         dashboard.update(parsed)
         dashboard["log_size"] = log_path.stat().st_size
     except Exception as exc:
@@ -52,13 +79,22 @@ def build_runtime_dashboard(
     return dashboard
 
 
-def parse_runtime_log(log_text: str, *, scenario_ids: list[str] | None = None) -> dict[str, object]:
+def parse_runtime_log(
+    log_text: str,
+    *,
+    scenario_ids: list[str] | None = None,
+    validation_failed_scenarios: set[str] | None = None,
+    validation_warning_scenarios: set[str] | None = None,
+) -> dict[str, object]:
     lines = log_text.splitlines()
     selected_ids = list(scenario_ids or []) or _extract_enabled_ids(log_text)
     selected_filter = set(selected_ids)
     progress = {scenario_id: {"id": scenario_id, "status": "queued", "steps": 0} for scenario_id in selected_ids}
     step_end_counts: dict[str, int] = {}
     summary_steps: dict[str, int] = {}
+    entry_success_scenarios: set[str] = set()
+    soft_entry_evidence_scenarios: set[str] = set()
+    summary_scenarios: set[str] = set()
     global_nav_start_gate_passed: set[str] = set()
     global_nav_menu_reached: set[str] = set()
     global_nav_terminal: set[str] = set()
@@ -68,8 +104,8 @@ def parse_runtime_log(log_text: str, *, scenario_ids: list[str] | None = None) -
     total_step_count = 0
     overlay_count = 0
     save_excel_count = 0
-    failed_scenarios: set[str] = set()
-    completed_scenarios: set[str] = set()
+    hard_failed_scenarios: set[str] = set(validation_failed_scenarios or set())
+    warning_scenarios: set[str] = set(validation_warning_scenarios or set())
     last_focus_label = None
     last_focus_package = None
     stop_reason = None
@@ -93,6 +129,19 @@ def parse_runtime_log(log_text: str, *, scenario_ids: list[str] | None = None) -
             global_nav_start_gate_passed.add(scenario)
         if scenario and _line_reaches_menu_tab(line):
             global_nav_menu_reached.add(scenario)
+        if scenario and "[SCENARIO][entry_contract] success" in line:
+            entry_success_scenarios.add(scenario)
+        if scenario and "[ENTRY][post_open_identity]" in line and _has_plugin_entry_identity_evidence(scenario, line):
+            soft_entry_evidence_scenarios.add(scenario)
+        if scenario and "[SCENARIO][entry_contract]" in line and " fail" in line.lower():
+            if "post_open_verify_miss" in line and scenario in soft_entry_evidence_scenarios:
+                warning_scenarios.add(scenario)
+                progress[scenario]["status"] = "warning"
+                _add_event(events, index, "scenario_warning", line, scenario=scenario)
+            else:
+                hard_failed_scenarios.add(scenario)
+                progress[scenario]["status"] = "failed"
+                _add_event(events, index, "scenario_failed", line, scenario=scenario)
 
         if "[QA_FRONTEND] start" in line:
             run_match = RUN_START_RE.search(line)
@@ -140,30 +189,35 @@ def parse_runtime_log(log_text: str, *, scenario_ids: list[str] | None = None) -
             stop_reason = _extract_first(STOP_REASON_RE, line) or stop_reason
             if scenario and _is_global_nav_terminal(line, scenario):
                 global_nav_terminal.add(scenario)
-                progress[scenario]["status"] = "completed"
-                completed_scenarios.add(scenario)
+                progress[scenario]["status"] = "passed"
                 _add_event(events, index, "traversal_terminal", line, scenario=scenario)
             elif scenario and str(final_result).upper() == "FAIL":
-                failed_scenarios.add(scenario)
-                progress[scenario]["status"] = "failed"
-                _add_event(events, index, "scenario_failed", line, scenario=scenario)
+                warning_scenarios.add(scenario)
+                if progress[scenario].get("status") not in {"failed"}:
+                    progress[scenario]["status"] = "warning"
+                _add_event(events, index, "scenario_warning", line, scenario=scenario)
             elif scenario and "decision='stop'" in line:
                 _add_event(events, index, "traversal_terminal", line, scenario=scenario)
-        elif "[TAB][select] stabilization failed" in line:
+        elif "[TAB][select] stabilization failed" in line or "no_bottom_nav_candidates" in line:
             if scenario:
-                failed_scenarios.add(scenario)
+                hard_failed_scenarios.add(scenario)
                 progress[scenario]["status"] = "failed"
                 _add_event(events, index, "scenario_failed", line, scenario=scenario)
         elif "[PERF][scenario_summary]" in line:
             if scenario:
+                summary_scenarios.add(scenario)
                 total_steps = _extract_total_steps(line)
                 if total_steps is not None:
                     summary_steps[scenario] = total_steps
                     progress[scenario]["steps"] = total_steps
-                completed_scenarios.add(scenario)
-                if scenario not in failed_scenarios:
-                    progress[scenario]["status"] = "completed"
+                if progress[scenario].get("status") not in {"failed", "warning"}:
+                    progress[scenario]["status"] = "passed"
                 _add_event(events, index, "scenario_completed", line, scenario=scenario)
+        elif "[FATAL]" in line or "Traceback" in line or "Exception" in line:
+            if scenario:
+                hard_failed_scenarios.add(scenario)
+                progress[scenario]["status"] = "failed"
+                _add_event(events, index, "scenario_failed", line, scenario=scenario)
         elif "[MAIN] skip disabled scenario_id=" in line:
             skipped = _extract_skip_scenario(line)
             if skipped in progress:
@@ -187,18 +241,43 @@ def parse_runtime_log(log_text: str, *, scenario_ids: list[str] | None = None) -
             menu_reached=global_nav_menu_reached,
             terminal=global_nav_terminal,
         ):
-            failed_scenarios.discard(scenario_id)
-            completed_scenarios.add(scenario_id)
-            item["status"] = "completed"
+            hard_failed_scenarios.discard(scenario_id)
+            warning_scenarios.discard(scenario_id)
+            item["status"] = "passed"
+            continue
+        if scenario_id in hard_failed_scenarios:
+            item["status"] = "failed"
+            continue
+        if scenario_id in warning_scenarios and scenario_id in soft_entry_evidence_scenarios:
+            item["status"] = "warning"
+            continue
+        has_summary = scenario_id in summary_scenarios
+        has_rows = step_end_counts.get(scenario_id, 0) > 0 or int(item.get("steps") or 0) > 0
+        has_entry = scenario_id in entry_success_scenarios or scenario_id.startswith("global_nav")
+        if item.get("status") == "skipped":
+            continue
+        if not has_summary or not has_rows:
+            if has_entry or item.get("status") not in {"queued", "running"}:
+                item["status"] = "failed"
+            continue
+        if scenario_id in warning_scenarios:
+            item["status"] = "warning"
+        elif item.get("status") not in {"failed", "warning"}:
+            item["status"] = "passed"
 
-    completed_count = len([item for item in progress.values() if item["status"] in {"completed", "failed", "skipped"}])
+    passed_count = len([item for item in progress.values() if item["status"] == "passed"])
+    warning_count = len([item for item in progress.values() if item["status"] == "warning"])
+    failed_count = len([item for item in progress.values() if item["status"] == "failed"])
+    completed_count = len([item for item in progress.values() if item["status"] in {"passed", "warning", "failed", "skipped"}])
     return {
         "mode": mode,
         "launch_mode": launch_mode,
         "current_scenario": current_scenario,
-        "completed_scenarios": len([item for item in progress.values() if item["status"] == "completed"]),
+        "passed_scenarios": passed_count,
+        "warning_scenarios": warning_count,
+        "completed_scenarios": passed_count + warning_count,
         "remaining_scenarios": len([item for item in progress.values() if item["status"] in {"queued", "running"}]),
-        "failed_scenarios": len([item for item in progress.values() if item["status"] == "failed"]),
+        "failed_scenarios": failed_count,
         "scenario_progress": list(progress.values()),
         "current_step": current_step,
         "total_step_count": total_step_count,
@@ -231,6 +310,8 @@ def _empty_dashboard(*, status: dict[str, object], started_at: str | None, scena
         "remaining_scenarios": len(scenario_ids),
         "failed_scenarios": 0,
         "scenario_progress": [{"id": item, "status": "queued", "steps": 0} for item in scenario_ids],
+        "passed_scenarios": 0,
+        "warning_scenarios": 0,
         "current_step": None,
         "total_step_count": 0,
         "overlay_count": 0,
@@ -262,11 +343,76 @@ def _extract_enabled_ids(log_text: str) -> list[str]:
     return [str(item) for item in value]
 
 
+def extract_validation_scenario_evidence_from_log(log_text: str) -> tuple[set[str], set[str]]:
+    filename = _extract_saved_excel_filename(log_text)
+    if not filename:
+        return set(), set()
+    return extract_validation_scenario_evidence_from_xlsx(OUTPUT_DIR / filename)
+
+
+def extract_validation_scenario_evidence_from_xlsx(path: Path) -> tuple[set[str], set[str]]:
+    if not path.exists():
+        return set(), set()
+    try:
+        import openpyxl
+    except ImportError:
+        return set(), set()
+    try:
+        workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        if "result" not in workbook.sheetnames:
+            return set(), set()
+        sheet = workbook["result"]
+        headers = [sheet.cell(1, column).value for column in range(1, sheet.max_column + 1)]
+        scenario_col = headers.index("scenario_id") + 1
+        result_col = headers.index("final_result") + 1
+        failure_col = headers.index("failure_reason") + 1 if "failure_reason" in headers else None
+        mismatch_col = headers.index("mismatch_type") + 1 if "mismatch_type" in headers else None
+    except (OSError, ValueError, KeyError):
+        return set(), set()
+
+    failed: set[str] = set()
+    warning: set[str] = set()
+    try:
+        for row in range(2, sheet.max_row + 1):
+            result = str(sheet.cell(row, result_col).value or "").strip().upper()
+            scenario = str(sheet.cell(row, scenario_col).value or "").strip()
+            if not scenario:
+                continue
+            if result == "WARN":
+                warning.add(scenario)
+            elif result == "FAIL":
+                failure_reason = str(sheet.cell(row, failure_col).value or "").strip() if failure_col else ""
+                mismatch_type = str(sheet.cell(row, mismatch_col).value or "").strip().upper() if mismatch_col else ""
+                normalized_failure = failure_reason.lower()
+                if mismatch_type in SCENARIO_HARD_MISMATCH_TYPES:
+                    failed.add(scenario)
+                elif (
+                    mismatch_type in ACCESSIBILITY_PASS_MISMATCH_TYPES
+                    and normalized_failure in TRANSIENT_PRESENTATION_FAILURE_REASONS
+                ):
+                    warning.add(scenario)
+                elif failure_reason:
+                    failed.add(scenario)
+                else:
+                    warning.add(scenario)
+    finally:
+        try:
+            workbook.close()
+        except Exception:
+            pass
+    return failed, warning
+
+
+def _extract_saved_excel_filename(log_text: str) -> str | None:
+    matches = SAVED_EXCEL_RE.findall(log_text)
+    return matches[-1] if matches else None
+
+
 def _extract_scenario(line: str) -> str | None:
     match = SCENARIO_RE.search(line)
     if not match:
         return None
-    return match.group(1) or match.group(2)
+    return match.group(1) or match.group(2) or match.group(3) or match.group(4)
 
 
 def _extract_skip_scenario(line: str) -> str | None:
@@ -326,6 +472,30 @@ def _is_completed_global_nav_terminal(
         and scenario in menu_reached
         and (scenario in start_gate_passed or scenario == "global_nav_main")
     )
+
+
+def _has_plugin_entry_identity_evidence(scenario: str, line: str) -> bool:
+    lowered = line.lower()
+    evidence_tokens = {
+        "life_find_plugin": (
+            "current location",
+            "my devices",
+            "offline",
+            "com.samsung.android.plugin.fme",
+        ),
+        "life_video_plugin": (
+            "live view",
+            "daily clips",
+            "home camera",
+            "홈카메라",
+        ),
+    }.get(scenario, ())
+    if not evidence_tokens:
+        return False
+    negative_tokens = ("location qr code", "change location")
+    has_evidence = any(token in lowered for token in evidence_tokens)
+    has_negative_only = any(token in lowered for token in negative_tokens) and not has_evidence
+    return bool(has_evidence and not has_negative_only)
 
 
 def _extract_first(pattern: re.Pattern[str], line: str) -> str | None:

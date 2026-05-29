@@ -1,6 +1,24 @@
 from __future__ import annotations
 
-from qa_frontend.backend.runtime_dashboard import build_runtime_dashboard, parse_runtime_log
+from qa_frontend.backend.runtime_dashboard import (
+    build_runtime_dashboard,
+    extract_validation_scenario_evidence_from_xlsx,
+    parse_runtime_log,
+)
+
+
+def _write_result_xlsx(path, rows):
+    import openpyxl
+
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "result"
+    headers = ["scenario_id", "final_result", "mismatch_type", "failure_reason"]
+    sheet.append(headers)
+    for row in rows:
+        sheet.append([row.get(header, "") for header in headers])
+    workbook.save(path)
+    workbook.close()
 
 
 def test_runtime_log_parser_extracts_summary_progress_and_events():
@@ -37,8 +55,10 @@ def test_runtime_log_parser_extracts_summary_progress_and_events():
     assert summary["total_step_count"] == 2
     assert summary["overlay_count"] == 1
     assert summary["save_excel_count"] == 1
+    assert summary["passed_scenarios"] == 1
+    assert summary["warning_scenarios"] == 0
     assert summary["failed_scenarios"] == 1
-    assert progress["global_nav_main"]["status"] == "completed"
+    assert progress["global_nav_main"]["status"] == "passed"
     assert progress["life_air_care_plugin"]["status"] == "failed"
     assert any(event["type"] == "popup_cleared" for event in summary["event_feed"])
     assert any(event["type"] == "scenario_failed" for event in summary["event_feed"])
@@ -61,7 +81,7 @@ def test_global_nav_smart_terminal_at_menu_is_completed_even_when_stop_eval_says
 
     assert summary["failed_scenarios"] == 0
     assert summary["completed_scenarios"] == 1
-    assert progress["global_nav_main"]["status"] == "completed"
+    assert progress["global_nav_main"]["status"] == "passed"
     assert progress["global_nav_main"]["steps"] == 6
     assert any(event["type"] == "traversal_terminal" for event in summary["event_feed"])
 
@@ -84,6 +104,40 @@ def test_global_nav_no_bottom_nav_candidates_remains_failed():
     assert progress["global_nav_main"]["steps"] == 1
 
 
+def test_entry_contract_failure_is_failed():
+    log_text = "\n".join(
+        [
+            "[QA_FRONTEND][scenario_selection] enabled_ids=['life_find_plugin']",
+            "[SCENARIO][entry_contract] failed scenario='life_find_plugin' entry_type='card' reason='verify_failed'",
+            "[PERF][scenario_summary] scenario=life_find_plugin total_steps=1",
+        ]
+    )
+
+    summary = parse_runtime_log(log_text)
+    progress = {item["id"]: item for item in summary["scenario_progress"]}
+
+    assert summary["failed_scenarios"] == 1
+    assert progress["life_find_plugin"]["status"] == "failed"
+
+
+def test_post_open_verify_miss_with_plugin_identity_evidence_is_warning():
+    log_text = "\n".join(
+        [
+            "[QA_FRONTEND][scenario_selection] enabled_ids=['life_find_plugin']",
+            "[ENTRY][post_open_identity] scenario_id='life_find_plugin' top_visible_labels='Navigate up Navigate up,More options More option,Current location Current,My devices My devices' body_texts='Current location Current location,My devices My devices,Offline 경기도 수원시' verify_hit=false",
+            "[SCENARIO][entry_contract] failed scenario='life_find_plugin' entry_type='card' reason='verify_failed' detail='post_open_verify_miss'",
+            "[PERF][scenario_summary] scenario=life_find_plugin total_steps=1",
+        ]
+    )
+
+    summary = parse_runtime_log(log_text)
+    progress = {item["id"]: item for item in summary["scenario_progress"]}
+
+    assert summary["failed_scenarios"] == 0
+    assert summary["warning_scenarios"] == 1
+    assert progress["life_find_plugin"]["status"] == "warning"
+
+
 def test_parser_ignores_disabled_skip_lines_when_enabled_ids_are_known():
     log_text = "\n".join(
         [
@@ -99,7 +153,172 @@ def test_parser_ignores_disabled_skip_lines_when_enabled_ids_are_known():
     summary = parse_runtime_log(log_text)
 
     assert len(summary["scenario_progress"]) == 1
-    assert summary["scenario_progress"] == [{"id": "global_nav_main", "status": "completed", "steps": 6}]
+    assert summary["scenario_progress"] == [{"id": "global_nav_main", "status": "passed", "steps": 6}]
+
+
+def test_entry_success_summary_and_fail_stuck_is_warning():
+    log_text = "\n".join(
+        [
+            "[QA_FRONTEND][scenario_selection] enabled_ids=['device_smoke_sensor_plugin']",
+            "[SCENARIO][entry_contract] success scenario='device_smoke_sensor_plugin' entry_type='card'",
+            "[STEP] END scenario='device_smoke_sensor_plugin' step=0 visible='Smoke detector'",
+            "[STOP][eval] step=8 scenario='device_smoke_sensor_plugin' decision='stop' reason='repeat_no_progress' traversal_result='FAIL_STUCK' final_result='FAIL' failure_reason='repeat_no_progress'",
+            "[PERF][scenario_summary] scenario=device_smoke_sensor_plugin total_steps=9",
+        ]
+    )
+
+    summary = parse_runtime_log(log_text)
+    progress = {item["id"]: item for item in summary["scenario_progress"]}
+
+    assert summary["passed_scenarios"] == 0
+    assert summary["warning_scenarios"] == 1
+    assert summary["failed_scenarios"] == 0
+    assert progress["device_smoke_sensor_plugin"]["status"] == "warning"
+
+
+def test_continue_stop_fail_does_not_pin_scenario_failed_when_it_recovers():
+    log_text = "\n".join(
+        [
+            "[QA_FRONTEND][scenario_selection] enabled_ids=['device_motion_sensor_plugin']",
+            "[SCENARIO][entry_contract] success scenario='device_motion_sensor_plugin' entry_type='card'",
+            "[STEP] END scenario='device_motion_sensor_plugin' step=0 visible='Motion sensor'",
+            "[STOP][eval] step=6 scenario='device_motion_sensor_plugin' decision='continue' reason='local_tab_continue' traversal_result='FAIL_STUCK' final_result='FAIL' failure_reason='repeat_no_progress'",
+            "[STEP] END scenario='device_motion_sensor_plugin' step=8 visible='Filter, All'",
+            "[PERF][scenario_summary] scenario=device_motion_sensor_plugin total_steps=9",
+        ]
+    )
+
+    summary = parse_runtime_log(log_text)
+    progress = {item["id"]: item for item in summary["scenario_progress"]}
+
+    assert summary["warning_scenarios"] == 1
+    assert summary["failed_scenarios"] == 0
+    assert progress["device_motion_sensor_plugin"]["status"] == "warning"
+
+
+def test_validation_failure_evidence_overrides_warning_to_failed():
+    log_text = "\n".join(
+        [
+            "[QA_FRONTEND][scenario_selection] enabled_ids=['life_family_care_plugin']",
+            "[SCENARIO][entry_contract] success scenario='life_family_care_plugin' entry_type='card'",
+            "[STEP] END scenario='life_family_care_plugin' step=0 visible='Family Care'",
+            "[STOP][eval] step=4 scenario='life_family_care_plugin' decision='continue' reason='none' traversal_result='FAIL_MOVE' final_result='FAIL' failure_reason='move_failed'",
+            "[PERF][scenario_summary] scenario=life_family_care_plugin total_steps=18",
+        ]
+    )
+
+    summary = parse_runtime_log(log_text, validation_failed_scenarios={"life_family_care_plugin"})
+    progress = {item["id"]: item for item in summary["scenario_progress"]}
+
+    assert summary["failed_scenarios"] == 1
+    assert summary["warning_scenarios"] == 0
+    assert progress["life_family_care_plugin"]["status"] == "failed"
+
+
+def test_xlsx_transient_exact_match_move_failed_is_warning(tmp_path):
+    xlsx_path = tmp_path / "result.xlsx"
+    _write_result_xlsx(
+        xlsx_path,
+        [
+            {
+                "scenario_id": "life_family_care_plugin",
+                "final_result": "FAIL",
+                "mismatch_type": "EXACT_MATCH",
+                "failure_reason": "move_failed",
+            },
+            {
+                "scenario_id": "life_family_care_plugin",
+                "final_result": "PASS",
+                "mismatch_type": "EXACT_MATCH",
+                "failure_reason": "",
+            },
+        ],
+    )
+
+    failed, warning = extract_validation_scenario_evidence_from_xlsx(xlsx_path)
+
+    assert failed == set()
+    assert warning == {"life_family_care_plugin"}
+
+
+def test_xlsx_repeat_no_progress_exact_match_is_warning(tmp_path):
+    xlsx_path = tmp_path / "result.xlsx"
+    _write_result_xlsx(
+        xlsx_path,
+        [
+            {
+                "scenario_id": "device_smoke_sensor_plugin",
+                "final_result": "FAIL",
+                "mismatch_type": "EXACT_MATCH",
+                "failure_reason": "repeat_no_progress",
+            }
+        ],
+    )
+
+    failed, warning = extract_validation_scenario_evidence_from_xlsx(xlsx_path)
+
+    assert failed == set()
+    assert warning == {"device_smoke_sensor_plugin"}
+
+
+def test_xlsx_empty_visible_remains_failed(tmp_path):
+    xlsx_path = tmp_path / "result.xlsx"
+    _write_result_xlsx(
+        xlsx_path,
+        [
+            {
+                "scenario_id": "life_home_monitor_plugin",
+                "final_result": "FAIL",
+                "mismatch_type": "EMPTY_VISIBLE",
+                "failure_reason": "",
+            }
+        ],
+    )
+
+    failed, warning = extract_validation_scenario_evidence_from_xlsx(xlsx_path)
+
+    assert failed == {"life_home_monitor_plugin"}
+    assert warning == set()
+
+
+def test_xlsx_label_mismatch_remains_failed(tmp_path):
+    xlsx_path = tmp_path / "result.xlsx"
+    _write_result_xlsx(
+        xlsx_path,
+        [
+            {
+                "scenario_id": "life_family_care_plugin",
+                "final_result": "FAIL",
+                "mismatch_type": "LABEL_MISMATCH",
+                "failure_reason": "speech_visible_diverged",
+            }
+        ],
+    )
+
+    failed, warning = extract_validation_scenario_evidence_from_xlsx(xlsx_path)
+
+    assert failed == {"life_family_care_plugin"}
+    assert warning == set()
+
+
+def test_normal_successful_traversal_is_passed():
+    log_text = "\n".join(
+        [
+            "[QA_FRONTEND][scenario_selection] enabled_ids=['device_tv_plugin']",
+            "[SCENARIO][entry_contract] success scenario='device_tv_plugin' entry_type='card'",
+            "[STEP] END scenario='device_tv_plugin' step=0 visible='TV'",
+            "[STOP][eval] step=0 scenario='device_tv_plugin' decision='continue' reason='none' traversal_result='PASS_MOVED' final_result='PASS'",
+            "[PERF][scenario_summary] scenario=device_tv_plugin total_steps=1",
+        ]
+    )
+
+    summary = parse_runtime_log(log_text)
+    progress = {item["id"]: item for item in summary["scenario_progress"]}
+
+    assert summary["passed_scenarios"] == 1
+    assert summary["warning_scenarios"] == 0
+    assert summary["failed_scenarios"] == 0
+    assert progress["device_tv_plugin"]["status"] == "passed"
 
 
 def test_runtime_log_parser_handles_malformed_log_without_exception():
