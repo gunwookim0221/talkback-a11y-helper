@@ -12566,6 +12566,127 @@ def test_overlay_still_runs_even_if_row_suppressed(monkeypatch):
     assert overlay_calls[0]["row"]["row_persist_suppressed_reason"] == "phase_test_suppressed"
 
 
+def _popup_dialog_row(idx=260, *, title="클립 공유 정책 업데이트", button="확인"):
+    button_node = {
+        "text": button,
+        "contentDescription": button,
+        "viewIdResourceName": "com.example:id/confirm",
+        "className": "android.widget.Button",
+        "clickable": True,
+        "focusable": True,
+        "effectiveClickable": True,
+        "visibleToUser": True,
+        "boundsInScreen": "420,1760,660,1860",
+        "children": [],
+    }
+    return {
+        **_main_row(idx),
+        "visible_label": button,
+        "normalized_visible_label": button,
+        "merged_announcement": button,
+        "focus_view_id": "com.example:id/confirm",
+        "focus_bounds": "420,1760,660,1860",
+        "focus_node": button_node,
+        "dump_tree_nodes": [
+            {
+                "className": "android.app.Dialog",
+                "visibleToUser": True,
+                "boundsInScreen": "80,720,1000,1900",
+                "children": [
+                    {
+                        "text": title,
+                        "contentDescription": title,
+                        "className": "android.widget.TextView",
+                        "visibleToUser": True,
+                        "boundsInScreen": "120,820,900,920",
+                        "children": [],
+                    },
+                    button_node,
+                ],
+            }
+        ],
+    }
+
+
+def test_runtime_popup_dismiss_clears_repeat_stop_and_resumes(monkeypatch):
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_args, **_kwargs: None)
+    row = _popup_dialog_row()
+
+    phase_ctx, _save_calls, overlay_calls = _run_persistence_main_loop(
+        monkeypatch,
+        row=row,
+        stop=True,
+        reason="repeat_no_progress",
+    )
+
+    assert phase_ctx.state.stop_triggered is False
+    assert phase_ctx.rows[0]["popup_detected"] is True
+    assert phase_ctx.rows[0]["popup_dismissed"] is True
+    assert phase_ctx.rows[0]["popup_dismiss_label"] == "확인"
+    assert phase_ctx.rows[0]["status"] == "OK"
+    assert overlay_calls == [{"rows_len": 1, "all_rows_len": 1, "row": phase_ctx.rows[0]}]
+
+
+def test_runtime_popup_guard_skips_after_repeated_signature(monkeypatch):
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_args, **_kwargs: None)
+    state = _phase_ordering_state()
+    row = _popup_dialog_row()
+    candidate = collection_flow.detect_popup_candidate(row)
+    state.dismissed_popup_signatures = {}
+    state.dismissed_popup_signatures[candidate.signature] = 2
+    client = DummyClient([])
+
+    result = collection_flow._maybe_dismiss_runtime_popup(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=_base_tab_cfg(),
+        row=row,
+        state=state,
+        stop_reason="repeat_no_progress",
+    )
+
+    assert result["handled"] is False
+    assert result["reason"] == "dismiss_guard_exceeded"
+    assert client.tap_xy_adb_calls == []
+
+
+def test_runtime_popup_dangerous_action_does_not_click(monkeypatch):
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_args, **_kwargs: None)
+    state = _phase_ordering_state()
+    client = DummyClient([])
+
+    result = collection_flow._maybe_dismiss_runtime_popup(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=_base_tab_cfg(),
+        row=_popup_dialog_row(title="Delete device", button="Delete"),
+        state=state,
+        stop_reason="repeat_no_progress",
+    )
+
+    assert result["handled"] is False
+    assert result["reason"] == "dangerous_action_present"
+    assert client.tap_xy_adb_calls == []
+
+
+def test_runtime_popup_not_checked_for_non_repeat_stop(monkeypatch):
+    state = _phase_ordering_state()
+    client = DummyClient([])
+
+    result = collection_flow._maybe_dismiss_runtime_popup(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=_base_tab_cfg(),
+        row=_popup_dialog_row(),
+        state=state,
+        stop_reason="terminal",
+    )
+
+    assert result["handled"] is False
+    assert result["reason"] == "stop_reason_not_allowed"
+    assert client.tap_xy_adb_calls == []
+
+
 def test_row_persistence_phase_impl_suppressed_returns_not_persisted(monkeypatch):
     monkeypatch.setattr(collection_flow, "_should_suppress_row_persistence", lambda **kwargs: (True, "phase_suppressed"))
     state = _phase_ordering_state()

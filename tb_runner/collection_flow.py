@@ -30,6 +30,7 @@ from tb_runner.overlay_logic import (
     realign_focus_after_overlay,
 )
 from tb_runner.perf_stats import ScenarioPerfStats, format_perf_summary, save_excel_with_perf
+from tb_runner.popup_handler import POPUP_STOP_REASONS, detect_popup_candidate, tap_popup_button
 from tb_runner.tab_logic import stabilize_tab_selection
 from tb_runner.utils import (
     _safe_regex_search,
@@ -281,6 +282,7 @@ class MainLoopState:
     cta_cluster_nodes_by_signature: dict[str, list[dict[str, Any]]]
     cta_cluster_visited_rids: dict[str, set[str]]
     cta_cluster_committed_rid: dict[str, str]
+    dismissed_popup_signatures: dict[str, int] = field(default_factory=dict)
     scroll_state: ScrollState = field(default_factory=ScrollState)
     focus_realign_state: FocusRealignState = field(default_factory=FocusRealignState)
 
@@ -10950,6 +10952,77 @@ def _apply_stop_evaluation_phase(
     )
 
 
+def _maybe_dismiss_runtime_popup(
+    *,
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict[str, Any],
+    row: dict[str, Any],
+    state: MainLoopState,
+    stop_reason: str,
+    max_dismiss_count: int = 2,
+) -> dict[str, Any]:
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    if str(stop_reason or "") not in POPUP_STOP_REASONS:
+        return {"handled": False, "result": "not_checked", "reason": "stop_reason_not_allowed"}
+
+    candidate = detect_popup_candidate(row)
+    safe_labels = ",".join(str(button.get("label", "") or "") for button in candidate.safe_buttons or [])
+    dangerous_labels = ",".join(str(button.get("label", "") or "") for button in candidate.dangerous_buttons or [])
+    if not candidate.detected:
+        if candidate.safe_buttons or candidate.dangerous_buttons:
+            log(
+                f"[POPUP][skip] scenario='{scenario_id}' reason='{candidate.reason}' "
+                f"safe_buttons='{_truncate_debug_text(safe_labels, 160)}' "
+                f"dangerous_buttons='{_truncate_debug_text(dangerous_labels, 160)}' "
+                f"actionable_count={candidate.actionable_count}"
+            )
+        return {"handled": False, "result": "not_detected", "reason": candidate.reason}
+
+    signature = candidate.signature or candidate.title or safe_labels
+    dismissed_popup_signatures = getattr(state, "dismissed_popup_signatures", None)
+    if not isinstance(dismissed_popup_signatures, dict):
+        dismissed_popup_signatures = {}
+        setattr(state, "dismissed_popup_signatures", dismissed_popup_signatures)
+    dismissed_count = int(dismissed_popup_signatures.get(signature, 0) or 0)
+    log(
+        f"[POPUP][detect] scenario='{scenario_id}' "
+        f"title='{_truncate_debug_text(candidate.title, 120)}' "
+        f"safe_buttons='{_truncate_debug_text(safe_labels, 160)}' "
+        f"dangerous_buttons='{_truncate_debug_text(dangerous_labels, 160)}' "
+        f"reason='{candidate.reason}' actionable_count={candidate.actionable_count}"
+    )
+    if dismissed_count >= max_dismiss_count:
+        log(
+            f"[POPUP][skip] scenario='{scenario_id}' reason='dismiss_guard_exceeded' "
+            f"signature='{_truncate_debug_text(signature, 160)}' count={dismissed_count}"
+        )
+        return {"handled": False, "result": "skipped", "reason": "dismiss_guard_exceeded"}
+
+    button = (candidate.safe_buttons or [])[0]
+    label = str(button.get("label", "") or "").strip()
+    log(f"[POPUP][safe_action] scenario='{scenario_id}' label='{_truncate_debug_text(label, 120)}'")
+    clicked = tap_popup_button(client, dev, button)
+    dismissed_popup_signatures[signature] = dismissed_count + 1
+    if not clicked:
+        log(f"[POPUP][dismiss] scenario='{scenario_id}' label='{_truncate_debug_text(label, 120)}' result='click_failed'")
+        return {"handled": False, "result": "click_failed", "reason": "click_failed", "label": label}
+
+    time.sleep(0.35)
+    still_detected = False
+    dump_tree_fn = getattr(client, "dump_tree", None)
+    if callable(dump_tree_fn):
+        try:
+            verify_row = {**row, "focus_node": {}, "dump_tree_nodes": dump_tree_fn(dev=dev)}
+            still_detected = bool(detect_popup_candidate(verify_row).detected)
+        except Exception:
+            still_detected = False
+    result = "success" if not still_detected else "dismissed_unverified"
+    log(f"[POPUP][dismiss] scenario='{scenario_id}' label='{_truncate_debug_text(label, 120)}' result='{result}'")
+    log(f"[POPUP][resume] scenario='{scenario_id}' mode='continue'")
+    return {"handled": True, "result": result, "reason": "safe_action_clicked", "label": label}
+
+
 def _main_loop_phase(
     client: A11yAdbClient,
     dev: str,
@@ -11202,6 +11275,23 @@ def _main_loop_phase(
                     f"repeat_stop_hit={str(repeat_stop_hit).lower()} but escape_attempted={str(state.stall_escape_attempted).lower()} "
                     f"escape_gate_reason='{escape_gate_reason}'"
                 )
+
+        if stop and reason in POPUP_STOP_REASONS:
+            popup_result = _maybe_dismiss_runtime_popup(
+                client=client,
+                dev=dev,
+                tab_cfg=tab_cfg,
+                row=row,
+                state=state,
+                stop_reason=reason,
+            )
+            if bool(popup_result.get("handled", False)):
+                row["popup_detected"] = True
+                row["popup_dismissed"] = True
+                row["popup_dismiss_label"] = str(popup_result.get("label", "") or "")
+                row["popup_dismiss_result"] = str(popup_result.get("result", "") or "")
+                stop = False
+                reason = ""
 
         _apply_stop_explain_phase(
             row=row,
