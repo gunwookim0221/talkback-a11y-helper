@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, HelperStatus, OutputFile, RecentRun, RunStatus, Scenario, RuntimeDashboard } from './api';
 import { applyPresetSelection, PRESETS, ScenarioPresetId } from './presets';
 import { DEFAULT_SCENARIO_ID, initialScenarioSelection } from './selection';
@@ -115,6 +115,21 @@ function describeScenarioSteps(scenario: Scenario, mode: 'smoke' | 'full') {
   return sourceSteps ? `${sourceSteps} full steps` : 'full steps use source config';
 }
 
+type LanguageMode = 'current' | 'ko-KR' | 'en-US';
+
+function languageLabel(languageMode: string | null | undefined) {
+  switch (languageMode) {
+    case 'ko-KR':
+      return 'Korean (ko-KR)';
+    case 'en-US':
+      return 'English (en-US)';
+    case 'current':
+      return 'Current device language';
+    default:
+      return languageMode ?? '-';
+  }
+}
+
 export default function App() {
   const [adb, setAdb] = useState<Record<string, unknown> | null>(null);
   const [helper, setHelper] = useState<HelperStatus | null>(null);
@@ -128,7 +143,10 @@ export default function App() {
   const [pollingLatencyMs, setPollingLatencyMs] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [launchMode, setLaunchMode] = useState<'warm' | 'clean'>('clean');
+  const [languageMode, setLanguageMode] = useState<LanguageMode>('current');
   const [plannedMode, setPlannedMode] = useState<'smoke' | 'full'>('smoke');
+  const preflightRef = useRef<HTMLElement | null>(null);
+  const scrolledBlockedRunRef = useRef<string | null>(null);
 
   const running = status?.state === 'running';
   const enabledCount = useMemo(() => scenarios.filter((scenario) => scenario.enabled).length, [scenarios]);
@@ -141,6 +159,21 @@ export default function App() {
     [recentRuns, status?.run_id],
   );
   const currentRunReadyForDownload = Boolean(status?.run_id && status.state !== 'running' && status.log_path);
+  const languageStatus = (status?.language_status ?? {}) as Record<string, unknown>;
+  const manualLanguageChangeRequired = Boolean(
+    status?.manual_language_change_required || languageStatus.manual_language_change_required,
+  );
+  const requestedLocale = String(status?.target_locale ?? languageStatus.target_locale ?? languageMode);
+  const currentDeviceLocale = String(status?.device_locale ?? languageStatus.device_locale ?? '-');
+  const languageError = String(status?.language_error ?? languageStatus.error ?? '');
+  const talkBackDisabled = status?.talkback_state === 'disabled';
+  const helperBlocked = helper?.status === 'disabled' || helper?.status === 'apk_not_found';
+  const genericPreflightBlocked = Boolean(
+    status?.state === 'error' && !manualLanguageChangeRequired && !talkBackDisabled && status?.preflight_state,
+  );
+  const shouldScrollToPreflight = Boolean(
+    manualLanguageChangeRequired || talkBackDisabled || ['blocked', 'error'].includes(String(status?.preflight_state ?? '')),
+  );
 
   async function refreshStatic() {
     const [adbStatus, helperStatus, scenarioResponse, outputResponse, recentRunsResponse] = await Promise.all([
@@ -186,11 +219,22 @@ export default function App() {
     return () => window.clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    if (!shouldScrollToPreflight || !status?.run_id) {
+      return;
+    }
+    if (scrolledBlockedRunRef.current === status.run_id) {
+      return;
+    }
+    scrolledBlockedRunRef.current = status.run_id;
+    preflightRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [shouldScrollToPreflight, status?.run_id]);
+
   async function start(mode: 'smoke' | 'full') {
     setError('');
     setPlannedMode(mode);
     try {
-      setStatus(await api.startRun(mode, Array.from(selected), launchMode));
+      setStatus(await api.startRun(mode, Array.from(selected), launchMode, languageMode));
       await refreshRun();
     } catch (err) {
       setError(String(err));
@@ -239,6 +283,27 @@ export default function App() {
     }
   }
 
+  async function openLanguageSettings() {
+    setError('');
+    try {
+      await api.openLanguageSettings();
+      await refreshRun();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  async function enableTalkBack() {
+    setError('');
+    try {
+      await api.enableTalkBack();
+      await refreshRun();
+    } catch (err) {
+      setError(String(err));
+      refreshRun().catch(() => undefined);
+    }
+  }
+
   function toggleScenario(id: string) {
     const next = new Set(selected);
     next.has(id) ? next.delete(id) : next.add(id);
@@ -258,6 +323,66 @@ export default function App() {
         </div>
         <div className={`state state-${status?.state ?? 'idle'}`}>{status?.state ?? 'idle'}</div>
       </header>
+
+      {manualLanguageChangeRequired && (
+        <section className="actionBanner actionBannerWarn">
+          <div>
+            <h2>Run blocked: language change required</h2>
+            <p>
+              This device does not allow changing system language via ADB. Open Language Settings and change the
+              language manually, then run again with Current device language.
+            </p>
+            <small>Requested: {requestedLocale} · Current device locale: {currentDeviceLocale}</small>
+            {languageError && <small>{languageError}</small>}
+          </div>
+          <div className="actionBannerActions">
+            <button onClick={openLanguageSettings} disabled={running}>Open Language Settings</button>
+          </div>
+        </section>
+      )}
+
+      {!manualLanguageChangeRequired && talkBackDisabled && (
+        <section className="actionBanner actionBannerWarn">
+          <div>
+            <h2>Run blocked: TalkBack disabled</h2>
+            <p>TalkBack A11y Helper is enabled, but Samsung/Google TalkBack is disabled.</p>
+            <small>TalkBack will be enabled on the connected device.</small>
+          </div>
+          <div className="actionBannerActions">
+            <button onClick={enableTalkBack} disabled={running}>Enable TalkBack via ADB</button>
+            <button onClick={openAccessibilitySettings} disabled={running}>Open Accessibility Settings</button>
+          </div>
+        </section>
+      )}
+
+      {!manualLanguageChangeRequired && !talkBackDisabled && helperBlocked && (
+        <section className="actionBanner actionBannerWarn">
+          <div>
+            <h2>Setup required: TalkBack A11y Helper</h2>
+            <p>
+              {helper?.status === 'apk_not_found'
+                ? 'Build the TalkBack A11y Helper APK before installing it on the device.'
+                : 'TalkBack A11y Helper is installed, but its accessibility service is disabled.'}
+            </p>
+            {helper?.build_command && <small>Build command: {helper.build_command}</small>}
+          </div>
+          <div className="actionBannerActions">
+            {helper?.status === 'disabled' && <button onClick={enableHelper} disabled={running}>Enable Helper via ADB</button>}
+            {helper?.status === 'disabled' && <button onClick={openAccessibilitySettings} disabled={running}>Open Accessibility Settings</button>}
+            {helper?.status === 'apk_not_found' && <button disabled>Install APK</button>}
+          </div>
+        </section>
+      )}
+
+      {genericPreflightBlocked && (
+        <section className="actionBanner actionBannerBad">
+          <div>
+            <h2>Run blocked: runtime preflight</h2>
+            <p>{status?.error ?? 'Runtime preflight blocked the run.'}</p>
+            <small>Reason: {status?.preflight_reason ?? '-'}</small>
+          </div>
+        </section>
+      )}
 
       {error && <div className="error">{error}</div>}
 
@@ -355,6 +480,42 @@ export default function App() {
               <small>Debug. Keeps current SmartThings state when possible.</small>
             </label>
           </div>
+          <div className="languageMode">
+            <strong>Language</strong>
+            <label>
+              <input
+                type="radio"
+                name="language_mode"
+                checked={languageMode === 'current'}
+                onChange={() => setLanguageMode('current')}
+                disabled={running}
+              />
+              <span>Current device language</span>
+              <small>Run without changing the device language.</small>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="language_mode"
+                checked={languageMode === 'ko-KR'}
+                onChange={() => setLanguageMode('ko-KR')}
+                disabled={running}
+              />
+              <span>Korean (ko-KR)</span>
+              <small>Switch to Korean before running.</small>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="language_mode"
+                checked={languageMode === 'en-US'}
+                onChange={() => setLanguageMode('en-US')}
+                disabled={running}
+              />
+              <span>English (en-US)</span>
+              <small>Switch to English before running.</small>
+            </label>
+          </div>
           <div className="buttonRow">
             <button onClick={() => start('smoke')} disabled={running}>
               Smoke
@@ -380,6 +541,10 @@ export default function App() {
             <dd>{status?.returncode ?? '-'}</dd>
             <dt>Launch</dt>
             <dd>{status?.launch_mode ?? launchMode}</dd>
+            <dt>Language</dt>
+            <dd>{languageLabel(status?.language_mode ?? languageMode)}</dd>
+            <dt>Locale</dt>
+            <dd>{status?.device_locale ?? '-'}</dd>
             <dt>Selected</dt>
             <dd>{selectedCount}</dd>
             <dt>Config</dt>
@@ -388,9 +553,30 @@ export default function App() {
         </article>
       </section>
 
-      <section className="panel preflightPanel">
+      <section className="panel preflightPanel" ref={preflightRef}>
         <h2>Runtime Preflight</h2>
         {status?.error && <div className="notice">{status.error}</div>}
+        {manualLanguageChangeRequired && (
+          <div className="notice">
+            <p>
+              The device locale did not verify as {requestedLocale}. Open Language Settings and change the language
+              manually, then run again with Current device language.
+            </p>
+            <div className="helperActions">
+              <button onClick={openLanguageSettings} disabled={running}>Open Language Settings</button>
+            </div>
+          </div>
+        )}
+        {status?.talkback_state === 'disabled' && (
+          <div className="notice">
+            <p>TalkBack A11y Helper is enabled, but Samsung/Google TalkBack is disabled. Enable TalkBack and retry.</p>
+            <p>TalkBack will be enabled on the connected device.</p>
+            <div className="helperActions">
+              <button onClick={enableTalkBack} disabled={running}>Enable TalkBack via ADB</button>
+              <button onClick={openAccessibilitySettings} disabled={running}>Open Accessibility Settings</button>
+            </div>
+          </div>
+        )}
         <dl>
           <dt>Preflight</dt>
           <dd>{status?.preflight_state ?? '-'}</dd>
@@ -467,6 +653,10 @@ export default function App() {
               <dd>{dashboard?.mode ?? status?.mode ?? '-'}</dd>
               <dt>Launch</dt>
               <dd>{dashboard?.launch_mode ?? status?.launch_mode ?? '-'}</dd>
+              <dt>Language</dt>
+              <dd>{languageLabel(dashboard?.language_mode ?? status?.language_mode)}</dd>
+              <dt>Locale</dt>
+              <dd>{dashboard?.device_locale ?? status?.device_locale ?? '-'}</dd>
               <dt>Started</dt>
               <dd>{dashboard?.started_at ?? status?.started_at ?? '-'}</dd>
               <dt>Scenario</dt>
@@ -613,6 +803,8 @@ export default function App() {
                     </div>
                     <small>
                       {run.mode} · {formatTime(Date.parse(run.started_at) / 1000)} · {formatDuration(run.duration_seconds)}
+                      {` · ${languageLabel(run.language_mode)}`}
+                      {run.device_locale ? ` · locale ${run.device_locale}` : ''}
                       {run.event_warning_count ? ` · ${run.event_warning_count} events` : ''}
                       {run.summary_source === 'summary_json' ? ' · summary cached' : ''}
                     </small>

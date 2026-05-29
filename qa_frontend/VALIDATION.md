@@ -157,10 +157,14 @@ FAIL logs:
 PASS:
 
 - `/api/run/status` includes `preflight_state`, `talkback_state`, `helper_state`, and `foreground_package`
+- `/api/run/status` includes `language_mode` and `device_locale`
 - `/api/run/dashboard` includes parsed runtime metrics, scenario progress, and event feed data without backend crash
+- `/api/run/dashboard` displays `language_mode` and `device_locale`
 - `/api/runs/recent` separates `process_status` from `scenario_result_status`
+- `/api/runs/recent` includes the run language mode and verified device locale when available
 - Scenario status separates `passed`, `warning`, and `failed`; `FAIL_STUCK` or `repeat_no_progress` after successful entry/rows/summary is warning unless hard validation failure evidence exists
 - Run completion writes `qa_frontend_runs/<run_id>_summary.json`
+- `summary.json` includes `language_mode` and `device_locale`
 - `summary.json` is a cache/index; the run log remains the source of truth
 - Recent Runs uses valid `summary.json` as a fast path and falls back to log parsing when the summary is missing or malformed
 - `qa_frontend_runs/<run_id>_<mode>.log` contains `[QA_FRONTEND][preflight]` lines
@@ -173,6 +177,26 @@ FAIL logs:
 - `/api/run/status` response payload
 - `/api/run/dashboard` response payload
 - `qa_frontend_runs/<run_id>_summary.json`
+
+### 5A. Language Mode
+
+PASS:
+
+- `Current device language` starts a run without locale change commands
+- `Korean (ko-KR)` reads current locale, attempts `ko-KR`, verifies `device_locale=ko-KR`, then starts the run
+- `English (en-US)` reads current locale, attempts `en-US`, verifies `device_locale=en-US`, then starts the run
+- A locale verification failure blocks the run with a clear language setup error
+- On devices that do not allow ADB system language changes, `/api/run/status` exposes `manual_language_change_required=true`, `target_locale`, `device_locale`, and `language_error`
+- The top action banner shows `Open Language Settings` and tells the user to run again with `Current device language`
+- `POST /api/device/open-language-settings` opens Android Language Settings, falling back to general Settings if needed
+- The selected language mode appears in Run panel, Runtime Dashboard, Recent Runs, and summary JSON
+
+FAIL logs:
+
+- `qa_frontend_runs/*.log` lines with `[QA_FRONTEND][language]`
+- `/api/run/status` response payload
+- `adb shell getprop persist.sys.locale`
+- `adb shell getprop ro.product.locale`
 
 ### 6. SmartThings 미실행 상태에서 Warm launch smoke
 
@@ -226,8 +250,10 @@ Precondition:
 PASS:
 
 - Run does not start `script_test.py`
-- UI displays `TalkBack is disabled`
-- UI displays `Please enable TalkBack and retry`
+- UI displays `TalkBack A11y Helper is enabled, but Samsung/Google TalkBack is disabled. Enable TalkBack and retry.`
+- UI offers `Enable TalkBack via ADB`
+- UI offers `Open Accessibility Settings`
+- `POST /api/talkback/enable` appends a Samsung or Google TalkBack service without removing TalkBack A11y Helper
 - `/api/run/status` has `preflight_state=blocked` and `talkback_state=disabled`
 - `qa_frontend_runs/*.log` contains `[QA_FRONTEND][preflight][talkback] status='disabled'`
 
