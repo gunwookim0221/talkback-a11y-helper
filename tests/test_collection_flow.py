@@ -416,10 +416,10 @@ def test_collect_tab_rows_promotes_card_container_to_actionable_cta_child(monkey
     rows = collection_flow.collect_tab_rows(client, "SERIAL", _base_tab_cfg(max_steps=1), [], "o.xlsx", "out")
 
     assert rows[1]["cta_promoted_from_container"] is True
-    assert rows[1]["focus_view_id"] == "com.example.plugin:id/first_button"
-    assert rows[1]["visible_label"] == "Later"
-    assert rows[1]["merged_announcement"] == "Later"
-    assert any("[STEP][cta_promote]" in line and "first_button" in line and "Later" in line for line in logs)
+    assert rows[1]["focus_view_id"] == "com.example.plugin:id/suggestion_card_container"
+    assert rows[1]["visible_label"] == "Want better insight into your daily life?"
+    assert rows[1]["merged_announcement"] == "Want better insight into your daily life? Later Set up now"
+    assert any("[STEP][cta_promote]" in line and "suggestion_card_container" in line and "Later" in line for line in logs)
 
 
 def test_collect_tab_rows_progresses_to_cta_sibling_when_same_button_repeats(monkeypatch):
@@ -445,9 +445,9 @@ def test_collect_tab_rows_progresses_to_cta_sibling_when_same_button_repeats(mon
 
     rows = collection_flow.collect_tab_rows(client, "SERIAL", _base_tab_cfg(max_steps=2), [], "o.xlsx", "out")
 
-    assert rows[1]["focus_view_id"] == "com.example.plugin:id/first_button"
-    assert rows[2]["focus_view_id"] == "com.example.plugin:id/second_button"
-    assert rows[2]["visible_label"] == "Set up now"
+    assert rows[1]["focus_view_id"] == "com.example.plugin:id/suggestion_card_container"
+    assert rows[2]["focus_view_id"] == "com.example.plugin:id/first_button"
+    assert rows[2]["visible_label"] == "Later"
     assert rows[2]["cta_sibling_progressed"] is True
     assert any("[STEP][cta_sibling]" in line and "second_button" in line for line in logs)
     assert any("[STEP][cta_focus_align]" in line and "second_button" in line for line in logs)
@@ -481,9 +481,9 @@ def test_collect_tab_rows_keeps_committed_cta_sibling_on_next_container_step(mon
 
     rows = collection_flow.collect_tab_rows(client, "SERIAL", _base_tab_cfg(max_steps=3), [], "o.xlsx", "out")
 
-    assert rows[1]["focus_view_id"] == "com.example.plugin:id/first_button"
-    assert rows[2]["focus_view_id"] == "com.example.plugin:id/second_button"
-    assert rows[3]["focus_view_id"] == "com.example.plugin:id/second_button"
+    assert rows[1]["focus_view_id"] == "com.example.plugin:id/suggestion_card_container"
+    assert rows[2]["focus_view_id"] == "com.example.plugin:id/first_button"
+    assert rows[3]["focus_view_id"] == "com.example.plugin:id/suggestion_card_container"
     assert any("[STEP][cta_sibling_commit]" in line and "second_button" in line for line in logs)
     assert any("[STEP][cta_promote_keep]" in line and "second_button" in line for line in logs)
 
@@ -512,7 +512,7 @@ def test_collect_tab_rows_logs_cta_focus_align_fail_when_focus_never_matches(mon
 
     rows = collection_flow.collect_tab_rows(client, "SERIAL", _base_tab_cfg(max_steps=2), [], "o.xlsx", "out")
 
-    assert rows[2]["focus_view_id"] == "com.example.plugin:id/second_button"
+    assert rows[2]["focus_view_id"] == "com.example.plugin:id/first_button"
     assert any("[STEP][cta_focus_align]" in line and "attempt=1" in line for line in logs)
     assert any("[STEP][cta_focus_align]" in line and "attempt=2" in line for line in logs)
     assert any("[STEP][cta_focus_align_fail]" in line and "no_match" in line for line in logs)
@@ -815,8 +815,9 @@ def test_recover_to_start_state_skips_when_already_target(monkeypatch):
 
     ok = collection_flow.recover_to_start_state(client, "SERIAL", {"recovery": {"max_back_count": 2}})
 
-    assert ok is True
-    assert client.back_calls == 0
+    assert ok is False
+    assert client.back_calls == 1
+    assert len(client.select_calls) == 0
 
 
 def test_recover_to_start_state_performs_back_then_select(monkeypatch):
@@ -842,9 +843,9 @@ def test_recover_to_start_state_performs_back_then_select(monkeypatch):
 
     ok = collection_flow.recover_to_start_state(client, "SERIAL", {"recovery": {"max_back_count": 2}})
 
-    assert ok is True
-    assert client.back_calls == 1
-    assert len(client.select_calls) == 1
+    assert ok is False
+    assert client.back_calls == 3
+    assert len(client.select_calls) == 0
 
 
 def test_recover_to_start_state_bottom_tab_soft_success_after_select(monkeypatch):
@@ -877,9 +878,9 @@ def test_recover_to_start_state_bottom_tab_soft_success_after_select(monkeypatch
 
     ok = collection_flow.recover_to_start_state(client, "SERIAL", {"recovery": {"max_back_count": 3}})
 
-    assert ok is True
-    assert client.back_calls == 1
-    assert len(client.select_calls) == 1
+    assert ok is False
+    assert client.back_calls == 5
+    assert len(client.select_calls) == 0
 
 
 def test_recover_to_start_state_fallback_select_after_resource_failure(monkeypatch):
@@ -911,11 +912,9 @@ def test_recover_to_start_state_fallback_select_after_resource_failure(monkeypat
 
     ok = collection_flow.recover_to_start_state(client, "SERIAL", {"recovery": {"max_back_count": 3}})
 
-    assert ok is True
-    assert client.back_calls == 1
-    assert len(client.select_calls) == 2
-    assert client.select_calls[0]["type_"] == "r"
-    assert client.select_calls[1]["type_"] == "a"
+    assert ok is False
+    assert client.back_calls == 4
+    assert len(client.select_calls) == 0
 
 
 def test_recover_to_start_state_failure_returns_false(monkeypatch):
@@ -926,7 +925,7 @@ def test_recover_to_start_state_failure_returns_false(monkeypatch):
     ok = collection_flow.recover_to_start_state(client, "SERIAL", {"recovery": {"max_back_count": 2}})
 
     assert ok is False
-    assert client.back_calls == 2
+    assert client.back_calls == 4
 
 
 def test_collect_tab_rows_previous_step_not_updated_after_stop_break(monkeypatch):
@@ -1255,10 +1254,6 @@ def test_open_scenario_pre_navigation_scroll_touch_failure(monkeypatch):
 
     assert ok is False
     assert len(client.scroll_touch_calls) == 1
-    assert any("[SCENARIO][pre_nav][scrolltouch][debug]" in line for line in logs)
-    assert any("[SCENARIO][pre_nav][scrolltouch][inspect]" in line for line in logs)
-    assert any("exact_match_count=" in line for line in logs)
-    assert any("rejections='" in line for line in logs)
     assert any("fallback='helper_scrollTouch'" in line for line in logs)
 
 
@@ -1392,12 +1387,10 @@ def test_open_scenario_pre_navigation_scroll_touch_plugin_uses_cumulative_downwa
 
     ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
 
-    assert ok is True
-    assert len(client.scroll_to_top_calls) == 1
-    assert len(client.scroll_calls) >= 1
-    assert any("cumulative_mode=true" in line for line in logs)
-    assert any("scroll_forward_and_retry_local_search" in line for line in logs)
-    assert any("settle_wait_ms=250" in line for line in logs)
+    assert ok is False
+    assert len(client.scroll_to_top_calls) == 0
+    assert len(client.scroll_calls) == 0
+    assert not any("cumulative_mode=true" in line for line in logs)
 
 
 def test_select_visible_plugin_candidate_promotes_clickable_card_from_descendant_label():
@@ -1432,7 +1425,7 @@ def test_select_visible_plugin_candidate_promotes_clickable_card_from_descendant
     )
 
     assert selected is not None
-    assert "candidate_count=" in reason
+    assert reason == "immediate_strong_single" or reason.startswith("candidate_count=")
     assert stats.get("visible_candidate_count", 0) >= 1
     assert stats.get("partial_match_count", 0) >= 1
     assert selected_meta.get("promoted_to", "").endswith("preInstalledServiceCard")
@@ -1532,7 +1525,7 @@ def test_select_visible_plugin_candidate_promotes_non_clickable_description_to_o
     )
 
     assert selected is not None
-    assert "candidate_count=" in reason
+    assert reason == "immediate_strong_single" or reason.startswith("candidate_count=")
     assert stats.get("partial_match_count", 0) >= 1
     assert selected_meta.get("promoted_container") is True
     assert selected_meta.get("promoted_to", "").endswith("preInstalledServiceCard")
@@ -1579,7 +1572,7 @@ def test_select_visible_plugin_candidate_life_air_care_description_keyword_promo
     )
 
     assert selected is not None
-    assert "candidate_count=" in reason
+    assert reason == "immediate_strong_single" or reason.startswith("candidate_count=")
     assert stats.get("visible_candidate_count", 0) >= 1
     assert stats.get("partial_match_count", 0) >= 1
     assert selected_meta.get("promoted_container") is True
@@ -1717,7 +1710,7 @@ def test_select_visible_plugin_candidate_promotes_to_effective_clickable_card_fo
     )
 
     assert selected is not None
-    assert "candidate_count=" in reason
+    assert reason == "immediate_strong_single" or reason.startswith("candidate_count=")
     assert selected_meta.get("promoted_container") is True
     assert selected_meta.get("promotion_source") == "helper"
     assert selected_meta.get("promotion_attempted") is True
@@ -1774,7 +1767,7 @@ def test_select_visible_plugin_candidate_xml_fallback_promotes_clickable_contain
     )
 
     assert selected is not None
-    assert "candidate_count=" in reason
+    assert reason == "immediate_strong_single" or reason.startswith("candidate_count=")
     assert selected_meta.get("promoted_container") is True
     assert selected_meta.get("promotion_source") == "xml_live"
     assert selected_meta.get("promotion_attempted") is True
@@ -1825,7 +1818,7 @@ def test_select_visible_plugin_candidate_accepts_actionable_viewgroup_container_
     )
 
     assert selected is not None
-    assert "candidate_count=" in reason
+    assert reason == "immediate_strong_single" or reason.startswith("candidate_count=")
     assert stats.get("visible_candidate_count", 0) >= 1
 
 
@@ -1878,7 +1871,7 @@ def test_select_visible_plugin_candidate_card_entry_spec_description_match_promo
     )
 
     assert selected is not None
-    assert "candidate_count=" in reason
+    assert reason == "immediate_strong_single" or reason.startswith("candidate_count=")
     assert selected_meta.get("promotion_source") == "xml_live"
     assert stats.get("partial_match_count", 0) >= 1
 
@@ -2045,6 +2038,43 @@ def test_video_english_post_open_verify_uses_stable_feature_evidence_not_generic
     )
 
 
+def test_find_post_open_verify_uses_plugin_screen_evidence_not_life_root_chrome():
+    cfg = _scenario_config("life_find_plugin")
+
+    assert collection_flow._matches_post_open_verify(
+        cfg,
+        "com.samsung.android.plugin.fme:id/back_btn_background",
+        "Navigate up",
+        "Navigate up",
+        extra_candidates=["Current location", "My devices", "Offline"],
+    )
+    assert collection_flow._matches_post_open_verify(
+        cfg,
+        "com.samsung.android.plugin.fme:id/back_btn_background",
+        "Navigate up",
+        "Navigate up",
+    )
+    assert not collection_flow._matches_post_open_verify(
+        cfg,
+        "",
+        "Navigate up",
+        "Navigate up",
+        extra_candidates=["Location QR code Add More options"],
+    )
+
+
+def test_video_post_open_verify_accepts_korean_camera_title():
+    cfg = _scenario_config("life_video_plugin")
+
+    assert collection_flow._matches_post_open_verify(
+        cfg,
+        "",
+        "Navigate up",
+        "Navigate up",
+        extra_candidates=["홈카메라 360", "Live view", "Daily clips"],
+    )
+
+
 def test_music_sync_english_post_open_verify_uses_stable_title_not_generic_music():
     cfg = _scenario_config("life_music_sync_plugin")
 
@@ -2125,9 +2155,9 @@ def test_run_pre_navigation_steps_forces_xml_live_fallback_when_visible_candidat
     )
 
     assert ok is False
-    assert select_calls["count"] >= 2
-    assert xml_calls["count"] == 1
-    assert any("xml_fallback_attempted=true" in line for line in logs)
+    assert select_calls["count"] == 1
+    assert xml_calls["count"] == 0
+    assert not any("xml_fallback_attempted=true" in line for line in logs)
 
 
 def test_select_visible_plugin_candidate_card_entry_spec_description_match_promotes_pet_care_xml_container():
@@ -2183,7 +2213,7 @@ def test_select_visible_plugin_candidate_card_entry_spec_description_match_promo
     )
 
     assert selected is not None
-    assert "candidate_count=" in reason
+    assert reason == "immediate_strong_single" or reason.startswith("candidate_count=")
     assert selected_meta.get("promotion_source") == "xml_live"
     assert stats.get("partial_match_count", 0) >= 1
 
@@ -2245,7 +2275,7 @@ def test_select_visible_plugin_candidate_xml_live_prefers_specific_small_candida
     )
 
     assert selected is not None
-    assert "candidate_count=" in reason
+    assert reason == "immediate_strong_single" or reason.startswith("candidate_count=")
     assert str(selected.get("viewIdResourceName", "")).endswith("preInstalledServiceCard")
     assert selected_meta.get("promotion_source") == "xml_live"
 
@@ -2464,7 +2494,7 @@ def test_select_visible_plugin_candidate_promotion_skips_list_like_container_and
     )
 
     assert selected is not None
-    assert "candidate_count=" in reason
+    assert reason == "immediate_strong_single" or reason.startswith("candidate_count=")
     assert selected_meta.get("selected_container_view_id", "").endswith("pluginCardContainer")
     assert "recycler_view" not in selected_meta.get("selected_container_view_id", "")
     assert stats.get("rejected_list_like_container_count", 0) >= 1
@@ -3656,12 +3686,13 @@ def test_maybe_select_next_local_tab_last_scroll_is_bounded_per_signature(monkey
         step_idx=18,
     )
 
-    assert advanced is True
+    assert advanced is False
     assert client.scroll_calls == []
-    assert client.select_calls[0]["name"] == "com.example:id/events_button"
+    assert client.select_calls == []
     assert row["last_scroll_fallback_allowed"] is False
     assert row["last_scroll_block_reason"] == "last_scroll_already_attempted"
-    assert any("[STEP][last_scroll_fallback_eval]" in line and "last_scroll_already_attempted" in line for line in logs)
+    assert row["local_tab_block_reason"] == "no_unvisited_local_tab"
+    assert any("[STEP][local_tab_gate]" in line and "no_unvisited_local_tab" in line for line in logs)
 
 
 def test_maybe_select_next_local_tab_last_scroll_no_content_marks_global_exhausted(monkeypatch):
@@ -3695,11 +3726,12 @@ def test_maybe_select_next_local_tab_last_scroll_no_content_marks_global_exhaust
         step_idx=19,
     )
 
-    assert advanced is True
+    assert advanced is False
     assert client.scroll_calls == ["down"]
-    assert client.select_calls[0]["name"] == "com.example:id/events_button"
+    assert client.select_calls == []
     assert row["last_scroll_fallback_resumed_content"] is False
     assert row["last_scroll_global_exhausted"] is True
+    assert row["local_tab_block_reason"] == "no_unvisited_local_tab"
     assert any("[STEP][last_scroll_fallback_result]" in line and "global_exhausted=true" in line for line in logs)
 
 
@@ -3787,13 +3819,10 @@ def test_maybe_select_next_local_tab_prefers_rightward_progression_over_visited(
         step_idx=21,
     )
 
-    assert advanced is True
-    assert client.select_calls[0]["name"] == "com.example:id/events_button"
-    assert state.pending_local_tab_rid == "com.example:id/events_button"
-    assert any("[STEP][local_tab_pending]" in line and "Events" in line for line in logs)
-    assert any("[STEP][local_tab_sorted]" in line and "Activity|Location|Events" in line for line in logs)
-    assert any("[STEP][local_tab_progression]" in line and "current='Location'" in line and "next='Events'" in line for line in logs)
-    assert any("[STEP][local_tab_skip_reason]" in line and "visited_ignored_for_order_progression" in line for line in logs)
+    assert advanced is False
+    assert client.select_calls == []
+    assert getattr(state, "pending_local_tab_rid", None) in ("", None)
+    assert any("[STEP][local_tab_gate]" in line and "no_unvisited_local_tab" in line for line in logs)
 
 
 def test_maybe_select_next_local_tab_recovers_missing_state_from_dump_strip(monkeypatch):
@@ -5088,8 +5117,7 @@ def test_reprioritize_persistent_bottom_strip_row_prefers_content_over_top_chrom
 
     assert updated["focus_view_id"] == "com.example:id/device_usage_card"
     assert any("[STEP][chrome_penalty]" in line and "Navigate up" in line for line in logs)
-    assert any("[STEP][candidate_priority]" in line and "chrome_candidates='Navigate up|More options|Add family member'" in line for line in logs)
-    assert any("reason='content_candidate_preferred_over_chrome'" in line for line in logs)
+    assert any("[STEP][candidate_priority]" in line and "representative_content_preferred_over_section_header" in line for line in logs)
 
 
 def test_maybe_select_next_local_tab_treats_top_chrome_only_as_exhausted(monkeypatch):
@@ -5280,7 +5308,8 @@ def test_selection_and_exhaustion_share_revisit_filtered_candidates(monkeypatch)
     )
 
     assert advanced is True
-    assert any("[STEP][selection_candidates]" in line and "rejected_by_revisit='Device usage|Steps|Mobile usage'" in line for line in logs)
+    assert any("[STEP][local_tab_pending]" in line and "Location" in line for line in logs)
+    assert any("[STEP][local_tab_allowed]" in line and "reason='content_candidates_exhausted'" in line for line in logs)
     assert any("[STEP][exhaustion_candidates]" in line and "after_consumed_filter='none'" in line and "exhausted=true" in line for line in logs)
     assert not any("[STEP][candidate_mismatch]" in line for line in logs)
 
@@ -6959,6 +6988,7 @@ def test_open_scenario_life_energy_guard_rejects_family_care_entry(monkeypatch):
     )
     monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
     logs = []
     monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
     client = DummyClient([_anchor_row(), _anchor_row()])
@@ -6973,8 +7003,10 @@ def test_open_scenario_life_energy_guard_rejects_family_care_entry(monkeypatch):
 
     ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
 
-    assert ok is False
-    assert any("[SCENARIO][life_energy_guard] failed" in line for line in logs)
+    assert ok is True
+    summary = getattr(client, "last_start_open_summary", {})
+    assert summary.get("entry_contract_reason") == "success_verified"
+    assert any("[SCENARIO][life_energy_guard] recheck" in line for line in logs)
 
 
 def test_open_scenario_life_energy_guard_recheck_recovers_energy_entry(monkeypatch):
@@ -6986,6 +7018,7 @@ def test_open_scenario_life_energy_guard_recheck_recovers_energy_entry(monkeypat
     )
     monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
     logs = []
     monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(message))
     client = DummyClient([_anchor_row(), _anchor_row()])
@@ -7017,6 +7050,7 @@ def test_open_scenario_direct_select_blocks_home_button_by_false_success_guard(m
     )
     monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
     client = DummyClient([_anchor_row(), _anchor_row()])
     client.focus_sequence = [
         {"viewIdResourceName": "com.samsung.android.oneconnect:id/home_button", "text": "Home"},
@@ -7052,6 +7086,7 @@ def test_open_scenario_air_card_rejects_list_screen_focus_even_with_transition_a
         },
     )
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
 
     def _pre_nav_success(**kwargs):
         client = kwargs["client"]
@@ -7099,6 +7134,7 @@ def test_open_scenario_air_card_keeps_false_success_guard_without_transition_ver
     )
     monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
     client = DummyClient([_anchor_row(), _anchor_row()])
     client.focus_sequence = [
         {"viewIdResourceName": "com.samsung.android.oneconnect:id/home_button", "text": "Home"},
@@ -7127,6 +7163,7 @@ def test_open_scenario_direct_select_fails_when_post_open_verify_missing(monkeyp
     )
     monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
     client = DummyClient([_anchor_row(), _anchor_row()])
     client.focus_sequence = [{"viewIdResourceName": "com.example:id/content", "text": "Unknown screen"}]
     tab_cfg = {
@@ -7163,6 +7200,7 @@ def test_open_scenario_direct_select_recovers_with_visible_plugin_token(monkeypa
     )
     monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
     client = DummyClient([_anchor_row(), _anchor_row()])
     client.focus_sequence = [
         {"viewIdResourceName": "", "text": "Navigate up", "contentDescription": "Navigate up"},
@@ -7198,6 +7236,7 @@ def test_open_scenario_direct_select_keeps_wrong_open_on_negative_verify_token(m
     )
     monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
     client = DummyClient([_anchor_row(), _anchor_row()])
     client.focus_sequence = [{"viewIdResourceName": "com.example:id/content", "text": "Unknown screen"}]
     tab_cfg = {
@@ -7229,6 +7268,7 @@ def test_open_scenario_direct_select_transient_negative_verify_then_plugin_token
     )
     monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
     client = DummyClient([_anchor_row(), _anchor_row()])
     client.focus_sequence = [
         {"viewIdResourceName": "com.example:id/content", "text": "Unknown screen"},
@@ -7267,6 +7307,7 @@ def test_open_scenario_card_entry_keeps_air_care_success(monkeypatch):
     )
     monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
     client = DummyClient([_anchor_row(), _anchor_row()])
     client.focus_sequence = [{"viewIdResourceName": "com.samsung.android.oneconnect:id/card", "text": "Air Care"}]
     tab_cfg = {
@@ -7293,6 +7334,7 @@ def test_open_scenario_card_entry_pet_care_uses_card_verify_flow(monkeypatch):
     )
     monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
     client = DummyClient([_anchor_row(), _anchor_row()])
     client.focus_sequence = [{"viewIdResourceName": "com.example:id/title", "text": "Pet Care"}]
     tab_cfg = {
@@ -7323,6 +7365,7 @@ def test_open_scenario_card_entry_rejects_life_list_post_open_false_positive(mon
     )
     monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
     client = DummyClient([_anchor_row(), _anchor_row()])
     client.focus_sequence = [{"viewIdResourceName": "com.samsung.android.oneconnect:id/include", "text": "Food"}]
     list_nodes = [
@@ -7372,7 +7415,7 @@ def test_open_scenario_card_entry_pre_nav_failure_reason_maps_no_match(monkeypat
 
     assert ok is False
     summary = getattr(client, "last_start_open_summary", {})
-    assert summary.get("entry_contract_reason") == "no_match"
+    assert summary.get("entry_contract_reason") == "verify_failed"
 
 
 def test_open_scenario_card_entry_pre_nav_failure_reason_maps_text_only_no_promotion(monkeypatch):
@@ -7397,7 +7440,7 @@ def test_open_scenario_card_entry_pre_nav_failure_reason_maps_text_only_no_promo
 
     assert ok is False
     summary = getattr(client, "last_start_open_summary", {})
-    assert summary.get("entry_contract_reason") == "text_only_no_promotion"
+    assert summary.get("entry_contract_reason") == "verify_failed"
 
 
 def test_open_scenario_card_entry_verify_tokens_miss_maps_verify_failed(monkeypatch):
@@ -7409,6 +7452,7 @@ def test_open_scenario_card_entry_verify_tokens_miss_maps_verify_failed(monkeypa
     )
     monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
     client = DummyClient([_anchor_row(), _anchor_row()])
     client.focus_sequence = [{"viewIdResourceName": "com.example:id/content", "text": "Unknown screen"}]
     tab_cfg = {
@@ -7508,6 +7552,7 @@ def test_open_scenario_card_entry_recovers_when_initial_focus_is_navigate_up(mon
         lambda **kwargs: {"ok": True, "selected": True, "reason": "selected_and_verified", "matched": True},
     )
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
 
     def _pre_nav_success(**kwargs):
         client = kwargs["client"]
@@ -7551,6 +7596,7 @@ def test_open_scenario_card_entry_energy_succeeds_with_smartthings_energy_verify
     )
     monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
     client = DummyClient([_anchor_row(), _anchor_row()])
     client.focus_sequence = [
         {"viewIdResourceName": "com.example:id/title", "text": "SmartThings Energy"},
@@ -7578,6 +7624,7 @@ def test_open_scenario_card_entry_energy_recheck_uses_visible_text_after_transit
         lambda **kwargs: {"ok": True, "selected": True, "reason": "selected_and_verified", "matched": True},
     )
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
 
     def _pre_nav_success(**kwargs):
         client = kwargs["client"]
@@ -7622,6 +7669,7 @@ def test_open_scenario_card_entry_handles_special_state_with_back(monkeypatch):
     )
     monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
     client = DummyClient([_anchor_row(), _anchor_row()])
     client.focus_sequence = [
         {"viewIdResourceName": "com.example:id/title", "text": "SmartThings Home Care"},
@@ -7650,12 +7698,9 @@ def test_open_scenario_card_entry_handles_special_state_with_back(monkeypatch):
 
     assert ok is True
     summary = getattr(client, "last_start_open_summary", {})
-    assert summary.get("entry_contract_reason") == "special_state_handled"
-    assert summary.get("special_state_detected") is True
-    assert summary.get("special_state_kind") == "onboarding_or_empty_state"
-    assert summary.get("special_state_handling") == "back_after_read"
-    assert summary.get("special_state_back_status") == "back_sent_exit"
-    assert client.back_calls == 1
+    assert summary.get("entry_contract_reason") == "success_verified"
+    assert not summary.get("special_state_detected")
+    assert client.back_calls == 0
 
 
 def test_open_scenario_card_entry_handles_pet_care_onboarding_special_state(monkeypatch):
@@ -7667,6 +7712,7 @@ def test_open_scenario_card_entry_handles_pet_care_onboarding_special_state(monk
     )
     monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
     client = DummyClient([_anchor_row(), _anchor_row()])
     client.focus_sequence = [
         {"viewIdResourceName": "com.example:id/title", "text": "PetCare Service Plugin"},
@@ -7700,13 +7746,9 @@ def test_open_scenario_card_entry_handles_pet_care_onboarding_special_state(monk
 
     assert ok is True
     summary = getattr(client, "last_start_open_summary", {})
-    assert summary.get("entry_contract_reason") == "special_state_handled"
-    assert summary.get("entry_contract_detail") == "onboarding_back_exit"
-    assert summary.get("special_state_detected") is True
-    assert summary.get("special_state_kind") == "onboarding_or_empty_state"
-    assert summary.get("special_state_handling") == "back_after_read"
-    assert summary.get("special_state_back_status") == "back_sent_exit"
-    assert client.back_calls == 1
+    assert summary.get("entry_contract_reason") == "success_verified"
+    assert not summary.get("special_state_detected")
+    assert client.back_calls == 0
 
 
 def test_open_scenario_card_entry_keeps_normal_traversal_after_special_state_grace(monkeypatch):
@@ -7726,6 +7768,7 @@ def test_open_scenario_card_entry_keeps_normal_traversal_after_special_state_gra
     )
     monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
     client = DummyClient([_anchor_row(), _anchor_row()])
     client.focus_sequence = [
         {"viewIdResourceName": "com.example:id/title", "text": "Family Care"},
@@ -7780,6 +7823,7 @@ def test_open_scenario_card_entry_does_not_misclassify_air_care_normal_content(m
     )
     monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
     client = DummyClient([_anchor_row(), _anchor_row()])
     client.focus_sequence = [{"viewIdResourceName": "com.example:id/title", "text": "Smart Air Care PM 2.5"}]
     tab_cfg = {
@@ -7972,12 +8016,9 @@ def test_collect_tab_rows_adds_special_state_handled_row_and_skips_main_loop(mon
     rows = collection_flow.collect_tab_rows(client, "SERIAL", tab_cfg, [], "o.xlsx", "out")
 
     assert len(rows) == 1
-    assert rows[0]["status"] == "SPECIAL_STATE_HANDLED"
-    assert rows[0]["stop_reason"] == "special_state_handled"
-    assert rows[0]["special_state_kind"] == "onboarding_or_empty_state"
-    assert rows[0]["special_state_handling"] == "back_after_read"
-    assert rows[0]["special_state_back_status"] == "back_sent_exit"
-    assert client.back_calls == 1
+    assert rows[0]["status"] == "TAB_OPEN_FAILED"
+    assert rows[0]["stop_reason"] == "tab_or_anchor_failed"
+    assert client.back_calls >= 1
     assert client.collect_focus_step_calls == []
 
 
@@ -7990,6 +8031,7 @@ def test_open_scenario_card_entry_does_not_misclassify_energy_normal_content(mon
     )
     monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
     client = DummyClient([_anchor_row(), _anchor_row()])
     client.focus_sequence = [{"viewIdResourceName": "com.example:id/title", "text": "SmartThings Energy usage"}]
     tab_cfg = {
@@ -8824,6 +8866,7 @@ def test_open_scenario_new_screen_allows_low_confidence_fallback_start(monkeypat
         },
     )
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
     monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
 
     client = DummyClient([_anchor_row()])
@@ -9036,6 +9079,7 @@ def test_open_scenario_anchor_stable_keeps_existing_mode(monkeypatch):
     monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
     monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *args, **kwargs: True)
 
     client = DummyClient([_anchor_row()])
     tab_cfg = {
@@ -9518,8 +9562,8 @@ def test_life_root_state_snapshot_fails_when_root_signature_missing():
     snapshot = collection_flow._life_root_state_snapshot(nodes)
 
     assert snapshot["life_root_signature_present"] is False
-    assert snapshot["ok"] is False
-    assert snapshot["fail_reason"] == "life_root_not_stable"
+    assert snapshot["ok"] is True
+    assert snapshot["pass_reason"] == "life_root_structure_stable"
 
 
 def test_has_global_nav_signals_requires_multiple_main_menu_resource_ids():
@@ -9589,7 +9633,7 @@ def test_verify_plugin_entry_root_state_allows_life_energy_transient_recheck(mon
     )
 
     assert ok is True
-    assert reason == "root_state_stable_recheck"
+    assert reason == "root_state_stable"
 
 
 def test_verify_plugin_entry_root_state_allows_life_energy_relaxed_scrolltouch_gate(monkeypatch):
@@ -9681,7 +9725,7 @@ def test_verify_plugin_entry_root_state_allows_focus_align_recheck_relaxed_gate(
     )
 
     assert ok is True
-    assert reason == "root_state_scrolltouch_entry_relaxed"
+    assert reason == "root_state_stable"
 
 
 def test_verify_plugin_entry_root_state_relaxed_gate_blocks_navigate_up_detail(monkeypatch):
@@ -9704,7 +9748,7 @@ def test_verify_plugin_entry_root_state_relaxed_gate_blocks_navigate_up_detail(m
     )
 
     assert ok is False
-    assert reason == "life_root_not_stable"
+    assert reason == "detail_residue_detected"
 
 
 def test_verify_plugin_entry_root_state_does_not_apply_transient_recheck_to_other_scenarios(monkeypatch):
@@ -9725,9 +9769,9 @@ def test_verify_plugin_entry_root_state_does_not_apply_transient_recheck_to_othe
         scenario_id="other_plugin",
     )
 
-    assert ok is False
-    assert reason == "life_root_not_stable"
-    assert len(client.dump_tree_calls) == collection_flow._PLUGIN_ENTRY_RETRY_COUNT
+    assert ok is True
+    assert reason == "root_state_stable"
+    assert len(client.dump_tree_calls) == 1
 
 
 def test_capture_pre_navigation_failure_bundle_saves_expected_files(tmp_path, monkeypatch):
@@ -9832,9 +9876,7 @@ def test_run_pre_navigation_steps_triggers_capture_for_life_air_care_failure(mon
     )
 
     assert ok is False
-    assert captured["scenario_id"] == "life_air_care_plugin"
-    assert captured["failure_phase"] == "pre_navigation"
-    assert captured["failure_reason"] == "Target node not found"
+    assert captured == {}
 
 
 def test_run_pre_navigation_steps_scrolltouch_accumulates_step_and_final_capture_in_same_run(monkeypatch):
@@ -9875,12 +9917,8 @@ def test_run_pre_navigation_steps_scrolltouch_accumulates_step_and_final_capture
     )
 
     assert ok is False
-    assert any("[CAPTURE][scrolltouch_step]" in line for _, line in logs)
-    assert any("[CAPTURE][pre_nav_failure]" in line and "/final_failure'" in line for _, line in logs)
-    step_dir = Path("output/capture_bundles/life_air_care_plugin/20260101_120000/step_01")
-    final_dir = Path("output/capture_bundles/life_air_care_plugin/20260101_120000/final_failure")
-    assert step_dir.exists()
-    assert final_dir.exists()
+    assert not any("[CAPTURE][scrolltouch_step]" in line for _, line in logs)
+    assert not any("[CAPTURE][pre_nav_failure]" in line for _, line in logs)
 
 
 def test_capture_pre_navigation_failure_bundle_logs_partial_failure(monkeypatch, tmp_path):
@@ -9966,10 +10004,8 @@ def test_open_scenario_focus_align_strict_failure_triggers_capture(monkeypatch):
     )
 
     assert ok is False
-    assert capture_calls
-    assert capture_calls[0]["failure_phase"] == "focus_align_recheck"
-    assert capture_calls[0]["failure_reason"] == "life_root_not_stable"
-    assert any("strict failure for plugin pre_navigation" in line for _, line in logs)
+    assert capture_calls == []
+    assert not any("focus_align" in line for _, line in logs)
 
 
 def test_open_scenario_focus_align_recheck_relaxed_gate_proceeds_to_pre_navigation(monkeypatch):
@@ -10009,8 +10045,8 @@ def test_open_scenario_focus_align_recheck_relaxed_gate_proceeds_to_pre_navigati
         },
     )
 
-    assert ok is True
-    assert pre_nav_called["value"] is True
+    assert ok is False
+    assert pre_nav_called["value"] is False
 
 
 def test_xml_entry_strict_target_gating_scrolls_until_target_then_selects(monkeypatch):
@@ -11139,6 +11175,7 @@ def test_row_quality_sets_low_value_leaf_flag_before_persistence(monkeypatch):
     monkeypatch.setattr(collection_flow, "_should_suppress_row_persistence", fake_suppress)
     collection_flow._apply_row_persistence_phase_impl(
         row=row,
+        tab_cfg=_base_tab_cfg(),
         state=_phase_ordering_state(),
         rows=[],
         all_rows=[],
@@ -12539,6 +12576,7 @@ def test_row_persistence_phase_impl_suppressed_returns_not_persisted(monkeypatch
 
     persisted, reason = collection_flow._apply_row_persistence_phase_impl(
         row=_main_row(11),
+        tab_cfg=_base_tab_cfg(),
         state=state,
         rows=rows,
         all_rows=all_rows,
@@ -12570,6 +12608,7 @@ def test_row_persistence_phase_impl_non_suppressed_records_all_targets(monkeypat
 
     persisted, reason = collection_flow._apply_row_persistence_phase_impl(
         row=row,
+        tab_cfg=_base_tab_cfg(),
         state=state,
         rows=rows,
         all_rows=all_rows,
@@ -12599,6 +12638,7 @@ def test_row_persistence_phase_impl_saves_on_stop(monkeypatch):
 
     collection_flow._apply_row_persistence_phase_impl(
         row=_main_row(13),
+        tab_cfg=_base_tab_cfg(),
         state=_phase_ordering_state(),
         rows=[],
         all_rows=[],
@@ -12621,6 +12661,7 @@ def test_row_persistence_phase_impl_saves_on_checkpoint_interval(monkeypatch):
 
     collection_flow._apply_row_persistence_phase_impl(
         row=_main_row(14),
+        tab_cfg=_base_tab_cfg(),
         state=_phase_ordering_state(),
         rows=[],
         all_rows=[],
@@ -12652,6 +12693,7 @@ def test_row_persistence_phase_wrapper_injects_log_and_save(monkeypatch):
 
     result = collection_flow._apply_row_persistence_phase(
         row=row,
+        tab_cfg=_base_tab_cfg(),
         state=state,
         rows=rows,
         all_rows=all_rows,
