@@ -25,6 +25,7 @@ def test_runtime_log_parser_extracts_summary_progress_and_events():
     log_text = "\n".join(
         [
             "[QA_FRONTEND] start mode='smoke' scenario_selection_applied=true scenario_ids=['global_nav_main'] runtime_config_path='x' launch_mode='clean'",
+            "[QA_FRONTEND][language] language_mode='ko-KR' device_locale='ko-KR' target_locale='ko-KR' changed='true' verified='true' status='ok'",
             "[QA_FRONTEND][scenario_selection] scenario_selection_applied=true runtime_config_path='x' enabled_ids=['global_nav_main', 'life_air_care_plugin']",
             "[QA_FRONTEND][preflight][adb] status='ok'",
             "[QA_FRONTEND][preflight][helper] status='ok'",
@@ -47,6 +48,8 @@ def test_runtime_log_parser_extracts_summary_progress_and_events():
 
     assert summary["mode"] == "smoke"
     assert summary["launch_mode"] == "clean"
+    assert summary["language_mode"] == "ko-KR"
+    assert summary["device_locale"] == "ko-KR"
     assert summary["popup_result"] == "cleared"
     assert summary["preflight_state"] == "passed"
     assert summary["adb_status"] == "ok"

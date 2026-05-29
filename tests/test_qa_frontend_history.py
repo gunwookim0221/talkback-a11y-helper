@@ -99,6 +99,29 @@ def test_recent_run_scenario_result_failed_when_process_success_and_scenario_fai
     assert run["failed_scenarios"] == 1
 
 
+def test_recent_run_scenario_result_warning_when_warning_scenarios_exist(tmp_path):
+    _write_log(
+        tmp_path / "20260528_110150_smoke.log",
+        body="\n".join(
+            [
+                "[QA_FRONTEND][scenario_selection] enabled_ids=['device_smoke_sensor_plugin']",
+                "[SCENARIO][entry_contract] success scenario='device_smoke_sensor_plugin' entry_type='card'",
+                "[STEP] END scenario='device_smoke_sensor_plugin' step=0 visible='Smoke detector'",
+                "[STOP][eval] step=8 scenario='device_smoke_sensor_plugin' decision='stop' reason='repeat_no_progress' traversal_result='FAIL_STUCK' final_result='FAIL' failure_reason='repeat_no_progress'",
+                "[PERF][scenario_summary] scenario=device_smoke_sensor_plugin total_steps=9",
+                "[MAIN] script end",
+            ]
+        ),
+    )
+
+    run = list_recent_runs(run_log_dir=tmp_path)[0]
+
+    assert run["process_status"] == "success"
+    assert run["scenario_result_status"] == "warning"
+    assert run["warning_scenarios"] == 1
+    assert run["failed_scenarios"] == 0
+
+
 def test_recent_run_scenario_result_partial_when_stopped_after_completed_scenario(tmp_path):
     _write_log(
         tmp_path / "20260528_110200_smoke.log",
@@ -136,6 +159,7 @@ def test_build_run_summary_contains_sidecar_schema(tmp_path):
         body="\n".join(
             [
                 "[QA_FRONTEND] start mode='smoke' scenario_selection_applied=true scenario_ids=['global_nav_main'] runtime_config_path='x' launch_mode='clean'",
+                "[QA_FRONTEND][language] language_mode='ko-KR' device_locale='ko-KR' target_locale='ko-KR' changed='true' verified='true' status='ok'",
                 "[QA_FRONTEND][scenario_selection] enabled_ids=['global_nav_main']",
                 "[QA_FRONTEND][preflight][popup] foreground_after='com.samsung.android.oneconnect' result='cleared'",
                 "[QA_FRONTEND][preflight] final_result='passed' reason='ok'",
@@ -155,6 +179,8 @@ def test_build_run_summary_contains_sidecar_schema(tmp_path):
             "run_id": "20260528_120000",
             "mode": "smoke",
             "launch_mode": "clean",
+            "language_mode": "ko-KR",
+            "device_locale": "ko-KR",
             "started_at": "2026-05-28T12:00:00",
             "finished_at": "2026-05-28T12:01:26",
         },
@@ -165,6 +191,8 @@ def test_build_run_summary_contains_sidecar_schema(tmp_path):
     assert summary["schema_version"] == 1
     assert summary["process_status"] == "success"
     assert summary["scenario_result_status"] == "passed"
+    assert summary["language_mode"] == "ko-KR"
+    assert summary["device_locale"] == "ko-KR"
     assert summary["completed_scenarios"] == 1
     assert summary["failed_scenarios"] == 0
     assert summary["total_steps"] == 6
@@ -172,7 +200,7 @@ def test_build_run_summary_contains_sidecar_schema(tmp_path):
     assert summary["xlsx_filename"] == "talkback_compare_20260528_120000.xlsx"
     assert summary["event_counts"]["popup_cleared"] == 1
     assert summary["scenarios"][0]["id"] == "global_nav_main"
-    assert summary["scenarios"][0]["status"] == "completed"
+    assert summary["scenarios"][0]["status"] == "passed"
     assert summary["scenarios"][0]["steps"] == 6
 
 
@@ -184,10 +212,14 @@ def test_recent_runs_uses_summary_fast_path_when_available(tmp_path):
   "schema_version": 1,
   "run_id": "20260528_120100",
   "mode": "smoke",
+  "language_mode": "en-US",
+  "device_locale": "en-US",
   "started_at": "2026-05-28T12:01:00",
   "elapsed_seconds": 42,
   "process_status": "success",
-  "scenario_result_status": "passed",
+  "scenario_result_status": "warning",
+  "passed_scenarios": 0,
+  "warning_scenarios": 1,
   "completed_scenarios": 1,
   "failed_scenarios": 0,
   "total_scenarios": 1,
@@ -201,7 +233,10 @@ def test_recent_runs_uses_summary_fast_path_when_available(tmp_path):
 
     assert run["summary_exists"] is True
     assert run["summary_source"] == "summary_json"
-    assert run["scenario_result_status"] == "passed"
+    assert run["language_mode"] == "en-US"
+    assert run["device_locale"] == "en-US"
+    assert run["scenario_result_status"] == "warning"
+    assert run["warning_scenarios"] == 1
     assert run["completed_scenarios"] == 1
     assert run["duration_seconds"] == 42
     assert run["xlsx_filename"] == "talkback_compare_cached.xlsx"
@@ -317,3 +352,17 @@ def test_recent_run_log_download_returns_requested_log(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert "recent" in response.text
+
+
+def test_open_language_settings_endpoint(monkeypatch):
+    client = TestClient(app)
+    monkeypatch.setattr(
+        "qa_frontend.backend.main.open_language_settings",
+        lambda: {"ok": True, "status": "opened", "intent": "android.settings.LOCALE_SETTINGS"},
+    )
+
+    response = client.post("/api/device/open-language-settings")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "opened"
+    assert response.json()["intent"] == "android.settings.LOCALE_SETTINGS"

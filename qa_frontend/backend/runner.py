@@ -11,6 +11,7 @@ from typing import Literal
 from tb_runner.runtime_config import RUNTIME_CONFIG_PATH_ENV
 
 from .paths import ROOT_DIR, RUN_LOG_DIR, SCRIPT_PATH, RUNTIME_CONFIG_PATH
+from .device_locale import apply_language_mode, format_language_log_lines, normalize_language_mode
 from .preflight import format_preflight_log_lines, normalize_launch_mode, run_runtime_preflight
 from .run_summary import write_summary_file
 from .runtime_dashboard import build_runtime_dashboard
@@ -33,6 +34,8 @@ class RunManager:
         self._error: str | None = None
         self._scenario_ids: list[str] = []
         self._launch_mode: str = "clean"
+        self._language_mode: str = "current"
+        self._language_status: dict[str, object] | None = None
         self._preflight: dict[str, object] | None = None
         self._scenario_selection_applied = False
         self._runtime_config_path: str | None = None
@@ -44,6 +47,7 @@ class RunManager:
         mode: str,
         scenario_ids: list[str] | None = None,
         launch_mode: str = "clean",
+        language_mode: str = "current",
     ) -> dict[str, object]:
         with self._lock:
             self._refresh_locked()
@@ -56,6 +60,7 @@ class RunManager:
             log_path = RUN_LOG_DIR / f"{run_id}_{mode}.log"
             command = [sys.executable, str(SCRIPT_PATH)]
             normalized_launch_mode = normalize_launch_mode(launch_mode)
+            normalized_language_mode = normalize_language_mode(language_mode)
 
             try:
                 log_file = log_path.open("w", encoding="utf-8", errors="replace")
@@ -67,6 +72,8 @@ class RunManager:
                 self._returncode = None
                 self._scenario_ids = list(scenario_ids or [])
                 self._launch_mode = normalized_launch_mode
+                self._language_mode = normalized_language_mode
+                self._language_status = None
                 self._scenario_selection_applied = False
                 self._runtime_config_path = None
                 self._max_steps_policy = None
@@ -79,7 +86,8 @@ class RunManager:
                     self._finished_at = datetime.now().isoformat(timespec="seconds")
                     log_file.write(
                         f"[QA_FRONTEND] start mode='{mode}' scenario_selection_applied=false "
-                        f"scenario_ids=[] launch_mode='{normalized_launch_mode}'\n"
+                        f"scenario_ids=[] launch_mode='{normalized_launch_mode}' "
+                        f"language_mode='{normalized_language_mode}'\n"
                     )
                     log_file.write("[QA_FRONTEND][scenario_selection] result='blocked' reason='no_scenario_selected'\n")
                     log_file.close()
@@ -101,7 +109,8 @@ class RunManager:
                     f"[QA_FRONTEND] start mode='{mode}' "
                     f"scenario_selection_applied=true scenario_ids={scenario_ids or []} "
                     f"runtime_config_path='{self._runtime_config_path}' "
-                    f"launch_mode='{normalized_launch_mode}'\n"
+                    f"launch_mode='{normalized_launch_mode}' "
+                    f"language_mode='{normalized_language_mode}'\n"
                 )
                 log_file.write(
                     "[QA_FRONTEND][scenario_selection] "
@@ -126,6 +135,19 @@ class RunManager:
                         f"effective_max_steps={scenario_step['effective_max_steps']!r} "
                         f"policy='{scenario_step['policy']}'\n"
                     )
+                language_status = apply_language_mode(normalized_language_mode)
+                self._language_status = language_status
+                for line in format_language_log_lines(language_status):
+                    log_file.write(f"{line}\n")
+                if not language_status.get("ok"):
+                    self._state = "error"
+                    self._error = str(language_status.get("error") or f"language setup failed: {normalized_language_mode}")
+                    self._process = None
+                    self._finished_at = datetime.now().isoformat(timespec="seconds")
+                    log_file.close()
+                    self._write_summary_safe()
+                    return self._status_locked()
+
                 preflight = run_runtime_preflight(normalized_launch_mode)
                 for line in format_preflight_log_lines(preflight):
                     log_file.write(f"{line}\n")
@@ -274,6 +296,7 @@ class RunManager:
             self._append_log_line(f"[QA_FRONTEND][summary] write_failed error='{exc}'")
 
     def _status_locked(self) -> dict[str, object]:
+        language_status = self._language_status or {}
         return {
             "state": self._state,
             "run_id": self._run_id,
@@ -289,6 +312,13 @@ class RunManager:
             "max_steps_policy": self._max_steps_policy,
             "scenario_steps": self._scenario_steps,
             "launch_mode": self._launch_mode,
+            "language_mode": self._language_mode,
+            "device_locale": language_status.get("device_locale") if language_status else None,
+            "target_locale": language_status.get("target_locale") if language_status else None,
+            "manual_language_change_required": bool(language_status.get("manual_language_change_required")),
+            "language_error": language_status.get("error") if language_status else None,
+            "language_settings_intent": language_status.get("settings_intent") if language_status else None,
+            "language_status": self._language_status,
             "preflight_state": self._preflight.get("state") if self._preflight else None,
             "preflight_reason": self._preflight.get("reason") if self._preflight else None,
             "talkback_state": self._preflight.get("talkback_state") if self._preflight else None,

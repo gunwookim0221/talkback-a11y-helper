@@ -99,6 +99,42 @@ p {
   padding: 16px;
 }
 
+.actionBanner {
+  align-items: center;
+  border-radius: 8px;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+}
+
+.actionBanner h2 {
+  margin-bottom: 4px;
+}
+
+.actionBanner small {
+  display: block;
+  margin-top: 4px;
+}
+
+.actionBannerWarn {
+  background: #fff5d8;
+  border: 1px solid #e0bf5b;
+}
+
+.actionBannerBad {
+  background: #ffe4e4;
+  border: 1px solid #efb3b3;
+}
+
+.actionBannerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .panelHeader {
   align-items: center;
   display: flex;
@@ -182,13 +218,15 @@ p {
   color: #5f6d79;
 }
 
-.launchMode {
+.launchMode,
+.languageMode {
   display: grid;
   gap: 8px;
   margin-bottom: 12px;
 }
 
-.launchMode label {
+.launchMode label,
+.languageMode label {
   align-items: center;
   border: 1px solid #dce3e9;
   border-radius: 6px;
@@ -198,7 +236,8 @@ p {
   padding: 8px;
 }
 
-.launchMode small {
+.launchMode small,
+.languageMode small {
   grid-column: 2;
 }
 
@@ -497,5 +536,14 @@ h3 {
   .topbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .actionBanner {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .actionBannerActions {
+    justify-content: flex-start;
   }
 }

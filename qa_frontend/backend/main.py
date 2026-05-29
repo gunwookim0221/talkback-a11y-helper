@@ -5,7 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from .adb import enable_helper, get_adb_status, get_helper_status, install_helper, open_accessibility_settings
+from .adb import enable_helper, enable_talkback, get_adb_status, get_helper_status, install_helper, open_accessibility_settings
+from .device_locale import normalize_language_mode, open_language_settings
 from .outputs import list_outputs, safe_output_path
 from .recent_runs import list_recent_runs, safe_recent_run_log_path
 from .runner import RunManager
@@ -28,6 +29,7 @@ class StartRunRequest(BaseModel):
     mode: str = "full"
     scenario_ids: list[str] | None = None
     launch_mode: str = "clean"
+    language_mode: str = "current"
 
 
 @app.get("/api/health")
@@ -60,6 +62,16 @@ def helper_open_accessibility_settings() -> dict[str, object]:
     return open_accessibility_settings()
 
 
+@app.post("/api/talkback/enable")
+def talkback_enable() -> dict[str, object]:
+    return enable_talkback()
+
+
+@app.post("/api/device/open-language-settings")
+def device_open_language_settings() -> dict[str, object]:
+    return open_language_settings()
+
+
 @app.get("/api/scenarios")
 def scenarios() -> dict[str, object]:
     try:
@@ -74,7 +86,16 @@ def run_start(request: StartRunRequest) -> dict[str, object]:
     if mode not in {"smoke", "full"}:
         raise HTTPException(status_code=400, detail="mode must be smoke or full")
     try:
-        return runner.start_run(mode=mode, scenario_ids=request.scenario_ids, launch_mode=request.launch_mode)
+        language_mode = normalize_language_mode(request.language_mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        return runner.start_run(
+            mode=mode,
+            scenario_ids=request.scenario_ids,
+            launch_mode=request.launch_mode,
+            language_mode=language_mode,
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:

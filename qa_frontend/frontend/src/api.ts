@@ -19,6 +19,13 @@ export type RunStatus = {
     policy: string;
   }>;
   launch_mode: 'warm' | 'clean';
+  language_mode: 'current' | 'ko-KR' | 'en-US';
+  device_locale: string | null;
+  target_locale?: string | null;
+  manual_language_change_required?: boolean;
+  language_error?: string | null;
+  language_settings_intent?: string | null;
+  language_status: Record<string, unknown> | null;
   preflight_state: string | null;
   preflight_reason: string | null;
   talkback_state: string | null;
@@ -48,6 +55,8 @@ export type OutputFile = {
 export type RecentRun = {
   run_id: string;
   mode: 'smoke' | 'full';
+  language_mode?: string;
+  device_locale?: string | null;
   status: string;
   process_status: string;
   scenario_result_status: string;
@@ -84,6 +93,8 @@ export type RuntimeDashboard = {
   run_id: string | null;
   mode: string | null;
   launch_mode: string | null;
+  language_mode: string | null;
+  device_locale: string | null;
   state: string | null;
   started_at: string | null;
   elapsed_seconds: number;
@@ -129,6 +140,26 @@ export type HelperStatus = {
   accessibility_settings_opened?: boolean;
 };
 
+export type TalkBackEnableResponse = {
+  ok: boolean;
+  status: 'enabled' | 'error' | string;
+  service_name?: string;
+  selected_package?: string;
+  candidates?: string[];
+  enabled_accessibility_services?: string;
+  accessibility_enabled?: string;
+  helper_service_preserved?: boolean;
+  talkback_service_appended?: boolean;
+  error?: string;
+};
+
+export type OpenLanguageSettingsResponse = {
+  ok: boolean;
+  status: 'opened' | 'error' | string;
+  intent?: string;
+  error?: string;
+};
+
 function formatApiPayloadError(payload: unknown) {
   if (!payload || typeof payload !== 'object') {
     return '';
@@ -165,11 +196,19 @@ export const api = {
   installHelper: () => request<HelperStatus>('/api/helper/install', { method: 'POST' }),
   enableHelper: () => request<HelperStatus>('/api/helper/enable', { method: 'POST' }),
   openAccessibilitySettings: () => request<HelperStatus>('/api/helper/open-accessibility-settings', { method: 'POST' }),
+  enableTalkBack: () => request<TalkBackEnableResponse>('/api/talkback/enable', { method: 'POST' }),
+  openLanguageSettings: () =>
+    request<OpenLanguageSettingsResponse>('/api/device/open-language-settings', { method: 'POST' }),
   scenarios: () => request<{ scenarios: Scenario[] }>('/api/scenarios'),
-  startRun: (mode: 'smoke' | 'full', scenarioIds: string[], launchMode: 'warm' | 'clean') =>
+  startRun: (
+    mode: 'smoke' | 'full',
+    scenarioIds: string[],
+    launchMode: 'warm' | 'clean',
+    languageMode: 'current' | 'ko-KR' | 'en-US',
+  ) =>
     request<RunStatus>('/api/run/start', {
       method: 'POST',
-      body: JSON.stringify({ mode, scenario_ids: scenarioIds, launch_mode: launchMode }),
+      body: JSON.stringify({ mode, scenario_ids: scenarioIds, launch_mode: launchMode, language_mode: languageMode }),
     }),
   stopRun: () => request<RunStatus>('/api/run/stop', { method: 'POST' }),
   runStatus: () => request<RunStatus>('/api/run/status'),

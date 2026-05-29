@@ -18,6 +18,14 @@ HELPER_APK_SEARCH_PATTERNS = [
     "android/app/build/outputs/apk/**/*.apk",
 ]
 HELPER_BUILD_COMMAND = r".\gradlew.bat :app:assembleDebug"
+TALKBACK_SERVICE_CANDIDATES = [
+    "com.samsung.android.accessibility.talkback/com.samsung.android.marvin.talkback.TalkBackService",
+    "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService",
+]
+TALKBACK_PACKAGE_TO_SERVICE = {
+    "com.samsung.android.accessibility.talkback": TALKBACK_SERVICE_CANDIDATES[0],
+    "com.google.android.marvin.talkback": TALKBACK_SERVICE_CANDIDATES[1],
+}
 
 
 def _relative_path(path: Path | None) -> str | None:
@@ -157,6 +165,30 @@ def get_helper_status() -> dict[str, object]:
     }
 
 
+def _get_installed_packages() -> dict[str, object]:
+    result = run_adb(["shell", "pm", "list", "packages"], timeout=8.0)
+    if not result.get("ok"):
+        return {**result, "packages": set()}
+    packages = {
+        line.strip().split(":", 1)[1]
+        for line in str(result.get("stdout", "")).splitlines()
+        if line.strip().startswith("package:")
+    }
+    return {**result, "packages": packages}
+
+
+def _get_enabled_accessibility_services() -> dict[str, object]:
+    result = run_adb(["shell", "settings", "get", "secure", "enabled_accessibility_services"], timeout=8.0)
+    services = str(result.get("stdout", "")).strip() if result.get("ok") else ""
+    return {**result, "enabled_accessibility_services": services}
+
+
+def _get_accessibility_enabled() -> dict[str, object]:
+    result = run_adb(["shell", "settings", "get", "secure", "accessibility_enabled"], timeout=8.0)
+    value = str(result.get("stdout", "")).strip() if result.get("ok") else ""
+    return {**result, "accessibility_enabled": value}
+
+
 def _split_enabled_accessibility_services(value: str | None) -> list[str]:
     raw = str(value or "").strip()
     if not raw or raw.lower() in {"null", "none"}:
@@ -204,7 +236,7 @@ def install_helper() -> dict[str, object]:
 
 
 def enable_helper() -> dict[str, object]:
-    services_result = run_adb(["shell", "settings", "get", "secure", "enabled_accessibility_services"], timeout=8.0)
+    services_result = _get_enabled_accessibility_services()
     if not services_result.get("ok"):
         return {
             **services_result,
@@ -214,7 +246,7 @@ def enable_helper() -> dict[str, object]:
             "error": services_result.get("error") or services_result.get("stderr") or "failed to read accessibility services",
         }
 
-    before = str(services_result.get("stdout", "")).strip()
+    before = str(services_result.get("enabled_accessibility_services", "")).strip()
     services = _split_enabled_accessibility_services_preserve(before)
     normalized = {service.lower() for service in services}
     appended = False
@@ -256,6 +288,119 @@ def enable_helper() -> dict[str, object]:
         "before_enabled_accessibility_services": before,
         "after_enabled_accessibility_services": ":".join(services),
         "helper_service_appended": appended,
+    }
+
+
+def enable_talkback() -> dict[str, object]:
+    packages_result = _get_installed_packages()
+    if not packages_result.get("ok"):
+        return {
+            **packages_result,
+            "status": "error",
+            "adb_status": "adb_error",
+            "candidates": TALKBACK_SERVICE_CANDIDATES,
+            "error": packages_result.get("error") or packages_result.get("stderr") or "failed to read installed packages",
+        }
+
+    installed_packages = packages_result.get("packages")
+    package_names = installed_packages if isinstance(installed_packages, set) else set()
+    selected_service = next(
+        (service for package, service in TALKBACK_PACKAGE_TO_SERVICE.items() if package in package_names),
+        None,
+    )
+    if selected_service is None:
+        return {
+            "ok": False,
+            "status": "error",
+            "error": "TalkBack service package not found",
+            "candidates": TALKBACK_SERVICE_CANDIDATES,
+        }
+
+    services_result = _get_enabled_accessibility_services()
+    if not services_result.get("ok"):
+        return {
+            **services_result,
+            "status": "error",
+            "adb_status": "adb_error",
+            "service_name": selected_service,
+            "candidates": TALKBACK_SERVICE_CANDIDATES,
+            "error": services_result.get("error") or services_result.get("stderr") or "failed to read accessibility services",
+        }
+
+    accessibility_enabled_result = _get_accessibility_enabled()
+    if not accessibility_enabled_result.get("ok"):
+        return {
+            **accessibility_enabled_result,
+            "status": "error",
+            "adb_status": "adb_error",
+            "service_name": selected_service,
+            "candidates": TALKBACK_SERVICE_CANDIDATES,
+            "error": accessibility_enabled_result.get("error") or accessibility_enabled_result.get("stderr") or "failed to read accessibility enabled state",
+        }
+
+    before_services = str(services_result.get("enabled_accessibility_services", "")).strip()
+    services = _split_enabled_accessibility_services_preserve(before_services)
+    normalized = {service.lower() for service in services}
+    appended = False
+    if selected_service.lower() not in normalized:
+        services.append(selected_service)
+        appended = True
+        write_services_result = run_adb(
+            ["shell", "settings", "put", "secure", "enabled_accessibility_services", ":".join(services)],
+            timeout=8.0,
+        )
+        if not write_services_result.get("ok"):
+            return {
+                **write_services_result,
+                "status": "error",
+                "adb_status": "adb_error",
+                "service_name": selected_service,
+                "candidates": TALKBACK_SERVICE_CANDIDATES,
+                "before_enabled_accessibility_services": before_services,
+                "error": write_services_result.get("error") or write_services_result.get("stderr") or "failed to update accessibility services",
+            }
+
+    enable_result = run_adb(["shell", "settings", "put", "secure", "accessibility_enabled", "1"], timeout=8.0)
+    if not enable_result.get("ok"):
+        return {
+            **enable_result,
+            "status": "error",
+            "adb_status": "adb_error",
+            "service_name": selected_service,
+            "candidates": TALKBACK_SERVICE_CANDIDATES,
+            "before_enabled_accessibility_services": before_services,
+            "error": enable_result.get("error") or enable_result.get("stderr") or "failed to enable accessibility",
+        }
+
+    verify_services_result = _get_enabled_accessibility_services()
+    verify_enabled_result = _get_accessibility_enabled()
+    final_services = str(verify_services_result.get("enabled_accessibility_services", "")).strip()
+    enabled = selected_service.lower() in {service.lower() for service in _split_enabled_accessibility_services(final_services)}
+    if not verify_services_result.get("ok") or not verify_enabled_result.get("ok") or not enabled:
+        return {
+            "ok": False,
+            "status": "error",
+            "service_name": selected_service,
+            "candidates": TALKBACK_SERVICE_CANDIDATES,
+            "before_enabled_accessibility_services": before_services,
+            "enabled_accessibility_services": final_services,
+            "accessibility_enabled": str(verify_enabled_result.get("accessibility_enabled", "")).strip(),
+            "helper_service_preserved": _has_enabled_helper_service(final_services),
+            "talkback_service_appended": appended,
+            "error": "TalkBack service did not verify after update",
+        }
+
+    return {
+        "ok": True,
+        "status": "enabled",
+        "service_name": selected_service,
+        "selected_package": selected_service.split("/", 1)[0],
+        "candidates": TALKBACK_SERVICE_CANDIDATES,
+        "before_enabled_accessibility_services": before_services,
+        "enabled_accessibility_services": final_services,
+        "accessibility_enabled": str(verify_enabled_result.get("accessibility_enabled", "")).strip(),
+        "helper_service_preserved": _has_enabled_helper_service(final_services),
+        "talkback_service_appended": appended,
     }
 
 

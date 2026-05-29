@@ -219,3 +219,124 @@ def test_enable_helper_does_not_duplicate_existing_helper(monkeypatch):
     assert result["helper_service_appended"] is False
     assert result["after_enabled_accessibility_services"] == before
     assert not any(call[:5] == ("shell", "settings", "put", "secure", "enabled_accessibility_services") for call in calls)
+
+
+def test_enable_talkback_prefers_samsung_service_when_package_exists(monkeypatch):
+    calls = []
+    before = f"{adb.HELPER_SERVICE_COMPONENT}:com.example/.Other"
+    expected = f"{before}:{adb.TALKBACK_SERVICE_CANDIDATES[0]}"
+
+    def fake_run_adb(args, timeout=10.0):
+        calls.append(tuple(args))
+        if tuple(args) == ("shell", "pm", "list", "packages"):
+            return {
+                "ok": True,
+                "status": "ok",
+                "stdout": "package:com.samsung.android.accessibility.talkback\npackage:com.iotpart.sqe.talkbackhelper\n",
+                "stderr": "",
+            }
+        if tuple(args) == ("shell", "settings", "get", "secure", "enabled_accessibility_services"):
+            stdout = before if len([call for call in calls if call == tuple(args)]) == 1 else expected
+            return {"ok": True, "status": "ok", "stdout": stdout, "stderr": ""}
+        if tuple(args) == ("shell", "settings", "get", "secure", "accessibility_enabled"):
+            return {"ok": True, "status": "ok", "stdout": "1", "stderr": ""}
+        if tuple(args[:5]) == ("shell", "settings", "put", "secure", "enabled_accessibility_services"):
+            return {"ok": True, "status": "ok", "stdout": "", "stderr": ""}
+        if tuple(args) == ("shell", "settings", "put", "secure", "accessibility_enabled", "1"):
+            return {"ok": True, "status": "ok", "stdout": "", "stderr": ""}
+        raise AssertionError(f"unexpected adb args: {args}")
+
+    monkeypatch.setattr(adb, "run_adb", fake_run_adb)
+
+    result = adb.enable_talkback()
+
+    assert result["ok"] is True
+    assert result["status"] == "enabled"
+    assert result["service_name"] == adb.TALKBACK_SERVICE_CANDIDATES[0]
+    assert result["enabled_accessibility_services"] == expected
+    assert result["helper_service_preserved"] is True
+    assert result["talkback_service_appended"] is True
+
+
+def test_enable_talkback_uses_google_service_when_only_google_package_exists(monkeypatch):
+    before = "com.example/.Other"
+    expected = f"{before}:{adb.TALKBACK_SERVICE_CANDIDATES[1]}"
+    service_reads = {"count": 0}
+
+    def fake_run_adb(args, timeout=10.0):
+        if tuple(args) == ("shell", "pm", "list", "packages"):
+            return {
+                "ok": True,
+                "status": "ok",
+                "stdout": "package:com.google.android.marvin.talkback\n",
+                "stderr": "",
+            }
+        if tuple(args) == ("shell", "settings", "get", "secure", "enabled_accessibility_services"):
+            service_reads["count"] += 1
+            return {"ok": True, "status": "ok", "stdout": before if service_reads["count"] == 1 else expected, "stderr": ""}
+        if tuple(args) == ("shell", "settings", "get", "secure", "accessibility_enabled"):
+            return {"ok": True, "status": "ok", "stdout": "1", "stderr": ""}
+        if tuple(args[:5]) == ("shell", "settings", "put", "secure", "enabled_accessibility_services"):
+            return {"ok": True, "status": "ok", "stdout": "", "stderr": ""}
+        if tuple(args) == ("shell", "settings", "put", "secure", "accessibility_enabled", "1"):
+            return {"ok": True, "status": "ok", "stdout": "", "stderr": ""}
+        raise AssertionError(f"unexpected adb args: {args}")
+
+    monkeypatch.setattr(adb, "run_adb", fake_run_adb)
+
+    result = adb.enable_talkback()
+
+    assert result["ok"] is True
+    assert result["service_name"] == adb.TALKBACK_SERVICE_CANDIDATES[1]
+    assert result["enabled_accessibility_services"] == expected
+
+
+def test_enable_talkback_does_not_duplicate_existing_service(monkeypatch):
+    before = f"{adb.HELPER_SERVICE_COMPONENT}:{adb.TALKBACK_SERVICE_CANDIDATES[1]}"
+    calls = []
+
+    def fake_run_adb(args, timeout=10.0):
+        calls.append(tuple(args))
+        if tuple(args) == ("shell", "pm", "list", "packages"):
+            return {
+                "ok": True,
+                "status": "ok",
+                "stdout": "package:com.google.android.marvin.talkback\npackage:com.iotpart.sqe.talkbackhelper\n",
+                "stderr": "",
+            }
+        if tuple(args) == ("shell", "settings", "get", "secure", "enabled_accessibility_services"):
+            return {"ok": True, "status": "ok", "stdout": before, "stderr": ""}
+        if tuple(args) == ("shell", "settings", "get", "secure", "accessibility_enabled"):
+            return {"ok": True, "status": "ok", "stdout": "1", "stderr": ""}
+        if tuple(args) == ("shell", "settings", "put", "secure", "accessibility_enabled", "1"):
+            return {"ok": True, "status": "ok", "stdout": "", "stderr": ""}
+        raise AssertionError(f"unexpected adb args: {args}")
+
+    monkeypatch.setattr(adb, "run_adb", fake_run_adb)
+
+    result = adb.enable_talkback()
+
+    assert result["ok"] is True
+    assert result["talkback_service_appended"] is False
+    assert result["helper_service_preserved"] is True
+    assert not any(call[:5] == ("shell", "settings", "put", "secure", "enabled_accessibility_services") for call in calls)
+
+
+def test_enable_talkback_returns_error_when_no_talkback_package_found(monkeypatch):
+    monkeypatch.setattr(
+        adb,
+        "run_adb",
+        lambda args, timeout=10.0: {
+            "ok": True,
+            "status": "ok",
+            "stdout": "package:com.example.app\n" if tuple(args) == ("shell", "pm", "list", "packages") else "",
+            "stderr": "",
+        },
+    )
+
+    result = adb.enable_talkback()
+
+    assert result["ok"] is False
+    assert result["status"] == "error"
+    assert result["error"] == "TalkBack service package not found"
+    assert result["candidates"] == adb.TALKBACK_SERVICE_CANDIDATES

@@ -30,6 +30,17 @@ class _FakeProcess:
         return 0
 
 
+def _language_ok(language_mode="current", device_locale="en-US"):
+    return {
+        "ok": True,
+        "status": "ok",
+        "language_mode": language_mode,
+        "device_locale": device_locale,
+        "changed": False,
+        "verified": True,
+    }
+
+
 def test_run_manager_initial_state_is_idle():
     state = RunManager().get_status()
 
@@ -41,6 +52,8 @@ def test_run_manager_initial_state_is_idle():
     assert state["scenario_selection_applied"] is False
     assert state["runtime_config_path"] is None
     assert state["launch_mode"] == "clean"
+    assert state["language_mode"] == "current"
+    assert state["device_locale"] is None
     assert state["preflight_state"] is None
 
 
@@ -48,6 +61,7 @@ def test_start_run_request_defaults_launch_mode_to_clean():
     request = StartRunRequest()
 
     assert request.launch_mode == "clean"
+    assert request.language_mode == "current"
 
 
 def test_run_manager_rejects_start_when_process_is_already_running():
@@ -73,11 +87,14 @@ def test_run_manager_blocks_when_preflight_blocks(monkeypatch):
         "user_message": "TalkBack is disabled. Accessibility settings opened on device. Please enable TalkBack and retry.",
     }
 
+    monkeypatch.setattr("qa_frontend.backend.runner.apply_language_mode", lambda language_mode: _language_ok(language_mode))
     monkeypatch.setattr("qa_frontend.backend.runner.run_runtime_preflight", lambda launch_mode: blocked)
 
-    state = RunManager().start_run(mode="smoke", scenario_ids=["global_nav_main"], launch_mode="warm")
+    state = RunManager().start_run(mode="smoke", scenario_ids=["global_nav_main"], launch_mode="warm", language_mode="ko-KR")
 
     assert state["state"] == "error"
+    assert state["language_mode"] == "ko-KR"
+    assert state["device_locale"] == "en-US"
     assert state["preflight_state"] == "blocked"
     assert state["preflight_reason"] == "talkback_disabled"
     assert state["talkback_state"] == "disabled"
@@ -98,6 +115,43 @@ def test_run_manager_blocks_when_no_scenario_selected(tmp_path, monkeypatch):
     assert summary["schema_version"] == 1
     assert summary["process_status"] == "failed"
     assert summary["scenario_result_status"] == "unknown"
+
+
+def test_run_manager_blocks_when_language_verify_fails(tmp_path, monkeypatch):
+    source_path = tmp_path / "runtime_config.json"
+    source_path.write_text(
+        json.dumps({"scenarios": {"global_nav_main": {"enabled": False, "max_steps": 10}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    language_error = {
+        "ok": False,
+        "status": "error",
+        "language_mode": "en-US",
+        "device_locale": "ko-KR",
+        "target_locale": "en-US",
+        "verified": False,
+        "manual_language_change_required": True,
+        "settings_intent": "android.settings.LOCALE_SETTINGS",
+        "error": "device locale did not verify as en-US",
+    }
+
+    monkeypatch.setattr("qa_frontend.backend.runner.RUNTIME_CONFIG_PATH", source_path)
+    monkeypatch.setattr("qa_frontend.backend.runner.RUN_LOG_DIR", tmp_path / "runs")
+    monkeypatch.setattr("qa_frontend.backend.runner.apply_language_mode", lambda language_mode: language_error)
+
+    state = RunManager().start_run(mode="smoke", scenario_ids=["global_nav_main"], language_mode="en-US")
+
+    assert state["state"] == "error"
+    assert state["language_mode"] == "en-US"
+    assert state["device_locale"] == "ko-KR"
+    assert state["target_locale"] == "en-US"
+    assert state["manual_language_change_required"] is True
+    assert state["language_error"] == "device locale did not verify as en-US"
+    assert state["language_settings_intent"] == "android.settings.LOCALE_SETTINGS"
+    assert "device locale did not verify" in str(state["error"])
+    log_text = (tmp_path / "runs" / f"{state['run_id']}_smoke.log").read_text(encoding="utf-8")
+    assert "[QA_FRONTEND][language]" in log_text
+    assert "verified='false'" in log_text
 
 
 def test_run_manager_writes_selected_runtime_config_and_env_without_mutating_source(tmp_path, monkeypatch):
@@ -130,12 +184,15 @@ def test_run_manager_writes_selected_runtime_config_and_env_without_mutating_sou
 
     monkeypatch.setattr("qa_frontend.backend.runner.RUNTIME_CONFIG_PATH", source_path)
     monkeypatch.setattr("qa_frontend.backend.runner.RUN_LOG_DIR", tmp_path / "runs")
+    monkeypatch.setattr("qa_frontend.backend.runner.apply_language_mode", lambda language_mode: _language_ok(language_mode, "ko-KR"))
     monkeypatch.setattr("qa_frontend.backend.runner.run_runtime_preflight", lambda launch_mode: passed)
     monkeypatch.setattr("qa_frontend.backend.runner.subprocess.Popen", fake_popen)
 
-    state = RunManager().start_run(mode="smoke", scenario_ids=["global_nav_main"], launch_mode="warm")
+    state = RunManager().start_run(mode="smoke", scenario_ids=["global_nav_main"], launch_mode="warm", language_mode="ko-KR")
 
     assert state["scenario_selection_applied"] is True
+    assert state["language_mode"] == "ko-KR"
+    assert state["device_locale"] == "ko-KR"
     assert state["runtime_config_path"]
     assert state["max_steps_policy"] == "smoke_override"
     assert captured["env"]["TB_RUNTIME_CONFIG_PATH"] == state["runtime_config_path"]
@@ -152,6 +209,8 @@ def test_run_manager_writes_selected_runtime_config_and_env_without_mutating_sou
 
     log_text = (tmp_path / "runs" / f"{state['run_id']}_smoke.log").read_text(encoding="utf-8")
     assert "scenario_selection_applied=true" in log_text
+    assert "language_mode='ko-KR'" in log_text
+    assert "[QA_FRONTEND][language]" in log_text
     assert str(state["runtime_config_path"]) in log_text
     assert "[QA_FRONTEND][runtime_config]" in log_text
     assert "max_steps_policy='smoke_override'" in log_text
@@ -185,12 +244,15 @@ def test_run_manager_uses_clean_launch_mode_when_omitted(tmp_path, monkeypatch):
 
     monkeypatch.setattr("qa_frontend.backend.runner.RUNTIME_CONFIG_PATH", source_path)
     monkeypatch.setattr("qa_frontend.backend.runner.RUN_LOG_DIR", tmp_path / "runs")
+    monkeypatch.setattr("qa_frontend.backend.runner.apply_language_mode", lambda language_mode: _language_ok(language_mode, "en-US"))
     monkeypatch.setattr("qa_frontend.backend.runner.run_runtime_preflight", lambda launch_mode: {**passed, "launch_mode": launch_mode})
     monkeypatch.setattr("qa_frontend.backend.runner.subprocess.Popen", fake_popen)
 
     state = RunManager().start_run(mode="smoke", scenario_ids=["global_nav_main"])
 
     assert state["launch_mode"] == "clean"
+    assert state["language_mode"] == "current"
+    assert state["device_locale"] == "en-US"
     assert state["preflight"]["launch_mode"] == "clean"
     assert captured["env"]["TB_RUNTIME_CONFIG_PATH"] == state["runtime_config_path"]
 
@@ -223,6 +285,7 @@ def test_run_manager_full_mode_preserves_source_max_steps(tmp_path, monkeypatch)
 
     monkeypatch.setattr("qa_frontend.backend.runner.RUNTIME_CONFIG_PATH", source_path)
     monkeypatch.setattr("qa_frontend.backend.runner.RUN_LOG_DIR", tmp_path / "runs")
+    monkeypatch.setattr("qa_frontend.backend.runner.apply_language_mode", lambda language_mode: _language_ok(language_mode, "en-US"))
     monkeypatch.setattr("qa_frontend.backend.runner.run_runtime_preflight", lambda launch_mode: passed)
     monkeypatch.setattr("qa_frontend.backend.runner.subprocess.Popen", fake_popen)
 

@@ -8,6 +8,7 @@ from typing import Any
 
 from .paths import OUTPUT_DIR
 from .runtime_dashboard import parse_runtime_log
+from .runtime_dashboard import extract_validation_scenario_evidence_from_log
 
 SUMMARY_SCHEMA_VERSION = 1
 SAVED_EXCEL_PATTERN = re.compile(r"saved excel:\s+output/(?P<filename>[^/\s]+\.xlsx)", re.IGNORECASE)
@@ -28,7 +29,13 @@ def build_run_summary(
     scenario_ids: list[str] | None = None,
 ) -> dict[str, object]:
     log_text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
-    parsed = _parse_runtime_log_safe(log_text, scenario_ids=scenario_ids)
+    validation_failed_scenarios, validation_warning_scenarios = extract_validation_scenario_evidence_from_log(log_text)
+    parsed = _parse_runtime_log_safe(
+        log_text,
+        scenario_ids=scenario_ids,
+        validation_failed_scenarios=validation_failed_scenarios,
+        validation_warning_scenarios=validation_warning_scenarios,
+    )
     process_status = resolve_process_status(status=status, log_text=log_text)
     scenario_result_status = resolve_scenario_result_status(process_status, parsed)
     xlsx_filename = extract_saved_excel_filename(log_text)
@@ -44,11 +51,15 @@ def build_run_summary(
         "run_id": run_id,
         "mode": _string_or_none(status.get("mode")) or mode,
         "launch_mode": _string_or_none(status.get("launch_mode")) or parsed.get("launch_mode"),
+        "language_mode": _string_or_none(status.get("language_mode")) or parsed.get("language_mode"),
+        "device_locale": _string_or_none(status.get("device_locale")) or parsed.get("device_locale"),
         "started_at": started_at,
         "finished_at": finished_at,
         "elapsed_seconds": _elapsed_seconds(started_at, finished_at),
         "process_status": process_status,
         "scenario_result_status": scenario_result_status,
+        "passed_scenarios": int(parsed.get("passed_scenarios") or 0),
+        "warning_scenarios": int(parsed.get("warning_scenarios") or 0),
         "completed_scenarios": int(parsed.get("completed_scenarios") or 0),
         "failed_scenarios": int(parsed.get("failed_scenarios") or 0),
         "total_scenarios": len(parsed.get("scenario_progress") or []),
@@ -133,12 +144,15 @@ def resolve_scenario_result_status(process_status: str, runtime_summary: dict[st
     if process_status == "running":
         return "running"
 
+    warning_scenarios = int(runtime_summary.get("warning_scenarios") or 0)
     completed_scenarios = int(runtime_summary.get("completed_scenarios") or 0)
     failed_scenarios = int(runtime_summary.get("failed_scenarios") or 0)
     total_scenarios = len(runtime_summary.get("scenario_progress") or [])
 
     if failed_scenarios > 0:
         return "failed"
+    if warning_scenarios > 0:
+        return "warning"
     if process_status == "stopped" and completed_scenarios > 0:
         return "partial"
     if process_status == "stopped" and completed_scenarios == 0:
@@ -150,15 +164,28 @@ def resolve_scenario_result_status(process_status: str, runtime_summary: dict[st
     return "unknown"
 
 
-def _parse_runtime_log_safe(log_text: str, *, scenario_ids: list[str] | None) -> dict[str, object]:
+def _parse_runtime_log_safe(
+    log_text: str,
+    *,
+    scenario_ids: list[str] | None,
+    validation_failed_scenarios: set[str] | None = None,
+    validation_warning_scenarios: set[str] | None = None,
+) -> dict[str, object]:
     try:
-        return parse_runtime_log(log_text, scenario_ids=scenario_ids or [])
+        return parse_runtime_log(
+            log_text,
+            scenario_ids=scenario_ids or [],
+            validation_failed_scenarios=validation_failed_scenarios,
+            validation_warning_scenarios=validation_warning_scenarios,
+        )
     except Exception as exc:
         return {
             "parse_error": str(exc),
             "scenario_progress": [],
             "completed_scenarios": 0,
             "failed_scenarios": 0,
+            "passed_scenarios": 0,
+            "warning_scenarios": 0,
             "total_step_count": 0,
             "overlay_count": 0,
             "save_excel_count": 0,

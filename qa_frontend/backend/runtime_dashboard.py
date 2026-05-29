@@ -21,7 +21,8 @@ STOP_REASON_RE = re.compile(r"reason='([^']+)'")
 POPUP_RESULT_RE = re.compile(r"\[QA_FRONTEND\]\[preflight\]\[popup\].*result='([^']*)'")
 PREFLIGHT_FINAL_RE = re.compile(r"\[QA_FRONTEND\]\[preflight\] final_result='([^']*)'")
 PRE_STATUS_RE = re.compile(r"\[QA_FRONTEND\]\[preflight\]\[(adb|helper)\] status='([^']*)'")
-RUN_START_RE = re.compile(r"\[QA_FRONTEND\] start mode='([^']*)'.*launch_mode='([^']*)'")
+RUN_START_RE = re.compile(r"\[QA_FRONTEND\] start mode='([^']*)'.*launch_mode='([^']*)'(?:.*language_mode='([^']*)')?")
+LANGUAGE_RE = re.compile(r"\[QA_FRONTEND\]\[language\].*language_mode='([^']*)'.*device_locale='([^']*)'")
 SAVED_EXCEL_RE = re.compile(r"saved excel:\s+output/(?P<filename>[^/\s]+\.xlsx)", re.IGNORECASE)
 ACCESSIBILITY_PASS_MISMATCH_TYPES = {
     "EXACT_MATCH",
@@ -72,6 +73,8 @@ def build_runtime_dashboard(
     dashboard["run_id"] = status.get("run_id")
     dashboard["mode"] = status.get("mode")
     dashboard["launch_mode"] = status.get("launch_mode")
+    dashboard["language_mode"] = status.get("language_mode")
+    dashboard["device_locale"] = status.get("device_locale") or dashboard.get("device_locale")
     dashboard["state"] = status.get("state")
     dashboard["preflight_state"] = status.get("preflight_state") or dashboard.get("preflight_state")
     dashboard["popup_result"] = status.get("popup_result") or dashboard.get("popup_result")
@@ -116,6 +119,8 @@ def parse_runtime_log(
     helper_status = None
     mode = None
     launch_mode = None
+    language_mode = None
+    device_locale = None
 
     for index, line in enumerate(lines):
         raw_scenario = _extract_scenario(line)
@@ -148,7 +153,14 @@ def parse_runtime_log(
             if run_match:
                 mode = run_match.group(1)
                 launch_mode = run_match.group(2)
+                language_mode = run_match.group(3)
                 _add_event(events, index, "run_started", line, scenario=None)
+        elif "[QA_FRONTEND][language]" in line:
+            language_match = LANGUAGE_RE.search(line)
+            if language_match:
+                language_mode = language_match.group(1)
+                device_locale = language_match.group(2) or None
+                _add_event(events, index, "language_ready", line, scenario=None)
         elif "[QA_FRONTEND][preflight][popup]" in line:
             popup_match = POPUP_RESULT_RE.search(line)
             if popup_match:
@@ -272,6 +284,8 @@ def parse_runtime_log(
     return {
         "mode": mode,
         "launch_mode": launch_mode,
+        "language_mode": language_mode,
+        "device_locale": device_locale,
         "current_scenario": current_scenario,
         "passed_scenarios": passed_count,
         "warning_scenarios": warning_count,
@@ -302,6 +316,8 @@ def _empty_dashboard(*, status: dict[str, object], started_at: str | None, scena
         "run_id": status.get("run_id"),
         "mode": status.get("mode"),
         "launch_mode": status.get("launch_mode"),
+        "language_mode": status.get("language_mode"),
+        "device_locale": status.get("device_locale"),
         "state": status.get("state"),
         "started_at": started_at,
         "elapsed_seconds": _elapsed_seconds(started_at, _string_or_none(status.get("finished_at"))),

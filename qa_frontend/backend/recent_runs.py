@@ -77,6 +77,8 @@ def parse_recent_run(path: Path, *, current_status: dict[str, object] | None = N
     runtime_summary = parse_runtime_log(log_text)
     scenario_result_status = resolve_scenario_result_status(process_status, runtime_summary)
     completed_scenarios = int(runtime_summary.get("completed_scenarios") or 0)
+    passed_scenarios = int(runtime_summary.get("passed_scenarios") or 0)
+    warning_scenarios = int(runtime_summary.get("warning_scenarios") or 0)
     failed_scenarios = int(runtime_summary.get("failed_scenarios") or 0)
     total_scenarios = len(runtime_summary.get("scenario_progress") or [])
     event_warning_count = _count_warning_events(runtime_summary)
@@ -84,9 +86,13 @@ def parse_recent_run(path: Path, *, current_status: dict[str, object] | None = N
     return {
         "run_id": run_id,
         "mode": mode,
+        "language_mode": _string_or_none(runtime_summary.get("language_mode")) or "current",
+        "device_locale": _string_or_none(runtime_summary.get("device_locale")),
         "status": process_status,
         "process_status": process_status,
         "scenario_result_status": scenario_result_status,
+        "passed_scenarios": passed_scenarios,
+        "warning_scenarios": warning_scenarios,
         "completed_scenarios": completed_scenarios,
         "failed_scenarios": failed_scenarios,
         "total_scenarios": total_scenarios,
@@ -126,9 +132,13 @@ def _recent_run_from_summary(
     return {
         "run_id": _string_or_none(summary.get("run_id")) or run_id,
         "mode": _string_or_none(summary.get("mode")) or mode,
+        "language_mode": _string_or_none(summary.get("language_mode")) or "current",
+        "device_locale": _string_or_none(summary.get("device_locale")),
         "status": process_status,
         "process_status": process_status,
         "scenario_result_status": str(summary.get("scenario_result_status") or "unknown"),
+        "passed_scenarios": int(summary.get("passed_scenarios") or 0),
+        "warning_scenarios": int(summary.get("warning_scenarios") or 0),
         "completed_scenarios": int(summary.get("completed_scenarios") or 0),
         "failed_scenarios": int(summary.get("failed_scenarios") or 0),
         "total_scenarios": int(summary.get("total_scenarios") or 0),
