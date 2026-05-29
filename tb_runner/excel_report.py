@@ -1,6 +1,7 @@
 import os
 from io import BytesIO
 from pathlib import Path
+import json
 import re
 
 import pandas as pd
@@ -854,6 +855,79 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     _pick_col("failure_reason", ["failure_reason"])
     _pick_col("_row_source", ["row_source"], default="")
     _pick_col("_representative_row_source", ["representative_row_source"], default="")
+    _pick_col("_representative_resource_id", ["representative_resource_id"], default="")
+    _pick_col("_focus_node", ["focus_node"], default="")
+
+    for text_col in (
+        "visible_label",
+        "merged_announcement",
+        "representative_visible",
+        "focus_view_id",
+        "_representative_row_source",
+        "_representative_resource_id",
+    ):
+        result[text_col] = result[text_col].fillna("")
+
+    def _focus_node_label(value: object) -> str:
+        node = value
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                node = {}
+            else:
+                try:
+                    node = json.loads(text)
+                except Exception:
+                    node = {}
+        if not isinstance(node, dict):
+            return ""
+        for key in ("talkbackLabel", "mergedLabel", "contentDescription", "text"):
+            candidate = str(node.get(key, "") or "").strip()
+            if candidate:
+                return candidate
+        return ""
+
+    def _representative_semantics_available(row: pd.Series) -> bool:
+        return (
+            str(row.get("_representative_row_source", "") or "").strip() == "representative"
+            and bool(str(row.get("representative_visible", "") or "").strip())
+        )
+
+    representative_mask = result.apply(_representative_semantics_available, axis=1)
+    visible_empty_mask = result["visible_label"].fillna("").astype(str).str.strip() == ""
+    speech_empty_mask = result["merged_announcement"].fillna("").astype(str).str.strip() == ""
+    focus_id_empty_mask = result["focus_view_id"].fillna("").astype(str).str.strip() == ""
+    if representative_mask.any():
+        result.loc[representative_mask & visible_empty_mask, "visible_label"] = result.loc[
+            representative_mask & visible_empty_mask,
+            "representative_visible",
+        ]
+        result.loc[representative_mask & speech_empty_mask, "merged_announcement"] = result.loc[
+            representative_mask & speech_empty_mask,
+            "representative_visible",
+        ]
+        representative_id_mask = representative_mask & (
+            focus_id_empty_mask
+            | (result["visible_label"].fillna("").astype(str).str.strip() == result["representative_visible"].fillna("").astype(str).str.strip())
+        )
+        result.loc[representative_id_mask, "focus_view_id"] = result.loc[
+            representative_id_mask,
+            "_representative_resource_id",
+        ].where(
+            result.loc[representative_id_mask, "_representative_resource_id"].fillna("").astype(str).str.strip() != "",
+            result.loc[representative_id_mask, "focus_view_id"],
+        )
+
+    focus_node_labels = result["_focus_node"].apply(_focus_node_label)
+    visible_empty_mask = result["visible_label"].fillna("").astype(str).str.strip() == ""
+    speech_empty_mask = result["merged_announcement"].fillna("").astype(str).str.strip() == ""
+    focus_node_label_mask = focus_node_labels.astype(str).str.strip() != ""
+    result.loc[visible_empty_mask & focus_node_label_mask, "visible_label"] = focus_node_labels.loc[
+        visible_empty_mask & focus_node_label_mask
+    ]
+    result.loc[speech_empty_mask & focus_node_label_mask, "merged_announcement"] = focus_node_labels.loc[
+        speech_empty_mask & focus_node_label_mask
+    ]
 
     result["_move_result"] = result.apply(
         lambda row: normalize_move_result(

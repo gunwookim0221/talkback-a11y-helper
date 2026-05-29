@@ -1215,7 +1215,15 @@ TAB_CONFIGS = [
                 "generic_weak_tokens": ["find"],
             },
         },
-        "verify_tokens": ["smart find", "find"],
+        "verify_tokens": [
+            "smart find",
+            "find",
+            "current location",
+            "my devices",
+            "offline",
+            "com.samsung.android.plugin.fme",
+        ],
+        "negative_verify_tokens": ["location qr code", "change location"],
         "anchor_name": "(?i).*navigate\\s*up.*",
         "anchor_type": "a",
         "anchor": {
@@ -1225,7 +1233,7 @@ TAB_CONFIGS = [
         },
         "context_verify": {
             "type": "screen_text",
-            "text_regex": "(?i).*smart\\s*find.*|^find$|^파인드$|.*내\\s*기기.*|.*find\\s*my\\s*(mobile|device|tag).*$",
+            "text_regex": "(?i).*smart\\s*find.*|^find$|^파인드$|.*current\\s*location.*|.*my\\s*devices.*|.*offline.*|.*내\\s*기기.*|.*find\\s*my\\s*(mobile|device|tag).*|.*com\\.samsung\\.android\\.plugin\\.fme.*$",
         },
         "enabled": False,
         "max_steps": 20,
@@ -1258,7 +1266,8 @@ TAB_CONFIGS = [
                 "generic_weak_tokens": ["video"],
             },
         },
-        "verify_tokens": ["smart video", "live view", "daily clips", "recorded clips"],
+        "verify_tokens": ["smart video", "live view", "daily clips", "recorded clips", "home camera", "홈카메라"],
+        "negative_verify_tokens": ["location qr code", "change location"],
         "anchor_name": "(?i).*navigate\\s*up.*",
         "anchor_type": "a",
         "anchor": {
@@ -1268,7 +1277,7 @@ TAB_CONFIGS = [
         },
         "context_verify": {
             "type": "screen_text",
-            "text_regex": "(?i)(^video$|.*smart\\s*video.*|.*live\\s*view.*|.*daily\\s*clips.*|.*recorded\\s*clips.*|^비디오$)",
+            "text_regex": "(?i)(^video$|.*smart\\s*video.*|.*live\\s*view.*|.*daily\\s*clips.*|.*recorded\\s*clips.*|.*home\\s*camera.*|.*홈카메라.*|^비디오$)",
         },
         "enabled": False,
         "max_steps": 20,

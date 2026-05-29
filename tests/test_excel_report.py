@@ -628,6 +628,68 @@ def test_make_result_df_marks_representative_context_and_keeps_representative_vi
     assert result.iloc[0]["mismatch_type"] == "REPRESENTATIVE_CONTEXT"
 
 
+def test_make_result_df_uses_representative_when_actual_focus_is_empty():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "life_home_monitor_plugin",
+                "tab_name": "life",
+                "step_index": 2,
+                "context_type": "main",
+                "visible_label": "",
+                "merged_announcement": "",
+                "representative_visible": "Arm (stay)",
+                "representative_resource_id": "com.samsung.android.oneconnect:id/shmBannerStayButton",
+                "row_source": "actual_focus",
+                "representative_row_source": "representative",
+                "move_result": "moved",
+                "focus_view_id": "com.samsung.android.oneconnect:id/shm_setting_button",
+                "focus_bounds": "[804,118][924,310]",
+            }
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    assert result.iloc[0]["visible_label"] == "Arm (stay)"
+    assert result.iloc[0]["merged_announcement"] == "Arm (stay)"
+    assert result.iloc[0]["focus_view_id"] == "com.samsung.android.oneconnect:id/shmBannerStayButton"
+    assert result.iloc[0]["mismatch_type"] == "EXACT_MATCH"
+    assert result.iloc[0]["final_result"] == "PASS"
+
+
+def test_make_result_df_uses_focus_node_label_fallback_for_icon_only_rows():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "s_icon",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "",
+                "merged_announcement": "",
+                "move_result": "moved",
+                "focus_view_id": "id/settings",
+                "focus_bounds": "[1,1][2,2]",
+                "focus_node": {
+                    "className": "android.widget.ImageButton",
+                    "text": None,
+                    "contentDescription": "Settings",
+                    "mergedLabel": "Settings",
+                    "talkbackLabel": "Settings",
+                },
+            }
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    assert result.iloc[0]["visible_label"] == "Settings"
+    assert result.iloc[0]["merged_announcement"] == "Settings"
+    assert result.iloc[0]["mismatch_type"] == "EXACT_MATCH"
+    assert result.iloc[0]["final_result"] == "PASS"
+
+
 def test_make_result_df_downgrades_exact_match_repeat_stop_to_warn():
     filtered_df = pd.DataFrame(
         [
