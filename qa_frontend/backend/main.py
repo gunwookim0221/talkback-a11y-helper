@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from .adb import get_adb_status, get_helper_status, install_helper
+from .adb import enable_helper, get_adb_status, get_helper_status, install_helper, open_accessibility_settings
 from .outputs import list_outputs, safe_output_path
 from .recent_runs import list_recent_runs, safe_recent_run_log_path
 from .runner import RunManager
@@ -48,6 +48,16 @@ def helper_status() -> dict[str, object]:
 @app.post("/api/helper/install")
 def helper_install() -> dict[str, object]:
     return install_helper()
+
+
+@app.post("/api/helper/enable")
+def helper_enable() -> dict[str, object]:
+    return enable_helper()
+
+
+@app.post("/api/helper/open-accessibility-settings")
+def helper_open_accessibility_settings() -> dict[str, object]:
+    return open_accessibility_settings()
 
 
 @app.get("/api/scenarios")

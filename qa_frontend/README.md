@@ -33,6 +33,8 @@ APIs:
 - `GET /api/adb/status`
 - `GET /api/helper/status`
 - `POST /api/helper/install`
+- `POST /api/helper/enable`
+- `POST /api/helper/open-accessibility-settings`
 - `GET /api/scenarios`
 - `POST /api/run/start`
 - `POST /api/run/stop`
@@ -50,7 +52,7 @@ When a run reaches a terminal state, the backend writes `qa_frontend_runs/<run_i
 
 Recent Runs is read-only. It exposes the latest run summaries plus log/xlsx downloads without rewriting source config or adding rerun behavior.
 Runtime Dashboard is read-only. It parses the current run log for best-effort progress, metrics, and event feed data while keeping the log as the source of truth.
-Run history separates process status from scenario result status. `process_status` describes execution (`success`, `failed`, `stopped`, `running`), while `scenario_result_status` describes parsed validation results (`passed`, `failed`, `partial`, `unknown`).
+Run history separates process status from scenario result status. `process_status` describes execution (`success`, `failed`, `stopped`, `running`), while `scenario_result_status` describes parsed validation results (`passed`, `warning`, `failed`, `partial`, `unknown`).
 Recent Runs uses `summary.json` as a fast path when present and valid. If the summary is missing or malformed, it falls back to parsing the log.
 
 ## Frontend
@@ -64,6 +66,27 @@ npm run dev
 ```
 
 Open the Vite URL, usually `http://localhost:5173`.
+
+## TalkBack A11y Helper
+
+The TalkBack A11y Helper APK is not stored in git. It is generated under `app/build/`, which is ignored by `.gitignore`.
+After a fresh clone or pull on another PC, build it when needed:
+
+```powershell
+.\gradlew.bat :app:assembleDebug
+```
+
+QA Frontend searches these APK paths:
+
+- `app/build/outputs/apk/**/*.apk`
+- `android/app/build/outputs/apk/**/*.apk`
+
+Use the Helper card to install the APK and then enable the accessibility service. `Enable via ADB` appends the TalkBack A11y Helper service to the existing `enabled_accessibility_services` value and preserves any existing TalkBack service.
+If ADB enable is unavailable on the device, open Settings manually:
+
+```text
+설정 > 접근성 > 설치된 앱 > TalkBack A11y Helper > 사용 중
+```
 
 ## Limitations
 

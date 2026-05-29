@@ -51,6 +51,8 @@ export type RecentRun = {
   status: string;
   process_status: string;
   scenario_result_status: string;
+  passed_scenarios?: number;
+  warning_scenarios?: number;
   completed_scenarios: number;
   failed_scenarios: number;
   total_scenarios: number;
@@ -87,6 +89,8 @@ export type RuntimeDashboard = {
   elapsed_seconds: number;
   current_scenario: string | null;
   completed_scenarios: number;
+  passed_scenarios?: number;
+  warning_scenarios?: number;
   remaining_scenarios: number;
   failed_scenarios: number;
   scenario_progress: ScenarioProgress[];
@@ -107,22 +111,60 @@ export type RuntimeDashboard = {
   parse_error: string | null;
 };
 
+export type HelperStatus = {
+  helper_name: string;
+  status: 'ok' | 'not_installed' | 'disabled' | 'apk_not_found' | 'error' | string;
+  apk_found: boolean;
+  apk_path: string | null;
+  apk_searched: string[];
+  installed: boolean;
+  accessibility_enabled: boolean;
+  package_name: string;
+  service_name: string;
+  build_command: string;
+  ok?: boolean;
+  error?: string;
+  enabled_accessibility_services?: string;
+  helper_service_appended?: boolean;
+  accessibility_settings_opened?: boolean;
+};
+
+function formatApiPayloadError(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    return '';
+  }
+  const data = payload as Record<string, unknown>;
+  const lines = [
+    data.error,
+    data.build_command ? `Build command: ${data.build_command}` : null,
+    Array.isArray(data.apk_searched) ? `Searched: ${data.apk_searched.join(', ')}` : null,
+  ].filter(Boolean);
+  return lines.join('\n');
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     ...init,
   });
+  const contentType = response.headers.get('content-type') ?? '';
+  const payload = contentType.includes('application/json') ? await response.json() : await response.text();
   if (!response.ok) {
-    const message = await response.text();
+    const message = typeof payload === 'string' ? payload : formatApiPayloadError(payload);
     throw new Error(message || response.statusText);
   }
-  return response.json() as Promise<T>;
+  if (payload && typeof payload === 'object' && (payload as Record<string, unknown>).ok === false) {
+    throw new Error(formatApiPayloadError(payload) || 'Request failed');
+  }
+  return payload as T;
 }
 
 export const api = {
   adbStatus: () => request<Record<string, unknown>>('/api/adb/status'),
-  helperStatus: () => request<Record<string, unknown>>('/api/helper/status'),
-  installHelper: () => request<Record<string, unknown>>('/api/helper/install', { method: 'POST' }),
+  helperStatus: () => request<HelperStatus>('/api/helper/status'),
+  installHelper: () => request<HelperStatus>('/api/helper/install', { method: 'POST' }),
+  enableHelper: () => request<HelperStatus>('/api/helper/enable', { method: 'POST' }),
+  openAccessibilitySettings: () => request<HelperStatus>('/api/helper/open-accessibility-settings', { method: 'POST' }),
   scenarios: () => request<{ scenarios: Scenario[] }>('/api/scenarios'),
   startRun: (mode: 'smoke' | 'full', scenarioIds: string[], launchMode: 'warm' | 'clean') =>
     request<RunStatus>('/api/run/start', {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, OutputFile, RecentRun, RunStatus, Scenario, RuntimeDashboard } from './api';
+import { api, HelperStatus, OutputFile, RecentRun, RunStatus, Scenario, RuntimeDashboard } from './api';
 import { applyPresetSelection, PRESETS, ScenarioPresetId } from './presets';
 import { DEFAULT_SCENARIO_ID, initialScenarioSelection } from './selection';
 
@@ -31,10 +31,22 @@ function formatBytes(value: number) {
 
 function healthClass(value: string | null | undefined) {
   const normalized = String(value ?? '').toLowerCase();
-  if (['finished', 'passed', 'success', 'ok', 'enabled', 'cleared', 'completed'].includes(normalized)) {
+  if (['finished', 'passed', 'success', 'ok', 'enabled', 'cleared'].includes(normalized)) {
     return 'healthOk';
   }
-  if (['running', 'queued', 'unknown', 'dismissed_unverified', 'partial', 'stopped'].includes(normalized)) {
+  if ([
+    'running',
+    'queued',
+    'unknown',
+    'dismissed_unverified',
+    'partial',
+    'stopped',
+    'warning',
+    'disabled',
+    'not_installed',
+    'apk_not_found',
+    'needs setup',
+  ].includes(normalized)) {
     return 'healthWarn';
   }
   if (['failed', 'error', 'blocked', 'adb_error', 'helper_error', 'uncleared'].includes(normalized)) {
@@ -43,12 +55,32 @@ function healthClass(value: string | null | undefined) {
   return 'healthNeutral';
 }
 
+function helperBadgeText(status: string | undefined) {
+  switch (status) {
+    case 'ok':
+      return 'OK';
+    case 'disabled':
+      return 'Needs setup';
+    case 'not_installed':
+      return 'Not installed';
+    case 'apk_not_found':
+      return 'APK not found';
+    case 'error':
+      return 'Error';
+    default:
+      return status ?? 'unknown';
+  }
+}
+
 function scenarioRunText(run: RecentRun) {
   if (run.scenario_result_status === 'failed') {
     return `Scenarios failed (${run.failed_scenarios})`;
   }
   if (run.scenario_result_status === 'passed') {
     return 'Scenarios passed';
+  }
+  if (run.scenario_result_status === 'warning') {
+    return `Scenarios warning (${run.warning_scenarios ?? 0})`;
   }
   if (run.scenario_result_status === 'partial') {
     return `Partial (${run.completed_scenarios}/${run.total_scenarios})`;
@@ -85,7 +117,7 @@ function describeScenarioSteps(scenario: Scenario, mode: 'smoke' | 'full') {
 
 export default function App() {
   const [adb, setAdb] = useState<Record<string, unknown> | null>(null);
-  const [helper, setHelper] = useState<Record<string, unknown> | null>(null);
+  const [helper, setHelper] = useState<HelperStatus | null>(null);
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<RunStatus | null>(null);
@@ -178,7 +210,29 @@ export default function App() {
   async function installHelper() {
     setError('');
     try {
-      setHelper(await api.installHelper());
+      await api.installHelper();
+      setHelper(await api.helperStatus());
+    } catch (err) {
+      setError(String(err));
+      api.helperStatus().then(setHelper).catch(() => undefined);
+    }
+  }
+
+  async function enableHelper() {
+    setError('');
+    try {
+      await api.enableHelper();
+      setHelper(await api.helperStatus());
+    } catch (err) {
+      setError(String(err));
+      api.helperStatus().then(setHelper).catch(() => undefined);
+    }
+  }
+
+  async function openAccessibilitySettings() {
+    setError('');
+    try {
+      await api.openAccessibilitySettings();
       setHelper(await api.helperStatus());
     } catch (err) {
       setError(String(err));
@@ -215,10 +269,59 @@ export default function App() {
         </article>
 
         <article className="panel">
-          <h2>Helper</h2>
-          <div className="metric">{String(helper?.status ?? 'unknown')}</div>
-          <p>{helper?.enabled ? 'Helper accessibility service enabled' : 'Helper service is not ready'}</p>
-          <button onClick={installHelper} disabled={running}>Install APK</button>
+          <div className="panelHeader">
+            <h2>{helper?.helper_name ?? 'TalkBack A11y Helper'}</h2>
+            <span className={`statusBadge ${healthClass(helper?.status)}`}>{helperBadgeText(helper?.status)}</span>
+          </div>
+          <div className="helperDetails">
+            {helper?.status === 'ok' && (
+              <>
+                <p>APK installed</p>
+                <p>Accessibility service enabled</p>
+              </>
+            )}
+            {helper?.status === 'disabled' && (
+              <>
+                <p>APK installed</p>
+                <p>Accessibility service disabled</p>
+              </>
+            )}
+            {helper?.status === 'not_installed' && (
+              <>
+                <p>APK found</p>
+                <p>Package not installed on device</p>
+              </>
+            )}
+            {helper?.status === 'apk_not_found' && (
+              <>
+                <p>Build helper APK first</p>
+                <code>{helper.build_command}</code>
+                <small>Searched: {helper.apk_searched.join(', ')}</small>
+              </>
+            )}
+            {helper?.status === 'error' && <p>{helper.error ?? 'Backend or ADB error'}</p>}
+            {helper?.apk_path && <small>APK path: {helper.apk_path}</small>}
+          </div>
+          <div className="helperActions">
+            {helper?.status === 'ok' && (
+              <>
+                <button onClick={installHelper} disabled={running}>Reinstall APK</button>
+                <button onClick={openAccessibilitySettings} disabled={running}>Open Accessibility Settings</button>
+              </>
+            )}
+            {helper?.status === 'disabled' && (
+              <>
+                <button onClick={enableHelper} disabled={running}>Enable via ADB</button>
+                <button onClick={openAccessibilitySettings} disabled={running}>Open Accessibility Settings</button>
+              </>
+            )}
+            {helper?.status === 'not_installed' && (
+              <button onClick={installHelper} disabled={running}>Install APK</button>
+            )}
+            {helper?.status === 'apk_not_found' && (
+              <button disabled>Install APK</button>
+            )}
+          </div>
         </article>
 
         <article className="panel controls">
@@ -322,8 +425,12 @@ export default function App() {
             <strong>{formatDuration(dashboard?.elapsed_seconds ?? 0)}</strong>
           </div>
           <div>
-            <span>Scenarios</span>
-            <strong>{dashboard?.completed_scenarios ?? 0}/{dashboard?.scenario_progress.length ?? selectedCount}</strong>
+            <span>Passed</span>
+            <strong>{dashboard?.passed_scenarios ?? 0}</strong>
+          </div>
+          <div>
+            <span>Warning</span>
+            <strong>{dashboard?.warning_scenarios ?? 0}</strong>
           </div>
           <div>
             <span>Failed</span>

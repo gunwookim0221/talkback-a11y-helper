@@ -142,6 +142,26 @@ p {
   margin-bottom: 12px;
 }
 
+.helperDetails {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 12px;
+}
+
+.helperDetails code {
+  background: #f4f7fa;
+  border: 1px solid #d9e0e7;
+  border-radius: 5px;
+  color: #1f3546;
+  padding: 6px 8px;
+}
+
+.helperActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .runDescription,
 .scenarioHint {
   margin-bottom: 12px;

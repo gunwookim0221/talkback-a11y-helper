@@ -12,6 +12,35 @@ from .paths import ROOT_DIR
 
 HELPER_PACKAGE_NAME = "com.iotpart.sqe.talkbackhelper"
 HELPER_SERVICE_SHORT_COMPONENT = "com.iotpart.sqe.talkbackhelper/.A11yHelperService"
+HELPER_NAME = "TalkBack A11y Helper"
+HELPER_APK_SEARCH_PATTERNS = [
+    "app/build/outputs/apk/**/*.apk",
+    "android/app/build/outputs/apk/**/*.apk",
+]
+HELPER_BUILD_COMMAND = r".\gradlew.bat :app:assembleDebug"
+
+
+def _relative_path(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    try:
+        return str(path.relative_to(ROOT_DIR))
+    except ValueError:
+        return str(path)
+
+
+def _helper_metadata(apk_path: Path | None = None) -> dict[str, object]:
+    return {
+        "helper_name": HELPER_NAME,
+        "package_name": HELPER_PACKAGE_NAME,
+        "service_name": HELPER_SERVICE_COMPONENT,
+        "component": HELPER_SERVICE_COMPONENT,
+        "package": HELPER_PACKAGE_NAME,
+        "apk_found": apk_path is not None,
+        "apk_path": _relative_path(apk_path),
+        "apk_searched": HELPER_APK_SEARCH_PATTERNS,
+        "build_command": HELPER_BUILD_COMMAND,
+    }
 
 
 def run_adb(args: list[str], timeout: float = 10.0) -> dict[str, object]:
@@ -64,13 +93,29 @@ def get_adb_status() -> dict[str, object]:
 
 
 def get_helper_status() -> dict[str, object]:
+    apk_path = _find_helper_apk()
+    metadata = _helper_metadata(apk_path)
+    if apk_path is None:
+        return {
+            **metadata,
+            "ok": True,
+            "status": "apk_not_found",
+            "installed": False,
+            "accessibility_enabled": False,
+            "package_installed": False,
+            "enabled": False,
+            "enabled_accessibility_services": "",
+        }
+
     package_result = run_adb(["shell", "pm", "list", "packages"], timeout=8.0)
     if not package_result.get("ok"):
         return {
             **package_result,
-            "status": "adb_error",
-            "component": HELPER_SERVICE_COMPONENT,
-            "package": HELPER_PACKAGE_NAME,
+            **metadata,
+            "status": "error",
+            "adb_status": "adb_error",
+            "installed": False,
+            "accessibility_enabled": False,
             "package_installed": False,
             "enabled": False,
             "enabled_accessibility_services": "",
@@ -80,9 +125,11 @@ def get_helper_status() -> dict[str, object]:
     if not services_result.get("ok"):
         return {
             **services_result,
-            "status": "adb_error",
-            "component": HELPER_SERVICE_COMPONENT,
-            "package": HELPER_PACKAGE_NAME,
+            **metadata,
+            "status": "error",
+            "adb_status": "adb_error",
+            "installed": False,
+            "accessibility_enabled": False,
             "package_installed": False,
             "enabled": False,
             "enabled_accessibility_services": "",
@@ -95,14 +142,15 @@ def get_helper_status() -> dict[str, object]:
     if package_installed and enabled:
         status = "ok"
     elif package_installed:
-        status = "installed_but_disabled"
+        status = "disabled"
     else:
         status = "not_installed"
     return {
         **services_result,
+        **metadata,
         "status": status,
-        "component": HELPER_SERVICE_COMPONENT,
-        "package": HELPER_PACKAGE_NAME,
+        "installed": package_installed,
+        "accessibility_enabled": enabled,
         "package_installed": package_installed,
         "enabled": enabled,
         "enabled_accessibility_services": enabled_services,
@@ -116,6 +164,13 @@ def _split_enabled_accessibility_services(value: str | None) -> list[str]:
     return [item.strip().lower() for item in raw.split(":") if item.strip()]
 
 
+def _split_enabled_accessibility_services_preserve(value: str | None) -> list[str]:
+    raw = str(value or "").strip()
+    if not raw or raw.lower() in {"null", "none"}:
+        return []
+    return [item.strip() for item in raw.split(":") if item.strip()]
+
+
 def _has_enabled_helper_service(enabled_services: str | None) -> bool:
     services = set(_split_enabled_accessibility_services(enabled_services))
     return (
@@ -125,12 +180,8 @@ def _has_enabled_helper_service(enabled_services: str | None) -> bool:
 
 
 def _find_helper_apk() -> Path | None:
-    patterns = [
-        "app/build/outputs/apk/**/*.apk",
-        "android/app/build/outputs/apk/**/*.apk",
-    ]
     candidates: list[Path] = []
-    for pattern in patterns:
+    for pattern in HELPER_APK_SEARCH_PATTERNS:
         candidates.extend(Path(match) for match in glob.glob(str(ROOT_DIR / pattern), recursive=True))
     candidates = [path for path in candidates if path.is_file()]
     if not candidates:
@@ -143,12 +194,75 @@ def install_helper() -> dict[str, object]:
     if apk_path is None:
         return {
             "ok": False,
-            "status": "error",
-            "error": "helper APK not found",
-            "searched": [
-                "app/build/outputs/apk/**/*.apk",
-                "android/app/build/outputs/apk/**/*.apk",
-            ],
+            "status": "apk_not_found",
+            **_helper_metadata(None),
+            "error": f"{HELPER_NAME} APK not found. Build it first: {HELPER_BUILD_COMMAND}",
+            "searched": HELPER_APK_SEARCH_PATTERNS,
         }
     result = run_adb(["install", "-r", str(apk_path)], timeout=120.0)
-    return {**result, "apk": str(apk_path)}
+    return {**result, **_helper_metadata(apk_path), "apk": str(apk_path)}
+
+
+def enable_helper() -> dict[str, object]:
+    services_result = run_adb(["shell", "settings", "get", "secure", "enabled_accessibility_services"], timeout=8.0)
+    if not services_result.get("ok"):
+        return {
+            **services_result,
+            **_helper_metadata(_find_helper_apk()),
+            "status": "error",
+            "adb_status": "adb_error",
+            "error": services_result.get("error") or services_result.get("stderr") or "failed to read accessibility services",
+        }
+
+    before = str(services_result.get("stdout", "")).strip()
+    services = _split_enabled_accessibility_services_preserve(before)
+    normalized = {service.lower() for service in services}
+    appended = False
+    if (
+        HELPER_SERVICE_COMPONENT.lower() not in normalized
+        and HELPER_SERVICE_SHORT_COMPONENT.lower() not in normalized
+    ):
+        services.append(HELPER_SERVICE_COMPONENT)
+        appended = True
+        write_result = run_adb(
+            ["shell", "settings", "put", "secure", "enabled_accessibility_services", ":".join(services)],
+            timeout=8.0,
+        )
+        if not write_result.get("ok"):
+            return {
+                **write_result,
+                **_helper_metadata(_find_helper_apk()),
+                "status": "error",
+                "adb_status": "adb_error",
+                "error": write_result.get("error") or write_result.get("stderr") or "failed to update accessibility services",
+                "before_enabled_accessibility_services": before,
+            }
+
+    enabled_result = run_adb(["shell", "settings", "put", "secure", "accessibility_enabled", "1"], timeout=8.0)
+    if not enabled_result.get("ok"):
+        return {
+            **enabled_result,
+            **_helper_metadata(_find_helper_apk()),
+            "status": "error",
+            "adb_status": "adb_error",
+            "error": enabled_result.get("error") or enabled_result.get("stderr") or "failed to enable accessibility",
+            "before_enabled_accessibility_services": before,
+            "helper_service_appended": appended,
+        }
+
+    status = get_helper_status()
+    return {
+        **status,
+        "before_enabled_accessibility_services": before,
+        "after_enabled_accessibility_services": ":".join(services),
+        "helper_service_appended": appended,
+    }
+
+
+def open_accessibility_settings() -> dict[str, object]:
+    result = run_adb(["shell", "am", "start", "-a", "android.settings.ACCESSIBILITY_SETTINGS"], timeout=8.0)
+    return {
+        **result,
+        **_helper_metadata(_find_helper_apk()),
+        "accessibility_settings_opened": bool(result.get("ok")),
+    }

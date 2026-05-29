@@ -133,10 +133,17 @@ Precondition:
 PASS:
 
 - Installed + enabled returns `status=ok`
-- Installed + disabled returns `status=installed_but_disabled`
+- Installed + disabled returns `status=disabled`
+- Local APK missing returns `status=apk_not_found` and shows build command `.\gradlew.bat :app:assembleDebug`
 - Missing package returns `status=not_installed`
-- ADB failure is the only condition that returns `status=adb_error`
+- ADB/device failure returns `status=error` with `adb_status=adb_error`
+- `POST /api/helper/enable` preserves existing TalkBack services and appends only `com.iotpart.sqe.talkbackhelper/com.iotpart.sqe.talkbackhelper.A11yHelperService`
+- `POST /api/helper/open-accessibility-settings` opens Android Accessibility Settings best-effort
 - UI helper panel reflects the returned backend state
+
+Manual setup path:
+
+- `설정 > 접근성 > 설치된 앱 > TalkBack A11y Helper > 사용 중`
 
 FAIL logs:
 
@@ -152,6 +159,7 @@ PASS:
 - `/api/run/status` includes `preflight_state`, `talkback_state`, `helper_state`, and `foreground_package`
 - `/api/run/dashboard` includes parsed runtime metrics, scenario progress, and event feed data without backend crash
 - `/api/runs/recent` separates `process_status` from `scenario_result_status`
+- Scenario status separates `passed`, `warning`, and `failed`; `FAIL_STUCK` or `repeat_no_progress` after successful entry/rows/summary is warning unless hard validation failure evidence exists
 - Run completion writes `qa_frontend_runs/<run_id>_summary.json`
 - `summary.json` is a cache/index; the run log remains the source of truth
 - Recent Runs uses valid `summary.json` as a fast path and falls back to log parsing when the summary is missing or malformed
