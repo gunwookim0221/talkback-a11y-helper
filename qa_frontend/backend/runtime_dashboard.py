@@ -49,6 +49,7 @@ def build_runtime_dashboard(
     status: dict[str, object],
     log_path: Path | None,
     scenario_ids: list[str] | None = None,
+    parsed_log: dict[str, object] | None = None,
 ) -> dict[str, object]:
     started_at = _string_or_none(status.get("started_at"))
     dashboard = _empty_dashboard(status=status, started_at=started_at, scenario_ids=scenario_ids or [])
@@ -56,16 +57,19 @@ def build_runtime_dashboard(
         return dashboard
 
     try:
-        log_text = log_path.read_text(encoding="utf-8", errors="replace")
-        validation_failed_scenarios, validation_warning_scenarios = extract_validation_scenario_evidence_from_log(log_text)
-        parsed = parse_runtime_log(
-            log_text,
-            scenario_ids=scenario_ids or [],
-            validation_failed_scenarios=validation_failed_scenarios,
-            validation_warning_scenarios=validation_warning_scenarios,
-        )
+        if parsed_log is not None:
+            parsed = parsed_log
+        else:
+            log_text = log_path.read_text(encoding="utf-8", errors="replace")
+            validation_failed_scenarios, validation_warning_scenarios = extract_validation_scenario_evidence_from_log(log_text)
+            parsed = parse_runtime_log(
+                log_text,
+                scenario_ids=scenario_ids or [],
+                validation_failed_scenarios=validation_failed_scenarios,
+                validation_warning_scenarios=validation_warning_scenarios,
+            )
+            parsed["log_size"] = log_path.stat().st_size
         dashboard.update(parsed)
-        dashboard["log_size"] = log_path.stat().st_size
     except Exception as exc:
         dashboard["parse_error"] = str(exc)
 

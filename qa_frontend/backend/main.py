@@ -122,6 +122,11 @@ def run_log() -> dict[str, object]:
     return runner.get_log_tail()
 
 
+@app.get("/api/run/snapshot")
+def run_snapshot() -> dict[str, object]:
+    return runner.get_snapshot()
+
+
 @app.get("/api/run/log/download")
 def run_log_download() -> FileResponse:
     path = runner.get_log_path()

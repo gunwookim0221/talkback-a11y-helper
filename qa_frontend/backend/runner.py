@@ -10,7 +10,7 @@ from typing import Literal
 
 from tb_runner.runtime_config import RUNTIME_CONFIG_PATH_ENV
 
-from .paths import ROOT_DIR, RUN_LOG_DIR, SCRIPT_PATH, RUNTIME_CONFIG_PATH
+from .paths import ROOT_DIR, RUN_LOG_DIR, SCRIPT_PATH, RUNTIME_CONFIG_PATH, OUTPUT_DIR
 from .device_locale import apply_language_mode, format_language_log_lines, normalize_language_mode
 from .preflight import format_preflight_log_lines, normalize_launch_mode, run_runtime_preflight
 from .run_summary import write_summary_file
@@ -41,6 +41,9 @@ class RunManager:
         self._runtime_config_path: str | None = None
         self._max_steps_policy: str | None = None
         self._scenario_steps: list[dict[str, object]] = []
+        self._dashboard_cache_key: tuple[str, int, float, str | None] | None = None
+        self._dashboard_parsed_cache: dict[str, object] | None = None
+        self._last_outputs_signature: str | None = None
 
     def start_run(
         self,
@@ -222,7 +225,64 @@ class RunManager:
             status = self._status_locked()
             log_path = self._log_path
             scenario_ids = list(self._scenario_ids)
-        return build_runtime_dashboard(status=status, log_path=log_path, scenario_ids=scenario_ids)
+            run_id = self._run_id
+            
+        parsed_log = None
+        if log_path and log_path.exists():
+            try:
+                stat = log_path.stat()
+                size = stat.st_size
+                mtime = stat.st_mtime
+                current_key = (str(log_path), size, mtime, run_id)
+                if self._dashboard_cache_key == current_key and self._dashboard_parsed_cache is not None:
+                    parsed_log = self._dashboard_parsed_cache
+                else:
+                    from .runtime_dashboard import extract_validation_scenario_evidence_from_log, parse_runtime_log
+                    log_text = log_path.read_text(encoding="utf-8", errors="replace")
+                    validation_failed_scenarios, validation_warning_scenarios = extract_validation_scenario_evidence_from_log(log_text)
+                    parsed_log = parse_runtime_log(
+                        log_text,
+                        scenario_ids=scenario_ids,
+                        validation_failed_scenarios=validation_failed_scenarios,
+                        validation_warning_scenarios=validation_warning_scenarios,
+                    )
+                    parsed_log["log_size"] = size
+                    self._dashboard_cache_key = current_key
+                    self._dashboard_parsed_cache = parsed_log
+            except Exception:
+                pass
+                
+        return build_runtime_dashboard(status=status, log_path=log_path, scenario_ids=scenario_ids, parsed_log=parsed_log)
+
+    def _get_outputs_signature(self) -> str:
+        if not OUTPUT_DIR.exists():
+            return "none"
+        try:
+            stat = OUTPUT_DIR.stat()
+            count = sum(1 for p in OUTPUT_DIR.iterdir() if p.is_file() and p.suffix.lower() in {".xlsx", ".json", ".log"})
+            return f"{stat.st_mtime}_{count}"
+        except OSError:
+            return "error"
+
+    def get_snapshot(self) -> dict[str, object]:
+        status = self.get_status()
+        dashboard = self.get_dashboard()
+        log_tail = self.get_log_tail()
+        
+        current_sig = self._get_outputs_signature()
+        outputs_changed = (current_sig != self._last_outputs_signature)
+        if outputs_changed:
+            self._last_outputs_signature = current_sig
+
+        return {
+            "status": status,
+            "dashboard": dashboard,
+            "log_tail": log_tail,
+            "run_id": status.get("run_id"),
+            "state": status.get("state"),
+            "log_path": status.get("log_path"),
+            "outputs_changed": outputs_changed,
+        }
 
     def get_log_tail(self, max_lines: int = 300) -> dict[str, object]:
         path = self._log_path

@@ -152,6 +152,8 @@ export default function App() {
   const [plannedMode, setPlannedMode] = useState<'smoke' | 'full'>('smoke');
   const preflightRef = useRef<HTMLElement | null>(null);
   const scrolledBlockedRunRef = useRef<string | null>(null);
+  const pollingRef = useRef(false);
+  const lastStateRef = useRef<string | null>(null);
 
   const running = status?.state === 'running';
   const enabledCount = useMemo(() => scenarios.filter((scenario) => scenario.enabled).length, [scenarios]);
@@ -210,19 +212,34 @@ export default function App() {
 
   async function refreshRun() {
     const started = performance.now();
-    const [runStatus, runDashboard, runLog, outputResponse, recentRunsResponse] = await Promise.all([
-      api.runStatus(),
-      api.runDashboard(),
-      api.runLog(),
-      api.outputs(),
-      api.recentRuns(),
-    ]);
-    setStatus(runStatus);
-    setDashboard(runDashboard);
-    setLog(runLog.text);
-    setOutputs(outputResponse.outputs);
-    setRecentRuns(recentRunsResponse.runs);
+    
+    const snapshot = await api.runSnapshot();
+
+    setStatus(snapshot.status);
+    setDashboard(snapshot.dashboard);
+    setLog(snapshot.log_tail.text);
+
+    if (snapshot.outputs_changed) {
+      api.outputs()
+        .then((res) => setOutputs(res.outputs))
+        .catch((err) => console.warn('Outputs poll failed:', err));
+    }
+
+    const previousState = lastStateRef.current;
+    const currentState = snapshot.state;
+    lastStateRef.current = currentState;
+
+    if (
+      previousState === 'running' &&
+      (currentState === 'finished' || currentState === 'stopped' || currentState === 'error')
+    ) {
+      api.recentRuns()
+        .then((res) => setRecentRuns(res.runs))
+        .catch((err) => console.warn('Recent runs poll failed:', err));
+    }
+
     setPollingLatencyMs(Math.round(performance.now() - started));
+    setError('');
   }
 
   useEffect(() => {
@@ -231,7 +248,13 @@ export default function App() {
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      refreshRun().catch((err) => setError(String(err)));
+      if (pollingRef.current) return;
+      pollingRef.current = true;
+      refreshRun()
+        .catch((err) => setError(String(err)))
+        .finally(() => {
+          pollingRef.current = false;
+        });
     }, 1500);
     return () => window.clearInterval(id);
   }, []);

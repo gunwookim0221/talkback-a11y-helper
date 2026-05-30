@@ -198,6 +198,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
+export type RunSnapshot = {
+  status: RunStatus;
+  dashboard: RuntimeDashboard;
+  log_tail: { lines: string[]; text: string; log_path: string | null };
+  run_id: string | null;
+  state: string | null;
+  log_path: string | null;
+  outputs_changed: boolean;
+};
+
 export const api = {
   adbStatus: () => request<Record<string, unknown>>('/api/adb/status'),
   helperStatus: () => request<HelperStatus>('/api/helper/status'),
@@ -222,6 +232,7 @@ export const api = {
   runStatus: () => request<RunStatus>('/api/run/status'),
   runDashboard: () => request<RuntimeDashboard>('/api/run/dashboard'),
   runLog: () => request<{ text: string }>('/api/run/log'),
+  runSnapshot: () => request<RunSnapshot>('/api/run/snapshot'),
   recentRuns: () => request<{ runs: RecentRun[] }>('/api/runs/recent'),
   outputs: () => request<{ outputs: OutputFile[] }>('/api/outputs'),
 };
