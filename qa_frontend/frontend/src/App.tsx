@@ -280,7 +280,7 @@ export default function App() {
 
       {error && <div className="error">{error}</div>}
 
-      <section className="grid">
+      <section className="grid2">
         <ADBPanel adb={adb} />
 
         <HelperPanel
@@ -290,7 +290,9 @@ export default function App() {
           enableHelper={enableHelper}
           openAccessibilitySettings={openAccessibilitySettings}
         />
+      </section>
 
+      <section style={{ marginTop: '14px' }}>
         <RunPanel
           launchMode={launchMode}
           setLaunchMode={setLaunchMode}

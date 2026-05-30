@@ -33,106 +33,95 @@ export function RunPanel({
 }: RunPanelProps) {
   return (
     <article className="panel controls">
-      <h2>Run</h2>
-      <p className="runDescription">
-        Smoke is a quick sanity check with reduced steps. Full is a regression run that keeps source
-        runtime_config max_steps.
-      </p>
-      <p className="scenarioHint">Clean launch is the default and recommended mode for consistent SmartThings entry.</p>
-      <div className="launchMode">
-        <label>
-          <input
-            type="radio"
-            name="launch_mode"
-            checked={launchMode === 'clean'}
-            onChange={() => setLaunchMode('clean')}
-            disabled={running}
-          />
-          <span>Clean launch</span>
-          <small>Recommended. Restarts SmartThings before running.</small>
-        </label>
-        <label>
-          <input
-            type="radio"
-            name="launch_mode"
-            checked={launchMode === 'warm'}
-            onChange={() => setLaunchMode('warm')}
-            disabled={running}
-          />
-          <span>Warm launch</span>
-          <small>Debug. Keeps current SmartThings state when possible.</small>
-        </label>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+        <h2>Run</h2>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <span style={{ fontSize: '12px', color: 'var(--color-text-dim)' }}>
+            <strong>Current:</strong> {effectiveMode === 'smoke' ? 'Smoke' : 'Full'} · {status?.launch_mode ?? launchMode} · {status?.language_mode ?? languageMode} · sel: {selectedCount}
+          </span>
+          {status?.run_id && (
+            <span style={{ fontSize: '12px', color: 'var(--color-text-dim)' }}>
+              (ID: {status.run_id} | Ret: {status.returncode ?? '-'})
+            </span>
+          )}
+        </div>
       </div>
-      <div className="languageMode">
-        <strong>Language</strong>
-        <label>
-          <input
-            type="radio"
-            name="language_mode"
-            checked={languageMode === 'current'}
-            onChange={() => setLanguageMode('current')}
-            disabled={running}
-          />
-          <span>Current device language</span>
-          <small>Run without changing the device language.</small>
-        </label>
-        <label>
-          <input
-            type="radio"
-            name="language_mode"
-            checked={languageMode === 'ko-KR'}
-            onChange={() => setLanguageMode('ko-KR')}
-            disabled={running}
-          />
-          <span>Korean (ko-KR)</span>
-          <small>Switch to Korean before running.</small>
-        </label>
-        <label>
-          <input
-            type="radio"
-            name="language_mode"
-            checked={languageMode === 'en-US'}
-            onChange={() => setLanguageMode('en-US')}
-            disabled={running}
-          />
-          <span>English (en-US)</span>
-          <small>Switch to English before running.</small>
-        </label>
+
+      <div className="runGrid">
+        <div>
+          <div className="launchMode" style={{ marginBottom: '0' }}>
+            <label style={{ padding: '4px 8px' }}>
+              <input
+                type="radio"
+                name="launch_mode"
+                checked={launchMode === 'clean'}
+                onChange={() => setLaunchMode('clean')}
+                disabled={running}
+              />
+              <span style={{ fontSize: '14px' }}>Clean launch</span>
+            </label>
+            <label style={{ padding: '4px 8px' }}>
+              <input
+                type="radio"
+                name="launch_mode"
+                checked={launchMode === 'warm'}
+                onChange={() => setLaunchMode('warm')}
+                disabled={running}
+              />
+              <span style={{ fontSize: '14px' }}>Warm launch</span>
+            </label>
+          </div>
+        </div>
+
+        <div>
+          <div className="languageMode" style={{ marginBottom: '0', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <label style={{ padding: '4px 8px', gridTemplateColumns: 'auto auto', gap: '4px' }}>
+              <input
+                type="radio"
+                name="language_mode"
+                checked={languageMode === 'current'}
+                onChange={() => setLanguageMode('current')}
+                disabled={running}
+              />
+              <span style={{ fontSize: '14px' }}>Current</span>
+            </label>
+            <label style={{ padding: '4px 8px', gridTemplateColumns: 'auto auto', gap: '4px' }}>
+              <input
+                type="radio"
+                name="language_mode"
+                checked={languageMode === 'ko-KR'}
+                onChange={() => setLanguageMode('ko-KR')}
+                disabled={running}
+              />
+              <span style={{ fontSize: '14px' }}>Korean</span>
+            </label>
+            <label style={{ padding: '4px 8px', gridTemplateColumns: 'auto auto', gap: '4px' }}>
+              <input
+                type="radio"
+                name="language_mode"
+                checked={languageMode === 'en-US'}
+                onChange={() => setLanguageMode('en-US')}
+                disabled={running}
+              />
+              <span style={{ fontSize: '14px' }}>English</span>
+            </label>
+          </div>
+        </div>
       </div>
-      <div className="buttonRow">
-        <button onClick={() => start('smoke')} disabled={running}>
+
+      <div className="buttonRow" style={{ marginTop: '12px', marginBottom: '0', justifyContent: 'flex-start' }}>
+        <button onClick={() => start('smoke')} disabled={running} style={{ minWidth: '100px' }}>
           Smoke
-          <small>Quick check · reduced steps</small>
+          <small style={{ marginTop: '0', fontSize: '10px' }}>quick check</small>
         </button>
-        <button onClick={() => start('full')} disabled={running}>
+        <button onClick={() => start('full')} disabled={running} style={{ minWidth: '100px' }}>
           Full
-          <small>Full regression · source max_steps</small>
+          <small style={{ marginTop: '0', fontSize: '10px' }}>regression</small>
         </button>
-        <button className="danger" onClick={stop} disabled={!running}>Stop</button>
+        <button className="danger" onClick={stop} disabled={!running} style={{ minWidth: '100px', alignSelf: 'center' }}>
+          Stop
+        </button>
       </div>
-      <div className="modeSummary">
-        <strong>Current mode:</strong> {effectiveMode === 'smoke' ? 'Smoke' : 'Full'}
-        <span>Step policy: {status?.max_steps_policy ?? (effectiveMode === 'smoke' ? 'smoke_override' : 'source_preserved')}</span>
-        <small>{stepPolicyText}</small>
-      </div>
-      <dl>
-        <dt>Run ID</dt>
-        <dd>{status?.run_id ?? '-'}</dd>
-        <dt>Mode</dt>
-        <dd>{status?.mode ?? '-'}</dd>
-        <dt>Return</dt>
-        <dd>{status?.returncode ?? '-'}</dd>
-        <dt>Launch</dt>
-        <dd>{status?.launch_mode ?? launchMode}</dd>
-        <dt>Language</dt>
-        <dd>{languageLabel(status?.language_mode ?? languageMode)}</dd>
-        <dt>Locale</dt>
-        <dd>{status?.device_locale ?? '-'}</dd>
-        <dt>Selected</dt>
-        <dd>{selectedCount}</dd>
-        <dt>Config</dt>
-        <dd>{status?.runtime_config_path ?? '-'}</dd>
-      </dl>
     </article>
   );
 }
