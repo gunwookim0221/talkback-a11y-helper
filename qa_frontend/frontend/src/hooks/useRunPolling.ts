@@ -68,14 +68,22 @@ export function useRunPolling({ onOutputsChanged, onRunFinished }: UseRunPolling
     return () => window.clearInterval(id);
   }, []);
 
+  const clearError = useCallback(() => {
+    setError('');
+  }, []);
+
+  const reportError = useCallback((err: unknown) => {
+    setError(String(err));
+  }, []);
+
   return {
     status,
-    setStatus,
     dashboard,
     log,
     pollingLatencyMs,
     error,
-    setError,
+    clearError,
+    reportError,
     refreshRun,
   };
 }

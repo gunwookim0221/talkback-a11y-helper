@@ -30,12 +30,12 @@ export default function App() {
 
   const {
     status,
-    setStatus,
     dashboard,
     log,
     pollingLatencyMs,
     error,
-    setError,
+    clearError,
+    reportError,
     refreshRun,
   } = useRunPolling({
     onOutputsChanged: () => {
@@ -106,7 +106,7 @@ export default function App() {
   }
 
   useEffect(() => {
-    refreshStatic().then(refreshRun).catch((err) => setError(String(err)));
+    refreshStatic().then(refreshRun).catch((err) => reportError(err));
   }, [refreshRun]);
 
   useEffect(() => {
@@ -121,75 +121,75 @@ export default function App() {
   }, [shouldScrollToPreflight, status?.run_id]);
 
   async function start(mode: 'smoke' | 'full') {
-    setError('');
+    clearError();
     setPlannedMode(mode);
     try {
-      setStatus(await api.startRun(mode, Array.from(selected), launchMode, languageMode));
+      await api.startRun(mode, Array.from(selected), launchMode, languageMode);
       await refreshRun();
     } catch (err) {
-      setError(String(err));
+      reportError(err);
     }
   }
 
   async function stop() {
-    setError('');
+    clearError();
     try {
-      setStatus(await api.stopRun());
+      await api.stopRun();
       await refreshRun();
     } catch (err) {
-      setError(String(err));
+      reportError(err);
     }
   }
 
   async function installHelper() {
-    setError('');
+    clearError();
     try {
       await api.installHelper();
       setHelper(await api.helperStatus());
     } catch (err) {
-      setError(String(err));
+      reportError(err);
       api.helperStatus().then(setHelper).catch(() => undefined);
     }
   }
 
   async function enableHelper() {
-    setError('');
+    clearError();
     try {
       await api.enableHelper();
       setHelper(await api.helperStatus());
     } catch (err) {
-      setError(String(err));
+      reportError(err);
       api.helperStatus().then(setHelper).catch(() => undefined);
     }
   }
 
   async function openAccessibilitySettings() {
-    setError('');
+    clearError();
     try {
       await api.openAccessibilitySettings();
       setHelper(await api.helperStatus());
     } catch (err) {
-      setError(String(err));
+      reportError(err);
     }
   }
 
   async function openLanguageSettings() {
-    setError('');
+    clearError();
     try {
       await api.openLanguageSettings();
       await refreshRun();
     } catch (err) {
-      setError(String(err));
+      reportError(err);
     }
   }
 
   async function enableTalkBack() {
-    setError('');
+    clearError();
     try {
       await api.enableTalkBack();
       await refreshRun();
     } catch (err) {
-      setError(String(err));
+      reportError(err);
       refreshRun().catch(() => undefined);
     }
   }
