@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, HelperStatus, OutputFile, RecentRun, RunStatus, Scenario, RuntimeDashboard } from './api';
 import { applyPresetSelection, PRESETS, ScenarioPresetId } from './presets';
 import { DEFAULT_SCENARIO_ID, initialScenarioSelection } from './selection';
+import { ADBPanel } from './components/ADBPanel';
+import { HelperPanel } from './components/HelperPanel';
+import { RunPanel } from './components/RunPanel';
 
 function formatTime(value: number) {
   return new Date(value * 1000).toLocaleString();
@@ -427,170 +430,29 @@ export default function App() {
       {error && <div className="error">{error}</div>}
 
       <section className="grid">
-        <article className="panel">
-          <h2>ADB</h2>
-          <div className="metric">{String(adb?.status ?? 'unknown')}</div>
-          <pre>{JSON.stringify(adb?.devices ?? [], null, 2)}</pre>
-        </article>
+        <ADBPanel adb={adb} />
 
-        <article className="panel">
-          <div className="panelHeader">
-            <h2>{helper?.helper_name ?? 'TalkBack A11y Helper'}</h2>
-            <span className={`statusBadge ${healthClass(helper?.status)}`}>{helperBadgeText(helper?.status)}</span>
-          </div>
-          <div className="helperDetails">
-            {helper?.status === 'ok' && (
-              <>
-                <p>APK installed</p>
-                <p>Accessibility service enabled</p>
-              </>
-            )}
-            {helper?.status === 'disabled' && (
-              <>
-                <p>APK installed</p>
-                <p>Accessibility service disabled</p>
-              </>
-            )}
-            {helper?.status === 'not_installed' && (
-              <>
-                <p>APK found</p>
-                <p>Package not installed on device</p>
-              </>
-            )}
-            {helper?.status === 'apk_not_found' && (
-              <>
-                <p>Build helper APK first</p>
-                <code>{helper.build_command}</code>
-                <small>Searched: {helper.apk_searched.join(', ')}</small>
-              </>
-            )}
-            {helper?.status === 'error' && <p>{helper.error ?? 'Backend or ADB error'}</p>}
-            {helper?.apk_path && <small>APK path: {helper.apk_path}</small>}
-          </div>
-          <div className="helperActions">
-            {helper?.status === 'ok' && (
-              <>
-                <button onClick={installHelper} disabled={running}>Reinstall APK</button>
-                <button onClick={openAccessibilitySettings} disabled={running}>Open Accessibility Settings</button>
-              </>
-            )}
-            {helper?.status === 'disabled' && (
-              <>
-                <button onClick={enableHelper} disabled={running}>Enable via ADB</button>
-                <button onClick={openAccessibilitySettings} disabled={running}>Open Accessibility Settings</button>
-              </>
-            )}
-            {helper?.status === 'not_installed' && (
-              <button onClick={installHelper} disabled={running}>Install APK</button>
-            )}
-            {helper?.status === 'apk_not_found' && (
-              <button disabled>Install APK</button>
-            )}
-          </div>
-        </article>
+        <HelperPanel
+          helper={helper}
+          running={running}
+          installHelper={installHelper}
+          enableHelper={enableHelper}
+          openAccessibilitySettings={openAccessibilitySettings}
+        />
 
-        <article className="panel controls">
-          <h2>Run</h2>
-          <p className="runDescription">
-            Smoke is a quick sanity check with reduced steps. Full is a regression run that keeps source
-            runtime_config max_steps.
-          </p>
-          <p className="scenarioHint">Clean launch is the default and recommended mode for consistent SmartThings entry.</p>
-          <div className="launchMode">
-            <label>
-              <input
-                type="radio"
-                name="launch_mode"
-                checked={launchMode === 'clean'}
-                onChange={() => setLaunchMode('clean')}
-                disabled={running}
-              />
-              <span>Clean launch</span>
-              <small>Recommended. Restarts SmartThings before running.</small>
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="launch_mode"
-                checked={launchMode === 'warm'}
-                onChange={() => setLaunchMode('warm')}
-                disabled={running}
-              />
-              <span>Warm launch</span>
-              <small>Debug. Keeps current SmartThings state when possible.</small>
-            </label>
-          </div>
-          <div className="languageMode">
-            <strong>Language</strong>
-            <label>
-              <input
-                type="radio"
-                name="language_mode"
-                checked={languageMode === 'current'}
-                onChange={() => setLanguageMode('current')}
-                disabled={running}
-              />
-              <span>Current device language</span>
-              <small>Run without changing the device language.</small>
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="language_mode"
-                checked={languageMode === 'ko-KR'}
-                onChange={() => setLanguageMode('ko-KR')}
-                disabled={running}
-              />
-              <span>Korean (ko-KR)</span>
-              <small>Switch to Korean before running.</small>
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="language_mode"
-                checked={languageMode === 'en-US'}
-                onChange={() => setLanguageMode('en-US')}
-                disabled={running}
-              />
-              <span>English (en-US)</span>
-              <small>Switch to English before running.</small>
-            </label>
-          </div>
-          <div className="buttonRow">
-            <button onClick={() => start('smoke')} disabled={running}>
-              Smoke
-              <small>Quick check · reduced steps</small>
-            </button>
-            <button onClick={() => start('full')} disabled={running}>
-              Full
-              <small>Full regression · source max_steps</small>
-            </button>
-            <button className="danger" onClick={stop} disabled={!running}>Stop</button>
-          </div>
-          <div className="modeSummary">
-            <strong>Current mode:</strong> {effectiveMode === 'smoke' ? 'Smoke' : 'Full'}
-            <span>Step policy: {status?.max_steps_policy ?? (effectiveMode === 'smoke' ? 'smoke_override' : 'source_preserved')}</span>
-            <small>{stepPolicyText}</small>
-          </div>
-          <dl>
-            <dt>Run ID</dt>
-            <dd>{status?.run_id ?? '-'}</dd>
-            <dt>Mode</dt>
-            <dd>{status?.mode ?? '-'}</dd>
-            <dt>Return</dt>
-            <dd>{status?.returncode ?? '-'}</dd>
-            <dt>Launch</dt>
-            <dd>{status?.launch_mode ?? launchMode}</dd>
-            <dt>Language</dt>
-            <dd>{languageLabel(status?.language_mode ?? languageMode)}</dd>
-            <dt>Locale</dt>
-            <dd>{status?.device_locale ?? '-'}</dd>
-            <dt>Selected</dt>
-            <dd>{selectedCount}</dd>
-            <dt>Config</dt>
-            <dd>{status?.runtime_config_path ?? '-'}</dd>
-          </dl>
-        </article>
+        <RunPanel
+          launchMode={launchMode}
+          setLaunchMode={setLaunchMode}
+          languageMode={languageMode}
+          setLanguageMode={setLanguageMode}
+          running={running}
+          start={start}
+          stop={stop}
+          effectiveMode={effectiveMode}
+          status={status}
+          stepPolicyText={stepPolicyText}
+          selectedCount={selectedCount}
+        />
       </section>
 
       <section className="panel preflightPanel" ref={preflightRef}>
