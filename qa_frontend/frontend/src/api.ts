@@ -234,5 +234,25 @@ export const api = {
   runLog: () => request<{ text: string }>('/api/run/log'),
   runSnapshot: () => request<RunSnapshot>('/api/run/snapshot'),
   recentRuns: () => request<{ runs: RecentRun[] }>('/api/runs/recent'),
+  runMismatch: (runId: string) => request<{
+    matched: number;
+    true_mismatch: number;
+    empty_speech: number;
+    empty_visible: number;
+    review: number;
+    runtime_warning: number;
+    previews: Array<{ 
+      scenario: string; 
+      plugin_name: string;
+      step: string;
+      visible: string; 
+      spoken: string; 
+      mismatch_type: string; 
+      final_result: string;
+      failure_reason: string;
+      focus_confidence: string;
+      category: string; 
+    }>;
+  }>(`/api/runs/recent/${encodeURIComponent(runId)}/mismatch`),
   outputs: () => request<{ outputs: OutputFile[] }>('/api/outputs'),
 };

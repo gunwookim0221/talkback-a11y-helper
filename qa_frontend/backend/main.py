@@ -11,6 +11,7 @@ from .outputs import list_outputs, safe_output_path
 from .recent_runs import list_recent_runs, safe_recent_run_log_path
 from .runner import RunManager
 from .scenarios import list_scenarios
+from .mismatch_viewer import get_run_mismatch_summary
 
 
 app = FastAPI(title="TalkBack QA Local Control Panel", version="0.1.0")
@@ -149,6 +150,14 @@ def recent_run_log_download(run_id: str) -> FileResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return FileResponse(path, filename=path.name)
+
+
+@app.get("/api/runs/recent/{run_id}/mismatch")
+def recent_run_mismatch_summary(run_id: str) -> dict[str, object]:
+    result = get_run_mismatch_summary(run_id)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=str(result["error"]))
+    return result
 
 
 @app.get("/api/outputs")

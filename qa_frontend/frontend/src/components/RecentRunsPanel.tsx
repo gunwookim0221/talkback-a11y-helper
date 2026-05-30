@@ -1,6 +1,27 @@
-import React from 'react';
-import { RecentRun } from '../api';
+import React, { useEffect, useState } from 'react';
+import { RecentRun, api } from '../api';
 import { formatTime, formatDuration, healthClass, scenarioRunText, languageLabel, scenarioReasonText } from '../utils/formatters';
+
+type MismatchSummary = {
+  matched: number;
+  true_mismatch: number;
+  empty_speech: number;
+  empty_visible: number;
+  review: number;
+  runtime_warning: number;
+  previews: Array<{ 
+    scenario: string; 
+    plugin_name: string;
+    step: string;
+    visible: string; 
+    spoken: string; 
+    mismatch_type: string; 
+    final_result: string;
+    failure_reason: string;
+    focus_confidence: string;
+    category: string; 
+  }>;
+};
 
 export interface RecentRunsPanelProps {
   recentRuns: RecentRun[];
@@ -21,6 +42,28 @@ export function RecentRunsPanel({
   selectedWarningScenarios,
   selectedPassedScenarios,
 }: RecentRunsPanelProps) {
+  const [mismatchSummary, setMismatchSummary] = useState<MismatchSummary | null>(null);
+
+  useEffect(() => {
+    if (!selectedRecentRunId) {
+      setMismatchSummary(null);
+      return;
+    }
+    const run = recentRuns.find(r => r.run_id === selectedRecentRunId);
+    if (!run || !run.xlsx_exists) {
+      setMismatchSummary(null);
+      return;
+    }
+    let ignore = false;
+    api.runMismatch(selectedRecentRunId).then(summary => {
+      if (!ignore) setMismatchSummary(summary);
+    }).catch(err => {
+      console.error('Failed to load mismatch summary:', err);
+      if (!ignore) setMismatchSummary(null);
+    });
+    return () => { ignore = true; };
+  }, [selectedRecentRunId, recentRuns]);
+
   return (
     <article className="panel">
       <h2>Recent Runs</h2>
@@ -125,6 +168,86 @@ export function RecentRunsPanel({
               )}
             </div>
           </details>
+          
+          {mismatchSummary && (
+            <details open>
+              <summary>TalkBack Quality</summary>
+              <div className="scenarioDetailList" style={{ marginTop: '8px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '12px' }}>
+                  <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                    <small>Matched</small>
+                    <strong style={{ fontSize: '1.2em' }}>{mismatchSummary.matched}</strong>
+                  </div>
+                  <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                    <small>True Mismatch</small>
+                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.true_mismatch > 0 ? 'var(--color-danger)' : 'inherit' }}>{mismatchSummary.true_mismatch}</strong>
+                  </div>
+                  <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                    <small>Empty Speech</small>
+                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.empty_speech > 0 ? 'var(--color-warning)' : 'inherit' }}>{mismatchSummary.empty_speech}</strong>
+                  </div>
+                  <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                    <small>Empty Visible</small>
+                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.empty_visible > 0 ? 'var(--color-warning)' : 'inherit' }}>{mismatchSummary.empty_visible}</strong>
+                  </div>
+                  <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                    <small>Review</small>
+                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.review > 0 ? 'var(--color-neutral)' : 'inherit' }}>{mismatchSummary.review}</strong>
+                  </div>
+                  <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                    <small>Runtime Warning</small>
+                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.runtime_warning > 0 ? 'var(--color-danger)' : 'inherit' }}>{mismatchSummary.runtime_warning}</strong>
+                  </div>
+                </div>
+
+                {mismatchSummary.previews.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <strong>Quality Signals</strong>
+                      <small style={{ color: 'var(--color-text-dim)' }}>Shows true mismatches, empty signals, reviews, and warnings.</small>
+                    </div>
+                    {mismatchSummary.previews.map((preview, i) => (
+                      <div key={i} className="scenarioDetailRow" style={{ gap: '6px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div>
+                            <strong>{preview.plugin_name || preview.scenario}</strong>
+                            <div style={{ fontSize: '11px', color: 'var(--color-text-dim)' }}>
+                              {preview.scenario} / step {preview.step}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                            <span className="statusBadge healthWarn" style={{ fontSize: '10px' }}>category: {preview.category}</span>
+                            {preview.mismatch_type && (
+                              <span style={{ fontSize: '10px', color: 'var(--color-text-dim)' }}>type: {preview.mismatch_type}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', gap: '4px', marginTop: '4px' }}>
+                          <small>visible:</small>
+                          <span style={{ fontSize: '13px' }}>{preview.visible || '(empty)'}</span>
+                          <small>spoken:</small>
+                          <span style={{ fontSize: '13px' }}>{preview.spoken || '(empty)'}</span>
+                          {preview.failure_reason && (
+                            <>
+                              <small>failure_reason:</small>
+                              <span style={{ fontSize: '13px', color: 'var(--color-danger)' }}>{preview.failure_reason}</span>
+                            </>
+                          )}
+                          {preview.focus_confidence && (
+                            <>
+                              <small>focus_conf:</small>
+                              <span style={{ fontSize: '13px' }}>{preview.focus_confidence}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </details>
+          )}
+
         </div>
       )}
     </article>
