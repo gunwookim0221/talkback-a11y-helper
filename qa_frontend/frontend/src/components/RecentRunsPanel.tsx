@@ -250,34 +250,49 @@ export function RecentRunsPanel({
                 {groupedScenarios.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
                     <strong>Scenario Quality</strong>
-                    {groupedScenarios.map((group) => (
-                      <div key={group.title} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <div style={{ fontSize: '0.9em', fontWeight: 'bold', color: 'var(--color-text-dim)', marginTop: '4px' }}>{group.title}</div>
-                        {group.items.map((scenario) => {
-                          let badgeClass = 'healthPass';
-                          if (scenario.status === 'fail') badgeClass = 'healthFail';
-                          else if (scenario.status === 'issue') badgeClass = 'healthWarn';
-                          else if (scenario.status === 'review') badgeClass = 'healthNeutral';
-                          
-                          const details = [];
-                          if (scenario.true_mismatch > 0) details.push(`True Mismatch ${scenario.true_mismatch}`);
-                          if (scenario.empty_speech > 0) details.push(`Empty Speech ${scenario.empty_speech}`);
-                          if (scenario.empty_visible > 0) details.push(`Empty Visible ${scenario.empty_visible}`);
-                          if (scenario.review > 0) details.push(`Review ${scenario.review}`);
-                          if (scenario.runtime_warning > 0) details.push(`Runtime Warning ${scenario.runtime_warning}`);
+                    {groupedScenarios.map((group) => {
+                      const renderScenario = (scenario: any) => {
+                        let badgeClass = 'healthPass';
+                        if (scenario.status === 'fail') badgeClass = 'healthFail';
+                        else if (scenario.status === 'issue') badgeClass = 'healthWarn';
+                        else if (scenario.status === 'review') badgeClass = 'healthNeutral';
+                        
+                        const details = [];
+                        if (scenario.true_mismatch > 0) details.push(`True Mismatch ${scenario.true_mismatch}`);
+                        if (scenario.empty_speech > 0) details.push(`Empty Speech ${scenario.empty_speech}`);
+                        if (scenario.empty_visible > 0) details.push(`Empty Visible ${scenario.empty_visible}`);
+                        if (scenario.review > 0) details.push(`Review ${scenario.review}`);
+                        if (scenario.runtime_warning > 0) details.push(`Runtime Warning ${scenario.runtime_warning}`);
 
-                          return (
-                            <div key={scenario.scenario_id} className="scenarioDetailRow" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', opacity: scenario.status === 'clean' ? 0.7 : 1 }}>
-                              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                <strong>{scenario.plugin_name || scenario.scenario_id}</strong>
-                                <small style={{ color: 'var(--color-text-dim)' }}>{details.length > 0 ? details.join(' · ') : 'Clean'}</small>
-                              </div>
-                              <span className={`statusBadge ${badgeClass}`}>{scenario.status.toUpperCase()}</span>
+                        return (
+                          <div key={scenario.scenario_id} className="scenarioDetailRow" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', opacity: scenario.status === 'clean' ? 0.7 : 1 }}>
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                              <strong>{scenario.plugin_name || scenario.scenario_id}</strong>
+                              <small style={{ color: 'var(--color-text-dim)' }}>{details.length > 0 ? details.join(' · ') : 'Clean'}</small>
                             </div>
-                          );
-                        })}
-                      </div>
-                    ))}
+                            <span className={`statusBadge ${badgeClass}`}>{scenario.status.toUpperCase()}</span>
+                          </div>
+                        );
+                      };
+
+                      const topScenarios = group.items.filter(s => s.status !== 'review');
+                      const reviewScenarios = group.items.filter(s => s.status === 'review');
+
+                      return (
+                        <div key={group.title} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div style={{ fontSize: '0.9em', fontWeight: 'bold', color: 'var(--color-text-dim)', marginTop: '4px' }}>{group.title}</div>
+                          {topScenarios.map(renderScenario)}
+                          {reviewScenarios.length > 0 && (
+                            <details style={{ marginTop: '4px' }}>
+                              <summary style={{ fontSize: '13px', color: 'var(--color-text-dim)' }}>Review Scenarios ({reviewScenarios.length})</summary>
+                              <div style={{ paddingLeft: '8px', borderLeft: '2px solid var(--color-border)', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                {reviewScenarios.map(renderScenario)}
+                              </div>
+                            </details>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 
@@ -285,44 +300,63 @@ export function RecentRunsPanel({
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
                       <strong>Quality Signals</strong>
-                      <small style={{ color: 'var(--color-text-dim)' }}>Shows true mismatches, empty signals, reviews, and warnings.</small>
+                      <small style={{ color: 'var(--color-text-dim)' }}>Shows true mismatches, empty signals, and warnings.</small>
                     </div>
-                    {mismatchSummary.signals.map((preview, i) => (
-                      <div key={i} className="scenarioDetailRow" style={{ gap: '6px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                          <div>
-                            <strong>{preview.plugin_name || preview.scenario}</strong>
-                            <div style={{ fontSize: '11px', color: 'var(--color-text-dim)' }}>
-                              {preview.scenario} / step {preview.step}
+                    {(() => {
+                      const renderPreview = (preview: any, key: string) => (
+                        <div key={key} className="scenarioDetailRow" style={{ gap: '6px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div>
+                              <strong>{preview.plugin_name || preview.scenario}</strong>
+                              <div style={{ fontSize: '11px', color: 'var(--color-text-dim)' }}>
+                                {preview.scenario} / step {preview.step}
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                              <span className="statusBadge healthWarn" style={{ fontSize: '10px' }}>category: {preview.category}</span>
+                              {preview.mismatch_type && (
+                                <span style={{ fontSize: '10px', color: 'var(--color-text-dim)' }}>type: {preview.mismatch_type}</span>
+                              )}
                             </div>
                           </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                            <span className="statusBadge healthWarn" style={{ fontSize: '10px' }}>category: {preview.category}</span>
-                            {preview.mismatch_type && (
-                              <span style={{ fontSize: '10px', color: 'var(--color-text-dim)' }}>type: {preview.mismatch_type}</span>
+                          <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', gap: '4px', marginTop: '4px' }}>
+                            <small>visible:</small>
+                            <span style={{ fontSize: '13px' }}>{preview.visible || '(empty)'}</span>
+                            <small>spoken:</small>
+                            <span style={{ fontSize: '13px' }}>{preview.spoken || '(empty)'}</span>
+                            {preview.failure_reason && (
+                              <>
+                                <small>failure_reason:</small>
+                                <span style={{ fontSize: '13px', color: 'var(--color-danger)' }}>{preview.failure_reason}</span>
+                              </>
+                            )}
+                            {preview.focus_confidence && (
+                              <>
+                                <small>focus_conf:</small>
+                                <span style={{ fontSize: '13px' }}>{preview.focus_confidence}</span>
+                              </>
                             )}
                           </div>
                         </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', gap: '4px', marginTop: '4px' }}>
-                          <small>visible:</small>
-                          <span style={{ fontSize: '13px' }}>{preview.visible || '(empty)'}</span>
-                          <small>spoken:</small>
-                          <span style={{ fontSize: '13px' }}>{preview.spoken || '(empty)'}</span>
-                          {preview.failure_reason && (
-                            <>
-                              <small>failure_reason:</small>
-                              <span style={{ fontSize: '13px', color: 'var(--color-danger)' }}>{preview.failure_reason}</span>
-                            </>
+                      );
+
+                      const topSignals = mismatchSummary.signals.filter(s => s.category !== 'REVIEW');
+                      const reviewSignals = mismatchSummary.signals.filter(s => s.category === 'REVIEW');
+
+                      return (
+                        <>
+                          {topSignals.map((s, i) => renderPreview(s, 'top_' + i))}
+                          {reviewSignals.length > 0 && (
+                            <details style={{ marginTop: '8px' }}>
+                              <summary style={{ fontSize: '13px', color: 'var(--color-text-dim)' }}>Review Signals ({reviewSignals.length})</summary>
+                              <div style={{ paddingLeft: '8px', borderLeft: '2px solid var(--color-border)', marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {reviewSignals.map((s, i) => renderPreview(s, 'rev_' + i))}
+                              </div>
+                            </details>
                           )}
-                          {preview.focus_confidence && (
-                            <>
-                              <small>focus_conf:</small>
-                              <span style={{ fontSize: '13px' }}>{preview.focus_confidence}</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    ))}
+                        </>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
