@@ -17,8 +17,8 @@ type ScenarioPreset = {
 export const PRESETS: ScenarioPreset[] = [
   {
     id: 'global',
-    label: 'Global Only',
-    description: 'select all global and settings scenarios',
+    label: 'Navigation',
+    description: 'select all navigation scenarios',
     scenarioIds: [],
   },
   {
@@ -59,7 +59,12 @@ export function applyPresetSelection(presetId: ScenarioPresetId, scenarios: Scen
 
   if (presetId === 'global') {
     for (const scenario of scenarios) {
-      if (scenario.id.startsWith('global_') || scenario.id.startsWith('settings_')) {
+      if (
+        scenario.id.startsWith('global_') || 
+        scenario.id.startsWith('settings_') ||
+        scenario.id.startsWith('home_') ||
+        scenario.id.startsWith('devices_')
+      ) {
         newSelection.add(scenario.id);
       }
     }
