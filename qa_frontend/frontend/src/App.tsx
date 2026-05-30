@@ -13,6 +13,7 @@ import { formatTime, formatDuration, formatBytes, healthClass, helperBadgeText, 
 import { useRunPolling } from './hooks/useRunPolling';
 import { groupScenarios } from './utils/scenarioGrouping';
 import { getDevicePluginName } from './utils/devicePluginMeta';
+import { getLifePluginName } from './utils/lifePluginMeta';
 
 type LanguageMode = 'current' | 'ko-KR' | 'en-US';
 
@@ -389,11 +390,16 @@ export default function App() {
                 <h3 style={{ margin: '1rem 0 0.5rem', fontSize: '1rem', color: 'var(--color-text-dim)' }}>{group.title}</h3>
                 <div className="scenarioList">
                   {group.scenarios.map((scenario) => {
-                    const deviceName = group.title === 'Device Plugins' ? getDevicePluginName(scenario.id) : null;
+                    let pluginName: string | null = null;
+                    if (group.title === 'Device Plugins') {
+                      pluginName = getDevicePluginName(scenario.id);
+                    } else if (group.title === 'Life Plugins') {
+                      pluginName = getLifePluginName(scenario.id);
+                    }
                     return (
                       <label 
                         key={scenario.id} 
-                        style={deviceName ? {
+                        style={pluginName ? {
                           display: 'flex',
                           alignItems: 'flex-start',
                           padding: '0.75rem',
@@ -408,11 +414,11 @@ export default function App() {
                           checked={selected.has(scenario.id)}
                           onChange={() => toggleScenario(scenario.id)}
                           disabled={running}
-                          style={deviceName ? { marginTop: '0.2rem' } : undefined}
+                          style={pluginName ? { marginTop: '0.2rem' } : undefined}
                         />
-                        {deviceName ? (
+                        {pluginName ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                            <strong style={{ fontSize: '1.05em' }}>{deviceName}</strong>
+                            <strong style={{ fontSize: '1.05em' }}>{pluginName}</strong>
                             <span style={{ fontSize: '0.85em', color: 'var(--color-text-dim)' }}>{scenario.id}</span>
                             <small>{describeScenarioSteps(scenario, effectiveMode)}</small>
                           </div>
