@@ -208,10 +208,20 @@ def parse_runtime_log(
                 progress[scenario]["status"] = "passed"
                 _add_event(events, index, "traversal_terminal", line, scenario=scenario)
             elif scenario and str(final_result).upper() == "FAIL":
-                warning_scenarios.add(scenario)
-                if progress[scenario].get("status") not in {"failed"}:
-                    progress[scenario]["status"] = "warning"
-                _add_event(events, index, "scenario_warning", line, scenario=scenario)
+                benign_reasons = {
+                    "repeat_no_progress",
+                    "viewport_exhausted",
+                    "terminal_reached",
+                    "end_of_content",
+                    "no_unvisited_local_tab"
+                }
+                if stop_reason and stop_reason in benign_reasons:
+                    _add_event(events, index, "traversal_terminal", line, scenario=scenario)
+                else:
+                    warning_scenarios.add(scenario)
+                    if progress[scenario].get("status") not in {"failed"}:
+                        progress[scenario]["status"] = "warning"
+                    _add_event(events, index, "scenario_warning", line, scenario=scenario)
             elif scenario and "decision='stop'" in line:
                 _add_event(events, index, "traversal_terminal", line, scenario=scenario)
         elif "[TAB][select] stabilization failed" in line or "no_bottom_nav_candidates" in line:

@@ -1,15 +1,28 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { RecentRun, api } from '../api';
 import { formatTime, formatDuration, healthClass, scenarioRunText, languageLabel, scenarioReasonText } from '../utils/formatters';
 
 type MismatchSummary = {
-  matched: number;
-  true_mismatch: number;
-  empty_speech: number;
-  empty_visible: number;
-  review: number;
+  summary: {
+    matched: number;
+    true_mismatch: number;
+    empty_speech: number;
+    empty_visible: number;
+    review: number;
+    runtime_warning: number;
+  };
+  scenario_summary: Array<{
+    scenario_id: string;
+    plugin_name: string;
+    matched: number;
+    true_mismatch: number;
+    empty_speech: number;
+    empty_visible: number;
+    review: number;
   runtime_warning: number;
-  previews: Array<{ 
+    status: 'fail' | 'issue' | 'review' | 'clean';
+  }>;
+  signals: Array<{ 
     scenario: string; 
     plugin_name: string;
     step: string;
@@ -43,6 +56,38 @@ export function RecentRunsPanel({
   selectedPassedScenarios,
 }: RecentRunsPanelProps) {
   const [mismatchSummary, setMismatchSummary] = useState<MismatchSummary | null>(null);
+
+  const groupedScenarios = useMemo(() => {
+    if (!mismatchSummary) return [];
+    const groups: Record<string, typeof mismatchSummary.scenario_summary> = {
+      Navigation: [],
+      'Life Plugins': [],
+      'Device Plugins': [],
+    };
+    mismatchSummary.scenario_summary.forEach(s => {
+      if (s.scenario_id.startsWith('global_') || s.scenario_id.startsWith('settings_') || s.scenario_id.startsWith('home_') || s.scenario_id.startsWith('devices_') || s.scenario_id.startsWith('routines_') || s.scenario_id.startsWith('menu_')) {
+        groups['Navigation'].push(s);
+      } else if (s.scenario_id.startsWith('life_')) {
+        groups['Life Plugins'].push(s);
+      } else if (s.scenario_id.startsWith('device_')) {
+        groups['Device Plugins'].push(s);
+      } else {
+        groups['Navigation'].push(s); // fallback
+      }
+    });
+  
+    return [
+      { title: 'Navigation', items: groups['Navigation'] },
+      { title: 'Life Plugins', items: groups['Life Plugins'] },
+      { title: 'Device Plugins', items: groups['Device Plugins'] }
+    ].filter(g => g.items.length > 0).map(g => ({
+      ...g,
+      items: g.items.sort((a, b) => {
+        const w = { fail: 0, issue: 1, review: 2, clean: 3 };
+        return w[a.status] - w[b.status];
+      })
+    }));
+  }, [mismatchSummary]);
 
   useEffect(() => {
     if (!selectedRecentRunId) {
@@ -176,37 +221,71 @@ export function RecentRunsPanel({
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '12px' }}>
                   <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
                     <small>Matched</small>
-                    <strong style={{ fontSize: '1.2em' }}>{mismatchSummary.matched}</strong>
+                    <strong style={{ fontSize: '1.2em' }}>{mismatchSummary.summary.matched}</strong>
                   </div>
                   <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
                     <small>True Mismatch</small>
-                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.true_mismatch > 0 ? 'var(--color-danger)' : 'inherit' }}>{mismatchSummary.true_mismatch}</strong>
+                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.summary.true_mismatch > 0 ? 'var(--color-danger)' : 'inherit' }}>{mismatchSummary.summary.true_mismatch}</strong>
                   </div>
                   <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
                     <small>Empty Speech</small>
-                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.empty_speech > 0 ? 'var(--color-warning)' : 'inherit' }}>{mismatchSummary.empty_speech}</strong>
+                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.summary.empty_speech > 0 ? 'var(--color-warning)' : 'inherit' }}>{mismatchSummary.summary.empty_speech}</strong>
                   </div>
                   <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
                     <small>Empty Visible</small>
-                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.empty_visible > 0 ? 'var(--color-warning)' : 'inherit' }}>{mismatchSummary.empty_visible}</strong>
+                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.summary.empty_visible > 0 ? 'var(--color-warning)' : 'inherit' }}>{mismatchSummary.summary.empty_visible}</strong>
                   </div>
                   <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
                     <small>Review</small>
-                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.review > 0 ? 'var(--color-neutral)' : 'inherit' }}>{mismatchSummary.review}</strong>
+                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.summary.review > 0 ? 'var(--color-neutral)' : 'inherit' }}>{mismatchSummary.summary.review}</strong>
                   </div>
                   <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
                     <small>Runtime Warning</small>
-                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.runtime_warning > 0 ? 'var(--color-danger)' : 'inherit' }}>{mismatchSummary.runtime_warning}</strong>
+                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.summary.runtime_warning > 0 ? 'var(--color-danger)' : 'inherit' }}>{mismatchSummary.summary.runtime_warning}</strong>
                   </div>
                 </div>
 
-                {mismatchSummary.previews.length > 0 && (
+                {groupedScenarios.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+                    <strong>Scenario Quality</strong>
+                    {groupedScenarios.map((group) => (
+                      <div key={group.title} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <div style={{ fontSize: '0.9em', fontWeight: 'bold', color: 'var(--color-text-dim)', marginTop: '4px' }}>{group.title}</div>
+                        {group.items.map((scenario) => {
+                          let badgeClass = 'healthPass';
+                          if (scenario.status === 'fail') badgeClass = 'healthFail';
+                          else if (scenario.status === 'issue') badgeClass = 'healthWarn';
+                          else if (scenario.status === 'review') badgeClass = 'healthNeutral';
+                          
+                          const details = [];
+                          if (scenario.true_mismatch > 0) details.push(`True Mismatch ${scenario.true_mismatch}`);
+                          if (scenario.empty_speech > 0) details.push(`Empty Speech ${scenario.empty_speech}`);
+                          if (scenario.empty_visible > 0) details.push(`Empty Visible ${scenario.empty_visible}`);
+                          if (scenario.review > 0) details.push(`Review ${scenario.review}`);
+                          if (scenario.runtime_warning > 0) details.push(`Runtime Warning ${scenario.runtime_warning}`);
+
+                          return (
+                            <div key={scenario.scenario_id} className="scenarioDetailRow" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', opacity: scenario.status === 'clean' ? 0.7 : 1 }}>
+                              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                <strong>{scenario.plugin_name || scenario.scenario_id}</strong>
+                                <small style={{ color: 'var(--color-text-dim)' }}>{details.length > 0 ? details.join(' · ') : 'Clean'}</small>
+                              </div>
+                              <span className={`statusBadge ${badgeClass}`}>{scenario.status.toUpperCase()}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {mismatchSummary.signals.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
                       <strong>Quality Signals</strong>
                       <small style={{ color: 'var(--color-text-dim)' }}>Shows true mismatches, empty signals, reviews, and warnings.</small>
                     </div>
-                    {mismatchSummary.previews.map((preview, i) => (
+                    {mismatchSummary.signals.map((preview, i) => (
                       <div key={i} className="scenarioDetailRow" style={{ gap: '6px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                           <div>

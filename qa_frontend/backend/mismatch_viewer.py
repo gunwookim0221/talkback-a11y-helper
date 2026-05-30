@@ -45,19 +45,33 @@ def get_run_mismatch_summary(run_id: str) -> dict[str, object]:
         failure_col = _get_col("failure_reason")
         focus_col = _get_col("focus_confidence")
 
-        matched_count = 0
-        true_mismatch_count = 0
-        empty_speech_count = 0
-        empty_visible_count = 0
-        review_count = 0
-        runtime_warning_count = 0
+        summary_matched = 0
+        summary_true_mismatch = 0
+        summary_empty_speech = 0
+        summary_empty_visible = 0
+        summary_review = 0
+        summary_runtime_warning = 0
         
+        scenario_stats = {}
         all_previews = []
 
         for row in range(2, sheet.max_row + 1):
             scenario = str(sheet.cell(row, scenario_col).value or "").strip() if scenario_col else ""
             if not scenario:
                 continue
+            
+            if scenario not in scenario_stats:
+                scenario_stats[scenario] = {
+                    "scenario_id": scenario,
+                    "plugin_name": "",
+                    "matched": 0,
+                    "true_mismatch": 0,
+                    "empty_speech": 0,
+                    "empty_visible": 0,
+                    "review": 0,
+                    "runtime_warning": 0,
+                    "status": "clean"
+                }
 
             plugin_name = str(sheet.cell(row, plugin_name_col).value or "").strip() if plugin_name_col else ""
             step = str(sheet.cell(row, step_col).value or "").strip() if step_col else ""
@@ -70,31 +84,42 @@ def get_run_mismatch_summary(run_id: str) -> dict[str, object]:
 
             category = ""
 
+            if not scenario_stats[scenario]["plugin_name"] and plugin_name:
+                scenario_stats[scenario]["plugin_name"] = plugin_name
+
             if mismatch_type == "EMPTY_VISIBLE" or (not visible and not speech):
-                empty_visible_count += 1
+                summary_empty_visible += 1
+                scenario_stats[scenario]["empty_visible"] += 1
                 category = "EMPTY_VISIBLE"
             elif mismatch_type == "EMPTY_SPEECH" or (visible and not speech):
-                empty_speech_count += 1
+                summary_empty_speech += 1
+                scenario_stats[scenario]["empty_speech"] += 1
                 category = "EMPTY_SPEECH"
             elif mismatch_type in {"PARTIAL_MATCH", "REPRESENTATIVE_CONTEXT"}:
-                review_count += 1
+                summary_review += 1
+                scenario_stats[scenario]["review"] += 1
                 category = "REVIEW"
             elif mismatch_type in {"TEXT_MISMATCH", "LABEL_MISMATCH", "SPOKEN_MISMATCH", "MISMATCH", "FAIL_MISMATCH"} or (mismatch_type and "MATCH" not in mismatch_type and "EMPTY" not in mismatch_type):
-                true_mismatch_count += 1
+                summary_true_mismatch += 1
+                scenario_stats[scenario]["true_mismatch"] += 1
                 category = "TRUE_MISMATCH"
-            elif final_result == "WARN" and failure_reason and any(reason in failure_reason.lower() for reason in ["repeat_no_progress", "move_failed", "terminal_not_handled", "plugin_boundary"]):
-                runtime_warning_count += 1
+            elif final_result == "WARN" and failure_reason and any(reason in failure_reason.lower() for reason in ["move_failed", "terminal_not_handled", "plugin_boundary", "focus_lost"]):
+                summary_runtime_warning += 1
+                scenario_stats[scenario]["runtime_warning"] += 1
                 category = "RUNTIME_WARNING"
             elif mismatch_type == "EXACT_MATCH" or (final_result == "PASS" and visible and speech):
-                matched_count += 1
+                summary_matched += 1
+                scenario_stats[scenario]["matched"] += 1
                 category = "MATCHED"
             else:
                 # Catch-all
                 if final_result == "PASS":
-                    matched_count += 1
+                    summary_matched += 1
+                    scenario_stats[scenario]["matched"] += 1
                     category = "MATCHED"
                 else:
-                    review_count += 1
+                    summary_review += 1
+                    scenario_stats[scenario]["review"] += 1
                     category = "REVIEW"
 
             if category and category != "MATCHED":
@@ -124,14 +149,30 @@ def get_run_mismatch_summary(run_id: str) -> dict[str, object]:
         all_previews.sort(key=lambda x: priority_map.get(x["category"], 99))
         previews = all_previews[:10]
 
+        # Calculate scenario status
+        scenario_summary = []
+        for s_id, stats in scenario_stats.items():
+            if stats["true_mismatch"] > 0 or stats["empty_speech"] > 0:
+                stats["status"] = "fail"
+            elif stats["empty_visible"] > 0 or stats["runtime_warning"] > 0:
+                stats["status"] = "issue"
+            elif stats["review"] > 0:
+                stats["status"] = "review"
+            else:
+                stats["status"] = "clean"
+            scenario_summary.append(stats)
+
         return {
-            "matched": matched_count,
-            "true_mismatch": true_mismatch_count,
-            "empty_speech": empty_speech_count,
-            "empty_visible": empty_visible_count,
-            "review": review_count,
-            "runtime_warning": runtime_warning_count,
-            "previews": previews
+            "summary": {
+                "matched": summary_matched,
+                "true_mismatch": summary_true_mismatch,
+                "empty_speech": summary_empty_speech,
+                "empty_visible": summary_empty_visible,
+                "review": summary_review,
+                "runtime_warning": summary_runtime_warning,
+            },
+            "scenario_summary": scenario_summary,
+            "signals": previews
         }
 
     except Exception as exc:

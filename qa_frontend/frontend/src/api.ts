@@ -235,13 +235,26 @@ export const api = {
   runSnapshot: () => request<RunSnapshot>('/api/run/snapshot'),
   recentRuns: () => request<{ runs: RecentRun[] }>('/api/runs/recent'),
   runMismatch: (runId: string) => request<{
-    matched: number;
-    true_mismatch: number;
-    empty_speech: number;
-    empty_visible: number;
-    review: number;
-    runtime_warning: number;
-    previews: Array<{ 
+    summary: {
+      matched: number;
+      true_mismatch: number;
+      empty_speech: number;
+      empty_visible: number;
+      review: number;
+      runtime_warning: number;
+    };
+    scenario_summary: Array<{
+      scenario_id: string;
+      plugin_name: string;
+      matched: number;
+      true_mismatch: number;
+      empty_speech: number;
+      empty_visible: number;
+      review: number;
+      runtime_warning: number;
+      status: 'fail' | 'issue' | 'review' | 'clean';
+    }>;
+    signals: Array<{ 
       scenario: string; 
       plugin_name: string;
       step: string;
