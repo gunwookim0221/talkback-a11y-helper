@@ -268,6 +268,7 @@ class MainLoopState:
     forced_local_tab_target_label: str
     forced_local_tab_target_bounds: str
     forced_local_tab_attempt_count: int
+    local_tab_activation_failures: dict[str, int]
     content_phase_grace_steps: int
     active_container_group_signature: str
     active_container_group_remaining: set[str]
@@ -11819,6 +11820,7 @@ def collect_tab_rows(
         forced_local_tab_target_label="",
         forced_local_tab_target_bounds="",
         forced_local_tab_attempt_count=0,
+        local_tab_activation_failures={},
         content_phase_grace_steps=0,
         active_container_group_signature="",
         active_container_group_remaining=set(),

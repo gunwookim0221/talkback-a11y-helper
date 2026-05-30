@@ -12,6 +12,8 @@ from tb_runner.perf_stats import ScenarioPerfStats
 from tb_runner.utils import parse_bounds_str
 
 LOCAL_TAB_ACTIVE_TTL_STEPS = 3
+LOCAL_TAB_ACTIVATION_MAX_FAILURES = 3
+LOCAL_TAB_ACTIVATION_GUARD_TRIGGER_COUNT = LOCAL_TAB_ACTIVATION_MAX_FAILURES + 1
 _TRANSITION_FAST_ACTION_WAIT_SECONDS = 2
 COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION = "pr108-local-tab-last-selected-hint-v1"
 COLLECTION_FLOW_SCROLL_READY_VERSION = "pr79-scroll-ready-move-smart-v1"
@@ -143,6 +145,96 @@ def _sort_local_tab_candidates_left_to_right(tab_candidates: list[dict[str, Any]
 
 def _local_tab_state_display(*, rid: str = "", label: str = "") -> str:
     return str(label or rid or "").strip()
+
+def _local_tab_activation_failure_key(*, signature: str, rid: str, label: str) -> str:
+    normalized_label = _normalize_logical_text(_canonicalize_local_tab_label(label))
+    return "||".join(
+        str(value or "").strip().lower()
+        for value in (signature, rid, normalized_label)
+        if str(value or "").strip()
+    )
+
+def _local_tab_activation_failures(state: Any) -> dict[str, int]:
+    failures = getattr(state, "local_tab_activation_failures", None)
+    if not isinstance(failures, dict):
+        failures = {}
+        setattr(state, "local_tab_activation_failures", failures)
+    return failures
+
+def _reset_local_tab_activation_failure(
+    state: Any,
+    *,
+    signature: str,
+    rid: str,
+    label: str,
+    reason: str,
+) -> None:
+    key = _local_tab_activation_failure_key(signature=signature, rid=rid, label=label)
+    failures = _local_tab_activation_failures(state)
+    if key and key in failures:
+        log(
+            f"[LOCAL_TAB][activation_fail] target='{_truncate_debug_text(label or rid, 96)}' "
+            f"fail_count=0 reason='{reason}'"
+        )
+        failures.pop(key, None)
+
+def _record_local_tab_activation_failure(
+    state: Any,
+    *,
+    signature: str,
+    rid: str,
+    label: str,
+    reason: str = "",
+    max_failures: int = LOCAL_TAB_ACTIVATION_MAX_FAILURES,
+) -> tuple[int, bool]:
+    key = _local_tab_activation_failure_key(signature=signature, rid=rid, label=label)
+    if not key:
+        return 0, False
+    failures = _local_tab_activation_failures(state)
+    fail_count = int(failures.get(key, 0) or 0) + 1
+    failures[key] = fail_count
+    log(
+        f"[LOCAL_TAB][activation_fail] target='{_truncate_debug_text(label or rid, 96)}' "
+        f"fail_count={fail_count} max_failures={max_failures} "
+        f"reason='{reason or 'activation_failed'}'"
+    )
+    return fail_count, fail_count > max_failures
+
+def _local_tab_activation_guarded(
+    state: Any,
+    *,
+    signature: str,
+    rid: str,
+    label: str,
+    max_failures: int = LOCAL_TAB_ACTIVATION_MAX_FAILURES,
+) -> bool:
+    key = _local_tab_activation_failure_key(signature=signature, rid=rid, label=label)
+    if not key:
+        return False
+    failures = _local_tab_activation_failures(state)
+    return int(failures.get(key, 0) or 0) > max_failures
+
+def _skip_guarded_local_tab_target(
+    state: Any,
+    *,
+    signature: str,
+    rid: str,
+    label: str,
+    fail_count: int,
+    reason: str = "activation_guard",
+    max_failures: int = LOCAL_TAB_ACTIVATION_MAX_FAILURES,
+) -> None:
+    target = _local_tab_state_display(rid=rid, label=label)
+    if signature and rid:
+        state.visited_local_tabs_by_signature.setdefault(signature, set()).add(rid)
+    log(
+        f"[LOCAL_TAB][activation_guard] target='{_truncate_debug_text(target, 96)}' "
+        f"fail_count={fail_count} max_failures={max_failures} action='skip'"
+    )
+    log(
+        f"[LOCAL_TAB][skip_target] target='{_truncate_debug_text(target, 96)}' "
+        f"reason='{reason}'"
+    )
 
 def _is_viewport_exhausted_for_scroll_fallback(
     *,
@@ -508,6 +600,21 @@ def _maybe_commit_pending_local_tab_progression(state: MainLoopState, row: dict[
             f"[STEP][local_tab_pending_clear] pending='{_truncate_debug_text(pending_label or pending_rid, 96)}' "
             "reason='expired'"
         )
+        fail_count, guarded = _record_local_tab_activation_failure(
+            state,
+            signature=pending_signature,
+            rid=pending_rid,
+            label=pending_label,
+            reason="pending_ttl_expired",
+        )
+        if guarded:
+            _skip_guarded_local_tab_target(
+                state,
+                signature=pending_signature,
+                rid=pending_rid,
+                label=pending_label,
+                fail_count=fail_count,
+            )
         state.pending_local_tab_signature = ""
         state.pending_local_tab_rid = ""
         state.pending_local_tab_label = ""
@@ -779,6 +886,13 @@ def _commit_forced_local_tab_target_success(state: MainLoopState) -> None:
         state.current_local_tab_active_rid = target_rid
     state.current_local_tab_active_label = target_label
     state.current_local_tab_active_age = 0
+    _reset_local_tab_activation_failure(
+        state,
+        signature=target_signature,
+        rid=target_rid,
+        label=target_label,
+        reason="activation_success",
+    )
     _reset_content_phase_after_tab_switch(
         state,
         active_label=target_label,
@@ -815,8 +929,24 @@ def _activate_forced_local_tab_target(
     target_label = str(getattr(state, "forced_local_tab_target_label", "") or "").strip()
     if not target:
         return None
+    target_signature = str(getattr(state, "forced_local_tab_target_signature", "") or "").strip()
     attempt = int(getattr(state, "forced_local_tab_attempt_count", 0) or 0) + 1
     if attempt > 2:
+        fail_count, guarded = _record_local_tab_activation_failure(
+            state,
+            signature=target_signature,
+            rid=target_rid,
+            label=target_label,
+            reason="max_attempts_reached",
+        )
+        if guarded:
+            _skip_guarded_local_tab_target(
+                state,
+                signature=target_signature,
+                rid=target_rid,
+                label=target_label,
+                fail_count=fail_count,
+            )
         _clear_forced_local_tab_navigation(state, reason="max_attempts_reached")
         return None
     state.forced_local_tab_attempt_count = attempt
@@ -916,6 +1046,28 @@ def _activate_forced_local_tab_target(
         f"[STEP][local_tab_target_activate_fail] target='{_truncate_debug_text(target, 96)}' "
         "reason='no_match_after_all_methods' fallback='move_smart_next'"
     )
+    fail_count, guarded = _record_local_tab_activation_failure(
+        state,
+        signature=target_signature,
+        rid=target_rid,
+        label=target_label,
+        reason="no_match_after_all_methods",
+    )
+    if guarded:
+        _skip_guarded_local_tab_target(
+            state,
+            signature=target_signature,
+            rid=target_rid,
+            label=target_label,
+            fail_count=fail_count,
+        )
+        state.pending_local_tab_signature = ""
+        state.pending_local_tab_rid = ""
+        state.pending_local_tab_label = ""
+        state.pending_local_tab_bounds = ""
+        state.pending_local_tab_age = 0
+        _clear_forced_local_tab_navigation(state, reason="activation_guard")
+        return last_row
     move_fn = getattr(client, "move_focus_smart", None)
     if callable(move_fn):
         log(
@@ -2465,6 +2617,20 @@ def _maybe_select_next_local_tab(
         state.current_local_tab_active_label = str(active_candidate.get("label", "") or "").strip()
         state.current_local_tab_active_age = 0
     progression_tab = sorted_tab_candidates[active_index + 1] if 0 <= active_index < len(sorted_tab_candidates) - 1 else None
+    if isinstance(progression_tab, dict):
+        progression_rid = str(progression_tab.get("rid", "") or "").strip().lower()
+        progression_label = str(progression_tab.get("label", "") or "").strip()
+        if _local_tab_activation_guarded(
+            state,
+            signature=local_tab_signature,
+            rid=progression_rid,
+            label=progression_label,
+        ):
+            log(
+                f"[LOCAL_TAB][skip_target] target='{_truncate_debug_text(progression_label or progression_rid, 96)}' "
+                "reason='activation_guard'"
+            )
+            progression_tab = None
     remaining_tabs_by_visit = [
         candidate
         for candidate in sorted_tab_candidates
@@ -2472,6 +2638,23 @@ def _maybe_select_next_local_tab(
         and str(candidate.get("rid", "") or "").strip().lower() not in {rid.lower() for rid in visited_tabs}
         and str(candidate.get("rid", "") or "").strip().lower() != active_rid
     ]
+    guard_filtered_tabs: list[dict[str, Any]] = []
+    for candidate in remaining_tabs_by_visit:
+        candidate_rid = str(candidate.get("rid", "") or "").strip().lower()
+        candidate_label = str(candidate.get("label", "") or "").strip()
+        if _local_tab_activation_guarded(
+            state,
+            signature=local_tab_signature,
+            rid=candidate_rid,
+            label=candidate_label,
+        ):
+            log(
+                f"[LOCAL_TAB][skip_target] target='{_truncate_debug_text(candidate_label or candidate_rid, 96)}' "
+                "reason='activation_guard'"
+            )
+            continue
+        guard_filtered_tabs.append(candidate)
+    remaining_tabs_by_visit = guard_filtered_tabs
     remaining_tabs = list(remaining_tabs_by_visit)
     if progression_tab is not None:
         current_label = ""

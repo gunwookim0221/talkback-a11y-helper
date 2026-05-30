@@ -562,6 +562,293 @@ def test_activate_forced_local_tab_target_taps_before_move_smart_direct(monkeypa
     assert any("[STEP][local_tab_commit]" in line and "target_activation_success" in line for line in logs)
 
 
+def test_activate_forced_local_tab_target_guard_skips_repeated_failures_direct(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    client = DummyClient([
+        {
+            "step_index": 31,
+            "visible_label": "Monitoring",
+            "merged_announcement": "Monitoring",
+            "focus_view_id": "com.example:id/monitoring_button",
+            "focus_bounds": "40,1700,300,1860",
+        }
+    ])
+    client.tap_xy_adb = lambda **kwargs: False
+    client.select = lambda **kwargs: False
+    signature = "monitoring||savings"
+    state = SimpleNamespace(
+        forced_local_tab_target_signature=signature,
+        forced_local_tab_target_rid="com.example:id/savings_button",
+        forced_local_tab_target_label="Savings",
+        forced_local_tab_target_bounds="760,1700,1040,1860",
+        forced_local_tab_attempt_count=1,
+        current_local_tab_signature=signature,
+        current_local_tab_active_rid="com.example:id/monitoring_button",
+        current_local_tab_active_label="Monitoring",
+        current_local_tab_active_age=0,
+        visited_local_tabs_by_signature={signature: {"com.example:id/monitoring_button"}},
+        pending_local_tab_signature=signature,
+        pending_local_tab_rid="com.example:id/savings_button",
+        pending_local_tab_label="Savings",
+        pending_local_tab_bounds="760,1700,1040,1860",
+        pending_local_tab_age=0,
+        local_tab_activation_failures={
+            local_tab_logic._local_tab_activation_failure_key(
+                signature=signature,
+                rid="com.example:id/savings_button",
+                label="Savings",
+            ): local_tab_logic.LOCAL_TAB_ACTIVATION_MAX_FAILURES
+        },
+    )
+
+    row = local_tab_logic._activate_forced_local_tab_target(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        step_idx=31,
+        wait_seconds=0.1,
+        announcement_wait_seconds=0.1,
+        announcement_idle_wait_seconds=0.0,
+        announcement_max_extra_wait_seconds=0.0,
+    )
+
+    assert row is None
+    assert state.forced_local_tab_target_rid == ""
+    assert state.pending_local_tab_rid == ""
+    assert "com.example:id/savings_button" in state.visited_local_tabs_by_signature[signature]
+    assert any("[LOCAL_TAB][activation_guard]" in line and "Savings" in line for line in logs)
+    assert any("[LOCAL_TAB][skip_target]" in line and "Savings" in line for line in logs)
+
+
+def test_activate_forced_local_tab_target_success_resets_failure_counter_direct(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    client = DummyClient([
+        {
+            "step_index": 32,
+            "visible_label": "Savings",
+            "merged_announcement": "Savings",
+            "focus_view_id": "com.example:id/savings_button",
+            "focus_bounds": "760,1700,1040,1860",
+        }
+    ])
+    signature = "monitoring||savings"
+    failure_key = local_tab_logic._local_tab_activation_failure_key(
+        signature=signature,
+        rid="com.example:id/savings_button",
+        label="Savings",
+    )
+    state = SimpleNamespace(
+        forced_local_tab_target_signature=signature,
+        forced_local_tab_target_rid="com.example:id/savings_button",
+        forced_local_tab_target_label="Savings",
+        forced_local_tab_target_bounds="760,1700,1040,1860",
+        forced_local_tab_attempt_count=0,
+        current_local_tab_signature=signature,
+        current_local_tab_active_rid="com.example:id/monitoring_button",
+        current_local_tab_active_label="Monitoring",
+        current_local_tab_active_age=0,
+        visited_local_tabs_by_signature={signature: {"com.example:id/monitoring_button"}},
+        pending_local_tab_signature=signature,
+        pending_local_tab_rid="com.example:id/savings_button",
+        pending_local_tab_label="Savings",
+        pending_local_tab_bounds="760,1700,1040,1860",
+        pending_local_tab_age=0,
+        fail_count=1,
+        same_count=1,
+        prev_fingerprint=("old", "old", "old"),
+        previous_step_row={"visible_label": "old"},
+        recent_representative_signatures=deque(["old"]),
+        consumed_representative_signatures={"old"},
+        visited_logical_signatures={"old"},
+        consumed_cluster_signatures={"old"},
+        consumed_cluster_logical_signatures={"old"},
+        recent_scroll_fallback_signatures={"old"},
+        last_scroll_fallback_attempted_signatures={"old"},
+        scroll_ready_retry_counts={"old": 1},
+        pending_scroll_ready_cluster_signature="old",
+        local_tab_activation_failures={failure_key: 2},
+    )
+
+    row = local_tab_logic._activate_forced_local_tab_target(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        step_idx=32,
+        wait_seconds=0.1,
+        announcement_wait_seconds=0.1,
+        announcement_idle_wait_seconds=0.0,
+        announcement_max_extra_wait_seconds=0.0,
+    )
+
+    assert row["focus_view_id"] == "com.example:id/savings_button"
+    assert failure_key not in state.local_tab_activation_failures
+    assert state.current_local_tab_active_rid == "com.example:id/savings_button"
+
+
+def test_local_tab_activation_failure_counts_are_per_target_direct(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    state = SimpleNamespace(local_tab_activation_failures={})
+
+    first_count, first_guarded = local_tab_logic._record_local_tab_activation_failure(
+        state,
+        signature="tabs",
+        rid="com.example:id/savings_button",
+        label="Savings",
+    )
+    second_count, second_guarded = local_tab_logic._record_local_tab_activation_failure(
+        state,
+        signature="tabs",
+        rid="com.example:id/activity_button",
+        label="Activity",
+    )
+
+    assert (first_count, first_guarded) == (1, False)
+    assert (second_count, second_guarded) == (1, False)
+    assert len(state.local_tab_activation_failures) == 2
+
+
+def test_forced_local_tab_activation_fail_counter_survives_attempt_reset_direct(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    client = DummyClient(
+        [
+            {
+                "step_index": idx,
+                "visible_label": "Monitoring",
+                "merged_announcement": "Monitoring",
+                "focus_view_id": "com.example:id/monitoring_button",
+                "focus_bounds": "40,1700,300,1860",
+            }
+            for idx in range(40, 43)
+        ]
+    )
+    client.tap_xy_adb = lambda **kwargs: False
+    client.select = lambda **kwargs: False
+    signature = "monitoring||savings"
+    state = SimpleNamespace(
+        current_local_tab_signature=signature,
+        current_local_tab_active_rid="com.example:id/monitoring_button",
+        current_local_tab_active_label="Monitoring",
+        current_local_tab_active_age=0,
+        visited_local_tabs_by_signature={signature: {"com.example:id/monitoring_button"}},
+        local_tab_activation_failures={},
+        pending_local_tab_signature=signature,
+        pending_local_tab_rid="com.example:id/savings_button",
+        pending_local_tab_label="Savings",
+        pending_local_tab_bounds="760,1700,1040,1860",
+        pending_local_tab_age=0,
+    )
+
+    for idx in range(4):
+        state.forced_local_tab_target_signature = signature
+        state.forced_local_tab_target_rid = "com.example:id/savings_button"
+        state.forced_local_tab_target_label = "Savings"
+        state.forced_local_tab_target_bounds = "760,1700,1040,1860"
+        state.forced_local_tab_attempt_count = 0
+        local_tab_logic._activate_forced_local_tab_target(
+            client=client,
+            dev="SERIAL",
+            state=state,
+            step_idx=40 + idx,
+            wait_seconds=0.1,
+            announcement_wait_seconds=0.1,
+            announcement_idle_wait_seconds=0.0,
+            announcement_max_extra_wait_seconds=0.0,
+        )
+
+    failure_key = local_tab_logic._local_tab_activation_failure_key(
+        signature=signature,
+        rid="com.example:id/savings_button",
+        label="Savings",
+    )
+    assert state.local_tab_activation_failures[failure_key] == 4
+    assert "com.example:id/savings_button" in state.visited_local_tabs_by_signature[signature]
+    assert state.pending_local_tab_rid == ""
+    assert len([line for line in logs if "[STEP][local_tab_target_activate_fail]" in line]) == 4
+    assert any("[LOCAL_TAB][activation_fail]" in line and "fail_count=4" in line for line in logs)
+    assert sum(1 for line in logs if "[LOCAL_TAB][activation_guard]" in line) == 1
+    assert sum(1 for line in logs if "[LOCAL_TAB][skip_target]" in line and "Savings" in line) >= 1
+    assert len(client.move_focus_smart_calls) == 3
+
+
+def test_pending_local_tab_ttl_records_failure_without_reset_direct(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    signature = "monitoring||savings"
+    failure_key = local_tab_logic._local_tab_activation_failure_key(
+        signature=signature,
+        rid="com.example:id/savings_button",
+        label="Savings",
+    )
+    state = SimpleNamespace(
+        pending_local_tab_signature=signature,
+        pending_local_tab_rid="com.example:id/savings_button",
+        pending_local_tab_label="Savings",
+        pending_local_tab_bounds="760,1700,1040,1860",
+        pending_local_tab_age=2,
+        current_local_tab_active_rid="com.example:id/monitoring_button",
+        current_local_tab_active_label="Monitoring",
+        visited_local_tabs_by_signature={signature: {"com.example:id/monitoring_button"}},
+        local_tab_activation_failures={failure_key: 2},
+    )
+
+    local_tab_logic._maybe_commit_pending_local_tab_progression(
+        state,
+        {
+            "visible_label": "Monitoring",
+            "merged_announcement": "Monitoring",
+            "focus_view_id": "com.example:id/monitoring_button",
+            "focus_bounds": "40,1700,300,1860",
+        },
+    )
+
+    assert state.pending_local_tab_rid == ""
+    assert state.local_tab_activation_failures[failure_key] == 3
+    assert "com.example:id/savings_button" not in state.visited_local_tabs_by_signature[signature]
+    assert any("[LOCAL_TAB][activation_fail]" in line and "pending_ttl_expired" in line for line in logs)
+    assert not any("[LOCAL_TAB][activation_guard]" in line for line in logs)
+
+
+def test_pending_local_tab_ttl_guard_skips_target_after_cap_direct(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    signature = "monitoring||savings"
+    failure_key = local_tab_logic._local_tab_activation_failure_key(
+        signature=signature,
+        rid="com.example:id/savings_button",
+        label="Savings",
+    )
+    state = SimpleNamespace(
+        pending_local_tab_signature=signature,
+        pending_local_tab_rid="com.example:id/savings_button",
+        pending_local_tab_label="Savings",
+        pending_local_tab_bounds="760,1700,1040,1860",
+        pending_local_tab_age=2,
+        current_local_tab_active_rid="com.example:id/monitoring_button",
+        current_local_tab_active_label="Monitoring",
+        visited_local_tabs_by_signature={signature: {"com.example:id/monitoring_button"}},
+        local_tab_activation_failures={failure_key: local_tab_logic.LOCAL_TAB_ACTIVATION_MAX_FAILURES},
+    )
+
+    local_tab_logic._maybe_commit_pending_local_tab_progression(
+        state,
+        {
+            "visible_label": "Monitoring",
+            "merged_announcement": "Monitoring",
+            "focus_view_id": "com.example:id/monitoring_button",
+            "focus_bounds": "40,1700,300,1860",
+        },
+    )
+
+    assert state.local_tab_activation_failures[failure_key] == 4
+    assert "com.example:id/savings_button" in state.visited_local_tabs_by_signature[signature]
+    assert any("[LOCAL_TAB][activation_guard]" in line and "fail_count=4" in line for line in logs)
+    assert any("[LOCAL_TAB][skip_target]" in line and "Savings" in line for line in logs)
+
+
 def test_maybe_select_next_local_tab_blocks_already_committed_progression_direct(monkeypatch):
     logs = []
     _bind_local_tab_logic(monkeypatch, logs)
@@ -615,6 +902,64 @@ def test_maybe_select_next_local_tab_blocks_already_committed_progression_direct
     assert state.pending_local_tab_rid == ""
     assert any("[STEP][local_tab_sorted]" in line and "Activity|Location|Events" in line for line in logs)
     assert any("[STEP][local_tab_skip_reason]" in line and "visited_progression_tab" in line for line in logs)
+    assert any("[STEP][local_tab_gate]" in line and "no_unvisited_local_tab" in line for line in logs)
+
+
+def test_maybe_select_next_local_tab_guarded_target_converges_to_no_unvisited_direct(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    client = DummyClient([])
+    client.dump_tree_sequence = [[]]
+    signature = "monitoring||savings"
+    guarded_key = local_tab_logic._local_tab_activation_failure_key(
+        signature=signature,
+        rid="com.example:id/savings_button",
+        label="Savings",
+    )
+    state = SimpleNamespace(
+        current_local_tab_signature=signature,
+        current_local_tab_active_rid="com.example:id/monitoring_button",
+        current_local_tab_active_label="Monitoring",
+        current_local_tab_active_age=0,
+        local_tab_candidates_by_signature={
+            signature: [
+                {"rid": "com.example:id/monitoring_button", "label": "Monitoring", "left": 40, "node": {"boundsInScreen": "40,1700,300,1860"}},
+                {"rid": "com.example:id/savings_button", "label": "Savings", "left": 760, "node": {"boundsInScreen": "760,1700,1040,1860"}},
+            ]
+        },
+        visited_local_tabs_by_signature={signature: {"com.example:id/monitoring_button"}},
+        local_tab_activation_failures={guarded_key: local_tab_logic.LOCAL_TAB_ACTIVATION_GUARD_TRIGGER_COUNT},
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={"focus_view_id": "com.example:id/monitoring_button", "visible_label": "Monitoring"},
+        pending_local_tab_signature="",
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        pending_local_tab_bounds="",
+        pending_local_tab_age=0,
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+        recent_scroll_fallback_signatures=set(),
+        last_scroll_fallback_attempted_signatures=set(),
+    )
+    row = {"focus_view_id": "com.example:id/monitoring_button", "visible_label": "Monitoring"}
+
+    advanced = local_tab_logic._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row=row,
+        scenario_id="life_energy_plugin",
+        step_idx=22,
+    )
+
+    assert advanced is False
+    assert client.select_calls == []
+    assert row["local_tab_block_reason"] == "no_unvisited_local_tab"
+    assert state.pending_local_tab_rid == ""
+    assert any("[LOCAL_TAB][skip_target]" in line and "Savings" in line for line in logs)
     assert any("[STEP][local_tab_gate]" in line and "no_unvisited_local_tab" in line for line in logs)
 
 
