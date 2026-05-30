@@ -90,24 +90,26 @@ export function RecentRunsPanel({
   }, [mismatchSummary]);
 
   useEffect(() => {
-    if (!selectedRecentRunId) {
+    const runIdToFetch = selectedRecentRun?.run_id;
+    if (!runIdToFetch) {
       setMismatchSummary(null);
       return;
     }
-    const run = recentRuns.find(r => r.run_id === selectedRecentRunId);
+    const run = recentRuns.find(r => r.run_id === runIdToFetch);
     if (!run || !run.xlsx_exists) {
       setMismatchSummary(null);
       return;
     }
     let ignore = false;
-    api.runMismatch(selectedRecentRunId).then(summary => {
+    setMismatchSummary(null);
+    api.runMismatch(runIdToFetch).then(summary => {
       if (!ignore) setMismatchSummary(summary);
     }).catch(err => {
       console.error('Failed to load mismatch summary:', err);
       if (!ignore) setMismatchSummary(null);
     });
     return () => { ignore = true; };
-  }, [selectedRecentRunId, recentRuns]);
+  }, [selectedRecentRun?.run_id, recentRuns]);
 
   return (
     <article className="panel">
@@ -183,7 +185,7 @@ export function RecentRunsPanel({
               )}
             </div>
           </details>
-          <details open>
+          <details>
             <summary>Warning ({selectedWarningScenarios.length})</summary>
             <div className="scenarioDetailList">
               {selectedWarningScenarios.length ? (

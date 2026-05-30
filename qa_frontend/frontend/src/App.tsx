@@ -313,6 +313,8 @@ export default function App() {
           setLaunchMode={setLaunchMode}
           languageMode={languageMode}
           setLanguageMode={setLanguageMode}
+          plannedMode={plannedMode}
+          setPlannedMode={setPlannedMode}
           running={running}
           start={start}
           stop={stop}

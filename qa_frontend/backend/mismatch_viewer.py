@@ -13,19 +13,21 @@ def get_run_mismatch_summary(run_id: str) -> dict[str, object]:
         return {"error": "run not found"}
 
     summary = read_summary_file(summary_path_for_log(log_path))
-    xlsx_filename = None
+    xlsx_path = None
     if summary:
-        xlsx_filename = summary.get("xlsx_filename")
-    
-    if not xlsx_filename:
+        if summary.get("xlsx_path"):
+            xlsx_path = Path(str(summary["xlsx_path"]))
+        elif summary.get("xlsx_filename"):
+            xlsx_path = OUTPUT_DIR / str(summary["xlsx_filename"])
+
+    if not xlsx_path:
         return {"error": "xlsx output not available"}
 
-    xlsx_path = OUTPUT_DIR / str(xlsx_filename)
     if not xlsx_path.exists():
         return {"error": "xlsx file not found"}
 
     try:
-        workbook = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
+        workbook = openpyxl.load_workbook(xlsx_path, data_only=True)
         if "result" not in workbook.sheetnames:
             return {"error": "result sheet not found"}
         
@@ -35,7 +37,7 @@ def get_run_mismatch_summary(run_id: str) -> dict[str, object]:
         def _get_col(name: str) -> int | None:
             return headers.index(name) + 1 if name in headers else None
 
-        scenario_col = _get_col("scenario_id")
+        scenario_col = _get_col("scenario_id") or _get_col("scenario")
         plugin_name_col = _get_col("plugin_name")
         step_col = _get_col("step")
         visible_col = _get_col("visible_label")
@@ -58,7 +60,7 @@ def get_run_mismatch_summary(run_id: str) -> dict[str, object]:
         for row in range(2, sheet.max_row + 1):
             scenario = str(sheet.cell(row, scenario_col).value or "").strip() if scenario_col else ""
             if not scenario:
-                continue
+                scenario = "unknown"
             
             if scenario not in scenario_stats:
                 scenario_stats[scenario] = {
@@ -172,7 +174,11 @@ def get_run_mismatch_summary(run_id: str) -> dict[str, object]:
                 "runtime_warning": summary_runtime_warning,
             },
             "scenario_summary": scenario_summary,
-            "signals": previews
+            "signals": previews,
+            "debug": {
+                "xlsx_path": xlsx_path.name,
+                "result_rows": sheet.max_row - 1 if sheet.max_row > 1 else 0
+            }
         }
 
     except Exception as exc:

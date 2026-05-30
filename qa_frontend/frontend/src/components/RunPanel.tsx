@@ -9,6 +9,8 @@ export interface RunPanelProps {
   setLaunchMode: (mode: 'warm' | 'clean') => void;
   languageMode: LanguageMode;
   setLanguageMode: (mode: LanguageMode) => void;
+  plannedMode: 'smoke' | 'full';
+  setPlannedMode: (mode: 'smoke' | 'full') => void;
   running: boolean;
   start: (mode: 'smoke' | 'full') => void;
   stop: () => void;
@@ -23,6 +25,8 @@ export function RunPanel({
   setLaunchMode,
   languageMode,
   setLanguageMode,
+  plannedMode,
+  setPlannedMode,
   running,
   start,
   stop,
@@ -35,20 +39,18 @@ export function RunPanel({
     <article className="panel controls">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
         <h2>Run</h2>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <span style={{ fontSize: '12px', color: 'var(--color-text-dim)' }}>
-            <strong>Current:</strong> {effectiveMode === 'smoke' ? 'Smoke' : 'Full'} · {status?.launch_mode ?? launchMode} · {status?.language_mode ?? languageMode} · sel: {selectedCount}
-          </span>
-          {status?.run_id && (
+        {status?.run_id && (
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <span style={{ fontSize: '12px', color: 'var(--color-text-dim)' }}>
               (ID: {status.run_id} | Ret: {status.returncode ?? '-'})
             </span>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       <div className="runGrid">
         <div>
+          <h3 style={{ margin: '0 0 6px', fontSize: '12px', color: 'var(--color-text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Launch</h3>
           <div className="launchMode" style={{ marginBottom: '0' }}>
             <label style={{ padding: '4px 8px' }}>
               <input
@@ -58,7 +60,7 @@ export function RunPanel({
                 onChange={() => setLaunchMode('clean')}
                 disabled={running}
               />
-              <span style={{ fontSize: '14px' }}>Clean launch</span>
+              <span style={{ fontSize: '14px' }}>Clean</span>
             </label>
             <label style={{ padding: '4px 8px' }}>
               <input
@@ -68,12 +70,13 @@ export function RunPanel({
                 onChange={() => setLaunchMode('warm')}
                 disabled={running}
               />
-              <span style={{ fontSize: '14px' }}>Warm launch</span>
+              <span style={{ fontSize: '14px' }}>Warm</span>
             </label>
           </div>
         </div>
 
         <div>
+          <h3 style={{ margin: '0 0 6px', fontSize: '12px', color: 'var(--color-text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Language</h3>
           <div className="languageMode" style={{ marginBottom: '0', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <label style={{ padding: '4px 8px', gridTemplateColumns: 'auto auto', gap: '4px' }}>
               <input
@@ -107,20 +110,46 @@ export function RunPanel({
             </label>
           </div>
         </div>
+
+        <div>
+          <h3 style={{ margin: '0 0 6px', fontSize: '12px', color: 'var(--color-text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Mode</h3>
+          <div className="runMode" style={{ marginBottom: '0', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <label style={{ padding: '4px 8px', gridTemplateColumns: 'auto auto', gap: '4px' }}>
+              <input
+                type="radio"
+                name="planned_mode"
+                checked={plannedMode === 'smoke'}
+                onChange={() => setPlannedMode('smoke')}
+                disabled={running}
+              />
+              <span style={{ fontSize: '14px' }}>Smoke</span>
+            </label>
+            <label style={{ padding: '4px 8px', gridTemplateColumns: 'auto auto', gap: '4px' }}>
+              <input
+                type="radio"
+                name="planned_mode"
+                checked={plannedMode === 'full'}
+                onChange={() => setPlannedMode('full')}
+                disabled={running}
+              />
+              <span style={{ fontSize: '14px' }}>Full</span>
+            </label>
+          </div>
+        </div>
       </div>
 
-      <div className="buttonRow" style={{ marginTop: '12px', marginBottom: '0', justifyContent: 'flex-start' }}>
-        <button onClick={() => start('smoke')} disabled={running} style={{ minWidth: '100px' }}>
-          Smoke
-          <small style={{ marginTop: '0', fontSize: '10px' }}>quick check</small>
-        </button>
-        <button onClick={() => start('full')} disabled={running} style={{ minWidth: '100px' }}>
-          Full
-          <small style={{ marginTop: '0', fontSize: '10px' }}>regression</small>
-        </button>
-        <button className="danger" onClick={stop} disabled={!running} style={{ minWidth: '100px', alignSelf: 'center' }}>
-          Stop
-        </button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px' }}>
+        <div style={{ fontSize: '13px', color: 'var(--color-text-dim)' }}>
+          <strong>Current:</strong> {effectiveMode === 'smoke' ? 'Smoke' : 'Full'} &middot; {String(status?.launch_mode ?? launchMode).replace(/^\w/, c => c.toUpperCase())} &middot; {String(status?.language_mode ?? languageMode).replace(/^\w/, c => c.toUpperCase())} &middot; Selected {selectedCount}
+        </div>
+        <div className="buttonRow" style={{ marginBottom: '0', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={() => start(plannedMode)} disabled={running} style={{ minWidth: '100px' }}>
+            Run
+          </button>
+          <button className="danger" onClick={stop} disabled={!running} style={{ minWidth: '100px' }}>
+            Stop
+          </button>
+        </div>
       </div>
     </article>
   );
