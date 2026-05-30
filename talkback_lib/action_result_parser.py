@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from talkback_lib.constants import STATUS_FAILED, STATUS_MOVED
@@ -24,15 +25,49 @@ class ActionResultParser:
         raw_payload: str,
         error: Exception | str,
     ) -> dict[str, Any]:
-        raw_snippet = str(raw_payload).replace("\n", "\\n")[:240]
-        return {
+        return ActionResultParser.log_parse_error_result(
+            prefix="TARGET_ACTION_RESULT",
+            req_id=req_id,
+            raw_payload=raw_payload,
+            error=error,
+        )
+
+    @staticmethod
+    def focus_parse_error_result(
+        req_id: str,
+        raw_payload: str,
+        error: Exception | str,
+    ) -> dict[str, Any]:
+        return ActionResultParser.log_parse_error_result(
+            prefix="FOCUS_RESULT",
+            req_id=req_id,
+            raw_payload=raw_payload,
+            error=error,
+        )
+
+    @staticmethod
+    def log_parse_error_result(
+        prefix: str,
+        req_id: str,
+        raw_payload: str,
+        error: Exception | str,
+    ) -> dict[str, Any]:
+        raw_text = str(raw_payload)
+        raw_snippet = raw_text.replace("\n", "\\n")[:240]
+        result: dict[str, Any] = {
             "success": False,
             "status": "parse_error",
             "reason": "json_parse_failed",
+            "prefix": prefix,
             "reqId": req_id,
             "rawSnippet": raw_snippet,
             "parseError": str(error),
         }
+        for key in ("packageName", "className"):
+            match = re.search(rf'"{key}"\s*:\s*"([^"]+)"', raw_text)
+            if match:
+                result[key] = match.group(1)
+        return result
 
     @staticmethod
     def normalize_action_result(

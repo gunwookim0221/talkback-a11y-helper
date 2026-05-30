@@ -337,6 +337,14 @@ class A11yAdbClient:
             error=exc,
         )
 
+    @staticmethod
+    def _focus_parse_error_result(req_id: str, payload: str, exc: Exception) -> dict[str, Any]:
+        return ActionResultParser.focus_parse_error_result(
+            req_id=req_id,
+            raw_payload=payload,
+            error=exc,
+        )
+
     def _read_log_result(
         self,
         dev: Any,
@@ -356,6 +364,7 @@ class A11yAdbClient:
             return self._last_action_payload
         start = time.monotonic()
         interval = max(0.05, poll_interval_sec)
+        logged_parse_errors: set[str] = set()
         print(f"[SMART_NEXT_TRACE] read_log_result_start prefix={prefix} req_id={req_id} wait_seconds={wait_seconds}")
         while time.monotonic() - start < wait_seconds:
             logs = self._logcat_reader.dump_filtered(dev=dev)
@@ -364,18 +373,28 @@ class A11yAdbClient:
                 try:
                     parsed = self._parse_json_payload(payload, prefix)
                 except Exception as exc:
-                    if prefix == "TARGET_ACTION_RESULT" and (req_id in payload or len(payloads) == 1):
-                        parsed = self._target_action_parse_error_result(req_id, payload, exc)
+                    raw_snippet = str(payload).replace("\n", "\\n")[:240]
+                    parse_error_key = f"{prefix}:{req_id}:{raw_snippet}"
+                    should_log_parse_error = parse_error_key not in logged_parse_errors
+                    if should_log_parse_error:
+                        logged_parse_errors.add(parse_error_key)
+                    if prefix in {"TARGET_ACTION_RESULT", "FOCUS_RESULT"} and (req_id in payload or len(payloads) == 1):
+                        if prefix == "TARGET_ACTION_RESULT":
+                            parsed = self._target_action_parse_error_result(req_id, payload, exc)
+                        else:
+                            parsed = self._focus_parse_error_result(req_id, payload, exc)
                         raw_snippet = str(payload).replace("\n", "\\n")[:240]
+                        if should_log_parse_error:
+                            print(
+                                f"[SMART_NEXT_TRACE] parse_error prefix={prefix} req_id={req_id} "
+                                f"reason=json_parse_failed error={exc} raw='{raw_snippet}'"
+                            )
+                        return parsed
+                    if should_log_parse_error:
                         print(
                             f"[SMART_NEXT_TRACE] parse_error prefix={prefix} req_id={req_id} "
-                            f"reason=json_parse_failed error={exc} raw='{raw_snippet}'"
+                            f"reason=json_parse_failed error={exc}"
                         )
-                        return parsed
-                    print(
-                        f"[SMART_NEXT_TRACE] parse_error prefix={prefix} req_id={req_id} "
-                        f"reason=json_parse_failed error={exc}"
-                    )
                     continue
                 if parsed.get("reqId") == req_id:
                     if prefix == "TARGET_ACTION_RESULT" and bool(parsed.get("success")):

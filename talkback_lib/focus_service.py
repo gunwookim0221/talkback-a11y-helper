@@ -220,7 +220,10 @@ class FocusService:
         empty_reason = "no_response"
         if result:
             reason_text = str(result.get("reason", "") or "").lower()
-            if "찾지 못했습니다" in reason_text:
+            status_text = str(result.get("status", "") or "").lower()
+            if status_text == "parse_error" or reason_text == "json_parse_failed":
+                empty_reason = "parse_error"
+            elif "찾지 못했습니다" in reason_text:
                 empty_reason = "timeout"
             elif not response_success:
                 empty_reason = "empty_json"
