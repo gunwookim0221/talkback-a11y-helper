@@ -218,6 +218,171 @@ def test_bottom_tab_candidate_rejects_korean_alias_without_bottom_nav_resource()
         assert result["matched"] is False
 
 
+def test_plugin_boundary_detects_global_bottom_nav_label():
+    tab_cfg = {**_base_tab_cfg(), "group": "plugin_screen", "screen_context_mode": "new_screen"}
+    hit, label, reason = collection_flow._row_global_bottom_nav_boundary(
+        {"visible_label": "Menu", "merged_announcement": "Menu"},
+        tab_cfg,
+    )
+
+    assert hit is True
+    assert label == "Menu | Menu"
+    assert reason == "label:menu"
+
+
+def test_plugin_boundary_detects_global_bottom_nav_resource_id():
+    tab_cfg = {**_base_tab_cfg(), "group": "plugin_screen", "screen_context_mode": "new_screen"}
+    hit, label, reason = collection_flow._row_global_bottom_nav_boundary(
+        {
+            "visible_label": "Any label",
+            "focus_view_id": "com.samsung.android.oneconnect:id/menu_more",
+        },
+        tab_cfg,
+    )
+
+    assert hit is True
+    assert label == "com.samsung.android.oneconnect:id/menu_more"
+    assert reason == "resource_id"
+
+
+def test_plugin_boundary_does_not_run_for_global_nav_scenario():
+    hit, _label, reason = collection_flow._row_global_bottom_nav_boundary(
+        {
+            "visible_label": "Menu",
+            "focus_view_id": "com.samsung.android.oneconnect:id/menu_more",
+        },
+        _global_nav_tab_cfg(),
+    )
+
+    assert hit is False
+    assert reason == "guard_disabled"
+
+
+def test_plugin_boundary_does_not_run_for_main_tabs_group():
+    tab_cfg = {**_base_tab_cfg(), "group": "main_tabs", "screen_context_mode": "bottom_tab"}
+    hit, _label, reason = collection_flow._row_global_bottom_nav_boundary(
+        {
+            "visible_label": "Menu",
+            "focus_view_id": "com.samsung.android.oneconnect:id/menu_more",
+        },
+        tab_cfg,
+    )
+
+    assert hit is False
+    assert reason == "guard_disabled"
+
+
+def test_plugin_boundary_does_not_confuse_local_routines_tab_without_context():
+    tab_cfg = {**_base_tab_cfg(), "group": "plugin_screen", "screen_context_mode": "new_screen"}
+    hit, _label, reason = collection_flow._row_global_bottom_nav_boundary(
+        {"visible_label": "Routines", "merged_announcement": "Routines"},
+        tab_cfg,
+    )
+
+    assert hit is False
+    assert reason == "label_requires_tab_context"
+
+
+def test_plugin_boundary_does_not_match_content_text_containing_bottom_alias():
+    tab_cfg = {**_base_tab_cfg(), "group": "plugin_screen", "screen_context_mode": "new_screen"}
+    hit, _label, reason = collection_flow._row_global_bottom_nav_boundary(
+        {
+            "visible_label": "기기 에너지 사용량",
+            "merged_announcement": "기기 에너지 사용량, 사용량 데이터 없음",
+        },
+        tab_cfg,
+    )
+
+    assert hit is False
+    assert reason == "not_bottom_nav_label"
+
+
+def test_plugin_boundary_detects_shell_chrome_resource_id():
+    tab_cfg = {**_base_tab_cfg(), "group": "plugin_screen", "screen_context_mode": "new_screen"}
+    hit, label, reason = collection_flow._row_plugin_shell_chrome_boundary(
+        {
+            "visible_label": "추가",
+            "focus_view_id": "com.samsung.android.oneconnect:id/add_menu_button",
+        },
+        tab_cfg,
+    )
+
+    assert hit is True
+    assert label == "com.samsung.android.oneconnect:id/add_menu_button"
+    assert reason == "shell_chrome_resource"
+
+
+def test_plugin_boundary_detects_shell_chrome_label():
+    tab_cfg = {**_base_tab_cfg(), "group": "plugin_screen", "screen_context_mode": "new_screen"}
+    hit, label, reason = collection_flow._row_plugin_shell_chrome_boundary(
+        {
+            "visible_label": "우리 집, 장소 변경",
+            "merged_announcement": "우리 집, 장소 변경",
+        },
+        tab_cfg,
+    )
+
+    assert hit is True
+    assert "우리 집, 장소 변경" in label
+    assert reason == "shell_chrome_label"
+
+
+def test_plugin_boundary_shell_chrome_does_not_run_for_global_nav_scenario():
+    hit, _label, reason = collection_flow._row_plugin_shell_chrome_boundary(
+        {
+            "visible_label": "우리 집, 장소 변경",
+            "focus_view_id": "com.samsung.android.oneconnect:id/tab_title",
+        },
+        _global_nav_tab_cfg(),
+    )
+
+    assert hit is False
+    assert reason == "guard_disabled"
+
+
+def test_plugin_local_tab_strip_blocks_overlay_candidate():
+    tab_cfg = {**_base_tab_cfg(), "group": "plugin_screen", "screen_context_mode": "new_screen"}
+    blocked, reason = collection_flow._is_plugin_local_tab_strip_overlay_blocked(
+        {
+            "visible_label": "더보기",
+            "merged_announcement": "더보기",
+            "focus_view_id": "activity",
+            "focus_bounds": "708,2344,1050,2467",
+            "focus_node": {
+                "viewIdResourceName": "activity",
+                "text": "활동 새 알림",
+                "clickable": True,
+                "focusable": True,
+            },
+        },
+        tab_cfg,
+    )
+
+    assert blocked is True
+    assert reason == "plugin_local_tab_strip"
+
+
+def test_plugin_local_tab_strip_overlay_block_does_not_apply_to_top_bar_more():
+    tab_cfg = {**_base_tab_cfg(), "group": "plugin_screen", "screen_context_mode": "new_screen"}
+    blocked, _reason = collection_flow._is_plugin_local_tab_strip_overlay_blocked(
+        {
+            "visible_label": "옵션 더보기",
+            "merged_announcement": "옵션 더보기",
+            "focus_view_id": "more",
+            "focus_bounds": "936,118,1008,310",
+            "focus_node": {
+                "viewIdResourceName": "more",
+                "text": "옵션 더보기",
+                "clickable": True,
+                "focusable": True,
+            },
+        },
+        tab_cfg,
+    )
+
+    assert blocked is False
+
+
 def test_expected_bottom_tab_from_tab_pattern_handles_legacy_regexes():
     assert _expected_bottom_tab_from_tab_pattern("(?i).*life.*") == "life"
     assert _expected_bottom_tab_from_tab_pattern("(?i).*(menu|more).*") == "menu"
@@ -742,6 +907,123 @@ def test_collect_tab_rows_unchanged_classification_skips_overlay_routine(monkeyp
     collection_flow.collect_tab_rows(client, "SERIAL", _base_tab_cfg(max_steps=1), [], "o.xlsx", "out")
 
     assert called == {"expand": 0, "realign": 0}
+
+
+def test_overlay_phase_blocks_plugin_local_tab_activity_candidate(monkeypatch):
+    row = {
+        "step_index": 7,
+        "move_result": "moved",
+        "visible_label": "더보기",
+        "normalized_visible_label": "더보기",
+        "merged_announcement": "더보기",
+        "focus_view_id": "activity",
+        "focus_bounds": "708,2344,1050,2467",
+        "focus_node": {
+            "viewIdResourceName": "activity",
+            "text": "활동 새 알림",
+            "clickable": True,
+            "focusable": True,
+        },
+    }
+    client = DummyClient([])
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (True, "matched_scenario_policy"))
+
+    result = collection_flow._overlay_phase(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={
+            **_base_tab_cfg(),
+            "scenario_id": "life_energy_plugin",
+            "group": "plugin_screen",
+            "screen_context_mode": "new_screen",
+            "tab_name": "(?i).*life.*",
+        },
+        row=row,
+        rows=[],
+        all_rows=[],
+        output_path="o.xlsx",
+        output_base_dir="out",
+        scenario_perf=None,
+        main_step_index_by_fingerprint={},
+        expanded_overlay_entries=set(),
+    )
+
+    assert result.candidate_checked is True
+    assert result.candidate_reason == "blocked_plugin_local_tab_strip"
+    assert result.classification == "unchanged"
+    assert client.touch_calls == []
+
+
+def test_overlay_realign_rejects_shell_anchor(monkeypatch):
+    client = DummyClient([])
+    called = {"expand": 0, "realign": 0}
+    row = {
+        "step_index": 7,
+        "move_result": "moved",
+        "visible_label": "Options",
+        "normalized_visible_label": "options",
+        "merged_announcement": "Options",
+        "focus_view_id": "more",
+        "focus_bounds": "900,120,1020,280",
+    }
+
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(
+        collection_flow,
+        "classify_post_click_result",
+        lambda **k: ("overlay", {"visible_label": "post", "focus_view_id": "id.post"}),
+    )
+    monkeypatch.setattr(
+        collection_flow,
+        "expand_overlay",
+        lambda **k: called.__setitem__("expand", called["expand"] + 1) or [],
+    )
+    monkeypatch.setattr(
+        collection_flow,
+        "realign_focus_after_overlay",
+        lambda **k: called.__setitem__("realign", called["realign"] + 1)
+        or {"status": "realign_entry_reached", "entry_reached": True, "steps_taken": 1, "match_by": "label"},
+    )
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **k: {
+            "ok": True,
+            "fallback_candidate_label": "우리 집, 장소 변경",
+            "fallback_candidate_resource_id": "com.samsung.android.oneconnect:id/tab_title",
+            "verify_row": {
+                "visible_label": "우리 집, 장소 변경",
+                "merged_announcement": "우리 집, 장소 변경",
+                "focus_view_id": "com.samsung.android.oneconnect:id/tab_title",
+            },
+        },
+    )
+
+    result = collection_flow._execute_overlay_for_candidate(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={
+            **_base_tab_cfg(),
+            "scenario_id": "life_energy_plugin",
+            "group": "plugin_screen",
+            "screen_context_mode": "new_screen",
+            "tab_name": "(?i).*life.*",
+        },
+        row=row,
+        rows=[],
+        all_rows=[],
+        output_path="o.xlsx",
+        output_base_dir="out",
+        scenario_perf=None,
+        main_step_index_by_fingerprint={},
+        expanded_overlay_entries=set(),
+        fingerprint="fp",
+        candidate_reason="matched_scenario_policy",
+    )
+
+    assert called == {"expand": 1, "realign": 1}
+    assert result.classification == "navigation"
+    assert result.post_realign_pending_steps_delta == 0
 
 
 def test_collect_tab_rows_global_nav_start_gate_abort_on_non_bottom_focus(monkeypatch):
@@ -9428,6 +9710,45 @@ def test_collect_tab_rows_stops_with_after_escape_reason_when_escape_fails(monke
 
     assert rows[1]["status"] == "END"
     assert rows[1]["stop_reason"] == "repeat_semantic_stall_after_escape"
+
+
+def test_collect_tab_rows_plugin_screen_stops_on_global_nav_boundary(monkeypatch):
+    global_nav_row = {
+        "step_index": 1,
+        "move_result": "moved",
+        "visible_label": "Menu",
+        "normalized_visible_label": "menu",
+        "merged_announcement": "Menu, Tab 5 of 5",
+        "focus_view_id": "com.samsung.android.oneconnect:id/menu_more",
+        "focus_bounds": "800,2300,1080,2470",
+        "screen_height": 2600,
+    }
+    client = DummyClient([_anchor_row(), global_nav_row])
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
+    monkeypatch.setattr(collection_flow, "should_stop", lambda **k: (False, 0, 0, "", ("menu", "id", "bounds"), {"terminal": False, "same_like_count": 0, "no_progress": False, "reason": ""}))
+    monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (False, "not_in_global_candidates"))
+    tab_cfg = {
+        **_base_tab_cfg(max_steps=5),
+        "scenario_id": "life_energy_plugin",
+        "group": "plugin_screen",
+        "screen_context_mode": "new_screen",
+        "scenario_type": "content",
+    }
+
+    rows = collection_flow.collect_tab_rows(client, "SERIAL", tab_cfg, [], "o.xlsx", "out")
+
+    assert rows[1]["status"] == "END"
+    assert rows[1]["stop_reason"] == "plugin_boundary_global_nav"
+    assert rows[1]["final_result"] == "WARN"
+    assert rows[1]["traversal_result"] == "WARN_PLUGIN_BOUNDARY"
+    assert rows[1]["plugin_boundary_global_nav"] is True
+    assert len(client.collect_focus_step_calls) == 2
+    assert any("[PLUGIN_BOUNDARY][global_nav_reached]" in line for line in logs)
 
 
 def test_collect_tab_rows_stall_escape_is_only_attempted_once_per_scenario(monkeypatch):

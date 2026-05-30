@@ -89,7 +89,10 @@ def classify_step_result(
         str(row.get(key, "") or "").strip()
         for key in ("visible_label", "merged_announcement", "focus_view_id", "focus_bounds")
     )
-    if move_result in {"moved", "edge_realign_then_moved"}:
+    if stop_reason == "plugin_boundary_global_nav":
+        traversal_result = "WARN_PLUGIN_BOUNDARY"
+        failure_reason = "plugin_boundary_global_nav"
+    elif move_result in {"moved", "edge_realign_then_moved"}:
         traversal_result = "PASS_MOVED"
         failure_reason = ""
     elif move_result == "scrolled":
@@ -118,7 +121,7 @@ def classify_step_result(
 
     if traversal_result.startswith("FAIL") or speech_match_result == "FAIL_MISMATCH":
         final_result = "FAIL"
-    elif traversal_result == "WARN_TERMINAL_BY_REPEAT_STOP" or speech_match_result == "WARN_CONTEXT_ADDED":
+    elif traversal_result in {"WARN_TERMINAL_BY_REPEAT_STOP", "WARN_PLUGIN_BOUNDARY"} or speech_match_result == "WARN_CONTEXT_ADDED":
         final_result = "WARN"
     elif traversal_result in {"PASS_MOVED", "PASS_SCROLLED"} and speech_match_result in {"PASS_EXACT", "PASS_CONTAINS", "PASS_SMART_NAV"}:
         final_result = "PASS"

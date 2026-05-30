@@ -21,7 +21,7 @@ from tb_runner.diagnostics import classify_step_result, detect_step_mismatch, no
 from tb_runner.diagnostics import is_global_nav_row
 from tb_runner.excel_report import save_excel
 from tb_runner.image_utils import maybe_capture_focus_crop
-from tb_runner.label_matcher import expand_verify_token_aliases, matches_alias
+from tb_runner.label_matcher import canonicalize_label, expand_verify_token_aliases, matches_alias
 from tb_runner.logging_utils import _should_log, log
 from tb_runner.overlay_logic import (
     classify_post_click_result,
@@ -107,6 +107,46 @@ _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _HOME_TAB_RESOURCE_ID = "com.samsung.android.oneconnect:id/menu_favorites"
 _LIFE_TAB_RESOURCE_ID = "com.samsung.android.oneconnect:id/menu_services"
+_GLOBAL_BOTTOM_NAV_RESOURCE_TOKENS = (
+    "menu_favorites",
+    "menu_devices",
+    "menu_services",
+    "menu_automations",
+    "menu_more",
+)
+_GLOBAL_BOTTOM_NAV_LABELS_REQUIRE_CONTEXT = {"routines"}
+_GLOBAL_BOTTOM_NAV_ALIAS_KEYS = (
+    ("bottom_home", "home"),
+    ("bottom_devices", "devices"),
+    ("bottom_life", "life"),
+    ("bottom_routines", "routines"),
+    ("bottom_menu", "menu"),
+)
+_PLUGIN_SHELL_CHROME_RESOURCE_TOKENS = (
+    "com.samsung.android.oneconnect:id/home_button",
+    "com.samsung.android.oneconnect:id/add_menu_button",
+    "com.samsung.android.oneconnect:id/more_menu_button",
+    "com.samsung.android.oneconnect:id/tab_title",
+    "com.samsung.android.oneconnect:id/small_title_bar",
+)
+_PLUGIN_SHELL_CHROME_LABEL_TOKENS = (
+    "우리 집, 장소 변경",
+    "장소 qr 코드",
+    "place qr code",
+    "change location",
+    "스마트싱스 설정",
+    "smartthings settings",
+    "공지사항",
+    "notice",
+    "문의하기",
+    "contact us",
+    "개인정보 처리방침",
+    "privacy policy",
+)
+_PLUGIN_SHELL_MENU_LABEL_TOKENS = (
+    "바코드 스캔",
+    "barcode scan",
+)
 _PRE_NAV_CAPTURE_REASON_KEYS = {"life_root_not_stable", "action_failed", "no_local_match", "target node not found"}
 _ENTRY_TYPE_CARD = "card"
 _ENTRY_TYPE_DIRECT_SELECT = "direct_select"
@@ -2081,6 +2121,182 @@ def _is_special_state_route_allowed(tab_cfg: dict[str, Any], *, screen_context_m
     if scenario_group == "main_tabs":
         return False
     return True
+
+
+def _is_plugin_boundary_guard_enabled(tab_cfg: dict[str, Any]) -> bool:
+    scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower()
+    scenario_group = str(tab_cfg.get("group", "") or "").strip().lower()
+    screen_context_mode = str(tab_cfg.get("screen_context_mode", "") or "").strip().lower()
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip().lower()
+    if scenario_type == "global_nav" or scenario_group == "main_tabs":
+        return False
+    return bool(scenario_group == "plugin_screen" or screen_context_mode == "new_screen" or "plugin" in scenario_id)
+
+
+def _row_focus_node_value(row: dict[str, Any], key: str) -> str:
+    focus_node = row.get("focus_node", {})
+    if not isinstance(focus_node, dict):
+        return ""
+    return str(focus_node.get(key, "") or "").strip()
+
+
+def _row_focus_view_id(row: dict[str, Any]) -> str:
+    return str(
+        row.get("focus_view_id", "")
+        or row.get("resource_id", "")
+        or _row_focus_node_value(row, "viewIdResourceName")
+        or _row_focus_node_value(row, "resourceId")
+        or ""
+    ).strip()
+
+
+def _row_label_values(row: dict[str, Any]) -> list[str]:
+    return [
+        str(row.get("visible_label", "") or "").strip(),
+        str(row.get("merged_announcement", "") or "").strip(),
+        str(row.get("normalized_visible_label", "") or "").strip(),
+        str(row.get("normalized_announcement", "") or "").strip(),
+        _row_focus_node_value(row, "talkbackLabel"),
+        _row_focus_node_value(row, "mergedLabel"),
+        _row_focus_node_value(row, "contentDescription"),
+        _row_focus_node_value(row, "text"),
+    ]
+
+
+def _row_focus_bounds(row: dict[str, Any]) -> tuple[int, int, int, int] | None:
+    bounds = str(row.get("focus_bounds", "") or "").strip()
+    if not bounds:
+        bounds = str(
+            _row_focus_node_value(row, "boundsInScreen")
+            or _row_focus_node_value(row, "bounds")
+            or ""
+        ).strip()
+    return parse_bounds_str(bounds)
+
+
+def _row_screen_height(row: dict[str, Any], bounds: tuple[int, int, int, int] | None = None) -> int:
+    for key in ("screen_height", "display_height", "window_height"):
+        try:
+            height = int(row.get(key, 0) or 0)
+        except Exception:
+            height = 0
+        if height > 0:
+            return height
+    if bounds:
+        return max(int(bounds[3]), 0)
+    return 0
+
+
+def _label_blob(values: list[str]) -> str:
+    return " ".join(value for value in values if value).strip().lower()
+
+
+def _plugin_boundary_enabled(tab_cfg: dict[str, Any]) -> bool:
+    return _is_plugin_boundary_guard_enabled(tab_cfg)
+
+
+def _is_plugin_local_tab_strip_overlay_blocked(row: dict[str, Any], tab_cfg: dict[str, Any]) -> tuple[bool, str]:
+    if not _plugin_boundary_enabled(tab_cfg):
+        return False, ""
+    view_id = _row_focus_view_id(row)
+    normalized_view_id = view_id.lower()
+    if any(token in normalized_view_id for token in _GLOBAL_BOTTOM_NAV_RESOURCE_TOKENS):
+        return False, ""
+    bounds = _row_focus_bounds(row)
+    if not bounds:
+        return False, ""
+    _left, top, _right, bottom = bounds
+    height = _row_screen_height(row, bounds)
+    bottom_region = bool(height > 0 and top >= int(height * 0.72))
+    if not bottom_region:
+        bottom_region = bool(top >= 1800 and bottom >= 2000)
+    if not bottom_region:
+        return False, ""
+    focus_node = row.get("focus_node", {})
+    clickable_or_focusable = bool(
+        row.get("focus_effective_clickable")
+        or row.get("focus_clickable")
+        or row.get("focus_focusable")
+        or (isinstance(focus_node, dict) and (
+            focus_node.get("effectiveClickable")
+            or focus_node.get("clickable")
+            or focus_node.get("focusable")
+        ))
+    )
+    if not clickable_or_focusable:
+        return False, ""
+    label_text = _label_blob(_row_label_values(row))
+    if not label_text and not normalized_view_id:
+        return False, ""
+    if "tab" in label_text or "탭" in label_text:
+        return False, ""
+    return True, "plugin_local_tab_strip"
+
+
+def _row_plugin_shell_chrome_boundary(row: dict[str, Any], tab_cfg: dict[str, Any]) -> tuple[bool, str, str]:
+    if not _plugin_boundary_enabled(tab_cfg):
+        return False, "", "guard_disabled"
+    view_id = _row_focus_view_id(row)
+    normalized_view_id = view_id.lower()
+    if any(token in normalized_view_id for token in _GLOBAL_BOTTOM_NAV_RESOURCE_TOKENS):
+        return False, "", "global_bottom_nav"
+    if any(token in normalized_view_id for token in _PLUGIN_SHELL_CHROME_RESOURCE_TOKENS):
+        return True, view_id, "shell_chrome_resource"
+    label_values = _row_label_values(row)
+    label_text = _label_blob(label_values)
+    if any(token in label_text for token in _PLUGIN_SHELL_CHROME_LABEL_TOKENS):
+        return True, " | ".join(value for value in label_values if value), "shell_chrome_label"
+    # These are menu/root-shell content signals; require prior overlay realign to avoid blocking plugin content by name alone.
+    if str(row.get("overlay_recovery_status", "") or "") == "after_realign" and any(
+        token in label_text for token in _PLUGIN_SHELL_MENU_LABEL_TOKENS
+    ):
+        return True, " | ".join(value for value in label_values if value), "shell_menu_label_after_overlay"
+    return False, " | ".join(value for value in label_values if value), "not_shell_chrome"
+
+
+def _canonicalize_bottom_nav_focus_label(label: str, *, has_tab_context: bool) -> str:
+    value = str(label or "").strip()
+    if not value:
+        return ""
+    for alias_key, canonical in _GLOBAL_BOTTOM_NAV_ALIAS_KEYS:
+        if matches_alias(value, alias_key, mode="exact"):
+            return canonical
+        if has_tab_context and (
+            matches_alias(value, alias_key, mode="token")
+            or matches_alias(value, alias_key, mode="contains")
+        ):
+            return canonical
+    return ""
+
+
+def _row_global_bottom_nav_boundary(row: dict[str, Any], tab_cfg: dict[str, Any]) -> tuple[bool, str, str]:
+    if not _is_plugin_boundary_guard_enabled(tab_cfg):
+        return False, "", "guard_disabled"
+    view_id = _row_focus_view_id(row)
+    normalized_view_id = view_id.lower()
+    if any(token in normalized_view_id for token in _GLOBAL_BOTTOM_NAV_RESOURCE_TOKENS):
+        return True, view_id, "resource_id"
+
+    label_values = _row_label_values(row)
+    label_text = " | ".join(value for value in label_values if value)
+    has_tab_context = bool(re.search(r"\btab\b|\btab\s+\d+\s+of\s+\d+\b|탭\s*\d*개|탭", label_text, flags=re.IGNORECASE))
+    canonical = ""
+    for value in label_values:
+        canonical = _canonicalize_bottom_nav_focus_label(value, has_tab_context=has_tab_context)
+        if canonical:
+            break
+    if not canonical and has_tab_context:
+        canonical = canonicalize_label(label_text, domain="bottom_tab") or ""
+    if not canonical:
+        return False, label_text, "not_bottom_nav_label"
+    bounds = _row_focus_bounds(row)
+    height = _row_screen_height(row, bounds)
+    is_bottom_region = bool(bounds and height > 0 and bounds[1] >= int(height * 0.72))
+    if canonical in _GLOBAL_BOTTOM_NAV_LABELS_REQUIRE_CONTEXT and not (has_tab_context or is_bottom_region):
+        return False, label_text, "label_requires_tab_context"
+    if has_tab_context or is_bottom_region or canonical in {"home", "devices", "life", "menu"}:
+        return True, label_text, f"label:{canonical}"
+    return False, label_text, "weak_label"
 
 
 def _get_card_entry_spec(tab_cfg: dict[str, Any], target: str) -> dict[str, Any]:
@@ -10520,10 +10736,44 @@ def _execute_overlay_for_candidate(
                     f"tab='{tab_cfg.get('tab_name', '')}'"
                 )
             else:
-                log(
-                    f"[ANCHOR][overlay_realign] success scenario='{tab_cfg.get('scenario_id', '')}' "
-                    "reason='overlay_realign_verified'"
+                verify_row = post_overlay_stabilized.get("verify_row", {})
+                fallback_label = str(post_overlay_stabilized.get("fallback_candidate_label", "") or "")
+                fallback_resource = str(post_overlay_stabilized.get("fallback_candidate_resource_id", "") or "")
+                shell_anchor_hit = False
+                shell_anchor_label = ""
+                shell_anchor_reason = ""
+                if isinstance(verify_row, dict):
+                    shell_anchor_hit, shell_anchor_label, shell_anchor_reason = _row_plugin_shell_chrome_boundary(
+                        verify_row,
+                        tab_cfg,
+                    )
+                fallback_probe = {
+                    "visible_label": fallback_label,
+                    "merged_announcement": fallback_label,
+                    "focus_view_id": fallback_resource,
+                }
+                fallback_shell_hit, fallback_shell_label, fallback_shell_reason = _row_plugin_shell_chrome_boundary(
+                    fallback_probe,
+                    tab_cfg,
                 )
+                if shell_anchor_hit or fallback_shell_hit:
+                    log(
+                        f"[ANCHOR][overlay_realign] rejected scenario='{tab_cfg.get('scenario_id', '')}' "
+                        f"reason='plugin_identity_lost' "
+                        f"label='{_truncate_debug_text(shell_anchor_label or fallback_shell_label, 120)}' "
+                        f"boundary_reason='{shell_anchor_reason or fallback_shell_reason}'"
+                    )
+                    return OverlayPhaseResult(
+                        candidate_checked=True,
+                        candidate_reason=candidate_reason,
+                        classification="navigation",
+                        post_realign_pending_steps_delta=0,
+                    )
+                else:
+                    log(
+                        f"[ANCHOR][overlay_realign] success scenario='{tab_cfg.get('scenario_id', '')}' "
+                        "reason='overlay_realign_verified'"
+                    )
             return OverlayPhaseResult(
                 candidate_checked=True,
                 candidate_reason=candidate_reason,
@@ -10775,6 +11025,20 @@ def _overlay_phase(
     if not is_global_nav_only_scenario:
         is_candidate, candidate_reason = is_overlay_candidate(row, tab_cfg)
     if is_candidate:
+        local_tab_blocked, local_tab_block_reason = _is_plugin_local_tab_strip_overlay_blocked(row, tab_cfg)
+        if local_tab_blocked:
+            log(
+                f"[OVERLAY] blocked plugin local tab strip scenario='{tab_cfg.get('scenario_id', '')}' "
+                f"tab='{tab_cfg.get('tab_name', '')}' step={row.get('step_index')} "
+                f"view_id='{row.get('focus_view_id', '')}' label='{row.get('visible_label', '')}' "
+                f"reason='{local_tab_block_reason}'"
+            )
+            return OverlayPhaseResult(
+                candidate_checked=True,
+                candidate_reason=f"blocked_{local_tab_block_reason}",
+                classification="unchanged",
+                post_realign_pending_steps_delta=0,
+            )
         fingerprint = make_overlay_entry_fingerprint(tab_cfg["tab_name"], row)
         if fingerprint not in expanded_overlay_entries:
             return _execute_overlay_for_candidate(
@@ -11293,6 +11557,36 @@ def _main_loop_phase(
                 row["popup_dismiss_result"] = str(popup_result.get("result", "") or "")
                 stop = False
                 reason = ""
+
+        shell_boundary_hit, shell_boundary_label, shell_boundary_reason = _row_plugin_shell_chrome_boundary(row, tab_cfg)
+        if shell_boundary_hit and not is_global_nav_only_scenario:
+            stop = True
+            reason = "plugin_boundary_shell_chrome"
+            row["plugin_boundary_shell_chrome"] = True
+            row["plugin_boundary_reason"] = shell_boundary_reason
+            row["plugin_boundary_label"] = shell_boundary_label
+            stop_eval_inputs["eval_reason"] = reason
+            log(
+                f"[PLUGIN_BOUNDARY][shell_chrome_reached] scenario='{tab_cfg.get('scenario_id', '')}' "
+                f"label='{_truncate_debug_text(shell_boundary_label, 120)}' "
+                f"view_id='{_truncate_debug_text(str(row.get('focus_view_id', '') or ''), 120)}' "
+                f"reason='{shell_boundary_reason}' action='stop'"
+            )
+
+        boundary_hit, boundary_label, boundary_reason = _row_global_bottom_nav_boundary(row, tab_cfg)
+        if boundary_hit and not is_global_nav_only_scenario:
+            stop = True
+            reason = "plugin_boundary_global_nav"
+            row["plugin_boundary_global_nav"] = True
+            row["plugin_boundary_reason"] = boundary_reason
+            row["plugin_boundary_label"] = boundary_label
+            stop_eval_inputs["eval_reason"] = reason
+            log(
+                f"[PLUGIN_BOUNDARY][global_nav_reached] scenario='{tab_cfg.get('scenario_id', '')}' "
+                f"label='{_truncate_debug_text(boundary_label, 120)}' "
+                f"view_id='{_truncate_debug_text(str(row.get('focus_view_id', '') or ''), 120)}' "
+                f"reason='{boundary_reason}' action='stop'"
+            )
 
         _apply_stop_explain_phase(
             row=row,
