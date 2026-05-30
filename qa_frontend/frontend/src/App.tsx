@@ -11,6 +11,7 @@ import { RecentRunsPanel } from './components/RecentRunsPanel';
 
 import { formatTime, formatDuration, formatBytes, healthClass, helperBadgeText, scenarioRunText, resolveSmokeSteps, describeScenarioSteps, languageLabel, scenarioReasonText } from './utils/formatters';
 import { useRunPolling } from './hooks/useRunPolling';
+import { groupScenarios } from './utils/scenarioGrouping';
 
 type LanguageMode = 'current' | 'ko-KR' | 'en-US';
 
@@ -381,18 +382,25 @@ export default function App() {
           {!scenarios.some((scenario) => scenario.id === DEFAULT_SCENARIO_ID) && (
             <div className="notice">Default scenario global_nav_main is not available. Select a scenario before running.</div>
           )}
-          <div className="scenarioList">
-            {scenarios.map((scenario) => (
-              <label key={scenario.id}>
-                <input
-                  type="checkbox"
-                  checked={selected.has(scenario.id)}
-                  onChange={() => toggleScenario(scenario.id)}
-                  disabled={running}
-                />
-                <span>{scenario.id}</span>
-                <small>{describeScenarioSteps(scenario, effectiveMode)}</small>
-              </label>
+          <div className="scenarioGroupsContainer">
+            {groupScenarios(scenarios).map((group) => (
+              <div key={group.title} className="scenarioGroup">
+                <h3 style={{ margin: '1rem 0 0.5rem', fontSize: '1rem', color: 'var(--color-text-dim)' }}>{group.title}</h3>
+                <div className="scenarioList">
+                  {group.scenarios.map((scenario) => (
+                    <label key={scenario.id}>
+                      <input
+                        type="checkbox"
+                        checked={selected.has(scenario.id)}
+                        onChange={() => toggleScenario(scenario.id)}
+                        disabled={running}
+                      />
+                      <span>{scenario.id}</span>
+                      <small>{describeScenarioSteps(scenario, effectiveMode)}</small>
+                    </label>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </article>

@@ -1,9 +1,9 @@
 import type { Scenario } from './api';
 
 export type ScenarioPresetId =
-  | 'global_nav_smoke'
-  | 'life_smoke'
-  | 'device_smoke'
+  | 'global'
+  | 'life'
+  | 'device'
   | 'select_all'
   | 'clear_all';
 
@@ -16,36 +16,26 @@ type ScenarioPreset = {
 
 export const PRESETS: ScenarioPreset[] = [
   {
-    id: 'global_nav_smoke',
-    label: 'Global Nav Smoke',
-    description: 'global_nav_main quick sanity check',
-    scenarioIds: ['global_nav_main'],
+    id: 'global',
+    label: 'Global Only',
+    description: 'select all global and settings scenarios',
+    scenarioIds: [],
   },
   {
-    id: 'life_smoke',
-    label: 'Life Smoke',
-    description: 'life plugin smoke set',
-    scenarioIds: [
-      'life_air_care_plugin',
-      'life_home_care_plugin',
-      'life_family_care_plugin',
-      'life_clothing_care_plugin',
-    ],
+    id: 'life',
+    label: 'Life Plugins',
+    description: 'select all life plugin scenarios',
+    scenarioIds: [],
   },
   {
-    id: 'device_smoke',
-    label: 'Device Smoke',
-    description: 'device plugin smoke set',
-    scenarioIds: [
-      'device_smoke_sensor_plugin',
-      'device_water_leak_sensor_plugin',
-      'device_door_lock_plugin',
-      'device_tv_plugin',
-    ],
+    id: 'device',
+    label: 'Device Plugins',
+    description: 'select all device plugin scenarios',
+    scenarioIds: [],
   },
   {
     id: 'select_all',
-    label: 'Select All Scenarios',
+    label: 'Select All',
     description: 'select every available scenario',
     scenarioIds: [],
   },
@@ -63,6 +53,35 @@ export function applyPresetSelection(presetId: ScenarioPresetId, scenarios: Scen
   }
   if (presetId === 'select_all') {
     return new Set(scenarios.map((scenario) => scenario.id));
+  }
+
+  const newSelection = new Set<string>();
+
+  if (presetId === 'global') {
+    for (const scenario of scenarios) {
+      if (scenario.id.startsWith('global_') || scenario.id.startsWith('settings_')) {
+        newSelection.add(scenario.id);
+      }
+    }
+    return newSelection;
+  }
+  
+  if (presetId === 'life') {
+    for (const scenario of scenarios) {
+      if (scenario.id.startsWith('life_')) {
+        newSelection.add(scenario.id);
+      }
+    }
+    return newSelection;
+  }
+  
+  if (presetId === 'device') {
+    for (const scenario of scenarios) {
+      if (scenario.id.startsWith('device_')) {
+        newSelection.add(scenario.id);
+      }
+    }
+    return newSelection;
   }
 
   const available = new Set(scenarios.map((scenario) => scenario.id));
