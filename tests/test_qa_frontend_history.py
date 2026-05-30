@@ -97,6 +97,9 @@ def test_recent_run_scenario_result_failed_when_process_success_and_scenario_fai
     assert run["scenario_result_status"] == "failed"
     assert run["completed_scenarios"] == 0
     assert run["failed_scenarios"] == 1
+    assert run["scenarios"][0]["id"] == "global_nav_main"
+    assert run["scenarios"][0]["status"] == "failed"
+    assert run["scenarios"][0]["reason"]
 
 
 def test_recent_run_scenario_result_warning_when_warning_scenarios_exist(tmp_path):
@@ -120,6 +123,9 @@ def test_recent_run_scenario_result_warning_when_warning_scenarios_exist(tmp_pat
     assert run["scenario_result_status"] == "warning"
     assert run["warning_scenarios"] == 1
     assert run["failed_scenarios"] == 0
+    assert run["scenarios"][0]["id"] == "device_smoke_sensor_plugin"
+    assert run["scenarios"][0]["status"] == "warning"
+    assert run["scenarios"][0]["reason"] == "repeat_no_progress"
 
 
 def test_recent_run_scenario_result_partial_when_stopped_after_completed_scenario(tmp_path):
@@ -224,6 +230,15 @@ def test_recent_runs_uses_summary_fast_path_when_available(tmp_path):
   "failed_scenarios": 0,
   "total_scenarios": 1,
   "event_warning_count": 0,
+  "scenarios": [
+    {
+      "id": "life_family_care_plugin",
+      "status": "warning",
+      "steps": 41,
+      "stop_reason": "repeat_no_progress",
+      "traversal_result": "FAIL_STUCK"
+    }
+  ],
   "xlsx_filename": "talkback_compare_cached.xlsx"
 }""",
         encoding="utf-8",
@@ -240,6 +255,16 @@ def test_recent_runs_uses_summary_fast_path_when_available(tmp_path):
     assert run["completed_scenarios"] == 1
     assert run["duration_seconds"] == 42
     assert run["xlsx_filename"] == "talkback_compare_cached.xlsx"
+    assert run["scenarios"] == [
+        {
+            "id": "life_family_care_plugin",
+            "status": "warning",
+            "steps": 41,
+            "reason": "repeat_no_progress",
+            "stop_reason": "repeat_no_progress",
+            "traversal_result": "FAIL_STUCK",
+        }
+    ]
 
 
 def test_recent_runs_falls_back_to_log_parse_when_summary_is_malformed(tmp_path):

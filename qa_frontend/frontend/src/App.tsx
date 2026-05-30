@@ -130,6 +130,10 @@ function languageLabel(languageMode: string | null | undefined) {
   }
 }
 
+function scenarioReasonText(scenario: NonNullable<RecentRun['scenarios']>[number]) {
+  return scenario.reason || scenario.stop_reason || scenario.traversal_result || '';
+}
+
 export default function App() {
   const [adb, setAdb] = useState<Record<string, unknown> | null>(null);
   const [helper, setHelper] = useState<HelperStatus | null>(null);
@@ -140,6 +144,7 @@ export default function App() {
   const [log, setLog] = useState('');
   const [outputs, setOutputs] = useState<OutputFile[]>([]);
   const [recentRuns, setRecentRuns] = useState<RecentRun[]>([]);
+  const [selectedRecentRunId, setSelectedRecentRunId] = useState<string | null>(null);
   const [pollingLatencyMs, setPollingLatencyMs] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [launchMode, setLaunchMode] = useState<'warm' | 'clean'>('clean');
@@ -158,6 +163,18 @@ export default function App() {
     () => recentRuns.find((run) => run.run_id === status?.run_id) ?? null,
     [recentRuns, status?.run_id],
   );
+  const selectedRecentRun = useMemo(
+    () =>
+      recentRuns.find((run) => run.run_id === selectedRecentRunId) ??
+      currentRunSummary ??
+      recentRuns[0] ??
+      null,
+    [currentRunSummary, recentRuns, selectedRecentRunId],
+  );
+  const selectedRunScenarios = selectedRecentRun?.scenarios ?? [];
+  const selectedFailedScenarios = selectedRunScenarios.filter((scenario) => scenario.status === 'failed');
+  const selectedWarningScenarios = selectedRunScenarios.filter((scenario) => scenario.status === 'warning');
+  const selectedPassedScenarios = selectedRunScenarios.filter((scenario) => scenario.status === 'passed');
   const currentRunReadyForDownload = Boolean(status?.run_id && status.state !== 'running' && status.log_path);
   const languageStatus = (status?.language_status ?? {}) as Record<string, unknown>;
   const manualLanguageChangeRequired = Boolean(
@@ -792,7 +809,19 @@ export default function App() {
             <h2>Recent Runs</h2>
             <div className="recentRuns">
               {recentRuns.map((run) => (
-                <div key={run.run_id} className="recentRunRow">
+                <div
+                  key={run.run_id}
+                  role="button"
+                  tabIndex={0}
+                  className={`recentRunRow ${selectedRecentRun?.run_id === run.run_id ? 'selected' : ''}`}
+                  onClick={() => setSelectedRecentRunId(run.run_id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setSelectedRecentRunId(run.run_id);
+                    }
+                  }}
+                >
                   <div>
                     <strong>{run.run_id}</strong>
                     <div className="recentStatusLine">
@@ -828,6 +857,59 @@ export default function App() {
                 </div>
               ))}
             </div>
+            {selectedRecentRun && (
+              <div className="runDetails">
+                <div className="runDetailsHeader">
+                  <h3>Run Details</h3>
+                  <span>{selectedRecentRun.run_id}</span>
+                </div>
+                <details open>
+                  <summary>Failed ({selectedFailedScenarios.length})</summary>
+                  <div className="scenarioDetailList">
+                    {selectedFailedScenarios.length ? (
+                      selectedFailedScenarios.map((scenario) => (
+                        <div key={scenario.id} className="scenarioDetailRow">
+                          <strong>{scenario.id}</strong>
+                          <small>reason={scenarioReasonText(scenario) || 'failed'}</small>
+                        </div>
+                      ))
+                    ) : (
+                      <small>No failed scenarios.</small>
+                    )}
+                  </div>
+                </details>
+                <details open>
+                  <summary>Warning ({selectedWarningScenarios.length})</summary>
+                  <div className="scenarioDetailList">
+                    {selectedWarningScenarios.length ? (
+                      selectedWarningScenarios.map((scenario) => (
+                        <div key={scenario.id} className="scenarioDetailRow">
+                          <strong>{scenario.id}</strong>
+                          <small>reason={scenarioReasonText(scenario) || 'warning'}</small>
+                        </div>
+                      ))
+                    ) : (
+                      <small>No warning scenarios.</small>
+                    )}
+                  </div>
+                </details>
+                <details>
+                  <summary>Passed ({selectedPassedScenarios.length})</summary>
+                  <div className="scenarioDetailList">
+                    {selectedPassedScenarios.length ? (
+                      selectedPassedScenarios.map((scenario) => (
+                        <div key={scenario.id} className="scenarioDetailRow">
+                          <strong>{scenario.id}</strong>
+                          {typeof scenario.steps === 'number' ? <small>{scenario.steps} steps</small> : null}
+                        </div>
+                      ))
+                    ) : (
+                      <small>No passed scenarios.</small>
+                    )}
+                  </div>
+                </details>
+              </div>
+            )}
           </article>
         </div>
       </section>

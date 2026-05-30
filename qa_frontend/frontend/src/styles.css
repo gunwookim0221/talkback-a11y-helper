@@ -356,11 +356,20 @@ small {
 }
 
 .recentRunRow {
+  background: #ffffff;
   border: 1px solid #dce3e9;
   border-radius: 6px;
+  color: inherit;
   display: grid;
   gap: 8px;
   padding: 10px;
+  text-align: left;
+}
+
+.recentRunRow:hover,
+.recentRunRow.selected {
+  border-color: #7a9fbd;
+  box-shadow: 0 0 0 2px rgba(54, 102, 139, 0.1);
 }
 
 .recentRunRow strong {
@@ -372,6 +381,55 @@ small {
   flex-wrap: wrap;
   gap: 6px;
   margin: 6px 0;
+}
+
+.runDetails {
+  border-top: 1px solid #dce3e9;
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.runDetailsHeader {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.runDetailsHeader span {
+  color: #667480;
+  font-size: 12px;
+}
+
+.runDetails details {
+  border: 1px solid #dce3e9;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.runDetails summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.scenarioDetailList {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.scenarioDetailRow {
+  background: #f6f8fa;
+  border-radius: 6px;
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+}
+
+.scenarioDetailRow small {
+  color: #667480;
 }
 
 .logPanel {

@@ -76,6 +76,7 @@ def parse_recent_run(path: Path, *, current_status: dict[str, object] | None = N
     process_status = _resolve_recent_process_status(log_text, run_id=run_id, current_status=current_status)
     runtime_summary = parse_runtime_log(log_text)
     scenario_result_status = resolve_scenario_result_status(process_status, runtime_summary)
+    scenarios = _recent_scenarios_from_runtime_summary(runtime_summary)
     completed_scenarios = int(runtime_summary.get("completed_scenarios") or 0)
     passed_scenarios = int(runtime_summary.get("passed_scenarios") or 0)
     warning_scenarios = int(runtime_summary.get("warning_scenarios") or 0)
@@ -105,6 +106,7 @@ def parse_recent_run(path: Path, *, current_status: dict[str, object] | None = N
         "xlsx_filename": xlsx_filename,
         "summary_exists": False,
         "summary_source": "log_parse",
+        "scenarios": scenarios,
     }
 
 
@@ -128,6 +130,7 @@ def _recent_run_from_summary(
     xlsx_filename = _string_or_none(summary.get("xlsx_filename"))
     started_text = _string_or_none(summary.get("started_at")) or started_at.isoformat(timespec="seconds")
     duration_seconds = int(summary.get("elapsed_seconds") or max(0, int((modified_at - started_at).total_seconds())))
+    scenarios = _recent_scenarios_from_summary(summary)
 
     return {
         "run_id": _string_or_none(summary.get("run_id")) or run_id,
@@ -151,6 +154,7 @@ def _recent_run_from_summary(
         "xlsx_filename": xlsx_filename,
         "summary_exists": True,
         "summary_source": "summary_json",
+        "scenarios": scenarios,
     }
 
 
@@ -171,6 +175,70 @@ def _count_warning_events(runtime_summary: dict[str, object]) -> int:
         for event in events
         if isinstance(event, dict) and str(event.get("type") or "") in warning_types
     )
+
+
+def _recent_scenarios_from_summary(summary: dict[str, object]) -> list[dict[str, object]]:
+    raw_scenarios = summary.get("scenarios")
+    if not isinstance(raw_scenarios, list):
+        return []
+    normalized: list[dict[str, object]] = []
+    for item in raw_scenarios:
+        if not isinstance(item, dict):
+            continue
+        scenario_id = _string_or_none(item.get("id"))
+        if not scenario_id:
+            continue
+        status = str(item.get("status") or "unknown")
+        stop_reason = _string_or_none(item.get("stop_reason"))
+        traversal_result = _string_or_none(item.get("traversal_result"))
+        normalized.append(
+            {
+                "id": scenario_id,
+                "status": status,
+                "steps": int(item.get("steps") or 0),
+                "reason": _scenario_reason(status=status, stop_reason=stop_reason, traversal_result=traversal_result),
+                "stop_reason": stop_reason,
+                "traversal_result": traversal_result,
+            }
+        )
+    return normalized
+
+
+def _recent_scenarios_from_runtime_summary(runtime_summary: dict[str, object]) -> list[dict[str, object]]:
+    progress = runtime_summary.get("scenario_progress")
+    if not isinstance(progress, list):
+        return []
+    stop_reason = _string_or_none(runtime_summary.get("stop_reason"))
+    traversal_result = _string_or_none(runtime_summary.get("traversal_result"))
+    normalized: list[dict[str, object]] = []
+    for item in progress:
+        if not isinstance(item, dict):
+            continue
+        scenario_id = _string_or_none(item.get("id"))
+        if not scenario_id:
+            continue
+        status = str(item.get("status") or "unknown")
+        normalized.append(
+            {
+                "id": scenario_id,
+                "status": status,
+                "steps": int(item.get("steps") or 0),
+                "reason": _scenario_reason(status=status, stop_reason=stop_reason, traversal_result=traversal_result),
+                "stop_reason": stop_reason,
+                "traversal_result": traversal_result,
+            }
+        )
+    return normalized
+
+
+def _scenario_reason(*, status: str, stop_reason: str | None, traversal_result: str | None) -> str | None:
+    if status not in {"failed", "warning"}:
+        return None
+    if stop_reason:
+        return stop_reason
+    if traversal_result:
+        return traversal_result
+    return status
 
 
 def _string_or_none(value: object) -> str | None:

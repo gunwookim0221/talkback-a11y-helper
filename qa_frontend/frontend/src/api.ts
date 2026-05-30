@@ -74,6 +74,14 @@ export type RecentRun = {
   xlsx_filename: string | null;
   summary_exists?: boolean;
   summary_source?: string;
+  scenarios?: Array<{
+    id: string;
+    status: 'passed' | 'warning' | 'failed' | 'skipped' | 'running' | 'queued' | string;
+    steps?: number;
+    reason?: string | null;
+    stop_reason?: string | null;
+    traversal_result?: string | null;
+  }>;
 };
 
 export type RuntimeEvent = {

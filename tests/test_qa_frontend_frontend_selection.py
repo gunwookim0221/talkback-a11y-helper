@@ -35,6 +35,12 @@ def test_frontend_initial_selection_defaults_to_global_nav_not_source_enabled():
     assert "Scenarios warning" in app_tsx
     assert "warning_scenarios" in app_tsx
     assert "summary cached" in app_tsx
+    assert "Run Details" in app_tsx
+    assert "selectedRecentRunId" in app_tsx
+    assert "reason={scenarioReasonText(scenario) || 'failed'}" in app_tsx
+    assert "Failed ({selectedFailedScenarios.length})" in app_tsx
+    assert "Warning ({selectedWarningScenarios.length})" in app_tsx
+    assert "Passed ({selectedPassedScenarios.length})" in app_tsx
     assert "Global Nav Smoke" in presets_ts
     assert "Life Smoke" in presets_ts
     assert "Device Smoke" in presets_ts
