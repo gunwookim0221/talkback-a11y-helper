@@ -208,6 +208,21 @@ export default function App() {
     setSelected(applyPresetSelection(presetId, scenarios, selected));
   }
 
+  function getScenarioHealth(scenarioId: string) {
+    const summaryResult = currentRunSummary?.scenarios?.find(s => s.id === scenarioId);
+    if (summaryResult) {
+      if (summaryResult.status === 'passed') return 'PASS';
+      if (summaryResult.status === 'warning') return 'WARN';
+      if (summaryResult.status === 'failed') return 'FAIL';
+    }
+    const dashResult = dashboard?.scenario_progress?.find(p => p.id === scenarioId);
+    if (dashResult) {
+      if (dashResult.status === 'completed') return 'PASS';
+      if (dashResult.status === 'failed') return 'FAIL';
+    }
+    return null;
+  }
+
   return (
     <main className="shell">
       <header className="topbar">
@@ -423,15 +438,29 @@ export default function App() {
                         />
                         {pluginName ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                            <strong style={{ fontSize: '1.05em' }}>{pluginName}</strong>
+                            <strong style={{ fontSize: '1.05em', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                              {pluginName}
+                              {getScenarioHealth(scenario.id) && (
+                                <span className={`statusBadge ${getScenarioHealth(scenario.id) === 'PASS' ? 'healthOk' : getScenarioHealth(scenario.id) === 'WARN' ? 'healthWarn' : 'healthBad'}`} style={{ fontSize: '10px', padding: '2px 6px' }}>
+                                  {getScenarioHealth(scenario.id)}
+                                </span>
+                              )}
+                            </strong>
                             <span style={{ fontSize: '0.85em', color: 'var(--color-text-dim)' }}>{scenario.id}</span>
                             <small>{describeScenarioSteps(scenario, effectiveMode)}</small>
                           </div>
                         ) : (
-                          <>
-                            <span>{scenario.id}</span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                            <span style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                              {scenario.id}
+                              {getScenarioHealth(scenario.id) && (
+                                <span className={`statusBadge ${getScenarioHealth(scenario.id) === 'PASS' ? 'healthOk' : getScenarioHealth(scenario.id) === 'WARN' ? 'healthWarn' : 'healthBad'}`} style={{ fontSize: '10px', padding: '2px 6px' }}>
+                                  {getScenarioHealth(scenario.id)}
+                                </span>
+                              )}
+                            </span>
                             <small>{describeScenarioSteps(scenario, effectiveMode)}</small>
-                          </>
+                          </div>
                         )}
                       </label>
                     );
