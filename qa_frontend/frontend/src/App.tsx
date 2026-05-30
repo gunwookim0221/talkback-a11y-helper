@@ -5,6 +5,9 @@ import { DEFAULT_SCENARIO_ID, initialScenarioSelection } from './selection';
 import { ADBPanel } from './components/ADBPanel';
 import { HelperPanel } from './components/HelperPanel';
 import { RunPanel } from './components/RunPanel';
+import { RuntimeDashboardPanel } from './components/RuntimeDashboard';
+import { OutputsPanel } from './components/OutputsPanel';
+import { RecentRunsPanel } from './components/RecentRunsPanel';
 
 function formatTime(value: number) {
   return new Date(value * 1000).toLocaleString();
@@ -501,119 +504,13 @@ export default function App() {
         </dl>
       </section>
 
-      <section className="panel dashboardPanel">
-        <div className="panelHeader">
-          <h2>Runtime Dashboard</h2>
-          <div className={`statusBadge ${healthClass(status?.state)}`}>{status?.state ?? 'idle'}</div>
-        </div>
-        {dashboard?.parse_error && <div className="notice">Dashboard parse warning: {dashboard.parse_error}</div>}
-        <div className="metricGrid">
-          <div>
-            <span>Elapsed</span>
-            <strong>{formatDuration(dashboard?.elapsed_seconds ?? 0)}</strong>
-          </div>
-          <div>
-            <span>Passed</span>
-            <strong>{dashboard?.passed_scenarios ?? 0}</strong>
-          </div>
-          <div>
-            <span>Warning</span>
-            <strong>{dashboard?.warning_scenarios ?? 0}</strong>
-          </div>
-          <div>
-            <span>Failed</span>
-            <strong>{dashboard?.failed_scenarios ?? 0}</strong>
-          </div>
-          <div>
-            <span>Steps</span>
-            <strong>{dashboard?.total_step_count ?? 0}</strong>
-          </div>
-          <div>
-            <span>Overlays</span>
-            <strong>{dashboard?.overlay_count ?? 0}</strong>
-          </div>
-          <div>
-            <span>Excel Saves</span>
-            <strong>{dashboard?.save_excel_count ?? 0}</strong>
-          </div>
-          <div>
-            <span>Log Size</span>
-            <strong>{formatBytes(dashboard?.log_size ?? 0)}</strong>
-          </div>
-          <div>
-            <span>Poll</span>
-            <strong>{pollingLatencyMs ?? '-'} ms</strong>
-          </div>
-        </div>
-        <div className="dashboardGrid">
-          <div>
-            <h3>Run State</h3>
-            <dl>
-              <dt>Run</dt>
-              <dd>{dashboard?.run_id ?? '-'}</dd>
-              <dt>Mode</dt>
-              <dd>{dashboard?.mode ?? status?.mode ?? '-'}</dd>
-              <dt>Launch</dt>
-              <dd>{dashboard?.launch_mode ?? status?.launch_mode ?? '-'}</dd>
-              <dt>Language</dt>
-              <dd>{languageLabel(dashboard?.language_mode ?? status?.language_mode)}</dd>
-              <dt>Locale</dt>
-              <dd>{dashboard?.device_locale ?? status?.device_locale ?? '-'}</dd>
-              <dt>Started</dt>
-              <dd>{dashboard?.started_at ?? status?.started_at ?? '-'}</dd>
-              <dt>Scenario</dt>
-              <dd>{dashboard?.current_scenario ?? '-'}</dd>
-              <dt>Current Step</dt>
-              <dd>{dashboard?.current_step ?? '-'}</dd>
-              <dt>Traversal</dt>
-              <dd>{dashboard?.traversal_result ?? '-'}</dd>
-              <dt>Stop Reason</dt>
-              <dd>{dashboard?.stop_reason ?? '-'}</dd>
-            </dl>
-          </div>
-          <div>
-            <h3>Health</h3>
-            <div className="healthList">
-              <span className={`statusBadge ${healthClass(dashboard?.preflight_state)}`}>preflight {dashboard?.preflight_state ?? '-'}</span>
-              <span className={`statusBadge ${healthClass(dashboard?.popup_result)}`}>popup {dashboard?.popup_result ?? '-'}</span>
-              <span className={`statusBadge ${healthClass(dashboard?.helper_status ?? helper?.status as string)}`}>helper {dashboard?.helper_status ?? String(helper?.status ?? '-')}</span>
-              <span className={`statusBadge ${healthClass(dashboard?.adb_status ?? adb?.status as string)}`}>adb {dashboard?.adb_status ?? String(adb?.status ?? '-')}</span>
-            </div>
-            <dl>
-              <dt>Focus Pkg</dt>
-              <dd>{dashboard?.last_focus_package ?? '-'}</dd>
-              <dt>Focus Label</dt>
-              <dd>{dashboard?.last_focus_label ?? '-'}</dd>
-            </dl>
-          </div>
-        </div>
-        <div className="dashboardGrid">
-          <div>
-            <h3>Scenario Progress</h3>
-            <div className="progressList">
-              {(dashboard?.scenario_progress ?? []).map((item) => (
-                <div key={item.id} className="progressRow">
-                  <span className={`statusDot ${healthClass(item.status)}`}></span>
-                  <strong>{item.id}</strong>
-                  <small>{item.status} · {item.steps} steps</small>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div>
-            <h3>Event Feed</h3>
-            <div className="eventFeed">
-              {(dashboard?.event_feed ?? []).slice().reverse().map((event) => (
-                <div key={`${event.line}-${event.type}`} className="eventRow">
-                  <span>{event.type}</span>
-                  <small>{event.scenario ?? 'run'} · line {event.line}</small>
-                  <p>{event.message}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
+      <RuntimeDashboardPanel
+        dashboard={dashboard}
+        status={status}
+        helper={helper}
+        adb={adb}
+        pollingLatencyMs={pollingLatencyMs}
+      />
 
       <section className="split">
         <article className="panel scenarios">
@@ -657,145 +554,21 @@ export default function App() {
         </article>
 
         <div className="stack">
-          <article className="panel">
-            <h2>Outputs</h2>
-            <div className="downloadActions">
-              <a
-                className={`downloadButton ${!currentRunSummary?.xlsx_exists ? 'disabled' : ''}`}
-                href={currentRunSummary?.xlsx_exists ? `/api/outputs/${encodeURIComponent(currentRunSummary.xlsx_filename ?? '')}` : undefined}
-                aria-disabled={!currentRunSummary?.xlsx_exists}
-              >
-                Download XLSX
-              </a>
-              <a
-                className={`downloadButton ${!currentRunReadyForDownload ? 'disabled' : ''}`}
-                href={currentRunReadyForDownload ? '/api/run/log/download' : undefined}
-                aria-disabled={!currentRunReadyForDownload}
-              >
-                Download Log
-              </a>
-            </div>
-            {currentRunSummary && (
-              <p className="scenarioHint">
-                Current run downloads: {currentRunSummary.xlsx_filename ?? 'xlsx pending'} · {currentRunSummary.log_filename ?? 'log pending'}
-              </p>
-            )}
-            <div className="outputList">
-              {outputs.map((file) => (
-                <a key={file.filename} href={`/api/outputs/${encodeURIComponent(file.filename)}`}>
-                  <span>{file.filename}</span>
-                  <small>{Math.round(file.size / 1024)} KB · {formatTime(file.modified)}</small>
-                </a>
-              ))}
-            </div>
-          </article>
+          <OutputsPanel
+            outputs={outputs}
+            currentRunSummary={currentRunSummary}
+            currentRunReadyForDownload={currentRunReadyForDownload}
+          />
 
-          <article className="panel">
-            <h2>Recent Runs</h2>
-            <div className="recentRuns">
-              {recentRuns.map((run) => (
-                <div
-                  key={run.run_id}
-                  role="button"
-                  tabIndex={0}
-                  className={`recentRunRow ${selectedRecentRun?.run_id === run.run_id ? 'selected' : ''}`}
-                  onClick={() => setSelectedRecentRunId(run.run_id)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      setSelectedRecentRunId(run.run_id);
-                    }
-                  }}
-                >
-                  <div>
-                    <strong>{run.run_id}</strong>
-                    <div className="recentStatusLine">
-                      <span className={`statusBadge ${healthClass(run.process_status)}`}>Run {run.process_status}</span>
-                      <span className={`statusBadge ${healthClass(run.scenario_result_status)}`}>
-                        {scenarioRunText(run)}
-                      </span>
-                    </div>
-                    <small>
-                      {run.mode} · {formatTime(Date.parse(run.started_at) / 1000)} · {formatDuration(run.duration_seconds)}
-                      {` · ${languageLabel(run.language_mode)}`}
-                      {run.device_locale ? ` · locale ${run.device_locale}` : ''}
-                      {run.event_warning_count ? ` · ${run.event_warning_count} events` : ''}
-                      {run.summary_source === 'summary_json' ? ' · summary cached' : ''}
-                    </small>
-                  </div>
-                  <div className="recentRunActions">
-                    <a
-                      className={`downloadButton ${!run.xlsx_exists ? 'disabled' : ''}`}
-                      href={run.xlsx_exists ? `/api/outputs/${encodeURIComponent(run.xlsx_filename ?? '')}` : undefined}
-                      aria-disabled={!run.xlsx_exists}
-                    >
-                      XLSX
-                    </a>
-                    <a
-                      className={`downloadButton ${!run.log_exists ? 'disabled' : ''}`}
-                      href={run.log_exists ? `/api/runs/recent/${encodeURIComponent(run.run_id)}/log` : undefined}
-                      aria-disabled={!run.log_exists}
-                    >
-                      Log
-                    </a>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {selectedRecentRun && (
-              <div className="runDetails">
-                <div className="runDetailsHeader">
-                  <h3>Run Details</h3>
-                  <span>{selectedRecentRun.run_id}</span>
-                </div>
-                <details open>
-                  <summary>Failed ({selectedFailedScenarios.length})</summary>
-                  <div className="scenarioDetailList">
-                    {selectedFailedScenarios.length ? (
-                      selectedFailedScenarios.map((scenario) => (
-                        <div key={scenario.id} className="scenarioDetailRow">
-                          <strong>{scenario.id}</strong>
-                          <small>reason={scenarioReasonText(scenario) || 'failed'}</small>
-                        </div>
-                      ))
-                    ) : (
-                      <small>No failed scenarios.</small>
-                    )}
-                  </div>
-                </details>
-                <details open>
-                  <summary>Warning ({selectedWarningScenarios.length})</summary>
-                  <div className="scenarioDetailList">
-                    {selectedWarningScenarios.length ? (
-                      selectedWarningScenarios.map((scenario) => (
-                        <div key={scenario.id} className="scenarioDetailRow">
-                          <strong>{scenario.id}</strong>
-                          <small>reason={scenarioReasonText(scenario) || 'warning'}</small>
-                        </div>
-                      ))
-                    ) : (
-                      <small>No warning scenarios.</small>
-                    )}
-                  </div>
-                </details>
-                <details>
-                  <summary>Passed ({selectedPassedScenarios.length})</summary>
-                  <div className="scenarioDetailList">
-                    {selectedPassedScenarios.length ? (
-                      selectedPassedScenarios.map((scenario) => (
-                        <div key={scenario.id} className="scenarioDetailRow">
-                          <strong>{scenario.id}</strong>
-                          {typeof scenario.steps === 'number' ? <small>{scenario.steps} steps</small> : null}
-                        </div>
-                      ))
-                    ) : (
-                      <small>No passed scenarios.</small>
-                    )}
-                  </div>
-                </details>
-              </div>
-            )}
-          </article>
+          <RecentRunsPanel
+            recentRuns={recentRuns}
+            selectedRecentRunId={selectedRecentRunId}
+            setSelectedRecentRunId={setSelectedRecentRunId}
+            selectedRecentRun={selectedRecentRun}
+            selectedFailedScenarios={selectedFailedScenarios}
+            selectedWarningScenarios={selectedWarningScenarios}
+            selectedPassedScenarios={selectedPassedScenarios}
+          />
         </div>
       </section>
 
