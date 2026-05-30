@@ -14,6 +14,7 @@ import { useRunPolling } from './hooks/useRunPolling';
 import { groupScenarios } from './utils/scenarioGrouping';
 import { getDevicePluginName } from './utils/devicePluginMeta';
 import { getLifePluginName } from './utils/lifePluginMeta';
+import { getNavigationName } from './utils/navigationMeta';
 
 type LanguageMode = 'current' | 'ko-KR' | 'en-US';
 
@@ -395,6 +396,8 @@ export default function App() {
                       pluginName = getDevicePluginName(scenario.id);
                     } else if (group.title === 'Life Plugins') {
                       pluginName = getLifePluginName(scenario.id);
+                    } else if (group.title === 'Navigation') {
+                      pluginName = getNavigationName(scenario.id);
                     }
                     return (
                       <label 
