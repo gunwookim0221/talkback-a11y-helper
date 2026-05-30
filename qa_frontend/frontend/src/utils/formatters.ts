@@ -107,9 +107,9 @@ export function describeScenarioSteps(scenario: Scenario, mode: 'smoke' | 'full'
   const sourceSteps = scenario.max_steps;
   if (mode === 'smoke') {
     const smokeSteps = resolveSmokeSteps(scenario.id);
-    return sourceSteps ? `${smokeSteps} smoke steps · source ${sourceSteps}` : `${smokeSteps} smoke steps`;
+    return `max_steps: ${smokeSteps}`;
   }
-  return sourceSteps ? `${sourceSteps} full steps` : 'full steps use source config';
+  return sourceSteps ? `max_steps: ${sourceSteps}` : 'max_steps: source config';
 }
 
 export function languageLabel(languageMode: string | null | undefined) {

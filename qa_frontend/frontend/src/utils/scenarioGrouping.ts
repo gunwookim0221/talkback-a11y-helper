@@ -10,7 +10,7 @@ export function groupScenarios(scenarios: Scenario[]): ScenarioGroup[] {
     Global: [],
     'Life Plugins': [],
     'Device Plugins': [],
-    Other: [],
+    'Core Navigation': [],
   };
 
   for (const scenario of scenarios) {
@@ -20,8 +20,8 @@ export function groupScenarios(scenarios: Scenario[]): ScenarioGroup[] {
       groups['Life Plugins'].push(scenario);
     } else if (scenario.id.startsWith('device_')) {
       groups['Device Plugins'].push(scenario);
-    } else {
-      groups['Other'].push(scenario);
+    } else if (scenario.id.startsWith('home_') || scenario.id.startsWith('devices_')) {
+      groups['Core Navigation'].push(scenario);
     }
   }
 
@@ -29,6 +29,6 @@ export function groupScenarios(scenarios: Scenario[]): ScenarioGroup[] {
     { title: 'Global', scenarios: groups['Global'] },
     { title: 'Life Plugins', scenarios: groups['Life Plugins'] },
     { title: 'Device Plugins', scenarios: groups['Device Plugins'] },
-    { title: 'Other', scenarios: groups['Other'] },
+    { title: 'Core Navigation', scenarios: groups['Core Navigation'] },
   ].filter((group) => group.scenarios.length > 0);
 }
