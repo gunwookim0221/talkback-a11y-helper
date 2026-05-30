@@ -1,18 +1,6 @@
 import React from 'react';
 import { RunStatus } from '../api';
-
-function languageLabel(languageMode: string | null | undefined) {
-  switch (languageMode) {
-    case 'ko-KR':
-      return 'Korean (ko-KR)';
-    case 'en-US':
-      return 'English (en-US)';
-    case 'current':
-      return 'Current device language';
-    default:
-      return languageMode ?? '-';
-  }
-}
+import { languageLabel } from '../utils/formatters';
 
 type LanguageMode = 'current' | 'ko-KR' | 'en-US';
 

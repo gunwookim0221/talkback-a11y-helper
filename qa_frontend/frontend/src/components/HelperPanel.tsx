@@ -1,48 +1,6 @@
 import React from 'react';
+import { healthClass, helperBadgeText } from '../utils/formatters';
 import { HelperStatus } from '../api';
-
-function healthClass(value: string | null | undefined) {
-  const normalized = String(value ?? '').toLowerCase();
-  if (['finished', 'passed', 'success', 'ok', 'enabled', 'cleared'].includes(normalized)) {
-    return 'healthOk';
-  }
-  if ([
-    'running',
-    'queued',
-    'unknown',
-    'dismissed_unverified',
-    'partial',
-    'stopped',
-    'warning',
-    'disabled',
-    'not_installed',
-    'apk_not_found',
-    'needs setup',
-  ].includes(normalized)) {
-    return 'healthWarn';
-  }
-  if (['failed', 'error', 'blocked', 'adb_error', 'helper_error', 'uncleared'].includes(normalized)) {
-    return 'healthBad';
-  }
-  return 'healthNeutral';
-}
-
-function helperBadgeText(status: string | undefined) {
-  switch (status) {
-    case 'ok':
-      return 'OK';
-    case 'disabled':
-      return 'Needs setup';
-    case 'not_installed':
-      return 'Not installed';
-    case 'apk_not_found':
-      return 'APK not found';
-    case 'error':
-      return 'Error';
-    default:
-      return status ?? 'unknown';
-  }
-}
 
 export interface HelperPanelProps {
   helper: HelperStatus | null;

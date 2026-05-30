@@ -1,9 +1,6 @@
 import React from 'react';
 import { OutputFile, RecentRun } from '../api';
-
-function formatTime(value: number) {
-  return new Date(value * 1000).toLocaleString();
-}
+import { formatTime } from '../utils/formatters';
 
 export interface OutputsPanelProps {
   outputs: OutputFile[];

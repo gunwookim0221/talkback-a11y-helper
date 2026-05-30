@@ -1,66 +1,6 @@
 import React from 'react';
 import { HelperStatus, RunStatus, RuntimeDashboard } from '../api';
-
-function formatDuration(seconds: number) {
-  if (seconds <= 0) {
-    return '0s';
-  }
-  const minutes = Math.floor(seconds / 60);
-  const remaining = seconds % 60;
-  if (minutes === 0) {
-    return `${remaining}s`;
-  }
-  return `${minutes}m ${remaining}s`;
-}
-
-function formatBytes(value: number) {
-  if (value < 1024) {
-    return `${value} B`;
-  }
-  if (value < 1024 * 1024) {
-    return `${Math.round(value / 1024)} KB`;
-  }
-  return `${(value / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function healthClass(value: string | null | undefined) {
-  const normalized = String(value ?? '').toLowerCase();
-  if (['finished', 'passed', 'success', 'ok', 'enabled', 'cleared'].includes(normalized)) {
-    return 'healthOk';
-  }
-  if ([
-    'running',
-    'queued',
-    'unknown',
-    'dismissed_unverified',
-    'partial',
-    'stopped',
-    'warning',
-    'disabled',
-    'not_installed',
-    'apk_not_found',
-    'needs setup',
-  ].includes(normalized)) {
-    return 'healthWarn';
-  }
-  if (['failed', 'error', 'blocked', 'adb_error', 'helper_error', 'uncleared'].includes(normalized)) {
-    return 'healthBad';
-  }
-  return 'healthNeutral';
-}
-
-function languageLabel(languageMode: string | null | undefined) {
-  switch (languageMode) {
-    case 'ko-KR':
-      return 'Korean (ko-KR)';
-    case 'en-US':
-      return 'English (en-US)';
-    case 'current':
-      return 'Current device language';
-    default:
-      return languageMode ?? '-';
-  }
-}
+import { formatDuration, formatBytes, healthClass, languageLabel } from '../utils/formatters';
 
 export interface RuntimeDashboardProps {
   dashboard: RuntimeDashboard | null;
