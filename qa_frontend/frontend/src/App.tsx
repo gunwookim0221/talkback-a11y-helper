@@ -10,6 +10,7 @@ import { OutputsPanel } from './components/OutputsPanel';
 import { RecentRunsPanel } from './components/RecentRunsPanel';
 
 import { formatTime, formatDuration, formatBytes, healthClass, helperBadgeText, scenarioRunText, resolveSmokeSteps, describeScenarioSteps, languageLabel, scenarioReasonText } from './utils/formatters';
+import { useRunPolling } from './hooks/useRunPolling';
 
 type LanguageMode = 'current' | 'ko-KR' | 'en-US';
 
@@ -18,21 +19,36 @@ export default function App() {
   const [helper, setHelper] = useState<HelperStatus | null>(null);
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [status, setStatus] = useState<RunStatus | null>(null);
-  const [dashboard, setDashboard] = useState<RuntimeDashboard | null>(null);
-  const [log, setLog] = useState('');
   const [outputs, setOutputs] = useState<OutputFile[]>([]);
   const [recentRuns, setRecentRuns] = useState<RecentRun[]>([]);
   const [selectedRecentRunId, setSelectedRecentRunId] = useState<string | null>(null);
-  const [pollingLatencyMs, setPollingLatencyMs] = useState<number | null>(null);
-  const [error, setError] = useState('');
   const [launchMode, setLaunchMode] = useState<'warm' | 'clean'>('clean');
   const [languageMode, setLanguageMode] = useState<LanguageMode>('current');
   const [plannedMode, setPlannedMode] = useState<'smoke' | 'full'>('smoke');
   const preflightRef = useRef<HTMLElement | null>(null);
   const scrolledBlockedRunRef = useRef<string | null>(null);
-  const pollingRef = useRef(false);
-  const lastStateRef = useRef<string | null>(null);
+
+  const {
+    status,
+    setStatus,
+    dashboard,
+    log,
+    pollingLatencyMs,
+    error,
+    setError,
+    refreshRun,
+  } = useRunPolling({
+    onOutputsChanged: () => {
+      api.outputs()
+        .then((res) => setOutputs(res.outputs))
+        .catch((err) => console.warn('Outputs poll failed:', err));
+    },
+    onRunFinished: () => {
+      api.recentRuns()
+        .then((res) => setRecentRuns(res.runs))
+        .catch((err) => console.warn('Recent runs poll failed:', err));
+    },
+  });
 
   const running = status?.state === 'running';
   const enabledCount = useMemo(() => scenarios.filter((scenario) => scenario.enabled).length, [scenarios]);
@@ -89,54 +105,9 @@ export default function App() {
     setRecentRuns(recentRunsResponse.runs);
   }
 
-  async function refreshRun() {
-    const started = performance.now();
-    
-    const snapshot = await api.runSnapshot();
-
-    setStatus(snapshot.status);
-    setDashboard(snapshot.dashboard);
-    setLog(snapshot.log_tail.text);
-
-    if (snapshot.outputs_changed) {
-      api.outputs()
-        .then((res) => setOutputs(res.outputs))
-        .catch((err) => console.warn('Outputs poll failed:', err));
-    }
-
-    const previousState = lastStateRef.current;
-    const currentState = snapshot.state;
-    lastStateRef.current = currentState;
-
-    if (
-      previousState === 'running' &&
-      (currentState === 'finished' || currentState === 'stopped' || currentState === 'error')
-    ) {
-      api.recentRuns()
-        .then((res) => setRecentRuns(res.runs))
-        .catch((err) => console.warn('Recent runs poll failed:', err));
-    }
-
-    setPollingLatencyMs(Math.round(performance.now() - started));
-    setError('');
-  }
-
   useEffect(() => {
     refreshStatic().then(refreshRun).catch((err) => setError(String(err)));
-  }, []);
-
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      if (pollingRef.current) return;
-      pollingRef.current = true;
-      refreshRun()
-        .catch((err) => setError(String(err)))
-        .finally(() => {
-          pollingRef.current = false;
-        });
-    }, 1500);
-    return () => window.clearInterval(id);
-  }, []);
+  }, [refreshRun]);
 
   useEffect(() => {
     if (!shouldScrollToPreflight || !status?.run_id) {
