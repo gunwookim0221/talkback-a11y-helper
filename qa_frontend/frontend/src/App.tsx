@@ -12,6 +12,7 @@ import { RecentRunsPanel } from './components/RecentRunsPanel';
 import { formatTime, formatDuration, formatBytes, healthClass, helperBadgeText, scenarioRunText, resolveSmokeSteps, describeScenarioSteps, languageLabel, scenarioReasonText } from './utils/formatters';
 import { useRunPolling } from './hooks/useRunPolling';
 import { groupScenarios } from './utils/scenarioGrouping';
+import { getDevicePluginName } from './utils/devicePluginMeta';
 
 type LanguageMode = 'current' | 'ko-KR' | 'en-US';
 
@@ -387,18 +388,43 @@ export default function App() {
               <div key={group.title} className="scenarioGroup">
                 <h3 style={{ margin: '1rem 0 0.5rem', fontSize: '1rem', color: 'var(--color-text-dim)' }}>{group.title}</h3>
                 <div className="scenarioList">
-                  {group.scenarios.map((scenario) => (
-                    <label key={scenario.id}>
-                      <input
-                        type="checkbox"
-                        checked={selected.has(scenario.id)}
-                        onChange={() => toggleScenario(scenario.id)}
-                        disabled={running}
-                      />
-                      <span>{scenario.id}</span>
-                      <small>{describeScenarioSteps(scenario, effectiveMode)}</small>
-                    </label>
-                  ))}
+                  {group.scenarios.map((scenario) => {
+                    const deviceName = group.title === 'Device Plugins' ? getDevicePluginName(scenario.id) : null;
+                    return (
+                      <label 
+                        key={scenario.id} 
+                        style={deviceName ? {
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          padding: '0.75rem',
+                          border: '1px solid var(--color-border)',
+                          borderRadius: '6px',
+                          background: 'var(--color-bg-alt, rgba(0,0,0,0.03))',
+                          gap: '0.5rem'
+                        } : undefined}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selected.has(scenario.id)}
+                          onChange={() => toggleScenario(scenario.id)}
+                          disabled={running}
+                          style={deviceName ? { marginTop: '0.2rem' } : undefined}
+                        />
+                        {deviceName ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                            <strong style={{ fontSize: '1.05em' }}>{deviceName}</strong>
+                            <span style={{ fontSize: '0.85em', color: 'var(--color-text-dim)' }}>{scenario.id}</span>
+                            <small>{describeScenarioSteps(scenario, effectiveMode)}</small>
+                          </div>
+                        ) : (
+                          <>
+                            <span>{scenario.id}</span>
+                            <small>{describeScenarioSteps(scenario, effectiveMode)}</small>
+                          </>
+                        )}
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
             ))}
