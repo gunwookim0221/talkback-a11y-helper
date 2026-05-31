@@ -146,13 +146,20 @@ class BatchRunManager:
                         print(f"Failed to parse log for summary: {e}")
 
             quality = parsed_summary.get("quality")
-            if quality is None:
-                quality = {
-                    "fail": parsed_summary.get("failed_scenarios", 0),
-                    "issue": parsed_summary.get("warning_scenarios", 0),
-                    "review": 0,
-                    "clean": parsed_summary.get("passed_scenarios", 0)
-                }
+            if quality is None and xlsx_path:
+                try:
+                    from .mismatch_viewer import get_mismatch_summary_from_xlsx
+                    mismatch_res = get_mismatch_summary_from_xlsx(ROOT_DIR / xlsx_path)
+                    if "error" not in mismatch_res and "summary" in mismatch_res:
+                        msummary = mismatch_res["summary"]
+                        quality = {
+                            "fail": msummary.get("fail_count", 0),
+                            "issue": msummary.get("issue_count", 0),
+                            "review": msummary.get("review_count", 0),
+                            "clean": msummary.get("clean_count", 0)
+                        }
+                except Exception as e:
+                    print(f"Failed to extract quality from xlsx: {e}")
 
             data.update({
                 "batch_id": self._batch_id,

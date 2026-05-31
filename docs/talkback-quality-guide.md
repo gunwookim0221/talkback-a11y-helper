@@ -2,6 +2,8 @@
 
 이 문서는 QA Frontend에서 제공하는 TalkBack 접근성 자동화 품질의 세부 판정 기준 및 시그널 의미를 정의합니다.
 
+*(참고: Batch 모드로 실행된 테스트의 경우, TalkBack Quality(fail, issue, review, clean)는 단순히 시나리오 통과 개수가 아닌 원본 XLSX 결과 파일의 mismatch summary를 기반으로 독립 계산됩니다.)*
+
 ---
 
 ## FAIL

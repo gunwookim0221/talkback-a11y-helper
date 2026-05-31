@@ -23,6 +23,9 @@ def get_run_mismatch_summary(run_id: str) -> dict[str, object]:
     if not xlsx_path:
         return {"error": "xlsx output not available"}
 
+    return get_mismatch_summary_from_xlsx(xlsx_path)
+
+def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
     if not xlsx_path.exists():
         return {"error": "xlsx file not found"}
 
