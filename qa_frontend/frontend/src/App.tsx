@@ -6,7 +6,7 @@ import { ADBPanel } from './components/ADBPanel';
 import { HelperPanel } from './components/HelperPanel';
 import { RunPanel } from './components/RunPanel';
 import { RuntimeDashboardPanel } from './components/RuntimeDashboard';
-import { OutputsPanel } from './components/OutputsPanel';
+
 import { RecentRunsPanel } from './components/RecentRunsPanel';
 
 import { formatTime, formatDuration, formatBytes, healthClass, helperBadgeText, scenarioRunText, resolveSmokeSteps, describeScenarioSteps, languageLabel, scenarioReasonText } from './utils/formatters';
@@ -322,6 +322,7 @@ export default function App() {
           status={status}
           stepPolicyText={stepPolicyText}
           selectedCount={selectedCount}
+          selectedScenarios={selected}
         />
       </section>
 
@@ -474,12 +475,6 @@ export default function App() {
         </article>
 
         <div className="stack">
-          <OutputsPanel
-            outputs={outputs}
-            currentRunSummary={currentRunSummary}
-            currentRunReadyForDownload={currentRunReadyForDownload}
-          />
-
           <RecentRunsPanel
             recentRuns={recentRuns}
             selectedRecentRunId={selectedRecentRunId}

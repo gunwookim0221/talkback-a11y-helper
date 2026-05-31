@@ -1,5 +1,5 @@
-import React from 'react';
-import { RunStatus } from '../api';
+import React, { useState, useEffect } from 'react';
+import { RunStatus, api, DeviceInfo, BatchStatus } from '../api';
 import { languageLabel } from '../utils/formatters';
 
 type LanguageMode = 'current' | 'ko-KR' | 'en-US';
@@ -18,6 +18,7 @@ export interface RunPanelProps {
   status: RunStatus | null;
   stepPolicyText: string;
   selectedCount: number;
+  selectedScenarios: Set<string>;
 }
 
 export function RunPanel({
@@ -34,7 +35,90 @@ export function RunPanel({
   status,
   stepPolicyText,
   selectedCount,
+  selectedScenarios,
 }: RunPanelProps) {
+  const [devices, setDevices] = useState<DeviceInfo[]>([]);
+  const [loadingDevices, setLoadingDevices] = useState(false);
+  const [selectedDevices, setSelectedDevices] = useState<Set<string>>(new Set());
+
+  const fetchDevices = async () => {
+    setLoadingDevices(true);
+    try {
+      const list = await api.devices();
+      setDevices(list);
+      // Auto-select ready devices
+      setSelectedDevices(new Set(list.filter(d => d.state === 'device').map(d => d.serial)));
+    } catch (err) {
+      console.error('Failed to fetch devices', err);
+    } finally {
+      setLoadingDevices(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDevices();
+  }, []);
+
+  const toggleDevice = (serial: string) => {
+    setSelectedDevices(prev => {
+      const next = new Set(prev);
+      if (next.has(serial)) next.delete(serial);
+      else next.add(serial);
+      return next;
+    });
+  };
+
+  const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
+
+  useEffect(() => {
+    let timer: number;
+    const pollBatch = async () => {
+      try {
+        const res = await api.getBatchStatus();
+        setBatchStatus(res);
+        if (res.state === 'running') {
+          timer = window.setTimeout(pollBatch, 2000);
+        } else {
+          timer = window.setTimeout(pollBatch, 5000);
+        }
+      } catch (err) {
+        timer = window.setTimeout(pollBatch, 5000);
+      }
+    };
+    pollBatch();
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const handleRunClick = async () => {
+    if (selectedDevices.size > 0) {
+      const selected = devices.filter(d => selectedDevices.has(d.serial) && d.state === 'device');
+      if (selected.length === 0) {
+         alert('No valid devices selected.');
+         return;
+      }
+      try {
+        const scenario_ids = selectedScenarios ? Array.from(selectedScenarios) : [];
+        if (scenario_ids.length === 0) {
+          alert('Please select at least one scenario before running.');
+          return;
+        }
+
+        const res = await api.startBatch({
+          mode: plannedMode,
+          devices: selected.map(d => ({ serial: d.serial, model: d.model })),
+          launch_mode: launchMode,
+          language_mode: languageMode,
+          scenario_ids
+        });
+        setBatchStatus(res);
+      } catch (err: any) {
+        alert(err.message || 'Failed to start batch');
+      }
+    } else {
+      start(plannedMode);
+    }
+  };
+
   return (
     <article className="panel controls">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
@@ -44,6 +128,75 @@ export function RunPanel({
             <span style={{ fontSize: '12px', color: 'var(--color-text-dim)' }}>
               (ID: {status.run_id} | Ret: {status.returncode ?? '-'})
             </span>
+          </div>
+        )}
+      </div>
+
+      <div style={{ marginBottom: '20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <h3 style={{ margin: 0, fontSize: '12px', color: 'var(--color-text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Devices</h3>
+          <button onClick={fetchDevices} disabled={loadingDevices || running} style={{ fontSize: '11px', padding: '2px 8px', minWidth: 'auto' }}>
+            {loadingDevices ? '...' : 'Refresh'}
+          </button>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {devices.length === 0 && !loadingDevices ? (
+            <div style={{ fontSize: '13px', color: 'var(--color-text-dim)' }}>No devices connected.</div>
+          ) : (
+            devices.map(d => {
+              let statusText = '';
+              if (d.state !== 'device') statusText = d.state === 'offline' ? 'Offline' : 'Error';
+              else if (!d.helper_ready) statusText = 'Helper missing';
+              else if (!d.talkback_enabled) statusText = 'TalkBack disabled';
+              else statusText = 'Ready';
+
+              const isSelectable = d.state === 'device';
+
+              return (
+                <label key={d.serial} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '8px 12px', background: 'var(--color-bg-dim)', borderRadius: '6px', opacity: isSelectable ? 1 : 0.6, cursor: isSelectable && !running ? 'pointer' : 'not-allowed', border: '1px solid var(--color-border)' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={selectedDevices.has(d.serial)} 
+                    onChange={() => toggleDevice(d.serial)}
+                    disabled={!isSelectable || running}
+                    style={{ marginTop: '3px' }}
+                  />
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ fontWeight: 500, fontSize: '14px' }}>
+                      {d.model} <span style={{ color: 'var(--color-text-dim)', fontSize: '12px', fontWeight: 'normal' }}>({d.serial})</span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: statusText === 'Ready' ? 'var(--color-success)' : 'var(--color-danger)', marginTop: '2px' }}>
+                      {statusText}
+                    </div>
+                    {d.foreground_package && (
+                      <div style={{ fontSize: '11px', color: 'var(--color-text-dim)', marginTop: '2px', wordBreak: 'break-all' }}>
+                        pkg: {d.foreground_package}
+                      </div>
+                    )}
+                  </div>
+                </label>
+              );
+            })
+          )}
+        </div>
+        {devices.length > 0 && (
+          <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--color-text-dim)', textAlign: 'right' }}>
+            Selected devices: {selectedDevices.size}
+          </div>
+        )}
+        {batchStatus && batchStatus.state !== 'idle' && (
+          <div style={{ marginTop: '12px', padding: '10px', background: 'var(--color-bg-dim)', borderRadius: '6px', fontSize: '12px' }}>
+            <div style={{ fontWeight: 500, marginBottom: '6px' }}>
+              Batch: {batchStatus.batch_id} - <span style={{ color: batchStatus.state === 'running' ? 'var(--color-primary)' : 'inherit' }}>{batchStatus.state}</span>
+            </div>
+            <div style={{ display: 'grid', gap: '4px' }}>
+              {batchStatus.devices.map(d => (
+                <div key={d.serial} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{d.model} <span style={{color: 'var(--color-text-dim)', fontSize: '10px'}}>({d.serial})</span></span>
+                  <span style={{ color: d.state === 'running' ? 'var(--color-primary)' : d.state === 'passed' ? 'var(--color-success)' : d.state === 'failed' ? 'var(--color-danger)' : 'var(--color-text-dim)' }}>{d.state}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -145,7 +298,7 @@ export function RunPanel({
           <strong>Current:</strong> {effectiveMode === 'smoke' ? 'Smoke' : 'Full'} &middot; {String(status?.launch_mode ?? launchMode).replace(/^\w/, c => c.toUpperCase())} &middot; {String(status?.language_mode ?? languageMode).replace(/^\w/, c => c.toUpperCase())} &middot; Selected {selectedCount}
         </div>
         <div className="buttonRow" style={{ marginBottom: '0', justifyContent: 'flex-end', gap: '12px' }}>
-          <button onClick={() => start(plannedMode)} disabled={running} style={{ minWidth: '100px' }}>
+          <button onClick={handleRunClick} disabled={running || batchStatus?.state === 'running'} style={{ minWidth: '100px' }}>
             Run
           </button>
           <button className="danger" onClick={stop} disabled={!running} style={{ minWidth: '100px' }}>

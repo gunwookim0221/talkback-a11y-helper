@@ -31,4 +31,4 @@ OVERLAY_REALIGN_MAX_STEPS = 8
 
 ENABLE_IMAGE_CROP = True
 ENABLE_IMAGE_INSERT_TO_EXCEL = True
-IMAGE_DIR = "output/crops"
+IMAGE_DIR = os.environ.get("TB_OUTPUT_DIR", "output") + "/crops"

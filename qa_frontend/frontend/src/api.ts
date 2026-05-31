@@ -39,6 +39,43 @@ export type RunStatus = {
   accessibility_settings_opened: boolean;
   preflight: Record<string, unknown> | null;
 };
+export type DeviceInfo = {
+  serial: string;
+  model: string;
+  state: string;
+  helper_ready: boolean;
+  talkback_enabled: boolean;
+  foreground_package: string | null;
+};
+
+export type BatchDeviceRequest = {
+  serial: string;
+  model: string;
+};
+
+export type BatchStartRequest = {
+  devices: BatchDeviceRequest[];
+  mode: string;
+};
+
+export type BatchDeviceStatus = {
+  serial: string;
+  model: string;
+  state: 'pending' | 'running' | 'passed' | 'failed' | 'skipped' | string;
+  output_dir: string;
+  return_code: number | null;
+  started_at: string | null;
+  finished_at: string | null;
+  error?: string;
+};
+
+export type BatchStatus = {
+  batch_id: string | null;
+  state: 'idle' | 'running' | 'finished' | 'error' | string;
+  mode: string | null;
+  current_device: string | null;
+  devices: BatchDeviceStatus[];
+};
 
 export type Scenario = {
   id: string;
@@ -82,6 +119,49 @@ export type RecentRun = {
     stop_reason?: string | null;
     traversal_result?: string | null;
   }>;
+};
+
+export type RecentBatchDevice = {
+  serial: string;
+  model: string;
+  state: string;
+  return_code: number | null;
+  log_path?: string | null;
+  runner_log_path?: string | null;
+  xlsx_path?: string | null;
+  quality?: {
+    fail: number;
+    issue: number;
+    review: number;
+    clean: number;
+  } | null;
+  process_status?: string;
+  scenario_result_status?: string;
+  passed_scenarios?: number;
+  warning_scenarios?: number;
+  completed_scenarios?: number;
+  failed_scenarios?: number;
+  total_scenarios?: number;
+  scenarios?: Array<{
+    id: string;
+    status: 'passed' | 'warning' | 'failed' | 'skipped' | 'running' | 'queued' | string;
+    steps?: number;
+    reason?: string | null;
+    stop_reason?: string | null;
+    traversal_result?: string | null;
+  }>;
+};
+
+export type RecentBatch = {
+  batch_id: string;
+  state: string;
+  mode: string;
+  created_at: string;
+  device_count: number;
+  passed_count: number;
+  failed_count: number;
+  summary_path: string;
+  devices?: RecentBatchDevice[];
 };
 
 export type RuntimeEvent = {
@@ -209,6 +289,7 @@ export type RunSnapshot = {
 };
 
 export const api = {
+  devices: () => request<DeviceInfo[]>('/api/devices'),
   adbStatus: () => request<Record<string, unknown>>('/api/adb/status'),
   helperStatus: () => request<HelperStatus>('/api/helper/status'),
   installHelper: () => request<HelperStatus>('/api/helper/install', { method: 'POST' }),
@@ -229,11 +310,20 @@ export const api = {
       body: JSON.stringify({ mode, scenario_ids: scenarioIds, launch_mode: launchMode, language_mode: languageMode }),
     }),
   stopRun: () => request<RunStatus>('/api/run/stop', { method: 'POST' }),
+  startBatch: async (data: { mode: string; devices: { serial: string; model: string }[]; launch_mode: string; language_mode: string; scenario_ids: string[] }) => {
+    return request<BatchStatus>('/api/batch/start', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  },
+  getBatchStatus: () => request<BatchStatus>('/api/batch/status'),
   runStatus: () => request<RunStatus>('/api/run/status'),
   runDashboard: () => request<RuntimeDashboard>('/api/run/dashboard'),
   runLog: () => request<{ text: string }>('/api/run/log'),
   runSnapshot: () => request<RunSnapshot>('/api/run/snapshot'),
   recentRuns: () => request<{ runs: RecentRun[] }>('/api/runs/recent'),
+  recentBatches: () => request<RecentBatch[]>('/api/batch/recent'),
+  getBatchLogTail: (path: string) => request<{ text: string }>(`/api/batch/log-tail?path=${encodeURIComponent(path)}`),
   runMismatch: (runId: string) => request<{
     summary: {
       fail_count: number;

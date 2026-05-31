@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { RecentRun, api } from '../api';
+import { RecentRun, api, RecentBatch } from '../api';
 import { formatTime, formatDuration, healthClass, scenarioRunText, languageLabel, scenarioReasonText } from '../utils/formatters';
 
 type MismatchSummary = {
@@ -55,317 +55,300 @@ export function RecentRunsPanel({
   selectedWarningScenarios,
   selectedPassedScenarios,
 }: RecentRunsPanelProps) {
-  const [mismatchSummary, setMismatchSummary] = useState<MismatchSummary | null>(null);
-
-  const groupedScenarios = useMemo(() => {
-    if (!mismatchSummary) return [];
-    const groups: Record<string, typeof mismatchSummary.scenario_summary> = {
-      Navigation: [],
-      'Life Plugins': [],
-      'Device Plugins': [],
-    };
-    mismatchSummary.scenario_summary.forEach(s => {
-      if (s.scenario_id.startsWith('global_') || s.scenario_id.startsWith('settings_') || s.scenario_id.startsWith('home_') || s.scenario_id.startsWith('devices_') || s.scenario_id.startsWith('routines_') || s.scenario_id.startsWith('menu_')) {
-        groups['Navigation'].push(s);
-      } else if (s.scenario_id.startsWith('life_')) {
-        groups['Life Plugins'].push(s);
-      } else if (s.scenario_id.startsWith('device_')) {
-        groups['Device Plugins'].push(s);
-      } else {
-        groups['Navigation'].push(s); // fallback
-      }
-    });
-  
-    return [
-      { title: 'Navigation', items: groups['Navigation'] },
-      { title: 'Life Plugins', items: groups['Life Plugins'] },
-      { title: 'Device Plugins', items: groups['Device Plugins'] }
-    ].filter(g => g.items.length > 0).map(g => ({
-      ...g,
-      items: g.items.sort((a, b) => {
-        const w = { fail: 0, issue: 1, review: 2, clean: 3 };
-        return w[a.status] - w[b.status];
-      })
-    }));
-  }, [mismatchSummary]);
+  const [mismatchSummaries, setMismatchSummaries] = useState<Record<string, MismatchSummary | null>>({});
+  const [recentBatches, setRecentBatches] = useState<RecentBatch[]>([]);
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
 
   useEffect(() => {
-    const runIdToFetch = selectedRecentRun?.run_id;
-    if (!runIdToFetch) {
-      setMismatchSummary(null);
+    let timer: number;
+    const fetchBatches = async () => {
+      try {
+        const res = await api.recentBatches();
+        setRecentBatches(res);
+      } catch (err) {
+        // ignore
+      }
+      timer = window.setTimeout(fetchBatches, 5000);
+    };
+    fetchBatches();
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const mismatchSummary = selectedRecentRun?.run_id ? mismatchSummaries[selectedRecentRun.run_id] : null;
+  const selectedBatch = useMemo(() => recentBatches.find(b => b.batch_id === selectedBatchId), [recentBatches, selectedBatchId]);
+  const [batchLogPreviews, setBatchLogPreviews] = useState<Record<string, string>>({});
+  const [batchMismatchSummaries, setBatchMismatchSummaries] = useState<Record<string, MismatchSummary | null>>({});
+
+  useEffect(() => {
+    if (!selectedBatch) {
+      setBatchLogPreviews({});
       return;
     }
-    const run = recentRuns.find(r => r.run_id === runIdToFetch);
-    if (!run || !run.xlsx_exists) {
-      setMismatchSummary(null);
-      return;
-    }
-    let ignore = false;
-    setMismatchSummary(null);
-    api.runMismatch(runIdToFetch).then(summary => {
-      if (!ignore) setMismatchSummary(summary);
-    }).catch(err => {
-      console.error('Failed to load mismatch summary:', err);
-      if (!ignore) setMismatchSummary(null);
+    
+    const logFetches: Promise<void>[] = [];
+    const newPreviews: Record<string, string> = {};
+    selectedBatch.devices?.forEach(d => {
+      let path = (d as any).runner_log_path || d.log_path;
+      if (!path) {
+        newPreviews[d.serial] = 'No log file found.';
+      } else {
+        logFetches.push(
+          api.getBatchLogTail(path).then(res => {
+            newPreviews[d.serial] = res.text || 'Empty log.';
+          }).catch(err => {
+            newPreviews[d.serial] = 'Error fetching log: ' + String(err);
+          })
+        );
+      }
     });
-    return () => { ignore = true; };
-  }, [selectedRecentRun?.run_id, recentRuns]);
+  }, [selectedBatch]);
 
-  return (
-    <article className="panel">
-      <h2>Recent Runs</h2>
-      <div className="recentRuns">
-        {recentRuns.map((run) => (
-          <div
-            key={run.run_id}
-            role="button"
-            tabIndex={0}
-            className={`recentRunRow ${selectedRecentRun?.run_id === run.run_id ? 'selected' : ''}`}
-            onClick={() => setSelectedRecentRunId(run.run_id)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                setSelectedRecentRunId(run.run_id);
-              }
-            }}
-          >
-            <div>
-              <strong>{run.run_id}</strong>
-              <div className="recentStatusLine">
-                <span className={`statusBadge ${healthClass(run.process_status)}`}>Run {run.process_status}</span>
-                <span className={`statusBadge ${healthClass(run.scenario_result_status)}`}>
-                  {scenarioRunText(run)}
-                </span>
-              </div>
-              <small>
-                {run.mode} · {formatTime(Date.parse(run.started_at) / 1000)} · {formatDuration(run.duration_seconds)}
-                {` · ${languageLabel(run.language_mode)}`}
-                {run.device_locale ? ` · locale ${run.device_locale}` : ''}
-                {run.event_warning_count ? ` · ${run.event_warning_count} events` : ''}
-                {run.summary_source === 'summary_json' ? ' · summary cached' : ''}
-              </small>
-            </div>
-            <div className="recentRunActions">
-              <a
-                className={`downloadButton ${!run.xlsx_exists ? 'disabled' : ''}`}
-                href={run.xlsx_exists ? `/api/outputs/${encodeURIComponent(run.xlsx_filename ?? '')}` : undefined}
-                aria-disabled={!run.xlsx_exists}
-              >
-                XLSX
-              </a>
-              <a
-                className={`downloadButton ${!run.log_exists ? 'disabled' : ''}`}
-                href={run.log_exists ? `/api/runs/recent/${encodeURIComponent(run.run_id)}/log` : undefined}
-                aria-disabled={!run.log_exists}
-              >
-                Log
-              </a>
-            </div>
-          </div>
-        ))}
-      </div>
-      {selectedRecentRun && (
-        <div className="runDetails">
-          <div className="runDetailsHeader">
-            <h3>Run Details</h3>
-            <span>{selectedRecentRun.run_id}</span>
-          </div>
-          <details open>
-            <summary>Failed ({selectedFailedScenarios.length})</summary>
-            <div className="scenarioDetailList">
-              {selectedFailedScenarios.length ? (
-                selectedFailedScenarios.map((scenario) => (
-                  <div key={scenario.id} className="scenarioDetailRow">
-                    <strong>{scenario.id}</strong>
-                    <small>reason={scenarioReasonText(scenario) || 'failed'}</small>
-                  </div>
-                ))
-              ) : (
-                <small>No failed scenarios.</small>
-              )}
-            </div>
-          </details>
-          <details>
-            <summary>Warning ({selectedWarningScenarios.length})</summary>
-            <div className="scenarioDetailList">
-              {selectedWarningScenarios.length ? (
-                selectedWarningScenarios.map((scenario) => (
-                  <div key={scenario.id} className="scenarioDetailRow">
-                    <strong>{scenario.id}</strong>
-                    <small>reason={scenarioReasonText(scenario) || 'warning'}</small>
-                  </div>
-                ))
-              ) : (
-                <small>No warning scenarios.</small>
-              )}
-            </div>
-          </details>
-          <details>
-            <summary>Passed ({selectedPassedScenarios.length})</summary>
-            <div className="scenarioDetailList">
-              {selectedPassedScenarios.length ? (
-                selectedPassedScenarios.map((scenario) => (
-                  <div key={scenario.id} className="scenarioDetailRow">
-                    <strong>{scenario.id}</strong>
-                    {typeof scenario.steps === 'number' ? <small>{scenario.steps} steps</small> : null}
-                  </div>
-                ))
-              ) : (
-                <small>No passed scenarios.</small>
-              )}
-            </div>
-          </details>
-          
-          {mismatchSummary && (
-            <details open>
-              <summary>TalkBack Quality</summary>
-              <div className="scenarioDetailList" style={{ marginTop: '8px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '8px' }}>
-                  <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
-                    <small>FAIL</small>
-                    <strong style={{ fontSize: '1.4em', color: mismatchSummary.summary.fail_count > 0 ? 'var(--color-danger)' : 'inherit' }}>{mismatchSummary.summary.fail_count}</strong>
-                  </div>
-                  <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
-                    <small>ISSUE</small>
-                    <strong style={{ fontSize: '1.4em', color: mismatchSummary.summary.issue_count > 0 ? 'var(--color-warning)' : 'inherit' }}>{mismatchSummary.summary.issue_count}</strong>
-                  </div>
-                  <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
-                    <small>REVIEW</small>
-                    <strong style={{ fontSize: '1.4em', color: mismatchSummary.summary.review_count > 0 ? 'var(--color-neutral)' : 'inherit' }}>{mismatchSummary.summary.review_count}</strong>
-                  </div>
-                  <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
-                    <small>CLEAN</small>
-                    <strong style={{ fontSize: '1.4em', color: 'var(--color-success)' }}>{mismatchSummary.summary.clean_count}</strong>
-                  </div>
-                </div>
-                
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px', marginBottom: '16px', fontSize: '11px', color: 'var(--color-text-dim)' }}>
-                  <div style={{ textAlign: 'center' }}>True Mismatch: {mismatchSummary.summary.true_mismatch}</div>
-                  <div style={{ textAlign: 'center' }}>Empty Speech: {mismatchSummary.summary.empty_speech}</div>
-                  <div style={{ textAlign: 'center' }}>Empty Visible: {mismatchSummary.summary.empty_visible}</div>
-                  <div style={{ textAlign: 'center' }}>Review: {mismatchSummary.summary.review}</div>
-                  <div style={{ textAlign: 'center' }}>Runtime Issue: {mismatchSummary.summary.runtime_warning}</div>
-                  <div style={{ textAlign: 'center' }}>Matched: {mismatchSummary.summary.matched}</div>
-                </div>
+  const renderDeviceDetails = (runData: any) => {
+    const failedScenarios = (runData?.scenarios || []).filter((s: any) => s.status === 'failed');
+    const warningScenarios = (runData?.scenarios || []).filter((s: any) => s.status === 'warning');
+    const passedScenarios = (runData?.scenarios || []).filter((s: any) => s.status === 'passed');
 
-                {groupedScenarios.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
-                    <strong>Scenario Quality</strong>
-                    {groupedScenarios.map((group) => {
-                      const renderScenario = (scenario: any) => {
-                        let badgeClass = 'healthPass';
-                        if (scenario.status === 'fail') badgeClass = 'healthFail';
-                        else if (scenario.status === 'issue') badgeClass = 'healthWarn';
-                        else if (scenario.status === 'review') badgeClass = 'healthNeutral';
-                        
-                        const details = [];
-                        if (scenario.true_mismatch > 0) details.push(`True Mismatch ${scenario.true_mismatch}`);
-                        if (scenario.empty_speech > 0) details.push(`Empty Speech ${scenario.empty_speech}`);
-                        if (scenario.empty_visible > 0) details.push(`Empty Visible ${scenario.empty_visible}`);
-                        if (scenario.review > 0) details.push(`Review ${scenario.review}`);
-                        if (scenario.runtime_warning > 0) details.push(`Runtime Warning ${scenario.runtime_warning}`);
-
-                        return (
-                          <div key={scenario.scenario_id} className="scenarioDetailRow" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', opacity: scenario.status === 'clean' ? 0.7 : 1 }}>
-                            <div style={{ display: 'flex', flexDirection: 'column' }}>
-                              <strong>{scenario.plugin_name || scenario.scenario_id}</strong>
-                              <small style={{ color: 'var(--color-text-dim)' }}>{details.length > 0 ? details.join(' · ') : 'Clean'}</small>
-                            </div>
-                            <span className={`statusBadge ${badgeClass}`}>{scenario.status.toUpperCase()}</span>
-                          </div>
-                        );
-                      };
-
-                      const topScenarios = group.items.filter(s => s.status !== 'review');
-                      const reviewScenarios = group.items.filter(s => s.status === 'review');
-
-                      return (
-                        <div key={group.title} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                          <div style={{ fontSize: '0.9em', fontWeight: 'bold', color: 'var(--color-text-dim)', marginTop: '4px' }}>{group.title}</div>
-                          {topScenarios.map(renderScenario)}
-                          {reviewScenarios.length > 0 && (
-                            <details style={{ marginTop: '4px' }}>
-                              <summary style={{ fontSize: '13px', color: 'var(--color-text-dim)' }}>Review Scenarios ({reviewScenarios.length})</summary>
-                              <div style={{ paddingLeft: '8px', borderLeft: '2px solid var(--color-border)', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                {reviewScenarios.map(renderScenario)}
-                              </div>
-                            </details>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {mismatchSummary.signals.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <strong>Quality Signals</strong>
-                      <small style={{ color: 'var(--color-text-dim)' }}>Shows true mismatches, empty signals, and warnings.</small>
+    return (
+      <div style={{ marginTop: '12px' }}>
+        <details open>
+          <summary style={{ fontSize: '14px', fontWeight: 'bold' }}>Run Details</summary>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingLeft: '8px', marginTop: '8px' }}>
+            <details>
+              <summary>Failed ({failedScenarios.length})</summary>
+              <div className="scenarioDetailList">
+                {failedScenarios.length ? (
+                  failedScenarios.map((scenario: any) => (
+                    <div key={scenario.id} className="scenarioDetailRow">
+                      <strong>{scenario.id}</strong>
+                      <small>reason={scenarioReasonText(scenario) || 'failed'}</small>
                     </div>
-                    {(() => {
-                      const renderPreview = (preview: any, key: string) => (
-                        <div key={key} className="scenarioDetailRow" style={{ gap: '6px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            <div>
-                              <strong>{preview.plugin_name || preview.scenario}</strong>
-                              <div style={{ fontSize: '11px', color: 'var(--color-text-dim)' }}>
-                                {preview.scenario} / step {preview.step}
-                              </div>
-                            </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                              <span className="statusBadge healthWarn" style={{ fontSize: '10px' }}>category: {preview.category}</span>
-                              {preview.mismatch_type && (
-                                <span style={{ fontSize: '10px', color: 'var(--color-text-dim)' }}>type: {preview.mismatch_type}</span>
-                              )}
-                            </div>
-                          </div>
-                          <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', gap: '4px', marginTop: '4px' }}>
-                            <small>visible:</small>
-                            <span style={{ fontSize: '13px' }}>{preview.visible || '(empty)'}</span>
-                            <small>spoken:</small>
-                            <span style={{ fontSize: '13px' }}>{preview.spoken || '(empty)'}</span>
-                            {preview.failure_reason && (
-                              <>
-                                <small>failure_reason:</small>
-                                <span style={{ fontSize: '13px', color: 'var(--color-danger)' }}>{preview.failure_reason}</span>
-                              </>
-                            )}
-                            {preview.focus_confidence && (
-                              <>
-                                <small>focus_conf:</small>
-                                <span style={{ fontSize: '13px' }}>{preview.focus_confidence}</span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      );
-
-                      const topSignals = mismatchSummary.signals.filter(s => s.top_category !== 'REVIEW');
-                      const reviewSignals = mismatchSummary.signals.filter(s => s.top_category === 'REVIEW');
-
-                      return (
-                        <>
-                          {topSignals.map((s, i) => renderPreview(s, 'top_' + i))}
-                          {reviewSignals.length > 0 && (
-                            <details style={{ marginTop: '8px' }}>
-                              <summary style={{ fontSize: '13px', color: 'var(--color-text-dim)' }}>Review Signals ({reviewSignals.length})</summary>
-                              <div style={{ paddingLeft: '8px', borderLeft: '2px solid var(--color-border)', marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                {reviewSignals.map((s, i) => renderPreview(s, 'rev_' + i))}
-                              </div>
-                            </details>
-                          )}
-                        </>
-                      );
-                    })()}
-                  </div>
+                  ))
+                ) : (
+                  <small>No failed scenarios.</small>
                 )}
               </div>
             </details>
-          )}
+            <details>
+              <summary>Warning ({warningScenarios.length})</summary>
+              <div className="scenarioDetailList">
+                {warningScenarios.length ? (
+                  warningScenarios.map((scenario: any) => (
+                    <div key={scenario.id} className="scenarioDetailRow">
+                      <strong>{scenario.id}</strong>
+                      <small>reason={scenarioReasonText(scenario) || 'warning'}</small>
+                    </div>
+                  ))
+                ) : (
+                  <small>No warning scenarios.</small>
+                )}
+              </div>
+            </details>
+            <details>
+              <summary>Passed ({passedScenarios.length})</summary>
+              <div className="scenarioDetailList">
+                {passedScenarios.length ? (
+                  passedScenarios.map((scenario: any) => (
+                    <div key={scenario.id} className="scenarioDetailRow">
+                      <strong>{scenario.id}</strong>
+                      {typeof scenario.steps === 'number' ? <small>{scenario.steps} steps</small> : null}
+                    </div>
+                  ))
+                ) : (
+                  <small>No passed scenarios.</small>
+                )}
+              </div>
+            </details>
+          </div>
+        </details>
+        
+        {runData?.quality && (
+          <details open style={{ marginTop: '16px' }}>
+            <summary style={{ fontSize: '14px', fontWeight: 'bold' }}>TalkBack Quality</summary>
+            <div className="scenarioDetailList" style={{ marginTop: '8px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '8px' }}>
+                <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                  <small>FAIL</small>
+                  <strong style={{ fontSize: '1.4em', color: runData.quality.fail > 0 ? 'var(--color-danger)' : 'inherit' }}>{runData.quality.fail}</strong>
+                </div>
+                <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                  <small>ISSUE</small>
+                  <strong style={{ fontSize: '1.4em', color: runData.quality.issue > 0 ? 'var(--color-warning)' : 'inherit' }}>{runData.quality.issue}</strong>
+                </div>
+                <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                  <small>REVIEW</small>
+                  <strong style={{ fontSize: '1.4em', color: runData.quality.review > 0 ? 'var(--color-neutral)' : 'inherit' }}>{runData.quality.review}</strong>
+                </div>
+                <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                  <small>CLEAN</small>
+                  <strong style={{ fontSize: '1.4em', color: 'var(--color-success)' }}>{runData.quality.clean}</strong>
+                </div>
+              </div>
+            </div>
+          </details>
+        )}
+      </div>
+    );
+  };
 
+
+  useEffect(() => {
+    const runIds = new Set(recentRuns.slice(0, 10).map(r => r.run_id));
+    if (selectedRecentRun?.run_id) {
+      runIds.add(selectedRecentRun.run_id);
+    }
+    
+    const toFetch = Array.from(runIds)
+      .map(id => recentRuns.find(r => r.run_id === id))
+      .filter((r): r is RecentRun => Boolean(r && r.xlsx_exists && mismatchSummaries[r.run_id] === undefined));
+    
+    if (toFetch.length === 0) return;
+    
+    let ignore = false;
+    Promise.all(
+      toFetch.map(r => 
+        api.runMismatch(r.run_id)
+          .then(summary => ({ run_id: r.run_id, summary }))
+          .catch(() => ({ run_id: r.run_id, summary: null }))
+      )
+    ).then(results => {
+      if (ignore) return;
+      setMismatchSummaries(prev => {
+        const next = { ...prev };
+        results.forEach(res => {
+          next[res.run_id] = res.summary as MismatchSummary | null;
+        });
+        return next;
+      });
+    });
+    
+    return () => { ignore = true; };
+  }, [recentRuns, selectedRecentRun?.run_id]);
+
+  function renderTalkBackBadge(runId: string) {
+    const summary = mismatchSummaries[runId];
+    if (summary === undefined) return null;
+    if (summary === null) return null;
+
+    const counts = summary.summary;
+    if (counts.fail_count > 0) {
+      return <span className="statusBadge healthBad">TALKBACK FAIL ({counts.fail_count})</span>;
+    }
+    if (counts.issue_count > 0) {
+      return <span className="statusBadge healthWarn">TALKBACK ISSUE ({counts.issue_count})</span>;
+    }
+    if (counts.review_count > 0) {
+      return <span className="statusBadge" style={{ background: 'var(--color-neutral)', color: '#fff' }}>TALKBACK REVIEW ({counts.review_count})</span>;
+    }
+    return <span className="statusBadge healthOk">TALKBACK CLEAN</span>;
+  }
+
+  return (
+    <article className="panel">
+      <h2>Run History</h2>
+      <p style={{ fontSize: '12px', color: 'var(--color-text-dim)', marginBottom: '16px' }}>
+        <strong>Batch Runs:</strong> Multi-device or sequential batch executions.<br/>
+        <strong>Single Runs:</strong> Legacy single-device direct executions.
+      </p>
+      {recentBatches.length > 0 && (
+        <>
+          <h3 style={{ fontSize: '13px', textTransform: 'uppercase', color: 'var(--color-text-dim)', margin: '0 0 8px 0' }}>Batch Runs</h3>
+          <div className="recentRuns" style={{ marginBottom: '20px' }}>
+            {recentBatches.map(batch => (
+              <div
+                key={batch.batch_id}
+                role="button"
+                tabIndex={0}
+                className={`recentRunRow ${selectedBatchId === batch.batch_id ? 'selected' : ''}`}
+                onClick={() => { setSelectedBatchId(batch.batch_id); setSelectedRecentRunId(null); }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setSelectedBatchId(batch.batch_id);
+                    setSelectedRecentRunId(null);
+                  }
+                }}
+              >
+                <div>
+                  <strong>{batch.batch_id}</strong>
+                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', margin: '6px 0' }}>
+                    <span className={`statusBadge ${batch.state === 'running' ? 'healthOk' : batch.state === 'finished' ? 'healthOk' : 'healthBad'}`}>
+                      {batch.state}
+                    </span>
+                  </div>
+                  <small>
+                    {batch.mode} &middot; {new Date(batch.created_at).toLocaleString()} &middot; devices: {batch.device_count} (passed: {batch.passed_count}, failed: {batch.failed_count})
+                  </small>
+                  {batch.devices && batch.devices.length > 0 && (
+                    <div style={{ marginTop: '8px', paddingLeft: '8px', borderLeft: '2px solid var(--color-border)' }}>
+                      <div style={{ fontSize: '11px', color: 'var(--color-text-dim)', marginBottom: '4px', textTransform: 'uppercase' }}>Devices:</div>
+                      <ul style={{ margin: 0, padding: 0, listStyle: 'none', fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {batch.devices.slice(0, 5).map(d => (
+                          <li key={d.serial} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ color: d.state === 'running' ? 'var(--color-primary)' : d.state === 'passed' ? 'var(--color-success)' : d.state === 'failed' ? 'var(--color-danger)' : 'var(--color-text-dim)' }}>
+                              &bull;
+                            </span>
+                            <span>
+                              {d.model} <span style={{ color: 'var(--color-text-dim)' }}>/ {d.serial}</span> &middot; {d.state} {d.return_code != null ? `· ret: ${d.return_code}` : ''}
+                              {d.quality && ` · fail:${d.quality.fail} issue:${d.quality.issue} review:${d.quality.review} clean:${d.quality.clean}`}
+                            </span>
+                            <div style={{ display: 'flex', gap: '4px', marginLeft: 'auto' }}>
+                              {d.log_path && (
+                                <a href={`/api/batch/file?path=${encodeURIComponent(d.log_path)}`} target="_blank" rel="noreferrer" style={{ fontSize: '11px', textDecoration: 'none', color: 'var(--color-primary)', background: 'rgba(52, 152, 219, 0.1)', padding: '2px 6px', borderRadius: '4px' }}>Log</a>
+                              )}
+                              {d.xlsx_path && (
+                                <a href={`/api/batch/file?path=${encodeURIComponent(d.xlsx_path)}`} style={{ fontSize: '11px', textDecoration: 'none', color: 'var(--color-success)', background: 'rgba(46, 204, 113, 0.1)', padding: '2px 6px', borderRadius: '4px' }}>XLSX</a>
+                              )}
+                            </div>
+                          </li>
+                        ))}
+                        {batch.devices.length > 5 && (
+                          <li style={{ color: 'var(--color-text-dim)', fontStyle: 'italic' }}>and {batch.devices.length - 5} more...</li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {selectedBatch && (
+        <div className="runDetails">
+          <div className="runDetailsHeader">
+            <h3>Batch Details</h3>
+            <span>{selectedBatch.batch_id}</span>
+          </div>
+          <div style={{ padding: '12px', fontSize: '13px' }}>
+            <div style={{ marginBottom: '16px' }}>
+              <strong>Status:</strong> {selectedBatch.state} &middot; <strong>Mode:</strong> {selectedBatch.mode} &middot; <strong>Devices:</strong> {selectedBatch.device_count}
+            </div>
+            {selectedBatch.devices && selectedBatch.devices.map(d => (
+               <div key={d.serial} style={{ padding: '8px 12px', border: '1px solid var(--color-border)', borderRadius: '6px', marginBottom: '16px', background: 'var(--color-bg-dim)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <strong>{d.model}</strong> <small style={{ color: 'var(--color-text-dim)' }}>/ {d.serial}</small>
+                    </div>
+                    <span className={`statusBadge ${d.state === 'running' ? 'healthWarn' : d.state === 'passed' ? 'healthOk' : d.state === 'failed' ? 'healthBad' : ''}`}>{d.state}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '8px', marginBottom: '8px' }}>
+                    {d.log_path && <a href={`/api/batch/file?path=${encodeURIComponent(d.log_path)}`} target="_blank" rel="noreferrer" style={{ color: 'var(--color-primary)' }}>View Log</a>}
+                    {d.xlsx_path && <a href={`/api/batch/file?path=${encodeURIComponent(d.xlsx_path)}`} target="_blank" rel="noreferrer" style={{ color: 'var(--color-success)' }}>View XLSX</a>}
+                  </div>
+                  <details style={{ marginTop: '16px', marginBottom: '16px' }}>
+                    <summary style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--color-text-dim)', textTransform: 'uppercase' }}>Log Preview</summary>
+                    <pre style={{ background: 'var(--color-bg-dark, #1e1e1e)', color: '#d4d4d4', padding: '12px', borderRadius: '6px', fontSize: '11px', maxHeight: '300px', overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', marginTop: '8px' }}>
+                      {batchLogPreviews[d.serial] || 'Loading log...'}
+                    </pre>
+                  </details>
+                  {renderDeviceDetails(d)}
+               </div>
+            ))}
+          </div>
         </div>
       )}
+
     </article>
   );
 }

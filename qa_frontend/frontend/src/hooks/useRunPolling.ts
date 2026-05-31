@@ -30,25 +30,86 @@ export function useRunPolling({ onOutputsChanged, onRunFinished }: UseRunPolling
   const refreshRun = useCallback(async () => {
     const started = performance.now();
     
-    const snapshot = await api.runSnapshot();
-
-    setStatus(snapshot.status);
-    setDashboard(snapshot.dashboard);
-    setLog(snapshot.log_tail.text);
-
-    if (snapshot.outputs_changed) {
-      onOutputsChangedRef.current();
+    let snapshot: any = null;
+    let currentLog = '';
+    let batchStatusRef: any = null;
+    try {
+      snapshot = await api.runSnapshot();
+      currentLog = snapshot.log_tail.text;
+    } catch (e) {
+      // ignore
     }
 
-    const previousState = lastStateRef.current;
-    const currentState = snapshot.state;
-    lastStateRef.current = currentState;
+    try {
+      const batchStatus = await api.getBatchStatus();
+      batchStatusRef = batchStatus;
+      if (batchStatus && batchStatus.state === 'running' && batchStatus.devices) {
+        const runningDevice = batchStatus.devices.find((d: any) => d.state === 'running' || d.state === 'pending');
+        if (runningDevice) {
+           const basePath = runningDevice.output_dir?.replace(/\\/g, '/') || '';
+           const targetPath = (runningDevice as any).runner_log_path?.replace(/\\/g, '/') || `${basePath}/runner.log`;
+           const batchLog = await api.getBatchLogTail(targetPath);
+           if (batchLog && batchLog.text) {
+             currentLog = batchLog.text;
+           } else {
+             currentLog = "Waiting for batch log...";
+           }
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
 
-    if (
-      previousState === 'running' &&
-      (currentState === 'finished' || currentState === 'stopped' || currentState === 'error')
-    ) {
-      onRunFinishedRef.current();
+    if (snapshot) {
+      let finalStatus = snapshot.status;
+      let finalDashboard = snapshot.dashboard;
+      let currentStateForEffect = snapshot.state;
+
+      if (batchStatusRef && batchStatusRef.state && batchStatusRef.state !== 'idle') {
+        const unifiedState = batchStatusRef.state === 'running' ? 'running' 
+          : batchStatusRef.state === 'error' ? 'error' 
+          : 'finished';
+          
+        finalStatus = {
+          ...snapshot.status,
+          state: unifiedState,
+        };
+        currentStateForEffect = unifiedState;
+        
+        if (unifiedState === 'running') {
+          const currentDev = batchStatusRef.devices?.find((d: any) => d.state === 'running' || d.state === 'pending');
+          finalDashboard = {
+            ...snapshot.dashboard,
+            state: 'running',
+            mode: batchStatusRef.mode || 'batch',
+            current_scenario: currentDev ? `[Batch Active] Device: ${currentDev.serial}` : 'Batch Active',
+            parse_error: 'Batch run in progress. See Run History / Log Preview for details.'
+          };
+        }
+      }
+
+      setStatus(finalStatus);
+      setDashboard(finalDashboard);
+      setLog(prev => {
+        if (!currentLog && prev && prev !== "Waiting for batch log...") {
+          return prev;
+        }
+        return currentLog;
+      });
+
+      if (snapshot.outputs_changed) {
+        onOutputsChangedRef.current();
+      }
+
+      const previousState = lastStateRef.current;
+      lastStateRef.current = currentStateForEffect;
+
+      if (
+        previousState === 'running' &&
+        (currentStateForEffect === 'finished' || currentStateForEffect === 'stopped' || currentStateForEffect === 'error')
+      ) {
+        onRunFinishedRef.current();
+      }
     }
 
     setPollingLatencyMs(Math.round(performance.now() - started));

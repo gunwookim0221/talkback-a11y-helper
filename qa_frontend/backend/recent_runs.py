@@ -40,6 +40,19 @@ def list_recent_runs(
 
 def safe_recent_run_log_path(run_id: str, *, run_log_dir: Path = RUN_LOG_DIR) -> Path:
     normalized_run_id = str(run_id or "").strip()
+    if "/" in normalized_run_id or "\\" in normalized_run_id:
+        target = (run_log_dir / normalized_run_id).resolve()
+        if not target.is_relative_to(run_log_dir.resolve()):
+            raise ValueError("invalid batch path")
+        if target.is_dir():
+            for log_file in sorted(target.glob("*.log")):
+                if log_file.is_file() and ".normal" in log_file.name:
+                    return log_file
+            for log_file in sorted(target.glob("*.log")):
+                if log_file.is_file() and log_file.name != "runner.log":
+                    return log_file
+        raise FileNotFoundError(normalized_run_id)
+
     if not re.fullmatch(r"\d{8}_\d{6}", normalized_run_id):
         raise ValueError("invalid run id")
 

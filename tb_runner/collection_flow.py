@@ -2359,7 +2359,8 @@ def _capture_pre_navigation_failure_bundle(
         return ""
 
     capture_root_id = str(capture_run_id or "").strip() or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    bundle_dir = Path("output") / "capture_bundles" / normalized_scenario_id / capture_root_id / "final_failure"
+    out_dir = os.environ.get("TB_OUTPUT_DIR", "output")
+    bundle_dir = Path(out_dir) / "capture_bundles" / normalized_scenario_id / capture_root_id / "final_failure"
     bundle_path = str(bundle_dir)
     log_fn(
         f"[CAPTURE][pre_nav_failure] start scenario='{normalized_scenario_id}' "
@@ -2488,7 +2489,8 @@ def _capture_scrolltouch_step_bundle(
     capture_root_id = str(capture_run_id or "").strip() or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     stats_map = candidate_stats if isinstance(candidate_stats, dict) else {}
     selected_meta_map = selected_meta if isinstance(selected_meta, dict) else {}
-    bundle_dir = Path("output") / "capture_bundles" / normalized_scenario_id / capture_root_id / f"step_{max(int(scroll_step), 0):02d}"
+    out_dir = os.environ.get("TB_OUTPUT_DIR", "output")
+    bundle_dir = Path(out_dir) / "capture_bundles" / normalized_scenario_id / capture_root_id / f"step_{max(int(scroll_step), 0):02d}"
     bundle_path = str(bundle_dir)
     try:
         bundle_dir.mkdir(parents=True, exist_ok=True)

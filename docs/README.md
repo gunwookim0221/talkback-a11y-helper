@@ -16,7 +16,8 @@
 - 신규 plugin onboarding: [plugin-onboarding-guide.md](plugin-onboarding-guide.md)
 - report row schema: [report-schema.md](report-schema.md)
 - i18n / locale matching: [i18n_locale_matching.md](i18n_locale_matching.md)
-- QA Local Control Panel: [../qa_frontend/README.md](../qa_frontend/README.md)
+- QA Local Control Panel: [qa-frontend-guide.md](qa-frontend-guide.md) (Batch-First UX 통합 적용)
+- TalkBack 접근성 품질 판독: [talkback-quality-guide.md](talkback-quality-guide.md)
 
 ## Historical design record
 
@@ -29,3 +30,4 @@
 - PR14 client split
 
 운영 판단은 archive 문서보다 운영 기준 문서를 우선합니다.
+*(최근의 Batch-First UX 통합 및 Known Issues 등에 대해서는 `qa-frontend-guide.md`를 참고하세요.)*

@@ -12,10 +12,15 @@ logger = logging.getLogger(__name__)
 
 def generate_output_path() -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"output/talkback_compare_{timestamp}.xlsx"
+    out_dir = os.environ.get("TB_OUTPUT_DIR", "output")
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    return f"{out_dir}/talkback_compare_{timestamp}.xlsx"
 
 
-def configure_process_temp_dir(temp_dir: str = "output/.tmp") -> tuple[bool, str]:
+def configure_process_temp_dir(temp_dir: str | None = None) -> tuple[bool, str]:
+    if not temp_dir:
+        out_dir = os.environ.get("TB_OUTPUT_DIR", "output")
+        temp_dir = f"{out_dir}/.tmp"
     temp_path = Path(temp_dir).resolve()
     temp_path.mkdir(parents=True, exist_ok=True)
     temp_path_text = str(temp_path)

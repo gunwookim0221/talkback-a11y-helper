@@ -1,5 +1,14 @@
+import argparse
 import sys
+import os
 from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--serial", type=str, default=None)
+parser.add_argument("--output-dir", type=str, default=None)
+args, _ = parser.parse_known_args()
+if args.output_dir:
+    os.environ["TB_OUTPUT_DIR"] = args.output_dir
 
 from talkback_lib import A11yAdbClient
 from tb_runner.collection_flow import collect_tab_rows, recover_to_start_state
@@ -42,7 +51,8 @@ _force_utf8_stdio()
 
 
 def main():
-    temp_override_applied, temp_override_path = configure_process_temp_dir("output/.tmp")
+    out_dir = os.environ.get("TB_OUTPUT_DIR", "output")
+    temp_override_applied, temp_override_path = configure_process_temp_dir(f"{out_dir}/.tmp")
     output_path = generate_output_path()
     output_base_dir = str(Path(output_path).with_suffix(""))
     configure_log_files(output_path)
@@ -52,11 +62,12 @@ def main():
     )
 
     log(f"[MAIN] script start (version={SCRIPT_VERSION}, log_level={LOG_LEVEL})")
-    client = A11yAdbClient(dev_serial=DEV_SERIAL)
+    target_serial = args.serial or DEV_SERIAL
+    client = A11yAdbClient(dev_serial=target_serial)
     accessibility_preflight = ensure_accessibility_service_enabled(
-        serial=DEV_SERIAL,
+        serial=target_serial,
         component=HELPER_SERVICE_COMPONENT,
-        helper_ready_check=lambda: client.ping(dev=DEV_SERIAL, wait_=3.0),
+        helper_ready_check=lambda: client.ping(dev=target_serial, wait_=3.0),
         log_fn=log,
     )
     log(
@@ -70,7 +81,7 @@ def main():
         f"helper_ready={str(accessibility_preflight.helper_ready).lower()} "
         f"result='{accessibility_preflight.reason}'"
     )
-    preflight = client.check_talkback_ready(dev=DEV_SERIAL)
+    preflight = client.check_talkback_ready(dev=target_serial)
     talkback_status = preflight.get("status", "disabled")
     talkback_reason = preflight.get("reason", "")
     log(f"[PREFLIGHT] talkback status='{talkback_status}'")

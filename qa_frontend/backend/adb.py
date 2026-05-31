@@ -411,3 +411,70 @@ def open_accessibility_settings() -> dict[str, object]:
         **_helper_metadata(_find_helper_apk()),
         "accessibility_settings_opened": bool(result.get("ok")),
     }
+
+
+def _make_adb_runner_for_serial(serial: str):
+    def runner(args: list[str], timeout: float = 10.0) -> dict[str, object]:
+        return run_adb(["-s", serial] + args, timeout)
+    return runner
+
+
+def get_devices() -> list[dict[str, object]]:
+    status = get_adb_status()
+    devices = status.get("devices", [])
+    if not isinstance(devices, list):
+        return []
+
+    from .preflight import get_talkback_status, get_foreground_package
+
+    result = []
+    for device in devices:
+        serial = device.get("serial")
+        state = device.get("state")
+        if not isinstance(serial, str) or not serial:
+            continue
+
+        if state != "device":
+            result.append({
+                "serial": serial,
+                "model": "Unknown",
+                "state": state,
+                "helper_ready": False,
+                "talkback_enabled": False,
+                "foreground_package": None,
+            })
+            continue
+
+        runner = _make_adb_runner_for_serial(serial)
+
+        prop_res = runner(["shell", "getprop", "ro.product.model"], 5.0)
+        model = str(prop_res.get("stdout", "")).strip() if prop_res.get("ok") else "Unknown"
+
+        try:
+            tb_status = get_talkback_status(runner)
+            talkback_enabled = tb_status.get("status") == "enabled"
+        except Exception:
+            talkback_enabled = False
+
+        try:
+            pm_res = runner(["shell", "pm", "list", "packages", HELPER_PACKAGE_NAME], 5.0)
+            helper_ready = HELPER_PACKAGE_NAME in str(pm_res.get("stdout", "")) if pm_res.get("ok") else False
+        except Exception:
+            helper_ready = False
+
+        try:
+            fg_status = get_foreground_package(runner)
+            fg_package = fg_status.get("package")
+        except Exception:
+            fg_package = None
+
+        result.append({
+            "serial": serial,
+            "model": model,
+            "state": state,
+            "helper_ready": helper_ready,
+            "talkback_enabled": talkback_enabled,
+            "foreground_package": fg_package,
+        })
+
+    return result

@@ -5,11 +5,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from .adb import enable_helper, enable_talkback, get_adb_status, get_helper_status, install_helper, open_accessibility_settings
+from .adb import enable_helper, enable_talkback, get_adb_status, get_helper_status, install_helper, open_accessibility_settings, get_devices
 from .device_locale import normalize_language_mode, open_language_settings
 from .outputs import list_outputs, safe_output_path
 from .recent_runs import list_recent_runs, safe_recent_run_log_path
 from .runner import RunManager
+from .batch_runner import global_batch_manager, get_recent_batches
 from .scenarios import list_scenarios
 from .mismatch_viewer import get_run_mismatch_summary
 
@@ -33,6 +34,19 @@ class StartRunRequest(BaseModel):
     language_mode: str = "current"
 
 
+class BatchDeviceReq(BaseModel):
+    serial: str
+    model: str
+
+
+class BatchStartReq(BaseModel):
+    devices: list[BatchDeviceReq]
+    mode: str = "smoke"
+    launch_mode: str = "clean"
+    language_mode: str = "current"
+    scenario_ids: list[str] | None = None
+
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -41,6 +55,11 @@ def health() -> dict[str, str]:
 @app.get("/api/adb/status")
 def adb_status() -> dict[str, object]:
     return get_adb_status()
+
+
+@app.get("/api/devices")
+def api_devices() -> list[dict[str, object]]:
+    return get_devices()
 
 
 @app.get("/api/helper/status")
@@ -106,6 +125,61 @@ def run_start(request: StartRunRequest) -> dict[str, object]:
 @app.post("/api/run/stop")
 def run_stop() -> dict[str, object]:
     return runner.stop_run()
+
+
+@app.post("/api/batch/start")
+def batch_start(request: BatchStartReq) -> dict[str, object]:
+    try:
+        devices = [d.model_dump() if hasattr(d, "model_dump") else d.dict() for d in request.devices]
+        return global_batch_manager.start_batch(
+            devices=devices, 
+            mode=request.mode,
+            launch_mode=request.launch_mode,
+            language_mode=request.language_mode,
+            scenario_ids=request.scenario_ids
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/batch/status")
+def get_batch_status() -> dict[str, object]:
+    return global_batch_manager.get_status()
+
+
+@app.get("/api/batch/recent")
+def api_batch_recent() -> list[dict[str, object]]:
+    return get_recent_batches()
+
+
+@app.get("/api/batch/file")
+def api_batch_file(path: str) -> FileResponse:
+    from .paths import ROOT_DIR, RUN_LOG_DIR
+    target = (ROOT_DIR / path).resolve()
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    if not target.is_relative_to(RUN_LOG_DIR.resolve()):
+        raise HTTPException(status_code=403, detail="Access denied")
+    return FileResponse(target, filename=target.name)
+
+
+@app.get("/api/batch/log-tail")
+def api_batch_log_tail(path: str) -> dict[str, object]:
+    from .paths import ROOT_DIR, RUN_LOG_DIR
+    target = (ROOT_DIR / path).resolve()
+    if not target.is_relative_to(RUN_LOG_DIR.resolve()):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not target.is_file():
+        return {"text": "Waiting for batch log..."}
+    try:
+        with open(target, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 10240))
+            text = f.read().decode("utf-8", errors="replace")
+        return {"text": text}
+    except Exception as e:
+        return {"text": f"Error reading log: {e}"}
 
 
 @app.get("/api/run/status")
