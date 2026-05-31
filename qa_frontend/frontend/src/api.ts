@@ -236,6 +236,10 @@ export const api = {
   recentRuns: () => request<{ runs: RecentRun[] }>('/api/runs/recent'),
   runMismatch: (runId: string) => request<{
     summary: {
+      fail_count: number;
+      issue_count: number;
+      review_count: number;
+      clean_count: number;
       matched: number;
       true_mismatch: number;
       empty_speech: number;
@@ -246,6 +250,10 @@ export const api = {
     scenario_summary: Array<{
       scenario_id: string;
       plugin_name: string;
+      fail_count: number;
+      issue_count: number;
+      review_count: number;
+      clean_count: number;
       matched: number;
       true_mismatch: number;
       empty_speech: number;
@@ -265,6 +273,7 @@ export const api = {
       failure_reason: string;
       focus_confidence: string;
       category: string; 
+      top_category: string;
     }>;
   }>(`/api/runs/recent/${encodeURIComponent(runId)}/mismatch`),
   outputs: () => request<{ outputs: OutputFile[] }>('/api/outputs'),

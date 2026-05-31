@@ -220,31 +220,32 @@ export function RecentRunsPanel({
             <details open>
               <summary>TalkBack Quality</summary>
               <div className="scenarioDetailList" style={{ marginTop: '8px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '12px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '8px' }}>
                   <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
-                    <small>Matched</small>
-                    <strong style={{ fontSize: '1.2em' }}>{mismatchSummary.summary.matched}</strong>
+                    <small>FAIL</small>
+                    <strong style={{ fontSize: '1.4em', color: mismatchSummary.summary.fail_count > 0 ? 'var(--color-danger)' : 'inherit' }}>{mismatchSummary.summary.fail_count}</strong>
                   </div>
                   <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
-                    <small>True Mismatch</small>
-                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.summary.true_mismatch > 0 ? 'var(--color-danger)' : 'inherit' }}>{mismatchSummary.summary.true_mismatch}</strong>
+                    <small>ISSUE</small>
+                    <strong style={{ fontSize: '1.4em', color: mismatchSummary.summary.issue_count > 0 ? 'var(--color-warning)' : 'inherit' }}>{mismatchSummary.summary.issue_count}</strong>
                   </div>
                   <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
-                    <small>Empty Speech</small>
-                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.summary.empty_speech > 0 ? 'var(--color-warning)' : 'inherit' }}>{mismatchSummary.summary.empty_speech}</strong>
+                    <small>REVIEW</small>
+                    <strong style={{ fontSize: '1.4em', color: mismatchSummary.summary.review_count > 0 ? 'var(--color-neutral)' : 'inherit' }}>{mismatchSummary.summary.review_count}</strong>
                   </div>
                   <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
-                    <small>Empty Visible</small>
-                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.summary.empty_visible > 0 ? 'var(--color-warning)' : 'inherit' }}>{mismatchSummary.summary.empty_visible}</strong>
+                    <small>CLEAN</small>
+                    <strong style={{ fontSize: '1.4em', color: 'var(--color-success)' }}>{mismatchSummary.summary.clean_count}</strong>
                   </div>
-                  <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
-                    <small>Review</small>
-                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.summary.review > 0 ? 'var(--color-neutral)' : 'inherit' }}>{mismatchSummary.summary.review}</strong>
-                  </div>
-                  <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
-                    <small>Runtime Warning</small>
-                    <strong style={{ fontSize: '1.2em', color: mismatchSummary.summary.runtime_warning > 0 ? 'var(--color-danger)' : 'inherit' }}>{mismatchSummary.summary.runtime_warning}</strong>
-                  </div>
+                </div>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px', marginBottom: '16px', fontSize: '11px', color: 'var(--color-text-dim)' }}>
+                  <div style={{ textAlign: 'center' }}>True Mismatch: {mismatchSummary.summary.true_mismatch}</div>
+                  <div style={{ textAlign: 'center' }}>Empty Speech: {mismatchSummary.summary.empty_speech}</div>
+                  <div style={{ textAlign: 'center' }}>Empty Visible: {mismatchSummary.summary.empty_visible}</div>
+                  <div style={{ textAlign: 'center' }}>Review: {mismatchSummary.summary.review}</div>
+                  <div style={{ textAlign: 'center' }}>Runtime Issue: {mismatchSummary.summary.runtime_warning}</div>
+                  <div style={{ textAlign: 'center' }}>Matched: {mismatchSummary.summary.matched}</div>
                 </div>
 
                 {groupedScenarios.length > 0 && (
@@ -340,8 +341,8 @@ export function RecentRunsPanel({
                         </div>
                       );
 
-                      const topSignals = mismatchSummary.signals.filter(s => s.category !== 'REVIEW');
-                      const reviewSignals = mismatchSummary.signals.filter(s => s.category === 'REVIEW');
+                      const topSignals = mismatchSummary.signals.filter(s => s.top_category !== 'REVIEW');
+                      const reviewSignals = mismatchSummary.signals.filter(s => s.top_category === 'REVIEW');
 
                       return (
                         <>
