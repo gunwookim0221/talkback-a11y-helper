@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { HelperStatus, RunStatus, RuntimeDashboard } from '../api';
 import { formatDuration, formatBytes, healthClass, languageLabel } from '../utils/formatters';
 
@@ -11,12 +11,30 @@ export interface RuntimeDashboardProps {
 }
 
 export function RuntimeDashboardPanel({ dashboard, status, helper, adb, pollingLatencyMs }: RuntimeDashboardProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const prevStateRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const currentState = status?.state ?? 'idle';
+    if (prevStateRef.current !== currentState) {
+      if (['running', 'starting'].includes(currentState)) {
+        setIsOpen(true);
+      } else if (['idle', 'stopped', 'finished'].includes(currentState)) {
+        setIsOpen(false);
+      }
+      prevStateRef.current = currentState;
+    }
+  }, [status?.state]);
+
   return (
-    <section className="panel dashboardPanel">
-      <div className="panelHeader">
-        <h2>Runtime Dashboard</h2>
-        <div className={`statusBadge ${healthClass(status?.state)}`}>{status?.state ?? 'idle'}</div>
-      </div>
+    <details className="panel dashboardPanel" open={isOpen} onToggle={(e) => setIsOpen(e.currentTarget.open)}>
+      <summary style={{ cursor: 'pointer', paddingBottom: isOpen ? '12px' : '0' }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', width: '90%' }}>
+          <h2 style={{ margin: 0 }}>Live Monitor</h2>
+          <div className={`statusBadge ${healthClass(status?.state)}`} style={{ marginLeft: '12px' }}>{status?.state ?? 'idle'}</div>
+        </div>
+      </summary>
+      <div style={{ paddingTop: '8px', borderTop: '1px solid var(--color-border)' }}>
       {dashboard?.parse_error && <div className="notice">Dashboard parse warning: {dashboard.parse_error}</div>}
       <div className="metricGrid">
         <div>
@@ -124,6 +142,7 @@ export function RuntimeDashboardPanel({ dashboard, status, helper, adb, pollingL
           </div>
         </div>
       </div>
-    </section>
+      </div>
+    </details>
   );
 }
