@@ -49,6 +49,9 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
         result_col = _get_col("final_result")
         failure_col = _get_col("failure_reason")
         focus_col = _get_col("focus_confidence")
+        context_col = _get_col("context_type")
+        note_col = _get_col("review_note")
+        crop_col = _get_col("result_crop_thumbnail")
 
         summary_matched = 0
         summary_true_mismatch = 0
@@ -95,6 +98,9 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
             final_result = str(sheet.cell(row, result_col).value or "").strip().upper() if result_col else ""
             failure_reason = str(sheet.cell(row, failure_col).value or "").strip() if failure_col else ""
             focus_confidence = str(sheet.cell(row, focus_col).value or "").strip() if focus_col else ""
+            context_type = str(sheet.cell(row, context_col).value or "").strip() if context_col else ""
+            review_note = str(sheet.cell(row, note_col).value or "").strip() if note_col else ""
+            crop_thumbnail = str(sheet.cell(row, crop_col).value or "").strip() if crop_col else ""
 
             if not scenario_stats[scenario]["plugin_name"] and plugin_name:
                 scenario_stats[scenario]["plugin_name"] = plugin_name
@@ -173,17 +179,21 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
                 scenario_stats[scenario]["clean_count"] += 1
                 top_category = "CLEAN"
 
-            if category and category != "MATCHED" and not is_clean:
+            # If there's a specific review note or it's not a clean match, add to preview
+            if (category and category != "MATCHED" and not is_clean) or review_note:
                 all_previews.append({
-                    "scenario": scenario,
+                    "scenario_id": scenario,
                     "plugin_name": plugin_name,
                     "step": step,
-                    "visible": visible,
-                    "spoken": speech,
+                    "context_type": context_type,
+                    "visible_label": visible,
+                    "merged_announcement": speech,
                     "mismatch_type": mismatch_type,
                     "final_result": final_result,
                     "failure_reason": failure_reason,
                     "focus_confidence": focus_confidence,
+                    "review_note": review_note,
+                    "crop_thumbnail": crop_thumbnail,
                     "category": category,
                     "top_category": top_category
                 })

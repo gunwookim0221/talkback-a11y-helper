@@ -186,6 +186,61 @@ export function RecentRunsPanel({
             </div>
           </details>
         )}
+
+        {runData?.quality_issues && runData.quality_issues.length > 0 && (
+          <details open style={{ marginTop: '16px' }}>
+            <summary style={{ fontSize: '14px', fontWeight: 'bold' }}>Quality Issues</summary>
+            <div className="scenarioDetailList" style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {runData.quality_issues.map((issue: any, i: number) => (
+                <div key={i} className="scenarioDetailRow" style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start', padding: '12px' }}>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', width: '100%' }}>
+                    <span className={`statusBadge ${issue.final_result.toLowerCase()}`} style={{ 
+                        backgroundColor: issue.final_result === 'FAIL' ? 'var(--color-danger)' : (issue.final_result === 'WARN' ? 'var(--color-warning)' : 'var(--color-neutral)'),
+                        color: '#fff', padding: '2px 6px', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold'
+                    }}>
+                      {issue.final_result}
+                    </span>
+                    <strong style={{ fontSize: '13px', wordBreak: 'break-all' }}>{issue.scenario_id} step {issue.step}</strong>
+                  </div>
+                  
+                  <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', width: '100%' }}>
+                    <strong>Mismatch:</strong> {issue.mismatch_type}
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--color-text)', width: '100%' }}>
+                    <strong>Visible text:</strong> {issue.visible_label || '-'}
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--color-text)', width: '100%' }}>
+                    <strong>TalkBack speech:</strong> {issue.merged_announcement || '-'}
+                  </div>
+                  {issue.review_note && (
+                    <div style={{ fontSize: '12px', color: 'var(--color-text)', width: '100%', fontStyle: 'italic' }}>
+                      <strong>Note:</strong> {issue.review_note}
+                    </div>
+                  )}
+                  {issue.crop_path ? (
+                    <div style={{ marginTop: '8px', border: '1px solid var(--color-border)', borderRadius: '4px', padding: '4px', backgroundColor: 'var(--color-bg-alt)' }}>
+                      <img 
+                        src={`/api/batch/file?path=${encodeURIComponent(issue.crop_path)}`} 
+                        alt="Crop thumbnail" 
+                        style={{ maxWidth: '100%', maxHeight: '150px', objectFit: 'contain' }}
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = 'none';
+                          if (target.nextSibling) {
+                            (target.nextSibling as HTMLElement).style.display = 'block';
+                          }
+                        }}
+                      />
+                      <div style={{ display: 'none', fontSize: '11px', color: 'var(--color-text-dim)', textAlign: 'center' }}>
+                        {issue.crop_path.split('/').pop()}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
       </div>
     );
   };

@@ -158,6 +158,29 @@ class BatchRunManager:
                             "review": msummary.get("review_count", 0),
                             "clean": msummary.get("clean_count", 0)
                         }
+                        
+                        quality_issues = []
+                        for sig in mismatch_res.get("signals", []):
+                            crop_thumb = sig.get("crop_thumbnail")
+                            crop_path = None
+                            if crop_thumb:
+                                rel_out_dir = str(out_dir.relative_to(ROOT_DIR)) if out_dir.is_relative_to(ROOT_DIR) else str(out_dir)
+                                crop_path = f"{rel_out_dir}/crops/{crop_thumb}".replace("\\", "/")
+                            
+                            quality_issues.append({
+                                "scenario_id": sig.get("scenario_id", ""),
+                                "step": sig.get("step", ""),
+                                "context_type": sig.get("context_type", ""),
+                                "visible_label": sig.get("visible_label", ""),
+                                "merged_announcement": sig.get("merged_announcement", ""),
+                                "mismatch_type": sig.get("mismatch_type", ""),
+                                "final_result": sig.get("final_result", ""),
+                                "review_note": sig.get("review_note", ""),
+                                "focus_confidence": sig.get("focus_confidence", ""),
+                                "crop_path": crop_path
+                            })
+                        data["quality_issues"] = quality_issues
+                        
                 except Exception as e:
                     print(f"Failed to extract quality from xlsx: {e}")
 

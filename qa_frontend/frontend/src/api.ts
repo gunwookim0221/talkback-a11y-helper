@@ -121,6 +121,19 @@ export type RecentRun = {
   }>;
 };
 
+export type QualityIssue = {
+  scenario_id: string;
+  step: string;
+  context_type?: string;
+  visible_label?: string;
+  merged_announcement?: string;
+  mismatch_type: string;
+  final_result: string;
+  review_note?: string;
+  focus_confidence?: string;
+  crop_path?: string | null;
+};
+
 export type RecentBatchDevice = {
   serial: string;
   model: string;
@@ -135,6 +148,7 @@ export type RecentBatchDevice = {
     review: number;
     clean: number;
   } | null;
+  quality_issues?: QualityIssue[];
   process_status?: string;
   scenario_result_status?: string;
   passed_scenarios?: number;
