@@ -113,8 +113,8 @@ export function RunPanel({
 
         <div>
           <h3 style={{ margin: '0 0 6px', fontSize: '12px', color: 'var(--color-text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Mode</h3>
-          <div className="runMode" style={{ marginBottom: '0', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <label style={{ padding: '4px 8px', gridTemplateColumns: 'auto auto', gap: '4px' }}>
+          <div className="launchMode" style={{ marginBottom: '0' }}>
+            <label style={{ padding: '4px 8px' }}>
               <input
                 type="radio"
                 name="planned_mode"
@@ -123,8 +123,9 @@ export function RunPanel({
                 disabled={running}
               />
               <span style={{ fontSize: '14px' }}>Smoke</span>
+              <small style={{ fontSize: '11px', margin: 0 }}>Quick check</small>
             </label>
-            <label style={{ padding: '4px 8px', gridTemplateColumns: 'auto auto', gap: '4px' }}>
+            <label style={{ padding: '4px 8px' }}>
               <input
                 type="radio"
                 name="planned_mode"
@@ -133,6 +134,7 @@ export function RunPanel({
                 disabled={running}
               />
               <span style={{ fontSize: '14px' }}>Full</span>
+              <small style={{ fontSize: '11px', margin: 0 }}>Full regression</small>
             </label>
           </div>
         </div>
