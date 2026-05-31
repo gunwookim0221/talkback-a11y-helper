@@ -179,8 +179,18 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
                 scenario_stats[scenario]["clean_count"] += 1
                 top_category = "CLEAN"
 
-            # If there's a specific review note or it's not a clean match, add to preview
-            if (category and category != "MATCHED" and not is_clean) or review_note:
+            add_to_preview = False
+            if final_result in {"FAIL", "WARN", "REVIEW"}:
+                add_to_preview = True
+            elif mismatch_type in {"EMPTY_VISIBLE", "EMPTY_SPEECH", "TRUE_MISMATCH", "LABEL_MISMATCH", "TEXT_MISMATCH", "SPOKEN_MISMATCH", "MISMATCH", "FAIL_MISMATCH"}:
+                add_to_preview = True
+            elif review_note and "정상 이동 및 발화 일치" not in review_note:
+                add_to_preview = True
+                
+            if final_result == "PASS":
+                add_to_preview = False
+
+            if add_to_preview:
                 all_previews.append({
                     "scenario_id": scenario,
                     "plugin_name": plugin_name,

@@ -198,7 +198,7 @@ export function RecentRunsPanel({
                         backgroundColor: issue.final_result === 'FAIL' ? 'var(--color-danger)' : (issue.final_result === 'WARN' ? 'var(--color-warning)' : 'var(--color-neutral)'),
                         color: '#fff', padding: '2px 6px', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold'
                     }}>
-                      {issue.final_result}
+                      {issue.final_result === 'WARN' ? 'ISSUE' : (issue.final_result === 'PASS' ? 'CLEAN' : issue.final_result)}
                     </span>
                     <strong style={{ fontSize: '13px', wordBreak: 'break-all' }}>{issue.scenario_id} step {issue.step}</strong>
                   </div>
