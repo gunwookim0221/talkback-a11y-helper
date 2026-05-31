@@ -221,21 +221,28 @@ export function RecentRunsPanel({
                     </div>
                   )}
                   {issue.crop_path ? (
-                    <div style={{ marginTop: '8px', border: '1px solid var(--color-border)', borderRadius: '4px', padding: '4px', backgroundColor: 'var(--color-bg-alt)' }}>
-                      <img 
-                        src={`/api/batch/file?path=${encodeURIComponent(issue.crop_path)}`} 
-                        alt="Crop thumbnail" 
-                        style={{ maxWidth: '100%', maxHeight: '150px', objectFit: 'contain' }}
-                        onError={(e) => {
-                          const target = e.target as HTMLImageElement;
-                          target.style.display = 'none';
-                          if (target.nextSibling) {
-                            (target.nextSibling as HTMLElement).style.display = 'block';
-                          }
-                        }}
-                      />
-                      <div style={{ display: 'none', fontSize: '11px', color: 'var(--color-text-dim)', textAlign: 'center' }}>
-                        {issue.crop_path.split('/').pop()}
+                    <div style={{ marginTop: '8px', border: '1px solid var(--color-border)', borderRadius: '4px', padding: '4px', backgroundColor: 'var(--color-bg-alt)', display: 'inline-block' }}>
+                      <a href={`/api/batch/file?path=${encodeURIComponent(issue.crop_path)}`} target="_blank" rel="noreferrer" style={{ display: 'block' }}>
+                        <img 
+                          src={`/api/batch/file?path=${encodeURIComponent(issue.crop_path)}`} 
+                          alt="crop" 
+                          style={{ width: '160px', maxHeight: '120px', objectFit: 'contain', borderRadius: '4px', cursor: 'zoom-in' }}
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            const parentAnchor = target.parentElement;
+                            if (parentAnchor) {
+                              parentAnchor.style.display = 'none';
+                              const fallback = parentAnchor.nextElementSibling as HTMLElement;
+                              if (fallback) {
+                                fallback.style.display = 'block';
+                              }
+                            }
+                          }}
+                        />
+                      </a>
+                      <div style={{ display: 'none', fontSize: '11px', color: 'var(--color-text-dim)', textAlign: 'center', padding: '4px' }}>
+                        <div style={{ marginBottom: '4px' }}>crop image unavailable</div>
+                        <div>{issue.crop_path.split('/').pop()}</div>
                       </div>
                     </div>
                   ) : null}
