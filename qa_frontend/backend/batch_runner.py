@@ -401,6 +401,7 @@ def get_recent_batches() -> list[dict]:
                             try:
                                 dev_data = json.loads(dev_summary_path.read_text(encoding="utf-8"))
                                 dev_info["quality"] = dev_data.get("quality")
+                                dev_info["quality_issues"] = dev_data.get("quality_issues")
                                 
                                 from .recent_runs import _recent_run_from_summary
                                 from datetime import datetime
