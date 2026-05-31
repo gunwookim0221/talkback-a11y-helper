@@ -190,6 +190,9 @@ export function RecentRunsPanel({
         {runData?.quality_issues && runData.quality_issues.length > 0 && (
           <details open style={{ marginTop: '16px' }}>
             <summary style={{ fontSize: '14px', fontWeight: 'bold' }}>Quality Issues</summary>
+            <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', marginTop: '4px', fontStyle: 'italic' }}>
+              Shows user-impacting TalkBack text/speech issues only.
+            </div>
             <div className="scenarioDetailList" style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {runData.quality_issues.map((issue: any, i: number) => (
                 <div key={i} className="scenarioDetailRow" style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start', padding: '12px' }}>

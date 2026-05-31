@@ -180,15 +180,31 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
                 top_category = "CLEAN"
 
             add_to_preview = False
-            if final_result in {"FAIL", "WARN", "REVIEW"}:
+            user_impact_types = {
+                "EMPTY_VISIBLE", "EMPTY_SPEECH", "TRUE_MISMATCH", 
+                "LABEL_MISMATCH", "TEXT_MISMATCH", "SPOKEN_MISMATCH", 
+                "MISMATCH", "FAIL_MISMATCH"
+            }
+            if final_result == "FAIL":
                 add_to_preview = True
-            elif mismatch_type in {"EMPTY_VISIBLE", "EMPTY_SPEECH", "TRUE_MISMATCH", "LABEL_MISMATCH", "TEXT_MISMATCH", "SPOKEN_MISMATCH", "MISMATCH", "FAIL_MISMATCH"}:
+            elif mismatch_type in user_impact_types:
                 add_to_preview = True
-            elif review_note and "정상 이동 및 발화 일치" not in review_note:
+            elif (not visible and speech) or (visible and not speech):
+                add_to_preview = True
+            elif visible != speech and mismatch_type not in {"EXACT_MATCH", "REPRESENTATIVE_CONTEXT"}:
                 add_to_preview = True
                 
-            if final_result == "PASS":
-                add_to_preview = False
+            if final_result != "FAIL":
+                if final_result == "PASS":
+                    add_to_preview = False
+                elif mismatch_type == "EXACT_MATCH" and visible == speech:
+                    add_to_preview = False
+                elif mismatch_type == "REPRESENTATIVE_CONTEXT":
+                    add_to_preview = False
+                elif review_note and any(x in review_note for x in ["발화 일치", "탐색 종료"]):
+                    add_to_preview = False
+                elif review_note and any(x in review_note.lower() for x in ["terminal", "repeat", "stop"]):
+                    add_to_preview = False
 
             if add_to_preview:
                 all_previews.append({
