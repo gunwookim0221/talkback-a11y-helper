@@ -8,11 +8,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import traceback
 from .paths import ROOT_DIR, RUN_LOG_DIR, SCRIPT_PATH, RUNTIME_CONFIG_PATH
 from tb_runner.runtime_config import RUNTIME_CONFIG_PATH_ENV
 from .runtime_config_selection import write_selected_runtime_config
 from .device_locale import apply_language_mode, normalize_language_mode, format_language_log_lines
 from .preflight import run_runtime_preflight, normalize_launch_mode, format_preflight_log_lines
+
+def _json_safe(value):
+    if isinstance(value, Path):
+        return value.as_posix()
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
 
 class BatchRunManager:
     def __init__(self):
@@ -163,9 +173,9 @@ class BatchRunManager:
                         for sig in mismatch_res.get("signals", []):
                             crop_thumb = sig.get("crop_thumbnail")
                             crop_path = None
-                            if crop_thumb:
-                                rel_out_dir = str(out_dir.relative_to(ROOT_DIR)) if out_dir.is_relative_to(ROOT_DIR) else str(out_dir)
-                                crop_path = f"{rel_out_dir}/crops/{crop_thumb}".replace("\\", "/")
+                            if crop_thumb and xlsx_path:
+                                compare_dir = Path(xlsx_path).with_suffix("")
+                                crop_path = f"{compare_dir.as_posix()}/crops/{crop_thumb}"
                             
                             quality_issues.append({
                                 "scenario_id": sig.get("scenario_id", ""),
@@ -205,9 +215,39 @@ class BatchRunManager:
                 "completed_scenarios": parsed_summary.get("completed_scenarios", 0),
                 "failed_scenarios": parsed_summary.get("failed_scenarios", 0)
             })
-            summary_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            safe_data = _json_safe(data)
+            summary_path.write_text(json.dumps(safe_data, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception as e:
+            err_text = traceback.format_exc()
             print(f"Failed to write device summary.json: {e}")
+            try:
+                out_dir = Path(dev_output_dir)
+                runner_log = out_dir / "runner.log"
+                if runner_log.is_file():
+                    with runner_log.open("a", encoding="utf-8", errors="replace") as f:
+                        f.write("\n[SUMMARY ERROR] Failed to write device summary.json\n")
+                        f.write(err_text)
+                        f.write("\n")
+                
+                fallback_data = {
+                    "summary_error": True,
+                    "summary_error_message": str(e),
+                    "batch_id": self._batch_id,
+                    "serial": device_info.get("serial"),
+                    "model": device_info.get("model"),
+                    "state": device_info.get("state"),
+                    "return_code": device_info.get("return_code", 0),
+                    "output_dir": device_info.get("output_dir"),
+                    "log_path": None,
+                    "xlsx_path": None,
+                    "quality": None,
+                    "quality_issues": [],
+                    "scenarios": []
+                }
+                summary_path = out_dir / "summary.json"
+                summary_path.write_text(json.dumps(fallback_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
 
     def _run_loop(self):
         while True:
