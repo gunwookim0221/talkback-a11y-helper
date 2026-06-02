@@ -92,6 +92,9 @@ def main() -> int:
         if preflight.talkback_reason == "false_positive_enabled":
             log("[PREFLIGHT] abort run reason='false_positive_enabled'")
             log("TalkBack service is configured, but 실제 응답이 없어 실행을 중단합니다.")
+        elif preflight.talkback_reason == "external_popup_contamination":
+            log("[PREFLIGHT] abort run reason='external_popup_contamination'")
+            log("Google Play popup contamination remains. Return to SmartThings and retry.")
         else:
             log("[PREFLIGHT] abort run reason='talkback_not_ready'")
             log("TalkBack is ON but not ready. Wait a moment and retry.")

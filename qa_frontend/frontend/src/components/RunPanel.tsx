@@ -50,6 +50,20 @@ export function RunPanel({
       setSelectedDevices(new Set(list.filter(d => d.state === 'device').map(d => d.serial)));
     } catch (err) {
       console.error('Failed to fetch devices', err);
+      try {
+        const adb = await api.adbStatus();
+        const fallback = adb.devices.map(device => ({
+          ...device,
+          model: 'Unknown',
+          helper_ready: null,
+          talkback_enabled: null,
+          foreground_package: null,
+        }));
+        setDevices(fallback);
+        setSelectedDevices(new Set(fallback.filter(d => d.state === 'device').map(d => d.serial)));
+      } catch (fallbackErr) {
+        console.error('Failed to fetch fallback ADB devices', fallbackErr);
+      }
     } finally {
       setLoadingDevices(false);
     }
@@ -146,6 +160,7 @@ export function RunPanel({
             devices.map(d => {
               let statusText = '';
               if (d.state !== 'device') statusText = d.state === 'offline' ? 'Offline' : 'Error';
+              else if (d.helper_ready === null || d.talkback_enabled === null) statusText = 'Connected';
               else if (!d.helper_ready) statusText = 'Helper missing';
               else if (!d.talkback_enabled) statusText = 'TalkBack disabled';
               else statusText = 'Ready';

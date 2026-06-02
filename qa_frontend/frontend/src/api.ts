@@ -43,9 +43,17 @@ export type DeviceInfo = {
   serial: string;
   model: string;
   state: string;
-  helper_ready: boolean;
-  talkback_enabled: boolean;
+  helper_ready: boolean | null;
+  talkback_enabled: boolean | null;
   foreground_package: string | null;
+};
+
+export type AdbStatus = Record<string, unknown> & {
+  status?: string;
+  devices: Array<{
+    serial: string;
+    state: string;
+  }>;
 };
 
 export type BatchDeviceRequest = {
@@ -304,7 +312,7 @@ export type RunSnapshot = {
 
 export const api = {
   devices: () => request<DeviceInfo[]>('/api/devices'),
-  adbStatus: () => request<Record<string, unknown>>('/api/adb/status'),
+  adbStatus: () => request<AdbStatus>('/api/adb/status'),
   helperStatus: () => request<HelperStatus>('/api/helper/status'),
   installHelper: () => request<HelperStatus>('/api/helper/install', { method: 'POST' }),
   enableHelper: () => request<HelperStatus>('/api/helper/enable', { method: 'POST' }),

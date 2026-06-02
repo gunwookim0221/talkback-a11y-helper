@@ -94,19 +94,20 @@ export default function App() {
   );
 
   async function refreshStatic() {
-    const [adbStatus, helperStatus, scenarioResponse, outputResponse, recentRunsResponse] = await Promise.all([
-      api.adbStatus(),
-      api.helperStatus(),
-      api.scenarios(),
-      api.outputs(),
-      api.recentRuns(),
+    const results = await Promise.allSettled([
+      api.adbStatus().then(setAdb),
+      api.helperStatus().then(setHelper),
+      api.scenarios().then((response) => {
+        setScenarios(response.scenarios);
+        setSelected(initialScenarioSelection(response.scenarios));
+      }),
+      api.outputs().then((response) => setOutputs(response.outputs)),
+      api.recentRuns().then((response) => setRecentRuns(response.runs)),
     ]);
-    setAdb(adbStatus);
-    setHelper(helperStatus);
-    setScenarios(scenarioResponse.scenarios);
-    setSelected(initialScenarioSelection(scenarioResponse.scenarios));
-    setOutputs(outputResponse.outputs);
-    setRecentRuns(recentRunsResponse.runs);
+    const rejected = results.find((result) => result.status === 'rejected');
+    if (rejected?.status === 'rejected') {
+      throw rejected.reason;
+    }
   }
 
   useEffect(() => {

@@ -72,6 +72,10 @@ RETRY_TIMEOUT_REFACTOR_VERSION = "PR11.0"
 PR12_REFACTOR_CLEANUP_VERSION = "PR12.0"
 PR13_CACHE_OPT_VERSION = "PR13.1"
 PR14_CLIENT_SPLIT_VERSION = "PR14-C.0"
+EXTERNAL_FOCUS_CONTAMINATION_PACKAGES = {
+    "com.android.vending",
+    "com.google.android.finsky",
+}
 
 
 @dataclass
@@ -205,6 +209,7 @@ class A11yAdbClient:
         sanity_retry_count = 2
         sanity_get_focus_success = False
         sanity_meaningful_focus = False
+        sanity_contamination_package = ""
         for attempt in range(1, sanity_retry_count + 2):
             focus_node = self.get_focus(
                 dev=dev,
@@ -213,11 +218,14 @@ class A11yAdbClient:
                 mode="fast",
             )
             sanity_get_focus_success = bool(focus_node)
+            sanity_contamination_package = self._external_focus_contamination_package(focus_node)
             sanity_meaningful_focus = self._is_meaningful_focus_node(focus_node)
             print(
                 f"[PREFLIGHT][sanity] attempt={attempt} "
                 f"success={sanity_get_focus_success} meaningful={sanity_meaningful_focus}"
             )
+            if sanity_contamination_package:
+                print(f"[PREFLIGHT][popup] contamination package='{sanity_contamination_package}'")
             if sanity_get_focus_success and sanity_meaningful_focus:
                 break
             if attempt <= sanity_retry_count:
@@ -228,6 +236,13 @@ class A11yAdbClient:
             f"meaningful={sanity_meaningful_focus}"
         )
         if not (sanity_get_focus_success and sanity_meaningful_focus):
+            if sanity_contamination_package:
+                print("[PREFLIGHT] final_status=enabled_but_not_ready final_reason=external_popup_contamination")
+                return {
+                    "status": "enabled_but_not_ready",
+                    "reason": "external_popup_contamination",
+                    "packageName": sanity_contamination_package,
+                }
             print("[PREFLIGHT] sanity failed but proceeding reason='no_initial_focus'")
             print("[PREFLIGHT] sanity failed, running readiness probe")
             self.move_focus(dev=dev, direction="next")
@@ -238,8 +253,17 @@ class A11yAdbClient:
                 mode="fast",
             )
             probe_success = bool(probe_focus_node)
+            probe_contamination_package = self._external_focus_contamination_package(probe_focus_node)
             probe_meaningful = self._is_meaningful_focus_node(probe_focus_node)
             print(f"[PREFLIGHT][probe] success={probe_success} meaningful={probe_meaningful}")
+            if probe_contamination_package:
+                print(f"[PREFLIGHT][popup] contamination package='{probe_contamination_package}'")
+                print("[PREFLIGHT] final_status=enabled_but_not_ready final_reason=external_popup_contamination")
+                return {
+                    "status": "enabled_but_not_ready",
+                    "reason": "external_popup_contamination",
+                    "packageName": probe_contamination_package,
+                }
             if not (probe_success and probe_meaningful):
                 print("[PREFLIGHT] probe failed -> false_positive_enabled")
                 print("[PREFLIGHT] final_status=enabled_but_not_ready final_reason=false_positive_enabled")
@@ -1577,8 +1601,20 @@ class A11yAdbClient:
         return result
 
     @staticmethod
+    def _external_focus_contamination_package(node: Any) -> str:
+        if not isinstance(node, dict):
+            return ""
+        for key in ("packageName", "package_name", "package"):
+            package = str(node.get(key, "") or "").strip()
+            if package in EXTERNAL_FOCUS_CONTAMINATION_PACKAGES:
+                return package
+        return ""
+
+    @staticmethod
     def _is_meaningful_focus_node(node: Any) -> bool:
         if not isinstance(node, dict) or not node:
+            return False
+        if A11yAdbClient._external_focus_contamination_package(node):
             return False
 
         text_value = node.get("text")
