@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "run_id": "20260528_120400",
+  "mode": "smoke",
+  "launch_mode": null,
+  "language_mode": null,
+  "device_locale": null,
+  "started_at": null,
+  "finished_at": null,
+  "elapsed_seconds": 0,
+  "process_status": "success",
+  "scenario_result_status": "failed",
+  "passed_scenarios": 0,
+  "warning_scenarios": 0,
+  "completed_scenarios": 0,
+  "failed_scenarios": 1,
+  "total_scenarios": 1,
+  "total_steps": 1,
+  "overlay_count": 0,
+  "save_excel_count": 0,
+  "popup_result": null,
+  "preflight_state": null,
+  "xlsx_path": null,
+  "xlsx_filename": null,
+  "log_path": "D:\\Python test\\talkback-a11y-helper\\.test_tmp_pytest\\basetemp\\test_write_summary_file_marks_0\\20260528_120400_smoke.log",
+  "log_filename": "20260528_120400_smoke.log",
+  "warnings": [
+    {
+      "line": 2,
+      "type": "scenario_failed",
+      "scenario": "global_nav_main",
+      "message": "[TAB][select] stabilization failed scenario='global_nav_main'"
+    }
+  ],
+  "warning_count": 1,
+  "event_counts": {
+    "scenario_failed": 1,
+    "scenario_completed": 1
+  },
+  "event_warning_count": 1,
+  "scenarios": [
+    {
+      "id": "global_nav_main",
+      "status": "failed",
+      "steps": 1,
+      "stop_reason": null,
+      "traversal_result": null
+    }
+  ],
+  "parse_error": null
+}

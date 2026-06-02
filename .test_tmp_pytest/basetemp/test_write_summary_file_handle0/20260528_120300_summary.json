@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "run_id": "20260528_120300",
+  "mode": "smoke",
+  "launch_mode": null,
+  "language_mode": null,
+  "device_locale": null,
+  "started_at": "2026-05-28T12:03:00",
+  "finished_at": "2026-05-28T12:03:20",
+  "elapsed_seconds": 20,
+  "process_status": "stopped",
+  "scenario_result_status": "partial",
+  "passed_scenarios": 1,
+  "warning_scenarios": 0,
+  "completed_scenarios": 1,
+  "failed_scenarios": 0,
+  "total_scenarios": 2,
+  "total_steps": 6,
+  "overlay_count": 0,
+  "save_excel_count": 0,
+  "popup_result": null,
+  "preflight_state": null,
+  "xlsx_path": null,
+  "xlsx_filename": null,
+  "log_path": "D:\\Python test\\talkback-a11y-helper\\.test_tmp_pytest\\basetemp\\test_write_summary_file_handle0\\20260528_120300_smoke.log",
+  "log_filename": "20260528_120300_smoke.log",
+  "warnings": [],
+  "warning_count": 0,
+  "event_counts": {
+    "scenario_completed": 1
+  },
+  "event_warning_count": 0,
+  "scenarios": [
+    {
+      "id": "global_nav_main",
+      "status": "passed",
+      "steps": 6,
+      "stop_reason": null,
+      "traversal_result": null
+    },
+    {
+      "id": "life_air_care_plugin",
+      "status": "queued",
+      "steps": 0,
+      "stop_reason": null,
+      "traversal_result": null
+    }
+  ],
+  "parse_error": null
+}

@@ -1,21 +1,25 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 import threading
-import os
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from tb_runner.runtime_config import RUNTIME_CONFIG_PATH_ENV
+from tb_runner.run_spec import RunSpec
 
 from .paths import ROOT_DIR, RUN_LOG_DIR, SCRIPT_PATH, RUNTIME_CONFIG_PATH, OUTPUT_DIR
 from .device_locale import apply_language_mode, format_language_log_lines, normalize_language_mode
-from .preflight import format_preflight_log_lines, normalize_launch_mode, run_runtime_preflight
+from .preflight import (
+    format_preflight_log_lines,
+    normalize_launch_mode,
+    run_surface_preflight as run_runtime_preflight,
+)
 from .run_summary import write_summary_file
 from .runtime_dashboard import build_runtime_dashboard
 from .runtime_config_selection import write_selected_runtime_config
+from .runtime_setup import prepare_runtime
+from .subprocess_executor import RunExecution, close_execution_log, start_execution, wait_for_execution
 
 RunState = Literal["idle", "running", "stopped", "finished", "error"]
 
@@ -24,6 +28,7 @@ class RunManager:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._process: subprocess.Popen[str] | None = None
+        self._execution: RunExecution | None = None
         self._state: RunState = "idle"
         self._run_id: str | None = None
         self._mode: str | None = None
@@ -61,7 +66,6 @@ class RunManager:
             run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
             run_dir = RUN_LOG_DIR / run_id
             log_path = RUN_LOG_DIR / f"{run_id}_{mode}.log"
-            command = [sys.executable, str(SCRIPT_PATH)]
             normalized_launch_mode = normalize_launch_mode(launch_mode)
             normalized_language_mode = normalize_language_mode(language_mode)
 
@@ -138,7 +142,18 @@ class RunManager:
                         f"effective_max_steps={scenario_step['effective_max_steps']!r} "
                         f"policy='{scenario_step['policy']}'\n"
                     )
-                language_status = apply_language_mode(normalized_language_mode)
+                spec = RunSpec(
+                    mode=mode,
+                    language_mode=normalized_language_mode,
+                    launch_mode=normalized_launch_mode,
+                    scenario_ids=tuple(scenario_ids),
+                    runtime_config_path=self._runtime_config_path,
+                )
+                language_status, preflight = prepare_runtime(
+                    spec,
+                    language_fn=apply_language_mode,
+                    preflight_fn=run_runtime_preflight,
+                )
                 self._language_status = language_status
                 for line in format_language_log_lines(language_status):
                     log_file.write(f"{line}\n")
@@ -151,7 +166,7 @@ class RunManager:
                     self._write_summary_safe()
                     return self._status_locked()
 
-                preflight = run_runtime_preflight(normalized_launch_mode)
+                assert preflight is not None
                 for line in format_preflight_log_lines(preflight):
                     log_file.write(f"{line}\n")
                 log_file.flush()
@@ -166,18 +181,13 @@ class RunManager:
                     self._write_summary_safe()
                     return self._status_locked()
 
-                env = os.environ.copy()
-                env[RUNTIME_CONFIG_PATH_ENV] = self._runtime_config_path
-                process = subprocess.Popen(
-                    command,
+                execution = start_execution(
+                    spec=spec,
+                    script_path=SCRIPT_PATH,
                     cwd=ROOT_DIR,
-                    env=env,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    bufsize=1,
+                    log_file=log_file,
+                    log_path=log_path,
+                    popen_factory=subprocess.Popen,
                 )
             except Exception as exc:
                 self._state = "error"
@@ -185,12 +195,12 @@ class RunManager:
                 self._process = None
                 raise
 
-            self._process = process
+            self._execution = execution
+            self._process = execution.process
             self._state = "running"
             self._error = None
 
-            threading.Thread(target=self._tee_output, args=(process, log_file), daemon=True).start()
-            threading.Thread(target=self._wait_for_process, args=(process,), daemon=True).start()
+            threading.Thread(target=self._wait_for_process, args=(execution,), daemon=True).start()
 
             return self._status_locked()
 
@@ -293,24 +303,18 @@ class RunManager:
         tail = lines[-max_lines:]
         return {"lines": tail, "text": "\n".join(tail), "log_path": str(path)}
 
-    def _tee_output(self, process: subprocess.Popen[str], log_file) -> None:
-        try:
-            if process.stdout:
-                for line in process.stdout:
-                    log_file.write(line)
-                    log_file.flush()
-        finally:
-            log_file.close()
-
-    def _wait_for_process(self, process: subprocess.Popen[str]) -> None:
-        returncode = process.wait()
+    def _wait_for_process(self, execution: RunExecution) -> None:
+        process = execution.process
+        returncode = wait_for_execution(execution)
         with self._lock:
             if process is not self._process:
+                close_execution_log(execution)
                 return
             self._returncode = returncode
             self._finished_at = datetime.now().isoformat(timespec="seconds")
             if self._state == "stopped":
                 self._append_log_line("[QA_FRONTEND][run] final_state='stopped' returncode=0")
+                close_execution_log(execution)
                 self._write_summary_safe()
                 return
             self._state = "finished" if returncode == 0 else "error"
@@ -319,20 +323,15 @@ class RunManager:
             self._append_log_line(
                 f"[QA_FRONTEND][run] final_state='{self._state}' returncode={returncode}"
             )
+            close_execution_log(execution)
             self._write_summary_safe()
 
     def _refresh_locked(self) -> None:
         process = self._process
         if not process or self._state != "running":
             return
-        returncode = process.poll()
-        if returncode is None:
-            return
-        self._returncode = returncode
-        self._finished_at = self._finished_at or datetime.now().isoformat(timespec="seconds")
-        self._state = "finished" if returncode == 0 else "error"
-        if returncode != 0:
-            self._error = f"script_test.py exited with code {returncode}"
+        # The waiter owns terminal state so status cannot race ahead of tee flush and summary.
+        process.poll()
 
     def _append_log_line(self, line: str) -> None:
         if not self._log_path:

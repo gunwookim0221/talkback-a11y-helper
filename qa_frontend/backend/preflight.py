@@ -425,6 +425,66 @@ def run_runtime_preflight(
         )
         return result
 
+    return _run_launch_surface_preflight(
+        normalized_launch_mode=normalized_launch_mode,
+        adb_status=adb_status,
+        helper_status=helper_status,
+        helper_state=helper_state,
+        talkback_status=talkback_status,
+        talkback_state="enabled",
+        adb_runner=adb_runner,
+        sleep_fn=sleep_fn,
+    )
+
+
+def run_surface_preflight(
+    launch_mode: str | None,
+    *,
+    adb_status_fn: Callable[[], dict[str, object]] = get_adb_status,
+    adb_runner: Callable[[list[str], float], dict[str, object]] = run_adb,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> dict[str, object]:
+    """Prepare the app surface; the core runtime owns readiness checks."""
+    normalized_launch_mode = normalize_launch_mode(launch_mode)
+    adb_status = adb_status_fn()
+    device_ready = bool(adb_status.get("ok")) and any(
+        device.get("state") == "device" for device in _devices(adb_status)
+    )
+    if not device_ready:
+        return _blocked_result(
+            reason="adb_device_unavailable",
+            launch_mode=normalized_launch_mode,
+            adb_status=adb_status,
+            helper_status=None,
+            talkback_status=None,
+            launch_status=None,
+            foreground_status=None,
+            accessibility_settings_opened=False,
+        )
+
+    return _run_launch_surface_preflight(
+        normalized_launch_mode=normalized_launch_mode,
+        adb_status=adb_status,
+        helper_status=None,
+        helper_state="deferred_to_core",
+        talkback_status=None,
+        talkback_state="deferred_to_core",
+        adb_runner=adb_runner,
+        sleep_fn=sleep_fn,
+    )
+
+
+def _run_launch_surface_preflight(
+    *,
+    normalized_launch_mode: str,
+    adb_status: dict[str, object],
+    helper_status: dict[str, object] | None,
+    helper_state: str,
+    talkback_status: dict[str, object] | None,
+    talkback_state: str,
+    adb_runner: Callable[[list[str], float], dict[str, object]],
+    sleep_fn: Callable[[float], None],
+) -> dict[str, object]:
     launch_status = launch_smartthings(
         normalized_launch_mode,
         adb_runner=adb_runner,
@@ -472,12 +532,12 @@ def run_runtime_preflight(
         "launch_mode": normalized_launch_mode,
         "adb_state": "ok",
         "helper_state": helper_state,
-        "talkback_state": "enabled",
-            "foreground_package": foreground_status.get("package"),
-            "foreground_matches_expected": foreground_status.get("matches_expected"),
-            "uiautomator_package": surface_status.get("uiautomator_package"),
-            "uiautomator_focused_package": surface_status.get("uiautomator_focused_package"),
-            "accessibility_settings_opened": False,
+        "talkback_state": talkback_state,
+        "foreground_package": foreground_status.get("package"),
+        "foreground_matches_expected": foreground_status.get("matches_expected"),
+        "uiautomator_package": surface_status.get("uiautomator_package"),
+        "uiautomator_focused_package": surface_status.get("uiautomator_focused_package"),
+        "accessibility_settings_opened": False,
         "adb_status": adb_status,
         "helper_status": helper_status,
         "talkback_status": talkback_status,

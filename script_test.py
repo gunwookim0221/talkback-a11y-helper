@@ -4,8 +4,12 @@ import os
 from pathlib import Path
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--serial", type=str, default=None)
+parser.add_argument("--serial", type=str, default=os.environ.get("ANDROID_SERIAL"))
 parser.add_argument("--output-dir", type=str, default=None)
+parser.add_argument("--mode", type=str, default="full")
+parser.add_argument("--language-mode", type=str, default="current")
+parser.add_argument("--launch-mode", type=str, default="warm")
+parser.add_argument("--scenario", action="append", default=[])
 args, _ = parser.parse_known_args()
 if args.output_dir:
     os.environ["TB_OUTPUT_DIR"] = args.output_dir
@@ -27,13 +31,15 @@ from tb_runner.tab_logic import (
     normalize_tab_config,
     stabilize_tab_selection,
 )
-from tb_runner.constants import DEV_SERIAL, LOG_LEVEL, SCRIPT_VERSION
+from tb_runner.constants import LOG_LEVEL, SCRIPT_VERSION
 from tb_runner.excel_report import save_excel
 from tb_runner.logging_utils import close_log_files, configure_log_files, log
 from tb_runner.perf_stats import RunPerfStats, format_perf_summary, save_excel_with_perf
 from tb_runner.scenario_config import TAB_CONFIGS
 from tb_runner.runtime_config import load_runtime_bundle
-from tb_runner.accessibility_preflight import HELPER_SERVICE_COMPONENT, ensure_accessibility_service_enabled
+from tb_runner.core_preflight import run_preflight
+from tb_runner.run_spec import RunContext, RunSpec
+from tb_runner.run_selection import apply_run_selection
 from tb_runner.utils import configure_process_temp_dir, generate_output_path
 
 
@@ -50,8 +56,18 @@ def _force_utf8_stdio():
 _force_utf8_stdio()
 
 
-def main():
-    out_dir = os.environ.get("TB_OUTPUT_DIR", "output")
+def main() -> int:
+    spec = RunSpec(
+        serial=args.serial,
+        mode=args.mode,
+        language_mode=args.language_mode,
+        launch_mode=args.launch_mode,
+        scenario_ids=tuple(args.scenario),
+        output_dir=args.output_dir,
+        runtime_config_path=os.environ.get("TB_RUNTIME_CONFIG_PATH"),
+    )
+    context = RunContext(spec)
+    out_dir = context.output_dir
     temp_override_applied, temp_override_path = configure_process_temp_dir(f"{out_dir}/.tmp")
     output_path = generate_output_path()
     output_base_dir = str(Path(output_path).with_suffix(""))
@@ -62,43 +78,28 @@ def main():
     )
 
     log(f"[MAIN] script start (version={SCRIPT_VERSION}, log_level={LOG_LEVEL})")
-    target_serial = args.serial or DEV_SERIAL
+    target_serial = context.serial
     client = A11yAdbClient(dev_serial=target_serial)
-    accessibility_preflight = ensure_accessibility_service_enabled(
-        serial=target_serial,
-        component=HELPER_SERVICE_COMPONENT,
-        helper_ready_check=lambda: client.ping(dev=target_serial, wait_=3.0),
-        log_fn=log,
-    )
-    log(
-        "[PREFLIGHT][accessibility] "
-        f"component='{HELPER_SERVICE_COMPONENT}' "
-        f"before_enabled='{accessibility_preflight.before.enabled_accessibility_services}' "
-        f"before_accessibility_enabled='{accessibility_preflight.before.accessibility_enabled}' "
-        f"after_enabled='{accessibility_preflight.after.enabled_accessibility_services}' "
-        f"after_accessibility_enabled='{accessibility_preflight.after.accessibility_enabled}' "
-        f"enable_attempted={str(accessibility_preflight.enable_attempted).lower()} "
-        f"helper_ready={str(accessibility_preflight.helper_ready).lower()} "
-        f"result='{accessibility_preflight.reason}'"
-    )
-    preflight = client.check_talkback_ready(dev=target_serial)
-    talkback_status = preflight.get("status", "disabled")
-    talkback_reason = preflight.get("reason", "")
-    log(f"[PREFLIGHT] talkback status='{talkback_status}'")
-    if talkback_status == "disabled":
+    preflight = run_preflight(client=client, serial=target_serial, log_fn=log)
+    if not preflight.ok:
+        log(f"[PREFLIGHT] abort run reason='{preflight.reason}'")
+    if preflight.talkback_status == "disabled":
         log("[PREFLIGHT] abort run reason='talkback_off'")
         log("TalkBack is OFF. Enable TalkBack and retry.")
         close_log_files()
-        return
-    if talkback_status == "enabled_but_not_ready":
-        if talkback_reason == "false_positive_enabled":
+        return 2
+    if preflight.talkback_status == "enabled_but_not_ready":
+        if preflight.talkback_reason == "false_positive_enabled":
             log("[PREFLIGHT] abort run reason='false_positive_enabled'")
             log("TalkBack service is configured, but 실제 응답이 없어 실행을 중단합니다.")
         else:
             log("[PREFLIGHT] abort run reason='talkback_not_ready'")
             log("TalkBack is ON but not ready. Wait a moment and retry.")
         close_log_files()
-        return
+        return 2
+    if not preflight.ok:
+        close_log_files()
+        return 2
 
     run_perf = RunPerfStats()
 
@@ -108,7 +109,11 @@ def main():
     log(f"[MAIN] image dir base: {output_base_dir}")
 
     runtime_bundle = load_runtime_bundle(TAB_CONFIGS)
-    runtime_tab_configs = runtime_bundle.get("tab_configs", TAB_CONFIGS)
+    runtime_tab_configs = apply_run_selection(
+        runtime_bundle.get("tab_configs", TAB_CONFIGS),
+        context.spec.scenario_ids,
+        mode=context.spec.mode,
+    )
     checkpoint_save_every = int(runtime_bundle.get("checkpoint_save_every", 3) or 3)
 
     has_run_scenario = False
@@ -121,7 +126,7 @@ def main():
                 )
                 continue
             if has_run_scenario:
-                recovered = recover_to_start_state(client, DEV_SERIAL, tab_cfg)
+                recovered = recover_to_start_state(client, target_serial, tab_cfg)
                 if not recovered:
                     log(
                         f"[MAIN] recovery failed but continuing scenario_id='{tab_cfg.get('scenario_id', '')}' "
@@ -133,7 +138,7 @@ def main():
             )
             collect_tab_rows(
                 client,
-                DEV_SERIAL,
+                target_serial,
                 tab_cfg,
                 all_rows,
                 output_path,
@@ -157,7 +162,8 @@ def main():
         close_log_files()
 
     log("[MAIN] script end")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

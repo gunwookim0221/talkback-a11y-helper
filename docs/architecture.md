@@ -1,4 +1,4 @@
-# Architecture (현재 운영 기준)
+  # Architecture (현재 운영 기준)
 
 [System Overview](system-overview.md) | [Current Client Architecture](current-client-architecture.md) | [Device Plugin Guide](device-plugin-guide.md)
 

@@ -1,0 +1,11 @@
+[QA_FRONTEND] start mode='smoke' scenario_selection_applied=true scenario_ids=['global_nav_main'] runtime_config_path='x' launch_mode='clean'
+[QA_FRONTEND][language] language_mode='ko-KR' device_locale='ko-KR' target_locale='ko-KR' changed='true' verified='true' status='ok'
+[QA_FRONTEND][scenario_selection] enabled_ids=['global_nav_main']
+[QA_FRONTEND][preflight][popup] foreground_after='com.samsung.android.oneconnect' result='cleared'
+[QA_FRONTEND][preflight] final_result='passed' reason='ok'
+[21:04:10] [GLOBAL_NAV][start_gate] passed scenario='global_nav_main'
+[21:04:48] [STEP] END scenario='global_nav_main' step=5 visible='Menu, Tab 5 of 5., New content available'
+[21:04:48] [STOP][eval] step=5 scenario='global_nav_main' scenario_type='global_nav' decision='stop' reason='smart_nav_terminal' traversal_result='FAIL_STUCK' final_result='FAIL'
+[21:04:49] [PERF][scenario_summary] scenario=global_nav_main total_steps=6
+[SAVE] saved excel: output/talkback_compare_20260528_120000.xlsx rows=6
+[MAIN] script end

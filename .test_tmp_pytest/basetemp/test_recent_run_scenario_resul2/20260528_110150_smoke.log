@@ -1,0 +1,6 @@
+[QA_FRONTEND][scenario_selection] enabled_ids=['device_smoke_sensor_plugin']
+[SCENARIO][entry_contract] success scenario='device_smoke_sensor_plugin' entry_type='card'
+[STEP] END scenario='device_smoke_sensor_plugin' step=0 visible='Smoke detector'
+[STOP][eval] step=8 scenario='device_smoke_sensor_plugin' decision='stop' reason='repeat_no_progress' traversal_result='FAIL_STUCK' final_result='FAIL' failure_reason='repeat_no_progress'
+[PERF][scenario_summary] scenario=device_smoke_sensor_plugin total_steps=9
+[MAIN] script end

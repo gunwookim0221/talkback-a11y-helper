@@ -114,6 +114,19 @@ def test_foreground_package_unknown_is_not_fatal_for_preflight():
     assert ["shell", "dumpsys", "activity", "activities"] in calls
 
 
+def test_surface_preflight_defers_helper_and_talkback_to_core_runtime():
+    result = preflight.run_surface_preflight(
+        "warm",
+        adb_status_fn=_adb_status,
+        adb_runner=lambda _args, _timeout: _ok(""),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result["state"] == "passed"
+    assert result["helper_state"] == "deferred_to_core"
+    assert result["talkback_state"] == "deferred_to_core"
+
+
 def test_talkback_disabled_opens_accessibility_settings_and_blocks_run():
     calls = []
 

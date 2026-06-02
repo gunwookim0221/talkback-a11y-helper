@@ -1,0 +1,3 @@
+[QA_FRONTEND][scenario_selection] enabled_ids=['global_nav_main']
+[08:06:57] [STOP][eval] scenario='global_nav_main' final_result='FAIL'
+[MAIN] script end

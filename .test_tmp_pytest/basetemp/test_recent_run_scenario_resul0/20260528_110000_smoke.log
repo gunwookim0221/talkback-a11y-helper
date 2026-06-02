@@ -1,0 +1,6 @@
+[QA_FRONTEND][scenario_selection] enabled_ids=['global_nav_main']
+[21:04:10] [GLOBAL_NAV][start_gate] passed scenario='global_nav_main'
+[21:04:48] [STEP] END scenario='global_nav_main' step=5 visible='Menu, Tab 5 of 5., New content available'
+[21:04:48] [STOP][eval] step=5 scenario='global_nav_main' scenario_type='global_nav' decision='stop' reason='smart_nav_terminal' traversal_result='FAIL_STUCK' final_result='FAIL'
+[21:04:49] [PERF][scenario_summary] scenario=global_nav_main total_steps=6
+[MAIN] script end

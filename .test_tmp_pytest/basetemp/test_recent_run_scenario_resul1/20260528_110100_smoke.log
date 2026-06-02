@@ -1,0 +1,4 @@
+[QA_FRONTEND][scenario_selection] enabled_ids=['global_nav_main']
+[08:06:57] [TAB][select] stabilization failed scenario='global_nav_main'
+[08:06:57] [PERF][scenario_summary] scenario=global_nav_main total_steps=1
+[MAIN] script end

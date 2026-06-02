@@ -1,19 +1,23 @@
 import threading
 import subprocess
-import sys
 import json
-import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import traceback
+from tb_runner.run_spec import RunSpec
 from .paths import ROOT_DIR, RUN_LOG_DIR, SCRIPT_PATH, RUNTIME_CONFIG_PATH
-from tb_runner.runtime_config import RUNTIME_CONFIG_PATH_ENV
 from .runtime_config_selection import write_selected_runtime_config
 from .device_locale import apply_language_mode, normalize_language_mode, format_language_log_lines
-from .preflight import run_runtime_preflight, normalize_launch_mode, format_preflight_log_lines
+from .preflight import (
+    run_surface_preflight as run_runtime_preflight,
+    normalize_launch_mode,
+    format_preflight_log_lines,
+)
+from .subprocess_executor import close_execution_log, start_execution, wait_for_execution
+from .runtime_setup import prepare_runtime
 
 def _json_safe(value):
     if isinstance(value, Path):
@@ -270,10 +274,6 @@ class BatchRunManager:
             log_path = Path(dev_output_dir) / "runner.log"
             log_file = log_path.open("w", encoding="utf-8", errors="replace")
             
-            env = os.environ.copy()
-            env["TB_OUTPUT_DIR"] = dev_output_dir
-            env["ANDROID_SERIAL"] = dev_serial
-            
             try:
                 # 1. Config copy
                 runtime_config = write_selected_runtime_config(
@@ -282,21 +282,28 @@ class BatchRunManager:
                     scenario_ids=self._scenario_ids,
                     mode=self._mode,
                 )
-                env[RUNTIME_CONFIG_PATH_ENV] = str(runtime_config["path"])
-                
                 log_file.write(f"[BATCH] Config generated for {dev_serial}\n")
                 log_file.flush()
-                
-                # 2. Language mode
-                os.environ["ANDROID_SERIAL"] = dev_serial
-                language_status = apply_language_mode(self._language_mode)
+                spec = RunSpec(
+                    serial=dev_serial,
+                    mode=self._mode,
+                    language_mode=self._language_mode,
+                    launch_mode=self._launch_mode,
+                    scenario_ids=tuple(self._scenario_ids),
+                    output_dir=dev_output_dir,
+                    runtime_config_path=str(runtime_config["path"]),
+                )
+                language_status, preflight = prepare_runtime(
+                    spec,
+                    language_fn=apply_language_mode,
+                    preflight_fn=run_runtime_preflight,
+                )
                 for line in format_language_log_lines(language_status):
                     log_file.write(f"{line}\n")
                 if not language_status.get("ok"):
                     raise Exception(f"Language setup failed: {language_status}")
                     
-                # 3. Preflight
-                preflight = run_runtime_preflight(self._launch_mode)
+                assert preflight is not None
                 for line in format_preflight_log_lines(preflight):
                     log_file.write(f"{line}\n")
                 if not preflight.get("ok"):
@@ -312,51 +319,18 @@ class BatchRunManager:
                 self._write_device_summary(device_info, dev_output_dir)
                 log_file.write(f"\n[BATCH ERROR] {e}\n")
                 log_file.close()
-                if "ANDROID_SERIAL" in os.environ:
-                    del os.environ["ANDROID_SERIAL"]
                 continue
-                
-            if "ANDROID_SERIAL" in os.environ:
-                del os.environ["ANDROID_SERIAL"]
-                
-            cmd = [sys.executable, str(SCRIPT_PATH), "--serial", dev_serial, "--output-dir", dev_output_dir]
-            
-            try:
-                proc = subprocess.Popen(
-                    cmd, 
-                    cwd=ROOT_DIR,
-                    env=env,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    bufsize=1
-                )
-                
-                def _tee_output():
-                    try:
-                        for line in iter(proc.stdout.readline, ""):
-                            log_file.write(line)
-                            log_file.flush()
-                        remainder = proc.stdout.read()
-                        if remainder:
-                            log_file.write(remainder)
-                            log_file.flush()
-                    except Exception as e:
-                        log_file.write(f"\n[TEE ERROR] {e}\n")
-                        log_file.flush()
 
-                import threading
-                tee_thread = threading.Thread(target=_tee_output, daemon=True)
-                tee_thread.start()
-                
-                proc.wait()
-                tee_thread.join(timeout=5.0)
-                
-                if tee_thread.is_alive():
-                    log_file.write("\n[BATCH WARNING] tee_thread join timeout\n")
-                log_file.flush()
+            try:
+                execution = start_execution(
+                    spec=spec,
+                    script_path=SCRIPT_PATH,
+                    cwd=ROOT_DIR,
+                    log_file=log_file,
+                    log_path=log_path,
+                    popen_factory=subprocess.Popen,
+                )
+                returncode = wait_for_execution(execution)
                 
                 try:
                     file_size = log_path.stat().st_size
@@ -366,12 +340,13 @@ class BatchRunManager:
                     pass
                 
                 with self._lock:
-                    device_info["state"] = "passed" if proc.returncode == 0 else "failed"
-                    device_info["return_code"] = proc.returncode
+                    device_info["state"] = "passed" if returncode == 0 else "failed"
+                    device_info["return_code"] = returncode
                     device_info["finished_at"] = datetime.now(timezone.utc).isoformat()
                     self._current_device_idx += 1
                     self._write_summary_locked()
                 self._write_device_summary(device_info, dev_output_dir)
+                close_execution_log(execution)
                     
             except Exception as e:
                 with self._lock:
@@ -383,7 +358,8 @@ class BatchRunManager:
                 self._write_device_summary(device_info, dev_output_dir)
                 log_file.write(f"\n[BATCH ERROR] {e}\n")
             finally:
-                log_file.close()
+                if not log_file.closed:
+                    log_file.close()
 
 global_batch_manager = BatchRunManager()
 

@@ -1,4 +1,6 @@
+import argparse
 import json
+import os
 import re
 import tempfile
 import time
@@ -14,7 +16,6 @@ from PIL import Image
 from talkback_lib import A11yAdbClient
 
 
-DEV_SERIAL = "R3CX40QFDBP"
 SCRIPT_VERSION = "1.4.0"
 
 OVERLAY_ENTRY_ALLOWLIST = [
@@ -1066,9 +1067,17 @@ def collect_tab_rows(
     return rows
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--serial", default=os.environ.get("ANDROID_SERIAL"))
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
+    target_serial = args.serial
     log(f"[MAIN] script start (version={SCRIPT_VERSION})")
-    client = A11yAdbClient(dev_serial=DEV_SERIAL)
+    client = A11yAdbClient(dev_serial=target_serial)
 
     all_rows: list[dict] = []
     output_path = generate_output_path()
@@ -1087,7 +1096,7 @@ def main():
                 continue
             collect_tab_rows(
                 client,
-                DEV_SERIAL,
+                target_serial,
                 tab_cfg,
                 all_rows,
                 output_path,

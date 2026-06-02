@@ -1,0 +1,3 @@
+[QA_FRONTEND][scenario_selection] enabled_ids=['global_nav_main', 'life_air_care_plugin']
+[08:00:04] [PERF][scenario_summary] scenario=global_nav_main total_steps=6
+[QA_FRONTEND][run] final_state='stopped' returncode=0

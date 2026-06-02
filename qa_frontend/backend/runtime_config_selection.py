@@ -5,37 +5,15 @@ import json
 from pathlib import Path
 from typing import Any
 
-
-SMOKE_EXACT_STEP_OVERRIDES: dict[str, int] = {
-    "global_nav_main": 6,
-    "home_main": 6,
-    "devices_main": 6,
-    "life_main": 6,
-    "routines_main": 6,
-    "menu_main": 6,
-    "settings_entry_example": 6,
-}
-SMOKE_PREFIX_STEP_OVERRIDES: tuple[tuple[str, int], ...] = (
-    ("life_", 8),
-    ("device_", 8),
-)
-SMOKE_FALLBACK_MAX_STEPS = 8
+from tb_runner.run_selection import normalize_mode, resolve_effective_max_steps
 
 
 def _normalize_mode(mode: str) -> str:
-    return "full" if str(mode).lower() == "full" else "smoke"
+    return normalize_mode(mode)
 
 
 def _resolve_effective_max_steps(scenario_id: str, original_max_steps: Any, mode: str) -> Any:
-    normalized_mode = _normalize_mode(mode)
-    if normalized_mode == "full":
-        return original_max_steps
-    if scenario_id in SMOKE_EXACT_STEP_OVERRIDES:
-        return SMOKE_EXACT_STEP_OVERRIDES[scenario_id]
-    for prefix, steps in SMOKE_PREFIX_STEP_OVERRIDES:
-        if scenario_id.startswith(prefix):
-            return steps
-    return SMOKE_FALLBACK_MAX_STEPS
+    return resolve_effective_max_steps(scenario_id, original_max_steps, mode)
 
 
 def build_selected_runtime_config(
