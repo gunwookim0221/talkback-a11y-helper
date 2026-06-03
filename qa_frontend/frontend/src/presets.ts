@@ -4,6 +4,7 @@ export type ScenarioPresetId =
   | 'global'
   | 'life'
   | 'device'
+  | 'all_plugins'
   | 'select_all'
   | 'clear_all';
 
@@ -34,9 +35,15 @@ export const PRESETS: ScenarioPreset[] = [
     scenarioIds: [],
   },
   {
+    id: 'all_plugins',
+    label: 'All Plugins',
+    description: 'select device and life plugin scenarios only',
+    scenarioIds: [],
+  },
+  {
     id: 'select_all',
-    label: 'Select All',
-    description: 'select every available scenario',
+    label: 'All Scenarios',
+    description: 'select navigation, main, and plugin scenarios',
     scenarioIds: [],
   },
   {
@@ -53,6 +60,16 @@ export function applyPresetSelection(presetId: ScenarioPresetId, scenarios: Scen
   }
   if (presetId === 'select_all') {
     return new Set(scenarios.map((scenario) => scenario.id));
+  }
+  if (presetId === 'all_plugins') {
+    return new Set(
+      scenarios
+        .filter((scenario) => {
+          const id = scenario.id;
+          return id.startsWith('device_') || (id.startsWith('life_') && id.endsWith('_plugin'));
+        })
+        .map((scenario) => scenario.id)
+    );
   }
 
   const newSelection = new Set<string>();

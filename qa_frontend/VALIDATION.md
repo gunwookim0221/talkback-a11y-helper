@@ -353,7 +353,7 @@ Precondition:
 PASS:
 
 - Run starts from UI
-- Smoke mode shows reduced-step intent in the Run panel and uses a reduced `max_steps` override in the per-run runtime config
+- Selected Smoke mode shows reduced-step intent in the Run panel and uses a reduced `max_steps` override in the per-run runtime config
 - `qa_frontend_runs/<run_id>_smoke.log` is created
 - Run reaches terminal `finished` or expected stop condition without backend crash
 - Output/log evidence shows `global_nav_main` traversal happened
@@ -420,7 +420,7 @@ FAIL logs:
 PASS:
 
 - `full` mode can be launched from the UI
-- Full mode shows source-`max_steps` regression intent in the Run panel and preserves source `max_steps` in the per-run runtime config
+- Selected Full mode shows source-`max_steps` regression intent in the Run panel and preserves source `max_steps` in the per-run runtime config
 - Backend remains responsive during the long run
 - Final state becomes `finished`, `stopped`, or a scenario-level failure reflected in logs, not a frontend/backend crash
 
@@ -465,8 +465,8 @@ FAIL logs:
 
 - Device-required scenarios remain manual because they depend on real ADB transport, helper state, SmartThings screen state, and live runner behavior.
 - The automated set only validates `qa_frontend` importability, API structure, safe path handling, static file presence, and runner guard behavior.
-- Smoke means a reduced-step sanity check for the currently selected scenarios. Full means a regression run that keeps source `runtime_config.json` `max_steps`.
+- Selected Smoke means a reduced-step sanity check for the currently selected scenarios. Selected Full means a regression run that keeps source `runtime_config.json` `max_steps` for the selected scenarios.
 - Source `enabled` flags are display-only in the UI. The actual run selection comes from the current checkbox state, which defaults to `global_nav_main`.
 - Launch mode defaults to `Clean launch` so SmartThings starts from a more stable baseline. `Warm launch` is retained for advanced/debug runs that intentionally preserve the current app state.
-- Presets (`Global Nav Smoke`, `Life Smoke`, `Device Smoke`, `Select All Scenarios`, `Clear All`) only change frontend checkbox selection state. Smoke/Full buttons choose execution mode. Presets do not modify the source runtime config.
+- Presets (`Navigation`, `Life Plugins`, `Device Plugins`, `All Plugins`, `All Scenarios`, `Clear All`) only change frontend checkbox selection state. All Plugins selects `device_*_plugin` and `life_*_plugin` only; All Scenarios also includes navigation/main scenarios. Selected Smoke/Selected Full choose execution mode. Presets do not modify the source runtime config.
 - Run status is process execution status. Scenario status is validation result status parsed from the run log and may be `failed` even when the process exits successfully.

@@ -290,8 +290,8 @@ export function RunPanel({
                 onChange={() => setPlannedMode('smoke')}
                 disabled={running}
               />
-              <span style={{ fontSize: '14px' }}>Smoke</span>
-              <small style={{ fontSize: '11px', margin: 0 }}>Quick check</small>
+              <span style={{ fontSize: '14px' }}>Selected Smoke</span>
+              <small style={{ fontSize: '11px', margin: 0 }}>selected scenarios with reduced max_steps</small>
             </label>
             <label style={{ padding: '4px 8px' }}>
               <input
@@ -301,8 +301,8 @@ export function RunPanel({
                 onChange={() => setPlannedMode('full')}
                 disabled={running}
               />
-              <span style={{ fontSize: '14px' }}>Full</span>
-              <small style={{ fontSize: '11px', margin: 0 }}>Full regression</small>
+              <span style={{ fontSize: '14px' }}>Selected Full</span>
+              <small style={{ fontSize: '11px', margin: 0 }}>selected scenarios with source max_steps</small>
             </label>
           </div>
         </div>
@@ -310,7 +310,7 @@ export function RunPanel({
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px' }}>
         <div style={{ fontSize: '13px', color: 'var(--color-text-dim)' }}>
-          <strong>Current:</strong> {effectiveMode === 'smoke' ? 'Smoke' : 'Full'} &middot; {String(status?.launch_mode ?? launchMode).replace(/^\w/, c => c.toUpperCase())} &middot; {String(status?.language_mode ?? languageMode).replace(/^\w/, c => c.toUpperCase())} &middot; Selected {selectedCount}
+          <strong>Current:</strong> {effectiveMode === 'smoke' ? 'Selected Smoke' : 'Selected Full'} &middot; {String(status?.launch_mode ?? launchMode).replace(/^\w/, c => c.toUpperCase())} &middot; {String(status?.language_mode ?? languageMode).replace(/^\w/, c => c.toUpperCase())} &middot; Selected {selectedCount}
         </div>
         <div className="buttonRow" style={{ marginBottom: '0', justifyContent: 'flex-end', gap: '12px' }}>
           <button onClick={handleRunClick} disabled={running || batchStatus?.state === 'running'} style={{ minWidth: '100px' }}>

@@ -395,7 +395,11 @@ export default function App() {
             this run uses your current checkbox selection.
           </p>
           <p className="scenarioHint">
-            Presets only change scenario checkboxes. Use the Smoke or Full buttons above to choose the execution mode.
+            Presets only change scenario checkboxes. Use Selected Smoke or Selected Full above to choose the execution mode.
+          </p>
+          <p className="scenarioHint">
+            Selected Full does not mean all plugins. Use All Plugins to run every plugin scenario, or All Scenarios to
+            include navigation and main scenarios as well.
           </p>
           <div className="presetActions">
             {PRESETS.map((preset) => (
