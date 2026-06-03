@@ -117,6 +117,21 @@ def test_parse_live_log_uses_step_bearing_non_step_lines_as_fallback():
     assert live["current"]["current_step_log"].startswith("[STOP][eval]")
 
 
+def test_parse_live_log_separates_smart_navigation_result_from_final_result():
+    log_text = "\n".join(
+        [
+            "[STEP][smart_next_trace] step=3 scenario='global_nav_main' last_smart_nav_result='failed' last_smart_nav_detail='reached_end'",
+        ]
+    )
+
+    live = batch_runner._parse_live_log(log_text, scenario_ids=["global_nav_main"])
+
+    assert live["current"]["current_step_index"] == 3
+    assert live["current"]["current_step_result"] is None
+    assert live["current"]["current_navigation_result"] == "failed"
+    assert live["current"]["current_navigation_detail"] == "reached_end"
+
+
 def test_parse_live_log_counts_runtime_events_without_step_index():
     log_text = "\n".join(
         [

@@ -34,7 +34,9 @@ CURRENT_STEP_LABEL_RE = re.compile(r"(?:visible|label|talkback_label)='([^']*)'"
 CURRENT_STEP_ACTION_RE = re.compile(r"(?:action|move_result)=(?:'([^']*)'|([^\s]+))")
 CURRENT_STEP_TARGET_RE = re.compile(r"(?:target|target_name|targetName)=(?:'([^']*)'|([^\s]+))")
 CURRENT_FINAL_RESULT_RE = re.compile(r"final_result='([^']*)'")
-CURRENT_STEP_RESULT_RE = re.compile(r"(?:move_result|result)='([^']*)'")
+CURRENT_STEP_RESULT_RE = re.compile(r"(?:\bmove_result|(?<!_)\bresult)='([^']*)'")
+SMART_NAV_RESULT_RE = re.compile(r"last_smart_nav_result='([^']*)'")
+SMART_NAV_DETAIL_RE = re.compile(r"last_smart_nav_detail='([^']*)'")
 PREFLIGHT_STEP_RE = re.compile(r"\[PREFLIGHT\]\s+(device_connected|wake_screen|unlock_swipe|app_foreground)\s+([A-Z_]+)")
 TALKBACK_STATUS_RE = re.compile(r"\[PREFLIGHT\]\s+talkback status='([^']*)'")
 
@@ -56,6 +58,8 @@ def _empty_live_status() -> dict:
             "current_step_action": None,
             "current_step_target": None,
             "current_step_result": None,
+            "current_navigation_result": None,
+            "current_navigation_detail": None,
             "latest_step_log": None,
             "current_step_log": None,
             "latest_runtime_event": None,
@@ -147,6 +151,15 @@ def _parse_live_log(log_text: str, *, scenario_ids: list[str] | None = None) -> 
                 _extract_first_group(CURRENT_FINAL_RESULT_RE, line)
                 or _extract_first_group(CURRENT_STEP_RESULT_RE, line)
                 or live["current"]["current_step_result"]
+            )
+            live["current"]["current_navigation_result"] = (
+                _extract_first_group(SMART_NAV_RESULT_RE, line)
+                or _extract_first_group(CURRENT_STEP_RESULT_RE, line)
+                or live["current"]["current_navigation_result"]
+            )
+            live["current"]["current_navigation_detail"] = (
+                _extract_first_group(SMART_NAV_DETAIL_RE, line)
+                or live["current"]["current_navigation_detail"]
             )
             live["current"]["latest_step_log"] = _trim_line(line)
             live["current"]["current_step_log"] = live["current"]["latest_step_log"]

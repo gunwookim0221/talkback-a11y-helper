@@ -154,6 +154,13 @@ export function RuntimeDashboardPanel({ dashboard, batchStatus, status, helper, 
   );
 }
 
+function formatNavigationResult(result?: string | null, detail?: string | null): string | null {
+  if (!result) {
+    return null;
+  }
+  return detail ? `${result} (${detail})` : result;
+}
+
 function BatchLiveMonitor({
   batchStatus,
   pollingLatencyMs,
@@ -189,6 +196,7 @@ function BatchLiveMonitor({
   const runtimeState = current?.current_scenario_runtime_state ?? (current?.current_scenario_id ? 'observing' : '-');
   const latestEvent = current?.latest_scenario_event ?? current?.current_step_result?.toLowerCase() ?? '-';
   const latestRuntimeEvent = current?.latest_runtime_event ?? current?.latest_step_log ?? logs?.latest_log_line ?? null;
+  const navigationResult = formatNavigationResult(current?.current_navigation_result, current?.current_navigation_detail);
 
   return (
     <details className="panel dashboardPanel" open={isOpen} onToggle={(e) => setIsOpen(e.currentTarget.open)}>
@@ -286,12 +294,13 @@ function BatchLiveMonitor({
                   <dd>{current.current_step_target}</dd>
                 </>
               )}
-              {current?.current_step_result && (
+              {navigationResult && (
                 <>
-                  <dt>Latest Result</dt>
-                  <dd>{current.current_step_result}</dd>
+                  <dt>Navigation Result</dt>
+                  <dd>{navigationResult}</dd>
                 </>
               )}
+              {navigationResult && <small style={{ color: 'var(--color-text-dim)' }}>Navigation result is the latest movement attempt, not the final scenario result.</small>}
               <dt>Latest Runtime Event</dt>
               <dd>{latestRuntimeEvent ?? '-'}</dd>
               <dt>Latest Step Log</dt>

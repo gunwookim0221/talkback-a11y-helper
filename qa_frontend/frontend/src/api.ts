@@ -107,6 +107,8 @@ export type BatchCurrentStatus = {
   current_step_action: string | null;
   current_step_target: string | null;
   current_step_result: string | null;
+  current_navigation_result?: string | null;
+  current_navigation_detail?: string | null;
   latest_step_log?: string | null;
   current_step_log?: string | null;
   latest_runtime_event?: string | null;
