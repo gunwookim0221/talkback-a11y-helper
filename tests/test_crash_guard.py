@@ -41,8 +41,10 @@ class GuardClient:
         self.pidof = pidof
         self.current_package = current_package
         self.dump_tree_calls = 0
+        self.collect_focus_step_calls = 0
 
     def collect_focus_step(self, **kwargs):
+        self.collect_focus_step_calls += 1
         row = dict(self.rows.pop(0))
         row.setdefault("step_index", kwargs.get("step_index", 1))
         return row
@@ -153,14 +155,20 @@ def test_main_loop_stops_on_launcher_focus_and_persists_crash_artifacts(tmp_path
     monkeypatch.setattr(collection_flow, "save_excel_with_perf", lambda *args, **kwargs: None)
     logs = []
     monkeypatch.setattr(collection_flow, "log", lambda message, *args, **kwargs: logs.append(str(message)))
-    client = GuardClient(rows=[_launcher_row()])
+    client = GuardClient(
+        rows=[
+            _launcher_row(step_index=1),
+            _launcher_row(step_index=2, visible_label="Camera", merged_announcement="Camera"),
+            _launcher_row(step_index=3, visible_label="Messages", merged_announcement="Messages"),
+        ]
+    )
     state = _main_loop_state(anchor_row=_oneconnect_anchor_row())
     phase_ctx = collection_flow.CollectionPhaseContext(
         tab_cfg={
             "tab_name": "Life",
             "scenario_id": "life_home_monitor_plugin",
             "scenario_type": "content",
-            "max_steps": 1,
+            "max_steps": 6,
         },
         rows=[_oneconnect_anchor_row()],
         all_rows=[_oneconnect_anchor_row()],
@@ -179,13 +187,27 @@ def test_main_loop_stops_on_launcher_focus_and_persists_crash_artifacts(tmp_path
 
     assert result_state.stop_triggered is True
     assert result_state.stop_reason == "app_terminated"
+    assert result_state.stop_step == 1
+    assert client.collect_focus_step_calls == 1
     assert phase_ctx.rows[-1]["crash_like_detected"] is True
     assert phase_ctx.rows[-1]["crash_type"] == "APP_TERMINATED"
+    assert phase_ctx.rows[-1]["status"] == "END"
+    assert phase_ctx.rows[-1]["stop_reason"] == "app_terminated"
+    assert phase_ctx.rows[-1]["crash_terminal"] is True
+    assert client.last_crash_terminal_signal["crash_event_id"] == "CRASH-0001"
+    assert client.last_crash_terminal_signal["recovery_state"] == "CRASH_DETECTED"
     assert (tmp_path / "crashes" / "CRASH-0001" / "crash_context.json").is_file()
     assert any("[CRASH_GUARD] check start source='main_loop'" in entry for entry in logs)
     assert any("[CRASH_GUARD] package source='focus_payload' package='com.sec.android.app.launcher'" in entry for entry in logs)
     assert any("[CRASH_GUARD] app_terminated pidof_empty=true" in entry for entry in logs)
     assert any("[CRASH_GUARD] event_created crash_event_id='CRASH-0001'" in entry for entry in logs)
+    assert sum("[CRASH_TERMINAL] scenario_exit" in entry for entry in logs) == 1
+    assert any(
+        "[CRASH_TERMINAL] scenario_exit scenario='life_home_monitor_plugin' step=1 "
+        "reason='app_terminated' crash_event_id='CRASH-0001'" in entry
+        for entry in logs
+    )
+    assert not any("duplicate_suppressed" in entry for entry in logs)
 
 
 def test_main_loop_logs_guard_on_global_nav_path(tmp_path, monkeypatch):
@@ -223,10 +245,114 @@ def test_main_loop_logs_guard_on_global_nav_path(tmp_path, monkeypatch):
     result_state = collection_flow._main_loop_phase(client, "SERIAL", phase_ctx)
 
     assert (tmp_path / "crashes" / "CRASH-0001" / "crash_context.json").is_file()
-    assert result_state.stop_reason in {"", "app_terminated"}
+    assert result_state.stop_reason == "app_terminated"
+    assert client.collect_focus_step_calls == 1
     assert any("[CRASH_GUARD] check start source='main_loop' scenario='home_main' step=1" in entry for entry in logs)
     assert any("[CRASH_GUARD] package source='smart_nav_actual_view_id' package='com.sec.android.app.launcher' key='smart_nav_package'" in entry for entry in logs)
     assert any("[CRASH_GUARD] app_terminated package='com.sec.android.app.launcher'" in entry for entry in logs)
+    assert sum("[CRASH_TERMINAL] scenario_exit scenario='home_main'" in entry for entry in logs) == 1
+
+
+def test_crash_guard_suppresses_duplicate_event_in_same_scenario_attempt(tmp_path, monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, *args, **kwargs: logs.append(str(message)))
+    client = GuardClient()
+    collection_flow._reset_crash_guard_latch(client, scenario_id="global_nav_main", attempt=0)
+
+    first = collection_flow._run_crash_guard_check(
+        client=client,
+        dev="SERIAL",
+        row=_launcher_row(),
+        scenario_id="global_nav_main",
+        step_idx=1,
+        output_base_dir=str(tmp_path),
+        source="main_loop",
+    )
+    second = collection_flow._run_crash_guard_check(
+        client=client,
+        dev="SERIAL",
+        row=_launcher_row(visible_label="Camera", merged_announcement="Camera"),
+        scenario_id="global_nav_main",
+        step_idx=2,
+        output_base_dir=str(tmp_path),
+        source="main_loop",
+    )
+
+    assert first is not None
+    assert second is not None
+    assert first["crash_event_id"] == "CRASH-0001"
+    assert second["crash_event_id"] == "CRASH-0001"
+    assert client.last_crash_terminal_signal["crash_event_id"] == "CRASH-0001"
+    assert (tmp_path / "crashes" / "CRASH-0001").is_dir()
+    assert not (tmp_path / "crashes" / "CRASH-0002").exists()
+    assert any(
+        "[CRASH_GUARD] duplicate_suppressed scenario='global_nav_main' attempt=0 crash_event_id='CRASH-0001'" in entry
+        for entry in logs
+    )
+
+
+def test_crash_guard_latch_reset_allows_new_event_for_next_scenario(tmp_path, monkeypatch):
+    monkeypatch.setattr(collection_flow, "log", lambda message, *args, **kwargs: None)
+    client = GuardClient()
+    collection_flow._reset_crash_guard_latch(client, scenario_id="global_nav_main", attempt=0)
+
+    first = collection_flow._run_crash_guard_check(
+        client=client,
+        dev="SERIAL",
+        row=_launcher_row(),
+        scenario_id="global_nav_main",
+        step_idx=1,
+        output_base_dir=str(tmp_path),
+        source="main_loop",
+    )
+    collection_flow._reset_crash_guard_latch(client, scenario_id="life_home_monitor_plugin", attempt=0)
+    second = collection_flow._run_crash_guard_check(
+        client=client,
+        dev="SERIAL",
+        row=_launcher_row(),
+        scenario_id="life_home_monitor_plugin",
+        step_idx=1,
+        output_base_dir=str(tmp_path),
+        source="main_loop",
+    )
+
+    assert first is not None
+    assert second is not None
+    assert first["crash_event_id"] == "CRASH-0001"
+    assert second["crash_event_id"] == "CRASH-0002"
+    assert (tmp_path / "crashes" / "CRASH-0001").is_dir()
+    assert (tmp_path / "crashes" / "CRASH-0002").is_dir()
+
+
+def test_crash_guard_latch_reset_allows_new_event_for_next_attempt(tmp_path, monkeypatch):
+    monkeypatch.setattr(collection_flow, "log", lambda message, *args, **kwargs: None)
+    client = GuardClient()
+    collection_flow._reset_crash_guard_latch(client, scenario_id="global_nav_main", attempt=0)
+
+    first = collection_flow._run_crash_guard_check(
+        client=client,
+        dev="SERIAL",
+        row=_launcher_row(attempt=0),
+        scenario_id="global_nav_main",
+        step_idx=1,
+        output_base_dir=str(tmp_path),
+        source="main_loop",
+    )
+    collection_flow._reset_crash_guard_latch(client, scenario_id="global_nav_main", attempt=1)
+    second = collection_flow._run_crash_guard_check(
+        client=client,
+        dev="SERIAL",
+        row=_launcher_row(attempt=1),
+        scenario_id="global_nav_main",
+        step_idx=1,
+        output_base_dir=str(tmp_path),
+        source="main_loop",
+    )
+
+    assert first is not None
+    assert second is not None
+    assert first["crash_event_id"] == "CRASH-0001"
+    assert second["crash_event_id"] == "CRASH-0002"
 
 
 def _oneconnect_anchor_row():

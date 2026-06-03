@@ -43,6 +43,7 @@ from tb_runner.utils import (
 )
 from tb_runner import container_group_logic
 from tb_runner import crash_guard
+from tb_runner import crash_recovery
 from tb_runner import device_tab_logic
 from tb_runner import focus_realign_logic
 from tb_runner import local_tab_logic
@@ -6348,6 +6349,7 @@ def _run_crash_guard_check(
     source: str,
 ) -> dict[str, Any] | None:
     payload = dict(row) if isinstance(row, dict) else {}
+    attempt = _crash_guard_attempt_for_row(client, payload)
     log(f"[CRASH_GUARD] check start source='{source}' scenario='{scenario_id}' step={step_idx}")
     inspection = crash_guard.inspect_foreground_package_exit(row=payload, client=client, dev=dev)
     packages = inspection.get("packages") if isinstance(inspection.get("packages"), dict) else {}
@@ -6370,7 +6372,9 @@ def _run_crash_guard_check(
     detection = inspection.get("detection") if isinstance(inspection.get("detection"), dict) else None
     if not detection:
         log("[CRASH_GUARD] result='ok'")
-        setattr(client, "last_crash_guard_result", {})
+        if not _crash_guard_latch_matches(client, scenario_id=scenario_id, attempt=attempt):
+            setattr(client, "last_crash_guard_result", {})
+            setattr(client, "last_crash_terminal_signal", {})
         return None
 
     detected_package = ""
@@ -6381,6 +6385,18 @@ def _run_crash_guard_check(
             break
     reason = str(detection.get("reason") or "possible_crash")
     log(f"[CRASH_GUARD] {reason} package='{detected_package or 'unknown'}'")
+
+    latched_payload = _get_latched_crash_payload(client, scenario_id=scenario_id, attempt=attempt)
+    if latched_payload is not None:
+        crash_event_id = str(latched_payload.get("crash_event_id") or "")
+        log(
+            f"[CRASH_GUARD] duplicate_suppressed scenario='{scenario_id}' "
+            f"attempt={attempt} crash_event_id='{crash_event_id}'"
+        )
+        setattr(client, "last_crash_guard_result", latched_payload)
+        signal = crash_recovery.extract_crash_terminal_signal(latched_payload)
+        setattr(client, "last_crash_terminal_signal", signal.to_dict() if signal else {})
+        return latched_payload
 
     resolved_output_base_dir = str(output_base_dir or os.environ.get("TB_OUTPUT_DIR", "output"))
     crash_event_id = crash_guard.record_foreground_exit_event(
@@ -6397,12 +6413,78 @@ def _run_crash_guard_check(
     log(f"[CRASH_GUARD] event_created crash_event_id='{crash_event_id}' path='{crash_event_path}'")
     detection_payload = {
         **detection,
+        "is_crash_like": True,
+        "scenario_id": scenario_id,
+        "attempt": attempt,
+        "recovery_state": crash_recovery.STATE_CRASH_DETECTED,
         "crash_event_id": crash_event_id,
         "source": source,
         "event_path": crash_event_path,
+        "artifact_dir": crash_event_path,
     }
     setattr(client, "last_crash_guard_result", detection_payload)
+    signal = crash_recovery.extract_crash_terminal_signal(detection_payload)
+    setattr(client, "last_crash_terminal_signal", signal.to_dict() if signal else {})
+    _set_crash_guard_latch(client, scenario_id=scenario_id, attempt=attempt, payload=detection_payload)
     return detection_payload
+
+
+def _crash_guard_attempt_for_tab_cfg(tab_cfg: dict[str, Any]) -> int:
+    try:
+        return int(tab_cfg.get("_crash_attempt", tab_cfg.get("attempt", 0)) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _crash_guard_attempt_for_row(client: A11yAdbClient, row: dict[str, Any]) -> int:
+    if "attempt" in row or "_crash_attempt" in row:
+        return _crash_guard_attempt_for_tab_cfg(row)
+    try:
+        return int(getattr(client, "crash_guard_latched_attempt", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _reset_crash_guard_latch(client: A11yAdbClient, *, scenario_id: str, attempt: int) -> None:
+    setattr(client, "crash_guard_latched", False)
+    setattr(client, "crash_guard_latched_scenario", scenario_id)
+    setattr(client, "crash_guard_latched_attempt", attempt)
+    setattr(client, "active_crash_event_id", "")
+    setattr(client, "last_crash_guard_result", {})
+    setattr(client, "last_crash_terminal_signal", {})
+
+
+def _set_crash_guard_latch(
+    client: A11yAdbClient,
+    *,
+    scenario_id: str,
+    attempt: int,
+    payload: dict[str, Any],
+) -> None:
+    setattr(client, "crash_guard_latched", True)
+    setattr(client, "crash_guard_latched_scenario", scenario_id)
+    setattr(client, "crash_guard_latched_attempt", attempt)
+    setattr(client, "active_crash_event_id", str(payload.get("crash_event_id") or ""))
+    setattr(client, "crash_guard_latched_payload", dict(payload))
+
+
+def _crash_guard_latch_matches(client: A11yAdbClient, *, scenario_id: str, attempt: int) -> bool:
+    try:
+        latched_attempt = int(getattr(client, "crash_guard_latched_attempt", -1))
+    except (TypeError, ValueError):
+        latched_attempt = -1
+    return (
+        bool(getattr(client, "crash_guard_latched", False))
+        and str(getattr(client, "crash_guard_latched_scenario", "") or "") == scenario_id
+        and latched_attempt == attempt
+    )
+
+
+def _get_latched_crash_payload(client: A11yAdbClient, *, scenario_id: str, attempt: int) -> dict[str, Any] | None:
+    if not _crash_guard_latch_matches(client, scenario_id=scenario_id, attempt=attempt):
+        return None
+    payload = getattr(client, "crash_guard_latched_payload", {})
+    return dict(payload) if isinstance(payload, dict) and payload.get("crash_event_id") else None
 
 
 def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict, *, output_base_dir: str | None = None) -> bool:
@@ -11506,6 +11588,31 @@ def _main_loop_phase(
             )
             stop_details = {**stop_details, "reason": reason, "crash_event_id": crash_event_id}
             stop_eval_inputs["eval_reason"] = reason
+            state.stop_triggered = True
+            state.stop_reason = reason
+            state.stop_step = step_idx
+            row["status"] = "END"
+            row["stop_reason"] = reason
+            row["stop_triggered"] = True
+            row["stop_step"] = step_idx
+            row["crash_terminal"] = True
+            log(
+                f"[CRASH_TERMINAL] scenario_exit scenario='{scenario_id}' step={step_idx} "
+                f"reason='{reason}' crash_event_id='{crash_event_id}'"
+            )
+            _apply_row_persistence_phase(
+                row=row,
+                tab_cfg=tab_cfg,
+                state=state,
+                rows=rows,
+                all_rows=all_rows,
+                scenario_perf=scenario_perf,
+                step_idx=step_idx,
+                stop=True,
+                checkpoint_every=phase_ctx.checkpoint_every,
+                output_path=phase_ctx.output_path,
+            )
+            break
         terminal_signal = bool(stop_eval_inputs["terminal_signal"])
         same_like_count = int(stop_eval_inputs["same_like_count"])
         no_progress = bool(stop_eval_inputs["no_progress"])
@@ -12105,11 +12212,14 @@ def collect_tab_rows(
     checkpoint_save_every: int = CHECKPOINT_SAVE_EVERY_STEPS,
 ) -> list[dict]:
     rows: list[dict] = []
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    crash_attempt = _crash_guard_attempt_for_tab_cfg(tab_cfg)
+    _reset_crash_guard_latch(client, scenario_id=scenario_id, attempt=crash_attempt)
     setattr(
         client,
         "last_main_traversal_summary",
         {
-            "scenario_id": str(tab_cfg.get("scenario_id", "") or ""),
+            "scenario_id": scenario_id,
             "scenario_type": str(tab_cfg.get("scenario_type", "") or ""),
             "main_steps_completed": 0,
             "stop_reason": "",

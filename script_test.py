@@ -38,6 +38,21 @@ from tb_runner.perf_stats import RunPerfStats, format_perf_summary, save_excel_w
 from tb_runner.scenario_config import TAB_CONFIGS
 from tb_runner.runtime_config import load_runtime_bundle
 from tb_runner.core_preflight import run_preflight
+from tb_runner.crash_recovery import (
+    CrashRunStats,
+    build_relaunch_recovery_decision,
+    build_retry_outcome_decision,
+    extract_crash_terminal_signal,
+    render_recovery_log_lines,
+    render_crash_stats_log_lines,
+    resolve_crash_abort_threshold,
+    run_recovery_preflight,
+    should_process_crash_recovery,
+    should_abort_for_crash_policy,
+    update_crash_context_recovery,
+    update_crash_context_batch_policy,
+    update_crash_run_stats,
+)
 from tb_runner.run_spec import RunContext, RunSpec
 from tb_runner.run_selection import apply_run_selection
 from tb_runner.utils import configure_process_temp_dir, generate_output_path
@@ -54,6 +69,58 @@ def _force_utf8_stdio():
 
 
 _force_utf8_stdio()
+
+
+MAX_CRASH_RETRY_ATTEMPTS = 1
+
+
+def _scenario_cfg_for_attempt(tab_cfg: dict, attempt: int) -> dict:
+    cfg = dict(tab_cfg)
+    cfg["_crash_attempt"] = max(0, int(attempt))
+    return cfg
+
+
+def _run_scenario_attempt(
+    *,
+    client: A11yAdbClient,
+    target_serial: str | None,
+    tab_cfg: dict,
+    all_rows: list[dict],
+    output_path: str,
+    output_base_dir: str,
+    run_perf: RunPerfStats,
+    checkpoint_save_every: int,
+    attempt: int,
+) -> tuple[list[dict], object | None]:
+    attempt_cfg = _scenario_cfg_for_attempt(tab_cfg, attempt)
+    scenario_perf = run_perf.start_scenario(
+        scenario_id=str(attempt_cfg.get("scenario_id", "") or ""),
+        tab_name=str(attempt_cfg.get("tab_name", "") or ""),
+    )
+    rows = collect_tab_rows(
+        client,
+        target_serial,
+        attempt_cfg,
+        all_rows,
+        output_path,
+        output_base_dir,
+        scenario_perf=scenario_perf,
+        checkpoint_save_every=checkpoint_save_every,
+    )
+    signal = extract_crash_terminal_signal(getattr(client, "last_crash_terminal_signal", None)) or extract_crash_terminal_signal(rows)
+    return rows, signal
+
+
+def _log_crash_detected(signal) -> None:
+    log(
+        f"[CRASH_RECOVERY] state='CRASH_DETECTED' "
+        f"scenario='{signal.scenario_id}' crash_event_id='{signal.crash_event_id}' "
+        f"crash_type='{signal.crash_type}' attempt={signal.attempt}"
+    )
+    log(
+        f"[CRASH_RECOVERY] state='ARTIFACT_CAPTURED' "
+        f"scenario='{signal.scenario_id}' crash_event_id='{signal.crash_event_id}'"
+    )
 
 
 def main() -> int:
@@ -120,8 +187,14 @@ def main() -> int:
     checkpoint_save_every = int(runtime_bundle.get("checkpoint_save_every", 3) or 3)
 
     has_run_scenario = False
+    processed_crash_event_ids: set[str] = set()
+    crash_run_stats = CrashRunStats()
+    crash_abort_threshold = resolve_crash_abort_threshold()
+    crash_policy_abort = False
     try:
         for tab_cfg in runtime_tab_configs:
+            if crash_policy_abort:
+                break
             if not bool(tab_cfg.get("enabled", True)):
                 log(
                     f"[MAIN] skip disabled scenario_id='{tab_cfg.get('scenario_id', '')}' "
@@ -135,20 +208,148 @@ def main() -> int:
                         f"[MAIN] recovery failed but continuing scenario_id='{tab_cfg.get('scenario_id', '')}' "
                         f"tab='{tab_cfg.get('tab_name', '')}'"
                     )
-            scenario_perf = run_perf.start_scenario(
-                scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
-                tab_name=str(tab_cfg.get("tab_name", "") or ""),
-            )
-            collect_tab_rows(
-                client,
-                target_serial,
-                tab_cfg,
-                all_rows,
-                output_path,
-                output_base_dir,
-                scenario_perf=scenario_perf,
+            _rows, signal = _run_scenario_attempt(
+                client=client,
+                target_serial=target_serial,
+                tab_cfg=tab_cfg,
+                all_rows=all_rows,
+                output_path=output_path,
+                output_base_dir=output_base_dir,
+                run_perf=run_perf,
                 checkpoint_save_every=checkpoint_save_every,
+                attempt=0,
             )
+            if signal is not None:
+                if not should_process_crash_recovery(signal, processed_crash_event_ids):
+                    log(f"[CRASH_RECOVERY] duplicate_ignored crash_event_id='{signal.crash_event_id}'")
+                else:
+                    _log_crash_detected(signal)
+                    recovery_preflight = run_recovery_preflight(client=client, serial=target_serial)
+                    decision = build_relaunch_recovery_decision(
+                        signal,
+                        recovery_preflight,
+                        attempt=signal.attempt,
+                    )
+                    recovery_lines = render_recovery_log_lines(decision)[2:]
+                    if recovery_preflight.ok:
+                        recovery_lines = [
+                            line for line in recovery_lines
+                            if "state='CONTINUE_WITHOUT_RETRY'" not in line
+                        ]
+                    for line in recovery_lines:
+                        log(line)
+                    if update_crash_context_recovery(signal, decision):
+                        log(
+                            f"[CRASH_RECOVERY] context_updated scenario='{signal.scenario_id}' "
+                            f"crash_event_id='{signal.crash_event_id}' decision='{decision.decision}'"
+                        )
+                    if recovery_preflight.ok and signal.attempt < MAX_CRASH_RETRY_ATTEMPTS:
+                        retry_attempt = signal.attempt + 1
+                        log(
+                            f"[CRASH_RECOVERY] state='RETRYING_SCENARIO' "
+                            f"scenario='{signal.scenario_id}' crash_event_id='{signal.crash_event_id}' "
+                            f"attempt={retry_attempt}"
+                        )
+                        _retry_rows, retry_signal = _run_scenario_attempt(
+                            client=client,
+                            target_serial=target_serial,
+                            tab_cfg=tab_cfg,
+                            all_rows=all_rows,
+                            output_path=output_path,
+                            output_base_dir=output_base_dir,
+                            run_perf=run_perf,
+                            checkpoint_save_every=checkpoint_save_every,
+                            attempt=retry_attempt,
+                        )
+                        if retry_signal is None:
+                            recovered_decision = build_retry_outcome_decision(
+                                signal,
+                                recovered=True,
+                                attempt=retry_attempt,
+                            )
+                            log(
+                                f"[CRASH_RECOVERY] state='CRASH_RECOVERED' "
+                                f"scenario='{signal.scenario_id}' attempt={retry_attempt}"
+                            )
+                            update_crash_context_recovery(signal, recovered_decision)
+                            update_crash_run_stats(
+                                crash_run_stats,
+                                signal=signal,
+                                decision=recovered_decision,
+                            )
+                            policy = should_abort_for_crash_policy(
+                                crash_run_stats,
+                                threshold=crash_abort_threshold,
+                                decision=recovered_decision,
+                            )
+                            update_crash_context_batch_policy(signal, policy)
+                            for line in render_crash_stats_log_lines(
+                                crash_run_stats,
+                                threshold=crash_abort_threshold,
+                                policy=policy,
+                            ):
+                                log(line)
+                            if policy["decision"] == "abort":
+                                crash_policy_abort = True
+                        else:
+                            if should_process_crash_recovery(retry_signal, processed_crash_event_ids):
+                                _log_crash_detected(retry_signal)
+                            repeated_decision = build_retry_outcome_decision(
+                                retry_signal,
+                                recovered=False,
+                                attempt=retry_attempt,
+                            )
+                            log(
+                                f"[CRASH_RECOVERY] state='CRASH_REPEATED' "
+                                f"scenario='{retry_signal.scenario_id}' attempt={retry_attempt}"
+                            )
+                            log(
+                                f"[CRASH_RECOVERY] scenario_skip "
+                                f"scenario='{retry_signal.scenario_id}' reason='crash_repeated'"
+                            )
+                            update_crash_context_recovery(signal, repeated_decision)
+                            update_crash_context_recovery(retry_signal, repeated_decision)
+                            update_crash_run_stats(
+                                crash_run_stats,
+                                signal=signal,
+                                decision=repeated_decision,
+                                retry_signal=retry_signal,
+                            )
+                            policy = should_abort_for_crash_policy(
+                                crash_run_stats,
+                                threshold=crash_abort_threshold,
+                                decision=repeated_decision,
+                            )
+                            update_crash_context_batch_policy(signal, policy)
+                            update_crash_context_batch_policy(retry_signal, policy)
+                            for line in render_crash_stats_log_lines(
+                                crash_run_stats,
+                                threshold=crash_abort_threshold,
+                                policy=policy,
+                            ):
+                                log(line)
+                            if policy["decision"] == "abort":
+                                crash_policy_abort = True
+                    else:
+                        update_crash_run_stats(
+                            crash_run_stats,
+                            signal=signal,
+                            decision=decision,
+                        )
+                        policy = should_abort_for_crash_policy(
+                            crash_run_stats,
+                            threshold=crash_abort_threshold,
+                            decision=decision,
+                        )
+                        update_crash_context_batch_policy(signal, policy)
+                        for line in render_crash_stats_log_lines(
+                            crash_run_stats,
+                            threshold=crash_abort_threshold,
+                            policy=policy,
+                        ):
+                            log(line)
+                        if policy["decision"] == "abort":
+                            crash_policy_abort = True
             has_run_scenario = True
 
     except Exception as exc:
