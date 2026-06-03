@@ -19,6 +19,7 @@ from .preflight import (
 )
 from .subprocess_executor import close_execution_log, start_execution, wait_for_execution
 from .runtime_setup import prepare_runtime
+from .crash_capture import start_crash_logcat_capture, stop_crash_logcat_capture
 
 def _json_safe(value):
     if isinstance(value, Path):
@@ -693,8 +694,18 @@ class BatchRunManager:
             
             log_path = Path(dev_output_dir) / "runner.log"
             log_file = log_path.open("w", encoding="utf-8", errors="replace")
+            crash_capture = None
+
+            def crash_log(line: str) -> None:
+                log_file.write(f"{line}\n")
+                log_file.flush()
             
             try:
+                crash_capture = start_crash_logcat_capture(
+                    serial=dev_serial,
+                    output_dir=Path(dev_output_dir),
+                    log_writer=crash_log,
+                )
                 # 1. Config copy
                 runtime_config = write_selected_runtime_config(
                     source_path=RUNTIME_CONFIG_PATH,
@@ -738,6 +749,8 @@ class BatchRunManager:
                     self._write_summary_locked()
                 self._write_device_summary(device_info, dev_output_dir)
                 log_file.write(f"\n[BATCH ERROR] {e}\n")
+                stop_crash_logcat_capture(crash_capture, log_writer=crash_log)
+                crash_capture = None
                 log_file.close()
                 continue
 
@@ -751,6 +764,8 @@ class BatchRunManager:
                     popen_factory=subprocess.Popen,
                 )
                 returncode = wait_for_execution(execution)
+                stop_crash_logcat_capture(crash_capture, log_writer=crash_log)
+                crash_capture = None
                 
                 try:
                     file_size = log_path.stat().st_size
@@ -769,6 +784,8 @@ class BatchRunManager:
                 close_execution_log(execution)
                     
             except Exception as e:
+                stop_crash_logcat_capture(crash_capture, log_writer=crash_log)
+                crash_capture = None
                 with self._lock:
                     device_info["state"] = "failed"
                     device_info["error"] = str(e)
@@ -778,6 +795,7 @@ class BatchRunManager:
                 self._write_device_summary(device_info, dev_output_dir)
                 log_file.write(f"\n[BATCH ERROR] {e}\n")
             finally:
+                stop_crash_logcat_capture(crash_capture, log_writer=crash_log)
                 if not log_file.closed:
                     log_file.close()
 

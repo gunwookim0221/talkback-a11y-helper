@@ -19,6 +19,7 @@
 - QA Local Control Panel: [qa-frontend-guide.md](qa-frontend-guide.md) (Batch-First UX 통합 적용)
 - QA Frontend 로컬 실행: [qa-frontend-local-run.md](qa-frontend-local-run.md)
 - TalkBack 접근성 품질 판독: [talkback-quality-guide.md](talkback-quality-guide.md)
+- Crash Capture Design: [crash-capture-design.md](crash-capture-design.md)
 
 ## Historical design record
 
