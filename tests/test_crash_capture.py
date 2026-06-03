@@ -4,9 +4,11 @@ import json
 import subprocess
 
 from qa_frontend.backend.crash_capture import (
+    CrashEvent,
     CrashEventStore,
     LogcatCapture,
     OneConnectCrashDetector,
+    capture_crash_context,
     start_crash_logcat_capture,
 )
 
@@ -51,8 +53,40 @@ class _FakeLogcatProcess:
         return 0
 
 
+def _ok_context_run_factory(command, **kwargs):
+    if command[-3:] == ["exec-out", "screencap", "-p"]:
+        return subprocess.CompletedProcess(command, 0, stdout=b"\x89PNG\r\n\x1a\n", stderr=b"")
+    if "uiautomator" in command:
+        return subprocess.CompletedProcess(command, 0, stdout="UI hierchary dumped to: /sdcard/window.xml")
+    if "cat" in command:
+        return subprocess.CompletedProcess(command, 0, stdout="<hierarchy package=\"com.samsung.android.oneconnect\" />")
+    if "dumpsys" in command:
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout="mCurrentFocus=Window{abc u0 com.sec.android.app.launcher/com.sec.android.app.launcher.Launcher}",
+        )
+    return subprocess.CompletedProcess(command, 0, stdout="")
+
+
+def _helper_dump(serial):
+    return {"nodes": [{"text": "Home Monitor", "packageName": "com.samsung.android.oneconnect"}], "serial": serial}
+
+
 def test_detector_stores_confirmed_oneconnect_crash_event(tmp_path):
-    store = CrashEventStore(tmp_path)
+    log_path = tmp_path / "runner.log"
+    log_path.write_text(
+        "[STEP] END scenario='life_home_monitor_plugin' step=7 visible='Home Monitor' "
+        "action='tap' target='Home Monitor' merged_announcement='Home Monitor, button'\n",
+        encoding="utf-8",
+    )
+    store = CrashEventStore(
+        tmp_path,
+        serial="SERIAL",
+        runner_log_path=log_path,
+        run_factory=_ok_context_run_factory,
+        helper_dump_factory=_helper_dump,
+    )
     detector = OneConnectCrashDetector(store)
 
     events = []
@@ -80,10 +114,16 @@ def test_detector_stores_confirmed_oneconnect_crash_event(tmp_path):
         "timestamp": "06-03 19:42:11.111",
     }
     assert "FATAL EXCEPTION" in (event_dir / "logcat_excerpt.txt").read_text(encoding="utf-8")
+    assert (event_dir / "crash_context.json").is_file()
+    assert (event_dir / "crash_repro.md").is_file()
+    assert (event_dir / "crash_screenshot.png").is_file()
+    assert (event_dir / "crash_window_dump.xml").is_file()
+    assert (event_dir / "crash_helper_dump.json").is_file()
+    assert (event_dir / "focus_state.json").is_file()
 
 
 def test_detector_ignores_non_oneconnect_fatal_exception(tmp_path):
-    store = CrashEventStore(tmp_path)
+    store = CrashEventStore(tmp_path, run_factory=_ok_context_run_factory, helper_dump_factory=_helper_dump)
     detector = OneConnectCrashDetector(store)
 
     lines = [
@@ -110,7 +150,13 @@ def test_logcat_capture_writes_full_logcat_and_crash_artifacts(tmp_path):
         commands.append(command)
         return process
 
-    capture = LogcatCapture(serial="SERIAL", output_dir=tmp_path, popen_factory=popen_factory)
+    capture = LogcatCapture(
+        serial="SERIAL",
+        output_dir=tmp_path,
+        popen_factory=popen_factory,
+        run_factory=_ok_context_run_factory,
+        helper_dump_factory=_helper_dump,
+    )
     capture.start()
     events = capture.stop()
 
@@ -120,6 +166,7 @@ def test_logcat_capture_writes_full_logcat_and_crash_artifacts(tmp_path):
     assert "Process: com.samsung.android.oneconnect" in (tmp_path / "logcat.txt").read_text(encoding="utf-8")
     assert (tmp_path / "crashes" / "CRASH-0001" / "crash_event.json").is_file()
     assert (tmp_path / "crashes" / "CRASH-0001" / "logcat_excerpt.txt").is_file()
+    assert (tmp_path / "crashes" / "CRASH-0001" / "crash_context.json").is_file()
 
 
 def test_start_capture_clears_logcat_before_background_capture(tmp_path):
@@ -129,6 +176,8 @@ def test_start_capture_clears_logcat_before_background_capture(tmp_path):
 
     def run_factory(command, **kwargs):
         calls.append(command)
+        if command[-3:] == ["exec-out", "screencap", "-p"]:
+            return subprocess.CompletedProcess(command, 0, stdout=b"\x89PNG\r\n\x1a\n", stderr=b"")
         return subprocess.CompletedProcess(command, 0, stdout="")
 
     def popen_factory(command, **kwargs):
@@ -141,6 +190,7 @@ def test_start_capture_clears_logcat_before_background_capture(tmp_path):
         log_writer=logs.append,
         run_factory=run_factory,
         popen_factory=popen_factory,
+        helper_dump_factory=_helper_dump,
     )
 
     assert capture is not None
@@ -148,3 +198,99 @@ def test_start_capture_clears_logcat_before_background_capture(tmp_path):
     assert calls[0] == ["adb", "-s", "SERIAL", "logcat", "-c"]
     assert calls[1] == ["adb", "-s", "SERIAL", "logcat", "-v", "threadtime"]
     assert logs[0] == "[CRASH_CAPTURE] logcat_clear returncode=0"
+
+
+def test_context_artifacts_include_minimum_schema_and_repro(tmp_path):
+    event = _event()
+    log_path = tmp_path / "runner.log"
+    log_path.write_text(
+        "[STEP] END scenario='life_home_monitor_plugin' step=7 visible='Home Monitor' "
+        "action='tap' target='Home Monitor' merged_announcement='Home Monitor, button'\n",
+        encoding="utf-8",
+    )
+
+    context = capture_crash_context(
+        event=event,
+        event_dir=tmp_path / "crashes" / "CRASH-0001",
+        output_dir=tmp_path,
+        serial="SERIAL",
+        runner_log_path=log_path,
+        run_factory=_ok_context_run_factory,
+        helper_dump_factory=_helper_dump,
+    )
+
+    event_dir = tmp_path / "crashes" / "CRASH-0001"
+    payload = json.loads((event_dir / "crash_context.json").read_text(encoding="utf-8"))
+    assert context["crash_event_id"] == "CRASH-0001"
+    assert payload["schema_version"] == 1
+    assert payload["device_id"] == "SERIAL"
+    assert payload["package"] == "com.samsung.android.oneconnect"
+    assert payload["crash_type"] == "CONFIRMED_CRASH"
+    assert payload["confidence"] == "high"
+    assert payload["scenario"]["name"] == "life_home_monitor_plugin"
+    assert payload["step"]["index"] == 7
+    assert payload["last_action"]["type"] == "tap"
+    assert payload["artifacts"]["screenshot"] == "crashes/CRASH-0001/crash_screenshot.png"
+    assert payload["recovery"]["decision"] == "capture_only"
+    assert payload["capture_errors"] == {}
+
+    repro = (event_dir / "crash_repro.md").read_text(encoding="utf-8")
+    assert "# Manual Repro Guide" in repro
+    assert "Scenario: life_home_monitor_plugin" in repro
+    assert "## Crash Evidence" in repro
+
+
+def test_context_is_created_when_screenshot_capture_fails(tmp_path):
+    def failing_screenshot_run_factory(command, **kwargs):
+        if command[-3:] == ["exec-out", "screencap", "-p"]:
+            return subprocess.CompletedProcess(command, 1, stdout=b"", stderr=b"screencap failed")
+        return _ok_context_run_factory(command, **kwargs)
+
+    capture_crash_context(
+        event=_event(),
+        event_dir=tmp_path / "crashes" / "CRASH-0001",
+        output_dir=tmp_path,
+        serial="SERIAL",
+        runner_log_path=None,
+        run_factory=failing_screenshot_run_factory,
+        helper_dump_factory=_helper_dump,
+    )
+
+    payload = json.loads((tmp_path / "crashes" / "CRASH-0001" / "crash_context.json").read_text(encoding="utf-8"))
+    assert "screenshot" in payload["capture_errors"]
+    assert not (tmp_path / "crashes" / "CRASH-0001" / "crash_screenshot.png").exists()
+    assert (tmp_path / "crashes" / "CRASH-0001" / "crash_repro.md").is_file()
+
+
+def test_context_is_created_when_helper_dump_fails(tmp_path):
+    def failing_helper(serial):
+        raise RuntimeError("helper unavailable")
+
+    capture_crash_context(
+        event=_event(),
+        event_dir=tmp_path / "crashes" / "CRASH-0001",
+        output_dir=tmp_path,
+        serial="SERIAL",
+        runner_log_path=None,
+        run_factory=_ok_context_run_factory,
+        helper_dump_factory=failing_helper,
+    )
+
+    event_dir = tmp_path / "crashes" / "CRASH-0001"
+    payload = json.loads((event_dir / "crash_context.json").read_text(encoding="utf-8"))
+    helper_payload = json.loads((event_dir / "crash_helper_dump.json").read_text(encoding="utf-8"))
+    assert payload["capture_errors"]["helper_dump"] == "helper unavailable"
+    assert helper_payload["nodes"] is None
+    assert helper_payload["error"] == "helper unavailable"
+
+
+def _event():
+    return CrashEvent(
+        crash_event_id="CRASH-0001",
+        crash_type="CONFIRMED_CRASH",
+        process="com.samsung.android.oneconnect",
+        exception="java.lang.NullPointerException: boom",
+        top_frame="com.samsung.android.oneconnect.HomeMonitorActivity.onCreate(HomeMonitorActivity.kt:12)",
+        timestamp="06-03 19:42:11.111",
+        logcat_excerpt="".join(CRASH_LINES[:-1]),
+    )

@@ -89,7 +89,10 @@ def classify_step_result(
         str(row.get(key, "") or "").strip()
         for key in ("visible_label", "merged_announcement", "focus_view_id", "focus_bounds")
     )
-    if stop_reason == "plugin_boundary_global_nav":
+    if stop_reason in {"possible_crash", "app_terminated"}:
+        traversal_result = "CRASH_LIKE"
+        failure_reason = stop_reason
+    elif stop_reason == "plugin_boundary_global_nav":
         traversal_result = "WARN_PLUGIN_BOUNDARY"
         failure_reason = "plugin_boundary_global_nav"
     elif move_result in {"moved", "edge_realign_then_moved"}:

@@ -334,6 +334,7 @@ def stabilize_tab_selection(
     last_context: dict[str, Any] = {"ok": True, "type": "none", "expected": ""}
     last_best: dict[str, Any] = {}
     last_selected = False
+    last_verify_row: dict[str, Any] = {}
     focus_align_result: dict[str, Any] = {"attempted": False, "ok": False, "reason": "not_attempted"}
     for attempt in range(1, max_retries + 1):
         dump_nodes = client.dump_tree(dev=dev)
@@ -475,6 +476,7 @@ def stabilize_tab_selection(
             allow_step_dump=not fast_focus_align,
             get_focus_mode="fast" if fast_focus_align else "normal",
         )
+        last_verify_row = dict(verify_row) if isinstance(verify_row, dict) else {}
         last_context = verify_context(verify_row, tab_cfg, client=client, dev=dev)
         log(
             f"[TAB][select] scenario='{scenario_id}' selected={selected} "
@@ -495,7 +497,9 @@ def stabilize_tab_selection(
                 "attempt": attempt,
                 "selected": selected,
                 "focus_align": focus_align_result,
+                "context": last_context,
                 "verify_context": last_context,
+                "verify_row": last_verify_row,
                 "best": best,
                 "candidate_count": len(matches),
             }
@@ -508,6 +512,8 @@ def stabilize_tab_selection(
         "attempt": max_retries,
         "selected": last_selected,
         "focus_align": focus_align_result,
+        "context": last_context,
         "verify_context": last_context,
+        "verify_row": last_verify_row,
         "best": last_best,
     }

@@ -42,6 +42,7 @@ from tb_runner.utils import (
     parse_bounds_str,
 )
 from tb_runner import container_group_logic
+from tb_runner import crash_guard
 from tb_runner import device_tab_logic
 from tb_runner import focus_realign_logic
 from tb_runner import local_tab_logic
@@ -6336,7 +6337,75 @@ def _run_pre_navigation_steps(
     return True
 
 
-def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
+def _run_crash_guard_check(
+    *,
+    client: A11yAdbClient,
+    dev: str,
+    row: dict[str, Any] | None,
+    scenario_id: str,
+    step_idx: int,
+    output_base_dir: str | None,
+    source: str,
+) -> dict[str, Any] | None:
+    payload = dict(row) if isinstance(row, dict) else {}
+    log(f"[CRASH_GUARD] check start source='{source}' scenario='{scenario_id}' step={step_idx}")
+    inspection = crash_guard.inspect_foreground_package_exit(row=payload, client=client, dev=dev)
+    packages = inspection.get("packages") if isinstance(inspection.get("packages"), dict) else {}
+    package_sources = inspection.get("package_sources") if isinstance(inspection.get("package_sources"), dict) else {}
+    for package_key in ("focused_package", "resource_package", "smart_nav_package", "current_package"):
+        package_value = str(packages.get(package_key) or "").strip()
+        if not package_value:
+            continue
+        package_source = str(package_sources.get(package_key) or package_key)
+        log(f"[CRASH_GUARD] package source='{package_source}' package='{package_value}' key='{package_key}'")
+
+    process_running = inspection.get("process_running")
+    if process_running is True:
+        log("[CRASH_GUARD] pidof package='com.samsung.android.oneconnect' running=true")
+    elif process_running is False:
+        log("[CRASH_GUARD] app_terminated pidof_empty=true")
+    else:
+        log("[CRASH_GUARD] pidof package='com.samsung.android.oneconnect' running=unknown")
+
+    detection = inspection.get("detection") if isinstance(inspection.get("detection"), dict) else None
+    if not detection:
+        log("[CRASH_GUARD] result='ok'")
+        setattr(client, "last_crash_guard_result", {})
+        return None
+
+    detected_package = ""
+    for package_key in ("current_package", "focused_package", "resource_package", "smart_nav_package"):
+        package_value = str(packages.get(package_key) or "").strip()
+        if package_value and package_value != crash_guard.EXPECTED_PACKAGE:
+            detected_package = package_value
+            break
+    reason = str(detection.get("reason") or "possible_crash")
+    log(f"[CRASH_GUARD] {reason} package='{detected_package or 'unknown'}'")
+
+    resolved_output_base_dir = str(output_base_dir or os.environ.get("TB_OUTPUT_DIR", "output"))
+    crash_event_id = crash_guard.record_foreground_exit_event(
+        output_base_dir=resolved_output_base_dir,
+        serial=dev,
+        row=payload,
+        detection=detection,
+        client=client,
+        dev=dev,
+        scenario_id=scenario_id,
+        step_idx=step_idx,
+    )
+    crash_event_path = str(Path(resolved_output_base_dir) / "crashes" / crash_event_id)
+    log(f"[CRASH_GUARD] event_created crash_event_id='{crash_event_id}' path='{crash_event_path}'")
+    detection_payload = {
+        **detection,
+        "crash_event_id": crash_event_id,
+        "source": source,
+        "event_path": crash_event_path,
+    }
+    setattr(client, "last_crash_guard_result", detection_payload)
+    return detection_payload
+
+
+def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict, *, output_base_dir: str | None = None) -> bool:
     tab_retry_count = _get_retry_count(tab_cfg, "tab_select_retry_count", 2)
     anchor_retry_count = _get_retry_count(tab_cfg, "anchor_retry_count", 2)
     main_step_wait_seconds = _get_wait_seconds(tab_cfg, "main_step_wait_seconds", MAIN_STEP_WAIT_SECONDS)
@@ -6367,6 +6436,7 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
         f"[SCENARIO][stabilization] scenario='{scenario_id}' "
         f"screen_context_mode='{screen_context_mode}' stabilization_mode='{stabilization_mode}'"
     )
+    setattr(client, "last_crash_guard_result", {})
     setattr(client, "last_tab_stabilization_result", {})
     setattr(client, "last_anchor_stabilize_result", {})
     setattr(
@@ -6499,6 +6569,16 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
             )
         elif is_strict_main_tab_scenario:
             log(f"{focus_log_tag} strict failure scenario='{scenario_id}'")
+            verify_row = tab_stabilized.get("verify_row", {}) if isinstance(tab_stabilized, dict) else {}
+            _run_crash_guard_check(
+                client=client,
+                dev=dev,
+                row=verify_row,
+                scenario_id=scenario_id,
+                step_idx=0,
+                output_base_dir=output_base_dir,
+                source="tab_stabilization",
+            )
             return False
 
     if not tab_stabilized.get("ok"):
@@ -6518,6 +6598,16 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
                 f"selected={selected} score={best_score}"
             )
         else:
+            verify_row = tab_stabilized.get("verify_row", {}) if isinstance(tab_stabilized, dict) else {}
+            _run_crash_guard_check(
+                client=client,
+                dev=dev,
+                row=verify_row,
+                scenario_id=scenario_id,
+                step_idx=0,
+                output_base_dir=output_base_dir,
+                source="tab_stabilization",
+            )
             log(f"[TAB][select] stabilization failed scenario='{scenario_id}'")
             return False
 
@@ -11383,6 +11473,16 @@ def _main_loop_phase(
             step_idx=step_idx,
             step_elapsed=step_elapsed,
         )
+        scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+        crash_detection = _run_crash_guard_check(
+            client=client,
+            dev=dev,
+            row=row,
+            scenario_id=scenario_id,
+            step_idx=step_idx,
+            output_base_dir=phase_ctx.output_base_dir,
+            source="main_loop",
+        )
 
         stop, reason, stop_details, stop_eval_inputs = _apply_stop_evaluation_phase(
             row=row,
@@ -11390,6 +11490,22 @@ def _main_loop_phase(
             state=state,
             tab_cfg=tab_cfg,
         )
+        if crash_detection:
+            crash_event_id = str(crash_detection.get("crash_event_id") or "")
+            stop = True
+            reason = str(crash_detection.get("reason") or "possible_crash")
+            row["crash_like_detected"] = True
+            row["crash_type"] = str(crash_detection.get("crash_type") or "POSSIBLE_CRASH")
+            row["crash_event_id"] = crash_event_id
+            row["crash_detection_source"] = "foreground_package_guard"
+            row["crash_detection_packages"] = json.dumps(crash_detection.get("packages") or {}, ensure_ascii=False)
+            log(
+                f"[CRASH_GUARD][detect] scenario='{scenario_id}' step={step_idx} "
+                f"type='{row['crash_type']}' reason='{reason}' event_id='{crash_event_id}' "
+                f"packages='{row['crash_detection_packages']}' action='stop'"
+            )
+            stop_details = {**stop_details, "reason": reason, "crash_event_id": crash_event_id}
+            stop_eval_inputs["eval_reason"] = reason
         terminal_signal = bool(stop_eval_inputs["terminal_signal"])
         same_like_count = int(stop_eval_inputs["same_like_count"])
         no_progress = bool(stop_eval_inputs["no_progress"])
@@ -11846,8 +11962,9 @@ def _run_start_pipeline(
         recent_semantic_fingerprint_history=deque(maxlen=_RECENT_DUPLICATE_WINDOW),
     )
 
-    opened = open_scenario(client, dev, tab_cfg)
+    opened = open_scenario(client, dev, tab_cfg, output_base_dir=output_base_dir)
     open_summary = getattr(client, "last_start_open_summary", {})
+    crash_guard_result = getattr(client, "last_crash_guard_result", {})
     if isinstance(open_summary, dict):
         result.context_ok = bool(open_summary.get("context_ok"))
         result.anchor_matched = bool(open_summary.get("anchor_matched"))
@@ -11875,7 +11992,10 @@ def _run_start_pipeline(
             result.focus_align_ok = bool(focus_align_payload.get("ok"))
             result.focus_align_reason = str(focus_align_payload.get("reason", "") or "")
     if not opened:
-        result.failure_reason = "tab_or_anchor_failed"
+        if isinstance(crash_guard_result, dict) and crash_guard_result.get("reason"):
+            result.failure_reason = str(crash_guard_result.get("reason") or "tab_or_anchor_failed")
+        else:
+            result.failure_reason = "tab_or_anchor_failed"
         result.needs_open_failed_row = True
         return result
 

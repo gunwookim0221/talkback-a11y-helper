@@ -8304,6 +8304,89 @@ def test_collect_tab_rows_adds_special_state_handled_row_and_skips_main_loop(mon
     assert client.collect_focus_step_calls == []
 
 
+def test_open_scenario_tab_stabilization_launcher_focus_creates_crash_event(monkeypatch, tmp_path):
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, *args, **kwargs: logs.append(str(message)))
+
+    launcher_verify_row = {
+        "step_index": -501,
+        "visible_label": "Messages",
+        "merged_announcement": "Messages",
+        "focus_view_id": "com.sec.android.app.launcher:id/folder_icon_view",
+        "packageName": "com.sec.android.app.launcher",
+        "focus_node": {
+            "packageName": "com.sec.android.app.launcher",
+            "viewIdResourceName": "com.sec.android.app.launcher:id/folder_icon_view",
+            "text": "Messages",
+        },
+    }
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_tab_selection",
+        lambda **kwargs: {
+            "ok": False,
+            "selected": True,
+            "focus_align": {"attempted": False, "ok": False, "reason": "not_selected"},
+            "verify_context": {"ok": False, "actual_selected_text": "", "reason": "no_bottom_nav_candidates"},
+            "context": {"ok": False, "actual_selected_text": "", "reason": "no_bottom_nav_candidates"},
+            "verify_row": launcher_verify_row,
+            "best": {},
+        },
+    )
+
+    client = DummyClient([])
+    ok = collection_flow.open_scenario(client, "SERIAL", _global_nav_tab_cfg(), output_base_dir=str(tmp_path))
+
+    assert ok is False
+    assert (tmp_path / "crashes" / "CRASH-0001" / "crash_event.json").is_file()
+    assert any("[CRASH_GUARD] check start source='tab_stabilization' scenario='global_nav_main' step=0" in line for line in logs)
+    assert any("[CRASH_GUARD] package source='focus_payload' package='com.sec.android.app.launcher'" in line for line in logs)
+    assert any("[CRASH_GUARD] event_created crash_event_id='CRASH-0001'" in line for line in logs)
+
+
+def test_collect_tab_rows_uses_app_terminated_reason_for_pre_main_guard(monkeypatch, tmp_path):
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "save_excel_with_perf", lambda *_args, **_kwargs: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, *args, **kwargs: logs.append(str(message)))
+
+    launcher_verify_row = {
+        "step_index": -501,
+        "visible_label": "Camera",
+        "merged_announcement": "Camera",
+        "focus_view_id": "com.sec.android.app.launcher:id/icon",
+        "packageName": "com.sec.android.app.launcher",
+        "focus_node": {
+            "packageName": "com.sec.android.app.launcher",
+            "viewIdResourceName": "com.sec.android.app.launcher:id/icon",
+            "text": "Camera",
+        },
+    }
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_tab_selection",
+        lambda **kwargs: {
+            "ok": False,
+            "selected": True,
+            "focus_align": {"attempted": False, "ok": False, "reason": "not_selected"},
+            "verify_context": {"ok": False, "actual_selected_text": "", "reason": "no_bottom_nav_candidates"},
+            "context": {"ok": False, "actual_selected_text": "", "reason": "no_bottom_nav_candidates"},
+            "verify_row": launcher_verify_row,
+            "best": {},
+        },
+    )
+
+    client = DummyClient([])
+    rows = collection_flow.collect_tab_rows(client, "SERIAL", _global_nav_tab_cfg(), [], str(tmp_path / "o.xlsx"), str(tmp_path))
+
+    assert len(rows) == 1
+    assert rows[0]["status"] == "TAB_OPEN_FAILED"
+    assert rows[0]["stop_reason"] == "app_terminated"
+    assert (tmp_path / "crashes" / "CRASH-0001" / "crash_context.json").is_file()
+    assert any("[CRASH_GUARD] app_terminated pidof_empty=true" in line for line in logs)
+
+
 def test_open_scenario_card_entry_does_not_misclassify_energy_normal_content(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(

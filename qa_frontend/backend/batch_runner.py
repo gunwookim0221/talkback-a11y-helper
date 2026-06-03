@@ -704,6 +704,7 @@ class BatchRunManager:
                 crash_capture = start_crash_logcat_capture(
                     serial=dev_serial,
                     output_dir=Path(dev_output_dir),
+                    runner_log_path=log_path,
                     log_writer=crash_log,
                 )
                 # 1. Config copy
