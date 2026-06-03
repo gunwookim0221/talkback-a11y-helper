@@ -8,6 +8,7 @@ from qa_frontend.backend.crash_capture import (
     CrashEventStore,
     LogcatCapture,
     OneConnectCrashDetector,
+    _render_repro_guide,
     capture_crash_context,
     start_crash_logcat_capture,
 )
@@ -238,6 +239,69 @@ def test_context_artifacts_include_minimum_schema_and_repro(tmp_path):
     assert "# Manual Repro Guide" in repro
     assert "Scenario: life_home_monitor_plugin" in repro
     assert "## Crash Evidence" in repro
+
+
+def test_repro_guide_formatting_confirmed_crash():
+    context = {"crash_type": "CONFIRMED_CRASH"}
+    repro = _render_repro_guide(context)
+    assert "Verify that SmartThings displays a crash dialog or terminates with a FATAL EXCEPTION." in repro
+    assert "SmartThings 크래시 발생" in repro
+
+
+def test_repro_guide_formatting_app_terminated():
+    context = {"crash_type": "APP_TERMINATED"}
+    repro = _render_repro_guide(context)
+    assert "Verify that SmartThings leaves the foreground and Android Launcher becomes visible." in repro
+    assert "Android Launcher로 이동" in repro
+
+
+def test_repro_guide_formatting_possible_crash():
+    context = {"crash_type": "POSSIBLE_CRASH"}
+    repro = _render_repro_guide(context)
+    assert "Verify that SmartThings unexpectedly leaves the expected screen or foreground." in repro
+    assert "예상 화면 이탈" in repro
+
+
+def test_repro_guide_action_formatting_dict():
+    context = {"last_action": {"type": "click", "label": "Button"}}
+    repro = _render_repro_guide(context)
+    assert "Activate the focused item using TalkBack double tap" in repro
+    assert '"type": "click"' in repro  # Should be in Raw Context
+
+
+def test_repro_guide_action_formatting_null():
+    context = {"last_action": None}
+    repro = _render_repro_guide(context)
+    assert "Repeat the last recorded TalkBack navigation action" in repro
+    assert "null" in repro  # Should be in Raw Context
+
+
+def test_repro_guide_korean_summary():
+    context = {
+        "scenario": {"name": "test_scenario"},
+        "last_focus_label": "Test Item",
+        "last_speech": "Test Speech",
+        "last_visible_text": ["Test Visible"],
+        "crash_type": "APP_TERMINATED"
+    }
+    repro = _render_repro_guide(context)
+    assert "# 재현 가이드 요약 (Korean)" in repro
+    assert "시나리오: test_scenario" in repro
+    assert "마지막 포커스: Test Item" in repro
+    assert "마지막 표시 텍스트: Test Visible" in repro
+
+
+def test_repro_guide_screenshot_filename():
+    context = {"artifacts": {"screenshot": "crashes/CRASH-0001/crash_screenshot.png"}}
+    repro = _render_repro_guide(context)
+    assert "Reference Screenshot:" in repro
+    assert "crash_screenshot.png" in repro
+
+
+def test_repro_guide_resource_mapping():
+    context = {"last_action": {"resource": "folder_icon_view"}, "last_focus_label": "Samsung"}
+    repro = _render_repro_guide(context)
+    assert 'Move TalkBack focus to folder "Samsung".' in repro
 
 
 def test_context_is_created_when_screenshot_capture_fails(tmp_path):

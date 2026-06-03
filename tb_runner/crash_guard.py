@@ -156,7 +156,7 @@ def record_foreground_exit_event(
         capture_errors=capture_errors,
     )
     _write_json(event_dir / "crash_context.json", context)
-    (event_dir / "crash_repro.md").write_text(_render_repro(context), encoding="utf-8")
+    (event_dir / "crash_repro.md").write_text(_render_repro(context, event_dir=event_dir), encoding="utf-8")
     return event_id
 
 
@@ -421,53 +421,221 @@ def _step_log(*, row: dict[str, Any], scenario_id: str, step_idx: int) -> str:
     )
 
 
-def _render_repro(context: dict[str, Any]) -> str:
+def _format_action(last_action: object) -> str:
+    if not last_action:
+        return "Repeat the last recorded TalkBack navigation action"
+
+    action_type = ""
+    if isinstance(last_action, dict):
+        action_type = str(last_action.get("type", "")).lower()
+    elif isinstance(last_action, str):
+        action_type = last_action.lower()
+
+    if action_type in ("tap", "click", "double_tap", "moved"):
+        return "Activate the focused item using TalkBack double tap"
+    elif action_type in ("focus", "move_next", "smart_next"):
+        return "Move TalkBack focus to the next item"
+    elif action_type == "back":
+        return "Press Back"
+    else:
+        return "Repeat the last recorded TalkBack navigation action"
+
+
+def _format_crash_verification(crash_type: str | None) -> str:
+    ct = str(crash_type).upper() if crash_type else ""
+    if ct == "CONFIRMED_CRASH":
+        return "Verify that SmartThings displays a crash dialog or terminates with a FATAL EXCEPTION."
+    elif ct == "APP_TERMINATED":
+        return "Verify that SmartThings leaves the foreground and Android Launcher becomes visible."
+    elif ct == "POSSIBLE_CRASH":
+        return "Verify that SmartThings unexpectedly leaves the expected screen or foreground."
+    else:
+        return "Verify that SmartThings leaves the expected screen or crashed."
+
+
+def _map_resource_id(resource: str | None, label: str) -> str:
+    if not resource:
+        return f'the item "{label}"'
+    if "folder_icon_view" in resource:
+        return f'folder "{label}"'
+    if "bottom_navigation" in resource:
+        return "the bottom navigation tab"
+    return f'the item "{label}"'
+
+
+def _map_scenario(scenario: str) -> str:
+    if scenario == "global_nav_main":
+        return "Home"
+    return scenario
+
+
+def _extract_focused_node(event_dir: Path | None) -> str | None:
+    if not event_dir:
+        return None
+    helper_path = event_dir / "crash_helper_dump.json"
+    if not helper_path.is_file():
+        return None
+    try:
+        data = json.loads(helper_path.read_text(encoding="utf-8"))
+        nodes = data.get("nodes")
+        if not nodes or not isinstance(nodes, list):
+            return None
+        for node in nodes:
+            if isinstance(node, dict):
+                text = node.get("text") or node.get("contentDescription")
+                if text:
+                    return str(text)
+    except Exception:
+        pass
+    return None
+
+
+def _render_repro(context: dict[str, Any], event_dir: Path | None = None) -> str:
     scenario = ((context.get("scenario") or {}).get("name") if isinstance(context.get("scenario"), dict) else None) or "unknown"
-    step = ((context.get("step") or {}).get("index") if isinstance(context.get("step"), dict) else None)
-    logcat = context.get("logcat") if isinstance(context.get("logcat"), dict) else {}
+    mapped_scenario = _map_scenario(str(scenario))
+    crash_type_str = str(context.get("crash_type") or "unknown")
     artifacts = context.get("artifacts") if isinstance(context.get("artifacts"), dict) else {}
-    return "\n".join(
-        [
-            "# Manual Repro Guide",
-            "",
-            f"Device: {context.get('device_id') or 'unknown'}",
-            f"Package: {context.get('package') or EXPECTED_PACKAGE}",
-            f"Scenario: {scenario}",
-            f"Crash Type: {context.get('crash_type') or 'unknown'}",
-            "",
-            "## Preconditions",
-            "",
-            "1. SmartThings 앱을 설치하고 로그인 상태를 준비합니다.",
-            "2. TalkBack을 ON으로 설정합니다.",
-            "3. TalkBack A11y Helper accessibility service를 활성화합니다.",
-            "4. 디바이스 언어와 region을 테스트 실행 당시 설정과 맞춥니다.",
-            "",
-            "## Manual Steps",
-            "",
-            "1. SmartThings를 실행합니다.",
-            f"2. {scenario} 시나리오 위치로 이동합니다.",
-            f"3. 자동화가 마지막으로 기록한 step {step if step is not None else 'unknown'} 지점까지 이동합니다.",
-            "4. Last Automation Context의 action/focus 정보를 기준으로 동일 동작을 수행합니다.",
-            "5. 앱이 종료되거나 launcher로 이탈하는지 확인합니다.",
-            "",
-            "## Last Automation Context",
-            "",
-            f"- Last action: {json.dumps(context.get('last_action'), ensure_ascii=False)}",
-            f"- Last focus: {context.get('last_focus_label') or 'unknown'}",
-            f"- Last speech: {context.get('last_speech') or 'unknown'}",
-            f"- Foreground after crash: {(context.get('foreground') or {}).get('after') if isinstance(context.get('foreground'), dict) else 'unknown'}",
-            "",
-            "## Crash Evidence",
-            "",
-            f"- Exception: {logcat.get('exception') or 'not observed'}",
-            f"- Top frame: {logcat.get('top_frame') or 'not observed'}",
-            "",
-            "## Artifacts",
-            "",
-            *[f"- {key}: {value}" for key, value in artifacts.items()],
-            "",
-        ]
-    )
+    last_action = context.get("last_action")
+    last_focus = context.get("last_focus_label") or "unknown"
+    last_speech = context.get("last_speech") or "unknown"
+    last_visible = context.get("last_visible_text")
+    if isinstance(last_visible, list) and last_visible:
+        last_visible_str = last_visible[0]
+    else:
+        last_visible_str = str(last_visible) if last_visible else "unknown"
+
+    resource_id = None
+    if isinstance(last_action, dict):
+        resource_id = last_action.get("resource")
+    if not resource_id:
+        resource_id = context.get("resource")
+
+    packages = context.get("packages") if isinstance(context.get("packages"), dict) else {}
+    latest_log = context.get("latest_step_log", "")
+    if isinstance(latest_log, str) and "resource='" in latest_log:
+        import re
+        m = re.search(r"resource='([^']+)'", latest_log)
+        if m:
+            resource_id = m.group(1)
+
+    mapped_focus = _map_resource_id(str(resource_id) if resource_id else None, str(last_focus))
+    formatted_action = _format_action(last_action)
+    formatted_verification = _format_crash_verification(crash_type_str)
+
+    foreground_dict = context.get("foreground") if isinstance(context.get("foreground"), dict) else {}
+    foreground_after = foreground_dict.get("after") or "unknown"
+
+    focused_ui_element = _extract_focused_node(event_dir)
+
+    lines = [
+        "# Manual Repro Guide",
+        "",
+        f"Device: {context.get('device_id') or 'unknown'}",
+        f"Package: {context.get('package') or EXPECTED_PACKAGE}",
+        f"Scenario: {scenario}",
+        f"Crash Type: {crash_type_str}",
+        "",
+        "## Preconditions",
+        "",
+        "1. Install the SmartThings app and sign in.",
+        "2. Turn ON TalkBack.",
+        "3. Enable the TalkBack A11y Helper accessibility service.",
+        "4. Set the device language and region to match the test execution environment.",
+        "",
+        "## Manual Steps",
+        "",
+        "1. Launch SmartThings.",
+        "2. Enable TalkBack.",
+        f"3. Navigate to {mapped_scenario}.",
+        f"4. Move TalkBack focus to {mapped_focus}.",
+        f"5. Verify TalkBack announces \"{last_speech}\".",
+        f"6. {formatted_action}.",
+        f"7. {formatted_verification}",
+        "",
+        "## Observed Crash Context",
+        "",
+        f"Crash Type: {crash_type_str}",
+        f"Last Focus: {last_focus}",
+        f"Last Speech: {last_speech}",
+        f"Foreground After Crash: {foreground_after}",
+        "Detection Source: foreground_package_guard",
+        "",
+    ]
+
+    if "screenshot" in artifacts:
+        lines.append("Reference Screenshot:")
+        screenshot_val = artifacts["screenshot"]
+        screenshot_filename = Path(str(screenshot_val)).name if screenshot_val else "crash_screenshot.png"
+        lines.append(screenshot_filename)
+        lines.append("")
+
+    if focused_ui_element:
+        lines.append("Focused UI Element:")
+        lines.append(focused_ui_element)
+        lines.append("")
+
+    lines.extend([
+        "## Raw Context",
+        "",
+        f"- Last action (raw): {json.dumps(last_action, ensure_ascii=False) if last_action else 'null'}",
+        "",
+        "## Crash Evidence",
+        "",
+    ])
+    logcat = context.get("logcat") if isinstance(context.get("logcat"), dict) else {}
+    lines.append(f"- Exception: {logcat.get('exception') or 'not observed'}")
+    lines.append(f"- Top frame: {logcat.get('top_frame') or 'not observed'}")
+    lines.extend([
+        "",
+        "## Artifacts",
+        "",
+    ])
+    for key, value in artifacts.items():
+        lines.append(f"- {key}: {value}")
+
+    lines.append("")
+
+    kor_obs = ""
+    ct = crash_type_str.upper()
+    if ct == "APP_TERMINATED":
+        kor_obs = "* SmartThings가 종료됨\n* Android Launcher로 이동\n* FATAL EXCEPTION 없음"
+    elif ct == "CONFIRMED_CRASH":
+        kor_obs = "* SmartThings 크래시 발생\n* FATAL EXCEPTION 확인"
+    elif ct == "POSSIBLE_CRASH":
+        kor_obs = "* 예상 화면 이탈\n* 확정 크래시 아님"
+    else:
+        kor_obs = "* 예상 화면 이탈 또는 크래시"
+
+    lines.extend([
+        "# 재현 가이드 요약 (Korean)",
+        "",
+        "## 재현 위치",
+        f"* 시나리오: {scenario}",
+        f"* 마지막 포커스: {last_focus}",
+        f"* 마지막 음성: {last_speech}",
+        f"* 마지막 표시 텍스트: {last_visible_str}",
+        "",
+        "## 재현 절차",
+        "1. SmartThings 실행",
+        "2. TalkBack 활성화",
+        "3. 대상 화면 진입",
+        "4. 마지막 포커스 요소로 이동",
+        "5. 더블탭 수행",
+        "6. 앱 종료 또는 크래시 여부 확인",
+        "",
+        "## 관찰 결과",
+        f"{ct}:",
+        kor_obs,
+        "",
+        "## 수집 정보",
+        f"* Crash Type: {crash_type_str}",
+        "* Detection Source: foreground_package_guard",
+        f"* Last Focus: {last_focus}",
+        f"* Last Speech: {last_speech}",
+        f"* Foreground After Crash: {foreground_after}",
+    ])
+
+    return "\n".join(lines) + "\n"
 
 
 def _write_json(path: Path, payload: Any) -> None:
