@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { api, RunStatus, RuntimeDashboard } from '../api';
+import { api, BatchStatus, RunStatus, RuntimeDashboard } from '../api';
 
 export interface UseRunPollingProps {
   onOutputsChanged: () => void;
@@ -9,6 +9,7 @@ export interface UseRunPollingProps {
 export function useRunPolling({ onOutputsChanged, onRunFinished }: UseRunPollingProps) {
   const [status, setStatus] = useState<RunStatus | null>(null);
   const [dashboard, setDashboard] = useState<RuntimeDashboard | null>(null);
+  const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
   const [log, setLog] = useState('');
   const [pollingLatencyMs, setPollingLatencyMs] = useState<number | null>(null);
   const [error, setError] = useState('');
@@ -43,6 +44,7 @@ export function useRunPolling({ onOutputsChanged, onRunFinished }: UseRunPolling
     try {
       const batchStatus = await api.getBatchStatus();
       batchStatusRef = batchStatus;
+      setBatchStatus(batchStatus);
       if (batchStatus && batchStatus.state === 'running' && batchStatus.devices) {
         const runningDevice = batchStatus.devices.find((d: any) => d.state === 'running' || d.state === 'pending');
         if (runningDevice) {
@@ -78,13 +80,7 @@ export function useRunPolling({ onOutputsChanged, onRunFinished }: UseRunPolling
         
         if (unifiedState === 'running') {
           const currentDev = batchStatusRef.devices?.find((d: any) => d.state === 'running' || d.state === 'pending');
-          finalDashboard = {
-            ...snapshot.dashboard,
-            state: 'running',
-            mode: batchStatusRef.mode || 'batch',
-            current_scenario: currentDev ? `[Batch Active] Device: ${currentDev.serial}` : 'Batch Active',
-            parse_error: 'Batch run in progress. See Run History / Log Preview for details.'
-          };
+          finalDashboard = snapshot.dashboard;
         }
       }
 
@@ -140,6 +136,7 @@ export function useRunPolling({ onOutputsChanged, onRunFinished }: UseRunPolling
   return {
     status,
     dashboard,
+    batchStatus,
     log,
     pollingLatencyMs,
     error,

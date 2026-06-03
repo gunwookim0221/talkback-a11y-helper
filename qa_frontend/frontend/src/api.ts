@@ -75,6 +75,73 @@ export type BatchDeviceStatus = {
   started_at: string | null;
   finished_at: string | null;
   error?: string;
+  runner_log_path?: string | null;
+  current?: BatchCurrentStatus;
+  progress?: BatchProgressStatus;
+  logs?: BatchLogStatus;
+};
+
+export type BatchSummaryStatus = {
+  batch_id: string | null;
+  state: 'idle' | 'running' | 'finished' | 'failed' | 'stopped' | string;
+  started_at: string | null;
+  finished_at: string | null;
+  total_devices: number;
+  finished_devices: number;
+  passed_devices: number;
+  failed_devices: number;
+  warning_devices: number;
+};
+
+export type BatchCurrentStatus = {
+  current_device_serial: string | null;
+  current_device_model: string | null;
+  current_device_state?: string | null;
+  current_scenario_id: string | null;
+  current_scenario_name: string | null;
+  current_scenario_runtime_state?: string | null;
+  current_scenario_state?: string | null;
+  latest_scenario_event?: string | null;
+  current_step_index: number | null;
+  current_step_label: string | null;
+  current_step_action: string | null;
+  current_step_target: string | null;
+  current_step_result: string | null;
+  latest_step_log?: string | null;
+  current_step_log?: string | null;
+  latest_runtime_event?: string | null;
+};
+
+export type BatchProgressStatus = {
+  selected_scenarios?: number;
+  observed_scenarios?: number;
+  total_scenarios: number;
+  completed_scenarios: number;
+  passed_scenarios: number;
+  failed_scenarios: number;
+  warning_scenarios: number;
+  observed_runtime_events?: number;
+  observed_steps?: number;
+  total_steps: number;
+  completed_steps: number;
+  pass_count: number;
+  warn_count: number;
+  fail_count: number;
+  review_count: number;
+};
+
+export type BatchLogStatus = {
+  latest_log_line: string | null;
+  latest_preflight_status: {
+    device_connected: string | null;
+    screen_awake: string | null;
+    unlock_swipe: string | null;
+    app_foreground: string | null;
+    helper: string | null;
+    talkback: string | null;
+    last?: string | null;
+  };
+  latest_quality_event: string | null;
 };
 
 export type BatchStatus = {
@@ -83,6 +150,10 @@ export type BatchStatus = {
   mode: string | null;
   current_device: string | null;
   devices: BatchDeviceStatus[];
+  batch?: BatchSummaryStatus;
+  current?: BatchCurrentStatus;
+  progress?: BatchProgressStatus;
+  logs?: BatchLogStatus;
 };
 
 export type Scenario = {

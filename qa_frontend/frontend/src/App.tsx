@@ -35,6 +35,7 @@ export default function App() {
   const {
     status,
     dashboard,
+    batchStatus,
     log,
     pollingLatencyMs,
     error,
@@ -375,6 +376,7 @@ export default function App() {
 
       <RuntimeDashboardPanel
         dashboard={dashboard}
+        batchStatus={batchStatus}
         status={status}
         helper={helper}
         adb={adb}

@@ -9,6 +9,7 @@ from typing import Any
 import traceback
 from tb_runner.run_spec import RunSpec
 from .paths import ROOT_DIR, RUN_LOG_DIR, SCRIPT_PATH, RUNTIME_CONFIG_PATH
+from .runtime_dashboard import parse_runtime_log
 from .runtime_config_selection import write_selected_runtime_config
 from .device_locale import apply_language_mode, normalize_language_mode, format_language_log_lines
 from .preflight import (
@@ -27,6 +28,343 @@ def _json_safe(value):
     if isinstance(value, list):
         return [_json_safe(v) for v in value]
     return value
+
+
+CURRENT_STEP_LABEL_RE = re.compile(r"(?:visible|label|talkback_label)='([^']*)'")
+CURRENT_STEP_ACTION_RE = re.compile(r"(?:action|move_result)=(?:'([^']*)'|([^\s]+))")
+CURRENT_STEP_TARGET_RE = re.compile(r"(?:target|target_name|targetName)=(?:'([^']*)'|([^\s]+))")
+CURRENT_FINAL_RESULT_RE = re.compile(r"final_result='([^']*)'")
+CURRENT_STEP_RESULT_RE = re.compile(r"(?:move_result|result)='([^']*)'")
+PREFLIGHT_STEP_RE = re.compile(r"\[PREFLIGHT\]\s+(device_connected|wake_screen|unlock_swipe|app_foreground)\s+([A-Z_]+)")
+TALKBACK_STATUS_RE = re.compile(r"\[PREFLIGHT\]\s+talkback status='([^']*)'")
+
+
+def _empty_live_status() -> dict:
+    return {
+        "runner_log_path": None,
+        "current": {
+            "current_device_serial": None,
+            "current_device_model": None,
+            "current_device_state": None,
+            "current_scenario_id": None,
+            "current_scenario_name": None,
+            "current_scenario_runtime_state": None,
+            "current_scenario_state": None,
+            "latest_scenario_event": None,
+            "current_step_index": None,
+            "current_step_label": None,
+            "current_step_action": None,
+            "current_step_target": None,
+            "current_step_result": None,
+            "latest_step_log": None,
+            "current_step_log": None,
+            "latest_runtime_event": None,
+        },
+        "progress": {
+            "selected_scenarios": 0,
+            "observed_scenarios": 0,
+            "total_scenarios": 0,
+            "completed_scenarios": 0,
+            "passed_scenarios": 0,
+            "failed_scenarios": 0,
+            "warning_scenarios": 0,
+            "observed_runtime_events": 0,
+            "observed_steps": 0,
+            "total_steps": 0,
+            "completed_steps": 0,
+            "pass_count": 0,
+            "warn_count": 0,
+            "fail_count": 0,
+            "review_count": 0,
+        },
+        "logs": {
+            "latest_log_line": None,
+            "latest_preflight_status": {
+                "device_connected": None,
+                "screen_awake": None,
+                "unlock_swipe": None,
+                "app_foreground": None,
+                "helper": None,
+                "talkback": None,
+            },
+            "latest_quality_event": None,
+        },
+    }
+
+
+def _parse_live_log(log_text: str, *, scenario_ids: list[str] | None = None) -> dict:
+    live = _empty_live_status()
+    lines = [line for line in log_text.splitlines() if line.strip()]
+    if not lines:
+        return live
+
+    parsed = parse_runtime_log(log_text, scenario_ids=scenario_ids or [])
+    current_scenario = _string_or_none(parsed.get("current_scenario"))
+    current_step = parsed.get("current_step")
+    scenario_state = _scenario_state(parsed.get("scenario_progress"), current_scenario)
+    live["current"].update({
+        "current_scenario_id": current_scenario,
+        "current_scenario_name": current_scenario,
+        "current_scenario_state": scenario_state,
+        "latest_scenario_event": scenario_state,
+        "current_step_index": current_step if isinstance(current_step, int) else None,
+    })
+    observed_step_count = _observed_step_count(lines)
+    observed_runtime_events = _count_runtime_events(lines)
+    selected_scenarios = len(scenario_ids or [])
+    live["progress"].update({
+        "selected_scenarios": selected_scenarios,
+        "observed_scenarios": len(_observed_scenario_ids(lines)),
+        "total_scenarios": selected_scenarios,
+        "completed_scenarios": int(parsed.get("completed_scenarios") or 0),
+        "passed_scenarios": int(parsed.get("passed_scenarios") or 0),
+        "failed_scenarios": int(parsed.get("failed_scenarios") or 0),
+        "warning_scenarios": int(parsed.get("warning_scenarios") or 0),
+        "observed_runtime_events": observed_runtime_events,
+        "observed_steps": observed_step_count,
+        "total_steps": max(int(parsed.get("total_step_count") or 0), observed_step_count),
+        "completed_steps": _count_lines(lines, "[STEP] END"),
+    })
+    live["progress"]["completed_scenarios"] = int(
+        parsed.get("completed_or_terminal_scenarios")
+        or (
+            live["progress"]["passed_scenarios"]
+            + live["progress"]["warning_scenarios"]
+            + live["progress"]["failed_scenarios"]
+        )
+        or 0
+    )
+
+    for line in lines:
+        if _is_step_status_line(line):
+            step_value = _extract_step_value(line)
+            if step_value is not None:
+                live["current"]["current_step_index"] = step_value
+            live["current"]["current_step_label"] = _extract_first_group(CURRENT_STEP_LABEL_RE, line) or live["current"]["current_step_label"]
+            live["current"]["current_step_action"] = _extract_first_group(CURRENT_STEP_ACTION_RE, line) or live["current"]["current_step_action"]
+            live["current"]["current_step_target"] = _extract_first_group(CURRENT_STEP_TARGET_RE, line) or live["current"]["current_step_target"]
+            live["current"]["current_step_result"] = (
+                _extract_first_group(CURRENT_FINAL_RESULT_RE, line)
+                or _extract_first_group(CURRENT_STEP_RESULT_RE, line)
+                or live["current"]["current_step_result"]
+            )
+            live["current"]["latest_step_log"] = _trim_line(line)
+            live["current"]["current_step_log"] = live["current"]["latest_step_log"]
+        if _is_runtime_event_line(line):
+            live["current"]["latest_runtime_event"] = _trim_line(line)
+        scenario_event = _scenario_event_from_line(line)
+        if scenario_event:
+            live["current"]["latest_scenario_event"] = scenario_event
+        if "[PREFLIGHT]" in line or "[QA_FRONTEND][preflight]" in line:
+            _update_preflight_status(live["logs"]["latest_preflight_status"], line)
+            live["logs"]["latest_preflight_status"]["last"] = _trim_line(line)
+        if "[QUALITY]" in line:
+            live["logs"]["latest_quality_event"] = _trim_line(line)
+        result = _extract_first_group(CURRENT_FINAL_RESULT_RE, line)
+        if result:
+            normalized = result.upper()
+            if normalized == "PASS":
+                live["progress"]["pass_count"] += 1
+            elif normalized == "WARN":
+                live["progress"]["warn_count"] += 1
+            elif normalized == "FAIL":
+                live["progress"]["fail_count"] += 1
+            elif normalized == "REVIEW":
+                live["progress"]["review_count"] += 1
+
+    live["logs"]["latest_log_line"] = _trim_line(lines[-1])
+    if parsed.get("preflight_state") and not live["logs"]["latest_preflight_status"].get("last"):
+        live["logs"]["latest_preflight_status"]["last"] = str(parsed["preflight_state"])
+    return live
+
+
+def _update_preflight_status(target: dict, line: str) -> None:
+    match = PREFLIGHT_STEP_RE.search(line)
+    if match:
+        key = "screen_awake" if match.group(1) == "wake_screen" else match.group(1)
+        target[key] = match.group(2)
+    if "[PREFLIGHT][accessibility]" in line:
+        target["helper"] = "PASS" if "helper_ready=true" in line else "WARN"
+    talkback_match = TALKBACK_STATUS_RE.search(line)
+    if talkback_match:
+        target["talkback"] = talkback_match.group(1)
+    if "[QA_FRONTEND][preflight][adb]" in line:
+        target["device_connected"] = _status_from_qa_frontend_line(line)
+    if "[QA_FRONTEND][preflight][helper]" in line:
+        target["helper"] = _status_from_qa_frontend_line(line)
+    if "[QA_FRONTEND][preflight][talkback]" in line:
+        target["talkback"] = _status_from_qa_frontend_line(line)
+    if "[QA_FRONTEND][preflight][launch_app]" in line and "foreground_package" in line:
+        target["app_foreground"] = "observed"
+
+
+def _status_from_qa_frontend_line(line: str) -> str | None:
+    match = re.search(r"status='([^']*)'", line)
+    return match.group(1) if match else None
+
+
+def _device_runner_log_path(device: dict | None) -> Path | None:
+    if not device:
+        return None
+    output_dir = str(device.get("output_dir") or "")
+    if not output_dir:
+        return None
+    return ROOT_DIR / output_dir / "runner.log"
+
+
+def _read_log_tail(path: Path | None, *, limit: int = 128 * 1024) -> str:
+    if not path or not path.is_file():
+        return ""
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, 2)
+            size = handle.tell()
+            handle.seek(max(0, size - limit))
+            return handle.read().decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _relative_path(path: Path | None) -> str | None:
+    if not path:
+        return None
+    return str(path.relative_to(ROOT_DIR)) if path.is_relative_to(ROOT_DIR) else str(path)
+
+
+def _extract_step_value(line: str) -> int | None:
+    match = re.search(r"step=(\d+)", line)
+    return int(match.group(1)) if match else None
+
+
+def _is_step_status_line(line: str) -> bool:
+    return (
+        "[STEP]" in line
+        or "[STOP][eval]" in line
+        or ("[SCENARIO][pre_nav]" in line and "step=" in line)
+    )
+
+
+def _is_runtime_event_line(line: str) -> bool:
+    if "[QUALITY]" in line:
+        return False
+    return (
+        "[STEP]" in line
+        or "[STOP][eval]" in line
+        or "[SCENARIO]" in line
+        or "[TAB]" in line
+        or "final_result=" in line
+        or "move_failed" in line
+        or "global_nav_main failed" in line
+    )
+
+
+def _scenario_event_from_line(line: str) -> str | None:
+    if "[QUALITY]" in line:
+        return None
+    result = _extract_first_group(CURRENT_FINAL_RESULT_RE, line)
+    if result:
+        return result.lower()
+    lowered = line.lower()
+    if " failed" in lowered or "failed " in lowered or "fail_stuck" in lowered:
+        return "failed"
+    if " warning" in lowered or "warn" in lowered:
+        return "warning"
+    if " success" in lowered or "passed" in lowered:
+        return "pass"
+    if "[scenario]" in lowered:
+        return "observed"
+    return None
+
+
+def _scenario_state(scenario_progress: object, scenario_id: str | None) -> str | None:
+    if not scenario_id or not isinstance(scenario_progress, list):
+        return None
+    for item in scenario_progress:
+        if isinstance(item, dict) and item.get("id") == scenario_id:
+            return _string_or_none(item.get("status"))
+    return None
+
+
+def _extract_first_group(pattern: re.Pattern[str], line: str) -> str | None:
+    match = pattern.search(line)
+    if not match:
+        return None
+    for value in match.groups():
+        if value not in {None, ""}:
+            return value
+    return None
+
+
+def _count_lines(lines: list[str], token: str) -> int:
+    return sum(1 for line in lines if token in line)
+
+
+def _observed_step_count(lines: list[str]) -> int:
+    observed_steps = [
+        step
+        for line in lines
+        if _is_step_status_line(line)
+        for step in [_extract_step_value(line)]
+        if step is not None
+    ]
+    if observed_steps:
+        return max(observed_steps) + 1
+    return sum(1 for line in lines if _is_step_status_line(line))
+
+
+def _count_runtime_events(lines: list[str]) -> int:
+    return sum(1 for line in lines if _is_runtime_event_line(line))
+
+
+def _observed_scenario_ids(lines: list[str]) -> set[str]:
+    return {
+        scenario
+        for line in lines
+        if _is_scenario_observation_line(line)
+        for scenario in [_extract_scenario_id(line)]
+        if scenario
+    }
+
+
+def _is_scenario_observation_line(line: str) -> bool:
+    if line.startswith("[CONFIG]") or "source='runtime'" in line or "base_enabled=" in line:
+        return False
+    return (
+        "[STEP]" in line
+        or "[STOP][eval]" in line
+        or "[SCENARIO][entry_contract]" in line
+        or "[SCENARIO][pre_nav]" in line
+        or "[PERF][scenario_summary]" in line
+        or "scenario_result" in line
+    )
+
+
+def _extract_scenario_id(line: str) -> str | None:
+    match = re.search(r"scenario='([^']+)'|scenario=([A-Za-z0-9_]+)|scenario_id='([^']+)'|scenario_id=([A-Za-z0-9_]+)", line)
+    if not match:
+        return None
+    for value in match.groups():
+        if value:
+            return value
+    return None
+
+
+def _string_or_none(value: object) -> str | None:
+    return str(value) if value not in {None, ""} else None
+
+
+def _dict(value: object) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _trim_line(value: str, limit: int = 300) -> str:
+    return value if len(value) <= limit else f"{value[:limit - 3]}..."
+
+
+def _normalize_batch_state(state: str | None) -> str:
+    if state == "error":
+        return "failed"
+    return state or "idle"
 
 class BatchRunManager:
     def __init__(self):
@@ -88,16 +426,85 @@ class BatchRunManager:
             
     def get_status_locked(self) -> dict:
         current_serial = None
+        current_device = None
         if 0 <= self._current_device_idx < len(self._devices):
-            current_serial = self._devices[self._current_device_idx]["serial"]
-            
-        return {
+            current_device = self._devices[self._current_device_idx]
+            current_serial = current_device["serial"]
+
+        device_statuses = [self._device_status_with_live_summary(device) for device in self._devices]
+        current_live = self._live_status_for_device(current_device) if current_device else _empty_live_status()
+        finished_devices = [device for device in device_statuses if device.get("state") in {"passed", "failed", "skipped", "error"}]
+        passed_devices = [device for device in device_statuses if device.get("state") == "passed"]
+        failed_devices = [device for device in device_statuses if device.get("state") in {"failed", "error"}]
+        warning_devices = [
+            device for device in device_statuses
+            if int(_dict(device.get("progress")).get("warning_scenarios") or 0) > 0
+        ]
+        status = {
             "batch_id": self._batch_id,
             "state": self._state,
             "mode": self._mode,
             "current_device": current_serial,
-            "devices": list(self._devices)
+            "devices": device_statuses,
+            "batch": {
+                "batch_id": self._batch_id,
+                "state": _normalize_batch_state(self._state),
+                "started_at": self._created_at,
+                "finished_at": self._batch_finished_at(device_statuses),
+                "total_devices": len(device_statuses),
+                "finished_devices": len(finished_devices),
+                "passed_devices": len(passed_devices),
+                "failed_devices": len(failed_devices),
+                "warning_devices": len(warning_devices),
+            },
+            "current": current_live["current"],
+            "progress": current_live["progress"],
+            "logs": current_live["logs"],
         }
+        return status
+
+    def _device_status_with_live_summary(self, device: dict) -> dict:
+        item = dict(device)
+        live = self._live_status_for_device(device)
+        item["runner_log_path"] = live.get("runner_log_path")
+        item["current"] = live["current"]
+        item["progress"] = live["progress"]
+        item["logs"] = live["logs"]
+        return item
+
+    def _live_status_for_device(self, device: dict | None) -> dict:
+        if not device:
+            return _empty_live_status()
+        log_path = _device_runner_log_path(device)
+        log_text = _read_log_tail(log_path)
+        parsed = _parse_live_log(log_text, scenario_ids=self._scenario_ids)
+        return {
+            **parsed,
+            "runner_log_path": _relative_path(log_path) if log_path else None,
+            "current": {
+                **parsed["current"],
+                "current_device_serial": device.get("serial"),
+                "current_device_model": device.get("model"),
+                "current_device_state": device.get("state"),
+                "current_scenario_runtime_state": self._scenario_runtime_state(device, parsed["current"]),
+            },
+        }
+
+    @staticmethod
+    def _scenario_runtime_state(device: dict | None, current: dict) -> str | None:
+        if not current.get("current_scenario_id"):
+            return None
+        device_state = str((device or {}).get("state") or "")
+        if device_state in {"running", "pending"}:
+            return "running"
+        if device_state in {"passed", "failed", "skipped", "error"}:
+            return "finished"
+        return device_state or None
+
+    @staticmethod
+    def _batch_finished_at(devices: list[dict]) -> str | None:
+        finished = [str(device.get("finished_at") or "") for device in devices if device.get("finished_at")]
+        return max(finished) if finished else None
 
     def _write_summary_locked(self):
         if not self._batch_id:
