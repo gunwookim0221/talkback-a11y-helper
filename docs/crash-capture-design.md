@@ -2,7 +2,7 @@
 
 이 문서는 SmartThings(OneConnect) 자동 검증 중 FC/Crash가 발생했을 때의 감지, 증거 수집, 재시도, Batch 복구, Frontend 표시, Manual Repro Guide 생성 정책을 정의합니다.
 
-현재 문서는 구현 전 설계 기준이며, runtime/frontend/backend/helper APK 변경은 포함하지 않습니다.
+현재 문서는 Phase 3-D 완료 기준의 운영 설계와 구현 계약을 함께 설명합니다.
 
 ---
 
@@ -142,11 +142,14 @@ Crash 발생 시에는 개발자가 원인 분석과 재현을 시작할 수 있
 
 - `runner.log`: runner 실행 로그
 - `logcat.txt`: run 시작 이후 background capture 로그
+- `crash_event.json`: crash event id/type/timestamp/signature 요약
 - `crash_screenshot.png`: Crash 감지 직후 화면
 - `crash_window_dump.xml`: Android UIAutomator window dump
 - `crash_helper_dump.json`: TalkBack A11y Helper dump
 - `focus_state.json`: 마지막 접근성 포커스 및 foreground 상태
 - `crash_context.json`: scenario/step/action/evidence를 요약한 구조화 context
+- `crash_repro.md`: 수동 재현 절차
+- `logcat_excerpt.txt`: crash 또는 app termination 판단에 사용한 logcat excerpt
 
 예시 디렉터리:
 
@@ -167,12 +170,14 @@ device_xxx/
 device_xxx/
 └ crashes/
    ├ CRASH-0001/
+   │  ├ crash_event.json
    │  ├ crash_context.json
    │  ├ crash_repro.md
    │  ├ crash_screenshot.png
    │  ├ crash_window_dump.xml
    │  ├ crash_helper_dump.json
-   │  └ focus_state.json
+   │  ├ focus_state.json
+   │  └ logcat_excerpt.txt
    └ CRASH-0002/
       └ ...
 ```
@@ -365,16 +370,52 @@ Crash 2회 연속
 - `POSSIBLE_CRASH`: foreground recovery를 먼저 시도하고, 실패하거나 반복되면 retry count를 소모합니다.
 - `ANR`: 현재는 future reserved입니다. 구현 전에는 timeout issue로 별도 기록합니다.
 
+## Retry 실행 지점
+
+Retry는 중간 step 재개가 아니라 scenario open pipeline부터 재시작합니다.
+
+```text
+attempt=0
+↓
+Crash detect
+↓
+artifact capture
+↓
+relaunch + recovery preflight
+↓
+collect_tab_rows(tab_cfg) 재호출
+↓
+scenario open pipeline
+↓
+anchor/tab validation
+↓
+step 1부터 재실행(attempt=1)
+```
+
+동일 scenario의 attempt는 최대 두 번입니다.
+
+- `attempt=0`: 최초 실행
+- `attempt=1`: crash recovery retry
+- `attempt=2`: 금지
+
 ## Retry 성공 기준
 
 - OneConnect가 foreground로 복귀합니다.
 - Helper와 TalkBack 상태가 정상입니다.
 - scenario가 retry 후 crash 없이 완료되거나, 다음 step으로 진행됩니다.
 
+성공 결과:
+
+- recovery result: `CRASH_RECOVERED`
+- `crash_context.json` recovery result: `crash_recovered`
+- scenario는 batch 진행을 막지 않습니다.
+
 ## Retry 실패 결과
 
 - scenario status: `skipped`
 - failure reason: `CRASH_REPEATED`
+- recovery result: `CRASH_REPEATED`
+- scenario skip reason: `crash_repeated`
 - quality issue: `Crash Issue`
 - batch는 계속 진행합니다.
 
@@ -396,6 +437,15 @@ Batch 중단 조건:
 
 Batch Crash Count는 Batch 중단 여부를 판단하기 위한 운영 카운터입니다. 모든 앱 이탈이나 복구 이벤트를 세지 않고, 실제 Crash로 확정되었거나 retry 비용을 소모한 Crash 후보만 누적합니다.
 
+구현 카운터:
+
+- `confirmed_crash_count`
+- `possible_crash_count`
+- `app_terminated_count`
+- `crash_repeated_count`
+- `crash_recovered_count`
+- `counted_crash_count`
+
 누적 대상:
 
 - `CONFIRMED_CRASH`
@@ -406,6 +456,13 @@ Batch Crash Count는 Batch 중단 여부를 판단하기 위한 운영 카운터
 - 단순 popup contamination
 - foreground recovery 성공
 - retry 없이 복구된 `APP_TERMINATED`
+- `APP_TERMINATED`는 기본 `counted_crash_count`에 포함하지 않습니다.
+
+기본 threshold:
+
+- 환경 변수: `TB_CRASH_ABORT_THRESHOLD`
+- 기본값: 5
+- 1 미만 또는 잘못된 값은 기본값으로 정규화합니다.
 
 예:
 
@@ -456,23 +513,16 @@ Frontend는 Crash를 TalkBack 품질 문제와 섞어 숨기지 않고, Device D
 
 ```text
 Crash Issue
-Status: CRASH_REPEATED
+Event: CRASH-0001
+Crash Type: APP_TERMINATED
+Recovery Result: CRASH_RECOVERED
 Scenario: life_home_monitor
-Step: 7 / enter_home_monitor
-Last action: tap "Home Monitor"
-Last focus: Home Monitor
-Last speech: Home Monitor, button
-Foreground after crash: com.sec.android.app.launcher
-Exception: java.lang.NullPointerException
-Top frame: HomeMonitorActivity.onCreate
-Recovery: retried once, scenario skipped
+Timestamp: 2026-06-04T01:23:45+09:00
 
 Artifacts:
-- Screenshot
-- Logcat
-- Window dump
-- Helper dump
-- Manual Repro Guide
+- View Repro Guide
+- View Screenshot
+- Download Artifacts
 ```
 
 ## 표시 원칙
@@ -482,6 +532,30 @@ Artifacts:
 - 비개발자에게는 scenario, step, last action, screenshot을 먼저 보여줍니다.
 - 개발자용 logcat exception/top frame은 접힘 영역 또는 상세 영역에 둡니다.
 - Manual Repro Guide는 Crash Card에서 바로 열 수 있어야 합니다.
+
+## Phase 3-D 구현 상태
+
+Run History의 Batch Details에서 Device Details를 열면 아래 순서로 Crash Issues를 확인합니다.
+
+```text
+TalkBack Quality
+Quality Issues
+Crash Issues
+```
+
+Crash Issues section:
+
+- loading: `Loading crash summary...`
+- empty: `No crash issues detected.`
+- error: `Crash summary unavailable`
+- Crash Card fields: event id, crash type, scenario, recovery result, timestamp, artifact badges
+- actions: `View Repro Guide`, `View Screenshot`, `Download Artifacts`
+
+Artifact viewer:
+
+- Repro Guide는 modal에서 `crash_repro.md` 내용을 pre-wrap text로 표시합니다.
+- Screenshot은 modal에서 `crash_screenshot.png`를 preview합니다.
+- Download는 crash artifact directory의 파일을 best-effort zip으로 제공합니다.
 
 ---
 
@@ -621,6 +695,16 @@ Crash Capture는 detection, context, recovery, UI를 한 번에 구현하지 않
 - Batch Crash Count 누적
 - batch abort 정책 적용
 
+구현 상태:
+
+- terminal signal contract
+- 동일 scenario attempt 내 crash dedup/latch
+- crash 감지 시 immediate scenario exit
+- relaunch + recovery preflight
+- scenario 단위 1회 retry
+- `CRASH_RECOVERED` / `CRASH_REPEATED`
+- crash policy count 및 threshold 판정
+
 ## Phase 3-D: Frontend Crash Issues
 
 범위:
@@ -629,6 +713,17 @@ Crash Capture는 detection, context, recovery, UI를 한 번에 구현하지 않
 - Crash Card
 - Repro Guide 표시
 - Artifact 다운로드
+
+구현 상태:
+
+- Crash Summary API
+- Crash Detail API
+- Screenshot API
+- Artifact ZIP Download API
+- Crash Issues Panel
+- Repro Guide Viewer
+- Screenshot Viewer
+- Artifact ZIP Download
 
 ---
 

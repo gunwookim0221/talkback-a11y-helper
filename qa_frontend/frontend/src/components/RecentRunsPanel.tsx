@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { RecentRun, api, RecentBatch } from '../api';
+import { RecentRun, api, RecentBatch, RecentBatchDevice } from '../api';
+import { CrashIssuesPanel } from './CrashIssuesPanel';
 import { formatTime, formatDuration, healthClass, scenarioRunText, languageLabel, scenarioReasonText } from '../utils/formatters';
 
 type MismatchSummary = {
@@ -79,6 +80,12 @@ export function RecentRunsPanel({
   const [batchLogPreviews, setBatchLogPreviews] = useState<Record<string, string>>({});
   const [batchMismatchSummaries, setBatchMismatchSummaries] = useState<Record<string, MismatchSummary | null>>({});
 
+  const resolveBatchDeviceId = (device: RecentBatchDevice) => {
+    const outputDir = device.output_dir?.replace(/\\/g, '/');
+    const leaf = outputDir?.split('/').filter(Boolean).pop();
+    return leaf || `${device.model}_${device.serial}`;
+  };
+
   useEffect(() => {
     if (!selectedBatch) {
       setBatchLogPreviews({});
@@ -103,7 +110,7 @@ export function RecentRunsPanel({
     });
   }, [selectedBatch]);
 
-  const renderDeviceDetails = (runData: any) => {
+  const renderDeviceDetails = (runData: any, crashContext?: { runId: string; deviceId: string }) => {
     const failedScenarios = (runData?.scenarios || []).filter((s: any) => s.status === 'failed');
     const warningScenarios = (runData?.scenarios || []).filter((s: any) => s.status === 'warning');
     const passedScenarios = (runData?.scenarios || []).filter((s: any) => s.status === 'passed');
@@ -250,6 +257,10 @@ export function RecentRunsPanel({
               ))}
             </div>
           </details>
+        )}
+
+        {crashContext && (
+          <CrashIssuesPanel runId={crashContext.runId} deviceId={crashContext.deviceId} />
         )}
       </div>
     );
@@ -407,7 +418,7 @@ export function RecentRunsPanel({
                       {batchLogPreviews[d.serial] || 'Loading log...'}
                     </pre>
                   </details>
-                  {renderDeviceDetails(d)}
+                  {renderDeviceDetails(d, { runId: selectedBatch.batch_id, deviceId: resolveBatchDeviceId(d) })}
                </div>
             ))}
           </div>

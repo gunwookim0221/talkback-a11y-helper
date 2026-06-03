@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from .adb import enable_helper, enable_talkback, get_adb_status, get_helper_status, install_helper, open_accessibility_settings, get_devices
@@ -13,6 +13,7 @@ from .runner import RunManager
 from .batch_runner import global_batch_manager, get_recent_batches
 from .scenarios import list_scenarios
 from .mismatch_viewer import get_run_mismatch_summary
+from .crash_summary import build_crash_artifact_zip, build_crash_detail, build_crash_summary, safe_crash_event_dir
 
 
 app = FastAPI(title="TalkBack QA Local Control Panel", version="0.1.0")
@@ -232,6 +233,55 @@ def recent_run_mismatch_summary(run_id: str) -> dict[str, object]:
     if "error" in result:
         raise HTTPException(status_code=404, detail=str(result["error"]))
     return result
+
+
+@app.get("/api/runs/{run_id}/devices/{device_id}/crashes")
+def run_device_crashes(run_id: str, device_id: str) -> dict[str, object]:
+    try:
+        return build_crash_summary(run_id, device_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="device run not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/runs/{run_id}/devices/{device_id}/crashes/{crash_event_id}")
+def run_device_crash_detail(run_id: str, device_id: str, crash_event_id: str) -> dict[str, object]:
+    try:
+        return build_crash_detail(run_id, device_id, crash_event_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="crash event not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/runs/{run_id}/devices/{device_id}/crashes/{crash_event_id}/screenshot")
+def run_device_crash_screenshot(run_id: str, device_id: str, crash_event_id: str) -> FileResponse:
+    try:
+        event_dir = safe_crash_event_dir(run_id, device_id, crash_event_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="crash event not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    screenshot = event_dir / "crash_screenshot.png"
+    if not screenshot.is_file():
+        raise HTTPException(status_code=404, detail="screenshot not found")
+    return FileResponse(screenshot, media_type="image/png", filename=screenshot.name)
+
+
+@app.get("/api/runs/{run_id}/devices/{device_id}/crashes/{crash_event_id}/download")
+def run_device_crash_download(run_id: str, device_id: str, crash_event_id: str) -> Response:
+    try:
+        payload, filename = build_crash_artifact_zip(run_id, device_id, crash_event_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="crash event not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/api/outputs")

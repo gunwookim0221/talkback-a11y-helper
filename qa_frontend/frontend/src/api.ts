@@ -219,6 +219,7 @@ export type RecentBatchDevice = {
   serial: string;
   model: string;
   state: string;
+  output_dir?: string | null;
   return_code: number | null;
   log_path?: string | null;
   runner_log_path?: string | null;
@@ -257,6 +258,32 @@ export type RecentBatch = {
   failed_count: number;
   summary_path: string;
   devices?: RecentBatchDevice[];
+};
+
+export type CrashItem = {
+  crash_event_id: string;
+  crash_type: string;
+  scenario: string | null;
+  timestamp: string | null;
+  recovery_result: 'CRASH_CAPTURED' | 'CRASH_RECOVERED' | 'CRASH_REPEATED' | 'unknown' | string;
+  repro_guide_exists: boolean;
+  screenshot_exists: boolean;
+  helper_dump_exists: boolean;
+  window_dump_exists: boolean;
+};
+
+export type CrashSummary = {
+  crash_count: number;
+  crashes: CrashItem[];
+};
+
+export type CrashDetail = CrashItem & {
+  repro_guide: string | null;
+  artifacts: {
+    screenshot: boolean;
+    helper_dump: boolean;
+    window_dump: boolean;
+  };
 };
 
 export type RuntimeEvent = {
@@ -419,6 +446,16 @@ export const api = {
   recentRuns: () => request<{ runs: RecentRun[] }>('/api/runs/recent'),
   recentBatches: () => request<RecentBatch[]>('/api/batch/recent'),
   getBatchLogTail: (path: string) => request<{ text: string }>(`/api/batch/log-tail?path=${encodeURIComponent(path)}`),
+  getRunDeviceCrashes: (runId: string, deviceId: string) =>
+    request<CrashSummary>(`/api/runs/${encodeURIComponent(runId)}/devices/${encodeURIComponent(deviceId)}/crashes`),
+  getRunDeviceCrash: (runId: string, deviceId: string, crashEventId: string) =>
+    request<CrashDetail>(
+      `/api/runs/${encodeURIComponent(runId)}/devices/${encodeURIComponent(deviceId)}/crashes/${encodeURIComponent(crashEventId)}`,
+    ),
+  getRunDeviceCrashScreenshotUrl: (runId: string, deviceId: string, crashEventId: string) =>
+    `/api/runs/${encodeURIComponent(runId)}/devices/${encodeURIComponent(deviceId)}/crashes/${encodeURIComponent(crashEventId)}/screenshot`,
+  getRunDeviceCrashDownloadUrl: (runId: string, deviceId: string, crashEventId: string) =>
+    `/api/runs/${encodeURIComponent(runId)}/devices/${encodeURIComponent(deviceId)}/crashes/${encodeURIComponent(crashEventId)}/download`,
   runMismatch: (runId: string) => request<{
     summary: {
       fail_count: number;

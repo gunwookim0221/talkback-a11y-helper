@@ -447,6 +447,156 @@ small {
   color: #667480;
 }
 
+.crashIssuesBody {
+  margin-top: 8px;
+}
+
+.crashIssueList {
+  display: grid;
+  gap: 10px;
+}
+
+.crashIssueCard {
+  background: #f6f8fa;
+  border: 1px solid #dce3e9;
+  border-radius: 6px;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.crashIssueHeader {
+  align-items: flex-start;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.crashIssueHeader strong {
+  overflow-wrap: anywhere;
+}
+
+.crashIssueBadges,
+.crashArtifactList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.crashIssueMeta {
+  gap: 4px 10px;
+  grid-template-columns: 84px minmax(0, 1fr);
+}
+
+.crashArtifactBadge {
+  background: #e7edf3;
+  border-radius: 999px;
+  color: #43515c;
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 7px;
+}
+
+.crashArtifactBadge.available {
+  background: #d8f4df;
+  color: #215a2f;
+}
+
+.crashArtifactBadge.missing {
+  background: #edf1f4;
+  color: #7b8790;
+}
+
+.crashArtifactActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.crashArtifactActions button {
+  font-size: 12px;
+  padding: 6px 9px;
+}
+
+.artifactModalBackdrop {
+  align-items: center;
+  background: rgba(17, 24, 32, 0.42);
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  left: 0;
+  padding: 24px;
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 40;
+}
+
+.artifactModal {
+  background: #ffffff;
+  border: 1px solid #d9e0e7;
+  border-radius: 8px;
+  box-shadow: 0 16px 48px rgba(17, 24, 32, 0.22);
+  display: grid;
+  gap: 12px;
+  max-height: min(82vh, 780px);
+  max-width: min(880px, 96vw);
+  overflow: hidden;
+  padding: 14px;
+  width: 100%;
+}
+
+.artifactModalHeader {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.artifactModalHeader strong {
+  overflow-wrap: anywhere;
+}
+
+.artifactModalHeader button {
+  flex: 0 0 auto;
+}
+
+.artifactReproText {
+  background: #f6f8fa;
+  border: 1px solid #dce3e9;
+  color: #172026;
+  max-height: 64vh;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.artifactScreenshotFrame {
+  align-items: center;
+  background: #111820;
+  border-radius: 6px;
+  display: flex;
+  justify-content: center;
+  max-height: 68vh;
+  overflow: auto;
+  padding: 10px;
+}
+
+.artifactScreenshotFrame img {
+  height: auto;
+  max-height: 64vh;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.artifactModalError {
+  background: #ffe4e4;
+  border: 1px solid #efb3b3;
+  border-radius: 6px;
+  color: #8d1e1e;
+  padding: 10px 12px;
+}
+
 .logPanel {
   margin-top: 14px;
 }

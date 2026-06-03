@@ -47,6 +47,10 @@ APIs:
 - `GET /api/run/log/download`
 - `GET /api/runs/recent`
 - `GET /api/runs/recent/{run_id}/log`
+- `GET /api/runs/{run_id}/devices/{device_id}/crashes`
+- `GET /api/runs/{run_id}/devices/{device_id}/crashes/{crash_event_id}`
+- `GET /api/runs/{run_id}/devices/{device_id}/crashes/{crash_event_id}/screenshot`
+- `GET /api/runs/{run_id}/devices/{device_id}/crashes/{crash_event_id}/download`
 - `GET /api/outputs`
 - `GET /api/outputs/{filename}`
 
@@ -57,6 +61,8 @@ Recent Runs is read-only. It exposes the latest run summaries plus log/xlsx down
 Runtime Dashboard is read-only. It parses the current run log for best-effort progress, metrics, and event feed data while keeping the log as the source of truth.
 Run history separates process status from scenario result status. `process_status` describes execution (`success`, `failed`, `stopped`, `running`), while `scenario_result_status` describes parsed validation results (`passed`, `warning`, `failed`, `partial`, `unknown`).
 Recent Runs uses `summary.json` as a fast path when present and valid. If the summary is missing or malformed, it falls back to parsing the log.
+
+Crash Issues APIs are read-only views over device crash artifact directories under `qa_frontend_runs/<batch_id>/<device_id>/crashes/<crash_event_id>/`. The detail endpoint returns metadata and `crash_repro.md` text, the screenshot endpoint returns `crash_screenshot.png`, and the download endpoint returns a best-effort zip containing available crash artifacts.
 
 ## Frontend
 
@@ -69,6 +75,14 @@ npm run dev
 ```
 
 Open the Vite URL, usually `http://localhost:5173`.
+
+Crash Issues is available from:
+
+```text
+Run History > Batch Details > Device Details > Crash Issues
+```
+
+Each Crash Card shows event id, crash type, scenario, recovery result, timestamp, and artifact availability. Operators can view the repro guide, preview the screenshot, or download a zip of the available artifacts.
 
 ## TalkBack A11y Helper
 

@@ -19,6 +19,7 @@ Run these commands from the repository root:
 ```powershell
 python -m py_compile qa_frontend/backend/*.py
 python -m pytest tests/test_qa_frontend_outputs.py tests/test_qa_frontend_adb.py tests/test_qa_frontend_preflight.py tests/test_qa_frontend_runner.py -q
+python -m pytest tests/test_crash_summary_api.py tests/test_crash_recovery.py tests/test_crash_guard.py tests/test_crash_capture.py tests/test_collection_flow.py -q
 python tools/validate_qa_frontend.py
 cd qa_frontend/frontend
 npm run build
@@ -45,6 +46,41 @@ FAIL logs to inspect:
 - Python traceback from the command output
 - backend import errors from `qa_frontend/backend/*.py`
 - Vite build errors from `qa_frontend/frontend`
+
+### Crash Recovery and Crash Issues validation
+
+Crash Recovery automated tests cover:
+
+- crash terminal signal extraction
+- duplicate crash event suppression
+- immediate scenario exit after crash-like detection
+- relaunch + recovery preflight decision
+- scenario retry once only (`attempt=0`, `attempt=1`, no `attempt=2`)
+- `CRASH_RECOVERED` and `CRASH_REPEATED`
+- crash run stats and policy count
+- Crash Summary/Detail/Screenshot/Download APIs
+
+Manual force-stop smoke:
+
+- Case A: force-stop once during a scenario, verify OneConnect relaunches, retry starts from the scenario open pipeline, and final recovery state is `CRASH_RECOVERED`.
+- Case B: force-stop during the retry attempt, verify `CRASH_REPEATED`, `scenario_skip reason='crash_repeated'`, no `attempt=2`, and next scenario continues.
+- Frontend: open `Run History > Batch Details > Device Details > Crash Issues`, then verify the Crash Card, Repro Guide viewer, Screenshot viewer, and Artifact ZIP download.
+
+Crash artifact directory expected shape:
+
+```text
+device_xxx/
+└ crashes/
+   └ CRASH-0001/
+      ├ crash_event.json
+      ├ crash_context.json
+      ├ crash_repro.md
+      ├ crash_screenshot.png
+      ├ crash_window_dump.xml
+      ├ crash_helper_dump.json
+      ├ focus_state.json
+      └ logcat_excerpt.txt
+```
 
 ## Manual Checklist
 
