@@ -161,6 +161,19 @@ function formatNavigationResult(result?: string | null, detail?: string | null):
   return detail ? `${result} (${detail})` : result;
 }
 
+function CompactValue({ value }: { value?: string | number | null }) {
+  const text = value === null || value === undefined || value === '' ? '-' : String(value);
+  return <dd className="compactValue" title={text}>{text}</dd>;
+}
+
+function CompactLogBox({ children }: { children?: string | null }) {
+  return (
+    <pre className="compactLogBox" title={children ?? undefined}>
+      {children ?? '-'}
+    </pre>
+  );
+}
+
 function BatchLiveMonitor({
   batchStatus,
   pollingLatencyMs,
@@ -273,39 +286,39 @@ function BatchLiveMonitor({
           </div>
           <div>
             <h3>Current Step / Event</h3>
-            <dl>
+            <dl className="compactDefinitionList">
               <dt>Observed Step</dt>
-              <dd>{typeof current?.current_step_index === 'number' ? current.current_step_index : `${observedEvents} events observed`}</dd>
+              <CompactValue value={typeof current?.current_step_index === 'number' ? current.current_step_index : `${observedEvents} events observed`} />
               {current?.current_step_label && (
                 <>
                   <dt>Label</dt>
-                  <dd>{current.current_step_label}</dd>
+                  <CompactValue value={current.current_step_label} />
                 </>
               )}
               {current?.current_step_action && (
                 <>
                   <dt>Action</dt>
-                  <dd>{current.current_step_action}</dd>
+                  <CompactValue value={current.current_step_action} />
                 </>
               )}
               {current?.current_step_target && (
                 <>
                   <dt>Target</dt>
-                  <dd>{current.current_step_target}</dd>
+                  <CompactValue value={current.current_step_target} />
                 </>
               )}
               {navigationResult && (
                 <>
                   <dt>Navigation Result</dt>
-                  <dd>{navigationResult}</dd>
+                  <CompactValue value={navigationResult} />
                 </>
               )}
-              {navigationResult && <small style={{ color: 'var(--color-text-dim)' }}>Navigation result is the latest movement attempt, not the final scenario result.</small>}
-              <dt>Latest Runtime Event</dt>
-              <dd>{latestRuntimeEvent ?? '-'}</dd>
-              <dt>Latest Step Log</dt>
-              <dd>{current?.latest_step_log ?? current?.current_step_log ?? '-'}</dd>
             </dl>
+            {navigationResult && (
+              <small className="compactHint" title="Navigation result is the latest movement attempt, not the final scenario result.">
+                Navigation attempt, not final result.
+              </small>
+            )}
           </div>
         </div>
         <div className="dashboardGrid">
@@ -334,11 +347,11 @@ function BatchLiveMonitor({
         <div className="dashboardGrid">
           <div>
             <h3>Latest Runtime Event</h3>
-            <pre style={{ minHeight: '80px' }}>{latestRuntimeEvent ?? 'Waiting for runtime event...'}</pre>
+            <CompactLogBox>{latestRuntimeEvent ?? 'Waiting for runtime event...'}</CompactLogBox>
           </div>
           <div>
             <h3>Raw Latest Log</h3>
-            <pre style={{ minHeight: '80px' }}>{logs?.latest_log_line ?? 'Waiting for batch log...'}</pre>
+            <CompactLogBox>{logs?.latest_log_line ?? 'Waiting for batch log...'}</CompactLogBox>
           </div>
         </div>
       </div>

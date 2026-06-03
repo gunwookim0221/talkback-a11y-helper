@@ -576,6 +576,35 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+.compactDefinitionList {
+  grid-template-columns: 120px minmax(0, 1fr);
+}
+
+.compactValue {
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compactHint {
+  display: inline-block;
+  margin-top: 8px;
+}
+
+.compactLogBox {
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.35;
+  margin-top: 6px;
+  max-height: 76px;
+  min-height: 0;
+  overflow: auto;
+  white-space: pre;
+  word-break: normal;
+}
+
 .logPanel pre {
   min-height: 320px;
 }
