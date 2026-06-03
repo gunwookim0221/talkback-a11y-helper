@@ -183,8 +183,8 @@ function BatchLiveMonitor({
   const scenarioMetricLabel = 'Scenarios';
   const scenarioObservedDisplay = scenarioObserved || (current?.current_scenario_id ? 1 : 0);
   const scenarioMetricValue = batchFinished
-    ? `${scenarioSelected} selected / ${scenarioObservedDisplay} observed / ${scenarioCompleted} completed`
-    : `${scenarioSelected} selected / ${scenarioObservedDisplay} observed`;
+    ? `${scenarioCompleted} completed / ${scenarioSelected} selected (${scenarioObservedDisplay} observed)`
+    : `${scenarioObservedDisplay} observed / ${scenarioSelected} selected`;
   const counterTitle = batchFinished ? 'Quality Counter' : 'Observed Counter';
   const runtimeState = current?.current_scenario_runtime_state ?? (current?.current_scenario_id ? 'observing' : '-');
   const latestEvent = current?.latest_scenario_event ?? current?.current_step_result?.toLowerCase() ?? '-';
