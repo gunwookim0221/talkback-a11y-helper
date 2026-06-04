@@ -728,6 +728,68 @@ def test_make_result_df_downgrades_exact_match_repeat_stop_to_warn():
     assert result.iloc[-1]["review_note"] == "발화 일치, 탐색 종료 reason 있음"
 
 
+def test_make_result_df_collapses_repeated_issue_group_by_fingerprint():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "life_energy_plugin",
+                "tab_name": "life",
+                "step_index": 23,
+                "context_type": "main",
+                "visible_label": "Activity New notification",
+                "merged_announcement": "Activity New notification",
+                "move_result": "failed",
+                "focus_view_id": "activity",
+                "focus_bounds": "879,2405",
+                "failure_reason": "move_failed",
+                "final_result": "FAIL",
+            },
+            {
+                "scenario_id": "life_energy_plugin",
+                "tab_name": "life",
+                "step_index": 24,
+                "context_type": "main",
+                "visible_label": "Activity New notification",
+                "merged_announcement": "Activity New notification",
+                "move_result": "failed",
+                "focus_view_id": "activity",
+                "focus_bounds": "879,2405",
+                "failure_reason": "move_failed",
+                "final_result": "FAIL",
+                "is_recent_duplicate_step": True,
+                "recent_duplicate_distance": 1,
+            },
+            {
+                "scenario_id": "life_energy_plugin",
+                "tab_name": "life",
+                "step_index": 25,
+                "context_type": "main",
+                "visible_label": "Activity New notification",
+                "merged_announcement": "Activity New notification",
+                "move_result": "failed",
+                "focus_view_id": "activity",
+                "focus_bounds": "879,2405",
+                "failure_reason": "move_failed",
+                "final_result": "FAIL",
+                "is_duplicate_step": True,
+            },
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    assert len(result) == 1
+    row = result.iloc[0]
+    assert row["visible_label"] == "Activity New notification"
+    assert row["focus_view_id"] == "activity"
+    assert row["failure_reason"] == "move_failed"
+    assert row["repeat_count"] == 3
+    assert row["first_step"] == 23
+    assert row["last_step"] == 25
+    assert row["steps"] == "23,24,25"
+    assert bool(row["is_repeated_issue_group"]) is True
+
+
 def test_make_result_df_keeps_label_mismatch_as_fail_even_with_repeat_stop():
     filtered_df = pd.DataFrame(
         [

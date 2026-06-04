@@ -68,6 +68,7 @@ def _empty_live_status() -> dict:
         "progress": {
             "selected_scenarios": 0,
             "observed_scenarios": 0,
+            "tail_observed_scenarios": 0,
             "total_scenarios": 0,
             "completed_scenarios": 0,
             "passed_scenarios": 0,
@@ -116,10 +117,12 @@ def _parse_live_log(log_text: str, *, scenario_ids: list[str] | None = None) -> 
     })
     observed_step_count = _observed_step_count(lines)
     observed_runtime_events = _count_runtime_events(lines)
+    tail_observed_ids = _observed_scenario_ids(lines)
     selected_scenarios = len(scenario_ids or [])
     live["progress"].update({
         "selected_scenarios": selected_scenarios,
-        "observed_scenarios": len(_observed_scenario_ids(lines)),
+        "observed_scenarios": len(tail_observed_ids),
+        "tail_observed_scenarios": len(tail_observed_ids),
         "total_scenarios": selected_scenarios,
         "completed_scenarios": int(parsed.get("completed_scenarios") or 0),
         "passed_scenarios": int(parsed.get("passed_scenarios") or 0),
@@ -423,7 +426,8 @@ class BatchRunManager:
                     "output_dir": str(dev_dir.relative_to(ROOT_DIR)) if dev_dir.is_relative_to(ROOT_DIR) else str(dev_dir),
                     "return_code": None,
                     "started_at": None,
-                    "finished_at": None
+                    "finished_at": None,
+                    "observed_scenario_ids": [],
                 })
             
             self._current_device_idx = 0
@@ -446,7 +450,17 @@ class BatchRunManager:
             current_serial = current_device["serial"]
 
         device_statuses = [self._device_status_with_live_summary(device) for device in self._devices]
-        current_live = self._live_status_for_device(current_device) if current_device else _empty_live_status()
+        if current_device:
+            current_live = self._live_status_for_device(current_device)
+        elif device_statuses:
+            current_live = {
+                "runner_log_path": device_statuses[-1].get("runner_log_path"),
+                "current": _dict(device_statuses[-1].get("current")),
+                "progress": _dict(device_statuses[-1].get("progress")),
+                "logs": _dict(device_statuses[-1].get("logs")),
+            }
+        else:
+            current_live = _empty_live_status()
         finished_devices = [device for device in device_statuses if device.get("state") in {"passed", "failed", "skipped", "error"}]
         passed_devices = [device for device in device_statuses if device.get("state") == "passed"]
         failed_devices = [device for device in device_statuses if device.get("state") in {"failed", "error"}]
@@ -492,6 +506,8 @@ class BatchRunManager:
         log_path = _device_runner_log_path(device)
         log_text = _read_log_tail(log_path)
         parsed = _parse_live_log(log_text, scenario_ids=self._scenario_ids)
+        observed_ids = self._accumulate_observed_scenario_ids(device, _observed_scenario_ids(log_text.splitlines()))
+        parsed["progress"]["observed_scenarios"] = len(observed_ids)
         return {
             **parsed,
             "runner_log_path": _relative_path(log_path) if log_path else None,
@@ -514,6 +530,28 @@ class BatchRunManager:
         if device_state in {"passed", "failed", "skipped", "error"}:
             return "finished"
         return device_state or None
+
+    def _observed_scenario_id_list(self, device: dict | None) -> list[str]:
+        if not device:
+            return []
+        observed = device.get("observed_scenario_ids")
+        return [str(item) for item in observed] if isinstance(observed, list) else []
+
+    def _accumulate_observed_scenario_ids(self, device: dict, tail_ids: set[str]) -> list[str]:
+        selected_ids = [str(item) for item in (self._scenario_ids or [])]
+        selected_set = set(selected_ids)
+        combined = set(self._observed_scenario_id_list(device))
+        for scenario_id in tail_ids:
+            if not selected_set or scenario_id in selected_set:
+                combined.add(scenario_id)
+        ordered = [scenario_id for scenario_id in selected_ids if scenario_id in combined]
+        ordered.extend(sorted(scenario_id for scenario_id in combined if scenario_id not in set(ordered)))
+        device["observed_scenario_ids"] = ordered
+        return ordered
+
+    def _mark_all_scenarios_observed(self, device: dict) -> None:
+        if self._scenario_ids:
+            device["observed_scenario_ids"] = [str(item) for item in self._scenario_ids]
 
     @staticmethod
     def _batch_finished_at(devices: list[dict]) -> str | None:
@@ -612,6 +650,11 @@ class BatchRunManager:
                                 "final_result": sig.get("final_result", ""),
                                 "review_note": sig.get("review_note", ""),
                                 "focus_confidence": sig.get("focus_confidence", ""),
+                                "repeat_count": sig.get("repeat_count", 1),
+                                "first_step": sig.get("first_step", ""),
+                                "last_step": sig.get("last_step", ""),
+                                "steps": sig.get("steps", ""),
+                                "is_repeated_issue_group": sig.get("is_repeated_issue_group", False),
                                 "crop_path": crop_path
                             })
                         data["quality_issues"] = quality_issues
@@ -779,6 +822,8 @@ class BatchRunManager:
                     device_info["state"] = "passed" if returncode == 0 else "failed"
                     device_info["return_code"] = returncode
                     device_info["finished_at"] = datetime.now(timezone.utc).isoformat()
+                    if returncode == 0:
+                        self._mark_all_scenarios_observed(device_info)
                     self._current_device_idx += 1
                     self._write_summary_locked()
                 self._write_device_summary(device_info, dev_output_dir)

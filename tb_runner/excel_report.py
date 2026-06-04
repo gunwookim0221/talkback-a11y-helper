@@ -51,6 +51,20 @@ RESULT_SHEET_COLUMNS = [
     "result_crop_thumbnail",
 ]
 
+RESULT_REPEAT_METADATA_COLUMNS = [
+    "repeat_count",
+    "first_step",
+    "last_step",
+    "steps",
+    "is_repeated_issue_group",
+]
+
+_REPEATED_ISSUE_FAILURE_REASONS = {
+    "repeat_no_progress",
+    "move_failed",
+    "focus_realign_fail",
+}
+
 PLUGIN_REPORT_METADATA: dict[str, dict[str, str]] = {
     "global_nav_main": {"group": "Global", "name": "Global Navigation"},
     "home_main": {"group": "Global", "name": "Home"},
@@ -765,6 +779,103 @@ def _normalize_result_match_text(value: object) -> str:
     return text
 
 
+def _step_sort_value(value: object) -> int:
+    if isinstance(value, bool):
+        return -1
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return -1
+
+
+def _format_repeat_steps(values: list[object]) -> str:
+    steps: list[int] = []
+    for value in values:
+        step = _step_sort_value(value)
+        if step >= 0:
+            steps.append(step)
+    return ",".join(str(step) for step in sorted(dict.fromkeys(steps)))
+
+
+def _collapse_repeated_issue_groups(result: pd.DataFrame) -> pd.DataFrame:
+    if result.empty:
+        result = result.copy()
+        result["repeat_count"] = pd.Series(dtype=int)
+        result["first_step"] = pd.Series(dtype=object)
+        result["last_step"] = pd.Series(dtype=object)
+        result["steps"] = pd.Series(dtype=object)
+        result["is_repeated_issue_group"] = pd.Series(dtype=bool)
+        return result
+
+    collapsed = result.copy()
+    duplicate_flags = []
+    recent_duplicate_flags = []
+    for source_col in ("is_duplicate_step", "is_recent_duplicate_step"):
+        if source_col not in collapsed.columns:
+            collapsed[source_col] = False
+    duplicate_flags = collapsed["is_duplicate_step"].apply(lambda value: str(value).strip().lower() in {"true", "1", "yes"})
+    recent_duplicate_flags = collapsed["is_recent_duplicate_step"].apply(
+        lambda value: str(value).strip().lower() in {"true", "1", "yes"}
+    )
+
+    collapsed["_repeat_norm_visible"] = collapsed["visible_label"].apply(_normalize_compare_text)
+    collapsed["_repeat_norm_speech"] = collapsed["merged_announcement"].apply(_normalize_compare_text)
+    collapsed["_repeat_failure"] = collapsed["failure_reason"].fillna("").astype(str).str.strip().str.lower()
+    collapsed["_repeat_focus_id"] = collapsed["focus_view_id"].fillna("").astype(str).str.strip()
+    collapsed["_repeat_scenario"] = collapsed["scenario_id"].fillna("").astype(str).str.strip()
+
+    repeated_reason = collapsed["_repeat_failure"].isin(_REPEATED_ISSUE_FAILURE_REASONS)
+    candidate_mask = repeated_reason | duplicate_flags | recent_duplicate_flags
+    group_cols = [
+        "_repeat_scenario",
+        "_repeat_focus_id",
+        "_repeat_norm_visible",
+        "_repeat_norm_speech",
+        "_repeat_failure",
+    ]
+    group_sizes = collapsed.groupby(group_cols, dropna=False)["_repeat_failure"].transform("size")
+    collapse_mask = candidate_mask & (group_sizes > 1)
+
+    collapsed["repeat_count"] = 1
+    collapsed["first_step"] = collapsed["step"]
+    collapsed["last_step"] = collapsed["step"]
+    collapsed["steps"] = collapsed["step"].apply(lambda value: _format_repeat_steps([value]))
+    collapsed["is_repeated_issue_group"] = False
+
+    drop_indexes: set[int] = set()
+    for _, group in collapsed[collapse_mask].groupby(group_cols, dropna=False, sort=False):
+        group_idx = group.index.tolist()
+        if len(group_idx) <= 1:
+            continue
+        step_values = group["step"].tolist()
+        sorted_steps = sorted(step for step in (_step_sort_value(value) for value in step_values) if step >= 0)
+        representative_idx = group_idx[0]
+        collapsed.at[representative_idx, "repeat_count"] = len(group_idx)
+        collapsed.at[representative_idx, "first_step"] = sorted_steps[0] if sorted_steps else group.at[representative_idx, "step"]
+        collapsed.at[representative_idx, "last_step"] = sorted_steps[-1] if sorted_steps else group.at[representative_idx, "step"]
+        collapsed.at[representative_idx, "steps"] = _format_repeat_steps(step_values)
+        collapsed.at[representative_idx, "is_repeated_issue_group"] = True
+        if "review_note" in collapsed.columns:
+            note = str(collapsed.at[representative_idx, "review_note"] or "").strip()
+            repeated_note = f"반복 이슈 group ({len(group_idx)} rows)"
+            collapsed.at[representative_idx, "review_note"] = f"{note}; {repeated_note}" if note else repeated_note
+        drop_indexes.update(group_idx[1:])
+
+    if drop_indexes:
+        collapsed = collapsed.drop(index=sorted(drop_indexes))
+
+    return collapsed.drop(
+        columns=[
+            "_repeat_norm_visible",
+            "_repeat_norm_speech",
+            "_repeat_failure",
+            "_repeat_focus_id",
+            "_repeat_scenario",
+        ],
+        errors="ignore",
+    )
+
+
 def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     status_series = (
         filtered_df["status"].fillna("").astype(str).str.strip().str.upper()
@@ -853,6 +964,9 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     _pick_col("_speech_match_result", ["speech_match_result"])
     _pick_col("_raw_final_result", ["final_result"])
     _pick_col("failure_reason", ["failure_reason"])
+    _pick_col("is_duplicate_step", ["is_duplicate_step"], default=False)
+    _pick_col("is_recent_duplicate_step", ["is_recent_duplicate_step"], default=False)
+    _pick_col("recent_duplicate_distance", ["recent_duplicate_distance"], default=0)
     _pick_col("_row_source", ["row_source"], default="")
     _pick_col("_representative_row_source", ["representative_row_source"], default="")
     _pick_col("_representative_resource_id", ["representative_resource_id"], default="")
@@ -1146,8 +1260,9 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     result["_debug_log_path"] = ""
     result["_debug_log_name"] = ""
     result["result_crop_thumbnail"] = ""
+    result = _collapse_repeated_issue_groups(result)
 
-    public_columns = RESULT_SHEET_COLUMNS
+    public_columns = [*RESULT_SHEET_COLUMNS, *RESULT_REPEAT_METADATA_COLUMNS]
     helper_columns = [
         "_tab",
         "_req_id",

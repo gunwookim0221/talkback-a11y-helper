@@ -11,6 +11,14 @@ export interface RuntimeDashboardProps {
   pollingLatencyMs: number | null;
 }
 
+function formatElapsedClock(seconds: number) {
+  const normalized = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(normalized / 3600);
+  const minutes = Math.floor((normalized % 3600) / 60);
+  const remaining = normalized % 60;
+  return [hours, minutes, remaining].map((value) => String(value).padStart(2, '0')).join(':');
+}
+
 export function RuntimeDashboardPanel({ dashboard, batchStatus, status, helper, adb, pollingLatencyMs }: RuntimeDashboardProps) {
   const [isOpen, setIsOpen] = useState(false);
   const prevStateRef = useRef<string | null>(null);
@@ -185,6 +193,7 @@ function BatchLiveMonitor({
   isOpen: boolean;
   setIsOpen: (value: boolean) => void;
 }) {
+  const [nowMs, setNowMs] = useState(Date.now());
   const batch = batchStatus?.batch;
   const current = batchStatus?.current;
   const progress = batchStatus?.progress;
@@ -192,19 +201,31 @@ function BatchLiveMonitor({
   const preflight = logs?.latest_preflight_status;
   const batchState = batch?.state ?? batchStatus?.state ?? 'idle';
   const batchFinished = ['finished', 'failed', 'stopped', 'error'].includes(batchState);
+  useEffect(() => {
+    if (batchFinished) {
+      return undefined;
+    }
+    const interval = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [batchFinished]);
+
   const deviceTotal = batch?.total_devices ?? batchStatus?.devices?.length ?? 0;
   const finishedDevices = batch?.finished_devices ?? batchStatus?.devices?.filter((device) => !['pending', 'running'].includes(device.state)).length ?? 0;
   const scenarioCompleted = progress?.completed_scenarios ?? 0;
   const scenarioSelected = progress?.selected_scenarios ?? progress?.total_scenarios ?? 0;
   const scenarioObserved = progress?.observed_scenarios ?? 0;
-  const currentStepCount = typeof current?.current_step_index === 'number' ? current.current_step_index + 1 : 0;
-  const observedSteps = Math.max(progress?.observed_steps ?? 0, progress?.total_steps ?? 0, progress?.completed_steps ?? 0, currentStepCount);
   const observedEvents = progress?.observed_runtime_events ?? 0;
   const scenarioMetricLabel = 'Scenarios';
   const scenarioObservedDisplay = scenarioObserved || (current?.current_scenario_id ? 1 : 0);
-  const scenarioMetricValue = batchFinished
-    ? `${scenarioCompleted} completed / ${scenarioSelected} selected (${scenarioObservedDisplay} observed)`
-    : `${scenarioObservedDisplay} observed / ${scenarioSelected} selected`;
+  const scenarioMetricValue = `${scenarioObservedDisplay} run / ${scenarioSelected} selected`;
+  const scenarioProgressValue = scenarioSelected
+    ? `${Math.min(scenarioObservedDisplay, scenarioSelected)} / ${scenarioSelected}`
+    : (scenarioObservedDisplay ? `${scenarioObservedDisplay} run` : '-');
+  const startedMs = batch?.started_at ? Date.parse(batch.started_at) : NaN;
+  const finishedMs = batch?.finished_at ? Date.parse(batch.finished_at) : nowMs;
+  const elapsedEndMs = Number.isFinite(finishedMs) ? finishedMs : nowMs;
+  const batchElapsedSeconds = Number.isFinite(startedMs) ? Math.max(0, Math.floor((elapsedEndMs - startedMs) / 1000)) : 0;
+  const batchElapsedDisplay = batch?.started_at ? formatElapsedClock(batchElapsedSeconds) : '-';
   const counterTitle = batchFinished ? 'Quality Counter' : 'Observed Counter';
   const runtimeState = current?.current_scenario_runtime_state ?? (current?.current_scenario_id ? 'observing' : '-');
   const latestEvent = current?.latest_scenario_event ?? current?.current_step_result?.toLowerCase() ?? '-';
@@ -232,8 +253,8 @@ function BatchLiveMonitor({
             <strong>{scenarioMetricValue}</strong>
           </div>
           <div>
-            <span>Observed Runtime Events</span>
-            <strong>{observedEvents || observedSteps}</strong>
+            <span>Elapsed Time</span>
+            <strong>{batchElapsedDisplay}</strong>
           </div>
           <div>
             <span>Poll</span>
@@ -252,6 +273,8 @@ function BatchLiveMonitor({
               <dd>{batchStatus?.mode ?? '-'}</dd>
               <dt>Started</dt>
               <dd>{batch?.started_at ?? '-'}</dd>
+              <dt>Runtime</dt>
+              <dd>{batchElapsedDisplay}</dd>
               <dt>Finished</dt>
               <dd>{batch?.finished_at ?? '-'}</dd>
             </dl>
@@ -280,6 +303,8 @@ function BatchLiveMonitor({
               <dd>{runtimeState}</dd>
               <dt>Latest Event</dt>
               <dd>{latestEvent}</dd>
+              <dt>Scenario Progress</dt>
+              <dd>{scenarioProgressValue}</dd>
               <dt>Progress</dt>
               <dd>{batchFinished ? `${scenarioCompleted} completed` : 'observing'}</dd>
             </dl>

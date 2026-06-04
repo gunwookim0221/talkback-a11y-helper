@@ -99,6 +99,85 @@ def test_batch_status_includes_stable_live_dashboard_fields(tmp_path, monkeypatc
     assert status["devices"][0]["runner_log_path"].endswith("runner.log")
 
 
+def test_batch_status_accumulates_observed_scenarios_across_log_tails(tmp_path, monkeypatch):
+    monkeypatch.setattr(batch_runner, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(batch_runner, "RUN_LOG_DIR", tmp_path / "qa_frontend_runs")
+
+    out_dir = tmp_path / "qa_frontend_runs" / "batch_20260605_010203" / "device_Model_SERIAL"
+    out_dir.mkdir(parents=True)
+    log_path = out_dir / "runner.log"
+    log_path.write_text("[STEP] END scenario='s1' step=0 visible='One' final_result='PASS'\n", encoding="utf-8")
+
+    manager = batch_runner.BatchRunManager()
+    manager._batch_id = "batch_20260605_010203"
+    manager._state = "running"
+    manager._mode = "full"
+    manager._created_at = "2026-06-05T01:02:03+00:00"
+    manager._scenario_ids = ["s1", "s2"]
+    manager._current_device_idx = 0
+    manager._devices = [
+        {
+            "serial": "SERIAL",
+            "model": "Model",
+            "state": "running",
+            "output_dir": "qa_frontend_runs/batch_20260605_010203/device_Model_SERIAL",
+            "return_code": None,
+            "started_at": "2026-06-05T01:02:04+00:00",
+            "finished_at": None,
+            "observed_scenario_ids": [],
+        }
+    ]
+
+    first_status = manager.get_status()
+    assert first_status["progress"]["observed_scenarios"] == 1
+    assert manager._devices[0]["observed_scenario_ids"] == ["s1"]
+
+    log_path.write_text("[STEP] END scenario='s2' step=0 visible='Two' final_result='PASS'\n", encoding="utf-8")
+
+    second_status = manager.get_status()
+    assert second_status["progress"]["observed_scenarios"] == 2
+    assert second_status["progress"]["selected_scenarios"] == 2
+    assert manager._devices[0]["observed_scenario_ids"] == ["s1", "s2"]
+
+
+def test_finished_batch_status_uses_last_device_progress_after_current_device_clears(tmp_path, monkeypatch):
+    monkeypatch.setattr(batch_runner, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(batch_runner, "RUN_LOG_DIR", tmp_path / "qa_frontend_runs")
+
+    out_dir = tmp_path / "qa_frontend_runs" / "batch_20260605_020304" / "device_Model_SERIAL"
+    out_dir.mkdir(parents=True)
+    (out_dir / "runner.log").write_text(
+        "[STEP] END scenario='s2' step=0 visible='Two' final_result='PASS'\n",
+        encoding="utf-8",
+    )
+
+    manager = batch_runner.BatchRunManager()
+    manager._batch_id = "batch_20260605_020304"
+    manager._state = "finished"
+    manager._mode = "full"
+    manager._created_at = "2026-06-05T02:03:04+00:00"
+    manager._scenario_ids = ["s1", "s2"]
+    manager._current_device_idx = 1
+    manager._devices = [
+        {
+            "serial": "SERIAL",
+            "model": "Model",
+            "state": "passed",
+            "output_dir": "qa_frontend_runs/batch_20260605_020304/device_Model_SERIAL",
+            "return_code": 0,
+            "started_at": "2026-06-05T02:03:05+00:00",
+            "finished_at": "2026-06-05T02:04:05+00:00",
+            "observed_scenario_ids": ["s1", "s2"],
+        }
+    ]
+
+    status = manager.get_status()
+
+    assert status["current"]["current_device_serial"] == "SERIAL"
+    assert status["progress"]["observed_scenarios"] == 2
+    assert status["progress"]["selected_scenarios"] == 2
+
+
 def test_parse_live_log_uses_step_bearing_non_step_lines_as_fallback():
     log_text = "\n".join(
         [

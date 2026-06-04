@@ -52,6 +52,19 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
         context_col = _get_col("context_type")
         note_col = _get_col("review_note")
         crop_col = _get_col("result_crop_thumbnail")
+        repeat_count_col = _get_col("repeat_count")
+        first_step_col = _get_col("first_step")
+        last_step_col = _get_col("last_step")
+        steps_col = _get_col("steps")
+        repeated_group_col = _get_col("is_repeated_issue_group")
+
+        def _int_cell(row: int, col: int | None, default: int = 0) -> int:
+            if not col:
+                return default
+            try:
+                return int(sheet.cell(row, col).value or default)
+            except (TypeError, ValueError):
+                return default
 
         summary_matched = 0
         summary_true_mismatch = 0
@@ -101,6 +114,14 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
             context_type = str(sheet.cell(row, context_col).value or "").strip() if context_col else ""
             review_note = str(sheet.cell(row, note_col).value or "").strip() if note_col else ""
             crop_thumbnail = str(sheet.cell(row, crop_col).value or "").strip() if crop_col else ""
+            repeat_count = _int_cell(row, repeat_count_col, 1)
+            first_step = str(sheet.cell(row, first_step_col).value or "").strip() if first_step_col else step
+            last_step = str(sheet.cell(row, last_step_col).value or "").strip() if last_step_col else step
+            repeated_steps = str(sheet.cell(row, steps_col).value or "").strip() if steps_col else step
+            is_repeated_issue_group = False
+            if repeated_group_col:
+                raw_repeated = sheet.cell(row, repeated_group_col).value
+                is_repeated_issue_group = str(raw_repeated).strip().lower() in {"true", "1", "yes"}
 
             if not scenario_stats[scenario]["plugin_name"] and plugin_name:
                 scenario_stats[scenario]["plugin_name"] = plugin_name
@@ -220,6 +241,11 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
                     "focus_confidence": focus_confidence,
                     "review_note": review_note,
                     "crop_thumbnail": crop_thumbnail,
+                    "repeat_count": repeat_count,
+                    "first_step": first_step,
+                    "last_step": last_step,
+                    "steps": repeated_steps,
+                    "is_repeated_issue_group": is_repeated_issue_group,
                     "category": category,
                     "top_category": top_category
                 })

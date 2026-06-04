@@ -117,6 +117,7 @@ export type BatchCurrentStatus = {
 export type BatchProgressStatus = {
   selected_scenarios?: number;
   observed_scenarios?: number;
+  tail_observed_scenarios?: number;
   total_scenarios: number;
   completed_scenarios: number;
   passed_scenarios: number;
@@ -494,6 +495,11 @@ export const api = {
       final_result: string;
       failure_reason: string;
       focus_confidence: string;
+      repeat_count?: number;
+      first_step?: string;
+      last_step?: string;
+      steps?: string;
+      is_repeated_issue_group?: boolean;
       category: string; 
       top_category: string;
     }>;

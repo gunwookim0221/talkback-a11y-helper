@@ -33,6 +33,11 @@ type MismatchSummary = {
     final_result: string;
     failure_reason: string;
     focus_confidence: string;
+    repeat_count?: number;
+    first_step?: string;
+    last_step?: string;
+    steps?: string;
+    is_repeated_issue_group?: boolean;
     category: string; 
   }>;
 };
@@ -210,7 +215,10 @@ export function RecentRunsPanel({
                     }}>
                       {issue.final_result === 'WARN' ? 'ISSUE' : (issue.final_result === 'PASS' ? 'CLEAN' : issue.final_result)}
                     </span>
-                    <strong style={{ fontSize: '13px', wordBreak: 'break-all' }}>{issue.scenario_id} step {issue.step}</strong>
+                    <strong style={{ fontSize: '13px', wordBreak: 'break-all' }}>
+                      {issue.scenario_id} step {issue.step}
+                      {issue.is_repeated_issue_group ? ` · repeated ${issue.repeat_count} rows (${issue.first_step}-${issue.last_step})` : ''}
+                    </strong>
                   </div>
                   
                   <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', width: '100%' }}>
