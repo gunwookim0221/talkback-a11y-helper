@@ -11297,6 +11297,231 @@ def test_stop_then_cta_grace_allows_continue_then_stops_after_exhaust():
     assert state.cta_descend_grace_remaining == 0
 
 
+def test_repeated_traversal_suppression_allows_initial_local_tab_continue():
+    state = _phase_ordering_state()
+    row = {
+        **_main_row(22),
+        "scenario_id": "life_energy_plugin",
+        "visible_label": "Activity New notification",
+        "normalized_visible_label": "activity new notification",
+        "merged_announcement": "Activity New notification",
+        "normalized_announcement": "activity new notification",
+        "focus_view_id": "activity",
+    }
+
+    stop, reason, applied = collection_flow._maybe_apply_repeated_traversal_suppression(
+        row=row,
+        state=state,
+        stop=False,
+        reason="",
+        repeat_stop_reason="repeat_no_progress",
+        stop_eval_inputs=_phase_ordering_stop_inputs(repeat_stop_hit=True),
+        local_tab_transition_applied=True,
+        scroll_fallback_continue_applied=False,
+        step_idx=22,
+        scenario_id="life_energy_plugin",
+    )
+
+    assert (stop, reason, applied) == (False, "", False)
+    assert row["repeat_traversal_suppression_count"] == 1
+    assert row["repeat_traversal_local_tab_continue_count"] == 1
+
+
+def test_repeated_traversal_suppression_stops_after_local_tab_continue_threshold():
+    state = _phase_ordering_state()
+    stop = False
+    reason = ""
+    applied = False
+    row = {}
+    for step_idx in range(22, 27):
+        row = {
+            **_main_row(step_idx),
+            "scenario_id": "life_energy_plugin",
+            "visible_label": "Activity New notification",
+            "normalized_visible_label": "activity new notification",
+            "merged_announcement": "Activity New notification",
+            "normalized_announcement": "activity new notification",
+            "focus_view_id": "activity",
+        }
+        stop, reason, applied = collection_flow._maybe_apply_repeated_traversal_suppression(
+            row=row,
+            state=state,
+            stop=False,
+            reason="",
+            repeat_stop_reason="repeat_no_progress",
+            stop_eval_inputs=_phase_ordering_stop_inputs(repeat_stop_hit=True),
+            local_tab_transition_applied=True,
+            scroll_fallback_continue_applied=False,
+            step_idx=step_idx,
+            scenario_id="life_energy_plugin",
+        )
+
+    assert (stop, reason, applied) == (True, "repeat_no_progress", True)
+    assert row["repeat_traversal_suppression_scope"] == "section"
+    assert row["repeat_traversal_suppression_reason"] == "local_tab_continue"
+    assert row["repeat_traversal_suppression_count"] == 5
+    assert row["repeat_traversal_local_tab_continue_count"] == 5
+
+
+def test_repeated_traversal_suppression_stops_after_scroll_fallback_threshold():
+    state = _phase_ordering_state()
+    stop = False
+    reason = ""
+    applied = False
+    row = {}
+    for step_idx in range(22, 27):
+        row = {
+            **_main_row(step_idx),
+            "scenario_id": "life_energy_plugin",
+            "visible_label": "Activity New notification",
+            "normalized_visible_label": "activity new notification",
+            "merged_announcement": "Activity New notification",
+            "normalized_announcement": "activity new notification",
+            "focus_view_id": "activity",
+        }
+        stop, reason, applied = collection_flow._maybe_apply_repeated_traversal_suppression(
+            row=row,
+            state=state,
+            stop=False,
+            reason="",
+            repeat_stop_reason="repeat_no_progress",
+            stop_eval_inputs=_phase_ordering_stop_inputs(repeat_stop_hit=True),
+            local_tab_transition_applied=False,
+            scroll_fallback_continue_applied=True,
+            step_idx=step_idx,
+            scenario_id="life_energy_plugin",
+        )
+
+    assert (stop, reason, applied) == (True, "repeat_no_progress", True)
+    assert row["repeat_traversal_suppression_scope"] == "section"
+    assert row["repeat_traversal_suppression_reason"] == "scroll_fallback_continue"
+    assert row["repeat_traversal_suppression_count"] == 5
+    assert row["repeat_traversal_scroll_fallback_continue_count"] == 5
+
+
+def test_repeated_traversal_suppression_marks_scenario_scope_for_move_and_realign_failures():
+    state = _phase_ordering_state()
+    stop = False
+    reason = ""
+    applied = False
+    row = {}
+    for step_idx in range(22, 27):
+        row = {
+            **_main_row(step_idx),
+            "scenario_id": "life_energy_plugin",
+            "visible_label": "Activity New notification",
+            "normalized_visible_label": "activity new notification",
+            "merged_announcement": "Activity New notification",
+            "normalized_announcement": "activity new notification",
+            "focus_view_id": "activity",
+            "move_result": "failed",
+            "focus_realign_failed": True,
+        }
+        stop, reason, applied = collection_flow._maybe_apply_repeated_traversal_suppression(
+            row=row,
+            state=state,
+            stop=False,
+            reason="",
+            repeat_stop_reason="repeat_no_progress",
+            stop_eval_inputs=_phase_ordering_stop_inputs(repeat_stop_hit=True),
+            local_tab_transition_applied=True,
+            scroll_fallback_continue_applied=False,
+            step_idx=step_idx,
+            scenario_id="life_energy_plugin",
+        )
+
+    assert (stop, reason, applied) == (True, "repeat_no_progress", True)
+    assert row["repeat_traversal_suppression_scope"] == "scenario"
+    assert row["repeat_traversal_move_failed_count"] == 5
+    assert row["repeat_traversal_focus_realign_fail_count"] == 5
+
+
+def test_repeated_traversal_suppression_stops_main_loop_after_local_tab_grace(monkeypatch):
+    logs = []
+    repeated_rows = [
+        {
+            **_main_row(step_idx),
+            "scenario_id": "life_energy_plugin",
+            "visible_label": "Activity New notification",
+            "normalized_visible_label": "activity new notification",
+            "merged_announcement": "Activity New notification",
+            "normalized_announcement": "activity new notification",
+            "focus_view_id": "activity",
+        }
+        for step_idx in range(1, 8)
+    ]
+    state = _phase_ordering_state()
+    client = DummyClient(repeated_rows)
+    phase_ctx = SimpleNamespace(
+        tab_cfg={**_base_tab_cfg(max_steps=7), "scenario_id": "life_energy_plugin"},
+        rows=[],
+        all_rows=[],
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        checkpoint_every=100,
+        main_step_wait_seconds=0,
+        main_announcement_wait_seconds=0,
+        main_announcement_idle_wait_seconds=0,
+        main_announcement_max_extra_wait_seconds=0,
+        state=state,
+    )
+
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda _client, _dev, row, _base: row)
+    monkeypatch.setattr(collection_flow, "_record_pending_scroll_ready_move", lambda **kwargs: None)
+    monkeypatch.setattr(collection_flow, "_maybe_reprioritize_persistent_bottom_strip_row", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_maybe_promote_row_to_cta_child", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_maybe_progress_row_to_cta_sibling", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_record_recent_representative_signature", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(collection_flow, "_annotate_row_quality", lambda row, **kwargs: ("fp", 1))
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **kwargs: ([], []))
+    monkeypatch.setattr(collection_flow, "_run_crash_guard_check", lambda **kwargs: None)
+    monkeypatch.setattr(
+        collection_flow,
+        "should_stop",
+        lambda **kwargs: (
+            True,
+            0,
+            0,
+            "repeat_no_progress",
+            ("activity new notification", "activity", "bounds"),
+            {"terminal": False, "same_like_count": 5, "no_progress": True, "reason": "repeat_no_progress"},
+        ),
+    )
+    monkeypatch.setattr(
+        collection_flow,
+        "_build_stop_evaluation_inputs",
+        lambda **kwargs: _phase_ordering_stop_inputs(
+            same_like_count=5,
+            no_progress=True,
+            strict_duplicate=True,
+            repeat_stop_hit=True,
+            eval_reason="repeat_no_progress",
+        ),
+    )
+    monkeypatch.setattr(collection_flow, "_maybe_apply_cta_pending_grace", lambda **kwargs: (kwargs["stop"], kwargs["reason"], False))
+    monkeypatch.setattr(collection_flow, "_maybe_apply_scroll_ready_continue", lambda **kwargs: (kwargs["stop"], kwargs["reason"], False))
+    monkeypatch.setattr(collection_flow, "_maybe_select_next_local_tab", lambda **kwargs: True)
+    monkeypatch.setattr(collection_flow, "classify_step_result", lambda *args, **kwargs: {})
+    monkeypatch.setattr(collection_flow, "_format_stop_explain_log_fields", lambda **kwargs: "")
+    monkeypatch.setattr(collection_flow, "_log_repeat_stop_debug", lambda **kwargs: None)
+    monkeypatch.setattr(collection_flow, "_should_suppress_row_persistence", lambda **kwargs: (False, ""))
+    monkeypatch.setattr(collection_flow, "_overlay_phase", lambda **kwargs: SimpleNamespace(post_realign_pending_steps_delta=0))
+    monkeypatch.setattr(collection_flow, "save_excel_with_perf", lambda *args, **kwargs: None)
+
+    collection_flow._main_loop_phase(client, "SERIAL", phase_ctx)
+
+    assert len(phase_ctx.rows) == 5
+    assert state.stop_triggered is True
+    assert state.stop_reason == "repeat_no_progress"
+    assert state.stop_step == 5
+    assert phase_ctx.rows[-1]["status"] == "END"
+    assert phase_ctx.rows[-1]["repeat_traversal_suppression_scope"] == "section"
+    assert any("[STOP][repeat_suppression]" in line and "continue_reason='local_tab_continue'" in line for line in logs)
+    assert any("[STOP][eval]" in line and "decision='stop'" in line for line in logs)
+
+
 def test_scroll_ready_continue_does_not_override_terminal_stop():
     row = {
         **_main_row(1),

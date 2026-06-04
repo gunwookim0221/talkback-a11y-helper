@@ -81,6 +81,7 @@ COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr67-special-state-grace-home-like-str
 COLLECTION_FLOW_REPEAT_CTA_GRACE_VERSION = "pr78-repeat-cta-focus-align-v1"
 COLLECTION_FLOW_SCROLL_READY_VERSION = "pr79-scroll-ready-move-smart-v1"
 COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION = "pr108-local-tab-last-selected-hint-v1"
+COLLECTION_FLOW_REPEAT_SUPPRESSION_VERSION = "phase3f-repeat-suppression-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
 COLLECTION_FLOW_LIFE_RESET_VERSION = "pr61-life-reset-strict-global-nav-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
@@ -88,6 +89,9 @@ COLLECTION_FLOW_OVERLAY_FIRSTROW_DEBUG_VERSION = "pr73-overlay-first-row-lifecyc
 COLLECTION_FLOW_SYNTAX_FIX_VERSION = "pr110-strict-token-pattern-syntax-fix-v1"
 _SPECIAL_STATE_GRACE_MAX_STEPS = 3
 _CTA_DESCEND_GRACE_STEPS = 2
+_REPEAT_SUPPRESSION_FINGERPRINT_THRESHOLD = 5
+_REPEAT_SUPPRESSION_CONTINUE_THRESHOLD = 3
+_REPEAT_SUPPRESSION_SIGNAL_THRESHOLD = 3
 _STRONG_ONBOARDING_TOKENS = (
     "agree",
     "consent",
@@ -273,6 +277,15 @@ class FocusRealignState:
 
 
 @dataclass
+class RepeatedTraversalSuppressionState:
+    fingerprint_counts: dict[str, int] = field(default_factory=dict)
+    local_tab_continue_counts: dict[str, int] = field(default_factory=dict)
+    scroll_fallback_continue_counts: dict[str, int] = field(default_factory=dict)
+    move_failed_counts: dict[str, int] = field(default_factory=dict)
+    focus_realign_fail_counts: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass
 class MainLoopState:
     last_fingerprint: str
     fingerprint_repeat_count: int
@@ -328,6 +341,9 @@ class MainLoopState:
     dismissed_popup_signatures: dict[str, int] = field(default_factory=dict)
     scroll_state: ScrollState = field(default_factory=ScrollState)
     focus_realign_state: FocusRealignState = field(default_factory=FocusRealignState)
+    repeated_traversal_suppression_state: RepeatedTraversalSuppressionState = field(
+        default_factory=RepeatedTraversalSuppressionState
+    )
 
 
 @dataclass
@@ -10147,6 +10163,132 @@ def _clear_cta_descend_grace(state: MainLoopState) -> None:
     cta_state.cta_descend_grace_remaining = 0
 
 
+def _repeat_suppression_fingerprint(row: dict[str, Any], *, scenario_id: str) -> str:
+    visible = str(row.get("normalized_visible_label", "") or "").strip()
+    if not visible:
+        visible = _normalize_logical_text(str(row.get("visible_label", "") or ""))
+    speech = str(row.get("normalized_announcement", "") or "").strip()
+    if not speech:
+        speech = _normalize_logical_text(str(row.get("merged_announcement", "") or ""))
+    focus_view_id = str(row.get("focus_view_id", "") or row.get("resource_id", "") or "").strip().lower()
+    return "||".join(
+        [
+            str(scenario_id or row.get("scenario_id", "") or "").strip().lower() or "none",
+            focus_view_id or "none",
+            visible or "none",
+            speech or "none",
+        ]
+    )
+
+
+def _increment_repeat_suppression_counter(counters: dict[str, int], fingerprint: str, increment: bool = True) -> int:
+    if not increment:
+        return int(counters.get(fingerprint, 0) or 0)
+    counters[fingerprint] = int(counters.get(fingerprint, 0) or 0) + 1
+    return counters[fingerprint]
+
+
+def _row_has_focus_realign_failure_signal(row: dict[str, Any]) -> bool:
+    if bool(row.get("focus_realign_failed", False)):
+        return True
+    result = str(row.get("focus_realign_result", "") or row.get("realign_result", "") or "").strip().lower()
+    reason = str(row.get("focus_realign_reason", "") or row.get("realign_reason", "") or "").strip().lower()
+    return result in {"failed", "fail", "no_match"} or reason in {"focus_realign_fail", "no_match", "recent_realign_failed"}
+
+
+def _maybe_apply_repeated_traversal_suppression(
+    *,
+    row: dict[str, Any],
+    state: MainLoopState,
+    stop: bool,
+    reason: str,
+    repeat_stop_reason: str,
+    stop_eval_inputs: dict[str, Any],
+    local_tab_transition_applied: bool,
+    scroll_fallback_continue_applied: bool,
+    step_idx: int,
+    scenario_id: str,
+) -> tuple[bool, str, bool]:
+    if stop or not repeat_stop_reason or not bool(stop_eval_inputs.get("repeat_stop_hit", False)):
+        return stop, reason, False
+
+    continuation_reason = ""
+    if local_tab_transition_applied:
+        continuation_reason = "local_tab_continue"
+    elif scroll_fallback_continue_applied:
+        continuation_reason = "scroll_fallback_continue"
+    if not continuation_reason:
+        return stop, reason, False
+
+    suppression_state = getattr(state, "repeated_traversal_suppression_state", None)
+    if not isinstance(suppression_state, RepeatedTraversalSuppressionState):
+        suppression_state = RepeatedTraversalSuppressionState()
+        setattr(state, "repeated_traversal_suppression_state", suppression_state)
+    fingerprint = _repeat_suppression_fingerprint(row, scenario_id=scenario_id)
+    same_fingerprint_count = _increment_repeat_suppression_counter(suppression_state.fingerprint_counts, fingerprint)
+    local_tab_continue_count = _increment_repeat_suppression_counter(
+        suppression_state.local_tab_continue_counts,
+        fingerprint,
+        continuation_reason == "local_tab_continue",
+    )
+    scroll_fallback_continue_count = _increment_repeat_suppression_counter(
+        suppression_state.scroll_fallback_continue_counts,
+        fingerprint,
+        continuation_reason == "scroll_fallback_continue",
+    )
+    move_failed_count = _increment_repeat_suppression_counter(
+        suppression_state.move_failed_counts,
+        fingerprint,
+        normalize_move_result(row) == "failed",
+    )
+    focus_realign_fail_count = _increment_repeat_suppression_counter(
+        suppression_state.focus_realign_fail_counts,
+        fingerprint,
+        _row_has_focus_realign_failure_signal(row),
+    )
+
+    section_stop = (
+        same_fingerprint_count >= _REPEAT_SUPPRESSION_FINGERPRINT_THRESHOLD
+        and (
+            local_tab_continue_count >= _REPEAT_SUPPRESSION_CONTINUE_THRESHOLD
+            or scroll_fallback_continue_count >= _REPEAT_SUPPRESSION_CONTINUE_THRESHOLD
+        )
+    )
+    scenario_stop = (
+        same_fingerprint_count >= _REPEAT_SUPPRESSION_FINGERPRINT_THRESHOLD
+        and move_failed_count >= _REPEAT_SUPPRESSION_SIGNAL_THRESHOLD
+        and focus_realign_fail_count >= _REPEAT_SUPPRESSION_SIGNAL_THRESHOLD
+    )
+    if not (section_stop or scenario_stop):
+        row["repeat_traversal_suppression_count"] = same_fingerprint_count
+        row["repeat_traversal_local_tab_continue_count"] = local_tab_continue_count
+        row["repeat_traversal_scroll_fallback_continue_count"] = scroll_fallback_continue_count
+        return stop, reason, False
+
+    scope = "scenario" if scenario_stop else "section"
+    row["repeat_traversal_suppression_stop"] = True
+    row["repeat_traversal_suppression_scope"] = scope
+    row["repeat_traversal_suppression_reason"] = continuation_reason
+    row["repeat_traversal_suppression_fingerprint"] = fingerprint
+    row["repeat_traversal_suppression_count"] = same_fingerprint_count
+    row["repeat_traversal_local_tab_continue_count"] = local_tab_continue_count
+    row["repeat_traversal_scroll_fallback_continue_count"] = scroll_fallback_continue_count
+    row["repeat_traversal_move_failed_count"] = move_failed_count
+    row["repeat_traversal_focus_realign_fail_count"] = focus_realign_fail_count
+    row["repeat_traversal_suppression_version"] = COLLECTION_FLOW_REPEAT_SUPPRESSION_VERSION
+    log(
+        f"[STOP][repeat_suppression] step={step_idx} scenario='{scenario_id}' "
+        f"scope='{scope}' reason='{repeat_stop_reason}' continue_reason='{continuation_reason}' "
+        f"same_fingerprint_count={same_fingerprint_count} "
+        f"local_tab_continue_count={local_tab_continue_count} "
+        f"scroll_fallback_continue_count={scroll_fallback_continue_count} "
+        f"move_failed_count={move_failed_count} focus_realign_fail_count={focus_realign_fail_count} "
+        f"fingerprint='{_truncate_debug_text(fingerprint, 180)}' "
+        f"version='{COLLECTION_FLOW_REPEAT_SUPPRESSION_VERSION}'"
+    )
+    return True, repeat_stop_reason, True
+
+
 def _maybe_apply_scroll_ready_continue(
     *,
     row: dict[str, Any],
@@ -11668,6 +11810,15 @@ def _main_loop_phase(
                 stop = False
                 reason = ""
         local_tab_transition_applied = False
+        repeat_stop_reason_before_continue = (
+            reason
+            if (
+                stop
+                and bool(stop_eval_inputs.get("repeat_stop_hit", False))
+                and reason in {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall", "repeat_semantic_stall_after_escape"}
+            )
+            else ""
+        )
         viewport_exhausted_direct_path = bool(
             row.get("viewport_exhausted_eval_result", False)
             and scenario_type != "global_nav"
@@ -11712,6 +11863,18 @@ def _main_loop_phase(
                 stop = False
                 reason = ""
                 state.scroll_state.pending_scroll_ready_cluster_signature = ""
+        stop, reason, repeat_suppression_applied = _maybe_apply_repeated_traversal_suppression(
+            row=row,
+            state=state,
+            stop=stop,
+            reason=reason,
+            repeat_stop_reason=repeat_stop_reason_before_continue,
+            stop_eval_inputs=stop_eval_inputs,
+            local_tab_transition_applied=local_tab_transition_applied,
+            scroll_fallback_continue_applied=bool(row.get("scroll_fallback_resumed_content", False)),
+            step_idx=step_idx,
+            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+        )
         repeat_stop_hit = bool(stop_eval_inputs["repeat_stop_hit"])
 
         if stop and reason == "repeat_semantic_stall":
