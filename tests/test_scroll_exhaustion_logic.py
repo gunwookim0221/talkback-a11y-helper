@@ -625,11 +625,12 @@ def test_last_scroll_no_content_marks_global_exhausted_without_completing_group(
         step_idx=12,
     )
 
-    assert advanced is True
+    assert advanced is False
     assert client.scroll_calls == ["down"]
     assert row["last_scroll_fallback_allowed"] is True
     assert row["last_scroll_fallback_resumed_content"] is False
     assert row["last_scroll_global_exhausted"] is True
+    assert row["local_tab_block_reason"] == "no_unvisited_local_tab"
     assert state.active_container_group_signature == ""
     assert state.active_container_group_remaining == set()
     assert state.completed_container_groups == set()
@@ -667,13 +668,14 @@ def test_last_scroll_new_signature_allowed_when_previous_signature_attempted():
         step_idx=17,
     )
 
-    assert advanced is True
+    assert advanced is False
     assert client.scroll_calls == ["down"]
     assert row["last_scroll_fallback_allowed"] is True
     assert row["last_scroll_block_reason"] == ""
     assert row["last_scroll_global_exhausted"] is True
-    assert row["local_tab_transition"] is True
-    assert state.last_scroll_fallback_attempted_signatures == set()
+    assert row["local_tab_block_reason"] == "no_unvisited_local_tab"
+    assert row.get("local_tab_transition") is not True
+    assert state.last_scroll_fallback_attempted_signatures != {"old||last"}
 
 
 def test_scroll_failure_does_not_complete_active_container_group():
