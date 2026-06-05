@@ -82,6 +82,7 @@ COLLECTION_FLOW_REPEAT_CTA_GRACE_VERSION = "pr78-repeat-cta-focus-align-v1"
 COLLECTION_FLOW_SCROLL_READY_VERSION = "pr79-scroll-ready-move-smart-v1"
 COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION = "pr108-local-tab-last-selected-hint-v1"
 COLLECTION_FLOW_REPEAT_SUPPRESSION_VERSION = "phase3f-repeat-suppression-v1"
+COLLECTION_FLOW_BOTTOM_STRIP_GUARD_VERSION = "phase4d-bottom-strip-guard-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
 COLLECTION_FLOW_LIFE_RESET_VERSION = "pr61-life-reset-strict-global-nav-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
@@ -92,6 +93,8 @@ _CTA_DESCEND_GRACE_STEPS = 2
 _REPEAT_SUPPRESSION_FINGERPRINT_THRESHOLD = 5
 _REPEAT_SUPPRESSION_CONTINUE_THRESHOLD = 3
 _REPEAT_SUPPRESSION_SIGNAL_THRESHOLD = 3
+_BOTTOM_STRIP_GUARD_FINGERPRINT_THRESHOLD = 5
+_BOTTOM_STRIP_GUARD_FAILURE_THRESHOLD = 3
 _STRONG_ONBOARDING_TOKENS = (
     "agree",
     "consent",
@@ -286,6 +289,13 @@ class RepeatedTraversalSuppressionState:
 
 
 @dataclass
+class BottomStripRepetitionGuardState:
+    fingerprint_counts: dict[str, int] = field(default_factory=dict)
+    move_failed_counts: dict[str, int] = field(default_factory=dict)
+    repeat_no_progress_counts: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass
 class MainLoopState:
     last_fingerprint: str
     fingerprint_repeat_count: int
@@ -344,6 +354,10 @@ class MainLoopState:
     repeated_traversal_suppression_state: RepeatedTraversalSuppressionState = field(
         default_factory=RepeatedTraversalSuppressionState
     )
+    bottom_strip_repetition_guard_state: BottomStripRepetitionGuardState = field(
+        default_factory=BottomStripRepetitionGuardState
+    )
+    local_tab_state: local_tab_logic.LocalTabState = field(default_factory=local_tab_logic.LocalTabState)
 
 
 @dataclass
@@ -10289,6 +10303,90 @@ def _maybe_apply_repeated_traversal_suppression(
     return True, repeat_stop_reason, True
 
 
+def _is_bottom_strip_lifecycle_row(row: dict[str, Any]) -> bool:
+    return bool(
+        str(row.get("row_lifecycle_kind", "") or "").strip() == "local_tab"
+        and str(row.get("row_lifecycle_source", "") or "").strip() == "bottom_strip_candidate"
+    )
+
+
+def _bottom_strip_guard_repeat_signal(
+    *,
+    stop: bool,
+    reason: str,
+    stop_eval_inputs: dict[str, Any],
+) -> bool:
+    if bool(stop_eval_inputs.get("repeat_stop_hit", False)):
+        return True
+    if str(reason or "") in {
+        "repeat_no_progress",
+        "bounded_two_card_loop",
+        "repeat_semantic_stall",
+        "repeat_semantic_stall_after_escape",
+    }:
+        return True
+    return bool(
+        stop
+        and bool(stop_eval_inputs.get("no_progress", False))
+        and bool(stop_eval_inputs.get("strict_duplicate", False))
+    )
+
+
+def _maybe_apply_bottom_strip_repetition_guard(
+    *,
+    row: dict[str, Any],
+    state: MainLoopState,
+    stop: bool,
+    reason: str,
+    stop_eval_inputs: dict[str, Any],
+    step_idx: int,
+    scenario_id: str,
+) -> tuple[bool, str, bool]:
+    if not _is_bottom_strip_lifecycle_row(row):
+        return stop, reason, False
+
+    guard_state = getattr(state, "bottom_strip_repetition_guard_state", None)
+    if not isinstance(guard_state, BottomStripRepetitionGuardState):
+        guard_state = BottomStripRepetitionGuardState()
+        setattr(state, "bottom_strip_repetition_guard_state", guard_state)
+
+    fingerprint = _repeat_suppression_fingerprint(row, scenario_id=scenario_id)
+    same_fingerprint_count = _increment_repeat_suppression_counter(guard_state.fingerprint_counts, fingerprint)
+    repeat_signal = _bottom_strip_guard_repeat_signal(
+        stop=stop,
+        reason=reason,
+        stop_eval_inputs=stop_eval_inputs,
+    )
+    move_failed_signal = bool(normalize_move_result(row) == "failed" and not repeat_signal)
+    move_failed_count = _increment_repeat_suppression_counter(
+        guard_state.move_failed_counts,
+        fingerprint,
+        move_failed_signal,
+    )
+    repeat_count = _increment_repeat_suppression_counter(
+        guard_state.repeat_no_progress_counts,
+        fingerprint,
+        repeat_signal,
+    )
+    failure_count = move_failed_count + repeat_count
+    if stop or same_fingerprint_count < _BOTTOM_STRIP_GUARD_FINGERPRINT_THRESHOLD:
+        return stop, reason, False
+    if failure_count < _BOTTOM_STRIP_GUARD_FAILURE_THRESHOLD:
+        return stop, reason, False
+
+    focus_view_id = str(row.get("focus_view_id", "") or row.get("resource_id", "") or "").strip().lower()
+    log(
+        f"[STOP][bottom_strip_guard] step={step_idx} scenario='{scenario_id}' "
+        "scope='section' "
+        f"same_fingerprint_count={same_fingerprint_count} "
+        f"move_failed_count={move_failed_count} repeat_count={repeat_count} "
+        f"focus_view_id='{_truncate_debug_text(focus_view_id, 120)}' "
+        f"fingerprint='{_truncate_debug_text(fingerprint, 180)}' "
+        f"version='{COLLECTION_FLOW_BOTTOM_STRIP_GUARD_VERSION}'"
+    )
+    return True, "repeat_no_progress", True
+
+
 def _maybe_apply_scroll_ready_continue(
     *,
     row: dict[str, Any],
@@ -11872,6 +11970,15 @@ def _main_loop_phase(
             stop_eval_inputs=stop_eval_inputs,
             local_tab_transition_applied=local_tab_transition_applied,
             scroll_fallback_continue_applied=bool(row.get("scroll_fallback_resumed_content", False)),
+            step_idx=step_idx,
+            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+        )
+        stop, reason, bottom_strip_guard_applied = _maybe_apply_bottom_strip_repetition_guard(
+            row=row,
+            state=state,
+            stop=stop,
+            reason=reason,
+            stop_eval_inputs=stop_eval_inputs,
             step_idx=step_idx,
             scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
         )

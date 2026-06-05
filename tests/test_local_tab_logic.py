@@ -78,6 +78,434 @@ def _bottom_strip_candidate(label, left, right, *, top=2338, bottom=2473, rid=""
     }
 
 
+def test_local_tab_state_defaults_are_empty():
+    state = local_tab_logic.LocalTabState()
+
+    assert state.signature == ""
+    assert state.active_label == ""
+    assert state.active_rid == ""
+    assert state.active_age == 0
+    assert state.pending_label == ""
+    assert state.pending_rid == ""
+    assert state.visited_by_signature == {}
+    assert state.exhausted_signatures == set()
+    assert state.candidates_by_signature == {}
+
+
+def test_local_tab_state_registers_candidates_by_signature():
+    state = local_tab_logic.LocalTabState()
+    candidates = [{"rid": "monitor", "label": "Monitor"}]
+
+    state.register_candidates("monitor||save", candidates)
+    candidates.append({"rid": "save", "label": "Save"})
+
+    assert state.candidates_by_signature == {
+        "monitor||save": [{"rid": "monitor", "label": "Monitor"}]
+    }
+
+
+def test_local_tab_state_marks_visited_and_exhausted():
+    state = local_tab_logic.LocalTabState()
+
+    state.mark_visited("monitor||save", "monitor")
+    state.mark_visited("monitor||save", "save")
+    state.mark_exhausted("monitor||save")
+
+    assert state.visited_by_signature["monitor||save"] == {"monitor", "save"}
+    assert state.exhausted_signatures == {"monitor||save"}
+
+
+def test_local_tab_state_updates_active_and_pending():
+    state = local_tab_logic.LocalTabState()
+
+    state.set_active(signature="monitor||save", rid="monitor", label="Monitor", age=2)
+    state.set_pending(
+        signature="monitor||save",
+        rid="save",
+        label="Save",
+        bounds="700,2338,1050,2473",
+        age=1,
+    )
+
+    assert state.signature == "monitor||save"
+    assert state.active_rid == "monitor"
+    assert state.active_label == "Monitor"
+    assert state.active_age == 2
+    assert state.pending_signature == "monitor||save"
+    assert state.pending_rid == "save"
+    assert state.pending_label == "Save"
+    assert state.pending_bounds == "700,2338,1050,2473"
+    assert state.pending_age == 1
+
+
+def test_local_tab_state_consistency_has_no_mismatch_when_mirror_matches():
+    mirror = local_tab_logic.LocalTabState()
+    mirror.set_active(signature="monitor||save", rid="monitor", label="Monitor")
+    mirror.set_pending(signature="monitor||save", rid="save", label="Save", bounds="700,2338,1050,2473")
+    mirror.set_forced(signature="monitor||save", rid="save", label="Save", bounds="700,2338,1050,2473")
+    mirror.set_last_selected(signature="monitor||save", rid="monitor", label="Monitor", bounds="30,2338,370,2473")
+    mirror.mark_visited("monitor||save", "monitor")
+    mirror.register_candidates("monitor||save", [{"rid": "monitor", "label": "Monitor"}])
+    state = SimpleNamespace(
+        local_tab_state=mirror,
+        current_local_tab_signature="monitor||save",
+        current_local_tab_active_rid="monitor",
+        current_local_tab_active_label="Monitor",
+        pending_local_tab_signature="monitor||save",
+        pending_local_tab_rid="save",
+        pending_local_tab_label="Save",
+        forced_local_tab_target_signature="monitor||save",
+        forced_local_tab_target_rid="save",
+        forced_local_tab_target_label="Save",
+        last_selected_local_tab_signature="monitor||save",
+        last_selected_local_tab_rid="monitor",
+        last_selected_local_tab_label="Monitor",
+        visited_local_tabs_by_signature={"monitor||save": {"monitor"}},
+        local_tab_candidates_by_signature={"monitor||save": [{"rid": "monitor", "label": "Monitor"}]},
+    )
+
+    assert local_tab_logic._get_local_tab_state_consistency_mismatches(state) == []
+
+
+def test_local_tab_state_consistency_reports_pending_label_mismatch():
+    mirror = local_tab_logic.LocalTabState()
+    mirror.set_pending(signature="monitor||save", rid="save", label="Savings", bounds="")
+    state = SimpleNamespace(
+        local_tab_state=mirror,
+        pending_local_tab_signature="monitor||save",
+        pending_local_tab_rid="save",
+        pending_local_tab_label="Save",
+    )
+
+    assert local_tab_logic._get_local_tab_state_consistency_mismatches(state) == ["pending_label"]
+
+
+def test_local_tab_state_consistency_reports_visited_mismatch():
+    mirror = local_tab_logic.LocalTabState()
+    mirror.mark_visited("monitor||save", "monitor")
+    state = SimpleNamespace(
+        local_tab_state=mirror,
+        visited_local_tabs_by_signature={"monitor||save": {"monitor", "save"}},
+    )
+
+    assert local_tab_logic._get_local_tab_state_consistency_mismatches(state) == ["visited_by_signature"]
+
+
+def test_local_tab_state_consistency_skips_missing_legacy_fields():
+    state = SimpleNamespace(local_tab_state=local_tab_logic.LocalTabState())
+
+    assert local_tab_logic._get_local_tab_state_consistency_mismatches(state) == []
+
+
+def test_local_tab_state_consistency_logs_mismatch_only(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    mirror = local_tab_logic.LocalTabState()
+    mirror.set_pending(signature="monitor||save", rid="save", label="Savings", bounds="")
+    state = SimpleNamespace(
+        local_tab_state=mirror,
+        pending_local_tab_signature="monitor||save",
+        pending_local_tab_rid="save",
+        pending_local_tab_label="Save",
+    )
+
+    mismatches = local_tab_logic._log_local_tab_state_consistency_mismatch(state, context="unit_test")
+
+    assert mismatches == ["pending_label"]
+    assert logs == ["[LOCAL_TAB_STATE][mismatch] context='unit_test' fields='pending_label'"]
+
+
+def test_local_tab_candidates_read_prefers_mirror_candidates():
+    mirror = local_tab_logic.LocalTabState()
+    mirror.register_candidates("mirror_sig", [{"rid": "mirror", "label": "Mirror"}])
+    state = SimpleNamespace(
+        local_tab_state=mirror,
+        local_tab_candidates_by_signature={"legacy_sig": [{"rid": "legacy", "label": "Legacy"}]},
+    )
+
+    candidates_by_signature = local_tab_logic._get_local_tab_candidates_by_signature(state)
+
+    assert list(candidates_by_signature) == ["mirror_sig"]
+    assert candidates_by_signature["mirror_sig"][0]["label"] == "Mirror"
+
+
+def test_local_tab_candidates_read_falls_back_to_legacy_when_mirror_empty():
+    state = SimpleNamespace(
+        local_tab_state=local_tab_logic.LocalTabState(),
+        local_tab_candidates_by_signature={"legacy_sig": [{"rid": "legacy", "label": "Legacy"}]},
+    )
+
+    candidates_by_signature = local_tab_logic._get_local_tab_candidates_by_signature(state)
+
+    assert list(candidates_by_signature) == ["legacy_sig"]
+    assert candidates_by_signature["legacy_sig"][0]["label"] == "Legacy"
+
+
+def test_local_tab_candidates_read_logs_key_mismatch_without_crash(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    mirror = local_tab_logic.LocalTabState()
+    mirror.register_candidates("mirror_sig", [{"rid": "mirror", "label": "Mirror"}])
+    state = SimpleNamespace(
+        local_tab_state=mirror,
+        local_tab_candidates_by_signature={"legacy_sig": [{"rid": "legacy", "label": "Legacy"}]},
+    )
+
+    candidates_by_signature = local_tab_logic._get_local_tab_candidates_by_signature(
+        state,
+        context="unit_candidates_read",
+    )
+
+    assert list(candidates_by_signature) == ["mirror_sig"]
+    assert logs == [
+        "[LOCAL_TAB_STATE][mismatch] context='unit_candidates_read' fields='candidates_by_signature'"
+    ]
+
+
+def test_active_local_tab_snapshot_prefers_mirror_active():
+    mirror = local_tab_logic.LocalTabState()
+    mirror.set_active(signature="mirror_sig", rid="mirror_rid", label="Mirror", age=2)
+    state = SimpleNamespace(
+        local_tab_state=mirror,
+        current_local_tab_signature="legacy_sig",
+        current_local_tab_active_rid="legacy_rid",
+        current_local_tab_active_label="Legacy",
+        current_local_tab_active_age=1,
+    )
+
+    snapshot = local_tab_logic._get_active_local_tab_snapshot(state)
+
+    assert snapshot == {
+        "signature": "mirror_sig",
+        "rid": "mirror_rid",
+        "label": "Mirror",
+        "age": 2,
+        "source": "mirror",
+    }
+
+
+def test_active_local_tab_snapshot_falls_back_to_legacy_when_mirror_empty():
+    state = SimpleNamespace(
+        local_tab_state=local_tab_logic.LocalTabState(),
+        current_local_tab_signature="legacy_sig",
+        current_local_tab_active_rid="legacy_rid",
+        current_local_tab_active_label="Legacy",
+        current_local_tab_active_age=3,
+    )
+
+    snapshot = local_tab_logic._get_active_local_tab_snapshot(state)
+
+    assert snapshot == {
+        "signature": "legacy_sig",
+        "rid": "legacy_rid",
+        "label": "Legacy",
+        "age": 3,
+        "source": "legacy",
+    }
+
+
+def test_active_local_tab_snapshot_logs_mismatch_without_crash(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    mirror = local_tab_logic.LocalTabState()
+    mirror.set_active(signature="mirror_sig", rid="mirror_rid", label="Mirror", age=2)
+    state = SimpleNamespace(
+        local_tab_state=mirror,
+        current_local_tab_signature="legacy_sig",
+        current_local_tab_active_rid="legacy_rid",
+        current_local_tab_active_label="Legacy",
+        current_local_tab_active_age=1,
+    )
+
+    snapshot = local_tab_logic._get_active_local_tab_snapshot(state, context="unit_active_read")
+
+    assert snapshot["source"] == "mirror"
+    assert logs == [
+        "[LOCAL_TAB_STATE][mismatch] context='unit_active_read' fields='active_signature,active_rid,active_label,active_age'"
+    ]
+
+
+def test_active_local_tab_snapshot_handles_missing_legacy_fields():
+    mirror = local_tab_logic.LocalTabState()
+    mirror.set_active(signature="mirror_sig", rid="mirror_rid", label="Mirror", age=2)
+    state = SimpleNamespace(local_tab_state=mirror)
+
+    snapshot = local_tab_logic._get_active_local_tab_snapshot(state)
+
+    assert snapshot["source"] == "mirror"
+    assert snapshot["label"] == "Mirror"
+
+
+def test_resolve_active_local_tab_candidate_prefers_mirror_active(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    mirror = local_tab_logic.LocalTabState()
+    mirror.set_active(signature="tabs", rid="save", label="Save", age=0)
+    state = SimpleNamespace(
+        local_tab_state=mirror,
+        current_local_tab_signature="tabs",
+        current_local_tab_active_rid="monitor",
+        current_local_tab_active_label="Monitor",
+        current_local_tab_active_age=0,
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        pending_local_tab_age=0,
+        last_selected_local_tab_signature="",
+        last_selected_local_tab_rid="",
+        last_selected_local_tab_label="",
+        last_selected_local_tab_bounds="",
+    )
+    candidates = [
+        {"rid": "monitor", "label": "Monitor", "bounds": "30,2338,370,2473"},
+        {"rid": "save", "label": "Save", "bounds": "370,2338,710,2473"},
+    ]
+
+    active, source, label = local_tab_logic._resolve_active_local_tab_candidate_for_progression(
+        state=state,
+        sorted_tab_candidates=candidates,
+        row={},
+        previous_row={},
+    )
+
+    assert active == candidates[1]
+    assert source == "committed"
+    assert label == "Save"
+
+
+def test_pending_local_tab_snapshot_prefers_mirror_pending():
+    mirror = local_tab_logic.LocalTabState()
+    mirror.set_pending(
+        signature="mirror_sig",
+        rid="mirror_rid",
+        label="Mirror",
+        bounds="10,20,30,40",
+        age=2,
+    )
+    state = SimpleNamespace(
+        local_tab_state=mirror,
+        pending_local_tab_signature="legacy_sig",
+        pending_local_tab_rid="legacy_rid",
+        pending_local_tab_label="Legacy",
+        pending_local_tab_bounds="1,2,3,4",
+        pending_local_tab_age=1,
+    )
+
+    snapshot = local_tab_logic._get_pending_local_tab_snapshot(state)
+
+    assert snapshot == {
+        "signature": "mirror_sig",
+        "rid": "mirror_rid",
+        "label": "Mirror",
+        "bounds": "10,20,30,40",
+        "age": 2,
+        "source": "mirror",
+    }
+
+
+def test_pending_local_tab_snapshot_falls_back_to_legacy_when_mirror_empty():
+    state = SimpleNamespace(
+        local_tab_state=local_tab_logic.LocalTabState(),
+        pending_local_tab_signature="legacy_sig",
+        pending_local_tab_rid="legacy_rid",
+        pending_local_tab_label="Legacy",
+        pending_local_tab_bounds="1,2,3,4",
+        pending_local_tab_age=3,
+    )
+
+    snapshot = local_tab_logic._get_pending_local_tab_snapshot(state)
+
+    assert snapshot == {
+        "signature": "legacy_sig",
+        "rid": "legacy_rid",
+        "label": "Legacy",
+        "bounds": "1,2,3,4",
+        "age": 3,
+        "source": "legacy",
+    }
+
+
+def test_pending_local_tab_snapshot_logs_mismatch_without_crash(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    mirror = local_tab_logic.LocalTabState()
+    mirror.set_pending(
+        signature="mirror_sig",
+        rid="mirror_rid",
+        label="Mirror",
+        bounds="10,20,30,40",
+        age=2,
+    )
+    state = SimpleNamespace(
+        local_tab_state=mirror,
+        pending_local_tab_signature="legacy_sig",
+        pending_local_tab_rid="legacy_rid",
+        pending_local_tab_label="Legacy",
+        pending_local_tab_bounds="1,2,3,4",
+        pending_local_tab_age=1,
+    )
+
+    snapshot = local_tab_logic._get_pending_local_tab_snapshot(state, context="unit_pending_read")
+
+    assert snapshot["source"] == "mirror"
+    assert logs == [
+        "[LOCAL_TAB_STATE][mismatch] context='unit_pending_read' fields='pending_signature,pending_rid,pending_label,pending_bounds,pending_age'"
+    ]
+
+
+def test_pending_local_tab_snapshot_handles_missing_legacy_fields():
+    mirror = local_tab_logic.LocalTabState()
+    mirror.set_pending(
+        signature="mirror_sig",
+        rid="mirror_rid",
+        label="Mirror",
+        bounds="10,20,30,40",
+        age=2,
+    )
+    state = SimpleNamespace(local_tab_state=mirror)
+
+    snapshot = local_tab_logic._get_pending_local_tab_snapshot(state)
+
+    assert snapshot["source"] == "mirror"
+    assert snapshot["label"] == "Mirror"
+
+
+def test_commit_pending_local_tab_progression_prefers_mirror_pending(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    mirror = local_tab_logic.LocalTabState()
+    mirror.set_pending(
+        signature="tabs",
+        rid="save",
+        label="Save",
+        bounds="370,2338,710,2473",
+        age=0,
+    )
+    state = SimpleNamespace(
+        local_tab_state=mirror,
+        current_local_tab_signature="tabs",
+        current_local_tab_active_rid="monitor",
+        current_local_tab_active_label="Monitor",
+        visited_local_tabs_by_signature={},
+        pending_local_tab_signature="tabs",
+        pending_local_tab_rid="legacy",
+        pending_local_tab_label="Legacy",
+        pending_local_tab_bounds="1,2,3,4",
+        pending_local_tab_age=0,
+        forced_local_tab_target_rid="",
+        forced_local_tab_target_label="",
+        forced_local_tab_target_bounds="",
+    )
+
+    local_tab_logic._maybe_commit_pending_local_tab_progression(
+        state,
+        {"focus_view_id": "save", "visible_label": "Save", "focus_bounds": "370,2338,710,2473"},
+    )
+
+    assert state.current_local_tab_active_rid == "save"
+    assert state.current_local_tab_active_label == "Save"
+    assert "save" in state.visited_local_tabs_by_signature["tabs"]
+
+
 def test_last_selected_local_tab_hint_write_and_clear_direct(monkeypatch):
     logs = []
     _bind_local_tab_logic(monkeypatch, logs)
@@ -137,6 +565,292 @@ def test_structural_local_tab_filter_accepts_energy_badged_activity(monkeypatch)
     assert accepted[2]["original_label"] == "Activity New notification"
     assert accepted[2]["label_canonicalized"] is True
     assert rejected == []
+
+
+def test_lifecycle_marks_bottom_strip_focus_row_as_local_tab(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    client = DummyClient([])
+    client.dump_tree_sequence = [[
+        {
+            "text": "",
+            "contentDescription": "",
+            "viewIdResourceName": "",
+            "className": "android.widget.FrameLayout",
+            "clickable": False,
+            "focusable": False,
+            "effectiveClickable": False,
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2200",
+            "children": [
+                {
+                    "text": "Device usage",
+                    "contentDescription": "",
+                    "viewIdResourceName": "com.example:id/device_usage_card",
+                    "className": "android.view.ViewGroup",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "60,420,1020,760",
+                    "children": [],
+                },
+                {
+                    "text": "Activity",
+                    "contentDescription": "",
+                    "viewIdResourceName": "com.example:id/activity_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "40,1760,320,1860",
+                    "children": [],
+                },
+                {
+                    "text": "Location",
+                    "contentDescription": "",
+                    "viewIdResourceName": "com.example:id/location_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "effectiveClickable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "400,1760,680,1860",
+                    "children": [],
+                },
+            ],
+        }
+    ]]
+    state = SimpleNamespace(
+        recent_representative_signatures=[],
+        consumed_representative_signatures=set(),
+        consumed_cluster_signatures=set(),
+        consumed_cluster_logical_signatures=set(),
+        local_tab_candidates_by_signature={},
+        visited_local_tabs_by_signature={},
+        current_local_tab_signature="",
+        current_local_tab_active_rid="",
+        current_local_tab_active_label="",
+        current_local_tab_active_age=0,
+        pending_local_tab_signature="",
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        pending_local_tab_bounds="",
+        forced_local_tab_target_rid="",
+        forced_local_tab_target_label="",
+        forced_local_tab_target_bounds="",
+    )
+    row = {
+        "focus_view_id": "com.example:id/location_button",
+        "visible_label": "Location",
+        "merged_announcement": "Location",
+        "focus_bounds": "400,1760,680,1860",
+        "focus_class_name": "android.widget.Button",
+        "focus_clickable": True,
+        "focus_focusable": True,
+        "focus_effective_clickable": True,
+    }
+
+    updated = local_tab_logic._maybe_reprioritize_persistent_bottom_strip_row(
+        row=row,
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_type": "content", "scenario_id": "life_energy_plugin"},
+        state=state,
+        step_idx=9,
+    )
+
+    assert updated["row_lifecycle_kind"] == "local_tab"
+    assert updated["row_lifecycle_source"] == "bottom_strip_candidate"
+    assert updated["row_lifecycle_confidence"] == "high"
+    assert state.local_tab_state.signature == "com.example:id/activity_button||com.example:id/location_button"
+    assert state.local_tab_state.active_rid == "com.example:id/location_button"
+    assert state.local_tab_state.active_label == "Location"
+    assert list(state.local_tab_state.candidates_by_signature) == [
+        "com.example:id/activity_button||com.example:id/location_button"
+    ]
+    assert any("[LIFECYCLE]" in line and "kind='local_tab'" in line for line in logs)
+
+
+def test_lifecycle_marks_regular_content_row_as_content(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    client = DummyClient([])
+    client.dump_tree_sequence = [[
+        {
+            "text": "Device usage",
+            "contentDescription": "",
+            "viewIdResourceName": "com.example:id/device_usage_card",
+            "className": "android.view.ViewGroup",
+            "clickable": True,
+            "focusable": True,
+            "effectiveClickable": True,
+            "visibleToUser": True,
+            "boundsInScreen": "60,420,1020,760",
+            "children": [],
+        }
+    ]]
+    state = SimpleNamespace(
+        recent_representative_signatures=[],
+        consumed_representative_signatures=set(),
+        consumed_cluster_signatures=set(),
+        consumed_cluster_logical_signatures=set(),
+        local_tab_candidates_by_signature={},
+        visited_local_tabs_by_signature={},
+        current_local_tab_signature="",
+        current_local_tab_active_rid="",
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        pending_local_tab_bounds="",
+        forced_local_tab_target_rid="",
+        forced_local_tab_target_label="",
+        forced_local_tab_target_bounds="",
+    )
+    row = {
+        "focus_view_id": "com.example:id/device_usage_card",
+        "visible_label": "Device usage",
+        "merged_announcement": "Device usage",
+        "focus_bounds": "60,420,1020,760",
+        "focus_class_name": "android.view.ViewGroup",
+        "focus_clickable": True,
+        "focus_focusable": True,
+        "focus_effective_clickable": True,
+    }
+
+    updated = local_tab_logic._maybe_reprioritize_persistent_bottom_strip_row(
+        row=row,
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_type": "content"},
+        state=state,
+        step_idx=10,
+    )
+
+    assert updated["row_lifecycle_kind"] == "content"
+    assert updated["row_lifecycle_source"] == "content_candidates_present"
+    assert updated["row_lifecycle_confidence"] == "medium"
+    assert not any("[LIFECYCLE]" in line for line in logs)
+
+
+def test_lifecycle_keeps_local_tab_metadata_context_off_content_kind(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    state = SimpleNamespace(
+        current_local_tab_signature="activity||monitor||save",
+        current_local_tab_active_rid="activity",
+        current_local_tab_active_label="Activity",
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        pending_local_tab_bounds="",
+        forced_local_tab_target_rid="",
+        forced_local_tab_target_label="",
+        forced_local_tab_target_bounds="",
+    )
+    row = {
+        "focus_view_id": "com.example:id/energy_card",
+        "visible_label": "Energy",
+        "merged_announcement": "Energy",
+        "local_tab_signature_logged": "activity||monitor||save",
+    }
+
+    local_tab_logic._annotate_row_lifecycle_kind(
+        row=row,
+        state=state,
+        step_idx=11,
+        content_candidates=[{"label": "Energy"}],
+    )
+
+    assert row["row_lifecycle_kind"] == "content"
+    assert row["row_lifecycle_source"] == "content_candidates_present"
+    assert row["row_lifecycle_confidence"] == "medium"
+    assert row["row_lifecycle_context"] == "local_tab_strip_present"
+    assert not any("[LIFECYCLE]" in line and "kind='local_tab'" in line for line in logs)
+
+
+def test_lifecycle_keeps_local_tab_metadata_context_off_status_kind(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    state = SimpleNamespace(
+        current_local_tab_signature="activity||monitor||save",
+        current_local_tab_active_rid="activity",
+        current_local_tab_active_label="Activity",
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        pending_local_tab_bounds="",
+        forced_local_tab_target_rid="",
+        forced_local_tab_target_label="",
+        forced_local_tab_target_bounds="",
+    )
+    row = {
+        "focus_view_id": "com.example:id/page_indicator",
+        "visible_label": "Page 1 of 5",
+        "merged_announcement": "Page 1 of 5",
+        "local_tab_gate_evaluated": True,
+    }
+
+    local_tab_logic._annotate_row_lifecycle_kind(
+        row=row,
+        state=state,
+        step_idx=12,
+        current_row_is_passive_status=local_tab_logic._is_passive_status_text("Page 1 of 5"),
+    )
+
+    assert row["row_lifecycle_kind"] == "status"
+    assert row["row_lifecycle_source"] == "passive_status_text"
+    assert row["row_lifecycle_confidence"] == "medium"
+    assert row["row_lifecycle_context"] == "local_tab_strip_present"
+    assert any("[LIFECYCLE]" in line and "kind='status'" in line for line in logs)
+
+
+def test_lifecycle_keeps_local_tab_transition_as_local_tab(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    state = SimpleNamespace(
+        current_local_tab_signature="",
+        current_local_tab_active_rid="",
+        current_local_tab_active_label="",
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        pending_local_tab_bounds="",
+        forced_local_tab_target_rid="",
+        forced_local_tab_target_label="",
+        forced_local_tab_target_bounds="",
+    )
+    row = {
+        "focus_view_id": "com.example:id/activity",
+        "visible_label": "Activity New notification",
+        "merged_announcement": "Activity New notification",
+        "local_tab_transition": True,
+    }
+
+    local_tab_logic._annotate_row_lifecycle_kind(
+        row=row,
+        state=state,
+        step_idx=13,
+        content_candidates=[{"label": "Energy"}],
+    )
+
+    assert row["row_lifecycle_kind"] == "local_tab"
+    assert row["row_lifecycle_source"] == "local_tab_transition"
+    assert row["row_lifecycle_confidence"] == "high"
+    assert any("[LIFECYCLE]" in line and "source='local_tab_transition'" in line for line in logs)
+
+
+def test_lifecycle_unknown_metadata_does_not_change_row_suppression():
+    row = {
+        "visible_label": "",
+        "merged_announcement": "",
+        "focus_view_id": "",
+        "row_lifecycle_kind": "unknown",
+        "row_lifecycle_source": "insufficient_signal",
+        "row_lifecycle_confidence": "low",
+    }
+    state = SimpleNamespace(current_local_tab_signature="", local_tab_candidates_by_signature={})
+
+    suppress, reason = collection_flow._should_suppress_row_persistence(row=row, state=state, stop=False)
+
+    assert (suppress, reason) == (False, "")
 
 
 def test_structural_local_tab_filter_accepts_korean_energy_tabs_with_canonical_identity(monkeypatch):
@@ -417,6 +1131,9 @@ def test_pending_local_tab_commit_matches_contained_label_direct(monkeypatch):
 
     assert state.current_local_tab_active_label == "LocationButton Location"
     assert state.pending_local_tab_label == ""
+    assert state.local_tab_state.active_label == "LocationButton Location"
+    assert state.local_tab_state.pending_label == ""
+    assert state.local_tab_state.visited_by_signature == {}
     assert any("[STEP][local_tab_commit_match]" in line and "matched_by='label_contains'" in line for line in logs)
     assert any("[STEP][local_tab_commit]" in line and "LocationButton Location" in line for line in logs)
 
@@ -457,6 +1174,11 @@ def test_record_pending_local_tab_progression_sets_forced_navigation_direct(monk
     assert state.pending_local_tab_rid == "com.example:id/location_button"
     assert state.forced_local_tab_target_rid == "com.example:id/location_button"
     assert state.forced_local_tab_attempt_count == 0
+    assert state.local_tab_state.pending_rid == "com.example:id/location_button"
+    assert state.local_tab_state.pending_label == "LocationButton Location"
+    assert state.local_tab_state.forced_rid == "com.example:id/location_button"
+    assert state.local_tab_state.forced_label == "LocationButton Location"
+    assert state.local_tab_state.forced_attempt_count == 0
     assert any("[STEP][local_tab_force_navigation_set]" in line and "LocationButton Location" in line for line in logs)
 
 
@@ -550,12 +1272,17 @@ def test_activate_forced_local_tab_target_taps_before_move_smart_direct(monkeypa
     assert client.tap_xy_adb_calls[0]["y"] == 1780
     assert client.move_focus_smart_calls == []
     assert state.current_local_tab_active_rid == "com.example:id/events_button"
+    assert state.local_tab_state.active_rid == "com.example:id/events_button"
+    assert state.local_tab_state.active_label == "EventsButton Events"
+    assert "com.example:id/events_button" in state.local_tab_state.visited_by_signature["activity||location||events"]
+    assert state.local_tab_state.pending_rid == ""
     assert state.visited_logical_signatures == set()
     assert state.consumed_cluster_signatures == set()
     assert state.recent_scroll_fallback_signatures == set()
     assert state.fail_count == 0
     assert state.same_count == 0
     assert state.forced_local_tab_target_rid == ""
+    assert state.local_tab_state.forced_rid == ""
     assert any("[STEP][local_tab_target_activate]" in line and "method='tap_bounds_center'" in line for line in logs)
     assert any("[STEP][local_tab_target_activate_success]" in line and "matched_by='rid'" in line for line in logs)
     assert any("[STEP][local_tab_content_phase_reset]" in line and "EventsButton Events" in line for line in logs)

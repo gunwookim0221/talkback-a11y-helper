@@ -11436,6 +11436,139 @@ def test_repeated_traversal_suppression_marks_scenario_scope_for_move_and_realig
     assert row["repeat_traversal_focus_realign_fail_count"] == 5
 
 
+def _bottom_strip_guard_row(step_idx=1, **overrides):
+    row = {
+        **_main_row(step_idx),
+        "scenario_id": "life_energy_plugin",
+        "visible_label": "Activity New notification",
+        "normalized_visible_label": "activity new notification",
+        "merged_announcement": "Activity New notification",
+        "normalized_announcement": "activity new notification",
+        "focus_view_id": "activity",
+        "row_lifecycle_kind": "local_tab",
+        "row_lifecycle_source": "bottom_strip_candidate",
+        "row_lifecycle_confidence": "high",
+    }
+    row.update(overrides)
+    return row
+
+
+def test_bottom_strip_guard_stops_after_repeated_failures(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    state = _phase_ordering_state()
+    stop = False
+    reason = ""
+    applied = False
+
+    rows = [
+        _bottom_strip_guard_row(1, move_result="moved"),
+        _bottom_strip_guard_row(2, move_result="moved"),
+        _bottom_strip_guard_row(3, move_result="failed"),
+        _bottom_strip_guard_row(4, move_result="failed"),
+        _bottom_strip_guard_row(5, move_result="failed"),
+    ]
+    for row in rows:
+        stop, reason, applied = collection_flow._maybe_apply_bottom_strip_repetition_guard(
+            row=row,
+            state=state,
+            stop=False,
+            reason="",
+            stop_eval_inputs=_phase_ordering_stop_inputs(),
+            step_idx=int(row["step_index"]),
+            scenario_id="life_energy_plugin",
+        )
+
+    assert (stop, reason, applied) == (True, "repeat_no_progress", True)
+    assert any("[STOP][bottom_strip_guard]" in line and "focus_view_id='activity'" in line for line in logs)
+
+
+def test_bottom_strip_guard_allows_normal_local_tab_transition():
+    state = _phase_ordering_state()
+    stop = False
+    reason = ""
+    applied = False
+
+    for step_idx, label, view_id in (
+        (1, "Monitor", "monitor"),
+        (2, "Save", "saver"),
+        (3, "Activity New notification", "activity"),
+        (4, "Monitor", "monitor"),
+        (5, "Save", "saver"),
+    ):
+        row = _bottom_strip_guard_row(
+            step_idx,
+            move_result="moved",
+            visible_label=label,
+            normalized_visible_label=label.lower(),
+            merged_announcement=label,
+            normalized_announcement=label.lower(),
+            focus_view_id=view_id,
+        )
+        stop, reason, applied = collection_flow._maybe_apply_bottom_strip_repetition_guard(
+            row=row,
+            state=state,
+            stop=False,
+            reason="",
+            stop_eval_inputs=_phase_ordering_stop_inputs(),
+            step_idx=step_idx,
+            scenario_id="life_energy_plugin",
+        )
+
+    assert (stop, reason, applied) == (False, "", False)
+
+
+def test_bottom_strip_guard_ignores_content_row_repetition():
+    state = _phase_ordering_state()
+    stop = False
+    reason = ""
+    applied = False
+
+    for step_idx in range(1, 7):
+        row = _bottom_strip_guard_row(
+            step_idx,
+            move_result="failed",
+            row_lifecycle_kind="content",
+            row_lifecycle_source="content_candidates_present",
+        )
+        stop, reason, applied = collection_flow._maybe_apply_bottom_strip_repetition_guard(
+            row=row,
+            state=state,
+            stop=False,
+            reason="",
+            stop_eval_inputs=_phase_ordering_stop_inputs(),
+            step_idx=step_idx,
+            scenario_id="life_energy_plugin",
+        )
+
+    assert (stop, reason, applied) == (False, "", False)
+
+
+def test_bottom_strip_guard_ignores_local_tab_metadata_source():
+    state = _phase_ordering_state()
+    stop = False
+    reason = ""
+    applied = False
+
+    for step_idx in range(1, 7):
+        row = _bottom_strip_guard_row(
+            step_idx,
+            move_result="failed",
+            row_lifecycle_source="local_tab_metadata",
+        )
+        stop, reason, applied = collection_flow._maybe_apply_bottom_strip_repetition_guard(
+            row=row,
+            state=state,
+            stop=False,
+            reason="",
+            stop_eval_inputs=_phase_ordering_stop_inputs(),
+            step_idx=step_idx,
+            scenario_id="life_energy_plugin",
+        )
+
+    assert (stop, reason, applied) == (False, "", False)
+
+
 def test_repeated_traversal_suppression_stops_main_loop_after_local_tab_grace(monkeypatch):
     logs = []
     repeated_rows = [
