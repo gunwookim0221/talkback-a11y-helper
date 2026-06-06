@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
-from .adb import enable_helper, enable_talkback, get_adb_status, get_helper_status, install_helper, open_accessibility_settings, get_devices
+from .adb import enable_helper, enable_talkback, fix_talkback, get_adb_status, get_helper_status, install_helper, open_accessibility_settings, get_devices
 from .device_locale import normalize_language_mode, open_language_settings
 from .outputs import list_outputs, safe_output_path
 from .recent_runs import list_recent_runs, safe_recent_run_log_path
@@ -86,6 +86,11 @@ def helper_open_accessibility_settings() -> dict[str, object]:
 @app.post("/api/talkback/enable")
 def talkback_enable() -> dict[str, object]:
     return enable_talkback()
+
+
+@app.post("/api/talkback/fix")
+def talkback_fix() -> dict[str, object]:
+    return fix_talkback()
 
 
 @app.post("/api/device/open-language-settings")

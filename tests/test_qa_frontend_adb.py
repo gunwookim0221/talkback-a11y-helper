@@ -340,3 +340,133 @@ def test_enable_talkback_returns_error_when_no_talkback_package_found(monkeypatc
     assert result["status"] == "error"
     assert result["error"] == "TalkBack service package not found"
     assert result["candidates"] == adb.TALKBACK_SERVICE_CANDIDATES
+
+
+def _adb_ready():
+    return {"ok": True, "status": "ok", "devices": [{"serial": "SERIAL", "state": "device"}]}
+
+
+def _helper_ready():
+    return {"ok": True, "status": "ok", "enabled": True}
+
+
+def _ok_enable_talkback():
+    return {"ok": True, "status": "enabled", "service_name": adb.TALKBACK_SERVICE_CANDIDATES[0]}
+
+
+class _ReadinessClient:
+    def __init__(self, result):
+        self.result = result
+
+    def check_talkback_ready(self):
+        return self.result
+
+
+def _client_factory(result):
+    return lambda **_kwargs: _ReadinessClient(result)
+
+
+def test_fix_talkback_enables_and_returns_fixed_when_readiness_ok(monkeypatch):
+    calls = []
+    monkeypatch.setattr(adb, "run_adb", lambda args, timeout=10.0: calls.append(tuple(args)) or {"ok": True, "status": "ok"})
+
+    result = adb.fix_talkback(
+        adb_status_fn=_adb_ready,
+        helper_status_fn=_helper_ready,
+        enable_talkback_fn=_ok_enable_talkback,
+        client_factory=_client_factory({"status": "enabled", "reason": "ok"}),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "fixed"
+    assert result["talkback_status"] == "ready"
+    assert ("shell", "input", "keyevent", "KEYCODE_WAKEUP") in calls
+    assert any(step["step"] == "readiness_probe" and step["ok"] is True for step in result["steps"])
+
+
+def test_fix_talkback_returns_still_not_ready_for_false_positive(monkeypatch):
+    settings_calls = []
+    monkeypatch.setattr(adb, "run_adb", lambda _args, timeout=10.0: {"ok": True, "status": "ok"})
+
+    result = adb.fix_talkback(
+        adb_status_fn=_adb_ready,
+        helper_status_fn=_helper_ready,
+        enable_talkback_fn=_ok_enable_talkback,
+        open_settings_fn=lambda: settings_calls.append(True) or {"ok": True, "accessibility_settings_opened": True},
+        client_factory=_client_factory({"status": "enabled_but_not_ready", "reason": "false_positive_enabled"}),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "still_not_ready"
+    assert result["talkback_reason"] == "false_positive_enabled"
+    assert result["settings_opened"] is True
+    assert settings_calls
+
+
+def test_fix_talkback_returns_helper_not_ready_when_helper_missing(monkeypatch):
+    monkeypatch.setattr(adb, "run_adb", lambda _args, timeout=10.0: {"ok": True, "status": "ok"})
+
+    result = adb.fix_talkback(
+        adb_status_fn=_adb_ready,
+        helper_status_fn=lambda: {"ok": True, "status": "apk_not_found", "build_command": "build"},
+        enable_talkback_fn=_ok_enable_talkback,
+        client_factory=_client_factory({"status": "enabled", "reason": "ok"}),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "helper_not_ready"
+    assert "Helper APK was not found" in result["message"]
+
+
+def test_fix_talkback_returns_popup_contamination_without_opening_settings(monkeypatch):
+    settings_calls = []
+    monkeypatch.setattr(adb, "run_adb", lambda _args, timeout=10.0: {"ok": True, "status": "ok"})
+
+    result = adb.fix_talkback(
+        adb_status_fn=_adb_ready,
+        helper_status_fn=_helper_ready,
+        enable_talkback_fn=_ok_enable_talkback,
+        open_settings_fn=lambda: settings_calls.append(True) or {"ok": True},
+        client_factory=_client_factory({"status": "enabled_but_not_ready", "reason": "external_popup_contamination"}),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "popup_contamination"
+    assert settings_calls == []
+
+
+def test_fix_talkback_returns_talkback_enable_error(monkeypatch):
+    monkeypatch.setattr(adb, "run_adb", lambda _args, timeout=10.0: {"ok": True, "status": "ok"})
+
+    result = adb.fix_talkback(
+        adb_status_fn=_adb_ready,
+        helper_status_fn=_helper_ready,
+        enable_talkback_fn=lambda: {"ok": False, "status": "error", "error": "TalkBack service package not found"},
+        client_factory=_client_factory({"status": "enabled", "reason": "ok"}),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "talkback_enable_failed"
+    assert result["message"] == "TalkBack service package not found"
+
+
+def test_fix_talkback_returns_adb_unavailable_without_recovery_attempt(monkeypatch):
+    calls = []
+    monkeypatch.setattr(adb, "run_adb", lambda args, timeout=10.0: calls.append(tuple(args)) or {"ok": True, "status": "ok"})
+
+    result = adb.fix_talkback(
+        adb_status_fn=lambda: {"ok": True, "status": "ok", "devices": [{"serial": "SERIAL", "state": "offline"}]},
+        helper_status_fn=_helper_ready,
+        enable_talkback_fn=_ok_enable_talkback,
+        client_factory=_client_factory({"status": "enabled", "reason": "ok"}),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "adb_unavailable"
+    assert calls == []

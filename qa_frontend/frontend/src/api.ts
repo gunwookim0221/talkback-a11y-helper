@@ -397,6 +397,17 @@ export type TalkBackEnableResponse = {
   error?: string;
 };
 
+export type TalkBackFixResponse = {
+  ok: boolean;
+  status: 'fixed' | 'still_not_ready' | 'helper_not_ready' | 'popup_contamination' | 'adb_unavailable' | 'talkback_enable_failed' | string;
+  talkback_status?: string;
+  talkback_reason?: string;
+  settings_opened?: boolean;
+  message?: string;
+  error?: string;
+  steps?: Array<Record<string, unknown>>;
+};
+
 export type OpenLanguageSettingsResponse = {
   ok: boolean;
   status: 'opened' | 'error' | string;
@@ -411,6 +422,7 @@ function formatApiPayloadError(payload: unknown) {
   const data = payload as Record<string, unknown>;
   const lines = [
     data.error,
+    data.message,
     data.build_command ? `Build command: ${data.build_command}` : null,
     Array.isArray(data.apk_searched) ? `Searched: ${data.apk_searched.join(', ')}` : null,
   ].filter(Boolean);
@@ -434,6 +446,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
+async function requestPayload<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, {
+    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    ...init,
+  });
+  const contentType = response.headers.get('content-type') ?? '';
+  const payload = contentType.includes('application/json') ? await response.json() : await response.text();
+  if (!response.ok) {
+    const message = typeof payload === 'string' ? payload : formatApiPayloadError(payload);
+    throw new Error(message || response.statusText);
+  }
+  return payload as T;
+}
+
 export type RunSnapshot = {
   status: RunStatus;
   dashboard: RuntimeDashboard;
@@ -452,6 +478,7 @@ export const api = {
   enableHelper: () => request<HelperStatus>('/api/helper/enable', { method: 'POST' }),
   openAccessibilitySettings: () => request<HelperStatus>('/api/helper/open-accessibility-settings', { method: 'POST' }),
   enableTalkBack: () => request<TalkBackEnableResponse>('/api/talkback/enable', { method: 'POST' }),
+  fixTalkBack: () => requestPayload<TalkBackFixResponse>('/api/talkback/fix', { method: 'POST' }),
   openLanguageSettings: () =>
     request<OpenLanguageSettingsResponse>('/api/device/open-language-settings', { method: 'POST' }),
   scenarios: () => request<{ scenarios: Scenario[] }>('/api/scenarios'),

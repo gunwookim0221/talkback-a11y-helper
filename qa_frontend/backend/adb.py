@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import glob
 import subprocess
+import time
 from pathlib import Path
 
+from talkback_lib import A11yAdbClient
 from talkback_lib.constants import DEFAULT_ADB_PATH
 from tb_runner.accessibility_preflight import HELPER_SERVICE_COMPONENT
 
@@ -401,6 +403,119 @@ def enable_talkback() -> dict[str, object]:
         "accessibility_enabled": str(verify_enabled_result.get("accessibility_enabled", "")).strip(),
         "helper_service_preserved": _has_enabled_helper_service(final_services),
         "talkback_service_appended": appended,
+    }
+
+
+def fix_talkback(
+    *,
+    adb_status_fn=get_adb_status,
+    helper_status_fn=get_helper_status,
+    enable_helper_fn=enable_helper,
+    enable_talkback_fn=enable_talkback,
+    open_settings_fn=None,
+    client_factory=A11yAdbClient,
+    sleep_fn=time.sleep,
+) -> dict[str, object]:
+    steps: list[dict[str, object]] = []
+
+    adb_status = adb_status_fn()
+    device_ready = bool(adb_status.get("ok")) and any(
+        isinstance(device, dict) and device.get("state") == "device"
+        for device in adb_status.get("devices", [])
+        if isinstance(device, dict)
+    )
+    if not device_ready:
+        return {
+            "ok": False,
+            "status": "adb_unavailable",
+            "message": "ADB device is not ready. Connect a device and retry.",
+            "adb_status": adb_status,
+            "steps": steps,
+        }
+
+    wake_result = run_adb(["shell", "input", "keyevent", "KEYCODE_WAKEUP"], timeout=8.0)
+    steps.append({"step": "wake_device", "ok": bool(wake_result.get("ok"))})
+    unlock_result = run_adb(["shell", "input", "swipe", "500", "1800", "500", "600", "300"], timeout=8.0)
+    steps.append({"step": "unlock_swipe", "ok": bool(unlock_result.get("ok"))})
+
+    helper_status = helper_status_fn()
+    helper_state = str(helper_status.get("status") or "")
+    if helper_state == "apk_not_found":
+        return {
+            "ok": False,
+            "status": "helper_not_ready",
+            "message": "Helper APK was not found. Build or install the helper, then retry.",
+            "helper_status": helper_status,
+            "steps": steps,
+        }
+    if helper_state != "ok":
+        helper_status = enable_helper_fn()
+        steps.append({"step": "enable_helper", "ok": bool(helper_status.get("ok")), "status": helper_status.get("status")})
+        if helper_status.get("status") != "ok":
+            return {
+                "ok": False,
+                "status": "helper_not_ready",
+                "message": "Helper accessibility service is not ready. Enable Helper service and retry.",
+                "helper_status": helper_status,
+                "steps": steps,
+            }
+
+    enable_result = enable_talkback_fn()
+    steps.append({"step": "enable_talkback", "ok": bool(enable_result.get("ok")), "status": enable_result.get("status")})
+    if not enable_result.get("ok"):
+        return {
+            "ok": False,
+            "status": "talkback_enable_failed",
+            "message": str(enable_result.get("error") or "TalkBack could not be enabled via ADB."),
+            "talkback_enable": enable_result,
+            "steps": steps,
+        }
+
+    sleep_fn(1.0)
+    client = client_factory(start_monitor=False)
+    readiness = client.check_talkback_ready()
+    talkback_status = str(readiness.get("status") or "")
+    talkback_reason = str(readiness.get("reason") or "")
+    steps.append({"step": "readiness_probe", "ok": talkback_status == "enabled", "status": talkback_status, "reason": talkback_reason})
+
+    if talkback_status == "enabled":
+        return {
+            "ok": True,
+            "status": "fixed",
+            "talkback_status": "ready",
+            "talkback_reason": talkback_reason or "ok",
+            "message": "TalkBack is ready.",
+            "talkback_enable": enable_result,
+            "readiness": readiness,
+            "steps": steps,
+        }
+
+    if talkback_reason == "external_popup_contamination":
+        return {
+            "ok": False,
+            "status": "popup_contamination",
+            "talkback_status": talkback_status,
+            "talkback_reason": talkback_reason,
+            "message": "External popup is blocking TalkBack focus. Close the popup and retry.",
+            "talkback_enable": enable_result,
+            "readiness": readiness,
+            "steps": steps,
+        }
+
+    if open_settings_fn is None:
+        open_settings_fn = open_accessibility_settings
+    settings_result = open_settings_fn()
+    return {
+        "ok": False,
+        "status": "still_not_ready",
+        "talkback_status": talkback_status,
+        "talkback_reason": talkback_reason,
+        "settings_opened": bool(settings_result.get("accessibility_settings_opened") or settings_result.get("ok")),
+        "message": "TalkBack service is configured but readiness probe failed. Toggle TalkBack manually and retry.",
+        "talkback_enable": enable_result,
+        "readiness": readiness,
+        "accessibility_settings_result": settings_result,
+        "steps": steps,
     }
 
 

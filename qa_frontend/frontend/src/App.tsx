@@ -29,6 +29,8 @@ export default function App() {
   const [launchMode, setLaunchMode] = useState<'warm' | 'clean'>('clean');
   const [languageMode, setLanguageMode] = useState<LanguageMode>('current');
   const [plannedMode, setPlannedMode] = useState<'smoke' | 'full'>('smoke');
+  const [fixTalkBackRunning, setFixTalkBackRunning] = useState(false);
+  const [fixTalkBackMessage, setFixTalkBackMessage] = useState<string | null>(null);
   const preflightRef = useRef<HTMLElement | null>(null);
   const scrolledBlockedRunRef = useRef<string | null>(null);
 
@@ -200,6 +202,22 @@ export default function App() {
     }
   }
 
+  async function fixTalkBack() {
+    clearError();
+    setFixTalkBackMessage(null);
+    setFixTalkBackRunning(true);
+    try {
+      const result = await api.fixTalkBack();
+      setFixTalkBackMessage(result.message ?? (result.ok ? 'TalkBack is ready.' : 'TalkBack is still not ready.'));
+      await refreshRun();
+    } catch (err) {
+      reportError(err);
+      refreshRun().catch(() => undefined);
+    } finally {
+      setFixTalkBackRunning(false);
+    }
+  }
+
   function toggleScenario(id: string) {
     const next = new Set(selected);
     next.has(id) ? next.delete(id) : next.add(id);
@@ -260,6 +278,9 @@ export default function App() {
             <small>TalkBack will be enabled on the connected device.</small>
           </div>
           <div className="actionBannerActions">
+            <button onClick={fixTalkBack} disabled={running || fixTalkBackRunning}>
+              {fixTalkBackRunning ? 'Fixing TalkBack...' : 'Fix TalkBack'}
+            </button>
             <button onClick={enableTalkBack} disabled={running}>Enable TalkBack via ADB</button>
             <button onClick={openAccessibilitySettings} disabled={running}>Open Accessibility Settings</button>
           </div>
@@ -292,10 +313,17 @@ export default function App() {
             <p>{status?.error ?? 'Runtime preflight blocked the run.'}</p>
             <small>Reason: {status?.preflight_reason ?? '-'}</small>
           </div>
+          <div className="actionBannerActions">
+            <button onClick={fixTalkBack} disabled={running || fixTalkBackRunning}>
+              {fixTalkBackRunning ? 'Fixing TalkBack...' : 'Fix TalkBack'}
+            </button>
+            <button onClick={openAccessibilitySettings} disabled={running}>Open Accessibility Settings</button>
+          </div>
         </section>
       )}
 
       {error && <div className="error">{error}</div>}
+      {fixTalkBackMessage && <div className="notice">{fixTalkBackMessage}</div>}
 
       <section className="grid2">
         <ADBPanel adb={adb} />
@@ -347,6 +375,9 @@ export default function App() {
             <p>TalkBack A11y Helper is enabled, but Samsung/Google TalkBack is disabled. Enable TalkBack and retry.</p>
             <p>TalkBack will be enabled on the connected device.</p>
             <div className="helperActions">
+              <button onClick={fixTalkBack} disabled={running || fixTalkBackRunning}>
+                {fixTalkBackRunning ? 'Fixing TalkBack...' : 'Fix TalkBack'}
+              </button>
               <button onClick={enableTalkBack} disabled={running}>Enable TalkBack via ADB</button>
               <button onClick={openAccessibilitySettings} disabled={running}>Open Accessibility Settings</button>
             </div>
