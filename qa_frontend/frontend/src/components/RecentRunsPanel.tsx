@@ -381,7 +381,9 @@ export function RecentRunsPanel({
                     </span>
                   </div>
                   <small>
-                    {batch.mode} &middot; {new Date(batch.created_at).toLocaleString()} &middot; devices: {batch.device_count} (passed: {batch.passed_count}, failed: {batch.failed_count})
+                    {batch.mode} &middot; {new Date(batch.created_at).toLocaleString()}
+                    {typeof batch.duration_seconds === 'number' ? ` · duration: ${formatDuration(batch.duration_seconds)}` : ''}
+                    &middot; devices: {batch.device_count} (passed: {batch.passed_count}, failed: {batch.failed_count})
                   </small>
                   {batch.devices && batch.devices.length > 0 && (
                     <div style={{ marginTop: '8px', paddingLeft: '8px', borderLeft: '2px solid var(--color-border)' }}>

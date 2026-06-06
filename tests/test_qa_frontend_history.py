@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from qa_frontend.backend.main import app, runner
+from qa_frontend.backend.batch_runner import get_recent_batches
 from qa_frontend.backend.recent_runs import list_recent_runs, safe_recent_run_log_path
 from qa_frontend.backend.run_summary import build_run_summary, summary_path_for_log, write_summary_file
 
@@ -415,6 +416,39 @@ def test_recent_run_log_download_returns_requested_log(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert "recent" in response.text
+
+
+def test_recent_batches_include_duration_for_finished_batch(tmp_path, monkeypatch):
+    run_log_dir = tmp_path / "qa_frontend_runs"
+    batch_dir = run_log_dir / "batch_20260606_184840"
+    batch_dir.mkdir(parents=True)
+    (batch_dir / "batch_summary.json").write_text(
+        """{
+  "batch_id": "batch_20260606_184840",
+  "mode": "full",
+  "created_at": "2026-06-06T18:48:40+09:00",
+  "state": "finished",
+  "devices": [
+    {
+      "serial": "SERIAL1",
+      "model": "Model",
+      "state": "passed",
+      "return_code": 0,
+      "output_dir": "qa_frontend_runs/batch_20260606_184840/device_Model_SERIAL1",
+      "finished_at": "2026-06-06T19:01:14+09:00"
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("qa_frontend.backend.batch_runner.RUN_LOG_DIR", run_log_dir)
+    monkeypatch.setattr("qa_frontend.backend.batch_runner.ROOT_DIR", tmp_path)
+
+    batches = get_recent_batches()
+
+    assert len(batches) == 1
+    assert batches[0]["batch_id"] == "batch_20260606_184840"
+    assert batches[0]["duration_seconds"] == 754
 
 
 def test_open_language_settings_endpoint(monkeypatch):

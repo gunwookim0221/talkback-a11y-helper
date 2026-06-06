@@ -939,6 +939,10 @@ def get_recent_batches() -> list[dict]:
                 "state": data.get("state", "unknown"),
                 "mode": data.get("mode", "unknown"),
                 "created_at": data.get("created_at"),
+                "duration_seconds": _batch_duration_seconds(
+                    data.get("created_at"),
+                    BatchRunManager._batch_finished_at(devices),
+                ),
                 "device_count": len(devices),
                 "passed_count": passed_count,
                 "failed_count": failed_count,
@@ -954,3 +958,14 @@ def get_recent_batches() -> list[dict]:
             break
             
     return batches
+
+
+def _batch_duration_seconds(started_at: object, finished_at: object) -> int | None:
+    if not started_at or not finished_at:
+        return None
+    try:
+        started = datetime.fromisoformat(str(started_at))
+        finished = datetime.fromisoformat(str(finished_at))
+    except ValueError:
+        return None
+    return max(0, int((finished - started).total_seconds()))

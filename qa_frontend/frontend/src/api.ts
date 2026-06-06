@@ -277,6 +277,7 @@ export type RecentBatch = {
   state: string;
   mode: string;
   created_at: string;
+  duration_seconds?: number | null;
   device_count: number;
   passed_count: number;
   failed_count: number;
