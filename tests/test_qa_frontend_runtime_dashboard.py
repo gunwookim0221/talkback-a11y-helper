@@ -324,6 +324,136 @@ def test_normal_successful_traversal_is_passed():
     assert progress["device_tv_plugin"]["status"] == "passed"
 
 
+def test_device_card_missing_is_not_available():
+    log_text = "\n".join(
+        [
+            "[QA_FRONTEND][scenario_selection] enabled_ids=['device_tv_plugin']",
+            "[19:04:52] [SCENARIO][pre_nav] step=1 action=enter_device_card_plugin target='TV'",
+            "[19:04:55] [DEVICE_ENTRY][inventory] phase='before_expand' count=1 labels='Galaxy Home Mini N7LM Melon'",
+            "[19:04:55] [DEVICE_ENTRY][expand] running reason='target_not_visible'",
+            "[19:04:56] [DEVICE][scroll] inventory_signature_changed=false",
+            "[19:05:04] [SCENARIO][pre_nav] failed reason='action_failed' step=1",
+            "[19:05:04] [PERF][scenario_summary] scenario=device_tv_plugin total_steps=1 save_excel_count=0",
+        ]
+    )
+
+    summary = parse_runtime_log(log_text)
+    progress = {item["id"]: item for item in summary["scenario_progress"]}
+
+    assert summary["passed_scenarios"] == 0
+    assert summary["executed_scenarios"] == 0
+    assert summary["not_available_scenarios"] == 1
+    assert summary["availability_candidate_scenarios"] == 1
+    assert progress["device_tv_plugin"]["status"] == "not_available"
+    assert progress["device_tv_plugin"]["availability_status"] == "NOT_AVAILABLE"
+    assert progress["device_tv_plugin"]["availability_confidence"] == "high"
+    assert "Galaxy Home Mini" in progress["device_tv_plugin"]["availability_reason"]
+
+
+def test_life_plugin_anchor_failure_is_no_target_candidate():
+    log_text = "\n".join(
+        [
+            "[QA_FRONTEND][scenario_selection] enabled_ids=['life_home_care_plugin']",
+            "[18:56:22] [SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='(?i)(^home\\\\s*care$|home\\\\s*care\\\\.|\\\\bhomecare\\\\b|홈\\\\s*케어)'",
+            "[18:56:34] [ANCHOR][scenario_start] stabilization failed tab='(?i).*life.*' scenario='life_home_care_plugin' low_confidence=true reason='low_confidence_anchor_start'",
+            "[18:56:34] [ANCHOR][scenario_start] abort low_confidence_fallback=false scenario='life_home_care_plugin' reason='insufficient_new_screen_evidence'",
+            "[18:56:34] [PERF][scenario_summary] scenario=life_home_care_plugin total_steps=1 save_excel_count=0",
+        ]
+    )
+
+    summary = parse_runtime_log(log_text)
+    progress = {item["id"]: item for item in summary["scenario_progress"]}
+
+    assert summary["passed_scenarios"] == 0
+    assert summary["no_target_candidate_scenarios"] == 1
+    assert summary["availability_candidate_scenarios"] == 1
+    assert progress["life_home_care_plugin"]["status"] == "no_target_candidate"
+    assert progress["life_home_care_plugin"]["availability_status"] == "NO_TARGET_CANDIDATE"
+    assert progress["life_home_care_plugin"]["availability_confidence"] == "medium"
+
+
+def test_crash_like_one_step_is_not_marked_not_available():
+    log_text = "\n".join(
+        [
+            "[QA_FRONTEND][scenario_selection] enabled_ids=['device_tv_plugin']",
+            "[19:04:52] [SCENARIO][pre_nav] step=1 action=enter_device_card_plugin target='TV'",
+            "[19:04:53] APP_TERMINATED scenario='device_tv_plugin'",
+            "[19:05:04] [PERF][scenario_summary] scenario=device_tv_plugin total_steps=1 save_excel_count=0",
+        ]
+    )
+
+    summary = parse_runtime_log(log_text)
+    progress = {item["id"]: item for item in summary["scenario_progress"]}
+
+    assert summary["availability_candidate_scenarios"] == 0
+    assert progress["device_tv_plugin"]["status"] == "passed"
+
+
+def test_one_step_with_result_row_is_executed_not_availability_candidate():
+    log_text = "\n".join(
+        [
+            "[QA_FRONTEND][scenario_selection] enabled_ids=['device_tv_plugin']",
+            "[SCENARIO][entry_contract] success scenario='device_tv_plugin' entry_type='card'",
+            "[STEP] END scenario='device_tv_plugin' step=0 visible='TV'",
+            "[PERF][scenario_summary] scenario=device_tv_plugin total_steps=1 save_excel_count=1",
+        ]
+    )
+
+    summary = parse_runtime_log(log_text)
+    progress = {item["id"]: item for item in summary["scenario_progress"]}
+
+    assert summary["availability_candidate_scenarios"] == 0
+    assert summary["executed_scenarios"] == 1
+    assert progress["device_tv_plugin"]["status"] == "passed"
+
+
+def test_availability_counts_are_excluded_from_passed_and_executed_totals():
+    executed_ids = [f"executed_{index}" for index in range(17)]
+    not_available_ids = [f"device_missing_{index}" for index in range(12)]
+    no_target_ids = ["life_food_plugin", "life_home_care_plugin"]
+    selected = executed_ids + not_available_ids + no_target_ids
+    lines = [f"[QA_FRONTEND][scenario_selection] enabled_ids={selected!r}"]
+    for scenario_id in executed_ids:
+        lines.extend(
+            [
+                f"[SCENARIO][entry_contract] success scenario='{scenario_id}' entry_type='card'",
+                f"[STEP] END scenario='{scenario_id}' step=0 visible='{scenario_id}'",
+                f"[PERF][scenario_summary] scenario={scenario_id} total_steps=1 save_excel_count=1",
+            ]
+        )
+    for scenario_id in not_available_ids:
+        lines.extend(
+            [
+                f"[SCENARIO][pre_nav] step=1 action=enter_device_card_plugin target='{scenario_id}'",
+                "[DEVICE_ENTRY][inventory] phase='before_expand' count=1 labels='Galaxy Home Mini N7LM Melon'",
+                "[DEVICE_ENTRY][expand] running reason='target_not_visible'",
+                "[DEVICE][scroll] inventory_signature_changed=false",
+                "[SCENARIO][pre_nav] failed reason='action_failed' step=1",
+                f"[PERF][scenario_summary] scenario={scenario_id} total_steps=1 save_excel_count=0",
+            ]
+        )
+    for scenario_id in no_target_ids:
+        lines.extend(
+            [
+                f"[SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='{scenario_id}'",
+                f"[ANCHOR][scenario_start] abort scenario='{scenario_id}' reason='insufficient_new_screen_evidence'",
+                f"[PERF][scenario_summary] scenario={scenario_id} total_steps=1 save_excel_count=0",
+            ]
+        )
+
+    summary = parse_runtime_log("\n".join(lines))
+
+    assert len(summary["scenario_progress"]) == 31
+    assert summary["executed_scenarios"] == 17
+    assert summary["availability_candidate_scenarios"] == 14
+    assert summary["not_available_scenarios"] == 12
+    assert summary["no_target_candidate_scenarios"] == 2
+    assert summary["failed_scenarios"] == 0
+    assert summary["passed_scenarios"] == 17
+    assert summary["passed_scenarios"] + summary["availability_candidate_scenarios"] == 31
+    assert summary["executed_scenarios"] + summary["availability_candidate_scenarios"] == 31
+
+
 def test_runtime_log_parser_handles_malformed_log_without_exception():
     summary = parse_runtime_log("[QA_FRONTEND][scenario_selection] enabled_ids=[not valid\n\0\0bad")
 

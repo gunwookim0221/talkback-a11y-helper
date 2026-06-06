@@ -210,6 +210,44 @@ def test_build_run_summary_contains_sidecar_schema(tmp_path):
     assert summary["scenarios"][0]["steps"] == 6
 
 
+def test_run_summary_and_recent_runs_preserve_availability_counts(tmp_path):
+    log_path = tmp_path / "20260606_184848_full.log"
+    body = "\n".join(
+        [
+            "[QA_FRONTEND][scenario_selection] enabled_ids=['device_tv_plugin', 'life_home_care_plugin']",
+            "[SCENARIO][pre_nav] step=1 action=enter_device_card_plugin target='TV'",
+            "[DEVICE_ENTRY][inventory] phase='before_expand' count=1 labels='Galaxy Home Mini N7LM Melon'",
+            "[DEVICE_ENTRY][expand] running reason='target_not_visible'",
+            "[DEVICE][scroll] inventory_signature_changed=false",
+            "[SCENARIO][pre_nav] failed reason='action_failed' step=1",
+            "[PERF][scenario_summary] scenario=device_tv_plugin total_steps=1 save_excel_count=0",
+            "[SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='Home Care'",
+            "[ANCHOR][scenario_start] abort scenario='life_home_care_plugin' reason='insufficient_new_screen_evidence'",
+            "[PERF][scenario_summary] scenario=life_home_care_plugin total_steps=1 save_excel_count=0",
+            "[MAIN] script end",
+        ]
+    )
+    _write_log(log_path, body=body)
+
+    summary = build_run_summary(
+        status={"state": "finished", "run_id": "20260606_184848", "mode": "full"},
+        log_path=log_path,
+        scenario_ids=["device_tv_plugin", "life_home_care_plugin"],
+    )
+    run = list_recent_runs(run_log_dir=tmp_path)[0]
+
+    assert summary["executed_scenarios"] == 0
+    assert summary["not_available_scenarios"] == 1
+    assert summary["no_target_candidate_scenarios"] == 1
+    assert summary["availability_candidate_scenarios"] == 2
+    assert run["executed_scenarios"] == summary["executed_scenarios"]
+    assert run["not_available_scenarios"] == summary["not_available_scenarios"]
+    assert run["no_target_candidate_scenarios"] == summary["no_target_candidate_scenarios"]
+    assert run["availability_candidate_scenarios"] == summary["availability_candidate_scenarios"]
+    assert run["scenarios"][0]["availability_status"] == "NOT_AVAILABLE"
+    assert run["scenarios"][1]["availability_status"] == "NO_TARGET_CANDIDATE"
+
+
 def test_recent_runs_uses_summary_fast_path_when_available(tmp_path):
     log_path = tmp_path / "20260528_120100_smoke.log"
     _write_log(log_path, body="unstructured log only\n")

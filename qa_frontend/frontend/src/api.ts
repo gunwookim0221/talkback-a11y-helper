@@ -120,6 +120,11 @@ export type BatchProgressStatus = {
   tail_observed_scenarios?: number;
   total_scenarios: number;
   completed_scenarios: number;
+  executed_scenarios?: number;
+  not_available_scenarios?: number;
+  not_available_candidate_scenarios?: number;
+  no_target_candidate_scenarios?: number;
+  availability_candidate_scenarios?: number;
   passed_scenarios: number;
   failed_scenarios: number;
   warning_scenarios: number;
@@ -182,6 +187,11 @@ export type RecentRun = {
   passed_scenarios?: number;
   warning_scenarios?: number;
   completed_scenarios: number;
+  executed_scenarios?: number;
+  not_available_scenarios?: number;
+  not_available_candidate_scenarios?: number;
+  no_target_candidate_scenarios?: number;
+  availability_candidate_scenarios?: number;
   failed_scenarios: number;
   total_scenarios: number;
   event_warning_count: number;
@@ -200,6 +210,10 @@ export type RecentRun = {
     reason?: string | null;
     stop_reason?: string | null;
     traversal_result?: string | null;
+    availability_status?: string | null;
+    availability_confidence?: string | null;
+    availability_reason?: string | null;
+    availability_target?: string | null;
   }>;
 };
 
@@ -237,6 +251,11 @@ export type RecentBatchDevice = {
   passed_scenarios?: number;
   warning_scenarios?: number;
   completed_scenarios?: number;
+  executed_scenarios?: number;
+  not_available_scenarios?: number;
+  not_available_candidate_scenarios?: number;
+  no_target_candidate_scenarios?: number;
+  availability_candidate_scenarios?: number;
   failed_scenarios?: number;
   total_scenarios?: number;
   scenarios?: Array<{
@@ -246,6 +265,10 @@ export type RecentBatchDevice = {
     reason?: string | null;
     stop_reason?: string | null;
     traversal_result?: string | null;
+    availability_status?: string | null;
+    availability_confidence?: string | null;
+    availability_reason?: string | null;
+    availability_target?: string | null;
   }>;
 };
 
@@ -298,6 +321,10 @@ export type ScenarioProgress = {
   id: string;
   status: 'queued' | 'running' | 'completed' | 'failed' | 'skipped' | string;
   steps: number;
+  availability_status?: string | null;
+  availability_confidence?: string | null;
+  availability_reason?: string | null;
+  availability_target?: string | null;
 };
 
 export type RuntimeDashboard = {
@@ -311,6 +338,11 @@ export type RuntimeDashboard = {
   elapsed_seconds: number;
   current_scenario: string | null;
   completed_scenarios: number;
+  executed_scenarios?: number;
+  not_available_scenarios?: number;
+  not_available_candidate_scenarios?: number;
+  no_target_candidate_scenarios?: number;
+  availability_candidate_scenarios?: number;
   passed_scenarios?: number;
   warning_scenarios?: number;
   remaining_scenarios: number;

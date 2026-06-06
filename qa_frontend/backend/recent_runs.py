@@ -91,6 +91,11 @@ def parse_recent_run(path: Path, *, current_status: dict[str, object] | None = N
     scenario_result_status = resolve_scenario_result_status(process_status, runtime_summary)
     scenarios = _recent_scenarios_from_runtime_summary(runtime_summary)
     completed_scenarios = int(runtime_summary.get("completed_scenarios") or 0)
+    executed_scenarios = int(runtime_summary.get("executed_scenarios") or 0)
+    not_available_scenarios = int(runtime_summary.get("not_available_scenarios") or 0)
+    not_available_candidate_scenarios = int(runtime_summary.get("not_available_candidate_scenarios") or 0)
+    no_target_candidate_scenarios = int(runtime_summary.get("no_target_candidate_scenarios") or 0)
+    availability_candidate_scenarios = int(runtime_summary.get("availability_candidate_scenarios") or 0)
     passed_scenarios = int(runtime_summary.get("passed_scenarios") or 0)
     warning_scenarios = int(runtime_summary.get("warning_scenarios") or 0)
     failed_scenarios = int(runtime_summary.get("failed_scenarios") or 0)
@@ -108,6 +113,11 @@ def parse_recent_run(path: Path, *, current_status: dict[str, object] | None = N
         "passed_scenarios": passed_scenarios,
         "warning_scenarios": warning_scenarios,
         "completed_scenarios": completed_scenarios,
+        "executed_scenarios": executed_scenarios,
+        "not_available_scenarios": not_available_scenarios,
+        "not_available_candidate_scenarios": not_available_candidate_scenarios,
+        "no_target_candidate_scenarios": no_target_candidate_scenarios,
+        "availability_candidate_scenarios": availability_candidate_scenarios,
         "failed_scenarios": failed_scenarios,
         "total_scenarios": total_scenarios,
         "event_warning_count": event_warning_count,
@@ -156,6 +166,11 @@ def _recent_run_from_summary(
         "passed_scenarios": int(summary.get("passed_scenarios") or 0),
         "warning_scenarios": int(summary.get("warning_scenarios") or 0),
         "completed_scenarios": int(summary.get("completed_scenarios") or 0),
+        "executed_scenarios": int(summary.get("executed_scenarios") or 0),
+        "not_available_scenarios": int(summary.get("not_available_scenarios") or 0),
+        "not_available_candidate_scenarios": int(summary.get("not_available_candidate_scenarios") or 0),
+        "no_target_candidate_scenarios": int(summary.get("no_target_candidate_scenarios") or 0),
+        "availability_candidate_scenarios": int(summary.get("availability_candidate_scenarios") or 0),
         "failed_scenarios": int(summary.get("failed_scenarios") or 0),
         "total_scenarios": int(summary.get("total_scenarios") or 0),
         "event_warning_count": int(summary.get("event_warning_count") or summary.get("warning_count") or 0),
@@ -205,14 +220,14 @@ def _recent_scenarios_from_summary(summary: dict[str, object]) -> list[dict[str,
         stop_reason = _string_or_none(item.get("stop_reason"))
         traversal_result = _string_or_none(item.get("traversal_result"))
         normalized.append(
-            {
-                "id": scenario_id,
-                "status": status,
-                "steps": int(item.get("steps") or 0),
-                "reason": _scenario_reason(status=status, stop_reason=stop_reason, traversal_result=traversal_result),
-                "stop_reason": stop_reason,
-                "traversal_result": traversal_result,
-            }
+            _recent_scenario_item(
+                scenario_id=scenario_id,
+                status=status,
+                steps=int(item.get("steps") or 0),
+                stop_reason=stop_reason,
+                traversal_result=traversal_result,
+                source=item,
+            )
         )
     return normalized
 
@@ -232,16 +247,40 @@ def _recent_scenarios_from_runtime_summary(runtime_summary: dict[str, object]) -
             continue
         status = str(item.get("status") or "unknown")
         normalized.append(
-            {
-                "id": scenario_id,
-                "status": status,
-                "steps": int(item.get("steps") or 0),
-                "reason": _scenario_reason(status=status, stop_reason=stop_reason, traversal_result=traversal_result),
-                "stop_reason": stop_reason,
-                "traversal_result": traversal_result,
-            }
+            _recent_scenario_item(
+                scenario_id=scenario_id,
+                status=status,
+                steps=int(item.get("steps") or 0),
+                stop_reason=stop_reason,
+                traversal_result=traversal_result,
+                source=item,
+            )
         )
     return normalized
+
+
+def _recent_scenario_item(
+    *,
+    scenario_id: str,
+    status: str,
+    steps: int,
+    stop_reason: str | None,
+    traversal_result: str | None,
+    source: dict[str, object],
+) -> dict[str, object]:
+    item: dict[str, object] = {
+        "id": scenario_id,
+        "status": status,
+        "steps": steps,
+        "reason": _scenario_reason(status=status, stop_reason=stop_reason, traversal_result=traversal_result),
+        "stop_reason": stop_reason,
+        "traversal_result": traversal_result,
+    }
+    for key in ("availability_status", "availability_confidence", "availability_reason", "availability_target"):
+        value = _string_or_none(source.get(key))
+        if value is not None:
+            item[key] = value
+    return item
 
 
 def _scenario_reason(*, status: str, stop_reason: str | None, traversal_result: str | None) -> str | None:

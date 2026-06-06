@@ -118,6 +118,7 @@ export function RecentRunsPanel({
   const renderDeviceDetails = (runData: any, crashContext?: { runId: string; deviceId: string }) => {
     const failedScenarios = (runData?.scenarios || []).filter((s: any) => s.status === 'failed');
     const warningScenarios = (runData?.scenarios || []).filter((s: any) => s.status === 'warning');
+    const unavailableScenarios = (runData?.scenarios || []).filter((s: any) => ['not_available', 'not_available_candidate', 'no_target_candidate'].includes(s.status));
     const passedScenarios = (runData?.scenarios || []).filter((s: any) => s.status === 'passed');
 
     return (
@@ -152,6 +153,26 @@ export function RecentRunsPanel({
                   ))
                 ) : (
                   <small>No warning scenarios.</small>
+                )}
+              </div>
+            </details>
+            <details>
+              <summary>Not Available ({unavailableScenarios.length})</summary>
+              <div className="scenarioDetailList">
+                {unavailableScenarios.length ? (
+                  unavailableScenarios.map((scenario: any) => (
+                    <div key={scenario.id} className="scenarioDetailRow">
+                      <strong>{scenario.id}</strong>
+                      <small>
+                        {scenario.availability_status || scenario.status}
+                        {scenario.availability_confidence ? ` · ${scenario.availability_confidence}` : ''}
+                        {scenario.availability_target ? ` · target=${scenario.availability_target}` : ''}
+                      </small>
+                      <small>{scenario.availability_reason || scenarioReasonText(scenario) || 'not available candidate'}</small>
+                    </div>
+                  ))
+                ) : (
+                  <small>No not-available candidates.</small>
                 )}
               </div>
             </details>

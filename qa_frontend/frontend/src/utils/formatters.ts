@@ -43,6 +43,9 @@ export function healthClass(value: string | null | undefined) {
     'not_installed',
     'apk_not_found',
     'needs setup',
+    'not_available',
+    'not_available_candidate',
+    'no_target_candidate',
   ].includes(normalized)) {
     return 'healthWarn';
   }
@@ -72,6 +75,10 @@ export function helperBadgeText(status: string | undefined) {
 export function scenarioRunText(run: RecentRun) {
   if (run.scenario_result_status === 'failed') {
     return `Scenarios failed (${run.failed_scenarios})`;
+  }
+  if ((run.availability_candidate_scenarios ?? 0) > 0) {
+    const executed = run.executed_scenarios ?? run.completed_scenarios ?? 0;
+    return `Executed ${executed}/${run.total_scenarios}, ${run.availability_candidate_scenarios} not available`;
   }
   if (run.scenario_result_status === 'passed') {
     return 'Scenarios passed';

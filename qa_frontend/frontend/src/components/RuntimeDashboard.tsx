@@ -57,12 +57,16 @@ export function RuntimeDashboardPanel({ dashboard, batchStatus, status, helper, 
           <strong>{formatDuration(dashboard?.elapsed_seconds ?? 0)}</strong>
         </div>
         <div>
-          <span>Passed</span>
-          <strong>{dashboard?.passed_scenarios ?? 0}</strong>
+          <span>Executed</span>
+          <strong>{dashboard?.executed_scenarios ?? dashboard?.completed_scenarios ?? 0} / {dashboard?.total_scenarios ?? 0}</strong>
         </div>
         <div>
           <span>Warning</span>
           <strong>{dashboard?.warning_scenarios ?? 0}</strong>
+        </div>
+        <div>
+          <span>Not Available</span>
+          <strong>{dashboard?.availability_candidate_scenarios ?? 0}</strong>
         </div>
         <div>
           <span>Failed</span>
@@ -139,7 +143,10 @@ export function RuntimeDashboardPanel({ dashboard, batchStatus, status, helper, 
               <div key={item.id} className="progressRow">
                 <span className={`statusDot ${healthClass(item.status)}`}></span>
                 <strong>{item.id}</strong>
-                <small>{item.status} · {item.steps} steps</small>
+                <small>
+                  {item.status} · {item.steps} steps
+                  {item.availability_reason ? ` · ${item.availability_reason}` : ''}
+                </small>
               </div>
             ))}
           </div>

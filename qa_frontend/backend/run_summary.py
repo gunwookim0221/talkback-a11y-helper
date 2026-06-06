@@ -61,6 +61,11 @@ def build_run_summary(
         "passed_scenarios": int(parsed.get("passed_scenarios") or 0),
         "warning_scenarios": int(parsed.get("warning_scenarios") or 0),
         "completed_scenarios": int(parsed.get("completed_scenarios") or 0),
+        "executed_scenarios": int(parsed.get("executed_scenarios") or 0),
+        "not_available_scenarios": int(parsed.get("not_available_scenarios") or 0),
+        "not_available_candidate_scenarios": int(parsed.get("not_available_candidate_scenarios") or 0),
+        "no_target_candidate_scenarios": int(parsed.get("no_target_candidate_scenarios") or 0),
+        "availability_candidate_scenarios": int(parsed.get("availability_candidate_scenarios") or 0),
         "failed_scenarios": int(parsed.get("failed_scenarios") or 0),
         "total_scenarios": len(parsed.get("scenario_progress") or []),
         "total_steps": _total_steps(parsed),
@@ -224,6 +229,10 @@ def _scenario_summaries(parsed: dict[str, object]) -> list[dict[str, object]]:
                 "steps": int(item.get("steps") or 0),
                 "stop_reason": stop_reason,
                 "traversal_result": traversal_result,
+                "availability_status": item.get("availability_status"),
+                "availability_confidence": item.get("availability_confidence"),
+                "availability_reason": item.get("availability_reason"),
+                "availability_target": item.get("availability_target"),
             }
         )
     return scenarios

@@ -12,6 +12,7 @@ from .paths import OUTPUT_DIR
 SCENARIO_RE = re.compile(r"scenario='([^']+)'|scenario=([A-Za-z0-9_]+)|scenario_id='([^']+)'|scenario_id=([A-Za-z0-9_]+)")
 STEP_RE = re.compile(r"step=(\d+)")
 TOTAL_STEPS_RE = re.compile(r"total_steps=(\d+)")
+SUMMARY_SAVE_EXCEL_RE = re.compile(r"save_excel_count=(\d+)")
 ENABLED_IDS_RE = re.compile(r"enabled_ids=(\[[^\]]*\])")
 FOCUS_PACKAGE_RE = re.compile(r"packageName': '([^']+)'|packageName=\"([^\"]+)\"|packageName=([^\s,]+)")
 FOCUS_LABEL_RE = re.compile(r"talkbackLabel': '([^']+)'|focus_label='([^']*)'|visible='([^']*)'")
@@ -42,6 +43,20 @@ TRANSIENT_PRESENTATION_FAILURE_REASONS = {
     "no_unvisited_local_tab",
     "viewport_exhausted",
 }
+
+
+def _availability_signal() -> dict[str, object]:
+    return {
+        "pre_nav_action": "",
+        "pre_nav_target": "",
+        "pre_nav_failed": False,
+        "pre_nav_failure_detail": "",
+        "anchor_insufficient": False,
+        "device_inventory_labels": "",
+        "device_target_not_visible": False,
+        "inventory_signature_unchanged": False,
+        "summary_save_excel_count": None,
+    }
 
 
 def build_runtime_dashboard(
@@ -99,6 +114,7 @@ def parse_runtime_log(
     progress = {scenario_id: {"id": scenario_id, "status": "queued", "steps": 0} for scenario_id in selected_ids}
     step_end_counts: dict[str, int] = {}
     summary_steps: dict[str, int] = {}
+    summary_save_excel_counts: dict[str, int] = {}
     entry_success_scenarios: set[str] = set()
     soft_entry_evidence_scenarios: set[str] = set()
     summary_scenarios: set[str] = set()
@@ -107,6 +123,7 @@ def parse_runtime_log(
     global_nav_terminal: set[str] = set()
     events: list[dict[str, object]] = []
     current_scenario = None
+    current_availability_scenario = None
     current_step = None
     total_step_count = 0
     overlay_count = 0
@@ -125,6 +142,8 @@ def parse_runtime_log(
     launch_mode = None
     language_mode = None
     device_locale = None
+    availability_signals: dict[str, dict[str, object]] = {}
+    fatal_or_crash_like_scenarios: set[str] = set()
 
     for index, line in enumerate(lines):
         raw_scenario = _extract_scenario(line)
@@ -133,6 +152,44 @@ def parse_runtime_log(
         if scenario:
             current_scenario = scenario
             progress.setdefault(scenario, {"id": scenario, "status": "queued", "steps": 0})
+            availability_signals.setdefault(scenario, _availability_signal())
+        signal_scenario = scenario or current_availability_scenario or current_scenario
+        if (
+            not scenario
+            and "[SCENARIO][pre_nav] step=" in line
+            and (current_scenario is None or current_scenario in summary_scenarios)
+        ):
+            next_scenario = _next_unfinished_selected_scenario(selected_ids, summary_scenarios)
+            if next_scenario:
+                signal_scenario = next_scenario
+                current_availability_scenario = next_scenario
+        if not signal_scenario and len(selected_ids) == 1 and _line_has_availability_signal(line):
+            signal_scenario = selected_ids[0]
+            current_availability_scenario = signal_scenario
+        if signal_scenario and (not selected_filter or signal_scenario in selected_filter):
+            availability_signals.setdefault(signal_scenario, _availability_signal())
+
+        if signal_scenario and "[SCENARIO][pre_nav] step=" in line:
+            action_match = re.search(r"action=([^\s]+)", line)
+            target_match = re.search(r"target='([^']*)'", line)
+            signal = availability_signals.setdefault(signal_scenario, _availability_signal())
+            signal["pre_nav_action"] = action_match.group(1) if action_match else ""
+            signal["pre_nav_target"] = target_match.group(1) if target_match else ""
+        if signal_scenario and "[SCENARIO][pre_nav] failed" in line:
+            signal = availability_signals.setdefault(signal_scenario, _availability_signal())
+            signal["pre_nav_failed"] = True
+            if "detail=" in line:
+                signal["pre_nav_failure_detail"] = line
+        if signal_scenario and "[DEVICE_ENTRY][inventory]" in line:
+            labels_match = re.search(r"labels='([^']*)'", line)
+            signal = availability_signals.setdefault(signal_scenario, _availability_signal())
+            signal["device_inventory_labels"] = labels_match.group(1) if labels_match else ""
+        if signal_scenario and "target_not_visible" in line:
+            availability_signals.setdefault(signal_scenario, _availability_signal())["device_target_not_visible"] = True
+        if signal_scenario and "inventory_signature_changed=false" in line:
+            availability_signals.setdefault(signal_scenario, _availability_signal())["inventory_signature_unchanged"] = True
+        if signal_scenario and "insufficient_new_screen_evidence" in line:
+            availability_signals.setdefault(signal_scenario, _availability_signal())["anchor_insufficient"] = True
 
         if "[GLOBAL_NAV][start_gate] passed" in line and scenario:
             global_nav_start_gate_passed.add(scenario)
@@ -216,6 +273,10 @@ def parse_runtime_log(
                     "no_unvisited_local_tab"
                 }
                 if stop_reason and stop_reason in benign_reasons:
+                    if scenario in entry_success_scenarios:
+                        warning_scenarios.add(scenario)
+                        if progress[scenario].get("status") not in {"failed"}:
+                            progress[scenario]["status"] = "warning"
                     _add_event(events, index, "traversal_terminal", line, scenario=scenario)
                 else:
                     warning_scenarios.add(scenario)
@@ -232,18 +293,28 @@ def parse_runtime_log(
         elif "[PERF][scenario_summary]" in line:
             if scenario:
                 summary_scenarios.add(scenario)
+                if current_availability_scenario == scenario:
+                    current_availability_scenario = None
                 total_steps = _extract_total_steps(line)
                 if total_steps is not None:
                     summary_steps[scenario] = total_steps
                     progress[scenario]["steps"] = total_steps
+                scenario_save_excel_count = _extract_summary_save_excel_count(line)
+                if scenario_save_excel_count is not None:
+                    summary_save_excel_counts[scenario] = scenario_save_excel_count
+                    availability_signals.setdefault(scenario, _availability_signal())["summary_save_excel_count"] = scenario_save_excel_count
                 if progress[scenario].get("status") not in {"failed", "warning"}:
                     progress[scenario]["status"] = "passed"
                 _add_event(events, index, "scenario_completed", line, scenario=scenario)
         elif "[FATAL]" in line or "Traceback" in line or "Exception" in line:
             if scenario:
+                fatal_or_crash_like_scenarios.add(scenario)
                 hard_failed_scenarios.add(scenario)
                 progress[scenario]["status"] = "failed"
                 _add_event(events, index, "scenario_failed", line, scenario=scenario)
+        elif "APP_TERMINATED" in line:
+            if signal_scenario:
+                fatal_or_crash_like_scenarios.add(signal_scenario)
         elif "[MAIN] skip disabled scenario_id=" in line:
             skipped = _extract_skip_scenario(line)
             if skipped in progress:
@@ -288,13 +359,30 @@ def parse_runtime_log(
             continue
         if scenario_id in warning_scenarios:
             item["status"] = "warning"
+        elif _is_availability_candidate(
+            scenario_id,
+            item,
+            has_entry=has_entry,
+            has_summary=has_summary,
+            summary_save_excel_count=summary_save_excel_counts.get(scenario_id),
+            signal=availability_signals.get(scenario_id, {}),
+            fatal_or_crash_like=scenario_id in fatal_or_crash_like_scenarios,
+        ):
+            availability = _classify_availability_signal(availability_signals.get(scenario_id, {}))
+            item.update(availability)
+            item["status"] = str(availability.get("status") or "not_available_candidate")
         elif item.get("status") not in {"failed", "warning"}:
             item["status"] = "passed"
 
     passed_count = len([item for item in progress.values() if item["status"] == "passed"])
     warning_count = len([item for item in progress.values() if item["status"] == "warning"])
     failed_count = len([item for item in progress.values() if item["status"] == "failed"])
-    completed_count = len([item for item in progress.values() if item["status"] in {"passed", "warning", "failed", "skipped"}])
+    not_available_count = len([item for item in progress.values() if item["status"] == "not_available"])
+    not_available_candidate_count = len([item for item in progress.values() if item["status"] == "not_available_candidate"])
+    no_target_candidate_count = len([item for item in progress.values() if item["status"] == "no_target_candidate"])
+    availability_candidate_count = not_available_count + not_available_candidate_count + no_target_candidate_count
+    executed_count = passed_count + warning_count + failed_count
+    completed_count = len([item for item in progress.values() if item["status"] in {"passed", "warning", "failed", "skipped", "not_available", "not_available_candidate", "no_target_candidate"}])
     return {
         "mode": mode,
         "launch_mode": launch_mode,
@@ -304,6 +392,11 @@ def parse_runtime_log(
         "passed_scenarios": passed_count,
         "warning_scenarios": warning_count,
         "completed_scenarios": passed_count + warning_count,
+        "executed_scenarios": executed_count,
+        "not_available_scenarios": not_available_count,
+        "not_available_candidate_scenarios": not_available_candidate_count,
+        "no_target_candidate_scenarios": no_target_candidate_count,
+        "availability_candidate_scenarios": availability_candidate_count,
         "remaining_scenarios": len([item for item in progress.values() if item["status"] in {"queued", "running"}]),
         "failed_scenarios": failed_count,
         "scenario_progress": list(progress.values()),
@@ -337,6 +430,11 @@ def _empty_dashboard(*, status: dict[str, object], started_at: str | None, scena
         "elapsed_seconds": _elapsed_seconds(started_at, _string_or_none(status.get("finished_at"))),
         "current_scenario": None,
         "completed_scenarios": 0,
+        "executed_scenarios": 0,
+        "not_available_scenarios": 0,
+        "not_available_candidate_scenarios": 0,
+        "no_target_candidate_scenarios": 0,
+        "availability_candidate_scenarios": 0,
         "remaining_scenarios": len(scenario_ids),
         "failed_scenarios": 0,
         "scenario_progress": [{"id": item, "status": "queued", "steps": 0} for item in scenario_ids],
@@ -357,6 +455,96 @@ def _empty_dashboard(*, status: dict[str, object], started_at: str | None, scena
         "event_feed": [],
         "log_size": 0,
         "parse_error": None,
+    }
+
+
+def _extract_summary_save_excel_count(line: str) -> int | None:
+    match = SUMMARY_SAVE_EXCEL_RE.search(line)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _line_has_availability_signal(line: str) -> bool:
+    return any(
+        marker in line
+        for marker in (
+            "[SCENARIO][pre_nav]",
+            "[DEVICE_ENTRY][inventory]",
+            "target_not_visible",
+            "inventory_signature_changed=false",
+            "insufficient_new_screen_evidence",
+        )
+    )
+
+
+def _next_unfinished_selected_scenario(selected_ids: list[str], finished: set[str]) -> str | None:
+    for scenario_id in selected_ids:
+        if scenario_id not in finished:
+            return scenario_id
+    return None
+
+
+def _is_availability_candidate(
+    scenario_id: str,
+    item: dict[str, object],
+    *,
+    has_entry: bool,
+    has_summary: bool,
+    summary_save_excel_count: int | None,
+    signal: dict[str, object],
+    fatal_or_crash_like: bool,
+) -> bool:
+    if fatal_or_crash_like or has_entry or not has_summary:
+        return False
+    if int(item.get("steps") or 0) > 1:
+        return False
+    if summary_save_excel_count not in {0, None}:
+        return False
+    pre_nav_action = str(signal.get("pre_nav_action") or "")
+    if pre_nav_action in {"enter_device_card_plugin", "xml_scroll_search_tap", "scrolltouch"}:
+        return True
+    return bool(signal.get("anchor_insufficient") or signal.get("pre_nav_failed"))
+
+
+def _classify_availability_signal(signal: dict[str, object]) -> dict[str, object]:
+    action = str(signal.get("pre_nav_action") or "")
+    target = str(signal.get("pre_nav_target") or "").strip()
+    inventory = str(signal.get("device_inventory_labels") or "").strip()
+    device_target_missing = bool(signal.get("device_target_not_visible") or signal.get("inventory_signature_unchanged"))
+    if action == "enter_device_card_plugin" and (inventory or device_target_missing):
+        reason = "target device card not found"
+        if inventory:
+            reason = f"{reason}; inventory only {inventory}"
+        return {
+            "status": "not_available",
+            "availability_status": "NOT_AVAILABLE",
+            "availability_confidence": "high",
+            "availability_reason": reason,
+            "availability_target": target,
+        }
+    if action in {"xml_scroll_search_tap", "scrolltouch"}:
+        reason = "target plugin/card anchor not found"
+        if bool(signal.get("anchor_insufficient")):
+            reason = "anchor insufficient new-screen evidence"
+        elif bool(signal.get("pre_nav_failed")):
+            reason = "pre-navigation target search failed"
+        return {
+            "status": "no_target_candidate",
+            "availability_status": "NO_TARGET_CANDIDATE",
+            "availability_confidence": "medium",
+            "availability_reason": reason,
+            "availability_target": target,
+        }
+    return {
+        "status": "not_available_candidate",
+        "availability_status": "NOT_AVAILABLE_CANDIDATE",
+        "availability_confidence": "low",
+        "availability_reason": "scenario ended before entry contract success",
+        "availability_target": target,
     }
 
 
