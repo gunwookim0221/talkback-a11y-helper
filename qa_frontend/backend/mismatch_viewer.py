@@ -132,11 +132,20 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
             is_review = False
             is_clean = False
 
-            if mismatch_type == "EMPTY_VISIBLE" or (not visible and not speech):
+            both_text_empty = not visible and not speech
+            exact_visible_speech_match = bool(visible and speech and visible == speech)
+
+            if mismatch_type == "EMPTY_VISIBLE" or both_text_empty:
                 summary_empty_visible += 1
                 scenario_stats[scenario]["empty_visible"] += 1
-                is_issue = True
-                category = "EMPTY_VISIBLE"
+                if both_text_empty:
+                    summary_review += 1
+                    scenario_stats[scenario]["review"] += 1
+                    is_review = True
+                    category = "REVIEW"
+                else:
+                    is_issue = True
+                    category = "EMPTY_VISIBLE"
             elif mismatch_type == "EMPTY_SPEECH" or (visible and not speech):
                 summary_empty_speech += 1
                 scenario_stats[scenario]["empty_speech"] += 1
@@ -152,7 +161,7 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
                 scenario_stats[scenario]["true_mismatch"] += 1
                 is_fail = True
                 category = "TRUE_MISMATCH"
-            elif mismatch_type == "EXACT_MATCH" or (final_result == "PASS" and visible and speech):
+            elif mismatch_type in {"EXACT_MATCH", "NORMALIZED_MATCH"} or (final_result == "PASS" and visible and speech):
                 summary_matched += 1
                 scenario_stats[scenario]["matched"] += 1
                 is_clean = True
@@ -200,32 +209,9 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
                 scenario_stats[scenario]["clean_count"] += 1
                 top_category = "CLEAN"
 
-            add_to_preview = False
-            user_impact_types = {
-                "EMPTY_VISIBLE", "EMPTY_SPEECH", "TRUE_MISMATCH", 
-                "LABEL_MISMATCH", "TEXT_MISMATCH", "SPOKEN_MISMATCH", 
-                "MISMATCH", "FAIL_MISMATCH"
-            }
-            if final_result == "FAIL":
-                add_to_preview = True
-            elif mismatch_type in user_impact_types:
-                add_to_preview = True
-            elif (not visible and speech) or (visible and not speech):
-                add_to_preview = True
-            elif visible != speech and mismatch_type not in {"EXACT_MATCH", "REPRESENTATIVE_CONTEXT"}:
-                add_to_preview = True
-                
-            if final_result != "FAIL":
-                if final_result == "PASS":
-                    add_to_preview = False
-                elif mismatch_type == "EXACT_MATCH" and visible == speech:
-                    add_to_preview = False
-                elif mismatch_type == "REPRESENTATIVE_CONTEXT":
-                    add_to_preview = False
-                elif review_note and any(x in review_note for x in ["발화 일치", "탐색 종료"]):
-                    add_to_preview = False
-                elif review_note and any(x in review_note.lower() for x in ["terminal", "repeat", "stop"]):
-                    add_to_preview = False
+            add_to_preview = top_category in {"FAIL", "ISSUE"}
+            if exact_visible_speech_match or both_text_empty:
+                add_to_preview = False
 
             if add_to_preview:
                 all_previews.append({
