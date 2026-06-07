@@ -6,6 +6,7 @@ import { ADBPanel } from './components/ADBPanel';
 import { HelperPanel } from './components/HelperPanel';
 import { RunPanel } from './components/RunPanel';
 import { RuntimeDashboardPanel } from './components/RuntimeDashboard';
+import { PluginDiscoveryPanel } from './components/PluginDiscoveryPanel';
 
 import { RecentRunsPanel } from './components/RecentRunsPanel';
 
@@ -354,6 +355,10 @@ export default function App() {
           selectedCount={selectedCount}
           selectedScenarios={selected}
         />
+      </section>
+
+      <section style={{ marginTop: '14px' }}>
+        <PluginDiscoveryPanel running={running} reportError={reportError} />
       </section>
 
       <section className="panel preflightPanel" ref={preflightRef}>

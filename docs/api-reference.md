@@ -119,3 +119,198 @@ GET /api/runs/{run_id}/devices/{device_id}/crashes/{crash_event_id}/download
 - `crash_helper_dump.json`
 - `focus_state.json`
 - `logcat_excerpt.txt`
+
+## QA Frontend Plugin Onboarding API
+
+Plugin Onboarding Wizard MVP는 신규 Life / Device plugin을 발견하고 draft scenario를
+적용 전후로 검토하기 위한 local backend API를 제공한다.
+
+### Plugin Discovery
+
+```http
+POST /api/plugin-discovery/discover
+```
+
+현재 SmartThings 화면에서 visible Life / Device plugin 후보를 수집한다.
+
+Request:
+
+```json
+{
+  "targets": ["life", "device"],
+  "include_xml": true,
+  "current_view_only": true
+}
+```
+
+### Plugin Probe
+
+```http
+POST /api/plugin-probe/start
+```
+
+Discovery card를 입력으로 받아 plugin 진입을 짧게 시도하고 draft seed를 수집한다.
+
+### Draft Generate
+
+```http
+POST /api/plugin-draft/generate
+```
+
+card와 probe 결과를 기반으로 scenario/runtime config draft를 생성한다. 이 단계는
+파일을 수정하지 않는다.
+
+### Draft Review
+
+```http
+POST /api/plugin-draft/review
+```
+
+scenario id 중복, runtime config key 중복, manual review 필요 여부와 diff preview를
+검사한다. 이 단계도 파일을 수정하지 않는다.
+
+### Apply Draft
+
+```http
+POST /api/plugin-draft/apply
+```
+
+review가 허용한 draft를 `tb_runner/scenario_config.py`와
+`config/runtime_config.json`에 적용한다. apply 전 backup은
+`output/plugin_draft_backups/<timestamp>/`에 생성된다.
+
+### Smoke Start
+
+```http
+POST /api/plugin-draft/smoke
+```
+
+apply된 scenario 하나를 smoke mode로 실행한다.
+
+제약:
+
+- `scenario_id` 1개
+- `max_steps <= 10`
+- `mode=smoke`
+- runtime config 원본은 override 방식으로 유지
+
+### Smoke Status
+
+```http
+GET /api/plugin-draft/smoke/{run_id}?scenario_id=...
+```
+
+run 상태, log/xlsx artifact, smoke summary를 조회한다.
+
+### Onboarding Session Create
+
+```http
+POST /api/plugin-onboarding/session
+```
+
+card 기준 onboarding session을 생성한다. session 파일은
+`output/plugin_onboarding_sessions/<session_id>.json`에 저장된다.
+
+### Onboarding Session Step Save
+
+```http
+POST /api/plugin-onboarding/session/{session_id}/step
+```
+
+지원 step:
+
+- `discovery`
+- `probe`
+- `draft`
+- `review`
+- `apply`
+- `smoke`
+
+### Onboarding Session Get/List
+
+```http
+GET /api/plugin-onboarding/session/{session_id}
+GET /api/plugin-onboarding/sessions
+```
+
+단일 session 또는 최근 updated_at 기준 session 목록을 조회한다.
+
+### Session Restore
+
+```http
+GET /api/plugin-onboarding/session/{session_id}/restore
+```
+
+저장된 step payload에서 wizard state를 best-effort로 복원하고 next action
+recommendation을 반환한다.
+
+Response shape:
+
+```json
+{
+  "ok": true,
+  "schema_version": "plugin-onboarding-restore-v1",
+  "session": {},
+  "restored_state": {
+    "selected_card": {},
+    "probe_result": {},
+    "draft_result": {},
+    "review_result": {},
+    "apply_result": {},
+    "smoke_start_result": {},
+    "smoke_status_result": {}
+  },
+  "recommendation": {
+    "next_action": "ready_for_manual_validation",
+    "severity": "success",
+    "reasons": [],
+    "allowed_actions": [],
+    "blocked_actions": []
+  }
+}
+```
+
+### Rollback Preview
+
+```http
+POST /api/plugin-onboarding/session/{session_id}/rollback/preview
+```
+
+apply backup과 현재 파일을 비교해 실제 rollback 전에 복원 가능성과 영향 범위를
+반환한다. 실제 파일 복원은 하지 않는다.
+
+Response shape:
+
+```json
+{
+  "ok": true,
+  "schema_version": "plugin-rollback-preview-v1",
+  "rollback_status": "preview_ready",
+  "can_rollback": true,
+  "target_files": [
+    "tb_runner/scenario_config.py",
+    "config/runtime_config.json"
+  ],
+  "backup": {
+    "found": true,
+    "paths": []
+  },
+  "preview": {
+    "scenario_entry_will_be_removed": true,
+    "runtime_config_entry_will_be_removed": true,
+    "diff_preview": "..."
+  },
+  "diagnostics": {
+    "warnings": [],
+    "errors": []
+  }
+}
+```
+
+## Plugin Onboarding API limitations
+
+- Discovery/probe는 현재 visible card 중심이다.
+- bounded scroll discovery와 자동 tab 이동은 아직 없다.
+- Smoke result는 수동 refresh 방식이다.
+- Apply는 backup을 생성하지만 rollback 실행은 아직 preview only다.
+- `serial`은 smoke request schema에 있지만 현재 runner 경로에 직접 연결되지 않는다.

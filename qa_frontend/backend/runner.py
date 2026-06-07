@@ -56,6 +56,7 @@ class RunManager:
         scenario_ids: list[str] | None = None,
         launch_mode: str = "clean",
         language_mode: str = "current",
+        max_steps_overrides: dict[str, int] | None = None,
     ) -> dict[str, object]:
         with self._lock:
             self._refresh_locked()
@@ -106,6 +107,7 @@ class RunManager:
                     output_path=run_dir / "runtime_config.json",
                     scenario_ids=list(scenario_ids),
                     mode=mode,
+                    max_steps_overrides=max_steps_overrides,
                 )
                 self._scenario_selection_applied = True
                 self._runtime_config_path = str(runtime_config["path"])

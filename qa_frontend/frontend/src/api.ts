@@ -415,6 +415,253 @@ export type OpenLanguageSettingsResponse = {
   error?: string;
 };
 
+export type PluginDiscoveryCard = {
+  id: string;
+  label: string;
+  stable_label: string;
+  type: 'life' | 'device' | string;
+  confidence: 'high' | 'medium' | 'low' | string;
+  source: 'helper' | 'xml' | 'helper+xml' | string;
+  bounds: string;
+  resource_id: string;
+  known: boolean;
+  existing_scenario_id: string;
+};
+
+export type PluginDiscoveryResponse = {
+  ok: boolean;
+  schema_version: 'plugin-discovery-v1' | string;
+  cards: PluginDiscoveryCard[];
+  diagnostics: {
+    warnings: string[];
+  };
+};
+
+export type PluginProbeResponse = {
+  ok: boolean;
+  schema_version: 'plugin-probe-v1' | string;
+  probe_status: string;
+  entry: {
+    attempted: boolean;
+    method: string;
+    open_confirmed: boolean;
+    reason: string;
+  };
+  summary: {
+    plugin_open_verified_candidate: boolean;
+    suggested_entry_method: string;
+    suggested_scenario_type: string;
+  };
+  seed: {
+    verify_tokens: string[];
+    negative_verify_tokens: string[];
+    headers: string[];
+    local_tabs: string[];
+    representative_cards: string[];
+    overlay_hints: string[];
+    context_verify_text_candidates: string[];
+    entry_candidate: {
+      action: string;
+      target_seed: string;
+    };
+  };
+  artifacts: {
+    helper_nodes_captured: boolean;
+    xml_captured: boolean;
+    focus_steps: number;
+  };
+  diagnostics: {
+    warnings: string[];
+    failure_reason: string;
+  };
+};
+
+export type PluginDraftResponse = {
+  ok: boolean;
+  schema_version: 'plugin-draft-v1' | string;
+  draft_status: string;
+  draft: {
+    scenario: Record<string, unknown>;
+    runtime_config: Record<string, unknown>;
+    metadata: {
+      source_card: PluginDiscoveryCard;
+      probe_status: string;
+      plugin_open_verified_candidate: boolean;
+      headers: string[];
+      local_tabs: string[];
+      representative_cards: string[];
+      overlay_hints: string[];
+      context_verify_text_candidates: string[];
+      manual_review_required: boolean;
+    };
+  };
+  diagnostics: {
+    warnings: string[];
+    notes: string[];
+    failure_reason: string;
+  };
+};
+
+export type PluginDraftReviewResponse = {
+  ok: boolean;
+  schema_version: 'plugin-draft-review-v1' | string;
+  review_status: string;
+  checks: {
+    scenario_id_exists: boolean;
+    runtime_config_exists: boolean;
+    manual_review_required: boolean;
+    can_apply: boolean;
+  };
+  preview: {
+    scenario_config_insertion_hint: string;
+    runtime_config_patch: Record<string, unknown>;
+    diff_preview: string;
+  };
+  diagnostics: {
+    warnings: string[];
+    errors: string[];
+  };
+};
+
+export type PluginDraftApplyResponse = {
+  ok: boolean;
+  schema_version: 'plugin-draft-apply-v1' | string;
+  apply_status: string;
+  changed_files: string[];
+  backup: {
+    created: boolean;
+    paths: string[];
+  };
+  applied: {
+    scenario_id: string;
+    runtime_config_key: string;
+  };
+  diagnostics: {
+    warnings: string[];
+    errors: string[];
+  };
+};
+
+export type PluginDraftSmokeResponse = {
+  ok: boolean;
+  schema_version: 'plugin-draft-smoke-v1' | string;
+  smoke_status: string;
+  run_id: string;
+  scenario_id: string;
+  max_steps: number;
+  summary: {
+    pre_navigation_success: boolean;
+    plugin_open_verified: boolean;
+    steps_collected: number;
+    failure_reason: string;
+    result_status: string;
+  };
+  artifacts: {
+    log_path: string;
+    xlsx_path: string;
+  };
+  diagnostics: {
+    warnings: string[];
+  };
+};
+
+export type PluginDraftSmokeStatusResponse = Omit<PluginDraftSmokeResponse, 'schema_version' | 'diagnostics'> & {
+  schema_version: 'plugin-draft-smoke-status-v1' | string;
+  run_status: string;
+  artifacts: PluginDraftSmokeResponse['artifacts'] & {
+    summary_json_path: string;
+    display_urls: {
+      log: string;
+      xlsx: string;
+    };
+  };
+  diagnostics: {
+    warnings: string[];
+    errors: string[];
+  };
+};
+
+export type PluginOnboardingSession = {
+  schema_version: 'plugin-onboarding-session-v1' | string;
+  session_id: string;
+  plugin: {
+    label: string;
+    stable_label: string;
+    type: string;
+    scenario_id: string;
+  };
+  status: string;
+  steps: Record<string, { status: string; payload: Record<string, unknown>; updated_at?: string }>;
+  feedback: {
+    warnings: string[];
+    errors: string[];
+    suggestions: string[];
+  };
+  created_at: string;
+  updated_at: string;
+};
+
+export type PluginOnboardingSessionCreateResponse = {
+  ok: boolean;
+  schema_version: 'plugin-onboarding-session-v1' | string;
+  session_id: string;
+};
+
+export type PluginOnboardingSessionResponse = {
+  ok: boolean;
+  schema_version: 'plugin-onboarding-session-v1' | string;
+  session: PluginOnboardingSession;
+};
+
+export type PluginOnboardingSessionsResponse = {
+  ok: boolean;
+  schema_version: 'plugin-onboarding-session-v1' | string;
+  sessions: PluginOnboardingSession[];
+};
+
+export type PluginOnboardingRestoreResponse = {
+  ok: boolean;
+  schema_version: 'plugin-onboarding-restore-v1' | string;
+  session: PluginOnboardingSession;
+  restored_state: {
+    selected_card: Partial<PluginDiscoveryCard>;
+    probe_result: Partial<PluginProbeResponse>;
+    draft_result: Partial<PluginDraftResponse>;
+    review_result: Partial<PluginDraftReviewResponse>;
+    apply_result: Partial<PluginDraftApplyResponse>;
+    smoke_start_result: Partial<PluginDraftSmokeResponse>;
+    smoke_status_result: Partial<PluginDraftSmokeStatusResponse>;
+  };
+  recommendation: {
+    next_action: string;
+    severity: 'success' | 'warning' | 'danger' | 'info' | string;
+    reasons: string[];
+    allowed_actions: string[];
+    blocked_actions: string[];
+  };
+};
+
+export type PluginRollbackPreviewResponse = {
+  ok: boolean;
+  schema_version: 'plugin-rollback-preview-v1' | string;
+  rollback_status: string;
+  can_rollback: boolean;
+  target_files: string[];
+  backup: {
+    found: boolean;
+    paths: string[];
+  };
+  preview: {
+    scenario_entry_will_be_removed: boolean;
+    runtime_config_entry_will_be_removed: boolean;
+    diff_preview: string;
+  };
+  diagnostics: {
+    warnings: string[];
+    errors: string[];
+  };
+};
+
 function formatApiPayloadError(payload: unknown) {
   if (!payload || typeof payload !== 'object') {
     return '';
@@ -481,6 +728,66 @@ export const api = {
   fixTalkBack: () => requestPayload<TalkBackFixResponse>('/api/talkback/fix', { method: 'POST' }),
   openLanguageSettings: () =>
     request<OpenLanguageSettingsResponse>('/api/device/open-language-settings', { method: 'POST' }),
+  discoverPlugins: (data: { targets: string[]; include_xml: boolean; current_view_only: boolean }) =>
+    requestPayload<PluginDiscoveryResponse>('/api/plugin-discovery/discover', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  startPluginProbe: (data: { card: PluginDiscoveryCard; max_probe_steps: number; include_xml: boolean; include_helper_dump: boolean }) =>
+    requestPayload<PluginProbeResponse>('/api/plugin-probe/start', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  generatePluginDraft: (data: { card: PluginDiscoveryCard; probe: PluginProbeResponse; options?: { include_disabled_runtime_config: boolean } }) =>
+    requestPayload<PluginDraftResponse>('/api/plugin-draft/generate', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  reviewPluginDraft: (data: { draft: PluginDraftResponse['draft']; options?: { include_diff_preview: boolean; check_existing: boolean } }) =>
+    requestPayload<PluginDraftReviewResponse>('/api/plugin-draft/review', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  applyPluginDraft: (data: { draft: PluginDraftResponse['draft']; review: PluginDraftReviewResponse; options?: { create_backup: boolean } }) =>
+    requestPayload<PluginDraftApplyResponse>('/api/plugin-draft/apply', {
+      method: 'POST',
+      body: JSON.stringify({
+        draft: data.draft,
+        review: {
+          schema_version: data.review.schema_version,
+          checks: data.review.checks,
+        },
+        options: data.options,
+      }),
+    }),
+  smokePluginDraft: (data: { scenario_id: string; max_steps: number; mode: 'smoke'; serial?: string | null; options?: { force_enabled_runtime_override: boolean; collect_summary: boolean } }) =>
+    requestPayload<PluginDraftSmokeResponse>('/api/plugin-draft/smoke', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getPluginDraftSmokeStatus: (runId: string, scenarioId: string) =>
+    requestPayload<PluginDraftSmokeStatusResponse>(
+      `/api/plugin-draft/smoke/${encodeURIComponent(runId)}?scenario_id=${encodeURIComponent(scenarioId)}`,
+    ),
+  createPluginOnboardingSession: (data: { card: Pick<PluginDiscoveryCard, 'label' | 'stable_label' | 'type' | 'existing_scenario_id'> }) =>
+    requestPayload<PluginOnboardingSessionCreateResponse>('/api/plugin-onboarding/session', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  savePluginOnboardingStep: (sessionId: string, data: { step: string; status: string; payload: Record<string, unknown> }) =>
+    requestPayload<PluginOnboardingSessionResponse>(`/api/plugin-onboarding/session/${encodeURIComponent(sessionId)}/step`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getPluginOnboardingSession: (sessionId: string) =>
+    requestPayload<PluginOnboardingSessionResponse>(`/api/plugin-onboarding/session/${encodeURIComponent(sessionId)}`),
+  restorePluginOnboardingSession: (sessionId: string) =>
+    requestPayload<PluginOnboardingRestoreResponse>(`/api/plugin-onboarding/session/${encodeURIComponent(sessionId)}/restore`),
+  previewPluginRollback: (sessionId: string) =>
+    requestPayload<PluginRollbackPreviewResponse>(`/api/plugin-onboarding/session/${encodeURIComponent(sessionId)}/rollback/preview`, {
+      method: 'POST',
+    }),
+  listPluginOnboardingSessions: () => requestPayload<PluginOnboardingSessionsResponse>('/api/plugin-onboarding/sessions'),
   scenarios: () => request<{ scenarios: Scenario[] }>('/api/scenarios'),
   startRun: (
     mode: 'smoke' | 'full',

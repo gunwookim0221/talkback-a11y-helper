@@ -14,6 +14,30 @@ from .batch_runner import global_batch_manager, get_recent_batches
 from .scenarios import list_scenarios
 from .mismatch_viewer import get_run_mismatch_summary
 from .crash_summary import build_crash_artifact_zip, build_crash_detail, build_crash_summary, safe_crash_event_dir
+from .plugin_discovery import PluginDiscoveryRequest, discover_plugins
+from .plugin_draft import (
+    PluginDraftApplyRequest,
+    PluginDraftRequest,
+    PluginDraftReviewRequest,
+    PluginDraftSmokeRequest,
+    PluginDraftSmokeStatusRequest,
+    apply_draft,
+    get_draft_smoke_status,
+    generate_draft,
+    review_draft,
+    start_draft_smoke,
+)
+from .plugin_probe import PluginProbeRequest, probe_plugin
+from .plugin_onboarding_session import (
+    PluginOnboardingSessionCreateRequest,
+    PluginOnboardingSessionStepRequest,
+    create_session,
+    get_session,
+    list_sessions,
+    preview_session_rollback,
+    restore_session,
+    save_session_step,
+)
 
 
 app = FastAPI(title="TalkBack QA Local Control Panel", version="0.1.0")
@@ -96,6 +120,145 @@ def talkback_fix() -> dict[str, object]:
 @app.post("/api/device/open-language-settings")
 def device_open_language_settings() -> dict[str, object]:
     return open_language_settings()
+
+
+@app.post("/api/plugin-discovery/discover")
+def plugin_discovery_discover(request: PluginDiscoveryRequest) -> dict[str, object]:
+    if runner.get_status().get("state") == "running":
+        raise HTTPException(status_code=409, detail="Discovery is blocked while a run is in progress")
+    try:
+        return discover_plugins(request)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/plugin-probe/start")
+def plugin_probe_start(request: PluginProbeRequest) -> dict[str, object]:
+    if runner.get_status().get("state") == "running":
+        raise HTTPException(status_code=409, detail="Probe is blocked while a run is in progress")
+    try:
+        return probe_plugin(request)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/plugin-draft/generate")
+def plugin_draft_generate(request: PluginDraftRequest) -> dict[str, object]:
+    if runner.get_status().get("state") == "running":
+        raise HTTPException(status_code=409, detail="Draft generation is blocked while a run is in progress")
+    try:
+        return generate_draft(request)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/plugin-draft/review")
+def plugin_draft_review(request: PluginDraftReviewRequest) -> dict[str, object]:
+    if runner.get_status().get("state") == "running":
+        raise HTTPException(status_code=409, detail="Draft review is blocked while a run is in progress")
+    try:
+        return review_draft(request)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/plugin-draft/apply")
+def plugin_draft_apply(request: PluginDraftApplyRequest) -> dict[str, object]:
+    if runner.get_status().get("state") == "running":
+        raise HTTPException(status_code=409, detail="Draft apply is blocked while a run is in progress")
+    try:
+        return apply_draft(request)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/plugin-draft/smoke")
+def plugin_draft_smoke(request: PluginDraftSmokeRequest) -> dict[str, object]:
+    if runner.get_status().get("state") == "running":
+        raise HTTPException(status_code=409, detail="Draft smoke is blocked while a run is in progress")
+    try:
+        return start_draft_smoke(request, runner=runner)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/plugin-draft/smoke/{run_id}")
+def plugin_draft_smoke_status(run_id: str, scenario_id: str) -> dict[str, object]:
+    try:
+        return get_draft_smoke_status(
+            PluginDraftSmokeStatusRequest(run_id=run_id, scenario_id=scenario_id),
+            runner=runner,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/plugin-onboarding/session")
+def plugin_onboarding_create_session(request: PluginOnboardingSessionCreateRequest) -> dict[str, object]:
+    try:
+        return create_session(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/plugin-onboarding/session/{session_id}/step")
+def plugin_onboarding_save_step(session_id: str, request: PluginOnboardingSessionStepRequest) -> dict[str, object]:
+    try:
+        return save_session_step(session_id, request)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/plugin-onboarding/session/{session_id}")
+def plugin_onboarding_get_session(session_id: str) -> dict[str, object]:
+    try:
+        return get_session(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/plugin-onboarding/session/{session_id}/restore")
+def plugin_onboarding_restore_session(session_id: str) -> dict[str, object]:
+    try:
+        return restore_session(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/plugin-onboarding/session/{session_id}/rollback/preview")
+def plugin_onboarding_rollback_preview(session_id: str) -> dict[str, object]:
+    try:
+        return preview_session_rollback(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/plugin-onboarding/sessions")
+def plugin_onboarding_list_sessions(limit: int = 20) -> dict[str, object]:
+    try:
+        return list_sessions(limit=limit)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/api/scenarios")

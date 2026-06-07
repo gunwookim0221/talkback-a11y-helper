@@ -21,10 +21,12 @@ def build_selected_runtime_config(
     scenario_ids: list[str],
     *,
     mode: str,
+    max_steps_overrides: dict[str, int] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     selected = {scenario_id for scenario_id in scenario_ids if scenario_id}
     normalized_mode = _normalize_mode(mode)
     selected_policy = "source_preserved" if normalized_mode == "full" else "smoke_override"
+    max_steps_overrides = max_steps_overrides or {}
     next_config = copy.deepcopy(source_config)
     scenarios = next_config.get("scenarios")
     if not isinstance(scenarios, dict):
@@ -43,9 +45,13 @@ def build_selected_runtime_config(
         effective_max_steps = original_max_steps
         policy = "source_preserved"
         if is_selected:
-            effective_max_steps = _resolve_effective_max_steps(scenario_key, original_max_steps, normalized_mode)
+            if scenario_key in max_steps_overrides:
+                effective_max_steps = max_steps_overrides[scenario_key]
+                policy = "explicit_override"
+            else:
+                effective_max_steps = _resolve_effective_max_steps(scenario_key, original_max_steps, normalized_mode)
+                policy = selected_policy
             cfg["max_steps"] = effective_max_steps
-            policy = selected_policy
         scenario_steps.append(
             {
                 "scenario": scenario_key,
@@ -65,13 +71,19 @@ def write_selected_runtime_config(
     output_path: Path,
     scenario_ids: list[str],
     mode: str,
+    max_steps_overrides: dict[str, int] | None = None,
 ) -> dict[str, object]:
     source_text = source_path.read_text(encoding="utf-8")
     source_config = json.loads(source_text)
     if not isinstance(source_config, dict):
         raise ValueError("runtime_config root must be an object")
 
-    selected_config, scenario_steps = build_selected_runtime_config(source_config, scenario_ids, mode=mode)
+    selected_config, scenario_steps = build_selected_runtime_config(
+        source_config,
+        scenario_ids,
+        mode=mode,
+        max_steps_overrides=max_steps_overrides,
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
         json.dumps(selected_config, ensure_ascii=False, indent=2) + "\n",

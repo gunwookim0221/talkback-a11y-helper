@@ -21,6 +21,23 @@
 - TalkBack 접근성 품질 판독: [talkback-quality-guide.md](talkback-quality-guide.md)
 - Crash Capture Design: [crash-capture-design.md](crash-capture-design.md)
 
+## Plugin Onboarding Wizard MVP
+
+신규 Life / Device plugin 추가 흐름은 [plugin-onboarding-guide.md](plugin-onboarding-guide.md)
+와 [qa-frontend-guide.md](qa-frontend-guide.md)를 우선 참조합니다.
+
+현재 MVP 범위:
+
+- visible plugin discovery
+- bounded probe
+- draft generate/review/apply
+- smoke start/status refresh
+- onboarding session persistence/restore
+- next action recommendation
+- rollback preview
+
+현재 rollback은 preview only이며 실제 복원 실행은 제공하지 않습니다.
+
 ## Historical design record
 
 설계 당시 기록은 [archive/](archive/) 아래에 보존합니다.

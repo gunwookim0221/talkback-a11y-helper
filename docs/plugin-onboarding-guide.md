@@ -325,7 +325,153 @@ result sheet는 사람 검수용이다.
 - representative smoke가 통과하는가
 - 필요한 경우 locale smoke가 통과하는가
 
-## 12. known high-risk plugin 유형
+## 12. Plugin Onboarding Wizard MVP
+
+QA Frontend의 Plugin Discovery panel은 신규 plugin 추가 비용을 줄이기 위한
+wizard형 workflow를 제공한다. 현재 MVP는 아래 순서를 지원한다.
+
+```text
+Discover Plugins
+↓
+Probe
+↓
+Generate Draft
+↓
+Review Draft
+↓
+Apply Draft
+↓
+Smoke Draft
+↓
+Refresh Smoke Result
+↓
+Session Restore / Recommendation
+↓
+Rollback Preview
+```
+
+### Discovery
+
+현재 SmartThings 화면에 visible 상태로 보이는 Life / Device plugin 후보를 수집한다.
+
+- Device: helper dump 기반 visible device card 수집
+- Life: XML 기반 visible card-like node 수집
+- run 실행 중에는 ADB/helper/TalkBack focus 충돌 방지를 위해 차단된다
+
+Discovery는 bounded scroll이나 자동 tab 이동을 수행하지 않는다.
+
+### Probe
+
+선택한 card에 대해 plugin 진입을 짧게 시도하고 draft 생성을 위한 seed를 수집한다.
+목표는 PASS/FAIL 판정이 아니라 다음 후보를 얻는 것이다.
+
+- plugin open verified 후보
+- verify token 후보
+- local tab 후보
+- header/title 후보
+- representative card 후보
+- overlay/modal hint
+
+### Draft Generate / Review
+
+Draft Generate는 `scenario_config.py`와 `runtime_config.json`에 들어갈 후보 JSON을
+만든다. Review는 실제 파일 수정 전에 중복과 적용 가능성을 검사한다.
+
+Review에서 확인하는 주요 항목:
+
+- scenario id 중복
+- runtime config key 중복
+- manual review required
+- fallback candidate id
+- 적용 예정 diff preview
+
+### Apply Draft
+
+Apply는 review가 허용한 draft만 실제 파일에 반영한다.
+
+수정 대상:
+
+- `tb_runner/scenario_config.py`
+- `config/runtime_config.json`
+
+Apply 전 backup은 `output/plugin_draft_backups/<timestamp>/` 아래에 생성된다.
+
+### Smoke Start / Result Refresh
+
+Smoke는 apply된 scenario 하나만 실행한다.
+
+- `scenario_id` 1개
+- `max_steps <= 10`
+- mode는 `smoke`
+- 원본 runtime config를 직접 수정하지 않고 override로 실행
+
+Smoke start 후 결과 summary는 수동 refresh로 조회한다. 자동 polling은 아직
+구현하지 않았다.
+
+### Onboarding Session
+
+wizard 진행 상태는 session 단위로 저장된다.
+
+저장 위치:
+
+```text
+output/plugin_onboarding_sessions/<session_id>.json
+```
+
+저장되는 단계:
+
+- discovery
+- probe
+- draft
+- review
+- apply
+- smoke
+
+최근 session을 선택하면 저장된 payload를 기반으로 panel state를 best-effort로
+복원한다.
+
+### Recommendation
+
+session restore 시 smoke 결과와 review/apply 상태를 기준으로 다음 action을 추천한다.
+
+- `ready_for_manual_validation`
+- `ready_with_warning`
+- `needs_probe_revision`
+- `apply_rollback_candidate`
+- `review_blocked`
+- `incomplete`
+
+추천은 UI 안내만 제공한다. commit, retry, rollback 실행은 아직 자동 수행하지
+않는다.
+
+### Rollback Preview
+
+Rollback Preview는 apply backup과 현재 파일을 비교해 실제 rollback 전에 영향 범위를
+보여준다.
+
+확인 항목:
+
+- backup file 존재 여부
+- 현재 파일 존재 여부
+- scenario entry 제거 예상 여부
+- runtime config entry 제거 예상 여부
+- current vs backup diff preview
+
+실제 rollback 복원은 아직 구현하지 않았다.
+
+## 13. Plugin Onboarding Wizard known limitations
+
+- discovery/probe는 현재 visible card 중심이다.
+- bounded scroll discovery는 아직 없다.
+- 자동 tab 이동은 아직 없다.
+- Smoke result는 수동 refresh 방식이다.
+- automatic polling은 아직 없다.
+- Apply는 backup을 생성하지만 rollback 실행 UI/API는 아직 없다.
+- Rollback은 preview only다.
+- `serial`은 smoke request schema에 있지만 현재 runner 실행 경로에 직접 연결되지 않는다.
+- 실기기 품질은 plugin별 smoke와 필요 시 long-run으로 확인해야 한다.
+
+## 14. known high-risk plugin 유형
 
 주의가 필요한 유형:
 
