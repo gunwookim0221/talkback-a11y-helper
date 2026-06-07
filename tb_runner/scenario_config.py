@@ -138,6 +138,37 @@ TAB_CONFIGS = [
             "type": "screen_text",
             "text_regex": "(?i).*smart\\s*things\\s*cooking.*|.*ingredients.*|.*푸드.*|.*모닝빵양배추샌드위치.*",
         },
+        "post_traversal_handoff": {
+            "enabled": True,
+            "navigate_up_regex": "(?i).*navigate\\s*up.*",
+            "recipe_detail_tokens": [
+                "recipe optimized",
+                "ingredients",
+                "instructions",
+                "reviews",
+                "more recipes for you",
+            ],
+            "recipe_detail_min_hits": 1,
+            "food_home_tokens": [
+                "food",
+                "suggestions",
+                "family meal planner",
+                "trending recipes",
+            ],
+            "food_home_min_hits": 1,
+            "food_home_local_tabs": [
+                "home",
+                "search",
+                "communities",
+                "my",
+                "scan",
+            ],
+            "food_scan_resource_patterns": [
+                "(?i)(:id/)?camera$",
+            ],
+            "food_scan_recovery_enabled": True,
+            "food_scan_recovery_min_tab_hits": 3,
+        },
         "overlay_policy": {
             "allow_candidates": [
                 {

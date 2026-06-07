@@ -125,9 +125,12 @@ export function RecentRunsPanel({
       <div style={{ marginTop: '12px' }}>
         <details open>
           <summary style={{ fontSize: '14px', fontWeight: 'bold' }}>Run Details</summary>
+          <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', marginTop: '6px', paddingLeft: '8px' }}>
+            Scenario-level result summary. This is separate from device result and TalkBack row quality.
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingLeft: '8px', marginTop: '8px' }}>
             <details>
-              <summary>Failed ({failedScenarios.length})</summary>
+              <summary>Scenario Failed ({failedScenarios.length})</summary>
               <div className="scenarioDetailList">
                 {failedScenarios.length ? (
                   failedScenarios.map((scenario: any) => (
@@ -142,7 +145,7 @@ export function RecentRunsPanel({
               </div>
             </details>
             <details>
-              <summary>Warning ({warningScenarios.length})</summary>
+              <summary>Scenario Warning ({warningScenarios.length})</summary>
               <div className="scenarioDetailList">
                 {warningScenarios.length ? (
                   warningScenarios.map((scenario: any) => (
@@ -157,7 +160,7 @@ export function RecentRunsPanel({
               </div>
             </details>
             <details>
-              <summary>Not Available ({unavailableScenarios.length})</summary>
+              <summary>Scenario Not Available ({unavailableScenarios.length})</summary>
               <div className="scenarioDetailList">
                 {unavailableScenarios.length ? (
                   unavailableScenarios.map((scenario: any) => (
@@ -177,7 +180,7 @@ export function RecentRunsPanel({
               </div>
             </details>
             <details>
-              <summary>Passed ({passedScenarios.length})</summary>
+              <summary>Scenario Passed ({passedScenarios.length})</summary>
               <div className="scenarioDetailList">
                 {passedScenarios.length ? (
                   passedScenarios.map((scenario: any) => (
@@ -196,7 +199,10 @@ export function RecentRunsPanel({
         
         {runData?.quality && (
           <details open style={{ marginTop: '16px' }}>
-            <summary style={{ fontSize: '14px', fontWeight: 'bold' }}>TalkBack Quality</summary>
+            <summary style={{ fontSize: '14px', fontWeight: 'bold' }}>TalkBack Rows</summary>
+            <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', marginTop: '4px' }}>
+              Row / utterance-level quality counts from result rows. This is separate from scenario result status.
+            </div>
             <div className="scenarioDetailList" style={{ marginTop: '8px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '8px' }}>
                 <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
@@ -336,15 +342,15 @@ export function RecentRunsPanel({
 
     const counts = summary.summary;
     if (counts.fail_count > 0) {
-      return <span className="statusBadge healthBad">TALKBACK FAIL ({counts.fail_count})</span>;
+      return <span className="statusBadge healthBad">ROW FAIL ({counts.fail_count})</span>;
     }
     if (counts.issue_count > 0) {
-      return <span className="statusBadge healthWarn">TALKBACK ISSUE ({counts.issue_count})</span>;
+      return <span className="statusBadge healthWarn">ROW ISSUE ({counts.issue_count})</span>;
     }
     if (counts.review_count > 0) {
-      return <span className="statusBadge" style={{ background: 'var(--color-neutral)', color: '#fff' }}>TALKBACK REVIEW ({counts.review_count})</span>;
+      return <span className="statusBadge" style={{ background: 'var(--color-neutral)', color: '#fff' }}>ROW REVIEW ({counts.review_count})</span>;
     }
-    return <span className="statusBadge healthOk">TALKBACK CLEAN</span>;
+    return <span className="statusBadge healthOk">ROW CLEAN</span>;
   }
 
   return (
@@ -383,7 +389,7 @@ export function RecentRunsPanel({
                   <small>
                     {batch.mode} &middot; {new Date(batch.created_at).toLocaleString()}
                     {typeof batch.duration_seconds === 'number' ? ` · duration: ${formatDuration(batch.duration_seconds)}` : ''}
-                    &middot; devices: {batch.device_count} (passed: {batch.passed_count}, failed: {batch.failed_count})
+                    &middot; devices: {batch.device_count} (devices passed: {batch.passed_count}, devices failed: {batch.failed_count})
                   </small>
                   {batch.devices && batch.devices.length > 0 && (
                     <div style={{ marginTop: '8px', paddingLeft: '8px', borderLeft: '2px solid var(--color-border)' }}>

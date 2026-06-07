@@ -202,6 +202,9 @@ def test_build_run_summary_contains_sidecar_schema(tmp_path):
     assert summary["device_locale"] == "ko-KR"
     assert summary["completed_scenarios"] == 1
     assert summary["failed_scenarios"] == 0
+    assert summary["scenario_completed_count"] == 1
+    assert summary["scenario_failed_count"] == 0
+    assert summary["scenario_passed_count"] == 1
     assert summary["total_steps"] == 6
     assert summary["popup_result"] == "cleared"
     assert summary["xlsx_filename"] == "talkback_compare_20260528_120000.xlsx"

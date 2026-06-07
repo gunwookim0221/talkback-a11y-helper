@@ -74,22 +74,22 @@ export function helperBadgeText(status: string | undefined) {
 
 export function scenarioRunText(run: RecentRun) {
   if (run.scenario_result_status === 'failed') {
-    return `Scenarios failed (${run.failed_scenarios})`;
+    return `Scenario results failed (${run.failed_scenarios})`;
   }
   if ((run.availability_candidate_scenarios ?? 0) > 0) {
     const executed = run.executed_scenarios ?? run.completed_scenarios ?? 0;
     return `Executed ${executed}/${run.total_scenarios}, ${run.availability_candidate_scenarios} not available`;
   }
   if (run.scenario_result_status === 'passed') {
-    return 'Scenarios passed';
+    return 'Scenario results passed';
   }
   if (run.scenario_result_status === 'warning') {
-    return `Scenarios warning (${run.warning_scenarios ?? 0})`;
+    return `Scenario results warning (${run.warning_scenarios ?? 0})`;
   }
   if (run.scenario_result_status === 'partial') {
     return `Partial (${run.completed_scenarios}/${run.total_scenarios})`;
   }
-  return `Scenarios ${run.scenario_result_status}`;
+  return `Scenario results ${run.scenario_result_status}`;
 }
 
 export function resolveSmokeSteps(scenarioId: string) {

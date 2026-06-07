@@ -83,6 +83,7 @@ COLLECTION_FLOW_SCROLL_READY_VERSION = "pr79-scroll-ready-move-smart-v1"
 COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION = "pr108-local-tab-last-selected-hint-v1"
 COLLECTION_FLOW_REPEAT_SUPPRESSION_VERSION = "phase3f-repeat-suppression-v1"
 COLLECTION_FLOW_BOTTOM_STRIP_GUARD_VERSION = "phase4d-bottom-strip-guard-v1"
+COLLECTION_FLOW_FOOD_HOME_HANDOFF_VERSION = "phase-food-two-stage-entry-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
 COLLECTION_FLOW_LIFE_RESET_VERSION = "pr61-life-reset-strict-global-nav-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
@@ -374,6 +375,7 @@ class CollectionPhaseContext:
     main_announcement_idle_wait_seconds: float
     main_announcement_max_extra_wait_seconds: float
     state: MainLoopState
+    start_step_index: int = 1
 
 @dataclass
 class StartPipelineResult:
@@ -1552,6 +1554,200 @@ def _collect_post_open_visible_text(client: A11yAdbClient, dev: str) -> str:
         if len(visible_fragments) >= 30:
             break
     return " ".join(visible_fragments).strip()
+
+
+def _collect_visible_text_fragments(nodes: list[dict[str, Any]] | None, *, limit: int = 40) -> list[str]:
+    if not isinstance(nodes, list) or not nodes:
+        return []
+    fragments: list[str] = []
+    seen: set[str] = set()
+    for node, _ in _iter_tree_nodes_with_parent(nodes):
+        if not _node_is_visible(node):
+            continue
+        label_blob = _node_label_blob(node).strip()
+        lowered = label_blob.lower()
+        if not label_blob or lowered in seen:
+            continue
+        fragments.append(label_blob)
+        seen.add(lowered)
+        if len(fragments) >= limit:
+            break
+    return fragments
+
+
+def _collect_runtime_screen_snapshot(
+    client: A11yAdbClient,
+    dev: str,
+    *,
+    wait_seconds: float,
+) -> dict[str, Any]:
+    dump_tree_fn = getattr(client, "dump_tree", None)
+    nodes: list[dict[str, Any]] = []
+    if callable(dump_tree_fn):
+        try:
+            raw_nodes = dump_tree_fn(dev=dev)
+            nodes = raw_nodes if isinstance(raw_nodes, list) else []
+        except Exception:
+            nodes = []
+    focus = client.get_focus(
+        dev=dev,
+        wait_seconds=min(wait_seconds, 0.8),
+        allow_fallback_dump=False,
+        mode="fast",
+    )
+    view_id, label, speech = _extract_post_open_focus_fields(focus if isinstance(focus, dict) else {})
+    texts = _collect_visible_text_fragments(nodes)
+    return {
+        "nodes": nodes,
+        "texts": texts,
+        "view_id": view_id,
+        "label": label,
+        "speech": speech,
+    }
+
+
+def _collect_screen_token_hits(snapshot: dict[str, Any], tokens: list[str]) -> list[str]:
+    if not isinstance(snapshot, dict):
+        return []
+    source_texts: list[str] = []
+    source_texts.extend(str(value or "") for value in snapshot.get("texts", []) if str(value or "").strip())
+    source_texts.append(str(snapshot.get("view_id", "") or ""))
+    source_texts.append(str(snapshot.get("label", "") or ""))
+    source_texts.append(str(snapshot.get("speech", "") or ""))
+    return _collect_strict_token_hits(tokens, source_texts)
+
+
+def _collect_food_home_tab_hits(snapshot: dict[str, Any], handoff_cfg: dict[str, Any]) -> list[str]:
+    tab_tokens = [
+        str(token or "").strip().lower()
+        for token in handoff_cfg.get("food_home_local_tabs", [])
+        if str(token or "").strip()
+    ]
+    source_texts: list[str] = []
+    source_texts.extend(str(value or "") for value in snapshot.get("texts", []) if str(value or "").strip())
+    source_texts.append(str(snapshot.get("label", "") or ""))
+    source_texts.append(str(snapshot.get("speech", "") or ""))
+    return _collect_strict_token_hits(tab_tokens, source_texts)
+
+
+def _food_local_tab_canonical_label(label: str) -> str:
+    _sync_local_tab_logic_dependencies()
+    canonical = local_tab_logic._canonicalize_local_tab_label(label)
+    display = local_tab_logic._display_local_tab_label(canonical or label)
+    normalized = str(display or canonical or label or "").strip()
+    lowered = normalized.lower()
+    label_map = {
+        "home": "Home",
+        "search": "Search",
+        "communities": "Communities",
+        "my": "MY",
+        "scan": "Scan",
+        "scan scan": "Scan",
+    }
+    return label_map.get(lowered, normalized)
+
+
+def _is_food_scan_local_tab_candidate(candidate: dict[str, Any], handoff_cfg: dict[str, Any]) -> bool:
+    label = _food_local_tab_canonical_label(str(candidate.get("label", "") or ""))
+    rid = str(candidate.get("rid", "") or "").strip()
+    if label.lower() == "scan":
+        return True
+    for pattern in handoff_cfg.get("food_scan_resource_patterns", []):
+        regex = str(pattern or "").strip()
+        if regex and _safe_regex_search(regex, rid):
+            return True
+    return False
+
+
+def _augment_food_bottom_strip_candidates(
+    raw_candidates: list[dict[str, Any]],
+    accepted_candidates: list[dict[str, Any]],
+    rejected_candidates: list[dict[str, Any]],
+    *,
+    handoff_cfg: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not isinstance(handoff_cfg, dict):
+        return accepted_candidates, rejected_candidates
+    required_labels = {
+        str(token or "").strip().lower()
+        for token in handoff_cfg.get("food_home_local_tabs", [])
+        if str(token or "").strip()
+    }
+    if not required_labels or len(required_labels) < 5:
+        return accepted_candidates, rejected_candidates
+    accepted = list(accepted_candidates)
+    rejected = list(rejected_candidates)
+    accepted_labels = {_food_local_tab_canonical_label(str(candidate.get("label", "") or "")).lower() for candidate in accepted}
+    if "scan" in accepted_labels:
+        return accepted, rejected
+    if not {"home", "search", "communities", "my"}.issubset(accepted_labels):
+        return accepted, rejected
+    scan_candidate: dict[str, Any] | None = None
+    for candidate in raw_candidates:
+        if _is_food_scan_local_tab_candidate(candidate, handoff_cfg):
+            scan_candidate = dict(candidate)
+            break
+    if not isinstance(scan_candidate, dict):
+        return accepted, rejected
+    scan_candidate["label"] = _food_local_tab_canonical_label(str(scan_candidate.get("label", "") or "")) or "Scan"
+    scan_rid = str(scan_candidate.get("rid", "") or "").strip().lower()
+    deduped: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str]] = set()
+    for candidate in [*accepted, scan_candidate]:
+        label = _food_local_tab_canonical_label(str(candidate.get("label", "") or "")).lower()
+        rid = str(candidate.get("rid", "") or "").strip().lower()
+        key = (rid, label)
+        if key in seen_keys:
+            continue
+        candidate = dict(candidate)
+        candidate["label"] = _food_local_tab_canonical_label(str(candidate.get("label", "") or "")) or str(candidate.get("label", "") or "")
+        deduped.append(candidate)
+        seen_keys.add(key)
+    deduped.sort(key=lambda item: int(item.get("center_x", 0) or 0))
+    filtered_rejected: list[dict[str, Any]] = []
+    for candidate in rejected:
+        rid = str(candidate.get("rid", "") or "").strip().lower()
+        label = _food_local_tab_canonical_label(str(candidate.get("label", "") or "")).lower()
+        if rid == scan_rid or label == "scan":
+            continue
+        filtered_rejected.append(candidate)
+    return deduped, filtered_rejected
+
+
+def _find_visible_node_by_regex(
+    nodes: list[dict[str, Any]] | None,
+    pattern: str,
+) -> dict[str, Any] | None:
+    if not isinstance(nodes, list) or not nodes:
+        return None
+    for node, _ in _iter_tree_nodes_with_parent(nodes):
+        if not _node_is_visible(node):
+            continue
+        resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
+        label_blob = _node_label_blob(node).strip()
+        combined = " ".join(value for value in (resource_id, label_blob) if value).strip()
+        if combined and _safe_regex_search(pattern, combined):
+            return node
+    return None
+
+
+def _tap_node_center(client: A11yAdbClient, dev: str, node: dict[str, Any]) -> bool:
+    bounds = parse_bounds_str(str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip())
+    if not bounds:
+        return False
+    center_x = (bounds[0] + bounds[2]) // 2
+    center_y = (bounds[1] + bounds[3]) // 2
+    tap_xy_adb = getattr(client, "tap_xy_adb", None)
+    if callable(tap_xy_adb):
+        return bool(tap_xy_adb(dev=dev, x=center_x, y=center_y))
+    run_fn = getattr(client, "_run", None)
+    if callable(run_fn):
+        try:
+            run_fn(["shell", "input", "tap", str(center_x), str(center_y)], dev=dev)
+            return True
+        except Exception:
+            return False
+    return False
 
 
 def _collect_post_open_identity_snapshot(
@@ -9499,6 +9695,7 @@ def _filter_local_tab_strip_candidates(
 def _collect_step_candidate_priority_groups(
     nodes: Any,
     *,
+    scenario_id: str = "",
     consumed_cluster_signatures: set[str] | None = None,
     consumed_cluster_logical_signatures: set[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[str]]]:
@@ -9807,6 +10004,16 @@ def _collect_step_candidate_priority_groups(
     content_candidates = clustered_content_candidates
 
     bottom_strip_candidates, rejected_bottom_strip_candidates = _filter_local_tab_strip_candidates(raw_bottom_strip_candidates)
+    if str(scenario_id or "").strip() == "life_food_plugin":
+        bottom_strip_candidates, rejected_bottom_strip_candidates = _augment_food_bottom_strip_candidates(
+            raw_bottom_strip_candidates,
+            bottom_strip_candidates,
+            rejected_bottom_strip_candidates,
+            handoff_cfg={
+                "food_home_local_tabs": ["home", "search", "communities", "my", "scan"],
+                "food_scan_resource_patterns": [r"(?i)(:id/)?camera$"],
+            },
+        )
     if not bottom_strip_candidates:
         return sorted(
             content_candidates,
@@ -11720,7 +11927,8 @@ def _main_loop_phase(
     all_rows = phase_ctx.all_rows
     scenario_perf = phase_ctx.scenario_perf
     state = phase_ctx.state
-    for step_idx in range(1, tab_cfg["max_steps"] + 1):
+    start_step_index = max(1, int(getattr(phase_ctx, "start_step_index", 1) or 1))
+    for step_idx in range(start_step_index, tab_cfg["max_steps"] + 1):
         log(f"[STEP] START tab='{tab_cfg['tab_name']}' step={step_idx}")
 
         row = _apply_step_collection_phase(
@@ -11915,6 +12123,16 @@ def _main_loop_phase(
             if stop:
                 stop = False
                 reason = ""
+        if _maybe_recover_food_scan_screen(
+            client,
+            dev,
+            row=row,
+            state=state,
+            tab_cfg=tab_cfg,
+            wait_seconds=phase_ctx.main_step_wait_seconds,
+        ):
+            stop = False
+            reason = ""
         local_tab_transition_applied = False
         repeat_stop_reason_before_continue = (
             reason
@@ -11931,7 +12149,23 @@ def _main_loop_phase(
             and not is_global_nav_only_scenario
             and not bool(row.get("scroll_fallback_resumed_content", False))
         )
-        if viewport_exhausted_direct_path:
+        if (
+            not bool(getattr(state, "food_scan_recovery_pending", False))
+            and str(tab_cfg.get("scenario_id", "") or "") == "life_food_plugin"
+            and bool(getattr(state, "food_force_local_tab_walk", False))
+        ):
+            local_tab_transition_applied = _maybe_select_next_local_tab(
+                client=client,
+                dev=dev,
+                state=state,
+                row=row,
+                scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+                step_idx=step_idx,
+            )
+            if local_tab_transition_applied:
+                stop = False
+                reason = ""
+        if viewport_exhausted_direct_path and not local_tab_transition_applied:
             local_tab_transition_applied = _maybe_select_next_local_tab(
                 client=client,
                 dev=dev,
@@ -11953,6 +12187,7 @@ def _main_loop_phase(
             and not is_global_nav_only_scenario
             and reason in {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall", "repeat_semantic_stall_after_escape"}
             and not viewport_exhausted_direct_path
+            and not local_tab_transition_applied
         ):
             local_tab_transition_applied = _maybe_select_next_local_tab(
                 client=client,
@@ -12259,11 +12494,12 @@ def _collect_start_anchor_row(
     main_announcement_wait_seconds: float,
     main_announcement_idle_wait_seconds: float,
     main_announcement_max_extra_wait_seconds: float,
+    step_index: int = 0,
 ) -> dict[str, Any]:
     anchor_start = time.perf_counter()
     anchor_row = client.collect_focus_step(
         dev=dev,
-        step_index=0,
+        step_index=step_index,
         move=False,
         wait_seconds=main_step_wait_seconds,
         announcement_wait_seconds=main_announcement_wait_seconds,
@@ -12292,7 +12528,7 @@ def _collect_start_anchor_row(
     anchor_view_id = str(anchor_row.get("focus_view_id", "") or "").strip()
     anchor_is_global_nav = bool(anchor_row.get("is_global_nav", False))
     log(
-        f"[TRACE][anchor_row] scenario='{scenario_id}' step=0 view_id='{anchor_view_id}' "
+        f"[TRACE][anchor_row] scenario='{scenario_id}' step={int(step_index)} view_id='{anchor_view_id}' "
         f"visible='{anchor_visible}' speech='{anchor_speech}' "
         f"normalized_visible='{anchor_normalized_visible}' is_global_nav={anchor_is_global_nav}",
     )
@@ -12300,6 +12536,352 @@ def _collect_start_anchor_row(
     anchor_row = maybe_capture_focus_crop(client, dev, anchor_row, output_base_dir)
     anchor_row.pop("_step_mono_start", None)
     return anchor_row
+
+
+def _build_main_loop_state_from_anchor(
+    anchor_row: dict[str, Any],
+    *,
+    anchor_fingerprint: str,
+    anchor_repeat_count: int,
+    step_index: int,
+) -> MainLoopState:
+    object_signature = _build_row_object_signature(anchor_row)
+    logical_signature = _row_logical_signature(anchor_row)
+    cluster_signature = str(anchor_row.get("focus_cluster_signature", "") or "").strip()
+    return MainLoopState(
+        last_fingerprint=anchor_fingerprint,
+        fingerprint_repeat_count=anchor_repeat_count,
+        previous_step_row=anchor_row,
+        prev_fingerprint=make_main_fingerprint(anchor_row),
+        fail_count=0,
+        same_count=0,
+        expanded_overlay_entries=set(),
+        post_realign_pending_steps=0,
+        main_step_index_by_fingerprint={make_main_fingerprint(anchor_row): int(step_index)},
+        recent_fingerprint_history=deque([(int(step_index), anchor_fingerprint)], maxlen=_RECENT_DUPLICATE_WINDOW),
+        recent_semantic_fingerprint_history=deque(
+            [(int(step_index), build_row_semantic_fingerprint(anchor_row))],
+            maxlen=_RECENT_DUPLICATE_WINDOW,
+        ),
+        stop_triggered=False,
+        stop_reason="",
+        stop_step=-1,
+        stall_escape_attempted=False,
+        recent_representative_signatures=deque([object_signature] if object_signature else [], maxlen=_RECENT_DUPLICATE_WINDOW),
+        consumed_representative_signatures=set([object_signature] if object_signature else []),
+        visited_logical_signatures=set([logical_signature] if logical_signature != "none||none||none" else []),
+        consumed_cluster_logical_signatures=set(),
+        consumed_cluster_signatures=set([cluster_signature]) if cluster_signature else set(),
+        current_local_tab_signature="",
+        current_local_tab_active_rid="",
+        local_tab_candidates_by_signature={},
+        visited_local_tabs_by_signature={},
+        pending_local_tab_signature="",
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        pending_local_tab_bounds="",
+        pending_local_tab_age=0,
+        current_local_tab_active_label="",
+        current_local_tab_active_age=0,
+        forced_local_tab_target_signature="",
+        forced_local_tab_target_rid="",
+        forced_local_tab_target_label="",
+        forced_local_tab_target_bounds="",
+        forced_local_tab_attempt_count=0,
+        local_tab_activation_failures={},
+        content_phase_grace_steps=0,
+        active_container_group_signature="",
+        active_container_group_remaining=set(),
+        active_container_group_labels={},
+        completed_container_groups=set(),
+        last_selected_local_tab_signature="",
+        last_selected_local_tab_rid="",
+        last_selected_local_tab_label="",
+        last_selected_local_tab_bounds="",
+        cta_grace_signature="",
+        cta_descend_grace_remaining=0,
+        cta_cluster_nodes_by_signature={},
+        cta_cluster_visited_rids={},
+        cta_cluster_committed_rid={},
+        scroll_state=ScrollState(),
+        focus_realign_state=FocusRealignState(),
+    )
+
+
+def _should_attempt_food_home_handoff(
+    snapshot: dict[str, Any],
+    handoff_cfg: dict[str, Any],
+) -> tuple[bool, list[str]]:
+    recipe_tokens = [str(token or "").strip().lower() for token in handoff_cfg.get("recipe_detail_tokens", []) if str(token or "").strip()]
+    recipe_hits = _collect_screen_token_hits(snapshot, recipe_tokens)
+    min_hits = max(1, int(handoff_cfg.get("recipe_detail_min_hits", 2) or 2))
+    navigate_up_regex = str(handoff_cfg.get("navigate_up_regex", r"(?i).*navigate\s*up.*") or r"(?i).*navigate\s*up.*")
+    navigate_up_present = _find_visible_node_by_regex(snapshot.get("nodes", []), navigate_up_regex) is not None
+    return bool(navigate_up_present and len(recipe_hits) >= min_hits), recipe_hits
+
+
+def _matches_food_home_snapshot(
+    snapshot: dict[str, Any],
+    handoff_cfg: dict[str, Any],
+) -> tuple[bool, list[str]]:
+    home_tokens = [str(token or "").strip().lower() for token in handoff_cfg.get("food_home_tokens", []) if str(token or "").strip()]
+    source_texts: list[str] = []
+    source_texts.extend(str(value or "") for value in snapshot.get("texts", []) if str(value or "").strip())
+    source_texts.append(str(snapshot.get("label", "") or ""))
+    source_texts.append(str(snapshot.get("speech", "") or ""))
+    home_hits = _collect_strict_token_hits(home_tokens, source_texts)
+    min_hits = max(1, int(handoff_cfg.get("food_home_min_hits", 2) or 2))
+    tab_hits = _collect_food_home_tab_hits(snapshot, handoff_cfg)
+    min_tab_hits = max(1, int(handoff_cfg.get("food_scan_recovery_min_tab_hits", 3) or 3))
+    return bool(len(home_hits) >= min_hits or len(tab_hits) >= min_tab_hits), sorted(set([*home_hits, *tab_hits]))
+
+
+def _set_food_scan_recovery_pending(
+    state: Any,
+    *,
+    pending: bool,
+    signature: str = "",
+    rid: str = "",
+    label: str = "",
+) -> None:
+    setattr(state, "food_scan_recovery_pending", bool(pending))
+    setattr(state, "food_scan_recovery_signature", str(signature or "").strip())
+    setattr(state, "food_scan_recovery_rid", str(rid or "").strip())
+    setattr(state, "food_scan_recovery_label", str(label or "").strip())
+
+
+def _maybe_recover_food_scan_screen(
+    client: A11yAdbClient,
+    dev: str,
+    *,
+    row: dict[str, Any],
+    state: Any,
+    tab_cfg: dict[str, Any],
+    wait_seconds: float,
+) -> bool:
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip()
+    handoff_cfg = tab_cfg.get("post_traversal_handoff", {})
+    if scenario_id != "life_food_plugin" or not isinstance(handoff_cfg, dict) or not bool(handoff_cfg.get("food_scan_recovery_enabled")):
+        return False
+    if not bool(getattr(state, "food_scan_recovery_pending", False)):
+        return False
+
+    snapshot = _collect_runtime_screen_snapshot(client, dev, wait_seconds=wait_seconds)
+    home_ok, home_hits = _matches_food_home_snapshot(snapshot, handoff_cfg)
+    if home_ok:
+        _set_food_scan_recovery_pending(state, pending=False)
+        log(
+            "[FOOD][scan_recovery] success=false skipped=true "
+            f"reason='already_on_food_home' hits='{','.join(home_hits) or 'none'}'"
+        )
+        return False
+
+    row["food_scan_recovery_attempted"] = True
+    navigate_up_regex = str(handoff_cfg.get("navigate_up_regex", r"(?i).*navigate\s*up.*") or r"(?i).*navigate\s*up.*")
+    navigate_up_node = _find_visible_node_by_regex(snapshot.get("nodes", []), navigate_up_regex)
+    recovery_method = ""
+    recovery_action_ok = False
+    if isinstance(navigate_up_node, dict):
+        recovery_method = "navigate_up"
+        recovery_action_ok = _tap_node_center(client, dev, navigate_up_node)
+    if not recovery_action_ok:
+        recovery_method = "back"
+        recovery_action_ok = _send_back(client, dev)
+    if not recovery_action_ok:
+        row["food_scan_recovery_success"] = False
+        row["food_scan_recovery_method"] = recovery_method or "none"
+        _set_food_scan_recovery_pending(state, pending=False)
+        log(f"[FOOD][scan_recovery] success=false reason='{recovery_method or 'recovery_action_failed'}'")
+        return False
+
+    home_snapshot: dict[str, Any] = {}
+    verify_ok = False
+    verify_hits: list[str] = []
+    for retry in range(1, 4):
+        time.sleep(min(wait_seconds, 0.45))
+        home_snapshot = _collect_runtime_screen_snapshot(client, dev, wait_seconds=wait_seconds)
+        verify_ok, verify_hits = _matches_food_home_snapshot(home_snapshot, handoff_cfg)
+        log(
+            "[FOOD][scan_recovery_verify] "
+            f"retry={retry}/3 ok={str(verify_ok).lower()} "
+            f"method='{recovery_method}' hits='{','.join(verify_hits) or 'none'}'"
+        )
+        if verify_ok:
+            break
+    row["food_scan_recovery_method"] = recovery_method
+    row["food_scan_recovery_success"] = verify_ok
+    row["food_scan_recovery_hits"] = "|".join(verify_hits)
+    _set_food_scan_recovery_pending(state, pending=False)
+    if not verify_ok:
+        log(f"[FOOD][scan_recovery] success=false method='{recovery_method}'")
+        return False
+
+    state.content_phase_grace_steps = 0
+    state.current_local_tab_signature = ""
+    state.current_local_tab_active_rid = ""
+    state.current_local_tab_active_label = ""
+    state.current_local_tab_active_age = 0
+    state.local_tab_candidates_by_signature = {}
+    mirror = getattr(state, "local_tab_state", None)
+    if mirror is not None:
+        try:
+            mirror.set_active(signature="", rid="", label="", age=0)
+            mirror.candidates_by_signature = {}
+        except Exception:
+            pass
+    row["food_scan_recovered_to_home"] = True
+    row["food_home_reentry"] = True
+    log(
+        "[FOOD][scan_recovery] success=true "
+        f"method='{recovery_method}' hits='{','.join(verify_hits) or 'none'}'"
+    )
+    return True
+
+
+def _maybe_run_food_post_traversal_handoff(
+    client: A11yAdbClient,
+    dev: str,
+    phase_ctx: CollectionPhaseContext,
+) -> bool:
+    tab_cfg = phase_ctx.tab_cfg
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    handoff_cfg = tab_cfg.get("post_traversal_handoff", {})
+    if scenario_id != "life_food_plugin" or not isinstance(handoff_cfg, dict) or not bool(handoff_cfg.get("enabled")):
+        return False
+    if str(phase_ctx.state.stop_reason or "").strip().lower() in {"possible_crash", "crash", "fatal", "app_terminated"}:
+        return False
+
+    recipe_snapshot = _collect_runtime_screen_snapshot(
+        client,
+        dev,
+        wait_seconds=phase_ctx.main_step_wait_seconds,
+    )
+    should_handoff, recipe_hits = _should_attempt_food_home_handoff(recipe_snapshot, handoff_cfg)
+    log(
+        "[FOOD][handoff_check] "
+        f"should_handoff={str(should_handoff).lower()} "
+        f"recipe_hits='{','.join(recipe_hits) or 'none'}' "
+        f"view_id='{str(recipe_snapshot.get('view_id', '') or '')[:96]}' "
+        f"label='{str(recipe_snapshot.get('label', '') or '')[:96]}'"
+    )
+    if not should_handoff:
+        return False
+
+    navigate_up_regex = str(handoff_cfg.get("navigate_up_regex", r"(?i).*navigate\s*up.*") or r"(?i).*navigate\s*up.*")
+    navigate_up_node = _find_visible_node_by_regex(recipe_snapshot.get("nodes", []), navigate_up_regex)
+    if not isinstance(navigate_up_node, dict):
+        log("[FOOD][handoff] skipped reason='navigate_up_not_found'")
+        return False
+    if not _tap_node_center(client, dev, navigate_up_node):
+        log("[FOOD][handoff] skipped reason='navigate_up_tap_failed'")
+        return False
+
+    home_snapshot: dict[str, Any] = {}
+    home_ok = False
+    home_hits: list[str] = []
+    for retry in range(1, 4):
+        time.sleep(min(phase_ctx.main_step_wait_seconds, 0.45))
+        home_snapshot = _collect_runtime_screen_snapshot(
+            client,
+            dev,
+            wait_seconds=phase_ctx.main_step_wait_seconds,
+        )
+        home_ok, home_hits = _matches_food_home_snapshot(home_snapshot, handoff_cfg)
+        log(
+            "[FOOD][handoff_verify] "
+            f"retry={retry}/3 ok={str(home_ok).lower()} "
+            f"home_hits='{','.join(home_hits) or 'none'}' "
+            f"label='{str(home_snapshot.get('label', '') or '')[:96]}'"
+        )
+        if home_ok:
+            break
+    if not home_ok:
+        return False
+
+    current_max_step = max((int(row.get("step_index", -1) or -1) for row in phase_ctx.rows), default=0)
+    anchor_step_index = max(current_max_step + 1, 1)
+    if anchor_step_index >= int(tab_cfg.get("max_steps", 0) or 0):
+        log(
+            "[FOOD][handoff] skipped reason='step_budget_exhausted' "
+            f"anchor_step_index={anchor_step_index} max_steps={int(tab_cfg.get('max_steps', 0) or 0)}"
+        )
+        return False
+
+    previous_start_mode = tab_cfg.get("_scenario_start_mode")
+    previous_start_source = tab_cfg.get("_scenario_start_source")
+    previous_start_note = tab_cfg.get("_scenario_start_note")
+    previous_anchor_stable = tab_cfg.get("_scenario_anchor_stable")
+    tab_cfg["_scenario_start_mode"] = "food_home_handoff"
+    tab_cfg["_scenario_start_source"] = "post_traversal_navigate_up"
+    tab_cfg["_scenario_start_note"] = "food recipe detail traversed; navigated up to Food Home"
+    tab_cfg["_scenario_anchor_stable"] = True
+    try:
+        anchor_row = _collect_start_anchor_row(
+            client,
+            dev,
+            tab_cfg,
+            scenario_id=scenario_id,
+            output_base_dir=phase_ctx.output_base_dir,
+            main_step_wait_seconds=phase_ctx.main_step_wait_seconds,
+            main_announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
+            main_announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
+            main_announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
+            step_index=anchor_step_index,
+        )
+    finally:
+        tab_cfg["_scenario_start_mode"] = previous_start_mode
+        tab_cfg["_scenario_start_source"] = previous_start_source
+        tab_cfg["_scenario_start_note"] = previous_start_note
+        tab_cfg["_scenario_anchor_stable"] = previous_anchor_stable
+
+    anchor_row["food_entry_stage"] = "food_home"
+    anchor_row["post_entry_handoff"] = True
+    anchor_row["post_entry_handoff_source"] = "recipe_detail_navigate_up"
+    anchor_row = _annotate_report_row_context(anchor_row, tab_cfg)
+    anchor_fingerprint, anchor_repeat_count = _annotate_row_quality(
+        anchor_row,
+        last_fingerprint="",
+        fingerprint_repeat_count=0,
+        recent_fingerprint_history=deque(maxlen=_RECENT_DUPLICATE_WINDOW),
+        recent_semantic_fingerprint_history=deque(maxlen=_RECENT_DUPLICATE_WINDOW),
+    )
+    persisted_anchor_row = _build_persisted_row_semantics(anchor_row)
+    phase_ctx.rows.append(persisted_anchor_row)
+    phase_ctx.all_rows.append(persisted_anchor_row)
+    if phase_ctx.scenario_perf is not None:
+        phase_ctx.scenario_perf.record_row(persisted_anchor_row)
+    save_excel_with_perf(save_excel, phase_ctx.all_rows, phase_ctx.output_path, with_images=False, scenario_perf=phase_ctx.scenario_perf)
+
+    second_state = _build_main_loop_state_from_anchor(
+        anchor_row,
+        anchor_fingerprint=anchor_fingerprint,
+        anchor_repeat_count=anchor_repeat_count,
+        step_index=anchor_step_index,
+    )
+    setattr(second_state, "food_force_local_tab_walk", True)
+    second_phase_ctx = CollectionPhaseContext(
+        tab_cfg=tab_cfg,
+        rows=phase_ctx.rows,
+        all_rows=phase_ctx.all_rows,
+        output_path=phase_ctx.output_path,
+        output_base_dir=phase_ctx.output_base_dir,
+        scenario_perf=phase_ctx.scenario_perf,
+        checkpoint_every=phase_ctx.checkpoint_every,
+        main_step_wait_seconds=phase_ctx.main_step_wait_seconds,
+        main_announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
+        main_announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
+        main_announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
+        state=second_state,
+        start_step_index=anchor_step_index + 1,
+    )
+    log(
+        "[FOOD][handoff] success=true "
+        f"anchor_step={anchor_step_index} start_step={anchor_step_index + 1} "
+        f"home_hits='{','.join(home_hits) or 'none'}'"
+    )
+    _main_loop_phase(client, dev, second_phase_ctx)
+    phase_ctx.state = second_phase_ctx.state
+    return True
 
 
 def _run_start_pipeline(
@@ -12580,68 +13162,16 @@ def collect_tab_rows(
     if scenario_perf is not None:
         scenario_perf.record_row(persisted_anchor_row)
     save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
-    state = MainLoopState(
-        last_fingerprint=start_result.anchor_fingerprint,
-        fingerprint_repeat_count=start_result.anchor_repeat_count,
-        previous_step_row=anchor_row,
-        prev_fingerprint=start_result.prev_fingerprint,
-        fail_count=0,
-        same_count=0,
-        expanded_overlay_entries=set(),
-        post_realign_pending_steps=0,
-        main_step_index_by_fingerprint={start_result.prev_fingerprint: 0},
-        recent_fingerprint_history=start_result.recent_fingerprint_history,
-        recent_semantic_fingerprint_history=start_result.recent_semantic_fingerprint_history,
-        stop_triggered=False,
-        stop_reason="",
-        stop_step=-1,
-        stall_escape_attempted=False,
-        recent_representative_signatures=deque(
-            [_build_row_object_signature(anchor_row)] if _build_row_object_signature(anchor_row) else [],
-            maxlen=_RECENT_DUPLICATE_WINDOW,
-        ),
-        consumed_representative_signatures=set(
-            [_build_row_object_signature(anchor_row)] if _build_row_object_signature(anchor_row) else []
-        ),
-        visited_logical_signatures=set(
-            [_row_logical_signature(anchor_row)] if _row_logical_signature(anchor_row) != "none||none||none" else []
-        ),
-        consumed_cluster_logical_signatures=set(),
-        consumed_cluster_signatures=set([str(anchor_row.get("focus_cluster_signature", "") or "").strip()]) if str(anchor_row.get("focus_cluster_signature", "") or "").strip() else set(),
-        current_local_tab_signature="",
-        current_local_tab_active_rid="",
-        local_tab_candidates_by_signature={},
-        visited_local_tabs_by_signature={},
-        pending_local_tab_signature="",
-        pending_local_tab_rid="",
-        pending_local_tab_label="",
-        pending_local_tab_bounds="",
-        pending_local_tab_age=0,
-        current_local_tab_active_label="",
-        current_local_tab_active_age=0,
-        forced_local_tab_target_signature="",
-        forced_local_tab_target_rid="",
-        forced_local_tab_target_label="",
-        forced_local_tab_target_bounds="",
-        forced_local_tab_attempt_count=0,
-        local_tab_activation_failures={},
-        content_phase_grace_steps=0,
-        active_container_group_signature="",
-        active_container_group_remaining=set(),
-        active_container_group_labels={},
-        completed_container_groups=set(),
-        last_selected_local_tab_signature="",
-        last_selected_local_tab_rid="",
-        last_selected_local_tab_label="",
-        last_selected_local_tab_bounds="",
-        cta_grace_signature="",
-        cta_descend_grace_remaining=0,
-        cta_cluster_nodes_by_signature={},
-        cta_cluster_visited_rids={},
-        cta_cluster_committed_rid={},
-        scroll_state=ScrollState(),
-        focus_realign_state=FocusRealignState(),
+    state = _build_main_loop_state_from_anchor(
+        anchor_row,
+        anchor_fingerprint=start_result.anchor_fingerprint,
+        anchor_repeat_count=start_result.anchor_repeat_count,
+        step_index=0,
     )
+    state.prev_fingerprint = start_result.prev_fingerprint
+    state.recent_fingerprint_history = start_result.recent_fingerprint_history
+    state.recent_semantic_fingerprint_history = start_result.recent_semantic_fingerprint_history
+    state.main_step_index_by_fingerprint = {start_result.prev_fingerprint: 0}
     phase_ctx = CollectionPhaseContext(
         tab_cfg=tab_cfg,
         rows=rows,
@@ -12657,6 +13187,7 @@ def collect_tab_rows(
         state=state,
     )
     _main_loop_phase(client, dev, phase_ctx)
+    _maybe_run_food_post_traversal_handoff(client, dev, phase_ctx)
     _persist_phase(phase_ctx)
     main_steps_completed = sum(1 for row in rows if int(row.get("step_index", -1) or -1) > 0)
     setattr(

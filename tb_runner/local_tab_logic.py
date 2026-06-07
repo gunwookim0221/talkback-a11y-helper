@@ -339,6 +339,26 @@ def _get_pending_local_tab_snapshot(state: Any, *, context: str = "") -> dict[st
 def _scroll_state(state: Any) -> Any:
     return getattr(state, "scroll_state", state)
 
+
+def _set_food_scan_recovery_pending(
+    state: Any,
+    *,
+    pending: bool,
+    signature: str = "",
+    rid: str = "",
+    label: str = "",
+) -> None:
+    setattr(state, "food_scan_recovery_pending", bool(pending))
+    setattr(state, "food_scan_recovery_signature", str(signature or "").strip())
+    setattr(state, "food_scan_recovery_rid", str(rid or "").strip())
+    setattr(state, "food_scan_recovery_label", str(label or "").strip())
+
+
+def _is_food_scan_local_tab_target(*, rid: str, label: str) -> bool:
+    normalized_rid = str(rid or "").strip().lower()
+    normalized_label = _canonicalize_local_tab_label(str(label or "")).strip().lower()
+    return bool(normalized_label == "scan" or normalized_rid.endswith(":id/camera") or normalized_rid.endswith("/camera") or normalized_rid == "camera")
+
 def _focus_realign_state(state: Any) -> Any:
     if hasattr(state, "focus_realign_state"):
         return state.focus_realign_state
@@ -2000,6 +2020,7 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
     scenario_perf: ScenarioPerfStats | None = None,
 ) -> dict[str, Any]:
     _maybe_commit_pending_local_tab_progression(state, row)
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip()
     scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower()
     row_signature = _build_row_object_signature(row)
     current_row_is_passive_status = _is_passive_status_text(
@@ -2053,6 +2074,7 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         return row
     content_candidates, bottom_strip_candidates, candidate_groups_meta = _collect_step_candidate_priority_groups(
         nodes,
+        scenario_id=scenario_id,
         consumed_cluster_signatures=set(getattr(state, "consumed_cluster_signatures", set()) or set()),
         consumed_cluster_logical_signatures=set(getattr(state, "consumed_cluster_logical_signatures", set()) or set()),
     )
@@ -2114,12 +2136,12 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
                     if not active_label and accepted_tab_labels:
                         active_reason = "fallback_first_member"
                     log(
-                        f"[STEP][local_tab_strip] tabs='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in bottom_strip_candidates[:4]), 120)}' "
+                        f"[STEP][local_tab_strip] tabs='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in bottom_strip_candidates[:5]), 120)}' "
                         f"active='{_truncate_debug_text(active_label or active_rid, 96)}' "
                         "deferred=true reason='local_tab_strip_separated_from_content'"
                     )
                     log(
-                        f"[STEP][local_tab_active] tabs='{_truncate_debug_text('|'.join(accepted_tab_labels[:4]), 120)}' "
+                        f"[STEP][local_tab_active] tabs='{_truncate_debug_text('|'.join(accepted_tab_labels[:5]), 120)}' "
                         f"active='{_truncate_debug_text(active_label or active_rid, 96)}' "
                         f"reason='{active_reason}'"
                     )
@@ -2735,6 +2757,7 @@ def _maybe_select_next_local_tab(
             nodes = dump_tree_fn(dev=dev)
             content_candidates, current_bottom_strip_candidates, candidate_groups_meta = _collect_step_candidate_priority_groups(
                 nodes,
+                scenario_id=scenario_id,
                 consumed_cluster_signatures=set(getattr(state, "consumed_cluster_signatures", set()) or set()),
                 consumed_cluster_logical_signatures=set(getattr(state, "consumed_cluster_logical_signatures", set()) or set()),
             )
@@ -2858,33 +2881,41 @@ def _maybe_select_next_local_tab(
             )
             return False
     if effective_content_candidates:
-        row["scroll_fallback_allowed"] = False
-        row["scroll_fallback_gate_evaluated"] = True
-        row["scroll_fallback_gate_reason"] = "representative_still_exists"
-        row["scroll_fallback_block_reason"] = "representative_still_exists"
-        row["local_tab_gate_evaluated"] = True
-        row["local_tab_block_reason"] = "content_not_exhausted"
-        log(
-            f"[STEP][scroll_fallback_gate] viewport_exhausted=false scrollable=false allowed=false "
-            "signature='' reason='representative_still_exists' "
-            f"version='{COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION}'"
-        )
-        log(
-            f"[STEP][local_tab_gate] allowed=false reason='content_not_exhausted' "
-            f"tabs='{_truncate_debug_text(_summarize_candidate_labels(_get_local_tab_candidates_by_signature(state, context='content_not_exhausted').get(local_tab_signature, [])), 120)}' "
-            f"active='{_truncate_debug_text(str(state.current_local_tab_active_rid or ''), 96)}' "
-            "unvisited='none'"
-        )
-        active_display = _local_tab_state_display(
-            rid=str(getattr(state, "current_local_tab_active_rid", "") or ""),
-            label=str(getattr(state, "current_local_tab_active_label", "") or ""),
-        )
-        if active_display:
+        if scenario_id == "life_food_plugin" and bool(getattr(state, "food_force_local_tab_walk", False)):
+            row["food_force_local_tab_walk"] = True
             log(
-                f"[STEP][local_tab_progression_block] reason='content_not_exhausted_after_tab_switch' "
-                f"active='{_truncate_debug_text(active_display, 96)}'"
+                f"[FOOD][local_tab_force_progression] allowed=true "
+                f"active='{_truncate_debug_text(str(getattr(state, 'current_local_tab_active_label', '') or getattr(state, 'current_local_tab_active_rid', '') or ''), 96)}' "
+                f"candidates='{_truncate_debug_text(_summarize_candidate_labels(effective_content_candidates), 120)}'"
             )
-        return False
+        else:
+            row["scroll_fallback_allowed"] = False
+            row["scroll_fallback_gate_evaluated"] = True
+            row["scroll_fallback_gate_reason"] = "representative_still_exists"
+            row["scroll_fallback_block_reason"] = "representative_still_exists"
+            row["local_tab_gate_evaluated"] = True
+            row["local_tab_block_reason"] = "content_not_exhausted"
+            log(
+                f"[STEP][scroll_fallback_gate] viewport_exhausted=false scrollable=false allowed=false "
+                "signature='' reason='representative_still_exists' "
+                f"version='{COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION}'"
+            )
+            log(
+                f"[STEP][local_tab_gate] allowed=false reason='content_not_exhausted' "
+                f"tabs='{_truncate_debug_text(_summarize_candidate_labels(_get_local_tab_candidates_by_signature(state, context='content_not_exhausted').get(local_tab_signature, [])), 120)}' "
+                f"active='{_truncate_debug_text(str(state.current_local_tab_active_rid or ''), 96)}' "
+                "unvisited='none'"
+            )
+            active_display = _local_tab_state_display(
+                rid=str(getattr(state, "current_local_tab_active_rid", "") or ""),
+                label=str(getattr(state, "current_local_tab_active_label", "") or ""),
+            )
+            if active_display:
+                log(
+                    f"[STEP][local_tab_progression_block] reason='content_not_exhausted_after_tab_switch' "
+                    f"active='{_truncate_debug_text(active_display, 96)}'"
+                )
+            return False
     log("[STEP][viewport_exhausted] representative_candidates='' reason='no_representative_in_viewport'")
     active_display = _local_tab_state_display(
         rid=str(getattr(state, "current_local_tab_active_rid", "") or ""),
@@ -3025,6 +3056,7 @@ def _maybe_select_next_local_tab(
                     refreshed_nodes = []
             refreshed_content, _, refreshed_meta = _collect_step_candidate_priority_groups(
                 refreshed_nodes,
+                scenario_id=scenario_id,
                 consumed_cluster_signatures=set(getattr(state, "consumed_cluster_signatures", set()) or set()),
                 consumed_cluster_logical_signatures=set(getattr(state, "consumed_cluster_logical_signatures", set()) or set()),
             )
@@ -3229,6 +3261,8 @@ def _maybe_select_next_local_tab(
             f"next='{_truncate_debug_text(next_label, 96)}' reason='wrap_to_unvisited'"
         )
     if not remaining_tabs:
+        if scenario_id == "life_food_plugin":
+            setattr(state, "food_force_local_tab_walk", False)
         row["local_tab_gate_evaluated"] = True
         row["local_tab_block_reason"] = "no_unvisited_local_tab"
         _local_tab_state_mirror(state).mark_exhausted(local_tab_signature)
@@ -3250,7 +3284,7 @@ def _maybe_select_next_local_tab(
         f"unvisited='{_truncate_debug_text(_summarize_candidate_labels(remaining_tabs_by_visit), 120)}'"
     )
     log(
-        f"[STEP][local_tab_allowed] tabs='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in (remaining_tabs_by_visit or remaining_tabs)[:4]), 120)}' "
+        f"[STEP][local_tab_allowed] tabs='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in (remaining_tabs_by_visit or remaining_tabs)[:5]), 120)}' "
         "reason='content_candidates_exhausted'"
     )
     next_tab = remaining_tabs[0]
@@ -3298,6 +3332,21 @@ def _maybe_select_next_local_tab(
     )
     row["local_tab_transition"] = True
     row["local_tab_selected"] = target_label or target_rid
+    if scenario_id == "life_food_plugin" and _is_food_scan_local_tab_target(rid=target_rid, label=target_label):
+        _set_food_scan_recovery_pending(
+            state,
+            pending=True,
+            signature=local_tab_signature,
+            rid=target_rid,
+            label=target_label,
+        )
+        row["food_scan_transition"] = True
+        log(
+            f"[FOOD][scan_transition] pending_recovery=true "
+            f"selected='{_truncate_debug_text(target_label or target_rid, 96)}'"
+        )
+    elif scenario_id == "life_food_plugin":
+        _set_food_scan_recovery_pending(state, pending=False)
     log(
         f"[STEP][local_tab_pending] selected='{_truncate_debug_text(target_label or target_rid, 96)}' "
         "reason='progression_selected'"

@@ -163,6 +163,219 @@ def _anchor_row():
     }
 
 
+def _food_recipe_detail_nodes():
+    return [
+        {
+            "text": "Navigate up",
+            "contentDescription": "Navigate up",
+            "viewIdResourceName": "com.example:id/navigate_up",
+            "className": "android.widget.Button",
+            "clickable": True,
+            "focusable": True,
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,120,120",
+            "children": [],
+        },
+        {
+            "text": "Recipe optimized for Samsung Qooker",
+            "contentDescription": "Recipe optimized for Samsung Qooker",
+            "viewIdResourceName": "recipeHeader",
+            "className": "android.widget.TextView",
+            "visibleToUser": True,
+            "boundsInScreen": "0,140,900,220",
+            "children": [],
+        },
+        {
+            "text": "Ingredients",
+            "contentDescription": "Ingredients",
+            "viewIdResourceName": "recipeIngredients@1",
+            "className": "android.widget.TextView",
+            "visibleToUser": True,
+            "boundsInScreen": "0,260,300,340",
+            "children": [],
+        },
+        {
+            "text": "Instructions",
+            "contentDescription": "Instructions",
+            "viewIdResourceName": "recipeInstructions@1",
+            "className": "android.widget.TextView",
+            "visibleToUser": True,
+            "boundsInScreen": "0,360,300,440",
+            "children": [],
+        },
+        {
+            "text": "More recipes for you",
+            "contentDescription": "More recipes for you",
+            "viewIdResourceName": "recipeMore@1",
+            "className": "android.widget.TextView",
+            "visibleToUser": True,
+            "boundsInScreen": "0,460,400,540",
+            "children": [],
+        },
+    ]
+
+
+def _food_home_nodes():
+    return [
+        {
+            "text": "Navigate up",
+            "contentDescription": "Navigate up",
+            "viewIdResourceName": "com.example:id/navigate_up",
+            "className": "android.widget.Button",
+            "clickable": True,
+            "focusable": True,
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,120,120",
+            "children": [],
+        },
+        {
+            "text": "Food",
+            "contentDescription": "Food",
+            "viewIdResourceName": "foodTitle",
+            "className": "android.widget.TextView",
+            "visibleToUser": True,
+            "boundsInScreen": "140,0,400,120",
+            "children": [],
+        },
+        {
+            "text": "Suggestions",
+            "contentDescription": "Suggestions",
+            "viewIdResourceName": "foodSuggestions",
+            "className": "android.widget.TextView",
+            "visibleToUser": True,
+            "boundsInScreen": "0,140,360,220",
+            "children": [],
+        },
+        {
+            "text": "Family meal planner",
+            "contentDescription": "Family meal planner",
+            "viewIdResourceName": "foodFamilyPlanner",
+            "className": "android.widget.Button",
+            "visibleToUser": True,
+            "clickable": True,
+            "focusable": True,
+            "boundsInScreen": "0,260,500,340",
+            "children": [],
+        },
+        {
+            "text": "Trending recipes",
+            "contentDescription": "Trending recipes",
+            "viewIdResourceName": "foodTrending",
+            "className": "android.widget.TextView",
+            "visibleToUser": True,
+            "boundsInScreen": "0,360,500,440",
+            "children": [],
+        },
+    ]
+
+
+def _food_home_nodes_with_local_tabs():
+    return [
+        *_food_home_nodes(),
+        {
+            "text": "",
+            "contentDescription": "Home",
+            "viewIdResourceName": "com.example.food:id/home",
+            "className": "android.view.View",
+            "clickable": True,
+            "focusable": True,
+            "visibleToUser": True,
+            "boundsInScreen": "20,2140,200,2280",
+            "children": [],
+        },
+        {
+            "text": "",
+            "contentDescription": "Search",
+            "viewIdResourceName": "com.example.food:id/search",
+            "className": "android.view.View",
+            "clickable": True,
+            "focusable": True,
+            "visibleToUser": True,
+            "boundsInScreen": "220,2140,400,2280",
+            "children": [],
+        },
+        {
+            "text": "",
+            "contentDescription": "Communities",
+            "viewIdResourceName": "com.example.food:id/community",
+            "className": "android.view.View",
+            "clickable": True,
+            "focusable": True,
+            "visibleToUser": True,
+            "boundsInScreen": "420,2140,620,2280",
+            "children": [],
+        },
+        {
+            "text": "",
+            "contentDescription": "MY",
+            "viewIdResourceName": "com.example.food:id/my",
+            "className": "android.view.View",
+            "clickable": True,
+            "focusable": True,
+            "visibleToUser": True,
+            "boundsInScreen": "640,2140,800,2280",
+            "children": [],
+        },
+        {
+            "text": "Scan Scan",
+            "contentDescription": "Scan Scan",
+            "viewIdResourceName": "com.example.food:id/camera",
+            "className": "android.view.View",
+            "clickable": True,
+            "focusable": True,
+            "visibleToUser": True,
+            "boundsInScreen": "820,2140,1060,2280",
+            "children": [
+                {
+                    "text": "",
+                    "contentDescription": "Scan",
+                    "viewIdResourceName": "com.example.food:id/camera_button",
+                    "className": "android.widget.Button",
+                    "clickable": True,
+                    "focusable": True,
+                    "visibleToUser": True,
+                    "boundsInScreen": "860,2140,1020,2280",
+                    "children": [],
+                }
+            ],
+        },
+    ]
+
+
+def _food_scan_screen_nodes():
+    return [
+        {
+            "text": "Navigate up",
+            "contentDescription": "Navigate up",
+            "viewIdResourceName": "com.example.food:id/navigate_up",
+            "className": "android.widget.Button",
+            "clickable": True,
+            "focusable": True,
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,120,120",
+            "children": [],
+        },
+        {
+            "text": "QR Scan",
+            "contentDescription": "QR Scan",
+            "viewIdResourceName": "com.example.food:id/scan_title",
+            "className": "android.widget.TextView",
+            "visibleToUser": True,
+            "boundsInScreen": "140,0,420,120",
+            "children": [],
+        },
+        {
+            "text": "Scan ingredients",
+            "contentDescription": "Scan ingredients",
+            "viewIdResourceName": "com.example.food:id/scan_body",
+            "className": "android.widget.TextView",
+            "visibleToUser": True,
+            "boundsInScreen": "80,240,920,360",
+            "children": [],
+        },
+    ]
+
+
 def _bottom_tab_node(label, resource_id):
     return {
         "text": "",
@@ -3735,6 +3948,54 @@ def test_maybe_select_next_local_tab_blocked_when_content_candidates_remain(monk
     assert advanced is False
     assert client.select_calls == []
     assert any("[STEP][representative_exhausted_eval]" in line and "Device usage" in line and "exhausted=false" in line for line in logs)
+
+
+def test_maybe_select_next_local_tab_food_force_walk_allows_progression_with_content(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[
+        {"text": "Family meal planner", "contentDescription": "", "viewIdResourceName": "com.example.food:id/planner", "className": "android.widget.Button", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "40,420,1040,760", "children": []},
+        {"text": "Navigate up", "contentDescription": "Navigate up", "viewIdResourceName": "com.example.food:id/navigate_up", "className": "android.widget.ImageButton", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "0,0,120,120", "children": []},
+    ]]
+    signature = "com.example.food:id/home||com.example.food:id/search||com.example.food:id/community||com.example.food:id/my||com.example.food:id/camera"
+    state = SimpleNamespace(
+        current_local_tab_signature=signature,
+        current_local_tab_active_rid="com.example.food:id/home",
+        current_local_tab_active_label="Home",
+        current_local_tab_active_age=0,
+        local_tab_candidates_by_signature={
+            signature: [
+                {"rid": "com.example.food:id/home", "label": "Home", "node": {}},
+                {"rid": "com.example.food:id/search", "label": "Search", "node": {}},
+                {"rid": "com.example.food:id/community", "label": "Communities", "node": {}},
+                {"rid": "com.example.food:id/my", "label": "MY", "node": {}},
+                {"rid": "com.example.food:id/camera", "label": "Scan", "node": {}},
+            ]
+        },
+        visited_local_tabs_by_signature={signature: {"com.example.food:id/home"}},
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={"focus_view_id": "com.example.food:id/home"},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+        food_force_local_tab_walk=True,
+    )
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row={},
+        scenario_id="life_food_plugin",
+        step_idx=13,
+    )
+
+    assert advanced is True
+    assert client.select_calls[0]["name"] == "com.example.food:id/search"
+    assert any("[FOOD][local_tab_force_progression] allowed=true" in line for line in logs)
 
 
 def test_maybe_select_next_local_tab_attempts_scroll_fallback_before_local_tab(monkeypatch):
@@ -9873,6 +10134,311 @@ def test_collect_tab_rows_plugin_screen_stops_on_global_nav_boundary(monkeypatch
     assert rows[1]["plugin_boundary_global_nav"] is True
     assert len(client.collect_focus_step_calls) == 2
     assert any("[PLUGIN_BOUNDARY][global_nav_reached]" in line for line in logs)
+
+
+def test_collect_tab_rows_food_post_traversal_handoff_enters_food_home(monkeypatch):
+    client = DummyClient(
+        [
+            _anchor_row(),
+            {
+                "step_index": 1,
+                "move_result": "moved",
+                "visible_label": "Ingredients",
+                "normalized_visible_label": "ingredients",
+                "merged_announcement": "Ingredients",
+                "focus_view_id": "recipeIngredients@1",
+                "focus_bounds": "0,260,300,340",
+            },
+            {
+                "step_index": 2,
+                "move_result": "ok",
+                "visible_label": "Food",
+                "normalized_visible_label": "food",
+                "merged_announcement": "Food",
+                "focus_view_id": "foodTitle",
+                "focus_bounds": "140,0,400,120",
+            },
+            {
+                "step_index": 3,
+                "move_result": "moved",
+                "visible_label": "Suggestions",
+                "normalized_visible_label": "suggestions",
+                "merged_announcement": "Suggestions",
+                "focus_view_id": "foodSuggestions",
+                "focus_bounds": "0,140,360,220",
+            },
+        ]
+    )
+    client.dump_tree_sequence = [
+        _food_recipe_detail_nodes(),
+        _food_recipe_detail_nodes(),
+        _food_recipe_detail_nodes(),
+        _food_home_nodes(),
+    ]
+    client.focus_sequence = [
+        {"text": "Ingredients", "contentDescription": "Ingredients", "viewIdResourceName": "recipeIngredients@1"},
+        {"text": "Ingredients", "contentDescription": "Ingredients", "viewIdResourceName": "recipeIngredients@1"},
+        {"text": "Food", "contentDescription": "Food", "viewIdResourceName": "foodTitle"},
+    ]
+    stop_sequence = iter(
+        [
+            (
+                True,
+                0,
+                2,
+                "repeat_no_progress",
+                ("ingredients", "recipeIngredients@1", "0,260,300,340"),
+                {"terminal": False, "same_like_count": 2, "no_progress": True, "reason": "repeat_no_progress", "repeat_stop_hit": True},
+            ),
+            (
+                True,
+                0,
+                2,
+                "repeat_no_progress",
+                ("suggestions", "foodSuggestions", "0,140,360,220"),
+                {"terminal": False, "same_like_count": 2, "no_progress": True, "reason": "repeat_no_progress", "repeat_stop_hit": True},
+            ),
+        ]
+    )
+
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
+    monkeypatch.setattr(collection_flow, "should_stop", lambda **k: next(stop_sequence))
+    monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
+    monkeypatch.setattr(collection_flow, "save_excel_with_perf", lambda *a, **k: None)
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (False, "not_in_global_candidates"))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    tab_cfg = {
+        **_scenario_config("life_food_plugin"),
+        "max_steps": 8,
+    }
+    rows = collection_flow.collect_tab_rows(client, "SERIAL", tab_cfg, [], "o.xlsx", "out")
+
+    assert client.tap_xy_adb_calls
+    assert any(row.get("post_entry_handoff") is True for row in rows)
+    assert any(row.get("food_entry_stage") == "food_home" for row in rows)
+    assert any(row.get("step_index") == 3 and row.get("visible_label") == "Suggestions" for row in rows)
+
+
+def test_collect_tab_rows_non_food_does_not_attempt_food_home_handoff(monkeypatch):
+    client = DummyClient([_anchor_row(), _main_row(1)])
+    client.dump_tree_sequence = [_food_recipe_detail_nodes()]
+    client.focus_sequence = [{"text": "Ingredients", "contentDescription": "Ingredients", "viewIdResourceName": "recipeIngredients@1"}]
+
+    monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **k: ([], []))
+    monkeypatch.setattr(
+        collection_flow,
+        "should_stop",
+        lambda **k: (
+            True,
+            0,
+            2,
+            "repeat_no_progress",
+            ("item", "id.1", "0,10,10,20"),
+            {"terminal": False, "same_like_count": 2, "no_progress": True, "reason": "repeat_no_progress", "repeat_stop_hit": True},
+        ),
+    )
+    monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
+    monkeypatch.setattr(collection_flow, "save_excel_with_perf", lambda *a, **k: None)
+    monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (False, "not_in_global_candidates"))
+
+    tab_cfg = {**_base_tab_cfg(max_steps=3), "scenario_id": "life_energy_plugin", "screen_context_mode": "new_screen"}
+    rows = collection_flow.collect_tab_rows(client, "SERIAL", tab_cfg, [], "o.xlsx", "out")
+
+    assert not client.tap_xy_adb_calls
+    assert not any(row.get("post_entry_handoff") is True for row in rows)
+
+
+def test_collect_step_candidate_priority_groups_food_home_accepts_scan_tab():
+    _content, bottom_strip_candidates, meta = collection_flow._collect_step_candidate_priority_groups(
+        _food_home_nodes_with_local_tabs(),
+        scenario_id="life_food_plugin",
+    )
+
+    assert [candidate.get("label") for candidate in bottom_strip_candidates] == [
+        "Home",
+        "Search",
+        "Communities",
+        "MY",
+        "Scan",
+    ]
+    assert "Scan" not in meta["rejected_bottom_strip_candidates"]
+
+
+def test_collect_step_candidate_priority_groups_non_food_keeps_scan_excluded():
+    _content, bottom_strip_candidates, meta = collection_flow._collect_step_candidate_priority_groups(
+        _food_home_nodes_with_local_tabs(),
+        scenario_id="life_energy_plugin",
+    )
+
+    assert [candidate.get("label") for candidate in bottom_strip_candidates] == [
+        "Home",
+        "Search",
+        "Communities",
+        "MY",
+    ]
+    assert any("Scan" in value for value in meta["rejected_bottom_strip_candidates"])
+
+
+def test_maybe_select_next_local_tab_food_scan_marks_recovery_pending():
+    client = DummyClient([])
+    state = SimpleNamespace(
+        current_local_tab_signature="home||search||community||my||camera",
+        current_local_tab_active_rid="com.example.food:id/my",
+        current_local_tab_active_label="MY",
+        current_local_tab_active_age=0,
+        local_tab_candidates_by_signature={
+            "home||search||community||my||camera": [
+                {"rid": "com.example.food:id/home", "label": "Home", "node": {}},
+                {"rid": "com.example.food:id/search", "label": "Search", "node": {}},
+                {"rid": "com.example.food:id/community", "label": "Communities", "node": {}},
+                {"rid": "com.example.food:id/my", "label": "MY", "node": {}},
+                {"rid": "com.example.food:id/camera", "label": "Scan", "node": {}},
+            ]
+        },
+        visited_local_tabs_by_signature={
+            "home||search||community||my||camera": {
+                "com.example.food:id/home",
+                "com.example.food:id/search",
+                "com.example.food:id/community",
+                "com.example.food:id/my",
+            }
+        },
+        previous_step_row={"focus_view_id": "com.example.food:id/my", "visible_label": "MY"},
+        content_phase_grace_steps=0,
+        last_selected_local_tab_signature="",
+        last_selected_local_tab_rid="",
+        last_selected_local_tab_label="",
+        last_selected_local_tab_bounds="",
+        pending_local_tab_signature="",
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        pending_local_tab_bounds="",
+        pending_local_tab_age=0,
+        forced_local_tab_target_signature="",
+        forced_local_tab_target_rid="",
+        forced_local_tab_target_label="",
+        forced_local_tab_target_bounds="",
+        forced_local_tab_attempt_count=0,
+        local_tab_activation_failures={},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        visited_logical_signatures=set(),
+        consumed_cluster_signatures=set(),
+        consumed_cluster_logical_signatures=set(),
+        cta_cluster_visited_rids={},
+        scroll_state=SimpleNamespace(pending_scroll_ready_cluster_signature=""),
+    )
+    row = {}
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row=row,
+        scenario_id="life_food_plugin",
+        step_idx=5,
+    )
+
+    assert advanced is True
+    assert row["food_scan_transition"] is True
+    assert state.food_scan_recovery_pending is True
+    assert state.food_scan_recovery_rid == "com.example.food:id/camera"
+
+
+def test_maybe_recover_food_scan_screen_returns_to_food_home(monkeypatch):
+    client = DummyClient([])
+    client.dump_tree_sequence = [
+        _food_scan_screen_nodes(),
+        _food_home_nodes_with_local_tabs(),
+    ]
+    client.focus_sequence = [
+        {"text": "QR Scan", "contentDescription": "QR Scan", "viewIdResourceName": "com.example.food:id/scan_title"},
+        {"text": "Food", "contentDescription": "Food", "viewIdResourceName": "foodTitle"},
+    ]
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    state = SimpleNamespace(
+        food_scan_recovery_pending=True,
+        food_scan_recovery_signature="home||search||community||my||camera",
+        food_scan_recovery_rid="com.example.food:id/camera",
+        food_scan_recovery_label="Scan",
+        content_phase_grace_steps=2,
+        current_local_tab_signature="home||search||community||my||camera",
+        current_local_tab_active_rid="com.example.food:id/camera",
+        current_local_tab_active_label="Scan",
+        current_local_tab_active_age=0,
+        local_tab_candidates_by_signature={"home||search||community||my||camera": [{"rid": "com.example.food:id/camera", "label": "Scan"}]},
+    )
+    row = {"visible_label": "QR Scan", "focus_view_id": "com.example.food:id/scan_title"}
+
+    recovered = collection_flow._maybe_recover_food_scan_screen(
+        client,
+        "SERIAL",
+        row=row,
+        state=state,
+        tab_cfg=_scenario_config("life_food_plugin"),
+        wait_seconds=0.2,
+    )
+
+    assert recovered is True
+    assert client.tap_xy_adb_calls == [{"dev": "SERIAL", "x": 60, "y": 60}]
+    assert row["food_scan_recovery_attempted"] is True
+    assert row["food_scan_recovery_success"] is True
+    assert row["food_scan_recovery_method"] == "navigate_up"
+    assert row["food_home_reentry"] is True
+    assert state.food_scan_recovery_pending is False
+    assert state.current_local_tab_active_rid == ""
+    assert state.local_tab_candidates_by_signature == {}
+
+
+def test_maybe_recover_food_scan_screen_falls_back_to_back(monkeypatch):
+    client = DummyClient([])
+    client.dump_tree_sequence = [
+        [
+            {
+                "text": "QR Scan",
+                "contentDescription": "QR Scan",
+                "viewIdResourceName": "com.example.food:id/scan_title",
+                "className": "android.widget.TextView",
+                "visibleToUser": True,
+                "boundsInScreen": "140,0,420,120",
+                "children": [],
+            }
+        ],
+        _food_home_nodes_with_local_tabs(),
+    ]
+    client.focus_sequence = [
+        {"text": "QR Scan", "contentDescription": "QR Scan", "viewIdResourceName": "com.example.food:id/scan_title"},
+        {"text": "Food", "contentDescription": "Food", "viewIdResourceName": "foodTitle"},
+    ]
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    state = SimpleNamespace(
+        food_scan_recovery_pending=True,
+        content_phase_grace_steps=0,
+        current_local_tab_signature="home||search||community||my||camera",
+        current_local_tab_active_rid="com.example.food:id/camera",
+        current_local_tab_active_label="Scan",
+        current_local_tab_active_age=0,
+        local_tab_candidates_by_signature={},
+    )
+    row = {"visible_label": "QR Scan", "focus_view_id": "com.example.food:id/scan_title"}
+
+    recovered = collection_flow._maybe_recover_food_scan_screen(
+        client,
+        "SERIAL",
+        row=row,
+        state=state,
+        tab_cfg=_scenario_config("life_food_plugin"),
+        wait_seconds=0.2,
+    )
+
+    assert recovered is True
+    assert client.back_calls == 1
+    assert row["food_scan_recovery_method"] == "back"
 
 
 def test_collect_tab_rows_stall_escape_is_only_attempted_once_per_scenario(monkeypatch):
