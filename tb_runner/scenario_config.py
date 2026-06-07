@@ -237,7 +237,15 @@ TAB_CONFIGS = [
             "resource_patterns": [],
             "allow_description_match": True,
         },
-        "verify_tokens": ["home care", "smart care", "home appliances"],
+        "verify_tokens": [
+            "home care",
+            "smart care",
+            "home appliances",
+            "suggestions",
+            "my device list",
+            "care options",
+            "software update",
+        ],
         "negative_verify_tokens": ["air care", "energy"],
         "special_state_tokens": [
             "smartthings home care",
@@ -249,17 +257,17 @@ TAB_CONFIGS = [
         "special_state_cta_tokens": ["start"],
         "special_state_handling": "back_after_read",
 
-        "anchor_name": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
+        "anchor_name": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동|suggestions|my\\s*device\\s*list|care\\s*options|software\\s*update).*",
         "anchor_type": "a",
         "anchor": {
-            "text_regex": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
-            "announcement_regex": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동).*",
+            "text_regex": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동|suggestions|my\\s*device\\s*list|care\\s*options|software\\s*update).*",
+            "announcement_regex": "(?i).*(navigate\\s*up|상위\\s*메뉴로\\s*이동|suggestions|my\\s*device\\s*list|care\\s*options|software\\s*update).*",
             "tie_breaker": "top_left",
         },
 
         "context_verify": {
             "type": "screen_text",
-            "text_regex": "(?i).*home\\s*care.*|.*homecare.*|.*홈\\s*케어.*|.*홈케어.*|.*삼성\\s*가전.*|.*가전\\s*기기.*",
+            "text_regex": "(?i).*home\\s*care.*|.*homecare.*|.*홈\\s*케어.*|.*홈케어.*|.*삼성\\s*가전.*|.*가전\\s*기기.*|.*suggestions.*|.*my\\s*device\\s*list.*|.*care\\s*options.*|.*software\\s*update.*",
         },
         "overlay_policy": {
             "allow_candidates": [

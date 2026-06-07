@@ -288,6 +288,40 @@ def test_stabilize_anchor_fallback_rejects_home_button_chrome_candidate(monkeypa
     assert result["fallback_candidate_rejected_reason"] == "no_readable_top_candidate"
 
 
+def test_stabilize_anchor_accepts_home_care_landing_section_title(monkeypatch):
+    client = FakeAnchorClient()
+    client.dump_tree.return_value = [
+        _focusable_node("com.example:id/plugin_title", "Home Care", "[40,140][600,220]"),
+        _focusable_node("com.example:id/suggestions", "Suggestions", "[40,320][600,390]"),
+        _focusable_node("com.example:id/device_list", "My device list", "[40,760][600,830]"),
+    ]
+    client.select.return_value = True
+    client.collect_focus_step.return_value = _verify_step(
+        view_id="com.example:id/suggestions",
+        label="Suggestions",
+        bounds="40,320,600,390",
+    )
+    monkeypatch.setattr(anchor_logic, "verify_context", lambda *a, **k: {"ok": True})
+    tab_cfg = {
+        "scenario_id": "life_home_care_plugin",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "pre_navigation": [{"action": "xml_scroll_search_tap", "target": ".*home.*", "type": "a"}],
+        "anchor_name": "(?i).*(navigate\\s*up|suggestions|my\\s*device\\s*list|care\\s*options|software\\s*update).*",
+        "anchor_type": "a",
+        "anchor": {
+            "text_regex": "(?i).*(navigate\\s*up|suggestions|my\\s*device\\s*list|care\\s*options|software\\s*update).*",
+            "announcement_regex": "(?i).*(navigate\\s*up|suggestions|my\\s*device\\s*list|care\\s*options|software\\s*update).*",
+        },
+    }
+
+    result = anchor_logic.stabilize_anchor(client, "SERIAL", tab_cfg, phase="scenario_start", max_retries=1)
+
+    assert result["ok"] is True
+    assert result["reason"] == "selected_and_verified"
+    assert "suggestions" in client.select.call_args.kwargs["name"]
+
+
 def test_stabilize_anchor_direct_select_fallback_prefers_verify_token_candidate(monkeypatch):
     client = FakeAnchorClient()
     client.dump_tree.return_value = [

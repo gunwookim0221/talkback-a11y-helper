@@ -1605,6 +1605,48 @@ def test_run_pre_navigation_scrolltouch_dispatch_false_and_same_screen_logs_disp
     assert any("candidate_click_failed:dispatch_failed" in line for line in logs)
 
 
+def test_run_pre_navigation_scrolltouch_xml_live_candidate_uses_tap_xy_for_center_strategy(monkeypatch):
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "_verify_scroll_top_state", lambda *args, **kwargs: (True, "life_root_marker_visible", []))
+    monkeypatch.setattr(
+        collection_flow,
+        "_select_visible_plugin_candidate",
+        lambda **kwargs: (
+            {
+                "text": "Food",
+                "clickable": True,
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/llCard",
+                "boundsInScreen": "38,350,1042,930",
+            },
+            "candidate_found",
+            {"candidate_committed": True, "visible_candidate_count": 1, "partial_match_count": 1},
+            {
+                "promotion_source": "xml_live",
+                "tap_point": "540,640",
+                "tap_strategy": "center",
+            },
+        ),
+    )
+    monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **kwargs: (True, "transition_confirmed"))
+
+    client = DummyClient([_anchor_row()])
+    client.dump_tree_sequence = [[{"text": "Upcoming meal", "visibleToUser": True, "boundsInScreen": "80,420,900,590"}]]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_food_plugin",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "pre_navigation": [{"action": "scrolltouch", "target": "(?i).*food.*", "type": "a"}],
+        "pre_navigation_retry_count": 1,
+    }
+
+    ok = collection_flow._run_pre_navigation_steps(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert client.tap_xy_adb_calls == [{"dev": "SERIAL", "x": 540, "y": 640}]
+    assert client.tap_bounds_center_adb_calls == []
+
+
 def test_open_scenario_pre_navigation_scroll_touch_plugin_uses_cumulative_downward_search(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
@@ -2437,9 +2479,8 @@ def test_run_pre_navigation_steps_forces_xml_live_fallback_when_visible_candidat
     )
 
     assert ok is False
-    assert select_calls["count"] == 1
-    assert xml_calls["count"] == 0
-    assert not any("xml_fallback_attempted=true" in line for line in logs)
+    assert select_calls["count"] == 2
+    assert xml_calls["count"] == 1
 
 
 def test_select_visible_plugin_candidate_card_entry_spec_description_match_promotes_pet_care_xml_container():
@@ -9968,6 +10009,45 @@ def test_life_root_state_snapshot_fails_when_root_signature_missing():
     assert snapshot["life_root_signature_present"] is False
     assert snapshot["ok"] is True
     assert snapshot["pass_reason"] == "life_root_structure_stable"
+
+
+def test_verify_scroll_top_state_accepts_xml_life_card_signature_when_helper_omits_titles(monkeypatch):
+    client = DummyClient([])
+    client.dump_tree_sequence = [
+        [
+            {"viewIdResourceName": "com.samsung.android.oneconnect:id/menu_services", "selected": True, "visibleToUser": True},
+            {"text": "Upcoming meal", "viewIdResourceName": "com.samsung.android.oneconnect:id/tvHeaderTitle", "visibleToUser": True},
+            {"text": "Picture", "viewIdResourceName": "com.samsung.android.oneconnect:id/image", "visibleToUser": True},
+        ]
+    ]
+    xml_nodes = [
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/menu_services", "selected": True, "visibleToUser": True},
+        {
+            "text": "Food",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/llCard",
+            "visibleToUser": True,
+            "boundsInScreen": "38,350,1042,930",
+        },
+        {
+            "text": "Home Care",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/llCard",
+            "visibleToUser": True,
+            "boundsInScreen": "38,960,1042,1320",
+        },
+        {
+            "text": "Energy",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/llCard",
+            "visibleToUser": True,
+            "boundsInScreen": "38,1350,1042,1710",
+        },
+    ]
+    monkeypatch.setattr(collection_flow, "_load_scrolltouch_xml_nodes", lambda **kwargs: (xml_nodes, "ok"))
+
+    ok, reason, nodes = collection_flow._verify_scroll_top_state(client, "SERIAL")
+
+    assert ok is True
+    assert reason == "life_root_marker_visible_xml"
+    assert any(node.get("text") == "Upcoming meal" for node in nodes)
 
 
 def test_has_global_nav_signals_requires_multiple_main_menu_resource_ids():

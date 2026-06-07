@@ -3009,6 +3009,16 @@ def _verify_scroll_top_state(
         return True, "empty_dump_skip", nodes
     if bool(snapshot.get("ok")):
         return True, "life_root_marker_visible", nodes
+    try:
+        xml_nodes, xml_reason = _load_scrolltouch_xml_nodes(client=client, dev=dev)
+    except Exception as exc:
+        xml_nodes, xml_reason = [], f"xml_root_check_failed:{exc}"
+    if xml_nodes:
+        xml_snapshot = _life_root_state_snapshot(xml_nodes)
+        if bool(xml_snapshot.get("ok")):
+            return True, "life_root_marker_visible_xml", nodes
+    elif str(xml_reason or "").strip():
+        log(f"[SCENARIO][pre_nav] top_state_verify_xml_skip reason='{str(xml_reason)[:80]}'")
     if isinstance(baseline_nodes, list) and baseline_nodes:
         before_sig = _make_dump_signature(baseline_nodes)
         after_sig = _make_dump_signature(nodes)
@@ -5883,7 +5893,7 @@ def _run_pre_navigation_steps(
                             or bool(candidate_stats.get("will_try_xml_live_fallback", False))
                         )
                     )
-                    if needs_xml_fallback and scrolltouch_debug_capture_enabled:
+                    if needs_xml_fallback:
                         xml_fallback_attempted = True
                         xml_nodes, xml_fallback_reason = _load_scrolltouch_xml_nodes(client=client, dev=dev)
                         if xml_nodes:
@@ -6016,7 +6026,6 @@ def _run_pre_navigation_steps(
                         click_dispatch_success = False
                         if (
                             str(selected_meta.get("promotion_source", "none")) == "xml_live"
-                            and tap_strategy in {"text_center", "refined_body_point"}
                             and tap_point
                             and hasattr(client, "tap_xy_adb")
                         ):
@@ -6066,7 +6075,6 @@ def _run_pre_navigation_steps(
                                 second_click_dispatch_success = False
                                 if (
                                     str(selected_meta.get("second_promotion_source", "none")) == "xml_live"
-                                    and second_tap_strategy in {"text_center", "refined_body_point"}
                                     and second_tap_point
                                     and hasattr(client, "tap_xy_adb")
                                 ):

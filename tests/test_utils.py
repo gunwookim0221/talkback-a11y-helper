@@ -37,6 +37,17 @@ def test_life_food_plugin_uses_xml_card_entry_spec():
     assert "(?i)(^food$|food\\.|smart\\s*things\\s*cooking|\\bcooking\\b|^푸드$)" in food_cfg["entry_match"]["title_patterns"]
 
 
+def test_life_home_care_plugin_uses_landing_section_anchor_tokens():
+    home_care_cfg = next(cfg for cfg in TAB_CONFIGS if cfg.get("scenario_id") == "life_home_care_plugin")
+
+    assert "suggestions" in home_care_cfg["verify_tokens"]
+    assert "my device list" in home_care_cfg["verify_tokens"]
+    assert "care options" in home_care_cfg["verify_tokens"]
+    assert "software update" in home_care_cfg["verify_tokens"]
+    assert "suggestions" in home_care_cfg["anchor"]["text_regex"].lower()
+    assert "my\\s*device\\s*list" in home_care_cfg["anchor"]["announcement_regex"].lower()
+
+
 def test_device_plugins_use_device_pre_navigation():
     expected_targets = {
         "device_smoke_sensor_plugin": ["연기", "Smoke sensor"],
