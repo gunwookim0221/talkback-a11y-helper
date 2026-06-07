@@ -8379,12 +8379,36 @@ def _normalize_cta_candidate_label(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip())
 
 
+def _extract_cta_descendant_label(node: dict[str, Any]) -> str:
+    if not isinstance(node, dict):
+        return ""
+    children = node.get("children")
+    if not isinstance(children, list) or not children:
+        return ""
+    text_candidates: list[str] = []
+    for descendant in _iter_visible_descendant_nodes(children):
+        if not isinstance(descendant, dict):
+            continue
+        label = _normalize_cta_candidate_label(
+            str(descendant.get("text", "") or "").strip()
+            or str(descendant.get("contentDescription", "") or "").strip()
+            or str(descendant.get("talkbackLabel", "") or "").strip()
+            or str(descendant.get("label", "") or "").strip()
+            or str(descendant.get("mergedLabel", "") or "").strip()
+        )
+        if label and label not in text_candidates:
+            text_candidates.append(label)
+    return text_candidates[0] if text_candidates else ""
+
+
 def _extract_cta_node_label(node: dict[str, Any]) -> str:
     return _normalize_cta_candidate_label(
         str(node.get("text", "") or "").strip()
         or str(node.get("contentDescription", "") or "").strip()
         or str(node.get("talkbackLabel", "") or "").strip()
         or str(node.get("label", "") or "").strip()
+        or str(node.get("mergedLabel", "") or "").strip()
+        or _extract_cta_descendant_label(node)
     )
 
 
@@ -10207,6 +10231,157 @@ def _align_focus_to_committed_cta(
     return False, "no_match"
 
 
+def _row_matches_family_care_onboarding(
+    row: dict[str, Any],
+    *,
+    state: MainLoopState | None = None,
+    scenario_id: str,
+) -> bool:
+    if str(scenario_id or "").strip() != "life_family_care_plugin":
+        return False
+    text_candidates = [
+        str(row.get("visible_label", "") or "").strip(),
+        str(row.get("merged_announcement", "") or "").strip(),
+        str(row.get("actual_focus_visible", "") or "").strip(),
+        str(row.get("actual_focus_speech", "") or "").strip(),
+    ]
+    normalized_blob = " ".join(text_candidates).lower()
+    if "want better insight into your daily life" in normalized_blob:
+        return True
+    cluster_signature = str(row.get("cta_cluster_signature", "") or "").strip()
+    if not cluster_signature or state is None:
+        return False
+    cta_state = _cta_state(state)
+    cta_nodes = cta_state.cta_cluster_nodes_by_signature.get(cluster_signature, [])
+    labels = [_extract_cta_node_label(node).lower() for node in cta_nodes if isinstance(node, dict)]
+    has_later = any(_text_matches_token_strict(label, "later") for label in labels if label)
+    has_setup = any(
+        _text_matches_token_strict(label, "set up now") or _text_matches_token_strict(label, "set up")
+        for label in labels
+        if label
+    )
+    return bool(has_later and has_setup)
+
+
+def _apply_focus_snapshot_to_row(
+    row: dict[str, Any],
+    focus_node: Any,
+    *,
+    client: A11yAdbClient,
+) -> dict[str, Any]:
+    if not isinstance(focus_node, dict):
+        return row
+    view_id, label, speech = _extract_post_open_focus_fields(focus_node)
+    normalized_label = re.sub(r"\s+", " ", str(label or "").strip()).lower()
+    normalized_speech = re.sub(r"\s+", " ", str(speech or "").strip()).lower()
+    if label and speech and normalized_speech and normalized_label == f"{normalized_speech} {normalized_speech}":
+        label = speech
+    normalizer = getattr(client, "normalize_for_comparison", None)
+    if view_id:
+        row["focus_view_id"] = view_id
+    if label:
+        row["visible_label"] = label
+        row["normalized_visible_label"] = normalizer(label) if callable(normalizer) else label.lower()
+    if speech:
+        row["merged_announcement"] = speech
+        row["normalized_announcement"] = normalizer(speech) if callable(normalizer) else speech.lower()
+    row["focus_node"] = focus_node
+    row["focus_class_name"] = str(focus_node.get("className", "") or focus_node.get("class", "") or "").strip()
+    row["focus_bounds"] = str(focus_node.get("boundsInScreen", "") or focus_node.get("bounds", "") or "").strip()
+    row["focus_clickable"] = bool(focus_node.get("clickable"))
+    row["focus_focusable"] = bool(focus_node.get("focusable"))
+    row["focus_effective_clickable"] = bool(focus_node.get("effectiveClickable")) or bool(focus_node.get("clickable"))
+    return row
+
+
+def _maybe_recover_family_care_onboarding(
+    *,
+    row: dict[str, Any],
+    client: A11yAdbClient,
+    dev: str,
+    state: MainLoopState,
+    scenario_id: str,
+    step_idx: int,
+) -> dict[str, Any]:
+    if not _row_matches_family_care_onboarding(row, state=state, scenario_id=scenario_id):
+        return row
+    if normalize_move_result(row) not in {"failed", "no_progress"}:
+        return row
+    cluster_signature = str(row.get("cta_cluster_signature", "") or "").strip()
+    if not cluster_signature:
+        return row
+    cta_state = _cta_state(state)
+    cta_nodes = cta_state.cta_cluster_nodes_by_signature.get(cluster_signature, [])
+    if not cta_nodes:
+        return row
+    later_node = next(
+        (
+            node
+            for node in cta_nodes
+            if isinstance(node, dict) and _text_matches_token_strict(_extract_cta_node_label(node), "later")
+        ),
+        None,
+    )
+    if not isinstance(later_node, dict):
+        return row
+    later_rid = str(later_node.get("viewIdResourceName", "") or later_node.get("resourceId", "") or "").strip()
+    later_label = _extract_cta_node_label(later_node)
+    select_fn = getattr(client, "select", None)
+    click_focused_fn = getattr(client, "click_focused", None)
+    get_focus_fn = getattr(client, "get_focus", None)
+    if not callable(click_focused_fn):
+        return row
+    if callable(select_fn):
+        try:
+            if later_rid:
+                select_fn(dev=dev, name=later_rid, type_="r", wait_=1.5)
+            elif later_label:
+                select_fn(dev=dev, name=later_label, type_="a", wait_=1.5)
+        except Exception:
+            pass
+    click_ok = False
+    try:
+        click_ok = bool(click_focused_fn(dev=dev, wait_=2.0))
+    except Exception:
+        click_ok = False
+    row["family_care_onboarding_recovery_attempted"] = True
+    row["family_care_onboarding_recovery_label"] = later_label or "Later"
+    if not click_ok:
+        log(
+            f"[FAMILY_CARE][onboarding_recover] step={step_idx} scenario='{scenario_id}' "
+            "success=false reason='click_failed'"
+        )
+        return row
+    time.sleep(0.25)
+    focus_node = get_focus_fn(
+        dev=dev,
+        wait_seconds=0.35,
+        allow_fallback_dump=False,
+        mode="fast",
+    ) if callable(get_focus_fn) else {}
+    row = _apply_focus_snapshot_to_row(row, focus_node, client=client)
+    post_blob = " ".join(
+        [
+            str(row.get("visible_label", "") or "").strip(),
+            str(row.get("merged_announcement", "") or "").strip(),
+        ]
+    ).lower()
+    success = "want better insight into your daily life" not in post_blob
+    row["family_care_onboarding_recovered"] = success
+    row["family_care_onboarding_recovery_reason"] = (
+        "later_clicked_onboarding_cleared" if success else "later_clicked_unverified"
+    )
+    if success:
+        row["move_result"] = "moved"
+        row["family_care_onboarding_recovery_result"] = "dismissed"
+    log(
+        f"[FAMILY_CARE][onboarding_recover] step={step_idx} scenario='{scenario_id}' "
+        f"success={str(success).lower()} label='{_truncate_debug_text(later_label or 'Later', 80)}' "
+        f"reason='{row['family_care_onboarding_recovery_reason']}'"
+    )
+    return row
+
+
 def _maybe_promote_row_to_cta_child(
     *,
     row: dict[str, Any],
@@ -11971,8 +12146,10 @@ def _main_loop_phase(
             scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
             step_idx=step_idx,
         )
+        cta_focus_align_success = False
+        cta_focus_align_reason = ""
         if bool(row.get("cta_focus_align_requested", False)) or bool(row.get("cta_promote_kept_committed", False)):
-            _align_focus_to_committed_cta(
+            cta_focus_align_success, cta_focus_align_reason = _align_focus_to_committed_cta(
                 client=client,
                 dev=dev,
                 target_rid=str(row.get("focus_view_id", "") or "").strip(),
@@ -11981,6 +12158,16 @@ def _main_loop_phase(
                 scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
                 step_idx=step_idx,
             )
+        row["cta_focus_align_success"] = cta_focus_align_success
+        row["cta_focus_align_result"] = cta_focus_align_reason
+        row = _maybe_recover_family_care_onboarding(
+            row=row,
+            client=client,
+            dev=dev,
+            state=state,
+            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+            step_idx=step_idx,
+        )
         scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower()
         if scenario_type == "global_nav":
             expected_view_id = str(row.get("smart_nav_requested_view_id", "") or "").strip()

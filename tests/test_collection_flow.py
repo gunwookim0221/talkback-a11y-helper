@@ -896,6 +896,109 @@ def test_collect_tab_rows_logs_cta_focus_align_fail_when_focus_never_matches(mon
     assert any("[STEP][cta_focus_align_fail]" in line and "no_match" in line for line in logs)
 
 
+def test_extract_cta_node_label_uses_descendant_text_for_actionable_frame():
+    node = {
+        "viewIdResourceName": "com.example.plugin:id/second_button",
+        "className": "android.widget.FrameLayout",
+        "clickable": True,
+        "focusable": True,
+        "effectiveClickable": True,
+        "visibleToUser": True,
+        "children": [
+            {
+                "text": "Set up now",
+                "viewIdResourceName": "com.example.plugin:id/second_button_text",
+                "className": "android.widget.TextView",
+                "visibleToUser": True,
+                "children": [],
+            }
+        ],
+    }
+
+    assert collection_flow._extract_cta_node_label(node) == "Set up now"
+
+
+def test_maybe_recover_family_care_onboarding_clicks_later_and_marks_move_recovered(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, *args, **kwargs: logs.append(message))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([])
+    client.focus_sequence = [
+        {
+            "viewIdResourceName": "com.example:id/device_usage_card",
+            "text": "Device usage",
+            "talkbackLabel": "Device usage",
+            "className": "android.widget.TextView",
+            "visibleToUser": True,
+            "boundsInScreen": "40,420,1040,760",
+        }
+    ]
+    cluster_signature = "family-care-cluster"
+    row = {
+        "move_result": "failed",
+        "visible_label": "Want better insight into your daily life?",
+        "merged_announcement": "Want better insight into your daily life? Later Set up now",
+        "cta_cluster_signature": cluster_signature,
+    }
+    state = SimpleNamespace(
+        cta_state=SimpleNamespace(
+            cta_cluster_nodes_by_signature={
+                cluster_signature: [
+                    {
+                        "viewIdResourceName": "com.example.plugin:id/first_button",
+                        "className": "android.widget.FrameLayout",
+                        "clickable": True,
+                        "focusable": True,
+                        "effectiveClickable": True,
+                        "visibleToUser": True,
+                        "children": [
+                            {
+                                "text": "Later",
+                                "className": "android.widget.TextView",
+                                "visibleToUser": True,
+                                "children": [],
+                            }
+                        ],
+                    },
+                    {
+                        "viewIdResourceName": "com.example.plugin:id/second_button",
+                        "className": "android.widget.FrameLayout",
+                        "clickable": True,
+                        "focusable": True,
+                        "effectiveClickable": True,
+                        "visibleToUser": True,
+                        "children": [
+                            {
+                                "text": "Set up now",
+                                "className": "android.widget.TextView",
+                                "visibleToUser": True,
+                                "children": [],
+                            }
+                        ],
+                    },
+                ]
+            }
+        )
+    )
+
+    updated = collection_flow._maybe_recover_family_care_onboarding(
+        row=row,
+        client=client,
+        dev="SERIAL",
+        state=state,
+        scenario_id="life_family_care_plugin",
+        step_idx=4,
+    )
+
+    assert updated["family_care_onboarding_recovery_attempted"] is True
+    assert updated["family_care_onboarding_recovered"] is True
+    assert updated["move_result"] == "moved"
+    assert updated["visible_label"] == "Device usage"
+    assert client.select_calls[0]["name"] == "com.example.plugin:id/first_button"
+    assert len(client.click_focused_calls) == 1
+    assert any("[FAMILY_CARE][onboarding_recover]" in line and "success=true" in line for line in logs)
+
+
 def test_collect_tab_rows_allows_bounded_cta_descend_grace_for_card_container(monkeypatch):
     client = DummyClient(
         [
@@ -6787,7 +6890,7 @@ def test_collect_step_candidate_priority_groups_collapses_same_card_cluster_node
     assert len(content_candidates) == 1
     assert content_candidates[0]["rid"] == "com.example:id/second_button"
     assert content_candidates[0]["cluster_signature"]
-    assert any("suggestion_card_container" in value for value in meta["clustered_candidates"])
+    assert any("Want better insight into your daily life?" in value for value in meta["clustered_candidates"])
     assert bottom_strip_candidates
 
 
@@ -7300,7 +7403,7 @@ def test_reprioritize_skips_realign_for_already_resolved_cluster(monkeypatch):
     cluster_signature = collection_flow._build_candidate_object_signature(
         rid="com.example:id/suggestion_card_container",
         bounds="40,420,1040,980",
-        label="",
+        label="Want better insight into your daily life?",
     )
     client = DummyClient([])
     client.dump_tree_sequence = [nodes]
