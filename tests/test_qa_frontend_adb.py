@@ -366,6 +366,16 @@ def _client_factory(result):
     return lambda **_kwargs: _ReadinessClient(result)
 
 
+def _samsung_account_popup_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<hierarchy>
+  <node text="Protect your Samsung account" resource-id="android:id/alertTitle" bounds="[100,800][900,900]" />
+  <node text="Set up two-step verification to keep your account safe and secure." resource-id="android:id/message" bounds="[100,920][980,1200]" />
+  <node text="Later" resource-id="android:id/button3" bounds="[120,1760][360,1860]" />
+  <node text="Set up now" resource-id="android:id/button1" bounds="[700,1760][940,1860]" />
+</hierarchy>"""
+
+
 def test_fix_talkback_enables_and_returns_fixed_when_readiness_ok(monkeypatch):
     calls = []
     monkeypatch.setattr(adb, "run_adb", lambda args, timeout=10.0: calls.append(tuple(args)) or {"ok": True, "status": "ok"})
@@ -437,6 +447,32 @@ def test_fix_talkback_returns_popup_contamination_without_opening_settings(monke
     assert result["ok"] is False
     assert result["status"] == "popup_contamination"
     assert settings_calls == []
+
+
+def test_fix_talkback_dismisses_samsung_account_popup_before_readiness(monkeypatch):
+    calls = []
+
+    def _run_adb(args, timeout=10.0):
+        calls.append(tuple(args))
+        if args == ["shell", "uiautomator", "dump", "/sdcard/fix_talkback_popup.xml"]:
+            return {"ok": True, "status": "ok"}
+        if args == ["shell", "cat", "/sdcard/fix_talkback_popup.xml"]:
+            return {"ok": True, "status": "ok", "stdout": _samsung_account_popup_xml()}
+        return {"ok": True, "status": "ok"}
+
+    monkeypatch.setattr(adb, "run_adb", _run_adb)
+
+    result = adb.fix_talkback(
+        adb_status_fn=_adb_ready,
+        helper_status_fn=_helper_ready,
+        enable_talkback_fn=_ok_enable_talkback,
+        client_factory=_client_factory({"status": "enabled", "reason": "ok"}),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result["ok"] is True
+    assert ("shell", "input", "tap", "240", "1810") in calls
+    assert any(step["step"] == "dismiss_samsung_account_popup" and step["ok"] is True for step in result["steps"])
 
 
 def test_fix_talkback_returns_talkback_enable_error(monkeypatch):

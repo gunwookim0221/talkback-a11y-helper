@@ -6,6 +6,16 @@ from .paths import OUTPUT_DIR
 from .recent_runs import safe_recent_run_log_path
 from .run_summary import read_summary_file, summary_path_for_log
 
+SEVERE_MISMATCH_TYPES = {
+    "EMPTY_VISIBLE",
+    "EMPTY_SPEECH",
+    "TEXT_MISMATCH",
+    "LABEL_MISMATCH",
+    "SPOKEN_MISMATCH",
+    "MISMATCH",
+    "FAIL_MISMATCH",
+}
+
 def get_run_mismatch_summary(run_id: str) -> dict[str, object]:
     try:
         log_path = safe_recent_run_log_path(run_id)
@@ -134,11 +144,15 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
 
             both_text_empty = not visible and not speech
             exact_visible_speech_match = bool(visible and speech and visible == speech)
+            severe_fail_row = final_result == "FAIL" and mismatch_type in SEVERE_MISMATCH_TYPES
 
-            if mismatch_type == "EMPTY_VISIBLE" or both_text_empty:
+            if mismatch_type == "EMPTY_VISIBLE":
                 summary_empty_visible += 1
                 scenario_stats[scenario]["empty_visible"] += 1
-                if both_text_empty:
+                if severe_fail_row and both_text_empty:
+                    is_fail = True
+                    category = "EMPTY_VISIBLE_FAIL"
+                elif both_text_empty:
                     summary_review += 1
                     scenario_stats[scenario]["review"] += 1
                     is_review = True
@@ -210,7 +224,7 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
                 top_category = "CLEAN"
 
             add_to_preview = top_category in {"FAIL", "ISSUE"}
-            if exact_visible_speech_match or both_text_empty:
+            if exact_visible_speech_match:
                 add_to_preview = False
 
             if add_to_preview:

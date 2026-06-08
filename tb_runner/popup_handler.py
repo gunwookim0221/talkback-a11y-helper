@@ -25,6 +25,11 @@ SAFE_ACTION_LABELS = {
     "cancel",
 }
 
+SAMSUNG_ACCOUNT_TITLE_TOKEN = "protect your samsung account"
+SAMSUNG_ACCOUNT_MESSAGE_TOKEN = "two-step verification"
+SAMSUNG_ACCOUNT_LATER_RESOURCE_ID = "android:id/button3"
+SAMSUNG_ACCOUNT_SETUP_NOW_RESOURCE_ID = "android:id/button1"
+
 DANGEROUS_ACTION_LABELS = {
     "삭제",
     "제거",
@@ -84,6 +89,7 @@ class PopupCandidate:
     dangerous_buttons: list[dict[str, Any]] | None = None
     actionable_count: int = 0
     modal_evidence: list[str] | None = None
+    popup_kind: str = ""
 
 
 def normalize_label(value: Any) -> str:
@@ -193,6 +199,34 @@ def _modal_evidence(nodes: list[dict[str, Any]], labels: list[str], action_nodes
     return evidence
 
 
+def _is_samsung_account_popup(nodes: list[dict[str, Any]], labels: list[str]) -> bool:
+    title_match = False
+    message_match = False
+    for node in nodes:
+        resource_id = normalize_label(_node_resource_id(node))
+        label = normalize_label(node_label(node))
+        if resource_id == "android:id/alerttitle" and SAMSUNG_ACCOUNT_TITLE_TOKEN in label:
+            title_match = True
+        if resource_id == "android:id/message" and SAMSUNG_ACCOUNT_MESSAGE_TOKEN in label:
+            message_match = True
+    if title_match or message_match:
+        return True
+    return any(SAMSUNG_ACCOUNT_TITLE_TOKEN in normalize_label(label) for label in labels) or any(
+        SAMSUNG_ACCOUNT_MESSAGE_TOKEN in normalize_label(label) for label in labels
+    )
+
+
+def _samsung_account_safe_buttons(action_nodes: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    safe_buttons: list[dict[str, Any]] = []
+    for node in action_nodes:
+        label = node_label(node)
+        resource_id = normalize_label(_node_resource_id(node))
+        button = {"node": node, "label": label}
+        if resource_id == SAMSUNG_ACCOUNT_LATER_RESOURCE_ID or normalize_label(label) == "later":
+            safe_buttons.append(button)
+    return safe_buttons, []
+
+
 def detect_popup_candidate(row: dict[str, Any], *, max_actionable_count: int = 5) -> PopupCandidate:
     raw_nodes: list[Any] = []
     focus_node = row.get("focus_node")
@@ -220,6 +254,10 @@ def detect_popup_candidate(row: dict[str, Any], *, max_actionable_count: int = 5
 
     actionable_count = len(action_nodes)
     modal_evidence = _modal_evidence(nodes, labels, action_nodes)
+    samsung_popup = _is_samsung_account_popup(nodes, labels)
+    popup_kind = "samsung_account_two_step" if samsung_popup else ""
+    if samsung_popup:
+        safe_buttons, dangerous_buttons = _samsung_account_safe_buttons(action_nodes)
     title = next(
         (
             label
@@ -232,28 +270,36 @@ def detect_popup_candidate(row: dict[str, Any], *, max_actionable_count: int = 5
     signature = "|".join(signature_parts[:12])
 
     if dangerous_buttons:
-        return PopupCandidate(False, "dangerous_action_present", title, signature, safe_buttons, dangerous_buttons, actionable_count, modal_evidence)
+        return PopupCandidate(False, "dangerous_action_present", title, signature, safe_buttons, dangerous_buttons, actionable_count, modal_evidence, popup_kind)
     if not safe_buttons:
-        return PopupCandidate(False, "no_safe_action", title, signature, safe_buttons, dangerous_buttons, actionable_count, modal_evidence)
+        return PopupCandidate(False, "no_safe_action", title, signature, safe_buttons, dangerous_buttons, actionable_count, modal_evidence, popup_kind)
     if not modal_evidence:
-        return PopupCandidate(False, "missing_modal_evidence", title, signature, safe_buttons, dangerous_buttons, actionable_count, modal_evidence)
+        return PopupCandidate(False, "missing_modal_evidence", title, signature, safe_buttons, dangerous_buttons, actionable_count, modal_evidence, popup_kind)
     if actionable_count > max_actionable_count:
-        return PopupCandidate(False, "too_many_actionable_candidates", title, signature, safe_buttons, dangerous_buttons, actionable_count, modal_evidence)
-    return PopupCandidate(True, "modal_candidate", title, signature, safe_buttons, dangerous_buttons, actionable_count, modal_evidence)
+        return PopupCandidate(False, "too_many_actionable_candidates", title, signature, safe_buttons, dangerous_buttons, actionable_count, modal_evidence, popup_kind)
+    return PopupCandidate(True, "modal_candidate", title, signature, safe_buttons, dangerous_buttons, actionable_count, modal_evidence, popup_kind)
 
 
 def tap_popup_button(client: Any, dev: str, button: dict[str, Any]) -> bool:
     node = button.get("node", {})
+    resource_id = _node_resource_id(node) if isinstance(node, dict) else ""
+    if normalize_label(resource_id) == SAMSUNG_ACCOUNT_LATER_RESOURCE_ID:
+        touched = bool(client.touch(dev=dev, type_="resourceId", name=f"^{re.escape(resource_id)}$"))
+        if touched:
+            return True
+    label = str(button.get("label", "") or "").strip()
+    if label and normalize_label(resource_id) == SAMSUNG_ACCOUNT_LATER_RESOURCE_ID:
+        touched = bool(client.touch(dev=dev, type_="text", name=f"^{re.escape(label)}$"))
+        if touched:
+            return True
     bounds = _node_bounds(node) if isinstance(node, dict) else None
     if bounds:
         left, top, right, bottom = bounds
         tap_xy_adb = getattr(client, "tap_xy_adb", None)
         if callable(tap_xy_adb):
             return bool(tap_xy_adb(dev=dev, x=(left + right) // 2, y=(top + bottom) // 2))
-    resource_id = _node_resource_id(node) if isinstance(node, dict) else ""
     if resource_id:
         return bool(client.touch(dev=dev, type_="resourceId", name=f"^{re.escape(resource_id)}$"))
-    label = str(button.get("label", "") or "").strip()
     if label:
         return bool(client.touch(dev=dev, type_="text", name=f"^{re.escape(label)}$"))
     return False

@@ -17,6 +17,10 @@ TALKBACK_PACKAGES = {
 KNOWN_EXTERNAL_POPUP_PACKAGES = {
     "com.android.vending": "google_play_review_or_rating_popup",
 }
+SAMSUNG_ACCOUNT_POPUP_TITLE = "protect your samsung account"
+SAMSUNG_ACCOUNT_POPUP_MESSAGE = "two-step verification"
+SAMSUNG_ACCOUNT_POPUP_LATER_RESOURCE_ID = "android:id/button3"
+SAMSUNG_ACCOUNT_POPUP_SETUP_NOW_RESOURCE_ID = "android:id/button1"
 DISMISS_LABELS = (
     "not now",
     "no thanks",
@@ -331,6 +335,10 @@ def find_dismiss_candidate_in_uiautomator_xml(xml_text: str) -> dict[str, object
     except ET.ParseError:
         return None
 
+    samsung_popup_candidate = _find_samsung_account_popup_candidate(root)
+    if samsung_popup_candidate is not None:
+        return samsung_popup_candidate
+
     candidates: dict[str, dict[str, object]] = {}
     for node in root.iter("node"):
         label = _node_label(node.attrib)
@@ -349,6 +357,67 @@ def find_dismiss_candidate_in_uiautomator_xml(xml_text: str) -> dict[str, object
         if label in candidates:
             return candidates[label]
     return None
+
+
+def _find_samsung_account_popup_candidate(root: ET.Element) -> dict[str, object] | None:
+    title_detected = False
+    message_detected = False
+    later_candidate: dict[str, object] | None = None
+    fallback_candidate: dict[str, object] | None = None
+
+    for node in root.iter("node"):
+        resource_id = str(node.attrib.get("resource-id", "") or "").strip()
+        label = _node_label(node.attrib)
+        normalized_label = _normalize_label(label)
+        normalized_resource = resource_id.lower()
+
+        if normalized_resource == "android:id/alerttitle" and SAMSUNG_ACCOUNT_POPUP_TITLE in normalized_label:
+            title_detected = True
+        if normalized_resource == "android:id/message" and SAMSUNG_ACCOUNT_POPUP_MESSAGE in normalized_label:
+            message_detected = True
+        if SAMSUNG_ACCOUNT_POPUP_TITLE in normalized_label:
+            title_detected = True
+        if SAMSUNG_ACCOUNT_POPUP_MESSAGE in normalized_label:
+            message_detected = True
+
+        bounds = str(node.attrib.get("bounds", "") or "")
+        center = _bounds_center(bounds)
+        if not center:
+            continue
+        candidate = {
+            "label": label,
+            "bounds": bounds,
+            "x": center[0],
+            "y": center[1],
+            "resource_id": resource_id,
+            "popup_kind": "samsung_account_two_step",
+        }
+        if normalized_resource == SAMSUNG_ACCOUNT_POPUP_LATER_RESOURCE_ID:
+            later_candidate = candidate
+        elif normalized_label == "later" and fallback_candidate is None:
+            fallback_candidate = candidate
+        elif normalized_resource == SAMSUNG_ACCOUNT_POPUP_SETUP_NOW_RESOURCE_ID or "set up now" in normalized_label:
+            continue
+
+    if not (title_detected or message_detected):
+        return None
+    return later_candidate or fallback_candidate
+
+
+def dismiss_samsung_account_popup(
+    adb_runner: Callable[[list[str], float], dict[str, object]] = run_adb,
+) -> dict[str, object]:
+    candidate = find_popup_dismiss_candidate(adb_runner)
+    if not candidate or candidate.get("popup_kind") != "samsung_account_two_step":
+        return {"popup_detected": False, "popup_dismissed": False, "dismiss_method": None, "candidate": None}
+    tap_result = tap_candidate_center(candidate, adb_runner)
+    return {
+        "popup_detected": True,
+        "popup_dismissed": bool(tap_result.get("ok")),
+        "dismiss_method": "button3" if candidate.get("resource_id") == SAMSUNG_ACCOUNT_POPUP_LATER_RESOURCE_ID else "label_or_bounds",
+        "candidate": candidate,
+        "tap_result": tap_result,
+    }
 
 
 def tap_candidate_center(
@@ -525,6 +594,10 @@ def _run_launch_surface_preflight(
             accessibility_settings_opened=False,
         )
 
+    internal_popup_status = dismiss_samsung_account_popup(adb_runner)
+    if internal_popup_status.get("popup_detected"):
+        sleep_fn(0.7)
+
     return {
         "state": "passed",
         "ok": True,
@@ -544,6 +617,7 @@ def _run_launch_surface_preflight(
         "launch_status": launch_status,
         "foreground_status": foreground_status,
         "popup_status": popup_status,
+        "internal_popup_status": internal_popup_status,
         "popup_detected": popup_status.get("popup_detected"),
         "popup_package": popup_status.get("popup_package"),
         "popup_dismissed": popup_status.get("popup_dismissed"),
@@ -556,6 +630,7 @@ def format_preflight_log_lines(preflight: dict[str, object]) -> list[str]:
     launch_status = _dict(preflight.get("launch_status"))
     foreground_status = _dict(preflight.get("foreground_status"))
     popup_status = _dict(preflight.get("popup_status"))
+    internal_popup_status = _dict(preflight.get("internal_popup_status"))
     surface_status = _dict(preflight.get("popup_status")).get("surface_status") or {}
     lines = [
         f"[QA_FRONTEND][preflight][adb] status='{preflight.get('adb_state', 'unknown')}'",
@@ -588,6 +663,15 @@ def format_preflight_log_lines(preflight: dict[str, object]) -> list[str]:
             "[QA_FRONTEND][preflight][popup] "
             f"foreground_after='{popup_status.get('foreground_after') or ''}' "
             f"result='{popup_status.get('popup_result') or ''}'"
+        )
+    if internal_popup_status:
+        candidate = _dict(internal_popup_status.get("candidate"))
+        lines.append(
+            "[QA_FRONTEND][preflight][popup] "
+            f"internal_detected='{str(internal_popup_status.get('popup_detected', False)).lower()}' "
+            f"internal_dismissed='{str(internal_popup_status.get('popup_dismissed', False)).lower()}' "
+            f"dismiss_method='{internal_popup_status.get('dismiss_method') or ''}' "
+            f"dismiss_label='{candidate.get('label') or ''}'"
         )
     lines.append(f"[QA_FRONTEND][preflight] final_result='{preflight.get('state')}' reason='{preflight.get('reason')}'")
     return lines

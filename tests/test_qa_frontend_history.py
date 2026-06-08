@@ -332,6 +332,36 @@ def test_recent_runs_falls_back_to_log_parse_when_summary_is_malformed(tmp_path)
     assert run["completed_scenarios"] == 1
 
 
+def test_recent_run_mismatch_route_surfaces_fail_counts(monkeypatch):
+    monkeypatch.setattr(
+        "qa_frontend.backend.main.get_run_mismatch_summary",
+        lambda _run_id: {
+            "summary": {
+                "fail_count": 2,
+                "issue_count": 0,
+                "review_count": 1,
+                "clean_count": 3,
+                "matched": 3,
+                "true_mismatch": 0,
+                "empty_speech": 0,
+                "empty_visible": 2,
+                "review": 1,
+                "runtime_warning": 0,
+            },
+            "scenario_summary": [],
+            "signals": [],
+        },
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/runs/recent/20260608_082804/mismatch")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["fail_count"] == 2
+    assert payload["summary"]["issue_count"] == 0
+
+
 def test_write_summary_file_handles_stopped_partial_run(tmp_path):
     log_path = tmp_path / "20260528_120300_smoke.log"
     _write_log(

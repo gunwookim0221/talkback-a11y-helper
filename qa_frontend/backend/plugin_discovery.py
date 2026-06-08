@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from talkback_lib import A11yAdbClient
+from qa_frontend.backend.preflight import dismiss_samsung_account_popup
 from tb_runner.plugin_card_discovery import (
     build_discovery_response,
     build_known_plugin_index,
@@ -63,12 +64,30 @@ def _capture_window_xml(client: A11yAdbClient, serial: str | None) -> tuple[str,
             pass
 
 
+def _client_adb_runner(client: A11yAdbClient, serial: str | None):
+    run_fn = getattr(client, "_run", None)
+
+    def _runner(args: list[str], _timeout: float) -> dict[str, object]:
+        if not callable(run_fn):
+            return {"ok": False, "status": "error", "error": "client_run_not_supported"}
+        try:
+            stdout = run_fn(args, dev=serial)
+            return {"ok": True, "status": "ok", "stdout": stdout, "stderr": ""}
+        except Exception as exc:
+            return {"ok": False, "status": "error", "error": str(exc), "stdout": "", "stderr": str(exc)}
+
+    return _runner
+
+
 def discover_plugins(request: PluginDiscoveryRequest, *, client: A11yAdbClient | None = None) -> dict[str, Any]:
     targets = _normalize_targets(request.targets)
     client = client or A11yAdbClient()
     warnings: list[str] = []
     cards: list[dict[str, Any]] = []
     known_index = build_known_plugin_index(TAB_CONFIGS)
+    popup_status = dismiss_samsung_account_popup(_client_adb_runner(client, request.serial))
+    if popup_status.get("popup_detected") and not popup_status.get("popup_dismissed"):
+        warnings.append("samsung_account_popup_detected_but_not_dismissed")
 
     if not request.current_view_only:
         warnings.append("bounded_discovery_not_implemented_current_view_only_used")

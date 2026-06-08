@@ -103,7 +103,7 @@ def test_exact_match_fail_is_clean_and_excluded_from_quality_preview(tmp_path):
     assert summary["signals"] == []
 
 
-def test_empty_visible_with_empty_speech_is_review_and_excluded_from_quality_preview(tmp_path):
+def test_empty_visible_with_empty_speech_and_fail_result_is_fail_and_included_in_quality_preview(tmp_path):
     output_path = tmp_path / "result.xlsx"
     _write_result_workbook(
         output_path,
@@ -130,10 +130,11 @@ def test_empty_visible_with_empty_speech_is_review_and_excluded_from_quality_pre
 
     summary = get_mismatch_summary_from_xlsx(output_path)
 
-    assert summary["summary"]["review_count"] == 1
+    assert summary["summary"]["fail_count"] == 1
     assert summary["summary"]["issue_count"] == 0
     assert summary["summary"]["empty_visible"] == 1
-    assert summary["signals"] == []
+    assert len(summary["signals"]) == 1
+    assert summary["signals"][0]["top_category"] == "FAIL"
 
 
 def test_empty_visible_with_speech_is_issue_and_included_in_quality_preview(tmp_path):
@@ -270,7 +271,99 @@ def test_quality_preview_only_contains_fail_or_issue_categories(tmp_path):
     summary = get_mismatch_summary_from_xlsx(output_path)
 
     assert summary["summary"]["clean_count"] == 1
-    assert summary["summary"]["review_count"] == 1
+    assert summary["summary"]["fail_count"] == 1
     assert summary["summary"]["issue_count"] == 1
-    assert [signal["scenario_id"] for signal in summary["signals"]] == ["issue_empty_visible"]
+    assert [signal["scenario_id"] for signal in summary["signals"]] == ["review_empty_empty", "issue_empty_visible"]
     assert all(signal["top_category"] in {"FAIL", "ISSUE"} for signal in summary["signals"])
+
+
+def test_result_sheet_fail_rows_are_counted_in_run_history_summary(tmp_path):
+    output_path = tmp_path / "result.xlsx"
+    _write_result_workbook(
+        output_path,
+        [
+            [
+                "menu_main",
+                "Menu",
+                1,
+                "",
+                "",
+                "EMPTY_VISIBLE",
+                "FAIL",
+                "",
+                "HIGH",
+                "main",
+                "",
+                "",
+                1,
+                1,
+                1,
+                "1",
+                False,
+            ],
+            [
+                "life_home_monitor_plugin",
+                "Home Monitor",
+                1,
+                "",
+                "",
+                "EMPTY_VISIBLE",
+                "FAIL",
+                "",
+                "HIGH",
+                "main",
+                "",
+                "",
+                1,
+                1,
+                1,
+                "1",
+                False,
+            ],
+            [
+                "life_energy_plugin",
+                "Energy",
+                2,
+                "Energy",
+                "Energy",
+                "NORMALIZED_MATCH",
+                "PASS",
+                "",
+                "HIGH",
+                "main",
+                "",
+                "",
+                1,
+                2,
+                2,
+                "2",
+                False,
+            ],
+            [
+                "life_family_care_plugin",
+                "Family Care",
+                3,
+                "Profile",
+                "Profile settings",
+                "PARTIAL_MATCH",
+                "WARN",
+                "",
+                "MEDIUM",
+                "main",
+                "",
+                "",
+                1,
+                3,
+                3,
+                "3",
+                False,
+            ],
+        ],
+    )
+
+    summary = get_mismatch_summary_from_xlsx(output_path)
+
+    assert summary["summary"]["fail_count"] == 2
+    assert summary["summary"]["issue_count"] == 0
+    assert summary["summary"]["review_count"] == 1
+    assert summary["summary"]["clean_count"] == 1

@@ -29,6 +29,16 @@ def _popup_xml(*labels: str) -> str:
     return f'<?xml version="1.0" encoding="UTF-8"?><hierarchy>{"".join(nodes)}</hierarchy>'
 
 
+def _samsung_account_popup_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<hierarchy>
+  <node text="Protect your Samsung account" resource-id="android:id/alertTitle" bounds="[100,800][900,900]" />
+  <node text="Set up two-step verification to keep your account safe and secure, even if someone has your password." resource-id="android:id/message" bounds="[100,920][980,1200]" />
+  <node text="Later" resource-id="android:id/button3" bounds="[120,1760][360,1860]" />
+  <node text="Set up now" resource-id="android:id/button1" bounds="[700,1760][940,1860]" />
+</hierarchy>"""
+
+
 def _package_xml(package: str, *, focused_package: str | None = None) -> str:
     focused = focused_package or package
     return (
@@ -178,6 +188,54 @@ def test_popup_dismiss_candidate_returns_none_for_dangerous_only_labels():
     candidate = preflight.find_dismiss_candidate_in_uiautomator_xml(_popup_xml("Rate", "Submit", "리뷰 작성"))
 
     assert candidate is None
+
+
+def test_samsung_account_popup_prefers_later_button3():
+    candidate = preflight.find_dismiss_candidate_in_uiautomator_xml(_samsung_account_popup_xml())
+
+    assert candidate is not None
+    assert candidate["popup_kind"] == "samsung_account_two_step"
+    assert candidate["resource_id"] == "android:id/button3"
+    assert candidate["label"] == "Later"
+
+
+def test_samsung_account_popup_dismiss_is_noop_when_absent():
+    calls = []
+
+    def adb_runner(args, timeout):
+        calls.append(args)
+        if args == ["shell", "uiautomator", "dump", "/sdcard/qa_frontend_popup.xml"]:
+            return _ok()
+        if args == ["shell", "cat", "/sdcard/qa_frontend_popup.xml"]:
+            return _ok(_popup_xml("Not now"))
+        return _ok()
+
+    result = preflight.dismiss_samsung_account_popup(adb_runner)
+
+    assert result["popup_detected"] is False
+    assert result["popup_dismissed"] is False
+    assert ["shell", "input", "tap", "110", "130"] not in calls
+
+
+def test_samsung_account_popup_dismiss_taps_later_only():
+    calls = []
+
+    def adb_runner(args, timeout):
+        calls.append(args)
+        if args == ["shell", "uiautomator", "dump", "/sdcard/qa_frontend_popup.xml"]:
+            return _ok()
+        if args == ["shell", "cat", "/sdcard/qa_frontend_popup.xml"]:
+            return _ok(_samsung_account_popup_xml())
+        if args[:3] == ["shell", "input", "tap"]:
+            return _ok()
+        return _ok()
+
+    result = preflight.dismiss_samsung_account_popup(adb_runner)
+
+    assert result["popup_detected"] is True
+    assert result["popup_dismissed"] is True
+    assert result["dismiss_method"] == "button3"
+    assert ["shell", "input", "tap", "240", "1810"] in calls
 
 
 def test_external_popup_detection_clicks_dismiss_candidate_and_clears_to_smartthings():

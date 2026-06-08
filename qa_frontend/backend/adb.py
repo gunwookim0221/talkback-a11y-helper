@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import glob
+import re
 import subprocess
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from talkback_lib import A11yAdbClient
@@ -28,6 +30,9 @@ TALKBACK_PACKAGE_TO_SERVICE = {
     "com.samsung.android.accessibility.talkback": TALKBACK_SERVICE_CANDIDATES[0],
     "com.google.android.marvin.talkback": TALKBACK_SERVICE_CANDIDATES[1],
 }
+SAMSUNG_ACCOUNT_POPUP_TITLE = "protect your samsung account"
+SAMSUNG_ACCOUNT_POPUP_MESSAGE = "two-step verification"
+SAMSUNG_ACCOUNT_POPUP_BUTTON3 = "android:id/button3"
 
 
 def _relative_path(path: Path | None) -> str | None:
@@ -51,6 +56,53 @@ def _helper_metadata(apk_path: Path | None = None) -> dict[str, object]:
         "apk_searched": HELPER_APK_SEARCH_PATTERNS,
         "build_command": HELPER_BUILD_COMMAND,
     }
+
+
+def _dismiss_samsung_account_popup_once(adb_runner=None) -> dict[str, object]:
+    adb_runner = adb_runner or run_adb
+    dump_result = adb_runner(["shell", "uiautomator", "dump", "/sdcard/fix_talkback_popup.xml"], timeout=8.0)
+    if not dump_result.get("ok"):
+        return {"popup_detected": False, "popup_dismissed": False}
+    cat_result = adb_runner(["shell", "cat", "/sdcard/fix_talkback_popup.xml"], timeout=8.0)
+    if not cat_result.get("ok"):
+        return {"popup_detected": False, "popup_dismissed": False}
+    try:
+        root = ET.fromstring(str(cat_result.get("stdout", "")))
+    except ET.ParseError:
+        return {"popup_detected": False, "popup_dismissed": False}
+
+    title_detected = False
+    message_detected = False
+    later_center: tuple[int, int] | None = None
+    for node in root.iter("node"):
+        label = str(node.attrib.get("text", "") or node.attrib.get("content-desc", "") or "").strip().lower()
+        resource_id = str(node.attrib.get("resource-id", "") or "").strip().lower()
+        if resource_id == "android:id/alerttitle" and SAMSUNG_ACCOUNT_POPUP_TITLE in label:
+            title_detected = True
+        if resource_id == "android:id/message" and SAMSUNG_ACCOUNT_POPUP_MESSAGE in label:
+            message_detected = True
+        if SAMSUNG_ACCOUNT_POPUP_TITLE in label:
+            title_detected = True
+        if SAMSUNG_ACCOUNT_POPUP_MESSAGE in label:
+            message_detected = True
+        if resource_id == SAMSUNG_ACCOUNT_POPUP_BUTTON3 or label == "later":
+            bounds = str(node.attrib.get("bounds", "") or "")
+            center = _bounds_center(bounds)
+            if center:
+                later_center = center
+    if not (title_detected or message_detected) or later_center is None:
+        return {"popup_detected": False, "popup_dismissed": False}
+    tap_result = adb_runner(["shell", "input", "tap", str(later_center[0]), str(later_center[1])], timeout=5.0)
+    return {"popup_detected": True, "popup_dismissed": bool(tap_result.get("ok"))}
+
+
+def _bounds_center(bounds: str) -> tuple[int, int] | None:
+    text = str(bounds or "").strip()
+    match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", text)
+    if not match:
+        return None
+    left, top, right, bottom = (int(part) for part in match.groups())
+    return ((left + right) // 2, (top + bottom) // 2)
 
 
 def run_adb(args: list[str], timeout: float = 10.0) -> dict[str, object]:
@@ -472,6 +524,16 @@ def fix_talkback(
         }
 
     sleep_fn(1.0)
+    popup_result = _dismiss_samsung_account_popup_once(run_adb)
+    if popup_result.get("popup_detected"):
+        steps.append(
+            {
+                "step": "dismiss_samsung_account_popup",
+                "ok": bool(popup_result.get("popup_dismissed")),
+                "status": "dismissed" if popup_result.get("popup_dismissed") else "dismiss_failed",
+            }
+        )
+        sleep_fn(0.5)
     client = client_factory(start_monitor=False)
     readiness = client.check_talkback_ready()
     talkback_status = str(readiness.get("status") or "")

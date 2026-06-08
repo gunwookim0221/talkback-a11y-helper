@@ -50,6 +50,51 @@ def _dialog_row(title, button, *, button_class="android.widget.Button"):
     }
 
 
+def _samsung_account_popup_row():
+    return {
+        "focus_node": _node(
+            "Later",
+            clickable=True,
+            class_name="android.widget.Button",
+            bounds="120,1760,360,1860",
+            resource_id="android:id/button3",
+        ),
+        "dump_tree_nodes": [
+            {
+                "className": "android.app.Dialog",
+                "boundsInScreen": "80,720,1000,1900",
+                "visibleToUser": True,
+                "children": [
+                    _node(
+                        "Protect your Samsung account",
+                        bounds="120,820,900,920",
+                        resource_id="android:id/alertTitle",
+                    ),
+                    _node(
+                        "Set up two-step verification to keep your account safe and secure, even if someone has your password.",
+                        bounds="120,940,900,1120",
+                        resource_id="android:id/message",
+                    ),
+                    _node(
+                        "Later",
+                        clickable=True,
+                        class_name="android.widget.Button",
+                        bounds="120,1760,360,1860",
+                        resource_id="android:id/button3",
+                    ),
+                    _node(
+                        "Set up now",
+                        clickable=True,
+                        class_name="android.widget.Button",
+                        bounds="700,1760,940,1860",
+                        resource_id="android:id/button1",
+                    ),
+                ],
+            }
+        ],
+    }
+
+
 def test_korean_policy_update_popup_with_confirm_is_safe():
     candidate = popup_handler.detect_popup_candidate(_dialog_row("클립 공유 정책 업데이트", "확인"))
 
@@ -137,3 +182,34 @@ def test_tap_popup_button_prefers_bounds_tap():
     assert popup_handler.tap_popup_button(client, "SERIAL", candidate.safe_buttons[0]) is True
     assert client.tap_xy_adb_calls == [{"dev": "SERIAL", "x": 540, "y": 1810}]
     assert client.touch_calls == []
+
+
+def test_samsung_account_popup_selects_later_only():
+    candidate = popup_handler.detect_popup_candidate(_samsung_account_popup_row())
+
+    assert candidate.detected is True
+    assert candidate.popup_kind == "samsung_account_two_step"
+    assert [button["label"] for button in candidate.safe_buttons] == ["Later", "Later"]
+    assert candidate.dangerous_buttons == []
+    assert all(button["label"] != "Set up now" for button in candidate.safe_buttons)
+
+
+def test_samsung_account_popup_tap_prefers_button3_resource_id():
+    client = _Client()
+    candidate = popup_handler.detect_popup_candidate(_samsung_account_popup_row())
+
+    assert popup_handler.tap_popup_button(client, "SERIAL", candidate.safe_buttons[0]) is True
+    assert client.touch_calls == [{"dev": "SERIAL", "type_": "resourceId", "name": "^android:id/button3$"}]
+    assert client.tap_xy_adb_calls == []
+
+
+def test_non_samsung_popup_without_safe_action_is_noop():
+    row = {
+        "focus_node": _node("Camera", clickable=True),
+        "dump_tree_nodes": [_node("Camera", clickable=True)],
+    }
+
+    candidate = popup_handler.detect_popup_candidate(row)
+
+    assert candidate.detected is False
+    assert candidate.reason == "no_safe_action"
