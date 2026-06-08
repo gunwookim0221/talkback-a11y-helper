@@ -29,8 +29,49 @@ CHROME_RESOURCE_PATTERNS = (
     r"(?i)(home_button|add_menu_button|more_menu_button|tab_title|small_title_bar)",
 )
 
-LIFE_CARD_RESOURCE_PATTERNS = (
-    r"(?i)(servicecard|preinstalledservicecard|card|container|item|layout|frame)",
+LIFE_POSITIVE_RESOURCE_PATTERNS = (
+    r"(?i)(preinstalledservicecard|servicecard(?:body|container)?|llcard)",
+    r"(?i)(containername(?:layout)?|containerheaderlayout|containerbodylayout)",
+    r"(?i)(tvheadertitle)",
+    r"(?i)(fme_title_layout|fme_map_touch_layer|fme_map_bubble_layout|map_area)",
+    r"(?i)(title_view|title_service_name|camera_description|container_name)",
+)
+
+LIFE_EXCLUDED_LABEL_PATTERNS = (
+    r"(?i)^search$",
+    r"(?i)^add$",
+    r"(?i)^more$",
+    r"(?i)^more options$",
+    r"(?i)^edit$",
+    r"(?i)^settings$",
+    r"(?i)^switch$",
+    r"(?i)^turn off$",
+    r"(?i)^picture$",
+    r"(?i)^profile$",
+    r"(?i)^active(?: now)?$",
+    r"(?i)^no room assigned$",
+    r"(?i)^qr(?:\s*code)?$",
+    r"(?i)^barcode scan$",
+    r"(?i)^바코드 스캔$",
+    r"(?i)^우리 집$",
+    r"(?i).*\(me\).*",
+    r"(?i)^\d+$",
+)
+
+LIFE_DETAIL_LABEL_PATTERNS = (
+    r"(?i)^mapview$",
+    r"(?i)^naver$",
+    r"(?i).*s24 ultra.*",
+    r"(?i).*last updated.*",
+)
+
+LIFE_EXCLUDED_RESOURCE_PATTERNS = (
+    r"(?i)(toolbar|app_bar|action_bar|home_button|add_menu_button|more_menu_button|small_title_bar|tab_title)",
+    r"(?i)(search|profile|avatar|picture|barcode|qr|location|room|setting_button|settings_button)",
+)
+
+LIFE_TITLE_RESOURCE_PATTERNS = (
+    r"(?i)(container_name|containername|title_service_name|tvheadertitle|fme_title_layout)",
 )
 
 
@@ -91,6 +132,15 @@ def _format_bounds(bounds: tuple[int, int, int, int] | None) -> str:
     return f"{bounds[0]},{bounds[1]},{bounds[2]},{bounds[3]}"
 
 
+def _bounds_contains(outer: tuple[int, int, int, int], inner: tuple[int, int, int, int]) -> bool:
+    return (
+        inner[0] >= outer[0]
+        and inner[1] >= outer[1]
+        and inner[2] <= outer[2]
+        and inner[3] <= outer[3]
+    )
+
+
 def _node_label(node: dict[str, Any]) -> str:
     for key in ("text", "contentDescription", "content-desc", "content_desc", "talkbackLabel", "mergedLabel"):
         value = _text(node.get(key))
@@ -142,6 +192,27 @@ def _walk_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if isinstance(children, list):
             stack.extend(child for child in children if isinstance(child, dict))
     return flattened
+
+
+def _walk_nodes_with_ancestors(
+    nodes: list[dict[str, Any]],
+    ancestors: list[dict[str, Any]] | None = None,
+) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
+    results: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        current_ancestors = list(ancestors or [])
+        results.append((node, current_ancestors))
+        children = node.get("children")
+        if isinstance(children, list):
+            results.extend(
+                _walk_nodes_with_ancestors(
+                    [child for child in children if isinstance(child, dict)],
+                    [*current_ancestors, node],
+                )
+            )
+    return results
 
 
 def parse_uiautomator_xml(xml_text: str) -> list[dict[str, Any]]:
@@ -260,7 +331,7 @@ def discover_device_cards(
 
 
 def _is_title_like(label: str) -> bool:
-    if not label or _is_chrome_label(label):
+    if not label or _is_chrome_label(label) or _is_life_excluded_label(label):
         return False
     normalized = _normalize_key(label)
     if not normalized:
@@ -285,7 +356,76 @@ def _descendant_labels(node: dict[str, Any]) -> list[str]:
     return labels
 
 
-def _is_life_card_like(node: dict[str, Any], viewport_area: int) -> bool:
+def _descendant_nodes(node: dict[str, Any]) -> list[dict[str, Any]]:
+    children = node.get("children")
+    if not isinstance(children, list):
+        return []
+    return _walk_nodes([child for child in children if isinstance(child, dict)])
+
+
+def _is_life_excluded_label(label: str) -> bool:
+    normalized = _text(label)
+    if not normalized:
+        return False
+    return any(_safe_regex_search(pattern, normalized) for pattern in LIFE_EXCLUDED_LABEL_PATTERNS)
+
+
+def _is_life_detail_label(label: str) -> bool:
+    normalized = _text(label)
+    if not normalized:
+        return False
+    return any(_safe_regex_search(pattern, normalized) for pattern in LIFE_DETAIL_LABEL_PATTERNS)
+
+
+def _is_life_excluded_resource(resource_id: str, class_name: str) -> bool:
+    blob = f"{resource_id} {class_name}"
+    return any(_safe_regex_search(pattern, blob) for pattern in LIFE_EXCLUDED_RESOURCE_PATTERNS)
+
+
+def _has_life_positive_structure(node: dict[str, Any]) -> bool:
+    resources = []
+    for candidate in [node, *_descendant_nodes(node)]:
+        resources.append(f"{_node_resource_id(candidate)} {_node_class_name(candidate)}")
+    return any(
+        _safe_regex_search(pattern, resource_blob)
+        for resource_blob in resources
+        for pattern in LIFE_POSITIVE_RESOURCE_PATTERNS
+    )
+
+
+def _has_life_excluded_content(node: dict[str, Any]) -> bool:
+    for candidate in [node, *_descendant_nodes(node)]:
+        if _is_life_excluded_label(_node_label(candidate)):
+            return True
+        if _is_life_excluded_resource(_node_resource_id(candidate), _node_class_name(candidate)):
+            return True
+    return False
+
+
+def _title_from_preferred_resources(node: dict[str, Any]) -> str:
+    candidates = [node, *_descendant_nodes(node)]
+    for candidate in candidates:
+        resource_id = _node_resource_id(candidate)
+        label = _node_label(candidate)
+        if not label or _is_life_excluded_label(label) or _is_life_detail_label(label):
+            continue
+        if any(_safe_regex_search(pattern, resource_id) for pattern in LIFE_TITLE_RESOURCE_PATTERNS):
+            if _is_title_like(label):
+                return label
+    return ""
+
+
+def _title_from_node(node: dict[str, Any]) -> str:
+    label = _node_label(node)
+    if not label or _is_life_excluded_label(label) or _is_life_detail_label(label):
+        return ""
+    resource_id = _node_resource_id(node)
+    if any(_safe_regex_search(pattern, resource_id) for pattern in LIFE_TITLE_RESOURCE_PATTERNS):
+        return label if _is_title_like(label) else ""
+    return ""
+
+
+def _is_life_container_candidate(node: dict[str, Any], viewport_area: int) -> bool:
     if not _is_visible(node):
         return False
     bounds = _node_bounds(node)
@@ -294,17 +434,84 @@ def _is_life_card_like(node: dict[str, Any], viewport_area: int) -> bool:
     width = bounds[2] - bounds[0]
     height = bounds[3] - bounds[1]
     area = max(1, width * height)
-    if area < max(5000, int(viewport_area * 0.003)) or area > int(viewport_area * 0.85):
+    if area < max(5000, int(viewport_area * 0.003)):
         return False
     resource_id = _node_resource_id(node)
     class_name = _node_class_name(node)
     label = _node_label(node)
     if _is_chrome_label(label) or _is_chrome_resource(resource_id, class_name):
         return False
-    blob = f"{resource_id} {class_name}"
-    has_card_hint = any(_safe_regex_search(pattern, blob) for pattern in LIFE_CARD_RESOURCE_PATTERNS)
-    has_title = any(_is_title_like(descendant) for descendant in [label, *_descendant_labels(node)])
-    return bool(has_card_hint and has_title)
+    if _is_life_excluded_label(label) or _is_life_excluded_resource(resource_id, class_name):
+        return False
+    if not bool(node.get("clickable") or node.get("focusable")):
+        return False
+    if _has_life_excluded_content(node):
+        return False
+    has_card_hint = _has_life_positive_structure(node)
+    if area > int(viewport_area * 0.95) and not has_card_hint:
+        return False
+    return bool(has_card_hint)
+
+
+def _promote_life_candidate_container(
+    node: dict[str, Any],
+    ancestors: list[dict[str, Any]],
+    viewport_area: int,
+) -> dict[str, Any] | None:
+    lineage = [node, *reversed(ancestors)]
+    for candidate in lineage:
+        if _is_life_container_candidate(candidate, viewport_area):
+            return candidate
+    return None
+
+
+def _candidate_resource_blob(node: dict[str, Any]) -> str:
+    return " ".join(
+        f"{_node_resource_id(candidate)} {_node_class_name(candidate)}"
+        for candidate in [node, *_descendant_nodes(node)]
+    ).lower()
+
+
+def _is_find_internal_item_candidate(
+    *,
+    label: str,
+    node: dict[str, Any],
+    container: dict[str, Any],
+    accepted_cards: list[dict[str, Any]],
+) -> bool:
+    node_bounds = _node_bounds(node)
+    if not node_bounds:
+        return False
+    lowered = _normalize_key(label)
+    if not lowered or lowered == "find":
+        return False
+    container_blob = _candidate_resource_blob(container)
+    if not any(token in container_blob for token in ("fme_", "map_area")):
+        return False
+    node_blob = f"{_node_resource_id(node)} {_node_class_name(node)}".lower()
+    if not any(token in node_blob for token in ("bubble", "marker", "map_area", "container_name")):
+        return False
+    if "last updated" in _text(label).lower():
+        return True
+    for accepted in accepted_cards:
+        accepted_bounds = accepted.get("bounds_tuple")
+        accepted_title = _normalize_key(accepted.get("title"))
+        accepted_blob = str(accepted.get("resource_blob") or "")
+        if (
+            accepted_bounds
+            and isinstance(accepted_bounds, tuple)
+            and _bounds_contains(accepted_bounds, node_bounds)
+            and accepted_title == "find"
+            and any(token in accepted_blob for token in ("fme_", "map_area"))
+        ):
+            return True
+    return False
+
+
+def _is_life_card_like(node: dict[str, Any], viewport_area: int) -> bool:
+    if not _is_life_container_candidate(node, viewport_area):
+        return False
+    return any(_is_title_like(descendant) for descendant in [_node_label(node), *_descendant_labels(node)])
 
 
 def discover_life_cards_from_nodes(
@@ -314,7 +521,9 @@ def discover_life_cards_from_nodes(
     source: str = "xml",
 ) -> list[dict[str, Any]]:
     known_index = known_index or {}
-    flat = _walk_nodes(nodes if isinstance(nodes, list) else [])
+    tree_nodes = [node for node in nodes if isinstance(node, dict)] if isinstance(nodes, list) else []
+    flat = _walk_nodes(tree_nodes)
+    flat_with_ancestors = _walk_nodes_with_ancestors(tree_nodes)
     bounds_list = [_node_bounds(node) for node in flat]
     bounds_list = [bounds for bounds in bounds_list if bounds]
     viewport_area = 1080 * 1920
@@ -327,25 +536,46 @@ def discover_life_cards_from_nodes(
 
     cards: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for index, node in enumerate(flat):
-        if not _is_life_card_like(node, viewport_area):
+    accepted_cards: list[dict[str, Any]] = []
+    for index, (node, ancestors) in enumerate(flat_with_ancestors):
+        node_title = _title_from_node(node)
+        if not node_title:
             continue
-        own_label = _node_label(node)
-        descendants = _descendant_labels(node)
-        title = next((label for label in [own_label, *descendants] if _is_title_like(label)), "")
+        container = _promote_life_candidate_container(node, ancestors, viewport_area)
+        if not container:
+            continue
+        title = _title_from_preferred_resources(container)
         if not title:
+            title = node_title
+        if not title:
+            continue
+        if _is_find_internal_item_candidate(
+            label=title,
+            node=node,
+            container=container,
+            accepted_cards=accepted_cards,
+        ):
             continue
         stable_label = title
         key = _normalize_key(stable_label)
         if not key or key in seen:
             continue
         seen.add(key)
-        resource_id = _node_resource_id(node)
-        class_name = _node_class_name(node)
+        container_bounds = _node_bounds(container)
+        resource_id = _node_resource_id(container)
+        class_name = _node_class_name(container)
         known, scenario_id = _known_meta("life", stable_label, known_index)
-        confidence = "high" if title in descendants else "medium"
-        if own_label and not descendants:
+        confidence = "high" if title in _descendant_labels(container) else "medium"
+        if _node_label(container) and not _descendant_labels(container):
             confidence = "low"
+        if container_bounds:
+            accepted_cards.append(
+                {
+                    "title": title,
+                    "bounds_tuple": container_bounds,
+                    "resource_blob": _candidate_resource_blob(container),
+                }
+            )
         cards.append(
             {
                 "id": f"life:{_slug(stable_label)}:{index}",
@@ -354,7 +584,7 @@ def discover_life_cards_from_nodes(
                 "type": "life",
                 "confidence": confidence,
                 "source": source,
-                "bounds": _format_bounds(_node_bounds(node)),
+                "bounds": _format_bounds(container_bounds),
                 "resource_id": resource_id,
                 "known": known,
                 "existing_scenario_id": scenario_id,
