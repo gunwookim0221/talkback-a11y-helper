@@ -11,6 +11,7 @@ import {
   PluginOnboardingSession,
   PluginOnboardingRestoreResponse,
   PluginProbeResponse,
+  PluginRollbackExecuteResponse,
   PluginRollbackPreviewResponse,
 } from '../api';
 
@@ -40,6 +41,8 @@ export function PluginDiscoveryPanel({ running, reportError }: { running: boolea
   const [restoreResult, setRestoreResult] = useState<PluginOnboardingRestoreResponse | null>(null);
   const [rollbackPreviewing, setRollbackPreviewing] = useState(false);
   const [rollbackPreview, setRollbackPreview] = useState<PluginRollbackPreviewResponse | null>(null);
+  const [rollbackExecuting, setRollbackExecuting] = useState(false);
+  const [rollbackResult, setRollbackResult] = useState<PluginRollbackExecuteResponse | null>(null);
 
   async function refreshSessions() {
     try {
@@ -139,6 +142,7 @@ export function PluginDiscoveryPanel({ running, reportError }: { running: boolea
     const selectedCard = restored.selected_card;
     setRestoreResult(response);
     setRollbackPreview(null);
+    setRollbackResult(null);
     setSessionId(response.session.session_id);
     setProbeCard(selectedCard?.stable_label ? (selectedCard as PluginDiscoveryCard) : null);
     setProbeResult(restored.probe_result?.schema_version ? (restored.probe_result as PluginProbeResponse) : null);
@@ -169,6 +173,7 @@ export function PluginDiscoveryPanel({ running, reportError }: { running: boolea
       return;
     }
     setRollbackPreviewing(true);
+    setRollbackResult(null);
     try {
       const response = await api.previewPluginRollback(sessionId);
       setRollbackPreview(response);
@@ -176,6 +181,27 @@ export function PluginDiscoveryPanel({ running, reportError }: { running: boolea
       reportError(err);
     } finally {
       setRollbackPreviewing(false);
+    }
+  }
+
+  async function executeRollback() {
+    if (!sessionId || !rollbackPreview?.can_rollback) {
+      return;
+    }
+    const confirmed = window.confirm('Restore scenario_config.py and runtime_config.json from backup?');
+    if (!confirmed) {
+      return;
+    }
+    setRollbackExecuting(true);
+    try {
+      const response = await api.executePluginRollback(sessionId, { confirm: true });
+      setRollbackResult(response);
+      await refreshSessions();
+      await restoreSession(sessionId);
+    } catch (err) {
+      reportError(err);
+    } finally {
+      setRollbackExecuting(false);
     }
   }
 
@@ -457,6 +483,51 @@ export function PluginDiscoveryPanel({ running, reportError }: { running: boolea
             <div className="draftPreviewFullWidth">
               <h4>Diff Preview</h4>
               <pre>{rollbackPreview.preview.diff_preview || '-'}</pre>
+            </div>
+          </div>
+          <div className="probeDraftActions">
+            <button type="button" onClick={executeRollback} disabled={running || rollbackExecuting || !rollbackPreview.can_rollback}>
+              {rollbackExecuting ? 'Executing Rollback...' : 'Execute Rollback'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {rollbackResult && (
+        <div className="rollbackPreviewPanel">
+          <h3>Rollback Result</h3>
+          <div className="probeSummaryGrid">
+            <div>
+              <span>Rollback Status</span>
+              <strong>{rollbackResult.rollback_status}</strong>
+            </div>
+            <div>
+              <span>Session ID</span>
+              <strong>{rollbackResult.session_id}</strong>
+            </div>
+          </div>
+          <div className="probeSeedGrid">
+            <div>
+              <h4>Restored Files</h4>
+              <p>{rollbackResult.restored_files.join(', ') || '-'}</p>
+            </div>
+            <div>
+              <h4>Backup Paths</h4>
+              <p>{rollbackResult.backup.paths.join(', ') || '-'}</p>
+            </div>
+            <div>
+              <h4>Warnings</h4>
+              <p>{rollbackResult.diagnostics.warnings.join(', ') || '-'}</p>
+            </div>
+            <div>
+              <h4>Errors</h4>
+              <p>{rollbackResult.diagnostics.errors.join(', ') || '-'}</p>
+            </div>
+          </div>
+          <div className="probeSeedGrid">
+            <div>
+              <h4>Pre-Rollback Backup</h4>
+              <p>{rollbackResult.pre_rollback_backup.join(', ') || '-'}</p>
             </div>
           </div>
         </div>

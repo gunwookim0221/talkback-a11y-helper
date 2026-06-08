@@ -629,6 +629,7 @@ export type PluginOnboardingRestoreResponse = {
     draft_result: Partial<PluginDraftResponse>;
     review_result: Partial<PluginDraftReviewResponse>;
     apply_result: Partial<PluginDraftApplyResponse>;
+    rollback_result?: Record<string, unknown>;
     smoke_start_result: Partial<PluginDraftSmokeResponse>;
     smoke_status_result: Partial<PluginDraftSmokeStatusResponse>;
   };
@@ -656,6 +657,22 @@ export type PluginRollbackPreviewResponse = {
     runtime_config_entry_will_be_removed: boolean;
     diff_preview: string;
   };
+  diagnostics: {
+    warnings: string[];
+    errors: string[];
+  };
+};
+
+export type PluginRollbackExecuteResponse = {
+  ok: boolean;
+  schema_version: 'plugin-rollback-execute-v1' | string;
+  rollback_status: string;
+  session_id: string;
+  restored_files: string[];
+  backup: {
+    paths: string[];
+  };
+  pre_rollback_backup: string[];
   diagnostics: {
     warnings: string[];
     errors: string[];
@@ -786,6 +803,11 @@ export const api = {
   previewPluginRollback: (sessionId: string) =>
     requestPayload<PluginRollbackPreviewResponse>(`/api/plugin-onboarding/session/${encodeURIComponent(sessionId)}/rollback/preview`, {
       method: 'POST',
+    }),
+  executePluginRollback: (sessionId: string, data: { confirm: boolean }) =>
+    requestPayload<PluginRollbackExecuteResponse>(`/api/plugin-onboarding/session/${encodeURIComponent(sessionId)}/rollback`, {
+      method: 'POST',
+      body: JSON.stringify(data),
     }),
   listPluginOnboardingSessions: () => requestPayload<PluginOnboardingSessionsResponse>('/api/plugin-onboarding/sessions'),
   scenarios: () => request<{ scenarios: Scenario[] }>('/api/scenarios'),

@@ -166,7 +166,7 @@ def test_plugin_onboarding_invalid_step_route_rejects(monkeypatch, tmp_path):
 
     response = client.post(
         f"/api/plugin-onboarding/session/{created['session_id']}/step",
-        json={"step": "rollback", "status": "completed", "payload": {}},
+        json={"step": "archive", "status": "completed", "payload": {}},
     )
 
     assert response.status_code == 400

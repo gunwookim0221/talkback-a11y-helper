@@ -45,3 +45,39 @@ def test_plugin_onboarding_rollback_preview_route_missing_session(monkeypatch):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "session_not_found"
+
+
+def test_plugin_onboarding_rollback_execute_route_returns_schema(monkeypatch):
+    monkeypatch.setattr(main.runner, "get_status", lambda: {"state": "idle"})
+    monkeypatch.setattr(
+        main,
+        "execute_session_rollback",
+        lambda session_id, request: {
+            "ok": True,
+            "schema_version": "plugin-rollback-execute-v1",
+            "rollback_status": "rolled_back",
+            "session_id": session_id,
+            "restored_files": ["tb_runner/scenario_config.py", "config/runtime_config.json"],
+            "backup": {"paths": ["output/plugin_draft_backups/x/scenario_config.py.bak"]},
+            "pre_rollback_backup": ["output/plugin_rollback_execute_backups/x/scenario_config.py.before_rollback"],
+            "diagnostics": {"warnings": [], "errors": []},
+        },
+    )
+    client = TestClient(main.app)
+
+    response = client.post("/api/plugin-onboarding/session/onboarding_1/rollback", json={"confirm": True})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["schema_version"] == "plugin-rollback-execute-v1"
+    assert body["rollback_status"] == "rolled_back"
+
+
+def test_plugin_onboarding_rollback_execute_route_blocks_while_running(monkeypatch):
+    monkeypatch.setattr(main.runner, "get_status", lambda: {"state": "running"})
+    client = TestClient(main.app)
+
+    response = client.post("/api/plugin-onboarding/session/onboarding_1/rollback", json={"confirm": True})
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Rollback is blocked while a run is in progress"

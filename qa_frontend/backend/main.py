@@ -29,9 +29,11 @@ from .plugin_draft import (
 )
 from .plugin_probe import PluginProbeRequest, probe_plugin
 from .plugin_onboarding_session import (
+    PluginOnboardingRollbackExecuteRequest,
     PluginOnboardingSessionCreateRequest,
     PluginOnboardingSessionStepRequest,
     create_session,
+    execute_session_rollback,
     get_session,
     list_sessions,
     preview_session_rollback,
@@ -245,6 +247,20 @@ def plugin_onboarding_restore_session(session_id: str) -> dict[str, object]:
 def plugin_onboarding_rollback_preview(session_id: str) -> dict[str, object]:
     try:
         return preview_session_rollback(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/plugin-onboarding/session/{session_id}/rollback")
+def plugin_onboarding_rollback_execute(session_id: str, request: PluginOnboardingRollbackExecuteRequest) -> dict[str, object]:
+    if runner.get_status().get("state") == "running":
+        raise HTTPException(status_code=409, detail="Rollback is blocked while a run is in progress")
+    try:
+        return execute_session_rollback(session_id, request)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

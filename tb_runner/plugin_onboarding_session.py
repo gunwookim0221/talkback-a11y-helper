@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from difflib import unified_diff
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,9 +11,10 @@ from typing import Any
 SESSION_SCHEMA_VERSION = "plugin-onboarding-session-v1"
 RESTORE_SCHEMA_VERSION = "plugin-onboarding-restore-v1"
 ROLLBACK_PREVIEW_SCHEMA_VERSION = "plugin-rollback-preview-v1"
+ROLLBACK_EXECUTE_SCHEMA_VERSION = "plugin-rollback-execute-v1"
 DEFAULT_SESSION_ROOT = Path("output/plugin_onboarding_sessions")
 DEFAULT_PROJECT_ROOT = Path(".")
-VALID_STEPS = {"discovery", "probe", "draft", "review", "apply", "smoke"}
+VALID_STEPS = {"discovery", "probe", "draft", "review", "apply", "smoke", "rollback"}
 
 
 def _text(value: Any) -> str:
@@ -128,6 +130,8 @@ def calculate_session_status(step: str, status: str, payload: dict[str, Any]) ->
             return "review_blocked"
     if step == "apply" and status == "applied":
         return "applied"
+    if step == "rollback" and status == "rolled_back":
+        return "rolled_back"
     if step == "smoke":
         if status in {"started", "running"}:
             return "smoke_started"
@@ -303,6 +307,7 @@ def build_restored_state(session: dict[str, Any]) -> dict[str, Any]:
         "draft_result": _step_payload(session, "draft"),
         "review_result": _step_payload(session, "review"),
         "apply_result": _step_payload(session, "apply"),
+        "rollback_result": _step_payload(session, "rollback"),
         "smoke_start_result": smoke_start_result,
         "smoke_status_result": smoke_status_result,
     }
@@ -319,6 +324,15 @@ def recommend_next_action(session: dict[str, Any], restored_state: dict[str, Any
     failure_reason = _text(smoke_summary.get("failure_reason"))
     backup = apply_payload.get("backup") if isinstance(apply_payload.get("backup"), dict) else {}
     backup_paths = backup.get("paths") if isinstance(backup.get("paths"), list) else []
+
+    if status == "rolled_back":
+        return {
+            "next_action": "rollback_completed",
+            "severity": "info",
+            "reasons": ["Draft changes restored from backup"],
+            "allowed_actions": ["review_restore_state", "retry_probe"],
+            "blocked_actions": ["apply_draft"],
+        }
 
     if status == "smoke_passed" or result_status == "PASS":
         return {
@@ -528,3 +542,116 @@ def preview_onboarding_rollback(
             "errors": errors,
         },
     }
+
+
+def execute_onboarding_rollback(
+    session_id: str,
+    confirm: bool,
+    session_root: Path | None = None,
+    project_root: Path | None = None,
+) -> dict[str, Any]:
+    root = Path(session_root or DEFAULT_SESSION_ROOT)
+    repo_root = Path(project_root or DEFAULT_PROJECT_ROOT)
+    safe_session_id = _safe_session_id(session_id)
+
+    if confirm is not True:
+        return {
+            "ok": False,
+            "schema_version": ROLLBACK_EXECUTE_SCHEMA_VERSION,
+            "rollback_status": "blocked",
+            "session_id": safe_session_id,
+            "restored_files": [],
+            "backup": {"paths": []},
+            "pre_rollback_backup": [],
+            "diagnostics": {
+                "warnings": [],
+                "errors": ["confirm=true required"],
+            },
+        }
+
+    preview = preview_onboarding_rollback(safe_session_id, root, repo_root)
+    preview_backup = preview.get("backup") if isinstance(preview.get("backup"), dict) else {}
+    preview_diagnostics = preview.get("diagnostics") if isinstance(preview.get("diagnostics"), dict) else {}
+    preview_warnings = [_text(item) for item in preview_diagnostics.get("warnings", []) if _text(item)] if isinstance(preview_diagnostics.get("warnings"), list) else []
+    preview_errors = [_text(item) for item in preview_diagnostics.get("errors", []) if _text(item)] if isinstance(preview_diagnostics.get("errors"), list) else []
+
+    if not preview.get("can_rollback"):
+        return {
+            "ok": False,
+            "schema_version": ROLLBACK_EXECUTE_SCHEMA_VERSION,
+            "rollback_status": "blocked",
+            "session_id": safe_session_id,
+            "restored_files": [],
+            "backup": {"paths": preview_backup.get("paths", []) if isinstance(preview_backup.get("paths"), list) else []},
+            "pre_rollback_backup": [],
+            "diagnostics": {
+                "warnings": preview_warnings,
+                "errors": ["Rollback preview is not ready", *preview_errors],
+            },
+        }
+
+    backup_by_name = _backup_paths_by_name(
+        preview_backup.get("paths", []) if isinstance(preview_backup.get("paths"), list) else [],
+        repo_root,
+    )
+    scenario_current = repo_root / "tb_runner" / "scenario_config.py"
+    runtime_current = repo_root / "config" / "runtime_config.json"
+    scenario_backup = backup_by_name.get("scenario_config")
+    runtime_backup = backup_by_name.get("runtime_config")
+    if not scenario_backup or not runtime_backup or not scenario_backup.is_file() or not runtime_backup.is_file():
+        return {
+            "ok": False,
+            "schema_version": ROLLBACK_EXECUTE_SCHEMA_VERSION,
+            "rollback_status": "blocked",
+            "session_id": safe_session_id,
+            "restored_files": [],
+            "backup": {"paths": preview_backup.get("paths", []) if isinstance(preview_backup.get("paths"), list) else []},
+            "pre_rollback_backup": [],
+            "diagnostics": {
+                "warnings": preview_warnings,
+                "errors": ["backup missing"],
+            },
+        }
+
+    pre_backup_root = repo_root / "output" / "plugin_rollback_execute_backups" / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    pre_backup_root.mkdir(parents=True, exist_ok=True)
+    scenario_before_path = pre_backup_root / "scenario_config.py.before_rollback"
+    runtime_before_path = pre_backup_root / "runtime_config.json.before_rollback"
+    shutil.copy2(scenario_current, scenario_before_path)
+    shutil.copy2(runtime_current, runtime_before_path)
+    shutil.copy2(scenario_backup, scenario_current)
+    shutil.copy2(runtime_backup, runtime_current)
+
+    restored_files = ["tb_runner/scenario_config.py", "config/runtime_config.json"]
+    pre_rollback_backup = [
+        str(scenario_before_path.relative_to(repo_root)).replace("\\", "/"),
+        str(runtime_before_path.relative_to(repo_root)).replace("\\", "/"),
+    ]
+    backup_paths = preview_backup.get("paths", []) if isinstance(preview_backup.get("paths"), list) else []
+    result = {
+        "ok": True,
+        "schema_version": ROLLBACK_EXECUTE_SCHEMA_VERSION,
+        "rollback_status": "rolled_back",
+        "session_id": safe_session_id,
+        "restored_files": restored_files,
+        "backup": {"paths": backup_paths},
+        "pre_rollback_backup": pre_rollback_backup,
+        "diagnostics": {
+            "warnings": preview_warnings,
+            "errors": [],
+        },
+    }
+    save_onboarding_step(
+        safe_session_id,
+        "rollback",
+        "rolled_back",
+        {
+            "schema_version": ROLLBACK_EXECUTE_SCHEMA_VERSION,
+            "rollback_status": "rolled_back",
+            "restored_files": restored_files,
+            "backup": {"paths": backup_paths},
+            "pre_rollback_backup": pre_rollback_backup,
+        },
+        root,
+    )
+    return result

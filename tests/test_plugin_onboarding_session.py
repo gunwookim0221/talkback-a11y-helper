@@ -86,7 +86,7 @@ def test_invalid_step_rejected(tmp_path):
     created = create_onboarding_session({"label": "TV", "stable_label": "TV", "type": "device"}, tmp_path)
 
     with pytest.raises(ValueError, match="invalid_step"):
-        save_onboarding_step(created["session_id"], "rollback", "completed", {}, tmp_path)
+        save_onboarding_step(created["session_id"], "archive", "completed", {}, tmp_path)
 
 
 def test_restore_complete_session(tmp_path):
@@ -203,3 +203,19 @@ def test_recommend_review_blocked(tmp_path):
 
     assert restored["recommendation"]["next_action"] == "review_blocked"
     assert "apply_draft" in restored["recommendation"]["blocked_actions"]
+
+
+def test_restore_recommend_rollback_completed(tmp_path):
+    created = create_onboarding_session({"label": "TV", "stable_label": "TV", "type": "device"}, tmp_path)
+    save_onboarding_step(
+        created["session_id"],
+        "rollback",
+        "rolled_back",
+        {"schema_version": "plugin-rollback-execute-v1", "restored_files": ["tb_runner/scenario_config.py"]},
+        tmp_path,
+    )
+
+    restored = restore_onboarding_session(created["session_id"], tmp_path)
+
+    assert restored["session"]["status"] == "rolled_back"
+    assert restored["recommendation"]["next_action"] == "rollback_completed"

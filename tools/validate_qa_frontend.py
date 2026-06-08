@@ -47,6 +47,7 @@ def check_fastapi_import(results: list[tuple[str, bool, str]]) -> None:
         "/api/plugin-onboarding/session/{session_id}",
         "/api/plugin-onboarding/session/{session_id}/restore",
         "/api/plugin-onboarding/session/{session_id}/rollback/preview",
+        "/api/plugin-onboarding/session/{session_id}/rollback",
         "/api/plugin-onboarding/sessions",
         "/api/scenarios",
         "/api/run/start",
