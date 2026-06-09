@@ -679,6 +679,24 @@ export type PluginRollbackExecuteResponse = {
   };
 };
 
+export type PluginRemoveAppliedDraftResponse = {
+  ok: boolean;
+  schema_version: string;
+  remove_status: string;
+  session_id: string;
+  removed?: { scenario_id: string; runtime_config_key: string };
+  changed_files?: string[];
+  backup?: { created: boolean; paths: string[] };
+  diagnostics: { warnings: string[]; errors: string[] };
+};
+
+export type PluginDeleteSessionResponse = {
+  ok: boolean;
+  schema_version: string;
+  session_id: string;
+  delete_status: string;
+};
+
 function formatApiPayloadError(payload: unknown) {
   if (!payload || typeof payload !== 'object') {
     return '';
@@ -810,6 +828,15 @@ export const api = {
       body: JSON.stringify(data),
     }),
   listPluginOnboardingSessions: () => requestPayload<PluginOnboardingSessionsResponse>('/api/plugin-onboarding/sessions'),
+  removeAppliedDraft: (sessionId: string, data: { confirm: boolean }) =>
+    requestPayload<PluginRemoveAppliedDraftResponse>(`/api/plugin-onboarding/session/${encodeURIComponent(sessionId)}/remove-applied-draft`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  deleteSession: (sessionId: string) =>
+    requestPayload<PluginDeleteSessionResponse>(`/api/plugin-onboarding/session/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE',
+    }),
   scenarios: () => request<{ scenarios: Scenario[] }>('/api/scenarios'),
   startRun: (
     mode: 'smoke' | 'full',

@@ -655,3 +655,23 @@ def execute_onboarding_rollback(
         root,
     )
     return result
+
+
+def delete_onboarding_session(session_id: str, session_root: Path | None = None) -> dict[str, Any]:
+    root = Path(session_root or DEFAULT_SESSION_ROOT)
+    safe_session_id = _safe_session_id(session_id)
+    path = _session_path(safe_session_id, root)
+    if not path.is_file():
+        return {
+            "ok": True,
+            "schema_version": "plugin-onboarding-session-delete-v1",
+            "session_id": safe_session_id,
+            "delete_status": "already_deleted",
+        }
+    path.unlink()
+    return {
+        "ok": True,
+        "schema_version": "plugin-onboarding-session-delete-v1",
+        "session_id": safe_session_id,
+        "delete_status": "deleted",
+    }

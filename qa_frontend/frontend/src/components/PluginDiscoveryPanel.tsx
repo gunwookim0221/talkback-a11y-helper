@@ -43,6 +43,8 @@ export function PluginDiscoveryPanel({ running, reportError }: { running: boolea
   const [rollbackPreview, setRollbackPreview] = useState<PluginRollbackPreviewResponse | null>(null);
   const [rollbackExecuting, setRollbackExecuting] = useState(false);
   const [rollbackResult, setRollbackResult] = useState<PluginRollbackExecuteResponse | null>(null);
+  const [removingAppliedDraft, setRemovingAppliedDraft] = useState(false);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
 
   async function refreshSessions() {
     try {
@@ -56,6 +58,30 @@ export function PluginDiscoveryPanel({ running, reportError }: { running: boolea
   useEffect(() => {
     refreshSessions();
   }, []);
+
+  useEffect(() => {
+    let intervalId: number | undefined;
+    const shouldPoll = smokeResult && !refreshingSmoke && (!smokeStatusResult || !['finished', 'error', 'stopped'].includes(smokeStatusResult.run_status));
+    
+    if (shouldPoll) {
+      intervalId = window.setInterval(async () => {
+        if (!smokeResult.run_id || !smokeResult.scenario_id) return;
+        try {
+          const response = await api.getPluginDraftSmokeStatus(smokeResult.run_id, smokeResult.scenario_id);
+          setSmokeStatusResult(response);
+          await saveSessionStep('smoke', response.smoke_status, response as unknown as Record<string, unknown>);
+        } catch (err) {
+          console.error(err);
+        }
+      }, 3000);
+    }
+    
+    return () => {
+      if (intervalId !== undefined) {
+        window.clearInterval(intervalId);
+      }
+    };
+  }, [smokeResult, smokeStatusResult?.run_status, refreshingSmoke]);
 
   function toggleTarget(target: Target) {
     setTargets((current) => {
@@ -335,6 +361,54 @@ export function PluginDiscoveryPanel({ running, reportError }: { running: boolea
     }
   }
 
+
+  async function removeAppliedDraft() {
+    if (!sessionId || !applyResult?.applied.scenario_id) return;
+    const confirmed = window.confirm('Remove applied draft from scenario_config.py and runtime_config.json?');
+    if (!confirmed) return;
+    
+    setRemovingAppliedDraft(true);
+    try {
+      await api.removeAppliedDraft(sessionId, { confirm: true });
+      setApplyResult(null);
+      setSmokeResult(null);
+      setSmokeStatusResult(null);
+      await saveSessionStep('apply', 'removed', {});
+    } catch (err) {
+      // reportError(err);
+      console.error(err);
+    } finally {
+      setRemovingAppliedDraft(false);
+    }
+  }
+
+  async function deleteSession(id: string) {
+    const confirmed = window.confirm(`Delete session ${id}?`);
+    if (!confirmed) return;
+    
+    setDeletingSessionId(id);
+    try {
+      await api.deleteSession(id);
+      if (id === sessionId) {
+        setSessionId('');
+        setRestoreResult(null);
+        setRollbackPreview(null);
+        setRollbackResult(null);
+        setProbeCard(null);
+        setProbeResult(null);
+        setDraftResult(null);
+        setReviewResult(null);
+        setApplyResult(null);
+        setSmokeResult(null);
+        setSmokeStatusResult(null);
+      }
+      await refreshSessions();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setDeletingSessionId(null);
+    }
+  }
   async function refreshSmokeResult() {
     if (!smokeResult?.run_id || !smokeResult.scenario_id) {
       return;
@@ -391,9 +465,14 @@ export function PluginDiscoveryPanel({ running, reportError }: { running: boolea
             {recentSessions.length === 0
               ? '-'
               : recentSessions.slice(0, 5).map((session) => (
-                  <button key={session.session_id} type="button" onClick={() => restoreSession(session.session_id)}>
-                    {session.plugin.stable_label || session.session_id} · {session.status}
-                  </button>
+                  <div key={session.session_id} style={{ display: 'flex', gap: '4px', marginBottom: '4px' }}>
+                    <button type="button" onClick={() => restoreSession(session.session_id)}>
+                      {session.plugin.stable_label || session.session_id} · {session.status}
+                    </button>
+                    <button type="button" onClick={() => deleteSession(session.session_id)} disabled={deletingSessionId === session.session_id}>
+                      Delete
+                    </button>
+                  </div>
                 ))}
           </div>
         </div>
@@ -730,6 +809,9 @@ export function PluginDiscoveryPanel({ running, reportError }: { running: boolea
                       <div className="probeDraftActions">
                         <button onClick={smokeDraft} disabled={running || smokingDraft || applyResult.apply_status !== 'applied' || !applyResult.applied.scenario_id}>
                           {smokingDraft ? 'Starting Smoke...' : 'Smoke Draft'}
+                        </button>
+                        <button onClick={removeAppliedDraft} disabled={running || removingAppliedDraft || applyResult.apply_status !== 'applied' || !applyResult.applied.scenario_id}>
+                          {removingAppliedDraft ? 'Removing...' : 'Remove Applied Draft'}
                         </button>
                       </div>
                       <div className="probeSummaryGrid">

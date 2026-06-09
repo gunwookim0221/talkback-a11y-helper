@@ -79,3 +79,30 @@ def execute_session_rollback(session_id: str, request: PluginOnboardingRollbackE
         SESSION_ROOT,
         ROOT_DIR,
     )
+
+
+class PluginOnboardingRemoveAppliedDraftRequest(BaseModel):
+    confirm: bool = False
+
+def remove_applied_draft(session_id: str, request: PluginOnboardingRemoveAppliedDraftRequest) -> dict[str, Any]:
+    from tb_runner.plugin_onboarding_session import get_onboarding_session, _extract_scenario_id, _extract_runtime_key
+    from tb_runner.plugin_draft import remove_applied_plugin_draft
+    
+    session = get_onboarding_session(session_id, SESSION_ROOT)
+    payload = request.model_dump() if hasattr(request, "model_dump") else request.dict()
+    
+    apply_payload = session.get("steps", {}).get("apply", {}).get("payload", {})
+    scenario_id = _extract_scenario_id(apply_payload)
+    runtime_config_key = _extract_runtime_key(apply_payload)
+    
+    draft_request = {
+        "confirm": payload.get("confirm", False),
+        "scenario_id": scenario_id,
+        "runtime_config_key": runtime_config_key,
+        "session_id": session_id,
+    }
+    return remove_applied_plugin_draft(draft_request, backup_root=ROOT_DIR / "output" / "backups")
+
+def delete_session(session_id: str) -> dict[str, Any]:
+    from tb_runner.plugin_onboarding_session import delete_onboarding_session
+    return delete_onboarding_session(session_id, SESSION_ROOT)

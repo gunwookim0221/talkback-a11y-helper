@@ -837,3 +837,120 @@ def parse_plugin_smoke_summary(log_text: str, scenario_id: str) -> dict[str, Any
         "failure_reason": failure_reason,
         "result_status": result_status,
     }
+
+
+REMOVE_SCHEMA_VERSION = "plugin-remove-applied-draft-v1"
+
+def _remove_scenario_config_entry(file_path: Path, scenario_id: str) -> None:
+    text = file_path.read_text(encoding="utf-8")
+    import ast
+    tree = ast.parse(text)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "TAB_CONFIGS":
+                    if isinstance(node.value, ast.List):
+                        for item in node.value.elts:
+                            if isinstance(item, ast.Dict):
+                                for k, v in zip(item.keys, item.values):
+                                    if isinstance(k, ast.Constant) and k.value == "scenario_id":
+                                        if isinstance(v, ast.Constant) and v.value == scenario_id:
+                                            start_line = item.lineno - 1
+                                            end_line = item.end_lineno
+                                            lines = text.splitlines(keepends=True)
+                                            del lines[start_line:end_line]
+                                            file_path.write_text("".join(lines), encoding="utf-8")
+                                            return
+
+def _unmerge_runtime_config(file_path: Path, runtime_key: str) -> None:
+    if not file_path.is_file():
+        return
+    import json
+    with file_path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    scenarios = payload.get("scenarios")
+    if isinstance(scenarios, dict) and runtime_key in scenarios:
+        del scenarios[runtime_key]
+        with file_path.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, ensure_ascii=False)
+            handle.write("\n")
+
+def remove_applied_plugin_draft(
+    request: dict[str, Any],
+    *,
+    scenario_config_path: Path | None = None,
+    runtime_config_path: Path | None = None,
+    backup_root: Path | None = None,
+) -> dict[str, Any]:
+    if not isinstance(request, dict):
+        return {"ok": False, "schema_version": REMOVE_SCHEMA_VERSION, "remove_status": "blocked", "diagnostics": {"errors": ["invalid_request"]}}
+    confirm = request.get("confirm")
+    if confirm is not True:
+        return {"ok": False, "schema_version": REMOVE_SCHEMA_VERSION, "remove_status": "blocked", "diagnostics": {"errors": ["confirm=true required"]}}
+    
+    scenario_id = _text(request.get("scenario_id"))
+    runtime_config_key = _text(request.get("runtime_config_key"))
+    session_id = _text(request.get("session_id"))
+    
+    if not scenario_id or not runtime_config_key:
+        return {"ok": False, "schema_version": REMOVE_SCHEMA_VERSION, "remove_status": "blocked", "diagnostics": {"errors": ["scenario_id and runtime_config_key required"]}}
+
+    scenario_config_path = Path(scenario_config_path or DEFAULT_SCENARIO_CONFIG_PATH)
+    runtime_config_path = Path(runtime_config_path or DEFAULT_RUNTIME_CONFIG_PATH)
+    backup_root = Path(backup_root or DEFAULT_BACKUP_ROOT)
+
+    if not scenario_config_path.is_file() or not runtime_config_path.is_file():
+        return {"ok": False, "schema_version": REMOVE_SCHEMA_VERSION, "remove_status": "blocked", "diagnostics": {"errors": ["Target config files not found"]}}
+
+    scenario_text = scenario_config_path.read_text(encoding="utf-8")
+    runtime_text = runtime_config_path.read_text(encoding="utf-8")
+    
+    backup_paths: list[Path] = []
+    if bool(request.get("create_backup", True)):
+        backup_paths = _create_backups([scenario_config_path, runtime_config_path], backup_root)
+
+    _remove_scenario_config_entry(scenario_config_path, scenario_id)
+    _unmerge_runtime_config(runtime_config_path, runtime_config_key)
+
+    import ast
+    import json
+    errors = []
+    try:
+        ast.parse(scenario_config_path.read_text(encoding="utf-8"))
+    except SyntaxError as e:
+        errors.append(f"SyntaxError after removal: {e}")
+    try:
+        with runtime_config_path.open("r", encoding="utf-8") as handle:
+            json.load(handle)
+    except Exception as e:
+        errors.append(f"JSON error after removal: {e}")
+
+    if errors:
+        scenario_config_path.write_text(scenario_text, encoding="utf-8")
+        runtime_config_path.write_text(runtime_text, encoding="utf-8")
+        return {
+            "ok": False,
+            "schema_version": REMOVE_SCHEMA_VERSION,
+            "remove_status": "blocked",
+            "diagnostics": {"errors": errors}
+        }
+
+    return {
+        "ok": True,
+        "schema_version": REMOVE_SCHEMA_VERSION,
+        "remove_status": "removed",
+        "session_id": session_id,
+        "removed": {
+            "scenario_id": scenario_id,
+            "runtime_config_key": runtime_config_key
+        },
+        "changed_files": [
+            str(scenario_config_path).replace("\\", "/"),
+            str(runtime_config_path).replace("\\", "/")
+        ],
+        "backup": {
+            "created": bool(backup_paths),
+            "paths": [str(path).replace("\\", "/") for path in backup_paths]
+        },
+        "diagnostics": {"warnings": [], "errors": []}
+    }
