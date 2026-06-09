@@ -38,12 +38,24 @@ class ActionResultParser:
         raw_payload: str,
         error: Exception | str,
     ) -> dict[str, Any]:
-        return ActionResultParser.log_parse_error_result(
+        result = ActionResultParser.log_parse_error_result(
             prefix="FOCUS_RESULT",
             req_id=req_id,
             raw_payload=raw_payload,
             error=error,
         )
+        salvaged_node: dict[str, str] = {}
+        for key in ("text", "contentDescription", "className", "packageName", "viewIdResourceName"):
+            match = re.search(rf'"{key}"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)(?:"|$)', str(raw_payload))
+            if match:
+                salvaged_node[key] = match.group(1).replace('\\"', '"')
+        
+        if salvaged_node:
+            result["node"] = salvaged_node
+            result["partial_parse_success"] = True
+            result["status"] = "partial_parse_success"
+            
+        return result
 
     @staticmethod
     def log_parse_error_result(

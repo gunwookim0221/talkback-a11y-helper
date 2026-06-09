@@ -66,10 +66,10 @@ def test_malformed_focus_result_returns_parse_error_without_retry(monkeypatch):
     assert "rawSnippet" in result
 
 
-def test_truncated_focus_result_returns_parse_error_without_retry(monkeypatch):
+def test_truncated_focus_result_salvages_text_field(monkeypatch):
     client = A11yAdbClient(start_monitor=False)
     calls = {"count": 0}
-    logs = '01-01 I/A11Y_HELPER: FOCUS_RESULT {"reqId":"focus-3","success":true,"node":{"text":"Energy"'
+    logs = '01-01 I/A11Y_HELPER: FOCUS_RESULT {"reqId":"focus-3","success":true,"node":{"text":"SmartThings Home Care","className":"android.webkit.WebView"'
 
     def dump_filtered(dev=None):
         calls["count"] += 1
@@ -81,28 +81,45 @@ def test_truncated_focus_result_returns_parse_error_without_retry(monkeypatch):
 
     assert calls["count"] == 1
     assert result["success"] is False
-    assert result["status"] == "parse_error"
+    assert result["status"] == "partial_parse_success"
+    assert result["partial_parse_success"] is True
     assert result["reason"] == "json_parse_failed"
     assert result["reqId"] == "focus-3"
+    assert result["node"]["text"] == "SmartThings Home Care"
+    assert result["node"]["className"] == "android.webkit.WebView"
 
 
-def test_truncated_focus_result_preserves_package_context(monkeypatch):
+def test_truncated_focus_result_salvages_content_description(monkeypatch):
     client = A11yAdbClient(start_monitor=False)
     logs = (
         '01-01 I/A11Y_HELPER: FOCUS_RESULT '
         '{"reqId":"focus-4","success":true,'
         '"packageName":"com.samsung.android.oneconnect",'
         '"className":"android.widget.FrameLayout",'
-        '"mergedLabel":"Energy'
+        '"contentDescription":"Home Care'
     )
 
     monkeypatch.setattr(client._logcat_reader, "dump_filtered", lambda dev=None: logs)
 
     result = client._read_log_result(None, "FOCUS_RESULT", "focus-4", wait_seconds=5.0)
 
+    assert result["status"] == "partial_parse_success"
+    assert result["partial_parse_success"] is True
+    assert result["node"]["contentDescription"] == "Home Care"
+    assert result["node"]["packageName"] == "com.samsung.android.oneconnect"
+    assert result["node"]["className"] == "android.widget.FrameLayout"
+
+def test_truncated_focus_result_without_salvageable_fields_remains_parse_error(monkeypatch):
+    client = A11yAdbClient(start_monitor=False)
+    logs = '01-01 I/A11Y_HELPER: FOCUS_RESULT {"reqId":"focus-5","success":true,"node":{"boundsInScreen"'
+
+    monkeypatch.setattr(client._logcat_reader, "dump_filtered", lambda dev=None: logs)
+
+    result = client._read_log_result(None, "FOCUS_RESULT", "focus-5", wait_seconds=5.0)
+
     assert result["status"] == "parse_error"
-    assert result["packageName"] == "com.samsung.android.oneconnect"
-    assert result["className"] == "android.widget.FrameLayout"
+    assert "partial_parse_success" not in result
+    assert "node" not in result
 
 
 def test_get_focus_parse_error_uses_bounded_fallback_reason(monkeypatch):

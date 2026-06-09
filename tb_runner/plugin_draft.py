@@ -333,9 +333,13 @@ def _append_scenario_config_entry(file_path: Path, entry: dict[str, Any]) -> Non
     idx = text.rfind(marker)
     if idx < 0:
         raise ValueError("TAB_CONFIGS list terminator not found")
+    preceding_text = text[:idx]
     block = _indent_block(_render_scenario_entry(entry), 4)
-    insertion = f",\n{block}\n"
-    updated = text[:idx] + insertion + text[idx:]
+    if preceding_text.rstrip().endswith(","):
+        insertion = f"\n{block}\n"
+    else:
+        insertion = f",\n{block}\n"
+    updated = preceding_text + insertion + text[idx:]
     file_path.write_text(updated, encoding="utf-8")
 
 
@@ -366,6 +370,73 @@ def _create_backups(paths: list[Path], backup_root: Path) -> list[Path]:
         target.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
         created.append(target)
     return created
+
+
+def find_reusable_landing_profile(probe_seed: dict[str, Any], card_type: str, existing_scenarios: list[dict[str, Any]]) -> dict[str, Any]:
+    if card_type != "life":
+        return {"matched": False}
+
+    GENERIC_TOKENS = {
+        "did_opt_navigate_up", "did_opt_more_options", "more options", 
+        "close", "settings", "view details",
+    }
+
+    STRONG_TITLES = {
+        "home care", "smartthings home care", "video", "find", 
+        "air care", "food", "family care", "clothing care", 
+        "pet care", "energy", "plant care", "home monitor",
+    }
+
+    original_tokens: list[str] = []
+    for key in ["verify_tokens", "headers", "local_tabs", "context_verify_text_candidates"]:
+        for token in probe_seed.get(key) or []:
+            text_val = _text(token)
+            if text_val and text_val not in original_tokens:
+                original_tokens.append(text_val)
+
+    best_match = None
+    best_score = 0
+    best_matched_tokens: list[str] = []
+
+    for scenario in existing_scenarios:
+        if not isinstance(scenario, dict):
+            continue
+        scenario_id = _text(scenario.get("scenario_id"))
+        if not scenario_id.startswith("life_") or not scenario_id.endswith("_plugin"):
+            continue
+
+        existing_tokens = set()
+        for token in scenario.get("verify_tokens") or []:
+            existing_tokens.add(_normalize_key(token))
+        
+        matched_original: list[str] = []
+        matched_normalized = set()
+        for orig_t in original_tokens:
+            t = _normalize_key(orig_t)
+            if t in existing_tokens and t not in GENERIC_TOKENS:
+                if t not in matched_normalized:
+                    matched_normalized.add(t)
+                    matched_original.append(orig_t)
+        
+        if len(matched_normalized) >= 2:
+            has_strong_title = any(t in STRONG_TITLES for t in matched_normalized)
+            if has_strong_title:
+                score = len(matched_normalized)
+                if score > best_score:
+                    best_score = score
+                    best_match = scenario_id
+                    best_matched_tokens = matched_original
+
+    if best_match:
+        return {
+            "matched": True,
+            "scenario_id": best_match,
+            "score": best_score,
+            "matched_tokens": best_matched_tokens
+        }
+
+    return {"matched": False}
+
 
 
 def generate_plugin_draft(request: dict[str, Any]) -> dict[str, Any]:
@@ -401,20 +472,42 @@ def generate_plugin_draft(request: dict[str, Any]) -> dict[str, Any]:
         "entry_contract": "plugin_screen",
         "anchor_mode": "anchor_only",
     }
-    if card_type == "life":
-        scenario["verify_tokens"] = _build_life_verify_tokens(card, probe)
-    else:
-        scenario["target_stable_labels"] = _build_device_target_stable_labels(card, probe)
-
-    runtime_config = {
-        scenario_id: {
-            "enabled": False,
-            "max_steps": 5,
-        }
-    }
-
+    
     failure_reason = _text(diagnostics.get("failure_reason"))
     overlay_hints = list(seed.get("overlay_hints") or [])
+
+    metadata = {
+        "source_card": card,
+        "probe_status": _text(probe.get("probe_status")),
+        "plugin_open_verified_candidate": plugin_open_verified,
+        "headers": list(seed.get("headers") or []),
+        "local_tabs": list(seed.get("local_tabs") or []),
+        "representative_cards": list(seed.get("representative_cards") or []),
+        "overlay_hints": overlay_hints,
+        "context_verify_text_candidates": list(seed.get("context_verify_text_candidates") or []),
+    }
+
+    reused_match = find_reusable_landing_profile(seed, card_type, TAB_CONFIGS)
+    if reused_match.get("matched"):
+        reused_id = reused_match.get("scenario_id", "")
+        reused_cfg = next((c for c in TAB_CONFIGS if isinstance(c, dict) and _text(c.get("scenario_id")) == reused_id), {})
+        
+        for field in ["anchor_name", "anchor", "context_verify", "verify_tokens", "special_state_tokens"]:
+            if field in reused_cfg:
+                scenario[field] = reused_cfg[field]
+                
+        metadata["reused_landing_profile_from"] = reused_id
+        metadata["landing_profile_match"] = {
+            "score": reused_match.get("score"),
+            "matched_tokens": reused_match.get("matched_tokens"),
+        }
+        warnings.append(f"Reused landing profile from {reused_id}")
+    else:
+        if card_type == "life":
+            scenario["verify_tokens"] = _build_life_verify_tokens(card, probe)
+        else:
+            scenario["target_stable_labels"] = _build_device_target_stable_labels(card, probe)
+
     manual_review_required = any(
         [
             not probe.get("ok", False),
@@ -426,17 +519,13 @@ def generate_plugin_draft(request: dict[str, Any]) -> dict[str, Any]:
             bool(overlay_hints),
         ]
     )
+    metadata["manual_review_required"] = manual_review_required
 
-    metadata = {
-        "source_card": card,
-        "probe_status": _text(probe.get("probe_status")),
-        "plugin_open_verified_candidate": plugin_open_verified,
-        "headers": list(seed.get("headers") or []),
-        "local_tabs": list(seed.get("local_tabs") or []),
-        "representative_cards": list(seed.get("representative_cards") or []),
-        "overlay_hints": overlay_hints,
-        "context_verify_text_candidates": list(seed.get("context_verify_text_candidates") or []),
-        "manual_review_required": manual_review_required,
+    runtime_config = {
+        scenario_id: {
+            "enabled": False,
+            "max_steps": 5,
+        }
     }
 
     return {
@@ -585,6 +674,7 @@ def apply_plugin_draft(
         return _apply_failure_response("blocked", errors=["Target config files not found"])
 
     scenario_text = scenario_config_path.read_text(encoding="utf-8")
+    runtime_text = runtime_config_path.read_text(encoding="utf-8")
     current_scenario_ids = _extract_scenario_ids_from_text(scenario_text)
     if scenario_id in current_scenario_ids:
         return _apply_failure_response("blocked", errors=[f"Scenario id already exists at apply time: {scenario_id}"])
@@ -603,6 +693,17 @@ def apply_plugin_draft(
 
     _append_scenario_config_entry(scenario_config_path, scenario_entry)
     _merge_runtime_config(runtime_config_path, scenario_id, runtime_entry)
+
+    import ast
+    try:
+        ast.parse(scenario_config_path.read_text(encoding="utf-8"))
+    except SyntaxError as e:
+        scenario_config_path.write_text(scenario_text, encoding="utf-8")
+        runtime_config_path.write_text(runtime_text, encoding="utf-8")
+        return _apply_failure_response(
+            "syntax_error",
+            errors=[f"Generated scenario_config.py has SyntaxError: {e}"]
+        )
 
     return {
         "ok": True,

@@ -124,19 +124,21 @@ class FocusService:
                 has_identity = bool(view_id or class_name)
                 top_level_signature = f"view_id='{view_id}' bounds='{normalized_bounds}' label='{label}'"
                 self.client.last_get_focus_trace["top_level_signature"] = top_level_signature
+                is_partial_salvaged = bool(result.get("partial_parse_success"))
                 strong_top_level_payload = bool(
-                    has_valid_bounds and (
+                    (has_valid_bounds and (
                         has_text_like_label
                         or (has_focus_flag and has_identity)
                         or (view_id and class_name)
-                    )
+                    ))
+                    or (is_partial_salvaged and has_text_like_label)
                 )
                 if not strong_top_level_payload and fast_mode:
                     strong_top_level_payload = has_valid_bounds
                 self.client.last_get_focus_trace["top_level_payload_sufficient"] = strong_top_level_payload
                 self.client._debug_print(
                     f"[DEBUG][get_focus] dump_skip_candidate={strong_top_level_payload} "
-                    f"{top_level_signature} has_focus_flag={has_focus_flag}"
+                    f"{top_level_signature} has_focus_flag={has_focus_flag} partial_salvaged={is_partial_salvaged}"
                 )
                 if strong_top_level_payload:
                     self.client.last_get_focus_trace["success_false_top_level_dump_skipped"] = True

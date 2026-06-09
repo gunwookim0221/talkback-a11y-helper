@@ -161,10 +161,10 @@ def _context_regex_from_label(label: str) -> str:
 def _extract_headers(records: list[dict[str, Any]], stable_label: str) -> list[str]:
     bounds_values = [record["bounds"] for record in records if record.get("bounds")]
     viewport_bottom = max((bounds[3] for bounds in bounds_values), default=1920)
-    cutoff = int(viewport_bottom * 0.28)
+    cutoff = max(320, int(viewport_bottom * 0.28))
     headers: list[str] = []
     seen: set[str] = set()
-    candidates = [stable_label] + [record.get("label", "") for record in records if record.get("bounds") and record["bounds"][1] <= cutoff]
+    candidates = [record.get("label", "") for record in records if record.get("bounds") and record["bounds"][1] <= cutoff]
     for candidate in candidates:
         label = _text(candidate)
         key = _normalize_key(label)
@@ -174,6 +174,11 @@ def _extract_headers(records: list[dict[str, Any]], stable_label: str) -> list[s
             continue
         seen.add(key)
         headers.append(label)
+    if not headers:
+        fallback = _text(stable_label)
+        fallback_key = _normalize_key(fallback)
+        if _meaningful_label(fallback) and fallback_key:
+            headers.append(fallback)
     return headers[:5]
 
 
@@ -275,18 +280,163 @@ def _extract_verify_tokens(
     return tokens[:6]
 
 
+def _build_life_scenario_signal_index(tab_configs: list[dict[str, Any]]) -> dict[str, dict[str, set[str]]]:
+    results: dict[str, dict[str, set[str]]] = {}
+    for cfg in tab_configs:
+        if not isinstance(cfg, dict):
+            continue
+        scenario_id = _text(cfg.get("scenario_id"))
+        if not scenario_id.startswith("life_"):
+            continue
+        verify_tokens = {
+            _normalize_key(token)
+            for token in cfg.get("verify_tokens", [])
+            if _normalize_key(token)
+        } if isinstance(cfg.get("verify_tokens"), list) else set()
+        special_tokens = {
+            _normalize_key(token)
+            for token in cfg.get("special_state_tokens", [])
+            if _normalize_key(token)
+        } if isinstance(cfg.get("special_state_tokens"), list) else set()
+        results[scenario_id] = {
+            "verify_tokens": verify_tokens,
+            "special_tokens": special_tokens,
+        }
+    return results
+
+
+def _collect_screen_text_keys(headers: list[str], rows: list[dict[str, Any]], records: list[dict[str, Any]]) -> set[str]:
+    keys: set[str] = set()
+    for candidate in headers:
+        key = _normalize_key(candidate)
+        if key:
+            keys.add(key)
+    for row in rows:
+        for candidate in (row.get("visible_label"), row.get("merged_announcement")):
+            key = _normalize_key(candidate)
+            if key:
+                keys.add(key)
+    for record in records:
+        key = _normalize_key(record.get("label"))
+        if key:
+            keys.add(key)
+    return keys
+
+
+def _has_webview_plugin_container(records: list[dict[str, Any]]) -> bool:
+    for record in records:
+        resource_id = _text(record.get("resource_id")).lower()
+        class_name = _text(record.get("class_name")).lower()
+        if "activity_plugin_web" in resource_id:
+            return True
+        if "android.webkit.webview" in class_name:
+            return True
+    return False
+
+
+def _detect_positive_life_open_scenario(
+    stable_label: str,
+    headers: list[str],
+    rows: list[dict[str, Any]],
+    records: list[dict[str, Any]],
+    known_index: dict[str, dict[str, str]],
+    signal_index: dict[str, dict[str, set[str]]],
+) -> dict[str, Any]:
+    screen_keys = _collect_screen_text_keys(headers, rows, records)
+    if not screen_keys:
+        return {
+            "confirmed": False,
+            "scenario_id": "",
+            "alias_hits": [],
+            "verify_hits": [],
+            "special_hits": [],
+            "webview": False,
+        }
+    webview = _has_webview_plugin_container(records)
+    candidate_scenarios: dict[str, dict[str, set[str]]] = {}
+    stable_key = _normalize_key(stable_label)
+    for key in screen_keys:
+        meta = known_index.get(f"life:{key}")
+        if not isinstance(meta, dict):
+            continue
+        scenario_id = _text(meta.get("scenario_id"))
+        if not scenario_id:
+            continue
+        candidate_scenarios.setdefault(
+            scenario_id,
+            {"alias_hits": set(), "verify_hits": set(), "special_hits": set()},
+        )["alias_hits"].add(key)
+    if stable_key:
+        meta = known_index.get(f"life:{stable_key}")
+        if isinstance(meta, dict):
+            scenario_id = _text(meta.get("scenario_id"))
+            if scenario_id:
+                candidate_scenarios.setdefault(
+                    scenario_id,
+                    {"alias_hits": set(), "verify_hits": set(), "special_hits": set()},
+                )
+    best: dict[str, Any] = {
+        "confirmed": False,
+        "scenario_id": "",
+        "alias_hits": [],
+        "verify_hits": [],
+        "special_hits": [],
+        "webview": webview,
+        "score": 0,
+    }
+    for scenario_id, hits in candidate_scenarios.items():
+        signals = signal_index.get(scenario_id, {})
+        verify_hits = sorted(screen_keys.intersection(signals.get("verify_tokens", set())))
+        special_hits = sorted(screen_keys.intersection(signals.get("special_tokens", set())))
+        alias_hits = sorted(hits["alias_hits"])
+        alias_count = len(alias_hits)
+        verify_count = len(verify_hits)
+        special_count = len(special_hits)
+        confirmed = False
+        if alias_count and (verify_count or special_count):
+            confirmed = True
+        elif webview and alias_count and (verify_count + special_count) >= 2:
+            confirmed = True
+        score = alias_count * 10 + verify_count * 4 + special_count * 4 + (1 if webview else 0)
+        if score > best["score"]:
+            best = {
+                "confirmed": confirmed,
+                "scenario_id": scenario_id,
+                "alias_hits": alias_hits,
+                "verify_hits": verify_hits,
+                "special_hits": special_hits,
+                "webview": webview,
+                "score": score,
+            }
+    best.pop("score", None)
+    return best
+
+
 def _wrong_plugin_open_suspected(
     stable_label: str,
     headers: list[str],
     known_index: dict[str, dict[str, str]],
     card_type: str,
+    *,
+    selected_scenario_id: str = "",
+    positive_scenario_id: str = "",
 ) -> bool:
     current_key = _normalize_key(stable_label)
     for header in headers:
         key = _normalize_key(header)
         if not key or key == current_key:
             continue
-        if f"{card_type}:{key}" in known_index:
+        meta = known_index.get(f"{card_type}:{key}")
+        if not isinstance(meta, dict):
+            continue
+        header_scenario_id = _text(meta.get("scenario_id"))
+        if positive_scenario_id and header_scenario_id == positive_scenario_id and (
+            not selected_scenario_id or positive_scenario_id == selected_scenario_id
+        ):
+            continue
+        if selected_scenario_id and header_scenario_id == selected_scenario_id:
+            continue
+        if meta:
             return True
     return False
 
@@ -314,6 +464,24 @@ def _still_on_shell_screen(stable_label: str, headers: list[str], rows: list[dic
     if not any(_text(row.get("visible_label") or row.get("merged_announcement")) for row in rows):
         return True
     return not bool(headers)
+
+
+def _has_visible_stable_label_anchor(
+    stable_label: str,
+    rows: list[dict[str, Any]],
+    records: list[dict[str, Any]],
+) -> bool:
+    stable_key = _normalize_key(stable_label)
+    if not stable_key:
+        return False
+    for row in rows:
+        for candidate in (row.get("visible_label"), row.get("merged_announcement")):
+            if _normalize_key(candidate) == stable_key:
+                return True
+    for record in records:
+        if _normalize_key(record.get("label")) == stable_key:
+            return True
+    return False
 
 
 def _observe_probe_steps(
@@ -474,13 +642,39 @@ def start_plugin_probe(
     representative_cards = _extract_representative_cards(card_type, helper_nodes or observed_helper_nodes, xml_nodes, stable_label)
     verify_tokens = _extract_verify_tokens(stable_label, headers, rows)
     context_regex = _context_regex_from_label(stable_label)
-
-    wrong_plugin = _wrong_plugin_open_suspected(stable_label, headers, known_index, card_type)
+    signal_index = _build_life_scenario_signal_index(TAB_CONFIGS) if card_type == "life" else {}
+    positive_life_open = (
+        _detect_positive_life_open_scenario(stable_label, headers, rows, records, known_index, signal_index)
+        if card_type == "life"
+        else {"confirmed": False, "scenario_id": "", "alias_hits": [], "verify_hits": [], "special_hits": [], "webview": False}
+    )
+    selected_scenario_id = _text((known_index.get(f"{card_type}:{_normalize_key(stable_label)}", {}) or {}).get("scenario_id"))
+    positive_scenario_id = _text(positive_life_open.get("scenario_id"))
+    positive_open_allowed = bool(positive_life_open.get("confirmed")) and (
+        not selected_scenario_id or positive_scenario_id == selected_scenario_id
+    )
+    wrong_plugin = _wrong_plugin_open_suspected(
+        stable_label,
+        headers,
+        known_index,
+        card_type,
+        selected_scenario_id=selected_scenario_id,
+        positive_scenario_id=positive_scenario_id,
+    )
     shell_screen = _still_on_shell_screen(stable_label, headers, rows)
-    open_confirmed = not shell_screen and not wrong_plugin
+    if card_type == "life" and positive_open_allowed:
+        shell_screen = False
+    visible_stable_anchor = _has_visible_stable_label_anchor(stable_label, rows, records)
+    if card_type == "life":
+        open_confirmed = not shell_screen and (
+            positive_open_allowed
+            or (visible_stable_anchor and not wrong_plugin)
+        )
+    else:
+        open_confirmed = not shell_screen and not wrong_plugin
     failure_reason = ""
     probe_status = "opened_partial_observed"
-    if wrong_plugin:
+    if wrong_plugin and not open_confirmed:
         failure_reason = "wrong_plugin_open_suspected"
         probe_status = "failed"
     elif shell_screen:
