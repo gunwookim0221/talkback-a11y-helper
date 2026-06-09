@@ -3894,7 +3894,7 @@ def _perform_device_list_adb_swipe(
     height = max(max_bottom, 2400)
     x = int(width * 0.5)
     y_start = int(height * 0.78)
-    y_end = int(height * 0.30)
+    y_end = int(height * 0.45)
     duration_ms = 500
     result = swipe_fn(dev=dev, x1=x, y1=y_start, x2=x, y2=y_end, duration_ms=duration_ms)
     return True, {

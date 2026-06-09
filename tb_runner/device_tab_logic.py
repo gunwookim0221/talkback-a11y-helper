@@ -39,6 +39,7 @@ DEVICE_STATE_SUFFIXES = (
     "no leak detected",
     "water leak detected",
     "no motion detected",
+    "no motion",
     "clear",
     "dry",
     "armed (away)",
