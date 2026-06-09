@@ -482,6 +482,8 @@ def find_collapsed_room_sections(nodes: list[dict[str, Any]]) -> list[dict[str, 
     for node in nodes:
         if not isinstance(node, dict) or not _visible(node):
             continue
+        if _is_device_card_node(node):
+            continue
         label = _node_label(node)
         if not label:
             continue
@@ -489,10 +491,19 @@ def find_collapsed_room_sections(nodes: list[dict[str, Any]]) -> list[dict[str, 
         class_name = _text(node.get("className")).lower()
         haystack = _normalized_label(f"{label} {rid} {class_name}")
         has_section_hint = any(token in rid for token in ROOM_SECTION_RESOURCE_HINTS)
-        has_collapsed = any(_normalized_label(token) in haystack for token in COLLAPSED_TOKENS)
-        has_expanded = any(_normalized_label(token) in haystack for token in EXPANDED_TOKENS)
-        if has_expanded and not has_collapsed:
+        
+        def _has_token(token: str) -> bool:
+            norm = _normalized_label(token)
+            if not norm:
+                return False
+            return bool(re.search(rf"(?:^|\s){re.escape(norm)}(?:\s|$)", haystack))
+            
+        has_collapsed = any(_has_token(token) for token in COLLAPSED_TOKENS)
+        has_expanded = any(_has_token(token) for token in EXPANDED_TOKENS)
+        
+        if has_expanded:
             continue
+            
         if has_collapsed or has_section_hint:
             candidate = _make_candidate(node, role="room_section")
             candidate["collapsed"] = bool(has_collapsed)
