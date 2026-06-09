@@ -186,14 +186,29 @@ class A11yAdbClient:
         enabled_services = self._run(
             ["shell", "settings", "get", "secure", "enabled_accessibility_services"],
             dev=dev,
+        ).strip()
+        
+        print(f"[PREFLIGHT][accessibility] raw_enabled_services='{enabled_services}'")
+        
+        if not enabled_services or enabled_services.lower() in ("null", "none"):
+            return False
+            
+        active_components = [svc.strip() for svc in enabled_services.split(":") if svc.strip()]
+        
+        talkback_prefixes = (
+            "com.google.android.marvin.talkback/",
+            "com.samsung.android.accessibility.talkback/",
         )
-        services_lower = enabled_services.lower()
-        talkback_service_tokens = (
-            "talkback",
-            "com.google.android.marvin.talkback",
-            "com.samsung.android.accessibility.talkback",
-        )
-        return any(token in services_lower for token in talkback_service_tokens)
+        
+        for component in active_components:
+            comp_lower = component.lower()
+            if "com.iotpart.sqe.talkbackhelper" in comp_lower:
+                continue
+            if any(comp_lower.startswith(prefix.lower()) for prefix in talkback_prefixes):
+                print(f"[PREFLIGHT][accessibility] matched_talkback_component='{component}'")
+                return True
+                
+        return False
 
     def check_talkback_ready(self, dev: Any = None) -> dict[str, str]:
         configured_service_found = self.is_talkback_enabled(dev=dev)
