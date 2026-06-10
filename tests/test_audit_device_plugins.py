@@ -138,7 +138,7 @@ def test_target_exists_but_not_available():
     
     report = evaluate_scenario("test_plugin", summary, log_data)
     assert report["verdict"] == "FAIL"
-    assert "Target found but exited with not_available" in report["reason"]
+    assert "Target entered but exited with not_available" in report["reason"]
 
 def test_target_not_exists_and_not_available():
     log_data = {
@@ -160,7 +160,7 @@ def test_preflight_fail():
     summary = {"scenarios": [{"id": "test_plugin"}]}
     
     report = evaluate_scenario("test_plugin", summary, log_data)
-    assert report["verdict"] == "FAIL"
+    assert report["verdict"] == "ENVIRONMENT_ERROR"
     assert "Preflight failed" in report["reason"]
 
 @patch("subprocess.run")

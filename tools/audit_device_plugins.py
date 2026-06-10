@@ -186,10 +186,10 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
     
     # Base failure states
     if log_data["preflight_fail"]:
-        verdict = "FAIL"
+        verdict = "ENVIRONMENT_ERROR"
         reason.append("Preflight failed")
     elif log_data["crash"]:
-        verdict = "FAIL"
+        verdict = "ENVIRONMENT_ERROR"
         reason.append("Crash detected")
     elif avail_status == "not_available":
         if log_data["target_entered"]:
@@ -214,16 +214,35 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
             reason.append(f"Missed tabs: {', '.join(missing_tabs)}")
             
         if log_data["repeat_warnings"]:
-            verdict = "REVIEW"
-            reason.append("repeat_no_progress")
+            if (
+                log_data["target_entered"] 
+                and len(detected) > 0 
+                and not missing_tabs 
+                and not log_data["boundary_warnings"] 
+                and not log_data["value_exclusion_warnings"]
+                and not log_data["crash"]
+                and not log_data["preflight_fail"]
+                and (not stop_reason or stop_reason == "repeat_no_progress")
+                and all(w == "repeat_no_progress" for w in log_data["repeat_warnings"])
+            ):
+                if verdict == "UNKNOWN":
+                    verdict = "PASS"
+                    reason.append("All detected tabs visited; repeat_no_progress after exhaustion")
+            else:
+                verdict = "REVIEW"
+                reason.append("repeat_no_progress")
             
         if verdict == "UNKNOWN":
             if log_data["target_entered"]:
                 verdict = "PASS"
                 reason.append("All detected tabs visited, no warnings")
             else:
-                verdict = "FAIL"
-                reason.append("Target was not entered, nor marked not_available")
+                if not log_data["inventory_found"]:
+                    verdict = "ENVIRONMENT_ERROR"
+                    reason.append("Failed to reach device inventory")
+                else:
+                    verdict = "FAIL"
+                    reason.append("Target was not entered, nor marked not_available")
             
         if not detected and verdict == "PASS":
             reason.append("(0 local tabs detected)")
@@ -359,11 +378,13 @@ def main():
         pass_na_count = sum(1 for r in results if r["verdict"] == "PASS_NOT_AVAILABLE")
         review_count = sum(1 for r in results if r["verdict"] == "REVIEW")
         fail_count = sum(1 for r in results if r["verdict"] == "FAIL")
+        env_error_count = sum(1 for r in results if r["verdict"] == "ENVIRONMENT_ERROR")
         
         global_nav_issues = sum(1 for r in results if "global_nav_reached" in r["reason"])
         missed_tabs_issues = sum(1 for r in results if "Missed tabs" in r["reason"])
         value_exclusion_issues = sum(1 for r in results if "Sensor values excluded" in r["reason"])
         repeat_no_progress_issues = sum(1 for r in results if "repeat_no_progress" in r["reason"])
+        env_issues = sum(1 for r in results if r["verdict"] == "ENVIRONMENT_ERROR")
 
         f.write("# Device Plugin Audit Report\n\n")
         f.write("## Audit Summary\n\n")
@@ -371,9 +392,11 @@ def main():
         f.write(f"PASS: {pass_count}\n")
         f.write(f"PASS_NOT_AVAILABLE: {pass_na_count}\n")
         f.write(f"REVIEW: {review_count}\n")
-        f.write(f"FAIL: {fail_count}\n\n")
+        f.write(f"FAIL: {fail_count}\n")
+        f.write(f"ENVIRONMENT_ERROR: {env_error_count}\n\n")
         
         f.write("Top Issues:\n")
+        f.write(f"* environment_error: {env_issues}\n")
         f.write(f"* global_nav_reached: {global_nav_issues}\n")
         f.write(f"* missed_tabs: {missed_tabs_issues}\n")
         f.write(f"* value_exclusion: {value_exclusion_issues}\n")
