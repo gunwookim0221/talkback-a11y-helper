@@ -495,6 +495,96 @@ def test_plugin_boundary_does_not_confuse_local_routines_tab_without_context():
     assert hit is False
     assert reason == "label_requires_tab_context"
 
+def test_plugin_boundary_detects_korean_global_nav_with_context():
+    tab_cfg = {**_base_tab_cfg(), "group": "plugin_screen", "screen_context_mode": "new_screen"}
+    hit, label, reason = collection_flow._row_global_bottom_nav_boundary(
+        {"visible_label": "루틴, 탭 5개 중 4번째", "merged_announcement": "루틴, 탭 5개 중 4번째"},
+        tab_cfg,
+    )
+
+    assert hit is True
+    assert reason == "label:routines"
+    
+def test_plugin_boundary_rejects_korean_local_tab_routines():
+    tab_cfg = {**_base_tab_cfg(), "group": "plugin_screen", "screen_context_mode": "new_screen"}
+    hit, _label, reason = collection_flow._row_global_bottom_nav_boundary(
+        {"visible_label": "루틴", "merged_announcement": "루틴"},
+        tab_cfg,
+    )
+
+    assert hit is False
+    assert reason == "label_requires_tab_context"
+
+def test_plugin_boundary_rejects_korean_local_tab_history():
+    tab_cfg = {**_base_tab_cfg(), "group": "plugin_screen", "screen_context_mode": "new_screen"}
+    hit, _label, reason = collection_flow._row_global_bottom_nav_boundary(
+        {"visible_label": "기록", "merged_announcement": "기록"},
+        tab_cfg,
+    )
+
+    assert hit is False
+    assert reason == "label_requires_tab_context"
+    
+def test_plugin_boundary_rejects_english_local_tab_history():
+    tab_cfg = {**_base_tab_cfg(), "group": "plugin_screen", "screen_context_mode": "new_screen"}
+    hit, _label, reason = collection_flow._row_global_bottom_nav_boundary(
+        {"visible_label": "History", "merged_announcement": "History"},
+        tab_cfg,
+    )
+
+    assert hit is False
+    assert reason == "label_requires_tab_context"
+
+class MockLocalTabState:
+    def __init__(self, labels):
+        self.candidates_by_signature = {"mock_sig": [{"label": label} for label in labels]}
+
+def test_plugin_boundary_rejects_local_tab_match_priority():
+    tab_cfg = {**_base_tab_cfg(), "group": "plugin_screen", "screen_context_mode": "new_screen"}
+    # Even if it has bottom region bounds (which would normally trigger true for routines with context)
+    # The local tab state should override it.
+    mock_state = MockLocalTabState(["Controls", "Routines", "History"])
+    hit, _label, reason = collection_flow._row_global_bottom_nav_boundary(
+        {
+            "visible_label": "Routines", 
+            "merged_announcement": "Routines, 탭 3개 중 2번째", 
+            "focus_bounds": "0,2000,1080,2100", # Bottom region
+            "screen_height": 2400
+        },
+        tab_cfg,
+        local_tab_state=mock_state
+    )
+
+    assert hit is False
+    assert reason == "local_tab_candidate_match:routines"
+    
+def test_plugin_boundary_rejects_korean_local_tab_match_priority():
+    tab_cfg = {**_base_tab_cfg(), "group": "plugin_screen", "screen_context_mode": "new_screen"}
+    mock_state = MockLocalTabState(["제어", "루틴", "기록"])
+    hit, _label, reason = collection_flow._row_global_bottom_nav_boundary(
+        {
+            "visible_label": "루틴", 
+            "merged_announcement": "루틴, 탭 3개 중 2번째", 
+            "focus_bounds": "0,2000,1080,2100",
+            "screen_height": 2400
+        },
+        tab_cfg,
+        local_tab_state=mock_state
+    )
+
+    assert hit is False
+    assert reason == "local_tab_candidate_match:routines"
+
+def test_plugin_boundary_accepts_is_bottom_navigation_bar():
+    tab_cfg = {**_base_tab_cfg(), "group": "plugin_screen", "screen_context_mode": "new_screen"}
+    hit, _label, reason = collection_flow._row_global_bottom_nav_boundary(
+        {"visible_label": "루틴", "isBottomNavigationBar": True},
+        tab_cfg,
+    )
+
+    assert hit is True
+    assert reason == "bottom_navigation_bar_property"
+
 
 def test_plugin_boundary_does_not_match_content_text_containing_bottom_alias():
     tab_cfg = {**_base_tab_cfg(), "group": "plugin_screen", "screen_context_mode": "new_screen"}

@@ -155,7 +155,8 @@ def _context_regex_from_label(label: str) -> str:
     tokens = [re.escape(token) for token in re.split(r"\s+", _text(label)) if token]
     if not tokens:
         return ""
-    return rf"(?i).*{r'\s*'.join(tokens)}.*"
+    pattern_body = r'\s*'.join(tokens)
+    return rf"(?i).*{pattern_body}.*"
 
 
 def _extract_headers(records: list[dict[str, Any]], stable_label: str) -> list[str]:
