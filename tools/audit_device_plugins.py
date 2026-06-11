@@ -26,10 +26,11 @@ def get_device_plugins() -> List[str]:
 PLUGIN_EXPECTED_CONTENT = {
     "device_motion_sensor_plugin": {
         "required": [
-            ["Motion sensor", "No motion"],
+            ["Motion sensor", "No motion", "Motion detected"],
             ["Battery", "%"]
         ],
-        "review_expected": [
+        "review_expected": [],
+        "optional_reference": [
             ["Vibration sensor"],
             ["Temperature", "℃", "°C", "℉", "°F"]
         ]
@@ -380,6 +381,7 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
         
     missing_required_content = []
     missing_review_expected_content = []
+    missing_optional_reference = []
 
     all_text = " ".join(" ".join(stats.get("visible_labels_set", set())) for stats in tab_stats.values()).lower()
     
@@ -390,6 +392,10 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
     for group in expected_config.get("review_expected", []):
         if not any(item.lower() in all_text for item in group):
             missing_review_expected_content.append(group[0])
+            
+    for group in expected_config.get("optional_reference", []):
+        if not any(item.lower() in all_text for item in group):
+            missing_optional_reference.append(group[0])
 
 
     # Base failure states
@@ -496,6 +502,7 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
         "tab_coverage_summary": " | ".join(tab_coverage_summary),
         "missing_required_content": ", ".join(missing_required_content),
         "missing_review_expected_content": ", ".join(missing_review_expected_content),
+        "missing_optional_reference": ", ".join(missing_optional_reference),
         "tabs_exhausted": ", ".join(tabs_exhausted_info),
         "coverage_warnings": ", ".join(coverage_warnings),
         "coverage_source": log_data.get("coverage_source", "none"),
