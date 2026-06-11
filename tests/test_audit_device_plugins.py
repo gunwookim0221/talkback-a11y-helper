@@ -426,6 +426,44 @@ def test_xml_candidate_policy_diagnostics_do_not_change_classification(tmp_path)
     assert summary["hypothetical_denominator_count"] == 1
     assert summary["hypothetical_denominator_delta"] == 2
 
+def test_life_candidate_subtype_diagnostics_do_not_change_classification(tmp_path):
+    xml_dir = tmp_path / "xml_dumps"
+    xml_dir.mkdir()
+    (xml_dir / "000_step_001_entry.xml").write_text(
+        """<hierarchy>
+  <node text="Add family member" resource-id="com.samsung.android.plugin.care:id/menu_main_invite_member" class="android.widget.Button" package="com.samsung.android.oneconnect" focusable="true" clickable="true" bounds="[1,2][3,4]" />
+  <node text="ActivityButton" resource-id="" class="android.widget.LinearLayout" package="com.samsung.android.oneconnect" focusable="true" clickable="false" bounds="[5,6][7,8]" />
+  <node text="Device care" resource-id="DASH_0102-5" class="android.view.View" package="com.samsung.android.oneconnect" focusable="true" clickable="false" bounds="[9,10][11,12]" />
+  <node text="Air purifier,Self-diagnosis if fine dust count does not decrease" resource-id="" class="android.view.View" package="com.samsung.android.oneconnect" focusable="true" clickable="false" bounds="[13,14][15,16]" />
+  <node text="Home Care" resource-id="" class="android.widget.TextView" package="com.samsung.android.oneconnect" focusable="true" clickable="false" bounds="[17,18][19,20]" />
+  <node text="Usage guide" resource-id="DASH_0106-17" class="android.view.View" package="com.samsung.android.oneconnect" focusable="true" clickable="false" bounds="[21,22][23,24]" />
+  <node text="Samsung Care+" resource-id="DASH_0109-13" class="android.view.View" package="com.samsung.android.oneconnect" focusable="true" clickable="true" bounds="[25,26][27,28]" />
+  <node text="35" resource-id="" class="android.widget.TextView" package="com.samsung.android.oneconnect" focusable="false" clickable="false" bounds="[29,30][31,32]" />
+  <node text="Active now" resource-id="profile_status_text" class="android.widget.TextView" package="com.samsung.android.oneconnect" focusable="false" clickable="false" bounds="[33,34][35,36]" />
+  <node text="," resource-id="DASH_0108-11" class="android.view.View" package="com.samsung.android.oneconnect" focusable="true" clickable="true" bounds="[37,38][39,40]" />
+</hierarchy>""",
+        encoding="utf-8",
+    )
+
+    summary = extract_xml_candidates(xml_dir)
+    by_label = {candidate["label"]: candidate for candidate in summary["merged_candidates"]}
+
+    assert all(candidate["classification"] == "REVIEW" for candidate in summary["merged_candidates"])
+    assert by_label["Add family member"]["candidate_subtype"] == "CTA"
+    assert by_label["ActivityButton"]["candidate_subtype"] == "NAV_TILE"
+    assert by_label["Device care"]["candidate_subtype"] == "SERVICE_TILE"
+    assert by_label["Air purifier,Self-diagnosis if fine dust count does not decrease"]["candidate_subtype"] == "CONTENT_CARD"
+    assert by_label["Home Care"]["candidate_subtype"] == "SCREEN_TITLE"
+    assert by_label["Usage guide"]["candidate_subtype"] == "ONBOARDING"
+    assert by_label["Samsung Care+"]["candidate_subtype"] == "PROMOTION_OR_SERVICE_CARD"
+    assert by_label["35"]["candidate_subtype"] == "STATUS_METRIC"
+    assert by_label["Active now"]["candidate_subtype"] == "STATUS_LABEL"
+    assert by_label[","]["candidate_subtype"] == "LOW_VALUE_LABEL"
+    assert summary["candidate_subtype_summary"]["CTA"] == 1
+    assert "Add family member" in summary["cta_candidates_sample"]
+    assert "Device care" in summary["service_tile_candidates_sample"]
+    assert "CTA: 1" in summary["life_taxonomy_summary"]
+
 def test_xml_candidate_classifier_rules():
     assert classify_xml_candidate({"label": "More options", "resource_ids": [], "classes": []})["classification"] == "EXCLUDE"
     assert classify_xml_candidate({"label": "Battery", "resource_ids": [], "classes": []})["classification"] == "KEEP"
@@ -527,6 +565,8 @@ def test_missing_xml_dumps_directory_does_not_fail_audit(tmp_path):
     report = evaluate_scenario("device_motion_sensor_plugin", summary, log_data, tmp_path / "missing" / "xml_dumps")
 
     assert report["verdict"] == "PASS"
+    assert report["xml_diagnostic_status"] == "xml_missing"
+    assert report["coverage_diagnostic_status"] == "xml_missing"
     assert report["xml_dump_count"] == 0
     assert report["xml_candidate_count"] == 0
 
@@ -545,8 +585,28 @@ def test_invalid_xml_file_does_not_fail_audit(tmp_path):
     report = evaluate_scenario("device_motion_sensor_plugin", summary, log_data, xml_dir)
 
     assert report["verdict"] == "PASS"
+    assert report["xml_diagnostic_status"] == "xml_present_parsed"
+    assert report["coverage_diagnostic_status"] == "ready_empty_denominator"
     assert report["xml_dump_count"] == 1
     assert report["xml_candidate_count"] == 0
+
+def test_empty_xml_directory_reports_present_empty_status(tmp_path):
+    xml_dir = tmp_path / "xml_dumps"
+    xml_dir.mkdir()
+    log_data = {
+        "detected_tabs": ["Controls"], "visited_tabs": ["Controls"], "preflight_fail": False, "crash": False,
+        "target_entered": "Motion Sensor", "inventory_found": True,
+        "value_exclusion_warnings": [], "boundary_warnings": [], "repeat_warnings": [],
+        "tab_stats": {"Controls": {"viewport_exhausted": True, "representative_exhausted": False, "unique_visible_labels": 2, "visible_labels_set": {"Motion sensor", "95%"}}},
+    }
+    summary = {"scenarios": [{"id": "device_motion_sensor_plugin", "availability_status": "none"}]}
+
+    report = evaluate_scenario("device_motion_sensor_plugin", summary, log_data, xml_dir)
+
+    assert report["xml_diagnostic_status"] == "xml_present_empty"
+    assert report["coverage_diagnostic_status"] == "xml_present_empty"
+    assert report["xml_dump_count"] == 0
+    assert report["merged_candidate_count"] == 0
 
 def test_xml_diagnostic_fields_exist_in_report(tmp_path):
     xml_dir = tmp_path / "xml_dumps"
@@ -570,6 +630,7 @@ def test_xml_diagnostic_fields_exist_in_report(tmp_path):
 
     for key in (
         "xml_dump_count",
+        "xml_diagnostic_status",
         "xml_candidate_count",
         "xml_unique_label_count",
         "xml_unique_labels_sample",
@@ -585,6 +646,20 @@ def test_xml_diagnostic_fields_exist_in_report(tmp_path):
         "exclude_candidates_sample",
         "candidate_classification_examples",
         "candidate_type_summary",
+        "candidate_subtype_summary",
+        "candidate_subtype_examples",
+        "life_taxonomy_summary",
+        "cta_candidates_sample",
+        "nav_tile_candidates_sample",
+        "service_tile_candidates_sample",
+        "content_card_candidates_sample",
+        "screen_title_candidates_sample",
+        "onboarding_candidates_sample",
+        "promotion_or_service_card_candidates_sample",
+        "status_metric_candidates_sample",
+        "status_label_candidates_sample",
+        "instructional_status_candidates_sample",
+        "low_value_label_candidates_sample",
         "actionable_candidates_sample",
         "status_candidates_sample",
         "empty_state_candidates_sample",
@@ -596,6 +671,7 @@ def test_xml_diagnostic_fields_exist_in_report(tmp_path):
         "candidate_policy_examples",
         "hypothetical_denominator_count",
         "hypothetical_denominator_delta",
+        "coverage_diagnostic_status",
         "merged_candidates_sample",
         "coverage_denominator_count",
         "coverage_matched_count",
@@ -610,6 +686,8 @@ def test_xml_diagnostic_fields_exist_in_report(tmp_path):
     ):
         assert key in report
     assert report["xml_dump_count"] == 1
+    assert report["xml_diagnostic_status"] == "xml_present_parsed"
+    assert report["coverage_diagnostic_status"] == "ready"
     assert report["merged_candidate_count"] == 2
     assert "Battery" in report["xml_labels_not_seen_in_traversal_sample"]
     assert "95%" in report["traversal_labels_not_in_xml_sample"]

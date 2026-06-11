@@ -365,6 +365,12 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
     xml_summary = extract_xml_candidates(xml_dir)
     xml_unique_labels = xml_summary["xml_unique_labels"]
     xml_coverage = calculate_xml_coverage(xml_summary["merged_candidates"], log_data.get("tab_stats", {}))
+    if xml_summary["xml_diagnostic_status"] != "xml_present_parsed":
+        coverage_diagnostic_status = xml_summary["xml_diagnostic_status"]
+    elif xml_coverage["coverage_denominator_count"] == 0:
+        coverage_diagnostic_status = "ready_empty_denominator"
+    else:
+        coverage_diagnostic_status = "ready"
     
     traversal_labels_set = set()
     for stats in log_data.get("tab_stats", {}).values():
@@ -543,6 +549,7 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
         "coverage_source": log_data.get("coverage_source", "none"),
         "tab_stats_raw": {k: {**v, "visible_labels_set": list(v.get("visible_labels_set", set()))} for k, v in tab_stats.items()},
         "expected_content_raw": [g[0] for g in (PLUGIN_EXPECTED_CONTENT.get(scenario_id, {}).get("required", []) if isinstance(PLUGIN_EXPECTED_CONTENT.get(scenario_id, []), dict) else PLUGIN_EXPECTED_CONTENT.get(scenario_id, []))],
+        "xml_diagnostic_status": xml_summary["xml_diagnostic_status"],
         "xml_dump_count": xml_summary["xml_dump_count"],
         "xml_candidate_count": xml_summary["xml_candidate_count"],
         "xml_unique_label_count": xml_summary["xml_unique_label_count"],
@@ -559,6 +566,20 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
         "exclude_candidates_sample": xml_summary["exclude_candidates_sample"],
         "candidate_classification_examples": xml_summary["candidate_classification_examples"],
         "candidate_type_summary": xml_summary["candidate_type_summary"],
+        "candidate_subtype_summary": xml_summary["candidate_subtype_summary"],
+        "candidate_subtype_examples": xml_summary["candidate_subtype_examples"],
+        "life_taxonomy_summary": xml_summary["life_taxonomy_summary"],
+        "cta_candidates_sample": xml_summary["cta_candidates_sample"],
+        "nav_tile_candidates_sample": xml_summary["nav_tile_candidates_sample"],
+        "service_tile_candidates_sample": xml_summary["service_tile_candidates_sample"],
+        "content_card_candidates_sample": xml_summary["content_card_candidates_sample"],
+        "screen_title_candidates_sample": xml_summary["screen_title_candidates_sample"],
+        "onboarding_candidates_sample": xml_summary["onboarding_candidates_sample"],
+        "promotion_or_service_card_candidates_sample": xml_summary["promotion_or_service_card_candidates_sample"],
+        "status_metric_candidates_sample": xml_summary["status_metric_candidates_sample"],
+        "status_label_candidates_sample": xml_summary["status_label_candidates_sample"],
+        "instructional_status_candidates_sample": xml_summary["instructional_status_candidates_sample"],
+        "low_value_label_candidates_sample": xml_summary["low_value_label_candidates_sample"],
         "actionable_candidates_sample": xml_summary["actionable_candidates_sample"],
         "status_candidates_sample": xml_summary["status_candidates_sample"],
         "empty_state_candidates_sample": xml_summary["empty_state_candidates_sample"],
@@ -570,6 +591,7 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
         "candidate_policy_examples": xml_summary["candidate_policy_examples"],
         "hypothetical_denominator_count": xml_summary["hypothetical_denominator_count"],
         "hypothetical_denominator_delta": xml_summary["hypothetical_denominator_delta"],
+        "coverage_diagnostic_status": coverage_diagnostic_status,
         "merged_candidates_sample": xml_summary["merged_candidates"][:10],
         **xml_coverage,
     }
@@ -748,6 +770,7 @@ def main():
             f.write(f"**Missing Review Expected**: {r.get('missing_review_expected_content') if r.get('missing_review_expected_content') else 'None'}\n")
             f.write(f"**XML Summary**:\n")
             f.write(f"* dumps: {r.get('xml_dump_count', 0)}\n")
+            f.write(f"* xml diagnostic status: {r.get('xml_diagnostic_status', 'xml_missing')}\n")
             f.write(f"* candidates: {r.get('xml_candidate_count', 0)}\n")
             f.write(f"* unique labels: {r.get('xml_unique_label_count', 0)}\n")
             f.write(f"* unique labels sample: {r.get('xml_unique_labels_sample', 'None')}\n")
@@ -763,6 +786,26 @@ def main():
             f.write(f"* exclude candidates sample: {r.get('exclude_candidates_sample', 'None')}\n")
             f.write(f"* candidate classification examples: {r.get('candidate_classification_examples', 'None')}\n")
             f.write(f"* candidate type summary: {r.get('candidate_type_summary', {})}\n")
+            f.write(f"* candidate subtype summary: {r.get('candidate_subtype_summary', {})}\n")
+            f.write(f"* candidate subtype examples: {r.get('candidate_subtype_examples', 'None')}\n")
+            f.write(f"* life taxonomy summary: {r.get('life_taxonomy_summary', 'None')}\n")
+            f.write(f"* CTA candidates sample: {r.get('cta_candidates_sample', 'None')}\n")
+            f.write(f"* NAV_TILE candidates sample: {r.get('nav_tile_candidates_sample', 'None')}\n")
+            f.write(f"* SERVICE_TILE candidates sample: {r.get('service_tile_candidates_sample', 'None')}\n")
+            f.write(f"* CONTENT_CARD candidates sample: {r.get('content_card_candidates_sample', 'None')}\n")
+            f.write(f"* SCREEN_TITLE candidates sample: {r.get('screen_title_candidates_sample', 'None')}\n")
+            f.write(f"* ONBOARDING candidates sample: {r.get('onboarding_candidates_sample', 'None')}\n")
+            f.write(
+                "* PROMOTION_OR_SERVICE_CARD candidates sample: "
+                f"{r.get('promotion_or_service_card_candidates_sample', 'None')}\n"
+            )
+            f.write(f"* STATUS_METRIC candidates sample: {r.get('status_metric_candidates_sample', 'None')}\n")
+            f.write(f"* STATUS_LABEL candidates sample: {r.get('status_label_candidates_sample', 'None')}\n")
+            f.write(
+                "* INSTRUCTIONAL_STATUS candidates sample: "
+                f"{r.get('instructional_status_candidates_sample', 'None')}\n"
+            )
+            f.write(f"* LOW_VALUE_LABEL candidates sample: {r.get('low_value_label_candidates_sample', 'None')}\n")
             f.write(f"* actionable candidates sample: {r.get('actionable_candidates_sample', 'None')}\n")
             f.write(f"* status candidates sample: {r.get('status_candidates_sample', 'None')}\n")
             f.write(f"* empty state candidates sample: {r.get('empty_state_candidates_sample', 'None')}\n")
@@ -774,6 +817,7 @@ def main():
             f.write(f"* candidate policy examples: {r.get('candidate_policy_examples', 'None')}\n")
             f.write(f"* hypothetical denominator: {r.get('hypothetical_denominator_count', 0)}\n")
             f.write(f"* hypothetical denominator delta: {r.get('hypothetical_denominator_delta', 0)}\n")
+            f.write(f"* coverage diagnostic status: {r.get('coverage_diagnostic_status', 'xml_missing')}\n")
             f.write(f"* coverage policy: {r.get('coverage_policy', 'None')}\n")
             f.write(f"* coverage denominator: {r.get('coverage_denominator_count', 0)}\n")
             f.write(f"* coverage matched: {r.get('coverage_matched_count', 0)}\n")
