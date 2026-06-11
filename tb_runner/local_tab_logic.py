@@ -667,17 +667,19 @@ def _local_tab_candidate_matches_identity(
     rid = str(rid or "").strip().lower()
     if candidate_rid and rid and candidate_rid == rid:
         return True, "rid"
+    
+    # Avoid false positive substring matches like 'control' inside 'trackcontroller'.
+    # We only allow substring matching if the shorter one is at least 8 characters long
+    # and is a significant part of the longer one.
     compact_candidate_rid = re.sub(r"[^a-z0-9]+", "", candidate_rid)
     compact_rid = re.sub(r"[^a-z0-9]+", "", rid)
-    if compact_candidate_rid and compact_rid and (compact_candidate_rid in compact_rid or compact_rid in compact_candidate_rid):
-        return True, "rid"
+    if compact_candidate_rid and compact_rid:
+        if compact_candidate_rid in compact_rid and len(compact_candidate_rid) >= 8:
+            return True, "rid_substring"
+        if compact_rid in compact_candidate_rid and len(compact_rid) >= 8:
+            return True, "rid_substring"
     if normalized_candidate_label and normalized_label and normalized_candidate_label == normalized_label:
         return True, "label"
-    if normalized_candidate_label and normalized_label and (
-        normalized_candidate_label in normalized_label
-        or normalized_label in normalized_candidate_label
-    ):
-        return True, "label_contains"
     candidate_bounds = str(candidate.get("bounds", "") or "").strip()
     if not candidate_bounds:
         node = candidate.get("node", {})
@@ -1560,6 +1562,7 @@ def _is_chrome_like_candidate(
     center_y: int,
     top_header_band: int,
     width_ratio: float,
+    scenario_id: str = "",
 ) -> bool:
     normalized_label = re.sub(r"\s+", " ", str(label or "").strip()).lower()
     if not normalized_label:
@@ -1569,6 +1572,13 @@ def _is_chrome_like_candidate(
         return True
     chrome_resource_tokens = ("toolbar", "appbar", "action", "overflow", "navigate", "header", "menu")
     resource_chrome = any(token in resource_id or token in class_name for token in chrome_resource_tokens)
+    
+    if scenario_id == "device_motion_sensor_plugin":
+        if re.fullmatch(r"\d+%", normalized_label):
+            return False
+        if "temperature" in normalized_label or "motion" in normalized_label or "vibration" in normalized_label:
+            return False
+            
     if center_y > top_header_band:
         return False
     if resource_chrome:
@@ -1617,10 +1627,18 @@ def _is_row_top_chrome_candidate(row: dict[str, Any]) -> bool:
         width_ratio=min(1.0, width / 1080.0),
     )
 
-def _is_passive_status_text(label: str) -> bool:
+def _is_passive_status_text(label: str, scenario_id: str = "") -> bool:
     normalized_label = re.sub(r"\s+", " ", str(label or "").strip()).lower()
     if not normalized_label:
         return False
+        
+    if scenario_id == "device_motion_sensor_plugin":
+        whitelist = ["no motion", "motion detected", "no vibration", "vibration detected"]
+        if any(w in normalized_label for w in whitelist) or re.fullmatch(r"\d+%", normalized_label):
+            return False
+        if re.search(r"\d+[\.,]?\d*\s*[°c]\w*", normalized_label) or "temperature" in normalized_label:
+            return False
+            
     exact_status_phrases = (
         "active now",
         "inactive",
@@ -1659,6 +1677,7 @@ def _is_passive_status_text(label: str) -> bool:
         return True
     if re.fullmatch(r"page\s+\d+\s+of\s+\d+", normalized_label):
         return True
+        
     return bool(len(normalized_label) <= 18 and any(phrase in normalized_label for phrase in exact_status_phrases))
 
 def _row_matches_any_local_tab_candidate(
@@ -1917,6 +1936,11 @@ def _local_tab_strip_group_is_structural(
         return False
     return True
 
+MEDIA_CONTROL_LABELS = {"play", "pause", "next", "previous", "mute", "volume", "rewind", "fast forward", "stop"}
+
+def _is_media_control_label(label: str) -> bool:
+    return label.strip().lower() in MEDIA_CONTROL_LABELS
+
 def _filter_local_tab_strip_candidates(
     raw_candidates: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -1924,6 +1948,7 @@ def _filter_local_tab_strip_candidates(
         prepared_candidate
         for index, candidate in enumerate(raw_candidates)
         if (prepared_candidate := _prepare_local_tab_strip_candidate(candidate, index)) is not None
+        and not _is_media_control_label(str(candidate.get("label", "") or ""))
     ]
     if len(prepared) < 2:
         return [], list(raw_candidates)

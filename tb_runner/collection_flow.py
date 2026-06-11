@@ -2497,17 +2497,24 @@ def _canonicalize_bottom_nav_focus_label(label: str, *, has_tab_context: bool) -
     return ""
 
 
-def _row_global_bottom_nav_boundary(row: dict[str, Any], tab_cfg: dict[str, Any]) -> tuple[bool, str, str]:
+def _row_global_bottom_nav_boundary(row: dict[str, Any], tab_cfg: dict[str, Any], local_tab_state: Any = None) -> tuple[bool, str, str]:
     if not _is_plugin_boundary_guard_enabled(tab_cfg):
         return False, "", "guard_disabled"
     view_id = _row_focus_view_id(row)
     normalized_view_id = view_id.lower()
+    
+    # Priority A: Global Nav Resource ID
     if any(token in normalized_view_id for token in _GLOBAL_BOTTOM_NAV_RESOURCE_TOKENS):
         return True, view_id, "resource_id"
+
+    # Priority B: isBottomNavigationBar=true
+    if str(row.get("isBottomNavigationBar", "")).lower() == "true":
+        return True, "isBottomNavigationBar", "bottom_navigation_bar_property"
 
     label_values = _row_label_values(row)
     label_text = " | ".join(value for value in label_values if value)
     has_tab_context = bool(re.search(r"\btab\b|\btab\s+\d+\s+of\s+\d+\b|탭\s*\d*개|탭", label_text, flags=re.IGNORECASE))
+    
     canonical = ""
     for value in label_values:
         canonical = _canonicalize_bottom_nav_focus_label(value, has_tab_context=has_tab_context)
@@ -2515,15 +2522,51 @@ def _row_global_bottom_nav_boundary(row: dict[str, Any], tab_cfg: dict[str, Any]
             break
     if not canonical and has_tab_context:
         canonical = canonicalize_label(label_text, domain="bottom_tab") or ""
+        
+    # Handle i18n
+    if not canonical:
+        lbl_lower = label_text.lower()
+        if "routines" in lbl_lower or "루틴" in lbl_lower:
+            canonical = "routines"
+        elif "history" in lbl_lower or "기록" in lbl_lower:
+            canonical = "history"
+        elif "controls" in lbl_lower or "제어" in lbl_lower:
+            canonical = "controls"
+
     if not canonical:
         return False, label_text, "not_bottom_nav_label"
+        
     bounds = _row_focus_bounds(row)
     height = _row_screen_height(row, bounds)
     is_bottom_region = bool(bounds and height > 0 and bounds[1] >= int(height * 0.72))
-    if canonical in _GLOBAL_BOTTOM_NAV_LABELS_REQUIRE_CONTEXT and not (has_tab_context or is_bottom_region):
-        return False, label_text, "label_requires_tab_context"
+    
+    # Priority C: local_tab_state 매칭
+    if local_tab_state and hasattr(local_tab_state, "candidates_by_signature"):
+        for sig, candidates in local_tab_state.candidates_by_signature.items():
+            for cand in candidates:
+                cand_label = str(cand.get("label", "")).lower()
+                cand_canonical = canonicalize_label(cand_label, domain="bottom_tab") or ""
+                if not cand_canonical:
+                    if "루틴" in cand_label: cand_canonical = "routines"
+                    elif "기록" in cand_label: cand_canonical = "history"
+                    elif "제어" in cand_label: cand_canonical = "controls"
+                
+                if cand_canonical and cand_canonical == canonical:
+                    # If it's a known local tab candidate, it's not a global nav boundary
+                    return False, label_text, f"local_tab_candidate_match:{canonical}"
+
+    # Priority D & E
+    if canonical in _GLOBAL_BOTTOM_NAV_LABELS_REQUIRE_CONTEXT or canonical in {"history", "controls"}:
+        if bounds and height > 0 and not is_bottom_region:
+            return False, label_text, "routines_not_in_bottom_region"
+        if not (has_tab_context or is_bottom_region):
+            return False, label_text, "label_requires_tab_context"
+            
     if has_tab_context or is_bottom_region or canonical in {"home", "devices", "life", "menu"}:
+        if canonical in {"history", "controls"}:
+            return False, label_text, "local_tab_only_label"
         return True, label_text, f"label:{canonical}"
+        
     return False, label_text, "weak_label"
 
 
@@ -9694,9 +9737,10 @@ def _is_chrome_like_candidate(
     center_y: int,
     top_header_band: int,
     width_ratio: float,
+    scenario_id: str = "",
 ) -> bool:
     _sync_local_tab_logic_dependencies()
-    return local_tab_logic._is_chrome_like_candidate(label=label, resource_id=resource_id, class_name=class_name, actionable=actionable, button_like=button_like, card_like=card_like, center_y=center_y, top_header_band=top_header_band, width_ratio=width_ratio)
+    return local_tab_logic._is_chrome_like_candidate(label=label, resource_id=resource_id, class_name=class_name, actionable=actionable, button_like=button_like, card_like=card_like, center_y=center_y, top_header_band=top_header_band, width_ratio=width_ratio, scenario_id=scenario_id)
 
 
 def _is_row_top_chrome_candidate(row: dict[str, Any]) -> bool:
@@ -9704,9 +9748,9 @@ def _is_row_top_chrome_candidate(row: dict[str, Any]) -> bool:
     return local_tab_logic._is_row_top_chrome_candidate(row)
 
 
-def _is_passive_status_text(label: str) -> bool:
+def _is_passive_status_text(label: str, scenario_id: str = "") -> bool:
     _sync_local_tab_logic_dependencies()
-    return local_tab_logic._is_passive_status_text(label)
+    return local_tab_logic._is_passive_status_text(label, scenario_id=scenario_id)
 
 
 def _filter_local_tab_strip_candidates(
@@ -9847,7 +9891,7 @@ def _collect_step_candidate_priority_groups(
             width=width,
             height=height,
         )
-        passive_status = _is_passive_status_text(label)
+        passive_status = _is_passive_status_text(label, scenario_id=scenario_id)
         content_like = bool(
             center_y < bottom_band_top
             and (
@@ -9866,6 +9910,7 @@ def _collect_step_candidate_priority_groups(
             center_y=center_y,
             top_header_band=top_header_band,
             width_ratio=width_ratio,
+            scenario_id=scenario_id,
         ):
             chrome_excluded_candidates.append(label)
             continue
@@ -12498,7 +12543,7 @@ def _main_loop_phase(
                 f"reason='{shell_boundary_reason}' action='stop'"
             )
 
-        boundary_hit, boundary_label, boundary_reason = _row_global_bottom_nav_boundary(row, tab_cfg)
+        boundary_hit, boundary_label, boundary_reason = _row_global_bottom_nav_boundary(row, tab_cfg, getattr(state, "local_tab_state", None))
         if boundary_hit and not is_global_nav_only_scenario:
             stop = True
             reason = "plugin_boundary_global_nav"

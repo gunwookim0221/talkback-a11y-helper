@@ -63,7 +63,7 @@ def parse_summary_json(summary_path: Path) -> Dict[str, Any]:
     except Exception:
         return {}
 
-def parse_normal_log(log_path: Path) -> Dict[str, Any]:
+def parse_run_results(log_path: Path, run_out_dir: Path) -> Dict[str, Any]:
     result = {
         "detected_tabs": [],
         "visited_tabs": [],
@@ -74,12 +74,67 @@ def parse_normal_log(log_path: Path) -> Dict[str, Any]:
         "crash": False,
         "target_entered": None,
         "inventory_found": False,
-        "stop_reason": ""
+        "stop_reason": "",
+        "tab_stats": {}
     }
     
+    xlsx_labels = {}
+    if run_out_dir and run_out_dir.exists():
+        xlsx_files = list(run_out_dir.glob("*.xlsx"))
+        if xlsx_files:
+            latest_xlsx = max(xlsx_files, key=os.path.getmtime)
+            try:
+                import pandas as pd
+                df = pd.read_excel(latest_xlsx)
+                tab_col = 'tab_name' if 'tab_name' in df.columns else 'tab' if 'tab' in df.columns else None
+                label_col = 'visible_label' if 'visible_label' in df.columns else 'text' if 'text' in df.columns else None
+                if tab_col and label_col:
+                    for _, row in df.iterrows():
+                        t = str(row[tab_col]).strip()
+                        l = str(row[label_col]).strip()
+                        if l and l.lower() not in ('nan', 'none', ''):
+                            if t not in xlsx_labels:
+                                xlsx_labels[t] = set()
+                            xlsx_labels[t].add(l)
+            except ImportError:
+                pass
+            except Exception as e:
+                print(f"Error parsing xlsx {latest_xlsx}: {e}")
+
+    for t in xlsx_labels:
+        result["tab_stats"][t] = {
+            "focus_count": 0,
+            "representative_count": 0,
+            "viewport_exhausted": False,
+            "representative_exhausted": False,
+            "repeat_no_progress": False,
+            "last_focus_label": "",
+            "last_representative_candidate": "",
+            "unique_visible_labels": len(xlsx_labels[t]),
+            "visible_labels_set": xlsx_labels[t]
+        }
+
     if not log_path.exists():
         return result
         
+    current_tab = ""
+
+    def get_or_create_tab_stats(t_name):
+        if t_name and t_name not in result["tab_stats"]:
+            result["tab_stats"][t_name] = {
+                "focus_count": 0,
+                "representative_count": 0,
+                "viewport_exhausted": False,
+                "representative_exhausted": False,
+                "repeat_no_progress": False,
+                "last_focus_label": "",
+                "last_representative_candidate": "",
+                "unique_visible_labels": len(xlsx_labels.get(t_name, set())),
+                "visible_labels_set": set(xlsx_labels.get(t_name, set()))
+            }
+        return result["tab_stats"].get(t_name)
+
+
     try:
         with open(log_path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -93,6 +148,8 @@ def parse_normal_log(log_path: Path) -> Dict[str, Any]:
                     m = re.search(r"label='([^']+)'", line)
                     if m:
                         tab_name = m.group(1)
+                        if tab_name in ("Play", "Next"):
+                            continue
                         if tab_name not in result["detected_tabs"]:
                             result["detected_tabs"].append(tab_name)
                             
@@ -100,12 +157,60 @@ def parse_normal_log(log_path: Path) -> Dict[str, Any]:
                     m = re.search(r"target='([^']+)'", line)
                     if m:
                         tab_name = m.group(1)
+                        if tab_name in ("Play", "Next"):
+                            continue
                         if tab_name not in result["visited_tabs"]:
                             result["visited_tabs"].append(tab_name)
+                        current_tab = tab_name
+                        get_or_create_tab_stats(current_tab)
                             
+                if "[STEP][local_tab_active]" in line or "[STEP][local_tab_active_state]" in line:
+                    m = re.search(r"active='([^']+)'", line)
+                    if m:
+                        tab_name = m.group(1)
+                        if tab_name in ("Play", "Next"):
+                            pass
+                        elif tab_name != "none":
+                            if tab_name not in result["visited_tabs"]:
+                                result["visited_tabs"].append(tab_name)
+                            current_tab = tab_name
+                            get_or_create_tab_stats(current_tab)
+                            
+                if "[STEP] END" in line:
+                    m = re.search(r"visible='([^']+)'", line)
+                    if m and current_tab:
+                        label = m.group(1).strip()
+                        stats = get_or_create_tab_stats(current_tab)
+                        stats["focus_count"] += 1
+                        stats["last_focus_label"] = label
+                        if label and label.lower() not in ('nan', 'none', ''):
+                            stats["visible_labels_set"].add(label)
+                            stats["unique_visible_labels"] = len(stats["visible_labels_set"])
+
+                if "[STEP][focus_realign_record]" in line:
+                    m = re.search(r"target='([^']+)'", line)
+                    if m and current_tab:
+                        label = m.group(1).strip()
+                        stats = get_or_create_tab_stats(current_tab)
+                        stats["representative_count"] += 1
+                        stats["last_representative_candidate"] = label
+                        if label and label.lower() not in ('nan', 'none', ''):
+                            stats["visible_labels_set"].add(label)
+                            stats["unique_visible_labels"] = len(stats["visible_labels_set"])
+
                 if "[STEP][viewport_exhausted_eval]" in line or "[STEP][representative_exhausted_eval]" in line:
+                    if current_tab:
+                        stats = get_or_create_tab_stats(current_tab)
+                        if "[STEP][viewport_exhausted_eval]" in line:
+                            stats["viewport_exhausted"] = True
+                        if "[STEP][representative_exhausted_eval]" in line:
+                            stats["representative_exhausted"] = True
                     m_status = re.search(r"status_excluded='([^']+)'", line)
                     m_chrome = re.search(r"chrome_excluded='([^']+)'", line)
+                    
+                    status_ex = [x.strip().lower() for x in m_status.group(1).split('|') if x.strip()] if m_status and m_status.group(1) != 'none' else []
+                    chrome_ex = [x.strip().lower() for x in m_chrome.group(1).split('|') if x.strip()] if m_chrome and m_chrome.group(1) != 'none' else []
+                    
                     excluded = []
                     if m_status and m_status.group(1) != 'none':
                         excluded.extend([x.strip() for x in m_status.group(1).split('|') if x.strip()])
@@ -114,6 +219,13 @@ def parse_normal_log(log_path: Path) -> Dict[str, Any]:
                         
                     for val in excluded:
                         vl = val.lower()
+                        
+                        # Suppress warnings for known harmless exclusions
+                        if vl in chrome_ex and (vl in ["on", "off"] or "vibration sensor" in vl):
+                            continue
+                        if vl in status_ex and vl in ["online", "offline"]:
+                            continue
+                            
                         if (
                             "motion" in vl or "vibration" in vl or "°" in vl or "battery" in vl 
                             or re.search(r"\d+[\.,]?\d*\s*[°c]\w*", vl)
@@ -130,6 +242,8 @@ def parse_normal_log(log_path: Path) -> Dict[str, Any]:
                         
                 if "[STOP][eval]" in line and "reason='repeat_no_progress'" in line:
                     result["repeat_warnings"].append("repeat_no_progress")
+                    if current_tab:
+                        get_or_create_tab_stats(current_tab)["repeat_no_progress"] = True
                     
                 if "[STEP][enter_device_card_success]" in line:
                     m = re.search(r"target='([^']+)'", line)
@@ -184,6 +298,40 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
     visited = log_data["visited_tabs"]
     missing_tabs = [t for t in detected if t not in visited]
     
+    # Coverage logic
+    tab_stats = log_data.get("tab_stats", {})
+    all_tabs_exhausted = True
+    coverage_warnings = []
+    missing_content = []
+    
+    for t in visited:
+        stats = tab_stats.get(t, {})
+        is_exhausted = stats.get("viewport_exhausted") or stats.get("representative_exhausted")
+        unique_labels = stats.get("unique_visible_labels", 0)
+        if not is_exhausted:
+            all_tabs_exhausted = False
+            coverage_warnings.append(f"{t} not exhausted")
+            
+        if unique_labels < 1:
+            coverage_warnings.append(f"{t} has no visible labels")
+            
+        if not is_exhausted and unique_labels == 0:
+            coverage_warnings.append(f"{t} skipped immediately")
+
+    # Plugin specific rules
+    if scenario_id == "device_motion_sensor_plugin" and "Controls" in tab_stats:
+        controls_labels = tab_stats["Controls"].get("visible_labels_set", set())
+        controls_text = " ".join(controls_labels).lower()
+        has_motion = "motion sensor" in controls_text or "no motion" in controls_text
+        has_vib = "vibration sensor" in controls_text
+        has_temp = "temperature" in controls_text or re.search(r"(\d+\s*degree|℃|℉|°c|°f)", controls_text)
+        has_batt = "battery" in controls_text or "%" in controls_text
+        
+        if not has_motion: missing_content.append("Motion sensor status")
+        if not has_vib: missing_content.append("Vibration sensor")
+        if not has_temp: missing_content.append("Temperature")
+        if not has_batt: missing_content.append("Battery")
+
     # Base failure states
     if log_data["preflight_fail"]:
         verdict = "ENVIRONMENT_ERROR"
@@ -213,6 +361,14 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
             verdict = "REVIEW"
             reason.append(f"Missed tabs: {', '.join(missing_tabs)}")
             
+        if missing_content:
+            verdict = "REVIEW"
+            reason.append("missing content coverage")
+            
+        if coverage_warnings:
+            verdict = "REVIEW"
+            reason.append(f"Coverage issue: {', '.join(coverage_warnings)}")
+
         if log_data["repeat_warnings"]:
             if (
                 log_data["target_entered"] 
@@ -222,12 +378,18 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
                 and not log_data["value_exclusion_warnings"]
                 and not log_data["crash"]
                 and not log_data["preflight_fail"]
+                and not missing_content
+                and not coverage_warnings
                 and (not stop_reason or stop_reason == "repeat_no_progress")
                 and all(w == "repeat_no_progress" for w in log_data["repeat_warnings"])
             ):
-                if verdict == "UNKNOWN":
-                    verdict = "PASS"
-                    reason.append("All detected tabs visited; repeat_no_progress after exhaustion")
+                if all_tabs_exhausted:
+                    if verdict == "UNKNOWN":
+                        verdict = "PASS"
+                        reason.append("All detected tabs visited; repeat_no_progress after exhaustion")
+                else:
+                    verdict = "REVIEW"
+                    reason.append("repeat_no_progress before exhaustion")
             else:
                 verdict = "REVIEW"
                 reason.append("repeat_no_progress")
@@ -235,7 +397,7 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
         if verdict == "UNKNOWN":
             if log_data["target_entered"]:
                 verdict = "PASS"
-                reason.append("All detected tabs visited, no warnings")
+                reason.append("All detected tabs visited, exhausted, and content present")
             else:
                 if not log_data["inventory_found"]:
                     verdict = "ENVIRONMENT_ERROR"
@@ -246,6 +408,13 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
             
         if not detected and verdict == "PASS":
             reason.append("(0 local tabs detected)")
+
+    tabs_exhausted_info = []
+    tab_coverage_summary = []
+    for t, stats in tab_stats.items():
+        is_exh = stats.get("viewport_exhausted") or stats.get("representative_exhausted")
+        tabs_exhausted_info.append(f"{t}: {is_exh}")
+        tab_coverage_summary.append(f"{t} (U: {stats.get('unique_visible_labels')}, F: {stats.get('focus_count')}, R: {stats.get('representative_count')})")
 
     return {
         "scenario_id": scenario_id,
@@ -259,7 +428,11 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
         "missing_tabs": ", ".join(missing_tabs),
         "value_exclusion_warnings": ", ".join(log_data["value_exclusion_warnings"]),
         "boundary_warnings": ", ".join(log_data["boundary_warnings"]),
-        "repeat_warnings": ", ".join(log_data["repeat_warnings"])
+        "repeat_warnings": ", ".join(log_data["repeat_warnings"]),
+        "tab_coverage_summary": " | ".join(tab_coverage_summary),
+        "missing_content": ", ".join(missing_content),
+        "tabs_exhausted": ", ".join(tabs_exhausted_info),
+        "coverage_warnings": ", ".join(coverage_warnings)
     }
 
 def main():
@@ -341,6 +514,10 @@ def main():
                 "value_exclusion_warnings": "",
                 "boundary_warnings": "",
                 "repeat_warnings": "",
+                "tab_coverage_summary": "",
+                "missing_content": "",
+                "tabs_exhausted": "",
+                "coverage_warnings": "",
                 "return_code": exec_info["return_code"],
                 "timed_out": exec_info["timed_out"],
                 "start_recovered": exec_info["start_recovered"]
@@ -348,7 +525,8 @@ def main():
             continue
             
         summary_data = parse_summary_json(summary_file)
-        log_data = parse_normal_log(normal_log) if normal_log else parse_normal_log(Path("nonexistent"))
+        log_data = parse_run_results(normal_log, run_out_dir) if normal_log else parse_run_results(Path("nonexistent"), run_out_dir)
+
         
         report = evaluate_scenario(sid, summary_data, log_data)
         report["return_code"] = exec_info["return_code"]
@@ -402,10 +580,10 @@ def main():
         f.write(f"* value_exclusion: {value_exclusion_issues}\n")
         f.write(f"* repeat_no_progress: {repeat_no_progress_issues}\n\n")
 
-        f.write("| Scenario ID | Verdict | Reason | Target | Return Code | Timed Out | Recovered | Missing Tabs | Exclusion Warnings |\n")
-        f.write("|-------------|---------|--------|--------|-------------|-----------|-----------|--------------|--------------------|\n")
+        f.write("| Scenario ID | Verdict | Tabs | Tab Coverage | Missing Content | Reason |\n")
+        f.write("|-------------|---------|------|--------------|-----------------|--------|\n")
         for r in results:
-            f.write(f"| {r['scenario_id']} | {r['verdict']} | {r['reason']} | {r['target']} | {r.get('return_code', 'N/A')} | {r.get('timed_out', False)} | {r.get('start_recovered', False)} | {r['missing_tabs']} | {r['value_exclusion_warnings']} |\n")
+            f.write(f"| {r['scenario_id']} | {r['verdict']} | {r['detected_tabs']} | {r['tab_coverage_summary']} | {r['missing_content']} | {r['reason']} |\n")
             
     print(f"\nAudit complete. Reports saved to {out_dir}")
 
