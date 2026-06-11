@@ -1,3 +1,5 @@
+import logging
+import xml.etree.ElementTree as ET
 import os
 import sys
 import json
@@ -332,12 +334,56 @@ def parse_run_results(log_path: Path, run_out_dir: Path) -> Dict[str, Any]:
 
     return result
 
-def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[str, Any]) -> Dict[str, Any]:
+def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[str, Any], xml_dir: Path = None) -> Dict[str, Any]:
     target = ""
     scenario_info = next((s for s in summary.get("scenarios", []) if s.get("id") == scenario_id), {})
     if not scenario_info and "scenarios" in summary and len(summary["scenarios"]) == 1:
         scenario_info = summary["scenarios"][0]
+
+    xml_dump_count = 0
+    xml_candidate_count = 0
+    xml_unique_label_count = 0
+    xml_unique_labels = set()
+    
+    if xml_dir and xml_dir.exists():
+        xml_files = list(xml_dir.glob("*.xml"))
+        xml_dump_count = len(xml_files)
         
+        for xml_file in xml_files:
+            try:
+                tree = ET.parse(xml_file)
+                root = tree.getroot()
+                for node in root.iter():
+                    text = node.get("text", "").strip()
+                    desc = node.get("content-desc", "").strip()
+                    rid = node.get("resource-id", "").strip()
+                    bounds = node.get("bounds", "").strip()
+                    pkg = node.get("package", "").strip()
+                    
+                    if pkg and pkg != "com.samsung.android.oneconnect":
+                        continue
+                    if not bounds or bounds == "[0,0][0,0]":
+                        continue
+                        
+                    label = desc if desc else text
+                    if not label and not rid:
+                        continue
+                        
+                    xml_candidate_count += 1
+                    if label:
+                        xml_unique_labels.add(label)
+            except Exception as e:
+                logging.warning(f"Failed to parse XML {xml_file}: {e}")
+                
+    xml_unique_label_count = len(xml_unique_labels)
+    
+    traversal_labels_set = set()
+    for stats in log_data.get("tab_stats", {}).values():
+        traversal_labels_set.update(stats.get("visible_labels_set", set()))
+        
+    xml_labels_not_seen = xml_unique_labels - traversal_labels_set
+    traversal_labels_not_in_xml = traversal_labels_set - xml_unique_labels
+
     avail_status = scenario_info.get("availability_status", "none")
     
     # Infer availability if summary is empty
@@ -507,7 +553,11 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
         "coverage_warnings": ", ".join(coverage_warnings),
         "coverage_source": log_data.get("coverage_source", "none"),
         "tab_stats_raw": {k: {**v, "visible_labels_set": list(v.get("visible_labels_set", set()))} for k, v in tab_stats.items()},
-        "expected_content_raw": [g[0] for g in (PLUGIN_EXPECTED_CONTENT.get(scenario_id, {}).get("required", []) if isinstance(PLUGIN_EXPECTED_CONTENT.get(scenario_id, []), dict) else PLUGIN_EXPECTED_CONTENT.get(scenario_id, []))]
+        "expected_content_raw": [g[0] for g in (PLUGIN_EXPECTED_CONTENT.get(scenario_id, {}).get("required", []) if isinstance(PLUGIN_EXPECTED_CONTENT.get(scenario_id, []), dict) else PLUGIN_EXPECTED_CONTENT.get(scenario_id, []))],
+        "xml_dump_count": xml_dump_count,
+        "xml_candidate_count": xml_candidate_count,
+        "xml_unique_label_count": xml_unique_label_count,
+        "xml_labels_not_seen_in_traversal_sample": ", ".join(list(xml_labels_not_seen)[:10])
     }
 
 def main():
@@ -603,7 +653,10 @@ def main():
         log_data = parse_run_results(normal_log, run_out_dir) if normal_log else parse_run_results(Path("nonexistent"), run_out_dir)
 
         
-        report = evaluate_scenario(sid, summary_data, log_data)
+        xml_dir = None
+        if normal_log:
+            xml_dir = run_out_dir / normal_log.name.replace(".normal.log", "") / sid / "xml_dumps"
+        report = evaluate_scenario(sid, summary_data, log_data, xml_dir)
         report["return_code"] = exec_info["return_code"]
         report["timed_out"] = exec_info["timed_out"]
         report["start_recovered"] = exec_info["start_recovered"]
@@ -681,6 +734,11 @@ def main():
             f.write(f"**Expected Content**: {', '.join(expected) if expected else 'None'}\n")
             f.write(f"**Missing Required**: {r.get('missing_required_content') if r.get('missing_required_content') else 'None'}\n")
             f.write(f"**Missing Review Expected**: {r.get('missing_review_expected_content') if r.get('missing_review_expected_content') else 'None'}\n")
+            f.write(f"**XML Summary**:\n")
+            f.write(f"* dumps: {r.get('xml_dump_count', 0)}\n")
+            f.write(f"* candidates: {r.get('xml_candidate_count', 0)}\n")
+            f.write(f"* unique labels: {r.get('xml_unique_label_count', 0)}\n")
+            f.write(f"* not seen in traversal sample: {r.get('xml_labels_not_seen_in_traversal_sample', 'None')}\n")
             f.write("---\n\n")
             
     print(f"\nAudit complete. Reports saved to {out_dir}")
