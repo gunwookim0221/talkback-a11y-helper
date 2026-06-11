@@ -14,6 +14,7 @@
 - helper/client API: [api-reference.md](api-reference.md)
 - Devices plugin 운영: [device-plugin-guide.md](device-plugin-guide.md)
 - Device Plugin Audit V3: [device-plugin-audit-guide.md](device-plugin-audit-guide.md)
+- Device Plugin Audit V4 Design: [design/audit-v4-xml-coverage-design.md](design/audit-v4-xml-coverage-design.md)
 - 신규 plugin onboarding: [plugin-onboarding-guide.md](plugin-onboarding-guide.md)
 - report row schema: [report-schema.md](report-schema.md)
 - i18n / locale matching: [i18n_locale_matching.md](i18n_locale_matching.md)
