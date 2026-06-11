@@ -17,6 +17,7 @@ except ImportError as e:
     TAB_CONFIGS = []
 
 from tools.audit_xml_candidates import extract_xml_candidates, sample_values
+from tools.audit_xml_coverage import calculate_xml_coverage
 
 def get_device_plugins() -> List[str]:
     return [
@@ -363,6 +364,7 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
 
     xml_summary = extract_xml_candidates(xml_dir)
     xml_unique_labels = xml_summary["xml_unique_labels"]
+    xml_coverage = calculate_xml_coverage(xml_summary["merged_candidates"], log_data.get("tab_stats", {}))
     
     traversal_labels_set = set()
     for stats in log_data.get("tab_stats", {}).values():
@@ -556,7 +558,20 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
         "review_candidates_sample": xml_summary["review_candidates_sample"],
         "exclude_candidates_sample": xml_summary["exclude_candidates_sample"],
         "candidate_classification_examples": xml_summary["candidate_classification_examples"],
+        "candidate_type_summary": xml_summary["candidate_type_summary"],
+        "actionable_candidates_sample": xml_summary["actionable_candidates_sample"],
+        "status_candidates_sample": xml_summary["status_candidates_sample"],
+        "empty_state_candidates_sample": xml_summary["empty_state_candidates_sample"],
+        "instructional_candidates_sample": xml_summary["instructional_candidates_sample"],
+        "chrome_candidates_sample": xml_summary["chrome_candidates_sample"],
+        "unknown_candidates_sample": xml_summary["unknown_candidates_sample"],
+        "candidate_policy_recommendations": xml_summary["candidate_policy_recommendations"],
+        "candidate_policy_recommendation_summary": xml_summary["candidate_policy_recommendation_summary"],
+        "candidate_policy_examples": xml_summary["candidate_policy_examples"],
+        "hypothetical_denominator_count": xml_summary["hypothetical_denominator_count"],
+        "hypothetical_denominator_delta": xml_summary["hypothetical_denominator_delta"],
         "merged_candidates_sample": xml_summary["merged_candidates"][:10],
+        **xml_coverage,
     }
 
 def main():
@@ -747,6 +762,28 @@ def main():
             f.write(f"* review candidates sample: {r.get('review_candidates_sample', 'None')}\n")
             f.write(f"* exclude candidates sample: {r.get('exclude_candidates_sample', 'None')}\n")
             f.write(f"* candidate classification examples: {r.get('candidate_classification_examples', 'None')}\n")
+            f.write(f"* candidate type summary: {r.get('candidate_type_summary', {})}\n")
+            f.write(f"* actionable candidates sample: {r.get('actionable_candidates_sample', 'None')}\n")
+            f.write(f"* status candidates sample: {r.get('status_candidates_sample', 'None')}\n")
+            f.write(f"* empty state candidates sample: {r.get('empty_state_candidates_sample', 'None')}\n")
+            f.write(f"* instructional candidates sample: {r.get('instructional_candidates_sample', 'None')}\n")
+            f.write(f"* chrome candidates sample: {r.get('chrome_candidates_sample', 'None')}\n")
+            f.write(f"* unknown candidates sample: {r.get('unknown_candidates_sample', 'None')}\n")
+            f.write(f"* candidate policy recommendations: {r.get('candidate_policy_recommendations', {})}\n")
+            f.write(f"* candidate policy recommendation summary: {r.get('candidate_policy_recommendation_summary', {})}\n")
+            f.write(f"* candidate policy examples: {r.get('candidate_policy_examples', 'None')}\n")
+            f.write(f"* hypothetical denominator: {r.get('hypothetical_denominator_count', 0)}\n")
+            f.write(f"* hypothetical denominator delta: {r.get('hypothetical_denominator_delta', 0)}\n")
+            f.write(f"* coverage policy: {r.get('coverage_policy', 'None')}\n")
+            f.write(f"* coverage denominator: {r.get('coverage_denominator_count', 0)}\n")
+            f.write(f"* coverage matched: {r.get('coverage_matched_count', 0)}\n")
+            f.write(f"* coverage missing: {r.get('coverage_missing_count', 0)}\n")
+            f.write(f"* coverage percent: {r.get('coverage_percent', 0.0)}\n")
+            f.write(f"* coverage matched sample: {r.get('coverage_matched_labels_sample', 'None')}\n")
+            f.write(f"* coverage missing sample: {r.get('coverage_missing_labels_sample', 'None')}\n")
+            f.write(f"* coverage missing reason sample: {r.get('coverage_missing_reason_sample', 'None')}\n")
+            f.write(f"* coverage extra traversal sample: {r.get('coverage_extra_traversal_labels_sample', 'None')}\n")
+            f.write(f"* coverage by tab: {r.get('coverage_by_tab', {})}\n")
             f.write("---\n\n")
             
     print(f"\nAudit complete. Reports saved to {out_dir}")

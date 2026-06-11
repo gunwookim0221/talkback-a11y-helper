@@ -10,6 +10,20 @@ from tools.audit_xml_filters import (
     sample_candidates_by_classification,
     summarize_candidate_classifications,
 )
+from tools.audit_xml_policy import (
+    ACTIONABLE,
+    CHROME,
+    EMPTY_STATE,
+    INSTRUCTIONAL,
+    STATUS,
+    UNKNOWN,
+    apply_candidate_policy_diagnostics,
+    policy_examples,
+    policy_recommendation_map,
+    sample_candidates_by_type,
+    summarize_candidate_types,
+    summarize_policy_recommendations,
+)
 
 
 EXCLUDE_RULE_TODO_LABELS = (
@@ -82,6 +96,25 @@ def extract_xml_candidates(xml_dir: Path | None) -> Dict[str, Any]:
             "review_candidates_sample": "",
             "exclude_candidates_sample": "",
             "candidate_classification_examples": "",
+            "candidate_type_summary": {
+                ACTIONABLE: 0,
+                STATUS: 0,
+                EMPTY_STATE: 0,
+                INSTRUCTIONAL: 0,
+                CHROME: 0,
+                UNKNOWN: 0,
+            },
+            "actionable_candidates_sample": "",
+            "status_candidates_sample": "",
+            "empty_state_candidates_sample": "",
+            "instructional_candidates_sample": "",
+            "chrome_candidates_sample": "",
+            "unknown_candidates_sample": "",
+            "candidate_policy_recommendations": {},
+            "candidate_policy_recommendation_summary": {"KEEP": 0, "REVIEW": 0, "EXCLUDE": 0},
+            "candidate_policy_examples": "",
+            "hypothetical_denominator_count": 0,
+            "hypothetical_denominator_delta": 0,
         }
 
     xml_files = sorted(xml_dir.glob("*.xml"))
@@ -102,6 +135,8 @@ def extract_xml_candidates(xml_dir: Path | None) -> Dict[str, Any]:
             class_name = node.get("class", "").strip()
             bounds = node.get("bounds", "").strip()
             pkg = node.get("package", "").strip()
+            focusable = node.get("focusable", "").strip().lower()
+            clickable = node.get("clickable", "").strip().lower()
 
             if pkg and pkg != "com.samsung.android.oneconnect":
                 continue
@@ -120,6 +155,8 @@ def extract_xml_candidates(xml_dir: Path | None) -> Dict[str, Any]:
                     "resource_id": rid,
                     "class": class_name,
                     "bounds": bounds,
+                    "focusable": focusable,
+                    "clickable": clickable,
                     "label": label,
                     "tabs": set(),
                     "dump_files": set(),
@@ -143,6 +180,8 @@ def extract_xml_candidates(xml_dir: Path | None) -> Dict[str, Any]:
                     "resource_ids": set(),
                     "classes": set(),
                     "bounds": set(),
+                    "focusable_values": set(),
+                    "clickable_values": set(),
                 },
             )
             merged_candidate["tabs"].add(inferred_tab)
@@ -153,6 +192,10 @@ def extract_xml_candidates(xml_dir: Path | None) -> Dict[str, Any]:
                 merged_candidate["classes"].add(class_name)
             if bounds:
                 merged_candidate["bounds"].add(bounds)
+            if focusable:
+                merged_candidate["focusable_values"].add(focusable)
+            if clickable:
+                merged_candidate["clickable_values"].add(clickable)
 
         for label_key in labels_seen_in_dump:
             merged_candidates_by_key[label_key].setdefault("xml_dump_count", 0)
@@ -175,13 +218,18 @@ def extract_xml_candidates(xml_dir: Path | None) -> Dict[str, Any]:
             "resource_ids": sorted(candidate["resource_ids"]),
             "classes": sorted(candidate["classes"]),
             "bounds": sorted(candidate["bounds"]),
+            "focusable_values": sorted(candidate["focusable_values"]),
+            "clickable_values": sorted(candidate["clickable_values"]),
             "xml_dump_count": int(candidate.get("xml_dump_count", 0) or 0),
         }
         for candidate in merged_candidates_by_key.values()
     ]
     for candidate in merged_candidates:
         candidate.update(classify_xml_candidate(candidate))
+        candidate.update(apply_candidate_policy_diagnostics(candidate))
     merged_candidates = sorted(merged_candidates, key=lambda candidate: str(candidate.get("label", "")).lower())
+    classification_summary = summarize_candidate_classifications(merged_candidates)
+    policy_summary = summarize_policy_recommendations(merged_candidates)
 
     tab_counts: dict[str, int] = {}
     for candidate in merged_candidates:
@@ -202,9 +250,21 @@ def extract_xml_candidates(xml_dir: Path | None) -> Dict[str, Any]:
         "candidate_exclusion_todo": (
             f"{EXCLUDE_RULE_TODO_NOTE} Labels to review: {', '.join(EXCLUDE_RULE_TODO_LABELS)}"
         ),
-        "candidate_classification_summary": summarize_candidate_classifications(merged_candidates),
+        "candidate_classification_summary": classification_summary,
         "keep_candidates_sample": sample_candidates_by_classification(merged_candidates, "KEEP"),
         "review_candidates_sample": sample_candidates_by_classification(merged_candidates, "REVIEW"),
         "exclude_candidates_sample": sample_candidates_by_classification(merged_candidates, "EXCLUDE"),
         "candidate_classification_examples": classification_examples(merged_candidates),
+        "candidate_type_summary": summarize_candidate_types(merged_candidates),
+        "actionable_candidates_sample": sample_candidates_by_type(merged_candidates, ACTIONABLE),
+        "status_candidates_sample": sample_candidates_by_type(merged_candidates, STATUS),
+        "empty_state_candidates_sample": sample_candidates_by_type(merged_candidates, EMPTY_STATE),
+        "instructional_candidates_sample": sample_candidates_by_type(merged_candidates, INSTRUCTIONAL),
+        "chrome_candidates_sample": sample_candidates_by_type(merged_candidates, CHROME),
+        "unknown_candidates_sample": sample_candidates_by_type(merged_candidates, UNKNOWN),
+        "candidate_policy_recommendations": policy_recommendation_map(merged_candidates),
+        "candidate_policy_recommendation_summary": policy_summary,
+        "candidate_policy_examples": policy_examples(merged_candidates),
+        "hypothetical_denominator_count": policy_summary.get("KEEP", 0),
+        "hypothetical_denominator_delta": classification_summary.get("KEEP", 0) - policy_summary.get("KEEP", 0),
     }

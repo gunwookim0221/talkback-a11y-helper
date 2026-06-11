@@ -7,6 +7,7 @@ import sys
 import os
 from tools.audit_device_plugins import parse_run_results, evaluate_scenario, parse_summary_json, main
 from tools.audit_xml_candidates import extract_xml_candidates
+from tools.audit_xml_coverage import calculate_xml_coverage, normalize_coverage_label
 from tools.audit_xml_filters import classify_xml_candidate
 
 @pytest.fixture
@@ -321,6 +322,8 @@ def test_xml_parser_extracts_candidate_fields(tmp_path):
     assert candidate["resource_id"] == "com.samsung.android.oneconnect:id/status"
     assert candidate["class"] == "android.widget.TextView"
     assert candidate["bounds"] == "[1,2][3,4]"
+    assert candidate["focusable"] == ""
+    assert candidate["clickable"] == ""
 
 def test_xml_parser_deduplicates_duplicate_nodes(tmp_path):
     xml_dir = tmp_path / "xml_dumps"
@@ -391,10 +394,126 @@ def test_xml_candidate_classification_keeps_merged_count_without_filtering(tmp_p
     assert "SmartThings Plugin" in summary["review_candidates_sample"]
     assert "Navigate up" in summary["exclude_candidates_sample"]
 
+def test_xml_candidate_policy_diagnostics_do_not_change_classification(tmp_path):
+    xml_dir = tmp_path / "xml_dumps"
+    xml_dir.mkdir()
+    (xml_dir / "000_step_001_local_tab_transition_History.xml").write_text(
+        """<hierarchy>
+  <node text="No history" resource-id="" class="android.widget.TextView" package="com.samsung.android.oneconnect" focusable="false" clickable="false" bounds="[1,2][3,4]" />
+  <node text="Add routine" resource-id="ADDROUTINE" class="android.widget.Button" package="com.samsung.android.oneconnect" focusable="true" clickable="true" bounds="[5,6][7,8]" />
+  <node text="Motion detected" resource-id="" class="android.widget.TextView" package="com.samsung.android.oneconnect" focusable="false" clickable="false" bounds="[9,10][11,12]" />
+  <node text="Navigate up" resource-id="back" class="android.widget.Button" package="com.samsung.android.oneconnect" bounds="[13,14][15,16]" />
+</hierarchy>""",
+        encoding="utf-8",
+    )
+
+    summary = extract_xml_candidates(xml_dir)
+    by_label = {candidate["label"]: candidate for candidate in summary["merged_candidates"]}
+
+    assert summary["candidate_classification_summary"] == {"KEEP": 3, "REVIEW": 0, "EXCLUDE": 1}
+    assert by_label["No history"]["classification"] == "KEEP"
+    assert by_label["No history"]["candidate_type"] == "EMPTY_STATE"
+    assert by_label["No history"]["policy_recommendation"] == "REVIEW"
+    assert by_label["Add routine"]["classification"] == "KEEP"
+    assert by_label["Add routine"]["candidate_type"] == "ACTIONABLE"
+    assert by_label["Add routine"]["policy_recommendation"] == "REVIEW"
+    assert by_label["Motion detected"]["classification"] == "KEEP"
+    assert by_label["Motion detected"]["candidate_type"] == "STATUS"
+    assert by_label["Motion detected"]["policy_recommendation"] == "KEEP"
+    assert by_label["Navigate up"]["classification"] == "EXCLUDE"
+    assert by_label["Navigate up"]["candidate_type"] == "CHROME"
+    assert summary["candidate_policy_recommendation_summary"] == {"KEEP": 1, "REVIEW": 2, "EXCLUDE": 1}
+    assert summary["hypothetical_denominator_count"] == 1
+    assert summary["hypothetical_denominator_delta"] == 2
+
 def test_xml_candidate_classifier_rules():
     assert classify_xml_candidate({"label": "More options", "resource_ids": [], "classes": []})["classification"] == "EXCLUDE"
     assert classify_xml_candidate({"label": "Battery", "resource_ids": [], "classes": []})["classification"] == "KEEP"
     assert classify_xml_candidate({"label": "Example: every day, 6:00 PM - 10:00 PM", "resource_ids": [], "classes": []})["classification"] == "REVIEW"
+
+def test_xml_coverage_uses_keep_candidates_only():
+    merged_candidates = [
+        {"label": "Motion sensor", "classification": "KEEP", "tabs": ["Controls"]},
+        {"label": "Battery", "classification": "KEEP", "tabs": ["Controls"]},
+        {"label": "No history", "classification": "KEEP", "policy_recommendation": "REVIEW", "tabs": ["Controls"]},
+        {"label": "SmartThings Plugin", "classification": "REVIEW", "policy_recommendation": "KEEP", "tabs": ["Controls"]},
+        {"label": "Navigate up", "classification": "EXCLUDE", "tabs": ["Controls"]},
+    ]
+    tab_stats = {
+        "Controls": {
+            "visible_labels_set": {"Motion sensor", "SmartThings Plugin", "Navigate up", "Unrelated label"}
+        }
+    }
+
+    coverage = calculate_xml_coverage(merged_candidates, tab_stats)
+
+    assert coverage["coverage_denominator_count"] == 3
+    assert coverage["coverage_matched_count"] == 1
+    assert coverage["coverage_missing_count"] == 2
+    assert coverage["coverage_percent"] == 33.3
+    assert coverage["coverage_matched_labels_sample"] == "Motion sensor"
+    assert coverage["coverage_missing_labels_sample"] == "Battery, No history"
+    assert "Battery: xml_only" in coverage["coverage_missing_reason_sample"]
+    assert "No history: xml_only" in coverage["coverage_missing_reason_sample"]
+    assert "SmartThings Plugin" in coverage["coverage_extra_traversal_labels_sample"]
+    assert coverage["coverage_policy"] == "denominator=KEEP_ONLY; matching=normalized_exact; verdict=diagnostic_only"
+    assert coverage["coverage_by_tab"]["Controls"]["denominator"] == 3
+    assert coverage["coverage_by_tab"]["Controls"]["matched"] == 1
+
+def test_xml_coverage_normalizes_case_and_whitespace_without_fuzzy_matching():
+    merged_candidates = [
+        {"label": "Motion sensor", "classification": "KEEP", "tabs": ["Controls"]},
+        {"label": "Battery", "classification": "KEEP", "tabs": ["Controls"]},
+    ]
+    tab_stats = {"Controls": {"visible_labels_set": {"  motion   SENSOR  ", "Battery level"}}}
+
+    coverage = calculate_xml_coverage(merged_candidates, tab_stats)
+
+    assert normalize_coverage_label("  motion   SENSOR  ") == "motion sensor"
+    assert coverage["coverage_matched_count"] == 1
+    assert coverage["coverage_missing_labels_sample"] == "Battery"
+
+def test_xml_coverage_missing_reason_diagnostics():
+    merged_candidates = [
+        {
+            "label": "Motion detected",
+            "classification": "KEEP",
+            "tabs": ["Controls"],
+            "classes": ["android.widget.TextView"],
+            "resource_ids": [],
+            "focusable_values": ["false"],
+            "clickable_values": ["false"],
+        },
+        {
+            "label": "Add routine",
+            "classification": "KEEP",
+            "tabs": ["Routines"],
+            "classes": ["android.widget.Button"],
+            "resource_ids": ["ADDROUTINE"],
+            "focusable_values": ["true"],
+            "clickable_values": ["true"],
+        },
+        {
+            "label": "No history",
+            "classification": "KEEP",
+            "tabs": ["History"],
+            "classes": ["android.widget.TextView"],
+            "resource_ids": [],
+            "focusable_values": ["false"],
+            "clickable_values": ["false"],
+        },
+    ]
+    tab_stats = {
+        "Controls": {"visible_labels_set": {"Motion sensor History Motion detected"}},
+        "Routines": {"visible_labels_set": {"History"}},
+        "History": {"visible_labels_set": {"History"}},
+    }
+
+    coverage = calculate_xml_coverage(merged_candidates, tab_stats)
+
+    assert "Motion detected: matching_mismatch_contained_in_traversal:Motion sensor History Motion detected" in coverage["coverage_missing_reason_sample"]
+    assert "Add routine: xml_only_actionable_candidate" in coverage["coverage_missing_reason_sample"]
+    assert "No history: xml_only_static_text_or_status" in coverage["coverage_missing_reason_sample"]
 
 def test_missing_xml_dumps_directory_does_not_fail_audit(tmp_path):
     log_data = {
@@ -465,7 +584,29 @@ def test_xml_diagnostic_fields_exist_in_report(tmp_path):
         "review_candidates_sample",
         "exclude_candidates_sample",
         "candidate_classification_examples",
+        "candidate_type_summary",
+        "actionable_candidates_sample",
+        "status_candidates_sample",
+        "empty_state_candidates_sample",
+        "instructional_candidates_sample",
+        "chrome_candidates_sample",
+        "unknown_candidates_sample",
+        "candidate_policy_recommendations",
+        "candidate_policy_recommendation_summary",
+        "candidate_policy_examples",
+        "hypothetical_denominator_count",
+        "hypothetical_denominator_delta",
         "merged_candidates_sample",
+        "coverage_denominator_count",
+        "coverage_matched_count",
+        "coverage_missing_count",
+        "coverage_percent",
+        "coverage_matched_labels_sample",
+        "coverage_missing_labels_sample",
+        "coverage_missing_reason_sample",
+        "coverage_extra_traversal_labels_sample",
+        "coverage_policy",
+        "coverage_by_tab",
     ):
         assert key in report
     assert report["xml_dump_count"] == 1
@@ -496,3 +637,4 @@ def test_xml_diagnostics_do_not_change_v3_verdict(tmp_path):
     assert without_xml["verdict"] == "PASS"
     assert with_xml["verdict"] == without_xml["verdict"]
     assert with_xml["xml_labels_not_seen_in_traversal_sample"] == "Never visited label"
+    assert with_xml["coverage_policy"].endswith("verdict=diagnostic_only")
