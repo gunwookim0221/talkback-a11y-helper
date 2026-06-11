@@ -23,6 +23,41 @@ def get_device_plugins() -> List[str]:
         if cfg.get("scenario_id", "").startswith("device_") and cfg.get("scenario_id") != "devices_main"
     ]
 
+PLUGIN_EXPECTED_CONTENT = {
+    "device_motion_sensor_plugin": [
+        ["Motion sensor", "No motion"],
+        ["Battery", "%"]
+    ],
+    "device_door_lock_plugin": [
+        ["Lock", "Unlock"]
+    ],
+    "device_audio_plugin": [
+        ["Play", "Pause"],
+        ["Next", "Previous", "Volume", "Mute"]
+    ],
+    "device_tv_plugin": [
+        ["On", "Off", "Volume", "Mute", "Channel", "Source"]
+    ],
+    "device_camera_plugin": [
+        ["Camera", "Live", "Connecting", "History"]
+    ],
+    "device_home_camera_plugin": [
+        ["Camera", "Offline", "Live", "Connecting"]
+    ],
+    "device_air_purifier_plugin": [
+        ["Air purifier", "Air quality", "PM", "Filter", "Fan", "On", "Off"]
+    ],
+    "device_humidity_sensor_plugin": [
+        ["Humidity", "%", "Vibration sensor"]
+    ],
+    "device_temperature_humidity_sensor_plugin": [
+        ["Temperature", "℃", "°C", "Humidity", "%", "Vibration sensor"]
+    ],
+    "device_washer_plugin": [
+        ["Washer", "On", "Off", "Start", "Status"]
+    ]
+}
+
 def before_each_scenario_reset(serial: str, dry_run: bool) -> bool:
     if dry_run or not serial:
         return True
@@ -75,7 +110,8 @@ def parse_run_results(log_path: Path, run_out_dir: Path) -> Dict[str, Any]:
         "target_entered": None,
         "inventory_found": False,
         "stop_reason": "",
-        "tab_stats": {}
+        "tab_stats": {},
+        "coverage_source": "none"
     }
     
     xlsx_labels = {}
@@ -273,6 +309,20 @@ def parse_run_results(log_path: Path, run_out_dir: Path) -> Dict[str, Any]:
     except Exception as e:
         print(f"Error parsing log {log_path}: {e}")
         
+    has_xlsx_labels = any(len(v) > 0 for v in xlsx_labels.values())
+    has_log_labels = False
+    for t_stats in result["tab_stats"].values():
+        if t_stats["focus_count"] > 0 or t_stats["representative_count"] > 0:
+            has_log_labels = True
+            break
+            
+    if has_xlsx_labels and has_log_labels:
+        result["coverage_source"] = "both"
+    elif has_xlsx_labels:
+        result["coverage_source"] = "xlsx"
+    elif has_log_labels:
+        result["coverage_source"] = "log"
+
     return result
 
 def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -319,18 +369,13 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
             coverage_warnings.append(f"{t} skipped immediately")
 
     # Plugin specific rules
-    if scenario_id == "device_motion_sensor_plugin" and "Controls" in tab_stats:
-        controls_labels = tab_stats["Controls"].get("visible_labels_set", set())
-        controls_text = " ".join(controls_labels).lower()
-        has_motion = "motion sensor" in controls_text or "no motion" in controls_text
-        has_vib = "vibration sensor" in controls_text
-        has_temp = "temperature" in controls_text or re.search(r"(\d+\s*degree|℃|℉|°c|°f)", controls_text)
-        has_batt = "battery" in controls_text or "%" in controls_text
-        
-        if not has_motion: missing_content.append("Motion sensor status")
-        if not has_vib: missing_content.append("Vibration sensor")
-        if not has_temp: missing_content.append("Temperature")
-        if not has_batt: missing_content.append("Battery")
+    expected_groups = PLUGIN_EXPECTED_CONTENT.get(scenario_id, [])
+    all_text = " ".join(" ".join(stats.get("visible_labels_set", set())) for stats in tab_stats.values()).lower()
+    for group in expected_groups:
+        # Check if at least one item in the group is in all_text
+        if not any(item.lower() in all_text for item in group):
+            missing_content.append(group[0])
+
 
     # Base failure states
     if log_data["preflight_fail"]:
@@ -432,7 +477,10 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
         "tab_coverage_summary": " | ".join(tab_coverage_summary),
         "missing_content": ", ".join(missing_content),
         "tabs_exhausted": ", ".join(tabs_exhausted_info),
-        "coverage_warnings": ", ".join(coverage_warnings)
+        "coverage_warnings": ", ".join(coverage_warnings),
+        "coverage_source": log_data.get("coverage_source", "none"),
+        "tab_stats_raw": {k: {**v, "visible_labels_set": list(v.get("visible_labels_set", set()))} for k, v in tab_stats.items()},
+        "expected_content_raw": [g[0] for g in PLUGIN_EXPECTED_CONTENT.get(scenario_id, [])]
     }
 
 def main():
@@ -580,10 +628,32 @@ def main():
         f.write(f"* value_exclusion: {value_exclusion_issues}\n")
         f.write(f"* repeat_no_progress: {repeat_no_progress_issues}\n\n")
 
-        f.write("| Scenario ID | Verdict | Tabs | Tab Coverage | Missing Content | Reason |\n")
-        f.write("|-------------|---------|------|--------------|-----------------|--------|\n")
+        f.write("## Detailed Reports\n\n")
         for r in results:
-            f.write(f"| {r['scenario_id']} | {r['verdict']} | {r['detected_tabs']} | {r['tab_coverage_summary']} | {r['missing_content']} | {r['reason']} |\n")
+            f.write(f"### {r['scenario_id']}\n")
+            f.write(f"**Verdict**: {r['verdict']}\n")
+            f.write(f"**Reason**: {r['reason']}\n")
+            f.write(f"**Coverage Source**: {r.get('coverage_source', 'none')}\n")
+            f.write(f"**Detected Tabs**: {r['detected_tabs']}\n\n")
+            f.write("**Coverage:**\n")
+            
+            tab_stats = r.get("tab_stats_raw", {})
+            for t_name, stats in tab_stats.items():
+                if t_name == "(?i).*devices.*":
+                    continue
+                f.write(f"- **{t_name}**\n")
+                labels = list(stats.get("visible_labels_set", set()))
+                if labels:
+                    for l in labels:
+                        f.write(f"  - {l}\n")
+                else:
+                    f.write(f"  - No labels found\n")
+            f.write("\n")
+            
+            expected = r.get('expected_content_raw', [])
+            f.write(f"**Expected Content**: {', '.join(expected) if expected else 'None'}\n")
+            f.write(f"**Missing**: {r['missing_content'] if r['missing_content'] else 'None'}\n")
+            f.write("---\n\n")
             
     print(f"\nAudit complete. Reports saved to {out_dir}")
 

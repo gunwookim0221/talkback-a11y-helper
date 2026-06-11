@@ -263,20 +263,20 @@ def test_repeat_no_progress_before_all_tabs_exhausted():
     assert "repeat_no_progress" in report["reason"]
     assert "not exhausted" in report["reason"]
 
-def test_motion_sensor_missing_temperature():
+def test_motion_sensor_missing_battery():
     log_data = {
         "detected_tabs": ["Controls"], "visited_tabs": ["Controls"], "preflight_fail": False, "crash": False,
         "target_entered": "Motion Sensor", "inventory_found": True,
         "value_exclusion_warnings": [], "boundary_warnings": [], "repeat_warnings": [],
         "tab_stats": {
-            "Controls": {"viewport_exhausted": True, "unique_visible_labels": 4, "visible_labels_set": {"Motion sensor", "Vibration sensor", "100%"}}
+            "Controls": {"viewport_exhausted": True, "unique_visible_labels": 2, "visible_labels_set": {"Motion sensor", "Vibration sensor"}}
         }
     }
     summary = {"scenarios": [{"id": "device_motion_sensor_plugin", "availability_status": "none"}]}
     report = evaluate_scenario("device_motion_sensor_plugin", summary, log_data)
     assert report["verdict"] == "REVIEW"
     assert "missing content coverage" in report["reason"]
-    assert "Temperature" in report["missing_content"]
+    assert "Battery" in report["missing_content"]
 
 def test_motion_sensor_content_complete():
     log_data = {
