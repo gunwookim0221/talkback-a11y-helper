@@ -10415,6 +10415,183 @@ def test_collect_tab_rows_food_post_traversal_handoff_enters_food_home(monkeypat
     assert any(row.get("step_index") == 3 and row.get("visible_label") == "Suggestions" for row in rows)
 
 
+def _food_onboarding_nodes():
+    return [
+        {"text": "Smart Things Cooking", "className": "android.webkit.WebView", "focusable": True},
+        {"text": "Cook like an expert with customized recipes.", "className": "android.widget.TextView"},
+        {"text": "Customized recipes are recommended based on the ingredients in your refrigerator.", "className": "android.widget.TextView"},
+        {
+            "text": "Start",
+            "className": "android.widget.Button",
+            "clickable": True,
+            "focusable": True,
+            "boundsInScreen": "180,2266,900,2425",
+        },
+    ]
+
+
+def test_food_onboarding_landing_detection_requires_food_intro_and_start_button():
+    detected = collection_flow._find_food_onboarding_start_node(
+        {"nodes": _food_onboarding_nodes(), "texts": [node["text"] for node in _food_onboarding_nodes()]}
+    )
+    assert detected is not None
+    assert detected["text"] == "Start"
+
+    assert (
+        collection_flow._find_food_onboarding_start_node(
+            {
+                "nodes": [{"text": "Smart Things Cooking", "className": "android.webkit.WebView", "focusable": True}],
+                "texts": ["Smart Things Cooking"],
+            }
+        )
+        is None
+    )
+    assert (
+        collection_flow._find_food_onboarding_start_node(
+            {
+                "nodes": [
+                    {
+                        "text": "Start",
+                        "className": "android.widget.Button",
+                        "clickable": True,
+                        "focusable": True,
+                        "boundsInScreen": "180,2266,900,2425",
+                    }
+                ],
+                "texts": ["Start"],
+            }
+        )
+        is None
+    )
+
+
+def test_food_onboarding_complete_annotation_is_diagnostic_only(monkeypatch):
+    client = DummyClient([])
+    row = {
+        "visible_label": "Start",
+        "focus_class_name": "android.widget.Button",
+    }
+    monkeypatch.setattr(
+        collection_flow,
+        "_collect_runtime_screen_snapshot",
+        lambda *args, **kwargs: {
+            "nodes": _food_onboarding_nodes(),
+            "texts": [node["text"] for node in _food_onboarding_nodes()],
+        },
+    )
+
+    annotated = collection_flow._annotate_food_onboarding_complete(
+        client,
+        "SERIAL",
+        {"scenario_id": "life_food_plugin"},
+        row,
+        stop=True,
+        reason="repeat_no_progress",
+        wait_seconds=0.1,
+    )
+
+    assert annotated is True
+    assert row["food_onboarding_complete"] is True
+    assert row["food_onboarding_complete_reason"] == "repeat_no_progress_on_onboarding_cta"
+    assert row["diagnostic_stop_reason"] == "food_onboarding_complete"
+    assert row["repeat_diagnostic_reason"] == "repeat_no_progress_on_onboarding_cta"
+    assert "stop_reason" not in row
+    assert client.tap_xy_adb_calls == []
+
+
+def test_food_onboarding_complete_annotation_uses_xml_fallback(monkeypatch):
+    client = DummyClient([])
+    row = {
+        "visible_label": "Start",
+        "focus_class_name": "android.widget.Button",
+    }
+    monkeypatch.setattr(collection_flow, "_collect_runtime_screen_snapshot", lambda *args, **kwargs: {"nodes": [], "texts": []})
+    monkeypatch.setattr(
+        collection_flow,
+        "_load_scrolltouch_xml_nodes",
+        lambda **kwargs: (_food_onboarding_nodes(), "ok"),
+    )
+
+    annotated = collection_flow._annotate_food_onboarding_complete(
+        client,
+        "SERIAL",
+        {"scenario_id": "life_food_plugin"},
+        row,
+        stop=True,
+        reason="repeat_no_progress",
+        wait_seconds=0.1,
+    )
+
+    assert annotated is True
+    assert row["food_onboarding_detection_source"] == "xml"
+    assert client.tap_xy_adb_calls == []
+
+
+def test_food_onboarding_complete_annotation_is_food_only(monkeypatch):
+    client = DummyClient([])
+    row = {
+        "visible_label": "Start",
+        "focus_class_name": "android.widget.Button",
+    }
+    monkeypatch.setattr(
+        collection_flow,
+        "_collect_runtime_screen_snapshot",
+        lambda *args, **kwargs: {
+            "nodes": _food_onboarding_nodes(),
+            "texts": [node["text"] for node in _food_onboarding_nodes()],
+        },
+    )
+
+    annotated = collection_flow._annotate_food_onboarding_complete(
+        client,
+        "SERIAL",
+        {"scenario_id": "life_home_care_plugin"},
+        row,
+        stop=True,
+        reason="repeat_no_progress",
+        wait_seconds=0.1,
+    )
+
+    assert annotated is False
+    assert "food_onboarding_complete" not in row
+    assert client.tap_xy_adb_calls == []
+
+
+def test_food_onboarding_complete_annotation_skips_food_home_tabs(monkeypatch):
+    client = DummyClient([])
+    row = {
+        "visible_label": "Start",
+        "focus_class_name": "android.widget.Button",
+    }
+    nodes = [
+        *_food_onboarding_nodes(),
+        {"text": "Home", "className": "android.widget.TextView", "focusable": True, "boundsInScreen": "0,2300,200,2400"},
+        {"text": "Search", "className": "android.widget.TextView", "focusable": True, "boundsInScreen": "200,2300,400,2400"},
+        {"text": "Communities", "className": "android.widget.TextView", "focusable": True, "boundsInScreen": "400,2300,650,2400"},
+        {"text": "My", "className": "android.widget.TextView", "focusable": True, "boundsInScreen": "650,2300,800,2400"},
+        {"text": "Scan", "className": "android.widget.TextView", "focusable": True, "boundsInScreen": "800,2300,1000,2400"},
+    ]
+    monkeypatch.setattr(
+        collection_flow,
+        "_collect_runtime_screen_snapshot",
+        lambda *args, **kwargs: {"nodes": nodes, "texts": [str(node.get("text", "")) for node in nodes]},
+    )
+
+    annotated = collection_flow._annotate_food_onboarding_complete(
+        client,
+        "SERIAL",
+        _scenario_config("life_food_plugin"),
+        row,
+        stop=True,
+        reason="repeat_no_progress",
+        wait_seconds=0.1,
+    )
+
+    assert annotated is False
+    assert "food_onboarding_complete" not in row
+    assert client.tap_xy_adb_calls == []
+
+
 def test_collect_tab_rows_non_food_does_not_attempt_food_home_handoff(monkeypatch):
     client = DummyClient([_anchor_row(), _main_row(1)])
     client.dump_tree_sequence = [_food_recipe_detail_nodes()]

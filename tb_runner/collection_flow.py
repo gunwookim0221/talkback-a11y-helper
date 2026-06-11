@@ -1750,6 +1750,137 @@ def _tap_node_center(client: A11yAdbClient, dev: str, node: dict[str, Any]) -> b
     return False
 
 
+def _food_onboarding_source_text(snapshot: dict[str, Any]) -> str:
+    if not isinstance(snapshot, dict):
+        return ""
+    text_values = snapshot.get("texts", [])
+    if not isinstance(text_values, list):
+        text_values = []
+    return " ".join(
+        str(value or "")
+        for value in [
+            *[str(text or "") for text in text_values if str(text or "").strip()],
+            snapshot.get("label", ""),
+            snapshot.get("speech", ""),
+        ]
+    ).lower()
+
+
+def _find_food_onboarding_start_node(snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(snapshot, dict):
+        return None
+    nodes = snapshot.get("nodes", [])
+    if not isinstance(nodes, list) or not nodes:
+        return None
+    source_text = _food_onboarding_source_text(snapshot)
+    if "smart things cooking" not in source_text and "smartthings cooking" not in source_text:
+        return None
+    if "cook like an expert" not in source_text and "customized recipes" not in source_text:
+        return None
+    for node, _parent in _iter_tree_nodes_with_parent(nodes):
+        if not _node_is_visible(node):
+            continue
+        label = _node_label_blob(node).strip()
+        if label.lower() != "start":
+            continue
+        class_name = str(node.get("className", "") or node.get("class", "") or "").strip().lower()
+        if "button" not in class_name:
+            continue
+        if not bool(node.get("clickable")) or not bool(node.get("focusable")):
+            continue
+        return node
+    return None
+
+
+def _is_food_onboarding_landing_snapshot(snapshot: dict[str, Any]) -> bool:
+    return _find_food_onboarding_start_node(snapshot) is not None
+
+
+def _row_is_food_onboarding_start_focus(row: dict[str, Any]) -> bool:
+    labels = [
+        row.get("visible_label", ""),
+        row.get("focus_text", ""),
+        row.get("focus_content_description", ""),
+        row.get("merged_announcement", ""),
+        row.get("talkback_speech", ""),
+    ]
+    focus_node = row.get("focus_node", {})
+    if isinstance(focus_node, dict):
+        labels.extend(
+            [
+                focus_node.get("text", ""),
+                focus_node.get("contentDescription", ""),
+                focus_node.get("talkbackLabel", ""),
+                focus_node.get("mergedLabel", ""),
+            ]
+        )
+        class_name = str(focus_node.get("className", "") or focus_node.get("class", "") or "").lower()
+    else:
+        class_name = ""
+    row_class_name = str(row.get("focus_class_name", "") or row.get("class_name", "") or "").lower()
+    if row_class_name:
+        class_name = row_class_name
+    normalized_labels = {str(label or "").strip().lower() for label in labels if str(label or "").strip()}
+    start_reached = bool({"start", "start start"} & normalized_labels)
+    button_like = not class_name or "button" in class_name
+    return bool(start_reached and button_like)
+
+
+def _annotate_food_onboarding_complete(
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict[str, Any],
+    row: dict[str, Any],
+    *,
+    stop: bool,
+    reason: str,
+    wait_seconds: float,
+) -> bool:
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip()
+    if scenario_id != "life_food_plugin" or not stop or reason != "repeat_no_progress":
+        return False
+    if not _row_is_food_onboarding_start_focus(row):
+        return False
+
+    snapshot = _collect_runtime_screen_snapshot(client, dev, wait_seconds=wait_seconds)
+    detection_source = "helper"
+    if not _is_food_onboarding_landing_snapshot(snapshot):
+        xml_nodes, xml_reason = _load_scrolltouch_xml_nodes(client=client, dev=dev)
+        if xml_nodes:
+            snapshot = {
+                "nodes": xml_nodes,
+                "texts": _collect_visible_text_fragments(xml_nodes),
+                "view_id": str(snapshot.get("view_id", "") or ""),
+                "label": str(snapshot.get("label", "") or ""),
+                "speech": str(snapshot.get("speech", "") or ""),
+            }
+            detection_source = "xml"
+        else:
+            log(f"[FOOD][onboarding_complete] xml_fallback reason='{xml_reason}'")
+    if not _is_food_onboarding_landing_snapshot(snapshot):
+        return False
+
+    handoff_cfg = tab_cfg.get("post_traversal_handoff", {})
+    if not isinstance(handoff_cfg, dict):
+        handoff_cfg = {}
+    food_home_tab_hits = _collect_food_home_tab_hits(snapshot, handoff_cfg)
+    if food_home_tab_hits:
+        return False
+
+    row["food_onboarding_complete"] = True
+    row["food_onboarding_complete_reason"] = "repeat_no_progress_on_onboarding_cta"
+    row["food_onboarding_bottom_tabs_detected"] = False
+    row["food_onboarding_detection_source"] = detection_source
+    row["diagnostic_stop_reason"] = "food_onboarding_complete"
+    row["repeat_diagnostic_reason"] = "repeat_no_progress_on_onboarding_cta"
+    log(
+        "[FOOD][onboarding_complete] "
+        f"detected=true reason='repeat_no_progress_on_onboarding_cta' source='{detection_source}' "
+        "bottom_tabs_detected=false action='diagnostic_only'"
+    )
+    return True
+
+
 def _collect_post_open_identity_snapshot(
     *,
     tab_cfg: dict[str, Any],
@@ -12629,6 +12760,16 @@ def _main_loop_phase(
                 f"view_id='{_truncate_debug_text(str(row.get('focus_view_id', '') or ''), 120)}' "
                 f"reason='{boundary_reason}' action='stop'"
             )
+
+        _annotate_food_onboarding_complete(
+            client,
+            dev,
+            tab_cfg,
+            row,
+            stop=stop,
+            reason=reason,
+            wait_seconds=phase_ctx.main_step_wait_seconds,
+        )
 
         _apply_stop_explain_phase(
             row=row,

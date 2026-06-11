@@ -1,5 +1,6 @@
 import os
 
+from tb_runner.runtime_config import load_runtime_bundle
 from tb_runner.scenario_config import TAB_CONFIGS
 from tb_runner.utils import _safe_regex_search, configure_process_temp_dir
 
@@ -35,6 +36,17 @@ def test_life_food_plugin_uses_xml_card_entry_spec():
         "entry_match"
     ]["description_patterns"]
     assert "(?i)(^food$|food\\.|smart\\s*things\\s*cooking|\\bcooking\\b|^푸드$)" in food_cfg["entry_match"]["title_patterns"]
+
+
+def test_runtime_config_does_not_downgrade_life_food_xml_entry():
+    bundle = load_runtime_bundle(TAB_CONFIGS, config_path="config/runtime_config.json")
+    food_cfg = next(cfg for cfg in bundle["tab_configs"] if cfg.get("scenario_id") == "life_food_plugin")
+
+    assert food_cfg["entry_type"] == "card"
+    assert food_cfg["pre_navigation"][0]["action"] == "xml_scroll_search_tap"
+    assert food_cfg["pre_navigation"][0]["target"] == "(?i)(^food$|food\\.|smart\\s*things\\s*cooking|\\bcooking\\b|^푸드$)"
+    assert food_cfg["entry_match"]["allow_description_match"] is True
+    assert "pre_navigation_ref" not in food_cfg
 
 
 def test_life_home_care_plugin_uses_landing_section_anchor_tokens():

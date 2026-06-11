@@ -203,7 +203,6 @@
     },
     "life_food_plugin": {
       "group": "plugin_screen",
-      "pre_navigation_ref": "enter_food_plugin",
       "enabled": false,
       "max_steps": 50
     },    
