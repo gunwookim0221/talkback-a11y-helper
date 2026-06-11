@@ -1,0 +1,210 @@
+import logging
+import re
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from typing import Any, Dict
+
+from tools.audit_xml_filters import (
+    classification_examples,
+    classify_xml_candidate,
+    sample_candidates_by_classification,
+    summarize_candidate_classifications,
+)
+
+
+EXCLUDE_RULE_TODO_LABELS = (
+    "Navigate up",
+    "More options",
+    "SmartThings Plugin",
+)
+EXCLUDE_RULE_TODO_NOTE = (
+    "Phase 2 does not filter candidates. Review common shell/system labels, "
+    "hidden containers, TalkBack overlays, and non-verification UI before Phase 3."
+)
+
+
+def sample_values(values, limit: int = 10) -> str:
+    return ", ".join(sorted(str(v) for v in values if str(v).strip())[:limit])
+
+
+def _normalize_label(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+
+
+def _infer_tab_from_dump_name(xml_file: Path, current_tab: str) -> tuple[str, str]:
+    stem = xml_file.stem
+    match = re.search(r"(?:local_tab_transition|after_scroll)_([^_].*)$", stem)
+    if match:
+        tab_name = match.group(1).replace("_", " ").strip()
+        if tab_name:
+            return tab_name, tab_name
+    if "entry" in stem:
+        return "entry", current_tab
+    if "viewport_exhausted" in stem:
+        return current_tab or "unknown", current_tab
+    return current_tab or "unknown", current_tab
+
+
+def _candidate_source_summary(merged_candidates: list[dict[str, Any]]) -> str:
+    if not merged_candidates:
+        return ""
+    top = sorted(
+        merged_candidates,
+        key=lambda candidate: (-int(candidate.get("xml_dump_count", 0) or 0), str(candidate.get("label", ""))),
+    )[:10]
+    return " | ".join(
+        f"{candidate.get('label', '')} ({candidate.get('xml_dump_count', 0)} dumps; "
+        f"{','.join(candidate.get('tabs', [])) or 'unknown'})"
+        for candidate in top
+    )
+
+
+def extract_xml_candidates(xml_dir: Path | None) -> Dict[str, Any]:
+    node_candidates_by_key: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    merged_candidates_by_key: dict[str, dict[str, Any]] = {}
+    unique_labels = set()
+
+    if not xml_dir or not xml_dir.exists():
+        return {
+            "xml_dump_count": 0,
+            "xml_candidate_count": 0,
+            "xml_unique_label_count": 0,
+            "xml_unique_labels": unique_labels,
+            "xml_unique_labels_sample": "",
+            "xml_candidates": [],
+            "merged_candidate_count": 0,
+            "merged_candidates": [],
+            "candidate_tab_distribution": "",
+            "candidate_source_summary": "",
+            "candidate_exclusion_todo": EXCLUDE_RULE_TODO_NOTE,
+            "candidate_classification_summary": {"KEEP": 0, "REVIEW": 0, "EXCLUDE": 0},
+            "keep_candidates_sample": "",
+            "review_candidates_sample": "",
+            "exclude_candidates_sample": "",
+            "candidate_classification_examples": "",
+        }
+
+    xml_files = sorted(xml_dir.glob("*.xml"))
+    current_tab = ""
+    for xml_file in xml_files:
+        inferred_tab, current_tab = _infer_tab_from_dump_name(xml_file, current_tab)
+        try:
+            tree = ET.parse(xml_file)
+        except Exception as e:
+            logging.warning(f"Failed to parse XML {xml_file}: {e}")
+            continue
+
+        labels_seen_in_dump = set()
+        for node in tree.getroot().iter():
+            text = node.get("text", "").strip()
+            desc = node.get("content-desc", "").strip()
+            rid = node.get("resource-id", "").strip()
+            class_name = node.get("class", "").strip()
+            bounds = node.get("bounds", "").strip()
+            pkg = node.get("package", "").strip()
+
+            if pkg and pkg != "com.samsung.android.oneconnect":
+                continue
+            if not bounds or bounds == "[0,0][0,0]":
+                continue
+            if not text and not desc and not rid:
+                continue
+
+            label = desc or text
+            node_key = (label, rid, class_name, bounds)
+            node_candidate = node_candidates_by_key.setdefault(
+                node_key,
+                {
+                    "text": text,
+                    "content_desc": desc,
+                    "resource_id": rid,
+                    "class": class_name,
+                    "bounds": bounds,
+                    "label": label,
+                    "tabs": set(),
+                    "dump_files": set(),
+                },
+            )
+            node_candidate["tabs"].add(inferred_tab)
+            node_candidate["dump_files"].add(xml_file.name)
+
+            if not label:
+                continue
+
+            unique_labels.add(label)
+            label_key = _normalize_label(label)
+            labels_seen_in_dump.add(label_key)
+            merged_candidate = merged_candidates_by_key.setdefault(
+                label_key,
+                {
+                    "label": label,
+                    "tabs": set(),
+                    "dump_files": set(),
+                    "resource_ids": set(),
+                    "classes": set(),
+                    "bounds": set(),
+                },
+            )
+            merged_candidate["tabs"].add(inferred_tab)
+            merged_candidate["dump_files"].add(xml_file.name)
+            if rid:
+                merged_candidate["resource_ids"].add(rid)
+            if class_name:
+                merged_candidate["classes"].add(class_name)
+            if bounds:
+                merged_candidate["bounds"].add(bounds)
+
+        for label_key in labels_seen_in_dump:
+            merged_candidates_by_key[label_key].setdefault("xml_dump_count", 0)
+            merged_candidates_by_key[label_key]["xml_dump_count"] += 1
+
+    xml_candidates = [
+        {
+            **candidate,
+            "tabs": sorted(candidate["tabs"]),
+            "dump_files": sorted(candidate["dump_files"]),
+            "xml_dump_count": len(candidate["dump_files"]),
+        }
+        for candidate in node_candidates_by_key.values()
+    ]
+    merged_candidates = [
+        {
+            **candidate,
+            "tabs": sorted(candidate["tabs"]),
+            "dump_files": sorted(candidate["dump_files"]),
+            "resource_ids": sorted(candidate["resource_ids"]),
+            "classes": sorted(candidate["classes"]),
+            "bounds": sorted(candidate["bounds"]),
+            "xml_dump_count": int(candidate.get("xml_dump_count", 0) or 0),
+        }
+        for candidate in merged_candidates_by_key.values()
+    ]
+    for candidate in merged_candidates:
+        candidate.update(classify_xml_candidate(candidate))
+    merged_candidates = sorted(merged_candidates, key=lambda candidate: str(candidate.get("label", "")).lower())
+
+    tab_counts: dict[str, int] = {}
+    for candidate in merged_candidates:
+        for tab_name in candidate.get("tabs", []):
+            tab_counts[tab_name] = tab_counts.get(tab_name, 0) + 1
+
+    return {
+        "xml_dump_count": len(xml_files),
+        "xml_candidate_count": len(node_candidates_by_key),
+        "xml_unique_label_count": len(unique_labels),
+        "xml_unique_labels": unique_labels,
+        "xml_unique_labels_sample": sample_values(unique_labels),
+        "xml_candidates": xml_candidates,
+        "merged_candidate_count": len(merged_candidates),
+        "merged_candidates": merged_candidates,
+        "candidate_tab_distribution": ", ".join(f"{tab}: {count}" for tab, count in sorted(tab_counts.items())),
+        "candidate_source_summary": _candidate_source_summary(merged_candidates),
+        "candidate_exclusion_todo": (
+            f"{EXCLUDE_RULE_TODO_NOTE} Labels to review: {', '.join(EXCLUDE_RULE_TODO_LABELS)}"
+        ),
+        "candidate_classification_summary": summarize_candidate_classifications(merged_candidates),
+        "keep_candidates_sample": sample_candidates_by_classification(merged_candidates, "KEEP"),
+        "review_candidates_sample": sample_candidates_by_classification(merged_candidates, "REVIEW"),
+        "exclude_candidates_sample": sample_candidates_by_classification(merged_candidates, "EXCLUDE"),
+        "candidate_classification_examples": classification_examples(merged_candidates),
+    }

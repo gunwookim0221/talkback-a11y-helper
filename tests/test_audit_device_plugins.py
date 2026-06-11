@@ -1,8 +1,13 @@
 import pytest
 from pathlib import Path
 import json
-from unittest.mock import patch, mock_open
+from unittest.mock import patch
+import tempfile
+import sys
+import os
 from tools.audit_device_plugins import parse_run_results, evaluate_scenario, parse_summary_json, main
+from tools.audit_xml_candidates import extract_xml_candidates
+from tools.audit_xml_filters import classify_xml_candidate
 
 @pytest.fixture
 def mock_log_3_tabs():
@@ -55,9 +60,6 @@ def mock_log_routines_boundary():
 [STEP][enter_device_card_success] target='Motion Sensor'
 [PLUGIN_BOUNDARY][global_nav_reached] label='Routines | Routines'
 """
-
-import tempfile
-
 def test_audit_3_tabs_pass(mock_log_3_tabs):
     with tempfile.TemporaryDirectory() as tmpdir:
         log_file = Path(tmpdir) / "test.normal.log"
@@ -199,20 +201,12 @@ def test_parse_active_tabs():
 [21:38:57] [LIFECYCLE] step=2 kind='local_tab' source='bottom_strip_candidate' confidence='high' label='Controls'
 [21:39:11] [STEP][local_tab_transition_success] target='Routines'
 '''
-
-
-def test_parse_active_tabs():
-    log_content = '''[21:38:49] [STEP][local_tab_active] tabs='Controls|Routines|History' active='Controls' reason='current_row_member_match'
-[21:38:57] [LIFECYCLE] step=2 kind='local_tab' source='bottom_strip_candidate' confidence='high' label='Controls'
-[21:39:11] [STEP][local_tab_transition_success] target='Routines'
-'''
     import tempfile
     from pathlib import Path
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as f:
         f.write(log_content)
         temp_name = f.name
     try:
-        import sys
         sys.path.insert(0, str(Path(__file__).parent.parent))
         from tools.audit_device_plugins import parse_run_results
         log_data = parse_run_results(Path(temp_name), Path("nonexistent"))
@@ -220,8 +214,22 @@ def test_parse_active_tabs():
         assert "Routines" in log_data["visited_tabs"]
         assert "Controls" in log_data["detected_tabs"]
     finally:
-        import os
         os.remove(temp_name)
+
+def test_lifecycle_local_tab_content_label_not_detected_as_tab(tmp_path):
+    log_file = tmp_path / "test.normal.log"
+    log_file.write_text(
+        """[STEP][local_tab_active] tabs='Controls|Routines|History' active='Controls' reason='current_row_member_match'
+[LIFECYCLE] step=5 kind='local_tab' source='bottom_strip_candidate' confidence='high' label='SmartThings Plugin'
+[STEP][local_tab_transition_success] target='Routines'
+""",
+        encoding="utf-8",
+    )
+
+    log_data = parse_run_results(log_file, Path("nonexistent"))
+
+    assert log_data["detected_tabs"] == ["Controls", "Routines", "History"]
+    assert "SmartThings Plugin" not in log_data["detected_tabs"]
 
 def test_tab_visited_not_exhausted():
     log_data = {
@@ -290,3 +298,201 @@ def test_motion_sensor_content_complete():
     summary = {"scenarios": [{"id": "device_motion_sensor_plugin", "availability_status": "none"}]}
     report = evaluate_scenario("device_motion_sensor_plugin", summary, log_data)
     assert report["verdict"] == "PASS"
+
+def test_xml_parser_extracts_candidate_fields(tmp_path):
+    xml_dir = tmp_path / "xml_dumps"
+    xml_dir.mkdir()
+    (xml_dir / "000_step_001_entry.xml").write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<hierarchy>
+  <node text="Motion sensor" content-desc="Motion status" resource-id="com.samsung.android.oneconnect:id/status" class="android.widget.TextView" package="com.samsung.android.oneconnect" bounds="[1,2][3,4]" />
+</hierarchy>
+""",
+        encoding="utf-8",
+    )
+
+    summary = extract_xml_candidates(xml_dir)
+
+    assert summary["xml_dump_count"] == 1
+    assert summary["xml_candidate_count"] == 1
+    candidate = summary["xml_candidates"][0]
+    assert candidate["text"] == "Motion sensor"
+    assert candidate["content_desc"] == "Motion status"
+    assert candidate["resource_id"] == "com.samsung.android.oneconnect:id/status"
+    assert candidate["class"] == "android.widget.TextView"
+    assert candidate["bounds"] == "[1,2][3,4]"
+
+def test_xml_parser_deduplicates_duplicate_nodes(tmp_path):
+    xml_dir = tmp_path / "xml_dumps"
+    xml_dir.mkdir()
+    duplicate = '<node text="Battery" content-desc="" resource-id="battery" class="android.widget.TextView" package="com.samsung.android.oneconnect" bounds="[10,20][30,40]" />'
+    (xml_dir / "000_step_001_entry.xml").write_text(f"<hierarchy>{duplicate}{duplicate}</hierarchy>", encoding="utf-8")
+
+    summary = extract_xml_candidates(xml_dir)
+
+    assert summary["xml_dump_count"] == 1
+    assert summary["xml_candidate_count"] == 1
+    assert summary["xml_unique_label_count"] == 1
+    assert summary["merged_candidate_count"] == 1
+
+def test_xml_candidate_merge_collapses_label_across_dumps_and_tracks_tabs(tmp_path):
+    xml_dir = tmp_path / "xml_dumps"
+    xml_dir.mkdir()
+    (xml_dir / "000_step_001_entry.xml").write_text(
+        """<hierarchy>
+  <node text="Battery" resource-id="battery_a" class="android.widget.TextView" package="com.samsung.android.oneconnect" bounds="[1,2][3,4]" />
+</hierarchy>""",
+        encoding="utf-8",
+    )
+    (xml_dir / "001_step_004_local_tab_transition_Controls.xml").write_text(
+        """<hierarchy>
+  <node text="Battery" resource-id="battery_b" class="android.widget.TextView" package="com.samsung.android.oneconnect" bounds="[5,6][7,8]" />
+</hierarchy>""",
+        encoding="utf-8",
+    )
+    (xml_dir / "002_step_007_local_tab_transition_Routines.xml").write_text(
+        """<hierarchy>
+  <node text="Battery" resource-id="battery_c" class="android.widget.TextView" package="com.samsung.android.oneconnect" bounds="[9,10][11,12]" />
+</hierarchy>""",
+        encoding="utf-8",
+    )
+
+    summary = extract_xml_candidates(xml_dir)
+    battery = next(candidate for candidate in summary["merged_candidates"] if candidate["label"] == "Battery")
+
+    assert summary["xml_candidate_count"] == 3
+    assert summary["merged_candidate_count"] == 1
+    assert battery["tabs"] == ["Controls", "Routines", "entry"]
+    assert battery["xml_dump_count"] == 3
+    assert "Controls" in summary["candidate_tab_distribution"]
+    assert "Battery" in summary["candidate_source_summary"]
+
+def test_xml_candidate_classification_keeps_merged_count_without_filtering(tmp_path):
+    xml_dir = tmp_path / "xml_dumps"
+    xml_dir.mkdir()
+    (xml_dir / "000_step_001_entry.xml").write_text(
+        """<hierarchy>
+  <node text="Motion sensor" resource-id="motion" class="android.widget.TextView" package="com.samsung.android.oneconnect" bounds="[1,2][3,4]" />
+  <node text="Navigate up" resource-id="back" class="android.widget.Button" package="com.samsung.android.oneconnect" bounds="[5,6][7,8]" />
+  <node text="SmartThings Plugin" resource-id="plugin_title" class="android.widget.TextView" package="com.samsung.android.oneconnect" bounds="[9,10][11,12]" />
+</hierarchy>""",
+        encoding="utf-8",
+    )
+
+    summary = extract_xml_candidates(xml_dir)
+    by_label = {candidate["label"]: candidate for candidate in summary["merged_candidates"]}
+
+    assert summary["merged_candidate_count"] == 3
+    assert by_label["Motion sensor"]["classification"] == "KEEP"
+    assert by_label["Navigate up"]["classification"] == "EXCLUDE"
+    assert by_label["SmartThings Plugin"]["classification"] == "REVIEW"
+    assert summary["candidate_classification_summary"] == {"KEEP": 1, "REVIEW": 1, "EXCLUDE": 1}
+    assert "Motion sensor" in summary["keep_candidates_sample"]
+    assert "SmartThings Plugin" in summary["review_candidates_sample"]
+    assert "Navigate up" in summary["exclude_candidates_sample"]
+
+def test_xml_candidate_classifier_rules():
+    assert classify_xml_candidate({"label": "More options", "resource_ids": [], "classes": []})["classification"] == "EXCLUDE"
+    assert classify_xml_candidate({"label": "Battery", "resource_ids": [], "classes": []})["classification"] == "KEEP"
+    assert classify_xml_candidate({"label": "Example: every day, 6:00 PM - 10:00 PM", "resource_ids": [], "classes": []})["classification"] == "REVIEW"
+
+def test_missing_xml_dumps_directory_does_not_fail_audit(tmp_path):
+    log_data = {
+        "detected_tabs": ["Controls"], "visited_tabs": ["Controls"], "preflight_fail": False, "crash": False,
+        "target_entered": "Motion Sensor", "inventory_found": True,
+        "value_exclusion_warnings": [], "boundary_warnings": [], "repeat_warnings": [],
+        "tab_stats": {"Controls": {"viewport_exhausted": True, "representative_exhausted": False, "unique_visible_labels": 2, "visible_labels_set": {"Motion sensor", "95%"}}},
+    }
+    summary = {"scenarios": [{"id": "device_motion_sensor_plugin", "availability_status": "none"}]}
+
+    report = evaluate_scenario("device_motion_sensor_plugin", summary, log_data, tmp_path / "missing" / "xml_dumps")
+
+    assert report["verdict"] == "PASS"
+    assert report["xml_dump_count"] == 0
+    assert report["xml_candidate_count"] == 0
+
+def test_invalid_xml_file_does_not_fail_audit(tmp_path):
+    xml_dir = tmp_path / "xml_dumps"
+    xml_dir.mkdir()
+    (xml_dir / "000_step_001_entry.xml").write_text("<hierarchy><node", encoding="utf-8")
+    log_data = {
+        "detected_tabs": ["Controls"], "visited_tabs": ["Controls"], "preflight_fail": False, "crash": False,
+        "target_entered": "Motion Sensor", "inventory_found": True,
+        "value_exclusion_warnings": [], "boundary_warnings": [], "repeat_warnings": [],
+        "tab_stats": {"Controls": {"viewport_exhausted": True, "representative_exhausted": False, "unique_visible_labels": 2, "visible_labels_set": {"Motion sensor", "95%"}}},
+    }
+    summary = {"scenarios": [{"id": "device_motion_sensor_plugin", "availability_status": "none"}]}
+
+    report = evaluate_scenario("device_motion_sensor_plugin", summary, log_data, xml_dir)
+
+    assert report["verdict"] == "PASS"
+    assert report["xml_dump_count"] == 1
+    assert report["xml_candidate_count"] == 0
+
+def test_xml_diagnostic_fields_exist_in_report(tmp_path):
+    xml_dir = tmp_path / "xml_dumps"
+    xml_dir.mkdir()
+    (xml_dir / "000_step_001_entry.xml").write_text(
+        """<hierarchy>
+  <node text="Motion sensor" resource-id="motion" class="android.widget.TextView" package="com.samsung.android.oneconnect" bounds="[1,2][3,4]" />
+  <node text="Battery" resource-id="battery" class="android.widget.TextView" package="com.samsung.android.oneconnect" bounds="[5,6][7,8]" />
+</hierarchy>""",
+        encoding="utf-8",
+    )
+    log_data = {
+        "detected_tabs": ["Controls"], "visited_tabs": ["Controls"], "preflight_fail": False, "crash": False,
+        "target_entered": "Motion Sensor", "inventory_found": True,
+        "value_exclusion_warnings": [], "boundary_warnings": [], "repeat_warnings": [],
+        "tab_stats": {"Controls": {"viewport_exhausted": True, "representative_exhausted": False, "unique_visible_labels": 2, "visible_labels_set": {"Motion sensor", "95%"}}},
+    }
+    summary = {"scenarios": [{"id": "device_motion_sensor_plugin", "availability_status": "none"}]}
+
+    report = evaluate_scenario("device_motion_sensor_plugin", summary, log_data, xml_dir)
+
+    for key in (
+        "xml_dump_count",
+        "xml_candidate_count",
+        "xml_unique_label_count",
+        "xml_unique_labels_sample",
+        "xml_labels_not_seen_in_traversal_sample",
+        "traversal_labels_not_in_xml_sample",
+        "merged_candidate_count",
+        "candidate_tab_distribution",
+        "candidate_source_summary",
+        "candidate_exclusion_todo",
+        "candidate_classification_summary",
+        "keep_candidates_sample",
+        "review_candidates_sample",
+        "exclude_candidates_sample",
+        "candidate_classification_examples",
+        "merged_candidates_sample",
+    ):
+        assert key in report
+    assert report["xml_dump_count"] == 1
+    assert report["merged_candidate_count"] == 2
+    assert "Battery" in report["xml_labels_not_seen_in_traversal_sample"]
+    assert "95%" in report["traversal_labels_not_in_xml_sample"]
+
+def test_xml_diagnostics_do_not_change_v3_verdict(tmp_path):
+    xml_dir = tmp_path / "xml_dumps"
+    xml_dir.mkdir()
+    (xml_dir / "000_step_001_entry.xml").write_text(
+        """<hierarchy>
+  <node text="Never visited label" resource-id="extra" class="android.widget.TextView" package="com.samsung.android.oneconnect" bounds="[1,2][3,4]" />
+</hierarchy>""",
+        encoding="utf-8",
+    )
+    log_data = {
+        "detected_tabs": ["Controls"], "visited_tabs": ["Controls"], "preflight_fail": False, "crash": False,
+        "target_entered": "Motion Sensor", "inventory_found": True,
+        "value_exclusion_warnings": [], "boundary_warnings": [], "repeat_warnings": [],
+        "tab_stats": {"Controls": {"viewport_exhausted": True, "representative_exhausted": False, "unique_visible_labels": 2, "visible_labels_set": {"Motion sensor", "95%"}}},
+    }
+    summary = {"scenarios": [{"id": "device_motion_sensor_plugin", "availability_status": "none"}]}
+
+    without_xml = evaluate_scenario("device_motion_sensor_plugin", summary, log_data)
+    with_xml = evaluate_scenario("device_motion_sensor_plugin", summary, log_data, xml_dir)
+
+    assert without_xml["verdict"] == "PASS"
+    assert with_xml["verdict"] == without_xml["verdict"]
+    assert with_xml["xml_labels_not_seen_in_traversal_sample"] == "Never visited label"

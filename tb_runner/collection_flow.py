@@ -8669,6 +8669,77 @@ def _apply_cta_node_to_row(
     return row
 
 
+def _capture_audit_v4_xml(
+    client: A11yAdbClient,
+    dev: str,
+    output_base_dir: str,
+    scenario_id: str,
+    step_idx: int,
+    phase_name: str,
+    local_tab_label: str = "",
+) -> None:
+    if not output_base_dir or not scenario_id:
+        return
+    try:
+        run_fn = getattr(client, "_run", None)
+        if not callable(run_fn):
+            return
+        xml_dir = Path(output_base_dir) / scenario_id / "xml_dumps"
+        xml_dir.mkdir(parents=True, exist_ok=True)
+        count = len(list(xml_dir.glob("*.xml")))
+        safe_phase = re.sub(r"[^a-zA-Z0-9_-]+", "_", phase_name or "snapshot").strip("_") or "snapshot"
+        safe_label = re.sub(r"[^a-zA-Z0-9_-]+", "_", local_tab_label or "").strip("_")
+        label_suffix = f"_{safe_label[:40]}" if safe_label else ""
+        filename = f"{count:03d}_step_{step_idx:03d}_{safe_phase}{label_suffix}.xml"
+        remote_xml = f"/sdcard/window_dump_v4_{count}.xml"
+        try:
+            run_fn(["shell", "uiautomator", "dump", remote_xml], dev=dev)
+            run_fn(["pull", remote_xml, str(xml_dir / filename)], dev=dev)
+        finally:
+            run_fn(["shell", "rm", "-f", remote_xml], dev=dev)
+    except Exception as e:
+        log(f"[WARNING] V4 XML Capture failed: {e}")
+
+
+def _capture_audit_v4_xml_for_row(
+    client: A11yAdbClient,
+    dev: str,
+    phase_ctx: CollectionPhaseContext,
+    row: dict[str, Any],
+    step_idx: int,
+    *,
+    local_tab_transition_applied: bool = False,
+    stop: bool = False,
+) -> None:
+    phase_name = ""
+    if step_idx == 1:
+        phase_name = "entry"
+    elif local_tab_transition_applied:
+        phase_name = "local_tab_transition"
+    elif bool(row.get("scroll_fallback_resumed_content", False)):
+        phase_name = "after_scroll"
+    elif bool(row.get("viewport_exhausted_eval_result", False)) or stop:
+        phase_name = "viewport_exhausted"
+
+    if not phase_name:
+        return
+
+    local_tab_label = str(
+        row.get("local_tab_selected", "")
+        or row.get("local_tab_phase_label", "")
+        or row.get("current_local_tab_active_label", "")
+        or ""
+    )
+    _capture_audit_v4_xml(
+        client,
+        dev,
+        phase_ctx.output_base_dir,
+        str(phase_ctx.tab_cfg.get("scenario_id", "") or ""),
+        step_idx,
+        phase_name,
+        local_tab_label,
+    )
+
 def _build_persisted_row_semantics(row: dict[str, Any]) -> dict[str, Any]:
     persisted = dict(row)
     current_row_source = str(row.get("row_source", "") or "").strip() or "actual_focus"
@@ -12161,6 +12232,7 @@ def _main_loop_phase(
             scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
         )
         step_elapsed = float(row.get("step_elapsed_sec", 0.0) or 0.0)
+
         _apply_scroll_ready_record_phase(
             row=row,
             state=state,
@@ -12607,6 +12679,15 @@ def _main_loop_phase(
 
         persistence_stop = bool(
             stop or (row.get("stall_escape_attempted") is True and row.get("stall_escape_result") == "success")
+        )
+        _capture_audit_v4_xml_for_row(
+            client,
+            dev,
+            phase_ctx,
+            row,
+            step_idx,
+            local_tab_transition_applied=local_tab_transition_applied,
+            stop=stop,
         )
         _apply_row_persistence_phase(
             row=row,

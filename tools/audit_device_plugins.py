@@ -1,5 +1,3 @@
-import logging
-import xml.etree.ElementTree as ET
 import os
 import sys
 import json
@@ -8,7 +6,7 @@ import subprocess
 import re
 import time
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -17,6 +15,8 @@ try:
 except ImportError as e:
     print(f"Warning: Could not import TAB_CONFIGS ({e})")
     TAB_CONFIGS = []
+
+from tools.audit_xml_candidates import extract_xml_candidates, sample_values
 
 def get_device_plugins() -> List[str]:
     return [
@@ -189,7 +189,7 @@ def parse_run_results(log_path: Path, run_out_dir: Path) -> Dict[str, Any]:
                 if "[CRASH_GUARD]" in line and "running=false" in line.lower():
                     result["crash"] = True
                     
-                if "kind='local_tab'" in line:
+                if "[STEP] kind='local_tab'" in line and "label='" in line:
                     m = re.search(r"label='([^']+)'", line)
                     if m:
                         tab_name = m.group(1)
@@ -209,6 +209,15 @@ def parse_run_results(log_path: Path, run_out_dir: Path) -> Dict[str, Any]:
                         current_tab = tab_name
                         get_or_create_tab_stats(current_tab)
                             
+                if "[STEP][local_tab_active]" in line:
+                    m_tabs = re.search(r"tabs='([^']+)'", line)
+                    if m_tabs and m_tabs.group(1) != "none":
+                        for tab_name in [t.strip() for t in m_tabs.group(1).split("|") if t.strip()]:
+                            if tab_name in ("Play", "Next"):
+                                continue
+                            if tab_name not in result["detected_tabs"]:
+                                result["detected_tabs"].append(tab_name)
+
                 if "[STEP][local_tab_active]" in line or "[STEP][local_tab_active_state]" in line:
                     m = re.search(r"active='([^']+)'", line)
                     if m:
@@ -334,48 +343,26 @@ def parse_run_results(log_path: Path, run_out_dir: Path) -> Dict[str, Any]:
 
     return result
 
+def find_xml_dump_dir(run_out_dir: Path, normal_log: Path | None, scenario_id: str) -> Path | None:
+    candidates = []
+    if normal_log:
+        candidates.append(run_out_dir / normal_log.name.replace(".normal.log", "") / scenario_id / "xml_dumps")
+    candidates.append(run_out_dir / scenario_id / "xml_dumps")
+    candidates.extend(sorted(run_out_dir.glob(f"*/{scenario_id}/xml_dumps")))
+
+    existing = [path for path in candidates if path.exists()]
+    if not existing:
+        return candidates[0] if candidates else None
+    return max(existing, key=lambda path: path.stat().st_mtime)
+
 def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[str, Any], xml_dir: Path = None) -> Dict[str, Any]:
     target = ""
     scenario_info = next((s for s in summary.get("scenarios", []) if s.get("id") == scenario_id), {})
     if not scenario_info and "scenarios" in summary and len(summary["scenarios"]) == 1:
         scenario_info = summary["scenarios"][0]
 
-    xml_dump_count = 0
-    xml_candidate_count = 0
-    xml_unique_label_count = 0
-    xml_unique_labels = set()
-    
-    if xml_dir and xml_dir.exists():
-        xml_files = list(xml_dir.glob("*.xml"))
-        xml_dump_count = len(xml_files)
-        
-        for xml_file in xml_files:
-            try:
-                tree = ET.parse(xml_file)
-                root = tree.getroot()
-                for node in root.iter():
-                    text = node.get("text", "").strip()
-                    desc = node.get("content-desc", "").strip()
-                    rid = node.get("resource-id", "").strip()
-                    bounds = node.get("bounds", "").strip()
-                    pkg = node.get("package", "").strip()
-                    
-                    if pkg and pkg != "com.samsung.android.oneconnect":
-                        continue
-                    if not bounds or bounds == "[0,0][0,0]":
-                        continue
-                        
-                    label = desc if desc else text
-                    if not label and not rid:
-                        continue
-                        
-                    xml_candidate_count += 1
-                    if label:
-                        xml_unique_labels.add(label)
-            except Exception as e:
-                logging.warning(f"Failed to parse XML {xml_file}: {e}")
-                
-    xml_unique_label_count = len(xml_unique_labels)
+    xml_summary = extract_xml_candidates(xml_dir)
+    xml_unique_labels = xml_summary["xml_unique_labels"]
     
     traversal_labels_set = set()
     for stats in log_data.get("tab_stats", {}).values():
@@ -554,10 +541,22 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
         "coverage_source": log_data.get("coverage_source", "none"),
         "tab_stats_raw": {k: {**v, "visible_labels_set": list(v.get("visible_labels_set", set()))} for k, v in tab_stats.items()},
         "expected_content_raw": [g[0] for g in (PLUGIN_EXPECTED_CONTENT.get(scenario_id, {}).get("required", []) if isinstance(PLUGIN_EXPECTED_CONTENT.get(scenario_id, []), dict) else PLUGIN_EXPECTED_CONTENT.get(scenario_id, []))],
-        "xml_dump_count": xml_dump_count,
-        "xml_candidate_count": xml_candidate_count,
-        "xml_unique_label_count": xml_unique_label_count,
-        "xml_labels_not_seen_in_traversal_sample": ", ".join(list(xml_labels_not_seen)[:10])
+        "xml_dump_count": xml_summary["xml_dump_count"],
+        "xml_candidate_count": xml_summary["xml_candidate_count"],
+        "xml_unique_label_count": xml_summary["xml_unique_label_count"],
+        "xml_unique_labels_sample": xml_summary["xml_unique_labels_sample"],
+        "xml_labels_not_seen_in_traversal_sample": sample_values(xml_labels_not_seen),
+        "traversal_labels_not_in_xml_sample": sample_values(traversal_labels_not_in_xml),
+        "merged_candidate_count": xml_summary["merged_candidate_count"],
+        "candidate_tab_distribution": xml_summary["candidate_tab_distribution"],
+        "candidate_source_summary": xml_summary["candidate_source_summary"],
+        "candidate_exclusion_todo": xml_summary["candidate_exclusion_todo"],
+        "candidate_classification_summary": xml_summary["candidate_classification_summary"],
+        "keep_candidates_sample": xml_summary["keep_candidates_sample"],
+        "review_candidates_sample": xml_summary["review_candidates_sample"],
+        "exclude_candidates_sample": xml_summary["exclude_candidates_sample"],
+        "candidate_classification_examples": xml_summary["candidate_classification_examples"],
+        "merged_candidates_sample": xml_summary["merged_candidates"][:10],
     }
 
 def main():
@@ -653,9 +652,7 @@ def main():
         log_data = parse_run_results(normal_log, run_out_dir) if normal_log else parse_run_results(Path("nonexistent"), run_out_dir)
 
         
-        xml_dir = None
-        if normal_log:
-            xml_dir = run_out_dir / normal_log.name.replace(".normal.log", "") / sid / "xml_dumps"
+        xml_dir = find_xml_dump_dir(run_out_dir, normal_log, sid)
         report = evaluate_scenario(sid, summary_data, log_data, xml_dir)
         report["return_code"] = exec_info["return_code"]
         report["timed_out"] = exec_info["timed_out"]
@@ -738,7 +735,18 @@ def main():
             f.write(f"* dumps: {r.get('xml_dump_count', 0)}\n")
             f.write(f"* candidates: {r.get('xml_candidate_count', 0)}\n")
             f.write(f"* unique labels: {r.get('xml_unique_label_count', 0)}\n")
+            f.write(f"* unique labels sample: {r.get('xml_unique_labels_sample', 'None')}\n")
             f.write(f"* not seen in traversal sample: {r.get('xml_labels_not_seen_in_traversal_sample', 'None')}\n")
+            f.write(f"* traversal labels not in XML sample: {r.get('traversal_labels_not_in_xml_sample', 'None')}\n")
+            f.write(f"* merged candidates: {r.get('merged_candidate_count', 0)}\n")
+            f.write(f"* candidate tab distribution: {r.get('candidate_tab_distribution', 'None')}\n")
+            f.write(f"* candidate source summary: {r.get('candidate_source_summary', 'None')}\n")
+            f.write(f"* candidate exclusion TODO: {r.get('candidate_exclusion_todo', 'None')}\n")
+            f.write(f"* candidate classification summary: {r.get('candidate_classification_summary', {})}\n")
+            f.write(f"* keep candidates sample: {r.get('keep_candidates_sample', 'None')}\n")
+            f.write(f"* review candidates sample: {r.get('review_candidates_sample', 'None')}\n")
+            f.write(f"* exclude candidates sample: {r.get('exclude_candidates_sample', 'None')}\n")
+            f.write(f"* candidate classification examples: {r.get('candidate_classification_examples', 'None')}\n")
             f.write("---\n\n")
             
     print(f"\nAudit complete. Reports saved to {out_dir}")
