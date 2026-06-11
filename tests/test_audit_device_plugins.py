@@ -275,8 +275,8 @@ def test_motion_sensor_missing_battery():
     summary = {"scenarios": [{"id": "device_motion_sensor_plugin", "availability_status": "none"}]}
     report = evaluate_scenario("device_motion_sensor_plugin", summary, log_data)
     assert report["verdict"] == "REVIEW"
-    assert "missing content coverage" in report["reason"]
-    assert "Battery" in report["missing_content"]
+    assert "missing required content" in report["reason"]
+    assert "Battery" in report["missing_required_content"]
 
 def test_motion_sensor_content_complete():
     log_data = {

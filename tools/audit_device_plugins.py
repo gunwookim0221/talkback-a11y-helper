@@ -24,10 +24,16 @@ def get_device_plugins() -> List[str]:
     ]
 
 PLUGIN_EXPECTED_CONTENT = {
-    "device_motion_sensor_plugin": [
-        ["Motion sensor", "No motion"],
-        ["Battery", "%"]
-    ],
+    "device_motion_sensor_plugin": {
+        "required": [
+            ["Motion sensor", "No motion"],
+            ["Battery", "%"]
+        ],
+        "review_expected": [
+            ["Vibration sensor"],
+            ["Temperature", "℃", "°C", "℉", "°F"]
+        ]
+    },
     "device_door_lock_plugin": [
         ["Lock", "Unlock"]
     ],
@@ -42,7 +48,7 @@ PLUGIN_EXPECTED_CONTENT = {
         ["Camera", "Live", "Connecting", "History"]
     ],
     "device_home_camera_plugin": [
-        ["Camera", "Offline", "Live", "Connecting"]
+        ["Camera", "Offline", "Live", "Connecting", "turned off"]
     ],
     "device_air_purifier_plugin": [
         ["Air purifier", "Air quality", "PM", "Filter", "Fan", "On", "Off"]
@@ -257,7 +263,7 @@ def parse_run_results(log_path: Path, run_out_dir: Path) -> Dict[str, Any]:
                         vl = val.lower()
                         
                         # Suppress warnings for known harmless exclusions
-                        if vl in chrome_ex and (vl in ["on", "off"] or "vibration sensor" in vl):
+                        if vl in chrome_ex and (vl in ["on", "off"] or "vibration sensor" in vl or re.fullmatch(r"\d+%", vl)):
                             continue
                         if vl in status_ex and vl in ["online", "offline"]:
                             continue
@@ -352,7 +358,6 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
     tab_stats = log_data.get("tab_stats", {})
     all_tabs_exhausted = True
     coverage_warnings = []
-    missing_content = []
     
     for t in visited:
         stats = tab_stats.get(t, {})
@@ -369,12 +374,22 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
             coverage_warnings.append(f"{t} skipped immediately")
 
     # Plugin specific rules
-    expected_groups = PLUGIN_EXPECTED_CONTENT.get(scenario_id, [])
+    expected_config = PLUGIN_EXPECTED_CONTENT.get(scenario_id, [])
+    if isinstance(expected_config, list):
+        expected_config = {"required": expected_config}
+        
+    missing_required_content = []
+    missing_review_expected_content = []
+
     all_text = " ".join(" ".join(stats.get("visible_labels_set", set())) for stats in tab_stats.values()).lower()
-    for group in expected_groups:
-        # Check if at least one item in the group is in all_text
+    
+    for group in expected_config.get("required", []):
         if not any(item.lower() in all_text for item in group):
-            missing_content.append(group[0])
+            missing_required_content.append(group[0])
+            
+    for group in expected_config.get("review_expected", []):
+        if not any(item.lower() in all_text for item in group):
+            missing_review_expected_content.append(group[0])
 
 
     # Base failure states
@@ -406,9 +421,13 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
             verdict = "REVIEW"
             reason.append(f"Missed tabs: {', '.join(missing_tabs)}")
             
-        if missing_content:
+        if missing_required_content:
             verdict = "REVIEW"
-            reason.append("missing content coverage")
+            reason.append("missing required content")
+            
+        if missing_review_expected_content:
+            verdict = "REVIEW"
+            reason.append("review expected content missing")
             
         if coverage_warnings:
             verdict = "REVIEW"
@@ -423,7 +442,7 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
                 and not log_data["value_exclusion_warnings"]
                 and not log_data["crash"]
                 and not log_data["preflight_fail"]
-                and not missing_content
+                and not missing_required_content and not missing_review_expected_content
                 and not coverage_warnings
                 and (not stop_reason or stop_reason == "repeat_no_progress")
                 and all(w == "repeat_no_progress" for w in log_data["repeat_warnings"])
@@ -475,12 +494,13 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
         "boundary_warnings": ", ".join(log_data["boundary_warnings"]),
         "repeat_warnings": ", ".join(log_data["repeat_warnings"]),
         "tab_coverage_summary": " | ".join(tab_coverage_summary),
-        "missing_content": ", ".join(missing_content),
+        "missing_required_content": ", ".join(missing_required_content),
+        "missing_review_expected_content": ", ".join(missing_review_expected_content),
         "tabs_exhausted": ", ".join(tabs_exhausted_info),
         "coverage_warnings": ", ".join(coverage_warnings),
         "coverage_source": log_data.get("coverage_source", "none"),
         "tab_stats_raw": {k: {**v, "visible_labels_set": list(v.get("visible_labels_set", set()))} for k, v in tab_stats.items()},
-        "expected_content_raw": [g[0] for g in PLUGIN_EXPECTED_CONTENT.get(scenario_id, [])]
+        "expected_content_raw": [g[0] for g in (PLUGIN_EXPECTED_CONTENT.get(scenario_id, {}).get("required", []) if isinstance(PLUGIN_EXPECTED_CONTENT.get(scenario_id, []), dict) else PLUGIN_EXPECTED_CONTENT.get(scenario_id, []))]
     }
 
 def main():
@@ -652,7 +672,8 @@ def main():
             
             expected = r.get('expected_content_raw', [])
             f.write(f"**Expected Content**: {', '.join(expected) if expected else 'None'}\n")
-            f.write(f"**Missing**: {r['missing_content'] if r['missing_content'] else 'None'}\n")
+            f.write(f"**Missing Required**: {r.get('missing_required_content') if r.get('missing_required_content') else 'None'}\n")
+            f.write(f"**Missing Review Expected**: {r.get('missing_review_expected_content') if r.get('missing_review_expected_content') else 'None'}\n")
             f.write("---\n\n")
             
     print(f"\nAudit complete. Reports saved to {out_dir}")
