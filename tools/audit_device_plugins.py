@@ -18,6 +18,7 @@ except ImportError as e:
 
 from tools.audit_xml_candidates import extract_xml_candidates, sample_values
 from tools.audit_xml_coverage import calculate_xml_coverage
+from tools.audit_shadow_verdict import add_shadow_verdict_fields, calculate_shadow_coverage_inputs
 
 def get_device_plugins() -> List[str]:
     return [
@@ -527,7 +528,8 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
         tabs_exhausted_info.append(f"{t}: {is_exh}")
         tab_coverage_summary.append(f"{t} (U: {stats.get('unique_visible_labels')}, F: {stats.get('focus_count')}, R: {stats.get('representative_count')})")
 
-    return {
+    shadow_inputs = calculate_shadow_coverage_inputs(xml_summary["merged_candidates"], tab_stats, scenario_id)
+    report = {
         "scenario_id": scenario_id,
         "target": target,
         "verdict": verdict,
@@ -593,8 +595,10 @@ def evaluate_scenario(scenario_id: str, summary: Dict[str, Any], log_data: Dict[
         "hypothetical_denominator_delta": xml_summary["hypothetical_denominator_delta"],
         "coverage_diagnostic_status": coverage_diagnostic_status,
         "merged_candidates_sample": xml_summary["merged_candidates"][:10],
+        **shadow_inputs,
         **xml_coverage,
     }
+    return add_shadow_verdict_fields(report)
 
 def main():
     parser = argparse.ArgumentParser(description="Audit device plugins automatically")
@@ -662,7 +666,7 @@ def main():
                 
         if not summary_file.exists() and not normal_log:
             print(f"No logs found for {sid} in {run_out_dir}")
-            results.append({
+            results.append(add_shadow_verdict_fields({
                 "scenario_id": sid,
                 "target": "N/A",
                 "verdict": "FAIL",
@@ -682,7 +686,7 @@ def main():
                 "return_code": exec_info["return_code"],
                 "timed_out": exec_info["timed_out"],
                 "start_recovered": exec_info["start_recovered"]
-            })
+            }))
             continue
             
         summary_data = parse_summary_json(summary_file)
@@ -707,10 +711,16 @@ def main():
         
     if results:
         import csv
+        csv_rows = []
+        for result in results:
+            shadow = result.get("shadow_verdict_v4", {})
+            csv_row = dict(result)
+            csv_row["shadow_verdict_v4"] = shadow.get("verdict", "")
+            csv_rows.append(csv_row)
         with open(csv_path, "w", encoding="utf-8", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=results[0].keys())
+            writer = csv.DictWriter(f, fieldnames=csv_rows[0].keys())
             writer.writeheader()
-            writer.writerows(results)
+            writer.writerows(csv_rows)
             
     with open(md_path, "w", encoding="utf-8") as f:
         total = len(results)
@@ -719,6 +729,14 @@ def main():
         review_count = sum(1 for r in results if r["verdict"] == "REVIEW")
         fail_count = sum(1 for r in results if r["verdict"] == "FAIL")
         env_error_count = sum(1 for r in results if r["verdict"] == "ENVIRONMENT_ERROR")
+        shadow_counts = {}
+        for r in results:
+            shadow_verdict = str((r.get("shadow_verdict_v4") or {}).get("verdict", "UNKNOWN") or "UNKNOWN")
+            shadow_counts[shadow_verdict] = shadow_counts.get(shadow_verdict, 0) + 1
+        shadow_differences = [
+            r for r in results
+            if str(r.get("verdict", "")) != str((r.get("shadow_verdict_v4") or {}).get("verdict", ""))
+        ]
         
         global_nav_issues = sum(1 for r in results if "global_nav_reached" in r["reason"])
         missed_tabs_issues = sum(1 for r in results if "Missed tabs" in r["reason"])
@@ -742,10 +760,33 @@ def main():
         f.write(f"* value_exclusion: {value_exclusion_issues}\n")
         f.write(f"* repeat_no_progress: {repeat_no_progress_issues}\n\n")
 
+        f.write("## Shadow Verdict Summary\n\n")
+        f.write("Policy: balanced_v1\n")
+        f.write(f"PASS: {shadow_counts.get('PASS', 0)}\n")
+        f.write(f"REVIEW: {shadow_counts.get('REVIEW', 0)}\n")
+        f.write(f"FAIL: {shadow_counts.get('FAIL', 0)}\n")
+        f.write(f"ENVIRONMENT_ERROR: {shadow_counts.get('ENVIRONMENT_ERROR', 0)}\n\n")
+
+        f.write("## V3 vs V4 Shadow Comparison\n\n")
+        if shadow_differences:
+            for r in shadow_differences:
+                shadow = r.get("shadow_verdict_v4") or {}
+                f.write(
+                    f"* {r['scenario_id']}: V3={r.get('verdict', 'UNKNOWN')} "
+                    f"V4_SHADOW={shadow.get('verdict', 'UNKNOWN')} "
+                    f"reason={shadow.get('reason', 'none')}\n"
+                )
+        else:
+            f.write("* No V3/V4 shadow verdict differences.\n")
+        f.write("\n")
+
         f.write("## Detailed Reports\n\n")
         for r in results:
+            shadow = r.get("shadow_verdict_v4") or {}
             f.write(f"### {r['scenario_id']}\n")
             f.write(f"**Verdict**: {r['verdict']}\n")
+            f.write(f"**V4 Shadow Verdict**: {shadow.get('verdict', 'UNKNOWN')}\n")
+            f.write(f"**V4 Shadow Reason**: {shadow.get('reason', 'none')}\n")
             f.write(f"**Reason**: {r['reason']}\n")
             f.write(f"**Coverage Source**: {r.get('coverage_source', 'none')}\n")
             f.write(f"**Detected Tabs**: {r['detected_tabs']}\n\n")

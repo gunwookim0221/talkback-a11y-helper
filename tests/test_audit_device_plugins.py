@@ -1,6 +1,7 @@
 import pytest
 from pathlib import Path
 import json
+import csv
 from unittest.mock import patch
 import tempfile
 import sys
@@ -195,6 +196,21 @@ def test_main_cli(mock_run):
         assert len(report_json) == 1
         assert report_json[0]["scenario_id"] == "test_plugin"
         assert report_json[0]["verdict"] == "FAIL"  # Because no logs were found
+        assert report_json[0]["shadow_verdict_v4"]["policy_name"] == "balanced_v1"
+        assert report_json[0]["shadow_verdict_v4"]["verdict"] == "FAIL"
+
+        report_csv = list(csv.DictReader((Path(tmpdir) / "audit_report.csv").open(encoding="utf-8")))
+        assert report_csv[0]["shadow_policy_name"] == "balanced_v1"
+        assert report_csv[0]["shadow_verdict_v4"] == "FAIL"
+        assert "shadow_required_coverage" in report_csv[0]
+        assert "shadow_required_missing_count" in report_csv[0]
+        assert "shadow_traversal_gap_count" in report_csv[0]
+        assert "shadow_taxonomy_gap_count" in report_csv[0]
+        assert "shadow_known_risks" in report_csv[0]
+
+        report_md = (Path(tmpdir) / "audit_report.md").read_text(encoding="utf-8")
+        assert "## Shadow Verdict Summary" in report_md
+        assert "## V3 vs V4 Shadow Comparison" in report_md
 
 
 def test_parse_active_tabs():
