@@ -6,6 +6,7 @@ from typing import Any
 
 POLICY_NAME = "balanced_v1"
 KNOWN_RISK_LABELS = {"EventsButton", "LocationButton"}
+MAX_KNOWN_RISK_LABELS = 5
 REQUIRED_SUBTYPES = {"CTA", "NAV_TILE", "SERVICE_TILE", "LIFE_TAB"}
 OPTIONAL_SUBTYPES = {
     "CONTENT_CARD",
@@ -19,7 +20,7 @@ OPTIONAL_SUBTYPES = {
     "TIP_CARD",
     "EMPTY_OR_NO_DATA_STATUS",
 }
-PROVISIONAL_SUBTYPES = {"METRIC_CARD", "PROGRAM_CARD"}
+PROVISIONAL_SUBTYPES = {"METRIC_CARD", "PROGRAM_CARD", "UNKNOWN"}
 EXCLUDED_SUBTYPES = {"CHROME", "LOW_VALUE_LABEL"}
 OPTIONAL_LABELS = {"Add family member", "View profile"}
 STRUCTURAL_LABELS = {"Controls"}
@@ -127,6 +128,7 @@ def calculate_shadow_coverage_inputs(
     required_missing: list[str] = []
     optional_labels: list[str] = []
     optional_matched: list[str] = []
+    provisional_labels: list[str] = []
     provisional_count = 0
     matching_gap_count = 0
     traversal_gap_count = 0
@@ -156,13 +158,20 @@ def calculate_shadow_coverage_inputs(
                 optional_matched.append(label)
         elif eligibility == "PROVISIONAL":
             provisional_count += 1
+            provisional_labels.append(label)
 
     required_denominator = len(required_labels)
     required_matched_count = len(required_matched)
     optional_denominator = len(optional_labels)
     optional_matched_count = len(optional_matched)
-    known_risks = [label for label in required_missing if label in KNOWN_RISK_LABELS]
-    traversal_gap_count = max(traversal_gap_count, len(known_risks))
+    required_known_risks = [label for label in required_missing if label in KNOWN_RISK_LABELS]
+    known_risks = list(required_known_risks)
+    for label in sorted(provisional_labels):
+        if len(known_risks) >= MAX_KNOWN_RISK_LABELS:
+            break
+        if label not in known_risks:
+            known_risks.append(label)
+    traversal_gap_count = max(traversal_gap_count, len(required_known_risks))
 
     return {
         "required_denominator_count": required_denominator,
@@ -182,6 +191,7 @@ def calculate_shadow_coverage_inputs(
         "taxonomy_gap_count": 0,
         "known_risk_labels": known_risks,
         "required_missing_labels_sample": ", ".join(sorted(required_missing)[:10]),
+        "provisional_labels_sample": ", ".join(sorted(provisional_labels)[:MAX_KNOWN_RISK_LABELS]),
     }
 
 
@@ -204,6 +214,12 @@ def _count_taxonomy_gaps(report: dict[str, Any]) -> int:
     if "taxonomy_gap_count" in report:
         return _int_value(report.get("taxonomy_gap_count"))
     return 0
+
+
+def _shadow_inputs_unavailable(coverage_status: str, required_denominator_count: int) -> bool:
+    if required_denominator_count > 0:
+        return coverage_status not in {"", "ready", "ready_empty_denominator"}
+    return True
 
 
 def calculate_balanced_shadow_verdict(report: dict[str, Any]) -> dict[str, Any]:
@@ -233,8 +249,15 @@ def calculate_balanced_shadow_verdict(report: dict[str, Any]) -> dict[str, Any]:
             report.get("required_missing_labels_sample", report.get("coverage_missing_labels_sample"))
         )
         known_risk_labels = [label for label in missing_labels if label in KNOWN_RISK_LABELS]
+    provisional_labels = _split_sample_labels(report.get("provisional_labels_sample"))
+    for label in provisional_labels:
+        if len(known_risk_labels) >= MAX_KNOWN_RISK_LABELS:
+            break
+        if label not in known_risk_labels:
+            known_risk_labels.append(label)
+    required_known_risks = [label for label in known_risk_labels if label in KNOWN_RISK_LABELS]
     matching_gap_count = _count_matching_gaps(report)
-    traversal_gap_count = _count_traversal_gaps(report, known_risk_labels)
+    traversal_gap_count = _count_traversal_gaps(report, required_known_risks)
     taxonomy_gap_count = _count_taxonomy_gaps(report)
 
     if environment_error:
@@ -243,7 +266,7 @@ def calculate_balanced_shadow_verdict(report: dict[str, Any]) -> dict[str, Any]:
     elif v3_verdict == "FAIL":
         verdict = "FAIL"
         reason = "v3_verdict=FAIL"
-    elif coverage_status != "ready" or required_denominator_count == 0:
+    elif _shadow_inputs_unavailable(coverage_status, required_denominator_count):
         verdict = "REVIEW"
         reason = f"coverage_not_ready:{coverage_status or 'unknown'}"
     elif required_coverage < 50.0:
@@ -263,6 +286,9 @@ def calculate_balanced_shadow_verdict(report: dict[str, Any]) -> dict[str, Any]:
     else:
         verdict = "REVIEW"
         reason = "balanced_policy_review_threshold"
+
+    if provisional_candidate_count > 0 and verdict != "ENVIRONMENT_ERROR":
+        reason = f"{reason}; provisional_risk_count={provisional_candidate_count}"
 
     return {
         "policy_name": POLICY_NAME,

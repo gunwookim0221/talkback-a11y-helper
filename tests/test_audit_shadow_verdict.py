@@ -88,6 +88,42 @@ def test_balanced_shadow_verdict_reviews_unready_coverage():
     assert shadow["reason"] == "coverage_not_ready:xml_missing"
 
 
+def test_balanced_shadow_verdict_allows_ready_empty_denominator_with_required_inputs():
+    shadow = calculate_balanced_shadow_verdict(
+        _base_report(
+            coverage_diagnostic_status="ready_empty_denominator",
+            coverage_denominator_count=0,
+            coverage_matched_count=0,
+            coverage_missing_count=0,
+            coverage_percent=0.0,
+            required_denominator_count=2,
+            required_matched_count=2,
+            required_missing_count=0,
+            required_coverage=100.0,
+            traversal_gap_count=0,
+            taxonomy_gap_count=0,
+        )
+    )
+
+    assert shadow["verdict"] == "PASS"
+    assert shadow["reason"] == "required_coverage>=90 and required_missing_count<=1 and no traversal/taxonomy gaps"
+
+
+def test_balanced_shadow_verdict_blocks_missing_xml_even_with_required_inputs():
+    shadow = calculate_balanced_shadow_verdict(
+        _base_report(
+            coverage_diagnostic_status="xml_missing",
+            required_denominator_count=2,
+            required_matched_count=2,
+            required_missing_count=0,
+            required_coverage=100.0,
+        )
+    )
+
+    assert shadow["verdict"] == "REVIEW"
+    assert shadow["reason"] == "coverage_not_ready:xml_missing"
+
+
 def test_shadow_coverage_inputs_treat_device_keep_status_as_required():
     candidates = [
         {
@@ -115,7 +151,35 @@ def test_shadow_coverage_inputs_treat_device_keep_status_as_required():
 
     assert shadow_inputs["required_denominator_count"] == 1
     assert shadow_inputs["required_matched_count"] == 1
-    assert shadow_inputs["optional_denominator_count"] == 1
+    assert shadow_inputs["optional_denominator_count"] == 0
+    assert shadow_inputs["provisional_candidate_count"] == 1
+
+
+def test_shadow_coverage_inputs_treat_unknown_actionable_keep_as_provisional():
+    candidates = [
+        {
+            "label": "Demand Response",
+            "candidate_type": "ACTIONABLE",
+            "candidate_subtype": "UNKNOWN",
+            "policy_recommendation": "KEEP",
+            "clickable_values": ["true"],
+        },
+        {
+            "label": "Monitor",
+            "candidate_type": "ACTIONABLE",
+            "candidate_subtype": "LIFE_TAB",
+            "policy_recommendation": "KEEP",
+        },
+    ]
+    tab_stats = {"entry": {"visible_labels_set": {"Monitor"}}}
+
+    shadow_inputs = calculate_shadow_coverage_inputs(candidates, tab_stats, "life_energy_plugin")
+
+    assert shadow_inputs["required_denominator_count"] == 1
+    assert shadow_inputs["required_matched_count"] == 1
+    assert shadow_inputs["provisional_candidate_count"] == 1
+    assert shadow_inputs["known_risk_labels"] == ["Demand Response"]
+    assert shadow_inputs["provisional_labels_sample"] == "Demand Response"
 
 
 def test_shadow_coverage_inputs_treat_life_status_metric_as_optional():
@@ -142,6 +206,40 @@ def test_shadow_coverage_inputs_treat_life_status_metric_as_optional():
     assert shadow_inputs["required_missing_count"] == 1
     assert shadow_inputs["optional_denominator_count"] == 1
     assert shadow_inputs["known_risk_labels"] == ["EventsButton"]
+
+
+def test_balanced_shadow_verdict_reports_provisional_risk_without_blocking_pass():
+    shadow = calculate_balanced_shadow_verdict(
+        _base_report(
+            required_denominator_count=3,
+            required_matched_count=3,
+            required_missing_count=0,
+            required_coverage=100.0,
+            provisional_candidate_count=2,
+            provisional_labels_sample="Demand Response, Energy level Information",
+        )
+    )
+
+    assert shadow["verdict"] == "PASS"
+    assert shadow["known_risk_labels"] == ["Demand Response", "Energy level Information"]
+    assert shadow["reason"].endswith("provisional_risk_count=2")
+
+
+def test_balanced_shadow_verdict_reports_provisional_risk_on_zero_required_review():
+    shadow = calculate_balanced_shadow_verdict(
+        _base_report(
+            required_denominator_count=0,
+            required_matched_count=0,
+            required_missing_count=0,
+            required_coverage=0.0,
+            provisional_candidate_count=2,
+            provisional_labels_sample="Demand Response, Energy level Information",
+        )
+    )
+
+    assert shadow["verdict"] == "REVIEW"
+    assert shadow["known_risk_labels"] == ["Demand Response", "Energy level Information"]
+    assert shadow["reason"] == "coverage_not_ready:ready; provisional_risk_count=2"
 
 
 def test_balanced_shadow_verdict_detects_known_family_care_risks():
