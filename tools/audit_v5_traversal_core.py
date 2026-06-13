@@ -255,6 +255,32 @@ class CandidateIndex:
             "match_confidence": "low",
         }
 
+    def match_many(
+        self,
+        label: str | None,
+        *,
+        resource_id: str | None = None,
+        bounds: str | None = None,
+        include_compound_parts: bool = True,
+    ) -> list[dict[str, Any]]:
+        labels = expand_compound_label(label) if include_compound_parts else [clean_log_label(label)]
+        matches: dict[str, dict[str, Any]] = {}
+        for candidate_label in labels:
+            metadata = self.match(candidate_label, resource_id=resource_id, bounds=bounds)
+            matches.setdefault(str(metadata["candidate_id"]), metadata)
+        return list(matches.values())
+
+    def contained_in_text(self, row_text: str | None) -> list[dict[str, Any]]:
+        normalized_row = normalize_label(row_text)
+        if not normalized_row:
+            return []
+        matches: list[dict[str, Any]] = []
+        for normalized_label, metadata in self.by_normalized_label.items():
+            if not can_match_inside_visited_text(normalized_label, normalized_row):
+                continue
+            matches.append(metadata)
+        return matches
+
 
 def normalize_label(value: str | None) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip()).lower()
@@ -336,6 +362,52 @@ def split_candidate_list(value: str | None) -> list[str]:
     if text == "none":
         return []
     return [item.strip() for item in text.split("|") if item.strip() and item.strip().lower() != "none"]
+
+
+def expand_compound_label(value: str | None) -> list[str]:
+    text = clean_log_label(value)
+    if not text:
+        return []
+    labels = [text]
+    button_match = re.match(r"^(.+?Button)\s+(.+)$", text)
+    if button_match:
+        labels.extend([button_match.group(1).strip(), button_match.group(2).strip()])
+    return unique_labels(labels)
+
+
+def unique_labels(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        label = clean_log_label(value)
+        key = normalize_label(label)
+        if not label or key in seen:
+            continue
+        seen.add(key)
+        unique.append(label)
+    return unique
+
+
+def is_local_tab_like(metadata: dict[str, Any]) -> bool:
+    label = str(metadata.get("stable_label") or "")
+    return (
+        metadata.get("candidate_subtype") == "NAV_TILE"
+        or metadata.get("candidate_type") == "ACTIONABLE"
+        or label.endswith("Button")
+    )
+
+
+def can_match_inside_visited_text(normalized_label: str, normalized_row: str) -> bool:
+    if not normalized_label or normalized_label == normalized_row:
+        return False
+    if not re.search(rf"(?<!\w){re.escape(normalized_label)}(?!\w)", normalized_row):
+        return False
+    if re.fullmatch(r"\d+", normalized_label):
+        metric_tokens = ("steps", "%", "avg", "week", "today", " h ", " m ")
+        return any(token in f" {normalized_row} " for token in metric_tokens)
+    if len(normalized_label) < 4:
+        return False
+    return True
 
 
 def find_artifacts(artifact_dir: Path) -> list[ScenarioArtifact]:
@@ -484,6 +556,27 @@ def build_log_events(
         ) -> None:
             nonlocal event_index
             metadata = candidate_index.match(label, resource_id=fields.get("rid"), bounds=fields.get("bounds"))
+            add_metadata(
+                event_type,
+                metadata,
+                phase=phase,
+                reason=reason,
+                confidence=confidence,
+                evidence=evidence,
+                visible_label=visible_label,
+            )
+
+        def add_metadata(
+            event_type: str,
+            metadata: dict[str, Any],
+            *,
+            phase: str = "main_loop",
+            reason: str | None = None,
+            confidence: str = "high",
+            evidence: dict[str, Any] | None = None,
+            visible_label: str | None = None,
+        ) -> None:
+            nonlocal event_index
             if metadata.get("match_confidence") == "low" and confidence == "high":
                 confidence = "medium"
             event_index += 1
@@ -506,9 +599,57 @@ def build_log_events(
                 )
             )
 
+        def add_many(
+            event_type: str,
+            label: str | None,
+            *,
+            phase: str = "main_loop",
+            reason: str | None = None,
+            confidence: str = "high",
+            evidence: dict[str, Any] | None = None,
+            visible_label: str | None = None,
+            local_tab_only: bool = False,
+            include_contained: bool = False,
+        ) -> None:
+            matches = candidate_index.match_many(label, resource_id=fields.get("rid"), bounds=fields.get("bounds"))
+            if include_contained:
+                contained_matches = candidate_index.contained_in_text(label)
+                for metadata in contained_matches:
+                    if str(metadata.get("candidate_id")) not in {str(item.get("candidate_id")) for item in matches}:
+                        matches.append(metadata)
+            for metadata in matches:
+                if local_tab_only and not is_local_tab_like(metadata):
+                    continue
+                add_metadata(
+                    event_type,
+                    metadata,
+                    phase=phase,
+                    reason=reason,
+                    confidence=confidence,
+                    evidence=evidence,
+                    visible_label=visible_label,
+                )
+
         if source_event == "STEP END":
             label = fields.get("visible") or fields.get("speech")
-            add("VISITED", label, phase="visit_commit", visible_label=label, evidence={"speech": fields.get("speech")})
+            metadata = candidate_index.match(label, resource_id=fields.get("rid"), bounds=fields.get("bounds"))
+            if metadata.get("match_confidence") != "medium":
+                add_metadata(
+                    "VISITED",
+                    metadata,
+                    phase="visit_commit",
+                    visible_label=label,
+                    evidence={"speech": fields.get("speech")},
+                )
+            for metadata in candidate_index.contained_in_text(label):
+                add_metadata(
+                    "VISITED",
+                    metadata,
+                    phase="visit_commit",
+                    confidence="medium",
+                    evidence={"visible_label": label, "matched_by": "visited_row_contains_discovered_label"},
+                    visible_label=label,
+                )
         elif source_event == "candidate_priority":
             add(
                 "SELECTED",
@@ -534,8 +675,36 @@ def build_log_events(
                 )
         elif source_event == "bottom_strip_policy":
             for label in split_candidate_list(fields.get("bottom_strip_candidates") or fields.get("candidates")):
-                add("BOTTOM_STRIP_DEFERRED", label, reason=fields.get("reason"), evidence=dict(fields))
-                add("POLICY_DEPRIORITIZED", label, reason=fields.get("reason"), evidence=dict(fields))
+                add_many("BOTTOM_STRIP_DEFERRED", label, reason=fields.get("reason"), evidence=dict(fields))
+                add_many("POLICY_DEPRIORITIZED", label, reason=fields.get("reason"), evidence=dict(fields))
+        elif source_event == "chrome_penalty":
+            for label in split_candidate_list(fields.get("deprioritized")):
+                add_many(
+                    "POLICY_DEPRIORITIZED",
+                    label,
+                    reason=fields.get("reason") or "chrome_penalty",
+                    confidence="medium",
+                    evidence=dict(fields),
+                )
+        elif source_event in {"viewport_exhausted_eval", "representative_exhausted_eval"}:
+            for label in split_candidate_list(fields.get("chrome_excluded")):
+                matched = candidate_index.match(label)
+                if matched.get("match_confidence") == "low":
+                    continue
+                add_many(
+                    "CANDIDATE_DISCARDED",
+                    label,
+                    reason="chrome_excluded",
+                    confidence="medium",
+                    evidence=dict(fields),
+                )
+                add_many(
+                    "POLICY_DEPRIORITIZED",
+                    label,
+                    reason="chrome_excluded",
+                    confidence="medium",
+                    evidence=dict(fields),
+                )
         elif source_event == "focus_context_mismatch":
             add(
                 "FOCUS_CONTEXT_MISMATCH",
@@ -557,12 +726,18 @@ def build_log_events(
                 evidence={"resolved_focus": fields.get("resolved_focus"), **fields},
             )
             if source_event == "focus_realign_record":
-                add("VISITED", fields.get("target"), phase="visit_commit", evidence=dict(fields))
+                add_many(
+                    "VISITED",
+                    fields.get("target"),
+                    phase="visit_commit",
+                    evidence=dict(fields),
+                    include_contained=True,
+                )
         elif source_event in {"focus_realign_fail", "focus_force_realign_fail"}:
             add("FOCUS_REALIGN_FAIL", fields.get("target"), reason=fields.get("reason"), evidence=dict(fields))
         elif source_event in {"local_tab_progression", "local_tab_state_write", "local_tab_select"}:
             if source_event != "local_tab_state_write" or fields.get("kind") == "pending":
-                add(
+                add_many(
                     "LOCAL_TAB_TRANSITION_ATTEMPT",
                     fields.get("next") or fields.get("selected") or fields.get("target") or fields.get("pending"),
                     phase="local_tab_transition",
@@ -571,27 +746,59 @@ def build_log_events(
                 )
         elif source_event in {"local_tab_commit", "local_tab_force_navigation_resolved"}:
             label = fields.get("target") or fields.get("active") or fields.get("label")
-            add("LOCAL_TAB_TRANSITION_SUCCESS", label, phase="local_tab_transition", evidence=dict(fields))
-            add("VISITED", label, phase="visit_commit", evidence=dict(fields))
+            add_many("LOCAL_TAB_TRANSITION_SUCCESS", label, phase="local_tab_transition", evidence=dict(fields))
+            add_many("VISITED", label, phase="visit_commit", evidence=dict(fields))
         elif source_event == "local_tab_target_activate":
-            add(
+            add_many(
                 "ACTIVATION_ATTEMPT",
                 fields.get("target"),
                 phase="activation",
                 evidence={"activation_method": fields.get("method"), **fields},
             )
         elif source_event in {"local_tab_target_activate_success"}:
-            add("ACTIVATION_SUCCESS", fields.get("target"), phase="activation", evidence=dict(fields))
+            add_many("ACTIVATION_SUCCESS", fields.get("target"), phase="activation", evidence=dict(fields))
         elif source_event in {
             "local_tab_target_activate_no_match",
             "local_tab_target_activate_fail",
             "local_tab_target_activate_skip",
         }:
-            add("ACTIVATION_FAIL", fields.get("target"), phase="activation", reason=fields.get("reason"), evidence=dict(fields))
+            add_many(
+                "ACTIVATION_FAIL",
+                fields.get("target"),
+                phase="activation",
+                reason=fields.get("reason"),
+                evidence=dict(fields),
+            )
         elif source_event == "local_tab_recover":
             label = fields.get("active") or fields.get("target") or fields.get("candidate")
             add("STATE_RECOVERY_ATTEMPT", label, phase="recovery", reason=fields.get("reason"), evidence=dict(fields))
             add("STATE_RECOVERY_SUCCESS", label, phase="recovery", reason=fields.get("reason"), evidence=dict(fields))
+            for candidate_label in split_candidate_list(fields.get("candidates")):
+                add_many(
+                    "BOTTOM_STRIP_DEFERRED",
+                    candidate_label,
+                    phase="recovery",
+                    reason=fields.get("reason") or "local_tab_recover_candidates",
+                    confidence="medium",
+                    evidence=dict(fields),
+                )
+            add_many(
+                "LOCAL_TAB_TRANSITION_SUCCESS",
+                label,
+                phase="recovery",
+                reason=fields.get("reason"),
+                evidence=dict(fields),
+                local_tab_only=True,
+            )
+            add_many(
+                "VISITED",
+                label,
+                phase="visit_commit",
+                reason=fields.get("reason"),
+                confidence="medium",
+                evidence={**fields, "matched_by": "local_tab_recover_active"},
+                local_tab_only=True,
+            )
         elif source_event in {"local_tab_recover_fail", "local_tab_pending_clear"}:
             label = fields.get("pending") or fields.get("target") or fields.get("active") or "unknown"
             add("STATE_RECOVERY_FAIL", label, phase="recovery", reason=fields.get("reason") or source_event, evidence=dict(fields))
@@ -938,4 +1145,3 @@ def sample_events(events: list[NormalizedEvent], limit: int = 100) -> list[Norma
     selected = [event for event in events if event.event_type in priority]
     selected.extend(event for event in events if event.event_type not in priority)
     return selected[:limit]
-

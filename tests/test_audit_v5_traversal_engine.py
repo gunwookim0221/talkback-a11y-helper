@@ -70,3 +70,118 @@ def test_markdown_summary_contains_top_missed_candidates(tmp_path):
     assert "## Top Missed Candidates" in markdown
     assert "`Usage guide`" in markdown
     assert "root_cause=CANDIDATE_DISCARDED" in markdown
+
+
+def test_local_tab_recover_compound_candidates_and_active_visit(tmp_path):
+    scenario_dir = tmp_path / "life_family_care_plugin"
+    xml_dir = scenario_dir / "talkback_compare_1" / "life_family_care_plugin" / "xml_dumps"
+    _write_text(xml_dir / "000_step_001_entry.xml", _xml("LocationButton"))
+    _write_text(xml_dir / "001_step_002_entry.xml", _xml("EventsButton"))
+    _write_text(
+        scenario_dir / "talkback_compare_1.normal.log",
+        "[10:00:00] [STEP][local_tab_recover] reason='state_missing_but_dump_strip_seen' "
+        "candidates='LocationButton Location|EventsButton Events' active='LocationButton Location'",
+    )
+
+    report = audit.build_report(scenario_dir)
+    by_label = {ledger["stable_label"]: ledger for ledger in report["candidate_ledgers"]}
+
+    assert by_label["LocationButton"]["visited"] is True
+    assert by_label["LocationButton"]["missed"] is False
+    assert by_label["EventsButton"]["missed"] is True
+    assert by_label["EventsButton"]["root_cause"] == "BOTTOM_STRIP_MISS"
+
+
+def test_chrome_penalty_becomes_policy_deprioritized(tmp_path):
+    scenario_dir = tmp_path / "life_family_care_plugin"
+    xml_dir = scenario_dir / "talkback_compare_1" / "life_family_care_plugin" / "xml_dumps"
+    _write_text(xml_dir / "000_step_001_entry.xml", _xml("Add family member", "invite_member"))
+    _write_text(
+        scenario_dir / "talkback_compare_1.normal.log",
+        "[10:00:00] [STEP][chrome_penalty] deprioritized='Navigate up|Family Care|Add family member|More options' "
+        "reason='top_chrome_during_content_phase'",
+    )
+
+    report = audit.build_report(scenario_dir)
+    missed = [ledger for ledger in report["candidate_ledgers"] if ledger["missed"]]
+
+    assert missed[0]["stable_label"] == "Add family member"
+    assert missed[0]["root_cause"] == "POLICY_DEPRIORITIZED"
+
+
+def test_compound_metric_row_marks_leaf_candidates_visited(tmp_path):
+    scenario_dir = tmp_path / "life_family_care_plugin"
+    xml_dir = scenario_dir / "talkback_compare_1" / "life_family_care_plugin" / "xml_dumps"
+    for index, label in enumerate(["Today", "Avg (week)", "6000", "12", "3", "32"]):
+        _write_text(xml_dir / f"{index:03d}_step_001_entry.xml", _xml(label))
+    _write_text(
+        scenario_dir / "talkback_compare_1.normal.log",
+        "\n".join(
+            [
+                "[10:00:00] [STEP] END step=1 visible='Today 4 h 32 m Avg (week) 3 12 03:12' "
+                "speech='Today 4 h 32 m Avg (week) 3 12 03:12'",
+                "[10:00:01] [STEP] END step=2 visible='0 steps / 6000 %' speech='0 steps / 6000 %'",
+            ]
+        ),
+    )
+
+    report = audit.build_report(scenario_dir)
+    by_label = {ledger["stable_label"]: ledger for ledger in report["candidate_ledgers"]}
+
+    for label in ["Today", "Avg (week)", "6000", "12", "3", "32"]:
+        assert by_label[label]["visited"] is True
+        assert by_label[label]["missed"] is False
+
+
+def test_numeric_leaf_does_not_match_non_metric_row(tmp_path):
+    scenario_dir = tmp_path / "life_family_care_plugin"
+    xml_dir = scenario_dir / "talkback_compare_1" / "life_family_care_plugin" / "xml_dumps"
+    _write_text(xml_dir / "000_step_001_entry.xml", _xml("12"))
+    _write_text(
+        scenario_dir / "talkback_compare_1.normal.log",
+        "[10:00:00] [STEP] END step=1 visible='Room 12' speech='Room 12'",
+    )
+
+    report = audit.build_report(scenario_dir)
+    ledger = next(ledger for ledger in report["candidate_ledgers"] if ledger["stable_label"] == "12")
+
+    assert ledger["visited"] is False
+    assert ledger["missed"] is True
+    assert ledger["root_cause"] == "UNKNOWN"
+
+
+def test_focus_realign_record_marks_composite_leaf_candidates_visited(tmp_path):
+    scenario_dir = tmp_path / "device_door_lock_plugin"
+    xml_dir = scenario_dir / "talkback_compare_1" / "device_door_lock_plugin" / "xml_dumps"
+    _write_text(xml_dir / "000_step_001_entry.xml", _xml("Locked"))
+    _write_text(
+        scenario_dir / "talkback_compare_1.normal.log",
+        "[10:00:00] [STEP][focus_realign_record] target='Lock state Locked switch' "
+        "signature='lockcapabilitycardview||bounds||lock state locked switch' phase='Controls'",
+    )
+
+    report = audit.build_report(scenario_dir)
+    ledger = next(ledger for ledger in report["candidate_ledgers"] if ledger["stable_label"] == "Locked")
+
+    assert ledger["visited"] is True
+    assert ledger["missed"] is False
+    assert ledger["root_cause"] is None
+
+
+def test_chrome_excluded_candidates_become_discarded(tmp_path):
+    scenario_dir = tmp_path / "device_motion_sensor_plugin"
+    xml_dir = scenario_dir / "talkback_compare_1" / "device_motion_sensor_plugin" / "xml_dumps"
+    _write_text(xml_dir / "000_step_001_entry.xml", _xml("Add routine"))
+    _write_text(
+        scenario_dir / "talkback_compare_1.normal.log",
+        "[10:00:00] [STEP][viewport_exhausted_eval] all_candidates='none' selection_candidates='none' "
+        "representative_candidates='none' chrome_excluded='Navigate up|Plugin title|Add routine|More options' "
+        "result=true reason='no_representative_candidates'",
+    )
+
+    report = audit.build_report(scenario_dir)
+    ledger = next(ledger for ledger in report["candidate_ledgers"] if ledger["stable_label"] == "Add routine")
+
+    assert ledger["visited"] is False
+    assert ledger["missed"] is True
+    assert ledger["root_cause"] == "CANDIDATE_DISCARDED"
