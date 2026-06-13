@@ -6,7 +6,16 @@ from unittest.mock import patch
 import tempfile
 import sys
 import os
-from tools.audit_device_plugins import parse_run_results, evaluate_scenario, parse_summary_json, main
+from tools.audit_device_plugins import (
+    parse_run_results,
+    evaluate_scenario,
+    parse_summary_json,
+    main,
+    find_latest_normal_log,
+    log_has_external_popup_abort,
+    stabilize_batch_surface,
+    execute_scenario_with_retries,
+)
 from tools.audit_xml_candidates import extract_xml_candidates
 from tools.audit_xml_coverage import calculate_xml_coverage, normalize_coverage_label
 from tools.audit_xml_filters import classify_xml_candidate
@@ -211,6 +220,100 @@ def test_main_cli(mock_run):
         report_md = (Path(tmpdir) / "audit_report.md").read_text(encoding="utf-8")
         assert "## Shadow Verdict Summary" in report_md
         assert "## V3 vs V4 Shadow Comparison" in report_md
+
+
+def test_find_latest_normal_log_returns_newest_file(tmp_path):
+    first = tmp_path / "a.normal.log"
+    second = tmp_path / "b.normal.log"
+    first.write_text("a", encoding="utf-8")
+    second.write_text("b", encoding="utf-8")
+
+    latest = find_latest_normal_log(tmp_path)
+
+    assert latest == second
+
+
+def test_log_has_external_popup_abort_detects_preflight_abort(tmp_path):
+    log_path = tmp_path / "scenario.normal.log"
+    log_path.write_text(
+        "[PREFLIGHT][popup] contamination package='com.android.vending'\n"
+        "[PREFLIGHT] abort run reason='external_popup_contamination'\n",
+        encoding="utf-8",
+    )
+
+    assert log_has_external_popup_abort(log_path) is True
+
+
+def test_stabilize_batch_surface_retries_external_popup(monkeypatch):
+    attempts = []
+
+    class DummyClient:
+        def __init__(self, dev_serial=None):
+            self.dev_serial = dev_serial
+
+    class DummyPreflight:
+        def __init__(self, ok, reason, talkback_reason=""):
+            self.ok = ok
+            self.reason = reason
+            self.talkback_reason = talkback_reason
+
+    sequence = iter(
+        [
+            DummyPreflight(False, "external_popup_contamination"),
+            DummyPreflight(True, "ok"),
+        ]
+    )
+
+    monkeypatch.setattr("tools.audit_device_plugins.A11yAdbClient", DummyClient)
+    monkeypatch.setattr(
+        "tools.audit_device_plugins.run_preflight",
+        lambda **kwargs: attempts.append(kwargs["serial"]) or next(sequence),
+    )
+    monkeypatch.setattr("tools.audit_device_plugins.time.sleep", lambda _seconds: None)
+
+    result = stabilize_batch_surface(serial="SERIAL", scenario_id="device_smoke_sensor_plugin")
+
+    assert result["ok"] is True
+    assert result["attempts"] == 2
+    assert attempts == ["SERIAL", "SERIAL"]
+
+
+def test_execute_scenario_with_retries_retries_once_after_popup_abort(monkeypatch, tmp_path):
+    run_out_dir = tmp_path / "device_smoke_sensor_plugin"
+    run_out_dir.mkdir()
+    log_path = run_out_dir / "retry.normal.log"
+    log_path.write_text(
+        "[PREFLIGHT] abort run reason='external_popup_contamination'\n",
+        encoding="utf-8",
+    )
+
+    run_results = iter(
+        [
+            {"return_code": 2, "timed_out": False},
+            {"return_code": 0, "timed_out": False},
+        ]
+    )
+    recoveries = []
+
+    monkeypatch.setattr("tools.audit_device_plugins.before_each_scenario_reset", lambda serial, dry_run: True)
+    monkeypatch.setattr("tools.audit_device_plugins.after_each_scenario_cleanup", lambda serial, dry_run: None)
+    monkeypatch.setattr("tools.audit_device_plugins.run_scenario_with_timeout", lambda cmd, timeout: next(run_results))
+    monkeypatch.setattr(
+        "tools.audit_device_plugins.stabilize_batch_surface",
+        lambda **kwargs: recoveries.append(kwargs["scenario_id"]) or {"ok": True, "attempts": 1, "reason": "ok"},
+    )
+
+    exec_info = execute_scenario_with_retries(
+        serial="SERIAL",
+        sid="device_smoke_sensor_plugin",
+        run_out_dir=run_out_dir,
+        python_executable=sys.executable,
+        dry_run=False,
+    )
+
+    assert exec_info["return_code"] == 0
+    assert exec_info["attempts"] == 2
+    assert recoveries == ["device_smoke_sensor_plugin"]
 
 
 def test_parse_active_tabs():

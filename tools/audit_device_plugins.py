@@ -8,6 +8,9 @@ import time
 from pathlib import Path
 from typing import List, Dict, Any
 
+from talkback_lib import A11yAdbClient
+from tb_runner.core_preflight import run_preflight
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 try:
@@ -19,6 +22,10 @@ except ImportError as e:
 from tools.audit_xml_candidates import extract_xml_candidates, sample_values
 from tools.audit_xml_coverage import calculate_xml_coverage
 from tools.audit_shadow_verdict import add_shadow_verdict_fields, calculate_shadow_coverage_inputs
+
+SMARTTHINGS_PACKAGE = "com.samsung.android.oneconnect"
+MAX_BATCH_PREFLIGHT_ATTEMPTS = 2
+MAX_EXTERNAL_POPUP_RETRY_ATTEMPTS = 2
 
 def get_device_plugins() -> List[str]:
     return [
@@ -73,10 +80,15 @@ def before_each_scenario_reset(serial: str, dry_run: bool) -> bool:
     if dry_run or not serial:
         return True
     try:
-        subprocess.run(["adb", "-s", serial, "shell", "am", "force-stop", "com.samsung.android.oneconnect"], check=True, capture_output=True, timeout=10)
-        subprocess.run(["adb", "-s", serial, "shell", "monkey", "-p", "com.samsung.android.oneconnect", "-c", "android.intent.category.LAUNCHER", "1"], check=True, capture_output=True, timeout=10)
+        subprocess.run(["adb", "-s", serial, "shell", "am", "force-stop", SMARTTHINGS_PACKAGE], check=True, capture_output=True, timeout=10)
+        subprocess.run(
+            ["adb", "-s", serial, "shell", "monkey", "-p", SMARTTHINGS_PACKAGE, "-c", "android.intent.category.LAUNCHER", "1"],
+            check=True,
+            capture_output=True,
+            timeout=10,
+        )
         time.sleep(5)
-        return True
+        return stabilize_batch_surface(serial=serial, scenario_id="batch_reset")["ok"]
     except Exception as e:
         print(f"Failed to reset app state: {e}")
         return False
@@ -85,9 +97,113 @@ def after_each_scenario_cleanup(serial: str, dry_run: bool):
     if dry_run or not serial:
         return
     try:
-        subprocess.run(["adb", "-s", serial, "shell", "am", "force-stop", "com.samsung.android.oneconnect"], check=False, capture_output=True, timeout=10)
+        subprocess.run(["adb", "-s", serial, "shell", "am", "force-stop", SMARTTHINGS_PACKAGE], check=False, capture_output=True, timeout=10)
     except Exception:
         pass
+
+
+def _batch_preflight_log(scenario_id: str, attempt: int, message: str) -> None:
+    print(f"[AUDIT_BATCH][{scenario_id}][preflight][attempt {attempt}] {message}")
+
+
+def stabilize_batch_surface(
+    serial: str,
+    scenario_id: str,
+    *,
+    max_attempts: int = MAX_BATCH_PREFLIGHT_ATTEMPTS,
+) -> Dict[str, Any]:
+    client = A11yAdbClient(dev_serial=serial)
+    last_preflight = None
+    for attempt in range(1, max(1, max_attempts) + 1):
+        _batch_preflight_log(scenario_id, attempt, "start")
+        preflight = run_preflight(
+            client=client,
+            serial=serial,
+            log_fn=lambda line, sid=scenario_id, idx=attempt: _batch_preflight_log(sid, idx, line),
+        )
+        last_preflight = preflight
+        if preflight.ok:
+            _batch_preflight_log(scenario_id, attempt, "passed")
+            return {"ok": True, "attempts": attempt, "reason": preflight.reason, "preflight": preflight}
+        popup_blocked = (
+            preflight.reason == "external_popup_contamination"
+            or preflight.talkback_reason == "external_popup_contamination"
+        )
+        _batch_preflight_log(
+            scenario_id,
+            attempt,
+            f"failed reason='{preflight.reason}' talkback_reason='{preflight.talkback_reason}' popup_blocked={str(popup_blocked).lower()}",
+        )
+        if not popup_blocked or attempt >= max(1, max_attempts):
+            break
+        time.sleep(1.0)
+    return {
+        "ok": False,
+        "attempts": max(1, max_attempts),
+        "reason": getattr(last_preflight, "reason", "unknown"),
+        "preflight": last_preflight,
+    }
+
+
+def find_latest_normal_log(run_out_dir: Path) -> Path | None:
+    if not run_out_dir.exists():
+        return None
+    logs = list(run_out_dir.glob("*.normal.log"))
+    if not logs:
+        return None
+    return max(logs, key=os.path.getmtime)
+
+
+def log_has_external_popup_abort(log_path: Path | None) -> bool:
+    if not log_path or not log_path.exists():
+        return False
+    try:
+        content = log_path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return False
+    return "[PREFLIGHT] abort run reason='external_popup_contamination'" in content
+
+
+def execute_scenario_with_retries(
+    *,
+    serial: str,
+    sid: str,
+    run_out_dir: Path,
+    python_executable: str,
+    dry_run: bool,
+    timeout: int = 300,
+    max_attempts: int = MAX_EXTERNAL_POPUP_RETRY_ATTEMPTS,
+) -> Dict[str, Any]:
+    exec_info = {"return_code": "N/A", "timed_out": False, "start_recovered": True, "attempts": 0}
+    if dry_run or not serial:
+        return exec_info
+
+    exec_info["start_recovered"] = before_each_scenario_reset(serial, dry_run)
+
+    for attempt in range(1, max(1, max_attempts) + 1):
+        exec_info["attempts"] = attempt
+        cmd = [
+            python_executable, "script_test.py",
+            "--serial", serial,
+            "--scenario", sid,
+            "--output-dir", str(run_out_dir)
+        ]
+        print(f"Executing (attempt {attempt}/{max_attempts}): {' '.join(cmd)}")
+        res = run_scenario_with_timeout(cmd, timeout=timeout)
+        exec_info["return_code"] = res["return_code"]
+        exec_info["timed_out"] = res["timed_out"]
+        if res["timed_out"]:
+            break
+
+        normal_log = find_latest_normal_log(run_out_dir)
+        if res["return_code"] == 2 and log_has_external_popup_abort(normal_log) and attempt < max(1, max_attempts):
+            print(f"[AUDIT_BATCH][{sid}] popup contamination persisted; retrying after shared core preflight recovery")
+            stabilize_batch_surface(serial=serial, scenario_id=sid)
+            continue
+        break
+
+    after_each_scenario_cleanup(serial, dry_run)
+    return exec_info
 
 def run_scenario_with_timeout(cmd: List[str], timeout: int) -> Dict[str, Any]:
     result = {"return_code": -1, "timed_out": False}
@@ -633,23 +749,16 @@ def main():
         print(f"\n--- Auditing {sid} ---")
         run_out_dir = out_dir / sid
         
-        exec_info = {"return_code": "N/A", "timed_out": False, "start_recovered": False}
-        
+        exec_info = {"return_code": "N/A", "timed_out": False, "start_recovered": False, "attempts": 0}
+
         if not args.dry_run and args.serial:
-            exec_info["start_recovered"] = before_each_scenario_reset(args.serial, args.dry_run)
-            
-            cmd = [
-                sys.executable, "script_test.py",
-                "--serial", args.serial,
-                "--scenario", sid,
-                "--output-dir", str(run_out_dir)
-            ]
-            print(f"Executing: {' '.join(cmd)}")
-            res = run_scenario_with_timeout(cmd, timeout=300)
-            exec_info["return_code"] = res["return_code"]
-            exec_info["timed_out"] = res["timed_out"]
-            
-            after_each_scenario_cleanup(args.serial, args.dry_run)
+            exec_info = execute_scenario_with_retries(
+                serial=args.serial,
+                sid=sid,
+                run_out_dir=run_out_dir,
+                python_executable=sys.executable,
+                dry_run=args.dry_run,
+            )
         else:
             if not args.dry_run:
                 print("Skipping execution because --device/--serial is not provided.")
@@ -660,9 +769,7 @@ def main():
         # Find normal log
         normal_log = None
         if run_out_dir.exists():
-            logs = list(run_out_dir.glob("*.normal.log"))
-            if logs:
-                normal_log = max(logs, key=os.path.getmtime)
+            normal_log = find_latest_normal_log(run_out_dir)
                 
         if not summary_file.exists() and not normal_log:
             print(f"No logs found for {sid} in {run_out_dir}")
@@ -685,7 +792,8 @@ def main():
                 "coverage_warnings": "",
                 "return_code": exec_info["return_code"],
                 "timed_out": exec_info["timed_out"],
-                "start_recovered": exec_info["start_recovered"]
+                "start_recovered": exec_info["start_recovered"],
+                "execution_attempts": exec_info["attempts"],
             }))
             continue
             
@@ -698,6 +806,7 @@ def main():
         report["return_code"] = exec_info["return_code"]
         report["timed_out"] = exec_info["timed_out"]
         report["start_recovered"] = exec_info["start_recovered"]
+        report["execution_attempts"] = exec_info["attempts"]
         results.append(report)
         print(f"Verdict: {report['verdict']} - {report['reason']}")
 
