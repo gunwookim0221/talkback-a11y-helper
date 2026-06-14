@@ -52,6 +52,7 @@ EVENT_TO_SOURCE_FILE = {
     "LOCAL_TAB_TRANSITION_ATTEMPT": "tb_runner/local_tab_logic.py",
     "LOCAL_TAB_TRANSITION_SUCCESS": "tb_runner/local_tab_logic.py",
     "LOCAL_TAB_TRANSITION_FAIL": "tb_runner/local_tab_logic.py",
+    "LOCAL_TAB_CONTENT_TRAVERSAL_FAIL": "tb_runner/local_tab_logic.py",
     "BOTTOM_STRIP_DEFERRED": "tb_runner/local_tab_logic.py",
     "POLICY_DEPRIORITIZED": "tb_runner/local_tab_logic.py",
     "CANDIDATE_DISCARDED": "tb_runner/local_tab_logic.py",
@@ -748,6 +749,16 @@ def build_log_events(
             label = fields.get("target") or fields.get("active") or fields.get("label")
             add_many("LOCAL_TAB_TRANSITION_SUCCESS", label, phase="local_tab_transition", evidence=dict(fields))
             add_many("VISITED", label, phase="visit_commit", evidence=dict(fields))
+        elif source_event == "local_tab_content_traversal_fail":
+            add_many(
+                "LOCAL_TAB_CONTENT_TRAVERSAL_FAIL",
+                fields.get("active"),
+                phase="local_tab_content",
+                reason=fields.get("reason"),
+                evidence=dict(fields),
+                visible_label=fields.get("visible"),
+                local_tab_only=True,
+            )
         elif source_event == "local_tab_target_activate":
             add_many(
                 "ACTIVATION_ATTEMPT",
@@ -955,6 +966,13 @@ def fold_events(events: list[NormalizedEvent], start_index: int = 0) -> tuple[li
             ledger.state_recovery_attempted = True
         elif event.event_type == "LOCAL_TAB_TRANSITION_FAIL":
             ledger.local_tab_transition_attempted = True
+        elif event.event_type == "LOCAL_TAB_CONTENT_TRAVERSAL_FAIL":
+            ledger.selected = True
+            ledger.local_tab_transition_attempted = True
+
+    for candidate_id, candidate_events in events_by_candidate.items():
+        if has_event(candidate_events, "LOCAL_TAB_CONTENT_TRAVERSAL_FAIL"):
+            ledgers[candidate_id].visited = False
 
     missed_events: list[NormalizedEvent] = []
     event_index = start_index
@@ -1020,6 +1038,8 @@ def attribute_root_cause(ledger: CandidateLedger, events: list[NormalizedEvent])
         return "STATE_RECOVERY_FAIL", "high"
     if ledger.bottom_strip_deferred:
         return "BOTTOM_STRIP_MISS", "medium"
+    if has_event(events, "LOCAL_TAB_CONTENT_TRAVERSAL_FAIL"):
+        return "LOCAL_TAB_MISS", "high"
     if has_event(events, "LOCAL_TAB_TRANSITION_FAIL") or (
         ledger.local_tab_transition_attempted and not ledger.local_tab_transition_succeeded
     ):
@@ -1137,6 +1157,7 @@ def sample_events(events: list[NormalizedEvent], limit: int = 100) -> list[Norma
         "FOCUS_REALIGN_FAIL",
         "STATE_RECOVERY_FAIL",
         "LOCAL_TAB_TRANSITION_FAIL",
+        "LOCAL_TAB_CONTENT_TRAVERSAL_FAIL",
         "BOTTOM_STRIP_DEFERRED",
         "POLICY_DEPRIORITIZED",
         "CANDIDATE_DISCARDED",

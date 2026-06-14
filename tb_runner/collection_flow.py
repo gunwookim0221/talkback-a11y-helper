@@ -336,6 +336,10 @@ class MainLoopState:
     forced_local_tab_attempt_count: int
     local_tab_activation_failures: dict[str, int]
     content_phase_grace_steps: int
+    current_local_tab_content_phase_active: bool
+    current_local_tab_content_entered: bool
+    current_local_tab_content_candidate_visited: bool
+    current_local_tab_content_fail_recorded: bool
     active_container_group_signature: str
     active_container_group_remaining: set[str]
     active_container_group_labels: dict[str, str]
@@ -13044,6 +13048,10 @@ def _build_main_loop_state_from_anchor(
         forced_local_tab_attempt_count=0,
         local_tab_activation_failures={},
         content_phase_grace_steps=0,
+        current_local_tab_content_phase_active=False,
+        current_local_tab_content_entered=False,
+        current_local_tab_content_candidate_visited=False,
+        current_local_tab_content_fail_recorded=False,
         active_container_group_signature="",
         active_container_group_remaining=set(),
         active_container_group_labels={},
@@ -13171,6 +13179,10 @@ def _maybe_recover_food_scan_screen(
         return False
 
     state.content_phase_grace_steps = 0
+    state.current_local_tab_content_phase_active = False
+    state.current_local_tab_content_entered = False
+    state.current_local_tab_content_candidate_visited = False
+    state.current_local_tab_content_fail_recorded = False
     state.current_local_tab_signature = ""
     state.current_local_tab_active_rid = ""
     state.current_local_tab_active_label = ""

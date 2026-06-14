@@ -209,15 +209,37 @@ Closure basis:
 
 Audit V5 ends as a reporting-only traversal audit system that is ready for controlled operational use with known limitations.
 
-## 12. Code Change Status
+## 12. Post-Closure Follow-up
+
+Post-closure follow-up:
+
+Device plugin local tab false pass was found after V5 closure.
+
+The issue was not that content traversal succeeded, but that tab activation was being interpreted as content traversal.
+
+The engine now emits `local_tab_content_traversal_fail` when content is not entered after tab activation.
+
+The V5 parser maps this to `LOCAL_TAB_MISS`.
+
+Motion, Smoke, and Door Lock now consistently show:
+
+- `Controls`: OK
+- `Routines`: `LOCAL_TAB_MISS`
+- `History`: `LOCAL_TAB_MISS`
+
+This follow-up does not change the V5 governance model.
+
+It makes the device-plugin local-tab interpretation stricter and more explainable.
+
+## 13. Code Change Status
 
 No code changes were made for this closure document.
 
-## 13. Test Status
+## 14. Test Status
 
 Pytest was not run for this closure document.
 
-## 14. Git Status
+## 15. Git Status
 
 Expected working tree delta after this document:
 

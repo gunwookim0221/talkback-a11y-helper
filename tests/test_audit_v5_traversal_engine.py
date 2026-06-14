@@ -185,3 +185,85 @@ def test_chrome_excluded_candidates_become_discarded(tmp_path):
     assert ledger["visited"] is False
     assert ledger["missed"] is True
     assert ledger["root_cause"] == "CANDIDATE_DISCARDED"
+
+
+def test_local_tab_content_traversal_fail_demotes_commit_visit(tmp_path):
+    scenario_dir = tmp_path / "device_motion_sensor_plugin"
+    xml_dir = scenario_dir / "talkback_compare_1" / "device_motion_sensor_plugin" / "xml_dumps"
+    _write_text(xml_dir / "000_step_001_entry.xml", _xml("Controls", "control"))
+    _write_text(xml_dir / "001_step_002_entry.xml", _xml("Routines", "routine"))
+    _write_text(
+        scenario_dir / "talkback_compare_1.normal.log",
+        "\n".join(
+            [
+                "[10:00:00] [STEP][local_tab_target_activate] target='Controls' method='tap_bounds_center'",
+                "[10:00:01] [STEP][local_tab_target_activate_success] target='Controls' matched_by='bounds'",
+                "[10:00:02] [STEP][local_tab_commit] active='Controls' reason='target_activation_success'",
+                "[10:00:03] [STEP][local_tab_target_activate] target='Routines' method='tap_bounds_center'",
+                "[10:00:04] [STEP][local_tab_target_activate_success] target='Routines' matched_by='rid'",
+                "[10:00:05] [STEP][local_tab_commit] active='Routines' reason='target_activation_success'",
+                "[10:00:06] [STEP][local_tab_content_traversal_fail] active='Routines' "
+                "reason='content_not_entered_after_tab_activation' visible='History' "
+                "focus_confidence='high' content_entered=false content_candidate_visited=false",
+            ]
+        ),
+    )
+
+    report = audit.build_report(scenario_dir)
+    by_label = {ledger["stable_label"]: ledger for ledger in report["candidate_ledgers"]}
+
+    assert by_label["Controls"]["visited"] is True
+    assert by_label["Controls"]["missed"] is False
+    assert by_label["Routines"]["selected"] is True
+    assert by_label["Routines"]["activation_attempted"] is True
+    assert by_label["Routines"]["activation_succeeded"] is True
+    assert by_label["Routines"]["local_tab_transition_succeeded"] is True
+    assert by_label["Routines"]["visited"] is False
+    assert by_label["Routines"]["missed"] is True
+    assert by_label["Routines"]["root_cause"] == "LOCAL_TAB_MISS"
+    assert report["root_cause_summary"]["LOCAL_TAB_MISS"] == 1
+
+    fail_events = [
+        event
+        for event in report["event_samples"]
+        if event["event_type"] == "LOCAL_TAB_CONTENT_TRAVERSAL_FAIL"
+    ]
+    assert len(fail_events) == 1
+    assert fail_events[0]["stable_label"] == "Routines"
+    assert fail_events[0]["visible_label"] == "History"
+    assert fail_events[0]["reason"] == "content_not_entered_after_tab_activation"
+    assert fail_events[0]["evidence"]["focus_confidence"] == "high"
+    assert fail_events[0]["evidence"]["content_entered"] == "false"
+    assert fail_events[0]["evidence"]["content_candidate_visited"] == "false"
+
+
+def test_local_tab_content_traversal_fail_only_affects_matching_tab(tmp_path):
+    scenario_dir = tmp_path / "device_motion_sensor_plugin"
+    xml_dir = scenario_dir / "talkback_compare_1" / "device_motion_sensor_plugin" / "xml_dumps"
+    for label, rid in [("Controls", "control"), ("Routines", "routine"), ("History", "history")]:
+        _write_text(xml_dir / f"{rid}.xml", _xml(label, rid))
+    _write_text(
+        scenario_dir / "talkback_compare_1.normal.log",
+        "\n".join(
+            [
+                "[10:00:00] [STEP][local_tab_commit] active='Controls' reason='target_activation_success'",
+                "[10:00:01] [STEP][local_tab_commit] active='Routines' reason='target_activation_success'",
+                "[10:00:02] [STEP][local_tab_content_traversal_fail] active='Routines' "
+                "reason='content_not_entered_after_tab_activation' visible='History'",
+                "[10:00:03] [STEP][local_tab_commit] active='History' reason='target_activation_success'",
+                "[10:00:04] [STEP][local_tab_content_traversal_fail] active='History' "
+                "reason='content_not_entered_after_tab_activation' visible='History'",
+            ]
+        ),
+    )
+
+    report = audit.build_report(scenario_dir)
+    by_label = {ledger["stable_label"]: ledger for ledger in report["candidate_ledgers"]}
+
+    assert by_label["Controls"]["visited"] is True
+    assert by_label["Controls"]["missed"] is False
+    assert by_label["Routines"]["visited"] is False
+    assert by_label["Routines"]["root_cause"] == "LOCAL_TAB_MISS"
+    assert by_label["History"]["visited"] is False
+    assert by_label["History"]["root_cause"] == "LOCAL_TAB_MISS"
+    assert report["root_cause_summary"]["LOCAL_TAB_MISS"] == 2

@@ -43,6 +43,10 @@ class LocalTabState:
     visited_by_signature: dict[str, set[str]] = field(default_factory=dict)
     exhausted_signatures: set[str] = field(default_factory=set)
     candidates_by_signature: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    current_content_phase_active: bool = False
+    current_content_entered: bool = False
+    current_content_candidate_visited: bool = False
+    current_content_fail_recorded: bool = False
 
     def register_candidates(self, signature: str, candidates: list[dict[str, Any]]) -> None:
         normalized_signature = str(signature or "").strip()
@@ -67,6 +71,17 @@ class LocalTabState:
         self.active_rid = str(rid or "").strip()
         self.active_label = str(label or "").strip()
         self.active_age = int(age or 0)
+
+    def reset_content_state(self) -> None:
+        self.current_content_phase_active = True
+        self.current_content_entered = False
+        self.current_content_candidate_visited = False
+        self.current_content_fail_recorded = False
+
+    def mark_content_visited(self) -> None:
+        self.current_content_phase_active = True
+        self.current_content_entered = True
+        self.current_content_candidate_visited = True
 
     def set_pending(self, *, signature: str, rid: str, label: str, bounds: str, age: int = 0) -> None:
         self.pending_signature = str(signature or "").strip()
@@ -119,6 +134,151 @@ def _local_tab_state_mirror(state: Any) -> LocalTabState:
     except Exception:
         pass
     return mirror
+
+
+def _reset_current_local_tab_content_state(state: Any) -> None:
+    mirror = _local_tab_state_mirror(state)
+    mirror.reset_content_state()
+    for name, value in {
+        "current_local_tab_content_phase_active": True,
+        "current_local_tab_content_entered": False,
+        "current_local_tab_content_candidate_visited": False,
+        "current_local_tab_content_fail_recorded": False,
+    }.items():
+        try:
+            setattr(state, name, value)
+        except Exception:
+            pass
+
+
+def _mark_current_local_tab_content_visited(state: Any) -> None:
+    mirror = _local_tab_state_mirror(state)
+    mirror.mark_content_visited()
+    for name in {
+        "current_local_tab_content_phase_active",
+        "current_local_tab_content_entered",
+        "current_local_tab_content_candidate_visited",
+    }:
+        try:
+            setattr(state, name, True)
+        except Exception:
+            pass
+
+
+def _mark_current_local_tab_content_fail_recorded(state: Any) -> None:
+    mirror = _local_tab_state_mirror(state)
+    mirror.current_content_fail_recorded = True
+    try:
+        setattr(state, "current_local_tab_content_fail_recorded", True)
+    except Exception:
+        pass
+
+
+def _current_local_tab_content_state(state: Any) -> tuple[bool, bool, bool, bool]:
+    mirror = _local_tab_state_mirror(state)
+    phase_active = bool(
+        getattr(state, "current_local_tab_content_phase_active", mirror.current_content_phase_active)
+    )
+    entered = bool(getattr(state, "current_local_tab_content_entered", mirror.current_content_entered))
+    candidate_visited = bool(
+        getattr(state, "current_local_tab_content_candidate_visited", mirror.current_content_candidate_visited)
+    )
+    fail_recorded = bool(
+        getattr(state, "current_local_tab_content_fail_recorded", mirror.current_content_fail_recorded)
+    )
+    return phase_active, entered, candidate_visited, fail_recorded
+
+
+def _is_empty_state_content_label(label: str) -> bool:
+    normalized_label = re.sub(r"\s+", " ", str(label or "").strip()).lower()
+    if not normalized_label:
+        return False
+    if normalized_label in {"nothing yet", "no history", "no activity", "no data", "no events"}:
+        return True
+    if re.fullmatch(r"no\s+[a-z0-9][a-z0-9\s\-]{0,40}", normalized_label):
+        return True
+    return False
+
+
+def _normalize_empty_state_match_text(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+
+
+def _row_matches_empty_state_content_candidate(
+    *,
+    state: Any,
+    row: dict[str, Any],
+    empty_state_labels: list[str],
+) -> bool:
+    if not empty_state_labels:
+        return False
+    if _is_current_focus_on_local_tab_strip(state, row):
+        return False
+    if _is_row_top_chrome_candidate(row) or _is_row_persistent_bottom_strip_candidate(row):
+        return False
+
+    row_values = [
+        row.get("visible_label", ""),
+        row.get("merged_announcement", ""),
+        row.get("focus_text", ""),
+        row.get("focus_content_description", ""),
+        row.get("actual_focus_visible", ""),
+        row.get("actual_focus_speech", ""),
+    ]
+    row_texts = {
+        _normalize_empty_state_match_text(value)
+        for value in row_values
+        if _normalize_empty_state_match_text(value)
+    }
+    candidate_texts = {
+        _normalize_empty_state_match_text(label)
+        for label in empty_state_labels
+        if _normalize_empty_state_match_text(label)
+    }
+    if not row_texts or not candidate_texts:
+        return False
+    for row_text in row_texts:
+        for candidate_text in candidate_texts:
+            if row_text == candidate_text:
+                return True
+            if candidate_text and candidate_text in row_text:
+                return True
+            if row_text and row_text in candidate_text:
+                return True
+    return False
+
+
+def _row_is_content_like_local_tab_focus(
+    *,
+    state: Any,
+    row: dict[str, Any],
+    current_row_is_passive_status: bool,
+    current_row_is_top_chrome: bool,
+) -> bool:
+    label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
+    if not label:
+        return False
+    if current_row_is_top_chrome or current_row_is_passive_status:
+        return False
+    if _is_current_focus_on_local_tab_strip(state, row) or _is_row_persistent_bottom_strip_candidate(row):
+        return False
+    bounds = parse_bounds_str(str(row.get("focus_bounds", "") or "").strip())
+    if not bounds:
+        return False
+    _left, top, _right, bottom = bounds
+    if (top + bottom) // 2 <= 220:
+        return False
+    resource_id = str(row.get("focus_view_id", "") or row.get("resource_id", "") or "").strip().lower()
+    class_name = str(row.get("focus_class_name", "") or row.get("class_name", "") or "").strip().lower()
+    if any(token in resource_id or token in class_name for token in ("toolbar", "appbar", "actionbar", "navigate", "overflow")):
+        return False
+    if "webview" in class_name:
+        return False
+    width = max(1, bounds[2] - bounds[0])
+    height = max(1, bounds[3] - bounds[1])
+    if width >= 1000 and height >= 1800:
+        return False
+    return True
 
 
 def _normalize_local_tab_visited_map(value: Any) -> dict[str, set[str]]:
@@ -1266,6 +1426,7 @@ def _reset_content_phase_after_tab_switch(
     scroll_state.scroll_ready_retry_counts = {}
     scroll_state.pending_scroll_ready_cluster_signature = ""
     state.content_phase_grace_steps = 2
+    _reset_current_local_tab_content_state(state)
     _write_last_selected_local_tab_hint(
         state,
         signature=active_signature or str(getattr(state, "current_local_tab_signature", "") or ""),
@@ -1757,6 +1918,8 @@ def _annotate_row_lifecycle_kind(
     row["row_lifecycle_confidence"] = confidence
     if local_tab_context:
         row["row_lifecycle_context"] = "local_tab_strip_present"
+    if kind == "content":
+        _mark_current_local_tab_content_visited(state)
     if kind in {"local_tab", "chrome", "status", "unknown"} and (
         previous_kind != kind or previous_source != source
     ):
@@ -2811,6 +2974,29 @@ def _maybe_select_next_local_tab(
             current_bottom_strip_candidates = []
     filtered_meta = _filter_content_candidates_for_phase(content_candidates, state=state)
     status_excluded = [str(candidate.get("label", "") or "").strip() for candidate in filtered_meta["status_candidates"]]
+    empty_state_content_labels = [label for label in status_excluded if _is_empty_state_content_label(label)]
+    if _row_matches_empty_state_content_candidate(
+        state=state,
+        row=row,
+        empty_state_labels=empty_state_content_labels,
+    ):
+        _mark_current_local_tab_content_visited(state)
+        row["local_tab_content_entered"] = True
+        row["local_tab_content_candidate_visited"] = True
+        row["local_tab_content_visit_source"] = "empty_state_focused_row"
+    elif _row_is_content_like_local_tab_focus(
+        state=state,
+        row=row,
+        current_row_is_passive_status=_is_passive_status_text(
+            str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip(),
+            scenario_id=scenario_id,
+        ),
+        current_row_is_top_chrome=_is_row_top_chrome_candidate(row),
+    ):
+        _mark_current_local_tab_content_visited(state)
+        row["local_tab_content_entered"] = True
+        row["local_tab_content_candidate_visited"] = True
+        row["local_tab_content_visit_source"] = "content_like_focused_row"
     section_header_deferred = [str(candidate.get("label", "") or "").strip() for candidate in filtered_meta.get("section_header_deferred", [])]
     consumed_representatives = [
         str(candidate.get("label", "") or "").strip()
@@ -3036,6 +3222,33 @@ def _maybe_select_next_local_tab(
     if last_scroll_allowed:
         scroll_allowed = True
         scroll_reason = last_scroll_reason
+    phase_active, content_entered, content_candidate_visited, content_fail_recorded = _current_local_tab_content_state(state)
+    content_traversal_missing_after_activation = bool(
+        active_display
+        and phase_active
+        and not content_entered
+        and not content_candidate_visited
+        and not content_fail_recorded
+        and bottom_strip_context
+    )
+    if content_traversal_missing_after_activation:
+        _mark_current_local_tab_content_fail_recorded(state)
+        row["local_tab_content_traversal_fail"] = True
+        row["local_tab_content_traversal_result"] = "FAIL"
+        row["local_tab_content_traversal_fail_reason"] = "content_not_entered_after_tab_activation"
+        row["local_tab_content_entered"] = False
+        row["local_tab_content_candidate_visited"] = False
+        visible = str(row.get("visible_label", "") or row.get("merged_announcement", "") or row.get("focus_view_id", "") or "").strip()
+        focus_confidence = str(row.get("focus_confidence", "") or row.get("row_lifecycle_confidence", "") or "").strip()
+        log(
+            f"[STEP][local_tab_content_traversal_fail] active='{_truncate_debug_text(active_display, 96)}' "
+            "reason='content_not_entered_after_tab_activation' "
+            f"visible='{_truncate_debug_text(visible, 96)}' "
+            f"focus_confidence='{_truncate_debug_text(focus_confidence, 32)}' "
+            "content_entered=false content_candidate_visited=false "
+            f"current_tab='{_truncate_debug_text(active_display, 96)}' "
+            "source='content_phase_exhaustion_guard'"
+        )
     row["scroll_fallback_allowed"] = scroll_allowed
     row["scroll_fallback_gate_evaluated"] = True
     row["scroll_fallback_gate_reason"] = scroll_reason

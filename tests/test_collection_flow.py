@@ -5897,7 +5897,7 @@ def test_reprioritize_persistent_bottom_strip_row_prefers_content_over_top_chrom
     assert any("[STEP][candidate_priority]" in line and "representative_content_preferred_over_section_header" in line for line in logs)
 
 
-def test_maybe_select_next_local_tab_treats_top_chrome_only_as_exhausted(monkeypatch):
+def test_maybe_select_next_local_tab_logs_content_traversal_fail_for_top_chrome_only(monkeypatch):
     logs = []
     monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
     client = DummyClient([])
@@ -5909,6 +5909,11 @@ def test_maybe_select_next_local_tab_treats_top_chrome_only_as_exhausted(monkeyp
     state = SimpleNamespace(
         current_local_tab_signature="com.example:id/activity_button||com.example:id/location_button||com.example:id/events_button",
         current_local_tab_active_rid="com.example:id/activity_button",
+        current_local_tab_active_label="Activity",
+        current_local_tab_content_phase_active=True,
+        current_local_tab_content_entered=False,
+        current_local_tab_content_candidate_visited=False,
+        current_local_tab_content_fail_recorded=False,
         local_tab_candidates_by_signature={
             "com.example:id/activity_button||com.example:id/location_button||com.example:id/events_button": [
                 {"rid": "com.example:id/activity_button", "label": "Activity", "node": {}},
@@ -5928,16 +5933,21 @@ def test_maybe_select_next_local_tab_treats_top_chrome_only_as_exhausted(monkeyp
         cta_cluster_visited_rids={},
     )
 
+    row = {}
     advanced = collection_flow._maybe_select_next_local_tab(
         client=client,
         dev="SERIAL",
         state=state,
-        row={},
+        row=row,
         scenario_id="life_family_care_plugin",
         step_idx=15,
     )
 
     assert advanced is True
+    assert row["local_tab_content_traversal_fail"] is True
+    assert row["local_tab_content_traversal_result"] == "FAIL"
+    assert row["local_tab_content_traversal_fail_reason"] == "content_not_entered_after_tab_activation"
+    assert any("[STEP][local_tab_content_traversal_fail]" in line and "Activity" in line for line in logs)
     assert any("[STEP][representative_exhausted_eval]" in line and "chrome_excluded='Navigate up|More options|Add family member'" in line and "exhausted=true" in line for line in logs)
 
 
@@ -6040,6 +6050,221 @@ def test_maybe_select_next_local_tab_keeps_false_when_new_representative_content
     assert any("[STEP][exhaustion_candidates]" in line and "from_selection='Device usage'" in line for line in logs)
 
 
+def test_maybe_select_next_local_tab_does_not_fail_after_content_visit(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[
+        {"text": "Navigate up", "contentDescription": "Navigate up", "viewIdResourceName": "com.example:id/navigate_up", "className": "android.widget.ImageButton", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "0,0,120,120", "children": []},
+    ]]
+    state = SimpleNamespace(
+        current_local_tab_signature="com.example:id/activity_button||com.example:id/location_button",
+        current_local_tab_active_rid="com.example:id/activity_button",
+        current_local_tab_active_label="Activity",
+        current_local_tab_content_phase_active=True,
+        current_local_tab_content_entered=True,
+        current_local_tab_content_candidate_visited=True,
+        current_local_tab_content_fail_recorded=False,
+        local_tab_candidates_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button": [
+                {"rid": "com.example:id/activity_button", "label": "Activity", "node": {}},
+                {"rid": "com.example:id/location_button", "label": "Location", "node": {}},
+            ]
+        },
+        visited_local_tabs_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button": {"com.example:id/activity_button"}
+        },
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={"focus_view_id": "com.example:id/activity_button"},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+    )
+
+    row = {}
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row=row,
+        scenario_id="life_family_care_plugin",
+        step_idx=18,
+    )
+
+    assert advanced is True
+    assert row.get("local_tab_content_traversal_fail") is not True
+    assert not any("[STEP][local_tab_content_traversal_fail]" in line for line in logs)
+
+
+def test_maybe_select_next_local_tab_treats_content_like_header_row_as_content_visit(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[
+        {"text": "Navigate up", "contentDescription": "Navigate up", "viewIdResourceName": "back", "className": "android.widget.Button", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "72,118,144,310", "children": []},
+    ]]
+    state = SimpleNamespace(
+        current_local_tab_signature="control||routine||history",
+        current_local_tab_active_rid="control",
+        current_local_tab_active_label="Controls",
+        current_local_tab_content_phase_active=True,
+        current_local_tab_content_entered=False,
+        current_local_tab_content_candidate_visited=False,
+        current_local_tab_content_fail_recorded=False,
+        local_tab_candidates_by_signature={
+            "control||routine||history": [
+                {"rid": "control", "label": "Controls", "node": {}},
+                {"rid": "routine", "label": "Routines", "node": {}},
+                {"rid": "history", "label": "History", "node": {}},
+            ]
+        },
+        visited_local_tabs_by_signature={"control||routine||history": {"control"}},
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={"visible_label": "Controls", "focus_view_id": "control", "focus_bounds": "30,2338,372,2473"},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+    )
+    row = {
+        "visible_label": "Device state",
+        "merged_announcement": "Device state",
+        "focus_view_id": "device_state_header",
+        "focus_class_name": "android.widget.TextView",
+        "focus_bounds": "84,358,936,427",
+    }
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row=row,
+        scenario_id="device_door_lock_plugin",
+        step_idx=19,
+    )
+
+    assert advanced is True
+    assert row.get("local_tab_content_traversal_fail") is not True
+    assert row["local_tab_content_entered"] is True
+    assert row["local_tab_content_candidate_visited"] is True
+    assert row["local_tab_content_visit_source"] == "content_like_focused_row"
+    assert not any("[STEP][local_tab_content_traversal_fail]" in line for line in logs)
+
+
+def test_maybe_select_next_local_tab_does_not_treat_bottom_strip_label_as_content_like_row(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[
+        {"text": "Navigate up", "contentDescription": "Navigate up", "viewIdResourceName": "back", "className": "android.widget.Button", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "72,118,144,310", "children": []},
+    ]]
+    state = SimpleNamespace(
+        current_local_tab_signature="control||routine||history",
+        current_local_tab_active_rid="routine",
+        current_local_tab_active_label="Routines",
+        current_local_tab_content_phase_active=True,
+        current_local_tab_content_entered=False,
+        current_local_tab_content_candidate_visited=False,
+        current_local_tab_content_fail_recorded=False,
+        local_tab_candidates_by_signature={
+            "control||routine||history": [
+                {"rid": "control", "label": "Controls", "node": {}},
+                {"rid": "routine", "label": "Routines", "node": {}},
+                {"rid": "history", "label": "History", "node": {}},
+            ]
+        },
+        visited_local_tabs_by_signature={"control||routine||history": {"routine"}},
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={"visible_label": "Routines", "focus_view_id": "routine", "focus_bounds": "369,2338,711,2473"},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+    )
+    row = {
+        "visible_label": "History",
+        "merged_announcement": "History",
+        "focus_view_id": "history",
+        "focus_class_name": "android.view.View",
+        "focus_bounds": "708,2338,1050,2473",
+    }
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row=row,
+        scenario_id="device_motion_sensor_plugin",
+        step_idx=19,
+    )
+
+    assert advanced is True
+    assert row["local_tab_content_traversal_fail"] is True
+    assert row["local_tab_content_entered"] is False
+    assert row["local_tab_content_candidate_visited"] is False
+    assert row.get("local_tab_content_visit_source") != "content_like_focused_row"
+    assert any("[STEP][local_tab_content_traversal_fail]" in line and "Routines" in line for line in logs)
+
+
+def test_maybe_select_next_local_tab_does_not_treat_plugin_root_as_content_like_row(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[
+        {"text": "Navigate up", "contentDescription": "Navigate up", "viewIdResourceName": "back", "className": "android.widget.Button", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "72,118,144,310", "children": []},
+    ]]
+    state = SimpleNamespace(
+        current_local_tab_signature="control||routine||history",
+        current_local_tab_active_rid="history",
+        current_local_tab_active_label="History",
+        current_local_tab_content_phase_active=True,
+        current_local_tab_content_entered=False,
+        current_local_tab_content_candidate_visited=False,
+        current_local_tab_content_fail_recorded=False,
+        local_tab_candidates_by_signature={
+            "control||routine||history": [
+                {"rid": "control", "label": "Controls", "node": {}},
+                {"rid": "routine", "label": "Routines", "node": {}},
+                {"rid": "history", "label": "History", "node": {}},
+            ]
+        },
+        visited_local_tabs_by_signature={"control||routine||history": {"history"}},
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={"visible_label": "History", "focus_view_id": "history", "focus_bounds": "708,2338,1050,2473"},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+    )
+    row = {
+        "visible_label": "SmartThings Plugin",
+        "merged_announcement": "SmartThings Plugin",
+        "focus_view_id": "",
+        "focus_class_name": "android.webkit.WebView",
+        "focus_bounds": "0,94,1080,2496",
+    }
+
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row=row,
+        scenario_id="device_door_lock_plugin",
+        step_idx=19,
+    )
+
+    assert advanced is True
+    assert row["local_tab_content_traversal_fail"] is True
+    assert row["local_tab_content_entered"] is False
+    assert row["local_tab_content_candidate_visited"] is False
+    assert row.get("local_tab_content_visit_source") != "content_like_focused_row"
+
+
 def test_selection_and_exhaustion_share_revisit_filtered_candidates(monkeypatch):
     logs = []
     monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
@@ -6057,6 +6282,11 @@ def test_selection_and_exhaustion_share_revisit_filtered_candidates(monkeypatch)
     state = SimpleNamespace(
         current_local_tab_signature="com.example:id/activity_button||com.example:id/location_button",
         current_local_tab_active_rid="com.example:id/activity_button",
+        current_local_tab_active_label="Activity",
+        current_local_tab_content_phase_active=True,
+        current_local_tab_content_entered=True,
+        current_local_tab_content_candidate_visited=True,
+        current_local_tab_content_fail_recorded=False,
         local_tab_candidates_by_signature={
             "com.example:id/activity_button||com.example:id/location_button": [
                 {"rid": "com.example:id/activity_button", "label": "Activity", "node": {}},
@@ -6091,7 +6321,7 @@ def test_selection_and_exhaustion_share_revisit_filtered_candidates(monkeypatch)
     assert not any("[STEP][candidate_mismatch]" in line for line in logs)
 
 
-def test_maybe_select_next_local_tab_treats_passive_status_and_empty_state_as_exhausted(monkeypatch):
+def test_maybe_select_next_local_tab_does_not_treat_dump_only_empty_state_as_content_visit(monkeypatch):
     logs = []
     monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
     client = DummyClient([])
@@ -6105,6 +6335,10 @@ def test_maybe_select_next_local_tab_treats_passive_status_and_empty_state_as_ex
     state = SimpleNamespace(
         current_local_tab_signature="com.example:id/activity_button||com.example:id/location_button",
         current_local_tab_active_rid="com.example:id/activity_button",
+        current_local_tab_content_phase_active=True,
+        current_local_tab_content_entered=False,
+        current_local_tab_content_candidate_visited=False,
+        current_local_tab_content_fail_recorded=False,
         local_tab_candidates_by_signature={
             "com.example:id/activity_button||com.example:id/location_button": [
                 {"rid": "com.example:id/activity_button", "label": "Activity", "node": {}},
@@ -6123,16 +6357,88 @@ def test_maybe_select_next_local_tab_treats_passive_status_and_empty_state_as_ex
         cta_cluster_visited_rids={},
     )
 
+    row = {
+        "visible_label": "Activity",
+        "merged_announcement": "Activity",
+        "focus_view_id": "com.example:id/activity_button",
+        "focus_bounds": "40,1960,260,2120",
+    }
     advanced = collection_flow._maybe_select_next_local_tab(
         client=client,
         dev="SERIAL",
         state=state,
-        row={},
+        row=row,
         scenario_id="life_family_care_plugin",
         step_idx=18,
     )
 
     assert advanced is True
+    assert row["local_tab_content_traversal_fail"] is True
+    assert row["local_tab_content_traversal_fail_reason"] == "content_not_entered_after_tab_activation"
+    assert row["local_tab_content_entered"] is False
+    assert row["local_tab_content_candidate_visited"] is False
+    assert row.get("local_tab_content_visit_source") != "empty_state_status_candidate"
+    assert any("[STEP][local_tab_content_traversal_fail]" in line for line in logs)
+    assert any("[STEP][status_exhausted_excluded]" in line and "No activity" in line and "Waiting" in line for line in logs)
+    assert any("[STEP][representative_exhausted_eval]" in line and "exhausted=true" in line for line in logs)
+
+
+def test_maybe_select_next_local_tab_treats_focused_empty_state_row_as_content_visit(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([])
+    client.dump_tree_sequence = [[
+        {"text": "", "contentDescription": "", "viewIdResourceName": "", "className": "android.widget.FrameLayout", "clickable": False, "focusable": False, "effectiveClickable": False, "visibleToUser": True, "boundsInScreen": "0,0,1080,2200", "children": [
+            {"text": "No activity", "contentDescription": "", "viewIdResourceName": "com.example:id/no_activity", "className": "android.widget.TextView", "clickable": False, "focusable": False, "effectiveClickable": False, "visibleToUser": True, "boundsInScreen": "40,420,340,500", "children": []},
+            {"text": "Waiting", "contentDescription": "", "viewIdResourceName": "com.example:id/waiting_status", "className": "android.widget.TextView", "clickable": False, "focusable": False, "effectiveClickable": False, "visibleToUser": True, "boundsInScreen": "40,520,260,600", "children": []},
+            {"text": "Activity will be measured again after 4:00 AM.", "contentDescription": "", "viewIdResourceName": "com.example:id/waiting_explanation", "className": "android.widget.TextView", "clickable": False, "focusable": False, "effectiveClickable": False, "visibleToUser": True, "boundsInScreen": "40,620,1040,760", "children": []},
+        ]},
+    ]]
+    state = SimpleNamespace(
+        current_local_tab_signature="com.example:id/activity_button||com.example:id/location_button",
+        current_local_tab_active_rid="com.example:id/activity_button",
+        current_local_tab_content_phase_active=True,
+        current_local_tab_content_entered=False,
+        current_local_tab_content_candidate_visited=False,
+        current_local_tab_content_fail_recorded=False,
+        local_tab_candidates_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button": [
+                {"rid": "com.example:id/activity_button", "label": "Activity", "node": {}},
+                {"rid": "com.example:id/location_button", "label": "Location", "node": {}},
+            ]
+        },
+        visited_local_tabs_by_signature={
+            "com.example:id/activity_button||com.example:id/location_button": {"com.example:id/activity_button"}
+        },
+        fail_count=2,
+        same_count=2,
+        prev_fingerprint=("a", "b", "c"),
+        previous_step_row={"focus_view_id": "com.example:id/activity_button"},
+        recent_representative_signatures=deque([], maxlen=5),
+        consumed_representative_signatures=set(),
+        cta_cluster_visited_rids={},
+    )
+
+    row = {
+        "visible_label": "No activity",
+        "merged_announcement": "No activity",
+        "focus_view_id": "com.example:id/no_activity",
+        "focus_bounds": "40,420,340,500",
+    }
+    advanced = collection_flow._maybe_select_next_local_tab(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        row=row,
+        scenario_id="life_family_care_plugin",
+        step_idx=18,
+    )
+
+    assert advanced is True
+    assert row.get("local_tab_content_traversal_fail") is not True
+    assert row["local_tab_content_entered"] is True
+    assert row["local_tab_content_candidate_visited"] is True
+    assert row["local_tab_content_visit_source"] == "empty_state_focused_row"
     assert any("[STEP][status_exhausted_excluded]" in line and "No activity" in line and "Waiting" in line for line in logs)
     assert any("[STEP][representative_exhausted_eval]" in line and "exhausted=true" in line for line in logs)
 
