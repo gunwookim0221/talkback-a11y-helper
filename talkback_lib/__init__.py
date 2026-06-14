@@ -26,6 +26,7 @@ from talkback_lib.constants import (
     ACTION_CLICK_TARGET,
     ACTION_COMMAND,
     ACTION_DUMP_TREE,
+    ACTION_FOCUS_IN_BOUNDS,
     ACTION_FOCUS_TARGET,
     ACTION_GET_FOCUS,
     ACTION_NEXT,
@@ -1308,6 +1309,66 @@ class A11yAdbClient:
             sleep_seconds=0.5,
             attempt_fn=_attempt_select,
             timeout_fn=_select_timeout,
+        )
+
+    def focus_in_bounds(
+        self,
+        dev: Any = None,
+        bounds: str = "",
+        wait_: int = 5,
+        prefer_empty_state: bool = True,
+        exclude_top_chrome: bool = True,
+        exclude_bottom_nav: bool = True,
+    ) -> dict[str, Any]:
+        if not self.check_helper_status(dev=dev):
+            result = {"success": False, "reason": "helper_unavailable"}
+            self.last_target_action_result = result
+            return self._normalize_action_result(
+                success=False,
+                status=STATUS_FAILED,
+                detail="helper_unavailable",
+                raw=result,
+            )
+        self.last_announcements = []
+        self.last_merged_announcement = ""
+
+        def _attempt_focus() -> tuple[bool, dict[str, Any]]:
+            self.clear_logcat(dev=dev)
+            req_id = str(uuid.uuid4())[:8]
+            extras = [
+                "--es", "bounds", self._escape_adb_string(str(bounds or "")),
+                "--ez", "preferEmptyState", "true" if prefer_empty_state else "false",
+                "--ez", "excludeTopChrome", "true" if exclude_top_chrome else "false",
+                "--ez", "excludeBottomNav", "true" if exclude_bottom_nav else "false",
+                "--es", "reqId", req_id,
+            ]
+            self._broadcast(dev, ACTION_FOCUS_IN_BOUNDS, extras)
+            result = self._read_log_result(dev, "TARGET_ACTION_RESULT", req_id)
+            if self._is_target_action_payload_missing(result, req_id):
+                return False, {}
+            self.last_target_action_result = self._normalize_target_action_payload(result)
+            return True, self._normalize_action_result(
+                success=bool(result.get("success")),
+                status=STATUS_MOVED if bool(result.get("success")) else STATUS_FAILED,
+                detail=str(result.get("reason", "")) or None,
+                raw=result,
+            )
+
+        def _focus_timeout() -> dict[str, Any]:
+            result = {"success": False, "reason": "timeout"}
+            self.last_target_action_result = result
+            return self._normalize_action_result(
+                success=False,
+                status=STATUS_FAILED,
+                detail="timeout",
+                raw=result,
+            )
+
+        return self._run_with_retry(
+            wait_seconds=wait_,
+            sleep_seconds=0.5,
+            attempt_fn=_attempt_focus,
+            timeout_fn=_focus_timeout,
         )
 
     def click_focused(self, dev: Any = None, wait_: int = 5) -> bool:

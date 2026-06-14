@@ -37,6 +37,8 @@ class DummyClient:
         self.collect_focus_step_calls = []
         self.move_focus_smart_calls = []
         self.get_focus_calls = []
+        self.focus_in_bounds_calls = []
+        self.focus_in_bounds_results = []
         self.dump_tree_calls = []
         self.dump_tree_sequence = []
         self.back_calls = 0
@@ -105,6 +107,12 @@ class DummyClient:
         if self.focus_sequence:
             return self.focus_sequence.pop(0)
         return {}
+
+    def focus_in_bounds(self, **kwargs):
+        self.focus_in_bounds_calls.append(kwargs)
+        if self.focus_in_bounds_results:
+            return self.focus_in_bounds_results.pop(0)
+        return {"success": False, "detail": "no_content_candidate_in_bounds", "raw": {"success": False, "reason": "no_content_candidate_in_bounds"}}
 
     def dump_tree(self, **kwargs):
         self.dump_tree_calls.append(kwargs)
@@ -5184,6 +5192,131 @@ def test_activate_forced_local_tab_target_taps_before_move_smart(monkeypatch):
     assert any("[STEP][local_tab_target_activate_success]" in line and "matched_by='rid'" in line for line in logs)
     assert any("[STEP][local_tab_content_phase_reset]" in line and "EventsButton Events" in line for line in logs)
     assert any("[STEP][local_tab_commit]" in line and "target_activation_success" in line for line in logs)
+
+
+def test_activate_forced_local_tab_target_uses_helper_content_entry_probe_once(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([
+        {
+            "step_index": 30,
+            "visible_label": "Routines",
+            "merged_announcement": "Routines",
+            "focus_view_id": "routine",
+            "focus_bounds": "369,2338,711,2473",
+        }
+    ])
+    client.focus_in_bounds_results = [{
+        "success": True,
+        "detail": "content_like_focused_row",
+        "raw": {
+            "success": True,
+            "reason": "content_like_focused_row",
+            "focused": {
+                "text": "Device usage",
+                "contentDescription": "",
+                "viewIdResourceName": "device_usage",
+                "className": "android.widget.FrameLayout",
+                "clickable": True,
+                "focusable": True,
+                "effectiveClickable": True,
+                "boundsInScreen": "40,420,1040,760",
+            },
+        },
+    }]
+    state = SimpleNamespace(
+        forced_local_tab_target_signature="control||routine||history",
+        forced_local_tab_target_rid="routine",
+        forced_local_tab_target_label="Routines",
+        forced_local_tab_target_bounds="369,2338,711,2473",
+        forced_local_tab_attempt_count=0,
+        current_local_tab_signature="control||routine||history",
+        current_local_tab_active_rid="control",
+        current_local_tab_active_label="Controls",
+        current_local_tab_active_age=0,
+        visited_local_tabs_by_signature={"control||routine||history": {"control"}},
+        pending_local_tab_signature="control||routine||history",
+        pending_local_tab_rid="routine",
+        pending_local_tab_label="Routines",
+        pending_local_tab_bounds="369,2338,711,2473",
+        pending_local_tab_age=0,
+        current_local_tab_content_entry_probe_attempted=False,
+    )
+
+    row = collection_flow._activate_forced_local_tab_target(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        step_idx=30,
+        wait_seconds=0.1,
+        announcement_wait_seconds=0.1,
+        announcement_idle_wait_seconds=0.0,
+        announcement_max_extra_wait_seconds=0.0,
+    )
+
+    assert row["visible_label"] == "Device usage"
+    assert row["local_tab_content_entered"] is True
+    assert row["local_tab_content_candidate_visited"] is True
+    assert row["local_tab_content_visit_source"] == "content_entry_probe:content_like_focused_row"
+    assert state.current_local_tab_content_entry_probe_attempted is True
+    assert len(client.focus_in_bounds_calls) == 1
+    assert client.focus_in_bounds_calls[0]["bounds"] == "0,220,1080,2337"
+    assert any("[STEP][local_tab_content_entry_probe_success]" in line and "Device usage" in line for line in logs)
+
+
+def test_activate_forced_local_tab_target_does_not_treat_helper_probe_failure_as_content_visit(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    client = DummyClient([
+        {
+            "step_index": 31,
+            "visible_label": "History",
+            "merged_announcement": "History",
+            "focus_view_id": "history",
+            "focus_bounds": "708,2338,1050,2473",
+        }
+    ])
+    client.focus_in_bounds_results = [{
+        "success": False,
+        "detail": "focus_action_failed",
+        "raw": {"success": False, "reason": "focus_action_failed"},
+    }]
+    state = SimpleNamespace(
+        forced_local_tab_target_signature="control||routine||history",
+        forced_local_tab_target_rid="history",
+        forced_local_tab_target_label="History",
+        forced_local_tab_target_bounds="708,2338,1050,2473",
+        forced_local_tab_attempt_count=0,
+        current_local_tab_signature="control||routine||history",
+        current_local_tab_active_rid="routine",
+        current_local_tab_active_label="Routines",
+        current_local_tab_active_age=0,
+        visited_local_tabs_by_signature={"control||routine||history": {"routine"}},
+        pending_local_tab_signature="control||routine||history",
+        pending_local_tab_rid="history",
+        pending_local_tab_label="History",
+        pending_local_tab_bounds="708,2338,1050,2473",
+        pending_local_tab_age=0,
+        current_local_tab_content_entry_probe_attempted=False,
+    )
+
+    row = collection_flow._activate_forced_local_tab_target(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        step_idx=31,
+        wait_seconds=0.1,
+        announcement_wait_seconds=0.1,
+        announcement_idle_wait_seconds=0.0,
+        announcement_max_extra_wait_seconds=0.0,
+    )
+
+    assert row["visible_label"] == "History"
+    assert row.get("local_tab_content_entered") is not True
+    assert row.get("local_tab_content_candidate_visited") is not True
+    assert state.current_local_tab_content_entry_probe_attempted is True
+    assert len(client.focus_in_bounds_calls) == 1
+    assert any("[STEP][local_tab_content_entry_probe_fail]" in line and "focus_action_failed" in line for line in logs)
 
 
 def test_activate_forced_local_tab_target_falls_back_to_move_smart(monkeypatch):

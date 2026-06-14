@@ -40,6 +40,7 @@
                 <action android:name="com.iotpart.sqe.talkbackhelper.GET_FOCUS" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.DUMP_TREE" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.FOCUS_TARGET" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.FOCUS_IN_BOUNDS" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.CLICK_TARGET" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.TOUCH_BOUNDS_CENTER_TARGET" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.CHECK_TARGET" />

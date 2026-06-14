@@ -16,6 +16,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val ACTION_FOCUS_RESULT = "com.iotpart.sqe.talkbackhelper.FOCUS_RESULT"
         private const val ACTION_DUMP_TREE = "com.iotpart.sqe.talkbackhelper.DUMP_TREE"
         private const val ACTION_FOCUS_TARGET = "com.iotpart.sqe.talkbackhelper.FOCUS_TARGET"
+        private const val ACTION_FOCUS_IN_BOUNDS = "com.iotpart.sqe.talkbackhelper.FOCUS_IN_BOUNDS"
         private const val ACTION_CLICK_TARGET = "com.iotpart.sqe.talkbackhelper.CLICK_TARGET"
         private const val ACTION_TOUCH_BOUNDS_CENTER_TARGET = "com.iotpart.sqe.talkbackhelper.TOUCH_BOUNDS_CENTER_TARGET"
         private const val ACTION_CHECK_TARGET = "com.iotpart.sqe.talkbackhelper.CHECK_TARGET"
@@ -39,6 +40,10 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val EXTRA_FORWARD = "forward"
         private const val EXTRA_DIRECTION = "direction"
         private const val EXTRA_TEXT = "text"
+        private const val EXTRA_BOUNDS = "bounds"
+        private const val EXTRA_PREFER_EMPTY_STATE = "preferEmptyState"
+        private const val EXTRA_EXCLUDE_TOP_CHROME = "excludeTopChrome"
+        private const val EXTRA_EXCLUDE_BOTTOM_NAV = "excludeBottomNav"
         private const val EXTRA_REQ_ID = "reqId"
         private const val EXTRA_COMMAND = "command"
         private const val DEFAULT_REQ_ID = "none"
@@ -62,6 +67,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
                 handleDumpTree(intent)
             }
             ACTION_FOCUS_TARGET -> handleTargetAction(intent, AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+            ACTION_FOCUS_IN_BOUNDS -> handleFocusInBounds(intent)
             ACTION_CLICK_TARGET -> {
                 val actionType = if (intent.getBooleanExtra(EXTRA_IS_LONG_CLICK, false)) {
                     AccessibilityNodeInfo.ACTION_LONG_CLICK
@@ -168,6 +174,30 @@ class A11yCommandReceiver : BroadcastReceiver() {
             "[DEBUG][TARGET_ACTION][recv] reqId=$reqId action=TOUCH_BOUNDS_CENTER_TARGET targetName='${query.targetName}' targetType='${query.targetType}' targetIndex=${query.targetIndex}"
         )
         service.performTargetBoundsCenterTap(query, reqId)
+    }
+
+    private fun handleFocusInBounds(intent: Intent) {
+        val reqId = parseReqId(intent)
+        val service = A11yHelperService.instance
+        if (service == null) {
+            logFailure("TARGET_ACTION_RESULT", reqId, "Accessibility Service is null or not running")
+            return
+        }
+        val bounds = intent.getStringExtra(EXTRA_BOUNDS)?.trim().orEmpty()
+        val preferEmptyState = intent.getBooleanExtra(EXTRA_PREFER_EMPTY_STATE, true)
+        val excludeTopChrome = intent.getBooleanExtra(EXTRA_EXCLUDE_TOP_CHROME, true)
+        val excludeBottomNav = intent.getBooleanExtra(EXTRA_EXCLUDE_BOTTOM_NAV, true)
+        Log.d(
+            TAG,
+            "[DEBUG][FOCUS_IN_BOUNDS][recv] reqId=$reqId bounds='$bounds' preferEmptyState=$preferEmptyState excludeTopChrome=$excludeTopChrome excludeBottomNav=$excludeBottomNav"
+        )
+        service.performFocusInBounds(
+            boundsString = bounds,
+            preferEmptyState = preferEmptyState,
+            excludeTopChrome = excludeTopChrome,
+            excludeBottomNav = excludeBottomNav,
+            reqId = reqId
+        )
     }
 
 

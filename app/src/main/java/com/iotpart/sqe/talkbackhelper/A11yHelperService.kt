@@ -269,6 +269,127 @@ class A11yHelperService : AccessibilityService() {
         return resultJson
     }
 
+    fun performFocusInBounds(
+        boundsString: String,
+        preferEmptyState: Boolean,
+        excludeTopChrome: Boolean,
+        excludeBottomNav: Boolean,
+        reqId: String = "none"
+    ): JSONObject {
+        val root = rootInActiveWindow
+        val targetRegion = parseShortBounds(boundsString)
+        if (root == null || targetRegion == null || targetRegion.isEmpty) {
+            val reason = if (root == null) "Root node is null" else "Invalid bounds"
+            val resultJson = JSONObject().apply {
+                put("timestamp", System.currentTimeMillis())
+                put("reqId", reqId)
+                put("success", false)
+                put("reason", reason)
+                put("action", "FOCUS_IN_BOUNDS")
+                put("bounds", boundsString)
+            }
+            Log.i(TAG, "TARGET_ACTION_RESULT $resultJson")
+            return resultJson
+        }
+
+        val rootBounds = Rect().also { root.getBoundsInScreen(it) }
+        val screenHeight = (rootBounds.bottom - rootBounds.top).coerceAtLeast(1)
+        val talkBackCandidates = A11yTraversalAnalyzer.buildTalkBackLikeFocusNodes(root)
+            .mapNotNull { focused ->
+                val node = focused.node
+                val bounds = Rect().also { node.getBoundsInScreen(it) }
+                val label = resolveFocusCandidateLabel(focused)
+                if (!node.isVisibleToUser || bounds.isEmpty || label.isBlank()) return@mapNotNull null
+                if (!targetRegion.contains(bounds.centerX(), bounds.centerY())) return@mapNotNull null
+                if (excludeTopChrome && A11yNodeUtils.isTopAppBar(node.className?.toString(), node.viewIdResourceName, bounds, rootBounds.top, screenHeight)) return@mapNotNull null
+                if (excludeBottomNav && A11yNodeUtils.isBottomNavigationBar(node.className?.toString(), node.viewIdResourceName, bounds, rootBounds.bottom, screenHeight)) return@mapNotNull null
+                if (isRootOrChromeLikeContentEntryCandidate(node, bounds, rootBounds, screenHeight)) return@mapNotNull null
+                FocusInBoundsCandidate(
+                    node = node,
+                    label = label,
+                    bounds = bounds,
+                    emptyState = isEmptyStateContentLabel(label),
+                    effectiveClickable = focused.effectiveClickable,
+                    hasFocusableDescendant = focused.hasFocusableDescendant,
+                    source = "talkback_like"
+                )
+            }
+        val rawContentCandidates = collectRawContentEntryCandidates(
+            root = root,
+            targetRegion = targetRegion,
+            rootBounds = rootBounds,
+            screenHeight = screenHeight,
+            excludeTopChrome = excludeTopChrome,
+            excludeBottomNav = excludeBottomNav
+        )
+        val candidates = (talkBackCandidates + rawContentCandidates)
+            .distinctBy { "${it.bounds.toShortString()}|${it.label.lowercase()}" }
+            .sortedWith(
+                compareByDescending<FocusInBoundsCandidate> { if (preferEmptyState && it.emptyState) 1 else 0 }
+                    .thenByDescending { if (!it.emptyState && (it.effectiveClickable || it.hasFocusableDescendant)) 1 else 0 }
+                    .thenByDescending { if (it.source == "talkback_like") 1 else 0 }
+                    .thenBy { it.bounds.top }
+                    .thenBy { it.bounds.left }
+            )
+
+        val target = candidates.firstOrNull()
+        val focusExecution = if (target != null) {
+            A11yFocusExecutor.requestAccessibilityFocusWithRetry(
+                target = target.node,
+                root = root,
+                maxAttempts = 2,
+                verificationWindowMs = 650L
+            )
+        } else {
+            null
+        }
+        val actualFocusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val success = target != null && focusExecution?.success == true && actualFocusedNode != null &&
+            A11yFocusExecutor.isTargetFocusResolved(
+                actualFocusedNode = actualFocusedNode,
+                actualFocusedBounds = actualFocusedNode.let { Rect().also(it::getBoundsInScreen) },
+                targetBounds = target.bounds,
+                expectedPackageName = target.node.packageName?.toString(),
+                intendedTarget = target.node
+            )
+        val reason = when {
+            target == null -> "no_content_candidate_in_bounds"
+            success && target.emptyState -> "empty_state_focused_row"
+            success -> "content_like_focused_row"
+            else -> "focus_action_failed"
+        }
+        val resultJson = JSONObject().apply {
+            put("timestamp", System.currentTimeMillis())
+            put("reqId", reqId)
+            put("success", success)
+            put("reason", reason)
+            put("action", "FOCUS_IN_BOUNDS")
+            put("bounds", boundsString)
+            put("candidateCount", candidates.size)
+            if (target != null) {
+                put("targetName", target.label)
+                put("targetType", "bounds")
+                put("targetIndex", 0)
+                put("attemptedResourceId", target.node.viewIdResourceName ?: JSONObject.NULL)
+                put("attemptedClassName", target.node.className?.toString() ?: JSONObject.NULL)
+                put("targetSource", target.source)
+                put("target", compactFocusInBoundsSnapshot(target.node, target.label, target.bounds))
+            }
+            if (actualFocusedNode != null) {
+                put("focused", compactFocusInBoundsSnapshot(actualFocusedNode))
+            }
+        }
+        Log.i(
+            TAG,
+            "[FOCUS_IN_BOUNDS] reqId=$reqId success=$success reason='$reason' bounds='${targetRegion.toShortString()}' candidates=${candidates.size} target='${target?.label.orEmpty().replace("\n", " ")}'"
+        )
+        Log.i(TAG, "TARGET_ACTION_RESULT $resultJson")
+        if (success && actualFocusedNode != null) {
+            A11yStateStore.update(FocusSnapshot.fromNode(actualFocusedNode))
+        }
+        return resultJson
+    }
+
     fun performTargetBoundsCenterTap(query: A11yTargetFinder.TargetQuery, reqId: String = "none"): JSONObject {
         Log.d(
             TAG,
@@ -338,6 +459,160 @@ class A11yHelperService : AccessibilityService() {
         }
         Log.i(TAG, "TARGET_ACTION_RESULT $resultJson")
         return resultJson
+    }
+
+    private data class FocusInBoundsCandidate(
+        val node: AccessibilityNodeInfo,
+        val label: String,
+        val bounds: Rect,
+        val emptyState: Boolean,
+        val effectiveClickable: Boolean,
+        val hasFocusableDescendant: Boolean,
+        val source: String
+    )
+
+    private fun parseShortBounds(value: String): Rect? {
+        val numbers = Regex("-?\\d+").findAll(value).mapNotNull { it.value.toIntOrNull() }.toList()
+        if (numbers.size < 4) return null
+        return Rect(numbers[0], numbers[1], numbers[2], numbers[3])
+    }
+
+    private fun resolveFocusCandidateLabel(focused: A11yTraversalAnalyzer.FocusedNode): String {
+        return focused.mergedLabel?.trim().takeUnless { it.isNullOrBlank() }
+            ?: focused.text?.trim().takeUnless { it.isNullOrBlank() }
+            ?: focused.contentDescription?.trim().takeUnless { it.isNullOrBlank() }
+            ?: A11yTraversalAnalyzer.recoverDescendantLabel(focused.node)?.trim().takeUnless { it.isNullOrBlank() }
+            ?: ""
+    }
+
+    private fun resolveNodeLabel(node: AccessibilityNodeInfo): String {
+        return node.text?.toString()?.trim().takeUnless { it.isNullOrBlank() }
+            ?: node.contentDescription?.toString()?.trim().takeUnless { it.isNullOrBlank() }
+            ?: A11yTraversalAnalyzer.recoverDescendantLabel(node)?.trim().takeUnless { it.isNullOrBlank() }
+            ?: ""
+    }
+
+    private fun collectRawContentEntryCandidates(
+        root: AccessibilityNodeInfo,
+        targetRegion: Rect,
+        rootBounds: Rect,
+        screenHeight: Int,
+        excludeTopChrome: Boolean,
+        excludeBottomNav: Boolean
+    ): List<FocusInBoundsCandidate> {
+        val candidates = mutableListOf<FocusInBoundsCandidate>()
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            for (index in 0 until node.childCount) {
+                node.getChild(index)?.let(queue::add)
+            }
+            if (!node.isVisibleToUser) continue
+            val bounds = Rect().also { node.getBoundsInScreen(it) }
+            if (bounds.isEmpty || !targetRegion.contains(bounds.centerX(), bounds.centerY())) continue
+            if (excludeTopChrome && A11yNodeUtils.isTopAppBar(node.className?.toString(), node.viewIdResourceName, bounds, rootBounds.top, screenHeight)) continue
+            if (excludeBottomNav && A11yNodeUtils.isBottomNavigationBar(node.className?.toString(), node.viewIdResourceName, bounds, rootBounds.bottom, screenHeight)) continue
+            if (isRootOrChromeLikeContentEntryCandidate(node, bounds, rootBounds, screenHeight)) continue
+
+            val label = resolveNodeLabel(node)
+            if (label.isBlank()) continue
+            val hasFocusableDescendant = hasVisibleFocusableDescendant(node)
+            val isActionableContainer = node.isClickable || node.isFocusable || hasFocusableDescendant
+            val isStaticContent = node.childCount == 0 && (node.text?.isNotBlank() == true || node.contentDescription?.isNotBlank() == true)
+            if (!isActionableContainer && !isStaticContent) continue
+
+            candidates += FocusInBoundsCandidate(
+                node = node,
+                label = label,
+                bounds = bounds,
+                emptyState = isEmptyStateContentLabel(label),
+                effectiveClickable = node.isClickable,
+                hasFocusableDescendant = hasFocusableDescendant || node.isFocusable,
+                source = "raw_tree"
+            )
+        }
+        return candidates
+    }
+
+    private fun hasVisibleFocusableDescendant(node: AccessibilityNodeInfo): Boolean {
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        for (index in 0 until node.childCount) {
+            node.getChild(index)?.let(queue::add)
+        }
+        while (queue.isNotEmpty()) {
+            val current = queue.removeFirst()
+            if (current.isVisibleToUser && (current.isFocusable || current.isClickable)) return true
+            for (index in 0 until current.childCount) {
+                current.getChild(index)?.let(queue::add)
+            }
+        }
+        return false
+    }
+
+    private fun compactFocusInBoundsSnapshot(
+        node: AccessibilityNodeInfo,
+        fallbackLabel: String = "",
+        knownBounds: Rect? = null
+    ): JSONObject {
+        val bounds = knownBounds ?: Rect().also { node.getBoundsInScreen(it) }
+        val text = node.text?.toString()
+        val contentDescription = node.contentDescription?.toString()
+        val label = fallbackLabel.ifBlank {
+            text?.trim().takeUnless { it.isNullOrBlank() }
+                ?: contentDescription?.trim().takeUnless { it.isNullOrBlank() }
+                ?: A11yTraversalAnalyzer.recoverDescendantLabel(node)?.trim().takeUnless { it.isNullOrBlank() }
+                ?: ""
+        }
+        return JSONObject().apply {
+            put("packageName", node.packageName?.toString() ?: JSONObject.NULL)
+            put("className", node.className?.toString() ?: JSONObject.NULL)
+            put("viewIdResourceName", node.viewIdResourceName ?: JSONObject.NULL)
+            put("text", text ?: JSONObject.NULL)
+            put("contentDescription", contentDescription ?: JSONObject.NULL)
+            put("mergedLabel", label)
+            put("talkbackLabel", label)
+            put("clickable", node.isClickable)
+            put("focusable", node.isFocusable)
+            put("focused", node.isFocused)
+            put("accessibilityFocused", node.isAccessibilityFocused)
+            put("visibleToUser", node.isVisibleToUser)
+            put("enabled", node.isEnabled)
+            put("boundsInScreen", JSONObject().apply {
+                put("l", bounds.left)
+                put("t", bounds.top)
+                put("r", bounds.right)
+                put("b", bounds.bottom)
+                put("left", bounds.left)
+                put("top", bounds.top)
+                put("right", bounds.right)
+                put("bottom", bounds.bottom)
+            })
+        }
+    }
+
+    private fun isEmptyStateContentLabel(label: String): Boolean {
+        val normalized = label.trim().lowercase().replace(Regex("\\s+"), " ")
+        if (normalized in setOf("nothing yet", "no history", "no activity", "no data", "no events")) return true
+        return Regex("^no\\s+[a-z0-9][a-z0-9\\s\\-]{0,40}$").matches(normalized)
+    }
+
+    private fun isRootOrChromeLikeContentEntryCandidate(
+        node: AccessibilityNodeInfo,
+        bounds: Rect,
+        rootBounds: Rect,
+        screenHeight: Int
+    ): Boolean {
+        val className = node.className?.toString()?.lowercase().orEmpty()
+        val viewId = node.viewIdResourceName?.lowercase().orEmpty()
+        if ("webview" in className) return true
+        if (listOf("toolbar", "appbar", "actionbar", "navigate", "overflow").any { it in className || it in viewId }) return true
+        if (bounds.top <= rootBounds.top + minOf(220, screenHeight / 10)) return true
+        val width = (bounds.right - bounds.left).coerceAtLeast(1)
+        val height = (bounds.bottom - bounds.top).coerceAtLeast(1)
+        val rootWidth = (rootBounds.right - rootBounds.left).coerceAtLeast(1)
+        val rootHeight = (rootBounds.bottom - rootBounds.top).coerceAtLeast(1)
+        return width >= rootWidth * 0.92 && height >= rootHeight * 0.72
     }
 
     private fun dispatchCenterTap(x: Int, y: Int, reqId: String): TargetActionOutcome {

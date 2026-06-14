@@ -47,6 +47,7 @@ class LocalTabState:
     current_content_entered: bool = False
     current_content_candidate_visited: bool = False
     current_content_fail_recorded: bool = False
+    current_content_entry_probe_attempted: bool = False
 
     def register_candidates(self, signature: str, candidates: list[dict[str, Any]]) -> None:
         normalized_signature = str(signature or "").strip()
@@ -77,6 +78,7 @@ class LocalTabState:
         self.current_content_entered = False
         self.current_content_candidate_visited = False
         self.current_content_fail_recorded = False
+        self.current_content_entry_probe_attempted = False
 
     def mark_content_visited(self) -> None:
         self.current_content_phase_active = True
@@ -144,6 +146,7 @@ def _reset_current_local_tab_content_state(state: Any) -> None:
         "current_local_tab_content_entered": False,
         "current_local_tab_content_candidate_visited": False,
         "current_local_tab_content_fail_recorded": False,
+        "current_local_tab_content_entry_probe_attempted": False,
     }.items():
         try:
             setattr(state, name, value)
@@ -172,6 +175,26 @@ def _mark_current_local_tab_content_fail_recorded(state: Any) -> None:
         setattr(state, "current_local_tab_content_fail_recorded", True)
     except Exception:
         pass
+
+
+def _mark_current_local_tab_content_entry_probe_attempted(state: Any) -> None:
+    mirror = _local_tab_state_mirror(state)
+    mirror.current_content_entry_probe_attempted = True
+    try:
+        setattr(state, "current_local_tab_content_entry_probe_attempted", True)
+    except Exception:
+        pass
+
+
+def _current_local_tab_content_entry_probe_attempted(state: Any) -> bool:
+    mirror = _local_tab_state_mirror(state)
+    return bool(
+        getattr(
+            state,
+            "current_local_tab_content_entry_probe_attempted",
+            mirror.current_content_entry_probe_attempted,
+        )
+    )
 
 
 def _current_local_tab_content_state(state: Any) -> tuple[bool, bool, bool, bool]:
@@ -1489,6 +1512,138 @@ def _commit_forced_local_tab_target_success(state: MainLoopState) -> None:
         "reason='target_activation_success'"
     )
 
+def _content_entry_bounds_from_tab_bounds(raw_bounds: str) -> str:
+    bounds = _parse_local_tab_bounds_value(raw_bounds)
+    if not bounds:
+        return ""
+    _left, top, right, _bottom = bounds
+    content_bottom = max(221, top - 1)
+    content_right = max(1080, right)
+    return f"0,220,{content_right},{content_bottom}"
+
+
+def _focus_snapshot_to_probe_row(snapshot: dict[str, Any]) -> dict[str, Any]:
+    label = _extract_cta_node_label(snapshot) or _node_label_blob(snapshot)
+    return {
+        "focus_node": snapshot,
+        "visible_label": label,
+        "merged_announcement": label,
+        "focus_text": str(snapshot.get("text", "") or "").strip(),
+        "focus_content_description": str(snapshot.get("contentDescription", "") or "").strip(),
+        "focus_view_id": str(snapshot.get("viewIdResourceName", "") or snapshot.get("resourceId", "") or "").strip(),
+        "focus_class_name": str(snapshot.get("className", "") or snapshot.get("class", "") or "").strip(),
+        "focus_bounds": str(snapshot.get("boundsInScreen", "") or snapshot.get("bounds", "") or "").strip(),
+        "focus_clickable": bool(snapshot.get("clickable")),
+        "focus_focusable": bool(snapshot.get("focusable")),
+        "focus_effective_clickable": bool(snapshot.get("effectiveClickable")) or bool(snapshot.get("clickable")),
+    }
+
+
+def _probe_result_raw_payload(result: Any) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        return {}
+    raw = result.get("raw")
+    if isinstance(raw, dict):
+        return raw
+    return result
+
+
+def _apply_content_entry_probe_success(
+    *,
+    state: MainLoopState,
+    row: dict[str, Any],
+    source: str,
+) -> dict[str, Any]:
+    _mark_current_local_tab_content_visited(state)
+    row["local_tab_content_entered"] = True
+    row["local_tab_content_candidate_visited"] = True
+    row["local_tab_content_visit_source"] = f"content_entry_probe:{source}"
+    row["local_tab_content_entry_probe_result"] = "success"
+    return row
+
+
+def _attempt_local_tab_content_entry_probe(
+    *,
+    client: A11yAdbClient,
+    dev: str,
+    state: MainLoopState,
+    collect_after_action: Callable[[], dict[str, Any]],
+) -> dict[str, Any] | None:
+    if _current_local_tab_content_entry_probe_attempted(state):
+        return None
+    active_display = _local_tab_state_display(
+        rid=str(getattr(state, "current_local_tab_active_rid", "") or ""),
+        label=str(getattr(state, "current_local_tab_active_label", "") or ""),
+    )
+    raw_tab_bounds = str(getattr(state, "last_selected_local_tab_bounds", "") or getattr(state, "forced_local_tab_target_bounds", "") or "").strip()
+    content_bounds = _content_entry_bounds_from_tab_bounds(raw_tab_bounds)
+    _mark_current_local_tab_content_entry_probe_attempted(state)
+    if not content_bounds:
+        log(
+            f"[STEP][local_tab_content_entry_probe_skip] active='{_truncate_debug_text(active_display, 96)}' "
+            "reason='content_bounds_unavailable'"
+        )
+        return None
+    focus_in_bounds = getattr(client, "focus_in_bounds", None)
+    if not callable(focus_in_bounds):
+        log(
+            f"[STEP][local_tab_content_entry_probe_skip] active='{_truncate_debug_text(active_display, 96)}' "
+            "reason='helper_focus_in_bounds_unavailable'"
+        )
+        return None
+    log(
+        f"[STEP][local_tab_content_entry_probe] active='{_truncate_debug_text(active_display, 96)}' "
+        f"bounds='{_truncate_debug_text(content_bounds, 96)}' method='helper_focus_in_bounds'"
+    )
+    try:
+        result = focus_in_bounds(dev=dev, bounds=content_bounds, wait_=_TRANSITION_FAST_ACTION_WAIT_SECONDS)
+    except Exception as exc:
+        log(
+            f"[STEP][local_tab_content_entry_probe_fail] active='{_truncate_debug_text(active_display, 96)}' "
+            f"reason='helper_exception:{exc.__class__.__name__}'"
+        )
+        return None
+    raw = _probe_result_raw_payload(result)
+    helper_reason = str(raw.get("reason", "") or result.get("detail", "") if isinstance(result, dict) else "").strip()
+    if not bool(result.get("success")):
+        log(
+            f"[STEP][local_tab_content_entry_probe_fail] active='{_truncate_debug_text(active_display, 96)}' "
+            f"reason='{_truncate_debug_text(helper_reason or 'helper_focus_failed', 96)}'"
+        )
+        return None
+    focused = raw.get("focused") if isinstance(raw.get("focused"), dict) else raw.get("target")
+    probe_row = _focus_snapshot_to_probe_row(focused) if isinstance(focused, dict) else {}
+    if not probe_row:
+        try:
+            probe_row = collect_after_action()
+        except Exception:
+            probe_row = {}
+    empty_success = helper_reason == "empty_state_focused_row" and _row_matches_empty_state_content_candidate(
+        state=state,
+        row=probe_row,
+        empty_state_labels=[str(probe_row.get("visible_label", "") or probe_row.get("merged_announcement", "") or "").strip()],
+    )
+    content_success = _row_is_content_like_local_tab_focus(
+        state=state,
+        row=probe_row,
+        current_row_is_passive_status=False,
+        current_row_is_top_chrome=_is_row_top_chrome_candidate(probe_row),
+    )
+    if empty_success or content_success:
+        source = "empty_state_focused_row" if empty_success else "content_like_focused_row"
+        log(
+            f"[STEP][local_tab_content_entry_probe_success] active='{_truncate_debug_text(active_display, 96)}' "
+            f"visible='{_truncate_debug_text(str(probe_row.get('visible_label', '') or ''), 96)}' "
+            f"reason='{source}'"
+        )
+        return _apply_content_entry_probe_success(state=state, row=probe_row, source=source)
+    visible = str(probe_row.get("visible_label", "") or probe_row.get("merged_announcement", "") or "").strip()
+    log(
+        f"[STEP][local_tab_content_entry_probe_fail] active='{_truncate_debug_text(active_display, 96)}' "
+        f"reason='focused_row_not_content_like' visible='{_truncate_debug_text(visible, 96)}'"
+    )
+    return None
+
 def _activate_forced_local_tab_target(
     *,
     client: A11yAdbClient,
@@ -1577,6 +1732,14 @@ def _activate_forced_local_tab_target(
                 f"matched_by='{matched_by}'"
             )
             _commit_forced_local_tab_target_success(state)
+            probe_row = _attempt_local_tab_content_entry_probe(
+                client=client,
+                dev=dev,
+                state=state,
+                collect_after_action=collect_after_action,
+            )
+            if probe_row is not None:
+                last_row = probe_row
             log(
                 f"[STEP][local_tab_force_navigation_resolved] target='{_truncate_debug_text(target, 96)}'"
             )
@@ -1622,6 +1785,14 @@ def _activate_forced_local_tab_target(
                 f"matched_by='{matched_by}'"
             )
             _commit_forced_local_tab_target_success(state)
+            probe_row = _attempt_local_tab_content_entry_probe(
+                client=client,
+                dev=dev,
+                state=state,
+                collect_after_action=collect_after_action,
+            )
+            if probe_row is not None:
+                last_row = probe_row
             log(
                 f"[STEP][local_tab_force_navigation_resolved] target='{_truncate_debug_text(target, 96)}'"
             )
@@ -1678,6 +1849,14 @@ def _activate_forced_local_tab_target(
                 f"matched_by='{matched_by}'"
             )
             _commit_forced_local_tab_target_success(state)
+            probe_row = _attempt_local_tab_content_entry_probe(
+                client=client,
+                dev=dev,
+                state=state,
+                collect_after_action=collect_after_action,
+            )
+            if probe_row is not None:
+                last_row = probe_row
             log(
                 f"[STEP][local_tab_force_navigation_resolved] target='{_truncate_debug_text(target, 96)}'"
             )

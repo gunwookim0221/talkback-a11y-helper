@@ -8,6 +8,7 @@ import re
 ACTION_DUMP_TREE = "com.iotpart.sqe.talkbackhelper.DUMP_TREE"
 ACTION_GET_FOCUS = "com.iotpart.sqe.talkbackhelper.GET_FOCUS"
 ACTION_FOCUS_TARGET = "com.iotpart.sqe.talkbackhelper.FOCUS_TARGET"
+ACTION_FOCUS_IN_BOUNDS = "com.iotpart.sqe.talkbackhelper.FOCUS_IN_BOUNDS"
 ACTION_CLICK_TARGET = "com.iotpart.sqe.talkbackhelper.CLICK_TARGET"
 ACTION_TOUCH_BOUNDS_CENTER_TARGET = "com.iotpart.sqe.talkbackhelper.TOUCH_BOUNDS_CENTER_TARGET"
 ACTION_CHECK_TARGET = "com.iotpart.sqe.talkbackhelper.CHECK_TARGET"

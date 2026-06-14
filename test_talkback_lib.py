@@ -9,6 +9,7 @@ from talkback_lib import (
     ACTION_CLICK_FOCUSED,
     ACTION_CLICK_TARGET,
     ACTION_FOCUS_TARGET,
+    ACTION_FOCUS_IN_BOUNDS,
     ACTION_GET_FOCUS,
     ACTION_NEXT,
     ACTION_PREV,
@@ -454,6 +455,20 @@ class TouchIsinTest(unittest.TestCase):
         self.assertEqual(client.last_target_action_result.get("reqId"), "REQFAIL0")
         self.assertFalse(client.last_target_action_result.get("success"))
         self.assertEqual(client.last_target_action_result.get("target", {}).get("accessibilityFocused"), True)
+
+    def test_focus_in_bounds_sends_helper_command(self):
+        client = FakeA11yClient()
+        client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"reason":"content_like_focused_row","reqId":"REQFOCUS"}'
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQFOCUS-xxxx"):
+            result = client.focus_in_bounds("SER", bounds="0,220,1080,2337", wait_=1)
+
+        self.assertTrue(result["success"])
+        broadcast = [c for c in client.calls if c[0][:3] == ["shell", "am", "broadcast"]][0][0]
+        self.assertIn(ACTION_FOCUS_IN_BOUNDS, broadcast)
+        self.assertIn("bounds", broadcast)
+        self.assertIn("'0,220,1080,2337'", broadcast)
+        self.assertIn("preferEmptyState", broadcast)
 
     def test_target_action_result_with_trailing_garbage_parses_json_object(self):
         client = FakeA11yClient()
