@@ -238,6 +238,41 @@ def test_make_result_df_skips_placeholder_rows(monkeypatch):
     assert any("[RESULT] skipped placeholder rows count=1" in msg for msg in logs)
 
 
+def test_make_result_df_keeps_local_tab_probe_success_placeholder_row():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "motion_sensor_main",
+                "tab_name": "main",
+                "step_index": -1,
+                "context_type": "main",
+                "visible_label": "Motion detection notifications",
+                "merged_announcement": "Motion detection notifications",
+                "move_result": "moved",
+                "local_tab_content_entered": True,
+                "local_tab_content_candidate_visited": True,
+                "local_tab_content_visit_source": "content_entry_probe:content_like_focused_row",
+                "local_tab_content_entry_probe_result": "success",
+            },
+            {
+                "scenario_id": "motion_sensor_main",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "History",
+                "merged_announcement": "History",
+                "move_result": "moved",
+            },
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    labels = result["visible_label"].tolist()
+    assert "Motion detection notifications" in labels
+    assert "History" in labels
+
+
 def test_make_result_df_prefers_upstream_classification():
     filtered_df = pd.DataFrame(
         [

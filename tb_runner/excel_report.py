@@ -33,6 +33,23 @@ _DEBUG_LOG_FAILURE_REASONS = {
 }
 _ANN_REQUIRED_TAGS = ("[ANN][baseline]", "[ANN][poll]", "[ANN][stable]", "[ANN][select]")
 
+
+def _to_boolish(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    text = str(value).strip().lower()
+    return text in {"1", "true", "yes", "y", "on"}
+
+
+def _keep_result_placeholder_row(row: dict[str, object]) -> bool:
+    return (
+        str(row.get("local_tab_content_entry_probe_result", "")).strip().lower() == "success"
+        and _to_boolish(row.get("local_tab_content_entered"))
+        and _to_boolish(row.get("local_tab_content_candidate_visited"))
+    )
+
 RESULT_SHEET_COLUMNS = [
     "plugin_group",
     "plugin_name",
@@ -900,7 +917,10 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
         log(f"[RESULT] skipped anchor rows count={skipped_anchor_count}")
     result_source_df = filtered_df.loc[~skip_anchor_mask].copy()
     if not result_source_df.empty:
-        placeholder_mask = result_source_df.apply(lambda row: is_placeholder_row(row.to_dict()), axis=1)
+        placeholder_mask = result_source_df.apply(
+            lambda row: is_placeholder_row(row.to_dict()) and not _keep_result_placeholder_row(row.to_dict()),
+            axis=1,
+        )
         skipped_placeholder_count = int(placeholder_mask.sum())
         if skipped_placeholder_count > 0:
             log(f"[RESULT] skipped placeholder rows count={skipped_placeholder_count}")
