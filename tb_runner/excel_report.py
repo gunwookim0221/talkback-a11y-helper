@@ -2,6 +2,7 @@ import os
 from io import BytesIO
 from pathlib import Path
 import json
+import math
 import re
 
 import pandas as pd
@@ -41,6 +42,33 @@ def _to_boolish(value: object) -> bool:
         return False
     text = str(value).strip().lower()
     return text in {"1", "true", "yes", "y", "on"}
+
+
+def _to_int_or_zero(value: object) -> int:
+    if value is None:
+        return 0
+    try:
+        if pd.isna(value):
+            return 0
+    except Exception:
+        pass
+    if isinstance(value, float):
+        if math.isnan(value):
+            return 0
+        return int(value)
+    text = str(value).strip()
+    if not text:
+        return 0
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        try:
+            numeric = float(text)
+        except (TypeError, ValueError):
+            return 0
+        if math.isnan(numeric):
+            return 0
+        return int(numeric)
 
 
 def _keep_result_placeholder_row(row: dict[str, object]) -> bool:
@@ -324,7 +352,7 @@ def _build_debug_log_sections(
 
     current_speech = str(source.get("merged_announcement", "") or _row_get("merged_announcement", "") or _row_get("speech", "") or "")
     partial_ann = source.get("partial_announcements", [])
-    ann_count = int(source.get("announcement_count", 0) or 0)
+    ann_count = _to_int_or_zero(source.get("announcement_count", 0))
     poll_source = "row_snapshot"
     poll_observed_at = ""
     if ann_lines:

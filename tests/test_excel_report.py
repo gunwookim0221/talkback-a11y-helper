@@ -6,6 +6,7 @@ from PIL import Image
 
 from tb_runner.excel_report import (
     RESULT_SHEET_COLUMNS,
+    _to_int_or_zero,
     add_status_columns,
     annotate_plugin_metadata,
     make_filtered_df,
@@ -1108,3 +1109,62 @@ def test_save_excel_raw_sheet_uses_resized_thumbnail_and_rightmost_image_column(
         assert len(ws._images) == 1
         assert ws._images[0].width <= 160
         assert ws._images[0].height <= 96
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, 0),
+        (float("nan"), 0),
+        (pd.NA, 0),
+        (pytest.importorskip("numpy").nan, 0),
+        ("3", 3),
+        (3, 3),
+        (0, 0),
+    ],
+)
+def test_to_int_or_zero_handles_nan_and_numeric_values(value, expected):
+    assert _to_int_or_zero(value) == expected
+
+
+def test_save_excel_handles_nan_announcement_count_in_debug_log_build(tmp_path):
+    rows = [
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "tab_name": "main",
+            "step_index": 1,
+            "context_type": "main",
+            "visible_label": "Controls",
+            "merged_announcement": "Controls",
+            "move_result": "moved",
+            "focus_view_id": "control",
+            "focus_bounds": "[0,0][10,10]",
+            "fallback_used": False,
+            "step_dump_used": False,
+            "req_id": "motion_req_1",
+            "announcement_count": float("nan"),
+            "step_elapsed_sec": 0.1,
+        },
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "tab_name": "main",
+            "step_index": 2,
+            "context_type": "main",
+            "visible_label": "Motion detection notifications",
+            "merged_announcement": "Motion detection notifications",
+            "move_result": "failed",
+            "failure_reason": "move_failed",
+            "focus_view_id": "active",
+            "focus_bounds": "[0,10][10,20]",
+            "fallback_used": False,
+            "step_dump_used": False,
+            "req_id": "motion_req_2",
+            "announcement_count": float("nan"),
+            "step_elapsed_sec": 0.2,
+        },
+    ]
+    output_path = tmp_path / "report_nan_announcement_count.xlsx"
+
+    save_excel(rows, str(output_path), with_images=False)
+
+    assert output_path.exists()
