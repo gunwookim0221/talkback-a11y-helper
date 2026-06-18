@@ -83,6 +83,7 @@ COLLECTION_FLOW_SCROLL_READY_VERSION = "pr79-scroll-ready-move-smart-v1"
 COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION = "pr108-local-tab-last-selected-hint-v1"
 COLLECTION_FLOW_REPEAT_SUPPRESSION_VERSION = "phase3f-repeat-suppression-v1"
 COLLECTION_FLOW_BOTTOM_STRIP_GUARD_VERSION = "phase4d-bottom-strip-guard-v1"
+COLLECTION_FLOW_BOTTOM_STRIP_FAST_STOP_VERSION = "phase4e-bottom-strip-no-unvisited-fast-stop-v1"
 COLLECTION_FLOW_FOOD_HOME_HANDOFF_VERSION = "phase-food-two-stage-entry-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
 COLLECTION_FLOW_LIFE_RESET_VERSION = "pr61-life-reset-strict-global-nav-v1"
@@ -10974,6 +10975,32 @@ def _bottom_strip_guard_repeat_signal(
     )
 
 
+def _bottom_strip_no_unvisited_fast_stop_eligible(
+    *,
+    row: dict[str, Any],
+    same_fingerprint_count: int,
+    repeat_signal: bool,
+    move_failed_count: int,
+    stop_eval_inputs: dict[str, Any],
+) -> bool:
+    if not bool(row.get("viewport_exhausted_eval_result", False)):
+        return False
+    if str(row.get("viewport_exhausted_eval_reason", "") or "") != "no_representative_candidates":
+        return False
+    if not bool(row.get("strip_focus_context", False)):
+        return False
+    if str(row.get("local_tab_block_reason", "") or "") != "no_unvisited_local_tab":
+        return False
+    return bool(
+        same_fingerprint_count > 1
+        or repeat_signal
+        or move_failed_count > 0
+        or bool(stop_eval_inputs.get("repeat_stop_hit", False))
+        or bool(stop_eval_inputs.get("no_progress", False))
+        or bool(stop_eval_inputs.get("strict_duplicate", False))
+    )
+
+
 def _maybe_apply_bottom_strip_repetition_guard(
     *,
     row: dict[str, Any],
@@ -11011,6 +11038,33 @@ def _maybe_apply_bottom_strip_repetition_guard(
         repeat_signal,
     )
     failure_count = move_failed_count + repeat_count
+    if (
+        not stop
+        and _bottom_strip_no_unvisited_fast_stop_eligible(
+            row=row,
+            same_fingerprint_count=same_fingerprint_count,
+            repeat_signal=repeat_signal,
+            move_failed_count=move_failed_count,
+            stop_eval_inputs=stop_eval_inputs,
+        )
+    ):
+        focus_view_id = str(row.get("focus_view_id", "") or row.get("resource_id", "") or "").strip().lower()
+        row["bottom_strip_fast_stop"] = True
+        row["bottom_strip_fast_stop_reason"] = "no_unvisited_local_tab_bottom_strip_repeat"
+        row["bottom_strip_fast_stop_fingerprint"] = fingerprint
+        row["bottom_strip_fast_stop_count"] = same_fingerprint_count
+        row["bottom_strip_fast_stop_version"] = COLLECTION_FLOW_BOTTOM_STRIP_FAST_STOP_VERSION
+        log(
+            f"[STOP][bottom_strip_guard] step={step_idx} scenario='{scenario_id}' "
+            "scope='no_unvisited_fast_path' "
+            f"same_fingerprint_count={same_fingerprint_count} "
+            f"move_failed_count={move_failed_count} repeat_count={repeat_count} "
+            f"focus_view_id='{_truncate_debug_text(focus_view_id, 120)}' "
+            "reason='no_unvisited_local_tab_bottom_strip_repeat' "
+            f"fingerprint='{_truncate_debug_text(fingerprint, 180)}' "
+            f"version='{COLLECTION_FLOW_BOTTOM_STRIP_FAST_STOP_VERSION}'"
+        )
+        return True, "repeat_no_progress", True
     if stop or same_fingerprint_count < _BOTTOM_STRIP_GUARD_FINGERPRINT_THRESHOLD:
         return stop, reason, False
     if failure_count < _BOTTOM_STRIP_GUARD_FAILURE_THRESHOLD:

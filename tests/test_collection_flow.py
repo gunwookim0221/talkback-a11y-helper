@@ -12973,6 +12973,91 @@ def test_bottom_strip_guard_allows_normal_local_tab_transition():
     assert (stop, reason, applied) == (False, "", False)
 
 
+def test_bottom_strip_guard_fast_stops_no_unvisited_exhausted_strip_repeat(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    state = _phase_ordering_state()
+
+    first = _bottom_strip_guard_row(
+        17,
+        scenario_id="device_motion_sensor_plugin",
+        visible_label="Controls",
+        normalized_visible_label="controls",
+        merged_announcement="Controls",
+        normalized_announcement="controls",
+        focus_view_id="control",
+        move_result="moved",
+        viewport_exhausted_eval_result=True,
+        viewport_exhausted_eval_reason="no_representative_candidates",
+        strip_focus_context=True,
+        local_tab_gate_evaluated=True,
+        local_tab_block_reason="no_unvisited_local_tab",
+    )
+    repeated = {
+        **first,
+        "step_index": 18,
+    }
+
+    stop, reason, applied = collection_flow._maybe_apply_bottom_strip_repetition_guard(
+        row=first,
+        state=state,
+        stop=False,
+        reason="",
+        stop_eval_inputs=_phase_ordering_stop_inputs(),
+        step_idx=17,
+        scenario_id="device_motion_sensor_plugin",
+    )
+
+    assert (stop, reason, applied) == (False, "", False)
+
+    stop, reason, applied = collection_flow._maybe_apply_bottom_strip_repetition_guard(
+        row=repeated,
+        state=state,
+        stop=False,
+        reason="",
+        stop_eval_inputs=_phase_ordering_stop_inputs(),
+        step_idx=18,
+        scenario_id="device_motion_sensor_plugin",
+    )
+
+    assert (stop, reason, applied) == (True, "repeat_no_progress", True)
+    assert repeated["bottom_strip_fast_stop"] is True
+    assert repeated["bottom_strip_fast_stop_reason"] == "no_unvisited_local_tab_bottom_strip_repeat"
+    assert any("scope='no_unvisited_fast_path'" in line for line in logs)
+
+
+def test_bottom_strip_guard_fast_stop_does_not_block_remaining_local_tabs():
+    state = _phase_ordering_state()
+    row = _bottom_strip_guard_row(
+        9,
+        scenario_id="device_motion_sensor_plugin",
+        visible_label="History",
+        normalized_visible_label="history",
+        merged_announcement="History",
+        normalized_announcement="history",
+        focus_view_id="history",
+        move_result="failed",
+        viewport_exhausted_eval_result=True,
+        viewport_exhausted_eval_reason="no_representative_candidates",
+        strip_focus_context=True,
+        local_tab_gate_evaluated=True,
+        local_tab_block_reason="",
+    )
+
+    stop, reason, applied = collection_flow._maybe_apply_bottom_strip_repetition_guard(
+        row=row,
+        state=state,
+        stop=False,
+        reason="",
+        stop_eval_inputs=_phase_ordering_stop_inputs(repeat_stop_hit=True, no_progress=True, strict_duplicate=True),
+        step_idx=9,
+        scenario_id="device_motion_sensor_plugin",
+    )
+
+    assert (stop, reason, applied) == (False, "", False)
+    assert "bottom_strip_fast_stop" not in row
+
+
 def test_bottom_strip_guard_ignores_content_row_repetition():
     state = _phase_ordering_state()
     stop = False
