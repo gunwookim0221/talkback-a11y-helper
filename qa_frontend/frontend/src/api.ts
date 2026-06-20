@@ -855,6 +855,7 @@ export const api = {
       body: JSON.stringify(data)
     });
   },
+  stopBatch: () => request<BatchStatus>('/api/batch/stop', { method: 'POST' }),
   getBatchStatus: () => request<BatchStatus>('/api/batch/status'),
   runStatus: () => request<RunStatus>('/api/run/status'),
   runDashboard: () => request<RuntimeDashboard>('/api/run/dashboard'),

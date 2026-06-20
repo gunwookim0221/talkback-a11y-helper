@@ -11,6 +11,7 @@ def test_frontend_initial_selection_defaults_to_global_nav_not_source_enabled():
     app_tsx = (ROOT / "qa_frontend" / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
     run_panel_tsx = (ROOT / "qa_frontend" / "frontend" / "src" / "components" / "RunPanel.tsx").read_text(encoding="utf-8")
     presets_ts = (ROOT / "qa_frontend" / "frontend" / "src" / "presets.ts").read_text(encoding="utf-8")
+    api_ts = (ROOT / "qa_frontend" / "frontend" / "src" / "api.ts").read_text(encoding="utf-8")
 
     assert "DEFAULT_SCENARIO_ID = 'global_nav_main'" in selection_ts
     assert "new Set([DEFAULT_SCENARIO_ID])" in selection_ts
@@ -44,3 +45,7 @@ def test_frontend_initial_selection_defaults_to_global_nav_not_source_enabled():
     assert "Full Regression Selected" not in presets_ts
     assert "full_regression_selected" not in presets_ts
     assert "recommendedMode" not in presets_ts
+    assert "stopBatch: () => request<BatchStatus>('/api/batch/stop', { method: 'POST' })" in api_ts
+    assert "if (batchStatus?.state === 'running')" in app_tsx
+    assert "await api.stopBatch()" in app_tsx
+    assert "await api.stopRun()" in app_tsx

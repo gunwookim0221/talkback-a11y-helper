@@ -356,6 +356,11 @@ def batch_start(request: BatchStartReq) -> dict[str, object]:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@app.post("/api/batch/stop")
+def batch_stop() -> dict[str, object]:
+    return global_batch_manager.stop_batch()
+
+
 @app.get("/api/batch/status")
 def get_batch_status() -> dict[str, object]:
     return global_batch_manager.get_status()

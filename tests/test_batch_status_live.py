@@ -300,3 +300,166 @@ def test_batch_run_manager_restores_sleep_prevention_after_device_run(tmp_path, 
 
     assert status["state"] == "finished"
     assert calls == ["enable", "disable"]
+
+
+class _StopFakeProcess:
+    def __init__(self):
+        self.terminated = False
+        self.killed = False
+        self._done = False
+
+    def poll(self):
+        return 0 if self._done else None
+
+    def terminate(self):
+        self.terminated = True
+        self._done = True
+
+    def kill(self):
+        self.killed = True
+        self._done = True
+
+    def wait(self, timeout=None):
+        self._done = True
+        return 0
+
+
+class _TimeoutThenKillProcess(_StopFakeProcess):
+    def __init__(self):
+        super().__init__()
+        self._wait_calls = 0
+
+    def terminate(self):
+        self.terminated = True
+
+    def wait(self, timeout=None):
+        self._wait_calls += 1
+        if self._wait_calls == 1:
+            raise batch_runner.subprocess.TimeoutExpired(cmd="fake", timeout=timeout)
+        self._done = True
+        return 0
+
+
+class _BlockingFakeProcess(_StopFakeProcess):
+    def __init__(self):
+        super().__init__()
+        import threading
+
+        self._event = threading.Event()
+
+    def terminate(self):
+        self.terminated = True
+        self._done = True
+        self._event.set()
+
+    def kill(self):
+        self.killed = True
+        self._done = True
+        self._event.set()
+
+    def wait(self, timeout=None):
+        if timeout is not None and not self._event.wait(timeout):
+            raise batch_runner.subprocess.TimeoutExpired(cmd="fake", timeout=timeout)
+        self._event.wait()
+        return 0
+
+
+def test_batch_stop_terminates_current_process():
+    process = _StopFakeProcess()
+    manager = batch_runner.BatchRunManager()
+    manager._state = "running"
+    manager._current_execution = SimpleNamespace(process=process)
+
+    status = manager.stop_batch()
+
+    assert process.terminated is True
+    assert process.killed is False
+    assert status["state"] == "stopped"
+
+
+def test_batch_stop_kills_process_after_terminate_timeout():
+    process = _TimeoutThenKillProcess()
+    manager = batch_runner.BatchRunManager()
+    manager._state = "running"
+    manager._current_execution = SimpleNamespace(process=process)
+
+    status = manager.stop_batch()
+
+    assert process.terminated is True
+    assert process.killed is True
+    assert status["state"] == "stopped"
+
+
+def test_batch_stop_when_not_running_is_noop():
+    manager = batch_runner.BatchRunManager()
+
+    status = manager.stop_batch()
+
+    assert status["state"] == "idle"
+
+
+def test_batch_stop_stops_current_process_and_does_not_start_next_device(tmp_path, monkeypatch):
+    calls = []
+    process = _BlockingFakeProcess()
+
+    monkeypatch.setattr(batch_runner, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(batch_runner, "RUN_LOG_DIR", tmp_path / "qa_frontend_runs")
+    monkeypatch.setattr(batch_runner, "RUNTIME_CONFIG_PATH", tmp_path / "runtime_config.json")
+    monkeypatch.setattr(batch_runner, "enable_sleep_prevention", lambda: calls.append("enable"))
+    monkeypatch.setattr(batch_runner, "disable_sleep_prevention", lambda: calls.append("disable"))
+    monkeypatch.setattr(batch_runner, "start_crash_logcat_capture", lambda **kwargs: None)
+    monkeypatch.setattr(batch_runner, "stop_crash_logcat_capture", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        batch_runner,
+        "write_selected_runtime_config",
+        lambda **kwargs: {
+            "path": tmp_path / "runtime_config.json",
+            "enabled_ids": ["global_nav_main"],
+            "max_steps_policy": "smoke_override",
+            "scenario_steps": [],
+        },
+    )
+    monkeypatch.setattr(
+        batch_runner,
+        "prepare_runtime",
+        lambda spec, language_fn, preflight_fn: (
+            {"ok": True, "status": "ok", "language_mode": "current"},
+            {"ok": True, "state": "passed", "reason": "ok"},
+        ),
+    )
+
+    started = []
+
+    def fake_start_execution(**kwargs):
+        started.append(kwargs["spec"].serial)
+        return SimpleNamespace(process=process)
+
+    monkeypatch.setattr(batch_runner, "start_execution", fake_start_execution)
+    monkeypatch.setattr(batch_runner, "wait_for_execution", lambda execution: execution.process.wait())
+    monkeypatch.setattr(batch_runner, "close_execution_log", lambda execution: None)
+    monkeypatch.setattr(batch_runner.BatchRunManager, "_write_device_summary", lambda *args, **kwargs: None)
+
+    manager = batch_runner.BatchRunManager()
+    manager.start_batch(
+        devices=[
+            {"serial": "SERIAL1", "model": "Model1"},
+            {"serial": "SERIAL2", "model": "Model2"},
+        ],
+        mode="smoke",
+        scenario_ids=["global_nav_main"],
+    )
+
+    deadline = time.time() + 1.0
+    while not started and time.time() < deadline:
+        time.sleep(0.01)
+
+    status = manager.stop_batch()
+    deadline = time.time() + 1.0
+    while manager._worker_thread and manager._worker_thread.is_alive() and time.time() < deadline:
+        time.sleep(0.01)
+
+    assert status["state"] == "stopped"
+    assert process.terminated is True
+    assert started == ["SERIAL1"]
+    assert manager.get_status()["state"] == "stopped"
+    assert calls == ["enable", "disable"]

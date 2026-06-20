@@ -143,7 +143,11 @@ export default function App() {
   async function stop() {
     clearError();
     try {
-      await api.stopRun();
+      if (batchStatus?.state === 'running') {
+        await api.stopBatch();
+      } else {
+        await api.stopRun();
+      }
       await refreshRun();
     } catch (err) {
       reportError(err);

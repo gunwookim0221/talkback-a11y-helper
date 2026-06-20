@@ -17,7 +17,7 @@ from .preflight import (
     normalize_launch_mode,
     format_preflight_log_lines,
 )
-from .subprocess_executor import close_execution_log, start_execution, wait_for_execution
+from .subprocess_executor import RunExecution, close_execution_log, start_execution, wait_for_execution
 from .runtime_setup import prepare_runtime
 from .crash_capture import start_crash_logcat_capture, stop_crash_logcat_capture
 from .sleep_prevention import disable_sleep_prevention, enable_sleep_prevention
@@ -404,6 +404,8 @@ class BatchRunManager:
         self._devices = []
         self._current_device_idx = -1
         self._worker_thread = None
+        self._stop_requested = False
+        self._current_execution: RunExecution | None = None
 
     def _sanitize_name(self, name: str) -> str:
         return re.sub(r'[^0-9a-zA-Z_-]+', '_', name)
@@ -415,6 +417,8 @@ class BatchRunManager:
 
             self._batch_id = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             self._state = "running"
+            self._stop_requested = False
+            self._current_execution = None
             self._mode = mode
             self._launch_mode = normalize_launch_mode(launch_mode)
             self._language_mode = normalize_language_mode(language_mode)
@@ -449,6 +453,26 @@ class BatchRunManager:
             
             return self.get_status_locked()
 
+    def stop_batch(self) -> dict:
+        execution = None
+        with self._lock:
+            if self._state != "running":
+                return self.get_status_locked()
+            self._stop_requested = True
+            self._state = "stopped"
+            execution = self._current_execution
+            self._write_summary_locked()
+
+        process = execution.process if execution is not None else None
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=8.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5.0)
+        return self.get_status()
+
     def get_status(self) -> dict:
         with self._lock:
             return self.get_status_locked()
@@ -472,7 +496,7 @@ class BatchRunManager:
             }
         else:
             current_live = _empty_live_status()
-        finished_devices = [device for device in device_statuses if device.get("state") in {"passed", "failed", "skipped", "error"}]
+        finished_devices = [device for device in device_statuses if device.get("state") in {"passed", "failed", "skipped", "error", "stopped"}]
         passed_devices = [device for device in device_statuses if device.get("state") == "passed"]
         failed_devices = [device for device in device_statuses if device.get("state") in {"failed", "error"}]
         warning_devices = [
@@ -538,7 +562,7 @@ class BatchRunManager:
         device_state = str((device or {}).get("state") or "")
         if device_state in {"running", "pending"}:
             return "running"
-        if device_state in {"passed", "failed", "skipped", "error"}:
+        if device_state in {"passed", "failed", "skipped", "error", "stopped"}:
             return "finished"
         return device_state or None
 
@@ -563,6 +587,18 @@ class BatchRunManager:
     def _mark_all_scenarios_observed(self, device: dict) -> None:
         if self._scenario_ids:
             device["observed_scenario_ids"] = [str(item) for item in self._scenario_ids]
+
+    def _is_stop_requested(self) -> bool:
+        with self._lock:
+            return bool(self._stop_requested)
+
+    def _mark_device_stopped_locked(self, device: dict) -> None:
+        device["state"] = "stopped"
+        device["error"] = "Batch stop requested"
+        device["finished_at"] = datetime.now(timezone.utc).isoformat()
+        self._state = "stopped"
+        self._current_device_idx = len(self._devices)
+        self._write_summary_locked()
 
     @staticmethod
     def _batch_finished_at(devices: list[dict]) -> str | None:
@@ -736,8 +772,13 @@ class BatchRunManager:
     def _run_loop(self):
         while True:
             with self._lock:
+                if self._stop_requested:
+                    self._state = "stopped"
+                    self._write_summary_locked()
+                    break
                 if self._current_device_idx >= len(self._devices):
-                    self._state = "finished"
+                    if self._state != "stopped":
+                        self._state = "finished"
                     self._write_summary_locked()
                     break
                 device_info = self._devices[self._current_device_idx]
@@ -802,14 +843,30 @@ class BatchRunManager:
                     log_file.write(f"{line}\n")
                 if not preflight.get("ok"):
                     raise Exception(f"Preflight blocked: {preflight.get('reason')}")
+
+                if self._is_stop_requested():
+                    log_file.write("\n[BATCH] stop_requested before execution\n")
+                    log_file.flush()
+                    with self._lock:
+                        self._mark_device_stopped_locked(device_info)
+                    self._write_device_summary(device_info, dev_output_dir)
+                    stop_crash_logcat_capture(crash_capture, log_writer=crash_log)
+                    crash_capture = None
+                    disable_sleep_prevention()
+                    sleep_prevention_enabled = False
+                    log_file.close()
+                    break
                 
             except Exception as e:
                 with self._lock:
-                    device_info["state"] = "failed"
-                    device_info["error"] = f"Setup error: {str(e)}"
-                    device_info["finished_at"] = datetime.now(timezone.utc).isoformat()
-                    self._current_device_idx += 1
-                    self._write_summary_locked()
+                    if self._stop_requested:
+                        self._mark_device_stopped_locked(device_info)
+                    else:
+                        device_info["state"] = "failed"
+                        device_info["error"] = f"Setup error: {str(e)}"
+                        device_info["finished_at"] = datetime.now(timezone.utc).isoformat()
+                        self._current_device_idx += 1
+                        self._write_summary_locked()
                 self._write_device_summary(device_info, dev_output_dir)
                 log_file.write(f"\n[BATCH ERROR] {e}\n")
                 stop_crash_logcat_capture(crash_capture, log_writer=crash_log)
@@ -817,9 +874,18 @@ class BatchRunManager:
                 disable_sleep_prevention()
                 sleep_prevention_enabled = False
                 log_file.close()
+                if self._is_stop_requested():
+                    break
                 continue
 
             try:
+                if self._is_stop_requested():
+                    log_file.write("\n[BATCH] stop_requested before start_execution\n")
+                    log_file.flush()
+                    with self._lock:
+                        self._mark_device_stopped_locked(device_info)
+                    self._write_device_summary(device_info, dev_output_dir)
+                    break
                 execution = start_execution(
                     spec=spec,
                     script_path=SCRIPT_PATH,
@@ -828,7 +894,12 @@ class BatchRunManager:
                     log_path=log_path,
                     popen_factory=subprocess.Popen,
                 )
+                with self._lock:
+                    self._current_execution = execution
                 returncode = wait_for_execution(execution)
+                with self._lock:
+                    if self._current_execution is execution:
+                        self._current_execution = None
                 stop_crash_logcat_capture(crash_capture, log_writer=crash_log)
                 crash_capture = None
                 
@@ -840,30 +911,46 @@ class BatchRunManager:
                     pass
                 
                 with self._lock:
-                    device_info["state"] = "passed" if returncode == 0 else "failed"
+                    if self._stop_requested:
+                        self._mark_device_stopped_locked(device_info)
+                    else:
+                        device_info["state"] = "passed" if returncode == 0 else "failed"
+                        device_info["return_code"] = returncode
+                        device_info["finished_at"] = datetime.now(timezone.utc).isoformat()
+                        if returncode == 0:
+                            self._mark_all_scenarios_observed(device_info)
+                        self._current_device_idx += 1
+                        self._write_summary_locked()
                     device_info["return_code"] = returncode
-                    device_info["finished_at"] = datetime.now(timezone.utc).isoformat()
-                    if returncode == 0:
-                        self._mark_all_scenarios_observed(device_info)
-                    self._current_device_idx += 1
-                    self._write_summary_locked()
                 self._write_device_summary(device_info, dev_output_dir)
                 close_execution_log(execution)
                 disable_sleep_prevention()
                 sleep_prevention_enabled = False
+                if self._is_stop_requested():
+                    break
                     
             except Exception as e:
                 stop_crash_logcat_capture(crash_capture, log_writer=crash_log)
                 crash_capture = None
                 with self._lock:
-                    device_info["state"] = "failed"
-                    device_info["error"] = str(e)
-                    device_info["finished_at"] = datetime.now(timezone.utc).isoformat()
-                    self._current_device_idx += 1
-                    self._write_summary_locked()
+                    if "execution" in locals() and self._current_execution is execution:
+                        self._current_execution = None
+                    if self._stop_requested:
+                        self._mark_device_stopped_locked(device_info)
+                    else:
+                        device_info["state"] = "failed"
+                        device_info["error"] = str(e)
+                        device_info["finished_at"] = datetime.now(timezone.utc).isoformat()
+                        self._current_device_idx += 1
+                        self._write_summary_locked()
                 self._write_device_summary(device_info, dev_output_dir)
                 log_file.write(f"\n[BATCH ERROR] {e}\n")
+                if self._is_stop_requested():
+                    break
             finally:
+                with self._lock:
+                    if "execution" in locals() and self._current_execution is execution:
+                        self._current_execution = None
                 stop_crash_logcat_capture(crash_capture, log_writer=crash_log)
                 if sleep_prevention_enabled:
                     disable_sleep_prevention()
