@@ -19,6 +19,7 @@ from .run_summary import write_summary_file
 from .runtime_dashboard import build_runtime_dashboard
 from .runtime_config_selection import write_selected_runtime_config
 from .runtime_setup import prepare_runtime
+from .sleep_prevention import disable_sleep_prevention, enable_sleep_prevention
 from .subprocess_executor import RunExecution, close_execution_log, start_execution, wait_for_execution
 
 RunState = Literal["idle", "running", "stopped", "finished", "error"]
@@ -69,6 +70,7 @@ class RunManager:
             log_path = RUN_LOG_DIR / f"{run_id}_{mode}.log"
             normalized_launch_mode = normalize_launch_mode(launch_mode)
             normalized_language_mode = normalize_language_mode(language_mode)
+            sleep_prevention_enabled = False
 
             try:
                 log_file = log_path.open("w", encoding="utf-8", errors="replace")
@@ -101,6 +103,9 @@ class RunManager:
                     log_file.close()
                     self._write_summary_safe()
                     return self._status_locked()
+
+                enable_sleep_prevention()
+                sleep_prevention_enabled = True
 
                 runtime_config = write_selected_runtime_config(
                     source_path=RUNTIME_CONFIG_PATH,
@@ -166,6 +171,8 @@ class RunManager:
                     self._finished_at = datetime.now().isoformat(timespec="seconds")
                     log_file.close()
                     self._write_summary_safe()
+                    disable_sleep_prevention()
+                    sleep_prevention_enabled = False
                     return self._status_locked()
 
                 assert preflight is not None
@@ -181,6 +188,8 @@ class RunManager:
                     self._finished_at = datetime.now().isoformat(timespec="seconds")
                     log_file.close()
                     self._write_summary_safe()
+                    disable_sleep_prevention()
+                    sleep_prevention_enabled = False
                     return self._status_locked()
 
                 execution = start_execution(
@@ -195,6 +204,8 @@ class RunManager:
                 self._state = "error"
                 self._error = str(exc)
                 self._process = None
+                if sleep_prevention_enabled:
+                    disable_sleep_prevention()
                 raise
 
             self._execution = execution
@@ -202,7 +213,18 @@ class RunManager:
             self._state = "running"
             self._error = None
 
-            threading.Thread(target=self._wait_for_process, args=(execution,), daemon=True).start()
+            try:
+                waiter = threading.Thread(target=self._wait_for_process, args=(execution,), daemon=True)
+                waiter.start()
+            except Exception:
+                close_execution_log(execution)
+                disable_sleep_prevention()
+                self._state = "error"
+                self._error = "failed to start run waiter thread"
+                self._process = None
+                self._execution = None
+                self._finished_at = datetime.now().isoformat(timespec="seconds")
+                raise
 
             return self._status_locked()
 
@@ -307,26 +329,29 @@ class RunManager:
 
     def _wait_for_process(self, execution: RunExecution) -> None:
         process = execution.process
-        returncode = wait_for_execution(execution)
-        with self._lock:
-            if process is not self._process:
-                close_execution_log(execution)
-                return
-            self._returncode = returncode
-            self._finished_at = datetime.now().isoformat(timespec="seconds")
-            if self._state == "stopped":
-                self._append_log_line("[QA_FRONTEND][run] final_state='stopped' returncode=0")
+        try:
+            returncode = wait_for_execution(execution)
+            with self._lock:
+                if process is not self._process:
+                    close_execution_log(execution)
+                    return
+                self._returncode = returncode
+                self._finished_at = datetime.now().isoformat(timespec="seconds")
+                if self._state == "stopped":
+                    self._append_log_line("[QA_FRONTEND][run] final_state='stopped' returncode=0")
+                    close_execution_log(execution)
+                    self._write_summary_safe()
+                    return
+                self._state = "finished" if returncode == 0 else "error"
+                if returncode != 0:
+                    self._error = f"script_test.py exited with code {returncode}"
+                self._append_log_line(
+                    f"[QA_FRONTEND][run] final_state='{self._state}' returncode={returncode}"
+                )
                 close_execution_log(execution)
                 self._write_summary_safe()
-                return
-            self._state = "finished" if returncode == 0 else "error"
-            if returncode != 0:
-                self._error = f"script_test.py exited with code {returncode}"
-            self._append_log_line(
-                f"[QA_FRONTEND][run] final_state='{self._state}' returncode={returncode}"
-            )
-            close_execution_log(execution)
-            self._write_summary_safe()
+        finally:
+            disable_sleep_prevention()
 
     def _refresh_locked(self) -> None:
         process = self._process

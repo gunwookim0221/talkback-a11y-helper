@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,15 @@ def _language_ok(language_mode="current", device_locale="en-US"):
         "changed": False,
         "verified": True,
     }
+
+
+def _wait_until_not_running(manager: RunManager, timeout: float = 1.0) -> dict[str, object]:
+    deadline = time.time() + timeout
+    state = manager.get_status()
+    while state["state"] == "running" and time.time() < deadline:
+        time.sleep(0.01)
+        state = manager.get_status()
+    return state
 
 
 def test_run_manager_initial_state_is_idle():
@@ -217,6 +227,121 @@ def test_run_manager_writes_selected_runtime_config_and_env_without_mutating_sou
     assert "scenario='global_nav_main'" in log_text
     assert "original_max_steps=10" in log_text
     assert "effective_max_steps=6" in log_text
+
+
+def test_run_manager_restores_sleep_prevention_after_success(tmp_path, monkeypatch):
+    source_path = tmp_path / "runtime_config.json"
+    source_path.write_text(
+        json.dumps({"scenarios": {"global_nav_main": {"enabled": False, "max_steps": 10}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    passed = {
+        "ok": True,
+        "state": "passed",
+        "reason": "ok",
+        "launch_mode": "warm",
+        "adb_state": "ok",
+        "helper_state": "ok",
+        "talkback_state": "enabled",
+        "foreground_package": "com.samsung.android.oneconnect",
+        "accessibility_settings_opened": False,
+    }
+    calls = []
+
+    monkeypatch.setattr("qa_frontend.backend.runner.RUNTIME_CONFIG_PATH", source_path)
+    monkeypatch.setattr("qa_frontend.backend.runner.RUN_LOG_DIR", tmp_path / "runs")
+    monkeypatch.setattr("qa_frontend.backend.runner.apply_language_mode", lambda language_mode: _language_ok(language_mode))
+    monkeypatch.setattr("qa_frontend.backend.runner.run_runtime_preflight", lambda launch_mode: passed)
+    monkeypatch.setattr("qa_frontend.backend.runner.subprocess.Popen", lambda *args, **kwargs: _FakeProcess())
+    monkeypatch.setattr("qa_frontend.backend.runner.enable_sleep_prevention", lambda: calls.append("enable"))
+    monkeypatch.setattr("qa_frontend.backend.runner.disable_sleep_prevention", lambda: calls.append("disable"))
+
+    manager = RunManager()
+    state = manager.start_run(mode="smoke", scenario_ids=["global_nav_main"], launch_mode="warm")
+    assert state["state"] == "running"
+
+    final_state = _wait_until_not_running(manager)
+
+    assert final_state["state"] == "finished"
+    assert calls == ["enable", "disable"]
+
+
+def test_run_manager_restores_sleep_prevention_when_preflight_blocks(tmp_path, monkeypatch):
+    source_path = tmp_path / "runtime_config.json"
+    source_path.write_text(
+        json.dumps({"scenarios": {"global_nav_main": {"enabled": False, "max_steps": 10}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    blocked = {
+        "ok": False,
+        "state": "blocked",
+        "reason": "talkback_disabled",
+        "launch_mode": "warm",
+        "adb_state": "ok",
+        "helper_state": "ok",
+        "talkback_state": "disabled",
+        "foreground_package": None,
+        "accessibility_settings_opened": True,
+        "user_message": "TalkBack is disabled.",
+    }
+    calls = []
+
+    monkeypatch.setattr("qa_frontend.backend.runner.RUNTIME_CONFIG_PATH", source_path)
+    monkeypatch.setattr("qa_frontend.backend.runner.RUN_LOG_DIR", tmp_path / "runs")
+    monkeypatch.setattr("qa_frontend.backend.runner.apply_language_mode", lambda language_mode: _language_ok(language_mode))
+    monkeypatch.setattr("qa_frontend.backend.runner.run_runtime_preflight", lambda launch_mode: blocked)
+    monkeypatch.setattr("qa_frontend.backend.runner.enable_sleep_prevention", lambda: calls.append("enable"))
+    monkeypatch.setattr("qa_frontend.backend.runner.disable_sleep_prevention", lambda: calls.append("disable"))
+
+    state = RunManager().start_run(mode="smoke", scenario_ids=["global_nav_main"], launch_mode="warm")
+
+    assert state["state"] == "error"
+    assert state["preflight_state"] == "blocked"
+    assert calls == ["enable", "disable"]
+
+
+def test_run_manager_restores_sleep_prevention_when_waiter_thread_start_fails(tmp_path, monkeypatch):
+    source_path = tmp_path / "runtime_config.json"
+    source_path.write_text(
+        json.dumps({"scenarios": {"global_nav_main": {"enabled": False, "max_steps": 10}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    passed = {
+        "ok": True,
+        "state": "passed",
+        "reason": "ok",
+        "launch_mode": "warm",
+        "adb_state": "ok",
+        "helper_state": "ok",
+        "talkback_state": "enabled",
+        "foreground_package": "com.samsung.android.oneconnect",
+        "accessibility_settings_opened": False,
+    }
+    calls = []
+
+    class FailingThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            raise RuntimeError("thread start failed")
+
+    monkeypatch.setattr("qa_frontend.backend.runner.RUNTIME_CONFIG_PATH", source_path)
+    monkeypatch.setattr("qa_frontend.backend.runner.RUN_LOG_DIR", tmp_path / "runs")
+    monkeypatch.setattr("qa_frontend.backend.runner.apply_language_mode", lambda language_mode: _language_ok(language_mode))
+    monkeypatch.setattr("qa_frontend.backend.runner.run_runtime_preflight", lambda launch_mode: passed)
+    monkeypatch.setattr("qa_frontend.backend.runner.subprocess.Popen", lambda *args, **kwargs: _FakeProcess())
+    monkeypatch.setattr("qa_frontend.backend.runner.threading.Thread", FailingThread)
+    monkeypatch.setattr("qa_frontend.backend.runner.enable_sleep_prevention", lambda: calls.append("enable"))
+    monkeypatch.setattr("qa_frontend.backend.runner.disable_sleep_prevention", lambda: calls.append("disable"))
+
+    manager = RunManager()
+
+    with pytest.raises(RuntimeError, match="thread start failed"):
+        manager.start_run(mode="smoke", scenario_ids=["global_nav_main"], launch_mode="warm")
+
+    assert manager.get_status()["state"] == "error"
+    assert calls == ["enable", "disable"]
 
 
 def test_run_manager_uses_clean_launch_mode_when_omitted(tmp_path, monkeypatch):

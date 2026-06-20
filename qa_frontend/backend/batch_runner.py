@@ -20,6 +20,7 @@ from .preflight import (
 from .subprocess_executor import close_execution_log, start_execution, wait_for_execution
 from .runtime_setup import prepare_runtime
 from .crash_capture import start_crash_logcat_capture, stop_crash_logcat_capture
+from .sleep_prevention import disable_sleep_prevention, enable_sleep_prevention
 
 def _json_safe(value):
     if isinstance(value, Path):
@@ -753,12 +754,15 @@ class BatchRunManager:
             log_path = Path(dev_output_dir) / "runner.log"
             log_file = log_path.open("w", encoding="utf-8", errors="replace")
             crash_capture = None
+            sleep_prevention_enabled = False
 
             def crash_log(line: str) -> None:
                 log_file.write(f"{line}\n")
                 log_file.flush()
             
             try:
+                enable_sleep_prevention()
+                sleep_prevention_enabled = True
                 crash_capture = start_crash_logcat_capture(
                     serial=dev_serial,
                     output_dir=Path(dev_output_dir),
@@ -810,6 +814,8 @@ class BatchRunManager:
                 log_file.write(f"\n[BATCH ERROR] {e}\n")
                 stop_crash_logcat_capture(crash_capture, log_writer=crash_log)
                 crash_capture = None
+                disable_sleep_prevention()
+                sleep_prevention_enabled = False
                 log_file.close()
                 continue
 
@@ -843,6 +849,8 @@ class BatchRunManager:
                     self._write_summary_locked()
                 self._write_device_summary(device_info, dev_output_dir)
                 close_execution_log(execution)
+                disable_sleep_prevention()
+                sleep_prevention_enabled = False
                     
             except Exception as e:
                 stop_crash_logcat_capture(crash_capture, log_writer=crash_log)
@@ -857,6 +865,8 @@ class BatchRunManager:
                 log_file.write(f"\n[BATCH ERROR] {e}\n")
             finally:
                 stop_crash_logcat_capture(crash_capture, log_writer=crash_log)
+                if sleep_prevention_enabled:
+                    disable_sleep_prevention()
                 if not log_file.closed:
                     log_file.close()
 
