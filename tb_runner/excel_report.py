@@ -915,6 +915,36 @@ def _result_bounds_related(parent: object, candidate: object) -> bool:
     return bool(smaller_area and intersection / smaller_area >= 0.85)
 
 
+def _result_value(result: pd.DataFrame, idx: int, column: str, default: object = "") -> object:
+    if column not in result.columns:
+        return default
+    return result.at[idx, column]
+
+
+def _candidate_label_source_bounds(result: pd.DataFrame, idx: int) -> object:
+    representative_source = str(_result_value(result, idx, "_representative_row_source", "") or "").strip()
+    representative_visible = str(_result_value(result, idx, "representative_visible", "") or "").strip()
+    representative_bounds = _result_value(result, idx, "_representative_bounds", "")
+    if representative_source == "representative" and representative_visible and _parse_result_bounds(representative_bounds):
+        return representative_bounds
+    return _result_value(result, idx, "focus_bounds", "")
+
+
+def _candidate_label_source_focus_id(result: pd.DataFrame, idx: int) -> str:
+    representative_source = str(_result_value(result, idx, "_representative_row_source", "") or "").strip()
+    representative_visible = str(_result_value(result, idx, "representative_visible", "") or "").strip()
+    representative_id = str(_result_value(result, idx, "_representative_resource_id", "") or "").strip()
+    if representative_source == "representative" and representative_visible and representative_id:
+        return representative_id
+    return str(_result_value(result, idx, "focus_view_id", "") or "").strip()
+
+
+def _same_semantic_card(result: pd.DataFrame, left_idx: int, right_idx: int) -> bool:
+    left = str(_result_value(result, left_idx, "semantic_card_id", "") or "").strip()
+    right = str(_result_value(result, right_idx, "semantic_card_id", "") or "").strip()
+    return bool(left and right and left == right)
+
+
 def _find_nearby_contained_label(result: pd.DataFrame, group_idx: list[int], target_idx: int) -> str:
     target_focus_id = str(result.at[target_idx, "focus_view_id"] or "").strip()
     target_bounds = result.at[target_idx, "focus_bounds"] if "focus_bounds" in result.columns else ""
@@ -944,10 +974,10 @@ def _find_nearby_contained_label(result: pd.DataFrame, group_idx: list[int], tar
         if not nearby_step and not placeholder_followup:
             continue
 
-        candidate_focus_id = str(result.at[candidate_idx, "focus_view_id"] or "").strip()
+        candidate_focus_id = _candidate_label_source_focus_id(result, candidate_idx)
         same_focus_id = bool(target_focus_id and candidate_focus_id and target_focus_id == candidate_focus_id)
-        related_bounds = _result_bounds_related(target_bounds, result.at[candidate_idx, "focus_bounds"])
-        if same_focus_id or related_bounds:
+        related_bounds = _result_bounds_related(target_bounds, _candidate_label_source_bounds(result, candidate_idx))
+        if _same_semantic_card(result, target_idx, candidate_idx) or related_bounds or (same_focus_id and related_bounds):
             return candidate_visible
     return ""
 
@@ -1128,6 +1158,7 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     _pick_col("_row_source", ["row_source"], default="")
     _pick_col("_representative_row_source", ["representative_row_source"], default="")
     _pick_col("_representative_resource_id", ["representative_resource_id"], default="")
+    _pick_col("_representative_bounds", ["representative_bounds"], default="")
     _pick_col("_focus_node", ["focus_node"], default="")
     _pick_col("semantic_card_id", ["semantic_card_id"], default="")
     _pick_col("semantic_card_role", ["semantic_card_role"], default="")
@@ -1147,6 +1178,7 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
         "focus_view_id",
         "_representative_row_source",
         "_representative_resource_id",
+        "_representative_bounds",
         "semantic_card_id",
         "semantic_card_role",
         "semantic_card_title",

@@ -734,6 +734,55 @@ def test_make_result_df_uses_representative_when_actual_focus_is_empty():
     assert result.iloc[0]["final_result"] == "PASS"
 
 
+def test_make_result_df_keeps_home_monitor_empty_focus_fail_with_disjoint_representative_bounds():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "life_home_monitor_plugin",
+                "tab_name": "life",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "",
+                "merged_announcement": "",
+                "move_result": "moved",
+                "last_smart_nav_result": "moved",
+                "smart_nav_success": True,
+                "post_move_verdict_source": "smart_nav_result",
+                "focus_view_id": "com.samsung.android.oneconnect:id/shm_setting_button",
+                "focus_bounds": "804,118,924,310",
+                "req_id": "empty_settings",
+            },
+            {
+                "scenario_id": "life_home_monitor_plugin",
+                "tab_name": "life",
+                "step_index": 2,
+                "context_type": "main",
+                "visible_label": "",
+                "merged_announcement": "",
+                "representative_visible": "Armed (stay)",
+                "representative_speech": "Armed (stay)",
+                "representative_resource_id": "com.samsung.android.oneconnect:id/shmBannerStayButton",
+                "representative_bounds": "396,517,684,757",
+                "representative_row_source": "representative",
+                "row_source": "actual_focus",
+                "move_result": "moved",
+                "last_smart_nav_result": "moved",
+                "smart_nav_success": True,
+                "post_move_verdict_source": "smart_nav_result",
+                "focus_view_id": "com.samsung.android.oneconnect:id/shm_setting_button",
+                "focus_bounds": "804,118,924,310",
+                "req_id": "stale_focus_bounds",
+            },
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    row = result[result["step"] == 1].iloc[0]
+    assert row["mismatch_type"] == "EMPTY_VISIBLE"
+    assert row["final_result"] == "FAIL"
+
+
 def test_make_result_df_uses_focus_node_label_fallback_for_icon_only_rows():
     filtered_df = pd.DataFrame(
         [
@@ -1020,6 +1069,48 @@ def test_make_result_df_keeps_empty_visible_fail_when_nearby_label_bounds_unrela
 
     assert result.iloc[0]["mismatch_type"] == "EMPTY_VISIBLE"
     assert result.iloc[0]["final_result"] == "FAIL"
+
+
+def test_make_result_df_allows_empty_visible_downgrade_for_same_semantic_card():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "generic_card",
+                "tab_name": "main",
+                "step_index": 10,
+                "context_type": "main",
+                "visible_label": "",
+                "merged_announcement": "",
+                "move_result": "moved",
+                "last_smart_nav_result": "moved",
+                "smart_nav_success": True,
+                "post_move_verdict_source": "smart_nav_result",
+                "focus_view_id": "GenericCapabilityCardView",
+                "focus_bounds": "0,0,100,100",
+                "semantic_card_id": "semantic_card:generic||card||power",
+                "req_id": "empty_parent",
+            },
+            {
+                "scenario_id": "generic_card",
+                "tab_name": "main",
+                "step_index": 11,
+                "context_type": "main",
+                "visible_label": "On",
+                "merged_announcement": "On",
+                "move_result": "moved",
+                "focus_view_id": "OtherView",
+                "focus_bounds": "300,300,400,400",
+                "semantic_card_id": "semantic_card:generic||card||power",
+                "req_id": "same_semantic_value",
+            },
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    assert result.iloc[0]["mismatch_type"] == "REPRESENTATIVE_CONTEXT"
+    assert result.iloc[0]["representative_visible"] == "On"
+    assert result.iloc[0]["final_result"] == "WARN"
 
 
 def test_make_result_df_keeps_non_empty_normal_row_exact_match():
