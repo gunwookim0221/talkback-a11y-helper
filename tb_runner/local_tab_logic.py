@@ -3113,7 +3113,17 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         "semantic_card_is_title_only",
     ):
         if key in selected_candidate:
-            updated_row[key] = selected_candidate.get(key)
+            current_value = updated_row.get(key)
+            current_missing = current_value is None
+            if not current_missing:
+                try:
+                    current_missing = bool(current_value != current_value)
+                except Exception:
+                    current_missing = False
+            if not current_missing:
+                current_missing = not bool(str(current_value or "").strip())
+            if current_missing:
+                updated_row[key] = selected_candidate.get(key)
     return updated_row
 
 def _maybe_select_next_local_tab(

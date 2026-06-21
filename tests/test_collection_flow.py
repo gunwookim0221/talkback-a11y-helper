@@ -5765,6 +5765,171 @@ def test_filter_content_candidates_for_phase_rejects_consumed_cluster_logical_ch
     assert [candidate["label"] for candidate in filtered["selection_candidates"]] == ["Latest activity"]
 
 
+def _semantic_candidate(
+    label: str,
+    role: str,
+    *,
+    semantic_id: str = "semantic_card:generic||30,300,1050,620||mode",
+    values: str = "Auto",
+    actions: str = "Change",
+    active_rid: str = "controls",
+) -> dict:
+    return {
+        "label": label,
+        "rid": f"com.example:id/{role}_{label.lower().replace(' ', '_')}",
+        "bounds": "40,420,1040,760",
+        "cluster_rid": "com.example:id/generic_card",
+        "cluster_label": "Mode Auto Change",
+        "cluster_role": role if role in {"title", "action"} else "description",
+        "representative": True,
+        "passive_status": False,
+        "low_value_leaf": False,
+        "semantic_card_id": semantic_id,
+        "semantic_card_role": role,
+        "semantic_card_title": "Mode",
+        "semantic_card_values": values,
+        "semantic_card_actions": actions,
+        "semantic_card_bounds": "30,300,1050,620",
+        "semantic_card_member_count": 4,
+        "semantic_card_is_value_covered": role in {"root", "value", "toggle"},
+        "semantic_card_is_action_only": role == "action" and not values,
+        "semantic_card_is_title_only": role == "title" and not values and not actions,
+        "_active_rid_for_test": active_rid,
+    }
+
+
+def _semantic_filter_state(*, consumed: bool = True, active_rid: str = "controls"):
+    candidate = _semantic_candidate("Mode", "title", active_rid=active_rid)
+    return SimpleNamespace(
+        recent_representative_signatures=[],
+        consumed_representative_signatures=set(),
+        consumed_cluster_signatures=set(),
+        consumed_cluster_logical_signatures=set(),
+        consumed_semantic_card_signatures={
+            collection_flow._semantic_card_consumed_signature(candidate, SimpleNamespace(current_local_tab_signature="tabs", current_local_tab_active_rid=active_rid))
+        } if consumed else set(),
+        visited_logical_signatures=set(),
+        cta_cluster_visited_rids={},
+        current_local_tab_signature="tabs",
+        current_local_tab_active_rid=active_rid,
+    )
+
+
+def test_filter_content_candidates_for_phase_suppresses_consumed_semantic_title_repeat():
+    title = _semantic_candidate("Mode", "title")
+    title["rid"] = "com.example:id/mode_label"
+    title["cluster_role"] = "description"
+    value = _semantic_candidate("Auto", "value")
+    filtered = collection_flow._filter_content_candidates_for_phase(
+        [title, value],
+        state=_semantic_filter_state(consumed=True),
+    )
+
+    assert [candidate["label"] for candidate in filtered["semantic_consumed_rejected"]] == ["Mode"]
+    assert [candidate["label"] for candidate in filtered["selection_candidates"]] == ["Auto"]
+
+
+def test_filter_content_candidates_for_phase_keeps_consumed_semantic_value_candidate():
+    value = _semantic_candidate("Auto", "value")
+    changed_value = _semantic_candidate("Manual", "value", values="Manual")
+    filtered = collection_flow._filter_content_candidates_for_phase(
+        [value, changed_value],
+        state=_semantic_filter_state(consumed=True),
+    )
+
+    assert filtered["semantic_consumed_rejected"] == []
+    assert [candidate["label"] for candidate in filtered["selection_candidates"]] == ["Auto", "Manual"]
+
+
+def test_filter_content_candidates_for_phase_suppresses_consumed_semantic_action_repeat():
+    action = _semantic_candidate("Change", "action")
+    value = _semantic_candidate("Auto", "value")
+    filtered = collection_flow._filter_content_candidates_for_phase(
+        [action, value],
+        state=_semantic_filter_state(consumed=True),
+    )
+
+    assert [candidate["label"] for candidate in filtered["semantic_consumed_rejected"]] == ["Change"]
+    assert [candidate["label"] for candidate in filtered["selection_candidates"]] == ["Auto"]
+
+
+def test_filter_content_candidates_for_phase_scopes_semantic_consumed_to_active_local_tab():
+    action = _semantic_candidate("Change", "action")
+    consumed_state = _semantic_filter_state(consumed=True, active_rid="controls")
+    consumed_state.current_local_tab_active_rid = "routines"
+
+    filtered = collection_flow._filter_content_candidates_for_phase([action], state=consumed_state)
+
+    assert filtered["semantic_consumed_rejected"] == []
+    assert [candidate["label"] for candidate in filtered["selection_candidates"]] == ["Change"]
+
+
+def test_record_recent_representative_signature_consumes_semantic_card_only_for_value_or_root():
+    state = SimpleNamespace(
+        recent_representative_signatures=deque(),
+        consumed_representative_signatures=set(),
+        visited_logical_signatures=set(),
+        consumed_cluster_signatures=set(),
+        consumed_cluster_logical_signatures=set(),
+        consumed_semantic_card_signatures=set(),
+        active_container_group_remaining=set(),
+        current_local_tab_signature="tabs",
+        current_local_tab_active_rid="controls",
+    )
+    title_row = {
+        "move_result": "moved",
+        "focus_view_id": "title",
+        "focus_bounds": "1,1,2,2",
+        "visible_label": "Mode",
+        "semantic_card_id": "semantic_card:generic||30,300,1050,620||mode",
+        "semantic_card_role": "title",
+        "semantic_card_values": "Auto",
+    }
+    value_row = {
+        **title_row,
+        "focus_view_id": "value",
+        "visible_label": "Auto",
+        "semantic_card_role": "value",
+    }
+
+    collection_flow._record_recent_representative_signature(state, title_row)
+    assert state.consumed_semantic_card_signatures == set()
+
+    collection_flow._record_recent_representative_signature(state, value_row)
+    assert state.consumed_semantic_card_signatures
+    assert value_row["semantic_card_consumed"] is True
+
+
+def test_record_recent_representative_signature_consumes_semantic_root_with_action():
+    state = SimpleNamespace(
+        recent_representative_signatures=deque(),
+        consumed_representative_signatures=set(),
+        visited_logical_signatures=set(),
+        consumed_cluster_signatures=set(),
+        consumed_cluster_logical_signatures=set(),
+        consumed_semantic_card_signatures=set(),
+        active_container_group_remaining=set(),
+        current_local_tab_signature="tabs",
+        current_local_tab_active_rid="controls",
+    )
+    root_row = {
+        "move_result": "moved",
+        "focus_view_id": "root",
+        "focus_bounds": "1,1,2,2",
+        "visible_label": "Mode Change",
+        "semantic_card_id": "semantic_card:generic||30,300,1050,620||mode",
+        "semantic_card_role": "root",
+        "semantic_card_title": "Mode",
+        "semantic_card_values": "",
+        "semantic_card_actions": "Change",
+    }
+
+    collection_flow._record_recent_representative_signature(state, root_row)
+
+    assert state.consumed_semantic_card_signatures
+    assert root_row["semantic_card_consumed"] is True
+
+
 def test_filter_content_candidates_for_phase_hard_filters_low_value_leaf():
     leaf_candidate = {
         "label": "8:00",
@@ -11213,6 +11378,125 @@ def test_collect_step_candidate_priority_groups_keeps_unrelated_cards_semantical
     assert len(semantic_ids) == 2
 
 
+def test_enrich_row_semantic_card_metadata_handles_actual_focus_root_payload():
+    status_card = _semantic_card_fixture(
+        left=30,
+        top=1162,
+        title="Status",
+        value="Stopped",
+        action="Start",
+    )["children"][0]
+    status_card["viewIdResourceName"] = "OperationalStateCapabilityCardView"
+    row = {
+        "focus_node": status_card,
+        "focus_view_id": "OperationalStateCapabilityCardView",
+        "focus_bounds": "30,1162,1050,1482",
+        "visible_label": "Status Stopped Start",
+        "merged_announcement": "Status Stopped Start",
+        "final_result": "PASS",
+    }
+
+    enriched = collection_flow._enrich_row_semantic_card_metadata(row)
+
+    assert enriched["semantic_card_id"]
+    assert enriched["semantic_card_role"] == "root"
+    assert enriched["semantic_card_title"] == "Status"
+    assert enriched["semantic_card_values"] == "Stopped"
+    assert enriched["semantic_card_actions"] == "Start"
+    assert enriched["final_result"] == "PASS"
+
+
+def test_enrich_row_semantic_card_metadata_links_leaf_value_to_parent_card():
+    card = _semantic_card_fixture(title="Rinse mode", value="Normal", action="Change")["children"][0]
+    value_node = card["children"][1]
+    row = {
+        "focus_node": value_node,
+        "focus_view_id": "",
+        "focus_bounds": value_node["boundsInScreen"],
+        "visible_label": "Normal",
+        "merged_announcement": "Normal",
+        "dump_tree_nodes": [card],
+    }
+
+    enriched = collection_flow._enrich_row_semantic_card_metadata(row)
+
+    assert enriched["semantic_card_id"]
+    assert enriched["semantic_card_role"] == "value"
+    assert enriched["semantic_card_title"] == "Rinse mode"
+    assert enriched["semantic_card_values"] == "Normal"
+    assert enriched["semantic_card_actions"] == "Change"
+
+
+def test_enrich_row_semantic_card_metadata_handles_single_toggle_card_payload():
+    row = {
+        "focus_node": {
+            "visibleToUser": True,
+            "boundsInScreen": "30,310,1050,502",
+            "viewIdResourceName": "SwitchCapabilityCardView",
+            "className": "android.view.View",
+            "text": "On",
+        },
+        "focus_view_id": "SwitchCapabilityCardView",
+        "focus_bounds": "30,310,1050,502",
+        "visible_label": "On",
+        "merged_announcement": "On",
+    }
+
+    enriched = collection_flow._enrich_row_semantic_card_metadata(row)
+
+    assert enriched["semantic_card_id"]
+    assert enriched["semantic_card_role"] == "toggle"
+    assert enriched["semantic_card_values"] == "On"
+
+
+def test_enrich_row_semantic_card_metadata_uses_representative_value_after_actual_focus_restore():
+    row = {
+        "focus_node": {
+            "visibleToUser": True,
+            "boundsInScreen": "84,1012,348,1120",
+            "className": "android.view.View",
+            "text": "Normal",
+        },
+        "focus_view_id": "LaundryWasherRinseModeCapabilityCardView_header_title",
+        "focus_bounds": "84,898,936,967",
+        "visible_label": "Rinse mode",
+        "merged_announcement": "Rinse mode",
+        "representative_visible": "Normal",
+        "representative_row_source": "representative",
+    }
+
+    enriched = collection_flow._enrich_row_semantic_card_metadata(row)
+
+    assert enriched["semantic_card_id"]
+    assert enriched["semantic_card_role"] == "value"
+    assert enriched["semantic_card_title"] == "Rinse mode"
+    assert enriched["semantic_card_values"] == "Normal"
+
+
+def test_enrich_row_semantic_card_metadata_marks_header_title_rows():
+    row = {
+        "focus_node": {
+            "visibleToUser": True,
+            "boundsInScreen": "84,898,936,967",
+            "viewIdResourceName": "LaundryWasherRinseModeCapabilityCardView_header_title",
+            "className": "android.widget.TextView",
+            "text": "Rinse mode",
+        },
+        "focus_view_id": "LaundryWasherRinseModeCapabilityCardView_header_title",
+        "focus_bounds": "84,898,936,967",
+        "visible_label": "Rinse mode",
+        "merged_announcement": "Rinse mode",
+    }
+
+    enriched = collection_flow._enrich_row_semantic_card_metadata(row)
+
+    assert enriched["semantic_card_id"]
+    assert enriched["semantic_card_role"] == "title"
+    assert enriched["semantic_card_title"] == "Rinse mode"
+    assert enriched["semantic_card_values"] == ""
+    assert enriched["semantic_card_actions"] == ""
+
+
 def test_maybe_select_next_local_tab_food_scan_marks_recovery_pending():
     client = DummyClient([])
     state = SimpleNamespace(
@@ -15173,6 +15457,225 @@ def test_row_persistence_phase_impl_non_suppressed_records_all_targets(monkeypat
     assert all_rows[0]["visible_label"] == row["visible_label"]
     assert perf.rows[0]["visible_label"] == row["visible_label"]
     assert state.main_step_index_by_fingerprint == {("fingerprint", "label", "rid"): 12}
+
+
+def _semantic_persistence_state(row, *, consumed: bool = True):
+    state = _phase_ordering_state()
+    state.current_local_tab_signature = "controls||routines||history"
+    state.current_local_tab_active_rid = "com.example:id/controls"
+    state.consumed_semantic_card_signatures = set()
+    if consumed:
+        state.consumed_semantic_card_signatures.add(collection_flow._semantic_card_consumed_signature(row, state))
+    return state
+
+
+def _apply_test_persistence(row, state):
+    rows = []
+    all_rows = []
+    logs = []
+
+    persisted, reason = collection_flow._apply_row_persistence_phase_impl(
+        row=row,
+        tab_cfg=_base_tab_cfg(),
+        state=state,
+        rows=rows,
+        all_rows=all_rows,
+        scenario_perf=None,
+        step_idx=int(row.get("step_index", 20) or 20),
+        stop=False,
+        checkpoint_every=100,
+        output_path="unused.xlsx",
+        log_fn=logs.append,
+        make_fingerprint_fn=lambda _row: ("fingerprint", "label", "rid"),
+        save_fn=lambda *args, **kwargs: None,
+    )
+    return persisted, reason, rows, all_rows, logs
+
+
+def _semantic_persistence_row(role: str, *, visible: str = "Mode", values: str = "Normal", actions: str = "Change"):
+    return {
+        "step_index": 30,
+        "move_result": "moved",
+        "visible_label": visible,
+        "normalized_visible_label": visible.lower(),
+        "merged_announcement": visible,
+        "focus_view_id": f"GenericCapabilityCardView_{role}",
+        "focus_bounds": "84,898,936,967",
+        "semantic_card_id": "semantic_card:generic||30,800,1050,1120||mode",
+        "semantic_card_role": role,
+        "semantic_card_title": "Mode",
+        "semantic_card_values": values,
+        "semantic_card_actions": actions,
+        "semantic_card_bounds": "30,800,1050,1120",
+        "semantic_card_member_count": 4,
+        "semantic_card_is_value_covered": role in {"root", "value", "toggle"},
+        "semantic_card_is_action_only": role == "action",
+        "semantic_card_is_title_only": role == "title",
+    }
+
+
+def test_row_persistence_phase_recomputes_semantic_metadata_after_actual_focus_restore():
+    value_node = {
+        "visibleToUser": True,
+        "boundsInScreen": "84,1012,348,1120",
+        "className": "android.widget.TextView",
+        "text": "Normal",
+    }
+    row = {
+        "step_index": 31,
+        "move_result": "moved",
+        "visible_label": "Normal",
+        "normalized_visible_label": "normal",
+        "merged_announcement": "Normal",
+        "normalized_announcement": "normal",
+        "focus_view_id": "",
+        "focus_bounds": "84,1012,348,1120",
+        "focus_node": value_node,
+        "actual_focus_visible": "Rinse mode",
+        "actual_focus_speech": "Rinse mode",
+        "actual_focus_resource_id": "LaundryWasherRinseModeCapabilityCardView_header_title",
+        "actual_focus_bounds": "84,898,936,967",
+        "row_source": "representative",
+        "crop_source": "actual_focus",
+    }
+    state = _semantic_persistence_state(row, consumed=False)
+
+    persisted, reason, rows, _all_rows, _logs = _apply_test_persistence(row, state)
+
+    assert (persisted, reason) == (False, "")
+    assert rows[0]["visible_label"] == "Rinse mode"
+    assert rows[0]["representative_visible"] == "Normal"
+    assert rows[0]["semantic_card_role"] == "value"
+    assert rows[0]["semantic_card_title"] == "Rinse mode"
+    assert rows[0]["semantic_card_values"] == "Normal"
+
+
+def test_row_persistence_phase_clears_stale_representative_semantic_metadata_after_actual_focus_restore():
+    row = {
+        "step_index": 32,
+        "move_result": "moved",
+        "visible_label": "Mode Change",
+        "normalized_visible_label": "mode change",
+        "merged_announcement": "Mode Change",
+        "normalized_announcement": "mode change",
+        "focus_view_id": "ModeCapabilityCardView",
+        "focus_bounds": "30,538,1050,850",
+        "actual_focus_visible": "More options",
+        "actual_focus_speech": "More options",
+        "actual_focus_resource_id": "more",
+        "actual_focus_bounds": "936,118,1008,310",
+        "row_source": "representative",
+        "semantic_card_id": "semantic_card:modecapabilitycardview||30,538,1050,850||mode",
+        "semantic_card_role": "root",
+        "semantic_card_title": "Mode",
+        "semantic_card_values": "",
+        "semantic_card_actions": "Change",
+    }
+    state = _semantic_persistence_state(row, consumed=False)
+
+    persisted, reason, rows, _all_rows, _logs = _apply_test_persistence(row, state)
+
+    assert (persisted, reason) == (False, "")
+    assert rows[0]["visible_label"] == "More options"
+    assert rows[0].get("representative_visible") == "Mode Change"
+    assert not rows[0].get("semantic_card_id")
+
+
+def test_row_persistence_phase_suppresses_consumed_semantic_title_repeat():
+    row = _semantic_persistence_row("title", visible="Rinse mode")
+    state = _semantic_persistence_state(row, consumed=True)
+
+    persisted, reason, rows, all_rows, logs = _apply_test_persistence(row, state)
+
+    assert (persisted, reason) == (True, "consumed_semantic_card_title_action")
+    assert rows == []
+    assert all_rows == []
+    assert row["row_persist_suppressed"] is True
+    assert any("[STEP][semantic_persistence_suppressed]" in message for message in logs)
+
+
+def test_row_persistence_phase_matches_semantic_consumed_across_member_bounds():
+    title_row = _semantic_persistence_row("title", visible="Rinse mode")
+    title_row["semantic_card_id"] = "semantic_card:rinsemodecard||84,898,936,967||rinse mode"
+    value_row = _semantic_persistence_row("value", visible="Normal")
+    value_row["semantic_card_id"] = "semantic_card:rinsemodecard||84,1012,348,1120||rinse mode"
+    state = _semantic_persistence_state(value_row, consumed=True)
+
+    persisted, reason, rows, all_rows, _logs = _apply_test_persistence(title_row, state)
+
+    assert (persisted, reason) == (True, "consumed_semantic_card_title_action")
+    assert rows == []
+    assert all_rows == []
+
+
+def test_row_persistence_phase_suppresses_consumed_semantic_action_repeat():
+    row = _semantic_persistence_row("action", visible="Change", values="")
+    state = _semantic_persistence_state(row, consumed=True)
+
+    persisted, reason, rows, all_rows, _logs = _apply_test_persistence(row, state)
+
+    assert (persisted, reason) == (True, "consumed_semantic_card_title_action")
+    assert rows == []
+    assert all_rows == []
+
+
+def test_row_persistence_phase_keeps_consumed_semantic_value_row():
+    row = _semantic_persistence_row("value", visible="Normal")
+    state = _semantic_persistence_state(row, consumed=True)
+
+    persisted, reason, rows, _all_rows, _logs = _apply_test_persistence(row, state)
+
+    assert (persisted, reason) == (False, "")
+    assert rows[0]["visible_label"] == "Normal"
+
+
+def test_row_persistence_phase_keeps_consumed_semantic_toggle_row():
+    row = _semantic_persistence_row("toggle", visible="On", values="On", actions="")
+    state = _semantic_persistence_state(row, consumed=True)
+
+    persisted, reason, rows, _all_rows, _logs = _apply_test_persistence(row, state)
+
+    assert (persisted, reason) == (False, "")
+    assert rows[0]["visible_label"] == "On"
+
+
+def test_row_persistence_phase_keeps_consumed_semantic_root_with_values():
+    row = _semantic_persistence_row("root", visible="Status Stopped Start", values="Stopped", actions="Start")
+    state = _semantic_persistence_state(row, consumed=True)
+
+    persisted, reason, rows, _all_rows, _logs = _apply_test_persistence(row, state)
+
+    assert (persisted, reason) == (False, "")
+    assert rows[0]["visible_label"] == "Status Stopped Start"
+
+
+def test_row_persistence_phase_keeps_local_tab_lifecycle_row_even_if_semantic_consumed():
+    row = _semantic_persistence_row("title", visible="Controls")
+    row["row_lifecycle_kind"] = "local_tab"
+    state = _semantic_persistence_state(row, consumed=True)
+
+    persisted, reason, rows, _all_rows, _logs = _apply_test_persistence(row, state)
+
+    assert (persisted, reason) == (False, "")
+    assert rows[0]["visible_label"] == "Controls"
+
+
+def test_row_persistence_phase_keeps_empty_visible_and_local_tab_miss_rows():
+    empty_row = _semantic_persistence_row("title", visible="")
+    empty_row["mismatch_type"] = "EMPTY_VISIBLE"
+    empty_state = _semantic_persistence_state(empty_row, consumed=True)
+    persisted, reason, rows, _all_rows, _logs = _apply_test_persistence(empty_row, empty_state)
+
+    assert (persisted, reason) == (False, "")
+    assert rows
+
+    miss_row = _semantic_persistence_row("title", visible="Routines")
+    miss_row["failure_reason"] = "LOCAL_TAB_MISS"
+    miss_state = _semantic_persistence_state(miss_row, consumed=True)
+    persisted, reason, rows, _all_rows, _logs = _apply_test_persistence(miss_row, miss_state)
+
+    assert (persisted, reason) == (False, "")
+    assert rows[0]["failure_reason"] == "LOCAL_TAB_MISS"
 
 
 def test_row_persistence_phase_impl_saves_on_stop(monkeypatch):

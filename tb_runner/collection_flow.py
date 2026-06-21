@@ -319,6 +319,7 @@ class MainLoopState:
     visited_logical_signatures: set[str]
     consumed_cluster_logical_signatures: set[str]
     consumed_cluster_signatures: set[str]
+    consumed_semantic_card_signatures: set[str]
     current_local_tab_signature: str
     current_local_tab_active_rid: str
     local_tab_candidates_by_signature: dict[str, list[dict[str, Any]]]
@@ -9099,7 +9100,7 @@ def _semantic_card_is_toggle_node(node: dict[str, Any]) -> bool:
     rid, cls, _ = _semantic_card_node_identity(node)
     return bool(
         node.get("checkable")
-        or node.get("checked") is not None
+        or bool(node.get("checked"))
         or "switch" in rid
         or "toggle" in rid
         or "switch" in cls
@@ -9115,6 +9116,17 @@ def _semantic_card_is_action_node(node: dict[str, Any]) -> bool:
         or node.get("effectiveClickable")
         or "button" in rid
         or "button" in cls
+    )
+
+
+def _semantic_card_is_explicit_action_node(node: dict[str, Any]) -> bool:
+    rid, cls, _ = _semantic_card_node_identity(node)
+    return bool(
+        "button" in rid
+        or "button" in cls
+        or "action" in rid
+        or "contentsicon" in rid
+        or "startbtn" in rid
     )
 
 
@@ -9277,6 +9289,300 @@ def _apply_semantic_card_metadata(candidate: dict[str, Any], model: dict[str, An
     candidate["semantic_card_is_title_only"] = bool(node_role == "title" and not values and not actions)
 
 
+def _semantic_card_field_text(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        if value != value:
+            return ""
+    except Exception:
+        pass
+    return str(value or "").strip()
+
+
+def _has_semantic_card_metadata(value: dict[str, Any]) -> bool:
+    return bool(_semantic_card_field_text(value.get("semantic_card_id", "")))
+
+
+def _copy_semantic_card_metadata(target: dict[str, Any], source: dict[str, Any]) -> None:
+    for key in SEMANTIC_CARD_METADATA_KEYS:
+        if key in source:
+            target[key] = source.get(key)
+
+
+def _clear_semantic_card_metadata(target: dict[str, Any]) -> None:
+    for key in SEMANTIC_CARD_METADATA_KEYS:
+        target.pop(key, None)
+
+
+def _semantic_card_bounds_contains(parent: Any, child: Any) -> bool:
+    parent_bounds = parse_bounds_str(str(parent or "").strip())
+    child_bounds = parse_bounds_str(str(child or "").strip())
+    if parent_bounds is None or child_bounds is None:
+        return False
+    pl, pt, pr, pb = parent_bounds
+    cl, ct, cr, cb = child_bounds
+    return bool(pl <= cl and pt <= ct and pr >= cr and pb >= cb)
+
+
+def _iter_semantic_card_dump_nodes(value: Any) -> list[dict[str, Any]]:
+    nodes = value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            nodes = json.loads(text)
+        except Exception:
+            return []
+    if isinstance(nodes, dict):
+        nodes = [nodes]
+    if not isinstance(nodes, list):
+        return []
+    return [node for node in _iter_visible_descendant_nodes(nodes) if isinstance(node, dict)]
+
+
+def _load_semantic_card_dump_roots(value: Any) -> list[dict[str, Any]]:
+    nodes = value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            nodes = json.loads(text)
+        except Exception:
+            return []
+    if isinstance(nodes, dict):
+        nodes = [nodes]
+    if not isinstance(nodes, list):
+        return []
+    return [node for node in nodes if isinstance(node, dict)]
+
+
+def _apply_direct_semantic_card_metadata(row: dict[str, Any], node: dict[str, Any]) -> bool:
+    if not isinstance(node, dict):
+        return False
+    model = _build_semantic_card_model(node)
+    if model:
+        candidate = {"node": node}
+        _apply_semantic_card_metadata(candidate, model)
+        _copy_semantic_card_metadata(row, candidate)
+        return True
+
+    label = _semantic_card_readable_label(node)
+    bounds = str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip()
+    rid, cls, _ = _semantic_card_node_identity(node)
+    leaf_hint = bool(any(token in rid for token in ("_value", "value", "_title", "title", "_action", "button", "contentsicon")))
+    card_like = bool(("card" in rid or "card" in cls) and not leaf_hint)
+    toggle = _semantic_card_is_toggle_node(node)
+    if not (label and bounds and (card_like or toggle)):
+        return False
+
+    title = label
+    semantic_id = _build_semantic_card_id(node, title)
+    role = "toggle" if toggle else "root"
+    row["semantic_card_id"] = semantic_id
+    row["semantic_card_role"] = role
+    row["semantic_card_title"] = title
+    row["semantic_card_values"] = label if toggle else ""
+    row["semantic_card_actions"] = ""
+    row["semantic_card_bounds"] = bounds
+    row["semantic_card_member_count"] = 1
+    row["semantic_card_is_value_covered"] = bool(toggle)
+    row["semantic_card_is_action_only"] = False
+    row["semantic_card_is_title_only"] = False
+    return True
+
+
+def _apply_containing_semantic_card_metadata(row: dict[str, Any]) -> bool:
+    row_bounds = str(row.get("focus_bounds", "") or "").strip()
+    row_label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
+    if not row_bounds or not row_label:
+        return False
+
+    dump_roots = _load_semantic_card_dump_roots(row.get("dump_tree_nodes", []))
+    dump_nodes = _iter_semantic_card_dump_nodes(dump_roots)
+    if not dump_nodes:
+        return False
+    parent_by_node_id: dict[int, dict[str, Any]] = {}
+    for node, parent in _iter_tree_nodes_with_parent(dump_roots):
+        if isinstance(node, dict) and isinstance(parent, dict):
+            parent_by_node_id[id(node)] = parent
+
+    matching_nodes = [
+        node
+        for node in dump_nodes
+        if _semantic_card_readable_label(node) == row_label
+        and _semantic_card_bounds_contains(str(node.get("boundsInScreen", "") or node.get("bounds", "") or ""), row_bounds)
+    ]
+    if not matching_nodes:
+        matching_nodes = [
+            node
+            for node in dump_nodes
+            if _semantic_card_readable_label(node) == row_label
+            and str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip() == row_bounds
+        ]
+    for node in matching_nodes:
+        semantic_root = _select_semantic_card_root(node, parent_by_node_id)
+        if not isinstance(semantic_root, dict):
+            continue
+        model = _build_semantic_card_model(semantic_root)
+        if not model:
+            continue
+        candidate = {"node": node}
+        _apply_semantic_card_metadata(candidate, model)
+        _copy_semantic_card_metadata(row, candidate)
+        return True
+    return False
+
+
+def _semantic_card_family_from_title_resource(resource_id: str) -> str:
+    value = str(resource_id or "").strip()
+    if not value:
+        return ""
+    value = re.sub(r"(?i)(_header_title|_title|_header)$", "", value)
+    if value == resource_id:
+        return ""
+    return value
+
+
+def _apply_representative_semantic_card_metadata(row: dict[str, Any]) -> bool:
+    representative = _semantic_card_field_text(row.get("representative_visible", ""))
+    title = _semantic_card_field_text(row.get("visible_label", ""))
+    resource_id = _semantic_card_field_text(row.get("focus_view_id", ""))
+    if not representative or not title or representative == title:
+        return False
+    family = _semantic_card_family_from_title_resource(resource_id)
+    if not family:
+        return False
+    focus_node = row.get("focus_node")
+    if isinstance(focus_node, str):
+        try:
+            focus_node = json.loads(focus_node) if focus_node.strip() else {}
+        except Exception:
+            focus_node = {}
+    focus_node = focus_node if isinstance(focus_node, dict) else {}
+    role = "action" if _semantic_card_is_explicit_action_node(focus_node) else "value"
+    normalized_family = re.sub(r"[^a-z0-9_]+", "_", family.lower()).strip("_")
+    semantic_bounds = _semantic_card_field_text(row.get("semantic_card_bounds", "")) or _semantic_card_field_text(row.get("focus_bounds", ""))
+    row["semantic_card_id"] = "semantic_card:" + "||".join(
+        [
+            normalized_family or "card",
+            semantic_bounds or "none",
+            _normalize_logical_text(title) or "none",
+        ]
+    )
+    row["semantic_card_role"] = role
+    row["semantic_card_title"] = title
+    row["semantic_card_values"] = representative if role == "value" else ""
+    row["semantic_card_actions"] = representative if role == "action" else ""
+    row["semantic_card_bounds"] = semantic_bounds
+    row["semantic_card_member_count"] = 2
+    row["semantic_card_is_value_covered"] = role == "value"
+    row["semantic_card_is_action_only"] = role == "action"
+    row["semantic_card_is_title_only"] = False
+    return True
+
+
+def _apply_title_semantic_card_metadata(row: dict[str, Any]) -> bool:
+    title = _semantic_card_field_text(row.get("visible_label", "")) or _semantic_card_field_text(row.get("merged_announcement", ""))
+    resource_id = _semantic_card_field_text(row.get("focus_view_id", ""))
+    family = _semantic_card_family_from_title_resource(resource_id)
+    if not title or not family:
+        return False
+    semantic_bounds = _semantic_card_field_text(row.get("focus_bounds", ""))
+    normalized_family = re.sub(r"[^a-z0-9_]+", "_", family.lower()).strip("_")
+    row["semantic_card_id"] = "semantic_card:" + "||".join(
+        [
+            normalized_family or "card",
+            semantic_bounds or "none",
+            _normalize_logical_text(title) or "none",
+        ]
+    )
+    row["semantic_card_role"] = "title"
+    row["semantic_card_title"] = title
+    row["semantic_card_values"] = ""
+    row["semantic_card_actions"] = ""
+    row["semantic_card_bounds"] = semantic_bounds
+    row["semantic_card_member_count"] = 1
+    row["semantic_card_is_value_covered"] = False
+    row["semantic_card_is_action_only"] = False
+    row["semantic_card_is_title_only"] = True
+    return True
+
+
+def _enrich_row_semantic_card_metadata(row: dict[str, Any]) -> dict[str, Any]:
+    focus_node = row.get("focus_node")
+    if isinstance(focus_node, str):
+        try:
+            focus_node = json.loads(focus_node) if focus_node.strip() else {}
+        except Exception:
+            focus_node = {}
+    if _apply_representative_semantic_card_metadata(row):
+        return row
+    if _has_semantic_card_metadata(row):
+        return row
+    if (
+        not bool(row.get("_semantic_skip_direct_focus_node", False))
+        and isinstance(focus_node, dict)
+        and _apply_direct_semantic_card_metadata(row, focus_node)
+    ):
+        return row
+    if _apply_containing_semantic_card_metadata(row):
+        return row
+    _apply_title_semantic_card_metadata(row)
+    return row
+
+
+def _semantic_card_scope_signature(state: Any) -> str:
+    local_tab_signature = str(getattr(state, "current_local_tab_signature", "") or "").strip()
+    active_rid = str(getattr(state, "current_local_tab_active_rid", "") or "").strip()
+    return "||".join([local_tab_signature or "content", active_rid or "active"])
+
+
+def _semantic_card_consumed_identity(item: dict[str, Any]) -> str:
+    semantic_id = str(item.get("semantic_card_id", "") or "").strip()
+    title = _normalize_logical_text(str(item.get("semantic_card_title", "") or "").strip())
+    if semantic_id:
+        parts = semantic_id.split("||")
+        if len(parts) >= 3:
+            family = parts[0]
+            return "||".join([family, title or parts[-1] or "none"])
+        if title:
+            return "||".join([semantic_id, title])
+        return semantic_id
+    return title
+
+
+def _semantic_card_consumed_signature(item: dict[str, Any], state: Any) -> str:
+    semantic_identity = _semantic_card_consumed_identity(item)
+    if not semantic_identity:
+        return ""
+    return "semantic_consumed:" + "||".join([_semantic_card_scope_signature(state), semantic_identity])
+
+
+def _semantic_card_role(item: dict[str, Any]) -> str:
+    return str(item.get("semantic_card_role", "") or "").strip().lower()
+
+
+def _semantic_card_can_consume(item: dict[str, Any]) -> bool:
+    role = _semantic_card_role(item)
+    return bool(
+        role in {"value", "toggle"}
+        or (
+            role == "root"
+            and (
+                str(item.get("semantic_card_values", "") or "").strip()
+                or str(item.get("semantic_card_actions", "") or "").strip()
+            )
+        )
+    )
+
+
+def _semantic_card_is_repeat_suppressible(item: dict[str, Any]) -> bool:
+    return _semantic_card_role(item) in {"title", "action"}
+
+
 def _select_better_cluster_representative(
     *,
     selected_candidate: dict[str, Any],
@@ -9335,6 +9641,7 @@ def _record_recent_representative_signature(state: MainLoopState, row: dict[str,
     cluster_logical_signature = str(row.get("focus_cluster_logical_signature", "") or "").strip()
     consumed_clusters = set(getattr(state, "consumed_cluster_signatures", set()) or set())
     consumed_cluster_logical = set(getattr(state, "consumed_cluster_logical_signatures", set()) or set())
+    consumed_semantic_cards = set(getattr(state, "consumed_semantic_card_signatures", set()) or set())
     row["logical_signature"] = logical_signature
     row["logical_signature_already_visited"] = bool(
         logical_signature and logical_signature != "none||none||none" and logical_signature in visited_logical_signatures
@@ -9359,6 +9666,14 @@ def _record_recent_representative_signature(state: MainLoopState, row: dict[str,
     if cluster_logical_signature:
         consumed_cluster_logical.add(cluster_logical_signature)
         state.consumed_cluster_logical_signatures = consumed_cluster_logical
+    semantic_consumed_signature = _semantic_card_consumed_signature(row, state)
+    if semantic_consumed_signature and _semantic_card_can_consume(row):
+        consumed_semantic_cards.add(semantic_consumed_signature)
+        state.consumed_semantic_card_signatures = consumed_semantic_cards
+        row["semantic_card_consumed"] = True
+        log(f"[STEP][semantic_card_consumed] card='{_truncate_debug_text(semantic_consumed_signature, 120)}'")
+    elif semantic_consumed_signature:
+        row["semantic_card_consumed"] = semantic_consumed_signature in consumed_semantic_cards
     _record_active_container_group_progress(state, signature)
 
 
@@ -9515,6 +9830,28 @@ def _row_is_low_value_leaf(row: dict[str, Any]) -> bool:
 def _should_suppress_row_persistence(*, row: dict[str, Any], state: MainLoopState, stop: bool) -> tuple[bool, str]:
     if stop or bool(row.get("local_tab_transition", False)) or _is_current_focus_on_local_tab_strip(state, row):
         return False, ""
+    lifecycle_kind = str(row.get("row_lifecycle_kind", "") or "").strip().lower()
+    status = str(row.get("status", "") or "").strip().upper()
+    mismatch_type = str(row.get("mismatch_type", "") or row.get("speech_match_result", "") or "").strip().upper()
+    failure_reason = str(row.get("failure_reason", "") or "").strip().upper()
+    if (
+        lifecycle_kind == "local_tab"
+        or status == "ANCHOR"
+        or "EMPTY_VISIBLE" in mismatch_type
+        or "EMPTY_VISIBLE" in failure_reason
+        or "LOCAL_TAB_MISS" in mismatch_type
+        or "LOCAL_TAB_MISS" in failure_reason
+        or bool(row.get("local_tab_content_traversal_fail", False))
+    ):
+        return False, ""
+    semantic_consumed_signature = _semantic_card_consumed_signature(row, state)
+    consumed_semantic_cards = set(getattr(state, "consumed_semantic_card_signatures", set()) or set())
+    if (
+        semantic_consumed_signature
+        and semantic_consumed_signature in consumed_semantic_cards
+        and _semantic_card_is_repeat_suppressible(row)
+    ):
+        return True, "consumed_semantic_card_title_action"
     has_focus_node = isinstance(row.get("focus_node"), dict)
     low_value_leaf = bool(row.get("low_value_leaf_row", False) or _row_is_low_value_leaf(row))
     logical_already_visited = bool(row.get("logical_signature_already_visited", False))
@@ -9689,6 +10026,7 @@ def _filter_content_candidates_for_phase(
     consumed_signatures = set(getattr(state, "consumed_representative_signatures", set()) or set())
     consumed_clusters = set(getattr(state, "consumed_cluster_signatures", set()) or set())
     consumed_cluster_logical = set(getattr(state, "consumed_cluster_logical_signatures", set()) or set())
+    consumed_semantic_cards = set(getattr(state, "consumed_semantic_card_signatures", set()) or set())
     visited_logical_signatures = set(getattr(state, "visited_logical_signatures", set()) or set())
     consumed_cta_rids = {
         str(rid or "").strip().lower()
@@ -9733,6 +10071,20 @@ def _filter_content_candidates_for_phase(
         for candidate in selection_candidates
         if _candidate_object_signature(candidate) not in consumed_signatures
         and str(candidate.get("rid", "") or "").strip().lower() not in consumed_cta_rids
+    ]
+    semantic_consumed_rejected = [
+        candidate
+        for candidate in selection_candidates
+        if _semantic_card_is_repeat_suppressible(candidate)
+        and _semantic_card_consumed_signature(candidate, state) in consumed_semantic_cards
+    ]
+    selection_candidates = [
+        candidate
+        for candidate in selection_candidates
+        if not (
+            _semantic_card_is_repeat_suppressible(candidate)
+            and _semantic_card_consumed_signature(candidate, state) in consumed_semantic_cards
+        )
     ]
     top_priority_candidates = [candidate for candidate in selection_candidates if bool(candidate.get("top_priority_container", False))]
     completed_groups = set(getattr(state, "completed_container_groups", set()) or set())
@@ -9810,6 +10162,7 @@ def _filter_content_candidates_for_phase(
         "revisit_rejected": revisit_rejected,
         "cluster_consumed_rejected": cluster_consumed_rejected,
         "consumed_rejected": consumed_rejected,
+        "semantic_consumed_rejected": semantic_consumed_rejected,
         "completed_container_rejected": completed_container_candidates,
         "selection_candidates": selection_candidates,
         "representative_candidates": representative_candidates,
@@ -10496,6 +10849,13 @@ def _collect_step_candidate_priority_groups(
         if synthetic_root_candidate is not None:
             ranking_candidates.append(synthetic_root_candidate)
         best_candidate = max(ranking_candidates, key=_cluster_candidate_sort_key)
+        if not _has_semantic_card_metadata(best_candidate):
+            semantic_source = next(
+                (candidate for candidate in ranking_candidates if _has_semantic_card_metadata(candidate)),
+                None,
+            )
+            if isinstance(semantic_source, dict):
+                _copy_semantic_card_metadata(best_candidate, semantic_source)
         cluster_label = _cluster_display_name(best_candidate)
         selected_label = str(best_candidate.get("label", "") or best_candidate.get("rid", "") or "").strip()
         cluster_representatives_meta.append((cluster_label, selected_label, _cluster_candidate_reason(best_candidate)))
@@ -11617,6 +11977,7 @@ def _apply_row_quality_phase_impl(
     log_fn,
     detect_mismatch_fn,
 ) -> tuple[list[str], list[str]]:
+    _enrich_row_semantic_card_metadata(row)
     _record_recent_representative_signature(state, row)
     state.last_fingerprint, state.fingerprint_repeat_count = _annotate_row_quality(
         row,
@@ -11729,16 +12090,37 @@ def _apply_row_persistence_phase_impl(
         row["low_value_leaf_row"] = _row_is_low_value_leaf(row)
     else:
         row["low_value_leaf_row"] = bool(row.get("low_value_leaf_row", False))
-    suppress_row, suppress_reason = _should_suppress_row_persistence(row=row, state=state, stop=stop)
+    persisted_row = _build_persisted_row_semantics(row)
+    if str(persisted_row.get("representative_row_source", "") or "").strip() == "representative":
+        _clear_semantic_card_metadata(persisted_row)
+        persisted_row["_semantic_skip_direct_focus_node"] = True
+    _enrich_row_semantic_card_metadata(persisted_row)
+    persisted_row.pop("_semantic_skip_direct_focus_node", None)
+    if "low_value_leaf_row" not in persisted_row:
+        persisted_row["low_value_leaf_row"] = _row_is_low_value_leaf(persisted_row)
+    else:
+        persisted_row["low_value_leaf_row"] = bool(persisted_row.get("low_value_leaf_row", False))
+    suppress_row, suppress_reason = _should_suppress_row_persistence(row=persisted_row, state=state, stop=stop)
     if suppress_row:
         row["row_persist_suppressed"] = True
         row["row_persist_suppressed_reason"] = suppress_reason
-        log_fn(
-            f"[STEP][row_filter] label='{_truncate_debug_text(str(row.get('visible_label', '') or row.get('focus_view_id', '') or ''), 96)}' "
-            f"reason='{suppress_reason}'"
-        )
+        persisted_row["row_persist_suppressed"] = True
+        persisted_row["row_persist_suppressed_reason"] = suppress_reason
+        visible = str(persisted_row.get("visible_label", "") or persisted_row.get("focus_view_id", "") or "").strip()
+        if suppress_reason == "consumed_semantic_card_title_action":
+            log_fn(
+                f"[STEP][semantic_persistence_suppressed] "
+                f"role='{_truncate_debug_text(str(persisted_row.get('semantic_card_role', '') or ''), 32)}' "
+                f"semantic_card_id='{_truncate_debug_text(str(persisted_row.get('semantic_card_id', '') or ''), 120)}' "
+                f"visible='{_truncate_debug_text(visible, 96)}' "
+                "reason='consumed_semantic_card_title_action'"
+            )
+        else:
+            log_fn(
+                f"[STEP][row_filter] label='{_truncate_debug_text(visible, 96)}' "
+                f"reason='{suppress_reason}'"
+            )
     else:
-        persisted_row = _build_persisted_row_semantics(row)
         rows.append(persisted_row)
         all_rows.append(persisted_row)
         if scenario_perf is not None:
@@ -13107,6 +13489,7 @@ def _main_loop_phase(
         persistence_stop = bool(
             stop or (row.get("stall_escape_attempted") is True and row.get("stall_escape_result") == "success")
         )
+        _enrich_row_semantic_card_metadata(row)
         _capture_audit_v4_xml_for_row(
             client,
             dev,
@@ -13312,6 +13695,7 @@ def _build_main_loop_state_from_anchor(
         visited_logical_signatures=set([logical_signature] if logical_signature != "none||none||none" else []),
         consumed_cluster_logical_signatures=set(),
         consumed_cluster_signatures=set([cluster_signature]) if cluster_signature else set(),
+        consumed_semantic_card_signatures=set(),
         current_local_tab_signature="",
         current_local_tab_active_rid="",
         local_tab_candidates_by_signature={},
