@@ -664,6 +664,46 @@ def test_make_result_df_marks_representative_context_and_keeps_representative_vi
     assert result.iloc[0]["mismatch_type"] == "REPRESENTATIVE_CONTEXT"
 
 
+def test_make_result_df_preserves_semantic_card_metadata_without_changing_result():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "generic_card",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "Mode",
+                "merged_announcement": "Mode",
+                "move_result": "moved",
+                "focus_view_id": "GenericCapabilityCardView_header_title",
+                "focus_bounds": "84,586,936,655",
+                "semantic_card_id": "semantic_card:generic||30,538,1050,850||mode",
+                "semantic_card_role": "title",
+                "semantic_card_title": "Mode",
+                "semantic_card_values": "Auto",
+                "semantic_card_actions": "Change",
+                "semantic_card_bounds": "30,538,1050,850",
+                "semantic_card_member_count": 4,
+                "semantic_card_is_value_covered": False,
+                "semantic_card_is_action_only": False,
+                "semantic_card_is_title_only": False,
+            }
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    row = result.iloc[0]
+    assert row["semantic_card_id"] == "semantic_card:generic||30,538,1050,850||mode"
+    assert row["semantic_card_role"] == "title"
+    assert row["semantic_card_title"] == "Mode"
+    assert row["semantic_card_values"] == "Auto"
+    assert row["semantic_card_actions"] == "Change"
+    assert row["semantic_card_member_count"] == 4
+    assert row["mismatch_type"] == "EXACT_MATCH"
+    assert row["final_result"] == "PASS"
+
+
 def test_make_result_df_uses_representative_when_actual_focus_is_empty():
     filtered_df = pd.DataFrame(
         [

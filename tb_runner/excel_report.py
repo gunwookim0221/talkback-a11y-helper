@@ -94,6 +94,16 @@ RESULT_SHEET_COLUMNS = [
     "review_note",
     "focus_view_id",
     "focus_confidence",
+    "semantic_card_id",
+    "semantic_card_role",
+    "semantic_card_title",
+    "semantic_card_values",
+    "semantic_card_actions",
+    "semantic_card_bounds",
+    "semantic_card_member_count",
+    "semantic_card_is_value_covered",
+    "semantic_card_is_action_only",
+    "semantic_card_is_title_only",
     "result_crop_thumbnail",
 ]
 
@@ -1119,6 +1129,16 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     _pick_col("_representative_row_source", ["representative_row_source"], default="")
     _pick_col("_representative_resource_id", ["representative_resource_id"], default="")
     _pick_col("_focus_node", ["focus_node"], default="")
+    _pick_col("semantic_card_id", ["semantic_card_id"], default="")
+    _pick_col("semantic_card_role", ["semantic_card_role"], default="")
+    _pick_col("semantic_card_title", ["semantic_card_title"], default="")
+    _pick_col("semantic_card_values", ["semantic_card_values"], default="")
+    _pick_col("semantic_card_actions", ["semantic_card_actions"], default="")
+    _pick_col("semantic_card_bounds", ["semantic_card_bounds"], default="")
+    _pick_col("semantic_card_member_count", ["semantic_card_member_count"], default=0)
+    _pick_col("semantic_card_is_value_covered", ["semantic_card_is_value_covered"], default=False)
+    _pick_col("semantic_card_is_action_only", ["semantic_card_is_action_only"], default=False)
+    _pick_col("semantic_card_is_title_only", ["semantic_card_is_title_only"], default=False)
 
     for text_col in (
         "visible_label",
@@ -1127,8 +1147,21 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
         "focus_view_id",
         "_representative_row_source",
         "_representative_resource_id",
+        "semantic_card_id",
+        "semantic_card_role",
+        "semantic_card_title",
+        "semantic_card_values",
+        "semantic_card_actions",
+        "semantic_card_bounds",
     ):
         result[text_col] = result[text_col].fillna("")
+    result["semantic_card_member_count"] = result["semantic_card_member_count"].apply(_to_int_or_zero)
+    for bool_col in (
+        "semantic_card_is_value_covered",
+        "semantic_card_is_action_only",
+        "semantic_card_is_title_only",
+    ):
+        result[bool_col] = result[bool_col].apply(_to_boolish)
 
     def _focus_node_label(value: object) -> str:
         node = value

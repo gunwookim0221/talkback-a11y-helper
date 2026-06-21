@@ -4,9 +4,16 @@ from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
 
-sys.modules.setdefault("pandas", SimpleNamespace(DataFrame=object, ExcelWriter=object))
-sys.modules.setdefault("openpyxl", SimpleNamespace(load_workbook=lambda *_args, **_kwargs: None))
-sys.modules.setdefault("openpyxl.drawing.image", SimpleNamespace(Image=object))
+try:
+    import pandas  # noqa: F401
+except ImportError:
+    sys.modules.setdefault("pandas", SimpleNamespace(DataFrame=object, ExcelWriter=object))
+
+try:
+    import openpyxl  # noqa: F401
+except ImportError:
+    sys.modules.setdefault("openpyxl", SimpleNamespace(load_workbook=lambda *_args, **_kwargs: None))
+    sys.modules.setdefault("openpyxl.drawing.image", SimpleNamespace(Image=object))
 
 from tb_runner import collection_flow
 from tb_runner.scenario_config import TAB_CONFIGS
@@ -11091,6 +11098,119 @@ def test_collect_step_candidate_priority_groups_non_food_keeps_scan_excluded():
         "MY",
     ]
     assert any("Scan" in value for value in meta["rejected_bottom_strip_candidates"])
+
+
+def _semantic_card_fixture(*, left: int = 30, top: int = 300, title: str = "Mode", value: str = "Auto", action: str = "Change"):
+    return {
+        "visibleToUser": True,
+        "boundsInScreen": "0,0,1080,1920",
+        "className": "android.widget.FrameLayout",
+        "children": [
+            {
+                "visibleToUser": True,
+                "boundsInScreen": f"{left},{top},{left + 1020},{top + 320}",
+                "viewIdResourceName": "GenericCapabilityCardView",
+                "className": "android.view.ViewGroup",
+                "clickable": True,
+                "hasClickableDescendant": True,
+                "children": [
+                    {
+                        "visibleToUser": True,
+                        "boundsInScreen": f"{left + 54},{top + 48},{left + 900},{top + 110}",
+                        "viewIdResourceName": "GenericCapabilityCardView_header_title",
+                        "className": "android.widget.TextView",
+                        "text": title,
+                    },
+                    {
+                        "visibleToUser": True,
+                        "boundsInScreen": f"{left + 54},{top + 135},{left + 780},{top + 210}",
+                        "viewIdResourceName": "GenericCapabilityCardView_value",
+                        "className": "android.widget.TextView",
+                        "text": value,
+                    },
+                    {
+                        "visibleToUser": True,
+                        "boundsInScreen": f"{left + 780},{top + 120},{left + 980},{top + 230}",
+                        "viewIdResourceName": "GenericCapabilityCardView_action_button",
+                        "className": "android.widget.Button",
+                        "text": action,
+                        "clickable": True,
+                        "focusable": True,
+                    },
+                ],
+            }
+        ],
+    }
+
+
+def test_collect_step_candidate_priority_groups_adds_semantic_card_metadata_for_generic_card():
+    content, _bottom, _meta = collection_flow._collect_step_candidate_priority_groups(
+        [_semantic_card_fixture(title="Mode", value="Auto", action="Change")],
+        scenario_id="generic_device_plugin",
+    )
+
+    card_candidates = [
+        candidate
+        for content_candidate in content
+        for candidate in content_candidate.get("cluster_members", [content_candidate])
+        if candidate.get("semantic_card_id")
+    ]
+    semantic_ids = {candidate["semantic_card_id"] for candidate in card_candidates}
+    roles = {candidate["semantic_card_role"] for candidate in card_candidates}
+
+    assert len(semantic_ids) == 1
+    assert {"root", "title", "value", "action"}.issubset(roles)
+    for candidate in card_candidates:
+        assert candidate["semantic_card_title"] == "Mode"
+        assert candidate["semantic_card_values"] == "Auto"
+        assert candidate["semantic_card_actions"] == "Change"
+        assert candidate["semantic_card_member_count"] >= 4
+
+
+def test_collect_step_candidate_priority_groups_marks_toggle_state_as_semantic_value():
+    fixture = _semantic_card_fixture(title="Power", value="On", action="")
+    toggle = fixture["children"][0]["children"][2]
+    toggle["text"] = "On"
+    toggle["viewIdResourceName"] = "GenericCapabilityCardView_toggle_button"
+    toggle["className"] = "android.widget.Switch"
+    toggle["checkable"] = True
+    toggle["checked"] = True
+
+    content, _bottom, _meta = collection_flow._collect_step_candidate_priority_groups(
+        [fixture],
+        scenario_id="generic_device_plugin",
+    )
+
+    card_candidates = [
+        candidate
+        for content_candidate in content
+        for candidate in content_candidate.get("cluster_members", [content_candidate])
+        if candidate.get("semantic_card_id")
+    ]
+    toggle_candidates = [candidate for candidate in card_candidates if candidate["semantic_card_role"] == "toggle"]
+
+    assert toggle_candidates
+    assert "On" in {candidate["semantic_card_values"] for candidate in card_candidates}
+
+
+def test_collect_step_candidate_priority_groups_keeps_unrelated_cards_semantically_separate():
+    first = _semantic_card_fixture(left=30, top=300, title="Mode", value="Auto", action="Change")
+    second_card = _semantic_card_fixture(left=30, top=700, title="Status", value="Ready", action="Start")["children"][0]
+    first["children"].append(second_card)
+
+    content, _bottom, _meta = collection_flow._collect_step_candidate_priority_groups(
+        [first],
+        scenario_id="generic_device_plugin",
+    )
+
+    semantic_ids = {
+        candidate["semantic_card_id"]
+        for content_candidate in content
+        for candidate in content_candidate.get("cluster_members", [content_candidate])
+        if candidate.get("semantic_card_id")
+    }
+
+    assert len(semantic_ids) == 2
 
 
 def test_maybe_select_next_local_tab_food_scan_marks_recovery_pending():

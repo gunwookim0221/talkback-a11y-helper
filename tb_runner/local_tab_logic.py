@@ -3100,6 +3100,20 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
     )
     updated_row["focus_cluster_signature"] = str(selected_candidate.get("cluster_signature", "") or "").strip()
     updated_row["focus_cluster_logical_signature"] = _candidate_cluster_logical_signature(selected_candidate)
+    for key in (
+        "semantic_card_id",
+        "semantic_card_role",
+        "semantic_card_title",
+        "semantic_card_values",
+        "semantic_card_actions",
+        "semantic_card_bounds",
+        "semantic_card_member_count",
+        "semantic_card_is_value_covered",
+        "semantic_card_is_action_only",
+        "semantic_card_is_title_only",
+    ):
+        if key in selected_candidate:
+            updated_row[key] = selected_candidate.get(key)
     return updated_row
 
 def _maybe_select_next_local_tab(

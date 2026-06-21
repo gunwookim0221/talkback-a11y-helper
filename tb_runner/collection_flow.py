@@ -9060,6 +9060,223 @@ def _cluster_candidate_reason(candidate: dict[str, Any]) -> str:
     return "description_fallback"
 
 
+SEMANTIC_CARD_METADATA_KEYS = (
+    "semantic_card_id",
+    "semantic_card_role",
+    "semantic_card_title",
+    "semantic_card_values",
+    "semantic_card_actions",
+    "semantic_card_bounds",
+    "semantic_card_member_count",
+    "semantic_card_is_value_covered",
+    "semantic_card_is_action_only",
+    "semantic_card_is_title_only",
+)
+
+
+def _semantic_card_readable_label(node: dict[str, Any]) -> str:
+    return _normalize_cta_candidate_label(
+        str(node.get("text", "") or "").strip()
+        or str(node.get("contentDescription", "") or "").strip()
+        or str(node.get("talkbackLabel", "") or "").strip()
+        or str(node.get("label", "") or "").strip()
+        or str(node.get("mergedLabel", "") or "").strip()
+    )
+
+
+def _semantic_card_node_bounds(node: dict[str, Any]) -> tuple[int, int, int, int] | None:
+    return parse_bounds_str(str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip())
+
+
+def _semantic_card_node_identity(node: dict[str, Any]) -> tuple[str, str, str]:
+    rid = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip().lower()
+    cls = str(node.get("className", "") or node.get("class", "") or "").strip().lower()
+    bounds = str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip()
+    return rid, cls, bounds
+
+
+def _semantic_card_is_toggle_node(node: dict[str, Any]) -> bool:
+    rid, cls, _ = _semantic_card_node_identity(node)
+    return bool(
+        node.get("checkable")
+        or node.get("checked") is not None
+        or "switch" in rid
+        or "toggle" in rid
+        or "switch" in cls
+        or "toggle" in cls
+    )
+
+
+def _semantic_card_is_action_node(node: dict[str, Any]) -> bool:
+    rid, cls, _ = _semantic_card_node_identity(node)
+    return bool(
+        node.get("clickable")
+        or node.get("focusable")
+        or node.get("effectiveClickable")
+        or "button" in rid
+        or "button" in cls
+    )
+
+
+def _semantic_card_root_family(root_node: dict[str, Any]) -> str:
+    rid, cls, _ = _semantic_card_node_identity(root_node)
+    source = rid or cls or "card"
+    source = source.rsplit("/", 1)[-1].rsplit(".", 1)[-1]
+    source = re.sub(r"[^a-z0-9_]+", "_", source).strip("_")
+    return source or "card"
+
+
+def _semantic_card_is_root_like(root_node: dict[str, Any], members: list[dict[str, Any]]) -> bool:
+    rid, cls, _ = _semantic_card_node_identity(root_node)
+    children = root_node.get("children")
+    return bool(
+        len(members) >= 2
+        and (
+            "card" in rid
+            or "card" in cls
+            or "container" in rid
+            or "item" in rid
+            or "item" in cls
+            or "layout" in cls
+            or "frame" in cls
+            or root_node.get("hasClickableDescendant")
+            or root_node.get("hasFocusableDescendant")
+            or isinstance(children, list)
+        )
+    )
+
+
+def _select_semantic_card_root(node: dict[str, Any], parent_by_node_id: dict[int, dict[str, Any]]) -> dict[str, Any] | None:
+    cursor: dict[str, Any] | None = node
+    hops = 0
+    while isinstance(cursor, dict) and hops < 8:
+        children = cursor.get("children")
+        if isinstance(children, list) and children:
+            descendant_labels = [
+                _semantic_card_readable_label(descendant)
+                for descendant in _iter_visible_descendant_nodes(children)
+                if isinstance(descendant, dict)
+            ]
+            descendant_labels = [label for label in descendant_labels if label]
+            if _semantic_card_is_root_like(cursor, [{"label": label} for label in descendant_labels]):
+                return cursor
+        cursor = parent_by_node_id.get(id(cursor))
+        hops += 1
+    return None
+
+
+def _build_semantic_card_id(root_node: dict[str, Any], title: str) -> str:
+    bounds = str(root_node.get("boundsInScreen", "") or root_node.get("bounds", "") or "").strip()
+    normalized_title = _normalize_logical_text(title)
+    return "semantic_card:" + "||".join(
+        [
+            _semantic_card_root_family(root_node),
+            bounds or "none",
+            normalized_title or "none",
+        ]
+    )
+
+
+def _build_semantic_card_model(root_node: dict[str, Any]) -> dict[str, Any]:
+    root_bounds = _semantic_card_node_bounds(root_node)
+    children = root_node.get("children")
+    visible_descendants = _iter_visible_descendant_nodes(children if isinstance(children, list) else [])
+    readable_members: list[dict[str, Any]] = []
+    for node in visible_descendants:
+        label = _semantic_card_readable_label(node)
+        if not label:
+            continue
+        bounds = _semantic_card_node_bounds(node)
+        if root_bounds and bounds:
+            l, t, r, b = root_bounds
+            cl, ct, cr, cb = bounds
+            if not (l <= cl and t <= ct and r >= cr and b >= cb):
+                continue
+        readable_members.append(node)
+    if not _semantic_card_is_root_like(root_node, readable_members):
+        return {}
+
+    role_by_identity: dict[tuple[str, str, str], str] = {}
+    title = ""
+    values: list[str] = []
+    actions: list[str] = []
+    root_label = _extract_cta_node_label(root_node) or _node_label_blob(root_node)
+
+    title_candidates: list[tuple[int, int, int, dict[str, Any], str]] = []
+    for index, node in enumerate(readable_members):
+        label = _semantic_card_readable_label(node)
+        bounds = _semantic_card_node_bounds(node)
+        top = bounds[1] if bounds else 999999
+        word_count = len([token for token in re.split(r"\s+", label) if token])
+        actionable = _semantic_card_is_action_node(node)
+        toggle = _semantic_card_is_toggle_node(node)
+        rid, _, _ = _semantic_card_node_identity(node)
+        title_hint = bool("title" in rid or "header" in rid or "heading" in rid)
+        if not actionable and not toggle and (title_hint or word_count <= 4):
+            title_candidates.append((0 if title_hint else 1, top, index, node, label))
+    if title_candidates:
+        title_candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+        title = title_candidates[0][4]
+
+    for node in readable_members:
+        label = _semantic_card_readable_label(node)
+        identity = _semantic_card_node_identity(node)
+        if title and label == title and identity == _semantic_card_node_identity(title_candidates[0][3]):
+            role = "title"
+        elif _semantic_card_is_toggle_node(node):
+            role = "toggle"
+        elif _semantic_card_is_action_node(node):
+            role = "action"
+        else:
+            role = "value"
+        role_by_identity[identity] = role
+        if role in {"value", "toggle"} and label not in values:
+            values.append(label)
+        elif role == "action" and label not in actions:
+            actions.append(label)
+
+    if not title:
+        title = root_label or (readable_members and _semantic_card_readable_label(readable_members[0])) or ""
+    semantic_id = _build_semantic_card_id(root_node, title)
+    return {
+        "semantic_card_id": semantic_id,
+        "semantic_card_title": title,
+        "semantic_card_values": "|".join(values),
+        "semantic_card_actions": "|".join(actions),
+        "semantic_card_bounds": str(root_node.get("boundsInScreen", "") or root_node.get("bounds", "") or "").strip(),
+        "semantic_card_member_count": len(readable_members) + 1,
+        "semantic_card_root_identity": _semantic_card_node_identity(root_node),
+        "semantic_card_role_by_identity": role_by_identity,
+    }
+
+
+def _apply_semantic_card_metadata(candidate: dict[str, Any], model: dict[str, Any], *, role: str = "") -> None:
+    if not model:
+        for key in SEMANTIC_CARD_METADATA_KEYS:
+            candidate.setdefault(key, "" if key != "semantic_card_member_count" else 0)
+        return
+    node = candidate.get("node", {}) if isinstance(candidate.get("node", {}), dict) else {}
+    node_identity = _semantic_card_node_identity(node)
+    if role:
+        node_role = role
+    elif node_identity == model.get("semantic_card_root_identity"):
+        node_role = "root"
+    else:
+        node_role = model.get("semantic_card_role_by_identity", {}).get(node_identity, "unknown")
+    values = str(model.get("semantic_card_values", "") or "").strip()
+    actions = str(model.get("semantic_card_actions", "") or "").strip()
+    candidate["semantic_card_id"] = str(model.get("semantic_card_id", "") or "")
+    candidate["semantic_card_role"] = node_role
+    candidate["semantic_card_title"] = str(model.get("semantic_card_title", "") or "")
+    candidate["semantic_card_values"] = values
+    candidate["semantic_card_actions"] = actions
+    candidate["semantic_card_bounds"] = str(model.get("semantic_card_bounds", "") or "")
+    candidate["semantic_card_member_count"] = int(model.get("semantic_card_member_count", 0) or 0)
+    candidate["semantic_card_is_value_covered"] = bool(values and node_role in {"root", "value", "toggle"})
+    candidate["semantic_card_is_action_only"] = bool(node_role in {"action", "toggle"} and not values)
+    candidate["semantic_card_is_title_only"] = bool(node_role == "title" and not values and not actions)
+
+
 def _select_better_cluster_representative(
     *,
     selected_candidate: dict[str, Any],
@@ -10214,6 +10431,11 @@ def _collect_step_candidate_priority_groups(
             "top_priority_container": bool(top_priority_container),
         }
         candidate["cluster_role"] = _cluster_candidate_role(candidate)
+        semantic_root = _select_semantic_card_root(node, parent_by_node_id)
+        if isinstance(semantic_root, dict):
+            _apply_semantic_card_metadata(candidate, _build_semantic_card_model(semantic_root))
+        else:
+            _apply_semantic_card_metadata(candidate, {})
         if bool(candidate.get("section_header_like", False)):
             section_header_candidates.append(label)
         content_candidates.append(candidate)
@@ -10230,6 +10452,10 @@ def _collect_step_candidate_priority_groups(
         grouped_candidates.setdefault(cluster_signature, []).append(candidate)
     for cluster_signature, cluster_candidates in grouped_candidates.items():
         root_node = cluster_candidates[0].get("cluster_root_node", {})
+        semantic_model = _build_semantic_card_model(root_node) if isinstance(root_node, dict) else {}
+        for cluster_candidate in cluster_candidates:
+            if not str(cluster_candidate.get("semantic_card_id", "") or "").strip():
+                _apply_semantic_card_metadata(cluster_candidate, semantic_model)
         synthetic_root_candidate = None
         if isinstance(root_node, dict):
             root_bounds = str(root_node.get("boundsInScreen", "") or root_node.get("bounds", "") or "").strip()
@@ -10265,6 +10491,7 @@ def _collect_step_candidate_priority_groups(
                     "cluster_root_node": root_node,
                     "cluster_role": "descendant_actionable" if root_descendant_actionable else "container",
                 }
+                _apply_semantic_card_metadata(synthetic_root_candidate, semantic_model, role="root")
         ranking_candidates = list(cluster_candidates)
         if synthetic_root_candidate is not None:
             ranking_candidates.append(synthetic_root_candidate)
