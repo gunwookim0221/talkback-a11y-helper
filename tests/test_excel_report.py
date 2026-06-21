@@ -875,6 +875,137 @@ def test_make_result_df_keeps_empty_speech_as_fail():
     assert result.iloc[0]["final_result"] == "FAIL"
 
 
+def test_make_result_df_downgrades_empty_visible_when_contained_child_label_exists():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "generic_card",
+                "tab_name": "main",
+                "step_index": 10,
+                "context_type": "main",
+                "visible_label": "",
+                "merged_announcement": "",
+                "move_result": "moved",
+                "last_smart_nav_result": "moved",
+                "smart_nav_success": True,
+                "post_move_verdict_source": "smart_nav_result",
+                "focus_view_id": "GenericCapabilityCardView",
+                "focus_bounds": "0,0,100,100",
+                "req_id": "empty_parent",
+            },
+            {
+                "scenario_id": "generic_card",
+                "tab_name": "main",
+                "step_index": 11,
+                "context_type": "main",
+                "visible_label": "Enabled",
+                "merged_announcement": "Enabled",
+                "move_result": "moved",
+                "focus_view_id": "",
+                "focus_bounds": "10,10,90,90",
+                "req_id": "contained_child",
+            },
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    row = result.iloc[0]
+    assert row["mismatch_type"] == "REPRESENTATIVE_CONTEXT"
+    assert row["representative_visible"] == "Enabled"
+    assert row["final_result"] == "WARN"
+
+
+def test_make_result_df_keeps_empty_visible_fail_without_nearby_child_label():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "generic_card",
+                "tab_name": "main",
+                "step_index": 10,
+                "context_type": "main",
+                "visible_label": "",
+                "merged_announcement": "",
+                "move_result": "moved",
+                "last_smart_nav_result": "moved",
+                "smart_nav_success": True,
+                "post_move_verdict_source": "smart_nav_result",
+                "focus_view_id": "GenericCapabilityCardView",
+                "focus_bounds": "0,0,100,100",
+                "req_id": "empty_parent",
+            }
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    assert result.iloc[0]["mismatch_type"] == "EMPTY_VISIBLE"
+    assert result.iloc[0]["final_result"] == "FAIL"
+
+
+def test_make_result_df_keeps_empty_visible_fail_when_nearby_label_bounds_unrelated():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "generic_card",
+                "tab_name": "main",
+                "step_index": 10,
+                "context_type": "main",
+                "visible_label": "",
+                "merged_announcement": "",
+                "move_result": "moved",
+                "last_smart_nav_result": "moved",
+                "smart_nav_success": True,
+                "post_move_verdict_source": "smart_nav_result",
+                "focus_view_id": "GenericCapabilityCardView",
+                "focus_bounds": "0,0,100,100",
+                "req_id": "empty_parent",
+            },
+            {
+                "scenario_id": "generic_card",
+                "tab_name": "main",
+                "step_index": 11,
+                "context_type": "main",
+                "visible_label": "Unrelated",
+                "merged_announcement": "Unrelated",
+                "move_result": "moved",
+                "focus_view_id": "",
+                "focus_bounds": "300,300,400,400",
+                "req_id": "unrelated_label",
+            },
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    assert result.iloc[0]["mismatch_type"] == "EMPTY_VISIBLE"
+    assert result.iloc[0]["final_result"] == "FAIL"
+
+
+def test_make_result_df_keeps_non_empty_normal_row_exact_match():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "normal",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "Normal label",
+                "merged_announcement": "Normal label",
+                "move_result": "moved",
+                "focus_view_id": "normal/id",
+                "focus_bounds": "0,0,100,100",
+                "req_id": "normal_row",
+            }
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    assert result.iloc[0]["mismatch_type"] == "EXACT_MATCH"
+    assert result.iloc[0]["final_result"] == "PASS"
+
+
 def test_annotate_plugin_metadata_uses_mapping_and_fallback():
     df = pd.DataFrame(
         [

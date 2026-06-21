@@ -4,6 +4,7 @@ from pathlib import Path
 import json
 import math
 import re
+import ast
 
 import pandas as pd
 
@@ -842,6 +843,105 @@ def _format_repeat_steps(values: list[object]) -> str:
     return ",".join(str(step) for step in sorted(dict.fromkeys(steps)))
 
 
+def _parse_result_bounds(value: object) -> tuple[float, float, float, float] | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        left = value.get("l", value.get("left"))
+        top = value.get("t", value.get("top"))
+        right = value.get("r", value.get("right"))
+        bottom = value.get("b", value.get("bottom"))
+        try:
+            return float(left), float(top), float(right), float(bottom)
+        except (TypeError, ValueError):
+            return None
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.startswith("{") and text.endswith("}"):
+        try:
+            parsed = ast.literal_eval(text)
+        except (SyntaxError, ValueError):
+            parsed = None
+        if isinstance(parsed, dict):
+            return _parse_result_bounds(parsed)
+
+    numbers = [float(item) for item in re.findall(r"-?\d+(?:\.\d+)?", text)]
+    if len(numbers) < 4:
+        return None
+    left, top, right, bottom = numbers[:4]
+    if right < left or bottom < top:
+        return None
+    return left, top, right, bottom
+
+
+def _result_bounds_related(parent: object, candidate: object) -> bool:
+    parent_bounds = _parse_result_bounds(parent)
+    candidate_bounds = _parse_result_bounds(candidate)
+    if not parent_bounds or not candidate_bounds:
+        return False
+    pl, pt, pr, pb = parent_bounds
+    cl, ct, cr, cb = candidate_bounds
+    if pr <= pl or pb <= pt or cr <= cl or cb <= ct:
+        return False
+
+    parent_contains_candidate = pl <= cl and pt <= ct and pr >= cr and pb >= cb
+    candidate_contains_parent = cl <= pl and ct <= pt and cr >= pr and cb >= pb
+    if parent_contains_candidate or candidate_contains_parent:
+        return True
+
+    parent_cx = (pl + pr) / 2.0
+    parent_cy = (pt + pb) / 2.0
+    candidate_cx = (cl + cr) / 2.0
+    candidate_cy = (ct + cb) / 2.0
+    if abs(parent_cx - candidate_cx) <= 8 and abs(parent_cy - candidate_cy) <= 8:
+        return True
+
+    inter_w = max(0.0, min(pr, cr) - max(pl, cl))
+    inter_h = max(0.0, min(pb, cb) - max(pt, ct))
+    intersection = inter_w * inter_h
+    smaller_area = min((pr - pl) * (pb - pt), (cr - cl) * (cb - ct))
+    return bool(smaller_area and intersection / smaller_area >= 0.85)
+
+
+def _find_nearby_contained_label(result: pd.DataFrame, group_idx: list[int], target_idx: int) -> str:
+    target_focus_id = str(result.at[target_idx, "focus_view_id"] or "").strip()
+    target_bounds = result.at[target_idx, "focus_bounds"] if "focus_bounds" in result.columns else ""
+    if not target_focus_id and not _parse_result_bounds(target_bounds):
+        return ""
+
+    target_step = _step_sort_value(result.at[target_idx, "step"])
+    target_position = group_idx.index(target_idx)
+    for candidate_idx in group_idx:
+        if candidate_idx == target_idx:
+            continue
+        candidate_position = group_idx.index(candidate_idx)
+        if abs(candidate_position - target_position) > 10:
+            continue
+        candidate_visible = str(result.at[candidate_idx, "visible_label"] or "").strip()
+        candidate_speech = str(result.at[candidate_idx, "merged_announcement"] or "").strip()
+        if not candidate_visible or not candidate_speech:
+            continue
+
+        candidate_step = _step_sort_value(result.at[candidate_idx, "step"])
+        nearby_step = (
+            target_step >= 0
+            and candidate_step >= 0
+            and abs(candidate_step - target_step) <= 3
+        )
+        placeholder_followup = candidate_step < 0 and candidate_position > target_position
+        if not nearby_step and not placeholder_followup:
+            continue
+
+        candidate_focus_id = str(result.at[candidate_idx, "focus_view_id"] or "").strip()
+        same_focus_id = bool(target_focus_id and candidate_focus_id and target_focus_id == candidate_focus_id)
+        related_bounds = _result_bounds_related(target_bounds, result.at[candidate_idx, "focus_bounds"])
+        if same_focus_id or related_bounds:
+            return candidate_visible
+    return ""
+
+
 def _collapse_repeated_issue_groups(result: pd.DataFrame) -> pd.DataFrame:
     if result.empty:
         result = result.copy()
@@ -1236,6 +1336,19 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
         return "UNKNOWN"
 
     result["mismatch_type"] = result.apply(_mismatch_type, axis=1)
+    result["_empty_visible_contained_label"] = ""
+
+    for _, group in result.groupby(group_keys, dropna=False, sort=False):
+        group_idx = group.index.tolist()
+        for idx in group_idx:
+            if str(result.at[idx, "mismatch_type"] or "").strip().upper() != "EMPTY_VISIBLE":
+                continue
+            contained_label = _find_nearby_contained_label(result, group_idx, idx)
+            if not contained_label:
+                continue
+            result.at[idx, "_empty_visible_contained_label"] = contained_label
+            result.at[idx, "representative_visible"] = contained_label
+            result.at[idx, "mismatch_type"] = "REPRESENTATIVE_CONTEXT"
 
     _ACCESSIBILITY_PASS_MATCH_TYPES = {
         "EXACT_MATCH",
@@ -1256,10 +1369,13 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
         traversal_result = str(row.get("_traversal_result", "") or "").strip().upper()
         speech_match_result = str(row.get("_speech_match_result", "") or "").strip().upper()
         focus_confidence = str(row.get("focus_confidence", "") or "").strip().upper()
+        empty_visible_contained_label = str(row.get("_empty_visible_contained_label", "") or "").strip()
         accessibility_match_ok = mismatch_type in _ACCESSIBILITY_PASS_MATCH_TYPES
 
         if mismatch_type in {"LABEL_MISMATCH", "EMPTY_SPEECH", "EMPTY_VISIBLE"} or speech_match_result == "FAIL_MISMATCH":
             return "FAIL"
+        if empty_visible_contained_label and mismatch_type == "REPRESENTATIVE_CONTEXT":
+            return "WARN"
         if traversal_result in {"FAIL_MOVE", "FAIL_STUCK"}:
             return "WARN" if accessibility_match_ok else "FAIL"
         if traversal_result == "WARN_TERMINAL_BY_REPEAT_STOP":
@@ -1296,6 +1412,8 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
             traversal_result == "WARN_TERMINAL_BY_REPEAT_STOP" or failure_reason in _TERMINAL_PRESENTATION_REASONS
         ):
             return "발화 일치, 탐색 종료 reason 있음"
+        if str(row.get("_empty_visible_contained_label", "") or "").strip():
+            return "인접/포함된 child label로 EMPTY_VISIBLE false positive 완화"
         if speech_match_result == "WARN_CONTEXT_ADDED":
             return "정상 이동, speech에 상위 문맥 포함"
         if traversal_result == "FAIL_STUCK":

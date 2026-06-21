@@ -126,11 +126,7 @@ class FocusService:
                 self.client.last_get_focus_trace["top_level_signature"] = top_level_signature
                 is_partial_salvaged = bool(result.get("partial_parse_success"))
                 strong_top_level_payload = bool(
-                    (has_valid_bounds and (
-                        has_text_like_label
-                        or (has_focus_flag and has_identity)
-                        or (view_id and class_name)
-                    ))
+                    (has_valid_bounds and has_text_like_label)
                     or (is_partial_salvaged and has_text_like_label)
                 )
                 if not strong_top_level_payload and fast_mode:
