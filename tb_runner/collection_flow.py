@@ -9130,6 +9130,183 @@ def _semantic_card_is_explicit_action_node(node: dict[str, Any]) -> bool:
     )
 
 
+_MEDIA_ACTION_LABELS = {
+    "play": "Play",
+    "pause": "Pause",
+    "next": "Next",
+    "previous": "Previous",
+    "shuffle": "Shuffle",
+    "repeat": "Repeat",
+    "mute": "Mute",
+    "unmute": "Unmute",
+}
+
+
+def _semantic_card_is_media_resource(value: Any) -> bool:
+    text = str(value or "").strip().lower()
+    return bool(
+        "musicplayer" in text
+        or "mediaplayer" in text
+        or "media_player" in text
+        or "media-player" in text
+    )
+
+
+def _semantic_card_media_label_action(label: str) -> str:
+    normalized = _normalize_logical_text(label)
+    return _MEDIA_ACTION_LABELS.get(normalized, "")
+
+
+def _semantic_card_media_value_labels(label: str) -> list[str]:
+    text = str(label or "").strip()
+    if not text:
+        return []
+    normalized = _normalize_logical_text(text)
+    if not normalized or normalized in _MEDIA_ACTION_LABELS:
+        return []
+
+    values: list[str] = []
+    words = [word for word in re.split(r"\s+", text) if word]
+    lowered_words = [word.lower() for word in words]
+    if len(lowered_words) >= 2 and lowered_words[:2] == ["youtube", "music"]:
+        values.append(" ".join(words[:2]))
+    elif words and not re.search(r"^\d{1,2}:\d{2}/?$", words[0]):
+        first = words[0].strip(" ,")
+        if first and _normalize_logical_text(first) not in _MEDIA_ACTION_LABELS:
+            values.append(first)
+
+    numeric_source = re.sub(r"\b\d{1,2}:\d{2}/?\b", " ", text)
+    for token in re.findall(r"\b\d{1,3}\b", numeric_source):
+        try:
+            numeric = int(token)
+        except ValueError:
+            continue
+        if 0 <= numeric <= 100 and token not in values:
+            values.append(token)
+    return values
+
+
+def _semantic_card_parse_media_label(label: str) -> tuple[list[str], list[str]]:
+    text = str(label or "").strip()
+    if not text:
+        return [], []
+    values = _semantic_card_media_value_labels(text)
+    actions: list[str] = []
+    normalized_blob = f" {_normalize_logical_text(text)} "
+    action_hits: list[tuple[int, str]] = []
+    for normalized, display in _MEDIA_ACTION_LABELS.items():
+        index = normalized_blob.find(f" {normalized} ")
+        if index >= 0:
+            action_hits.append((index, display))
+    for _, display in sorted(action_hits, key=lambda item: item[0]):
+        if display not in actions:
+            actions.append(display)
+    return values, actions
+
+
+def _semantic_card_media_family(row: dict[str, Any], focus_node: dict[str, Any] | None = None) -> str:
+    focus_node = focus_node if isinstance(focus_node, dict) else {}
+    candidates = [
+        row.get("focus_view_id", ""),
+        row.get("representative_resource_id", ""),
+        row.get("actual_focus_resource_id", ""),
+        focus_node.get("viewIdResourceName", ""),
+    ]
+    for candidate in candidates:
+        if _semantic_card_is_media_resource(candidate):
+            family = str(candidate or "").strip().rsplit("/", 1)[-1].rsplit(".", 1)[-1]
+            family = re.sub(r"(?i)(_trackcontroller_.*|_volume.*|_button)$", "", family)
+            family = re.sub(r"[^a-zA-Z0-9_]+", "_", family).strip("_").lower()
+            return family or "media"
+    return ""
+
+
+def _semantic_card_is_standalone_media_value(label: str) -> bool:
+    normalized = _normalize_logical_text(label)
+    if not normalized:
+        return False
+    if normalized in {"spotify", "youtube music"}:
+        return True
+    if re.fullmatch(r"\d{1,3}", normalized):
+        try:
+            return 0 <= int(normalized) <= 100
+        except ValueError:
+            return False
+    return False
+
+
+def _apply_media_semantic_card_metadata(row: dict[str, Any], focus_node: dict[str, Any] | None = None) -> bool:
+    focus_node = focus_node if isinstance(focus_node, dict) else {}
+    visible = _semantic_card_field_text(row.get("visible_label", ""))
+    speech = _semantic_card_field_text(row.get("merged_announcement", ""))
+    representative = _semantic_card_field_text(row.get("representative_visible", ""))
+    node_label = _semantic_card_readable_label(focus_node) if focus_node else ""
+    current_label = visible or speech or node_label or representative
+    has_media_resource = bool(_semantic_card_media_family(row, focus_node))
+    family = _semantic_card_media_family(row, focus_node)
+    if not family and "audio" in str(row.get("scenario_id", "") or "").lower() and _semantic_card_is_standalone_media_value(current_label):
+        family = "audio_media"
+    if not family:
+        return False
+
+    values: list[str] = []
+    actions: list[str] = []
+    label_sources = [source for source in (node_label, representative) if source]
+    if not has_media_resource and _semantic_card_is_standalone_media_value(current_label):
+        label_sources.append(current_label)
+    elif has_media_resource and _semantic_card_is_standalone_media_value(current_label):
+        label_sources.append(current_label)
+    for source in label_sources:
+        source_values, source_actions = _semantic_card_parse_media_label(source)
+        for value in source_values:
+            if value and value not in values:
+                values.append(value)
+        for action in source_actions:
+            if action and action not in actions:
+                actions.append(action)
+
+    current_action = _semantic_card_media_label_action(current_label)
+    if current_action and current_action not in actions:
+        actions.append(current_action)
+    if not values and not actions:
+        return False
+
+    role = "root"
+    if current_action:
+        role = "action"
+    elif values and any(_semantic_value == current_label for _semantic_value in values):
+        role = "value"
+    elif representative and values and any(_semantic_value == representative for _semantic_value in values):
+        role = "value"
+    elif values:
+        role = "value"
+
+    title = "Audio" if "audio" in str(row.get("scenario_id", "") or "").lower() else "Media"
+    semantic_bounds = (
+        _semantic_card_field_text(row.get("semantic_card_bounds", ""))
+        or _semantic_card_field_text(row.get("representative_bounds", ""))
+        or _semantic_card_field_text(row.get("focus_bounds", ""))
+        or _semantic_card_field_text(focus_node.get("boundsInScreen", ""))
+    )
+    row["semantic_card_id"] = "semantic_card:" + "||".join(
+        [
+            family or "media",
+            semantic_bounds or "none",
+            _normalize_logical_text(title) or "media",
+        ]
+    )
+    row["semantic_card_role"] = role
+    row["semantic_card_title"] = title
+    row["semantic_card_values"] = "|".join(values)
+    row["semantic_card_actions"] = "|".join(actions)
+    row["semantic_card_bounds"] = semantic_bounds
+    row["semantic_card_member_count"] = max(1, len(values) + len(actions) + 1)
+    row["semantic_card_is_value_covered"] = bool(values and role in {"root", "value", "toggle"})
+    row["semantic_card_is_action_only"] = bool(role == "action" and not values)
+    row["semantic_card_is_title_only"] = bool(role == "title" and not values and not actions)
+    return True
+
+
 def _semantic_card_root_family(root_node: dict[str, Any]) -> str:
     rid, cls, _ = _semantic_card_node_identity(root_node)
     source = rid or cls or "card"
@@ -9518,6 +9695,8 @@ def _enrich_row_semantic_card_metadata(row: dict[str, Any]) -> dict[str, Any]:
             focus_node = json.loads(focus_node) if focus_node.strip() else {}
         except Exception:
             focus_node = {}
+    if _apply_media_semantic_card_metadata(row, focus_node if isinstance(focus_node, dict) else {}):
+        return row
     if _apply_representative_semantic_card_metadata(row):
         return row
     if _has_semantic_card_metadata(row):

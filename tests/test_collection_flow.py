@@ -11497,6 +11497,116 @@ def test_enrich_row_semantic_card_metadata_marks_header_title_rows():
     assert enriched["semantic_card_actions"] == ""
 
 
+def test_enrich_row_semantic_card_metadata_extracts_media_root_values_and_actions():
+    row = {
+        "scenario_id": "device_audio_plugin",
+        "focus_node": {
+            "visibleToUser": True,
+            "boundsInScreen": {"l": 30, "t": 310, "r": 1050, "b": 1210},
+            "viewIdResourceName": "MusicPlayerCapabilityCardView",
+            "className": "android.view.View",
+            "text": "Spotify When Will I Be Loved Linda Ronstadt - Heart Like A Wheel 00:45/ 03:05 Previous Play Next Mute 25",
+            "contentDescription": "Spotify When Will I Be Loved Linda Ronstadt - Heart Like A Wheel 00:45/ 03:05 Previous Play Next Mute 25",
+            "clickable": True,
+        },
+        "focus_view_id": "MusicPlayerCapabilityCardView",
+        "focus_bounds": "30,310,1050,1210",
+        "visible_label": "Spotify",
+        "merged_announcement": "Spotify",
+        "representative_visible": "Spotify When Will I Be Loved Linda Ronstadt - Heart Like A Wheel 00:45/ 03:05 Previous Play Next Mute 25",
+    }
+
+    enriched = collection_flow._enrich_row_semantic_card_metadata(row)
+
+    assert enriched["semantic_card_id"]
+    assert enriched["semantic_card_role"] in {"root", "value"}
+    assert enriched["semantic_card_title"] == "Audio"
+    assert enriched["semantic_card_values"] == "Spotify|25"
+    assert enriched["semantic_card_actions"] == "Previous|Play|Next|Mute"
+
+
+def test_enrich_row_semantic_card_metadata_marks_media_controls_as_actions():
+    row = {
+        "scenario_id": "device_audio_plugin",
+        "focus_node": {
+            "visibleToUser": True,
+            "boundsInScreen": "492,748,588,844",
+            "viewIdResourceName": "MusicPlayerCapabilityCardView_trackcontroller_playback_button",
+            "className": "android.widget.Button",
+            "text": "Play",
+            "contentDescription": "Play",
+            "clickable": True,
+            "focusable": True,
+        },
+        "focus_view_id": "MusicPlayerCapabilityCardView_trackcontroller_playback_button",
+        "focus_bounds": "492,748,588,844",
+        "visible_label": "Play",
+        "merged_announcement": "Play",
+    }
+
+    enriched = collection_flow._enrich_row_semantic_card_metadata(row)
+
+    assert enriched["semantic_card_id"]
+    assert enriched["semantic_card_role"] == "action"
+    assert enriched["semantic_card_values"] == ""
+    assert enriched["semantic_card_actions"] == "Play"
+    assert enriched["semantic_card_is_action_only"] is True
+
+
+def test_enrich_row_semantic_card_metadata_marks_media_volume_as_value():
+    row = {
+        "scenario_id": "device_audio_plugin",
+        "focus_node": {
+            "visibleToUser": True,
+            "boundsInScreen": "198,940,291,1048",
+            "className": "android.widget.Button",
+            "text": "25",
+            "contentDescription": "25",
+            "clickable": True,
+            "focusable": True,
+        },
+        "focus_view_id": "",
+        "focus_bounds": "198,940,291,1048",
+        "visible_label": "25",
+        "merged_announcement": "25",
+    }
+
+    enriched = collection_flow._enrich_row_semantic_card_metadata(row)
+
+    assert enriched["semantic_card_id"]
+    assert enriched["semantic_card_role"] == "value"
+    assert enriched["semantic_card_title"] == "Audio"
+    assert enriched["semantic_card_values"] == "25"
+    assert enriched["semantic_card_actions"] == ""
+
+
+def test_enrich_row_semantic_card_metadata_does_not_treat_tv_volume_representative_as_audio_media():
+    row = {
+        "scenario_id": "device_tv_plugin",
+        "focus_node": {
+            "visibleToUser": True,
+            "boundsInScreen": "936,118,1008,310",
+            "viewIdResourceName": "more",
+            "className": "android.widget.Button",
+            "text": "More options",
+            "contentDescription": "More options",
+            "clickable": True,
+            "focusable": True,
+        },
+        "focus_view_id": "more",
+        "focus_bounds": "936,118,1008,310",
+        "visible_label": "More options",
+        "merged_announcement": "More options",
+        "representative_visible": "Volume Mute",
+        "representative_resource_id": "SpeakerVolumeCapabilityCardView_volume_mute_button",
+    }
+
+    enriched = collection_flow._enrich_row_semantic_card_metadata(row)
+
+    assert not enriched.get("semantic_card_values")
+    assert not enriched.get("semantic_card_actions")
+
+
 def test_maybe_select_next_local_tab_food_scan_marks_recovery_pending():
     client = DummyClient([])
     state = SimpleNamespace(
