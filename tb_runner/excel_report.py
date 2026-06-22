@@ -857,6 +857,30 @@ def _split_semantic_value_labels(value: object) -> list[str]:
     return labels
 
 
+def _normalize_semantic_value_match_text(value: object) -> str:
+    text = str(value or "").strip().lower()
+    text = text.replace("\n", " ")
+    text = re.sub(r"[\.,!?;:()\[\]{}\"'`]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _semantic_value_matches_text(label: str, text: object) -> bool:
+    normalized_label = _normalize_semantic_value_match_text(label)
+    normalized_text = _normalize_semantic_value_match_text(text)
+    return bool(normalized_label and normalized_text and normalized_label in normalized_text)
+
+
+def _semantic_value_matched_labels(labels: list[str], texts: list[object]) -> list[str]:
+    matched: list[str] = []
+    for label in labels:
+        if label in matched:
+            continue
+        if any(_semantic_value_matches_text(label, text) for text in texts):
+            matched.append(label)
+    return matched
+
+
 def _semantic_value_coverage_for_row(row: pd.Series) -> pd.Series:
     labels = _split_semantic_value_labels(row.get("semantic_card_values", ""))
     if not labels:
@@ -871,14 +895,25 @@ def _semantic_value_coverage_for_row(row: pd.Series) -> pd.Series:
             }
         )
 
-    normalized_announcement = _normalize_result_match_text(row.get("merged_announcement", ""))
-    matched = [
-        label
-        for label in labels
-        if _normalize_result_match_text(label)
-        and _normalize_result_match_text(label) in normalized_announcement
+    announcement_texts = [row.get("merged_announcement", "")]
+    representative_texts = [
+        row.get("representative_announcement", ""),
+        row.get("representative_visible", ""),
     ]
+    announcement_matched = _semantic_value_matched_labels(labels, announcement_texts)
+    matched = list(announcement_matched)
+    representative_matched = [
+        label
+        for label in _semantic_value_matched_labels(labels, representative_texts)
+        if label not in matched
+    ]
+    matched.extend(representative_matched)
     matched_count = len(matched)
+    match_sources: list[str] = []
+    if announcement_matched:
+        match_sources.append("announcement")
+    if representative_matched:
+        match_sources.append("representative")
     return pd.Series(
         {
             "semantic_value_labels": "|".join(labels),
@@ -886,7 +921,7 @@ def _semantic_value_coverage_for_row(row: pd.Series) -> pd.Series:
             "semantic_value_missing": matched_count < len(labels),
             "semantic_value_total_count": len(labels),
             "semantic_value_matched_count": matched_count,
-            "semantic_value_match_source": "announcement" if matched_count else "",
+            "semantic_value_match_source": "|".join(match_sources),
         }
     )
 
@@ -1265,6 +1300,99 @@ def _find_nearby_contained_label(result: pd.DataFrame, group_idx: list[int], tar
         if _same_semantic_card(result, target_idx, candidate_idx) or related_bounds or (same_focus_id and related_bounds):
             return candidate_visible
     return ""
+
+
+def _semantic_value_nearby_relation(result: pd.DataFrame, target_idx: int, candidate_idx: int) -> bool:
+    if _same_semantic_card(result, target_idx, candidate_idx):
+        return True
+
+    target_title = _normalize_semantic_value_match_text(_result_value(result, target_idx, "semantic_card_title", ""))
+    candidate_title = _normalize_semantic_value_match_text(_result_value(result, candidate_idx, "semantic_card_title", ""))
+    if not target_title or not candidate_title or target_title != candidate_title:
+        return False
+
+    target_bounds = _result_value(result, target_idx, "semantic_card_bounds", "") or _result_value(result, target_idx, "focus_bounds", "")
+    candidate_bounds = (
+        _result_value(result, candidate_idx, "semantic_card_bounds", "")
+        or _candidate_label_source_bounds(result, candidate_idx)
+    )
+    return _result_bounds_related(target_bounds, candidate_bounds)
+
+
+def _apply_semantic_value_nearby_coverage(result: pd.DataFrame) -> pd.DataFrame:
+    if result.empty or "semantic_value_labels" not in result.columns:
+        return result
+
+    updated = result.copy()
+    group_keys = [col for col in ("scenario_id", "_tab") if col in updated.columns]
+    if not group_keys:
+        group_keys = ["scenario_id"] if "scenario_id" in updated.columns else []
+    groups = updated.groupby(group_keys, dropna=False, sort=False) if group_keys else [(None, updated)]
+
+    for _, group in groups:
+        group_idx = group.index.tolist()
+        for target_idx in group_idx:
+            labels = _split_semantic_value_labels(_result_value(updated, target_idx, "semantic_value_labels", ""))
+            if not labels:
+                continue
+            total = _to_int_or_zero(_result_value(updated, target_idx, "semantic_value_total_count", 0))
+            matched_count = _to_int_or_zero(_result_value(updated, target_idx, "semantic_value_matched_count", 0))
+            if total <= 0 or matched_count >= total:
+                continue
+
+            direct_matched = _semantic_value_matched_labels(
+                labels,
+                [
+                    _result_value(updated, target_idx, "merged_announcement", ""),
+                    _result_value(updated, target_idx, "representative_announcement", ""),
+                    _result_value(updated, target_idx, "representative_visible", ""),
+                ],
+            )
+            target_step = _step_sort_value(_result_value(updated, target_idx, "step", ""))
+            target_position = group_idx.index(target_idx)
+            nearby_matched: list[str] = []
+            for candidate_idx in group_idx:
+                if candidate_idx == target_idx:
+                    continue
+                candidate_step = _step_sort_value(_result_value(updated, candidate_idx, "step", ""))
+                nearby_step = (
+                    target_step >= 0
+                    and candidate_step >= 0
+                    and abs(candidate_step - target_step) <= 3
+                )
+                if not nearby_step and abs(group_idx.index(candidate_idx) - target_position) > 3:
+                    continue
+                if not _semantic_value_nearby_relation(updated, target_idx, candidate_idx):
+                    continue
+
+                candidate_texts = [
+                    _result_value(updated, candidate_idx, "merged_announcement", ""),
+                    _result_value(updated, candidate_idx, "visible_label", ""),
+                    _result_value(updated, candidate_idx, "representative_announcement", ""),
+                    _result_value(updated, candidate_idx, "representative_visible", ""),
+                ]
+                for label in _semantic_value_matched_labels(labels, candidate_texts):
+                    if label not in direct_matched and label not in nearby_matched:
+                        nearby_matched.append(label)
+
+            if not nearby_matched:
+                continue
+
+            all_matched = [*direct_matched, *nearby_matched]
+            new_matched_count = min(len(all_matched), len(labels))
+            sources = [
+                source
+                for source in str(_result_value(updated, target_idx, "semantic_value_match_source", "") or "").split("|")
+                if source
+            ]
+            if "nearby_announcement" not in sources:
+                sources.append("nearby_announcement")
+            updated.at[target_idx, "semantic_value_matched_count"] = new_matched_count
+            updated.at[target_idx, "semantic_value_covered"] = new_matched_count == len(labels)
+            updated.at[target_idx, "semantic_value_missing"] = new_matched_count < len(labels)
+            updated.at[target_idx, "semantic_value_match_source"] = "|".join(sources)
+
+    return updated
 
 
 def _collapse_repeated_issue_groups(result: pd.DataFrame) -> pd.DataFrame:
@@ -1776,6 +1904,7 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     semantic_value_coverage = result.apply(_semantic_value_coverage_for_row, axis=1)
     for col in semantic_value_coverage.columns:
         result[col] = semantic_value_coverage[col]
+    result = _apply_semantic_value_nearby_coverage(result)
     semantic_value_quality = result.apply(_semantic_value_quality_for_row, axis=1)
     for col in semantic_value_quality.columns:
         result[col] = semantic_value_quality[col]

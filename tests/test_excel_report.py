@@ -791,6 +791,169 @@ def test_make_result_df_marks_semantic_value_covered_from_announcement():
     assert row["final_result"] == baseline.iloc[0]["final_result"]
 
 
+@pytest.mark.parametrize(
+    ("value", "speech"),
+    [
+        ("Dry", "援熱 Dry"),
+        ("Motion detected", "賅暮撫憮 Motion detected"),
+        ("Locked", "Switch Test lock Locked"),
+        ("100%", "100%"),
+    ],
+)
+def test_make_result_df_semantic_value_direct_match_preserves_state_tokens(value, speech):
+    result = make_result_df(
+        pd.DataFrame(
+            [
+                {
+                    "scenario_id": "generic_card",
+                    "tab_name": "main",
+                    "step_index": 1,
+                    "context_type": "main",
+                    "visible_label": speech,
+                    "merged_announcement": speech,
+                    "move_result": "moved",
+                    "focus_view_id": "GenericCapabilityCardView",
+                    "focus_bounds": "0,0,100,100",
+                    "semantic_card_values": value,
+                    "semantic_card_role": "root",
+                }
+            ]
+        )
+    )
+    row = result.iloc[0]
+
+    assert row["semantic_value_covered"] == True
+    assert row["semantic_value_missing"] == False
+    assert row["semantic_value_matched_count"] == 1
+    assert row["semantic_value_match_source"] == "announcement"
+    assert row["semantic_value_quality"] == "VALUE_FULLY_COVERED"
+    assert row["semantic_value_gate_candidate"] == False
+
+
+def test_make_result_df_semantic_value_covered_from_representative_value():
+    result = make_result_df(
+        pd.DataFrame(
+            [
+                {
+                    "scenario_id": "generic_card",
+                    "tab_name": "main",
+                    "step_index": 1,
+                    "context_type": "main",
+                    "visible_label": "Rinse mode",
+                    "merged_announcement": "Rinse mode",
+                    "representative_visible": "Normal",
+                    "representative_announcement": "Normal",
+                    "move_result": "moved",
+                    "focus_view_id": "GenericCapabilityCardView",
+                    "focus_bounds": "0,0,100,100",
+                    "semantic_card_values": "Normal",
+                    "semantic_card_role": "value",
+                }
+            ]
+        )
+    )
+    row = result.iloc[0]
+
+    assert row["semantic_value_covered"] == True
+    assert row["semantic_value_missing"] == False
+    assert row["semantic_value_matched_count"] == 1
+    assert row["semantic_value_match_source"] == "representative"
+    assert row["semantic_value_gate_candidate"] == False
+
+
+def test_make_result_df_semantic_value_covered_from_nearby_same_card_announcement():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "generic_card",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "Rinse mode",
+                "merged_announcement": "Rinse mode",
+                "move_result": "moved",
+                "focus_view_id": "GenericCapabilityCardView_title",
+                "focus_bounds": "0,0,100,40",
+                "semantic_card_id": "semantic_card:generic||0,0,100,100||rinse",
+                "semantic_card_title": "Rinse mode",
+                "semantic_card_values": "Normal",
+                "semantic_card_role": "title",
+            },
+            {
+                "scenario_id": "generic_card",
+                "tab_name": "main",
+                "step_index": 2,
+                "context_type": "main",
+                "visible_label": "Normal",
+                "merged_announcement": "Normal",
+                "move_result": "moved",
+                "focus_view_id": "GenericCapabilityCardView_value",
+                "focus_bounds": "0,40,100,80",
+                "semantic_card_id": "semantic_card:generic||0,0,100,100||rinse",
+                "semantic_card_title": "Rinse mode",
+                "semantic_card_values": "Normal",
+                "semantic_card_role": "value",
+            },
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+    row = result.iloc[0]
+
+    assert row["semantic_value_covered"] == True
+    assert row["semantic_value_missing"] == False
+    assert row["semantic_value_matched_count"] == 1
+    assert row["semantic_value_match_source"] == "nearby_announcement"
+    assert row["semantic_value_quality"] == "VALUE_FULLY_COVERED"
+    assert row["semantic_value_gate_candidate"] == False
+
+
+def test_make_result_df_semantic_value_ignores_unrelated_nearby_value():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "generic_card",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "Rinse mode",
+                "merged_announcement": "Rinse mode",
+                "move_result": "moved",
+                "focus_view_id": "GenericCapabilityCardView_title",
+                "focus_bounds": "0,0,100,40",
+                "semantic_card_id": "semantic_card:generic||0,0,100,100||rinse",
+                "semantic_card_title": "Rinse mode",
+                "semantic_card_values": "Normal",
+                "semantic_card_role": "value",
+            },
+            {
+                "scenario_id": "generic_card",
+                "tab_name": "main",
+                "step_index": 2,
+                "context_type": "main",
+                "visible_label": "Normal",
+                "merged_announcement": "Normal",
+                "move_result": "moved",
+                "focus_view_id": "OtherCardView_value",
+                "focus_bounds": "300,300,400,360",
+                "semantic_card_id": "semantic_card:generic||300,300,400,420||other",
+                "semantic_card_title": "Other mode",
+                "semantic_card_values": "Normal",
+                "semantic_card_role": "value",
+            },
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+    row = result.iloc[0]
+
+    assert row["semantic_value_covered"] == False
+    assert row["semantic_value_missing"] == True
+    assert row["semantic_value_matched_count"] == 0
+    assert row["semantic_value_match_source"] == ""
+    assert row["semantic_value_gate_candidate"] == True
+
+
 def test_make_result_df_marks_semantic_value_missing_without_changing_result():
     row_data = {
         "scenario_id": "generic_card",
