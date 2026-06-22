@@ -470,10 +470,14 @@ def test_save_excel_writes_semantic_value_coverage_summary(tmp_path):
     assert metrics["semantic_value_missing"] == 1
     assert metrics["semantic_value_coverage_rate"] == 50
     assert metrics["semantic_value_quality_total"] == 2
+    assert metrics["semantic_value_quality_full"] == 1
+    assert metrics["semantic_value_quality_partial"] == 0
     assert metrics["semantic_value_quality_missing"] == 1
     assert metrics["semantic_value_quality_warn_candidate"] == 1
-    assert metrics["semantic_value_quality_review_candidate"] == 0
+    assert metrics["semantic_value_quality_review_candidate"] == 1
     assert metrics["semantic_value_medium_missing"] == 1
+    assert metrics["semantic_value_medium_importance_missing"] == 1
+    assert metrics["semantic_value_review_candidate"] == 1
 
 
 def test_save_excel_writes_debug_log_only_for_warn_fail_rows(tmp_path, monkeypatch):
@@ -786,6 +790,7 @@ def test_make_result_df_marks_semantic_value_covered_from_announcement():
     assert row["semantic_value_match_source"] == "announcement"
     assert row["semantic_value_quality"] == "VALUE_FULLY_COVERED"
     assert row["semantic_value_gate_candidate"] == False
+    assert row["semantic_value_review_candidate"] == False
     assert row["semantic_value_quality_reason"] == "value_fully_covered"
     assert row["mismatch_type"] == baseline.iloc[0]["mismatch_type"]
     assert row["final_result"] == baseline.iloc[0]["final_result"]
@@ -828,6 +833,7 @@ def test_make_result_df_semantic_value_direct_match_preserves_state_tokens(value
     assert row["semantic_value_match_source"] == "announcement"
     assert row["semantic_value_quality"] == "VALUE_FULLY_COVERED"
     assert row["semantic_value_gate_candidate"] == False
+    assert row["semantic_value_review_candidate"] == False
 
 
 def test_make_result_df_semantic_value_covered_from_representative_value():
@@ -859,6 +865,7 @@ def test_make_result_df_semantic_value_covered_from_representative_value():
     assert row["semantic_value_matched_count"] == 1
     assert row["semantic_value_match_source"] == "representative"
     assert row["semantic_value_gate_candidate"] == False
+    assert row["semantic_value_review_candidate"] == False
 
 
 def test_make_result_df_semantic_value_covered_from_nearby_same_card_announcement():
@@ -906,6 +913,7 @@ def test_make_result_df_semantic_value_covered_from_nearby_same_card_announcemen
     assert row["semantic_value_match_source"] == "nearby_announcement"
     assert row["semantic_value_quality"] == "VALUE_FULLY_COVERED"
     assert row["semantic_value_gate_candidate"] == False
+    assert row["semantic_value_review_candidate"] == False
 
 
 def test_make_result_df_semantic_value_ignores_unrelated_nearby_value():
@@ -952,6 +960,7 @@ def test_make_result_df_semantic_value_ignores_unrelated_nearby_value():
     assert row["semantic_value_matched_count"] == 0
     assert row["semantic_value_match_source"] == ""
     assert row["semantic_value_gate_candidate"] == True
+    assert row["semantic_value_review_candidate"] == True
 
 
 def test_make_result_df_marks_semantic_value_missing_without_changing_result():
@@ -987,6 +996,7 @@ def test_make_result_df_marks_semantic_value_missing_without_changing_result():
     assert row["semantic_value_quality"] == "VALUE_MISSING"
     assert row["semantic_value_importance"] == "medium"
     assert row["semantic_value_gate_candidate"] == True
+    assert row["semantic_value_review_candidate"] == True
     assert row["semantic_value_quality_reason"] == "missing_medium_importance_value"
     assert row["mismatch_type"] == baseline.iloc[0]["mismatch_type"]
     assert row["final_result"] == baseline.iloc[0]["final_result"]
@@ -1021,6 +1031,7 @@ def test_make_result_df_counts_partially_matched_semantic_values():
     assert row["semantic_value_match_source"] == "announcement"
     assert row["semantic_value_quality"] == "VALUE_PARTIALLY_COVERED"
     assert row["semantic_value_gate_candidate"] == False
+    assert row["semantic_value_review_candidate"] == False
 
 
 def test_make_result_df_leaves_semantic_value_coverage_empty_without_value():
@@ -1051,6 +1062,7 @@ def test_make_result_df_leaves_semantic_value_coverage_empty_without_value():
     assert row["semantic_value_quality"] == "VALUE_NOT_APPLICABLE"
     assert row["semantic_value_importance"] == "ignore"
     assert row["semantic_value_gate_candidate"] == False
+    assert row["semantic_value_review_candidate"] == False
     assert row["semantic_value_quality_reason"] == "no_semantic_value"
 
 
@@ -1083,6 +1095,7 @@ def test_make_result_df_marks_missing_high_importance_value_as_shadow_gate_candi
     assert row["semantic_value_quality"] == "VALUE_MISSING"
     assert row["semantic_value_importance"] == "high"
     assert row["semantic_value_gate_candidate"] == True
+    assert row["semantic_value_review_candidate"] == True
     assert row["semantic_value_quality_reason"] == "missing_high_importance_value"
     assert row["mismatch_type"] == baseline.iloc[0]["mismatch_type"]
     assert row["final_result"] == baseline.iloc[0]["final_result"]
@@ -1113,6 +1126,7 @@ def test_make_result_df_ignores_missing_action_like_semantic_value():
     assert row["semantic_value_quality"] == "VALUE_MISSING"
     assert row["semantic_value_importance"] == "ignore"
     assert row["semantic_value_gate_candidate"] == False
+    assert row["semantic_value_review_candidate"] == False
     assert row["semantic_value_quality_reason"] == "action_like_value_ignored"
 
 
@@ -1142,6 +1156,7 @@ def test_make_result_df_reviews_missing_composite_semantic_value_without_gate_ca
     assert row["semantic_value_quality"] == "VALUE_MISSING"
     assert row["semantic_value_importance"] == "low"
     assert row["semantic_value_gate_candidate"] == False
+    assert row["semantic_value_review_candidate"] == False
     assert row["semantic_value_quality_reason"] == "composite_value_review"
 
 

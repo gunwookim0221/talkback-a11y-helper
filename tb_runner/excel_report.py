@@ -113,6 +113,7 @@ RESULT_SHEET_COLUMNS = [
     "semantic_value_quality",
     "semantic_value_importance",
     "semantic_value_gate_candidate",
+    "semantic_value_review_candidate",
     "semantic_value_quality_reason",
     "result_crop_thumbnail",
 ]
@@ -1063,37 +1064,46 @@ def _semantic_value_quality_for_row(row: pd.Series) -> pd.Series:
         quality = "VALUE_NOT_APPLICABLE"
         reason = "no_semantic_value"
         gate_candidate = False
+        review_candidate = False
     elif matched >= total:
         quality = "VALUE_FULLY_COVERED"
         reason = "value_fully_covered"
         gate_candidate = False
+        review_candidate = False
     elif matched > 0:
         quality = "VALUE_PARTIALLY_COVERED"
         reason = "value_partially_covered"
         gate_candidate = False
+        review_candidate = False
     else:
         quality = "VALUE_MISSING"
         if reason_hint in {"action_like_value_ignored", "composite_value_review"}:
             reason = reason_hint
             gate_candidate = False
+            review_candidate = False
         elif importance == "high":
             reason = "missing_high_importance_value"
             gate_candidate = True
+            review_candidate = True
         elif importance == "medium":
             reason = "missing_medium_importance_value"
             gate_candidate = True
+            review_candidate = True
         elif importance in {"low", "ignore"}:
             reason = reason_hint or "metadata_unreliable"
             gate_candidate = False
+            review_candidate = False
         else:
             reason = "metadata_unreliable"
             gate_candidate = False
+            review_candidate = False
 
     return pd.Series(
         {
             "semantic_value_quality": quality,
             "semantic_value_importance": importance,
             "semantic_value_gate_candidate": gate_candidate,
+            "semantic_value_review_candidate": review_candidate,
             "semantic_value_quality_reason": reason,
         }
     )
@@ -1119,27 +1129,35 @@ def _semantic_value_summary_rows(result_df: pd.DataFrame) -> list[dict[str, obje
 
 def _semantic_value_quality_summary_rows(result_df: pd.DataFrame) -> list[dict[str, object]]:
     if result_df.empty or "semantic_value_quality" not in result_df.columns:
-        total = missing = warn_candidate = review_candidate = high_missing = medium_missing = low_or_ignored = 0
+        total = full = partial = missing = warn_candidate = review_candidate = high_missing = medium_missing = low_or_ignored = 0
     else:
         quality = result_df["semantic_value_quality"].fillna("").astype(str)
         importance = result_df.get("semantic_value_importance", pd.Series("", index=result_df.index)).fillna("").astype(str)
         reason = result_df.get("semantic_value_quality_reason", pd.Series("", index=result_df.index)).fillna("").astype(str)
         gate = result_df.get("semantic_value_gate_candidate", pd.Series(False, index=result_df.index)).fillna(False).astype(bool)
+        review = result_df.get("semantic_value_review_candidate", pd.Series(False, index=result_df.index)).fillna(False).astype(bool)
         total = int((quality != "VALUE_NOT_APPLICABLE").sum())
+        full = int((quality == "VALUE_FULLY_COVERED").sum())
+        partial = int((quality == "VALUE_PARTIALLY_COVERED").sum())
         missing_mask = quality == "VALUE_MISSING"
         missing = int(missing_mask.sum())
         warn_candidate = int((missing_mask & gate).sum())
-        review_candidate = int((missing_mask & ~gate & reason.isin({"composite_value_review", "metadata_unreliable"})).sum())
+        review_candidate = int((missing_mask & review).sum())
         high_missing = int((missing_mask & (importance == "high")).sum())
         medium_missing = int((missing_mask & (importance == "medium")).sum())
         low_or_ignored = int((missing_mask & importance.isin({"low", "ignore"})).sum())
     return [
         {"section": "semantic_value_quality", "metric": "semantic_value_quality_total", "value": total},
+        {"section": "semantic_value_quality", "metric": "semantic_value_quality_full", "value": full},
+        {"section": "semantic_value_quality", "metric": "semantic_value_quality_partial", "value": partial},
         {"section": "semantic_value_quality", "metric": "semantic_value_quality_missing", "value": missing},
         {"section": "semantic_value_quality", "metric": "semantic_value_quality_warn_candidate", "value": warn_candidate},
         {"section": "semantic_value_quality", "metric": "semantic_value_quality_review_candidate", "value": review_candidate},
         {"section": "semantic_value_quality", "metric": "semantic_value_high_missing", "value": high_missing},
         {"section": "semantic_value_quality", "metric": "semantic_value_medium_missing", "value": medium_missing},
+        {"section": "semantic_value_quality", "metric": "semantic_value_high_importance_missing", "value": high_missing},
+        {"section": "semantic_value_quality", "metric": "semantic_value_medium_importance_missing", "value": medium_missing},
+        {"section": "semantic_value_quality", "metric": "semantic_value_review_candidate", "value": review_candidate},
         {"section": "semantic_value_quality", "metric": "semantic_value_low_or_ignored", "value": low_or_ignored},
     ]
 
