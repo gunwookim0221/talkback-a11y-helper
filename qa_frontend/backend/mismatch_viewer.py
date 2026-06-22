@@ -67,6 +67,10 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
         last_step_col = _get_col("last_step")
         steps_col = _get_col("steps")
         repeated_group_col = _get_col("is_repeated_issue_group")
+        shadow_verdict_col = _get_col("shadow_verdict")
+        shadow_reason_col = _get_col("shadow_verdict_reason")
+        shadow_source_col = _get_col("shadow_verdict_source")
+        scenario_shadow_col = _get_col("scenario_shadow_verdict")
 
         def _int_cell(row: int, col: int | None, default: int = 0) -> int:
             if not col:
@@ -110,6 +114,11 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
                     "issue_count": 0,
                     "review_count": 0,
                     "clean_count": 0,
+                    "shadow_pass_count": 0,
+                    "shadow_review_count": 0,
+                    "shadow_warn_count": 0,
+                    "shadow_fail_count": 0,
+                    "scenario_shadow_verdict": "",
                     "status": "clean"
                 }
 
@@ -132,9 +141,23 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
             if repeated_group_col:
                 raw_repeated = sheet.cell(row, repeated_group_col).value
                 is_repeated_issue_group = str(raw_repeated).strip().lower() in {"true", "1", "yes"}
+            shadow_verdict = str(sheet.cell(row, shadow_verdict_col).value or "").strip().upper() if shadow_verdict_col else ""
+            shadow_reason = str(sheet.cell(row, shadow_reason_col).value or "").strip() if shadow_reason_col else ""
+            shadow_source = str(sheet.cell(row, shadow_source_col).value or "").strip() if shadow_source_col else ""
+            scenario_shadow_verdict = str(sheet.cell(row, scenario_shadow_col).value or "").strip().upper() if scenario_shadow_col else ""
 
             if not scenario_stats[scenario]["plugin_name"] and plugin_name:
                 scenario_stats[scenario]["plugin_name"] = plugin_name
+            if scenario_shadow_verdict and not scenario_stats[scenario]["scenario_shadow_verdict"]:
+                scenario_stats[scenario]["scenario_shadow_verdict"] = scenario_shadow_verdict
+            if shadow_verdict == "SHADOW_PASS":
+                scenario_stats[scenario]["shadow_pass_count"] += 1
+            elif shadow_verdict == "SHADOW_REVIEW":
+                scenario_stats[scenario]["shadow_review_count"] += 1
+            elif shadow_verdict == "SHADOW_WARN":
+                scenario_stats[scenario]["shadow_warn_count"] += 1
+            elif shadow_verdict == "SHADOW_FAIL":
+                scenario_stats[scenario]["shadow_fail_count"] += 1
 
             category = ""
             is_fail = False
@@ -246,6 +269,10 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
                     "last_step": last_step,
                     "steps": repeated_steps,
                     "is_repeated_issue_group": is_repeated_issue_group,
+                    "shadow_verdict": shadow_verdict,
+                    "shadow_verdict_reason": shadow_reason,
+                    "shadow_verdict_source": shadow_source,
+                    "scenario_shadow_verdict": scenario_shadow_verdict,
                     "category": category,
                     "top_category": top_category
                 })
@@ -274,6 +301,15 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
                 stats["status"] = "clean"
             scenario_summary.append(stats)
 
+        shadow_summary = _read_shadow_summary_from_xlsx(xlsx_path)
+        if not shadow_summary:
+            shadow_summary = {
+                "shadow_pass_count": sum(stats["shadow_pass_count"] for stats in scenario_stats.values()),
+                "shadow_review_count": sum(stats["shadow_review_count"] for stats in scenario_stats.values()),
+                "shadow_warn_count": sum(stats["shadow_warn_count"] for stats in scenario_stats.values()),
+                "shadow_fail_count": sum(stats["shadow_fail_count"] for stats in scenario_stats.values()),
+            }
+
         return {
             "summary": {
                 "fail_count": summary_fail_count,
@@ -286,6 +322,10 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
                 "empty_visible": summary_empty_visible,
                 "review": summary_review,
                 "runtime_warning": summary_runtime_warning,
+                "shadow_pass_count": int(shadow_summary.get("shadow_pass_count") or 0),
+                "shadow_review_count": int(shadow_summary.get("shadow_review_count") or 0),
+                "shadow_warn_count": int(shadow_summary.get("shadow_warn_count") or 0),
+                "shadow_fail_count": int(shadow_summary.get("shadow_fail_count") or 0),
             },
             "scenario_summary": scenario_summary,
             "signals": previews,
@@ -297,3 +337,37 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
 
     except Exception as exc:
         return {"error": f"Failed to parse xlsx: {str(exc)}"}
+
+
+def _read_shadow_summary_from_xlsx(xlsx_path: Path) -> dict[str, int]:
+    try:
+        workbook = openpyxl.load_workbook(xlsx_path, data_only=True, read_only=True)
+        if "summary" not in workbook.sheetnames:
+            workbook.close()
+            return {}
+        sheet = workbook["summary"]
+        headers = [str(sheet.cell(1, c).value or "") for c in range(1, sheet.max_column + 1)]
+        if "metric" not in headers or "value" not in headers:
+            workbook.close()
+            return {}
+        metric_col = headers.index("metric") + 1
+        value_col = headers.index("value") + 1
+        wanted = {
+            "shadow_pass_count",
+            "shadow_review_count",
+            "shadow_warn_count",
+            "shadow_fail_count",
+        }
+        values: dict[str, int] = {}
+        for row in range(2, sheet.max_row + 1):
+            metric = str(sheet.cell(row, metric_col).value or "").strip()
+            if metric not in wanted:
+                continue
+            try:
+                values[metric] = int(float(sheet.cell(row, value_col).value or 0))
+            except (TypeError, ValueError):
+                values[metric] = 0
+        workbook.close()
+        return values
+    except Exception:
+        return {}

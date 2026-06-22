@@ -11,6 +11,10 @@ type MismatchSummary = {
     empty_visible: number;
     review: number;
     runtime_warning: number;
+    shadow_pass_count?: number;
+    shadow_review_count?: number;
+    shadow_warn_count?: number;
+    shadow_fail_count?: number;
   };
   scenario_summary: Array<{
     scenario_id: string;
@@ -21,6 +25,11 @@ type MismatchSummary = {
     empty_visible: number;
     review: number;
   runtime_warning: number;
+    shadow_pass_count?: number;
+    shadow_review_count?: number;
+    shadow_warn_count?: number;
+    shadow_fail_count?: number;
+    scenario_shadow_verdict?: string;
     status: 'fail' | 'issue' | 'review' | 'clean';
   }>;
   signals: Array<{ 
@@ -31,6 +40,10 @@ type MismatchSummary = {
     spoken: string; 
     mismatch_type: string; 
     final_result: string;
+    shadow_verdict?: string;
+    shadow_verdict_reason?: string;
+    shadow_verdict_source?: string;
+    scenario_shadow_verdict?: string;
     failure_reason: string;
     focus_confidence: string;
     repeat_count?: number;
@@ -120,6 +133,17 @@ export function RecentRunsPanel({
     const warningScenarios = (runData?.scenarios || []).filter((s: any) => s.status === 'warning');
     const unavailableScenarios = (runData?.scenarios || []).filter((s: any) => ['not_available', 'not_available_candidate', 'no_target_candidate'].includes(s.status));
     const passedScenarios = (runData?.scenarios || []).filter((s: any) => s.status === 'passed');
+    const shadowScenarioById = new Map(
+      (runData?.shadow_scenarios || [])
+        .filter((item: any) => item?.scenario_id)
+        .map((item: any) => [item.scenario_id, item])
+    );
+    const shadowQuality = runData?.shadow_quality;
+
+    const scenarioShadowText = (scenario: any) => {
+      const shadow = shadowScenarioById.get(scenario.id) as any;
+      return shadow?.scenario_shadow_verdict ? `Shadow: ${shadow.scenario_shadow_verdict}` : null;
+    };
 
     return (
       <div style={{ marginTop: '12px' }}>
@@ -137,6 +161,7 @@ export function RecentRunsPanel({
                     <div key={scenario.id} className="scenarioDetailRow">
                       <strong>{scenario.id}</strong>
                       <small>reason={scenarioReasonText(scenario) || 'failed'}</small>
+                      {scenarioShadowText(scenario) ? <small>{scenarioShadowText(scenario)}</small> : null}
                     </div>
                   ))
                 ) : (
@@ -152,6 +177,7 @@ export function RecentRunsPanel({
                     <div key={scenario.id} className="scenarioDetailRow">
                       <strong>{scenario.id}</strong>
                       <small>reason={scenarioReasonText(scenario) || 'warning'}</small>
+                      {scenarioShadowText(scenario) ? <small>{scenarioShadowText(scenario)}</small> : null}
                     </div>
                   ))
                 ) : (
@@ -172,6 +198,7 @@ export function RecentRunsPanel({
                         {scenario.availability_target ? ` · target=${scenario.availability_target}` : ''}
                       </small>
                       <small>{scenario.availability_reason || scenarioReasonText(scenario) || 'not available candidate'}</small>
+                      {scenarioShadowText(scenario) ? <small>{scenarioShadowText(scenario)}</small> : null}
                     </div>
                   ))
                 ) : (
@@ -187,6 +214,7 @@ export function RecentRunsPanel({
                     <div key={scenario.id} className="scenarioDetailRow">
                       <strong>{scenario.id}</strong>
                       {typeof scenario.steps === 'number' ? <small>{scenario.steps} steps</small> : null}
+                      {scenarioShadowText(scenario) ? <small>{scenarioShadowText(scenario)}</small> : null}
                     </div>
                   ))
                 ) : (
@@ -226,6 +254,35 @@ export function RecentRunsPanel({
           </details>
         )}
 
+        {shadowQuality && (
+          <details open style={{ marginTop: '16px' }}>
+            <summary style={{ fontSize: '14px', fontWeight: 'bold' }}>Shadow Verdict</summary>
+            <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', marginTop: '4px' }}>
+              Reporting-only V6 shadow quality signal. This does not change PASS/WARN/FAIL.
+            </div>
+            <div className="scenarioDetailList" style={{ marginTop: '8px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '8px' }}>
+                <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                  <small>Shadow Pass</small>
+                  <strong style={{ fontSize: '1.4em', color: 'var(--color-success)' }}>{shadowQuality.pass ?? 0}</strong>
+                </div>
+                <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                  <small>Shadow Review</small>
+                  <strong style={{ fontSize: '1.4em', color: 'var(--color-neutral)' }}>{shadowQuality.review ?? 0}</strong>
+                </div>
+                <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                  <small>Shadow Warn</small>
+                  <strong style={{ fontSize: '1.4em', color: (shadowQuality.warn ?? 0) > 0 ? 'var(--color-warning)' : 'inherit' }}>{shadowQuality.warn ?? 0}</strong>
+                </div>
+                <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                  <small>Shadow Fail</small>
+                  <strong style={{ fontSize: '1.4em', color: (shadowQuality.fail ?? 0) > 0 ? 'var(--color-danger)' : 'inherit' }}>{shadowQuality.fail ?? 0}</strong>
+                </div>
+              </div>
+            </div>
+          </details>
+        )}
+
         {runData?.quality_issues && runData.quality_issues.length > 0 && (
           <details open style={{ marginTop: '16px' }}>
             <summary style={{ fontSize: '14px', fontWeight: 'bold' }}>Quality Issues</summary>
@@ -251,6 +308,12 @@ export function RecentRunsPanel({
                   <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', width: '100%' }}>
                     <strong>Mismatch:</strong> {issue.mismatch_type}
                   </div>
+                  {issue.shadow_verdict && (
+                    <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', width: '100%' }}>
+                      <strong>Shadow:</strong> {issue.shadow_verdict}
+                      {issue.shadow_verdict_reason ? ` · ${issue.shadow_verdict_reason}` : ''}
+                    </div>
+                  )}
                   <div style={{ fontSize: '12px', color: 'var(--color-text)', width: '100%' }}>
                     <strong>Visible text:</strong> {issue.visible_label || '-'}
                   </div>
@@ -403,6 +466,7 @@ export function RecentRunsPanel({
                             <span>
                               {d.model} <span style={{ color: 'var(--color-text-dim)' }}>/ {d.serial}</span> &middot; {d.state} {d.return_code != null ? `· ret: ${d.return_code}` : ''}
                               {d.quality && ` · fail:${d.quality.fail} issue:${d.quality.issue} review:${d.quality.review} clean:${d.quality.clean}`}
+                              {d.shadow_quality && ` · shadow fail:${d.shadow_quality.fail} warn:${d.shadow_quality.warn} review:${d.shadow_quality.review}`}
                             </span>
                             <div style={{ display: 'flex', gap: '4px', marginLeft: 'auto' }}>
                               {d.log_path && (

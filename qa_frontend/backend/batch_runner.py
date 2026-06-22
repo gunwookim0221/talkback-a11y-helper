@@ -678,6 +678,23 @@ class BatchRunManager:
                             "review": msummary.get("review_count", 0),
                             "clean": msummary.get("clean_count", 0)
                         }
+                        data["shadow_quality"] = {
+                            "pass": msummary.get("shadow_pass_count", 0),
+                            "review": msummary.get("shadow_review_count", 0),
+                            "warn": msummary.get("shadow_warn_count", 0),
+                            "fail": msummary.get("shadow_fail_count", 0),
+                        }
+                        data["shadow_scenarios"] = [
+                            {
+                                "scenario_id": item.get("scenario_id", ""),
+                                "scenario_shadow_verdict": item.get("scenario_shadow_verdict", ""),
+                                "shadow_pass_count": item.get("shadow_pass_count", 0),
+                                "shadow_review_count": item.get("shadow_review_count", 0),
+                                "shadow_warn_count": item.get("shadow_warn_count", 0),
+                                "shadow_fail_count": item.get("shadow_fail_count", 0),
+                            }
+                            for item in mismatch_res.get("scenario_summary", [])
+                        ]
                         
                         quality_issues = []
                         for sig in mismatch_res.get("signals", []):
@@ -702,6 +719,10 @@ class BatchRunManager:
                                 "last_step": sig.get("last_step", ""),
                                 "steps": sig.get("steps", ""),
                                 "is_repeated_issue_group": sig.get("is_repeated_issue_group", False),
+                                "shadow_verdict": sig.get("shadow_verdict", ""),
+                                "shadow_verdict_reason": sig.get("shadow_verdict_reason", ""),
+                                "shadow_verdict_source": sig.get("shadow_verdict_source", ""),
+                                "scenario_shadow_verdict": sig.get("scenario_shadow_verdict", ""),
                                 "crop_path": crop_path
                             })
                         data["quality_issues"] = quality_issues
@@ -1013,6 +1034,8 @@ def get_recent_batches() -> list[dict]:
                             try:
                                 dev_data = json.loads(dev_summary_path.read_text(encoding="utf-8"))
                                 dev_info["quality"] = dev_data.get("quality")
+                                dev_info["shadow_quality"] = dev_data.get("shadow_quality")
+                                dev_info["shadow_scenarios"] = dev_data.get("shadow_scenarios")
                                 dev_info["quality_issues"] = dev_data.get("quality_issues")
                                 
                                 from .recent_runs import _recent_run_from_summary

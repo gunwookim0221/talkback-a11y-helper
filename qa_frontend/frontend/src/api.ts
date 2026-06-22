@@ -225,6 +225,10 @@ export type QualityIssue = {
   merged_announcement?: string;
   mismatch_type: string;
   final_result: string;
+  shadow_verdict?: string;
+  shadow_verdict_reason?: string;
+  shadow_verdict_source?: string;
+  scenario_shadow_verdict?: string;
   review_note?: string;
   focus_confidence?: string;
   crop_path?: string | null;
@@ -245,6 +249,20 @@ export type RecentBatchDevice = {
     review: number;
     clean: number;
   } | null;
+  shadow_quality?: {
+    pass: number;
+    review: number;
+    warn: number;
+    fail: number;
+  } | null;
+  shadow_scenarios?: Array<{
+    scenario_id: string;
+    scenario_shadow_verdict?: string;
+    shadow_pass_count?: number;
+    shadow_review_count?: number;
+    shadow_warn_count?: number;
+    shadow_fail_count?: number;
+  }>;
   quality_issues?: QualityIssue[];
   process_status?: string;
   scenario_result_status?: string;
@@ -886,6 +904,10 @@ export const api = {
       empty_visible: number;
       review: number;
       runtime_warning: number;
+      shadow_pass_count?: number;
+      shadow_review_count?: number;
+      shadow_warn_count?: number;
+      shadow_fail_count?: number;
     };
     scenario_summary: Array<{
       scenario_id: string;
@@ -900,6 +922,11 @@ export const api = {
       empty_visible: number;
       review: number;
       runtime_warning: number;
+      shadow_pass_count?: number;
+      shadow_review_count?: number;
+      shadow_warn_count?: number;
+      shadow_fail_count?: number;
+      scenario_shadow_verdict?: string;
       status: 'fail' | 'issue' | 'review' | 'clean';
     }>;
     signals: Array<{ 
@@ -910,6 +937,10 @@ export const api = {
       spoken: string; 
       mismatch_type: string; 
       final_result: string;
+      shadow_verdict?: string;
+      shadow_verdict_reason?: string;
+      shadow_verdict_source?: string;
+      scenario_shadow_verdict?: string;
       failure_reason: string;
       focus_confidence: string;
       repeat_count?: number;
