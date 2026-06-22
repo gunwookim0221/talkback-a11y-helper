@@ -104,6 +104,12 @@ RESULT_SHEET_COLUMNS = [
     "semantic_card_is_value_covered",
     "semantic_card_is_action_only",
     "semantic_card_is_title_only",
+    "semantic_value_labels",
+    "semantic_value_covered",
+    "semantic_value_missing",
+    "semantic_value_total_count",
+    "semantic_value_matched_count",
+    "semantic_value_match_source",
     "result_crop_thumbnail",
 ]
 
@@ -835,6 +841,74 @@ def _normalize_result_match_text(value: object) -> str:
     return text
 
 
+def _split_semantic_value_labels(value: object) -> list[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    labels: list[str] = []
+    for part in re.split(r"\s*\|\s*", text):
+        label = " ".join(str(part or "").strip().split())
+        if label and label not in labels:
+            labels.append(label)
+    return labels
+
+
+def _semantic_value_coverage_for_row(row: pd.Series) -> pd.Series:
+    labels = _split_semantic_value_labels(row.get("semantic_card_values", ""))
+    if not labels:
+        return pd.Series(
+            {
+                "semantic_value_labels": "",
+                "semantic_value_covered": "",
+                "semantic_value_missing": "",
+                "semantic_value_total_count": 0,
+                "semantic_value_matched_count": 0,
+                "semantic_value_match_source": "",
+            }
+        )
+
+    normalized_announcement = _normalize_result_match_text(row.get("merged_announcement", ""))
+    matched = [
+        label
+        for label in labels
+        if _normalize_result_match_text(label)
+        and _normalize_result_match_text(label) in normalized_announcement
+    ]
+    matched_count = len(matched)
+    return pd.Series(
+        {
+            "semantic_value_labels": "|".join(labels),
+            "semantic_value_covered": matched_count == len(labels),
+            "semantic_value_missing": matched_count < len(labels),
+            "semantic_value_total_count": len(labels),
+            "semantic_value_matched_count": matched_count,
+            "semantic_value_match_source": "announcement" if matched_count else "",
+        }
+    )
+
+
+def _semantic_value_summary_rows(result_df: pd.DataFrame) -> list[dict[str, object]]:
+    if result_df.empty or "semantic_value_total_count" not in result_df.columns:
+        total = covered = 0
+    else:
+        value_counts = pd.to_numeric(result_df["semantic_value_total_count"], errors="coerce").fillna(0)
+        matched_counts = pd.to_numeric(result_df.get("semantic_value_matched_count", 0), errors="coerce").fillna(0)
+        total = int(value_counts.sum())
+        covered = int(matched_counts.sum())
+    missing = max(0, total - covered)
+    rate = round((covered / total) * 100, 1) if total else 0.0
+    return [
+        {"section": "semantic_value_coverage", "metric": "semantic_value_total", "value": total},
+        {"section": "semantic_value_coverage", "metric": "semantic_value_covered", "value": covered},
+        {"section": "semantic_value_coverage", "metric": "semantic_value_missing", "value": missing},
+        {"section": "semantic_value_coverage", "metric": "semantic_value_coverage_rate", "value": rate},
+    ]
+
+
+def add_semantic_value_summary(summary_df: pd.DataFrame, result_df: pd.DataFrame) -> pd.DataFrame:
+    return pd.concat([summary_df, pd.DataFrame(_semantic_value_summary_rows(result_df))], ignore_index=True)
+
+
 def _step_sort_value(value: object) -> int:
     if isinstance(value, bool):
         return -1
@@ -1488,6 +1562,9 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
         return "이동/발화 결과 재검토 필요"
 
     result["review_note"] = result.apply(_review_note, axis=1)
+    semantic_value_coverage = result.apply(_semantic_value_coverage_for_row, axis=1)
+    for col in semantic_value_coverage.columns:
+        result[col] = semantic_value_coverage[col]
     result["_debug_log_path"] = ""
     result["_debug_log_name"] = ""
     result["result_crop_thumbnail"] = ""
@@ -1749,6 +1826,7 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
     filtered_df = make_filtered_df(raw_df)
     summary_df = make_summary_df(raw_df, filtered_df)
     result_df = make_result_df(filtered_df)
+    summary_df = add_semantic_value_summary(summary_df, result_df)
     result_df = _populate_result_debug_logs(result_df, output_path, source_df=filtered_df)
     if _overlay_first_row_debug_enabled():
         tracked_keys: list[str] = []

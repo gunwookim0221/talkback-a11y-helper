@@ -427,6 +427,50 @@ def test_save_excel_adds_result_crop_hyperlink(tmp_path):
     assert crop_cell.hyperlink.target == str(crop_file.resolve())
 
 
+def test_save_excel_writes_semantic_value_coverage_summary(tmp_path):
+    output_path = tmp_path / "semantic_value_summary.xlsx"
+
+    save_excel(
+        [
+            {
+                "scenario_id": "generic_card",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "Status",
+                "merged_announcement": "Status Stopped Start",
+                "move_result": "moved",
+                "focus_view_id": "GenericCapabilityCardView",
+                "focus_bounds": "0,0,100,100",
+                "semantic_card_values": "Stopped",
+            },
+            {
+                "scenario_id": "generic_card",
+                "tab_name": "main",
+                "step_index": 2,
+                "context_type": "main",
+                "visible_label": "Rinse mode",
+                "merged_announcement": "Rinse mode Change",
+                "move_result": "moved",
+                "focus_view_id": "GenericCapabilityCardView",
+                "focus_bounds": "0,120,100,220",
+                "semantic_card_values": "Normal",
+            },
+        ],
+        str(output_path),
+        with_images=False,
+    )
+
+    wb = openpyxl.load_workbook(output_path)
+    ws = wb["summary"]
+    metrics = {ws.cell(row=i, column=2).value: ws.cell(row=i, column=3).value for i in range(2, ws.max_row + 1)}
+
+    assert metrics["semantic_value_total"] == 2
+    assert metrics["semantic_value_covered"] == 1
+    assert metrics["semantic_value_missing"] == 1
+    assert metrics["semantic_value_coverage_rate"] == 50
+
+
 def test_save_excel_writes_debug_log_only_for_warn_fail_rows(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "tb_runner.excel_report.get_recent_logs",
@@ -702,6 +746,131 @@ def test_make_result_df_preserves_semantic_card_metadata_without_changing_result
     assert row["semantic_card_member_count"] == 4
     assert row["mismatch_type"] == "EXACT_MATCH"
     assert row["final_result"] == "PASS"
+
+
+def test_make_result_df_marks_semantic_value_covered_from_announcement():
+    row_data = {
+        "scenario_id": "generic_card",
+        "tab_name": "main",
+        "step_index": 1,
+        "context_type": "main",
+        "visible_label": "Status",
+        "merged_announcement": "Status Stopped Start",
+        "move_result": "moved",
+        "focus_view_id": "GenericCapabilityCardView",
+        "focus_bounds": "0,0,100,100",
+    }
+    baseline = make_result_df(pd.DataFrame([row_data]))
+    filtered_df = pd.DataFrame(
+        [
+            {
+                **row_data,
+                "semantic_card_values": "Stopped",
+            }
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+    row = result.iloc[0]
+
+    assert row["semantic_value_labels"] == "Stopped"
+    assert row["semantic_value_covered"] == True
+    assert row["semantic_value_missing"] == False
+    assert row["semantic_value_total_count"] == 1
+    assert row["semantic_value_matched_count"] == 1
+    assert row["semantic_value_match_source"] == "announcement"
+    assert row["mismatch_type"] == baseline.iloc[0]["mismatch_type"]
+    assert row["final_result"] == baseline.iloc[0]["final_result"]
+
+
+def test_make_result_df_marks_semantic_value_missing_without_changing_result():
+    row_data = {
+        "scenario_id": "generic_card",
+        "tab_name": "main",
+        "step_index": 1,
+        "context_type": "main",
+        "visible_label": "Rinse mode",
+        "merged_announcement": "Rinse mode Change",
+        "move_result": "moved",
+        "focus_view_id": "GenericCapabilityCardView",
+        "focus_bounds": "0,0,100,100",
+    }
+    baseline = make_result_df(pd.DataFrame([row_data]))
+    filtered_df = pd.DataFrame(
+        [
+            {
+                **row_data,
+                "semantic_card_values": "Normal",
+            }
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+    row = result.iloc[0]
+
+    assert row["semantic_value_covered"] == False
+    assert row["semantic_value_missing"] == True
+    assert row["semantic_value_total_count"] == 1
+    assert row["semantic_value_matched_count"] == 0
+    assert row["semantic_value_match_source"] == ""
+    assert row["mismatch_type"] == baseline.iloc[0]["mismatch_type"]
+    assert row["final_result"] == baseline.iloc[0]["final_result"]
+
+
+def test_make_result_df_counts_partially_matched_semantic_values():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "generic_card",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "Air quality",
+                "merged_announcement": "Air quality CAQI",
+                "move_result": "moved",
+                "focus_view_id": "GenericCapabilityCardView",
+                "focus_bounds": "0,0,100,100",
+                "semantic_card_values": "CAQI|0100",
+            }
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+    row = result.iloc[0]
+
+    assert row["semantic_value_labels"] == "CAQI|0100"
+    assert row["semantic_value_covered"] == False
+    assert row["semantic_value_missing"] == True
+    assert row["semantic_value_total_count"] == 2
+    assert row["semantic_value_matched_count"] == 1
+    assert row["semantic_value_match_source"] == "announcement"
+
+
+def test_make_result_df_leaves_semantic_value_coverage_empty_without_value():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "generic_card",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "Mode",
+                "merged_announcement": "Mode",
+                "move_result": "moved",
+                "focus_view_id": "GenericCapabilityCardView",
+                "focus_bounds": "0,0,100,100",
+            }
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+    row = result.iloc[0]
+
+    assert row["semantic_value_labels"] == ""
+    assert row["semantic_value_covered"] == ""
+    assert row["semantic_value_missing"] == ""
+    assert row["semantic_value_total_count"] == 0
+    assert row["semantic_value_matched_count"] == 0
 
 
 def test_make_result_df_uses_representative_when_actual_focus_is_empty():
