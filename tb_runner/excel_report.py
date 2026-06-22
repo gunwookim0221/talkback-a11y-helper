@@ -110,6 +110,8 @@ RESULT_SHEET_COLUMNS = [
     "semantic_value_total_count",
     "semantic_value_matched_count",
     "semantic_value_match_source",
+    "semantic_value_confidence",
+    "semantic_value_confidence_reason",
     "semantic_value_quality",
     "semantic_value_importance",
     "semantic_value_gate_candidate",
@@ -1109,6 +1111,41 @@ def _semantic_value_quality_for_row(row: pd.Series) -> pd.Series:
     )
 
 
+def _semantic_value_confidence_for_row(row: pd.Series) -> pd.Series:
+    total = _to_int_or_zero(row.get("semantic_value_total_count", 0))
+    if total <= 0:
+        return pd.Series(
+            {
+                "semantic_value_confidence": "NONE",
+                "semantic_value_confidence_reason": "not_applicable",
+            }
+        )
+
+    sources = {
+        source.strip()
+        for source in str(row.get("semantic_value_match_source", "") or "").split("|")
+        if source.strip()
+    }
+    if "announcement" in sources:
+        confidence = "HIGH"
+        reason = "announcement"
+    elif "representative" in sources:
+        confidence = "MEDIUM"
+        reason = "representative"
+    elif "nearby_announcement" in sources:
+        confidence = "LOW"
+        reason = "nearby_announcement"
+    else:
+        confidence = "NONE"
+        reason = "not_covered"
+    return pd.Series(
+        {
+            "semantic_value_confidence": confidence,
+            "semantic_value_confidence_reason": reason,
+        }
+    )
+
+
 def _semantic_value_summary_rows(result_df: pd.DataFrame) -> list[dict[str, object]]:
     if result_df.empty or "semantic_value_total_count" not in result_df.columns:
         total = covered = 0
@@ -1162,12 +1199,32 @@ def _semantic_value_quality_summary_rows(result_df: pd.DataFrame) -> list[dict[s
     ]
 
 
+def _semantic_value_confidence_summary_rows(result_df: pd.DataFrame) -> list[dict[str, object]]:
+    if result_df.empty or "semantic_value_confidence" not in result_df.columns:
+        counts = {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "NONE": 0}
+    else:
+        confidence = result_df["semantic_value_confidence"].fillna("NONE").astype(str).str.upper()
+        counts = {
+            "HIGH": int((confidence == "HIGH").sum()),
+            "MEDIUM": int((confidence == "MEDIUM").sum()),
+            "LOW": int((confidence == "LOW").sum()),
+            "NONE": int((confidence == "NONE").sum()),
+        }
+    return [
+        {"section": "semantic_value_confidence", "metric": "semantic_value_confidence_high", "value": counts["HIGH"]},
+        {"section": "semantic_value_confidence", "metric": "semantic_value_confidence_medium", "value": counts["MEDIUM"]},
+        {"section": "semantic_value_confidence", "metric": "semantic_value_confidence_low", "value": counts["LOW"]},
+        {"section": "semantic_value_confidence", "metric": "semantic_value_confidence_none", "value": counts["NONE"]},
+    ]
+
+
 def add_semantic_value_summary(summary_df: pd.DataFrame, result_df: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(
         [
             summary_df,
             pd.DataFrame(_semantic_value_summary_rows(result_df)),
             pd.DataFrame(_semantic_value_quality_summary_rows(result_df)),
+            pd.DataFrame(_semantic_value_confidence_summary_rows(result_df)),
         ],
         ignore_index=True,
     )
@@ -1923,6 +1980,9 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     for col in semantic_value_coverage.columns:
         result[col] = semantic_value_coverage[col]
     result = _apply_semantic_value_nearby_coverage(result)
+    semantic_value_confidence = result.apply(_semantic_value_confidence_for_row, axis=1)
+    for col in semantic_value_confidence.columns:
+        result[col] = semantic_value_confidence[col]
     semantic_value_quality = result.apply(_semantic_value_quality_for_row, axis=1)
     for col in semantic_value_quality.columns:
         result[col] = semantic_value_quality[col]

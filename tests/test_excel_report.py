@@ -478,6 +478,10 @@ def test_save_excel_writes_semantic_value_coverage_summary(tmp_path):
     assert metrics["semantic_value_medium_missing"] == 1
     assert metrics["semantic_value_medium_importance_missing"] == 1
     assert metrics["semantic_value_review_candidate"] == 1
+    assert metrics["semantic_value_confidence_high"] == 1
+    assert metrics["semantic_value_confidence_medium"] == 0
+    assert metrics["semantic_value_confidence_low"] == 0
+    assert metrics["semantic_value_confidence_none"] == 1
 
 
 def test_save_excel_writes_debug_log_only_for_warn_fail_rows(tmp_path, monkeypatch):
@@ -788,6 +792,8 @@ def test_make_result_df_marks_semantic_value_covered_from_announcement():
     assert row["semantic_value_total_count"] == 1
     assert row["semantic_value_matched_count"] == 1
     assert row["semantic_value_match_source"] == "announcement"
+    assert row["semantic_value_confidence"] == "HIGH"
+    assert row["semantic_value_confidence_reason"] == "announcement"
     assert row["semantic_value_quality"] == "VALUE_FULLY_COVERED"
     assert row["semantic_value_gate_candidate"] == False
     assert row["semantic_value_review_candidate"] == False
@@ -864,6 +870,8 @@ def test_make_result_df_semantic_value_covered_from_representative_value():
     assert row["semantic_value_missing"] == False
     assert row["semantic_value_matched_count"] == 1
     assert row["semantic_value_match_source"] == "representative"
+    assert row["semantic_value_confidence"] == "MEDIUM"
+    assert row["semantic_value_confidence_reason"] == "representative"
     assert row["semantic_value_gate_candidate"] == False
     assert row["semantic_value_review_candidate"] == False
 
@@ -911,6 +919,8 @@ def test_make_result_df_semantic_value_covered_from_nearby_same_card_announcemen
     assert row["semantic_value_missing"] == False
     assert row["semantic_value_matched_count"] == 1
     assert row["semantic_value_match_source"] == "nearby_announcement"
+    assert row["semantic_value_confidence"] == "LOW"
+    assert row["semantic_value_confidence_reason"] == "nearby_announcement"
     assert row["semantic_value_quality"] == "VALUE_FULLY_COVERED"
     assert row["semantic_value_gate_candidate"] == False
     assert row["semantic_value_review_candidate"] == False
@@ -1060,6 +1070,8 @@ def test_make_result_df_leaves_semantic_value_coverage_empty_without_value():
     assert row["semantic_value_total_count"] == 0
     assert row["semantic_value_matched_count"] == 0
     assert row["semantic_value_quality"] == "VALUE_NOT_APPLICABLE"
+    assert row["semantic_value_confidence"] == "NONE"
+    assert row["semantic_value_confidence_reason"] == "not_applicable"
     assert row["semantic_value_importance"] == "ignore"
     assert row["semantic_value_gate_candidate"] == False
     assert row["semantic_value_review_candidate"] == False
