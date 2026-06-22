@@ -469,6 +469,11 @@ def test_save_excel_writes_semantic_value_coverage_summary(tmp_path):
     assert metrics["semantic_value_covered"] == 1
     assert metrics["semantic_value_missing"] == 1
     assert metrics["semantic_value_coverage_rate"] == 50
+    assert metrics["semantic_value_quality_total"] == 2
+    assert metrics["semantic_value_quality_missing"] == 1
+    assert metrics["semantic_value_quality_warn_candidate"] == 1
+    assert metrics["semantic_value_quality_review_candidate"] == 0
+    assert metrics["semantic_value_medium_missing"] == 1
 
 
 def test_save_excel_writes_debug_log_only_for_warn_fail_rows(tmp_path, monkeypatch):
@@ -779,6 +784,9 @@ def test_make_result_df_marks_semantic_value_covered_from_announcement():
     assert row["semantic_value_total_count"] == 1
     assert row["semantic_value_matched_count"] == 1
     assert row["semantic_value_match_source"] == "announcement"
+    assert row["semantic_value_quality"] == "VALUE_FULLY_COVERED"
+    assert row["semantic_value_gate_candidate"] == False
+    assert row["semantic_value_quality_reason"] == "value_fully_covered"
     assert row["mismatch_type"] == baseline.iloc[0]["mismatch_type"]
     assert row["final_result"] == baseline.iloc[0]["final_result"]
 
@@ -813,6 +821,10 @@ def test_make_result_df_marks_semantic_value_missing_without_changing_result():
     assert row["semantic_value_total_count"] == 1
     assert row["semantic_value_matched_count"] == 0
     assert row["semantic_value_match_source"] == ""
+    assert row["semantic_value_quality"] == "VALUE_MISSING"
+    assert row["semantic_value_importance"] == "medium"
+    assert row["semantic_value_gate_candidate"] == True
+    assert row["semantic_value_quality_reason"] == "missing_medium_importance_value"
     assert row["mismatch_type"] == baseline.iloc[0]["mismatch_type"]
     assert row["final_result"] == baseline.iloc[0]["final_result"]
 
@@ -844,6 +856,8 @@ def test_make_result_df_counts_partially_matched_semantic_values():
     assert row["semantic_value_total_count"] == 2
     assert row["semantic_value_matched_count"] == 1
     assert row["semantic_value_match_source"] == "announcement"
+    assert row["semantic_value_quality"] == "VALUE_PARTIALLY_COVERED"
+    assert row["semantic_value_gate_candidate"] == False
 
 
 def test_make_result_df_leaves_semantic_value_coverage_empty_without_value():
@@ -871,6 +885,101 @@ def test_make_result_df_leaves_semantic_value_coverage_empty_without_value():
     assert row["semantic_value_missing"] == ""
     assert row["semantic_value_total_count"] == 0
     assert row["semantic_value_matched_count"] == 0
+    assert row["semantic_value_quality"] == "VALUE_NOT_APPLICABLE"
+    assert row["semantic_value_importance"] == "ignore"
+    assert row["semantic_value_gate_candidate"] == False
+    assert row["semantic_value_quality_reason"] == "no_semantic_value"
+
+
+def test_make_result_df_marks_missing_high_importance_value_as_shadow_gate_candidate():
+    row_data = {
+        "scenario_id": "generic_card",
+        "tab_name": "main",
+        "step_index": 1,
+        "context_type": "main",
+        "visible_label": "Lock state",
+        "merged_announcement": "Lock state",
+        "move_result": "moved",
+        "focus_view_id": "GenericCapabilityCardView",
+        "focus_bounds": "0,0,100,100",
+    }
+    baseline = make_result_df(pd.DataFrame([row_data]))
+    result = make_result_df(
+        pd.DataFrame(
+            [
+                {
+                    **row_data,
+                    "semantic_card_values": "Locked",
+                    "semantic_card_role": "value",
+                }
+            ]
+        )
+    )
+    row = result.iloc[0]
+
+    assert row["semantic_value_quality"] == "VALUE_MISSING"
+    assert row["semantic_value_importance"] == "high"
+    assert row["semantic_value_gate_candidate"] == True
+    assert row["semantic_value_quality_reason"] == "missing_high_importance_value"
+    assert row["mismatch_type"] == baseline.iloc[0]["mismatch_type"]
+    assert row["final_result"] == baseline.iloc[0]["final_result"]
+
+
+def test_make_result_df_ignores_missing_action_like_semantic_value():
+    result = make_result_df(
+        pd.DataFrame(
+            [
+                {
+                    "scenario_id": "generic_card",
+                    "tab_name": "main",
+                    "step_index": 1,
+                    "context_type": "main",
+                    "visible_label": "Mode",
+                    "merged_announcement": "Mode",
+                    "move_result": "moved",
+                    "focus_view_id": "GenericCapabilityCardView",
+                    "focus_bounds": "0,0,100,100",
+                    "semantic_card_values": "Change",
+                    "semantic_card_role": "value",
+                }
+            ]
+        )
+    )
+    row = result.iloc[0]
+
+    assert row["semantic_value_quality"] == "VALUE_MISSING"
+    assert row["semantic_value_importance"] == "ignore"
+    assert row["semantic_value_gate_candidate"] == False
+    assert row["semantic_value_quality_reason"] == "action_like_value_ignored"
+
+
+def test_make_result_df_reviews_missing_composite_semantic_value_without_gate_candidate():
+    result = make_result_df(
+        pd.DataFrame(
+            [
+                {
+                    "scenario_id": "generic_card",
+                    "tab_name": "main",
+                    "step_index": 1,
+                    "context_type": "main",
+                    "visible_label": "Fine dust",
+                    "merged_announcement": "Fine dust",
+                    "move_result": "moved",
+                    "focus_view_id": "GenericCapabilityCardView",
+                    "focus_bounds": "0,0,100,100",
+                    "semantic_card_title": "Fine dust",
+                    "semantic_card_values": "Fine dust History PM 10 0 ug 0999 PM 2.5 0 ug 0999",
+                    "semantic_card_role": "value",
+                }
+            ]
+        )
+    )
+    row = result.iloc[0]
+
+    assert row["semantic_value_quality"] == "VALUE_MISSING"
+    assert row["semantic_value_importance"] == "low"
+    assert row["semantic_value_gate_candidate"] == False
+    assert row["semantic_value_quality_reason"] == "composite_value_review"
 
 
 def test_make_result_df_uses_representative_when_actual_focus_is_empty():

@@ -110,6 +110,10 @@ RESULT_SHEET_COLUMNS = [
     "semantic_value_total_count",
     "semantic_value_matched_count",
     "semantic_value_match_source",
+    "semantic_value_quality",
+    "semantic_value_importance",
+    "semantic_value_gate_candidate",
+    "semantic_value_quality_reason",
     "result_crop_thumbnail",
 ]
 
@@ -887,6 +891,179 @@ def _semantic_value_coverage_for_row(row: pd.Series) -> pd.Series:
     )
 
 
+_SEMANTIC_VALUE_ACTION_WORDS = {
+    "change",
+    "edit",
+    "more",
+    "history",
+    "view",
+    "details",
+    "use",
+    "start",
+    "pause",
+    "play",
+    "next",
+    "previous",
+    "delete",
+    "remove",
+    "settings",
+    "button",
+}
+
+_SEMANTIC_VALUE_HIGH_STATES = {
+    "on",
+    "off",
+    "locked",
+    "unlocked",
+    "open",
+    "closed",
+    "stopped",
+    "running",
+    "detected",
+    "not detected",
+    "dry",
+    "clear",
+}
+
+_SEMANTIC_VALUE_MEDIUM_STATES = {
+    "normal",
+    "heavy",
+    "auto",
+    "standard",
+    "low",
+    "medium",
+    "high",
+    "cool",
+    "heat",
+}
+
+_SEMANTIC_VALUE_HIGH_CONTEXT_RE = re.compile(
+    r"\b(pm\s*\d+(?:\.\d+)?|caqi|temperature|humidity|battery|volume|channel|lock|door|smoke|water|motion|vibration|dust)\b",
+    re.IGNORECASE,
+)
+
+_SEMANTIC_VALUE_MEDIUM_CONTEXT_RE = re.compile(
+    r"\b(mode|cycle|fan|picture|sound|rinse|spin|temperature)\b",
+    re.IGNORECASE,
+)
+
+
+def _semantic_value_tokens(label: str) -> list[str]:
+    return re.findall(r"[A-Za-z0-9.]+", _normalize_compare_text(label))
+
+
+def _is_semantic_value_action_like(labels: list[str]) -> bool:
+    if not labels:
+        return False
+    for label in labels:
+        tokens = _semantic_value_tokens(label)
+        if not tokens:
+            continue
+        if all(token in _SEMANTIC_VALUE_ACTION_WORDS for token in tokens):
+            return True
+        normalized = _normalize_compare_text(label)
+        if normalized in {"view details", "view details and use"}:
+            return True
+    return False
+
+
+def _is_semantic_value_composite_or_unreliable(labels: list[str], row: pd.Series) -> bool:
+    if not labels:
+        return False
+    role = str(row.get("semantic_card_role", "") or "").strip().lower()
+    if role in {"title", "action", "unknown"}:
+        return True
+    for label in labels:
+        tokens = _semantic_value_tokens(label)
+        normalized = _normalize_compare_text(label)
+        if len(label) > 64 or len(tokens) > 6:
+            return True
+        if any(token in _SEMANTIC_VALUE_ACTION_WORDS for token in tokens) and len(tokens) > 1:
+            return True
+        title = _normalize_compare_text(row.get("semantic_card_title", ""))
+        if title and title in normalized and len(tokens) > 2:
+            return True
+    return False
+
+
+def _semantic_value_importance(labels: list[str], row: pd.Series) -> tuple[str, str]:
+    if not labels:
+        return "ignore", "no_semantic_value"
+    if _is_semantic_value_action_like(labels):
+        return "ignore", "action_like_value_ignored"
+    if _is_semantic_value_composite_or_unreliable(labels, row):
+        return "low", "composite_value_review"
+
+    combined = " ".join(labels)
+    normalized_labels = {_normalize_compare_text(label) for label in labels}
+    context = " ".join(
+        str(row.get(field, "") or "")
+        for field in ("semantic_card_title", "semantic_card_values", "visible_label", "representative_visible")
+    )
+    on_off_values = {"on", "off"}
+    if normalized_labels and normalized_labels.issubset(on_off_values):
+        role = str(row.get("semantic_card_role", "") or "").strip().lower()
+        if role != "toggle" and not re.search(r"\b(power|switch|status|state|lock)\b", context, flags=re.IGNORECASE):
+            return "low", "metadata_unreliable"
+    if normalized_labels & _SEMANTIC_VALUE_HIGH_STATES:
+        return "high", ""
+    if _SEMANTIC_VALUE_HIGH_CONTEXT_RE.search(combined) or _SEMANTIC_VALUE_HIGH_CONTEXT_RE.search(context):
+        return "high", ""
+    if any(re.search(r"\d", label) for label in labels):
+        return "high", ""
+    if normalized_labels & _SEMANTIC_VALUE_MEDIUM_STATES:
+        return "medium", ""
+    if _SEMANTIC_VALUE_MEDIUM_CONTEXT_RE.search(context):
+        return "medium", ""
+    return "low", "metadata_unreliable"
+
+
+def _semantic_value_quality_for_row(row: pd.Series) -> pd.Series:
+    labels = _split_semantic_value_labels(row.get("semantic_value_labels", "") or row.get("semantic_card_values", ""))
+    total = int(pd.to_numeric(pd.Series([row.get("semantic_value_total_count", 0)]), errors="coerce").fillna(0).iloc[0])
+    matched = int(pd.to_numeric(pd.Series([row.get("semantic_value_matched_count", 0)]), errors="coerce").fillna(0).iloc[0])
+    importance, reason_hint = _semantic_value_importance(labels, row)
+
+    if total <= 0:
+        quality = "VALUE_NOT_APPLICABLE"
+        reason = "no_semantic_value"
+        gate_candidate = False
+    elif matched >= total:
+        quality = "VALUE_FULLY_COVERED"
+        reason = "value_fully_covered"
+        gate_candidate = False
+    elif matched > 0:
+        quality = "VALUE_PARTIALLY_COVERED"
+        reason = "value_partially_covered"
+        gate_candidate = False
+    else:
+        quality = "VALUE_MISSING"
+        if reason_hint in {"action_like_value_ignored", "composite_value_review"}:
+            reason = reason_hint
+            gate_candidate = False
+        elif importance == "high":
+            reason = "missing_high_importance_value"
+            gate_candidate = True
+        elif importance == "medium":
+            reason = "missing_medium_importance_value"
+            gate_candidate = True
+        elif importance in {"low", "ignore"}:
+            reason = reason_hint or "metadata_unreliable"
+            gate_candidate = False
+        else:
+            reason = "metadata_unreliable"
+            gate_candidate = False
+
+    return pd.Series(
+        {
+            "semantic_value_quality": quality,
+            "semantic_value_importance": importance,
+            "semantic_value_gate_candidate": gate_candidate,
+            "semantic_value_quality_reason": reason,
+        }
+    )
+
+
 def _semantic_value_summary_rows(result_df: pd.DataFrame) -> list[dict[str, object]]:
     if result_df.empty or "semantic_value_total_count" not in result_df.columns:
         total = covered = 0
@@ -905,8 +1082,42 @@ def _semantic_value_summary_rows(result_df: pd.DataFrame) -> list[dict[str, obje
     ]
 
 
+def _semantic_value_quality_summary_rows(result_df: pd.DataFrame) -> list[dict[str, object]]:
+    if result_df.empty or "semantic_value_quality" not in result_df.columns:
+        total = missing = warn_candidate = review_candidate = high_missing = medium_missing = low_or_ignored = 0
+    else:
+        quality = result_df["semantic_value_quality"].fillna("").astype(str)
+        importance = result_df.get("semantic_value_importance", pd.Series("", index=result_df.index)).fillna("").astype(str)
+        reason = result_df.get("semantic_value_quality_reason", pd.Series("", index=result_df.index)).fillna("").astype(str)
+        gate = result_df.get("semantic_value_gate_candidate", pd.Series(False, index=result_df.index)).fillna(False).astype(bool)
+        total = int((quality != "VALUE_NOT_APPLICABLE").sum())
+        missing_mask = quality == "VALUE_MISSING"
+        missing = int(missing_mask.sum())
+        warn_candidate = int((missing_mask & gate).sum())
+        review_candidate = int((missing_mask & ~gate & reason.isin({"composite_value_review", "metadata_unreliable"})).sum())
+        high_missing = int((missing_mask & (importance == "high")).sum())
+        medium_missing = int((missing_mask & (importance == "medium")).sum())
+        low_or_ignored = int((missing_mask & importance.isin({"low", "ignore"})).sum())
+    return [
+        {"section": "semantic_value_quality", "metric": "semantic_value_quality_total", "value": total},
+        {"section": "semantic_value_quality", "metric": "semantic_value_quality_missing", "value": missing},
+        {"section": "semantic_value_quality", "metric": "semantic_value_quality_warn_candidate", "value": warn_candidate},
+        {"section": "semantic_value_quality", "metric": "semantic_value_quality_review_candidate", "value": review_candidate},
+        {"section": "semantic_value_quality", "metric": "semantic_value_high_missing", "value": high_missing},
+        {"section": "semantic_value_quality", "metric": "semantic_value_medium_missing", "value": medium_missing},
+        {"section": "semantic_value_quality", "metric": "semantic_value_low_or_ignored", "value": low_or_ignored},
+    ]
+
+
 def add_semantic_value_summary(summary_df: pd.DataFrame, result_df: pd.DataFrame) -> pd.DataFrame:
-    return pd.concat([summary_df, pd.DataFrame(_semantic_value_summary_rows(result_df))], ignore_index=True)
+    return pd.concat(
+        [
+            summary_df,
+            pd.DataFrame(_semantic_value_summary_rows(result_df)),
+            pd.DataFrame(_semantic_value_quality_summary_rows(result_df)),
+        ],
+        ignore_index=True,
+    )
 
 
 def _step_sort_value(value: object) -> int:
@@ -1565,6 +1776,9 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     semantic_value_coverage = result.apply(_semantic_value_coverage_for_row, axis=1)
     for col in semantic_value_coverage.columns:
         result[col] = semantic_value_coverage[col]
+    semantic_value_quality = result.apply(_semantic_value_quality_for_row, axis=1)
+    for col in semantic_value_quality.columns:
+        result[col] = semantic_value_quality[col]
     result["_debug_log_path"] = ""
     result["_debug_log_name"] = ""
     result["result_crop_thumbnail"] = ""
