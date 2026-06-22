@@ -855,6 +855,7 @@ def test_make_result_df_semantic_value_covered_from_representative_value():
                     "merged_announcement": "Rinse mode",
                     "representative_visible": "Normal",
                     "representative_announcement": "Normal",
+                    "row_source": "actual_focus",
                     "move_result": "moved",
                     "focus_view_id": "GenericCapabilityCardView",
                     "focus_bounds": "0,0,100,100",
@@ -874,6 +875,8 @@ def test_make_result_df_semantic_value_covered_from_representative_value():
     assert row["semantic_value_confidence_reason"] == "representative"
     assert row["semantic_value_gate_candidate"] == False
     assert row["semantic_value_review_candidate"] == False
+    assert row["shadow_verdict"] == "SHADOW_PASS"
+    assert row["shadow_verdict_reason"] == "representative_semantic_value_covered"
 
 
 def test_make_result_df_semantic_value_covered_from_nearby_same_card_announcement():
@@ -1603,6 +1606,173 @@ def test_make_result_df_keeps_non_empty_normal_row_exact_match():
 
     assert result.iloc[0]["mismatch_type"] == "EXACT_MATCH"
     assert result.iloc[0]["final_result"] == "PASS"
+
+
+def test_make_result_df_adds_shadow_verdicts_without_changing_final_results():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "s_fail",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "",
+                "merged_announcement": "",
+                "move_result": "moved",
+                "focus_view_id": "id/empty",
+                "focus_bounds": "0,0,100,100",
+            },
+            {
+                "scenario_id": "s_warn",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "History",
+                "merged_announcement": "History",
+                "move_result": "failed",
+                "focus_view_id": "history",
+                "focus_bounds": "0,0,100,100",
+                "failure_reason": "move_failed",
+            },
+            {
+                "scenario_id": "s_review",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "Rinse mode",
+                "merged_announcement": "Rinse mode",
+                "representative_visible": "Normal",
+                "representative_row_source": "representative",
+                "row_source": "actual_focus",
+                "move_result": "moved",
+                "focus_view_id": "RinseModeCapabilityCardView_header_title",
+                "focus_bounds": "0,0,100,100",
+            },
+            {
+                "scenario_id": "s_pass",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "Status Stopped Start",
+                "merged_announcement": "Status Stopped Start",
+                "move_result": "moved",
+                "focus_view_id": "StatusCapabilityCardView",
+                "focus_bounds": "0,0,100,100",
+                "semantic_card_values": "Stopped",
+            },
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    by_scenario = result.set_index("scenario_id")
+    assert by_scenario.loc["s_fail", "final_result"] == "FAIL"
+    assert by_scenario.loc["s_fail", "shadow_verdict"] == "SHADOW_FAIL"
+    assert by_scenario.loc["s_fail", "shadow_verdict_source"] == "final_result"
+
+    assert by_scenario.loc["s_warn", "final_result"] == "WARN"
+    assert by_scenario.loc["s_warn", "shadow_verdict"] == "SHADOW_WARN"
+    assert by_scenario.loc["s_warn", "shadow_verdict_reason"] == "move_failed"
+
+    assert by_scenario.loc["s_review", "final_result"] == "PASS"
+    assert by_scenario.loc["s_review", "mismatch_type"] == "REPRESENTATIVE_CONTEXT"
+    assert by_scenario.loc["s_review", "shadow_verdict"] == "SHADOW_REVIEW"
+    assert by_scenario.loc["s_review", "shadow_verdict_reason"] == "representative_context"
+
+    assert by_scenario.loc["s_pass", "final_result"] == "PASS"
+    assert by_scenario.loc["s_pass", "shadow_verdict"] == "SHADOW_PASS"
+    assert by_scenario.loc["s_pass", "shadow_verdict_reason"] == "no_shadow_issue"
+
+
+def test_make_result_df_sets_scenario_shadow_verdict_to_worst_row():
+    filtered_df = pd.DataFrame(
+        [
+            {
+                "scenario_id": "scenario_warn",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "Good",
+                "merged_announcement": "Good",
+                "move_result": "moved",
+                "focus_view_id": "id/good",
+                "focus_bounds": "0,0,100,100",
+            },
+            {
+                "scenario_id": "scenario_warn",
+                "tab_name": "main",
+                "step_index": 2,
+                "context_type": "main",
+                "visible_label": "History",
+                "merged_announcement": "History",
+                "move_result": "failed",
+                "failure_reason": "repeat_no_progress",
+                "focus_view_id": "history",
+                "focus_bounds": "0,0,100,100",
+            },
+        ]
+    )
+
+    result = make_result_df(filtered_df)
+
+    assert result["shadow_verdict"].tolist() == ["SHADOW_WARN", "SHADOW_WARN"]
+    assert result["scenario_shadow_verdict"].tolist() == ["SHADOW_WARN", "SHADOW_WARN"]
+
+
+def test_save_excel_writes_shadow_verdict_summary(tmp_path):
+    output_path = tmp_path / "shadow_summary.xlsx"
+
+    save_excel(
+        [
+            {
+                "scenario_id": "s_pass",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "Status",
+                "merged_announcement": "Status",
+                "move_result": "moved",
+                "focus_view_id": "id/status",
+                "focus_bounds": "0,0,100,100",
+            },
+            {
+                "scenario_id": "s_warn",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "History",
+                "merged_announcement": "History",
+                "move_result": "failed",
+                "failure_reason": "move_failed",
+                "focus_view_id": "history",
+                "focus_bounds": "0,0,100,100",
+            },
+            {
+                "scenario_id": "s_fail",
+                "tab_name": "main",
+                "step_index": 1,
+                "context_type": "main",
+                "visible_label": "",
+                "merged_announcement": "",
+                "move_result": "moved",
+                "focus_view_id": "id/empty",
+                "focus_bounds": "0,0,100,100",
+            },
+        ],
+        str(output_path),
+        with_images=False,
+    )
+
+    wb = openpyxl.load_workbook(output_path)
+    ws = wb["summary"]
+    metrics = {ws.cell(row=i, column=2).value: ws.cell(row=i, column=3).value for i in range(2, ws.max_row + 1)}
+
+    assert metrics["shadow_pass_count"] == 1
+    assert metrics["shadow_warn_count"] == 1
+    assert metrics["shadow_fail_count"] == 1
+    assert metrics["scenario_shadow_pass_count"] == 1
+    assert metrics["scenario_shadow_warn_count"] == 1
+    assert metrics["scenario_shadow_fail_count"] == 1
 
 
 def test_annotate_plugin_metadata_uses_mapping_and_fallback():

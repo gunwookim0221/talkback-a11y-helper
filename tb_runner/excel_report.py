@@ -117,6 +117,10 @@ RESULT_SHEET_COLUMNS = [
     "semantic_value_gate_candidate",
     "semantic_value_review_candidate",
     "semantic_value_quality_reason",
+    "shadow_verdict",
+    "shadow_verdict_reason",
+    "shadow_verdict_source",
+    "scenario_shadow_verdict",
     "result_crop_thumbnail",
 ]
 
@@ -1218,6 +1222,158 @@ def _semantic_value_confidence_summary_rows(result_df: pd.DataFrame) -> list[dic
     ]
 
 
+_SHADOW_VERDICT_SEVERITY = {
+    "SHADOW_PASS": 0,
+    "SHADOW_REVIEW": 1,
+    "SHADOW_WARN": 2,
+    "SHADOW_FAIL": 3,
+}
+
+
+def _shadow_verdict_for_row(row: pd.Series) -> pd.Series:
+    final_result = str(row.get("final_result", "") or "").strip().upper()
+    mismatch_type = str(row.get("mismatch_type", "") or "").strip().upper()
+    failure_reason = str(row.get("failure_reason", "") or "").strip().lower()
+    focus_confidence = str(row.get("focus_confidence", "") or "").strip().upper()
+    semantic_quality = str(row.get("semantic_value_quality", "") or "").strip().upper()
+    semantic_importance = str(row.get("semantic_value_importance", "") or "").strip().lower()
+    semantic_confidence = str(row.get("semantic_value_confidence", "") or "").strip().upper()
+    semantic_review = _to_boolish(row.get("semantic_value_review_candidate", False))
+    local_tab_traversal_fail = _to_boolish(row.get("local_tab_content_traversal_fail", False))
+
+    if final_result == "FAIL":
+        return pd.Series(
+            {
+                "shadow_verdict": "SHADOW_FAIL",
+                "shadow_verdict_reason": "final_result_fail",
+                "shadow_verdict_source": "final_result",
+            }
+        )
+    if mismatch_type in {"EMPTY_VISIBLE", "EMPTY_SPEECH", "LABEL_MISMATCH"}:
+        return pd.Series(
+            {
+                "shadow_verdict": "SHADOW_FAIL",
+                "shadow_verdict_reason": mismatch_type.lower(),
+                "shadow_verdict_source": "mismatch_type",
+            }
+        )
+    if local_tab_traversal_fail:
+        return pd.Series(
+            {
+                "shadow_verdict": "SHADOW_FAIL",
+                "shadow_verdict_reason": "local_tab_content_traversal_fail",
+                "shadow_verdict_source": "local_tab",
+            }
+        )
+
+    if failure_reason in {"move_failed", "repeat_no_progress", "terminal_not_handled"}:
+        return pd.Series(
+            {
+                "shadow_verdict": "SHADOW_WARN",
+                "shadow_verdict_reason": failure_reason,
+                "shadow_verdict_source": "failure_reason",
+            }
+        )
+    if (
+        semantic_quality == "VALUE_MISSING"
+        and semantic_importance == "high"
+        and semantic_confidence == "NONE"
+    ):
+        return pd.Series(
+            {
+                "shadow_verdict": "SHADOW_WARN",
+                "shadow_verdict_reason": "missing_high_importance_semantic_value",
+                "shadow_verdict_source": "semantic_value",
+            }
+        )
+
+    if semantic_review:
+        return pd.Series(
+            {
+                "shadow_verdict": "SHADOW_REVIEW",
+                "shadow_verdict_reason": "semantic_value_review_candidate",
+                "shadow_verdict_source": "semantic_value",
+            }
+        )
+    if semantic_quality == "VALUE_MISSING" and semantic_importance == "medium":
+        return pd.Series(
+            {
+                "shadow_verdict": "SHADOW_REVIEW",
+                "shadow_verdict_reason": "missing_medium_importance_semantic_value",
+                "shadow_verdict_source": "semantic_value",
+            }
+        )
+    if (
+        mismatch_type == "REPRESENTATIVE_CONTEXT"
+        and final_result == "PASS"
+        and semantic_quality == "VALUE_FULLY_COVERED"
+        and semantic_confidence in {"HIGH", "MEDIUM"}
+    ):
+        return pd.Series(
+            {
+                "shadow_verdict": "SHADOW_PASS",
+                "shadow_verdict_reason": "representative_semantic_value_covered",
+                "shadow_verdict_source": "semantic_value",
+            }
+        )
+    if mismatch_type == "REPRESENTATIVE_CONTEXT":
+        return pd.Series(
+            {
+                "shadow_verdict": "SHADOW_REVIEW",
+                "shadow_verdict_reason": "representative_context",
+                "shadow_verdict_source": "mismatch_type",
+            }
+        )
+    if focus_confidence == "LOW":
+        return pd.Series(
+            {
+                "shadow_verdict": "SHADOW_REVIEW",
+                "shadow_verdict_reason": "low_focus_confidence",
+                "shadow_verdict_source": "focus_confidence",
+            }
+        )
+    return pd.Series(
+        {
+            "shadow_verdict": "SHADOW_PASS",
+            "shadow_verdict_reason": "no_shadow_issue",
+            "shadow_verdict_source": "default",
+        }
+    )
+
+
+def _shadow_summary_rows(result_df: pd.DataFrame) -> list[dict[str, object]]:
+    if result_df.empty or "shadow_verdict" not in result_df.columns:
+        counts = {"SHADOW_PASS": 0, "SHADOW_REVIEW": 0, "SHADOW_WARN": 0, "SHADOW_FAIL": 0}
+        scenario_counts = counts.copy()
+    else:
+        verdict = result_df["shadow_verdict"].fillna("SHADOW_PASS").astype(str).str.upper()
+        counts = {
+            key: int((verdict == key).sum())
+            for key in ("SHADOW_PASS", "SHADOW_REVIEW", "SHADOW_WARN", "SHADOW_FAIL")
+        }
+        scenario_counts = {"SHADOW_PASS": 0, "SHADOW_REVIEW": 0, "SHADOW_WARN": 0, "SHADOW_FAIL": 0}
+        if "scenario_id" in result_df.columns:
+            for _, group in result_df.groupby("scenario_id", dropna=False, sort=False):
+                scenario_verdict = max(
+                    (
+                        str(value or "SHADOW_PASS").strip().upper()
+                        for value in group["shadow_verdict"].tolist()
+                    ),
+                    key=lambda value: _SHADOW_VERDICT_SEVERITY.get(value, 0),
+                )
+                scenario_counts[scenario_verdict] = scenario_counts.get(scenario_verdict, 0) + 1
+    return [
+        {"section": "shadow_verdict", "metric": "shadow_pass_count", "value": counts["SHADOW_PASS"]},
+        {"section": "shadow_verdict", "metric": "shadow_review_count", "value": counts["SHADOW_REVIEW"]},
+        {"section": "shadow_verdict", "metric": "shadow_warn_count", "value": counts["SHADOW_WARN"]},
+        {"section": "shadow_verdict", "metric": "shadow_fail_count", "value": counts["SHADOW_FAIL"]},
+        {"section": "shadow_verdict", "metric": "scenario_shadow_pass_count", "value": scenario_counts["SHADOW_PASS"]},
+        {"section": "shadow_verdict", "metric": "scenario_shadow_review_count", "value": scenario_counts["SHADOW_REVIEW"]},
+        {"section": "shadow_verdict", "metric": "scenario_shadow_warn_count", "value": scenario_counts["SHADOW_WARN"]},
+        {"section": "shadow_verdict", "metric": "scenario_shadow_fail_count", "value": scenario_counts["SHADOW_FAIL"]},
+    ]
+
+
 def add_semantic_value_summary(summary_df: pd.DataFrame, result_df: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(
         [
@@ -1225,6 +1381,7 @@ def add_semantic_value_summary(summary_df: pd.DataFrame, result_df: pd.DataFrame
             pd.DataFrame(_semantic_value_summary_rows(result_df)),
             pd.DataFrame(_semantic_value_quality_summary_rows(result_df)),
             pd.DataFrame(_semantic_value_confidence_summary_rows(result_df)),
+            pd.DataFrame(_shadow_summary_rows(result_df)),
         ],
         ignore_index=True,
     )
@@ -1986,6 +2143,18 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     semantic_value_quality = result.apply(_semantic_value_quality_for_row, axis=1)
     for col in semantic_value_quality.columns:
         result[col] = semantic_value_quality[col]
+    shadow_verdict = result.apply(_shadow_verdict_for_row, axis=1)
+    for col in shadow_verdict.columns:
+        result[col] = shadow_verdict[col]
+    result["scenario_shadow_verdict"] = result["shadow_verdict"]
+    if "scenario_id" in result.columns and not result.empty:
+        scenario_verdict = {}
+        for scenario_id, group in result.groupby("scenario_id", dropna=False, sort=False):
+            scenario_verdict[scenario_id] = max(
+                group["shadow_verdict"].fillna("SHADOW_PASS").astype(str).str.upper().tolist(),
+                key=lambda value: _SHADOW_VERDICT_SEVERITY.get(value, 0),
+            )
+        result["scenario_shadow_verdict"] = result["scenario_id"].map(scenario_verdict).fillna(result["shadow_verdict"])
     result["_debug_log_path"] = ""
     result["_debug_log_name"] = ""
     result["result_crop_thumbnail"] = ""
