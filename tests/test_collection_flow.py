@@ -28,6 +28,643 @@ def _scenario_config(scenario_id):
     return next(cfg for cfg in TAB_CONFIGS if cfg.get("scenario_id") == scenario_id)
 
 
+def test_focusable_inventory_collects_focus_payload_and_dump_nodes(tmp_path):
+    client = SimpleNamespace()
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    row = {
+        "scenario_id": "device_motion_sensor_plugin",
+        "tab_name": "Motion Sensor",
+        "step_index": 3,
+        "visible_label": "Motion detected",
+        "focus_view_id": "com.example:id/motion_state",
+        "focus_bounds": "10,20,200,80",
+        "focus_class_name": "android.widget.TextView",
+        "dump_tree_nodes": [
+            {
+                "text": "Motion detected",
+                "viewIdResourceName": "com.example:id/motion_state",
+                "boundsInScreen": "10,20,200,80",
+                "focusable": True,
+                "visibleToUser": True,
+            },
+            {
+                "text": "100%",
+                "viewIdResourceName": "com.example:id/battery",
+                "boundsInScreen": "210,20,300,80",
+                "focusable": True,
+                "visibleToUser": True,
+            },
+            {
+                "text": ">",
+                "viewIdResourceName": "com.example:id/chevron",
+                "boundsInScreen": "950,20,990,80",
+                "clickable": True,
+                "visibleToUser": True,
+            },
+            {
+                "contentDescription": "Graph button",
+                "className": "android.widget.Button",
+                "viewIdResourceName": "com.example:id/graph_button",
+                "boundsInScreen": "10,120,300,220",
+                "clickable": True,
+                "visibleToUser": True,
+            },
+            {
+                "text": "Controls",
+                "viewIdResourceName": "com.example:id/tab_controls",
+                "boundsInScreen": "0,1700,300,1850",
+                "clickable": True,
+                "visibleToUser": True,
+            },
+            {
+                "text": "Routines",
+                "viewIdResourceName": "com.example:id/tab_routines",
+                "boundsInScreen": "300,1700,600,1850",
+                "clickable": True,
+                "visibleToUser": True,
+            },
+            {
+                "text": "History",
+                "viewIdResourceName": "com.example:id/tab_history",
+                "boundsInScreen": "600,1700,900,1850",
+                "clickable": True,
+                "visibleToUser": True,
+            },
+        ],
+    }
+
+    collection_flow._register_focusable_inventory_from_row(
+        client,
+        output_path=output_path,
+        row=row,
+        state=SimpleNamespace(current_local_tab_signature="controls"),
+    )
+
+    labels = {item["label"] for item in client._focusable_inventory}
+    assert {"Motion detected", "100%", ">", "Graph button", "Controls", "Routines", "History"} <= labels
+    assert any(item["source"] == "focus_payload" and item["label"] == "Motion detected" for item in client._focusable_inventory)
+    assert any(item["source"] == "dump_tree" and item["label"] == "Graph button" for item in client._focusable_inventory)
+
+
+def test_focusable_inventory_saves_json_artifact(tmp_path):
+    client = SimpleNamespace()
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    collection_flow._register_focusable_inventory_item(
+        client,
+        output_path=output_path,
+        scenario_id="device_motion_sensor_plugin",
+        tab_name="Motion Sensor",
+        step_index=1,
+        label="100%",
+        view_id="com.example:id/battery",
+        bounds="10,20,100,80",
+        source="focus_payload",
+    )
+
+    collection_flow._save_focusable_inventory(client, output_path)
+
+    artifact = tmp_path / "talkback_compare.focusable_inventory.json"
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "audit-v7-focusable-inventory-v1"
+    assert payload["count"] == 1
+    assert payload["items"][0]["label"] == "100%"
+
+
+def test_focusable_coverage_marks_view_id_match_covered(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    inventory = [
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "tab_name": "Motion Sensor",
+            "label": "Controls",
+            "view_id": "control",
+            "bounds": "0,1700,300,1850",
+            "source": "focus_payload",
+        }
+    ]
+    rows = [
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "step_index": 8,
+            "visible_label": "Controls",
+            "focus_view_id": "control",
+            "focus_bounds": "0,1700,300,1850",
+        }
+    ]
+
+    payload = collection_flow._build_focusable_coverage_payload(inventory, rows, output_path)
+
+    assert payload["records"][0]["coverage_status"] == "COVERED"
+    assert payload["records"][0]["coverage_reason"] == "view_id_exact"
+    assert payload["records"][0]["matched_step"] == 8
+    assert payload["summary"][0]["expected_count"] == 1
+    assert payload["summary"][0]["canonical_expected_count"] == 1
+    assert payload["summary"][0]["raw_inventory_count"] == 1
+    assert payload["summary"][0]["covered_count"] == 1
+    assert payload["summary"][0]["coverage_rate"] == 100.0
+
+
+def test_focusable_coverage_merges_duplicate_sources_into_one_canonical_item(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    inventory = [
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "tab_name": "Motion Sensor",
+            "label": "Controls",
+            "view_id": "control",
+            "bounds": "0,1700,300,1850",
+            "source": "helper_snapshot",
+        },
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "tab_name": "Motion Sensor",
+            "label": "Controls",
+            "view_id": "control",
+            "bounds": "{'l': 0, 't': 1700, 'r': 300, 'b': 1850}",
+            "source": "focus_payload",
+        },
+    ]
+    rows = [
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "step_index": 6,
+            "visible_label": "Controls",
+            "focus_view_id": "control",
+        }
+    ]
+
+    payload = collection_flow._build_focusable_coverage_payload(inventory, rows, output_path)
+
+    assert len(payload["records"]) == 1
+    record = payload["records"][0]
+    assert record["coverage_status"] == "COVERED"
+    assert record["primary_source"] == "focus_payload"
+    assert record["sources"] == ["focus_payload", "helper_snapshot"]
+    assert record["raw_record_count"] == 2
+    summary = payload["summary"][0]
+    assert summary["raw_inventory_count"] == 2
+    assert summary["canonical_expected_count"] == 1
+    assert summary["expected_count"] == 1
+    assert summary["coverage_rate"] == 100.0
+
+
+def test_focusable_coverage_marks_missing_inventory_item_missed(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    inventory = [
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "tab_name": "Motion Sensor",
+            "label": "100%",
+            "view_id": "lowBattery",
+            "bounds": "850,330,990,390",
+            "source": "helper_snapshot",
+        }
+    ]
+
+    payload = collection_flow._build_focusable_coverage_payload(inventory, [], output_path)
+
+    assert payload["records"][0]["coverage_status"] == "MISSED"
+    assert payload["records"][0]["coverage_reason"] == "no_matching_row"
+    assert payload["records"][0]["matched_step"] is None
+    assert payload["summary"][0]["missed_count"] == 1
+    assert payload["summary"][0]["coverage_rate"] == 0.0
+
+
+def test_focusable_coverage_does_not_use_representative_label_as_covered(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    inventory = [
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "tab_name": "Motion Sensor",
+            "label": "100%",
+            "view_id": "lowBattery",
+            "bounds": "850,330,990,390",
+            "source": "helper_snapshot",
+        }
+    ]
+    rows = [
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "step": 1,
+            "visible_label": "Motion sensor",
+            "merged_announcement": "Motion sensor",
+            "focus_view_id": "MotionSensorCapabilityCardView_header_title",
+            "representative_visible": "100%",
+        }
+    ]
+
+    payload = collection_flow._build_focusable_coverage_payload(inventory, rows, output_path)
+
+    assert payload["records"][0]["coverage_status"] == "MISSED"
+    assert payload["records"][0]["coverage_reason"] == "no_matching_row"
+
+
+def test_focusable_coverage_marks_ambiguous_history_unknown(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    inventory = [
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "tab_name": "Motion Sensor",
+            "label": "History",
+            "view_id": "MotionSensorCapabilityCardView_header_graphButton",
+            "bounds": "900,330,990,420",
+            "source": "actionable_descendant",
+        }
+    ]
+    rows = [
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "step_index": 12,
+            "visible_label": "History",
+            "focus_view_id": "history",
+            "focus_bounds": "600,1700,900,1850",
+        }
+    ]
+
+    payload = collection_flow._build_focusable_coverage_payload(inventory, rows, output_path)
+
+    assert payload["records"][0]["coverage_status"] == "UNKNOWN"
+    assert payload["records"][0]["coverage_reason"] == "label_match_view_id_mismatch"
+    assert payload["summary"][0]["unknown_count"] == 1
+
+
+def test_focusable_coverage_keeps_graph_history_and_tab_history_separate(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    inventory = [
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "tab_name": "Motion Sensor",
+            "label": "History",
+            "view_id": "MotionSensorCapabilityCardView_header_graphButton",
+            "bounds": "900,330,990,420",
+            "source": "actionable_descendant",
+        },
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "tab_name": "Motion Sensor",
+            "label": "History",
+            "view_id": "history",
+            "bounds": "600,1700,900,1850",
+            "source": "focus_payload",
+        },
+    ]
+    rows = [
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "step_index": 8,
+            "visible_label": "History",
+            "focus_view_id": "history",
+        }
+    ]
+
+    payload = collection_flow._build_focusable_coverage_payload(inventory, rows, output_path)
+    by_view_id = {record["view_id"]: record for record in payload["records"]}
+
+    assert len(payload["records"]) == 2
+    assert by_view_id["history"]["coverage_status"] == "COVERED"
+    assert by_view_id["MotionSensorCapabilityCardView_header_graphButton"]["coverage_status"] == "UNKNOWN"
+    assert payload["summary"][0]["canonical_expected_count"] == 2
+
+
+def test_focusable_coverage_merges_label_bounds_with_dict_and_string_bounds(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    inventory = [
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "tab_name": "Motion Sensor",
+            "label": "Motion detected",
+            "view_id": "",
+            "bounds": "90,470,600,540",
+            "source": "helper_snapshot",
+        },
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "tab_name": "Motion Sensor",
+            "label": "Motion detected",
+            "view_id": "",
+            "bounds": "{'l': 90, 't': 470, 'r': 600, 'b': 540}",
+            "source": "dump_tree",
+        },
+    ]
+
+    payload = collection_flow._build_focusable_coverage_payload(inventory, [], output_path)
+
+    assert len(payload["records"]) == 1
+    assert payload["records"][0]["raw_record_count"] == 2
+    assert payload["summary"][0]["raw_inventory_count"] == 2
+    assert payload["summary"][0]["canonical_expected_count"] == 1
+    assert payload["records"][0]["coverage_status"] == "MISSED"
+
+
+def test_focusable_coverage_summary_counts_rate(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    inventory = [
+        {"scenario_id": "device_motion_sensor_plugin", "label": "Controls", "view_id": "control", "bounds": "", "source": "focus_payload"},
+        {"scenario_id": "device_motion_sensor_plugin", "label": "100%", "view_id": "lowBattery", "bounds": "", "source": "helper_snapshot"},
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "label": "History",
+            "view_id": "MotionSensorCapabilityCardView_header_graphButton",
+            "bounds": "",
+            "source": "actionable_descendant",
+        },
+    ]
+    rows = [
+        {"scenario_id": "device_motion_sensor_plugin", "step_index": 1, "visible_label": "Controls", "focus_view_id": "control"},
+        {"scenario_id": "device_motion_sensor_plugin", "step_index": 2, "visible_label": "History", "focus_view_id": "history"},
+    ]
+
+    payload = collection_flow._build_focusable_coverage_payload(inventory, rows, output_path)
+    summary = payload["summary"][0]
+
+    assert summary["expected_count"] == 3
+    assert summary["canonical_expected_count"] == 3
+    assert summary["raw_inventory_count"] == 3
+    assert summary["covered_count"] == 1
+    assert summary["missed_count"] == 1
+    assert summary["unknown_count"] == 1
+    assert summary["coverage_rate"] == 33.3
+
+
+def test_focusable_coverage_saves_without_inventory(tmp_path):
+    client = SimpleNamespace()
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+
+    collection_flow._save_focusable_coverage(client, output_path, [])
+
+    artifact = tmp_path / "talkback_compare.focusable_coverage.json"
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "audit-v7-focusable-coverage-v1"
+    assert payload["summary"] == []
+    assert payload["records"] == []
+
+
+def test_focusable_inventory_includes_readable_dump_values_and_text(tmp_path):
+    client = SimpleNamespace()
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    row = {
+        "scenario_id": "device_motion_sensor_plugin",
+        "tab_name": "Motion Sensor",
+        "step_index": 4,
+        "dump_tree_nodes": [
+            {
+                "text": "100%",
+                "viewIdResourceName": "com.example:id/lowBattery",
+                "boundsInScreen": "850,330,990,390",
+                "visibleToUser": True,
+            },
+            {
+                "text": "Motion detected",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "90,470,600,540",
+                "visibleToUser": True,
+            },
+        ],
+    }
+
+    collection_flow._register_focusable_inventory_from_row(client, output_path=output_path, row=row)
+
+    labels = {item["label"] for item in client._focusable_inventory}
+    assert "100%" in labels
+    assert "Motion detected" in labels
+
+
+def test_focusable_inventory_adds_actionable_descendant_from_card_root(tmp_path):
+    client = SimpleNamespace()
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    row = {
+        "scenario_id": "device_motion_sensor_plugin",
+        "tab_name": "Motion Sensor",
+        "step_index": 4,
+        "dump_tree_nodes": [
+            {
+                "text": "Motion sensor History Motion detected",
+                "viewIdResourceName": "com.example:id/MotionSensorCapabilityCardView",
+                "boundsInScreen": "30,310,1050,650",
+                "visibleToUser": True,
+                "hasClickableDescendant": True,
+                "actionableDescendantContentDescription": "History",
+                "actionableDescendantResourceId": "com.example:id/MotionSensorCapabilityCardView_header_graphButton",
+            },
+        ],
+    }
+
+    collection_flow._register_focusable_inventory_from_row(client, output_path=output_path, row=row)
+
+    action = next(item for item in client._focusable_inventory if item["source"] == "actionable_descendant")
+    assert action["label"] == "History"
+    assert action["view_id"] == "com.example:id/MotionSensorCapabilityCardView_header_graphButton"
+
+
+def test_focusable_inventory_dedupes_with_focus_payload_priority(tmp_path):
+    client = SimpleNamespace()
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    collection_flow._register_focusable_inventory_item(
+        client,
+        output_path=output_path,
+        scenario_id="device_motion_sensor_plugin",
+        tab_name="Motion Sensor",
+        step_index=1,
+        label="Motion detected",
+        view_id="com.example:id/motion_state",
+        bounds="10,20,200,80",
+        source="dump_tree",
+    )
+    collection_flow._register_focusable_inventory_item(
+        client,
+        output_path=output_path,
+        scenario_id="device_motion_sensor_plugin",
+        tab_name="Motion Sensor",
+        step_index=2,
+        label="Motion detected",
+        view_id="com.example:id/motion_state",
+        bounds="10,20,200,80",
+        source="focus_payload",
+    )
+
+    matches = [item for item in client._focusable_inventory if item["label"] == "Motion detected"]
+    assert len(matches) == 1
+    assert matches[0]["source"] == "focus_payload"
+    assert matches[0]["step_index"] == 2
+
+
+def test_focusable_inventory_excludes_invisible_dump_nodes(tmp_path):
+    client = SimpleNamespace()
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    row = {
+        "scenario_id": "device_motion_sensor_plugin",
+        "tab_name": "Motion Sensor",
+        "step_index": 4,
+        "dump_tree_nodes": [
+            {
+                "text": "Hidden value",
+                "viewIdResourceName": "com.example:id/hidden",
+                "boundsInScreen": "10,20,200,80",
+                "focusable": True,
+                "visibleToUser": False,
+            }
+        ],
+    }
+
+    collection_flow._register_focusable_inventory_from_row(client, output_path=output_path, row=row)
+
+    assert not getattr(client, "_focusable_inventory", [])
+
+
+def test_focusable_inventory_helper_snapshot_collects_motion_sensor_nodes(tmp_path):
+    class SnapshotClient:
+        def __init__(self):
+            self.dump_tree_calls = []
+
+        def dump_tree(self, **kwargs):
+            self.dump_tree_calls.append(kwargs)
+            return [
+                {
+                    "text": "100%",
+                    "viewIdResourceName": "com.example:id/lowBattery",
+                    "boundsInScreen": "850,330,990,390",
+                    "visibleToUser": True,
+                },
+                {
+                    "text": "Motion detected",
+                    "className": "android.widget.TextView",
+                    "boundsInScreen": "90,470,600,540",
+                    "visibleToUser": True,
+                },
+                {
+                    "text": "Motion sensor History Motion detected",
+                    "viewIdResourceName": "com.example:id/MotionSensorCapabilityCardView",
+                    "boundsInScreen": "30,310,1050,650",
+                    "visibleToUser": True,
+                    "hasClickableDescendant": True,
+                    "actionableDescendantContentDescription": "History",
+                    "actionableDescendantResourceId": "com.example:id/MotionSensorCapabilityCardView_header_graphButton",
+                },
+                {
+                    "text": "Controls",
+                    "viewIdResourceName": "com.example:id/tab_controls",
+                    "boundsInScreen": "0,1700,300,1850",
+                    "clickable": True,
+                    "visibleToUser": True,
+                },
+                {
+                    "text": "Routines",
+                    "viewIdResourceName": "com.example:id/tab_routines",
+                    "boundsInScreen": "300,1700,600,1850",
+                    "clickable": True,
+                    "visibleToUser": True,
+                },
+                {
+                    "text": "History",
+                    "viewIdResourceName": "com.example:id/tab_history",
+                    "boundsInScreen": "600,1700,900,1850",
+                    "clickable": True,
+                    "visibleToUser": True,
+                },
+            ]
+
+    client = SnapshotClient()
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+
+    collection_flow._capture_focusable_inventory_snapshot(
+        client,
+        dev="device",
+        output_path=output_path,
+        tab_cfg={"scenario_id": "device_motion_sensor_plugin", "tab_name": "Motion Sensor"},
+        state=SimpleNamespace(current_local_tab_signature="controls"),
+    )
+
+    labels = {item["label"] for item in client._focusable_inventory}
+    assert {"100%", "Motion detected", "Controls", "Routines", "History"} <= labels
+    assert any(item["source"] == "helper_snapshot" and item["label"] == "100%" for item in client._focusable_inventory)
+    action = next(item for item in client._focusable_inventory if item["source"] == "actionable_descendant")
+    assert action["label"] == "History"
+    assert action["view_id"] == "com.example:id/MotionSensorCapabilityCardView_header_graphButton"
+    assert len(client.dump_tree_calls) == 1
+
+    collection_flow._capture_focusable_inventory_snapshot(
+        client,
+        dev="device",
+        output_path=output_path,
+        tab_cfg={"scenario_id": "device_motion_sensor_plugin", "tab_name": "Motion Sensor"},
+    )
+    assert len(client.dump_tree_calls) == 1
+
+
+def test_focusable_inventory_helper_snapshot_dedupes_below_focus_payload(tmp_path):
+    class SnapshotClient:
+        def dump_tree(self, **_kwargs):
+            return [
+                {
+                    "text": "Motion detected",
+                    "viewIdResourceName": "com.example:id/motion_state",
+                    "boundsInScreen": "10,20,200,80",
+                    "visibleToUser": True,
+                }
+            ]
+
+    client = SnapshotClient()
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    collection_flow._register_focusable_inventory_item(
+        client,
+        output_path=output_path,
+        scenario_id="device_motion_sensor_plugin",
+        tab_name="Motion Sensor",
+        step_index=1,
+        label="Motion detected",
+        view_id="com.example:id/motion_state",
+        bounds="10,20,200,80",
+        source="focus_payload",
+    )
+
+    collection_flow._capture_focusable_inventory_snapshot(
+        client,
+        dev="device",
+        output_path=output_path,
+        tab_cfg={"scenario_id": "device_motion_sensor_plugin", "tab_name": "Motion Sensor"},
+    )
+
+    matches = [item for item in client._focusable_inventory if item["label"] == "Motion detected"]
+    assert len(matches) == 1
+    assert matches[0]["source"] == "focus_payload"
+
+
+def test_focusable_inventory_helper_snapshot_excludes_invisible_and_continues_on_failure(tmp_path):
+    class HiddenSnapshotClient:
+        def dump_tree(self, **_kwargs):
+            return [
+                {
+                    "text": "Hidden value",
+                    "viewIdResourceName": "com.example:id/hidden",
+                    "boundsInScreen": "10,20,200,80",
+                    "visibleToUser": False,
+                }
+            ]
+
+    hidden_client = HiddenSnapshotClient()
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    collection_flow._capture_focusable_inventory_snapshot(
+        hidden_client,
+        dev="device",
+        output_path=output_path,
+        tab_cfg={"scenario_id": "device_motion_sensor_plugin", "tab_name": "Motion Sensor"},
+    )
+    assert not getattr(hidden_client, "_focusable_inventory", [])
+
+    class FailingSnapshotClient:
+        def dump_tree(self, **_kwargs):
+            raise RuntimeError("boom")
+
+    failing_client = FailingSnapshotClient()
+    collection_flow._capture_focusable_inventory_snapshot(
+        failing_client,
+        dev="device",
+        output_path=output_path,
+        tab_cfg={"scenario_id": "device_motion_sensor_plugin", "tab_name": "Motion Sensor"},
+    )
+    assert getattr(failing_client, "_focusable_inventory", []) == []
+
+
 class DummyClient:
     def __init__(self, steps):
         self.steps = list(steps)
@@ -10974,6 +11611,7 @@ def test_collect_tab_rows_food_post_traversal_handoff_enters_food_home(monkeypat
         ]
     )
     client.dump_tree_sequence = [
+        _food_recipe_detail_nodes(),
         _food_recipe_detail_nodes(),
         _food_recipe_detail_nodes(),
         _food_recipe_detail_nodes(),

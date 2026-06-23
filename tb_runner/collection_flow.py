@@ -453,10 +453,674 @@ def _node_label_blob(node: dict[str, Any]) -> str:
         [
             str(node.get("text", "") or "").strip(),
             str(node.get("contentDescription", "") or "").strip(),
+            str(node.get("stateDescription", "") or "").strip(),
             str(node.get("talkbackLabel", "") or "").strip(),
+            str(node.get("mergedLabel", "") or "").strip(),
             str(node.get("label", "") or "").strip(),
+            str(node.get("actionableDescendantContentDescription", "") or "").strip(),
         ]
     ).strip()
+
+
+def _normalize_focusable_inventory_value(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+
+
+def _focusable_inventory_source_priority(source: str) -> int:
+    return {
+        "focus_payload": 30,
+        "helper_snapshot": 25,
+        "dump_tree": 20,
+        "actionable_descendant": 10,
+    }.get(str(source or "").strip(), 0)
+
+
+def _focusable_inventory_path(output_path: str) -> Path:
+    path = Path(output_path)
+    return path.with_name(f"{path.stem}.focusable_inventory.json")
+
+
+def _focusable_coverage_path(output_path: str) -> Path:
+    path = Path(output_path)
+    return path.with_name(f"{path.stem}.focusable_coverage.json")
+
+
+def _ensure_focusable_inventory(client: Any, output_path: str) -> list[dict[str, Any]]:
+    current_output = str(getattr(client, "_focusable_inventory_output_path", "") or "")
+    if current_output != str(output_path):
+        setattr(client, "_focusable_inventory", [])
+        setattr(client, "_focusable_inventory_keys", {})
+        setattr(client, "_focusable_inventory_snapshot_keys", set())
+        setattr(client, "_focusable_inventory_output_path", str(output_path))
+    inventory = getattr(client, "_focusable_inventory", None)
+    if not isinstance(inventory, list):
+        inventory = []
+        setattr(client, "_focusable_inventory", inventory)
+    keys = getattr(client, "_focusable_inventory_keys", None)
+    if not isinstance(keys, dict):
+        setattr(client, "_focusable_inventory_keys", {})
+    return inventory
+
+
+def _focusable_node_label(node: dict[str, Any]) -> str:
+    return (_extract_cta_node_label(node) or _node_label_blob(node)).strip()
+
+
+def _focusable_node_class(node: dict[str, Any]) -> str:
+    return str(node.get("className", "") or node.get("class", "") or "").strip()
+
+
+def _focusable_node_view_id(node: dict[str, Any]) -> str:
+    return str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
+
+
+def _focusable_node_bounds(node: dict[str, Any]) -> str:
+    return str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip()
+
+
+def _focusable_node_has_valid_bounds(node: dict[str, Any]) -> bool:
+    return bool(parse_bounds_str(_focusable_node_bounds(node)))
+
+
+def _is_focusable_inventory_node(node: dict[str, Any], *, source: str) -> bool:
+    label = _focusable_node_label(node)
+    if not label:
+        return False
+    if source in {"focus_payload", "representative_candidate", "local_tab_candidate"}:
+        return True
+    class_name = _focusable_node_class(node).lower()
+    view_id = _focusable_node_view_id(node).lower()
+    actionable_or_container = bool(
+        node.get("accessibilityFocused")
+        or node.get("focused")
+        or node.get("focusable")
+        or node.get("clickable")
+        or node.get("effectiveClickable")
+        or node.get("hasClickableDescendant")
+        or node.get("hasFocusableDescendant")
+        or "button" in class_name
+        or "button" in view_id
+        or "tab" in view_id
+        or "card" in class_name
+        or "card" in view_id
+        or "action" in view_id
+    )
+    readable_value = bool(_focusable_node_has_valid_bounds(node) and len(label.strip()) <= 160)
+    return bool(actionable_or_container or readable_value)
+
+
+def _register_focusable_inventory_item(
+    client: Any,
+    *,
+    output_path: str,
+    scenario_id: str,
+    tab_name: str,
+    step_index: Any,
+    label: str,
+    source: str,
+    view_id: str = "",
+    bounds: str = "",
+    class_name: str = "",
+    local_tab_signature: str = "",
+    clickable: Any = None,
+    focusable: Any = None,
+    enabled: Any = None,
+    selected: Any = None,
+    checked: Any = None,
+) -> None:
+    inventory = _ensure_focusable_inventory(client, output_path)
+    label = str(label or "").strip()
+    if not label:
+        return
+    view_id = str(view_id or "").strip()
+    bounds = str(bounds or "").strip()
+    source = str(source or "").strip() or "unknown"
+    key = "|".join(
+        [
+            str(scenario_id or "").strip(),
+            str(tab_name or "").strip(),
+            _normalize_focusable_inventory_value(label),
+            _normalize_focusable_inventory_value(view_id),
+            _normalize_focusable_inventory_value(bounds),
+        ]
+    )
+    keys = getattr(client, "_focusable_inventory_keys", {})
+    if not isinstance(keys, dict):
+        keys = {}
+    source_priority = _focusable_inventory_source_priority(source)
+    existing_index = keys.get(key)
+    if isinstance(existing_index, int) and 0 <= existing_index < len(inventory):
+        existing = inventory[existing_index]
+        existing_priority = _focusable_inventory_source_priority(str(existing.get("source", "") or ""))
+        if existing_priority >= source_priority:
+            setattr(client, "_focusable_inventory_keys", keys)
+            return
+        inventory[existing_index] = {
+            **existing,
+            "step_index": step_index,
+            "source": source,
+            "class_name": str(class_name or "").strip(),
+            "local_tab_signature": str(local_tab_signature or "").strip(),
+            "clickable": bool(clickable) if clickable is not None else False,
+            "focusable": bool(focusable) if focusable is not None else False,
+            "enabled": bool(enabled) if enabled is not None else None,
+            "selected": bool(selected) if selected is not None else None,
+            "checked": bool(checked) if checked is not None else None,
+        }
+        setattr(client, "_focusable_inventory_keys", keys)
+        return
+    keys[key] = len(inventory)
+    setattr(client, "_focusable_inventory_keys", keys)
+    inventory.append(
+        {
+            "scenario_id": str(scenario_id or "").strip(),
+            "tab_name": str(tab_name or "").strip(),
+            "step_index": step_index,
+            "label": label,
+            "view_id": view_id,
+            "bounds": bounds,
+            "source": source,
+            "class_name": str(class_name or "").strip(),
+            "local_tab_signature": str(local_tab_signature or "").strip(),
+            "clickable": bool(clickable) if clickable is not None else False,
+            "focusable": bool(focusable) if focusable is not None else False,
+            "enabled": bool(enabled) if enabled is not None else None,
+            "selected": bool(selected) if selected is not None else None,
+            "checked": bool(checked) if checked is not None else None,
+        }
+    )
+
+
+def _register_focusable_actionable_descendant(
+    client: Any,
+    *,
+    output_path: str,
+    scenario_id: str,
+    tab_name: str,
+    step_index: Any,
+    node: dict[str, Any],
+    local_tab_signature: str = "",
+) -> None:
+    label = str(
+        node.get("actionableDescendantContentDescription", "")
+        or node.get("actionableDescendantText", "")
+        or node.get("actionableDescendantLabel", "")
+        or ""
+    ).strip()
+    view_id = str(
+        node.get("actionableDescendantResourceId", "")
+        or node.get("actionableDescendantViewId", "")
+        or ""
+    ).strip()
+    bounds = str(
+        node.get("actionableDescendantBoundsInScreen", "")
+        or node.get("actionableDescendantBounds", "")
+        or _focusable_node_bounds(node)
+    ).strip()
+    if not label and not view_id:
+        return
+    _register_focusable_inventory_item(
+        client,
+        output_path=output_path,
+        scenario_id=scenario_id,
+        tab_name=tab_name,
+        step_index=step_index,
+        label=label or view_id,
+        view_id=view_id,
+        bounds=bounds,
+        source="actionable_descendant",
+        class_name="",
+        local_tab_signature=local_tab_signature,
+        clickable=True,
+        focusable=True,
+        enabled=node.get("enabled"),
+    )
+
+
+def _register_focusable_inventory_node(
+    client: Any,
+    *,
+    output_path: str,
+    scenario_id: str,
+    tab_name: str,
+    step_index: Any,
+    node: dict[str, Any],
+    source: str,
+    local_tab_signature: str = "",
+) -> None:
+    if not isinstance(node, dict) or not _node_is_visible(node):
+        return
+    if _is_focusable_inventory_node(node, source=source):
+        _register_focusable_inventory_item(
+            client,
+            output_path=output_path,
+            scenario_id=scenario_id,
+            tab_name=tab_name,
+            step_index=step_index,
+            label=_focusable_node_label(node),
+            view_id=_focusable_node_view_id(node),
+            bounds=_focusable_node_bounds(node),
+            source=source,
+            class_name=_focusable_node_class(node),
+            local_tab_signature=local_tab_signature,
+            clickable=node.get("clickable") or node.get("effectiveClickable"),
+            focusable=node.get("focusable") or node.get("accessibilityFocused") or node.get("focused"),
+            enabled=node.get("enabled"),
+            selected=node.get("selected"),
+            checked=node.get("checked"),
+        )
+    _register_focusable_actionable_descendant(
+        client,
+        output_path=output_path,
+        scenario_id=scenario_id,
+        tab_name=tab_name,
+        step_index=step_index,
+        node=node,
+        local_tab_signature=local_tab_signature,
+    )
+
+
+def _register_focusable_inventory_from_row(
+    client: Any,
+    *,
+    output_path: str,
+    row: dict[str, Any],
+    state: Any = None,
+) -> None:
+    scenario_id = str(row.get("scenario_id", "") or "").strip()
+    tab_name = str(row.get("tab_name", "") or "").strip()
+    step_index = row.get("step_index", "")
+    local_tab_signature = str(getattr(state, "current_local_tab_signature", "") or "").strip() if state else ""
+    label = str(row.get("actual_focus_visible", "") or row.get("visible_label", "") or "").strip()
+    view_id = str(row.get("actual_focus_resource_id", "") or row.get("focus_view_id", "") or "").strip()
+    bounds = str(row.get("actual_focus_bounds", "") or row.get("focus_bounds", "") or "").strip()
+    if label or view_id or bounds:
+        _register_focusable_inventory_item(
+            client,
+            output_path=output_path,
+            scenario_id=scenario_id,
+            tab_name=tab_name,
+            step_index=step_index,
+            label=label or view_id or bounds,
+            view_id=view_id,
+            bounds=bounds,
+            source="focus_payload",
+            class_name=str(row.get("focus_class_name", "") or "").strip(),
+            local_tab_signature=local_tab_signature,
+        )
+    dump_nodes = row.get("dump_tree_nodes", [])
+    if isinstance(dump_nodes, list):
+        for node, _parent in _iter_tree_nodes_with_parent(dump_nodes):
+            _register_focusable_inventory_node(
+                client,
+                output_path=output_path,
+                scenario_id=scenario_id,
+                tab_name=tab_name,
+                step_index=step_index,
+                node=node,
+                source="dump_tree",
+                local_tab_signature=local_tab_signature,
+            )
+
+
+def _capture_focusable_inventory_snapshot(
+    client: Any,
+    *,
+    dev: str,
+    output_path: str,
+    tab_cfg: dict[str, Any],
+    state: Any = None,
+    step_index: Any = "snapshot",
+) -> None:
+    _ensure_focusable_inventory(client, output_path)
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip()
+    tab_name = str(tab_cfg.get("tab_name", "") or "").strip()
+    snapshot_key = "|".join([str(output_path), scenario_id, tab_name])
+    snapshot_keys = getattr(client, "_focusable_inventory_snapshot_keys", None)
+    if not isinstance(snapshot_keys, set):
+        snapshot_keys = set()
+        setattr(client, "_focusable_inventory_snapshot_keys", snapshot_keys)
+    if snapshot_key in snapshot_keys:
+        return
+    snapshot_keys.add(snapshot_key)
+
+    dump_tree_fn = getattr(client, "dump_tree", None)
+    if not callable(dump_tree_fn):
+        log(
+            f"[AUDIT_V7][focusable_snapshot] scenario='{scenario_id}' "
+            f"tab='{tab_name}' ok=false reason='dump_tree_not_supported'"
+        )
+        return
+
+    before_count = len(getattr(client, "_focusable_inventory", []) or [])
+    try:
+        nodes = dump_tree_fn(dev=dev)
+    except Exception as exc:
+        log(
+            f"[AUDIT_V7][focusable_snapshot] scenario='{scenario_id}' "
+            f"tab='{tab_name}' ok=false reason='dump_tree_failed' error='{exc}'"
+        )
+        return
+    if not isinstance(nodes, list):
+        log(
+            f"[AUDIT_V7][focusable_snapshot] scenario='{scenario_id}' "
+            f"tab='{tab_name}' ok=false reason='dump_tree_non_list'"
+        )
+        return
+
+    local_tab_signature = str(getattr(state, "current_local_tab_signature", "") or "").strip() if state else ""
+    for node, _parent in _iter_tree_nodes_with_parent(nodes):
+        _register_focusable_inventory_node(
+            client,
+            output_path=output_path,
+            scenario_id=scenario_id,
+            tab_name=tab_name,
+            step_index=step_index,
+            node=node,
+            source="helper_snapshot",
+            local_tab_signature=local_tab_signature,
+        )
+    after_count = len(getattr(client, "_focusable_inventory", []) or [])
+    log(
+        f"[AUDIT_V7][focusable_snapshot] scenario='{scenario_id}' tab='{tab_name}' "
+        f"ok=true nodes={len(nodes)} added={max(0, after_count - before_count)}"
+    )
+
+
+def _save_focusable_inventory(client: Any, output_path: str) -> None:
+    inventory = _ensure_focusable_inventory(client, output_path)
+    output = Path(output_path)
+    if str(output.parent) in {"", "."}:
+        return
+    target = _focusable_inventory_path(output_path)
+    payload = {
+        "schema_version": "audit-v7-focusable-inventory-v1",
+        "output_path": str(output_path),
+        "count": len(inventory),
+        "items": inventory,
+    }
+    try:
+        target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as exc:
+        log(f"[FOCUSABLE][inventory_save_failed] path='{target}' error='{exc}'")
+
+
+def _focusable_coverage_row_labels(row: dict[str, Any]) -> set[str]:
+    labels: set[str] = set()
+    for key in (
+        "visible_label",
+        "merged_announcement",
+        "actual_focus_visible",
+        "actual_focus_speech",
+    ):
+        normalized = _normalize_focusable_inventory_value(row.get(key, ""))
+        if normalized:
+            labels.add(normalized)
+    return labels
+
+
+def _focusable_coverage_row_view_ids(row: dict[str, Any]) -> set[str]:
+    view_ids: set[str] = set()
+    for key in (
+        "focus_view_id",
+        "actual_focus_resource_id",
+    ):
+        normalized = _normalize_focusable_inventory_value(row.get(key, ""))
+        if normalized:
+            view_ids.add(normalized)
+    return view_ids
+
+
+def _focusable_coverage_row_bounds(row: dict[str, Any]) -> set[str]:
+    bounds_values: set[str] = set()
+    for key in (
+        "focus_bounds",
+        "actual_focus_bounds",
+    ):
+        normalized = _normalize_focusable_bounds_value(row.get(key, ""))
+        if normalized:
+            bounds_values.add(normalized)
+    return bounds_values
+
+
+def _normalize_focusable_bounds_value(value: Any) -> str:
+    bounds = parse_bounds_str(str(value or "").strip())
+    if not bounds:
+        return _normalize_focusable_inventory_value(value)
+    return ",".join(str(part) for part in bounds)
+
+
+def _canonical_focusable_id(item: dict[str, Any]) -> str:
+    scenario_id = _normalize_focusable_inventory_value(item.get("scenario_id", ""))
+    view_id = _normalize_focusable_inventory_value(item.get("view_id", ""))
+    if view_id:
+        return "|".join([scenario_id, "view_id", view_id])
+    label = _normalize_focusable_inventory_value(item.get("label", ""))
+    bounds = _normalize_focusable_bounds_value(item.get("bounds", ""))
+    return "|".join([scenario_id, "label_bounds", label, bounds])
+
+
+def _bounds_related(left_raw: Any, right_raw: Any) -> bool:
+    left = parse_bounds_str(str(left_raw or "").strip())
+    right = parse_bounds_str(str(right_raw or "").strip())
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    l1, t1, r1, b1 = left
+    l2, t2, r2, b2 = right
+    inter_w = max(0, min(r1, r2) - max(l1, l2))
+    inter_h = max(0, min(b1, b2) - max(t1, t2))
+    if inter_w <= 0 or inter_h <= 0:
+        return False
+    left_area = max(1, (r1 - l1) * (b1 - t1))
+    right_area = max(1, (r2 - l2) * (b2 - t2))
+    overlap_ratio = (inter_w * inter_h) / float(min(left_area, right_area))
+    return overlap_ratio >= 0.8
+
+
+def _focusable_coverage_candidate_rows(item: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    scenario_id = str(item.get("scenario_id", "") or "").strip()
+    item_label = _normalize_focusable_inventory_value(item.get("label", ""))
+    item_view_id = _normalize_focusable_inventory_value(item.get("view_id", ""))
+    item_bounds = _normalize_focusable_bounds_value(item.get("bounds", ""))
+    item_semantic_card_id = _normalize_focusable_inventory_value(item.get("semantic_card_id", ""))
+    scoped_rows = [
+        row
+        for row in rows
+        if isinstance(row, dict) and str(row.get("scenario_id", "") or "").strip() == scenario_id
+    ]
+    view_id_matches: list[dict[str, Any]] = []
+    label_matches: list[dict[str, Any]] = []
+    semantic_matches: list[dict[str, Any]] = []
+    bounds_matches: list[dict[str, Any]] = []
+    for row in scoped_rows:
+        row_view_ids = _focusable_coverage_row_view_ids(row)
+        row_labels = _focusable_coverage_row_labels(row)
+        row_bounds = _focusable_coverage_row_bounds(row)
+        if item_view_id and item_view_id in row_view_ids:
+            view_id_matches.append(row)
+        if item_label and item_label in row_labels:
+            label_matches.append(row)
+        if item_semantic_card_id and item_semantic_card_id == _normalize_focusable_inventory_value(row.get("semantic_card_id", "")):
+            semantic_matches.append(row)
+        if item_bounds and (item_bounds in row_bounds or any(_bounds_related(item.get("bounds", ""), row_bounds_raw) for row_bounds_raw in row_bounds)):
+            bounds_matches.append(row)
+    return {
+        "view_id": view_id_matches,
+        "label": label_matches,
+        "semantic": semantic_matches,
+        "bounds": bounds_matches,
+    }
+
+
+def _focusable_coverage_match(item: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    matches = _focusable_coverage_candidate_rows(item, rows)
+    item_view_id = _normalize_focusable_inventory_value(item.get("view_id", ""))
+    item_label = _normalize_focusable_inventory_value(item.get("label", ""))
+
+    if matches["view_id"]:
+        row = matches["view_id"][0]
+        return {"status": "COVERED", "row": row, "reason": "view_id_exact"}
+
+    label_matches = matches["label"]
+    if label_matches:
+        if len(label_matches) > 1:
+            return {"status": "UNKNOWN", "row": label_matches[0], "reason": "ambiguous_label_match"}
+        row = label_matches[0]
+        row_view_ids = _focusable_coverage_row_view_ids(row)
+        if item_view_id and row_view_ids and item_view_id not in row_view_ids:
+            return {"status": "UNKNOWN", "row": row, "reason": "label_match_view_id_mismatch"}
+        return {"status": "COVERED", "row": row, "reason": "label_exact"}
+
+    if matches["semantic"]:
+        row = matches["semantic"][0]
+        return {"status": "COVERED", "row": row, "reason": "semantic_card_id"}
+
+    if matches["bounds"]:
+        row = matches["bounds"][0]
+        if item_label and item_label in _focusable_coverage_row_labels(row):
+            return {"status": "COVERED", "row": row, "reason": "related_bounds_label"}
+        return {"status": "UNKNOWN", "row": row, "reason": "related_bounds_only"}
+
+    return {"status": "MISSED", "row": None, "reason": "no_matching_row"}
+
+
+def _focusable_status_rank(status: str) -> int:
+    return {"MISSED": 0, "UNKNOWN": 1, "COVERED": 2}.get(str(status or "").strip(), 1)
+
+
+def _canonicalize_focusable_inventory(inventory: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    canonical_by_id: dict[str, dict[str, Any]] = {}
+    for item in inventory if isinstance(inventory, list) else []:
+        if not isinstance(item, dict):
+            continue
+        canonical_id = _canonical_focusable_id(item)
+        source = str(item.get("source", "") or "").strip()
+        existing = canonical_by_id.get(canonical_id)
+        if existing is None:
+            canonical_by_id[canonical_id] = {
+                **item,
+                "canonical_id": canonical_id,
+                "sources": [source] if source else [],
+                "raw_records": [item],
+                "raw_record_count": 1,
+                "primary_source": source,
+            }
+            continue
+        if source and source not in existing["sources"]:
+            existing["sources"].append(source)
+        existing["raw_records"].append(item)
+        existing["raw_record_count"] = len(existing["raw_records"])
+        primary_source = str(existing.get("primary_source", "") or "")
+        if _focusable_inventory_source_priority(source) > _focusable_inventory_source_priority(primary_source):
+            existing.update(
+                {
+                    **item,
+                    "canonical_id": canonical_id,
+                    "sources": existing["sources"],
+                    "raw_records": existing["raw_records"],
+                    "raw_record_count": existing["raw_record_count"],
+                    "primary_source": source,
+                }
+            )
+    for item in canonical_by_id.values():
+        item["sources"] = sorted(
+            item.get("sources", []),
+            key=lambda source: (-_focusable_inventory_source_priority(source), source),
+        )
+        item["primary_source"] = item["sources"][0] if item["sources"] else ""
+    return list(canonical_by_id.values())
+
+
+def _focusable_coverage_canonical_match(item: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    best_match: dict[str, Any] = {"status": "MISSED", "row": None, "reason": "no_matching_row"}
+    for raw_item in item.get("raw_records", []) if isinstance(item.get("raw_records"), list) else [item]:
+        match = _focusable_coverage_match(raw_item, rows)
+        if _focusable_status_rank(str(match.get("status", ""))) > _focusable_status_rank(str(best_match.get("status", ""))):
+            best_match = match
+        if str(best_match.get("status", "")) == "COVERED":
+            break
+    return best_match
+
+
+def _build_focusable_coverage_payload(inventory: list[dict[str, Any]], rows: list[dict[str, Any]], output_path: str) -> dict[str, Any]:
+    records: list[dict[str, Any]] = []
+    summary_by_scenario: dict[str, dict[str, Any]] = {}
+    canonical_items = _canonicalize_focusable_inventory(inventory if isinstance(inventory, list) else [])
+    for item in canonical_items:
+        if not isinstance(item, dict):
+            continue
+        match = _focusable_coverage_canonical_match(item, rows if isinstance(rows, list) else [])
+        matched_row = match.get("row") if isinstance(match.get("row"), dict) else None
+        scenario_id = str(item.get("scenario_id", "") or "").strip()
+        status = str(match.get("status", "UNKNOWN") or "UNKNOWN")
+        record = {
+            "canonical_id": str(item.get("canonical_id", "") or ""),
+            "scenario_id": scenario_id,
+            "tab_name": str(item.get("tab_name", "") or "").strip(),
+            "label": str(item.get("label", "") or "").strip(),
+            "view_id": str(item.get("view_id", "") or "").strip(),
+            "bounds": str(item.get("bounds", "") or "").strip(),
+            "source": str(item.get("primary_source", "") or item.get("source", "") or "").strip(),
+            "primary_source": str(item.get("primary_source", "") or item.get("source", "") or "").strip(),
+            "sources": list(item.get("sources", [])) if isinstance(item.get("sources"), list) else [],
+            "raw_record_count": int(item.get("raw_record_count", 1) or 1),
+            "coverage_status": status,
+            "coverage_reason": str(match.get("reason", "") or "").strip(),
+            "matched_step": (matched_row.get("step_index") or matched_row.get("step")) if matched_row else None,
+            "matched_label": str(matched_row.get("visible_label", "") or "").strip() if matched_row else "",
+            "matched_view_id": str(matched_row.get("focus_view_id", "") or "").strip() if matched_row else "",
+            "matched_bounds": str(matched_row.get("focus_bounds", "") or "").strip() if matched_row else "",
+        }
+        records.append(record)
+        summary = summary_by_scenario.setdefault(
+            scenario_id,
+            {
+                "scenario_id": scenario_id,
+                "expected_count": 0,
+                "canonical_expected_count": 0,
+                "raw_inventory_count": 0,
+                "covered_count": 0,
+                "missed_count": 0,
+                "unknown_count": 0,
+                "coverage_rate": 0.0,
+            },
+        )
+        summary["expected_count"] += 1
+        summary["canonical_expected_count"] += 1
+        summary["raw_inventory_count"] += int(item.get("raw_record_count", 1) or 1)
+        if status == "COVERED":
+            summary["covered_count"] += 1
+        elif status == "MISSED":
+            summary["missed_count"] += 1
+        else:
+            summary["unknown_count"] += 1
+
+    for summary in summary_by_scenario.values():
+        expected = int(summary.get("expected_count", 0) or 0)
+        covered = int(summary.get("covered_count", 0) or 0)
+        summary["coverage_rate"] = round((covered / expected) * 100.0, 1) if expected else 0.0
+
+    return {
+        "schema_version": "audit-v7-focusable-coverage-v1",
+        "output_path": str(output_path),
+        "summary": list(summary_by_scenario.values()),
+        "records": records,
+    }
+
+
+def _save_focusable_coverage(client: Any, output_path: str, rows: list[dict[str, Any]]) -> None:
+    output = Path(output_path)
+    if str(output.parent) in {"", "."}:
+        return
+    inventory = _ensure_focusable_inventory(client, output_path)
+    target = _focusable_coverage_path(output_path)
+    payload = _build_focusable_coverage_payload(inventory, rows if isinstance(rows, list) else [], output_path)
+    try:
+        target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as exc:
+        log(f"[FOCUSABLE][coverage_save_failed] path='{target}' error='{exc}'")
 
 
 def _iter_tree_nodes_with_parent(nodes: list[dict[str, Any]]) -> list[tuple[dict[str, Any], dict[str, Any] | None]]:
@@ -13048,6 +13712,12 @@ def _apply_step_collection_phase_impl(
     row = capture_fn(client, dev, row, phase_ctx.output_base_dir)
     row.pop("_step_mono_start", None)
     row["step_total_elapsed_sec"] = round(mono_time_fn() - phase_start_mono, 3)
+    _register_focusable_inventory_from_row(
+        client,
+        output_path=phase_ctx.output_path,
+        row=row,
+        state=state,
+    )
     return row
 
 
@@ -13350,6 +14020,8 @@ def _main_loop_phase(
                 checkpoint_every=phase_ctx.checkpoint_every,
                 output_path=phase_ctx.output_path,
             )
+            _save_focusable_inventory(client, phase_ctx.output_path)
+            _save_focusable_coverage(client, phase_ctx.output_path, phase_ctx.all_rows)
             break
         terminal_signal = bool(stop_eval_inputs["terminal_signal"])
         same_like_count = int(stop_eval_inputs["same_like_count"])
@@ -13690,6 +14362,9 @@ def _main_loop_phase(
             checkpoint_every=phase_ctx.checkpoint_every,
             output_path=phase_ctx.output_path,
         )
+        if persistence_stop or (step_idx % phase_ctx.checkpoint_every == 0):
+            _save_focusable_inventory(client, phase_ctx.output_path)
+            _save_focusable_coverage(client, phase_ctx.output_path, phase_ctx.all_rows)
 
         overlay_result = _overlay_phase(
             client=client,
@@ -14385,6 +15060,7 @@ def collect_tab_rows(
     checkpoint_save_every: int = CHECKPOINT_SAVE_EVERY_STEPS,
 ) -> list[dict]:
     rows: list[dict] = []
+    _ensure_focusable_inventory(client, output_path)
     scenario_id = str(tab_cfg.get("scenario_id", "") or "")
     crash_attempt = _crash_guard_attempt_for_tab_cfg(tab_cfg)
     _reset_crash_guard_latch(client, scenario_id=scenario_id, attempt=crash_attempt)
@@ -14441,6 +15117,8 @@ def collect_tab_rows(
             scenario_perf.finalize()
             log(format_perf_summary("scenario_summary", scenario_perf.summary_dict()))
         save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
+        _save_focusable_inventory(client, output_path)
+        _save_focusable_coverage(client, output_path, all_rows)
         return rows
     if not start_result.should_enter_main_loop:
         if start_result.entry_contract_reason == _ENTRY_REASON_SPECIAL_STATE_HANDLED:
@@ -14463,18 +15141,28 @@ def collect_tab_rows(
                 scenario_perf.finalize()
                 log(format_perf_summary("scenario_summary", scenario_perf.summary_dict()))
             save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
+            _save_focusable_inventory(client, output_path)
+            _save_focusable_coverage(client, output_path, all_rows)
         return rows
     if start_result.start_row is None:
         return rows
 
     anchor_row = start_result.start_row
     anchor_row = _annotate_report_row_context(anchor_row, tab_cfg)
+    _register_focusable_inventory_from_row(
+        client,
+        output_path=output_path,
+        row=anchor_row,
+        state=None,
+    )
     persisted_anchor_row = _build_persisted_row_semantics(anchor_row)
     rows.append(persisted_anchor_row)
     all_rows.append(persisted_anchor_row)
     if scenario_perf is not None:
         scenario_perf.record_row(persisted_anchor_row)
     save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
+    _save_focusable_inventory(client, output_path)
+    _save_focusable_coverage(client, output_path, all_rows)
     state = _build_main_loop_state_from_anchor(
         anchor_row,
         anchor_fingerprint=start_result.anchor_fingerprint,
@@ -14485,6 +15173,16 @@ def collect_tab_rows(
     state.recent_fingerprint_history = start_result.recent_fingerprint_history
     state.recent_semantic_fingerprint_history = start_result.recent_semantic_fingerprint_history
     state.main_step_index_by_fingerprint = {start_result.prev_fingerprint: 0}
+    _capture_focusable_inventory_snapshot(
+        client,
+        dev=dev,
+        output_path=output_path,
+        tab_cfg=tab_cfg,
+        state=state,
+        step_index="post_anchor_snapshot",
+    )
+    _save_focusable_inventory(client, output_path)
+    _save_focusable_coverage(client, output_path, all_rows)
     phase_ctx = CollectionPhaseContext(
         tab_cfg=tab_cfg,
         rows=rows,
@@ -14502,6 +15200,8 @@ def collect_tab_rows(
     _main_loop_phase(client, dev, phase_ctx)
     _maybe_run_food_post_traversal_handoff(client, dev, phase_ctx)
     _persist_phase(phase_ctx)
+    _save_focusable_inventory(client, output_path)
+    _save_focusable_coverage(client, output_path, all_rows)
     main_steps_completed = sum(1 for row in rows if int(row.get("step_index", -1) or -1) > 0)
     setattr(
         client,
