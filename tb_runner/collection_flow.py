@@ -485,6 +485,68 @@ def _focusable_coverage_path(output_path: str) -> Path:
     return path.with_name(f"{path.stem}.focusable_coverage.json")
 
 
+def _is_air_quality_value_text(text: str) -> bool:
+    normalized = _normalize_focusable_inventory_value(text)
+    return bool(
+        re.search(r"\bpm\s*(?:10|2\.?5|25)\b", normalized)
+        or re.search(
+            "\\b\\d+(?:\\.\\d+)?\\s*(?:\\u03bcg|ug|\\u338d|\\u4f0ag)\\s*/?\\s*(?:\\u33a5|m3|m\\u00b3|\\u599d)(?:\\s|$)",
+            normalized,
+        )
+        or "fine dust" in normalized
+        or "air quality" in normalized
+        or "caqi" in normalized
+    )
+
+
+def _focusable_taxonomy(item: dict[str, Any]) -> tuple[str, str]:
+    label = _normalize_focusable_inventory_value(item.get("label", ""))
+    view_id = _normalize_focusable_inventory_value(item.get("view_id", ""))
+    class_name = _normalize_focusable_inventory_value(item.get("class_name", ""))
+    source = str(item.get("primary_source", "") or item.get("source", "") or "").strip()
+    combined = " ".join(part for part in (label, view_id, class_name) if part)
+
+    if label in {"navigate up", "more options", "overflow"}:
+        return "IGNORE", "toolbar_chrome"
+    if any(token in view_id for token in ("home_button", "more_menu_button", "toolbar", "action_bar", "appbar")):
+        return "IGNORE", "toolbar_chrome"
+    if ("card" in view_id or "card" in class_name or "container" in class_name) and len(label.split()) > 2:
+        return "IGNORE", "container_root"
+
+    if label in {"no history"}:
+        return "OPTIONAL", "supporting_empty_state"
+    if any(token in combined for token in ("subtitle", "supporting", "description")):
+        return "OPTIONAL", "supporting_text"
+
+    if (
+        source == "actionable_descendant"
+        or label in {">", "graph button", "chart button"}
+        or any(token in combined for token in ("graph", "chart", "settings", "detail", "details"))
+    ):
+        return "REVIEW", "action_or_affordance"
+
+    if re.search(r"\b\d{1,3}\s*%$", label):
+        return "REQUIRED", "percentage_value"
+    if label in {"on", "off", "locked", "unlocked", "open", "closed", "running", "stopped"}:
+        return "REQUIRED", "state_value"
+    if _is_air_quality_value_text(combined):
+        return "REQUIRED", "air_quality_value"
+    if any(
+        token in combined
+        for token in (
+            "motion detected",
+            "battery",
+            "temperature",
+            "humidity",
+            "volume",
+            "channel",
+        )
+    ):
+        return "REQUIRED", "user_state_or_sensor_value"
+
+    return "OPTIONAL", "unclassified_readable"
+
+
 def _ensure_focusable_inventory(client: Any, output_path: str) -> list[dict[str, Any]]:
     current_output = str(getattr(client, "_focusable_inventory_output_path", "") or "")
     if current_output != str(output_path):
@@ -1055,6 +1117,7 @@ def _build_focusable_coverage_payload(inventory: list[dict[str, Any]], rows: lis
         matched_row = match.get("row") if isinstance(match.get("row"), dict) else None
         scenario_id = str(item.get("scenario_id", "") or "").strip()
         status = str(match.get("status", "UNKNOWN") or "UNKNOWN")
+        taxonomy, taxonomy_reason = _focusable_taxonomy(item)
         record = {
             "canonical_id": str(item.get("canonical_id", "") or ""),
             "scenario_id": scenario_id,
@@ -1066,6 +1129,8 @@ def _build_focusable_coverage_payload(inventory: list[dict[str, Any]], rows: lis
             "primary_source": str(item.get("primary_source", "") or item.get("source", "") or "").strip(),
             "sources": list(item.get("sources", [])) if isinstance(item.get("sources"), list) else [],
             "raw_record_count": int(item.get("raw_record_count", 1) or 1),
+            "taxonomy": taxonomy,
+            "taxonomy_reason": taxonomy_reason,
             "coverage_status": status,
             "coverage_reason": str(match.get("reason", "") or "").strip(),
             "matched_step": (matched_row.get("step_index") or matched_row.get("step")) if matched_row else None,
@@ -1085,17 +1150,39 @@ def _build_focusable_coverage_payload(inventory: list[dict[str, Any]], rows: lis
                 "missed_count": 0,
                 "unknown_count": 0,
                 "coverage_rate": 0.0,
+                "required_expected_count": 0,
+                "required_covered_count": 0,
+                "required_missed_count": 0,
+                "review_expected_count": 0,
+                "review_unknown_count": 0,
+                "optional_expected_count": 0,
+                "ignore_count": 0,
             },
         )
-        summary["expected_count"] += 1
         summary["canonical_expected_count"] += 1
         summary["raw_inventory_count"] += int(item.get("raw_record_count", 1) or 1)
-        if status == "COVERED":
-            summary["covered_count"] += 1
-        elif status == "MISSED":
-            summary["missed_count"] += 1
+        if taxonomy == "IGNORE":
+            summary["ignore_count"] += 1
         else:
-            summary["unknown_count"] += 1
+            summary["expected_count"] += 1
+            if status == "COVERED":
+                summary["covered_count"] += 1
+            elif status == "MISSED":
+                summary["missed_count"] += 1
+            else:
+                summary["unknown_count"] += 1
+        if taxonomy == "REQUIRED":
+            summary["required_expected_count"] += 1
+            if status == "COVERED":
+                summary["required_covered_count"] += 1
+            elif status == "MISSED":
+                summary["required_missed_count"] += 1
+        elif taxonomy == "REVIEW":
+            summary["review_expected_count"] += 1
+            if status == "UNKNOWN":
+                summary["review_unknown_count"] += 1
+        elif taxonomy == "OPTIONAL":
+            summary["optional_expected_count"] += 1
 
     for summary in summary_by_scenario.values():
         expected = int(summary.get("expected_count", 0) or 0)

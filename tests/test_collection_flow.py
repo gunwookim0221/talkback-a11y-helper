@@ -386,6 +386,81 @@ def test_focusable_coverage_summary_counts_rate(tmp_path):
     assert summary["coverage_rate"] == 33.3
 
 
+def test_focusable_coverage_assigns_taxonomy_and_excludes_ignore_from_denominator(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    inventory = [
+        {"scenario_id": "device_motion_sensor_plugin", "label": "Navigate up", "view_id": "home_button", "bounds": "", "source": "focus_payload"},
+        {"scenario_id": "device_motion_sensor_plugin", "label": "More options", "view_id": "more_menu_button", "bounds": "", "source": "focus_payload"},
+        {"scenario_id": "device_motion_sensor_plugin", "label": "100%", "view_id": "lowBattery", "bounds": "", "source": "helper_snapshot"},
+        {"scenario_id": "device_motion_sensor_plugin", "label": "Motion detected", "view_id": "motion_state", "bounds": "", "source": "helper_snapshot"},
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "label": "History",
+            "view_id": "MotionSensorCapabilityCardView_header_graphButton",
+            "bounds": "",
+            "source": "actionable_descendant",
+        },
+        {"scenario_id": "device_motion_sensor_plugin", "label": "No history", "view_id": "no_history", "bounds": "", "source": "helper_snapshot"},
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "label": "Motion detection notifications, Example: every day, 6:00 PM - 10:00 PM",
+            "view_id": "Active",
+            "bounds": "",
+            "source": "focus_payload",
+        },
+    ]
+    rows = [
+        {"scenario_id": "device_motion_sensor_plugin", "step_index": 1, "visible_label": "History", "focus_view_id": "history"},
+        {"scenario_id": "device_motion_sensor_plugin", "step_index": 2, "visible_label": "No history", "focus_view_id": "no_history"},
+        {
+            "scenario_id": "device_motion_sensor_plugin",
+            "step_index": 3,
+            "visible_label": "Motion detection notifications, Example: every day, 6:00 PM - 10:00 PM",
+            "focus_view_id": "Active",
+        },
+    ]
+
+    payload = collection_flow._build_focusable_coverage_payload(inventory, rows, output_path)
+    by_label = {record["label"]: record for record in payload["records"]}
+    summary = payload["summary"][0]
+
+    assert by_label["Navigate up"]["taxonomy"] == "IGNORE"
+    assert by_label["More options"]["taxonomy"] == "IGNORE"
+    assert by_label["100%"]["taxonomy"] == "REQUIRED"
+    assert by_label["Motion detected"]["taxonomy"] == "REQUIRED"
+    assert by_label["History"]["taxonomy"] == "REVIEW"
+    assert by_label["No history"]["taxonomy"] == "OPTIONAL"
+    assert by_label["Motion detection notifications, Example: every day, 6:00 PM - 10:00 PM"]["taxonomy"] == "OPTIONAL"
+    assert summary["canonical_expected_count"] == 7
+    assert summary["expected_count"] == 5
+    assert summary["ignore_count"] == 2
+    assert summary["required_expected_count"] == 2
+    assert summary["required_missed_count"] == 2
+    assert summary["review_expected_count"] == 1
+    assert summary["review_unknown_count"] == 1
+    assert summary["optional_expected_count"] == 2
+
+
+def test_focusable_coverage_taxonomy_keeps_air_quality_values_required(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    inventory = [
+        {"scenario_id": "device_air_purifier_plugin", "label": "PM10", "view_id": "pm10", "bounds": "", "source": "helper_snapshot"},
+        {"scenario_id": "device_air_purifier_plugin", "label": "PM 2.5", "view_id": "pm25", "bounds": "", "source": "helper_snapshot"},
+        {"scenario_id": "device_air_purifier_plugin", "label": "0 μg/㎥", "view_id": "dust_value", "bounds": "", "source": "helper_snapshot"},
+    ]
+
+    payload = collection_flow._build_focusable_coverage_payload(inventory, [], output_path)
+    by_label = {record["label"]: record for record in payload["records"]}
+    summary = payload["summary"][0]
+
+    assert by_label["PM10"]["taxonomy"] == "REQUIRED"
+    assert by_label["PM10"]["taxonomy_reason"] == "air_quality_value"
+    assert by_label["PM 2.5"]["taxonomy"] == "REQUIRED"
+    assert by_label["0 μg/㎥"]["taxonomy"] == "REQUIRED"
+    assert summary["required_expected_count"] == 3
+    assert summary["required_missed_count"] == 3
+
+
 def test_focusable_coverage_saves_without_inventory(tmp_path):
     client = SimpleNamespace()
     output_path = str(tmp_path / "talkback_compare.xlsx")

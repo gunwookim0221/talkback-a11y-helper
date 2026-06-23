@@ -179,14 +179,14 @@ importance.
 
 Initial categories:
 
-- `required`
-- `review`
-- `optional`
-- `ignore`
+- `REQUIRED`
+- `REVIEW`
+- `OPTIONAL`
+- `IGNORE`
 
 ### 4.1 Required
 
-Required focusables are user-meaningful elements whose absence from persisted
+`REQUIRED` focusables are user-meaningful elements whose absence from persisted
 coverage likely hides an accessibility or traversal issue.
 
 Examples:
@@ -207,7 +207,7 @@ Expected behavior:
 
 ### 4.2 Review
 
-Review focusables are meaningful controls or structural affordances that may be
+`REVIEW` focusables are meaningful controls or structural affordances that may be
 validly represented by nearby context, but deserve manual inspection if missing.
 
 Examples:
@@ -226,7 +226,7 @@ Expected behavior:
 
 ### 4.3 Optional
 
-Optional focusables are low-risk or redundant nodes where missing row evidence is
+`OPTIONAL` focusables are low-risk or redundant nodes where missing row evidence is
 not enough to indicate a quality problem.
 
 Examples:
@@ -243,11 +243,13 @@ Expected behavior:
 
 ### 4.4 Ignore
 
-Ignored focusables are expected artifacts or implementation details.
+`IGNORE` focusables are expected artifacts or implementation details.
 
 Examples:
 
 - duplicate focus artifact;
+- toolbar chrome such as `Navigate up`, `More options`, overflow controls;
+- container root rows whose child nodes carry the meaningful state/action;
 - off-screen stale node;
 - invisible / zero-sized helper node;
 - overlay artifact unrelated to current plugin;
@@ -454,36 +456,63 @@ node itself persisted as a result row.
 - `unknown_count`
 - `coverage_rate`
 
-`expected_count` and `canonical_expected_count` are canonical item counts in
-Phase 2. `raw_inventory_count` preserves the source-expanded count for
-diagnostics.
+`canonical_expected_count` is the full canonical item count. `raw_inventory_count`
+preserves the source-expanded count for diagnostics.
 
 Current limitations:
 
-- taxonomy is not applied yet, so chrome and content items share the denominator;
 - coverage does not affect `PASS`, `WARN`, `FAIL`, `mismatch_type`, semantic
   value metrics, or shadow verdicts;
 - `UNKNOWN` requires manual review until taxonomy and stronger matching evidence
   are validated.
 
-### Phase 3: Taxonomy Validation
+### Phase 3: Focusable Taxonomy
 
-Goal: validate required / review / optional / ignore classification against
-real artifacts.
+Goal: classify canonical focusables by accessibility importance and keep chrome
+or container artifacts out of the coverage denominator.
 
-Tasks:
+Each `focusable_coverage.json` record adds:
 
-- review Motion Sensor, Door Lock, TV, Audio, Washer, Air Purifier;
-- tune taxonomy based on false positives;
-- add metadata confidence;
-- identify plugin-agnostic rules.
+- `taxonomy`
+- `taxonomy_reason`
 
-Expected output:
+Initial reporting rules:
 
-- `focusable_required_expected_count`
-- `focusable_required_missing_count`
-- `focusable_review_missing_count`
-- taxonomy false-positive notes.
+- `REQUIRED`: user state/value readings such as `100%`, `Motion detected`,
+  toggle states, battery, temperature, humidity, air-quality PM/CAQI values,
+  volume, and channel.
+- `REVIEW`: actionable or structural affordances such as graph/chart buttons,
+  card action buttons, details/settings shortcuts, and chevrons.
+- `OPTIONAL`: supporting or redundant text such as `No history`, subtitles, and
+  descriptive copy.
+- `IGNORE`: toolbar chrome, overflow controls, navigation controls, and
+  composite container roots.
+
+Phase 3 summary fields:
+
+- `required_expected_count`
+- `required_covered_count`
+- `required_missed_count`
+- `review_expected_count`
+- `review_unknown_count`
+- `optional_expected_count`
+- `ignore_count`
+
+`expected_count` and `coverage_rate` exclude `IGNORE` records. This keeps
+inventory diagnostics intact through `canonical_expected_count` while making
+the headline coverage rate reflect auditable content rather than toolbar chrome.
+
+Known limitations:
+
+- taxonomy is heuristic and should remain reporting-only until validated across
+  multiple plugins;
+- `PM` is required only in air-quality / dust sensor contexts such as `PM10`,
+  `PM 2.5`, `CAQI`, or `0 μg/㎥`; time-of-day text such as `6:00 PM` is not a
+  required PM sensor value;
+- `REVIEW` does not mean a defect, only that missing or ambiguous evidence
+  deserves manual inspection;
+- composite card roots may be ignored while child state/action nodes remain
+  counted separately.
 
 ### Phase 4: Shadow Coverage
 
@@ -564,10 +593,10 @@ Example expected inventory:
 
 | label | taxonomy | rationale |
 | --- | --- | --- |
-| `Motion detected` | `required` | current motion state |
-| `100%` | `required` | battery value |
-| `>` | `review` | navigational affordance / chevron |
-| `Graph button` | `review` | user-actionable collapsed control |
+| `Motion detected` | `REQUIRED` | current motion state |
+| `100%` | `REQUIRED` | battery value |
+| `>` | `REVIEW` | navigational affordance / chevron |
+| `Graph button` | `REVIEW` | user-actionable collapsed control |
 
 Phase 1 inventory should include these nodes from either focus payload or helper
 snapshot evidence:
