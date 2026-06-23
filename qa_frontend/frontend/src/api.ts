@@ -234,6 +234,35 @@ export type QualityIssue = {
   crop_path?: string | null;
 };
 
+export type FocusableCoverageIssue = {
+  scenario_id: string;
+  focusable_label: string;
+  focusable_view_id?: string;
+  focusable_taxonomy: 'REQUIRED' | 'REVIEW' | 'OPTIONAL' | 'IGNORE' | string;
+  focusable_coverage_status: 'COVERED' | 'MISSED' | 'UNKNOWN' | string;
+  focusable_coverage_reason?: string;
+  focusable_taxonomy_reason?: string;
+};
+
+export type FocusableCoverage = {
+  summary?: {
+    focusable_required_expected_count?: number;
+    focusable_required_covered_count?: number;
+    focusable_required_missed_count?: number;
+    focusable_review_expected_count?: number;
+    focusable_review_unknown_count?: number;
+    focusable_optional_expected_count?: number;
+    focusable_coverage_rate?: number | null;
+  };
+  scenarios?: Array<{
+    scenario_id: string;
+    focusable_required_missed?: number;
+    focusable_review_unknown?: number;
+    focusable_coverage_rate?: number | null;
+  }>;
+  issues?: FocusableCoverageIssue[];
+};
+
 export type RecentBatchDevice = {
   serial: string;
   model: string;
@@ -262,8 +291,13 @@ export type RecentBatchDevice = {
     shadow_review_count?: number;
     shadow_warn_count?: number;
     shadow_fail_count?: number;
+    focusable_required_missed?: number;
+    focusable_review_unknown?: number;
+    focusable_coverage_rate?: number | null;
   }>;
   quality_issues?: QualityIssue[];
+  focusable_coverage?: FocusableCoverage | null;
+  focusable_issues?: FocusableCoverageIssue[];
   process_status?: string;
   scenario_result_status?: string;
   passed_scenarios?: number;
@@ -908,6 +942,13 @@ export const api = {
       shadow_review_count?: number;
       shadow_warn_count?: number;
       shadow_fail_count?: number;
+      focusable_required_expected_count?: number;
+      focusable_required_covered_count?: number;
+      focusable_required_missed_count?: number;
+      focusable_review_expected_count?: number;
+      focusable_review_unknown_count?: number;
+      focusable_optional_expected_count?: number;
+      focusable_coverage_rate?: number | null;
     };
     scenario_summary: Array<{
       scenario_id: string;
@@ -927,6 +968,9 @@ export const api = {
       shadow_warn_count?: number;
       shadow_fail_count?: number;
       scenario_shadow_verdict?: string;
+      focusable_required_missed?: number;
+      focusable_review_unknown?: number;
+      focusable_coverage_rate?: number | null;
       status: 'fail' | 'issue' | 'review' | 'clean';
     }>;
     signals: Array<{ 
@@ -951,6 +995,7 @@ export const api = {
       category: string; 
       top_category: string;
     }>;
+    focusable_coverage?: FocusableCoverage;
   }>(`/api/runs/recent/${encodeURIComponent(runId)}/mismatch`),
   outputs: () => request<{ outputs: OutputFile[] }>('/api/outputs'),
 };

@@ -692,9 +692,14 @@ class BatchRunManager:
                                 "shadow_review_count": item.get("shadow_review_count", 0),
                                 "shadow_warn_count": item.get("shadow_warn_count", 0),
                                 "shadow_fail_count": item.get("shadow_fail_count", 0),
+                                "focusable_required_missed": item.get("focusable_required_missed", 0),
+                                "focusable_review_unknown": item.get("focusable_review_unknown", 0),
+                                "focusable_coverage_rate": item.get("focusable_coverage_rate"),
                             }
                             for item in mismatch_res.get("scenario_summary", [])
                         ]
+                        data["focusable_coverage"] = mismatch_res.get("focusable_coverage")
+                        data["focusable_issues"] = (mismatch_res.get("focusable_coverage") or {}).get("issues", [])
                         
                         quality_issues = []
                         for sig in mismatch_res.get("signals", []):
@@ -1037,6 +1042,8 @@ def get_recent_batches() -> list[dict]:
                                 dev_info["shadow_quality"] = dev_data.get("shadow_quality")
                                 dev_info["shadow_scenarios"] = dev_data.get("shadow_scenarios")
                                 dev_info["quality_issues"] = dev_data.get("quality_issues")
+                                dev_info["focusable_coverage"] = dev_data.get("focusable_coverage")
+                                dev_info["focusable_issues"] = dev_data.get("focusable_issues")
                                 
                                 from .recent_runs import _recent_run_from_summary
                                 from datetime import datetime

@@ -15,6 +15,13 @@ type MismatchSummary = {
     shadow_review_count?: number;
     shadow_warn_count?: number;
     shadow_fail_count?: number;
+    focusable_required_expected_count?: number;
+    focusable_required_covered_count?: number;
+    focusable_required_missed_count?: number;
+    focusable_review_expected_count?: number;
+    focusable_review_unknown_count?: number;
+    focusable_optional_expected_count?: number;
+    focusable_coverage_rate?: number | null;
   };
   scenario_summary: Array<{
     scenario_id: string;
@@ -30,6 +37,9 @@ type MismatchSummary = {
     shadow_warn_count?: number;
     shadow_fail_count?: number;
     scenario_shadow_verdict?: string;
+    focusable_required_missed?: number;
+    focusable_review_unknown?: number;
+    focusable_coverage_rate?: number | null;
     status: 'fail' | 'issue' | 'review' | 'clean';
   }>;
   signals: Array<{ 
@@ -53,6 +63,32 @@ type MismatchSummary = {
     is_repeated_issue_group?: boolean;
     category: string; 
   }>;
+  focusable_coverage?: {
+    summary?: {
+      focusable_required_expected_count?: number;
+      focusable_required_covered_count?: number;
+      focusable_required_missed_count?: number;
+      focusable_review_expected_count?: number;
+      focusable_review_unknown_count?: number;
+      focusable_optional_expected_count?: number;
+      focusable_coverage_rate?: number | null;
+    };
+    scenarios?: Array<{
+      scenario_id: string;
+      focusable_required_missed?: number;
+      focusable_review_unknown?: number;
+      focusable_coverage_rate?: number | null;
+    }>;
+    issues?: Array<{
+      scenario_id: string;
+      focusable_label: string;
+      focusable_view_id?: string;
+      focusable_taxonomy: string;
+      focusable_coverage_status: string;
+      focusable_coverage_reason?: string;
+      focusable_taxonomy_reason?: string;
+    }>;
+  };
 };
 
 export interface RecentRunsPanelProps {
@@ -139,10 +175,28 @@ export function RecentRunsPanel({
         .map((item: any) => [item.scenario_id, item])
     );
     const shadowQuality = runData?.shadow_quality;
+    const focusableCoverage = runData?.focusable_coverage;
+    const focusableSummary = focusableCoverage?.summary;
+    const focusableIssues = runData?.focusable_issues || focusableCoverage?.issues || [];
+    const focusableScenarioById = new Map(
+      (focusableCoverage?.scenarios || runData?.shadow_scenarios || [])
+        .filter((item: any) => item?.scenario_id)
+        .map((item: any) => [item.scenario_id, item])
+    );
 
     const scenarioShadowText = (scenario: any) => {
       const shadow = shadowScenarioById.get(scenario.id) as any;
       return shadow?.scenario_shadow_verdict ? `Shadow: ${shadow.scenario_shadow_verdict}` : null;
+    };
+
+    const scenarioCoverageText = (scenario: any) => {
+      const coverage = focusableScenarioById.get(scenario.id) as any;
+      const requiredMissed = Number(coverage?.focusable_required_missed || 0);
+      const reviewUnknown = Number(coverage?.focusable_review_unknown || 0);
+      if (!requiredMissed && !reviewUnknown) {
+        return null;
+      }
+      return `Coverage: required misses ${requiredMissed}, review unknown ${reviewUnknown}`;
     };
 
     return (
@@ -162,6 +216,7 @@ export function RecentRunsPanel({
                       <strong>{scenario.id}</strong>
                       <small>reason={scenarioReasonText(scenario) || 'failed'}</small>
                       {scenarioShadowText(scenario) ? <small>{scenarioShadowText(scenario)}</small> : null}
+                      {scenarioCoverageText(scenario) ? <small>{scenarioCoverageText(scenario)}</small> : null}
                     </div>
                   ))
                 ) : (
@@ -178,6 +233,7 @@ export function RecentRunsPanel({
                       <strong>{scenario.id}</strong>
                       <small>reason={scenarioReasonText(scenario) || 'warning'}</small>
                       {scenarioShadowText(scenario) ? <small>{scenarioShadowText(scenario)}</small> : null}
+                      {scenarioCoverageText(scenario) ? <small>{scenarioCoverageText(scenario)}</small> : null}
                     </div>
                   ))
                 ) : (
@@ -199,6 +255,7 @@ export function RecentRunsPanel({
                       </small>
                       <small>{scenario.availability_reason || scenarioReasonText(scenario) || 'not available candidate'}</small>
                       {scenarioShadowText(scenario) ? <small>{scenarioShadowText(scenario)}</small> : null}
+                      {scenarioCoverageText(scenario) ? <small>{scenarioCoverageText(scenario)}</small> : null}
                     </div>
                   ))
                 ) : (
@@ -215,6 +272,7 @@ export function RecentRunsPanel({
                       <strong>{scenario.id}</strong>
                       {typeof scenario.steps === 'number' ? <small>{scenario.steps} steps</small> : null}
                       {scenarioShadowText(scenario) ? <small>{scenarioShadowText(scenario)}</small> : null}
+                      {scenarioCoverageText(scenario) ? <small>{scenarioCoverageText(scenario)}</small> : null}
                     </div>
                   ))
                 ) : (
@@ -279,6 +337,59 @@ export function RecentRunsPanel({
                   <strong style={{ fontSize: '1.4em', color: (shadowQuality.fail ?? 0) > 0 ? 'var(--color-danger)' : 'inherit' }}>{shadowQuality.fail ?? 0}</strong>
                 </div>
               </div>
+            </div>
+          </details>
+        )}
+
+        {focusableSummary && (
+          <details open style={{ marginTop: '16px' }}>
+            <summary style={{ fontSize: '14px', fontWeight: 'bold' }}>Focusable Coverage</summary>
+            <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', marginTop: '4px' }}>
+              Reporting-only V7 focusable coverage signal. This does not change PASS/WARN/FAIL.
+            </div>
+            <div className="scenarioDetailList" style={{ marginTop: '8px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '8px' }}>
+                <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                  <small>Required Misses</small>
+                  <strong style={{ fontSize: '1.4em', color: (focusableSummary.focusable_required_missed_count ?? 0) > 0 ? 'var(--color-danger)' : 'var(--color-success)' }}>
+                    {focusableSummary.focusable_required_missed_count ?? 0}
+                  </strong>
+                </div>
+                <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                  <small>Review Unknown</small>
+                  <strong style={{ fontSize: '1.4em', color: (focusableSummary.focusable_review_unknown_count ?? 0) > 0 ? 'var(--color-warning)' : 'inherit' }}>
+                    {focusableSummary.focusable_review_unknown_count ?? 0}
+                  </strong>
+                </div>
+                <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                  <small>Coverage Rate</small>
+                  <strong style={{ fontSize: '1.4em' }}>
+                    {typeof focusableSummary.focusable_coverage_rate === 'number' ? `${focusableSummary.focusable_coverage_rate}%` : '-'}
+                  </strong>
+                </div>
+              </div>
+              {focusableIssues.length > 0 ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
+                  <div className="scenarioDetailRow" style={{ alignItems: 'flex-start' }}>
+                    <strong>Required Missing ({focusableIssues.filter((item: any) => item.focusable_taxonomy === 'REQUIRED').length})</strong>
+                    {focusableIssues.filter((item: any) => item.focusable_taxonomy === 'REQUIRED').map((item: any, index: number) => (
+                      <small key={`${item.scenario_id}-required-${index}`}>
+                        {item.focusable_label || item.focusable_view_id || '-'} · {item.scenario_id}
+                      </small>
+                    ))}
+                  </div>
+                  <div className="scenarioDetailRow" style={{ alignItems: 'flex-start' }}>
+                    <strong>Review Unknown ({focusableIssues.filter((item: any) => item.focusable_taxonomy === 'REVIEW').length})</strong>
+                    {focusableIssues.filter((item: any) => item.focusable_taxonomy === 'REVIEW').map((item: any, index: number) => (
+                      <small key={`${item.scenario_id}-review-${index}`}>
+                        {item.focusable_label || item.focusable_view_id || '-'} · {item.scenario_id}
+                      </small>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <small>No required misses or review unknown focusables.</small>
+              )}
             </div>
           </details>
         )}
@@ -467,6 +578,7 @@ export function RecentRunsPanel({
                               {d.model} <span style={{ color: 'var(--color-text-dim)' }}>/ {d.serial}</span> &middot; {d.state} {d.return_code != null ? `· ret: ${d.return_code}` : ''}
                               {d.quality && ` · fail:${d.quality.fail} issue:${d.quality.issue} review:${d.quality.review} clean:${d.quality.clean}`}
                               {d.shadow_quality && ` · shadow fail:${d.shadow_quality.fail} warn:${d.shadow_quality.warn} review:${d.shadow_quality.review}`}
+                              {d.focusable_coverage?.summary && ` · coverage required:${d.focusable_coverage.summary.focusable_required_missed_count ?? 0} review:${d.focusable_coverage.summary.focusable_review_unknown_count ?? 0}`}
                             </span>
                             <div style={{ display: 'flex', gap: '4px', marginLeft: 'auto' }}>
                               {d.log_path && (

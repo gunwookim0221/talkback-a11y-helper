@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import openpyxl
+import json
 from pathlib import Path
 from .paths import OUTPUT_DIR
 from .recent_runs import safe_recent_run_log_path
@@ -119,6 +120,9 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
                     "shadow_warn_count": 0,
                     "shadow_fail_count": 0,
                     "scenario_shadow_verdict": "",
+                    "focusable_required_missed": 0,
+                    "focusable_review_unknown": 0,
+                    "focusable_coverage_rate": None,
                     "status": "clean"
                 }
 
@@ -288,7 +292,46 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
         all_previews.sort(key=lambda x: priority_map.get(x["top_category"], 99))
         previews = all_previews[:20]
 
-        # Calculate scenario status
+        focusable_coverage = _read_focusable_coverage_for_xlsx(xlsx_path)
+        focusable_summary = focusable_coverage.get("summary", {})
+        focusable_by_scenario = {
+            str(item.get("scenario_id", "") or ""): item
+            for item in focusable_coverage.get("scenarios", [])
+            if isinstance(item, dict)
+        }
+
+        for scenario, coverage_stats in focusable_by_scenario.items():
+            stats = scenario_stats.setdefault(
+                scenario,
+                {
+                    "scenario_id": scenario,
+                    "plugin_name": "",
+                    "matched": 0,
+                    "true_mismatch": 0,
+                    "empty_speech": 0,
+                    "empty_visible": 0,
+                    "review": 0,
+                    "runtime_warning": 0,
+                    "fail_count": 0,
+                    "issue_count": 0,
+                    "review_count": 0,
+                    "clean_count": 0,
+                    "shadow_pass_count": 0,
+                    "shadow_review_count": 0,
+                    "shadow_warn_count": 0,
+                    "shadow_fail_count": 0,
+                    "scenario_shadow_verdict": "",
+                    "focusable_required_missed": 0,
+                    "focusable_review_unknown": 0,
+                    "focusable_coverage_rate": None,
+                    "status": "clean",
+                },
+            )
+            stats["focusable_required_missed"] = int(coverage_stats.get("focusable_required_missed") or 0)
+            stats["focusable_review_unknown"] = int(coverage_stats.get("focusable_review_unknown") or 0)
+            stats["focusable_coverage_rate"] = coverage_stats.get("focusable_coverage_rate")
+
+        # Calculate scenario status after all reporting-only scenario metrics are attached.
         scenario_summary = []
         for s_id, stats in scenario_stats.items():
             if stats["fail_count"] > 0:
@@ -326,9 +369,17 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
                 "shadow_review_count": int(shadow_summary.get("shadow_review_count") or 0),
                 "shadow_warn_count": int(shadow_summary.get("shadow_warn_count") or 0),
                 "shadow_fail_count": int(shadow_summary.get("shadow_fail_count") or 0),
+                "focusable_required_expected_count": int(focusable_summary.get("focusable_required_expected_count") or 0),
+                "focusable_required_covered_count": int(focusable_summary.get("focusable_required_covered_count") or 0),
+                "focusable_required_missed_count": int(focusable_summary.get("focusable_required_missed_count") or 0),
+                "focusable_review_expected_count": int(focusable_summary.get("focusable_review_expected_count") or 0),
+                "focusable_review_unknown_count": int(focusable_summary.get("focusable_review_unknown_count") or 0),
+                "focusable_optional_expected_count": int(focusable_summary.get("focusable_optional_expected_count") or 0),
+                "focusable_coverage_rate": focusable_summary.get("focusable_coverage_rate"),
             },
             "scenario_summary": scenario_summary,
             "signals": previews,
+            "focusable_coverage": focusable_coverage,
             "debug": {
                 "xlsx_path": xlsx_path.name,
                 "result_rows": sheet.max_row - 1 if sheet.max_row > 1 else 0
@@ -371,3 +422,115 @@ def _read_shadow_summary_from_xlsx(xlsx_path: Path) -> dict[str, int]:
         return values
     except Exception:
         return {}
+
+
+def _empty_focusable_coverage() -> dict[str, object]:
+    return {
+        "summary": {
+            "focusable_required_expected_count": 0,
+            "focusable_required_covered_count": 0,
+            "focusable_required_missed_count": 0,
+            "focusable_review_expected_count": 0,
+            "focusable_review_unknown_count": 0,
+            "focusable_optional_expected_count": 0,
+            "focusable_coverage_rate": None,
+        },
+        "scenarios": [],
+        "issues": [],
+    }
+
+
+def _read_focusable_coverage_for_xlsx(xlsx_path: Path) -> dict[str, object]:
+    coverage_path = xlsx_path.with_name(f"{xlsx_path.stem}.focusable_coverage.json")
+    if not coverage_path.is_file():
+        return _empty_focusable_coverage()
+    try:
+        payload = json.loads(coverage_path.read_text(encoding="utf-8"))
+    except Exception:
+        return _empty_focusable_coverage()
+
+    summaries = payload.get("summary")
+    records = payload.get("records")
+    if not isinstance(summaries, list):
+        summaries = []
+    if not isinstance(records, list):
+        records = []
+
+    total_required_expected = 0
+    total_required_covered = 0
+    total_required_missed = 0
+    total_review_expected = 0
+    total_review_unknown = 0
+    total_optional_expected = 0
+    expected_total = 0
+    covered_total = 0
+    scenarios: list[dict[str, object]] = []
+
+    for item in summaries:
+        if not isinstance(item, dict):
+            continue
+        required_expected = _safe_int(item.get("required_expected_count"))
+        required_covered = _safe_int(item.get("required_covered_count"))
+        required_missed = _safe_int(item.get("required_missed_count"))
+        review_expected = _safe_int(item.get("review_expected_count"))
+        review_unknown = _safe_int(item.get("review_unknown_count"))
+        optional_expected = _safe_int(item.get("optional_expected_count"))
+        expected = _safe_int(item.get("expected_count"))
+        covered = _safe_int(item.get("covered_count"))
+        total_required_expected += required_expected
+        total_required_covered += required_covered
+        total_required_missed += required_missed
+        total_review_expected += review_expected
+        total_review_unknown += review_unknown
+        total_optional_expected += optional_expected
+        expected_total += expected
+        covered_total += covered
+        scenarios.append(
+            {
+                "scenario_id": str(item.get("scenario_id", "") or ""),
+                "focusable_required_missed": required_missed,
+                "focusable_review_unknown": review_unknown,
+                "focusable_coverage_rate": item.get("coverage_rate"),
+            }
+        )
+
+    issues = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        taxonomy = str(record.get("taxonomy", "") or "").upper()
+        status = str(record.get("coverage_status", "") or "").upper()
+        if not ((taxonomy == "REQUIRED" and status == "MISSED") or (taxonomy == "REVIEW" and status == "UNKNOWN")):
+            continue
+        issues.append(
+            {
+                "scenario_id": str(record.get("scenario_id", "") or ""),
+                "focusable_label": str(record.get("label", "") or ""),
+                "focusable_view_id": str(record.get("view_id", "") or ""),
+                "focusable_taxonomy": taxonomy,
+                "focusable_coverage_status": status,
+                "focusable_coverage_reason": str(record.get("coverage_reason", "") or ""),
+                "focusable_taxonomy_reason": str(record.get("taxonomy_reason", "") or ""),
+            }
+        )
+
+    return {
+        "summary": {
+            "focusable_required_expected_count": total_required_expected,
+            "focusable_required_covered_count": total_required_covered,
+            "focusable_required_missed_count": total_required_missed,
+            "focusable_review_expected_count": total_review_expected,
+            "focusable_review_unknown_count": total_review_unknown,
+            "focusable_optional_expected_count": total_optional_expected,
+            "focusable_coverage_rate": round((covered_total / expected_total) * 100.0, 1) if expected_total else None,
+        },
+        "scenarios": scenarios,
+        "issues": issues,
+    }
+
+
+def _safe_int(value: object) -> int:
+    try:
+        return int(float(value or 0))
+    except (TypeError, ValueError):
+        return 0
