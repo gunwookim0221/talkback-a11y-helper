@@ -240,3 +240,8 @@ Artifact viewer 실패는 Crash Issues modal 안에서만 표시되며 Device De
 - **Smoke result manual refresh**: smoke 결과는 자동 polling이 아니라 `Refresh Smoke Result` 수동 갱신 방식입니다.
 - **Rollback preview only**: Apply는 backup을 만들지만 rollback 실행 API/UI는 아직 없고 preview만 제공합니다.
 - **Smoke serial 미연결**: smoke request schema의 `serial`은 현재 runner 실행 경로에 직접 연결되지 않습니다.
+
+## Related design documents
+
+- [semantic-value-shadow-audit.md](design/semantic-value-shadow-audit.md)
+- [audit-v7-focusable-coverage-design.md](design/audit-v7-focusable-coverage-design.md)

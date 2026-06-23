@@ -56,3 +56,8 @@
 
 운영 판단은 archive 문서보다 운영 기준 문서를 우선합니다.
 *(최근의 Batch-First UX 통합 및 Known Issues 등에 대해서는 `qa-frontend-guide.md`를 참고하세요.)*
+
+## Related design documents
+
+- [semantic-value-shadow-audit.md](design/semantic-value-shadow-audit.md)
+- [audit-v7-focusable-coverage-design.md](design/audit-v7-focusable-coverage-design.md)

@@ -69,3 +69,8 @@ Traversal / scoring / representative selection은 유지되고, 저장 semantics
 
 따라서 downstream이 representative 기준 visible을 기대한다면 이제
 `representative_*`를 읽어야 한다.
+
+## Related design documents
+
+- [semantic-value-shadow-audit.md](design/semantic-value-shadow-audit.md)
+- [audit-v7-focusable-coverage-design.md](design/audit-v7-focusable-coverage-design.md)
