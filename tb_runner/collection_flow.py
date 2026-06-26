@@ -44,6 +44,7 @@ from tb_runner.utils import (
 from tb_runner import container_group_logic
 from tb_runner import crash_guard
 from tb_runner import crash_recovery
+from tb_runner import coverage_probe_engine
 from tb_runner import device_tab_logic
 from tb_runner import focus_realign_logic
 from tb_runner import local_tab_logic
@@ -483,6 +484,11 @@ def _focusable_inventory_path(output_path: str) -> Path:
 def _focusable_coverage_path(output_path: str) -> Path:
     path = Path(output_path)
     return path.with_name(f"{path.stem}.focusable_coverage.json")
+
+
+def _coverage_probe_plan_path(output_path: str) -> Path:
+    path = Path(output_path)
+    return path.with_name(f"{path.stem}.coverage_probe_plan.json")
 
 
 def _is_air_quality_value_text(text: str) -> bool:
@@ -1125,10 +1131,12 @@ def _build_focusable_coverage_payload(inventory: list[dict[str, Any]], rows: lis
             "label": str(item.get("label", "") or "").strip(),
             "view_id": str(item.get("view_id", "") or "").strip(),
             "bounds": str(item.get("bounds", "") or "").strip(),
+            "class_name": str(item.get("class_name", "") or "").strip(),
             "source": str(item.get("primary_source", "") or item.get("source", "") or "").strip(),
             "primary_source": str(item.get("primary_source", "") or item.get("source", "") or "").strip(),
             "sources": list(item.get("sources", [])) if isinstance(item.get("sources"), list) else [],
             "raw_record_count": int(item.get("raw_record_count", 1) or 1),
+            "local_tab_signature": str(item.get("local_tab_signature", "") or "").strip(),
             "taxonomy": taxonomy,
             "taxonomy_reason": taxonomy_reason,
             "coverage_status": status,
@@ -1197,6 +1205,106 @@ def _build_focusable_coverage_payload(inventory: list[dict[str, Any]], rows: lis
     }
 
 
+def _coverage_probe_intent(record: dict[str, Any]) -> tuple[str, int]:
+    status = str(record.get("coverage_status", "") or "").strip().upper()
+    reason = str(record.get("coverage_reason", "") or "").strip()
+    if status == "MISSED" and reason == "no_matching_row":
+        return "VERIFY_MISSING_NODE", 1
+    if status == "UNKNOWN" and reason == "related_bounds_only":
+        return "VERIFY_RELATED_BOUNDS", 2
+    return "", 0
+
+
+def _coverage_probe_candidate_from_record(record: dict[str, Any]) -> dict[str, Any]:
+    bounds = str(record.get("bounds", "") or "").strip()
+    view_id = str(record.get("view_id", "") or "").strip()
+    probe_intent, probe_priority = _coverage_probe_intent(record)
+    has_bounds = bool(bounds)
+    has_view_id = bool(view_id)
+    probe_eligible = bool(has_bounds or has_view_id)
+    if has_bounds:
+        probe_method_candidate = "helper_focus_in_bounds"
+        probe_ineligible_reason = ""
+    elif has_view_id:
+        probe_method_candidate = "unresolved_view_id_only"
+        probe_ineligible_reason = ""
+    else:
+        probe_method_candidate = "ineligible_no_target"
+        probe_ineligible_reason = "ineligible_no_target"
+    coverage_reason = str(record.get("coverage_reason", "") or "").strip()
+    missing_reason = str(record.get("missing_reason", "") or "").strip()
+    if not missing_reason:
+        missing_reason = "no_persisted_row" if coverage_reason == "no_matching_row" else coverage_reason
+
+    return {
+        "scenario_id": str(record.get("scenario_id", "") or "").strip(),
+        "tab_name": str(record.get("tab_name", "") or "").strip(),
+        "label": str(record.get("label", "") or "").strip(),
+        "normalized_label": _normalize_focusable_inventory_value(record.get("label", "")),
+        "view_id": view_id,
+        "bounds": bounds,
+        "class_name": str(record.get("class_name", "") or "").strip(),
+        "taxonomy": str(record.get("taxonomy", "") or "").strip(),
+        "taxonomy_reason": str(record.get("taxonomy_reason", "") or "").strip(),
+        "coverage_status": str(record.get("coverage_status", "") or "").strip(),
+        "coverage_reason": coverage_reason,
+        "missing_reason": missing_reason,
+        "source": str(record.get("source", "") or record.get("primary_source", "") or "").strip(),
+        "local_tab_signature": str(record.get("local_tab_signature", "") or "").strip(),
+        "probe_intent": probe_intent,
+        "probe_eligible": probe_eligible,
+        "probe_ineligible_reason": probe_ineligible_reason,
+        "probe_method_candidate": probe_method_candidate,
+        "probe_priority": probe_priority,
+    }
+
+
+def _build_coverage_probe_plan_payload(coverage_payload: dict[str, Any], output_path: str) -> dict[str, Any]:
+    records = coverage_payload.get("records", []) if isinstance(coverage_payload, dict) else []
+    candidates: list[dict[str, Any]] = []
+    required_missed_input_count = 0
+    required_unknown_related_bounds_input_count = 0
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("taxonomy", "") or "").strip().upper() != "REQUIRED":
+            continue
+        probe_intent, _priority = _coverage_probe_intent(record)
+        if not probe_intent:
+            continue
+        if probe_intent == "VERIFY_MISSING_NODE":
+            required_missed_input_count += 1
+        elif probe_intent == "VERIFY_RELATED_BOUNDS":
+            required_unknown_related_bounds_input_count += 1
+        candidates.append(_coverage_probe_candidate_from_record(record))
+    eligible_count = sum(1 for candidate in candidates if bool(candidate.get("probe_eligible")))
+    return {
+        "schema_version": 1,
+        "source": "v8_coverage_probe_plan",
+        "output_path": str(output_path),
+        "summary": {
+            "candidate_count": len(candidates),
+            "eligible_count": eligible_count,
+            "ineligible_count": len(candidates) - eligible_count,
+            "required_missed_input_count": required_missed_input_count,
+            "required_unknown_related_bounds_input_count": required_unknown_related_bounds_input_count,
+        },
+        "candidates": candidates,
+    }
+
+
+def _save_coverage_probe_plan(output_path: str, coverage_payload: dict[str, Any]) -> None:
+    output = Path(output_path)
+    if str(output.parent) in {"", "."}:
+        return
+    target = _coverage_probe_plan_path(output_path)
+    payload = _build_coverage_probe_plan_payload(coverage_payload, output_path)
+    try:
+        target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as exc:
+        log(f"[FOCUSABLE][coverage_probe_plan_save_failed] path='{target}' error='{exc}'")
+
+
 def _save_focusable_coverage(client: Any, output_path: str, rows: list[dict[str, Any]]) -> None:
     output = Path(output_path)
     if str(output.parent) in {"", "."}:
@@ -1208,6 +1316,29 @@ def _save_focusable_coverage(client: Any, output_path: str, rows: list[dict[str,
         target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as exc:
         log(f"[FOCUSABLE][coverage_save_failed] path='{target}' error='{exc}'")
+    _save_coverage_probe_plan(output_path, payload)
+
+
+def _maybe_execute_coverage_probe_engine(client: Any, dev: str, output_path: str) -> None:
+    if not coverage_probe_engine.is_probe_enabled():
+        return
+    payload = coverage_probe_engine.maybe_execute_probe_plan_file(
+        client,
+        dev,
+        output_path=output_path,
+        log_fn=log,
+    )
+    if isinstance(payload, dict):
+        summary = payload.get("summary", {}) if isinstance(payload.get("summary"), dict) else {}
+        log(
+            "[FOCUSABLE][coverage_probe_results] "
+            f"enabled={str(bool(payload.get('enabled'))).lower()} "
+            f"candidate_count={int(summary.get('candidate_count', 0) or 0)} "
+            f"attempted_count={int(summary.get('attempted_count', 0) or 0)} "
+            f"success_count={int(summary.get('success_count', 0) or 0)} "
+            f"failed_count={int(summary.get('failed_count', 0) or 0)} "
+            f"skipped_count={int(summary.get('skipped_count', 0) or 0)}"
+        )
 
 
 def _iter_tree_nodes_with_parent(nodes: list[dict[str, Any]]) -> list[tuple[dict[str, Any], dict[str, Any] | None]]:
@@ -15206,6 +15337,7 @@ def collect_tab_rows(
         save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
         _save_focusable_inventory(client, output_path)
         _save_focusable_coverage(client, output_path, all_rows)
+        _maybe_execute_coverage_probe_engine(client, dev, output_path)
         return rows
     if not start_result.should_enter_main_loop:
         if start_result.entry_contract_reason == _ENTRY_REASON_SPECIAL_STATE_HANDLED:
@@ -15230,6 +15362,7 @@ def collect_tab_rows(
             save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
             _save_focusable_inventory(client, output_path)
             _save_focusable_coverage(client, output_path, all_rows)
+            _maybe_execute_coverage_probe_engine(client, dev, output_path)
         return rows
     if start_result.start_row is None:
         return rows
@@ -15289,6 +15422,7 @@ def collect_tab_rows(
     _persist_phase(phase_ctx)
     _save_focusable_inventory(client, output_path)
     _save_focusable_coverage(client, output_path, all_rows)
+    _maybe_execute_coverage_probe_engine(client, dev, output_path)
     main_steps_completed = sum(1 for row in rows if int(row.get("step_index", -1) or -1) > 0)
     setattr(
         client,
