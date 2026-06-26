@@ -90,6 +90,14 @@ RESULT_SHEET_COLUMNS = [
     "representative_visible",
     "mismatch_type",
     "final_result",
+    "row_source",
+    "probe_validation_status",
+    "probe_success_source",
+    "probe_validation_confidence",
+    "probe_target_strategy",
+    "probe_intent",
+    "probe_captured_speech",
+    "probe_captured_visible_text",
     "failure_reason",
     "review_note",
     "focus_view_id",
@@ -123,6 +131,9 @@ RESULT_SHEET_COLUMNS = [
     "scenario_shadow_verdict",
     "result_crop_thumbnail",
 ]
+
+PROBE_SHADOW_ROW_SOURCE = "COVERAGE_PROBE_SHADOW"
+PROBE_SHADOW_STATUSES = {"MATCH", "PARTIAL_MATCH"}
 
 RESULT_REPEAT_METADATA_COLUMNS = [
     "repeat_count",
@@ -1796,6 +1807,14 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     _pick_col("_traversal_result", ["traversal_result"])
     _pick_col("_speech_match_result", ["speech_match_result"])
     _pick_col("_raw_final_result", ["final_result"])
+    _pick_col("row_source", ["row_source"], default="")
+    _pick_col("probe_validation_status", ["probe_validation_status"], default="")
+    _pick_col("probe_success_source", ["probe_success_source"], default="")
+    _pick_col("probe_validation_confidence", ["probe_validation_confidence"], default="")
+    _pick_col("probe_target_strategy", ["probe_target_strategy"], default="")
+    _pick_col("probe_intent", ["probe_intent"], default="")
+    _pick_col("probe_captured_speech", ["probe_captured_speech"], default="")
+    _pick_col("probe_captured_visible_text", ["probe_captured_visible_text"], default="")
     _pick_col("failure_reason", ["failure_reason"])
     _pick_col("is_duplicate_step", ["is_duplicate_step"], default=False)
     _pick_col("is_recent_duplicate_step", ["is_recent_duplicate_step"], default=False)
@@ -1830,6 +1849,14 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
         "semantic_card_values",
         "semantic_card_actions",
         "semantic_card_bounds",
+        "row_source",
+        "probe_validation_status",
+        "probe_success_source",
+        "probe_validation_confidence",
+        "probe_target_strategy",
+        "probe_intent",
+        "probe_captured_speech",
+        "probe_captured_visible_text",
     ):
         result[text_col] = result[text_col].fillna("")
     result["semantic_card_member_count"] = result["semantic_card_member_count"].apply(_to_int_or_zero)
@@ -2403,6 +2430,113 @@ def _apply_result_visual_enhancements(
             )
 
 
+def _coverage_probe_validation_path(output_path: str) -> Path:
+    path = Path(output_path)
+    return path.with_name(f"{path.stem}.coverage_probe_validation.json")
+
+
+def _load_probe_validation_payload(output_path: str) -> dict[str, object]:
+    path = _coverage_probe_validation_path(output_path)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        log(f"[WARN][excel] coverage probe validation load failed path='{path}' error='{exc}'")
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def build_probe_shadow_rows(validation_payload: dict[str, object]) -> list[dict[str, object]]:
+    validations = validation_payload.get("validations", []) if isinstance(validation_payload, dict) else []
+    rows: list[dict[str, object]] = []
+    for item in validations if isinstance(validations, list) else []:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("validation_status", "") or "").strip().upper()
+        if status not in PROBE_SHADOW_STATUSES:
+            continue
+        if not bool(item.get("probe_success")):
+            continue
+        scenario_id = str(item.get("scenario_id", "") or "").strip()
+        metadata = PLUGIN_REPORT_METADATA.get(scenario_id, {})
+        label = str(item.get("label", "") or "").strip()
+        captured_speech = str(item.get("captured_speech", "") or "").strip()
+        captured_visible = str(item.get("captured_visible_text", "") or "").strip()
+        rows.append(
+            {
+                "plugin_group": metadata.get("group", "Coverage Probe"),
+                "plugin_name": metadata.get("name", scenario_id or "Coverage Probe"),
+                "scenario_id": scenario_id,
+                "step": "probe",
+                "context_type": "coverage_probe",
+                "visible_label": label,
+                "merged_announcement": captured_speech or captured_visible,
+                "representative_visible": captured_visible,
+                "mismatch_type": status,
+                "final_result": "SHADOW",
+                "row_source": PROBE_SHADOW_ROW_SOURCE,
+                "probe_validation_status": status,
+                "probe_success_source": str(item.get("probe_success_source", "") or ""),
+                "probe_validation_confidence": str(item.get("validation_confidence", "") or ""),
+                "probe_target_strategy": str(item.get("probe_target_strategy", "") or ""),
+                "probe_intent": str(item.get("probe_intent", "") or ""),
+                "probe_captured_speech": captured_speech,
+                "probe_captured_visible_text": captured_visible,
+                "failure_reason": "",
+                "review_note": "Coverage Probe Shadow",
+                "focus_view_id": str(item.get("probe_target_view_id", "") or item.get("view_id", "") or ""),
+                "focus_confidence": str(item.get("validation_confidence", "") or ""),
+                "semantic_card_id": "",
+                "semantic_card_role": "",
+                "semantic_card_title": "",
+                "semantic_card_values": "",
+                "semantic_card_actions": "",
+                "semantic_card_bounds": "",
+                "semantic_card_member_count": 0,
+                "semantic_card_is_value_covered": "",
+                "semantic_card_is_action_only": "",
+                "semantic_card_is_title_only": "",
+                "semantic_value_labels": "",
+                "semantic_value_covered": "",
+                "semantic_value_missing": "",
+                "semantic_value_total_count": 0,
+                "semantic_value_matched_count": 0,
+                "semantic_value_match_source": "",
+                "semantic_value_confidence": "NONE",
+                "semantic_value_confidence_reason": "not_applicable",
+                "semantic_value_quality": "VALUE_NOT_APPLICABLE",
+                "semantic_value_importance": "",
+                "semantic_value_gate_candidate": False,
+                "semantic_value_review_candidate": False,
+                "semantic_value_quality_reason": "not_applicable",
+                "shadow_verdict": "",
+                "shadow_verdict_reason": "",
+                "shadow_verdict_source": "",
+                "scenario_shadow_verdict": "",
+                "result_crop_thumbnail": "",
+            }
+        )
+    return rows
+
+
+def append_probe_shadow_rows(result_df: pd.DataFrame, validation_payload: dict[str, object]) -> pd.DataFrame:
+    shadow_rows = build_probe_shadow_rows(validation_payload)
+    if not shadow_rows:
+        return result_df
+    public_columns = [*RESULT_SHEET_COLUMNS, *RESULT_REPEAT_METADATA_COLUMNS]
+    helper_columns = [col for col in result_df.columns if col not in public_columns]
+    shadow_df = pd.DataFrame(shadow_rows)
+    for col in [*public_columns, *helper_columns]:
+        if col not in shadow_df.columns:
+            shadow_df[col] = ""
+    for col in result_df.columns:
+        if col not in shadow_df.columns:
+            shadow_df[col] = ""
+    shadow_df = shadow_df[result_df.columns]
+    return pd.concat([result_df, shadow_df], ignore_index=True)
+
+
 def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> None:
     df = pd.DataFrame(rows)
     if df.empty:
@@ -2418,6 +2552,7 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
     result_df = make_result_df(filtered_df)
     summary_df = add_semantic_value_summary(summary_df, result_df)
     result_df = _populate_result_debug_logs(result_df, output_path, source_df=filtered_df)
+    result_df = append_probe_shadow_rows(result_df, _load_probe_validation_payload(output_path))
     if _overlay_first_row_debug_enabled():
         tracked_keys: list[str] = []
         for row in rows:

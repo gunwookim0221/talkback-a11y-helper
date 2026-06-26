@@ -820,6 +820,19 @@ def execute_probe_plan_file(
     except Exception as exc:
         if log_fn:
             log_fn(f"[FOCUSABLE][coverage_probe_results_save_failed] path='{result_path}' error='{exc}'")
+    else:
+        try:
+            from tb_runner import coverage_probe_validation
+
+            coverage_probe_validation.write_validation_file(
+                payload,
+                probe_results_path=result_path,
+                output_path=output_path,
+            )
+        except Exception as exc:
+            if log_fn:
+                validation_path = result_path.with_name(f"{Path(output_path).stem}.coverage_probe_validation.json")
+                log_fn(f"[FOCUSABLE][coverage_probe_validation_save_failed] path='{validation_path}' error='{exc}'")
     return payload
 
 
