@@ -19,6 +19,8 @@ export interface RunPanelProps {
   stepPolicyText: string;
   selectedCount: number;
   selectedScenarios: Set<string>;
+  enableCoverageProbe: boolean;
+  setEnableCoverageProbe: (enabled: boolean) => void;
 }
 
 export function RunPanel({
@@ -36,6 +38,8 @@ export function RunPanel({
   stepPolicyText,
   selectedCount,
   selectedScenarios,
+  enableCoverageProbe,
+  setEnableCoverageProbe,
 }: RunPanelProps) {
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [loadingDevices, setLoadingDevices] = useState(false);
@@ -122,7 +126,8 @@ export function RunPanel({
           devices: selected.map(d => ({ serial: d.serial, model: d.model })),
           launch_mode: launchMode,
           language_mode: languageMode,
-          scenario_ids
+          scenario_ids,
+          enable_coverage_probe: enableCoverageProbe
         });
         setBatchStatus(res);
       } catch (err: any) {
@@ -304,6 +309,26 @@ export function RunPanel({
               <span style={{ fontSize: '14px' }}>Selected Full</span>
               <small style={{ fontSize: '11px', margin: 0 }}>selected scenarios with source max_steps</small>
             </label>
+          </div>
+        </div>
+
+        <div>
+          <h3 style={{ margin: '0 0 6px', fontSize: '12px', color: 'var(--color-text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Options</h3>
+          <div className="launchMode" style={{ marginBottom: '0' }}>
+            <label style={{ padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input
+                type="checkbox"
+                checked={enableCoverageProbe}
+                onChange={(e) => setEnableCoverageProbe(e.target.checked)}
+                disabled={running}
+              />
+              <span style={{ fontSize: '14px' }}>V8 Runtime Probe</span>
+            </label>
+            <div style={{ padding: '0 8px', marginTop: '-4px' }}>
+              <small style={{ fontSize: '11px', color: 'var(--color-text-dim)', display: 'block' }}>
+                Runs coverage-driven TalkBack probe after normal traversal. Adds probe result/validation artifacts and shadow rows. Experimental.
+              </small>
+            </div>
           </div>
         </div>
       </div>

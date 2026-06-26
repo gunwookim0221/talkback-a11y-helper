@@ -18,6 +18,7 @@ class RunSpec:
     scenario_ids: tuple[str, ...] = ()
     output_dir: str | None = None
     runtime_config_path: str | None = None
+    enable_coverage_probe: bool = False
 
     def build_script_command(self, script_path: str | Path) -> list[str]:
         command = [sys.executable, str(script_path)]
@@ -40,6 +41,8 @@ class RunSpec:
             env["TB_OUTPUT_DIR"] = self.output_dir
         if self.runtime_config_path:
             env[RUNTIME_CONFIG_PATH_ENV] = self.runtime_config_path
+        if self.enable_coverage_probe:
+            env["TB_V8_COVERAGE_PROBE"] = "1"
         return env
 
 

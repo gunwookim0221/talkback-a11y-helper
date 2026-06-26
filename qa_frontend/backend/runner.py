@@ -58,6 +58,7 @@ class RunManager:
         launch_mode: str = "clean",
         language_mode: str = "current",
         max_steps_overrides: dict[str, int] | None = None,
+        enable_coverage_probe: bool = False,
     ) -> dict[str, object]:
         with self._lock:
             self._refresh_locked()
@@ -155,6 +156,7 @@ class RunManager:
                     launch_mode=normalized_launch_mode,
                     scenario_ids=tuple(scenario_ids),
                     runtime_config_path=self._runtime_config_path,
+                    enable_coverage_probe=enable_coverage_probe,
                 )
                 language_status, preflight = prepare_runtime(
                     spec,

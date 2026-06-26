@@ -30,6 +30,7 @@ export default function App() {
   const [launchMode, setLaunchMode] = useState<'warm' | 'clean'>('clean');
   const [languageMode, setLanguageMode] = useState<LanguageMode>('current');
   const [plannedMode, setPlannedMode] = useState<'smoke' | 'full'>('smoke');
+  const [enableCoverageProbe, setEnableCoverageProbe] = useState(false);
   const [fixTalkBackRunning, setFixTalkBackRunning] = useState(false);
   const [fixTalkBackMessage, setFixTalkBackMessage] = useState<string | null>(null);
   const preflightRef = useRef<HTMLElement | null>(null);
@@ -133,7 +134,7 @@ export default function App() {
     clearError();
     setPlannedMode(mode);
     try {
-      await api.startRun(mode, Array.from(selected), launchMode, languageMode);
+      await api.startRun(mode, Array.from(selected), launchMode, languageMode, enableCoverageProbe);
       await refreshRun();
     } catch (err) {
       reportError(err);
@@ -358,6 +359,8 @@ export default function App() {
           stepPolicyText={stepPolicyText}
           selectedCount={selectedCount}
           selectedScenarios={selected}
+          enableCoverageProbe={enableCoverageProbe}
+          setEnableCoverageProbe={setEnableCoverageProbe}
         />
       </section>
 

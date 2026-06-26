@@ -114,6 +114,48 @@ def test_numeric_percent_value_matches_percent_word_form():
     assert validation["validation_reason"] == "numeric_value_match"
 
 
+def test_short_token_on_does_not_match_vibration():
+    status, confidence, validation = _status(
+        _result(
+            label="On",
+            normalized_label="on",
+            captured_speech="Vibration",
+        )
+    )
+
+    assert status == "MISMATCH"
+    assert confidence == "LOW"
+    assert "short_token_boundary_prevented_false_positive" in validation["notes"]
+
+
+def test_short_token_off_does_not_match_office():
+    status, confidence, validation = _status(
+        _result(
+            label="Off",
+            normalized_label="off",
+            captured_speech="Office",
+        )
+    )
+
+    assert status == "MISMATCH"
+    assert confidence == "LOW"
+    assert "short_token_boundary_prevented_false_positive" in validation["notes"]
+
+
+def test_long_token_containment_still_matches():
+    status, confidence, validation = _status(
+        _result(
+            label="Motion detected",
+            normalized_label="motion detected",
+            captured_speech="The current motion detected state is active",
+        )
+    )
+
+    assert status == "MATCH"
+    assert confidence == "HIGH"
+    assert validation["validation_reason"] == "captured_text_contains_expected_label"
+
+
 def test_build_validation_payload_counts_statuses():
     payload = coverage_probe_validation.build_validation_payload(
         {
@@ -135,6 +177,27 @@ def test_build_validation_payload_counts_statuses():
     assert payload["summary"]["partial_match_count"] == 1
     assert payload["summary"]["mismatch_count"] == 1
     assert payload["summary"]["not_validated_count"] == 1
+
+
+def test_build_validation_payload_carries_probe_quality_summary_counts():
+    payload = coverage_probe_validation.build_validation_payload(
+        {
+            "summary": {
+                "scenario_filtered_count": 2,
+                "screen_skipped_count": 3,
+            },
+            "results": [
+                _result(label="On", normalized_label="on", captured_speech="Vibration"),
+                _result(captured_speech="100%"),
+            ],
+        },
+        probe_results_path="talkback_compare.coverage_probe_results.json",
+        output_path="talkback_compare.xlsx",
+    )
+
+    assert payload["summary"]["scenario_filtered_count"] == 2
+    assert payload["summary"]["screen_skipped_count"] == 3
+    assert payload["summary"]["validation_false_positive_prevented_count"] == 1
 
 
 def test_execute_probe_plan_file_writes_validation_artifact(tmp_path):

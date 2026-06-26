@@ -21,11 +21,17 @@ WEAK_TOKENS = {
     "smartthings",
     "plugin",
 }
+BOUNDARY_ONLY_TOKENS = {"on", "off", "tv", "up"}
 
 
 def coverage_probe_validation_path(output_path: str) -> Path:
     path = Path(output_path)
     return path.with_name(f"{path.stem}.coverage_probe_validation.json")
+
+
+def coverage_probe_validation_aggregate_path(output_path: str) -> Path:
+    path = Path(output_path)
+    return path.with_name(f"{path.stem}.coverage_probe_validation.aggregate.json")
 
 
 def _normalize_text(value: Any) -> str:
@@ -49,6 +55,29 @@ def _meaningful_tokens(value: Any) -> list[str]:
     normalized = _normalize_text(value)
     tokens = re.findall(r"\d+%|[a-z0-9]+", normalized)
     return [token for token in tokens if token and token not in WEAK_TOKENS]
+
+
+def _token_phrase_matches(label: str, value: str) -> bool:
+    normalized_label = _normalize_text(label)
+    normalized_value = _normalize_text(value)
+    if not normalized_label or not normalized_value:
+        return False
+    label_tokens = _meaningful_tokens(normalized_label)
+    if not label_tokens:
+        return False
+    if any(len(token) <= 2 or token in BOUNDARY_ONLY_TOKENS for token in label_tokens):
+        pattern = r"\b" + r"\s+".join(re.escape(token) for token in label_tokens) + r"\b"
+        return bool(re.search(pattern, normalized_value))
+    return normalized_label in normalized_value
+
+
+def _short_token_false_positive_prevented(label: str, value: str) -> bool:
+    normalized_value = _normalize_text(value)
+    short_tokens = [
+        token for token in _meaningful_tokens(label) if len(token) <= 2 or token in BOUNDARY_ONLY_TOKENS
+    ]
+    value_tokens = set(_meaningful_tokens(value))
+    return any(token in normalized_value and token not in value_tokens for token in short_tokens)
 
 
 def _result_label(result: dict[str, Any]) -> str:
@@ -98,6 +127,12 @@ def validate_probe_result(result: dict[str, Any]) -> dict[str, Any]:
         "missing_terms": [],
         "notes": [],
     }
+    false_positive_prevented = any(
+        _short_token_false_positive_prevented(label, channel_value)
+        for channel_value in (captured_speech, captured_visible)
+    )
+    if false_positive_prevented:
+        base["notes"] = ["short_token_boundary_prevented_false_positive"]
 
     if not bool(result.get("attempted")):
         return {
@@ -155,7 +190,7 @@ def validate_probe_result(result: dict[str, Any]) -> dict[str, Any]:
             "missing_terms": [],
         }
 
-    containment_channels = _matched_channels(channels, lambda value: bool(normalized_label and normalized_label in value))
+    containment_channels = _matched_channels(channels, lambda value: _token_phrase_matches(label, value))
     if containment_channels:
         return {
             **base,
@@ -219,6 +254,13 @@ def build_validation_payload(probe_results_payload: dict[str, Any], *, probe_res
         "mismatch_count": sum(1 for item in validations if item["validation_status"] == "MISMATCH"),
         "no_speech_or_text_count": sum(1 for item in validations if item["validation_status"] == "NO_SPEECH_OR_TEXT"),
         "not_validated_count": sum(1 for item in validations if item["validation_status"] == "NOT_VALIDATED"),
+        "scenario_filtered_count": int(probe_results_payload.get("summary", {}).get("scenario_filtered_count", 0) or 0),
+        "screen_skipped_count": int(probe_results_payload.get("summary", {}).get("screen_skipped_count", 0) or 0),
+        "validation_false_positive_prevented_count": sum(
+            1
+            for item in validations
+            if "short_token_boundary_prevented_false_positive" in item.get("notes", [])
+        ),
     }
     return {
         "schema_version": 1,
@@ -230,11 +272,110 @@ def build_validation_payload(probe_results_payload: dict[str, Any], *, probe_res
     }
 
 
+def _int_summary(summary: dict[str, Any], key: str) -> int:
+    try:
+        return int(summary.get(key, 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _validation_plugin_name(validations: list[Any]) -> str:
+    for item in validations:
+        if not isinstance(item, dict):
+            continue
+        for key in ("plugin_name", "plugin", "tab_name"):
+            value = str(item.get(key, "") or "").strip()
+            if value:
+                return value
+    return ""
+
+
+def _validation_aggregate_entry(payload: dict[str, Any], current_scenario_id: str) -> dict[str, Any]:
+    summary = payload.get("summary", {}) if isinstance(payload.get("summary"), dict) else {}
+    validations = payload.get("validations", []) if isinstance(payload.get("validations"), list) else []
+    scenario_id = str(current_scenario_id or "").strip()
+    if not scenario_id:
+        for item in validations:
+            if isinstance(item, dict) and str(item.get("scenario_id", "") or "").strip():
+                scenario_id = str(item.get("scenario_id", "") or "").strip()
+                break
+    return {
+        "scenario_id": scenario_id,
+        "plugin_name": _validation_plugin_name(validations),
+        "result_count": _int_summary(summary, "result_count"),
+        "validated_count": _int_summary(summary, "validated_count"),
+        "match_count": _int_summary(summary, "match_count"),
+        "partial_match_count": _int_summary(summary, "partial_match_count"),
+        "mismatch_count": _int_summary(summary, "mismatch_count"),
+        "not_validated_count": _int_summary(summary, "not_validated_count"),
+        "screen_skipped_count": _int_summary(summary, "screen_skipped_count"),
+        "scenario_filtered_count": _int_summary(summary, "scenario_filtered_count"),
+        "validation_false_positive_prevented_count": _int_summary(
+            summary,
+            "validation_false_positive_prevented_count",
+        ),
+        "summary": dict(summary),
+        "validations": validations,
+    }
+
+
+def _build_validation_aggregate(output_path: str, scenarios: list[dict[str, Any]]) -> dict[str, Any]:
+    validations = [
+        validation
+        for scenario in scenarios
+        for validation in scenario.get("validations", [])
+        if isinstance(validation, dict)
+    ]
+    return {
+        "schema_version": 1,
+        "source": "v8_probe_validation_aggregate",
+        "run_id": Path(output_path).stem,
+        "output_path": str(output_path),
+        "scenario_count": len(scenarios),
+        "total_result_count": sum(_int_summary(item, "result_count") for item in scenarios),
+        "total_validated_count": sum(_int_summary(item, "validated_count") for item in scenarios),
+        "total_match_count": sum(_int_summary(item, "match_count") for item in scenarios),
+        "total_partial_match_count": sum(_int_summary(item, "partial_match_count") for item in scenarios),
+        "total_mismatch_count": sum(_int_summary(item, "mismatch_count") for item in scenarios),
+        "total_not_validated_count": sum(_int_summary(item, "not_validated_count") for item in scenarios),
+        "total_screen_skipped_count": sum(_int_summary(item, "screen_skipped_count") for item in scenarios),
+        "total_scenario_filtered_count": sum(_int_summary(item, "scenario_filtered_count") for item in scenarios),
+        "total_validation_false_positive_prevented_count": sum(
+            _int_summary(item, "validation_false_positive_prevented_count") for item in scenarios
+        ),
+        "scenarios": scenarios,
+        "validations": validations,
+    }
+
+
+def append_validation_aggregate_file(
+    payload: dict[str, Any],
+    *,
+    output_path: str,
+    current_scenario_id: str = "",
+) -> dict[str, Any]:
+    target = coverage_probe_validation_aggregate_path(output_path)
+    scenarios: list[dict[str, Any]] = []
+    if target.exists():
+        try:
+            existing = json.loads(target.read_text(encoding="utf-8"))
+            existing_scenarios = existing.get("scenarios", []) if isinstance(existing, dict) else []
+            if isinstance(existing_scenarios, list):
+                scenarios = [item for item in existing_scenarios if isinstance(item, dict)]
+        except Exception:
+            scenarios = []
+    scenarios.append(_validation_aggregate_entry(payload, current_scenario_id))
+    aggregate = _build_validation_aggregate(output_path, scenarios)
+    target.write_text(json.dumps(aggregate, ensure_ascii=False, indent=2), encoding="utf-8")
+    return aggregate
+
+
 def write_validation_file(
     probe_results_payload: dict[str, Any],
     *,
     probe_results_path: str | Path,
     output_path: str,
+    current_scenario_id: str = "",
 ) -> dict[str, Any]:
     payload = build_validation_payload(
         probe_results_payload,
@@ -243,4 +384,9 @@ def write_validation_file(
     )
     target = coverage_probe_validation_path(output_path)
     target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    append_validation_aggregate_file(
+        payload,
+        output_path=output_path,
+        current_scenario_id=current_scenario_id,
+    )
     return payload

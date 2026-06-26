@@ -1319,7 +1319,7 @@ def _save_focusable_coverage(client: Any, output_path: str, rows: list[dict[str,
     _save_coverage_probe_plan(output_path, payload)
 
 
-def _maybe_execute_coverage_probe_engine(client: Any, dev: str, output_path: str) -> None:
+def _maybe_execute_coverage_probe_engine(client: Any, dev: str, output_path: str, current_scenario_id: str = "") -> None:
     if not coverage_probe_engine.is_probe_enabled():
         return
     payload = coverage_probe_engine.maybe_execute_probe_plan_file(
@@ -1327,6 +1327,7 @@ def _maybe_execute_coverage_probe_engine(client: Any, dev: str, output_path: str
         dev,
         output_path=output_path,
         log_fn=log,
+        current_scenario_id=current_scenario_id,
     )
     if isinstance(payload, dict):
         summary = payload.get("summary", {}) if isinstance(payload.get("summary"), dict) else {}
@@ -15337,7 +15338,7 @@ def collect_tab_rows(
         save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
         _save_focusable_inventory(client, output_path)
         _save_focusable_coverage(client, output_path, all_rows)
-        _maybe_execute_coverage_probe_engine(client, dev, output_path)
+        _maybe_execute_coverage_probe_engine(client, dev, output_path, str(tab_cfg.get("scenario_id", "") or ""))
         return rows
     if not start_result.should_enter_main_loop:
         if start_result.entry_contract_reason == _ENTRY_REASON_SPECIAL_STATE_HANDLED:
@@ -15362,7 +15363,7 @@ def collect_tab_rows(
             save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
             _save_focusable_inventory(client, output_path)
             _save_focusable_coverage(client, output_path, all_rows)
-            _maybe_execute_coverage_probe_engine(client, dev, output_path)
+            _maybe_execute_coverage_probe_engine(client, dev, output_path, str(tab_cfg.get("scenario_id", "") or ""))
         return rows
     if start_result.start_row is None:
         return rows
@@ -15422,7 +15423,7 @@ def collect_tab_rows(
     _persist_phase(phase_ctx)
     _save_focusable_inventory(client, output_path)
     _save_focusable_coverage(client, output_path, all_rows)
-    _maybe_execute_coverage_probe_engine(client, dev, output_path)
+    _maybe_execute_coverage_probe_engine(client, dev, output_path, str(tab_cfg.get("scenario_id", "") or ""))
     main_steps_completed = sum(1 for row in rows if int(row.get("step_index", -1) or -1) > 0)
     setattr(
         client,

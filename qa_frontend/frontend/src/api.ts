@@ -895,13 +895,14 @@ export const api = {
     scenarioIds: string[],
     launchMode: 'warm' | 'clean',
     languageMode: 'current' | 'ko-KR' | 'en-US',
+    enableCoverageProbe?: boolean,
   ) =>
     request<RunStatus>('/api/run/start', {
       method: 'POST',
-      body: JSON.stringify({ mode, scenario_ids: scenarioIds, launch_mode: launchMode, language_mode: languageMode }),
+      body: JSON.stringify({ mode, scenario_ids: scenarioIds, launch_mode: launchMode, language_mode: languageMode, enable_coverage_probe: enableCoverageProbe }),
     }),
   stopRun: () => request<RunStatus>('/api/run/stop', { method: 'POST' }),
-  startBatch: async (data: { mode: string; devices: { serial: string; model: string }[]; launch_mode: string; language_mode: string; scenario_ids: string[] }) => {
+  startBatch: async (data: { mode: string; devices: { serial: string; model: string }[]; launch_mode: string; language_mode: string; scenario_ids: string[]; enable_coverage_probe?: boolean }) => {
     return request<BatchStatus>('/api/batch/start', {
       method: 'POST',
       body: JSON.stringify(data)

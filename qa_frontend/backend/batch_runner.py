@@ -410,7 +410,7 @@ class BatchRunManager:
     def _sanitize_name(self, name: str) -> str:
         return re.sub(r'[^0-9a-zA-Z_-]+', '_', name)
 
-    def start_batch(self, devices: list[dict], mode: str, launch_mode: str = "clean", language_mode: str = "current", scenario_ids: list[str] | None = None) -> dict:
+    def start_batch(self, devices: list[dict], mode: str, launch_mode: str = "clean", language_mode: str = "current", scenario_ids: list[str] | None = None, enable_coverage_probe: bool = False) -> dict:
         with self._lock:
             if self._state == "running":
                 raise RuntimeError("Batch run is already in progress")
@@ -423,6 +423,7 @@ class BatchRunManager:
             self._launch_mode = normalize_launch_mode(launch_mode)
             self._language_mode = normalize_language_mode(language_mode)
             self._scenario_ids = scenario_ids or []
+            self._enable_coverage_probe = enable_coverage_probe
             self._created_at = datetime.now(timezone.utc).isoformat()
             
             batch_dir = RUN_LOG_DIR / self._batch_id
@@ -853,6 +854,7 @@ class BatchRunManager:
                     scenario_ids=tuple(self._scenario_ids),
                     output_dir=dev_output_dir,
                     runtime_config_path=str(runtime_config["path"]),
+                    enable_coverage_probe=self._enable_coverage_probe,
                 )
                 language_status, preflight = prepare_runtime(
                     spec,

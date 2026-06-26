@@ -78,7 +78,16 @@ def _inventory_item(**overrides):
 
 
 class FakeProbeClient:
-    def __init__(self, focus_results=None, scroll_results=None, focus_snapshots=None):
+    def __init__(
+        self,
+        focus_results=None,
+        scroll_results=None,
+        focus_snapshots=None,
+        *,
+        foreground_package="com.samsung.android.oneconnect",
+        screen_state="SCREEN_ON",
+        keyguard_active=False,
+    ):
         self.focus_results = list(focus_results or [])
         self.scroll_results = list(scroll_results or [])
         self.focus_snapshots = list(focus_snapshots or [])
@@ -88,6 +97,9 @@ class FakeProbeClient:
         self.smart_next_calls = 0
         self.last_merged_announcement = ""
         self.last_announcements = []
+        self.foreground_package = foreground_package
+        self.screen_state = screen_state
+        self.keyguard_active = keyguard_active
 
     def focus_in_bounds(self, **kwargs):
         self.focus_in_bounds_calls.append(kwargs)
@@ -117,6 +129,20 @@ class FakeProbeClient:
                 self.last_announcements = [speech]
             return snapshot
         return {}
+
+    def _run(self, args, **_kwargs):
+        command = " ".join(args)
+        if "dumpsys window policy" in command:
+            value = "true" if self.keyguard_active else "false"
+            return f"isStatusBarKeyguard={value}"
+        if "dumpsys window" in command:
+            package = self.foreground_package or "com.samsung.android.oneconnect"
+            return f"mCurrentFocus=Window{{42 u0 {package}/.MainActivity}}"
+        if "dumpsys power" in command:
+            if self.screen_state == "SCREEN_OFF":
+                return "mWakefulness=Asleep\nDisplay Power: state=OFF"
+            return "mWakefulness=Awake\nDisplay Power: state=ON"
+        return ""
 
     def next(self, **_kwargs):
         self.next_calls += 1
@@ -155,7 +181,7 @@ def _fail_result(reason="no_content_candidate_in_bounds"):
     }
 
 
-def _focus_snapshot(label="100%", view_id="lowBattery", bounds=None, class_name="android.view.View", speech=""):
+def _focus_snapshot(label="100%", view_id="lowBattery", bounds=None, class_name="android.view.View", speech="", package_name="com.samsung.android.oneconnect"):
     bounds = bounds or {"l": 747, "t": 310, "r": 933, "b": 382}
     return {
         "mergedLabel": label,
@@ -163,6 +189,7 @@ def _focus_snapshot(label="100%", view_id="lowBattery", bounds=None, class_name=
         "text": label,
         "viewIdResourceName": view_id,
         "className": class_name,
+        "packageName": package_name,
         "boundsInScreen": bounds,
         "_speech": speech,
     }
@@ -648,3 +675,86 @@ def test_probe_engine_does_not_mutate_rows_or_create_xlsx_rows(tmp_path):
 
     assert rows == [{"scenario_id": "device_motion_sensor_plugin", "final_result": "PASS"}]
     assert not list(Path(tmp_path).glob("*.xlsx"))
+
+
+def test_probe_engine_filters_candidates_to_current_scenario(tmp_path):
+    client = FakeProbeClient(focus_results=[_success_result("100%")])
+    payload = coverage_probe_engine.build_probe_results_payload(
+        client,
+        "device",
+        _plan([
+            _candidate(scenario_id="device_motion_sensor_plugin"),
+            _candidate(label="Other", scenario_id="device_humidity_sensor_plugin", bounds="1,1,2,3"),
+        ]),
+        probe_plan_path=str(tmp_path / "plan.json"),
+        output_path=str(tmp_path / "talkback_compare.xlsx"),
+        enabled=True,
+        current_scenario_id="device_motion_sensor_plugin",
+    )
+
+    assert payload["summary"]["candidate_count"] == 1
+    assert payload["summary"]["attempted_count"] == 1
+    assert payload["summary"]["scenario_filtered_count"] == 1
+    assert payload["results"][1]["skip_reason"] == "scenario_mismatch"
+
+
+def test_probe_engine_skips_when_foreground_is_systemui(tmp_path):
+    client = FakeProbeClient(
+        focus_results=[_success_result("100%")],
+        foreground_package="com.android.systemui",
+    )
+    payload = coverage_probe_engine.build_probe_results_payload(
+        client,
+        "device",
+        _plan([_candidate()]),
+        probe_plan_path=str(tmp_path / "plan.json"),
+        output_path=str(tmp_path / "talkback_compare.xlsx"),
+        enabled=True,
+        current_scenario_id="device_motion_sensor_plugin",
+    )
+    result = payload["results"][0]
+
+    assert result["attempted"] is False
+    assert result["probe_skipped"] is True
+    assert result["skip_reason"] == "foreground_not_target_app"
+    assert result["foreground_package"] == "com.android.systemui"
+    assert payload["summary"]["screen_skipped_count"] == 1
+
+
+def test_probe_engine_skips_when_foreground_is_launcher(tmp_path):
+    client = FakeProbeClient(
+        focus_results=[_success_result("100%")],
+        foreground_package="com.sec.android.app.launcher",
+    )
+    payload = coverage_probe_engine.build_probe_results_payload(
+        client,
+        "device",
+        _plan([_candidate()]),
+        probe_plan_path=str(tmp_path / "plan.json"),
+        output_path=str(tmp_path / "talkback_compare.xlsx"),
+        enabled=True,
+        current_scenario_id="device_motion_sensor_plugin",
+    )
+
+    assert payload["results"][0]["skip_reason"] == "foreground_not_target_app"
+    assert payload["summary"]["screen_skipped_count"] == 1
+
+
+def test_probe_engine_continues_when_foreground_is_smartthings(tmp_path):
+    client = FakeProbeClient(
+        focus_results=[_success_result("100%")],
+        focus_snapshots=[_focus_snapshot("Before"), _focus_snapshot("100%")],
+        foreground_package="com.samsung.android.oneconnect",
+    )
+    payload = coverage_probe_engine.build_probe_results_payload(
+        client,
+        "device",
+        _plan([_candidate()]),
+        probe_plan_path=str(tmp_path / "plan.json"),
+        output_path=str(tmp_path / "talkback_compare.xlsx"),
+        enabled=True,
+        current_scenario_id="device_motion_sensor_plugin",
+    )
+
+    assert payload["results"][0]["probe_success"] is True
+    assert payload["summary"]["screen_skipped_count"] == 0

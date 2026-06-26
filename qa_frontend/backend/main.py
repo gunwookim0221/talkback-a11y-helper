@@ -62,6 +62,7 @@ class StartRunRequest(BaseModel):
     scenario_ids: list[str] | None = None
     launch_mode: str = "clean"
     language_mode: str = "current"
+    enable_coverage_probe: bool = False
 
 
 class BatchDeviceReq(BaseModel):
@@ -75,6 +76,7 @@ class BatchStartReq(BaseModel):
     launch_mode: str = "clean"
     language_mode: str = "current"
     scenario_ids: list[str] | None = None
+    enable_coverage_probe: bool = False
 
 
 @app.get("/api/health")
@@ -329,6 +331,7 @@ def run_start(request: StartRunRequest) -> dict[str, object]:
             scenario_ids=request.scenario_ids,
             launch_mode=request.launch_mode,
             language_mode=language_mode,
+            enable_coverage_probe=request.enable_coverage_probe,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -350,7 +353,8 @@ def batch_start(request: BatchStartReq) -> dict[str, object]:
             mode=request.mode,
             launch_mode=request.launch_mode,
             language_mode=request.language_mode,
-            scenario_ids=request.scenario_ids
+            scenario_ids=request.scenario_ids,
+            enable_coverage_probe=request.enable_coverage_probe
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

@@ -41,7 +41,17 @@ def test_run_spec_builds_shared_cli_command_and_environment():
     assert env["ANDROID_SERIAL"] == "SERIAL-1"
     assert env["TB_OUTPUT_DIR"] == "runs/device"
     assert env["TB_RUNTIME_CONFIG_PATH"] == "runs/device/runtime_config.json"
+    assert "TB_V8_COVERAGE_PROBE" not in env
     assert RunContext(spec).serial == "SERIAL-1"
+
+def test_run_spec_builds_subprocess_env_with_coverage_probe():
+    spec = RunSpec(enable_coverage_probe=True)
+    env = spec.build_subprocess_env()
+    assert env["TB_V8_COVERAGE_PROBE"] == "1"
+
+    spec_disabled = RunSpec(enable_coverage_probe=False)
+    env_disabled = spec_disabled.build_subprocess_env()
+    assert "TB_V8_COVERAGE_PROBE" not in env_disabled
 
 
 def test_prepare_runtime_scopes_android_serial(monkeypatch):

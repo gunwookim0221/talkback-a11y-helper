@@ -9,6 +9,13 @@ from typing import Any, Callable
 
 
 PROBE_ENV_VAR = "TB_V8_COVERAGE_PROBE"
+EXPECTED_FOREGROUND_PACKAGE = "com.samsung.android.oneconnect"
+SYSTEM_UI_PACKAGE = "com.android.systemui"
+LAUNCHER_PACKAGES = {
+    "com.sec.android.app.launcher",
+    "com.android.launcher",
+    "com.android.launcher3",
+}
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_MAX_SCROLLS = 2
 DEFAULT_LATE_VERIFICATION_TIMEOUT_MS = 500
@@ -26,6 +33,11 @@ SUCCESS_SOURCE_FAILED = "FAILED"
 def coverage_probe_results_path(output_path: str) -> Path:
     path = Path(output_path)
     return path.with_name(f"{path.stem}.coverage_probe_results.json")
+
+
+def coverage_probe_results_aggregate_path(output_path: str) -> Path:
+    path = Path(output_path)
+    return path.with_name(f"{path.stem}.coverage_probe_results.aggregate.json")
 
 
 def coverage_probe_plan_path(output_path: str) -> Path:
@@ -114,6 +126,79 @@ def _load_inventory_items(output_path: str) -> list[dict[str, Any]]:
     if not isinstance(items, list):
         return []
     return [item for item in items if isinstance(item, dict)]
+
+
+def _extract_package_from_window_text(text: str) -> str | None:
+    for pattern in (
+        r"mCurrentFocus=.*?\s([A-Za-z0-9_.]+)/",
+        r"mFocusedApp=.*?\s([A-Za-z0-9_.]+)/",
+        r"topResumedActivity=.*?\s([A-Za-z0-9_.]+)/",
+        r"ResumedActivity:.*?\s([A-Za-z0-9_.]+)/",
+    ):
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _current_package(*, client: Any, dev: str | None) -> str:
+    run_fn = getattr(client, "_run", None)
+    if not callable(run_fn):
+        return ""
+    try:
+        output = run_fn(["shell", "dumpsys", "window"], dev=dev, timeout=5.0)
+    except TypeError:
+        try:
+            output = run_fn(["shell", "dumpsys", "window"], dev=dev)
+        except Exception:
+            return ""
+    except Exception:
+        return ""
+    return str(_extract_package_from_window_text(str(output or "")) or "")
+
+
+def _read_screen_state(*, client: Any, dev: str | None) -> str:
+    run_fn = getattr(client, "_run", None)
+    if not callable(run_fn):
+        return "UNKNOWN"
+    try:
+        output = run_fn(["shell", "dumpsys", "power"], dev=dev, timeout=5.0)
+    except TypeError:
+        try:
+            output = run_fn(["shell", "dumpsys", "power"], dev=dev)
+        except Exception:
+            return "UNKNOWN"
+    except Exception:
+        return "UNKNOWN"
+    text = str(output or "")
+    if re.search(r"mWakefulness=\s*Awake", text, re.IGNORECASE) or re.search(r"Display Power:\s*state=\s*ON", text, re.IGNORECASE):
+        return "SCREEN_ON"
+    if re.search(r"mWakefulness=\s*(Asleep|Dozing)", text, re.IGNORECASE) or re.search(r"Display Power:\s*state=\s*OFF", text, re.IGNORECASE):
+        return "SCREEN_OFF"
+    return "UNKNOWN"
+
+
+def _read_keyguard_active(*, client: Any, dev: str | None) -> bool | None:
+    run_fn = getattr(client, "_run", None)
+    if not callable(run_fn):
+        return None
+    try:
+        output = run_fn(["shell", "dumpsys", "window", "policy"], dev=dev, timeout=5.0)
+    except TypeError:
+        try:
+            output = run_fn(["shell", "dumpsys", "window", "policy"], dev=dev)
+        except Exception:
+            return None
+    except Exception:
+        return None
+    match = re.search(
+        r"(?:isStatusBarKeyguard|mShowingLockscreen|mShowing)\s*=\s*(true|false|1|0)",
+        str(output or ""),
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return match.group(1).lower() in {"true", "1"}
 
 
 def _bool_field(value: Any) -> bool | None:
@@ -524,6 +609,8 @@ def _skip_result(candidate: dict[str, Any], reason: str) -> dict[str, Any]:
         **_candidate_result_base(candidate),
         "probe_method": "helper_focus_in_bounds_scroll_retry",
         "attempted": False,
+        "probe_skipped": True,
+        "skip_reason": reason,
         "probe_success": False,
         "probe_success_source": SUCCESS_SOURCE_FAILED,
         "helper_success": False,
@@ -541,6 +628,10 @@ def _skip_result(candidate: dict[str, Any], reason: str) -> dict[str, Any]:
         "captured_speech": "",
         "captured_visible_text": "",
         "matched_expected_label": False,
+        "foreground_package": "",
+        "screen_state": "",
+        "keyguard_active": None,
+        "candidate_scenario_id": str(candidate.get("scenario_id", "") or ""),
         "notes": [reason],
     }
 
@@ -570,6 +661,44 @@ def _candidate_result_base(candidate: dict[str, Any]) -> dict[str, Any]:
     return {key: candidate.get(key, "") for key in keys}
 
 
+def _scenario_filtered_result(candidate: dict[str, Any], current_scenario_id: str) -> dict[str, Any]:
+    result = _skip_result(candidate, "scenario_mismatch")
+    result["current_scenario_id"] = current_scenario_id
+    return result
+
+
+def _screen_guard_result(candidate: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    result = _skip_result(candidate, str(context.get("skip_reason", "") or "screen_not_active"))
+    result["foreground_package"] = str(context.get("foreground_package", "") or "")
+    result["screen_state"] = str(context.get("screen_state", "") or "")
+    result["keyguard_active"] = context.get("keyguard_active")
+    result["current_scenario_id"] = str(context.get("current_scenario_id", "") or "")
+    return result
+
+
+def _probe_runtime_context(client: Any, dev: Any, candidate: dict[str, Any], current_scenario_id: str) -> dict[str, Any]:
+    foreground_package = _current_package(client=client, dev=dev)
+    screen_state = _read_screen_state(client=client, dev=dev)
+    keyguard_active = _read_keyguard_active(client=client, dev=dev)
+    skip_reason = ""
+    if screen_state == "SCREEN_OFF" or keyguard_active is True:
+        skip_reason = "screen_not_active"
+    elif foreground_package == SYSTEM_UI_PACKAGE:
+        skip_reason = "foreground_not_target_app"
+    elif foreground_package in LAUNCHER_PACKAGES:
+        skip_reason = "foreground_not_target_app"
+    elif foreground_package and foreground_package != EXPECTED_FOREGROUND_PACKAGE:
+        skip_reason = "foreground_not_target_app"
+    return {
+        "foreground_package": foreground_package,
+        "screen_state": screen_state,
+        "keyguard_active": keyguard_active,
+        "skip_reason": skip_reason,
+        "current_scenario_id": current_scenario_id,
+        "candidate_scenario_id": str(candidate.get("scenario_id", "") or ""),
+    }
+
+
 def _probe_candidate(
     client: Any,
     dev: Any,
@@ -579,8 +708,18 @@ def _probe_candidate(
     max_scrolls: int,
     late_verification_timeout_ms: int,
     late_verification_poll_ms: int,
+    runtime_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     before_focus = _capture_focus_snapshot(client, dev)
+    focus_package = str(before_focus.get("packageName", "") or before_focus.get("package_name", "") or "")
+    if focus_package and focus_package != EXPECTED_FOREGROUND_PACKAGE:
+        return _screen_guard_result(
+            candidate,
+            {
+                **(runtime_context or {}),
+                "skip_reason": "focus_outside_target_app",
+            },
+        )
     attempt_count = 0
     scroll_attempt_count = 0
     last_failure = ""
@@ -721,6 +860,8 @@ def build_probe_results_payload(
     max_scrolls: int = DEFAULT_MAX_SCROLLS,
     late_verification_timeout_ms: int = DEFAULT_LATE_VERIFICATION_TIMEOUT_MS,
     late_verification_poll_ms: int = DEFAULT_LATE_VERIFICATION_POLL_MS,
+    current_scenario_id: str = "",
+    log_fn: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     if not enabled:
         return _empty_result_payload(False, probe_plan_path, output_path)
@@ -733,9 +874,22 @@ def build_probe_results_payload(
     )
     results: list[dict[str, Any]] = []
     focus_in_bounds = getattr(client, "focus_in_bounds", None)
+    scenario_filtered_count = 0
+    screen_skipped_count = 0
     for _idx, candidate in sorted_candidates:
         candidate = _resolve_probe_target(candidate, inventory_items)
         bounds = str(candidate.get("bounds", "") or "").strip()
+        candidate_scenario_id = str(candidate.get("scenario_id", "") or "")
+        if current_scenario_id and candidate_scenario_id and candidate_scenario_id != current_scenario_id:
+            scenario_filtered_count += 1
+            if log_fn:
+                log_fn(
+                    "[FOCUSABLE][coverage_probe_skip] "
+                    f"scenario_id='{current_scenario_id}' candidate_scenario_id='{candidate_scenario_id}' "
+                    "probe_skipped=true skip_reason='scenario_mismatch'"
+                )
+            results.append(_scenario_filtered_result(candidate, current_scenario_id))
+            continue
         if not bool(candidate.get("probe_eligible")):
             results.append(_skip_result(candidate, "probe_ineligible"))
             continue
@@ -744,6 +898,20 @@ def build_probe_results_payload(
             continue
         if not callable(focus_in_bounds):
             results.append(_skip_result(candidate, "focus_in_bounds_unavailable"))
+            continue
+        runtime_context = _probe_runtime_context(client, dev, candidate, current_scenario_id)
+        if runtime_context["skip_reason"]:
+            screen_skipped_count += 1
+            if log_fn:
+                log_fn(
+                    "[FOCUSABLE][coverage_probe_skip] "
+                    f"scenario_id='{current_scenario_id}' candidate_scenario_id='{candidate_scenario_id}' "
+                    f"foreground_package='{runtime_context['foreground_package']}' "
+                    f"screen_state='{runtime_context['screen_state']}' "
+                    "probe_skipped=true "
+                    f"skip_reason='{runtime_context['skip_reason']}'"
+                )
+            results.append(_screen_guard_result(candidate, runtime_context))
             continue
         results.append(
             _probe_candidate(
@@ -754,6 +922,7 @@ def build_probe_results_payload(
                 max_scrolls=max(0, int(max_scrolls or DEFAULT_MAX_SCROLLS)),
                 late_verification_timeout_ms=max(0, int(late_verification_timeout_ms)),
                 late_verification_poll_ms=max(1, int(late_verification_poll_ms)),
+                runtime_context=runtime_context,
             )
         )
 
@@ -771,7 +940,7 @@ def build_probe_results_payload(
         "probe_plan_path": str(probe_plan_path),
         "output_path": str(output_path),
         "summary": {
-            "candidate_count": len(sorted_candidates),
+            "candidate_count": len(sorted_candidates) - scenario_filtered_count,
             "attempted_count": attempted_count,
             "success_count": success_count,
             "failed_count": failed_count,
@@ -779,9 +948,93 @@ def build_probe_results_payload(
             "scroll_attempt_count": scroll_attempt_count,
             "promoted_target_count": promoted_target_count,
             "original_target_count": original_target_count,
+            "scenario_filtered_count": scenario_filtered_count,
+            "screen_skipped_count": screen_skipped_count,
         },
         "results": results,
     }
+
+
+def _int_summary(summary: dict[str, Any], key: str) -> int:
+    try:
+        return int(summary.get(key, 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _aggregate_plugin_name(results: list[Any]) -> str:
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        for key in ("plugin_name", "plugin", "tab_name"):
+            value = str(result.get(key, "") or "").strip()
+            if value:
+                return value
+    return ""
+
+
+def _results_aggregate_entry(payload: dict[str, Any], current_scenario_id: str) -> dict[str, Any]:
+    summary = payload.get("summary", {}) if isinstance(payload.get("summary"), dict) else {}
+    results = payload.get("results", []) if isinstance(payload.get("results"), list) else []
+    scenario_id = str(current_scenario_id or "").strip()
+    if not scenario_id:
+        for result in results:
+            if isinstance(result, dict) and str(result.get("scenario_id", "") or "").strip():
+                scenario_id = str(result.get("scenario_id", "") or "").strip()
+                break
+    return {
+        "scenario_id": scenario_id,
+        "plugin_name": _aggregate_plugin_name(results),
+        "candidate_count": _int_summary(summary, "candidate_count"),
+        "attempted_count": _int_summary(summary, "attempted_count"),
+        "success_count": _int_summary(summary, "success_count"),
+        "failed_count": _int_summary(summary, "failed_count"),
+        "skipped_count": _int_summary(summary, "skipped_count"),
+        "screen_skipped_count": _int_summary(summary, "screen_skipped_count"),
+        "scenario_filtered_count": _int_summary(summary, "scenario_filtered_count"),
+        "summary": dict(summary),
+        "results": results,
+    }
+
+
+def _build_results_aggregate(output_path: str, scenarios: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "source": "v8_probe_results_aggregate",
+        "run_id": Path(output_path).stem,
+        "output_path": str(output_path),
+        "scenario_count": len(scenarios),
+        "total_candidate_count": sum(_int_summary(item, "candidate_count") for item in scenarios),
+        "total_attempted_count": sum(_int_summary(item, "attempted_count") for item in scenarios),
+        "total_success_count": sum(_int_summary(item, "success_count") for item in scenarios),
+        "total_failed_count": sum(_int_summary(item, "failed_count") for item in scenarios),
+        "total_skipped_count": sum(_int_summary(item, "skipped_count") for item in scenarios),
+        "total_screen_skipped_count": sum(_int_summary(item, "screen_skipped_count") for item in scenarios),
+        "total_scenario_filtered_count": sum(_int_summary(item, "scenario_filtered_count") for item in scenarios),
+        "scenarios": scenarios,
+    }
+
+
+def append_results_aggregate_file(
+    payload: dict[str, Any],
+    *,
+    output_path: str,
+    current_scenario_id: str = "",
+) -> dict[str, Any]:
+    target = coverage_probe_results_aggregate_path(output_path)
+    scenarios: list[dict[str, Any]] = []
+    if target.exists():
+        try:
+            existing = json.loads(target.read_text(encoding="utf-8"))
+            existing_scenarios = existing.get("scenarios", []) if isinstance(existing, dict) else []
+            if isinstance(existing_scenarios, list):
+                scenarios = [item for item in existing_scenarios if isinstance(item, dict)]
+        except Exception:
+            scenarios = []
+    scenarios.append(_results_aggregate_entry(payload, current_scenario_id))
+    aggregate = _build_results_aggregate(output_path, scenarios)
+    target.write_text(json.dumps(aggregate, ensure_ascii=False, indent=2), encoding="utf-8")
+    return aggregate
 
 
 def execute_probe_plan_file(
@@ -792,6 +1045,7 @@ def execute_probe_plan_file(
     probe_plan_path: str | Path | None = None,
     enabled: bool = True,
     log_fn: Callable[[str], None] | None = None,
+    current_scenario_id: str = "",
 ) -> dict[str, Any]:
     plan_path = Path(probe_plan_path) if probe_plan_path is not None else coverage_probe_plan_path(output_path)
     result_path = coverage_probe_results_path(output_path)
@@ -814,6 +1068,8 @@ def execute_probe_plan_file(
             probe_plan_path=str(plan_path),
             output_path=output_path,
             enabled=enabled,
+            current_scenario_id=current_scenario_id,
+            log_fn=log_fn,
         )
     try:
         result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -822,12 +1078,23 @@ def execute_probe_plan_file(
             log_fn(f"[FOCUSABLE][coverage_probe_results_save_failed] path='{result_path}' error='{exc}'")
     else:
         try:
+            append_results_aggregate_file(
+                payload,
+                output_path=output_path,
+                current_scenario_id=current_scenario_id,
+            )
+        except Exception as exc:
+            if log_fn:
+                aggregate_path = coverage_probe_results_aggregate_path(output_path)
+                log_fn(f"[FOCUSABLE][coverage_probe_results_aggregate_save_failed] path='{aggregate_path}' error='{exc}'")
+        try:
             from tb_runner import coverage_probe_validation
 
             coverage_probe_validation.write_validation_file(
                 payload,
                 probe_results_path=result_path,
                 output_path=output_path,
+                current_scenario_id=current_scenario_id,
             )
         except Exception as exc:
             if log_fn:
@@ -843,7 +1110,15 @@ def maybe_execute_probe_plan_file(
     output_path: str,
     env: dict[str, str] | None = None,
     log_fn: Callable[[str], None] | None = None,
+    current_scenario_id: str = "",
 ) -> dict[str, Any] | None:
     if not is_probe_enabled(env):
         return None
-    return execute_probe_plan_file(client, dev, output_path=output_path, enabled=True, log_fn=log_fn)
+    return execute_probe_plan_file(
+        client,
+        dev,
+        output_path=output_path,
+        enabled=True,
+        log_fn=log_fn,
+        current_scenario_id=current_scenario_id,
+    )
