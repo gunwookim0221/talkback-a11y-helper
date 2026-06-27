@@ -151,6 +151,59 @@ def test_oneconnect_resource_package_does_not_trigger_guard():
     assert crash_guard.detect_foreground_package_exit(row=row, client=client, dev="SERIAL") is None
 
 
+def test_systemui_screen_off_is_environment_interruption_not_crash():
+    class ScreenOffClient(GuardClient):
+        def _run(self, args, **kwargs):
+            if args[:3] == ["shell", "dumpsys", "power"]:
+                return "mWakefulness=Asleep\nDisplay Power: state=OFF"
+            if args[:4] == ["shell", "dumpsys", "window", "policy"]:
+                return "isStatusBarKeyguard=true"
+            if args[:3] == ["shell", "dumpsys", "statusbar"]:
+                return "mExpandedVisible=false"
+            return super()._run(args, **kwargs)
+
+    client = ScreenOffClient(pidof="1234", current_package="com.android.systemui")
+    inspection = crash_guard.inspect_foreground_package_exit(
+        row=_launcher_row(),
+        client=client,
+        dev="SERIAL",
+    )
+
+    assert inspection["detection"] is None
+    assert inspection["environment_interruption"] == {
+        "classification": "ENVIRONMENT_ERROR",
+        "reason": "screen_off_interruption",
+        "package": "com.android.systemui",
+        "screen_state": "SCREEN_OFF",
+        "keyguard_active": True,
+        "notification_shade_active": False,
+        "crash_counted": False,
+    }
+
+
+def test_systemui_without_screen_keyguard_or_shade_still_uses_existing_crash_detection():
+    class ActiveSystemUiClient(GuardClient):
+        def _run(self, args, **kwargs):
+            if args[:3] == ["shell", "dumpsys", "power"]:
+                return "mWakefulness=Awake\nDisplay Power: state=ON"
+            if args[:4] == ["shell", "dumpsys", "window", "policy"]:
+                return "isStatusBarKeyguard=false"
+            if args[:3] == ["shell", "dumpsys", "statusbar"]:
+                return "mExpandedVisible=false"
+            return super()._run(args, **kwargs)
+
+    client = ActiveSystemUiClient(pidof="", current_package="com.android.systemui")
+    detection = crash_guard.detect_foreground_package_exit(
+        row=_launcher_row(),
+        client=client,
+        dev="SERIAL",
+    )
+
+    assert detection is not None
+    assert detection["crash_type"] == "APP_TERMINATED"
+    assert detection["reason"] == "app_terminated"
+
+
 def test_main_loop_stops_on_launcher_focus_and_persists_crash_artifacts(tmp_path, monkeypatch):
     monkeypatch.setattr(collection_flow, "save_excel_with_perf", lambda *args, **kwargs: None)
     logs = []
@@ -393,6 +446,7 @@ def _main_loop_state(anchor_row):
         visited_logical_signatures=set(),
         consumed_cluster_logical_signatures=set(),
         consumed_cluster_signatures=set(),
+        consumed_semantic_card_signatures=set(),
         current_local_tab_signature="",
         current_local_tab_active_rid="",
         local_tab_candidates_by_signature={},
@@ -411,6 +465,11 @@ def _main_loop_state(anchor_row):
         forced_local_tab_attempt_count=0,
         local_tab_activation_failures={},
         content_phase_grace_steps=0,
+        current_local_tab_content_phase_active=False,
+        current_local_tab_content_entered=False,
+        current_local_tab_content_candidate_visited=False,
+        current_local_tab_content_fail_recorded=False,
+        current_local_tab_content_entry_probe_attempted=False,
         active_container_group_signature="",
         active_container_group_remaining=set(),
         active_container_group_labels={},

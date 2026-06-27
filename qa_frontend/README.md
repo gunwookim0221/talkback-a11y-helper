@@ -57,6 +57,11 @@ APIs:
 Run logs are written under `qa_frontend_runs/`. Runner output files continue to be written under `output/`.
 When a run reaches a terminal state, the backend writes `qa_frontend_runs/<run_id>_summary.json` as a structured sidecar. The log remains the source of truth; the summary is a secondary cache/index for Recent Runs, dashboards, and future queue/statistics work.
 
+At run start, the backend applies `adb shell svc power stayon true` and records the prior
+`stay_on_while_plugged_in` value. At run end it restores that exact value only when the
+setting still matches the value applied by the run. If the setting changes externally
+during the run, cleanup leaves it unchanged rather than overwriting the user's developer option.
+
 Recent Runs is read-only. It exposes the latest run summaries plus log/xlsx downloads without rewriting source config or adding rerun behavior.
 Runtime Dashboard is read-only. It parses the current run log for best-effort progress, metrics, and event feed data while keeping the log as the source of truth.
 Run history separates process status from scenario result status. `process_status` describes execution (`success`, `failed`, `stopped`, `running`), while `scenario_result_status` describes parsed validation results (`passed`, `warning`, `failed`, `partial`, `unknown`).

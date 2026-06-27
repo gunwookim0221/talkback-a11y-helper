@@ -19,7 +19,12 @@ from .run_summary import write_summary_file
 from .runtime_dashboard import build_runtime_dashboard
 from .runtime_config_selection import write_selected_runtime_config
 from .runtime_setup import prepare_runtime
-from .sleep_prevention import disable_sleep_prevention, enable_sleep_prevention
+from .sleep_prevention import (
+    disable_sleep_prevention,
+    enable_device_stay_awake,
+    enable_sleep_prevention,
+    restore_device_stay_awake,
+)
 from .subprocess_executor import RunExecution, close_execution_log, start_execution, wait_for_execution
 
 RunState = Literal["idle", "running", "stopped", "finished", "error"]
@@ -50,6 +55,7 @@ class RunManager:
         self._dashboard_cache_key: tuple[str, int, float, str | None] | None = None
         self._dashboard_parsed_cache: dict[str, object] | None = None
         self._last_outputs_signature: str | None = None
+        self._device_stay_awake_state: dict[str, object] | None = None
 
     def start_run(
         self,
@@ -107,6 +113,15 @@ class RunManager:
 
                 enable_sleep_prevention()
                 sleep_prevention_enabled = True
+                self._device_stay_awake_state = enable_device_stay_awake()
+                log_file.write(
+                    "[QA_FRONTEND][keep_awake] "
+                    f"command='{self._device_stay_awake_state.get('command', '')}' "
+                    f"ok='{str(bool(self._device_stay_awake_state.get('ok'))).lower()}' "
+                    f"original_setting='{self._device_stay_awake_state.get('original_setting')}' "
+                    f"applied_setting='{self._device_stay_awake_state.get('applied_setting')}' "
+                    f"error='{self._device_stay_awake_state.get('error', '')}'\n"
+                )
 
                 runtime_config = write_selected_runtime_config(
                     source_path=RUNTIME_CONFIG_PATH,
@@ -173,6 +188,7 @@ class RunManager:
                     self._finished_at = datetime.now().isoformat(timespec="seconds")
                     log_file.close()
                     self._write_summary_safe()
+                    self._restore_device_stay_awake()
                     disable_sleep_prevention()
                     sleep_prevention_enabled = False
                     return self._status_locked()
@@ -190,6 +206,7 @@ class RunManager:
                     self._finished_at = datetime.now().isoformat(timespec="seconds")
                     log_file.close()
                     self._write_summary_safe()
+                    self._restore_device_stay_awake()
                     disable_sleep_prevention()
                     sleep_prevention_enabled = False
                     return self._status_locked()
@@ -207,6 +224,7 @@ class RunManager:
                 self._error = str(exc)
                 self._process = None
                 if sleep_prevention_enabled:
+                    self._restore_device_stay_awake()
                     disable_sleep_prevention()
                 raise
 
@@ -220,6 +238,7 @@ class RunManager:
                 waiter.start()
             except Exception:
                 close_execution_log(execution)
+                self._restore_device_stay_awake()
                 disable_sleep_prevention()
                 self._state = "error"
                 self._error = "failed to start run waiter thread"
@@ -353,6 +372,7 @@ class RunManager:
                 close_execution_log(execution)
                 self._write_summary_safe()
         finally:
+            self._restore_device_stay_awake()
             disable_sleep_prevention()
 
     def _refresh_locked(self) -> None:
@@ -370,6 +390,19 @@ class RunManager:
                 log_file.write(f"{line}\n")
         except OSError:
             return
+
+    def _restore_device_stay_awake(self) -> None:
+        state = self._device_stay_awake_state
+        self._device_stay_awake_state = None
+        if state is None:
+            return
+        result = restore_device_stay_awake(state)
+        self._append_log_line(
+            "[QA_FRONTEND][keep_awake] "
+            f"restore_ok='{str(bool(result.get('ok'))).lower()}' "
+            f"restored='{str(bool(result.get('restored'))).lower()}' "
+            f"reason='{result.get('reason', '')}' error='{result.get('error', '')}'"
+        )
 
     def _write_summary_safe(self) -> None:
         if not self._log_path:

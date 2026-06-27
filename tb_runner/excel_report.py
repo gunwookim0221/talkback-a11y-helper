@@ -2435,8 +2435,14 @@ def _coverage_probe_validation_path(output_path: str) -> Path:
     return path.with_name(f"{path.stem}.coverage_probe_validation.json")
 
 
+def _coverage_probe_validation_aggregate_path(output_path: str) -> Path:
+    path = Path(output_path)
+    return path.with_name(f"{path.stem}.coverage_probe_validation.aggregate.json")
+
+
 def _load_probe_validation_payload(output_path: str) -> dict[str, object]:
-    path = _coverage_probe_validation_path(output_path)
+    aggregate_path = _coverage_probe_validation_aggregate_path(output_path)
+    path = aggregate_path if aggregate_path.exists() else _coverage_probe_validation_path(output_path)
     if not path.exists():
         return {}
     try:

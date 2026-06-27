@@ -7669,7 +7669,24 @@ def _run_crash_guard_check(
 
     detection = inspection.get("detection") if isinstance(inspection.get("detection"), dict) else None
     if not detection:
-        log("[CRASH_GUARD] result='ok'")
+        environment = (
+            inspection.get("environment_interruption")
+            if isinstance(inspection.get("environment_interruption"), dict)
+            else None
+        )
+        if environment:
+            log(
+                "[CRASH_GUARD] environment_interruption "
+                f"classification='{environment.get('classification')}' "
+                f"reason='{environment.get('reason')}' package='{environment.get('package')}' "
+                f"screen_state='{environment.get('screen_state')}' "
+                f"keyguard_active='{environment.get('keyguard_active')}' "
+                f"notification_shade_active='{environment.get('notification_shade_active')}' "
+                "crash_counted=false"
+            )
+            log("[CRASH_GUARD] result='environment_interruption'")
+        else:
+            log("[CRASH_GUARD] result='ok'")
         if not _crash_guard_latch_matches(client, scenario_id=scenario_id, attempt=attempt):
             setattr(client, "last_crash_guard_result", {})
             setattr(client, "last_crash_terminal_signal", {})

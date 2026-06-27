@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 EXPECTED_PACKAGE = "com.samsung.android.oneconnect"
+SYSTEM_UI_PACKAGE = "com.android.systemui"
 LAUNCHER_PACKAGES = {
     "com.sec.android.app.launcher",
     "com.android.launcher",
@@ -39,6 +40,9 @@ def inspect_foreground_package_exit(
     )
     helper_alive_not_oneconnect = _helper_dump_alive_but_not_oneconnect(row)
     process_running = _oneconnect_process_running(client=client, dev=dev)
+    environment_interruption = None
+    if current_package == SYSTEM_UI_PACKAGE:
+        environment_interruption = _inspect_system_ui_environment(client=client, dev=dev)
     signals = {
         "launcher_hit": launcher_hit,
         "non_oneconnect_current": non_oneconnect_current,
@@ -48,7 +52,9 @@ def inspect_foreground_package_exit(
     }
 
     detection: dict[str, Any] | None = None
-    if launcher_hit or non_oneconnect_current or launcher_focus or launcher_resource or helper_alive_not_oneconnect:
+    if environment_interruption is None and (
+        launcher_hit or non_oneconnect_current or launcher_focus or launcher_resource or helper_alive_not_oneconnect
+    ):
         crash_type = "APP_TERMINATED" if process_running is False else "POSSIBLE_CRASH"
         reason = "app_terminated" if crash_type == "APP_TERMINATED" else "possible_crash"
         detection = {
@@ -65,6 +71,7 @@ def inspect_foreground_package_exit(
         "package_sources": package_sources,
         "process_running": process_running,
         "signals": signals,
+        "environment_interruption": environment_interruption,
         "detection": detection,
     }
 
@@ -300,6 +307,88 @@ def _oneconnect_process_running(*, client: Any, dev: str | None) -> bool | None:
     except Exception:
         return None
     return bool(str(output or "").strip())
+
+
+def _inspect_system_ui_environment(*, client: Any, dev: str | None) -> dict[str, Any] | None:
+    screen_state = _read_screen_state(client=client, dev=dev)
+    keyguard_active = _read_keyguard_active(client=client, dev=dev)
+    notification_shade_active = _read_notification_shade_active(client=client, dev=dev)
+    if screen_state == "SCREEN_OFF":
+        reason = "screen_off_interruption"
+    elif keyguard_active is True:
+        reason = "keyguard_interruption"
+    elif notification_shade_active is True:
+        reason = "notification_shade_interruption"
+    else:
+        return None
+    return {
+        "classification": "ENVIRONMENT_ERROR",
+        "reason": reason,
+        "package": SYSTEM_UI_PACKAGE,
+        "screen_state": screen_state,
+        "keyguard_active": keyguard_active,
+        "notification_shade_active": notification_shade_active,
+        "crash_counted": False,
+    }
+
+
+def _read_screen_state(*, client: Any, dev: str | None) -> str:
+    output = _run_client_command(client, ["shell", "dumpsys", "power"], dev=dev)
+    if output is None:
+        return "UNKNOWN"
+    if re.search(r"mWakefulness=\s*Awake", output, re.IGNORECASE) or re.search(
+        r"Display Power:\s*state=\s*ON", output, re.IGNORECASE
+    ):
+        return "SCREEN_ON"
+    if re.search(r"mWakefulness=\s*(Asleep|Dozing)", output, re.IGNORECASE) or re.search(
+        r"Display Power:\s*state=\s*OFF", output, re.IGNORECASE
+    ):
+        return "SCREEN_OFF"
+    return "UNKNOWN"
+
+
+def _read_keyguard_active(*, client: Any, dev: str | None) -> bool | None:
+    output = _run_client_command(client, ["shell", "dumpsys", "window", "policy"], dev=dev)
+    if output is None:
+        return None
+    match = re.search(
+        r"(?:isStatusBarKeyguard|mShowingLockscreen|mShowing)\s*=\s*(true|false|1|0)",
+        output,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return match.group(1).lower() in {"true", "1"}
+
+
+def _read_notification_shade_active(*, client: Any, dev: str | None) -> bool | None:
+    output = _run_client_command(client, ["shell", "dumpsys", "statusbar"], dev=dev)
+    if output is None:
+        return None
+    match = re.search(
+        r"(?:mExpandedVisible|mPanelExpanded|panelExpanded|mQsExpanded)\s*=\s*(true|false|1|0)",
+        output,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return match.group(1).lower() in {"true", "1"}
+
+
+def _run_client_command(client: Any, args: list[str], *, dev: str | None) -> str | None:
+    run_fn = getattr(client, "_run", None)
+    if not callable(run_fn):
+        return None
+    try:
+        output = run_fn(args, dev=dev, timeout=5.0)
+    except TypeError:
+        try:
+            output = run_fn(args, dev=dev)
+        except Exception:
+            return None
+    except Exception:
+        return None
+    return str(output or "")
 
 
 def _next_event_id(output_dir: Path) -> str:

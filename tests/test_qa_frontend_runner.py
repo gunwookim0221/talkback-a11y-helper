@@ -10,6 +10,18 @@ from qa_frontend.backend.main import StartRunRequest
 from qa_frontend.backend.runner import RunManager
 
 
+@pytest.fixture(autouse=True)
+def _stub_device_stay_awake(monkeypatch):
+    monkeypatch.setattr(
+        "qa_frontend.backend.runner.enable_device_stay_awake",
+        lambda: {"ok": True, "command": "adb shell svc power stayon true"},
+    )
+    monkeypatch.setattr(
+        "qa_frontend.backend.runner.restore_device_stay_awake",
+        lambda state: {"ok": True, "restored": True, "reason": "restored"},
+    )
+
+
 class _RunningProcess:
     def poll(self):
         return None
@@ -298,6 +310,52 @@ def test_run_manager_restores_sleep_prevention_when_preflight_blocks(tmp_path, m
     assert state["state"] == "error"
     assert state["preflight_state"] == "blocked"
     assert calls == ["enable", "disable"]
+
+
+def test_run_manager_invokes_device_keep_awake_for_run_lifecycle(tmp_path, monkeypatch):
+    source_path = tmp_path / "runtime_config.json"
+    source_path.write_text(
+        json.dumps({"scenarios": {"global_nav_main": {"enabled": False, "max_steps": 10}}}),
+        encoding="utf-8",
+    )
+    passed = {
+        "ok": True,
+        "state": "passed",
+        "reason": "ok",
+        "launch_mode": "warm",
+        "adb_state": "ok",
+        "helper_state": "ok",
+        "talkback_state": "enabled",
+        "foreground_package": "com.samsung.android.oneconnect",
+    }
+    calls = []
+    state = {"ok": True, "command": "adb shell svc power stayon true", "original_setting": "0", "applied_setting": "7"}
+
+    monkeypatch.setattr("qa_frontend.backend.runner.RUNTIME_CONFIG_PATH", source_path)
+    monkeypatch.setattr("qa_frontend.backend.runner.RUN_LOG_DIR", tmp_path / "runs")
+    monkeypatch.setattr("qa_frontend.backend.runner.apply_language_mode", lambda mode: _language_ok(mode))
+    monkeypatch.setattr("qa_frontend.backend.runner.run_runtime_preflight", lambda mode: passed)
+    monkeypatch.setattr("qa_frontend.backend.runner.subprocess.Popen", lambda *args, **kwargs: _FakeProcess())
+    monkeypatch.setattr(
+        "qa_frontend.backend.runner.enable_device_stay_awake",
+        lambda: calls.append("enable_device") or state,
+    )
+    monkeypatch.setattr(
+        "qa_frontend.backend.runner.restore_device_stay_awake",
+        lambda actual: calls.append(("restore_device", actual)) or {"ok": True, "restored": True, "reason": "restored"},
+    )
+    monkeypatch.setattr("qa_frontend.backend.runner.enable_sleep_prevention", lambda: calls.append("enable_host"))
+    monkeypatch.setattr("qa_frontend.backend.runner.disable_sleep_prevention", lambda: calls.append("disable_host"))
+
+    manager = RunManager()
+    manager.start_run(mode="smoke", scenario_ids=["global_nav_main"], launch_mode="warm")
+    final_state = _wait_until_not_running(manager)
+
+    assert final_state["state"] == "finished"
+    assert calls == ["enable_host", "enable_device", ("restore_device", state), "disable_host"]
+    log_text = Path(final_state["log_path"]).read_text(encoding="utf-8")
+    assert "command='adb shell svc power stayon true'" in log_text
+    assert "restore_ok='true'" in log_text
 
 
 def test_run_manager_restores_sleep_prevention_when_waiter_thread_start_fails(tmp_path, monkeypatch):

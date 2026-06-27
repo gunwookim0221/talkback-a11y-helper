@@ -186,3 +186,62 @@ def test_generated_xlsx_contains_probe_shadow_columns_and_appended_row(tmp_path)
     assert worksheet.cell(row=4, column=row_source_col).value == PROBE_SHADOW_ROW_SOURCE
     assert worksheet.cell(row=4, column=visible_col).value == "Motion detected"
     assert worksheet.cell(row=4, column=status_col).value == "PARTIAL_MATCH"
+
+
+def test_generated_xlsx_prefers_aggregate_probe_validation(tmp_path):
+    output_path = tmp_path / "talkback_compare.xlsx"
+    per_scenario_path = tmp_path / "talkback_compare.coverage_probe_validation.json"
+    aggregate_path = tmp_path / "talkback_compare.coverage_probe_validation.aggregate.json"
+    per_scenario_path.write_text(
+        json.dumps(_payload(_validation("Last scenario only", "MATCH")), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    aggregate_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "source": "v8_probe_validation_aggregate",
+                "validations": [
+                    _validation("Water Leak 100%", "MATCH", scenario_id="device_water_leak_sensor_plugin"),
+                    _validation("Motion 100%", "PARTIAL_MATCH"),
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    save_excel(_traversal_df().to_dict("records"), str(output_path), with_images=False)
+
+    worksheet = openpyxl.load_workbook(output_path)["result"]
+    headers = [cell.value for cell in worksheet[1]]
+    visible_col = headers.index("visible_label") + 1
+    row_source_col = headers.index("row_source") + 1
+    shadow_labels = [
+        worksheet.cell(row=row_index, column=visible_col).value
+        for row_index in range(2, worksheet.max_row + 1)
+        if worksheet.cell(row=row_index, column=row_source_col).value == PROBE_SHADOW_ROW_SOURCE
+    ]
+    assert shadow_labels == ["Water Leak 100%", "Motion 100%"]
+
+
+def test_generated_xlsx_falls_back_to_per_scenario_validation_without_aggregate(tmp_path):
+    output_path = tmp_path / "talkback_compare.xlsx"
+    validation_path = tmp_path / "talkback_compare.coverage_probe_validation.json"
+    validation_path.write_text(
+        json.dumps(_payload(_validation("Fallback match", "MATCH")), ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    save_excel(_traversal_df().to_dict("records"), str(output_path), with_images=False)
+
+    worksheet = openpyxl.load_workbook(output_path)["result"]
+    headers = [cell.value for cell in worksheet[1]]
+    visible_col = headers.index("visible_label") + 1
+    row_source_col = headers.index("row_source") + 1
+    shadow_labels = [
+        worksheet.cell(row=row_index, column=visible_col).value
+        for row_index in range(2, worksheet.max_row + 1)
+        if worksheet.cell(row=row_index, column=row_source_col).value == PROBE_SHADOW_ROW_SOURCE
+    ]
+    assert shadow_labels == ["Fallback match"]
