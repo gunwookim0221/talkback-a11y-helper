@@ -96,6 +96,9 @@ RESULT_SHEET_COLUMNS = [
     "probe_success_source",
     "promotion_status",
     "promotion_reason",
+    "promotion_applied",
+    "promotion_dedup_status",
+    "promotion_dedup_reason",
     "probe_validation_confidence",
     "probe_target_strategy",
     "probe_intent",
@@ -136,6 +139,7 @@ RESULT_SHEET_COLUMNS = [
 ]
 
 PROBE_SHADOW_ROW_SOURCE = "COVERAGE_PROBE_SHADOW"
+PROBE_PROMOTED_ROW_SOURCE = "COVERAGE_PROBE_PROMOTED"
 PROBE_SHADOW_STATUSES = {"MATCH", "PARTIAL_MATCH"}
 
 RESULT_REPEAT_METADATA_COLUMNS = [
@@ -1815,6 +1819,10 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     _pick_col("probe_success_source", ["probe_success_source"], default="")
     _pick_col("promotion_status", ["promotion_status"], default="")
     _pick_col("promotion_reason", ["promotion_reason"], default="")
+    _pick_col("promotion_applied", ["promotion_applied"], default=False)
+    _pick_col("promotion_dedup_status", ["promotion_dedup_status"], default="")
+    _pick_col("promotion_dedup_reason", ["promotion_dedup_reason"], default="")
+    _pick_col("_probe_success", ["probe_success"], default=False)
     _pick_col("probe_validation_confidence", ["probe_validation_confidence"], default="")
     _pick_col("probe_target_strategy", ["probe_target_strategy"], default="")
     _pick_col("probe_intent", ["probe_intent"], default="")
@@ -1859,6 +1867,8 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
         "probe_success_source",
         "promotion_status",
         "promotion_reason",
+        "promotion_dedup_status",
+        "promotion_dedup_reason",
         "probe_validation_confidence",
         "probe_target_strategy",
         "probe_intent",
@@ -1871,6 +1881,7 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
         "semantic_card_is_value_covered",
         "semantic_card_is_action_only",
         "semantic_card_is_title_only",
+        "promotion_applied",
     ):
         result[bool_col] = result[bool_col].apply(_to_boolish)
 
@@ -2209,6 +2220,8 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
         "_row_source",
         "_representative_row_source",
         "_mismatch_reasons",
+        "focus_bounds",
+        "_probe_success",
     ]
     return result[[*public_columns, *helper_columns]]
 
@@ -2494,6 +2507,7 @@ def build_probe_shadow_rows(validation_payload: dict[str, object]) -> list[dict[
                 "probe_success_source": str(item.get("probe_success_source", "") or ""),
                 "promotion_status": str(item.get("promotion_status", "") or promotion["promotion_status"]),
                 "promotion_reason": str(item.get("promotion_reason", "") or promotion["promotion_reason"]),
+                "_probe_success": _to_boolish(item.get("probe_success")),
                 "probe_validation_confidence": str(item.get("validation_confidence", "") or ""),
                 "probe_target_strategy": str(item.get("probe_target_strategy", "") or ""),
                 "probe_intent": str(item.get("probe_intent", "") or ""),
@@ -2502,6 +2516,7 @@ def build_probe_shadow_rows(validation_payload: dict[str, object]) -> list[dict[
                 "failure_reason": "",
                 "review_note": "Coverage Probe Shadow",
                 "focus_view_id": str(item.get("probe_target_view_id", "") or item.get("view_id", "") or ""),
+                "focus_bounds": str(item.get("probe_bounds", "") or item.get("bounds", "") or ""),
                 "focus_confidence": str(item.get("validation_confidence", "") or ""),
                 "semantic_card_id": "",
                 "semantic_card_role": "",
@@ -2553,6 +2568,134 @@ def append_probe_shadow_rows(result_df: pd.DataFrame, validation_payload: dict[s
     return pd.concat([result_df, shadow_df], ignore_index=True)
 
 
+def _normalize_promotion_text(value: object) -> str:
+    text = str(value or "").strip().lower()
+    text = text.replace("％", "%")
+    text = re.sub(r"[^\w%]+", " ", text, flags=re.UNICODE)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _normalize_promotion_id(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
+def _normalize_promotion_bounds(value: object) -> str:
+    numbers = re.findall(r"-?\d+", str(value or ""))
+    return ",".join(numbers[:4]) if len(numbers) >= 4 else ""
+
+
+def _promotion_identity(row: pd.Series | dict[str, object]) -> dict[str, str]:
+    getter = row.get
+    return {
+        "visible_label": _normalize_promotion_text(getter("visible_label", "")),
+        "speech": _normalize_promotion_text(getter("merged_announcement", "")),
+        "resource_id": _normalize_promotion_id(getter("focus_view_id", "")),
+        "bounds": _normalize_promotion_bounds(getter("focus_bounds", "")),
+    }
+
+
+def _production_duplicate_fields(shadow_row: pd.Series, production_rows: pd.DataFrame) -> list[str]:
+    scenario_id = str(shadow_row.get("scenario_id", "") or "").strip()
+    candidates = production_rows
+    if "scenario_id" in candidates.columns:
+        candidates = candidates.loc[candidates["scenario_id"].fillna("").astype(str).str.strip() == scenario_id]
+    shadow_identity = _promotion_identity(shadow_row)
+    matched_fields: set[str] = set()
+    for _, production_row in candidates.iterrows():
+        production_identity = _promotion_identity(production_row)
+        matched_fields.update(
+            field
+            for field, value in shadow_identity.items()
+            if value and value == production_identity.get(field, "")
+        )
+    return sorted(matched_fields)
+
+
+def append_probe_promoted_rows(result_df: pd.DataFrame) -> pd.DataFrame:
+    if result_df.empty or "row_source" not in result_df.columns:
+        return result_df
+
+    output = result_df.copy()
+    for col, default in (
+        ("promotion_applied", False),
+        ("promotion_dedup_status", ""),
+        ("promotion_dedup_reason", ""),
+    ):
+        if col not in output.columns:
+            output[col] = default
+
+    row_sources = output["row_source"].fillna("").astype(str)
+    shadow_indices = output.index[row_sources == PROBE_SHADOW_ROW_SOURCE].tolist()
+    production_rows = output.loc[
+        ~row_sources.isin({PROBE_SHADOW_ROW_SOURCE, PROBE_PROMOTED_ROW_SOURCE})
+    ]
+    promoted_rows: list[dict[str, object]] = []
+    dedup_skipped_count = 0
+
+    for index in shadow_indices:
+        shadow = output.loc[index]
+        eligible = (
+            str(shadow.get("promotion_status", "") or "").strip().upper() == "PROMOTABLE"
+            and str(shadow.get("probe_validation_status", "") or "").strip().upper() == "MATCH"
+            and _to_boolish(shadow.get("_probe_success"))
+        )
+        if not eligible:
+            output.at[index, "promotion_applied"] = False
+            output.at[index, "promotion_dedup_status"] = "NOT_APPLICABLE"
+            output.at[index, "promotion_dedup_reason"] = "promotion_not_eligible"
+            continue
+
+        duplicate_fields = _production_duplicate_fields(shadow, production_rows)
+        if duplicate_fields:
+            dedup_skipped_count += 1
+            output.at[index, "promotion_applied"] = False
+            output.at[index, "promotion_dedup_status"] = "SKIPPED"
+            output.at[index, "promotion_dedup_reason"] = (
+                "existing_production_row_match:" + ",".join(duplicate_fields)
+            )
+            continue
+
+        output.at[index, "promotion_applied"] = True
+        output.at[index, "promotion_dedup_status"] = "PROMOTED"
+        output.at[index, "promotion_dedup_reason"] = "no_existing_production_match"
+        promoted = shadow.to_dict()
+        promoted.update(
+            {
+                "row_source": PROBE_PROMOTED_ROW_SOURCE,
+                "final_result": "PASS",
+                "promotion_applied": True,
+                "promotion_dedup_status": "PROMOTED",
+                "promotion_dedup_reason": "no_existing_production_match",
+                "review_note": "Coverage Probe Promoted",
+            }
+        )
+        promoted_rows.append(promoted)
+
+    if promoted_rows:
+        promoted_df = pd.DataFrame(promoted_rows)
+        for col in output.columns:
+            if col not in promoted_df.columns:
+                promoted_df[col] = ""
+        promoted_df = promoted_df[output.columns]
+        output = pd.concat([output, promoted_df], ignore_index=True)
+
+    output.attrs["probe_promotion_summary"] = {
+        "promotable_count": sum(
+            1
+            for index in shadow_indices
+            if str(output.loc[index].get("promotion_status", "") or "").strip().upper() == "PROMOTABLE"
+        ),
+        "promoted_row_count": len(promoted_rows),
+        "promotion_dedup_skipped_count": dedup_skipped_count,
+    }
+    log(
+        "[V8][PROMOTION] "
+        f"promotable={output.attrs['probe_promotion_summary']['promotable_count']} "
+        f"promoted={len(promoted_rows)} dedup_skipped={dedup_skipped_count}"
+    )
+    return output
+
+
 def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> None:
     df = pd.DataFrame(rows)
     if df.empty:
@@ -2569,6 +2712,7 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
     summary_df = add_semantic_value_summary(summary_df, result_df)
     result_df = _populate_result_debug_logs(result_df, output_path, source_df=filtered_df)
     result_df = append_probe_shadow_rows(result_df, _load_probe_validation_payload(output_path))
+    result_df = append_probe_promoted_rows(result_df)
     if _overlay_first_row_debug_enabled():
         tracked_keys: list[str] = []
         for row in rows:

@@ -116,6 +116,8 @@ def validate_probe_result(result: dict[str, Any]) -> dict[str, Any]:
         "probe_target_strategy": str(result.get("probe_target_strategy", "") or ""),
         "probe_target_label": str(result.get("probe_target_label", "") or ""),
         "probe_target_view_id": str(result.get("probe_target_view_id", "") or ""),
+        "bounds": str(result.get("bounds", "") or ""),
+        "probe_bounds": str(result.get("probe_bounds", "") or ""),
         "probe_success": bool(result.get("probe_success")),
         "probe_success_source": str(result.get("probe_success_source", "") or ""),
         "probe_skipped": bool(result.get("probe_skipped")),
