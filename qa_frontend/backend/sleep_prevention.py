@@ -15,6 +15,7 @@ ES_DISPLAY_REQUIRED = 0x00000002
 
 _RUN_FLAGS = ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED
 _RESTORE_FLAGS = ES_CONTINUOUS
+DEVICE_STAY_AWAKE_SETTING = "15"
 
 
 class _SleepPreventionWorker:
@@ -84,19 +85,42 @@ def disable_sleep_prevention() -> bool:
 
 def enable_device_stay_awake(
     adb_runner: Callable[[list[str], float], dict[str, object]] = run_adb,
+    *,
+    serial: str | None = None,
 ) -> dict[str, object]:
     """Enable Android stay-awake and retain enough state for a safe restore."""
-    before = adb_runner(["shell", "settings", "get", "global", "stay_on_while_plugged_in"], 8.0)
+    before = _run_device_adb(
+        adb_runner,
+        ["shell", "settings", "get", "global", "stay_on_while_plugged_in"],
+        serial=serial,
+    )
     original_setting = _setting_value(before)
-    applied = adb_runner(["shell", "svc", "power", "stayon", "true"], 8.0)
-    after = adb_runner(["shell", "settings", "get", "global", "stay_on_while_plugged_in"], 8.0)
+    applied = _run_device_adb(
+        adb_runner,
+        [
+            "shell",
+            "settings",
+            "put",
+            "global",
+            "stay_on_while_plugged_in",
+            DEVICE_STAY_AWAKE_SETTING,
+        ],
+        serial=serial,
+    )
+    after = _run_device_adb(
+        adb_runner,
+        ["shell", "settings", "get", "global", "stay_on_while_plugged_in"],
+        serial=serial,
+    )
     applied_setting = _setting_value(after)
     return {
-        "ok": bool(applied.get("ok")),
+        "ok": bool(applied.get("ok")) and applied_setting == DEVICE_STAY_AWAKE_SETTING,
+        "applied": bool(applied.get("ok")),
         "original_setting_known": bool(before.get("ok")),
         "original_setting": original_setting,
         "applied_setting": applied_setting,
-        "command": "adb shell svc power stayon true",
+        "serial": serial,
+        "command": f"adb shell settings put global stay_on_while_plugged_in {DEVICE_STAY_AWAKE_SETTING}",
         "error": str(applied.get("error") or applied.get("stderr") or ""),
     }
 
@@ -106,14 +130,16 @@ def restore_device_stay_awake(
     adb_runner: Callable[[list[str], float], dict[str, object]] = run_adb,
 ) -> dict[str, object]:
     """Restore only the setting this run changed, preserving external changes."""
-    if not state or not state.get("ok"):
+    if not state or not state.get("applied", state.get("ok")):
         return {"ok": False, "restored": False, "reason": "stay_awake_not_applied"}
     if not state.get("original_setting_known"):
         return {"ok": False, "restored": False, "reason": "original_setting_unknown"}
 
-    current_result = adb_runner(
+    serial = str(state.get("serial") or "") or None
+    current_result = _run_device_adb(
+        adb_runner,
         ["shell", "settings", "get", "global", "stay_on_while_plugged_in"],
-        8.0,
+        serial=serial,
     )
     current_setting = _setting_value(current_result)
     applied_setting = state.get("applied_setting")
@@ -134,14 +160,25 @@ def restore_device_stay_awake(
             "stay_on_while_plugged_in",
             str(original_setting),
         ]
-    restored = adb_runner(command, 8.0)
+    restored = _run_device_adb(adb_runner, command, serial=serial)
     return {
         "ok": bool(restored.get("ok")),
         "restored": bool(restored.get("ok")),
         "reason": "restored" if restored.get("ok") else "restore_failed",
         "original_setting": original_setting,
+        "serial": serial,
         "error": str(restored.get("error") or restored.get("stderr") or ""),
     }
+
+
+def _run_device_adb(
+    adb_runner: Callable[[list[str], float], dict[str, object]],
+    args: list[str],
+    *,
+    serial: str | None,
+) -> dict[str, object]:
+    command = ["-s", serial, *args] if serial else args
+    return adb_runner(command, 8.0)
 
 
 def _setting_value(result: dict[str, object]) -> str | None:

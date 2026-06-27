@@ -254,12 +254,35 @@ def test_parse_live_log_excludes_disabled_config_scenarios_from_observed_count()
 
 def test_batch_run_manager_restores_sleep_prevention_after_device_run(tmp_path, monkeypatch):
     calls = []
+    stay_awake_state = {
+        "ok": True,
+        "applied": True,
+        "serial": "SERIAL",
+        "original_setting": "3",
+        "applied_setting": "15",
+        "command": "adb shell settings put global stay_on_while_plugged_in 15",
+    }
 
     monkeypatch.setattr(batch_runner, "ROOT_DIR", tmp_path)
     monkeypatch.setattr(batch_runner, "RUN_LOG_DIR", tmp_path / "qa_frontend_runs")
     monkeypatch.setattr(batch_runner, "RUNTIME_CONFIG_PATH", tmp_path / "runtime_config.json")
     monkeypatch.setattr(batch_runner, "enable_sleep_prevention", lambda: calls.append("enable"))
     monkeypatch.setattr(batch_runner, "disable_sleep_prevention", lambda: calls.append("disable"))
+    monkeypatch.setattr(
+        batch_runner,
+        "enable_device_stay_awake",
+        lambda *, serial: calls.append(("enable_device", serial)) or stay_awake_state,
+    )
+    monkeypatch.setattr(
+        batch_runner,
+        "restore_device_stay_awake",
+        lambda state: calls.append(("restore_device", state)) or {
+            "ok": True,
+            "restored": True,
+            "original_setting": "3",
+            "reason": "restored",
+        },
+    )
     monkeypatch.setattr(batch_runner, "start_crash_logcat_capture", lambda **kwargs: None)
     monkeypatch.setattr(batch_runner, "stop_crash_logcat_capture", lambda *args, **kwargs: None)
     monkeypatch.setattr(
@@ -281,7 +304,7 @@ def test_batch_run_manager_restores_sleep_prevention_after_device_run(tmp_path, 
         ),
     )
     monkeypatch.setattr(batch_runner, "start_execution", lambda **kwargs: SimpleNamespace())
-    monkeypatch.setattr(batch_runner, "wait_for_execution", lambda execution: 0)
+    monkeypatch.setattr(batch_runner, "wait_for_execution", lambda execution: calls.append("wait") or 0)
     monkeypatch.setattr(batch_runner, "close_execution_log", lambda execution: None)
     monkeypatch.setattr(batch_runner.BatchRunManager, "_write_device_summary", lambda *args, **kwargs: None)
 
@@ -299,7 +322,95 @@ def test_batch_run_manager_restores_sleep_prevention_after_device_run(tmp_path, 
         status = manager.get_status()
 
     assert status["state"] == "finished"
-    assert calls == ["enable", "disable"]
+    assert calls == [
+        "enable",
+        ("enable_device", "SERIAL"),
+        "wait",
+        ("restore_device", stay_awake_state),
+        "disable",
+    ]
+    log_text = (
+        tmp_path
+        / "qa_frontend_runs"
+        / str(status["batch_id"])
+        / "device_Model_SERIAL"
+        / "runner.log"
+    ).read_text(encoding="utf-8")
+    assert "[QA_FRONTEND][keep_awake] original=3 serial='SERIAL'" in log_text
+    assert "[QA_FRONTEND][keep_awake] applied=15" in log_text
+    assert "[QA_FRONTEND][keep_awake] restored=3" in log_text
+
+
+def test_batch_run_restores_device_keep_awake_after_setup_failure(tmp_path, monkeypatch):
+    calls = []
+    stay_awake_state = {
+        "ok": True,
+        "applied": True,
+        "serial": "SERIAL",
+        "original_setting": "7",
+        "applied_setting": "15",
+    }
+
+    monkeypatch.setattr(batch_runner, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(batch_runner, "RUN_LOG_DIR", tmp_path / "qa_frontend_runs")
+    monkeypatch.setattr(batch_runner, "RUNTIME_CONFIG_PATH", tmp_path / "runtime_config.json")
+    monkeypatch.setattr(batch_runner, "enable_sleep_prevention", lambda: calls.append("enable_host"))
+    monkeypatch.setattr(batch_runner, "disable_sleep_prevention", lambda: calls.append("disable_host"))
+    monkeypatch.setattr(
+        batch_runner,
+        "enable_device_stay_awake",
+        lambda *, serial: calls.append(("enable_device", serial)) or stay_awake_state,
+    )
+    monkeypatch.setattr(
+        batch_runner,
+        "restore_device_stay_awake",
+        lambda state: calls.append(("restore_device", state)) or {
+            "ok": True,
+            "restored": True,
+            "original_setting": "7",
+            "reason": "restored",
+        },
+    )
+    monkeypatch.setattr(batch_runner, "start_crash_logcat_capture", lambda **kwargs: None)
+    monkeypatch.setattr(batch_runner, "stop_crash_logcat_capture", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        batch_runner,
+        "write_selected_runtime_config",
+        lambda **kwargs: {
+            "path": tmp_path / "runtime_config.json",
+            "enabled_ids": ["global_nav_main"],
+            "max_steps_policy": "smoke_override",
+            "scenario_steps": [],
+        },
+    )
+    monkeypatch.setattr(
+        batch_runner,
+        "prepare_runtime",
+        lambda spec, language_fn, preflight_fn: (_ for _ in ()).throw(RuntimeError("setup failed")),
+    )
+    monkeypatch.setattr(batch_runner.BatchRunManager, "_write_device_summary", lambda *args, **kwargs: None)
+
+    manager = batch_runner.BatchRunManager()
+    manager.start_batch(
+        devices=[{"serial": "SERIAL", "model": "Model"}],
+        mode="full",
+        scenario_ids=["global_nav_main"],
+    )
+
+    deadline = time.time() + 1.0
+    status = manager.get_status()
+    while status["state"] == "running" and time.time() < deadline:
+        time.sleep(0.01)
+        status = manager.get_status()
+
+    assert status["state"] == "finished"
+    assert status["devices"][0]["state"] == "failed"
+    assert calls == [
+        "enable_host",
+        ("enable_device", "SERIAL"),
+        ("restore_device", stay_awake_state),
+        "disable_host",
+    ]
 
 
 class _StopFakeProcess:
@@ -401,12 +512,34 @@ def test_batch_stop_when_not_running_is_noop():
 def test_batch_stop_stops_current_process_and_does_not_start_next_device(tmp_path, monkeypatch):
     calls = []
     process = _BlockingFakeProcess()
+    stay_awake_state = {
+        "ok": True,
+        "applied": True,
+        "serial": "SERIAL1",
+        "original_setting": "0",
+        "applied_setting": "15",
+    }
 
     monkeypatch.setattr(batch_runner, "ROOT_DIR", tmp_path)
     monkeypatch.setattr(batch_runner, "RUN_LOG_DIR", tmp_path / "qa_frontend_runs")
     monkeypatch.setattr(batch_runner, "RUNTIME_CONFIG_PATH", tmp_path / "runtime_config.json")
     monkeypatch.setattr(batch_runner, "enable_sleep_prevention", lambda: calls.append("enable"))
     monkeypatch.setattr(batch_runner, "disable_sleep_prevention", lambda: calls.append("disable"))
+    monkeypatch.setattr(
+        batch_runner,
+        "enable_device_stay_awake",
+        lambda *, serial: calls.append(("enable_device", serial)) or stay_awake_state,
+    )
+    monkeypatch.setattr(
+        batch_runner,
+        "restore_device_stay_awake",
+        lambda state: calls.append(("restore_device", state)) or {
+            "ok": True,
+            "restored": True,
+            "original_setting": "0",
+            "reason": "restored",
+        },
+    )
     monkeypatch.setattr(batch_runner, "start_crash_logcat_capture", lambda **kwargs: None)
     monkeypatch.setattr(batch_runner, "stop_crash_logcat_capture", lambda *args, **kwargs: None)
     monkeypatch.setattr(
@@ -462,4 +595,9 @@ def test_batch_stop_stops_current_process_and_does_not_start_next_device(tmp_pat
     assert process.terminated is True
     assert started == ["SERIAL1"]
     assert manager.get_status()["state"] == "stopped"
-    assert calls == ["enable", "disable"]
+    assert calls == [
+        "enable",
+        ("enable_device", "SERIAL1"),
+        ("restore_device", stay_awake_state),
+        "disable",
+    ]

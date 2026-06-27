@@ -20,7 +20,12 @@ from .preflight import (
 from .subprocess_executor import RunExecution, close_execution_log, start_execution, wait_for_execution
 from .runtime_setup import prepare_runtime
 from .crash_capture import start_crash_logcat_capture, stop_crash_logcat_capture
-from .sleep_prevention import disable_sleep_prevention, enable_sleep_prevention
+from .sleep_prevention import (
+    disable_sleep_prevention,
+    enable_device_stay_awake,
+    enable_sleep_prevention,
+    restore_device_stay_awake,
+)
 
 def _json_safe(value):
     if isinstance(value, Path):
@@ -456,12 +461,14 @@ class BatchRunManager:
 
     def stop_batch(self) -> dict:
         execution = None
+        worker_thread = None
         with self._lock:
             if self._state != "running":
                 return self.get_status_locked()
             self._stop_requested = True
             self._state = "stopped"
             execution = self._current_execution
+            worker_thread = self._worker_thread
             self._write_summary_locked()
 
         process = execution.process if execution is not None else None
@@ -472,6 +479,8 @@ class BatchRunManager:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=5.0)
+        if worker_thread is not None and worker_thread is not threading.current_thread():
+            worker_thread.join(timeout=15.0)
         return self.get_status()
 
     def get_status(self) -> dict:
@@ -842,14 +851,45 @@ class BatchRunManager:
             log_file = log_path.open("w", encoding="utf-8", errors="replace")
             crash_capture = None
             sleep_prevention_enabled = False
+            device_stay_awake_state = None
+            execution = None
 
             def crash_log(line: str) -> None:
                 log_file.write(f"{line}\n")
                 log_file.flush()
+
+            def restore_keep_awake() -> None:
+                nonlocal device_stay_awake_state
+                state = device_stay_awake_state
+                device_stay_awake_state = None
+                if state is None:
+                    return
+                result = restore_device_stay_awake(state)
+                crash_log(
+                    "[QA_FRONTEND][keep_awake] "
+                    f"restored={result.get('original_setting')} "
+                    f"ok='{str(bool(result.get('ok'))).lower()}' "
+                    f"restored_ok='{str(bool(result.get('restored'))).lower()}' "
+                    f"serial='{dev_serial}' reason='{result.get('reason', '')}' "
+                    f"error='{result.get('error', '')}'"
+                )
             
             try:
                 enable_sleep_prevention()
                 sleep_prevention_enabled = True
+                device_stay_awake_state = enable_device_stay_awake(serial=dev_serial)
+                crash_log(
+                    "[QA_FRONTEND][keep_awake] "
+                    f"original={device_stay_awake_state.get('original_setting')} "
+                    f"serial='{dev_serial}'"
+                )
+                crash_log(
+                    "[QA_FRONTEND][keep_awake] "
+                    f"applied={device_stay_awake_state.get('applied_setting')} "
+                    f"ok='{str(bool(device_stay_awake_state.get('ok'))).lower()}' "
+                    f"serial='{dev_serial}' command='{device_stay_awake_state.get('command', '')}' "
+                    f"error='{device_stay_awake_state.get('error', '')}'"
+                )
                 crash_capture = start_crash_logcat_capture(
                     serial=dev_serial,
                     output_dir=Path(dev_output_dir),
@@ -899,6 +939,7 @@ class BatchRunManager:
                     self._write_device_summary(device_info, dev_output_dir)
                     stop_crash_logcat_capture(crash_capture, log_writer=crash_log)
                     crash_capture = None
+                    restore_keep_awake()
                     disable_sleep_prevention()
                     sleep_prevention_enabled = False
                     log_file.close()
@@ -918,6 +959,7 @@ class BatchRunManager:
                 log_file.write(f"\n[BATCH ERROR] {e}\n")
                 stop_crash_logcat_capture(crash_capture, log_writer=crash_log)
                 crash_capture = None
+                restore_keep_awake()
                 disable_sleep_prevention()
                 sleep_prevention_enabled = False
                 log_file.close()
@@ -970,6 +1012,7 @@ class BatchRunManager:
                         self._write_summary_locked()
                     device_info["return_code"] = returncode
                 self._write_device_summary(device_info, dev_output_dir)
+                restore_keep_awake()
                 close_execution_log(execution)
                 disable_sleep_prevention()
                 sleep_prevention_enabled = False
@@ -980,7 +1023,7 @@ class BatchRunManager:
                 stop_crash_logcat_capture(crash_capture, log_writer=crash_log)
                 crash_capture = None
                 with self._lock:
-                    if "execution" in locals() and self._current_execution is execution:
+                    if execution is not None and self._current_execution is execution:
                         self._current_execution = None
                     if self._stop_requested:
                         self._mark_device_stopped_locked(device_info)
@@ -996,9 +1039,10 @@ class BatchRunManager:
                     break
             finally:
                 with self._lock:
-                    if "execution" in locals() and self._current_execution is execution:
+                    if execution is not None and self._current_execution is execution:
                         self._current_execution = None
                 stop_crash_logcat_capture(crash_capture, log_writer=crash_log)
+                restore_keep_awake()
                 if sleep_prevention_enabled:
                     disable_sleep_prevention()
                 if not log_file.closed:

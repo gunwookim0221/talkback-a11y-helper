@@ -37,9 +37,9 @@ def test_sleep_prevention_is_noop_off_windows(monkeypatch):
     assert calls == []
 
 
-def test_device_stay_awake_applies_svc_command_and_restores_original_setting():
+def test_device_stay_awake_applies_setting_15_and_restores_original_setting():
     calls = []
-    settings = iter(["3", "7", "7"])
+    settings = iter(["3", "15", "15"])
 
     def adb_runner(args, timeout):
         calls.append(args)
@@ -52,7 +52,14 @@ def test_device_stay_awake_applies_svc_command_and_restores_original_setting():
 
     assert state["ok"] is True
     assert state["original_setting"] == "3"
-    assert ["shell", "svc", "power", "stayon", "true"] in calls
+    assert [
+        "shell",
+        "settings",
+        "put",
+        "global",
+        "stay_on_while_plugged_in",
+        "15",
+    ] in calls
     assert calls[-1] == [
         "shell",
         "settings",
@@ -65,7 +72,7 @@ def test_device_stay_awake_applies_svc_command_and_restores_original_setting():
 
 
 def test_device_stay_awake_does_not_overwrite_setting_changed_during_run():
-    settings = iter(["0", "7", "1"])
+    settings = iter(["0", "15", "1"])
     calls = []
 
     def adb_runner(args, timeout):
@@ -78,4 +85,37 @@ def test_device_stay_awake_does_not_overwrite_setting_changed_during_run():
     restored = sleep_prevention.restore_device_stay_awake(state, adb_runner)
 
     assert restored == {"ok": True, "restored": False, "reason": "setting_changed_externally"}
-    assert not any(args[:4] == ["shell", "settings", "put", "global"] for args in calls)
+    assert not any(
+        args[:5] == ["shell", "settings", "put", "global", "stay_on_while_plugged_in"]
+        and args[-1] == "0"
+        for args in calls
+    )
+
+
+def test_device_stay_awake_targets_serial_and_restores_nonzero_value():
+    calls = []
+    settings = iter(["7", "15", "15"])
+
+    def adb_runner(args, timeout):
+        calls.append(args)
+        command = args[2:] if args[:2] == ["-s", "SERIAL"] else args
+        if command[:5] == ["shell", "settings", "get", "global", "stay_on_while_plugged_in"]:
+            return {"ok": True, "stdout": next(settings)}
+        return {"ok": True, "stdout": ""}
+
+    state = sleep_prevention.enable_device_stay_awake(adb_runner, serial="SERIAL")
+    restored = sleep_prevention.restore_device_stay_awake(state, adb_runner)
+
+    assert state["serial"] == "SERIAL"
+    assert restored["original_setting"] == "7"
+    assert all(args[:2] == ["-s", "SERIAL"] for args in calls)
+    assert calls[-1] == [
+        "-s",
+        "SERIAL",
+        "shell",
+        "settings",
+        "put",
+        "global",
+        "stay_on_while_plugged_in",
+        "7",
+    ]

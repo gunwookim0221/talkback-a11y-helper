@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -40,6 +42,30 @@ class _FakeProcess:
         return None
 
     def wait(self, timeout=None):
+        return 0
+
+
+class _BlockingProcess:
+    stdout = _FakeStdout()
+    returncode = 0
+
+    def __init__(self):
+        self._done = threading.Event()
+        self.terminated = False
+
+    def poll(self):
+        return 0 if self._done.is_set() else None
+
+    def terminate(self):
+        self.terminated = True
+        self._done.set()
+
+    def kill(self):
+        self._done.set()
+
+    def wait(self, timeout=None):
+        if not self._done.wait(timeout):
+            raise TimeoutError("process still running")
         return 0
 
 
@@ -342,7 +368,12 @@ def test_run_manager_invokes_device_keep_awake_for_run_lifecycle(tmp_path, monke
     )
     monkeypatch.setattr(
         "qa_frontend.backend.runner.restore_device_stay_awake",
-        lambda actual: calls.append(("restore_device", actual)) or {"ok": True, "restored": True, "reason": "restored"},
+        lambda actual: calls.append(("restore_device", actual)) or {
+            "ok": True,
+            "restored": True,
+            "original_setting": "0",
+            "reason": "restored",
+        },
     )
     monkeypatch.setattr("qa_frontend.backend.runner.enable_sleep_prevention", lambda: calls.append("enable_host"))
     monkeypatch.setattr("qa_frontend.backend.runner.disable_sleep_prevention", lambda: calls.append("disable_host"))
@@ -354,8 +385,67 @@ def test_run_manager_invokes_device_keep_awake_for_run_lifecycle(tmp_path, monke
     assert final_state["state"] == "finished"
     assert calls == ["enable_host", "enable_device", ("restore_device", state), "disable_host"]
     log_text = Path(final_state["log_path"]).read_text(encoding="utf-8")
+    assert "[QA_FRONTEND][keep_awake] original=0" in log_text
     assert "command='adb shell svc power stayon true'" in log_text
-    assert "restore_ok='true'" in log_text
+    assert "[QA_FRONTEND][keep_awake] restored=0 ok='true'" in log_text
+
+
+def test_run_manager_stop_restores_device_keep_awake_before_return(tmp_path, monkeypatch):
+    source_path = tmp_path / "runtime_config.json"
+    source_path.write_text(
+        json.dumps({"scenarios": {"global_nav_main": {"enabled": False, "max_steps": 10}}}),
+        encoding="utf-8",
+    )
+    passed = {
+        "ok": True,
+        "state": "passed",
+        "reason": "ok",
+        "launch_mode": "warm",
+        "adb_state": "ok",
+        "helper_state": "ok",
+        "talkback_state": "enabled",
+        "foreground_package": "com.samsung.android.oneconnect",
+    }
+    process = _BlockingProcess()
+    execution = SimpleNamespace(process=process)
+    stay_awake_state = {"ok": True, "applied": True, "original_setting": "0", "applied_setting": "15"}
+    calls = []
+
+    monkeypatch.setattr("qa_frontend.backend.runner.RUNTIME_CONFIG_PATH", source_path)
+    monkeypatch.setattr("qa_frontend.backend.runner.RUN_LOG_DIR", tmp_path / "runs")
+    monkeypatch.setattr("qa_frontend.backend.runner.apply_language_mode", lambda mode: _language_ok(mode))
+    monkeypatch.setattr("qa_frontend.backend.runner.run_runtime_preflight", lambda mode: passed)
+    monkeypatch.setattr("qa_frontend.backend.runner.start_execution", lambda **kwargs: execution)
+    monkeypatch.setattr("qa_frontend.backend.runner.wait_for_execution", lambda actual: actual.process.wait())
+    monkeypatch.setattr("qa_frontend.backend.runner.close_execution_log", lambda actual: None)
+    monkeypatch.setattr(
+        "qa_frontend.backend.runner.enable_device_stay_awake",
+        lambda: calls.append("enable_device") or stay_awake_state,
+    )
+    monkeypatch.setattr(
+        "qa_frontend.backend.runner.restore_device_stay_awake",
+        lambda state: calls.append(("restore_device", state)) or {
+            "ok": True,
+            "restored": True,
+            "original_setting": "0",
+            "reason": "restored",
+        },
+    )
+    monkeypatch.setattr("qa_frontend.backend.runner.enable_sleep_prevention", lambda: calls.append("enable_host"))
+    monkeypatch.setattr("qa_frontend.backend.runner.disable_sleep_prevention", lambda: calls.append("disable_host"))
+
+    manager = RunManager()
+    manager.start_run(mode="full", scenario_ids=["global_nav_main"], launch_mode="warm")
+    status = manager.stop_run()
+
+    assert status["state"] == "stopped"
+    assert process.terminated is True
+    assert calls == [
+        "enable_host",
+        "enable_device",
+        ("restore_device", stay_awake_state),
+        "disable_host",
+    ]
 
 
 def test_run_manager_restores_sleep_prevention_when_waiter_thread_start_fails(tmp_path, monkeypatch):

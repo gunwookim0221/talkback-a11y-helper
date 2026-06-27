@@ -35,6 +35,7 @@ class RunManager:
         self._lock = threading.Lock()
         self._process: subprocess.Popen[str] | None = None
         self._execution: RunExecution | None = None
+        self._waiter_thread: threading.Thread | None = None
         self._state: RunState = "idle"
         self._run_id: str | None = None
         self._mode: str | None = None
@@ -116,10 +117,15 @@ class RunManager:
                 self._device_stay_awake_state = enable_device_stay_awake()
                 log_file.write(
                     "[QA_FRONTEND][keep_awake] "
-                    f"command='{self._device_stay_awake_state.get('command', '')}' "
+                    f"original={self._device_stay_awake_state.get('original_setting')} "
+                    "serial='default'\n"
+                )
+                log_file.write(
+                    "[QA_FRONTEND][keep_awake] "
+                    f"applied={self._device_stay_awake_state.get('applied_setting')} "
                     f"ok='{str(bool(self._device_stay_awake_state.get('ok'))).lower()}' "
-                    f"original_setting='{self._device_stay_awake_state.get('original_setting')}' "
-                    f"applied_setting='{self._device_stay_awake_state.get('applied_setting')}' "
+                    f"command='{self._device_stay_awake_state.get('command', '')}' "
+                    "serial='default' "
                     f"error='{self._device_stay_awake_state.get('error', '')}'\n"
                 )
 
@@ -235,6 +241,7 @@ class RunManager:
 
             try:
                 waiter = threading.Thread(target=self._wait_for_process, args=(execution,), daemon=True)
+                self._waiter_thread = waiter
                 waiter.start()
             except Exception:
                 close_execution_log(execution)
@@ -244,6 +251,7 @@ class RunManager:
                 self._error = "failed to start run waiter thread"
                 self._process = None
                 self._execution = None
+                self._waiter_thread = None
                 self._finished_at = datetime.now().isoformat(timespec="seconds")
                 raise
 
@@ -253,6 +261,7 @@ class RunManager:
         with self._lock:
             self._refresh_locked()
             process = self._process
+            waiter = self._waiter_thread
             if not process or process.poll() is not None:
                 return self._status_locked()
             self._state = "stopped"
@@ -264,6 +273,8 @@ class RunManager:
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=5.0)
+        if waiter is not None and waiter is not threading.current_thread():
+            waiter.join(timeout=10.0)
         return self.get_status()
 
     def get_log_path(self) -> Path | None:
@@ -352,28 +363,40 @@ class RunManager:
         process = execution.process
         try:
             returncode = wait_for_execution(execution)
-            with self._lock:
-                if process is not self._process:
-                    close_execution_log(execution)
-                    return
-                self._returncode = returncode
-                self._finished_at = datetime.now().isoformat(timespec="seconds")
-                if self._state == "stopped":
-                    self._append_log_line("[QA_FRONTEND][run] final_state='stopped' returncode=0")
-                    close_execution_log(execution)
-                    self._write_summary_safe()
-                    return
-                self._state = "finished" if returncode == 0 else "error"
-                if returncode != 0:
-                    self._error = f"script_test.py exited with code {returncode}"
-                self._append_log_line(
-                    f"[QA_FRONTEND][run] final_state='{self._state}' returncode={returncode}"
-                )
-                close_execution_log(execution)
-                self._write_summary_safe()
+        except Exception as exc:
+            returncode = None
+            wait_error = str(exc)
+        else:
+            wait_error = None
         finally:
             self._restore_device_stay_awake()
             disable_sleep_prevention()
+
+        with self._lock:
+            if process is not self._process:
+                close_execution_log(execution)
+                return
+            self._returncode = returncode
+            self._finished_at = datetime.now().isoformat(timespec="seconds")
+            if self._state == "stopped":
+                self._append_log_line("[QA_FRONTEND][run] final_state='stopped' returncode=0")
+                close_execution_log(execution)
+                self._write_summary_safe()
+                self._waiter_thread = None
+                return
+            if wait_error is not None:
+                self._state = "error"
+                self._error = f"failed while waiting for script_test.py: {wait_error}"
+            else:
+                self._state = "finished" if returncode == 0 else "error"
+                if returncode != 0:
+                    self._error = f"script_test.py exited with code {returncode}"
+            self._append_log_line(
+                f"[QA_FRONTEND][run] final_state='{self._state}' returncode={returncode}"
+            )
+            close_execution_log(execution)
+            self._write_summary_safe()
+            self._waiter_thread = None
 
     def _refresh_locked(self) -> None:
         process = self._process
@@ -399,8 +422,10 @@ class RunManager:
         result = restore_device_stay_awake(state)
         self._append_log_line(
             "[QA_FRONTEND][keep_awake] "
-            f"restore_ok='{str(bool(result.get('ok'))).lower()}' "
-            f"restored='{str(bool(result.get('restored'))).lower()}' "
+            f"restored={result.get('original_setting')} "
+            f"ok='{str(bool(result.get('ok'))).lower()}' "
+            f"restored_ok='{str(bool(result.get('restored'))).lower()}' "
+            "serial='default' "
             f"reason='{result.get('reason', '')}' error='{result.get('error', '')}'"
         )
 
