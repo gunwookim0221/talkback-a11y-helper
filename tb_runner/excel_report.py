@@ -9,6 +9,7 @@ import ast
 import pandas as pd
 
 from tb_runner.diagnostics import is_placeholder_row, normalize_move_result
+from tb_runner.coverage_probe_promotion import evaluate_probe_promotion
 from tb_runner.image_utils import create_excel_thumbnail, insert_images_to_excel
 from tb_runner.logging_utils import get_recent_logs, log
 from tb_runner.utils import to_json_text
@@ -93,6 +94,8 @@ RESULT_SHEET_COLUMNS = [
     "row_source",
     "probe_validation_status",
     "probe_success_source",
+    "promotion_status",
+    "promotion_reason",
     "probe_validation_confidence",
     "probe_target_strategy",
     "probe_intent",
@@ -1810,6 +1813,8 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     _pick_col("row_source", ["row_source"], default="")
     _pick_col("probe_validation_status", ["probe_validation_status"], default="")
     _pick_col("probe_success_source", ["probe_success_source"], default="")
+    _pick_col("promotion_status", ["promotion_status"], default="")
+    _pick_col("promotion_reason", ["promotion_reason"], default="")
     _pick_col("probe_validation_confidence", ["probe_validation_confidence"], default="")
     _pick_col("probe_target_strategy", ["probe_target_strategy"], default="")
     _pick_col("probe_intent", ["probe_intent"], default="")
@@ -1852,6 +1857,8 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
         "row_source",
         "probe_validation_status",
         "probe_success_source",
+        "promotion_status",
+        "promotion_reason",
         "probe_validation_confidence",
         "probe_target_strategy",
         "probe_intent",
@@ -2469,6 +2476,7 @@ def build_probe_shadow_rows(validation_payload: dict[str, object]) -> list[dict[
         label = str(item.get("label", "") or "").strip()
         captured_speech = str(item.get("captured_speech", "") or "").strip()
         captured_visible = str(item.get("captured_visible_text", "") or "").strip()
+        promotion = evaluate_probe_promotion(item)
         rows.append(
             {
                 "plugin_group": metadata.get("group", "Coverage Probe"),
@@ -2484,6 +2492,8 @@ def build_probe_shadow_rows(validation_payload: dict[str, object]) -> list[dict[
                 "row_source": PROBE_SHADOW_ROW_SOURCE,
                 "probe_validation_status": status,
                 "probe_success_source": str(item.get("probe_success_source", "") or ""),
+                "promotion_status": str(item.get("promotion_status", "") or promotion["promotion_status"]),
+                "promotion_reason": str(item.get("promotion_reason", "") or promotion["promotion_reason"]),
                 "probe_validation_confidence": str(item.get("validation_confidence", "") or ""),
                 "probe_target_strategy": str(item.get("probe_target_strategy", "") or ""),
                 "probe_intent": str(item.get("probe_intent", "") or ""),

@@ -6,6 +6,8 @@ import string
 from pathlib import Path
 from typing import Any
 
+from tb_runner.coverage_probe_promotion import PROMOTABLE, apply_probe_promotion
+
 
 VALIDATION_SOURCE = "v8_coverage_probe_validation"
 WEAK_TOKENS = {
@@ -116,6 +118,11 @@ def validate_probe_result(result: dict[str, Any]) -> dict[str, Any]:
         "probe_target_view_id": str(result.get("probe_target_view_id", "") or ""),
         "probe_success": bool(result.get("probe_success")),
         "probe_success_source": str(result.get("probe_success_source", "") or ""),
+        "probe_skipped": bool(result.get("probe_skipped")),
+        "skip_reason": str(result.get("skip_reason", "") or ""),
+        "failure_reason": str(result.get("failure_reason", "") or ""),
+        "foreground_package": str(result.get("foreground_package", "") or ""),
+        "screen_state": str(result.get("screen_state", "") or ""),
         "captured_speech": captured_speech,
         "captured_visible_text": captured_visible,
         "validation_status": "",
@@ -245,7 +252,11 @@ def validate_probe_result(result: dict[str, Any]) -> dict[str, Any]:
 
 def build_validation_payload(probe_results_payload: dict[str, Any], *, probe_results_path: str, output_path: str) -> dict[str, Any]:
     results = probe_results_payload.get("results", []) if isinstance(probe_results_payload, dict) else []
-    validations = [validate_probe_result(result) for result in results if isinstance(result, dict)]
+    validations = [
+        apply_probe_promotion(validate_probe_result(result))
+        for result in results
+        if isinstance(result, dict)
+    ]
     summary = {
         "result_count": len(validations),
         "validated_count": sum(1 for item in validations if item["validation_status"] not in {"NOT_VALIDATED"}),
@@ -254,6 +265,8 @@ def build_validation_payload(probe_results_payload: dict[str, Any], *, probe_res
         "mismatch_count": sum(1 for item in validations if item["validation_status"] == "MISMATCH"),
         "no_speech_or_text_count": sum(1 for item in validations if item["validation_status"] == "NO_SPEECH_OR_TEXT"),
         "not_validated_count": sum(1 for item in validations if item["validation_status"] == "NOT_VALIDATED"),
+        "promotable_count": sum(1 for item in validations if item["promotion_status"] == PROMOTABLE),
+        "not_promotable_count": sum(1 for item in validations if item["promotion_status"] != PROMOTABLE),
         "scenario_filtered_count": int(probe_results_payload.get("summary", {}).get("scenario_filtered_count", 0) or 0),
         "screen_skipped_count": int(probe_results_payload.get("summary", {}).get("screen_skipped_count", 0) or 0),
         "validation_false_positive_prevented_count": sum(
@@ -308,6 +321,8 @@ def _validation_aggregate_entry(payload: dict[str, Any], current_scenario_id: st
         "partial_match_count": _int_summary(summary, "partial_match_count"),
         "mismatch_count": _int_summary(summary, "mismatch_count"),
         "not_validated_count": _int_summary(summary, "not_validated_count"),
+        "promotable_count": _int_summary(summary, "promotable_count"),
+        "not_promotable_count": _int_summary(summary, "not_promotable_count"),
         "screen_skipped_count": _int_summary(summary, "screen_skipped_count"),
         "scenario_filtered_count": _int_summary(summary, "scenario_filtered_count"),
         "validation_false_positive_prevented_count": _int_summary(
@@ -338,6 +353,8 @@ def _build_validation_aggregate(output_path: str, scenarios: list[dict[str, Any]
         "total_partial_match_count": sum(_int_summary(item, "partial_match_count") for item in scenarios),
         "total_mismatch_count": sum(_int_summary(item, "mismatch_count") for item in scenarios),
         "total_not_validated_count": sum(_int_summary(item, "not_validated_count") for item in scenarios),
+        "promotable_count": sum(_int_summary(item, "promotable_count") for item in scenarios),
+        "not_promotable_count": sum(_int_summary(item, "not_promotable_count") for item in scenarios),
         "total_screen_skipped_count": sum(_int_summary(item, "screen_skipped_count") for item in scenarios),
         "total_scenario_filtered_count": sum(_int_summary(item, "scenario_filtered_count") for item in scenarios),
         "total_validation_false_positive_prevented_count": sum(

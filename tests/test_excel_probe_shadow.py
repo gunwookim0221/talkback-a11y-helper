@@ -69,6 +69,8 @@ def test_match_validation_creates_one_shadow_row():
     assert rows[0]["row_source"] == PROBE_SHADOW_ROW_SOURCE
     assert rows[0]["final_result"] == "SHADOW"
     assert rows[0]["probe_validation_status"] == "MATCH"
+    assert rows[0]["promotion_status"] == "PROMOTABLE"
+    assert rows[0]["promotion_reason"] == "exact_probe_match"
 
 
 def test_partial_match_validation_creates_one_shadow_row():
@@ -91,6 +93,8 @@ def test_partial_match_validation_creates_one_shadow_row():
     assert rows[0]["probe_validation_status"] == "PARTIAL_MATCH"
     assert rows[0]["probe_validation_confidence"] == "MEDIUM"
     assert rows[0]["probe_success_source"] == "LATE_FOCUS_VERIFIED"
+    assert rows[0]["promotion_status"] == "NOT_PROMOTABLE"
+    assert rows[0]["promotion_reason"] == "partial_validation"
 
 
 def test_mismatch_validation_does_not_create_shadow_row():
@@ -173,9 +177,13 @@ def test_generated_xlsx_contains_probe_shadow_columns_and_appended_row(tmp_path)
     assert "row_source" in headers
     assert "probe_validation_status" in headers
     assert "probe_success_source" in headers
+    assert "promotion_status" in headers
+    assert "promotion_reason" in headers
 
     row_source_col = headers.index("row_source") + 1
     status_col = headers.index("probe_validation_status") + 1
+    promotion_status_col = headers.index("promotion_status") + 1
+    promotion_reason_col = headers.index("promotion_reason") + 1
     final_col = headers.index("final_result") + 1
     visible_col = headers.index("visible_label") + 1
 
@@ -183,9 +191,13 @@ def test_generated_xlsx_contains_probe_shadow_columns_and_appended_row(tmp_path)
     assert worksheet.cell(row=3, column=row_source_col).value == PROBE_SHADOW_ROW_SOURCE
     assert worksheet.cell(row=3, column=visible_col).value == "100%"
     assert worksheet.cell(row=3, column=status_col).value == "MATCH"
+    assert worksheet.cell(row=3, column=promotion_status_col).value == "PROMOTABLE"
+    assert worksheet.cell(row=3, column=promotion_reason_col).value == "exact_probe_match"
     assert worksheet.cell(row=4, column=row_source_col).value == PROBE_SHADOW_ROW_SOURCE
     assert worksheet.cell(row=4, column=visible_col).value == "Motion detected"
     assert worksheet.cell(row=4, column=status_col).value == "PARTIAL_MATCH"
+    assert worksheet.cell(row=4, column=promotion_status_col).value == "NOT_PROMOTABLE"
+    assert worksheet.cell(row=4, column=promotion_reason_col).value == "partial_validation"
 
 
 def test_generated_xlsx_prefers_aggregate_probe_validation(tmp_path):
