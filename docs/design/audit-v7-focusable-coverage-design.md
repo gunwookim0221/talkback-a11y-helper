@@ -1,738 +1,432 @@
 # Audit V7 Focusable Coverage Design
 
-## 1. Problem Statement
+## 1. Status
 
-Audit V6 can explain row quality, semantic value coverage, and shadow verdicts,
-but it still assumes that the collected result rows are a sufficiently complete
-view of the TalkBack traversal.
+이 문서는 V8 완료 기준으로 갱신된 V7/V8 coverage-driven audit 설계 문서다.
 
-The Motion Sensor plugin exposed a new class of gap:
+초기 V7 문서가 다루던 범위는:
 
-- TalkBack appears to read focusable elements on screen.
-- Some of those elements are not present as persisted result rows.
-- Therefore row-level quality can look acceptable while actual TalkBack
-  focusable coverage is incomplete.
+- focusable discovery
+- focusable coverage
+- taxonomy
+- reporting-only shadow visibility
 
-Observed Motion Sensor examples include:
+현재 구현은 그 위에 다음 단계를 추가로 완성했다.
 
-- `Motion detected`
-- `100%`
-- `>`
-- `Graph button`, collapsed button
+- coverage probe plan
+- runtime probe execution
+- late focus verification
+- probe validation
+- shadow reporting
+- promotion policy
+- production promotion
+- conservative deduplication
+- aggregate artifacts
+- QA Frontend coverage probe reporting
 
-Comparable misses can happen for:
+즉, V7의 "focusable coverage 설명 계층"은 현재 V8의 end-to-end pipeline으로 확장되었다.
 
-- battery values such as `100%`
-- chevron or navigation affordances such as `>`
-- collapsed / expanded buttons
-- `More options`
-- state values
-- other focusable nodes that TalkBack can land on but reporting does not retain
+## 2. Final Architecture
 
-The core V7 question is:
-
-- "Which TalkBack focusable nodes existed, and which of them were represented by
-  persisted rows?"
-
-This is intentionally different from V6:
-
-- V6 asks whether a known semantic value was spoken.
-- V7 asks whether each expected focusable node was discovered, covered, or
-  missing from the result artifact.
-
-## 2. Existing System Analysis
-
-### 2.1 Traversal Engine
-
-The traversal engine drives movement through the UI, usually with TalkBack
-navigation primitives such as next / previous focus movement, local tab
-activation, and stop conditions.
-
-It can visit a real TalkBack focusable node without necessarily producing a
-stable persisted row if:
-
-- the focus payload is used only as movement evidence;
-- the node is treated as representative context instead of the actual row;
-- the row is suppressed as duplicate / consumed / terminal noise;
-- the node appears in a helper dump but is never selected as a candidate;
-- the node is visible only during a transient state;
-- the node is outside current row-level quality issue filters.
-
-### 2.2 Collection Flow
-
-Collection flow currently builds rows from a mixture of:
-
-- actual focus payloads;
-- dump-derived candidates;
-- inventory-only helper dump snapshots;
-- selected / representative candidates;
-- local-tab lifecycle signals;
-- bottom-strip and terminal movement state;
-- result persistence suppression.
-
-This means "TalkBack focused it" and "XLSX result has a row for it" are not the
-same invariant.
-
-V7 should make that invariant explicit by introducing a focusable coverage audit
-layer that compares expected focusable nodes with persisted row evidence.
-
-The initial Phase 1 implementation extracted inventory from focus payloads and
-from `dump_tree_nodes` already attached to rows. Motion Sensor live validation
-showed that this is insufficient: successful focus payload paths can mark the
-payload as sufficient and skip dump fallback, so `dump_tree_nodes` remains empty
-even though readable / actionable child nodes are present on screen.
-
-V7 therefore also needs an inventory-only helper dump snapshot. The snapshot is
-used only to populate focusable inventory artifacts. It must not affect
-traversal movement, candidate selection, row persistence, mismatch calculation,
-semantic value quality, or shadow verdicts.
-
-### 2.3 Actual Focus Row
-
-Actual focus rows are strongest evidence that TalkBack landed on a node.
-However, actual focus can still fail to become an auditable row when:
-
-- a fallback representative row overwrites the useful node identity;
-- a later persistence phase suppresses the row;
-- only a composite label is saved, hiding child focusables;
-- the focus payload omits child / state metadata;
-- an artifact row lacks enough bounds / id metadata to match back to the node.
-
-### 2.4 Representative Row
-
-Representative rows were introduced to reduce false positives and preserve
-context. They are useful for card-style UI, but they can hide a focusable
-coverage gap.
-
-Example risk:
+현재 파이프라인은 아래 순서로 동작한다.
 
 ```text
-focusable node: Graph button
-representative row: Motion detected
+Traversal
+↓
+Focusable Discovery
+↓
+Focusable Coverage
+↓
+Coverage Probe Plan
+↓
+Runtime Probe
+↓
+Late Focus Verification
+↓
+Probe Validation
+↓
+Shadow Reporting
+↓
+Promotion Policy
+↓
+Production Promotion
+↓
+Deduplication
+↓
+Excel
+↓
+QA Frontend
 ```
 
-If only the representative row remains, V6 may see useful speech while V7 should
-still report that the `Graph button` focusable needs coverage evidence.
+핵심 원칙:
 
-### 2.5 Semantic Value Extraction
+- traversal row 생성 규칙은 유지한다.
+- `PASS` / `WARN` / `FAIL` 의미는 바꾸지 않는다.
+- probe 결과는 별도 artifact와 shadow row로 먼저 표현한다.
+- production row 승격은 conservative policy로만 수행한다.
 
-Semantic value extraction handles structures such as:
+## 3. Focusable Discovery And Coverage
 
-```text
-Card:
-  title = Status
-  value = Stopped
-  action = Start
-```
+### 3.1 Discovery 목적
 
-It does not prove that every focusable child was captured as a row. A value can
-be covered in speech while a separate focusable control inside the same card is
-missing from persistence.
+V7/V8의 첫 질문은 여전히 동일하다.
 
-V7 should reuse semantic metadata as evidence, but should not redefine semantic
-value quality.
+- 현재 화면에서 TalkBack이 방문 가능하거나 의미 있게 읽을 수 있는 focusable node는 무엇인가?
+- 그 node가 persisted row로 설명되었는가?
 
-### 2.6 Shadow Verdict
+### 3.2 Discovery 입력
 
-V6 shadow verdict combines row quality signals into a reporting-only verdict.
-It is row-centric:
+현재 inventory는 아래 evidence를 정규화해 구성한다.
 
-- `EMPTY_VISIBLE`
-- `REPRESENTATIVE_CONTEXT`
-- semantic value missing
-- movement warnings
-- local tab traversal failures
+- focus payload
+- helper snapshot
+- dump tree nodes
+- actionable descendant metadata
 
-V7 should add focusable coverage metrics as another shadow input, but Phase 1
-must remain reporting-only and must not change `PASS`, `WARN`, `FAIL`,
-`mismatch_type`, or V6 shadow verdict semantics.
+### 3.3 Coverage 출력
 
-## 3. Scope
+`*.focusable_coverage.json`의 canonical item은 최소한 아래 축을 가진다.
 
-### 3.1 Included
+- label
+- bounds
+- class / view id
+- taxonomy
+- coverage status
+- coverage reason
+- scenario / tab scope
 
-Audit V7 includes:
+Coverage status:
 
-- TalkBack focusable node discovery.
-- Missing focusable discovery.
-- Focusable coverage measurement.
-- Shadow-only focusable coverage reporting.
-- Per-scenario and per-plugin focusable coverage summaries.
-- Evidence links from expected focusable nodes to covering rows.
+- `COVERED`
+- `MISSED`
+- `UNKNOWN`
 
-### 3.2 Excluded
+현재 `UNKNOWN`은 "관련 row evidence는 있지만 coverage를 강하게 증명하지 못함"을 뜻한다.
+대표적인 예는 `related_bounds_only` 같은 weak relation이다.
 
-Audit V7 explicitly excludes:
+### 3.4 Taxonomy
 
-- changing existing `PASS`, `WARN`, `FAIL`;
-- changing `mismatch_type`;
-- traversal engine redesign;
-- local tab rewrite;
-- candidate selection rewrite;
-- semantic value verdict policy changes;
-- enforcing focusable coverage as a hard gate in the initial phase.
-
-## 4. Focusable Taxonomy
-
-V7 needs a taxonomy because not every focusable node has the same accessibility
-importance.
-
-Initial categories:
+현재 taxonomy는 reporting and probe planning에 사용된다.
 
 - `REQUIRED`
 - `REVIEW`
 - `OPTIONAL`
 - `IGNORE`
 
-### 4.1 Required
+기본 운영 의미:
 
-`REQUIRED` focusables are user-meaningful elements whose absence from persisted
-coverage likely hides an accessibility or traversal issue.
+- `REQUIRED`: 상태값, 센서값, 현재 값처럼 사용자 의미가 직접적인 항목
+- `REVIEW`: 버튼, chevron, graph/history 같은 검토 대상 affordance
+- `OPTIONAL`: 중복 설명 또는 보조 텍스트
+- `IGNORE`: chrome, container root, 노이즈
 
-Examples:
+## 4. Coverage Probe Planning
 
-- state value: `Motion detected`, `Locked`, `Stopped`
-- battery percentage: `100%`
-- toggle state: `On`, `Off`
-- selected item / selected mode
-- active device status
-- alarm / alert state
-- sensor reading that communicates current state
+Coverage만으로는 "row 미존재"와 "실제 TalkBack focus 미검증"을 분리하기 어렵다.
+그래서 현재 구현은 coverage artifact에서 별도 probe plan을 만든다.
 
-Expected behavior:
-
-- must be covered by an actual row, representative row with strong relation, or
-  explicit semantic evidence;
-- missing required focusables should appear in V7 shadow reporting.
-
-### 4.2 Review
-
-`REVIEW` focusables are meaningful controls or structural affordances that may be
-validly represented by nearby context, but deserve manual inspection if missing.
-
-Examples:
-
-- graph button
-- collapsed / expanded button
-- overflow menu / `More options`
-- chevron `>`
-- history / details button
-- CTA button where context may be represented elsewhere
-
-Expected behavior:
-
-- missing review focusables should not immediately fail;
-- they should be surfaced in a V7 review section.
-
-### 4.3 Optional
-
-`OPTIONAL` focusables are low-risk or redundant nodes where missing row evidence is
-not enough to indicate a quality problem.
-
-Examples:
-
-- decorative label that is also included in a parent row;
-- duplicate card title;
-- repeated section header;
-- non-state text repeated in a composite row.
-
-Expected behavior:
-
-- tracked for diagnostics;
-- not counted as required missing by default.
-
-### 4.4 Ignore
-
-`IGNORE` focusables are expected artifacts or implementation details.
-
-Examples:
-
-- duplicate focus artifact;
-- toolbar chrome such as `Navigate up`, `More options`, overflow controls;
-- container root rows whose child nodes carry the meaningful state/action;
-- off-screen stale node;
-- invisible / zero-sized helper node;
-- overlay artifact unrelated to current plugin;
-- tab strip item outside the current content audit scope;
-- transient focus target that disappears before stable collection.
-
-Expected behavior:
-
-- excluded from denominator;
-- retained only in debug evidence if needed.
-
-## 5. Focusable Coverage Model
-
-V7 introduces a separate accounting model:
+현재 후보 생성은 보수적으로 유지된다.
 
 ```text
-focusable_expected
--> focusable_covered
--> focusable_missing
+taxonomy == REQUIRED
+AND
+coverage_status == MISSED or UNKNOWN
 ```
 
-### 5.1 Expected Focusable
+실제 실행 의도는 coverage reason에 따라 분기된다.
 
-An expected focusable is a node that V7 believes TalkBack can or should visit in
-the current screen / local tab scope.
+- 명확한 miss 재검증
+- related-bounds 기반 representative/container probe
 
-Candidate evidence sources:
+Plan artifact는 row-like candidate record와 summary를 포함한다.
 
-- actual TalkBack focus payloads;
-- helper accessibility dump nodes;
-- inventory-only helper dump snapshots;
-- Android XML / window dump nodes;
-- candidate list before filtering;
-- semantic card children;
-- representative row sources;
-- movement log labels.
+## 5. Runtime Probe Flow
 
-Expected focusables should carry:
+Runtime Probe는 Helper APK의 `FOCUS_IN_BOUNDS` primitive를 사용한다.
 
-- stable node identity if available;
-- bounds;
-- class name;
-- resource id;
-- text / content description / state description;
-- semantic card id if available;
-- local tab scope;
-- taxonomy category;
-- evidence source.
+현재 probe method:
 
-### 5.2 Covered Focusable
+- `helper_focus_in_bounds_scroll_retry`
 
-A focusable is covered when a persisted row can be linked to it with sufficient
-confidence.
+현재 probe engine 정책:
 
-Coverage evidence can include:
+1. candidate bounds 또는 promoted target bounds를 결정한다.
+2. foreground / screen / keyguard 상태를 점검한다.
+3. `focus_in_bounds(bounds)`를 시도한다.
+4. helper success면 capture된 focus/speech/text를 저장한다.
+5. helper success가 아니어도 late verification polling을 잠시 수행한다.
+6. retryable failure면 scroll 후 재시도한다.
 
-- same focus payload id / resource id;
-- same bounds or contained bounds;
-- same semantic card id and same role/value/action;
-- same normalized label in the same local tab scope;
-- representative row with source bounds matching the expected focusable;
-- direct speech evidence for a required value.
+현재 late verification success source:
 
-Coverage should record:
+- `LATE_FOCUS_VERIFIED`
+- `LATE_SPEECH_VERIFIED`
+- `LATE_VISIBLE_TEXT_VERIFIED`
 
-- `focusable_coverage_status = covered`
-- `focusable_covering_row_step`
-- `focusable_covering_row_type`
-- `focusable_match_confidence`
-- `focusable_match_reason`
+현재 primary helper success source:
 
-### 5.3 Missing Focusable
+- `HELPER_SUCCESS`
 
-A focusable is missing when it is expected but no persisted row can be linked.
+## 6. Target Promotion During Probe
 
-Missing focusables should record:
+probe는 leaf text node 자체보다 enclosing actionable container가 더 실제 TalkBack target에
+가깝다고 판단되는 경우 bounds target을 승격할 수 있다.
 
-- `focusable_coverage_status = missing`
-- `focusable_missing_reason`
-- `focusable_taxonomy`
-- `focusable_importance`
-- `focusable_evidence_source`
+현재 target strategy:
 
-Initial missing reasons:
+- `original_bounds`
+- `promote_to_enclosing_actionable_container`
 
-- `no_persisted_row`
-- `representative_only_no_node_row`
-- `suppressed_duplicate_or_consumed`
-- `candidate_filtered`
-- `focus_payload_not_persisted`
-- `bounds_or_id_unmatched`
-- `taxonomy_review_required`
+이 승격은 traversal row semantics를 바꾸지 않는다.
+probe 실행 타겟을 현실적인 focus target으로 조정하는 runtime policy다.
 
-## 6. Audit Phase Plan
+## 7. Environment Guards
 
-### Phase 1: Focusable Discovery Audit
+Runtime Probe는 실행 안정성을 위해 screen/app guards를 갖는다.
 
-Goal: discover and report focusable coverage without changing traversal or
-verdicts.
+현재 주요 guard:
 
-Add reporting-only metrics:
+- foreground가 target app이 아니면 skip
+- `SCREEN_OFF`면 skip
+- keyguard active면 skip
+- `com.android.systemui` foreground + screen interruption은 crash가 아니라 environment interruption으로 분류
 
-- `focusable_expected_count`
-- `focusable_covered_count`
-- `focusable_missing_count`
-- `focusable_coverage_rate`
+실행 안정성 보완:
 
-Row-level / evidence outputs:
+- scenario isolation
+- aggregate append 방식
+- keep-awake lifecycle
 
-- expected focusable inventory sheet;
-- per-focusable taxonomy;
-- covering row link where available;
-- missing reason.
+keep-awake는 QA Frontend batch run 시작 시 `adb shell svc power stayon true`를 적용하고,
+종료 후 기존 값을 복원하는 운영 경로를 사용한다.
 
-Discovery sources:
+## 8. Probe Validation
 
-- `focus_payload`: actual focus rows already collected by traversal;
-- `dump_tree`: dump nodes already present on a row;
-- `helper_snapshot`: inventory-only helper dump collected after scenario entry
-  / anchor stabilization;
-- `actionable_descendant`: separate action item derived from helper metadata
-  such as `actionableDescendantContentDescription` and
-  `actionableDescendantResourceId`.
+Probe validation은 traversal mismatch와 별개의 V8 validation layer다.
 
-Source priority for de-duplication:
+입력:
 
-```text
-focus_payload > helper_snapshot > dump_tree > actionable_descendant
-```
+- captured speech
+- captured visible text
+- probe success metadata
 
-The recommended initial snapshot location is immediately after the scenario
-anchor row is established and before main traversal starts. This gives V7 an
-independent view of visible readable / actionable nodes while preserving the
-existing traversal and reporting behavior.
+출력 status:
 
-No enforcement.
+- `MATCH`
+- `PARTIAL_MATCH`
+- `MISMATCH`
+- `NO_SPEECH_OR_TEXT`
+- `NOT_VALIDATED`
 
-### Phase 2: Focusable Coverage Calculation
+현재 특징:
 
-Goal: compare discovered inventory with persisted rows and produce a
-reporting-only coverage artifact.
+- numeric value match 허용
+- exact normalized match 허용
+- token overlap 기반 partial match 분리
+- short-token false positive 억제
 
-Artifacts:
+## 9. Shadow Reporting
 
-- `focusable_inventory.json`: raw discovery records from `focus_payload`,
-  `helper_snapshot`, `dump_tree`, and `actionable_descendant`;
-- `focusable_coverage.json`: canonical focusable items, coverage status, match
-  reason, and per-scenario summary.
+Validation 결과는 먼저 result sheet에 shadow row로 append된다.
 
-Raw inventory records are first canonicalized so source-expanded duplicates do
-not inflate coverage:
+row source:
 
-```text
-raw inventory records
--> canonical focusable items
--> coverage records
--> scenario summary
-```
+- `COVERAGE_PROBE_SHADOW`
 
-Canonical key:
+shadow row 조건:
 
-- `scenario_id` plus normalized `view_id` when a view id exists;
-- otherwise `scenario_id` plus normalized `label` and normalized bounds bucket.
+- validation status가 `MATCH` 또는 `PARTIAL_MATCH`
+- probe success가 true
 
-This keeps same-label controls separate when they represent different nodes. For
-example, bottom tab `History` with `view_id=history` is distinct from graph
-button `History` with `view_id=MotionSensorCapabilityCardView_header_graphButton`.
+중요한 점:
 
-Bounds are normalized through the common bounds parser so comma strings and dict
-strings such as `30,2338,372,2473` and `{'l': 30, 't': 2338, ...}` can collapse
-to the same canonical item when the label and scenario also match.
+- shadow row는 기존 traversal row를 대체하지 않는다.
+- shadow row는 production verdict를 바꾸지 않는다.
 
-Coverage statuses:
+## 10. Promotion Policy
 
-- `COVERED`: a persisted row confidently matches the canonical item;
-- `MISSED`: no persisted row matches the canonical item;
-- `UNKNOWN`: there is related evidence, but it is ambiguous or not specific
-  enough to prove coverage.
+Promotion policy는 shadow row가 production 승격 후보인지 판정하는 별도 계층이다.
 
-Matching precedence:
+현재 `PROMOTABLE` 조건:
 
-```text
-view_id exact
-> normalized label exact
-> same semantic card
-> related bounds
-```
+- `probe_success == true`
+- `validation_status == MATCH`
+- `probe_success_source in {HELPER_SUCCESS, LATE_FOCUS_VERIFIED}`
+- `probe_skipped == false`
 
-If a label match exists but the result row has a different view id, the status is
-`UNKNOWN`. If multiple rows match only by label, the status is also `UNKNOWN`.
+그 외는 모두 `NOT_PROMOTABLE`.
 
-Phase 2 deliberately excludes `representative_visible` and
-`representative_speech` as coverage evidence. Representative context can prove
-that useful text exists nearby, but it does not prove that the expected focusable
-node itself persisted as a result row.
+현재 대표 reason:
 
-`focusable_coverage.json` summary fields:
+- `exact_probe_match`
+- `partial_validation`
+- `probe_failed`
+- `screen_skip`
+- `environment_skip`
+- `unsupported_success_source`
 
-- `raw_inventory_count`
-- `expected_count`
-- `canonical_expected_count`
-- `covered_count`
-- `missed_count`
-- `unknown_count`
-- `coverage_rate`
+## 11. Production Promotion And Dedup
 
-`canonical_expected_count` is the full canonical item count. `raw_inventory_count`
-preserves the source-expanded count for diagnostics.
+Promotion policy가 `PROMOTABLE`이어도 즉시 traversal row를 수정하지는 않는다.
 
-Current limitations:
+현재 단계:
 
-- coverage does not affect `PASS`, `WARN`, `FAIL`, `mismatch_type`, semantic
-  value metrics, or shadow verdicts;
-- `UNKNOWN` requires manual review until taxonomy and stronger matching evidence
-  are validated.
+1. shadow row 생성
+2. promotion eligibility 판정
+3. 기존 production row와 identity 비교
+4. 중복이 아니면 promoted row append
+5. 중복이면 shadow row에 dedup skip metadata만 기록
 
-### Phase 3: Focusable Taxonomy
+promoted row source:
 
-Goal: classify canonical focusables by accessibility importance and keep chrome
-or container artifacts out of the coverage denominator.
+- `COVERAGE_PROBE_PROMOTED`
 
-Each `focusable_coverage.json` record adds:
+promotion dedup 상태:
 
-- `taxonomy`
-- `taxonomy_reason`
+- `PROMOTED`
+- `SKIPPED`
+- `NOT_APPLICABLE`
 
-Initial reporting rules:
+현재 production promotion은 conservative append-only 정책이다.
 
-- `REQUIRED`: user state/value readings such as `100%`, `Motion detected`,
-  toggle states, battery, temperature, humidity, air-quality PM/CAQI values,
-  volume, and channel.
-- `REVIEW`: actionable or structural affordances such as graph/chart buttons,
-  card action buttons, details/settings shortcuts, and chevrons.
-- `OPTIONAL`: supporting or redundant text such as `No history`, subtitles, and
-  descriptive copy.
-- `IGNORE`: toolbar chrome, overflow controls, navigation controls, and
-  composite container roots.
+## 12. Aggregate Artifacts
 
-Phase 3 summary fields:
+V8 완료 구현은 per-scenario file과 aggregate file을 함께 만든다.
 
-- `required_expected_count`
-- `required_covered_count`
-- `required_missed_count`
-- `review_expected_count`
-- `review_unknown_count`
-- `optional_expected_count`
-- `ignore_count`
+### 12.1 Artifact list
 
-`expected_count` and `coverage_rate` exclude `IGNORE` records. This keeps
-inventory diagnostics intact through `canonical_expected_count` while making
-the headline coverage rate reflect auditable content rather than toolbar chrome.
+`*.focusable_inventory.json`
 
-Known limitations:
+- 목적: raw inventory evidence
+- producer: `tb_runner/collection_flow.py`
+- consumer: coverage calculation, probe target promotion
+- lifecycle: scenario execution 중 생성, per-run 기준 파일
 
-- taxonomy is heuristic and should remain reporting-only until validated across
-  multiple plugins;
-- `PM` is required only in air-quality / dust sensor contexts such as `PM10`,
-  `PM 2.5`, `CAQI`, or `0 μg/㎥`; time-of-day text such as `6:00 PM` is not a
-  required PM sensor value;
-- `REVIEW` does not mean a defect, only that missing or ambiguous evidence
-  deserves manual inspection;
-- composite card roots may be ignored while child state/action nodes remain
-  counted separately.
+`*.focusable_coverage.json`
 
-### Phase 4: Shadow Coverage
+- 목적: canonical focusable item, taxonomy, coverage status
+- producer: `tb_runner/collection_flow.py`
+- consumer: probe plan builder, shadow/analysis
+- lifecycle: scenario execution 중 생성
 
-Goal: make missing focusables visible in V6-style shadow reporting without
-changing production verdicts.
+`*.coverage_probe_plan.json`
 
-New metrics:
+- 목적: coverage 기반 runtime probe candidate plan
+- producer: `tb_runner/collection_flow.py`
+- consumer: `tb_runner/coverage_probe_engine.py`
+- lifecycle: per-scenario 실행 직전 또는 coverage 생성 직후 저장
 
-- `focusable_expected_count`
-- `focusable_covered_count`
-- `focusable_missing_count`
-- `focusable_coverage_rate`
-- `focusable_required_missing_count`
-- `focusable_review_missing_count`
+`*.coverage_probe_results.json`
 
-Possible shadow interpretation:
+- 목적: scenario 단위 probe execution 결과
+- producer: `tb_runner/coverage_probe_engine.py`
+- consumer: probe validation, manual debug
+- lifecycle: scenario별 overwrite
 
-- missing required focusable -> V7 shadow review / warning candidate;
-- missing review focusable -> V7 shadow review;
-- missing optional focusable -> diagnostic only;
-- ignored focusable -> excluded.
+`*.coverage_probe_results.aggregate.json`
 
-Production `PASS`, `WARN`, `FAIL` remains unchanged.
+- 목적: run 전체 scenario probe execution aggregate
+- producer: `tb_runner/coverage_probe_engine.py`
+- consumer: QA Frontend summary, docs/debug
+- lifecycle: scenario별 append aggregate
 
-### Phase 5: Frontend Reporting
+`*.coverage_probe_validation.json`
 
-Goal: surface V7 evidence in QA Frontend without changing existing result UX.
+- 목적: scenario 단위 probe validation + promotion metadata
+- producer: `tb_runner/coverage_probe_validation.py`
+- consumer: Excel shadow row fallback, manual debug
+- lifecycle: scenario별 overwrite
 
-Display locations:
+`*.coverage_probe_validation.aggregate.json`
 
-- XLSX summary sheet;
-- dedicated `focusable_coverage` sheet;
-- QA Frontend Shadow section;
-- Scenario Evidence / run detail view.
+- 목적: run 전체 validation aggregate
+- producer: `tb_runner/coverage_probe_validation.py`
+- consumer: Excel shadow row source, QA Frontend summary
+- lifecycle: scenario별 append aggregate
 
-Suggested UI:
+`*.xlsx`
 
-```text
-Focusable Coverage
-Expected: 4
-Covered: 4
-Missing: 0
-Required Missing: 0
-Review Missing: 0
-Coverage: 100%
-```
+- 목적: traversal rows + shadow rows + promoted rows를 포함한 운영 보고서
+- producer: `tb_runner/excel_report.py`
+- consumer: QA review, QA Frontend, downstream analysis
+- lifecycle: final run artifact
 
-Missing focusables should include:
+### 12.2 Aggregate summary fields
 
-- label;
-- taxonomy;
-- bounds;
-- source;
-- reason;
-- nearest covering row candidate if any.
+results aggregate 주요 필드:
 
-## 7. Motion Sensor Example
+- `total_candidate_count`
+- `total_attempted_count`
+- `total_success_count`
+- `total_failed_count`
+- `total_screen_skipped_count`
+- `total_scenario_filtered_count`
 
-### 7.1 Observed Screen
+validation aggregate 주요 필드:
 
-Motion Sensor screen has TalkBack-readable elements:
+- `total_match_count`
+- `total_partial_match_count`
+- `promotable_count`
+- `not_promotable_count`
+- `total_screen_skipped_count`
+- `total_scenario_filtered_count`
 
-- `Motion detected`
-- `100%`
-- `>`
-- `Graph button`, collapsed button
+Excel promotion summary:
 
-Current result rows may include only a subset. This creates ambiguity:
+- `promoted_row_count`
+- `promotion_dedup_skipped_count`
 
-- Did traversal miss the node?
-- Did traversal visit the node but persistence suppress it?
-- Did representative context absorb it?
-- Did semantic extraction fail to classify it?
+## 13. QA Frontend Reporting
 
-### 7.2 Expected V7 Focusable Inventory
+QA Frontend는 aggregate artifact를 우선 사용한다.
 
-Example expected inventory:
+fallback 순서:
 
-| label | taxonomy | rationale |
-| --- | --- | --- |
-| `Motion detected` | `REQUIRED` | current motion state |
-| `100%` | `REQUIRED` | battery value |
-| `>` | `REVIEW` | navigational affordance / chevron |
-| `Graph button` | `REVIEW` | user-actionable collapsed control |
+1. `*.coverage_probe_validation.aggregate.json`
+2. `*.coverage_probe_validation.json`
 
-Phase 1 inventory should include these nodes from either focus payload or helper
-snapshot evidence:
+execution metrics는 results artifact에서 읽고,
+validation/promotion metrics는 validation artifact에서 읽는다.
 
-| label / id | preferred source |
-| --- | --- |
-| `Motion detected` | `helper_snapshot` readable node or `focus_payload` |
-| `100%` | `helper_snapshot` readable value node |
-| `MotionSensorCapabilityCardView_header_graphButton` / `History` | `actionable_descendant` |
-| `Controls`, `Routines`, `History` | `focus_payload` or `helper_snapshot` |
+Coverage Probe summary card 주요 지표:
 
-### 7.3 Current Coverage Example
+- Candidates
+- Attempted
+- Succeeded
+- Failed
+- Promotable
+- Promoted
+- Dedup Skipped
+- Screen Skipped
+- Scenario Filtered
 
-Illustrative current state:
+상태 구분:
 
-| label | expected | covered | possible reason |
-| --- | --- | --- | --- |
-| `Motion detected` | yes | partial / unknown | may be spoken but not persisted |
-| `100%` | yes | missing / unknown | value may lack row |
-| `>` | yes | missing / unknown | affordance may be filtered |
-| `Graph button` | yes | missing / unknown | collapsed button may be represented indirectly |
+- artifact 없음: `available=false`, `source=none`, UI는 `Not Available`
+- aggregate 있음: `available=true`, `source=aggregate`
+- scenario fallback: `available=true`, `source=scenario`
+- artifact는 있으나 candidate가 0: zero run으로 해석하고 별도 안내 문구 표시
 
-### 7.4 Future Coverage Example
+## 14. Final Operational Semantics
 
-Target V7 output:
+현재 V8은 다음을 보장한다.
 
-```text
-focusable_expected_count = 4
-focusable_covered_count = 4
-focusable_missing_count = 0
-focusable_coverage_rate = 100.0%
-focusable_required_missing_count = 0
-focusable_review_missing_count = 0
-```
+- traversal / mismatch / V6 shadow semantics 유지
+- probe는 opt-in
+- helper APK 변경 없이 runner + reporting pipeline으로 동작
+- aggregate artifact 기반 batch reporting 가능
+- environment interruption이 crash threshold를 불필요하게 소모하지 않음
 
-If `Graph button` remains unlinked:
+## 15. Known Limitations
 
-```text
-focusable_expected_count = 4
-focusable_covered_count = 3
-focusable_missing_count = 1
-focusable_review_missing_count = 1
-focusable_coverage_rate = 75.0%
-```
+- promotion은 conservative하다.
+- `PARTIAL_MATCH`는 승격하지 않는다.
+- `LATE_SPEECH_VERIFIED`와 `LATE_VISIBLE_TEXT_VERIFIED`는 success로 기록되더라도 production promotion 대상이 아니다.
+- cross-run learning 또는 cache 기반 probe 최적화는 지원하지 않는다.
+- probe는 aggregate reporting을 제공하지만 traversal policy 자체를 self-healing 하지는 않는다.
 
-This should not change production `PASS/WARN/FAIL` in early phases, but should
-appear in V7 shadow reporting.
+## 16. Recommended Reading
 
-## 8. Risk Analysis
-
-### 8.1 False Positive Risks
-
-Potential false positives:
-
-- duplicate representative rows counted as missing focusables;
-- collapsed controls that are intentionally summarized by parent rows;
-- hidden nodes from stale dumps;
-- overlay artifacts from other apps;
-- off-screen nodes included in a dump but not reachable in current viewport;
-- chevrons / decorative affordances treated as required;
-- local tab strip nodes mixed into content scope;
-- synthetic helper nodes that TalkBack cannot actually focus.
-
-### 8.2 False Negative Risks
-
-Potential false negatives:
-
-- focusable node merged into a composite label and treated as covered too
-  broadly;
-- same label appears in unrelated row;
-- stale focus bounds create incorrect coverage relation;
-- semantic card id over-groups unrelated children;
-- nearby representative evidence hides an actually missing focusable.
-
-### 8.3 Mitigation
-
-Initial safeguards:
-
-- require same local tab scope for coverage matching;
-- prefer exact id / bounds / semantic relation over label-only match;
-- separate `required` from `review`;
-- treat chevrons and collapsed controls as `review` until validated;
-- keep V7 reporting-only until precision is measured;
-- expose match reason and confidence for each coverage link.
-
-## 9. Exit Criteria
-
-Audit V7 is complete when the system can answer, per scenario:
-
-- how many TalkBack focusable nodes were expected;
-- how many were covered by persisted rows;
-- which were missing;
-- which missing nodes are required vs review;
-- why each missing node was not covered;
-- whether the gap is traversal, persistence, taxonomy, or artifact quality.
-
-Minimum Motion Sensor exit criteria:
-
-```text
-expected focusables = 4
-covered focusables = 4
-missing focusables = 0
-coverage rate = 100%
-missing required focusables = 0
-```
-
-General rollout criteria:
-
-- required focusable false-positive rate is low enough for shadow reporting;
-- no regression to V6 semantic value / shadow verdict behavior;
-- old artifacts without V7 sheets remain readable;
-- QA Frontend can show V7 metrics without changing production verdict UX;
-- per-focusable evidence is auditable from the XLSX.
-
-## 10. Expected Implementation Touch Points
-
-Likely implementation files:
-
-- `tb_runner/collection_flow.py`
-- `tb_runner/excel_report.py`
-- `talkback_lib/focus_service.py`
-- `talkback_lib/step_collection_service.py`
-- `qa_frontend/backend/mismatch_viewer.py`
-- `qa_frontend/backend/recent_runs.py`
-- `qa_frontend/frontend/src/components/RecentRunsPanel.tsx`
-- `qa_frontend/frontend/src/api.ts`
-
-Implementation should start in reporting / artifact generation, not traversal
-movement.
-
-Recommended order:
-
-1. Add focusable inventory extraction from existing dumps / focus payloads.
-2. Add inventory-only helper snapshot extraction for cases where row dumps are
-   skipped by successful focus payload paths.
-3. Add XLSX-only focusable coverage sheet and summary metrics.
-4. Validate taxonomy on Motion Sensor and several device plugins.
-5. Add shadow-only frontend display.
-6. Consider V7 shadow verdict integration only after precision is measured.
+- [V8 Coverage-Driven Traversal](/d:/Python%20test/talkback-a11y-helper/docs/design/v8-coverage-driven-traversal.md)
+- [Semantic Value Shadow Audit](/d:/Python%20test/talkback-a11y-helper/docs/design/semantic-value-shadow-audit.md)
+- [QA Frontend Guide](/d:/Python%20test/talkback-a11y-helper/docs/qa-frontend-guide.md)

@@ -2,354 +2,184 @@
 
 ## 1. Purpose
 
-This document explains the reporting-only semantic value audit layer that now
-exists alongside the core TalkBack result pipeline.
+이 문서는 semantic value audit와 V8 probe reporting의 경계를 설명한다.
 
-It covers:
+현재 시스템에는 서로 다른 reporting layer가 공존한다.
 
-- semantic value discovery from semantic card metadata;
-- speech matching and nearby evidence;
-- semantic value quality and importance;
-- semantic value confidence;
-- media card semantic extraction;
-- shadow review and gate candidate semantics;
-- known limitations.
+- semantic value shadow
+- coverage probe shadow
+- promotion policy
+- production promotion
 
-This layer does not change traversal behavior and does not change the primary
-`PASS`, `WARN`, `FAIL`, or `mismatch_type` outputs.
+이 문서의 목적은 특히 아래 구분을 명확히 하는 것이다.
 
-## 2. Scope
+```text
+Shadow
+↓
+Promotion
+↓
+Production
+```
 
-Included:
+## 2. Semantic Value Audit Scope
 
-- `semantic_card_values`
-- `semantic_value_*` result columns
-- semantic value summary metrics
-- semantic value confidence rules
-- media card semantic extraction rules
-- shadow review / gate candidate interpretation
+semantic value audit는 row-centric reporting layer다.
 
-Explicitly excluded:
-
-- TalkBack traversal movement
-- candidate selection
-- local tab progression
-- `final_result`
-- `mismatch_type`
-- shadow verdict enforcement
-
-## 3. Semantic Value Coverage
-
-Semantic value coverage starts from semantic card metadata generated during row
-collection. The key input is:
+다루는 것:
 
 - `semantic_card_values`
+- semantic value coverage
+- semantic value confidence
+- semantic value quality
+- semantic value review/gate candidate
 
-That value is projected into reporting columns:
+다루지 않는 것:
 
-- `semantic_value_labels`
-- `semantic_value_covered`
-- `semantic_value_missing`
-- `semantic_value_total_count`
-- `semantic_value_matched_count`
-- `semantic_value_match_source`
+- traversal movement 변경
+- probe targetting
+- helper focus primitive
+- production row 승격
 
-The intent is to answer:
+semantic value audit는 여전히 `PASS` / `WARN` / `FAIL`을 직접 바꾸지 않는다.
 
-- "Was the user-meaningful value for this card or row actually observed in the
-  TalkBack speech evidence?"
+## 3. Shadow Layers In The Current System
 
-Examples:
+현재 shadow에는 최소 두 종류가 있다.
 
-Washer:
+### 3.1 Semantic shadow
 
-- `Rinse mode` / `Normal`
-- `Status` / `Stopped`
-- `On`
+semantic card metadata와 speech evidence를 비교해 row-level 값 커버리지를 설명한다.
 
-TV:
+예:
 
-- `picturemode` / `Standard`
-
-Air Purifier:
-
-- PM reading / `0 ug/m3`
-- air quality labels such as `CAQI`
-
-Audio:
-
-- `Spotify`
-- `25`
-- actions such as `Play`, `Mute`, `Next`
-
-## 4. Coverage Matching
-
-Semantic value matching is reporting-only and text-based.
-
-Current evidence sources:
-
-- `announcement`
-- `representative`
-- `nearby_announcement`
-
-Matching flow:
-
-1. Extract semantic value labels from `semantic_card_values`.
-2. Try direct match against the row announcement text.
-3. If not fully covered, try representative text evidence.
-4. If still not fully covered, try nearby announcement evidence using a strict
-   same-card / nearby-row relation.
-
-Important policy:
-
-- representative evidence can contribute to semantic value coverage;
-- this does not mean the representative row is treated as a primary TalkBack
-  focus row for V7 focusable coverage;
-- semantic value coverage and focusable coverage are different audit layers.
-
-`semantic_value_match_source` stores the winning evidence sources joined by `|`.
-
-Typical values:
-
-- `announcement`
-- `representative`
-- `nearby_announcement`
-- combinations such as `announcement|nearby_announcement`
-
-## 5. Semantic Value Shadow Quality
-
-Semantic value quality is a reporting-only classification that summarizes value
-coverage completeness.
-
-Values:
-
-- `VALUE_NOT_APPLICABLE`
 - `VALUE_FULLY_COVERED`
 - `VALUE_PARTIALLY_COVERED`
 - `VALUE_MISSING`
 
-Definitions:
+### 3.2 Coverage probe shadow
 
-- `VALUE_NOT_APPLICABLE`
-  No semantic value labels are available for the row.
-- `VALUE_FULLY_COVERED`
-  All discovered semantic value labels matched allowed speech evidence.
-- `VALUE_PARTIALLY_COVERED`
-  At least one value matched, but not all values matched.
-- `VALUE_MISSING`
-  Semantic value labels were expected, but none were matched strongly enough.
+runtime probe가 별도 focus candidate를 검증한 뒤 result sheet에 shadow row를 append한다.
 
-These values do not alter:
+row source:
 
-- `final_result`
-- `mismatch_type`
-- `PASS` / `WARN` / `FAIL`
+- `COVERAGE_PROBE_SHADOW`
 
-They are shadow / reporting signals only.
+이 row는 traversal row를 대체하지 않는다.
 
-## 6. Semantic Value Importance
+## 4. Shadow Means Reporting, Not Production
 
-Each semantic value row is also classified by importance:
+Shadow의 공통 의미:
 
-- `high`
-- `medium`
-- `low`
-- `ignore`
+- 추가 evidence를 보여 준다.
+- 기존 traversal result를 덮어쓰지 않는다.
+- production verdict semantics를 즉시 바꾸지 않는다.
 
-Current intent:
+현재 shadow row 특징:
 
-- `high`
-  State or status values that directly affect user understanding.
-- `medium`
-  Secondary mode / cycle / preset values that still matter but are less urgent.
-- `low`
-  Values with weaker operational importance or lower confidence as a gate input.
-- `ignore`
-  Action-like or UI chrome labels that should not drive semantic value quality
-  escalation.
+- `final_result=SHADOW`
+- review/audit visibility 제공
+- downstream promotion policy의 입력이 될 수 있음
 
-Examples:
+## 5. Promotion Layer
 
-- `high`
-  `On`, `Off`, `Locked`, `Unlocked`, `Stopped`, battery values, PM values,
-  volume values, channel values
-- `medium`
-  `Normal`, `Standard`, mode values, cycle values
-- `ignore`
-  `Change`, `Edit`, `History`, `More`
+Promotion은 shadow row를 production row로 올릴 수 있는지 판정하는 독립 계층이다.
 
-This importance classification is still shadow-only and is intended to guide
-review prioritization rather than verdict enforcement.
+중요한 점:
 
-## 7. Semantic Value Confidence
+- shadow 생성과 promotion은 다른 단계다.
+- `MATCH`라고 해서 자동 승격되지 않는다.
+- semantic shadow와 probe shadow는 promotion 대상 성격이 다르다.
 
-Semantic value confidence indicates how strong the speech evidence is for the
- value match.
+현재 V8 promotion policy는 coverage probe validation에만 적용된다.
 
-Values:
+핵심 fields:
 
-- `HIGH`
-- `MEDIUM`
-- `LOW`
-- `NONE`
+- `promotion_status`
+- `promotion_reason`
 
-Definitions:
+대표 값:
 
-- `HIGH`
-  Direct match from the row announcement.
-- `MEDIUM`
-  Match found only through representative evidence.
-- `LOW`
-  Match found only through nearby announcement evidence.
-- `NONE`
-  No coverage evidence exists, or the row is not applicable.
+- `PROMOTABLE`
+- `NOT_PROMOTABLE`
 
-Companion field:
+대표 reason:
 
-- `semantic_value_confidence_reason`
+- `exact_probe_match`
+- `partial_validation`
+- `probe_failed`
+- `screen_skip`
+- `environment_skip`
 
-Typical reasons:
+## 6. Production Layer
 
-- `announcement`
-- `representative`
-- `nearby_announcement`
-- `not_applicable`
-- `no_evidence`
+Production은 최종 result sheet의 운영 row semantics를 뜻한다.
 
-Important limitation:
+현재 production row는 두 source에서 올 수 있다.
 
-- representative evidence is weaker than direct announcement evidence;
-- confidence affects semantic value review interpretation only;
-- confidence does not change `final_result` by itself.
+- 원래 traversal row
+- `COVERAGE_PROBE_PROMOTED`
 
-## 8. Media Card Semantic Extraction
+promoted row 특징:
 
-Media semantic extraction is intentionally narrower than generic capability card
-extraction.
+- `final_result=PASS`
+- 기존 traversal row는 그대로 유지
+- duplicate production row가 이미 있으면 append하지 않음
 
-Current policy:
+즉, current production promotion은 replace가 아니라 append + dedup 정책이다.
 
-- Only clear Music Player / Media Player style surfaces are treated as media
-  semantic cards.
-- Broad keywords such as `audio`, `speaker`, or generic `volume` are not enough
-  by themselves.
-- This narrower rule exists to avoid TV contamination such as `Volume Mute`
-  being misclassified as audio media semantics.
+## 7. Semantic Value vs Probe Shadow
 
-Current supported behavior:
+두 계층은 목적이 다르다.
 
-- `MusicPlayerCapabilityCardView` or equivalent media-player resource families
-  can produce semantic values and actions.
+semantic value audit:
 
-Audio examples:
+- 한 row가 user-meaningful value를 충분히 말했는지 본다.
+- representative / nearby evidence를 활용할 수 있다.
 
-- values
-  `Spotify`, `25`
-- actions
-  `Play`, `Pause`, `Next`, `Mute`
+coverage probe audit:
 
-TV limitation:
+- coverage gap node를 runtime에서 다시 focus/verify한다.
+- helper focus success, late verification, validation status, promotion policy를 따진다.
 
-- TV `Volume Mute` is intentionally not treated as media semantic extraction in
-  this phase.
-- TV audio / volume semantics require a separate phase with device-specific
-  precision checks.
+따라서 semantic value coverage가 충분해도 probe promotion이 불가능할 수 있고,
+반대로 probe shadow는 semantic value 판단과 무관하게 production append 후보가 될 수 있다.
 
-## 9. Shadow Review And Gate Candidates
+## 8. Result Sheet Semantics
 
-Two reporting fields surface rows that deserve extra attention:
+현재 result sheet에서 구분해야 할 source:
 
-- `semantic_value_review_candidate`
-- `semantic_value_gate_candidate`
+- traversal row: 기존 수집 결과
+- `COVERAGE_PROBE_SHADOW`: validation evidence row
+- `COVERAGE_PROBE_PROMOTED`: production 승격 row
 
-Meaning:
+현재 추가 메타데이터:
 
-- `semantic_value_review_candidate`
-  The row should be reviewed because the semantic value signal is incomplete or
-  weak enough to warrant manual inspection.
-- `semantic_value_gate_candidate`
-  The row is a potential future enforcement candidate, but is not enforced
-  today.
+- `probe_validation_status`
+- `probe_success_source`
+- `promotion_status`
+- `promotion_reason`
+- `promotion_applied`
+- `promotion_dedup_status`
+- `promotion_dedup_reason`
 
-Current operational policy:
+## 9. Operational Interpretation
 
-- both are reporting-only;
-- neither one changes `PASS`, `WARN`, `FAIL`;
-- neither one activates automatic gate failure.
+리뷰 시 해석 우선순위:
 
-It is valid for:
+1. traversal row는 원래 pipeline 결과다.
+2. semantic value fields는 row 의미 품질을 설명한다.
+3. probe shadow row는 coverage gap recheck evidence다.
+4. promotion status는 production 승격 가능성만 설명한다.
+5. promoted row는 dedup을 통과한 보수적 append 결과다.
 
-- `semantic_value_review_candidate > 0`
-- `semantic_value_gate_candidate = 0`
+## 10. Known Limitations
 
-This can happen after false-positive reduction has removed unsafe gate
-classifications while still leaving rows worth reviewing.
+- semantic value gate candidate는 여전히 reporting-only다.
+- coverage probe promotion은 conservative하다.
+- `PARTIAL_MATCH`는 production 승격하지 않는다.
+- semantic value confidence와 probe promotion confidence는 같은 개념이 아니다.
 
-## 10. Result And Summary Columns
-
-Current result-sheet semantic value fields include:
-
-- `semantic_card_values`
-- `semantic_value_labels`
-- `semantic_value_covered`
-- `semantic_value_missing`
-- `semantic_value_total_count`
-- `semantic_value_matched_count`
-- `semantic_value_match_source`
-- `semantic_value_confidence`
-- `semantic_value_confidence_reason`
-- `semantic_value_quality`
-- `semantic_value_importance`
-- `semantic_value_gate_candidate`
-- `semantic_value_review_candidate`
-- `semantic_value_quality_reason`
-
-Current summary metrics include coverage, quality, and confidence aggregates.
-
-Examples:
-
-- `semantic_value_total`
-- `semantic_value_covered`
-- `semantic_value_missing`
-- `semantic_value_coverage_rate`
-- `semantic_value_quality_total`
-- `semantic_value_quality_full`
-- `semantic_value_quality_partial`
-- `semantic_value_quality_missing`
-- `semantic_value_confidence_high`
-- `semantic_value_confidence_medium`
-- `semantic_value_confidence_low`
-- `semantic_value_confidence_none`
-
-## 11. Relationship To Shadow Verdict
-
-Shadow verdict is a separate reporting layer.
-
-Semantic value signals can influence shadow interpretation, but they do not
-replace the row-quality pipeline.
-
-In particular:
-
-- semantic value quality is not a replacement for row mismatch analysis;
-- semantic value confidence is not a replacement for focus confidence;
-- review / gate candidate fields are not enforcement verdicts.
-
-## 12. Known Limitations
-
-Current limitations:
-
-- Rows without semantic metadata remain `VALUE_NOT_APPLICABLE`.
-- Representative-based confidence is weaker than direct announcement evidence.
-- Nearby announcement evidence is weaker than representative evidence.
-- Media semantic extraction is still Audio-centered.
-- TV volume semantics are intentionally excluded in the current media phase.
-- Gate candidates are still under operational validation and are not enforced.
-- Capability-card coverage and semantic value coverage can disagree when a value
-  is inferable from context but not persisted as its own TalkBack row.
-
-## 13. Recommended Reading
-
-Related design documents:
+## 11. Related Reading
 
 - [Audit V7 Focusable Coverage Design](/d:/Python%20test/talkback-a11y-helper/docs/design/audit-v7-focusable-coverage-design.md)
-- [Audit V4 Shadow Verdict Design](/d:/Python%20test/talkback-a11y-helper/docs/design/audit-v4-shadow-verdict-design.md)
+- [V8 Coverage-Driven Traversal](/d:/Python%20test/talkback-a11y-helper/docs/design/v8-coverage-driven-traversal.md)

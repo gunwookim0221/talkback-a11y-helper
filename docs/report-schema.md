@@ -47,6 +47,40 @@ Traversal / scoring / representative selection은 유지되고, 저장 semantics
 - `crop_source=actual_focus`
 - `representative_row_source=representative`
 
+V8 이후 result sheet에는 probe row source가 추가될 수 있다.
+
+- `row_source=COVERAGE_PROBE_SHADOW`
+- `row_source=COVERAGE_PROBE_PROMOTED`
+
+의미:
+
+- `COVERAGE_PROBE_SHADOW`
+  Runtime Probe validation evidence row. `final_result=SHADOW`.
+- `COVERAGE_PROBE_PROMOTED`
+  Promotion policy와 dedup을 통과해 production report에 append된 row. `final_result=PASS`.
+
+기존 traversal row semantics는 그대로 유지된다.
+
+## V8 Probe Metadata
+
+현재 result sheet는 V8 probe 관련 메타데이터를 추가로 가질 수 있다.
+
+- `probe_validation_status`
+- `probe_success_source`
+- `promotion_status`
+- `promotion_reason`
+- `promotion_applied`
+- `promotion_dedup_status`
+- `promotion_dedup_reason`
+- `probe_validation_confidence`
+- `probe_target_strategy`
+- `probe_intent`
+- `probe_captured_speech`
+- `probe_captured_visible_text`
+
+이 필드는 shadow/promoted row를 설명하기 위한 reporting metadata다.
+기존 traversal scoring이나 `PASS` / `WARN` / `FAIL` 정의를 재정의하지 않는다.
+
 ## 예시
 
 ### Water leak
@@ -66,6 +100,7 @@ Traversal / scoring / representative selection은 유지되고, 저장 semantics
 - 컬럼 삭제 없음
 - 컬럼 rename 없음
 - 하지만 `visible_label` 의미는 representative에서 **actual focus**로 바뀌었다
+- probe 관련 행은 append-only 방식으로 추가된다
 
 따라서 downstream이 representative 기준 visible을 기대한다면 이제
 `representative_*`를 읽어야 한다.

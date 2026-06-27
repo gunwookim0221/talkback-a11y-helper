@@ -12,6 +12,9 @@
 - scenario 설정: [scenario-config.md](scenario-config.md)
 - runtime 설정: [runtime-config.md](runtime-config.md)
 - helper/client API: [api-reference.md](api-reference.md)
+- V8 Coverage-Driven Traversal: [design/v8-coverage-driven-traversal.md](design/v8-coverage-driven-traversal.md)
+- V7/V8 Focusable Coverage 설계: [design/audit-v7-focusable-coverage-design.md](design/audit-v7-focusable-coverage-design.md)
+- Semantic Value / Shadow / Promotion 구분: [design/semantic-value-shadow-audit.md](design/semantic-value-shadow-audit.md)
 - Devices plugin 운영: [device-plugin-guide.md](device-plugin-guide.md)
 - Device Plugin Audit V3: [device-plugin-audit-guide.md](device-plugin-audit-guide.md)
 - Device Plugin Audit V4 Design: [design/audit-v4-xml-coverage-design.md](design/audit-v4-xml-coverage-design.md)
@@ -59,5 +62,6 @@
 
 ## Related design documents
 
-- [semantic-value-shadow-audit.md](design/semantic-value-shadow-audit.md)
+- [v8-coverage-driven-traversal.md](design/v8-coverage-driven-traversal.md)
 - [audit-v7-focusable-coverage-design.md](design/audit-v7-focusable-coverage-design.md)
+- [semantic-value-shadow-audit.md](design/semantic-value-shadow-audit.md)

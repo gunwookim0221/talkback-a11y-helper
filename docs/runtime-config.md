@@ -38,3 +38,27 @@
 
 - 새 scenario를 base config에 추가해도 runtime에서 켜지지 않으면 실행되지 않는다
 - Devices plugin 전체 추가가 끝난 상태여도 runtime 기본값은 비활성 유지가 운영 기준이다
+
+## 6) V8 Runtime Probe 활성화
+
+V8 Runtime Probe는 `config/runtime_config.json`의 일반 scenario enablement와 별도다.
+
+현재 활성화 경로:
+
+- 환경변수 `TB_V8_COVERAGE_PROBE=1`
+- `tb_runner/run_spec.py`의 `enable_coverage_probe=True`
+- QA Frontend Run panel의 V8 Runtime Probe toggle
+
+중요한 점:
+
+- `runtime_config.json`은 probe on/off의 primary source가 아니다.
+- probe는 run subprocess env로 전달되는 opt-in feature다.
+- scenario 자체가 runtime에서 disabled면 probe도 실행되지 않는다.
+
+현재 probe가 켜지면 scenario별 artifact가 추가로 생성된다.
+
+- `*.coverage_probe_plan.json`
+- `*.coverage_probe_results.json`
+- `*.coverage_probe_results.aggregate.json`
+- `*.coverage_probe_validation.json`
+- `*.coverage_probe_validation.aggregate.json`
