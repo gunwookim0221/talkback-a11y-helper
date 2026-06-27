@@ -194,6 +194,11 @@ export function RecentRunsPanel({
     const probeScenarioFilteredCount = (
       coverageProbe?.scenario_filtered_count ?? coverageProbe?.total_scenario_filtered_count
     );
+    const coverageProbeUnavailableMessage = coverageProbe?.probe_enabled === false
+      ? 'Runtime Probe: OFF'
+      : coverageProbe?.probe_enabled === true
+        ? 'Runtime Probe: ON, but no V8 probe artifacts were generated.'
+        : 'Runtime Probe appears to be OFF for this run, or no V8 probe artifacts were generated.';
     const focusableIssues = runData?.focusable_issues || focusableCoverage?.issues || [];
     const focusableScenarioById = new Map(
       (focusableCoverage?.scenarios || runData?.shadow_scenarios || [])
@@ -473,10 +478,8 @@ export function RecentRunsPanel({
             <div className="scenarioDetailList" style={{ marginTop: '8px' }}>
               <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '16px 8px' }}>
                 <strong style={{ color: 'var(--color-text-dim)' }}>Not Available</strong>
-                <small style={{ color: coverageProbe?.probe_enabled ? 'var(--color-warning)' : 'var(--color-text-dim)' }}>
-                  {coverageProbe?.probe_enabled
-                    ? 'V8 Runtime Probe was enabled, but no probe aggregate artifact was found.'
-                    : 'No V8 probe artifacts found for this run.'}
+                <small style={{ color: coverageProbe?.probe_enabled === true ? 'var(--color-warning)' : 'var(--color-text-dim)' }}>
+                  {coverageProbeUnavailableMessage}
                 </small>
               </div>
             </div>
