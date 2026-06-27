@@ -293,6 +293,7 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
         previews = all_previews[:20]
 
         focusable_coverage = _read_focusable_coverage_for_xlsx(xlsx_path)
+        coverage_probe_summary = _read_coverage_probe_summary_for_xlsx(xlsx_path, sheet, headers)
         focusable_summary = focusable_coverage.get("summary", {})
         focusable_by_scenario = {
             str(item.get("scenario_id", "") or ""): item
@@ -380,6 +381,8 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
             "scenario_summary": scenario_summary,
             "signals": previews,
             "focusable_coverage": focusable_coverage,
+            "coverage_probe_summary": coverage_probe_summary,
+            "coverage_probe": coverage_probe_summary,
             "debug": {
                 "xlsx_path": xlsx_path.name,
                 "result_rows": sheet.max_row - 1 if sheet.max_row > 1 else 0
@@ -422,6 +425,127 @@ def _read_shadow_summary_from_xlsx(xlsx_path: Path) -> dict[str, int]:
         return values
     except Exception:
         return {}
+
+
+def _read_json_object(path: Path) -> dict[str, object] | None:
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _artifact_metric(payload: dict[str, object] | None, *keys: str) -> int | None:
+    if not payload:
+        return None
+    summary = payload.get("summary")
+    sources = (payload, summary if isinstance(summary, dict) else {})
+    for source in sources:
+        for key in keys:
+            if key not in source:
+                continue
+            try:
+                return int(float(source[key] or 0))
+            except (TypeError, ValueError):
+                return 0
+    return None
+
+
+def _read_coverage_probe_summary_for_xlsx(
+    xlsx_path: Path,
+    result_sheet: openpyxl.worksheet.worksheet.Worksheet,
+    result_headers: list[str],
+) -> dict[str, object]:
+    aggregate_path = xlsx_path.with_name(f"{xlsx_path.stem}.coverage_probe_validation.aggregate.json")
+    fallback_path = xlsx_path.with_name(f"{xlsx_path.stem}.coverage_probe_validation.json")
+    validation_path: Path | None = aggregate_path
+    validation = _read_json_object(aggregate_path)
+    source = "aggregate"
+    if validation is None:
+        validation_path = fallback_path
+        validation = _read_json_object(validation_path)
+        source = "scenario"
+    if validation is None:
+        return {
+            "available": False,
+            "source": "none",
+            "results_artifact": None,
+            "validation_artifact": None,
+        }
+
+    results_aggregate_path = xlsx_path.with_name(f"{xlsx_path.stem}.coverage_probe_results.aggregate.json")
+    results_fallback_path = xlsx_path.with_name(f"{xlsx_path.stem}.coverage_probe_results.json")
+    results = _read_json_object(results_aggregate_path)
+    results_path: Path | None = results_aggregate_path if results is not None else None
+    if results is None:
+        results = _read_json_object(results_fallback_path)
+        results_path = results_fallback_path if results is not None else None
+
+    row_source_col = result_headers.index("row_source") + 1 if "row_source" in result_headers else None
+    dedup_status_col = (
+        result_headers.index("promotion_dedup_status") + 1
+        if "promotion_dedup_status" in result_headers
+        else None
+    )
+    promoted_row_count = _artifact_metric(validation, "promoted_row_count")
+    dedup_skipped_count = _artifact_metric(validation, "promotion_dedup_skipped_count")
+    if promoted_row_count is None or dedup_skipped_count is None:
+        promoted_rows = 0
+        dedup_skipped_rows = 0
+        for row in range(2, result_sheet.max_row + 1):
+            row_source = (
+                str(result_sheet.cell(row, row_source_col).value or "").strip().upper()
+                if row_source_col
+                else ""
+            )
+            dedup_status = (
+                str(result_sheet.cell(row, dedup_status_col).value or "").strip().upper()
+                if dedup_status_col
+                else ""
+            )
+            if row_source == "COVERAGE_PROBE_PROMOTED":
+                promoted_rows += 1
+            if row_source == "COVERAGE_PROBE_SHADOW" and dedup_status == "SKIPPED":
+                dedup_skipped_rows += 1
+        if promoted_row_count is None:
+            promoted_row_count = promoted_rows
+        if dedup_skipped_count is None:
+            dedup_skipped_count = dedup_skipped_rows
+
+    screen_skipped = _artifact_metric(validation, "total_screen_skipped_count", "screen_skipped_count")
+    if screen_skipped is None:
+        screen_skipped = _artifact_metric(results, "total_screen_skipped_count", "screen_skipped_count")
+    scenario_filtered = _artifact_metric(
+        validation,
+        "total_scenario_filtered_count",
+        "scenario_filtered_count",
+    )
+    if scenario_filtered is None:
+        scenario_filtered = _artifact_metric(
+            results,
+            "total_scenario_filtered_count",
+            "scenario_filtered_count",
+        )
+
+    return {
+        "available": True,
+        "source": source,
+        "results_artifact": results_path.name if results_path else None,
+        "validation_artifact": validation_path.name,
+        "candidate_count": _artifact_metric(results, "total_candidate_count", "candidate_count") or 0,
+        "attempted_count": _artifact_metric(results, "total_attempted_count", "attempted_count") or 0,
+        "success_count": _artifact_metric(results, "total_success_count", "success_count") or 0,
+        "failed_count": _artifact_metric(results, "total_failed_count", "failed_count") or 0,
+        "match_count": _artifact_metric(validation, "total_match_count", "match_count") or 0,
+        "promotable_count": _artifact_metric(validation, "promotable_count") or 0,
+        "not_promotable_count": _artifact_metric(validation, "not_promotable_count") or 0,
+        "promoted_row_count": promoted_row_count or 0,
+        "dedup_skipped_count": dedup_skipped_count or 0,
+        "screen_skipped_count": screen_skipped,
+        "scenario_filtered_count": scenario_filtered,
+    }
 
 
 def _empty_focusable_coverage() -> dict[str, object]:

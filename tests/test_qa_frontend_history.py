@@ -484,6 +484,57 @@ def test_recent_batches_include_duration_for_finished_batch(tmp_path, monkeypatc
     assert batches[0]["duration_seconds"] == 754
 
 
+def test_recent_batches_expose_coverage_probe_from_reporting_summary(tmp_path, monkeypatch):
+    run_log_dir = tmp_path / "qa_frontend_runs"
+    batch_dir = run_log_dir / "batch_20260627_182220"
+    output_dir = batch_dir / "device_Model_SERIAL1"
+    output_dir.mkdir(parents=True)
+    (output_dir / "result.xlsx").write_bytes(b"xlsx")
+    (output_dir / "summary.json").write_text("{}", encoding="utf-8")
+    (batch_dir / "batch_summary.json").write_text(
+        """{
+  "batch_id": "batch_20260627_182220",
+  "mode": "full",
+  "created_at": "2026-06-27T18:22:20+09:00",
+  "state": "finished",
+  "enable_coverage_probe": true,
+  "devices": [
+    {
+      "serial": "SERIAL1",
+      "model": "Model",
+      "state": "passed",
+      "return_code": 0,
+      "output_dir": "qa_frontend_runs/batch_20260627_182220/device_Model_SERIAL1"
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+    expected = {
+        "available": True,
+        "total_candidate_count": 24,
+        "total_attempted_count": 24,
+        "total_success_count": 18,
+        "total_failed_count": 6,
+        "promotable_count": 10,
+        "promoted_row_count": 8,
+        "dedup_skipped_count": 2,
+    }
+    monkeypatch.setattr("qa_frontend.backend.batch_runner.RUN_LOG_DIR", run_log_dir)
+    monkeypatch.setattr("qa_frontend.backend.batch_runner.ROOT_DIR", tmp_path)
+    monkeypatch.setattr(
+        "qa_frontend.backend.mismatch_viewer.get_mismatch_summary_from_xlsx",
+        lambda _path: {"coverage_probe_summary": expected},
+    )
+
+    batches = get_recent_batches()
+
+    assert batches[0]["devices"][0]["coverage_probe_summary"] == {
+        **expected,
+        "probe_enabled": True,
+    }
+
+
 def test_open_language_settings_endpoint(monkeypatch):
     client = TestClient(app)
     monkeypatch.setattr(

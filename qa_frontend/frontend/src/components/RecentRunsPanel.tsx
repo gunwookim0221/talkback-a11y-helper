@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { RecentRun, api, RecentBatch, RecentBatchDevice } from '../api';
+import { RecentRun, api, RecentBatch, RecentBatchDevice, CoverageProbeSummary } from '../api';
 import { CrashIssuesPanel } from './CrashIssuesPanel';
 import { formatTime, formatDuration, healthClass, scenarioRunText, languageLabel, scenarioReasonText } from '../utils/formatters';
 
@@ -89,6 +89,7 @@ type MismatchSummary = {
       focusable_taxonomy_reason?: string;
     }>;
   };
+  coverage_probe?: CoverageProbeSummary | null;
 };
 
 export interface RecentRunsPanelProps {
@@ -177,6 +178,22 @@ export function RecentRunsPanel({
     const shadowQuality = runData?.shadow_quality;
     const focusableCoverage = runData?.focusable_coverage;
     const focusableSummary = focusableCoverage?.summary;
+    const coverageProbe = (
+      runData?.coverage_probe_summary ?? runData?.coverage_probe
+    ) as CoverageProbeSummary | null | undefined;
+    const probeCandidateCount = coverageProbe?.candidate_count ?? coverageProbe?.total_candidate_count ?? 0;
+    const probeAttemptedCount = coverageProbe?.attempted_count ?? coverageProbe?.total_attempted_count ?? 0;
+    const probeSuccessCount = coverageProbe?.success_count ?? coverageProbe?.total_success_count ?? 0;
+    const probeFailedCount = coverageProbe?.failed_count ?? coverageProbe?.total_failed_count ?? 0;
+    const probeDedupSkippedCount = (
+      coverageProbe?.dedup_skipped_count ?? coverageProbe?.promotion_dedup_skipped_count ?? 0
+    );
+    const probeScreenSkippedCount = (
+      coverageProbe?.screen_skipped_count ?? coverageProbe?.total_screen_skipped_count
+    );
+    const probeScenarioFilteredCount = (
+      coverageProbe?.scenario_filtered_count ?? coverageProbe?.total_scenario_filtered_count
+    );
     const focusableIssues = runData?.focusable_issues || focusableCoverage?.issues || [];
     const focusableScenarioById = new Map(
       (focusableCoverage?.scenarios || runData?.shadow_scenarios || [])
@@ -393,6 +410,78 @@ export function RecentRunsPanel({
             </div>
           </details>
         )}
+
+        <details open style={{ marginTop: '16px' }}>
+          <summary style={{ fontSize: '14px', fontWeight: 'bold' }}>
+            Coverage Probe
+            {coverageProbe?.available && coverageProbe.source && (
+              <span className="statusBadge" style={{ marginLeft: '8px', fontSize: '10px', fontWeight: 'normal' }}>
+                Source: {coverageProbe.source}
+              </span>
+            )}
+          </summary>
+          {coverageProbe?.available ? (
+            <div className="scenarioDetailList" style={{ marginTop: '8px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '8px', marginBottom: '8px' }}>
+                {[
+                  ['Candidates', probeCandidateCount],
+                  ['Attempted', probeAttemptedCount],
+                  ['Succeeded', probeSuccessCount],
+                  ['Failed', probeFailedCount],
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                    <small>{label}</small>
+                    <strong style={{ fontSize: '1.4em' }}>{value}</strong>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '8px', marginBottom: '8px' }}>
+                {[
+                  ['Promotable', coverageProbe.promotable_count],
+                  ['Promoted', coverageProbe.promoted_row_count],
+                  ['Dedup Skipped', probeDedupSkippedCount],
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                    <small>{label}</small>
+                    <strong style={{ fontSize: '1.4em' }}>{value}</strong>
+                  </div>
+                ))}
+              </div>
+              {(probeScreenSkippedCount != null || probeScenarioFilteredCount != null) && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
+                  {probeScreenSkippedCount != null && (
+                    <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                      <small>Screen Skipped</small>
+                      <strong style={{ fontSize: '1.4em' }}>{probeScreenSkippedCount}</strong>
+                    </div>
+                  )}
+                  {probeScenarioFilteredCount != null && (
+                    <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
+                      <small>Scenario Filtered</small>
+                      <strong style={{ fontSize: '1.4em' }}>{probeScenarioFilteredCount}</strong>
+                    </div>
+                  )}
+                </div>
+              )}
+              {probeCandidateCount === 0 && (
+                <small style={{ color: 'var(--color-text-dim)', padding: '4px 2px' }}>
+                  Probe artifacts found, but no candidates were recorded.
+                </small>
+              )}
+            </div>
+          ) : (
+            <div className="scenarioDetailList" style={{ marginTop: '8px' }}>
+              <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '16px 8px' }}>
+                <strong style={{ color: 'var(--color-text-dim)' }}>Not Available</strong>
+                <small style={{ color: coverageProbe?.probe_enabled ? 'var(--color-warning)' : 'var(--color-text-dim)' }}>
+                  {coverageProbe?.probe_enabled
+                    ? 'V8 Runtime Probe was enabled, but no probe aggregate artifact was found.'
+                    : 'No V8 probe artifacts found for this run.'}
+                </small>
+              </div>
+            </div>
+          )}
+        </details>
 
         {runData?.quality_issues && runData.quality_issues.length > 0 && (
           <details open style={{ marginTop: '16px' }}>

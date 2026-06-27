@@ -615,6 +615,7 @@ class BatchRunManager:
             "mode": self._mode,
             "created_at": self._created_at,
             "state": self._state,
+            "enable_coverage_probe": self._enable_coverage_probe,
             "devices": self._devices
         }
         try:
@@ -701,6 +702,9 @@ class BatchRunManager:
                         ]
                         data["focusable_coverage"] = mismatch_res.get("focusable_coverage")
                         data["focusable_issues"] = (mismatch_res.get("focusable_coverage") or {}).get("issues", [])
+                        coverage_probe_summary = mismatch_res.get("coverage_probe_summary", mismatch_res.get("coverage_probe"))
+                        data["coverage_probe_summary"] = coverage_probe_summary
+                        data["coverage_probe"] = coverage_probe_summary
                         
                         quality_issues = []
                         for sig in mismatch_res.get("signals", []):
@@ -736,6 +740,20 @@ class BatchRunManager:
                 except Exception as e:
                     print(f"Failed to extract quality from xlsx: {e}")
 
+            if xlsx_path and "coverage_probe_summary" not in data:
+                try:
+                    from .mismatch_viewer import get_mismatch_summary_from_xlsx
+                    mismatch_res = get_mismatch_summary_from_xlsx(ROOT_DIR / xlsx_path)
+                    if "error" not in mismatch_res:
+                        coverage_probe_summary = mismatch_res.get(
+                            "coverage_probe_summary",
+                            mismatch_res.get("coverage_probe"),
+                        )
+                        data["coverage_probe_summary"] = coverage_probe_summary
+                        data["coverage_probe"] = coverage_probe_summary
+                except Exception as e:
+                    print(f"Failed to extract coverage probe summary from xlsx: {e}")
+
             data.update({
                 "batch_id": self._batch_id,
                 "serial": device_info.get("serial"),
@@ -748,6 +766,7 @@ class BatchRunManager:
                 "runner_log_path": runner_log_path,
                 "log_path": log_path,
                 "xlsx_path": xlsx_path,
+                "enable_coverage_probe": self._enable_coverage_probe,
                 "quality": quality,
                 "scenarios": parsed_summary.get("scenarios", []),
                 "process_status": parsed_summary.get("process_status"),
@@ -1046,6 +1065,12 @@ def get_recent_batches() -> list[dict]:
                                 dev_info["quality_issues"] = dev_data.get("quality_issues")
                                 dev_info["focusable_coverage"] = dev_data.get("focusable_coverage")
                                 dev_info["focusable_issues"] = dev_data.get("focusable_issues")
+                                coverage_probe_summary = dev_data.get(
+                                    "coverage_probe_summary",
+                                    dev_data.get("coverage_probe"),
+                                )
+                                dev_info["coverage_probe_summary"] = coverage_probe_summary
+                                dev_info["coverage_probe"] = coverage_probe_summary
                                 
                                 from .recent_runs import _recent_run_from_summary
                                 from datetime import datetime
@@ -1061,6 +1086,36 @@ def get_recent_batches() -> list[dict]:
                                 dev_info.update(parsed)
                             except Exception:
                                 pass
+                        coverage_probe_summary = dev_info.get("coverage_probe_summary")
+                        needs_probe_summary_refresh = not isinstance(coverage_probe_summary, dict) or (
+                            coverage_probe_summary.get("available") is True
+                            and "candidate_count" not in coverage_probe_summary
+                        )
+                        if needs_probe_summary_refresh and dev_info.get("xlsx_path"):
+                            try:
+                                from .mismatch_viewer import get_mismatch_summary_from_xlsx
+                                mismatch_res = get_mismatch_summary_from_xlsx(ROOT_DIR / dev_info["xlsx_path"])
+                                if "error" not in mismatch_res:
+                                    coverage_probe_summary = mismatch_res.get(
+                                        "coverage_probe_summary",
+                                        mismatch_res.get("coverage_probe"),
+                                    )
+                                    dev_info["coverage_probe_summary"] = coverage_probe_summary
+                                    dev_info["coverage_probe"] = coverage_probe_summary
+                            except Exception:
+                                pass
+                        coverage_probe_summary = dev_info.get("coverage_probe_summary")
+                        if not isinstance(coverage_probe_summary, dict):
+                            coverage_probe_summary = {
+                                "available": False,
+                                "source": "none",
+                                "results_artifact": None,
+                                "validation_artifact": None,
+                            }
+                            dev_info["coverage_probe_summary"] = coverage_probe_summary
+                            dev_info["coverage_probe"] = coverage_probe_summary
+                        if "enable_coverage_probe" in data:
+                            coverage_probe_summary["probe_enabled"] = bool(data.get("enable_coverage_probe"))
                 devices_info.append(dev_info)
 
             batches.append({

@@ -263,6 +263,32 @@ export type FocusableCoverage = {
   issues?: FocusableCoverageIssue[];
 };
 
+export type CoverageProbeSummary = {
+  available: boolean;
+  source: 'aggregate' | 'scenario' | 'none' | string;
+  results_artifact?: string | null;
+  validation_artifact?: string | null;
+  probe_enabled?: boolean;
+  candidate_count?: number;
+  attempted_count?: number;
+  success_count?: number;
+  failed_count?: number;
+  match_count?: number;
+  promotable_count: number;
+  not_promotable_count?: number;
+  promoted_row_count: number;
+  dedup_skipped_count?: number;
+  screen_skipped_count?: number | null;
+  scenario_filtered_count?: number | null;
+  total_candidate_count?: number;
+  total_attempted_count?: number;
+  total_success_count?: number;
+  total_failed_count?: number;
+  promotion_dedup_skipped_count?: number;
+  total_screen_skipped_count?: number | null;
+  total_scenario_filtered_count?: number | null;
+};
+
 export type RecentBatchDevice = {
   serial: string;
   model: string;
@@ -298,6 +324,8 @@ export type RecentBatchDevice = {
   quality_issues?: QualityIssue[];
   focusable_coverage?: FocusableCoverage | null;
   focusable_issues?: FocusableCoverageIssue[];
+  coverage_probe_summary?: CoverageProbeSummary | null;
+  coverage_probe?: CoverageProbeSummary | null;
   process_status?: string;
   scenario_result_status?: string;
   passed_scenarios?: number;
@@ -997,6 +1025,8 @@ export const api = {
       top_category: string;
     }>;
     focusable_coverage?: FocusableCoverage;
+    coverage_probe_summary?: CoverageProbeSummary;
+    coverage_probe?: CoverageProbeSummary | null;
   }>(`/api/runs/recent/${encodeURIComponent(runId)}/mismatch`),
   outputs: () => request<{ outputs: OutputFile[] }>('/api/outputs'),
 };
