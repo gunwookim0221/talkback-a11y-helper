@@ -268,7 +268,153 @@ def _candidate_equivalent_to_item(candidate: dict[str, Any], item: dict[str, Any
     )
 
 
-def _promotion_target_metadata(item: dict[str, Any], bounds: tuple[int, int, int, int]) -> dict[str, Any]:
+def _semantic_tokens(value: Any) -> list[str]:
+    return re.findall(r"[a-z]+|\d+(?:\.\d+)?", _normalize_text(value))
+
+
+def _semantic_text(*values: Any) -> str:
+    return " ".join(part for part in (_normalize_text(value) for value in values) if part)
+
+
+def _candidate_semantic_profile(candidate: dict[str, Any]) -> dict[str, Any]:
+    label = str(candidate.get("label", "") or "")
+    normalized = _normalize_text(label)
+    tokens = _semantic_tokens(label)
+    alpha_tokens = [token for token in tokens if re.search(r"[a-z]", token)]
+    numeric_tokens = [token for token in tokens if re.fullmatch(r"\d+(?:\.\d+)?", token)]
+    kind = "generic"
+    if normalized in {"on", "off"}:
+        kind = "switch_state"
+    elif "motion" in alpha_tokens and "detected" in alpha_tokens:
+        kind = "motion_state"
+    elif "caqi" in alpha_tokens or "pm" in alpha_tokens or "μg" in normalized or "㎥" in normalized:
+        kind = "air_quality_metric"
+    return {
+        "label": label,
+        "normalized": normalized,
+        "tokens": tokens,
+        "alpha_tokens": alpha_tokens,
+        "numeric_tokens": numeric_tokens,
+        "kind": kind,
+    }
+
+
+def _target_semantic_text(item: dict[str, Any]) -> str:
+    return _semantic_text(
+        item.get("label", ""),
+        item.get("visible_text", ""),
+        item.get("speech", ""),
+        item.get("contentDescription", ""),
+        item.get("content_description", ""),
+        item.get("subtree_text", ""),
+        item.get("view_id", ""),
+        item.get("class_name", ""),
+    )
+
+
+def _semantic_conflict_phrases(profile: dict[str, Any]) -> tuple[str, ...]:
+    kind = str(profile.get("kind", "") or "")
+    if kind == "air_quality_metric":
+        return (
+            "air conditioner",
+            "fan mode",
+            "carbon monoxide",
+            "motion",
+            "washer",
+            "tv",
+            "camera",
+        )
+    if kind == "motion_state":
+        return (
+            "air conditioner",
+            "fan mode",
+            "carbon monoxide",
+            "washer",
+            "tv",
+            "camera",
+        )
+    if kind == "switch_state":
+        return (
+            "carbon monoxide",
+            "motion detected",
+            "fan mode",
+        )
+    return ()
+
+
+def _promotion_semantic_evidence(candidate: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
+    profile = _candidate_semantic_profile(candidate)
+    target_text = _target_semantic_text(item)
+    target_tokens = _semantic_tokens(target_text)
+    target_token_set = set(target_tokens)
+    alpha_tokens = [token for token in profile["alpha_tokens"] if len(token) > 1 or token in {"pm", "on", "off"}]
+    numeric_tokens = profile["numeric_tokens"]
+    reasons: list[str] = []
+    score = 0
+    supported = False
+    conflict_reason = ""
+
+    normalized_label = str(profile.get("normalized", "") or "")
+    if normalized_label and normalized_label in target_text:
+        score += 6
+        supported = True
+        reasons.append("exact_label_match")
+
+    if alpha_tokens and all(token in target_token_set for token in alpha_tokens):
+        score += 3
+        supported = True
+        reasons.append("alpha_tokens_present")
+
+    if numeric_tokens and all(token in target_token_set for token in numeric_tokens):
+        score += 2
+        supported = True
+        reasons.append("numeric_tokens_present")
+
+    if (
+        str(profile.get("kind", "") or "") == "switch_state"
+        and any(token in target_token_set for token in {"switch", "toggle", "state"})
+    ):
+        score += 2
+        supported = True
+        reasons.append("switch_evidence")
+
+    if (
+        str(profile.get("kind", "") or "") == "motion_state"
+        and "motion" in target_token_set
+        and any(token in target_token_set for token in {"sensor", "history", "capability", "card"})
+    ):
+        score += 2
+        supported = True
+        reasons.append("motion_container_evidence")
+
+    for phrase in _semantic_conflict_phrases(profile):
+        if phrase in target_text and phrase not in normalized_label:
+            if not supported or "exact_label_match" not in reasons:
+                conflict_reason = f"semantic_conflict:{phrase}"
+            score -= 4
+            reasons.append(conflict_reason or f"semantic_penalty:{phrase}")
+            break
+
+    if score < 0:
+        score = 0
+    if conflict_reason and "exact_label_match" not in reasons:
+        supported = False
+
+    return {
+        "supported": supported and score > 0,
+        "score": score,
+        "reason": "|".join(reasons) if reasons else ("semantic_conflict" if conflict_reason else "no_semantic_evidence"),
+        "rejected_reason": conflict_reason if conflict_reason and not supported else "",
+    }
+
+
+def _promotion_target_metadata(
+    item: dict[str, Any],
+    bounds: tuple[int, int, int, int],
+    *,
+    semantic_evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    semantic_evidence = semantic_evidence or {}
     return {
         "probe_bounds": _format_bounds(bounds),
         "probe_target_strategy": PROMOTED_TARGET_STRATEGY,
@@ -278,10 +424,14 @@ def _promotion_target_metadata(item: dict[str, Any], bounds: tuple[int, int, int
         "probe_target_class_name": str(item.get("class_name", "") or ""),
         "probe_target_clickable": _bool_field(item.get("clickable")),
         "probe_target_focusable": _bool_field(item.get("focusable")),
+        "probe_target_semantic_supported": bool(semantic_evidence.get("supported")),
+        "probe_target_semantic_score": int(semantic_evidence.get("score", 0) or 0),
+        "probe_target_semantic_reason": str(semantic_evidence.get("reason", "") or ""),
+        "probe_target_rejected_reason": str(semantic_evidence.get("rejected_reason", "") or ""),
     }
 
 
-def _original_target_metadata(candidate: dict[str, Any]) -> dict[str, Any]:
+def _original_target_metadata(candidate: dict[str, Any], *, rejected_reason: str = "", semantic_reason: str = "") -> dict[str, Any]:
     return {
         "probe_bounds": str(candidate.get("bounds", "") or "").strip(),
         "probe_target_strategy": ORIGINAL_TARGET_STRATEGY,
@@ -291,6 +441,10 @@ def _original_target_metadata(candidate: dict[str, Any]) -> dict[str, Any]:
         "probe_target_class_name": str(candidate.get("class_name", "") or ""),
         "probe_target_clickable": _bool_field(candidate.get("clickable")),
         "probe_target_focusable": _bool_field(candidate.get("focusable")),
+        "probe_target_semantic_supported": False,
+        "probe_target_semantic_score": 0,
+        "probe_target_semantic_reason": semantic_reason,
+        "probe_target_rejected_reason": rejected_reason,
     }
 
 
@@ -337,7 +491,7 @@ def _resolve_probe_target(
         if (parsed := _parse_bounds(item.get("bounds"))) is not None
     ]
     max_area = max((_bounds_area(bounds) for bounds in inventory_bounds), default=0)
-    matches: list[tuple[tuple[int, int, int, int], dict[str, Any], tuple[Any, ...]]] = []
+    matches: list[tuple[tuple[int, int, int, int], dict[str, Any], dict[str, Any], tuple[Any, ...]]] = []
     for item in scoped_inventory_items:
         item_bounds = _parse_bounds(item.get("bounds"))
         if item_bounds is None:
@@ -356,20 +510,35 @@ def _resolve_probe_target(
         candidate_area = _bounds_area(candidate_bounds)
         if item_area <= candidate_area:
             continue
+        semantic_evidence = _promotion_semantic_evidence(candidate, item)
         useful_label = bool(_normalize_text(item.get("label", "")) and _normalize_text(item.get("label", "")) not in {"smartthings plugin"})
         score = (
+            0 if semantic_evidence.get("supported") else 1,
+            -int(semantic_evidence.get("score", 0) or 0),
             0 if contains else 1,
             0 if _is_actionable_container_like(item) else 1,
             item_area,
             _center_distance(item_bounds, candidate_bounds),
             0 if useful_label else 1,
         )
-        matches.append((item_bounds, item, score))
+        matches.append((item_bounds, item, semantic_evidence, score))
 
     if not matches:
         return resolved
-    target_bounds, target_item, _score = min(matches, key=lambda entry: entry[2])
-    return {**resolved, **_promotion_target_metadata(target_item, target_bounds)}
+    supported_matches = [entry for entry in matches if bool(entry[2].get("supported"))]
+    if not supported_matches:
+        best_unsupported = min(matches, key=lambda entry: entry[3])
+        semantic_evidence = best_unsupported[2]
+        return {
+            **resolved,
+            **_original_target_metadata(
+                candidate,
+                rejected_reason=str(semantic_evidence.get("rejected_reason", "") or "semantic_support_missing"),
+                semantic_reason=str(semantic_evidence.get("reason", "") or "no_semantic_evidence"),
+            ),
+        }
+    target_bounds, target_item, semantic_evidence, _score = min(supported_matches, key=lambda entry: entry[3])
+    return {**resolved, **_promotion_target_metadata(target_item, target_bounds, semantic_evidence=semantic_evidence)}
 
 
 def _raw_action_result(result: Any) -> dict[str, Any]:
@@ -688,6 +857,10 @@ def _candidate_result_base(candidate: dict[str, Any]) -> dict[str, Any]:
         "probe_target_class_name",
         "probe_target_clickable",
         "probe_target_focusable",
+        "probe_target_semantic_supported",
+        "probe_target_semantic_score",
+        "probe_target_semantic_reason",
+        "probe_target_rejected_reason",
     )
     return {key: candidate.get(key, "") for key in keys}
 

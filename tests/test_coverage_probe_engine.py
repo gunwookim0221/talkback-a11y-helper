@@ -77,6 +77,35 @@ def _inventory_item(**overrides):
     return base
 
 
+def _air_purifier_leaf_candidate(**overrides):
+    return _candidate(
+        label="PM 2.5",
+        normalized_label="pm 2.5",
+        scenario_id="device_air_purifier_plugin",
+        tab_name="Air Purifier",
+        view_id="",
+        class_name="android.widget.TextView",
+        bounds="84,1570,996,1648",
+        **overrides,
+    )
+
+
+def _air_purifier_inventory_item(**overrides):
+    base = {
+        "scenario_id": "device_air_purifier_plugin",
+        "tab_name": "(?i).*devices.*",
+        "label": "Fine dust History PM 10 0 μg/㎥ 0999 PM 2.5 0 μg/㎥ 0999 PM 1.0 0 μg/㎥ 0999",
+        "view_id": "DustSensorCapabilityCardView",
+        "bounds": "30,1219,1050,2002",
+        "source": "helper_snapshot",
+        "class_name": "android.view.View",
+        "clickable": True,
+        "focusable": False,
+    }
+    base.update(overrides)
+    return base
+
+
 class FakeProbeClient:
     def __init__(
         self,
@@ -432,6 +461,133 @@ def test_probe_target_promotion_same_scenario_filter_does_not_regress_ranking_ag
     assert result["probe_target_view_id"] == "MotionSensorCapabilityCardView"
     assert result["probe_target_label"] == "Motion sensor Same scenario container"
     assert result["probe_target_label"] != "Smoke sensor Closer container"
+
+
+def test_probe_target_promotion_prefers_semantically_supported_same_scenario_candidate(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    _write_inventory(
+        output_path,
+        [
+            _air_purifier_inventory_item(
+                label="Air conditioner fan mode Change",
+                view_id="AirConditionerFanModeCardView",
+                bounds="30,1219,1050,2002",
+            ),
+            _air_purifier_inventory_item(),
+        ],
+    )
+    client = FakeProbeClient(
+        focus_results=[
+            _success_result("Fine dust History PM 10 0 μg/㎥ 0999 PM 2.5 0 μg/㎥ 0999 PM 1.0 0 μg/㎥ 0999")
+        ]
+    )
+
+    payload = coverage_probe_engine.build_probe_results_payload(
+        client,
+        "device",
+        _plan([_air_purifier_leaf_candidate()]),
+        probe_plan_path=str(tmp_path / "plan.json"),
+        output_path=output_path,
+        enabled=True,
+    )
+    result = payload["results"][0]
+
+    assert result["probe_target_view_id"] == "DustSensorCapabilityCardView"
+    assert result["probe_target_semantic_supported"] is True
+    assert result["probe_target_semantic_score"] > 0
+    assert client.focus_in_bounds_calls[0]["bounds"] == "30,1219,1050,2002"
+
+
+def test_probe_target_promotion_rejects_semantic_conflict_when_no_supported_target_exists(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    _write_inventory(
+        output_path,
+        [
+            _air_purifier_inventory_item(
+                label="Air conditioner fan mode Change",
+                view_id="AirConditionerFanModeCardView",
+                bounds="30,1219,1050,2002",
+            ),
+        ],
+    )
+    client = FakeProbeClient(focus_results=[_success_result("PM 2.5")])
+
+    payload = coverage_probe_engine.build_probe_results_payload(
+        client,
+        "device",
+        _plan([_air_purifier_leaf_candidate()]),
+        probe_plan_path=str(tmp_path / "plan.json"),
+        output_path=output_path,
+        enabled=True,
+    )
+    result = payload["results"][0]
+
+    assert result["probe_target_strategy"] == "original_bounds"
+    assert result["probe_target_semantic_supported"] is False
+    assert result["probe_target_rejected_reason"] == "semantic_conflict:air conditioner"
+    assert client.focus_in_bounds_calls[0]["bounds"] == "84,1570,996,1648"
+
+
+def test_probe_target_promotion_keeps_original_bounds_for_semantically_unsupported_same_scenario_targets(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    _write_inventory(
+        output_path,
+        [
+            _air_purifier_inventory_item(
+                label="Large capability container",
+                view_id="LargeCapabilityContainer",
+                bounds="30,1219,1050,2002",
+            ),
+        ],
+    )
+    client = FakeProbeClient(focus_results=[_success_result("PM 2.5")])
+
+    payload = coverage_probe_engine.build_probe_results_payload(
+        client,
+        "device",
+        _plan([_air_purifier_leaf_candidate()]),
+        probe_plan_path=str(tmp_path / "plan.json"),
+        output_path=output_path,
+        enabled=True,
+    )
+    result = payload["results"][0]
+
+    assert result["probe_target_strategy"] == "original_bounds"
+    assert result["probe_target_semantic_reason"] == "no_semantic_evidence"
+    assert client.focus_in_bounds_calls[0]["bounds"] == "84,1570,996,1648"
+
+
+def test_probe_target_promotion_does_not_promote_repeated_metric_label_to_adjacent_unrelated_card(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    _write_inventory(
+        output_path,
+        [
+            _air_purifier_inventory_item(
+                label="Air conditioner fan mode Change",
+                view_id="AirConditionerFanModeCardView",
+                bounds="30,1219,1050,2002",
+            ),
+            _air_purifier_inventory_item(
+                label="Carbon monoxide detector History Clear",
+                view_id="CarbonMonoxideDetectorCapabilityCardView",
+                bounds="20,1200,1060,2050",
+            ),
+        ],
+    )
+    client = FakeProbeClient(focus_results=[_success_result("PM 2.5")])
+
+    payload = coverage_probe_engine.build_probe_results_payload(
+        client,
+        "device",
+        _plan([_air_purifier_leaf_candidate()]),
+        probe_plan_path=str(tmp_path / "plan.json"),
+        output_path=output_path,
+        enabled=True,
+    )
+    result = payload["results"][0]
+
+    assert result["probe_target_strategy"] == "original_bounds"
+    assert result["probe_target_view_id"] == ""
 
 
 def test_helper_failure_late_focus_promotes_probe_to_success(tmp_path):
