@@ -14135,6 +14135,26 @@ def _bottom_strip_guard_row(step_idx=1, **overrides):
     return row
 
 
+def _strip_only_terminal_row(step_idx=1, **overrides):
+    row = {
+        **_main_row(step_idx),
+        "scenario_id": "life_family_care_plugin",
+        "viewport_exhausted_eval_result": True,
+        "viewport_exhausted_eval_reason": "no_representative_candidates",
+        "scroll_fallback_allowed": True,
+        "scroll_fallback_gate_reason": "bottom_strip_context_scrollable_uncertain",
+        "local_tab_block_reason": "no_unvisited_local_tab",
+        "visible_label": "EventsButton",
+        "normalized_visible_label": "eventsbutton",
+        "merged_announcement": "EventsButton",
+        "row_lifecycle_kind": "local_tab",
+        "row_lifecycle_source": "bottom_strip_candidate",
+        "row_lifecycle_confidence": "high",
+    }
+    row.update(overrides)
+    return row
+
+
 def test_bottom_strip_guard_stops_after_repeated_failures(monkeypatch):
     logs = []
     monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
@@ -14309,6 +14329,505 @@ def test_bottom_strip_guard_ignores_content_row_repetition():
         )
 
     assert (stop, reason, applied) == (False, "", False)
+
+
+def test_exhausted_terminal_guard_does_not_trigger_after_one_observation(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    state = _phase_ordering_state()
+    row = {
+        **_main_row(12),
+        "scenario_id": "life_family_care_plugin",
+        "viewport_exhausted_eval_result": True,
+        "viewport_exhausted_eval_reason": "no_representative_candidates",
+        "scroll_fallback_allowed": False,
+        "scroll_fallback_gate_reason": "not_scrollable",
+        "local_tab_block_reason": "no_unvisited_local_tab",
+    }
+
+    stop, reason, applied = collection_flow._maybe_apply_exhausted_terminal_guard(
+        row=row,
+        state=state,
+        stop=False,
+        reason="",
+        step_idx=12,
+        scenario_id="life_family_care_plugin",
+    )
+
+    assert (stop, reason, applied) == (False, "", False)
+    assert row["exhausted_terminal_guard_streak"] == 1
+    assert any("decision='continue'" in line for line in logs)
+
+
+def test_exhausted_terminal_guard_triggers_after_consecutive_observations(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    state = _phase_ordering_state()
+
+    first = {
+        **_main_row(12),
+        "scenario_id": "life_family_care_plugin",
+        "viewport_exhausted_eval_result": True,
+        "viewport_exhausted_eval_reason": "no_representative_candidates",
+        "scroll_fallback_allowed": False,
+        "scroll_fallback_gate_reason": "not_scrollable",
+        "local_tab_block_reason": "no_unvisited_local_tab",
+    }
+    second = {**first, "step_index": 13}
+
+    assert collection_flow._maybe_apply_exhausted_terminal_guard(
+        row=first,
+        state=state,
+        stop=False,
+        reason="",
+        step_idx=12,
+        scenario_id="life_family_care_plugin",
+    ) == (False, "", False)
+
+    stop, reason, applied = collection_flow._maybe_apply_exhausted_terminal_guard(
+        row=second,
+        state=state,
+        stop=False,
+        reason="",
+        step_idx=13,
+        scenario_id="life_family_care_plugin",
+    )
+
+    assert (stop, reason, applied) == (
+        True,
+        "exhausted_not_scrollable_no_unvisited_local_tab",
+        True,
+    )
+    assert second["exhausted_terminal_guard_triggered"] is True
+    assert any("decision='stop'" in line for line in logs)
+
+
+def test_exhausted_terminal_guard_requires_viewport_exhausted():
+    state = _phase_ordering_state()
+    row = {
+        **_main_row(5),
+        "scenario_id": "life_family_care_plugin",
+        "viewport_exhausted_eval_result": False,
+        "viewport_exhausted_eval_reason": "no_representative_candidates",
+        "scroll_fallback_allowed": False,
+        "scroll_fallback_gate_reason": "not_scrollable",
+        "local_tab_block_reason": "no_unvisited_local_tab",
+    }
+
+    stop, reason, applied = collection_flow._maybe_apply_exhausted_terminal_guard(
+        row=row,
+        state=state,
+        stop=False,
+        reason="",
+        step_idx=5,
+        scenario_id="life_family_care_plugin",
+    )
+
+    assert (stop, reason, applied) == (False, "", False)
+
+
+def test_exhausted_terminal_guard_does_not_trigger_when_scroll_fallback_allowed():
+    state = _phase_ordering_state()
+    row = {
+        **_main_row(6),
+        "scenario_id": "life_family_care_plugin",
+        "viewport_exhausted_eval_result": True,
+        "viewport_exhausted_eval_reason": "no_representative_candidates",
+        "scroll_fallback_allowed": True,
+        "scroll_fallback_gate_reason": "scrollable",
+        "local_tab_block_reason": "no_unvisited_local_tab",
+    }
+
+    stop, reason, applied = collection_flow._maybe_apply_exhausted_terminal_guard(
+        row=row,
+        state=state,
+        stop=False,
+        reason="",
+        step_idx=6,
+        scenario_id="life_family_care_plugin",
+    )
+
+    assert (stop, reason, applied) == (False, "", False)
+
+
+def test_exhausted_terminal_guard_does_not_trigger_when_local_tab_has_unvisited_candidate():
+    state = _phase_ordering_state()
+    row = {
+        **_main_row(7),
+        "scenario_id": "life_family_care_plugin",
+        "viewport_exhausted_eval_result": True,
+        "viewport_exhausted_eval_reason": "no_representative_candidates",
+        "scroll_fallback_allowed": False,
+        "scroll_fallback_gate_reason": "not_scrollable",
+        "local_tab_block_reason": "",
+    }
+
+    stop, reason, applied = collection_flow._maybe_apply_exhausted_terminal_guard(
+        row=row,
+        state=state,
+        stop=False,
+        reason="",
+        step_idx=7,
+        scenario_id="life_family_care_plugin",
+    )
+
+    assert (stop, reason, applied) == (False, "", False)
+
+
+def test_exhausted_terminal_guard_preserves_existing_repeat_no_progress_stop():
+    state = _phase_ordering_state()
+    row = {
+        **_main_row(8),
+        "scenario_id": "life_family_care_plugin",
+        "viewport_exhausted_eval_result": True,
+        "viewport_exhausted_eval_reason": "no_representative_candidates",
+        "scroll_fallback_allowed": False,
+        "scroll_fallback_gate_reason": "not_scrollable",
+        "local_tab_block_reason": "no_unvisited_local_tab",
+    }
+
+    stop, reason, applied = collection_flow._maybe_apply_exhausted_terminal_guard(
+        row=row,
+        state=state,
+        stop=True,
+        reason="repeat_no_progress",
+        step_idx=8,
+        scenario_id="life_family_care_plugin",
+    )
+
+    assert (stop, reason, applied) == (True, "repeat_no_progress", False)
+
+
+def test_exhausted_terminal_guard_main_loop_preserves_safety_limit(monkeypatch):
+    row = {
+        **_main_row(1),
+        "scenario_id": "life_family_care_plugin",
+        "visible_label": "LocationButton",
+        "viewport_exhausted_eval_result": True,
+        "viewport_exhausted_eval_reason": "no_representative_candidates",
+        "scroll_fallback_allowed": False,
+        "scroll_fallback_gate_reason": "not_scrollable",
+        "local_tab_block_reason": "no_unvisited_local_tab",
+    }
+    events, phase_ctx = _run_phase_ordering_main_loop(monkeypatch, row=row, stop=False, reason="")
+    collection_flow._persist_phase(phase_ctx)
+
+    assert events == [(1, "LocationButton")]
+    assert phase_ctx.state.stop_reason == "safety_limit"
+    assert phase_ctx.rows[-1]["stop_triggered"] is False
+
+
+def test_exhausted_terminal_guard_main_loop_sets_explicit_stop_reason(monkeypatch):
+    rows = [
+        {
+            **_main_row(1),
+            "scenario_id": "life_family_care_plugin",
+            "visible_label": "LocationButton",
+            "viewport_exhausted_eval_result": True,
+            "viewport_exhausted_eval_reason": "no_representative_candidates",
+            "scroll_fallback_allowed": False,
+            "scroll_fallback_gate_reason": "not_scrollable",
+            "local_tab_block_reason": "no_unvisited_local_tab",
+        },
+        {
+            **_main_row(2),
+            "scenario_id": "life_family_care_plugin",
+            "visible_label": "EventsButton",
+            "viewport_exhausted_eval_result": True,
+            "viewport_exhausted_eval_reason": "no_representative_candidates",
+            "scroll_fallback_allowed": False,
+            "scroll_fallback_gate_reason": "not_scrollable",
+            "local_tab_block_reason": "no_unvisited_local_tab",
+        },
+    ]
+    client = DummyClient(rows)
+    state = _phase_ordering_state()
+    phase_ctx = SimpleNamespace(
+        tab_cfg=_base_tab_cfg(max_steps=2),
+        rows=[],
+        all_rows=[],
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        checkpoint_every=100,
+        main_step_wait_seconds=0,
+        main_announcement_wait_seconds=0,
+        main_announcement_idle_wait_seconds=0,
+        main_announcement_max_extra_wait_seconds=0,
+        state=state,
+    )
+
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda _client, _dev, row, _base: row)
+    monkeypatch.setattr(collection_flow, "_record_pending_scroll_ready_move", lambda **kwargs: None)
+    monkeypatch.setattr(collection_flow, "_maybe_reprioritize_persistent_bottom_strip_row", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_maybe_promote_row_to_cta_child", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_maybe_progress_row_to_cta_sibling", lambda **kwargs: kwargs["row"])
+    monkeypatch.setattr(collection_flow, "_record_recent_representative_signature", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(collection_flow, "_annotate_row_quality", lambda row, **kwargs: ("fp", 1))
+    monkeypatch.setattr(collection_flow, "detect_step_mismatch", lambda **kwargs: ([], []))
+    monkeypatch.setattr(collection_flow, "should_stop", lambda **kwargs: (False, 0, 0, "", ("fp", "", ""), {}))
+    monkeypatch.setattr(collection_flow, "_build_stop_evaluation_inputs", lambda **kwargs: _phase_ordering_stop_inputs())
+    monkeypatch.setattr(collection_flow, "_maybe_apply_cta_pending_grace", lambda **kwargs: (kwargs["stop"], kwargs["reason"], False))
+    monkeypatch.setattr(collection_flow, "_maybe_apply_scroll_ready_continue", lambda **kwargs: (kwargs["stop"], kwargs["reason"], False))
+    monkeypatch.setattr(collection_flow, "classify_step_result", lambda *args, **kwargs: {})
+    monkeypatch.setattr(collection_flow, "_format_stop_explain_log_fields", lambda **kwargs: "")
+    monkeypatch.setattr(collection_flow, "_log_repeat_stop_debug", lambda **kwargs: None)
+    monkeypatch.setattr(collection_flow, "_should_suppress_row_persistence", lambda **kwargs: (False, ""))
+    monkeypatch.setattr(collection_flow, "_overlay_phase", lambda **kwargs: SimpleNamespace(post_realign_pending_steps_delta=0))
+    monkeypatch.setattr(collection_flow, "save_excel_with_perf", lambda *args, **kwargs: None)
+    monkeypatch.setattr(collection_flow, "_maybe_select_next_local_tab", lambda **kwargs: False)
+
+    collection_flow._main_loop_phase(client, "SERIAL", phase_ctx)
+
+    assert phase_ctx.rows[-1]["stop_reason"] == "exhausted_not_scrollable_no_unvisited_local_tab"
+
+
+def test_strip_only_terminal_guard_does_not_trigger_on_first_uncertain_state(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    state = _phase_ordering_state()
+    row = _strip_only_terminal_row(21)
+
+    stop, reason, applied = collection_flow._maybe_apply_strip_only_terminal_guard(
+        row=row,
+        state=state,
+        stop=False,
+        reason="",
+        step_idx=21,
+        scenario_id="life_family_care_plugin",
+    )
+
+    assert (stop, reason, applied) == (False, "", False)
+    assert row["strip_only_terminal_guard_streak"] == 1
+    assert any("decision='continue'" in line for line in logs)
+
+
+def test_strip_only_terminal_guard_meaningful_row_does_not_trigger(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    state = _phase_ordering_state()
+    row = _strip_only_terminal_row(
+        22,
+        visible_label="Medication",
+        normalized_visible_label="medication",
+        merged_announcement="Medication",
+        row_lifecycle_kind="content",
+        row_lifecycle_source="content_candidates_present",
+    )
+
+    stop, reason, applied = collection_flow._maybe_apply_strip_only_terminal_guard(
+        row=row,
+        state=state,
+        stop=False,
+        reason="",
+        step_idx=22,
+        scenario_id="life_family_care_plugin",
+    )
+
+    assert (stop, reason, applied) == (False, "", False)
+    assert state.strip_only_terminal_guard_state.streak == 0
+    assert row["strip_only_terminal_guard_new_non_strip_content"] is True
+    assert any("reset_reason='new_non_strip_content'" in line for line in logs)
+
+
+def test_strip_only_terminal_guard_resets_streak_when_meaningful_content_appears():
+    state = _phase_ordering_state()
+    first = _strip_only_terminal_row(23)
+    reset_row = _strip_only_terminal_row(
+        24,
+        visible_label="Hospital",
+        normalized_visible_label="hospital",
+        merged_announcement="Hospital",
+        row_lifecycle_kind="content",
+        row_lifecycle_source="content_candidates_present",
+    )
+    third = _strip_only_terminal_row(25, visible_label="ActivityButton", normalized_visible_label="activitybutton")
+
+    assert collection_flow._maybe_apply_strip_only_terminal_guard(
+        row=first,
+        state=state,
+        stop=False,
+        reason="",
+        step_idx=23,
+        scenario_id="life_family_care_plugin",
+    ) == (False, "", False)
+    assert state.strip_only_terminal_guard_state.streak == 1
+
+    assert collection_flow._maybe_apply_strip_only_terminal_guard(
+        row=reset_row,
+        state=state,
+        stop=False,
+        reason="",
+        step_idx=24,
+        scenario_id="life_family_care_plugin",
+    ) == (False, "", False)
+    assert state.strip_only_terminal_guard_state.streak == 0
+
+    assert collection_flow._maybe_apply_strip_only_terminal_guard(
+        row=third,
+        state=state,
+        stop=False,
+        reason="",
+        step_idx=25,
+        scenario_id="life_family_care_plugin",
+    ) == (False, "", False)
+    assert third["strip_only_terminal_guard_streak"] == 1
+
+
+def test_strip_only_terminal_guard_triggers_after_consecutive_strip_only_states():
+    state = _phase_ordering_state()
+    rows = [
+        _strip_only_terminal_row(26, visible_label="EventsButton", normalized_visible_label="eventsbutton"),
+        _strip_only_terminal_row(27, visible_label="ActivityButton", normalized_visible_label="activitybutton"),
+        _strip_only_terminal_row(28, visible_label="LocationButton", normalized_visible_label="locationbutton"),
+    ]
+
+    for row in rows[:2]:
+        assert collection_flow._maybe_apply_strip_only_terminal_guard(
+            row=row,
+            state=state,
+            stop=False,
+            reason="",
+            step_idx=row["step_index"],
+            scenario_id="life_family_care_plugin",
+        ) == (False, "", False)
+
+    stop, reason, applied = collection_flow._maybe_apply_strip_only_terminal_guard(
+        row=rows[2],
+        state=state,
+        stop=False,
+        reason="",
+        step_idx=28,
+        scenario_id="life_family_care_plugin",
+    )
+
+    assert (stop, reason, applied) == (True, "exhausted_strip_only_terminal_state", True)
+    assert rows[2]["strip_only_terminal_guard_triggered"] is True
+
+
+def test_strip_only_terminal_guard_label_denylist_rows_do_not_reset_streak():
+    state = _phase_ordering_state()
+    rows = [
+        _strip_only_terminal_row(
+            29,
+            visible_label="EventsButton",
+            normalized_visible_label="eventsbutton",
+            row_lifecycle_kind="content",
+            row_lifecycle_source="content_candidates_present",
+        ),
+        _strip_only_terminal_row(
+            30,
+            visible_label="ActivityButton",
+            normalized_visible_label="activitybutton",
+            row_lifecycle_kind="content",
+            row_lifecycle_source="content_candidates_present",
+        ),
+        _strip_only_terminal_row(
+            31,
+            visible_label="LocationButton",
+            normalized_visible_label="locationbutton",
+            row_lifecycle_kind="content",
+            row_lifecycle_source="content_candidates_present",
+        ),
+    ]
+
+    for row in rows:
+        collection_flow._maybe_apply_strip_only_terminal_guard(
+            row=row,
+            state=state,
+            stop=False,
+            reason="",
+            step_idx=row["step_index"],
+            scenario_id="life_family_care_plugin",
+        )
+
+    assert state.strip_only_terminal_guard_state.streak == 3
+    assert rows[1]["strip_only_terminal_guard_control_reason"] == "strip_label_denylist"
+
+
+def test_strip_only_terminal_guard_meaningful_labels_reset_streak():
+    state = _phase_ordering_state()
+    strip_row = _strip_only_terminal_row(32)
+
+    assert collection_flow._maybe_apply_strip_only_terminal_guard(
+        row=strip_row,
+        state=state,
+        stop=False,
+        reason="",
+        step_idx=32,
+        scenario_id="life_family_care_plugin",
+    ) == (False, "", False)
+    assert state.strip_only_terminal_guard_state.streak == 1
+
+    for step_idx, label in ((33, "Medication"), (34, "Hospital"), (35, "Event")):
+        row = _strip_only_terminal_row(
+            step_idx,
+            visible_label=label,
+            normalized_visible_label=label.lower(),
+            merged_announcement=label,
+            row_lifecycle_kind="content",
+            row_lifecycle_source="content_candidates_present",
+        )
+        assert collection_flow._maybe_apply_strip_only_terminal_guard(
+            row=row,
+            state=state,
+            stop=False,
+            reason="",
+            step_idx=step_idx,
+            scenario_id="life_family_care_plugin",
+        ) == (False, "", False)
+        assert state.strip_only_terminal_guard_state.streak == 0
+
+
+def test_strip_only_terminal_guard_treats_uncertain_metadata_as_meaningful():
+    state = _phase_ordering_state()
+    row = _strip_only_terminal_row(
+        36,
+        visible_label="Unknown summary",
+        normalized_visible_label="unknown summary",
+        merged_announcement="Unknown summary",
+        row_lifecycle_kind="",
+        row_lifecycle_source="",
+    )
+
+    stop, reason, applied = collection_flow._maybe_apply_strip_only_terminal_guard(
+        row=row,
+        state=state,
+        stop=False,
+        reason="",
+        step_idx=36,
+        scenario_id="life_family_care_plugin",
+    )
+
+    assert (stop, reason, applied) == (False, "", False)
+    assert state.strip_only_terminal_guard_state.streak == 0
+    assert row["strip_only_terminal_guard_new_non_strip_content"] is True
+
+
+def test_strip_only_terminal_guard_preserves_existing_repeat_no_progress_stop():
+    state = _phase_ordering_state()
+    row = _strip_only_terminal_row(37)
+
+    stop, reason, applied = collection_flow._maybe_apply_strip_only_terminal_guard(
+        row=row,
+        state=state,
+        stop=True,
+        reason="repeat_no_progress",
+        step_idx=37,
+        scenario_id="life_family_care_plugin",
+    )
+
+    assert (stop, reason, applied) == (True, "repeat_no_progress", False)
+
+
+def test_strip_only_terminal_guard_main_loop_preserves_safety_limit(monkeypatch):
+    row = _strip_only_terminal_row(1)
+    events, phase_ctx = _run_phase_ordering_main_loop(monkeypatch, row=row, stop=False, reason="")
+    collection_flow._persist_phase(phase_ctx)
+
+    assert events == [(1, "EventsButton")]
+    assert phase_ctx.state.stop_reason == "safety_limit"
+    assert phase_ctx.rows[-1]["stop_triggered"] is False
 
 
 def test_bottom_strip_guard_ignores_local_tab_metadata_source():

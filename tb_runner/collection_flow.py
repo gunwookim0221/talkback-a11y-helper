@@ -85,6 +85,8 @@ COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION = "pr108-local-tab-last-selected-h
 COLLECTION_FLOW_REPEAT_SUPPRESSION_VERSION = "phase3f-repeat-suppression-v1"
 COLLECTION_FLOW_BOTTOM_STRIP_GUARD_VERSION = "phase4d-bottom-strip-guard-v1"
 COLLECTION_FLOW_BOTTOM_STRIP_FAST_STOP_VERSION = "phase4e-bottom-strip-no-unvisited-fast-stop-v1"
+COLLECTION_FLOW_EXHAUSTED_TERMINAL_GUARD_VERSION = "v8_2-exhausted-terminal-guard-v1"
+COLLECTION_FLOW_STRIP_ONLY_TERMINAL_GUARD_VERSION = "v8_2-strip-only-terminal-guard-v1"
 COLLECTION_FLOW_FOOD_HOME_HANDOFF_VERSION = "phase-food-two-stage-entry-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
 COLLECTION_FLOW_LIFE_RESET_VERSION = "pr61-life-reset-strict-global-nav-v1"
@@ -98,6 +100,21 @@ _REPEAT_SUPPRESSION_CONTINUE_THRESHOLD = 3
 _REPEAT_SUPPRESSION_SIGNAL_THRESHOLD = 3
 _BOTTOM_STRIP_GUARD_FINGERPRINT_THRESHOLD = 5
 _BOTTOM_STRIP_GUARD_FAILURE_THRESHOLD = 3
+_EXHAUSTED_TERMINAL_GUARD_STREAK_THRESHOLD = 2
+_EXHAUSTED_TERMINAL_GUARD_STOP_REASON = "exhausted_not_scrollable_no_unvisited_local_tab"
+_STRIP_ONLY_TERMINAL_GUARD_STREAK_THRESHOLD = 3
+_STRIP_ONLY_TERMINAL_GUARD_STOP_REASON = "exhausted_strip_only_terminal_state"
+_STRIP_ONLY_TERMINAL_SCROLL_REASONS = frozenset({"not_scrollable", "bottom_strip_context_scrollable_uncertain"})
+_STRIP_ONLY_TERMINAL_LABEL_DENYLIST = frozenset(
+    {
+        "eventsbutton",
+        "activitybutton",
+        "locationbutton",
+        "history",
+        "controls",
+        "routines",
+    }
+)
 _STRONG_ONBOARDING_TOKENS = (
     "agree",
     "consent",
@@ -299,6 +316,16 @@ class BottomStripRepetitionGuardState:
 
 
 @dataclass
+class ExhaustedTerminalGuardState:
+    streak: int = 0
+
+
+@dataclass
+class StripOnlyTerminalGuardState:
+    streak: int = 0
+
+
+@dataclass
 class MainLoopState:
     last_fingerprint: str
     fingerprint_repeat_count: int
@@ -365,6 +392,12 @@ class MainLoopState:
     )
     bottom_strip_repetition_guard_state: BottomStripRepetitionGuardState = field(
         default_factory=BottomStripRepetitionGuardState
+    )
+    exhausted_terminal_guard_state: ExhaustedTerminalGuardState = field(
+        default_factory=ExhaustedTerminalGuardState
+    )
+    strip_only_terminal_guard_state: StripOnlyTerminalGuardState = field(
+        default_factory=StripOnlyTerminalGuardState
     )
     local_tab_state: local_tab_logic.LocalTabState = field(default_factory=local_tab_logic.LocalTabState)
 
@@ -12749,6 +12782,166 @@ def _maybe_apply_bottom_strip_repetition_guard(
     return True, "repeat_no_progress", True
 
 
+def _is_exhausted_terminal_guard_eligible(row: dict[str, Any]) -> bool:
+    if not bool(row.get("viewport_exhausted_eval_result", False)):
+        return False
+    if str(row.get("viewport_exhausted_eval_reason", "") or "") != "no_representative_candidates":
+        return False
+    if bool(row.get("scroll_fallback_allowed", False)):
+        return False
+    scroll_reason = str(
+        row.get("scroll_fallback_gate_reason", "") or row.get("scroll_fallback_block_reason", "") or ""
+    ).strip()
+    if scroll_reason != "not_scrollable":
+        return False
+    if str(row.get("local_tab_block_reason", "") or "") != "no_unvisited_local_tab":
+        return False
+    return True
+
+
+def _strip_only_terminal_scroll_reason(row: dict[str, Any]) -> str:
+    return str(
+        row.get("scroll_fallback_gate_reason", "") or row.get("scroll_fallback_block_reason", "") or ""
+    ).strip()
+
+
+def _is_strip_only_terminal_guard_eligible(row: dict[str, Any]) -> bool:
+    if not bool(row.get("viewport_exhausted_eval_result", False)):
+        return False
+    if str(row.get("viewport_exhausted_eval_reason", "") or "") != "no_representative_candidates":
+        return False
+    if str(row.get("local_tab_block_reason", "") or "") != "no_unvisited_local_tab":
+        return False
+    if _strip_only_terminal_scroll_reason(row) not in _STRIP_ONLY_TERMINAL_SCROLL_REASONS:
+        return False
+    return True
+
+
+def _strip_only_terminal_control_reason(row: dict[str, Any]) -> str:
+    if _is_bottom_strip_lifecycle_row(row):
+        return "bottom_strip_lifecycle"
+    if bool(row.get("local_tab_transition", False)):
+        return "local_tab_transition"
+    if bool(row.get("forced_local_tab_navigation", False)):
+        return "forced_local_tab_navigation"
+    if _is_row_persistent_bottom_strip_candidate(row):
+        return "persistent_bottom_strip_candidate"
+
+    normalized_label = str(
+        row.get("normalized_visible_label", "")
+        or _normalize_logical_text(str(row.get("visible_label", "") or ""))
+    ).strip().lower()
+    if normalized_label in _STRIP_ONLY_TERMINAL_LABEL_DENYLIST:
+        return "strip_label_denylist"
+    return ""
+
+
+def _is_new_non_strip_meaningful_main_row(row: dict[str, Any]) -> bool:
+    return not bool(_strip_only_terminal_control_reason(row))
+
+
+def _maybe_apply_exhausted_terminal_guard(
+    *,
+    row: dict[str, Any],
+    state: MainLoopState,
+    stop: bool,
+    reason: str,
+    step_idx: int,
+    scenario_id: str,
+) -> tuple[bool, str, bool]:
+    guard_state = getattr(state, "exhausted_terminal_guard_state", None)
+    if not isinstance(guard_state, ExhaustedTerminalGuardState):
+        guard_state = ExhaustedTerminalGuardState()
+        setattr(state, "exhausted_terminal_guard_state", guard_state)
+
+    if stop:
+        guard_state.streak = 0
+        return stop, reason, False
+
+    if not _is_exhausted_terminal_guard_eligible(row):
+        guard_state.streak = 0
+        return stop, reason, False
+
+    guard_state.streak += 1
+    row["exhausted_terminal_guard_streak"] = guard_state.streak
+    row["exhausted_terminal_guard_version"] = COLLECTION_FLOW_EXHAUSTED_TERMINAL_GUARD_VERSION
+    decision = "stop" if guard_state.streak >= _EXHAUSTED_TERMINAL_GUARD_STREAK_THRESHOLD else "continue"
+    log(
+        f"[EARLY_STOP][exhausted_terminal_guard] scenario='{scenario_id}' step={step_idx} "
+        f"streak={guard_state.streak} viewport_exhausted=true "
+        "scroll_fallback_allowed=false scroll_fallback_reason='not_scrollable' "
+        "local_tab_gate_allowed=false local_tab_gate_reason='no_unvisited_local_tab' "
+        f"decision='{decision}' reason='{_EXHAUSTED_TERMINAL_GUARD_STOP_REASON}' "
+        f"version='{COLLECTION_FLOW_EXHAUSTED_TERMINAL_GUARD_VERSION}'"
+    )
+    if guard_state.streak < _EXHAUSTED_TERMINAL_GUARD_STREAK_THRESHOLD:
+        return stop, reason, False
+    row["exhausted_terminal_guard_triggered"] = True
+    row["exhausted_terminal_guard_reason"] = _EXHAUSTED_TERMINAL_GUARD_STOP_REASON
+    return True, _EXHAUSTED_TERMINAL_GUARD_STOP_REASON, True
+
+
+def _maybe_apply_strip_only_terminal_guard(
+    *,
+    row: dict[str, Any],
+    state: MainLoopState,
+    stop: bool,
+    reason: str,
+    step_idx: int,
+    scenario_id: str,
+) -> tuple[bool, str, bool]:
+    guard_state = getattr(state, "strip_only_terminal_guard_state", None)
+    if not isinstance(guard_state, StripOnlyTerminalGuardState):
+        guard_state = StripOnlyTerminalGuardState()
+        setattr(state, "strip_only_terminal_guard_state", guard_state)
+
+    if stop:
+        guard_state.streak = 0
+        return stop, reason, False
+
+    if not _is_strip_only_terminal_guard_eligible(row):
+        guard_state.streak = 0
+        return stop, reason, False
+
+    scroll_reason = _strip_only_terminal_scroll_reason(row)
+    new_non_strip_content = _is_new_non_strip_meaningful_main_row(row)
+    row["strip_only_terminal_guard_version"] = COLLECTION_FLOW_STRIP_ONLY_TERMINAL_GUARD_VERSION
+    row["strip_only_terminal_guard_new_non_strip_content"] = new_non_strip_content
+
+    if new_non_strip_content:
+        guard_state.streak = 0
+        log(
+            f"[EARLY_STOP][strip_only_terminal_guard] scenario='{scenario_id}' step={step_idx} "
+            "streak=0 viewport_exhausted=true "
+            f"scroll_fallback_reason='{scroll_reason}' "
+            "local_tab_gate_reason='no_unvisited_local_tab' "
+            "new_non_strip_content=true decision='continue' "
+            f"reason='{_STRIP_ONLY_TERMINAL_GUARD_STOP_REASON}' "
+            "reset_reason='new_non_strip_content' "
+            f"version='{COLLECTION_FLOW_STRIP_ONLY_TERMINAL_GUARD_VERSION}'"
+        )
+        return stop, reason, False
+
+    guard_state.streak += 1
+    row["strip_only_terminal_guard_streak"] = guard_state.streak
+    row["strip_only_terminal_guard_control_reason"] = _strip_only_terminal_control_reason(row)
+    decision = "stop" if guard_state.streak >= _STRIP_ONLY_TERMINAL_GUARD_STREAK_THRESHOLD else "continue"
+    log(
+        f"[EARLY_STOP][strip_only_terminal_guard] scenario='{scenario_id}' step={step_idx} "
+        f"streak={guard_state.streak} viewport_exhausted=true "
+        f"scroll_fallback_reason='{scroll_reason}' "
+        "local_tab_gate_reason='no_unvisited_local_tab' "
+        "new_non_strip_content=false "
+        f"decision='{decision}' reason='{_STRIP_ONLY_TERMINAL_GUARD_STOP_REASON}' "
+        f"version='{COLLECTION_FLOW_STRIP_ONLY_TERMINAL_GUARD_VERSION}'"
+    )
+    if guard_state.streak < _STRIP_ONLY_TERMINAL_GUARD_STREAK_THRESHOLD:
+        return stop, reason, False
+    row["strip_only_terminal_guard_triggered"] = True
+    row["strip_only_terminal_guard_reason"] = _STRIP_ONLY_TERMINAL_GUARD_STOP_REASON
+    return True, _STRIP_ONLY_TERMINAL_GUARD_STOP_REASON, True
+
+
 def _maybe_apply_scroll_ready_continue(
     *,
     row: dict[str, Any],
@@ -14415,6 +14608,22 @@ def _main_loop_phase(
             step_idx=step_idx,
             scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
         )
+        stop, reason, exhausted_terminal_guard_applied = _maybe_apply_exhausted_terminal_guard(
+            row=row,
+            state=state,
+            stop=stop,
+            reason=reason,
+            step_idx=step_idx,
+            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+        )
+        stop, reason, strip_only_terminal_guard_applied = _maybe_apply_strip_only_terminal_guard(
+            row=row,
+            state=state,
+            stop=stop,
+            reason=reason,
+            step_idx=step_idx,
+            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+        )
         repeat_stop_hit = bool(stop_eval_inputs["repeat_stop_hit"])
 
         if stop and reason == "repeat_semantic_stall":
@@ -14824,6 +15033,8 @@ def _build_main_loop_state_from_anchor(
         cta_cluster_committed_rid={},
         scroll_state=ScrollState(),
         focus_realign_state=FocusRealignState(),
+        exhausted_terminal_guard_state=ExhaustedTerminalGuardState(),
+        strip_only_terminal_guard_state=StripOnlyTerminalGuardState(),
     )
 
 
