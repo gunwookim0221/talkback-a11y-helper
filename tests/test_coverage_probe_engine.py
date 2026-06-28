@@ -295,6 +295,145 @@ def test_static_related_bounds_leaf_promotes_to_enclosing_actionable_container(t
     assert payload["summary"]["promoted_target_count"] == 1
 
 
+def test_probe_target_promotion_prefers_same_scenario_inventory_item(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    _write_inventory(
+        output_path,
+        [
+            _inventory_item(
+                scenario_id="device_smoke_sensor_plugin",
+                label="Smoke sensor History Motion detected",
+                view_id="SmokeSensorCapabilityCardView",
+                bounds="30,412,1050,727",
+            ),
+            _inventory_item(
+                scenario_id="device_motion_sensor_plugin",
+                label="Motion sensor History Motion detected",
+                view_id="MotionSensorCapabilityCardView",
+                bounds="30,420,1040,720",
+            ),
+        ],
+    )
+    client = FakeProbeClient(focus_results=[_success_result("Motion sensor History Motion detected")])
+
+    payload = coverage_probe_engine.build_probe_results_payload(
+        client,
+        "device",
+        _plan([_motion_leaf_candidate()]),
+        probe_plan_path=str(tmp_path / "plan.json"),
+        output_path=output_path,
+        enabled=True,
+    )
+    result = payload["results"][0]
+
+    assert result["probe_target_view_id"] == "MotionSensorCapabilityCardView"
+    assert result["probe_target_label"] == "Motion sensor History Motion detected"
+    assert client.focus_in_bounds_calls[0]["bounds"] == "30,420,1040,720"
+
+
+def test_probe_target_promotion_falls_back_to_global_inventory_when_same_scenario_missing(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    _write_inventory(
+        output_path,
+        [
+            _inventory_item(
+                scenario_id="device_smoke_sensor_plugin",
+                label="Smoke sensor History Motion detected",
+                view_id="SmokeSensorCapabilityCardView",
+                bounds="30,412,1050,727",
+            ),
+        ],
+    )
+    logs = []
+    client = FakeProbeClient(focus_results=[_success_result("Smoke sensor History Motion detected")])
+
+    payload = coverage_probe_engine.build_probe_results_payload(
+        client,
+        "device",
+        _plan([_motion_leaf_candidate()]),
+        probe_plan_path=str(tmp_path / "plan.json"),
+        output_path=output_path,
+        enabled=True,
+        log_fn=logs.append,
+    )
+    result = payload["results"][0]
+
+    assert result["probe_target_view_id"] == "SmokeSensorCapabilityCardView"
+    assert any("scenario_filter_fallback=true" in line for line in logs)
+    assert any("candidate_scenario='device_motion_sensor_plugin'" in line for line in logs)
+
+
+def test_probe_target_promotion_preserves_existing_ranking_with_same_scenario_candidates(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    _write_inventory(
+        output_path,
+        [
+            _inventory_item(
+                scenario_id="device_motion_sensor_plugin",
+                label="Motion sensor Oversized container",
+                view_id="MotionSensorOversizedCardView",
+                bounds="20,390,1060,760",
+            ),
+            _inventory_item(
+                scenario_id="device_motion_sensor_plugin",
+                label="Motion sensor Preferred container",
+                view_id="MotionSensorCapabilityCardView",
+                bounds="30,412,1050,727",
+            ),
+        ],
+    )
+    client = FakeProbeClient(focus_results=[_success_result("Motion sensor Preferred container")])
+
+    payload = coverage_probe_engine.build_probe_results_payload(
+        client,
+        "device",
+        _plan([_motion_leaf_candidate()]),
+        probe_plan_path=str(tmp_path / "plan.json"),
+        output_path=output_path,
+        enabled=True,
+    )
+    result = payload["results"][0]
+
+    assert result["probe_target_view_id"] == "MotionSensorCapabilityCardView"
+    assert client.focus_in_bounds_calls[0]["bounds"] == "30,412,1050,727"
+
+
+def test_probe_target_promotion_same_scenario_filter_does_not_regress_ranking_against_cross_scenario_candidates(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    _write_inventory(
+        output_path,
+        [
+            _inventory_item(
+                scenario_id="device_smoke_sensor_plugin",
+                label="Smoke sensor Closer container",
+                view_id="SmokeSensorCapabilityCardView",
+                bounds="30,412,1050,727",
+            ),
+            _inventory_item(
+                scenario_id="device_motion_sensor_plugin",
+                label="Motion sensor Same scenario container",
+                view_id="MotionSensorCapabilityCardView",
+                bounds="30,430,1040,734",
+            ),
+        ],
+    )
+    client = FakeProbeClient(focus_results=[_success_result("Motion sensor Same scenario container")])
+
+    payload = coverage_probe_engine.build_probe_results_payload(
+        client,
+        "device",
+        _plan([_motion_leaf_candidate()]),
+        probe_plan_path=str(tmp_path / "plan.json"),
+        output_path=output_path,
+        enabled=True,
+    )
+    result = payload["results"][0]
+
+    assert result["probe_target_view_id"] == "MotionSensorCapabilityCardView"
+    assert result["probe_target_label"] == "Motion sensor Same scenario container"
+    assert result["probe_target_label"] != "Smoke sensor Closer container"
+
+
 def test_helper_failure_late_focus_promotes_probe_to_success(tmp_path):
     output_path = str(tmp_path / "talkback_compare.xlsx")
     _write_inventory(output_path, [_inventory_item()])

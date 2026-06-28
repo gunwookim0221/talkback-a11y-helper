@@ -294,20 +294,51 @@ def _original_target_metadata(candidate: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _resolve_probe_target(candidate: dict[str, Any], inventory_items: list[dict[str, Any]]) -> dict[str, Any]:
+def _inventory_items_for_candidate(
+    candidate: dict[str, Any],
+    inventory_items: list[dict[str, Any]],
+    *,
+    log_fn: Callable[[str], None] | None = None,
+) -> list[dict[str, Any]]:
+    candidate_scenario_id = str(candidate.get("scenario_id", "") or "").strip()
+    if not candidate_scenario_id:
+        return inventory_items
+    same_scenario_items = [
+        item
+        for item in inventory_items
+        if str(item.get("scenario_id", "") or "").strip() == candidate_scenario_id
+    ]
+    if same_scenario_items:
+        return same_scenario_items
+    if callable(log_fn):
+        log_fn(
+            "[V8_PROMOTION] "
+            f"scenario_filter_fallback=true candidate_scenario='{candidate_scenario_id}' "
+            f"searched_same_scenario={len(same_scenario_items)}"
+        )
+    return inventory_items
+
+
+def _resolve_probe_target(
+    candidate: dict[str, Any],
+    inventory_items: list[dict[str, Any]],
+    *,
+    log_fn: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
     resolved = {**candidate, **_original_target_metadata(candidate)}
     candidate_bounds = _parse_bounds(candidate.get("bounds"))
     if candidate_bounds is None or not _is_related_bounds_leaf_candidate(candidate):
         return resolved
 
+    scoped_inventory_items = _inventory_items_for_candidate(candidate, inventory_items, log_fn=log_fn)
     inventory_bounds = [
         parsed
-        for item in inventory_items
+        for item in scoped_inventory_items
         if (parsed := _parse_bounds(item.get("bounds"))) is not None
     ]
     max_area = max((_bounds_area(bounds) for bounds in inventory_bounds), default=0)
     matches: list[tuple[tuple[int, int, int, int], dict[str, Any], tuple[Any, ...]]] = []
-    for item in inventory_items:
+    for item in scoped_inventory_items:
         item_bounds = _parse_bounds(item.get("bounds"))
         if item_bounds is None:
             continue
@@ -877,7 +908,7 @@ def build_probe_results_payload(
     scenario_filtered_count = 0
     screen_skipped_count = 0
     for _idx, candidate in sorted_candidates:
-        candidate = _resolve_probe_target(candidate, inventory_items)
+        candidate = _resolve_probe_target(candidate, inventory_items, log_fn=log_fn)
         bounds = str(candidate.get("bounds", "") or "").strip()
         candidate_scenario_id = str(candidate.get("scenario_id", "") or "")
         if current_scenario_id and candidate_scenario_id and candidate_scenario_id != current_scenario_id:
