@@ -130,6 +130,13 @@ class A11yAdbClient:
         if self._is_debug_log_enabled():
             print(message)
 
+    @staticmethod
+    def _safe_trace_print(message: str) -> None:
+        try:
+            print(message)
+        except (BrokenPipeError, OSError):
+            return
+
     def _resolve_serial(self, dev: Any) -> str | None:
         if dev is None:
             return self.dev_serial
@@ -405,7 +412,9 @@ class A11yAdbClient:
         start = time.monotonic()
         interval = max(0.05, poll_interval_sec)
         logged_parse_errors: set[str] = set()
-        print(f"[SMART_NEXT_TRACE] read_log_result_start prefix={prefix} req_id={req_id} wait_seconds={wait_seconds}")
+        self._safe_trace_print(
+            f"[SMART_NEXT_TRACE] read_log_result_start prefix={prefix} req_id={req_id} wait_seconds={wait_seconds}"
+        )
         while time.monotonic() - start < wait_seconds:
             logs = self._logcat_reader.dump_filtered(dev=dev)
             payloads = self._extract_all_payloads(logs, prefix)
@@ -425,13 +434,13 @@ class A11yAdbClient:
                             parsed = self._focus_parse_error_result(req_id, payload, exc)
                         raw_snippet = str(payload).replace("\n", "\\n")[:240]
                         if should_log_parse_error:
-                            print(
+                            self._safe_trace_print(
                                 f"[SMART_NEXT_TRACE] parse_error prefix={prefix} req_id={req_id} "
                                 f"reason=json_parse_failed error={exc} raw='{raw_snippet}'"
                             )
                         return parsed
                     if should_log_parse_error:
-                        print(
+                        self._safe_trace_print(
                             f"[SMART_NEXT_TRACE] parse_error prefix={prefix} req_id={req_id} "
                             f"reason=json_parse_failed error={exc}"
                         )
@@ -441,7 +450,9 @@ class A11yAdbClient:
                         self._last_action_payload = parsed
                         self._last_action_req_id = req_id
                         self._last_action_timestamp = time.monotonic()
-                    print(f"[SMART_NEXT_TRACE] read_log_result_match prefix={prefix} req_id={req_id} parsed={parsed}")
+                    self._safe_trace_print(
+                        f"[SMART_NEXT_TRACE] read_log_result_match prefix={prefix} req_id={req_id} parsed={parsed}"
+                    )
                     return parsed
             elapsed = time.monotonic() - start
             remaining = wait_seconds - elapsed
@@ -449,7 +460,9 @@ class A11yAdbClient:
                 break
             time.sleep(min(interval, remaining))
         miss = {"success": False, "reason": f"{prefix} 로그를 찾지 못했습니다.", "reqId": req_id}
-        print(f"[SMART_NEXT_TRACE] read_log_result_miss prefix={prefix} req_id={req_id} parsed={miss}")
+        self._safe_trace_print(
+            f"[SMART_NEXT_TRACE] read_log_result_miss prefix={prefix} req_id={req_id} parsed={miss}"
+        )
         return miss
 
     @staticmethod
@@ -1824,12 +1837,12 @@ class A11yAdbClient:
 
     def move_focus_smart(self, dev: Any = None, direction: str = "next") -> dict[str, Any]:
         direction_token = str(direction).strip().lower()
-        print(
+        self._safe_trace_print(
             f"[SMART_NEXT_TRACE] move_focus_smart_entry "
             f"action={ACTION_SMART_NEXT} req_id='' fallback={'true' if direction_token != 'next' else 'false'}"
         )
         if direction_token != "next":
-            print(
+            self._safe_trace_print(
                 "[SMART_NEXT_TRACE] move_focus_smart_fallback "
                 f"reason='direction_not_next' action={ACTION_NEXT if direction_token == 'next' else ACTION_PREV if direction_token == 'prev' else 'UNKNOWN'} "
                 "req_id='' fallback=true"
@@ -1856,12 +1869,12 @@ class A11yAdbClient:
 
         def _attempt_smart_next() -> tuple[bool, dict[str, Any]]:
             req_id = str(uuid.uuid4())[:8]
-            print(f"[SMART_NEXT_TRACE] req_id_generated req_id={req_id} source=move_focus_smart")
+            self._safe_trace_print(f"[SMART_NEXT_TRACE] req_id_generated req_id={req_id} source=move_focus_smart")
             result = self._helper_bridge._request_smart_next(dev=dev, req_id=req_id)
             self.last_smart_nav_result = result
             normalized, terminal, _, _ = self._helper_bridge.normalize_smart_next_status(result)
             self.last_smart_nav_terminal = terminal
-            print(
+            self._safe_trace_print(
                 f"[SMART_NEXT_TRACE] move_focus_smart_result req_id={req_id} "
                 f"status={result.get('status', '')} detail={result.get('detail', '')} normalized={normalized}"
             )

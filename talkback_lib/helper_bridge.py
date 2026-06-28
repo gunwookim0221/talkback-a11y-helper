@@ -161,12 +161,14 @@ class HelperBridge:
             ]
         )
         full_cmd = " ".join(cmd_parts)
-        print(
+        self._client._safe_trace_print(
             f"[SMART_NEXT_TRACE] before_broadcast action={ACTION_SMART_NEXT} "
             f"req_id={req_id} fallback=false full_adb_command=\"{full_cmd}\""
         )
         raw_stdout = self._client._broadcast(dev, ACTION_SMART_NEXT, ["--es", "reqId", req_id])
-        print(f"[SMART_NEXT_TRACE] adb_raw_response req_id={req_id} raw_stdout=\"{raw_stdout}\"")
+        self._client._safe_trace_print(
+            f"[SMART_NEXT_TRACE] adb_raw_response req_id={req_id} raw_stdout=\"{raw_stdout}\""
+        )
         result = self._client._read_log_result(
             dev,
             "SMART_NAV_RESULT",
@@ -174,7 +176,9 @@ class HelperBridge:
             wait_seconds=3.0,
             poll_interval_sec=0.2,
         )
-        print(f"[SMART_NEXT_TRACE] parsed_broadcast_result req_id={req_id} raw_json={result}")
+        self._client._safe_trace_print(
+            f"[SMART_NEXT_TRACE] parsed_broadcast_result req_id={req_id} raw_json={result}"
+        )
         return result
 
     @staticmethod
