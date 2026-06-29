@@ -87,6 +87,7 @@ COLLECTION_FLOW_BOTTOM_STRIP_GUARD_VERSION = "phase4d-bottom-strip-guard-v1"
 COLLECTION_FLOW_BOTTOM_STRIP_FAST_STOP_VERSION = "phase4e-bottom-strip-no-unvisited-fast-stop-v1"
 COLLECTION_FLOW_EXHAUSTED_TERMINAL_GUARD_VERSION = "v8_2-exhausted-terminal-guard-v1"
 COLLECTION_FLOW_STRIP_ONLY_TERMINAL_GUARD_VERSION = "v8_2-strip-only-terminal-guard-v1"
+COLLECTION_FLOW_LOCAL_TAB_REVISIT_GUARD_VERSION = "v9-local-tab-revisit-no-new-semantic-v1"
 COLLECTION_FLOW_FOOD_HOME_HANDOFF_VERSION = "phase-food-two-stage-entry-v1"
 COLLECTION_FLOW_LIFE_RECOVERY_VERSION = "pr58-life-reset-ready-gate-relax-v1"
 COLLECTION_FLOW_LIFE_RESET_VERSION = "pr61-life-reset-strict-global-nav-v1"
@@ -105,6 +106,8 @@ _EXHAUSTED_TERMINAL_GUARD_STOP_REASON = "exhausted_not_scrollable_no_unvisited_l
 _STRIP_ONLY_TERMINAL_GUARD_STREAK_THRESHOLD = 3
 _STRIP_ONLY_TERMINAL_GUARD_STOP_REASON = "exhausted_strip_only_terminal_state"
 _STRIP_ONLY_TERMINAL_SCROLL_REASONS = frozenset({"not_scrollable", "bottom_strip_context_scrollable_uncertain"})
+_LOCAL_TAB_REVISIT_GUARD_STREAK_THRESHOLD = 5
+_LOCAL_TAB_REVISIT_GUARD_STOP_REASON = "local_tab_revisit_no_new_semantic_content"
 _STRIP_ONLY_TERMINAL_LABEL_DENYLIST = frozenset(
     {
         "eventsbutton",
@@ -326,6 +329,20 @@ class StripOnlyTerminalGuardState:
 
 
 @dataclass
+class LocalTabRevisitGuardState:
+    successful_transition_count: int = 0
+    entered_tabs_by_signature: dict[str, set[str]] = field(default_factory=dict)
+    seen_semantic_signatures: set[str] = field(default_factory=set)
+    current_representative_signatures: set[str] = field(default_factory=set)
+    representative_observation_available: bool = False
+    revisit_active: bool = False
+    revisit_signature: str = ""
+    revisit_tab_id: str = ""
+    streak: int = 0
+
+
+
+@dataclass
 class MainLoopState:
     last_fingerprint: str
     fingerprint_repeat_count: int
@@ -398,6 +415,9 @@ class MainLoopState:
     )
     strip_only_terminal_guard_state: StripOnlyTerminalGuardState = field(
         default_factory=StripOnlyTerminalGuardState
+    )
+    local_tab_revisit_guard_state: LocalTabRevisitGuardState = field(
+        default_factory=LocalTabRevisitGuardState
     )
     local_tab_state: local_tab_logic.LocalTabState = field(default_factory=local_tab_logic.LocalTabState)
 
@@ -11264,6 +11284,18 @@ def _filter_content_candidates_for_phase(
         )
     representative_candidates = [candidate for candidate in selection_candidates if bool(candidate.get("representative", False))]
     exhausted_candidates = list(representative_candidates)
+    revisit_guard_state = getattr(state, "local_tab_revisit_guard_state", None)
+    if isinstance(revisit_guard_state, LocalTabRevisitGuardState):
+        revisit_guard_state.representative_observation_available = True
+        revisit_guard_state.current_representative_signatures = {
+            normalized
+            for candidate in representative_candidates
+            if (
+                normalized := _normalize_logical_text(
+                    str(candidate.get("label", "") or candidate.get("rid", "") or "")
+                )
+            )
+        }
     return {
         "all_candidates": list(content_candidates),
         "status_candidates": status_candidates,
@@ -12840,6 +12872,242 @@ def _is_new_non_strip_meaningful_main_row(row: dict[str, Any]) -> bool:
     return not bool(_strip_only_terminal_control_reason(row))
 
 
+def _local_tab_revisit_guard_state(state: Any) -> LocalTabRevisitGuardState:
+    guard_state = getattr(state, "local_tab_revisit_guard_state", None)
+    if not isinstance(guard_state, LocalTabRevisitGuardState):
+        guard_state = LocalTabRevisitGuardState()
+        setattr(state, "local_tab_revisit_guard_state", guard_state)
+    return guard_state
+
+
+def _local_tab_revisit_guard_control_signatures(state: Any) -> set[str]:
+    controls = {
+        *_STRIP_ONLY_TERMINAL_LABEL_DENYLIST,
+        "navigate up",
+        "more",
+        "more options",
+        "dismiss",
+    }
+    for candidates in (getattr(state, "local_tab_candidates_by_signature", {}) or {}).values():
+        for candidate in candidates:
+            for value in (candidate.get("rid", ""), candidate.get("label", "")):
+                normalized = _normalize_logical_text(str(value or ""))
+                if normalized:
+                    controls.add(normalized)
+    return controls
+
+
+def _local_tab_revisit_guard_semantic_signatures(
+    row: dict[str, Any],
+    *,
+    state: Any,
+) -> set[str]:
+    actual_values = (
+        row.get("actual_focus_visible", ""),
+        row.get("actual_focus_speech", ""),
+    )
+    values = actual_values if any(str(value or "").strip() for value in actual_values) else (
+        row.get("visible_label", ""),
+        row.get("merged_announcement", ""),
+    )
+    control_signatures = _local_tab_revisit_guard_control_signatures(state)
+    return {
+        normalized
+        for value in values
+        if (normalized := _normalize_logical_text(str(value or "")))
+        and normalized not in control_signatures
+    }
+
+
+def _local_tab_revisit_guard_tab_id(state: Any) -> tuple[str, str]:
+    signature = str(getattr(state, "current_local_tab_signature", "") or "").strip()
+    rid = str(getattr(state, "current_local_tab_active_rid", "") or "").strip().lower()
+    return signature, rid
+
+
+def _local_tab_revisit_guard_has_unvisited_tab(
+    state: Any,
+    guard_state: LocalTabRevisitGuardState,
+    signature: str,
+) -> bool:
+    candidates = list(
+        (getattr(state, "local_tab_candidates_by_signature", {}) or {}).get(signature, [])
+    )
+    if not candidates:
+        return True
+    candidate_ids = {
+        str(candidate.get("rid", "") or "").strip().lower()
+        for candidate in candidates
+        if str(candidate.get("rid", "") or "").strip()
+    }
+    entered = guard_state.entered_tabs_by_signature.get(signature, set())
+    return not candidate_ids or bool(candidate_ids - entered)
+
+
+def _local_tab_revisit_guard_loading(
+    row: dict[str, Any],
+    guard_state: LocalTabRevisitGuardState,
+    state: Any,
+) -> bool:
+    text = " ".join(
+        [
+            *sorted(guard_state.current_representative_signatures),
+            *sorted(
+                _local_tab_revisit_guard_semantic_signatures(
+                    row,
+                    state=state,
+                )
+            ),
+            str(row.get("actual_focus_visible", "") or ""),
+            str(row.get("actual_focus_speech", "") or ""),
+            str(row.get("visible_label", "") or ""),
+            str(row.get("merged_announcement", "") or ""),
+            str(row.get("focus_class_name", "") or ""),
+            str((row.get("focus_node", {}) or {}).get("className", "") or "")
+            if isinstance(row.get("focus_node", {}), dict)
+            else "",
+        ]
+    ).lower()
+    return bool(
+        row.get("loading", False)
+        or row.get("is_loading", False)
+        or "loading" in text
+        or "progressbar" in text
+        or "please wait" in text
+    )
+
+
+def _local_tab_revisit_guard_block_reason(
+    *,
+    row: dict[str, Any],
+    state: Any,
+    guard_state: LocalTabRevisitGuardState,
+    signature: str,
+) -> str:
+    if str(row.get("context_type", "main") or "main").strip().lower() == "overlay":
+        return "overlay"
+    if str(row.get("parent_step_index", "") or "").strip():
+        return "overlay"
+    if bool(row.get("local_tab_transition", False)):
+        return "local_tab_transition"
+    if str(getattr(state, "pending_local_tab_rid", "") or "").strip():
+        return "pending_local_tab_transition"
+    if str(getattr(state, "forced_local_tab_target_rid", "") or "").strip():
+        return "forced_local_tab_transition"
+    if int(getattr(state, "post_realign_pending_steps", 0) or 0) > 0:
+        return "recovery"
+    if int(getattr(state, "content_phase_grace_steps", 0) or 0) > 0:
+        return "content_phase_grace"
+    overlay_recovery = str(row.get("overlay_recovery_status", "") or "").strip().lower()
+    if overlay_recovery and overlay_recovery not in {"none", "not_applicable"}:
+        return "recovery"
+    if _local_tab_revisit_guard_loading(row, guard_state, state):
+        return "loading"
+    if _local_tab_revisit_guard_has_unvisited_tab(state, guard_state, signature):
+        return "unvisited_local_tab"
+    if not guard_state.representative_observation_available:
+        return "representative_observation_unavailable"
+    unseen_candidates = (
+        guard_state.current_representative_signatures
+        - guard_state.seen_semantic_signatures
+    )
+    if unseen_candidates:
+        return "unseen_representative_candidate"
+    return ""
+
+
+def _maybe_apply_local_tab_revisit_no_new_semantic_guard(
+    *,
+    row: dict[str, Any],
+    state: Any,
+    stop: bool,
+    reason: str,
+    step_idx: int,
+    scenario_id: str,
+) -> tuple[bool, str, bool]:
+    guard_state = _local_tab_revisit_guard_state(state)
+    signature, active_tab_id = _local_tab_revisit_guard_tab_id(state)
+    semantic_signatures = _local_tab_revisit_guard_semantic_signatures(row, state=state)
+    new_semantic_signatures = semantic_signatures - guard_state.seen_semantic_signatures
+
+    entered_tabs = guard_state.entered_tabs_by_signature.setdefault(signature, set()) if signature else set()
+    transition_applied = bool(row.get("local_tab_transition", False))
+    if signature and active_tab_id:
+        was_entered = active_tab_id in entered_tabs
+        if transition_applied:
+            guard_state.successful_transition_count += 1
+            guard_state.revisit_active = was_entered
+            guard_state.revisit_signature = signature if was_entered else ""
+            guard_state.revisit_tab_id = active_tab_id if was_entered else ""
+            guard_state.streak = 0
+        entered_tabs.add(active_tab_id)
+
+    guard_state.seen_semantic_signatures.update(semantic_signatures)
+    row["local_tab_revisit_guard_version"] = COLLECTION_FLOW_LOCAL_TAB_REVISIT_GUARD_VERSION
+    row["local_tab_revisit_guard_new_semantic_count"] = len(new_semantic_signatures)
+
+    if stop:
+        guard_state.streak = 0
+        return stop, reason, False
+    if new_semantic_signatures:
+        guard_state.streak = 0
+        if guard_state.revisit_active:
+            log(
+                f"[EARLY_STOP][local_tab_revisit_no_new_semantic_content] "
+                f"scenario='{scenario_id}' step={step_idx} streak=0 "
+                f"tab='{active_tab_id}' new_semantic_count={len(new_semantic_signatures)} "
+                "decision='continue' reset_reason='new_semantic_content' "
+                f"reason='{_LOCAL_TAB_REVISIT_GUARD_STOP_REASON}' "
+                f"version='{COLLECTION_FLOW_LOCAL_TAB_REVISIT_GUARD_VERSION}'"
+            )
+        return stop, reason, False
+    if (
+        guard_state.successful_transition_count < 1
+        or not guard_state.revisit_active
+        or signature != guard_state.revisit_signature
+        or active_tab_id != guard_state.revisit_tab_id
+    ):
+        guard_state.streak = 0
+        return stop, reason, False
+
+    block_reason = _local_tab_revisit_guard_block_reason(
+        row=row,
+        state=state,
+        guard_state=guard_state,
+        signature=signature,
+    )
+    if block_reason:
+        guard_state.streak = 0
+        log(
+            f"[EARLY_STOP][local_tab_revisit_no_new_semantic_content] "
+            f"scenario='{scenario_id}' step={step_idx} streak=0 tab='{active_tab_id}' "
+            f"decision='continue' reset_reason='{block_reason}' "
+            f"reason='{_LOCAL_TAB_REVISIT_GUARD_STOP_REASON}' "
+            f"version='{COLLECTION_FLOW_LOCAL_TAB_REVISIT_GUARD_VERSION}'"
+        )
+        return stop, reason, False
+
+    guard_state.streak += 1
+    row["local_tab_revisit_guard_streak"] = guard_state.streak
+    decision = (
+        "stop"
+        if guard_state.streak >= _LOCAL_TAB_REVISIT_GUARD_STREAK_THRESHOLD
+        else "continue"
+    )
+    log(
+        f"[EARLY_STOP][local_tab_revisit_no_new_semantic_content] "
+        f"scenario='{scenario_id}' step={step_idx} streak={guard_state.streak} "
+        f"tab='{active_tab_id}' unseen_representative_count=0 "
+        f"decision='{decision}' reason='{_LOCAL_TAB_REVISIT_GUARD_STOP_REASON}' "
+        f"version='{COLLECTION_FLOW_LOCAL_TAB_REVISIT_GUARD_VERSION}'"
+    )
+    if guard_state.streak < _LOCAL_TAB_REVISIT_GUARD_STREAK_THRESHOLD:
+        return stop, reason, False
+    row["local_tab_revisit_guard_triggered"] = True
+    row["local_tab_revisit_guard_reason"] = _LOCAL_TAB_REVISIT_GUARD_STOP_REASON
+    return True, _LOCAL_TAB_REVISIT_GUARD_STOP_REASON, True
+
+
 def _maybe_apply_exhausted_terminal_guard(
     *,
     row: dict[str, Any],
@@ -14304,7 +14572,11 @@ def _main_loop_phase(
     scenario_perf = phase_ctx.scenario_perf
     state = phase_ctx.state
     start_step_index = max(1, int(getattr(phase_ctx, "start_step_index", 1) or 1))
+    state.local_tab_revisit_guard_state = LocalTabRevisitGuardState()
     for step_idx in range(start_step_index, tab_cfg["max_steps"] + 1):
+        revisit_guard_state = _local_tab_revisit_guard_state(state)
+        revisit_guard_state.current_representative_signatures = set()
+        revisit_guard_state.representative_observation_available = False
         log(f"[STEP] START tab='{tab_cfg['tab_name']}' step={step_idx}")
 
         row = _apply_step_collection_phase(
@@ -14615,6 +14887,16 @@ def _main_loop_phase(
             stop_eval_inputs=stop_eval_inputs,
             step_idx=step_idx,
             scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+        )
+        stop, reason, local_tab_revisit_guard_applied = (
+            _maybe_apply_local_tab_revisit_no_new_semantic_guard(
+                row=row,
+                state=state,
+                stop=stop,
+                reason=reason,
+                step_idx=step_idx,
+                scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+            )
         )
         stop, reason, exhausted_terminal_guard_applied = _maybe_apply_exhausted_terminal_guard(
             row=row,
@@ -15043,6 +15325,7 @@ def _build_main_loop_state_from_anchor(
         focus_realign_state=FocusRealignState(),
         exhausted_terminal_guard_state=ExhaustedTerminalGuardState(),
         strip_only_terminal_guard_state=StripOnlyTerminalGuardState(),
+        local_tab_revisit_guard_state=LocalTabRevisitGuardState(),
     )
 
 

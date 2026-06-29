@@ -17312,3 +17312,235 @@ def test_build_persisted_row_semantics_keeps_representative_when_actual_focus_mi
     assert persisted["representative_resource_id"] == "WaterSensorCapabilityCardView"
     assert persisted["representative_bounds"] == "30,412,1050,727"
     assert persisted["row_source"] == "representative_fallback"
+
+
+def _local_tab_revisit_guard_test_state():
+    signature = "control||routine||history"
+    guard_state = collection_flow.LocalTabRevisitGuardState(
+        successful_transition_count=3,
+        entered_tabs_by_signature={
+            signature: {"control", "routine", "history"},
+        },
+        seen_semantic_signatures={
+            "on",
+            "mode change",
+            "mode",
+            "change",
+            "rinse mode change",
+            "status stopped start",
+            "loading",
+        },
+        current_representative_signatures={"on"},
+        representative_observation_available=True,
+        revisit_active=True,
+        revisit_signature=signature,
+        revisit_tab_id="control",
+    )
+    return SimpleNamespace(
+        current_local_tab_signature=signature,
+        current_local_tab_active_rid="control",
+        local_tab_candidates_by_signature={
+            signature: [
+                {"rid": "control", "label": "Controls"},
+                {"rid": "routine", "label": "Routines"},
+                {"rid": "history", "label": "History"},
+            ],
+        },
+        pending_local_tab_rid="",
+        forced_local_tab_target_rid="",
+        post_realign_pending_steps=0,
+        content_phase_grace_steps=0,
+        local_tab_revisit_guard_state=guard_state,
+    )
+
+
+def _local_tab_revisit_guard_test_row(step_index, label, **overrides):
+    row = {
+        **_main_row(step_index),
+        "scenario_id": "device_washer_plugin",
+        "visible_label": label,
+        "merged_announcement": label,
+        "actual_focus_visible": label,
+        "actual_focus_speech": label,
+        "context_type": "main",
+        "local_tab_transition": False,
+    }
+    row.update(overrides)
+    return row
+
+
+def _apply_local_tab_revisit_guard(state, row):
+    semantic_signatures = collection_flow._local_tab_revisit_guard_semantic_signatures(
+        row,
+        state=state,
+    )
+    state.local_tab_revisit_guard_state.current_representative_signatures = set(
+        semantic_signatures
+    )
+    state.local_tab_revisit_guard_state.representative_observation_available = True
+    return collection_flow._maybe_apply_local_tab_revisit_no_new_semantic_guard(
+        row=row,
+        state=state,
+        stop=False,
+        reason="",
+        step_idx=row["step_index"],
+        scenario_id=row["scenario_id"],
+    )
+
+
+def test_local_tab_revisit_guard_stops_after_five_steps_without_new_semantic_content():
+    state = _local_tab_revisit_guard_test_state()
+    result = (False, "", False)
+
+    for step_index, label in enumerate(
+        ("On", "Mode Change", "Mode", "Change", "Rinse mode Change"),
+        start=1,
+    ):
+        result = _apply_local_tab_revisit_guard(
+            state,
+            _local_tab_revisit_guard_test_row(step_index, label),
+        )
+
+    assert result == (
+        True,
+        "local_tab_revisit_no_new_semantic_content",
+        True,
+    )
+    assert state.local_tab_revisit_guard_state.streak == 5
+
+
+def test_local_tab_revisit_guard_resets_when_late_new_semantic_content_appears():
+    state = _local_tab_revisit_guard_test_state()
+
+    for step_index, label in enumerate(("On", "Mode Change", "Mode", "Change"), start=1):
+        stop, reason, applied = _apply_local_tab_revisit_guard(
+            state,
+            _local_tab_revisit_guard_test_row(step_index, label),
+        )
+        assert (stop, reason, applied) == (False, "", False)
+
+    stop, reason, applied = _apply_local_tab_revisit_guard(
+        state,
+        _local_tab_revisit_guard_test_row(5, "Late dynamic carbon intensity"),
+    )
+
+    assert (stop, reason, applied) == (False, "", False)
+    assert state.local_tab_revisit_guard_state.streak == 0
+    assert "late dynamic carbon intensity" in (
+        state.local_tab_revisit_guard_state.seen_semantic_signatures
+    )
+
+    for step_index, label in enumerate(("On", "Mode Change", "Mode", "Change"), start=6):
+        stop, reason, applied = _apply_local_tab_revisit_guard(
+            state,
+            _local_tab_revisit_guard_test_row(step_index, label),
+        )
+
+    assert (stop, reason, applied) == (False, "", False)
+    assert state.local_tab_revisit_guard_state.streak == 4
+
+
+def test_local_tab_revisit_guard_does_not_treat_strip_label_as_new_semantic_content():
+    state = _local_tab_revisit_guard_test_state()
+
+    for step_index in range(1, 6):
+        stop, reason, applied = _apply_local_tab_revisit_guard(
+            state,
+            _local_tab_revisit_guard_test_row(step_index, "Controls"),
+        )
+
+    assert (stop, reason, applied) == (
+        True,
+        "local_tab_revisit_no_new_semantic_content",
+        True,
+    )
+
+
+def test_local_tab_revisit_guard_does_not_run_with_unvisited_local_tab():
+    state = _local_tab_revisit_guard_test_state()
+    state.local_tab_revisit_guard_state.entered_tabs_by_signature[
+        state.current_local_tab_signature
+    ].remove("history")
+
+    for step_index in range(1, 7):
+        stop, reason, applied = _apply_local_tab_revisit_guard(
+            state,
+            _local_tab_revisit_guard_test_row(step_index, "On"),
+        )
+
+    assert (stop, reason, applied) == (False, "", False)
+    assert state.local_tab_revisit_guard_state.streak == 0
+
+
+def test_local_tab_revisit_guard_does_not_run_with_unseen_representative_candidate():
+    state = _local_tab_revisit_guard_test_state()
+    state.local_tab_revisit_guard_state.current_representative_signatures = {
+        "new washer capability"
+    }
+
+    for step_index in range(1, 7):
+        row = _local_tab_revisit_guard_test_row(step_index, "On")
+        stop, reason, applied = (
+            collection_flow._maybe_apply_local_tab_revisit_no_new_semantic_guard(
+                row=row,
+                state=state,
+                stop=False,
+                reason="",
+                step_idx=step_index,
+                scenario_id="device_washer_plugin",
+            )
+        )
+
+    assert (stop, reason, applied) == (False, "", False)
+    assert state.local_tab_revisit_guard_state.streak == 0
+
+
+def test_local_tab_revisit_guard_is_blocked_during_transient_states():
+    cases = [
+        ({}, {"context_type": "overlay"}),
+        ({"post_realign_pending_steps": 1}, {}),
+        ({"pending_local_tab_rid": "routine"}, {}),
+        ({"forced_local_tab_target_rid": "history"}, {}),
+        ({"content_phase_grace_steps": 1}, {}),
+        (
+            {},
+            {
+                "visible_label": "Loading",
+                "merged_announcement": "Loading",
+                "actual_focus_visible": "Loading",
+                "actual_focus_speech": "Loading",
+            },
+        ),
+    ]
+
+    for state_updates, row_updates in cases:
+        state = _local_tab_revisit_guard_test_state()
+        for key, value in state_updates.items():
+            setattr(state, key, value)
+
+        for step_index in range(1, 7):
+            row = _local_tab_revisit_guard_test_row(step_index, "On", **row_updates)
+            stop, reason, applied = _apply_local_tab_revisit_guard(state, row)
+
+        assert (stop, reason, applied) == (False, "", False)
+        assert state.local_tab_revisit_guard_state.streak == 0
+
+
+def test_local_tab_revisit_guard_detects_successful_reentry():
+    state = _local_tab_revisit_guard_test_state()
+    state.local_tab_revisit_guard_state.revisit_active = False
+    state.local_tab_revisit_guard_state.revisit_signature = ""
+    state.local_tab_revisit_guard_state.revisit_tab_id = ""
+    state.local_tab_revisit_guard_state.successful_transition_count = 2
+
+    row = _local_tab_revisit_guard_test_row(
+        1,
+        "History",
+        local_tab_transition=True,
+    )
+    stop, reason, applied = _apply_local_tab_revisit_guard(state, row)
+
+    assert (stop, reason, applied) == (False, "", False)
+    assert state.local_tab_revisit_guard_state.successful_transition_count == 3
+    assert state.local_tab_revisit_guard_state.revisit_active is True
+    assert state.local_tab_revisit_guard_state.revisit_tab_id == "control"
