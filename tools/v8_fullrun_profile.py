@@ -22,6 +22,10 @@ PROFILE_CSV = "v8_fullrun_profile.csv"
 SCENARIO_FIELDS = [
     "scenario_id",
     "step_count",
+    "attempted_step_count",
+    "persisted_step_count",
+    "suppressed_row_count",
+    "suppressed_row_count_estimated",
     "first_step",
     "last_step",
     "duration_sec",
@@ -44,6 +48,12 @@ SCENARIO_FIELDS = [
     "promotable_count",
     "promoted_count",
     "dedup_skipped_count",
+    "adaptive_extension_count",
+    "adaptive_hard_limit_count",
+    "adaptive_safety_stop_count",
+    "soft_limit_extension_rows",
+    "post_soft_limit_new_rows",
+    "post_soft_limit_suppressed_rows",
 ]
 
 COUNT_FIELDS = [field for field in SCENARIO_FIELDS if field.endswith("_count")]
@@ -88,6 +98,10 @@ def _empty_scenario(scenario_id: str) -> dict[str, Any]:
     row: dict[str, Any] = {
         "scenario_id": scenario_id,
         "step_count": 0,
+        "attempted_step_count": 0,
+        "persisted_step_count": 0,
+        "suppressed_row_count": 0,
+        "suppressed_row_count_estimated": False,
         "first_step": None,
         "last_step": None,
         "duration_sec": None,
@@ -301,6 +315,12 @@ def parse_log(
     scenario_start_seconds: dict[str, int] = {}
     scenario_end_seconds: dict[str, int] = {}
     observed_step_events: dict[str, int] = {}
+    attempted_steps: dict[str, set[int]] = {}
+    explicit_suppressed_steps: dict[str, set[int]] = {}
+    active_step_by_scenario: dict[str, int] = {}
+    adaptive_soft_limit: dict[str, int] = {}
+    post_soft_limit_attempted_steps: dict[str, set[int]] = {}
+    post_soft_limit_suppressed_steps: dict[str, set[int]] = {}
     repeat_keys: set[tuple[str, str]] = set()
 
     for line in lines:
@@ -331,8 +351,39 @@ def parse_log(
                 step = int(step_match.group(1))
                 metric["first_step"] = step if metric["first_step"] is None else min(metric["first_step"], step)
                 metric["last_step"] = step if metric["last_step"] is None else max(metric["last_step"], step)
+                if "[STEP] START" in line:
+                    attempted_steps.setdefault(metric["scenario_id"], set()).add(step)
+                    active_step_by_scenario[metric["scenario_id"]] = step
                 if "[STEP] END" in line:
                     observed_step_events[metric["scenario_id"]] = observed_step_events.get(metric["scenario_id"], 0) + 1
+                    active_step_by_scenario[metric["scenario_id"]] = step
+
+        if "[STEP][row_filter]" in line:
+            active_step = active_step_by_scenario.get(metric["scenario_id"])
+            if active_step is not None:
+                explicit_suppressed_steps.setdefault(metric["scenario_id"], set()).add(active_step)
+
+        if "[ADAPTIVE_MAX_STEPS]" in line:
+            scenario_key = metric["scenario_id"]
+            current_limit_match = re.search(r"\bcurrent_limit=(\d+)", line)
+            decision_match = re.search(r"\bdecision='([^']+)'", line)
+            if current_limit_match:
+                current_limit = int(current_limit_match.group(1))
+                adaptive_soft_limit.setdefault(scenario_key, current_limit)
+                for attempted_step in attempted_steps.get(scenario_key, set()):
+                    if attempted_step > adaptive_soft_limit[scenario_key]:
+                        post_soft_limit_attempted_steps.setdefault(scenario_key, set()).add(attempted_step)
+                for suppressed_step in explicit_suppressed_steps.get(scenario_key, set()):
+                    if suppressed_step > adaptive_soft_limit[scenario_key]:
+                        post_soft_limit_suppressed_steps.setdefault(scenario_key, set()).add(suppressed_step)
+            if decision_match:
+                decision = decision_match.group(1)
+                if decision == "extend":
+                    metric["adaptive_extension_count"] += 1
+                elif decision == "hard_stop":
+                    metric["adaptive_hard_limit_count"] += 1
+                elif decision == "stop":
+                    metric["adaptive_safety_stop_count"] += 1
 
         if "[STEP][viewport_exhausted_eval]" in line:
             metric["viewport_exhausted_eval_count"] += 1
@@ -354,12 +405,39 @@ def parse_log(
                 metric["duration_sec"] = float(runtime_match.group(1))
             if steps_match:
                 metric["step_count"] = int(steps_match.group(1))
+                metric["persisted_step_count"] = int(steps_match.group(1))
             if clock is not None:
                 scenario_end_seconds[metric["scenario_id"]] = clock
 
     for scenario_id, metric in scenarios.items():
+        attempted_count = len(attempted_steps.get(scenario_id, set()))
+        metric["attempted_step_count"] = attempted_count
         if metric["step_count"] == 0 and observed_step_events.get(scenario_id):
             metric["step_count"] = observed_step_events[scenario_id]
+            metric["persisted_step_count"] = observed_step_events[scenario_id]
+        explicit_suppressed_count = len(explicit_suppressed_steps.get(scenario_id, set()))
+        if explicit_suppressed_count > 0:
+            metric["suppressed_row_count"] = explicit_suppressed_count
+        else:
+            metric["suppressed_row_count"] = max(
+                0,
+                int(metric["attempted_step_count"]) - int(metric["persisted_step_count"]),
+            )
+            metric["suppressed_row_count_estimated"] = metric["attempted_step_count"] > 0
+        soft_limit = adaptive_soft_limit.get(scenario_id)
+        if soft_limit is not None:
+            attempted_after_soft_limit = {
+                step for step in attempted_steps.get(scenario_id, set()) if step > soft_limit
+            }
+            suppressed_after_soft_limit = {
+                step for step in explicit_suppressed_steps.get(scenario_id, set()) if step > soft_limit
+            }
+            metric["post_soft_limit_suppressed_rows"] = len(suppressed_after_soft_limit)
+            metric["post_soft_limit_new_rows"] = max(
+                0,
+                len(attempted_after_soft_limit) - len(suppressed_after_soft_limit),
+            )
+            metric["soft_limit_extension_rows"] = metric["post_soft_limit_new_rows"]
         if metric["duration_sec"] is None:
             start = scenario_start_seconds.get(scenario_id)
             end = scenario_end_seconds.get(scenario_id)
@@ -419,6 +497,9 @@ def build_summary(scenarios: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "scenario_count": len(scenarios),
         "total_steps": sum(int(row["step_count"]) for row in scenarios),
+        "total_attempted_steps": sum(int(row["attempted_step_count"]) for row in scenarios),
+        "total_persisted_steps": sum(int(row["persisted_step_count"]) for row in scenarios),
+        "total_suppressed_rows": sum(int(row["suppressed_row_count"]) for row in scenarios),
         "total_duration_sec": round(sum(durations), 3) if durations else None,
         "total_repeat_no_progress": sum(int(row["repeat_no_progress_count"]) for row in scenarios),
         "total_probe_candidates": sum(int(row["probe_candidate_count"]) for row in scenarios),
@@ -426,6 +507,11 @@ def build_summary(scenarios: list[dict[str, Any]]) -> dict[str, Any]:
         "total_probe_success": sum(int(row["probe_success_count"]) for row in scenarios),
         "total_promoted": sum(int(row["promoted_count"]) for row in scenarios),
         "total_dedup_skipped": sum(int(row["dedup_skipped_count"]) for row in scenarios),
+        "total_adaptive_extensions": sum(int(row["adaptive_extension_count"]) for row in scenarios),
+        "total_adaptive_hard_limits": sum(int(row["adaptive_hard_limit_count"]) for row in scenarios),
+        "total_adaptive_safety_stops": sum(int(row["adaptive_safety_stop_count"]) for row in scenarios),
+        "total_post_soft_limit_new_rows": sum(int(row["post_soft_limit_new_rows"]) for row in scenarios),
+        "total_post_soft_limit_suppressed_rows": sum(int(row["post_soft_limit_suppressed_rows"]) for row in scenarios),
         "slowest_scenarios": _rank(scenarios, "duration_sec", include_zero=False),
         "highest_repeat_scenarios": _rank(scenarios, "repeat_no_progress_count", include_zero=False),
         "highest_probe_failure_scenarios": _rank(scenarios, "probe_failed_count", include_zero=False),
@@ -531,6 +617,9 @@ def render_markdown(profile: dict[str, Any]) -> str:
     for key in (
         "scenario_count",
         "total_steps",
+        "total_attempted_steps",
+        "total_persisted_steps",
+        "total_suppressed_rows",
         "total_duration_sec",
         "total_repeat_no_progress",
         "total_probe_candidates",
@@ -538,8 +627,31 @@ def render_markdown(profile: dict[str, Any]) -> str:
         "total_probe_success",
         "total_promoted",
         "total_dedup_skipped",
+        "total_adaptive_extensions",
+        "total_adaptive_hard_limits",
+        "total_adaptive_safety_stops",
+        "total_post_soft_limit_new_rows",
+        "total_post_soft_limit_suppressed_rows",
     ):
         lines.append(f"| {key} | {_display(summary.get(key))} |")
+
+    lines.extend(
+        [
+            "",
+            "## Step Accounting",
+            "",
+            "Profiler `step_count` remains backward-compatible and reflects persisted/perf steps.",
+            "Use `attempted_step_count` when evaluating adaptive max steps or loop churn.",
+            "",
+            "| Scenario | Attempted steps | Persisted steps | Suppressed rows | Estimated suppression | Result rows |",
+            "| --- | ---: | ---: | ---: | --- | ---: |",
+        ]
+    )
+    for row in scenarios:
+        lines.append(
+            f"| {row['scenario_id']} | {row['attempted_step_count']} | {row['persisted_step_count']} "
+            f"| {row['suppressed_row_count']} | {row['suppressed_row_count_estimated']} | {row['result_row_count']} |"
+        )
 
     lines.extend(
         [
@@ -559,9 +671,36 @@ def render_markdown(profile: dict[str, Any]) -> str:
             f"| {row['promoted_count']} | {row['dedup_skipped_count']} |"
         )
 
+    lines.extend(
+        [
+            "",
+            "## Adaptive Max Steps",
+            "",
+            "| Scenario | Extensions | Hard limit | Safety stop | Post-soft new rows | Post-soft suppressed |",
+            "| --- | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    extended_scenarios = []
+    for row in scenarios:
+        if int(row["adaptive_extension_count"]) > 0:
+            extended_scenarios.append(row["scenario_id"])
+        lines.append(
+            f"| {row['scenario_id']} | {row['adaptive_extension_count']} | {row['adaptive_hard_limit_count']} "
+            f"| {row['adaptive_safety_stop_count']} | {row['post_soft_limit_new_rows']} "
+            f"| {row['post_soft_limit_suppressed_rows']} |"
+        )
+    lines.extend(
+        [
+            "",
+            f"Scenarios extended: {', '.join(f'`{scenario}`' for scenario in extended_scenarios) if extended_scenarios else 'None'}",
+            "",
+        ]
+    )
+
     lines.extend(["", "## Top Slow / Heavy Scenarios", ""])
     _append_ranking(lines, "Top by duration", summary["slowest_scenarios"], "s")
     _append_ranking(lines, "Top by step_count", _rank(scenarios, "step_count", include_zero=False), "")
+    _append_ranking(lines, "Top by attempted_step_count", _rank(scenarios, "attempted_step_count", include_zero=False), "")
     _append_ranking(lines, "Top by repeat_no_progress_count", summary["highest_repeat_scenarios"], "")
     _append_ranking(lines, "Top by probe_failed_count", summary["highest_probe_failure_scenarios"], "")
 

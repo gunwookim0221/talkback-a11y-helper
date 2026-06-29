@@ -42,10 +42,24 @@ def _write_log(path: Path) -> None:
                 "[10:00:05] [STOP][eval] step=1 scenario='scenario_one' reason='repeat_no_progress'",
                 "[10:00:06] [STOP][eval] step=2 scenario='scenario_one' reason='repeat_no_progress'",
                 "[10:00:07] [STOP][eval] step=3 scenario='scenario_one' reason='repeat_no_progress'",
-                "[10:00:08] [PERF][scenario_summary] scenario=scenario_one total_runtime=8.0 total_steps=4",
-                "[10:00:10] [SCENARIO][stabilization] scenario='scenario_two'",
-                "[10:00:11] [STEP] END scenario='scenario_two' step=5 final_result='WARN'",
-                "[10:00:15] [PERF][scenario_summary] scenario=scenario_two total_runtime=5.0 total_steps=1",
+                "[10:00:08] [STEP] START scenario='scenario_one' step=1",
+                "[10:00:09] [STEP] END scenario='scenario_one' step=1 final_result='FAIL'",
+                "[10:00:10] [STEP] START scenario='scenario_one' step=2",
+                "[10:00:11] [STEP][row_filter] label='duplicate row' reason='visited_logical_signature'",
+                "[10:00:12] [STEP] START scenario='scenario_one' step=3",
+                "[10:00:13] [STEP] END scenario='scenario_one' step=3 final_result='PASS'",
+                "[10:00:14] [ADAPTIVE_MAX_STEPS] scenario='scenario_one' step=4 current_limit=2 hard_limit=5 lookback_steps=2 meaningful_new_count=2 decision='extend' new_limit=4 reason='productive_tail'",
+                "[10:00:15] [STEP] START scenario='scenario_one' step=4",
+                "[10:00:16] [STEP] END scenario='scenario_one' step=4 final_result='PASS'",
+                "[10:00:17] [ADAPTIVE_MAX_STEPS] scenario='scenario_one' step=5 current_limit=4 hard_limit=5 lookback_steps=2 meaningful_new_count=1 decision='stop' new_limit=4 reason='unproductive_tail'",
+                "[10:00:18] [PERF][scenario_summary] scenario=scenario_one total_runtime=18.0 total_steps=4",
+                "[10:00:20] [SCENARIO][stabilization] scenario='scenario_two'",
+                "[10:00:21] [STEP] END scenario='scenario_two' step=5 final_result='WARN'",
+                "[10:00:22] [STEP] START scenario='scenario_two' step=5",
+                "[10:00:23] [STEP] START scenario='scenario_two' step=6",
+                "[10:00:24] [STEP] END scenario='scenario_two' step=6 final_result='WARN'",
+                "[10:00:25] [ADAPTIVE_MAX_STEPS] scenario='scenario_two' step=7 current_limit=6 hard_limit=6 lookback_steps=2 meaningful_new_count=0 decision='hard_stop' new_limit=6 reason='hard_limit'",
+                "[10:00:26] [PERF][scenario_summary] scenario=scenario_two total_runtime=5.0 total_steps=1",
             ]
         )
         + "\n",
@@ -178,12 +192,22 @@ def test_log_metrics_and_high_repeat_finding(tmp_path):
     scenario = _scenario(profile, "scenario_one")
 
     assert scenario["step_count"] == 4
+    assert scenario["attempted_step_count"] == 5
+    assert scenario["persisted_step_count"] == 4
+    assert scenario["suppressed_row_count"] == 1
+    assert scenario["suppressed_row_count_estimated"] is False
     assert scenario["first_step"] == 0
-    assert scenario["last_step"] == 0
-    assert scenario["duration_sec"] == 8.0
+    assert scenario["last_step"] == 4
+    assert scenario["duration_sec"] == 18.0
     assert scenario["repeat_no_progress_count"] == 3
     assert scenario["viewport_exhausted_eval_count"] == 1
     assert scenario["local_tab_probe_success_count"] == 1
+    assert scenario["adaptive_extension_count"] == 1
+    assert scenario["adaptive_hard_limit_count"] == 0
+    assert scenario["adaptive_safety_stop_count"] == 1
+    assert scenario["post_soft_limit_new_rows"] == 2
+    assert scenario["post_soft_limit_suppressed_rows"] == 0
+    assert scenario["soft_limit_extension_rows"] == 2
     assert any(
         finding["scenario_id"] == "scenario_one"
         and finding["code"] == "high_repeat_no_progress"
@@ -215,13 +239,19 @@ def test_writes_json_markdown_and_scenario_csv(tmp_path):
     assert all(path.is_file() for path in outputs.values())
     loaded = json.loads(outputs["json"].read_text(encoding="utf-8"))
     assert loaded["summary"]["scenario_count"] == 2
+    assert loaded["scenarios"][0]["attempted_step_count"] == 5
     markdown = outputs["markdown"].read_text(encoding="utf-8")
     assert "## Run Summary" in markdown
+    assert "## Step Accounting" in markdown
+    assert "## Adaptive Max Steps" in markdown
+    assert "attempted_step_count" in markdown
     assert "## Top Slow / Heavy Scenarios" in markdown
     with outputs["csv"].open(encoding="utf-8-sig", newline="") as csv_file:
         rows = list(csv.DictReader(csv_file))
     assert [row["scenario_id"] for row in rows] == ["scenario_one", "scenario_two"]
     assert list(rows[0]) == profiler.SCENARIO_FIELDS
+    assert rows[0]["attempted_step_count"] == "5"
+    assert rows[0]["adaptive_extension_count"] == "1"
 
 
 def test_summary_totals_and_rankings_are_consistent(tmp_path):
@@ -232,15 +262,47 @@ def test_summary_totals_and_rankings_are_consistent(tmp_path):
 
     assert summary["scenario_count"] == 2
     assert summary["total_steps"] == 5
-    assert summary["total_duration_sec"] == 13.0
+    assert summary["total_attempted_steps"] == 7
+    assert summary["total_persisted_steps"] == 5
+    assert summary["total_suppressed_rows"] == 2
+    assert summary["total_duration_sec"] == 23.0
     assert summary["total_repeat_no_progress"] == 3
     assert summary["total_probe_candidates"] == 5
     assert summary["total_probe_attempted"] == 5
     assert summary["total_probe_success"] == 2
     assert summary["total_promoted"] == 1
     assert summary["total_dedup_skipped"] == 1
-    assert summary["slowest_scenarios"][0] == {"scenario_id": "scenario_one", "value": 8.0}
+    assert summary["total_adaptive_extensions"] == 1
+    assert summary["total_adaptive_hard_limits"] == 1
+    assert summary["total_adaptive_safety_stops"] == 1
+    assert summary["total_post_soft_limit_new_rows"] == 2
+    assert summary["total_post_soft_limit_suppressed_rows"] == 0
+    assert summary["slowest_scenarios"][0] == {"scenario_id": "scenario_one", "value": 18.0}
     assert summary["highest_probe_failure_scenarios"][0]["scenario_id"] == "scenario_one"
+
+
+def test_estimates_suppressed_rows_when_row_filter_logs_are_missing(tmp_path):
+    paths = _artifact_set(tmp_path)
+    paths["log"].write_text(
+        "\n".join(
+            [
+                "[10:00:00] [SCENARIO][stabilization] scenario='scenario_three'",
+                "[10:00:01] [STEP] START scenario='scenario_three' step=0",
+                "[10:00:02] [STEP] START scenario='scenario_three' step=1",
+                "[10:00:03] [PERF][scenario_summary] scenario=scenario_three total_runtime=3.0 total_steps=1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    profile = profiler.build_profile(**paths)
+    scenario = _scenario(profile, "scenario_three")
+
+    assert scenario["attempted_step_count"] == 2
+    assert scenario["persisted_step_count"] == 1
+    assert scenario["suppressed_row_count"] == 1
+    assert scenario["suppressed_row_count_estimated"] is True
 
 
 def test_artifact_dir_resolves_latest_same_stem_files(tmp_path):
