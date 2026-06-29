@@ -14280,9 +14280,17 @@ def _maybe_dismiss_runtime_popup(
         except Exception:
             still_detected = False
     result = "success" if not still_detected else "dismissed_unverified"
+    if str(candidate.popup_kind or "") == "samsung_account_two_step":
+        log("[POPUP][dismissed] type=samsung_account_protection action=later")
     log(f"[POPUP][dismiss] scenario='{scenario_id}' label='{_truncate_debug_text(label, 120)}' result='{result}'")
     log(f"[POPUP][resume] scenario='{scenario_id}' mode='continue'")
-    return {"handled": True, "result": result, "reason": "safe_action_clicked", "label": label}
+    return {
+        "handled": True,
+        "result": result,
+        "reason": "safe_action_clicked",
+        "label": label,
+        "popup_kind": str(candidate.popup_kind or ""),
+    }
 
 
 def _main_loop_phase(

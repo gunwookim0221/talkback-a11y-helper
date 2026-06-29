@@ -199,6 +199,12 @@ def test_samsung_account_popup_prefers_later_button3():
     assert candidate["label"] == "Later"
 
 
+def test_generic_later_popup_is_not_selected_without_samsung_evidence():
+    candidate = preflight.find_dismiss_candidate_in_uiautomator_xml(_popup_xml("Later", "Open now"))
+
+    assert candidate is None
+
+
 def test_samsung_account_popup_dismiss_is_noop_when_absent():
     calls = []
 

@@ -24,12 +24,9 @@ SAMSUNG_ACCOUNT_POPUP_SETUP_NOW_RESOURCE_ID = "android:id/button1"
 DISMISS_LABELS = (
     "not now",
     "no thanks",
-    "later",
-    "maybe later",
     "cancel",
     "close",
     "dismiss",
-    "나중에",
     "아니요",
     "괜찮아요",
     "취소",

@@ -16656,6 +16656,71 @@ def _popup_dialog_row(idx=260, *, title="클립 공유 정책 업데이트", but
     }
 
 
+def _samsung_account_popup_dialog_row(idx=260):
+    later_button_node = {
+        "text": "Later",
+        "contentDescription": "Later",
+        "viewIdResourceName": "android:id/button3",
+        "className": "android.widget.Button",
+        "clickable": True,
+        "focusable": True,
+        "effectiveClickable": True,
+        "visibleToUser": True,
+        "boundsInScreen": "120,1760,360,1860",
+        "children": [],
+    }
+    setup_now_button_node = {
+        "text": "Set up now",
+        "contentDescription": "Set up now",
+        "viewIdResourceName": "android:id/button1",
+        "className": "android.widget.Button",
+        "clickable": True,
+        "focusable": True,
+        "effectiveClickable": True,
+        "visibleToUser": True,
+        "boundsInScreen": "700,1760,940,1860",
+        "children": [],
+    }
+    return {
+        **_main_row(idx),
+        "visible_label": "Later",
+        "normalized_visible_label": "later",
+        "merged_announcement": "Protect your Samsung account Later Set up now",
+        "focus_view_id": "android:id/button3",
+        "focus_bounds": "120,1760,360,1860",
+        "focus_node": later_button_node,
+        "dump_tree_nodes": [
+            {
+                "className": "android.app.Dialog",
+                "visibleToUser": True,
+                "boundsInScreen": "80,720,1000,1900",
+                "children": [
+                    {
+                        "text": "Protect your Samsung account",
+                        "contentDescription": "Protect your Samsung account",
+                        "viewIdResourceName": "android:id/alertTitle",
+                        "className": "android.widget.TextView",
+                        "visibleToUser": True,
+                        "boundsInScreen": "120,820,900,920",
+                        "children": [],
+                    },
+                    {
+                        "text": "Set up two-step verification to keep your account safe and secure, even if someone has your password.",
+                        "contentDescription": "Set up two-step verification to keep your account safe and secure, even if someone has your password.",
+                        "viewIdResourceName": "android:id/message",
+                        "className": "android.widget.TextView",
+                        "visibleToUser": True,
+                        "boundsInScreen": "120,940,900,1120",
+                        "children": [],
+                    },
+                    later_button_node,
+                    setup_now_button_node,
+                ],
+            }
+        ],
+    }
+
+
 def test_runtime_popup_dismiss_clears_repeat_stop_and_resumes(monkeypatch):
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_args, **_kwargs: None)
     row = _popup_dialog_row()
@@ -16673,6 +16738,30 @@ def test_runtime_popup_dismiss_clears_repeat_stop_and_resumes(monkeypatch):
     assert phase_ctx.rows[0]["popup_dismiss_label"] == "확인"
     assert phase_ctx.rows[0]["status"] == "OK"
     assert overlay_calls == [{"rows_len": 1, "all_rows_len": 1, "row": phase_ctx.rows[0]}]
+
+
+def test_runtime_samsung_account_popup_clicks_later_only_and_logs(monkeypatch):
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_args, **_kwargs: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append((level, message)))
+    state = _phase_ordering_state()
+    client = DummyClient([])
+
+    result = collection_flow._maybe_dismiss_runtime_popup(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=_base_tab_cfg(),
+        row=_samsung_account_popup_dialog_row(),
+        state=state,
+        stop_reason="repeat_no_progress",
+    )
+
+    assert result["handled"] is True
+    assert result["label"] == "Later"
+    assert result["popup_kind"] == "samsung_account_two_step"
+    assert client.touch_calls[0] == {"dev": "SERIAL", "type_": "resourceId", "name": "^android:id/button3$"}
+    assert all("button1" not in str(call) for call in client.touch_calls)
+    assert any("[POPUP][dismissed] type=samsung_account_protection action=later" in line for _, line in logs)
 
 
 def test_runtime_popup_guard_skips_after_repeated_signature(monkeypatch):
@@ -16714,6 +16803,26 @@ def test_runtime_popup_dangerous_action_does_not_click(monkeypatch):
 
     assert result["handled"] is False
     assert result["reason"] == "dangerous_action_present"
+    assert client.tap_xy_adb_calls == []
+
+
+def test_runtime_generic_later_popup_is_not_dismissed_without_samsung_evidence(monkeypatch):
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_args, **_kwargs: None)
+    state = _phase_ordering_state()
+    client = DummyClient([])
+
+    result = collection_flow._maybe_dismiss_runtime_popup(
+        client=client,
+        dev="SERIAL",
+        tab_cfg=_base_tab_cfg(),
+        row=_popup_dialog_row(title="Weekly tips", button="Later"),
+        state=state,
+        stop_reason="repeat_no_progress",
+    )
+
+    assert result["handled"] is False
+    assert result["reason"] == "no_safe_action"
+    assert client.touch_calls == []
     assert client.tap_xy_adb_calls == []
 
 

@@ -95,6 +95,43 @@ def _samsung_account_popup_row():
     }
 
 
+def _generic_later_popup_row():
+    return {
+        "focus_node": _node(
+            "Later",
+            clickable=True,
+            class_name="android.widget.Button",
+            bounds="120,1760,360,1860",
+            resource_id="com.example:id/later",
+        ),
+        "dump_tree_nodes": [
+            {
+                "className": "android.app.Dialog",
+                "boundsInScreen": "80,720,1000,1900",
+                "visibleToUser": True,
+                "children": [
+                    _node("Weekly tips", bounds="120,820,900,920"),
+                    _node("See tips next time?", bounds="120,940,900,1120"),
+                    _node(
+                        "Later",
+                        clickable=True,
+                        class_name="android.widget.Button",
+                        bounds="120,1760,360,1860",
+                        resource_id="com.example:id/later",
+                    ),
+                    _node(
+                        "Open now",
+                        clickable=True,
+                        class_name="android.widget.Button",
+                        bounds="700,1760,940,1860",
+                        resource_id="com.example:id/open_now",
+                    ),
+                ],
+            }
+        ],
+    }
+
+
 def test_korean_policy_update_popup_with_confirm_is_safe():
     candidate = popup_handler.detect_popup_candidate(_dialog_row("클립 공유 정책 업데이트", "확인"))
 
@@ -201,6 +238,13 @@ def test_samsung_account_popup_tap_prefers_button3_resource_id():
     assert popup_handler.tap_popup_button(client, "SERIAL", candidate.safe_buttons[0]) is True
     assert client.touch_calls == [{"dev": "SERIAL", "type_": "resourceId", "name": "^android:id/button3$"}]
     assert client.tap_xy_adb_calls == []
+
+
+def test_generic_later_popup_is_not_treated_as_safe_without_samsung_evidence():
+    candidate = popup_handler.detect_popup_candidate(_generic_later_popup_row())
+
+    assert candidate.detected is False
+    assert candidate.reason == "no_safe_action"
 
 
 def test_non_samsung_popup_without_safe_action_is_noop():

@@ -9,15 +9,12 @@ SAFE_ACTION_LABELS = {
     "확인",
     "닫기",
     "취소",
-    "나중에",
-    "나중에 하기",
     "괜찮아요",
     "완료",
     "알겠습니다",
     "ok",
     "close",
     "dismiss",
-    "later",
     "not now",
     "no thanks",
     "done",
@@ -222,7 +219,7 @@ def _samsung_account_safe_buttons(action_nodes: list[dict[str, Any]]) -> tuple[l
         label = node_label(node)
         resource_id = normalize_label(_node_resource_id(node))
         button = {"node": node, "label": label}
-        if resource_id == SAMSUNG_ACCOUNT_LATER_RESOURCE_ID or normalize_label(label) == "later":
+        if resource_id == SAMSUNG_ACCOUNT_LATER_RESOURCE_ID or normalize_label(label) in {"later", "나중에", "나중에 하기"}:
             safe_buttons.append(button)
     return safe_buttons, []
 
