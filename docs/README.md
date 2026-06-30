@@ -30,6 +30,11 @@
 - TalkBack 접근성 품질 판독: [talkback-quality-guide.md](talkback-quality-guide.md)
 - Crash Capture Design: [crash-capture-design.md](crash-capture-design.md)
 
+## V10 Design
+
+- V10 Overview: [design/v10/v10-overview.md](design/v10/v10-overview.md)
+- V10 Phase Plan: [design/v10/v10-phase-plan.md](design/v10/v10-phase-plan.md)
+
 ## Plugin Onboarding Wizard MVP
 
 신규 Life / Device plugin 추가 흐름은 [plugin-onboarding-guide.md](plugin-onboarding-guide.md)
