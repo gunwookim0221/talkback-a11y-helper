@@ -62,7 +62,7 @@ def test_feature_flags_can_be_parsed_independently_with_inventory_shadow_only():
     assert prepared["supported_shadow_features"] == {
         "inventory": True,
         "quick_identify": True,
-        "policy_mapping": False,
+        "policy_mapping": True,
         "shadow_validation": False,
     }
 

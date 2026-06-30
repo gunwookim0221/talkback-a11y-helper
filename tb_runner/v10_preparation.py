@@ -121,7 +121,7 @@ def build_v10_preparation_config(value: Any = None) -> dict[str, Any]:
         "supported_shadow_features": {
             "inventory": True,
             "quick_identify": True,
-            "policy_mapping": False,
+            "policy_mapping": True,
             "shadow_validation": False,
         },
         "feature_flags": flags.as_dict(),

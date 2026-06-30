@@ -1,0 +1,55 @@
+{
+  "schema_version": "v10-policy-mapping-fixture-v1",
+  "cases": [
+    {
+      "id": "motion_high",
+      "decision": "identified",
+      "plugin_family_candidate": "MotionSensorCapability",
+      "confidence": 88,
+      "confidence_band": "high",
+      "restore_success": true,
+      "expected_scenario": "device_motion_sensor_plugin",
+      "expected_eligibility": "eligible"
+    },
+    {
+      "id": "home_camera_high_is_shadow_only",
+      "decision": "identified",
+      "plugin_family_candidate": "HomeCamera360CapabilitySet",
+      "confidence": 90,
+      "confidence_band": "high",
+      "restore_success": true,
+      "expected_scenario": "device_home_camera_plugin",
+      "expected_eligibility": "shadow_only"
+    },
+    {
+      "id": "unsupported_family",
+      "decision": "identified",
+      "plugin_family_candidate": "RobotVacuumCapabilitySet",
+      "confidence": 98,
+      "confidence_band": "definite",
+      "restore_success": true,
+      "expected_scenario": "",
+      "expected_eligibility": "unsupported"
+    },
+    {
+      "id": "ambiguous_identify",
+      "decision": "ambiguous",
+      "plugin_family_candidate": "unknown",
+      "confidence": 0,
+      "confidence_band": "unknown",
+      "restore_success": true,
+      "expected_scenario": "",
+      "expected_eligibility": "ambiguous"
+    },
+    {
+      "id": "restore_failed",
+      "decision": "identified",
+      "plugin_family_candidate": "TVCapabilitySet",
+      "confidence": 97,
+      "confidence_band": "definite",
+      "restore_success": false,
+      "expected_scenario": "",
+      "expected_eligibility": "failed"
+    }
+  ]
+}
