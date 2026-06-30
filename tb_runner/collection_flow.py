@@ -12902,13 +12902,13 @@ def _local_tab_revisit_guard_semantic_signatures(
     *,
     state: Any,
 ) -> set[str]:
-    actual_values = (
+    values = (
         row.get("actual_focus_visible", ""),
         row.get("actual_focus_speech", ""),
-    )
-    values = actual_values if any(str(value or "").strip() for value in actual_values) else (
         row.get("visible_label", ""),
         row.get("merged_announcement", ""),
+        row.get("representative_visible", ""),
+        row.get("representative_speech", ""),
     )
     control_signatures = _local_tab_revisit_guard_control_signatures(state)
     return {
@@ -12983,6 +12983,7 @@ def _local_tab_revisit_guard_block_reason(
     state: Any,
     guard_state: LocalTabRevisitGuardState,
     signature: str,
+    fallback_evidence_available: bool,
 ) -> str:
     if str(row.get("context_type", "main") or "main").strip().lower() == "overlay":
         return "overlay"
@@ -13005,7 +13006,10 @@ def _local_tab_revisit_guard_block_reason(
         return "loading"
     if _local_tab_revisit_guard_has_unvisited_tab(state, guard_state, signature):
         return "unvisited_local_tab"
-    if not guard_state.representative_observation_available:
+    if (
+        not guard_state.representative_observation_available
+        and not fallback_evidence_available
+    ):
         return "representative_observation_unavailable"
     unseen_candidates = (
         guard_state.current_representative_signatures
@@ -13075,6 +13079,14 @@ def _maybe_apply_local_tab_revisit_no_new_semantic_guard(
         state=state,
         guard_state=guard_state,
         signature=signature,
+        fallback_evidence_available=bool(semantic_signatures),
+    )
+    row["local_tab_revisit_guard_evidence_source"] = (
+        "representative_observation"
+        if guard_state.representative_observation_available
+        else "row_semantic_fallback"
+        if semantic_signatures
+        else "unavailable"
     )
     if block_reason:
         guard_state.streak = 0

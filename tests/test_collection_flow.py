@@ -17495,6 +17495,129 @@ def test_local_tab_revisit_guard_does_not_run_with_unseen_representative_candida
     assert state.local_tab_revisit_guard_state.streak == 0
 
 
+def test_local_tab_revisit_guard_uses_same_namespace_for_representative_evidence():
+    state = _local_tab_revisit_guard_test_state()
+    state.local_tab_revisit_guard_state.revisit_active = False
+    state.local_tab_revisit_guard_state.seen_semantic_signatures.discard("mode change")
+
+    initial_row = _local_tab_revisit_guard_test_row(
+        1,
+        "Mode Change",
+        actual_focus_visible="More options",
+        actual_focus_speech="More options",
+    )
+    _apply_local_tab_revisit_guard(state, initial_row)
+
+    assert "mode change" in (
+        state.local_tab_revisit_guard_state.seen_semantic_signatures
+    )
+    assert "more options" not in (
+        state.local_tab_revisit_guard_state.seen_semantic_signatures
+    )
+
+    state.local_tab_revisit_guard_state.revisit_active = True
+    state.local_tab_revisit_guard_state.current_representative_signatures = {
+        "mode change"
+    }
+    revisit_row = _local_tab_revisit_guard_test_row(2, "On")
+    stop, reason, applied = (
+        collection_flow._maybe_apply_local_tab_revisit_no_new_semantic_guard(
+            row=revisit_row,
+            state=state,
+            stop=False,
+            reason="",
+            step_idx=2,
+            scenario_id="device_washer_plugin",
+        )
+    )
+
+    assert (stop, reason, applied) == (False, "", False)
+    assert state.local_tab_revisit_guard_state.streak == 1
+    assert (
+        revisit_row["local_tab_revisit_guard_evidence_source"]
+        == "representative_observation"
+    )
+
+
+def test_local_tab_revisit_guard_uses_known_row_fallback_without_observation():
+    state = _local_tab_revisit_guard_test_state()
+    state.local_tab_revisit_guard_state.current_representative_signatures = set()
+    state.local_tab_revisit_guard_state.representative_observation_available = False
+    row = _local_tab_revisit_guard_test_row(1, "On")
+
+    stop, reason, applied = (
+        collection_flow._maybe_apply_local_tab_revisit_no_new_semantic_guard(
+            row=row,
+            state=state,
+            stop=False,
+            reason="",
+            step_idx=1,
+            scenario_id="device_washer_plugin",
+        )
+    )
+
+    assert (stop, reason, applied) == (False, "", False)
+    assert state.local_tab_revisit_guard_state.streak == 1
+    assert (
+        row["local_tab_revisit_guard_evidence_source"]
+        == "row_semantic_fallback"
+    )
+
+
+def test_local_tab_revisit_guard_fallback_resets_for_late_dynamic_content():
+    state = _local_tab_revisit_guard_test_state()
+    state.local_tab_revisit_guard_state.current_representative_signatures = set()
+    state.local_tab_revisit_guard_state.representative_observation_available = False
+    state.local_tab_revisit_guard_state.streak = 4
+    row = _local_tab_revisit_guard_test_row(5, "Late dynamic carbon intensity")
+
+    stop, reason, applied = (
+        collection_flow._maybe_apply_local_tab_revisit_no_new_semantic_guard(
+            row=row,
+            state=state,
+            stop=False,
+            reason="",
+            step_idx=5,
+            scenario_id="life_energy_plugin",
+        )
+    )
+
+    assert (stop, reason, applied) == (False, "", False)
+    assert state.local_tab_revisit_guard_state.streak == 0
+    assert "late dynamic carbon intensity" in (
+        state.local_tab_revisit_guard_state.seen_semantic_signatures
+    )
+
+
+def test_local_tab_revisit_guard_still_blocks_without_any_evidence():
+    state = _local_tab_revisit_guard_test_state()
+    state.local_tab_revisit_guard_state.current_representative_signatures = set()
+    state.local_tab_revisit_guard_state.representative_observation_available = False
+    row = _local_tab_revisit_guard_test_row(
+        1,
+        "",
+        actual_focus_visible="",
+        actual_focus_speech="",
+        visible_label="",
+        merged_announcement="",
+    )
+
+    stop, reason, applied = (
+        collection_flow._maybe_apply_local_tab_revisit_no_new_semantic_guard(
+            row=row,
+            state=state,
+            stop=False,
+            reason="",
+            step_idx=1,
+            scenario_id="device_washer_plugin",
+        )
+    )
+
+    assert (stop, reason, applied) == (False, "", False)
+    assert state.local_tab_revisit_guard_state.streak == 0
+    assert row["local_tab_revisit_guard_evidence_source"] == "unavailable"
+
+
 def test_local_tab_revisit_guard_is_blocked_during_transient_states():
     cases = [
         ({}, {"context_type": "overlay"}),
