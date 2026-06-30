@@ -1,0 +1,116 @@
+{
+  "schema_version": "v10-identify-fixture-v1",
+  "cases": [
+    {
+      "id": "motion_custom_display_name",
+      "display_label": "거실 센서",
+      "helper_nodes": [
+        {
+          "text": "No motion",
+          "viewIdResourceName": "com.samsung.android.oneconnect:id/MotionSensorCapabilityCardView",
+          "className": "android.view.ViewGroup",
+          "children": []
+        }
+      ],
+      "window_xml": "<hierarchy><node resource-id=\"com.samsung.android.oneconnect:id/MotionSensorCapabilityCardView\" text=\"No motion\" class=\"android.view.ViewGroup\" /></hierarchy>",
+      "expected_decision": "identified",
+      "expected_family": "MotionSensorCapability"
+    },
+    {
+      "id": "door_lock",
+      "display_label": "현관",
+      "helper_nodes": [
+        {
+          "text": "Locked",
+          "viewIdResourceName": "com.samsung.android.oneconnect:id/LockCapabilityCardView",
+          "className": "android.view.ViewGroup",
+          "children": []
+        }
+      ],
+      "window_xml": "<hierarchy><node resource-id=\"com.samsung.android.oneconnect:id/LockCapabilityCardView\" text=\"Locked\" class=\"android.view.ViewGroup\" /></hierarchy>",
+      "expected_decision": "identified",
+      "expected_family": "GenericLockCapability"
+    },
+    {
+      "id": "smoke",
+      "display_label": "안방 안전 장치",
+      "helper_nodes": [
+        {
+          "text": "Clear",
+          "viewIdResourceName": "com.samsung.android.oneconnect:id/SmokeSensorCapabilityCardView",
+          "className": "android.view.ViewGroup",
+          "children": []
+        }
+      ],
+      "window_xml": "<hierarchy><node resource-id=\"com.samsung.android.oneconnect:id/SmokeSensorCapabilityCardView\" text=\"Clear\" class=\"android.view.ViewGroup\" /></hierarchy>",
+      "expected_decision": "identified",
+      "expected_family": "SmokeDetectorCapability"
+    },
+    {
+      "id": "leak",
+      "display_label": "싱크대",
+      "helper_nodes": [
+        {
+          "text": "Dry",
+          "viewIdResourceName": "com.samsung.android.oneconnect:id/WaterSensorCapabilityCardView",
+          "className": "android.view.ViewGroup",
+          "children": []
+        }
+      ],
+      "window_xml": "<hierarchy><node resource-id=\"com.samsung.android.oneconnect:id/WaterSensorCapabilityCardView\" text=\"Dry\" class=\"android.view.ViewGroup\" /></hierarchy>",
+      "expected_decision": "identified",
+      "expected_family": "LeakSensorCapability"
+    },
+    {
+      "id": "washer",
+      "display_label": "Laundry A",
+      "helper_nodes": [
+        {
+          "text": "Rinse",
+          "viewIdResourceName": "com.samsung.android.oneconnect:id/LaundryWasherRinseModeCapabilityCardView_header_title",
+          "className": "android.widget.TextView",
+          "children": []
+        }
+      ],
+      "window_xml": "<hierarchy><node resource-id=\"com.samsung.android.oneconnect:id/LaundryWasherRinseModeCapabilityCardView_header_title\" text=\"Rinse\" class=\"android.widget.TextView\" /></hierarchy>",
+      "expected_decision": "identified",
+      "expected_family": "LaundryWasherCapability"
+    },
+    {
+      "id": "tv_multi_signal",
+      "display_label": "거실 화면",
+      "helper_nodes": [
+        {
+          "text": "Channel",
+          "viewIdResourceName": "com.samsung.android.oneconnect:id/TVChannelCapabilityCardView",
+          "className": "android.view.ViewGroup",
+          "children": []
+        },
+        {
+          "text": "Volume",
+          "viewIdResourceName": "com.samsung.android.oneconnect:id/TVVolumeCapabilityCardView",
+          "className": "android.view.ViewGroup",
+          "children": []
+        }
+      ],
+      "window_xml": "<hierarchy><node resource-id=\"com.samsung.android.oneconnect:id/TVChannelCapabilityCardView\" text=\"Channel\" class=\"android.view.ViewGroup\" /><node resource-id=\"com.samsung.android.oneconnect:id/TVVolumeCapabilityCardView\" text=\"Volume\" class=\"android.view.ViewGroup\" /></hierarchy>",
+      "expected_decision": "identified",
+      "expected_family": "TVCapabilitySet"
+    },
+    {
+      "id": "display_name_only",
+      "display_label": "Motion Sensor",
+      "helper_nodes": [
+        {
+          "text": "Motion Sensor",
+          "viewIdResourceName": "com.samsung.android.oneconnect:id/GenericCapabilityCardView",
+          "className": "android.view.ViewGroup",
+          "children": []
+        }
+      ],
+      "window_xml": "<hierarchy><node resource-id=\"com.samsung.android.oneconnect:id/GenericCapabilityCardView\" text=\"Motion Sensor\" class=\"android.view.ViewGroup\" /></hierarchy>",
+      "expected_decision": "unknown",
+      "expected_family": "unknown"
+    }
+  ]
+}

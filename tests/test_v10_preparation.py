@@ -61,7 +61,7 @@ def test_feature_flags_can_be_parsed_independently_with_inventory_shadow_only():
     assert prepared["runtime_activation_supported"] is False
     assert prepared["supported_shadow_features"] == {
         "inventory": True,
-        "quick_identify": False,
+        "quick_identify": True,
         "policy_mapping": False,
         "shadow_validation": False,
     }

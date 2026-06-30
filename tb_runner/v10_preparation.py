@@ -120,7 +120,7 @@ def build_v10_preparation_config(value: Any = None) -> dict[str, Any]:
         "runtime_activation_supported": False,
         "supported_shadow_features": {
             "inventory": True,
-            "quick_identify": False,
+            "quick_identify": True,
             "policy_mapping": False,
             "shadow_validation": False,
         },
