@@ -1,5 +1,15 @@
 # V10 Overview
 
+| Metadata | Value |
+| --- | --- |
+| Status | Active |
+| Phase | V10 Phase 0 |
+| Owner | TalkBack Automation |
+| Last Updated | 2026-06-30 |
+| Depends On | None |
+| Related Documents | [V10 Phase Plan](v10-phase-plan.md), [V10 Device Inventory Design](v10-device-inventory-design.md) |
+| Next | [V10 Device Inventory Design](v10-device-inventory-design.md) |
+
 ## 1. Background
 
 현재 Device plugin 진입은 `scenario_config.target_stable_labels`와 stable display

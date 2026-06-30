@@ -1,5 +1,15 @@
 # V10 Phase Plan
 
+| Metadata | Value |
+| --- | --- |
+| Status | Active |
+| Phase | V10 Phase 0 |
+| Owner | TalkBack Automation |
+| Last Updated | 2026-06-30 |
+| Depends On | [V10 Overview](v10-overview.md) |
+| Related Documents | [V10 Device Inventory Design](v10-device-inventory-design.md) |
+| Next | [V10 Device Inventory Design](v10-device-inventory-design.md) |
+
 ## 1. Delivery Principle
 
 V10의 첫 구현은 production replacement가 아니라 shadow MVP다.
