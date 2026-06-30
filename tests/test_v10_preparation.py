@@ -41,7 +41,7 @@ def test_feature_flags_default_off_and_invalid_values_stay_off():
     }
 
 
-def test_feature_flags_can_be_parsed_independently_without_runtime_activation():
+def test_feature_flags_can_be_parsed_independently_with_inventory_shadow_only():
     prepared = build_v10_preparation_config(
         {
             "feature_flags": {
@@ -57,8 +57,14 @@ def test_feature_flags_can_be_parsed_independently_without_runtime_activation():
     assert prepared["feature_flags"]["quick_identify_enabled"] is False
     assert prepared["feature_flags"]["policy_mapping_enabled"] is True
     assert prepared["feature_flags"]["shadow_validation_enabled"] is False
-    assert prepared["preparation_only"] is True
+    assert prepared["preparation_only"] is False
     assert prepared["runtime_activation_supported"] is False
+    assert prepared["supported_shadow_features"] == {
+        "inventory": True,
+        "quick_identify": False,
+        "policy_mapping": False,
+        "shadow_validation": False,
+    }
 
 
 def test_version_schema_defaults_and_rejects_invalid_values():

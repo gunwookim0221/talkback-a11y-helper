@@ -1,0 +1,72 @@
+{
+  "schema_version": "v10-inventory-fixture-v1",
+  "viewports": [
+    [
+      {
+        "text": "Motion Sensor No motion",
+        "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+        "className": "android.view.ViewGroup",
+        "boundsInScreen": "40,420,1040,760",
+        "clickable": true,
+        "visibleToUser": true
+      },
+      {
+        "text": "Shared name",
+        "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+        "className": "android.view.ViewGroup",
+        "boundsInScreen": "40,800,1040,1140",
+        "clickable": true,
+        "visibleToUser": true
+      },
+      {
+        "text": "Shared name",
+        "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+        "className": "android.view.ViewGroup",
+        "boundsInScreen": "40,1180,1040,1520",
+        "clickable": true,
+        "visibleToUser": true
+      }
+    ],
+    [
+      {
+        "text": "Motion Sensor No motion",
+        "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+        "className": "android.view.ViewGroup",
+        "boundsInScreen": "40,120,1040,460",
+        "clickable": true,
+        "visibleToUser": true
+      },
+      {
+        "text": "Door Lock Locked",
+        "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+        "className": "android.view.ViewGroup",
+        "boundsInScreen": "40,500,1040,840",
+        "clickable": true,
+        "visibleToUser": true
+      }
+    ],
+    [
+      {
+        "text": "Motion Sensor No motion",
+        "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+        "className": "android.view.ViewGroup",
+        "boundsInScreen": "40,120,1040,460",
+        "clickable": true,
+        "visibleToUser": true
+      },
+      {
+        "text": "Door Lock Locked",
+        "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+        "className": "android.view.ViewGroup",
+        "boundsInScreen": "40,500,1040,840",
+        "clickable": true,
+        "visibleToUser": true
+      }
+    ]
+  ],
+  "expected": {
+    "termination_reason": "repeated_viewport",
+    "minimum_item_count": 4,
+    "shared_name_count": 2
+  }
+}

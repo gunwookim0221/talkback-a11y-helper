@@ -116,8 +116,14 @@ def build_v10_preparation_config(value: Any = None) -> dict[str, Any]:
     versions = V10VersionSchema.from_mapping(raw.get("versions"))
     return {
         "schema_version": V10_PREPARATION_SCHEMA_VERSION,
-        "preparation_only": True,
+        "preparation_only": False,
         "runtime_activation_supported": False,
+        "supported_shadow_features": {
+            "inventory": True,
+            "quick_identify": False,
+            "policy_mapping": False,
+            "shadow_validation": False,
+        },
         "feature_flags": flags.as_dict(),
         "versions": versions.as_dict(),
         "artifact_layout": V10ArtifactLayout().as_dict(),
