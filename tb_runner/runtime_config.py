@@ -13,8 +13,9 @@ from tb_runner.constants import (
     OVERLAY_STEP_WAIT_SECONDS,
 )
 from tb_runner.logging_utils import log
+from tb_runner.v10_preparation import build_v10_preparation_config
 
-RUNTIME_CONFIG_VERSION = "1.9.0"
+RUNTIME_CONFIG_VERSION = "1.10.0"
 DEFAULT_RUNTIME_CONFIG_PATH = Path("config/runtime_config.json")
 RUNTIME_CONFIG_PATH_ENV = "TB_RUNTIME_CONFIG_PATH"
 
@@ -480,5 +481,6 @@ def load_runtime_bundle(base_tab_configs: list[dict[str, Any]], config_path: str
         "version": RUNTIME_CONFIG_VERSION,
         "config_path": str(resolved_path),
         "checkpoint_save_every": checkpoint_save_every,
+        "v10": build_v10_preparation_config(raw_config.get("v10")),
         "tab_configs": merged_tab_configs,
     }

@@ -2,6 +2,21 @@
   "global": {
     "checkpoint_save_every": 3
   },
+  "v10": {
+    "feature_flags": {
+      "inventory_enabled": false,
+      "quick_identify_enabled": false,
+      "policy_mapping_enabled": false,
+      "shadow_validation_enabled": false
+    },
+    "versions": {
+      "policy_version": "v10-scenario-policy-v1",
+      "registry_version": "v10-policy-registry-v1",
+      "mapping_revision": 1,
+      "identify_contract_version": "v10-quick-identify-v1",
+      "shadow_validation_version": "v10-shadow-validation-v1"
+    }
+  },
   "defaults": {
     "tab_select_retry_count": 2,
     "anchor_retry_count": 2,

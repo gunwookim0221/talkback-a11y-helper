@@ -1,0 +1,120 @@
+{
+  "schema_version": "v10-validation-matrix-v1",
+  "languages": [
+    "en-US",
+    "ko-KR"
+  ],
+  "android_targets": [
+    {
+      "release": "13",
+      "api_level": 33,
+      "priority": "secondary"
+    },
+    {
+      "release": "14",
+      "api_level": 34,
+      "priority": "primary"
+    },
+    {
+      "release": "15",
+      "api_level": 35,
+      "priority": "primary"
+    },
+    {
+      "release": "16",
+      "api_level": 36,
+      "priority": "exploratory"
+    }
+  ],
+  "device_families": [
+    {
+      "family": "smoke_sensor",
+      "plugin_type": "SmokeDetectorCapability",
+      "scenario_id": "device_smoke_sensor_plugin",
+      "pilot": true
+    },
+    {
+      "family": "water_leak_sensor",
+      "plugin_type": "LeakSensorCapability",
+      "scenario_id": "device_water_leak_sensor_plugin",
+      "pilot": true
+    },
+    {
+      "family": "motion_sensor",
+      "plugin_type": "MotionSensorCapability",
+      "scenario_id": "device_motion_sensor_plugin",
+      "pilot": true
+    },
+    {
+      "family": "door_lock",
+      "plugin_type": "GenericLockCapability",
+      "scenario_id": "device_door_lock_plugin",
+      "pilot": true
+    },
+    {
+      "family": "air_purifier",
+      "plugin_type": "AirPurifierCapabilitySet",
+      "scenario_id": "device_air_purifier_plugin",
+      "pilot": false
+    },
+    {
+      "family": "tv",
+      "plugin_type": "TVCapabilitySet",
+      "scenario_id": "device_tv_plugin",
+      "pilot": true
+    },
+    {
+      "family": "washer",
+      "plugin_type": "LaundryWasherCapability",
+      "scenario_id": "device_washer_plugin",
+      "pilot": true
+    },
+    {
+      "family": "humidity_sensor",
+      "plugin_type": "HumiditySensorCapability",
+      "scenario_id": "device_humidity_sensor_plugin",
+      "pilot": false
+    },
+    {
+      "family": "temperature_humidity_sensor",
+      "plugin_type": "TemperatureHumiditySensorCapabilitySet",
+      "scenario_id": "device_temperature_humidity_sensor_plugin",
+      "pilot": false
+    },
+    {
+      "family": "camera",
+      "plugin_type": "CameraCapabilitySet",
+      "scenario_id": "device_camera_plugin",
+      "pilot": false
+    },
+    {
+      "family": "home_camera",
+      "plugin_type": "HomeCamera360CapabilitySet",
+      "scenario_id": "device_home_camera_plugin",
+      "pilot": false
+    },
+    {
+      "family": "audio",
+      "plugin_type": "AudioCapabilitySet",
+      "scenario_id": "device_audio_plugin",
+      "pilot": false
+    }
+  ],
+  "required_dimensions": [
+    "device_family",
+    "plugin_type",
+    "language",
+    "android_version",
+    "app_version",
+    "helper_version",
+    "account",
+    "location"
+  ],
+  "result_states": [
+    "positive",
+    "negative",
+    "unknown",
+    "ambiguous",
+    "failed"
+  ]
+}

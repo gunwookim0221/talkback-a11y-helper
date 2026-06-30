@@ -9,6 +9,8 @@
 *.iml
 app/build/
 /output/
+/artifacts/v10/*/*
+!/artifacts/v10/*/.gitkeep
 adb.log
 /qa_frontend_runs/
 /qa_frontend/frontend/node_modules/
