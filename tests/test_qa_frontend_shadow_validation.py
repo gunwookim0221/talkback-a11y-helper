@@ -286,3 +286,83 @@ def test_run_manager_calls_shadow_hook_after_legacy_completion(tmp_path, monkeyp
     assert len(calls) == 1
     assert calls[0]["requested"] is True
     assert calls[0]["scenario_ids"] == ["device_motion_sensor_plugin"]
+    runtime_snapshot = json.loads(Path(status["runtime_config_path"]).read_text(encoding="utf-8"))
+    assert all(runtime_snapshot["v10"]["feature_flags"].values())
+
+
+def test_run_manager_shadow_off_keeps_snapshot_flags_off(tmp_path, monkeypatch):
+    source_path = _runtime_config(tmp_path / "runtime.json", enabled=False)
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    source["scenarios"] = {"devices_main": {"enabled": False, "max_steps": 20}}
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+
+    monkeypatch.setattr("qa_frontend.backend.runner.RUNTIME_CONFIG_PATH", source_path)
+    monkeypatch.setattr("qa_frontend.backend.runner.RUN_LOG_DIR", tmp_path / "runs")
+    monkeypatch.setattr(
+        "qa_frontend.backend.runner.prepare_runtime",
+        lambda spec, language_fn, preflight_fn: (
+            {"ok": False, "error": "stop before legacy execution"},
+            None,
+        ),
+    )
+    monkeypatch.setattr("qa_frontend.backend.runner.enable_sleep_prevention", lambda: None)
+    monkeypatch.setattr("qa_frontend.backend.runner.disable_sleep_prevention", lambda: None)
+    monkeypatch.setattr(
+        "qa_frontend.backend.runner.enable_device_stay_awake",
+        lambda: {"ok": True},
+    )
+    monkeypatch.setattr(
+        "qa_frontend.backend.runner.restore_device_stay_awake",
+        lambda state: {"ok": True, "restored": True},
+    )
+
+    manager = RunManager()
+    status = manager.start_run(
+        mode="full",
+        scenario_ids=["devices_main"],
+        shadow_validation=False,
+    )
+
+    runtime_snapshot = json.loads(Path(status["runtime_config_path"]).read_text(encoding="utf-8"))
+    assert not any(runtime_snapshot["v10"]["feature_flags"].values())
+    assert status["shadow_validation"] is False
+    assert not (Path(status["runtime_config_path"]).parent / "shadow").exists()
+
+
+def test_run_manager_rejects_shadow_for_smoke_snapshot(tmp_path, monkeypatch):
+    source_path = _runtime_config(tmp_path / "runtime.json", enabled=False)
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    source["scenarios"] = {"devices_main": {"enabled": False, "max_steps": 20}}
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+
+    monkeypatch.setattr("qa_frontend.backend.runner.RUNTIME_CONFIG_PATH", source_path)
+    monkeypatch.setattr("qa_frontend.backend.runner.RUN_LOG_DIR", tmp_path / "runs")
+    monkeypatch.setattr(
+        "qa_frontend.backend.runner.prepare_runtime",
+        lambda spec, language_fn, preflight_fn: (
+            {"ok": False, "error": "stop before legacy execution"},
+            None,
+        ),
+    )
+    monkeypatch.setattr("qa_frontend.backend.runner.enable_sleep_prevention", lambda: None)
+    monkeypatch.setattr("qa_frontend.backend.runner.disable_sleep_prevention", lambda: None)
+    monkeypatch.setattr(
+        "qa_frontend.backend.runner.enable_device_stay_awake",
+        lambda: {"ok": True},
+    )
+    monkeypatch.setattr(
+        "qa_frontend.backend.runner.restore_device_stay_awake",
+        lambda state: {"ok": True, "restored": True},
+    )
+
+    manager = RunManager()
+    status = manager.start_run(
+        mode="smoke",
+        scenario_ids=["devices_main"],
+        shadow_validation=True,
+    )
+
+    runtime_snapshot = json.loads(Path(status["runtime_config_path"]).read_text(encoding="utf-8"))
+    assert not any(runtime_snapshot["v10"]["feature_flags"].values())
+    assert status["shadow_validation"] is False
+    assert not (Path(status["runtime_config_path"]).parent / "shadow").exists()

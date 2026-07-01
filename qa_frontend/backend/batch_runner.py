@@ -26,6 +26,7 @@ from .sleep_prevention import (
     enable_sleep_prevention,
     restore_device_stay_awake,
 )
+from .shadow_pipeline import run_shadow_validation_pipeline
 
 def _json_safe(value):
     if isinstance(value, Path):
@@ -411,11 +412,12 @@ class BatchRunManager:
         self._worker_thread = None
         self._stop_requested = False
         self._current_execution: RunExecution | None = None
+        self._shadow_validation_requested = False
 
     def _sanitize_name(self, name: str) -> str:
         return re.sub(r'[^0-9a-zA-Z_-]+', '_', name)
 
-    def start_batch(self, devices: list[dict], mode: str, launch_mode: str = "clean", language_mode: str = "current", scenario_ids: list[str] | None = None, enable_coverage_probe: bool = False) -> dict:
+    def start_batch(self, devices: list[dict], mode: str, launch_mode: str = "clean", language_mode: str = "current", scenario_ids: list[str] | None = None, enable_coverage_probe: bool = False, shadow_validation: bool = False) -> dict:
         with self._lock:
             if self._state == "running":
                 raise RuntimeError("Batch run is already in progress")
@@ -429,6 +431,9 @@ class BatchRunManager:
             self._language_mode = normalize_language_mode(language_mode)
             self._scenario_ids = scenario_ids or []
             self._enable_coverage_probe = enable_coverage_probe
+            self._shadow_validation_requested = (
+                shadow_validation is True and str(mode).lower() == "full"
+            )
             self._created_at = datetime.now(timezone.utc).isoformat()
             
             batch_dir = RUN_LOG_DIR / self._batch_id
@@ -625,6 +630,7 @@ class BatchRunManager:
             "created_at": self._created_at,
             "state": self._state,
             "enable_coverage_probe": self._enable_coverage_probe,
+            "shadow_validation": self._shadow_validation_requested,
             "devices": self._devices
         }
         try:
@@ -776,6 +782,7 @@ class BatchRunManager:
                 "log_path": log_path,
                 "xlsx_path": xlsx_path,
                 "enable_coverage_probe": self._enable_coverage_probe,
+                "shadow_validation": self._shadow_validation_requested,
                 "quality": quality,
                 "scenarios": parsed_summary.get("scenarios", []),
                 "process_status": parsed_summary.get("process_status"),
@@ -902,6 +909,7 @@ class BatchRunManager:
                     output_path=Path(dev_output_dir) / "runtime_config.json",
                     scenario_ids=self._scenario_ids,
                     mode=self._mode,
+                    shadow_validation=self._shadow_validation_requested,
                 )
                 log_file.write(f"[BATCH] Config generated for {dev_serial}\n")
                 log_file.flush()
@@ -991,6 +999,32 @@ class BatchRunManager:
                         self._current_execution = None
                 stop_crash_logcat_capture(crash_capture, log_writer=crash_log)
                 crash_capture = None
+
+                if (
+                    self._shadow_validation_requested
+                    and self._mode == "full"
+                    and not self._is_stop_requested()
+                ):
+                    try:
+                        shadow_result = run_shadow_validation_pipeline(
+                            runtime_config_path=str(runtime_config["path"]),
+                            requested=True,
+                            output_dir=dev_output_dir,
+                            scenario_ids=self._scenario_ids,
+                            serial=dev_serial,
+                            run_id=str(self._batch_id or ""),
+                            device_name=str(device_info.get("model") or ""),
+                        )
+                        crash_log(
+                            "[QA_FRONTEND][shadow] "
+                            f"status='{shadow_result.get('status', 'unknown')}' "
+                            f"artifact_dir='{shadow_result.get('artifact_dir', '')}'"
+                        )
+                    except Exception as shadow_exc:
+                        crash_log(
+                            "[QA_FRONTEND][shadow] status='warning' "
+                            f"error='{shadow_exc}' legacy_result_preserved=true"
+                        )
                 
                 try:
                     file_size = log_path.stat().st_size

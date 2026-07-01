@@ -96,3 +96,70 @@ def test_runtime_config_env_path_is_used_by_runner_loader(tmp_path, monkeypatch)
     home_cfg = bundle["tab_configs"][0]
     assert home_cfg["enabled"] is True
     assert home_cfg["max_steps"] == 12
+
+
+def test_full_shadow_request_enables_only_run_local_v10_flags(tmp_path):
+    source_path = tmp_path / "runtime_config.json"
+    output_path = tmp_path / "run" / "runtime_config.json"
+    source = {
+        "v10": {
+            "feature_flags": {
+                "inventory_enabled": False,
+                "quick_identify_enabled": False,
+                "policy_mapping_enabled": False,
+                "shadow_validation_enabled": False,
+            }
+        },
+        "scenarios": {"devices_main": {"enabled": False, "max_steps": 20}},
+    }
+    source_text = json.dumps(source, ensure_ascii=False, indent=2)
+    source_path.write_text(source_text, encoding="utf-8")
+
+    result = write_selected_runtime_config(
+        source_path=source_path,
+        output_path=output_path,
+        scenario_ids=["devices_main"],
+        mode="full",
+        shadow_validation=True,
+    )
+
+    generated = json.loads(output_path.read_text(encoding="utf-8"))
+    assert all(generated["v10"]["feature_flags"].values())
+    assert result["shadow_validation_enabled"] is True
+    assert source_path.read_text(encoding="utf-8") == source_text
+
+
+def test_shadow_flags_stay_off_for_off_request_and_smoke_request(tmp_path):
+    source_path = tmp_path / "runtime_config.json"
+    source_path.write_text(
+        json.dumps(
+            {
+                "v10": {
+                    "feature_flags": {
+                        "inventory_enabled": True,
+                        "quick_identify_enabled": True,
+                        "policy_mapping_enabled": True,
+                        "shadow_validation_enabled": True,
+                    }
+                },
+                "scenarios": {"devices_main": {"enabled": False, "max_steps": 20}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    for name, mode, requested in (
+        ("full-off", "full", False),
+        ("smoke-on", "smoke", True),
+    ):
+        output_path = tmp_path / name / "runtime_config.json"
+        result = write_selected_runtime_config(
+            source_path=source_path,
+            output_path=output_path,
+            scenario_ids=["devices_main"],
+            mode=mode,
+            shadow_validation=requested,
+        )
+        generated = json.loads(output_path.read_text(encoding="utf-8"))
+        assert not any(generated["v10"]["feature_flags"].values())
+        assert result["shadow_validation_enabled"] is False

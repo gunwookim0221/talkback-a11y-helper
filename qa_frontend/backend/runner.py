@@ -25,6 +25,7 @@ from .sleep_prevention import (
     enable_sleep_prevention,
     restore_device_stay_awake,
 )
+from .shadow_pipeline import run_shadow_validation_pipeline
 from .subprocess_executor import RunExecution, close_execution_log, start_execution, wait_for_execution
 
 RunState = Literal["idle", "running", "stopped", "finished", "error"]
@@ -57,6 +58,8 @@ class RunManager:
         self._dashboard_parsed_cache: dict[str, object] | None = None
         self._last_outputs_signature: str | None = None
         self._device_stay_awake_state: dict[str, object] | None = None
+        self._run_dir: Path | None = None
+        self._shadow_validation_requested = False
 
     def start_run(
         self,
@@ -66,6 +69,7 @@ class RunManager:
         language_mode: str = "current",
         max_steps_overrides: dict[str, int] | None = None,
         enable_coverage_probe: bool = False,
+        shadow_validation: bool = False,
     ) -> dict[str, object]:
         with self._lock:
             self._refresh_locked()
@@ -83,6 +87,7 @@ class RunManager:
             try:
                 log_file = log_path.open("w", encoding="utf-8", errors="replace")
                 self._run_id = run_id
+                self._run_dir = run_dir
                 self._mode = mode
                 self._log_path = log_path
                 self._started_at = datetime.now().isoformat(timespec="seconds")
@@ -97,6 +102,9 @@ class RunManager:
                 self._max_steps_policy = None
                 self._scenario_steps = []
                 self._preflight = None
+                self._shadow_validation_requested = (
+                    shadow_validation is True and str(mode).lower() == "full"
+                )
 
                 if not scenario_ids:
                     self._state = "error"
@@ -135,6 +143,7 @@ class RunManager:
                     scenario_ids=list(scenario_ids),
                     mode=mode,
                     max_steps_overrides=max_steps_overrides,
+                    shadow_validation=self._shadow_validation_requested,
                 )
                 self._scenario_selection_applied = True
                 self._runtime_config_path = str(runtime_config["path"])
@@ -368,6 +377,8 @@ class RunManager:
             wait_error = str(exc)
         else:
             wait_error = None
+            if self._state != "stopped":
+                self._run_shadow_validation_safe()
         finally:
             self._restore_device_stay_awake()
             disable_sleep_prevention()
@@ -429,6 +440,32 @@ class RunManager:
             f"reason='{result.get('reason', '')}' error='{result.get('error', '')}'"
         )
 
+    def _run_shadow_validation_safe(self) -> None:
+        if not self._shadow_validation_requested or self._mode != "full":
+            return
+        if not self._runtime_config_path or not self._run_dir:
+            self._append_log_line(
+                "[QA_FRONTEND][shadow] status='warning' reason='runtime_context_unavailable'"
+            )
+            return
+        try:
+            result = run_shadow_validation_pipeline(
+                runtime_config_path=self._runtime_config_path,
+                requested=True,
+                output_dir=self._run_dir,
+                scenario_ids=self._scenario_ids,
+                run_id=str(self._run_id or ""),
+            )
+            self._append_log_line(
+                "[QA_FRONTEND][shadow] "
+                f"status='{result.get('status', 'unknown')}' "
+                f"artifact_dir='{result.get('artifact_dir', '')}'"
+            )
+        except Exception as exc:
+            self._append_log_line(
+                f"[QA_FRONTEND][shadow] status='warning' error='{exc}' legacy_result_preserved=true"
+            )
+
     def _write_summary_safe(self) -> None:
         if not self._log_path:
             return
@@ -457,6 +494,7 @@ class RunManager:
             "runtime_config_path": self._runtime_config_path,
             "max_steps_policy": self._max_steps_policy,
             "scenario_steps": self._scenario_steps,
+            "shadow_validation": self._shadow_validation_requested,
             "launch_mode": self._launch_mode,
             "language_mode": self._language_mode,
             "device_locale": language_status.get("device_locale") if language_status else None,
