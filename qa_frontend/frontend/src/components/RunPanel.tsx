@@ -21,6 +21,8 @@ export interface RunPanelProps {
   selectedScenarios: Set<string>;
   enableCoverageProbe: boolean;
   setEnableCoverageProbe: (enabled: boolean) => void;
+  shadowValidation: boolean;
+  setShadowValidation: (enabled: boolean) => void;
 }
 
 export function RunPanel({
@@ -40,6 +42,8 @@ export function RunPanel({
   selectedScenarios,
   enableCoverageProbe,
   setEnableCoverageProbe,
+  shadowValidation,
+  setShadowValidation,
 }: RunPanelProps) {
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [loadingDevices, setLoadingDevices] = useState(false);
@@ -127,7 +131,8 @@ export function RunPanel({
           launch_mode: launchMode,
           language_mode: languageMode,
           scenario_ids,
-          enable_coverage_probe: enableCoverageProbe
+          enable_coverage_probe: enableCoverageProbe,
+          shadow_validation: plannedMode === 'full' && shadowValidation,
         });
         setBatchStatus(res);
       } catch (err: any) {
@@ -322,11 +327,25 @@ export function RunPanel({
                 onChange={(e) => setEnableCoverageProbe(e.target.checked)}
                 disabled={running}
               />
-              <span style={{ fontSize: '14px' }}>V8 Runtime Probe</span>
+              <span style={{ fontSize: '14px' }}>Runtime Coverage Probe</span>
             </label>
             <div style={{ padding: '0 8px', marginTop: '-4px' }}>
               <small style={{ fontSize: '11px', color: 'var(--color-text-dim)', display: 'block' }}>
-                Runs coverage-driven TalkBack probe after normal traversal. Adds probe result/validation artifacts and shadow rows. Experimental.
+                Runs coverage-driven TalkBack probe after traversal to validate expected device/plugin content. Recommended for Full runs.
+              </small>
+            </div>
+            <label style={{ padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input
+                type="checkbox"
+                checked={shadowValidation}
+                onChange={(e) => setShadowValidation(e.target.checked)}
+                disabled={running || plannedMode !== 'full'}
+              />
+              <span style={{ fontSize: '14px' }}>Shadow Validation (Experimental)</span>
+            </label>
+            <div style={{ padding: '0 8px', marginTop: '-4px' }}>
+              <small style={{ fontSize: '11px', color: 'var(--color-text-dim)', display: 'block' }}>
+                Runs the V10 inventory, identify, policy, and comparison pipeline after the legacy run. Legacy remains authoritative.
               </small>
             </div>
           </div>

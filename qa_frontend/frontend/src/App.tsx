@@ -31,6 +31,7 @@ export default function App() {
   const [languageMode, setLanguageMode] = useState<LanguageMode>('current');
   const [plannedMode, setPlannedMode] = useState<'smoke' | 'full'>('smoke');
   const [enableCoverageProbe, setEnableCoverageProbe] = useState(false);
+  const [shadowValidation, setShadowValidation] = useState(false);
   const [fixTalkBackRunning, setFixTalkBackRunning] = useState(false);
   const [fixTalkBackMessage, setFixTalkBackMessage] = useState<string | null>(null);
   const preflightRef = useRef<HTMLElement | null>(null);
@@ -120,6 +121,10 @@ export default function App() {
   }, [refreshRun]);
 
   useEffect(() => {
+    setEnableCoverageProbe(plannedMode === 'full');
+  }, [plannedMode]);
+
+  useEffect(() => {
     if (!shouldScrollToPreflight || !status?.run_id) {
       return;
     }
@@ -134,7 +139,14 @@ export default function App() {
     clearError();
     setPlannedMode(mode);
     try {
-      await api.startRun(mode, Array.from(selected), launchMode, languageMode, enableCoverageProbe);
+      await api.startRun(
+        mode,
+        Array.from(selected),
+        launchMode,
+        languageMode,
+        enableCoverageProbe,
+        mode === 'full' && shadowValidation,
+      );
       await refreshRun();
     } catch (err) {
       reportError(err);
@@ -361,6 +373,8 @@ export default function App() {
           selectedScenarios={selected}
           enableCoverageProbe={enableCoverageProbe}
           setEnableCoverageProbe={setEnableCoverageProbe}
+          shadowValidation={shadowValidation}
+          setShadowValidation={setShadowValidation}
         />
       </section>
 

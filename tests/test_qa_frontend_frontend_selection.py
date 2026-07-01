@@ -17,6 +17,7 @@ def test_frontend_initial_selection_defaults_to_global_nav_not_source_enabled():
     assert "new Set([DEFAULT_SCENARIO_ID])" in selection_ts
     assert "scenario.enabled" not in selection_ts
     assert "setSelected(initialScenarioSelection(response.scenarios))" in app_tsx
+    assert "setEnableCoverageProbe(plannedMode === 'full')" in app_tsx
     assert "filter((scenario) => scenario.enabled).map((scenario) => scenario.id)" not in app_tsx
     assert "useState<'warm' | 'clean'>('clean')" in app_tsx
     assert "Run blocked: language change required" in app_tsx
@@ -42,6 +43,10 @@ def test_frontend_initial_selection_defaults_to_global_nav_not_source_enabled():
     assert "selected scenarios with reduced max_steps" in run_panel_tsx
     assert "Selected Full" in run_panel_tsx
     assert "selected scenarios with source max_steps" in run_panel_tsx
+    assert "Runtime Coverage Probe" in run_panel_tsx
+    assert "Recommended for Full runs." in run_panel_tsx
+    assert "V8 Runtime Probe" not in run_panel_tsx
+    assert "Experimental." not in run_panel_tsx
     assert "Full Regression Selected" not in presets_ts
     assert "full_regression_selected" not in presets_ts
     assert "recommendedMode" not in presets_ts
