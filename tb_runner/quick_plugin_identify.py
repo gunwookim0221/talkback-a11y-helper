@@ -386,6 +386,7 @@ def _result(
     restore_success: bool = False,
     snapshot_refs: Mapping[str, Any] | None = None,
     stabilization: Mapping[str, Any] | None = None,
+    locator_diagnostics: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if decision not in ALLOWED_DECISIONS:
         raise ValueError(f"unsupported identify decision: {decision}")
@@ -411,6 +412,7 @@ def _result(
         "restore_success": bool(restore_success),
         "snapshot_refs": dict(snapshot_refs or {}),
         "stabilization": dict(stabilization or {}),
+        "locator_diagnostics": dict(locator_diagnostics or {}),
         "errors": list(errors or []),
     }
 
@@ -570,13 +572,27 @@ def _locate_inventory_item(
     ranked: list[tuple[int, dict[str, Any]]] = []
     for card in device_tab_logic.collect_visible_device_cards(nodes):
         actual = _candidate_values(card)
+        stable_match = bool(
+            expected["stable_label"]
+            and actual["stable_label"] == expected["stable_label"]
+        )
+        display_match = bool(
+            expected["display_label"]
+            and actual["display_label"] == expected["display_label"]
+        )
+        bounds_match = bool(
+            expected["bounds"]
+            and actual["bounds"] == expected["bounds"]
+        )
         score = 0
         score += 4 if expected["resource_id"] and actual["resource_id"] == expected["resource_id"] else 0
         score += 3 if expected["class_name"] and actual["class_name"] == expected["class_name"] else 0
-        score += 3 if expected["stable_label"] and actual["stable_label"] == expected["stable_label"] else 0
-        score += 2 if expected["display_label"] and actual["display_label"] == expected["display_label"] else 0
-        score += 2 if expected["bounds"] and actual["bounds"] == expected["bounds"] else 0
-        if score >= 7:
+        score += 3 if stable_match else 0
+        score += 2 if display_match else 0
+        score += 2 if bounds_match else 0
+        # Generic card resource/class and grid bounds repeat across viewports.
+        # A label discriminator is required before bounds can raise confidence.
+        if score >= 7 and (stable_match or display_match):
             ranked.append((score, card))
     if not ranked:
         return None, "runtime_card_not_visible"
@@ -609,13 +625,29 @@ def _locate_inventory_item_bounded(
     sleep: Sleep,
     max_scrolls: int,
     settle_seconds: float,
+    diagnostics: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, str]:
+    trace = diagnostics if diagnostics is not None else {}
+    trace["expected_viewport_indexes"] = sorted(
+        {
+            int(value)
+            for value in item.get("observed_viewport_indexes", [])
+            if isinstance(value, int) and value >= 0
+        }
+    )
     scroll_to_top = getattr(client, "scroll_to_top", None)
     if callable(scroll_to_top):
         try:
-            scroll_to_top(dev=dev, max_swipes=max(1, max_scrolls + 1), pause=0.2)
-        except Exception:
-            pass
+            normalized = scroll_to_top(
+                dev=dev,
+                max_swipes=max(1, max_scrolls + 1),
+                pause=0.2,
+            )
+            trace["scroll_to_top"] = (
+                dict(normalized) if isinstance(normalized, Mapping) else {"called": True}
+            )
+        except Exception as exc:
+            trace["scroll_to_top"] = {"called": True, "error": str(exc)}
 
     expected_viewports = {
         int(value)
@@ -627,25 +659,51 @@ def _locate_inventory_item_bounded(
 
     seen: set[str] = set()
     latest_nodes: list[dict[str, Any]] = []
+    scanned_viewports: list[dict[str, Any]] = []
+    trace["scanned_viewports"] = scanned_viewports
     for viewport_index in range(max(0, int(max_scrolls)) + 1):
         latest_nodes, capture_error = _capture_helper(client, dev)
         if capture_error:
+            trace["termination_reason"] = capture_error
             return latest_nodes, None, capture_error
         signature = _viewport_signature(latest_nodes)
-        if signature in seen:
-            return latest_nodes, None, "runtime_card_viewport_repeated"
-        seen.add(signature)
+        card, locate_error = _locate_inventory_item(latest_nodes, item)
+        repeated = signature in seen
+        scanned_viewports.append(
+            {
+                "viewport_index": viewport_index,
+                "expected_viewport": viewport_index in expected_viewports,
+                "signature": signature,
+                "card_count": len(device_tab_logic.collect_visible_device_cards(latest_nodes)),
+                "locate_result": (
+                    "matched"
+                    if card is not None
+                    else locate_error or "runtime_card_not_visible"
+                ),
+                "repeated": repeated,
+            }
+        )
 
-        if viewport_index in expected_viewports:
-            card, locate_error = _locate_inventory_item(latest_nodes, item)
-            if card is not None or locate_error == "runtime_card_ambiguous":
-                return latest_nodes, card, locate_error
+        # A viewport index is navigation evidence, not identity. Always accept
+        # a unique strong composite match before evaluating scroll repetition.
+        if card is not None or locate_error == "runtime_card_ambiguous":
+            trace["termination_reason"] = locate_error or "runtime_card_matched"
+            trace["matched_viewport_index"] = viewport_index if card is not None else None
+            return latest_nodes, card, locate_error
+
+        if repeated:
+            reason = "runtime_card_not_found_before_viewport_repeat"
+            trace["termination_reason"] = reason
+            return latest_nodes, None, reason
+        seen.add(signature)
 
         if viewport_index >= max_scrolls:
             break
         if not _client_scroll_down(client, dev, latest_nodes):
+            trace["termination_reason"] = "runtime_card_scroll_exhausted"
             return latest_nodes, None, "runtime_card_scroll_exhausted"
         sleep(max(0.0, settle_seconds))
+    trace["termination_reason"] = "runtime_card_not_found_within_bound"
     return latest_nodes, None, "runtime_card_not_found_within_bound"
 
 
@@ -710,6 +768,7 @@ def _lifecycle_failure(
     decision: str,
     errors: list[str],
     artifact_dir: str | Path,
+    locator_diagnostics: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     result = _result(
         inventory_id=_text(inventory.get("inventory_id")),
@@ -719,6 +778,7 @@ def _lifecycle_failure(
         decision=decision,
         errors=errors,
         restore_success=False,
+        locator_diagnostics=locator_diagnostics,
     )
     path = write_identify_artifact(result, artifact_dir=artifact_dir)
     return {"status": decision, "result": result, "artifact_path": str(path)}
@@ -762,6 +822,7 @@ def run_quick_identify_if_enabled(
         )
 
     item = items[0]
+    locate_diagnostics: dict[str, Any] = {"phase": "card_locate"}
     before_nodes, card, locate_error = _locate_inventory_item_bounded(
         client,
         dev,
@@ -769,6 +830,7 @@ def run_quick_identify_if_enabled(
         sleep=sleep,
         max_scrolls=locate_max_scrolls,
         settle_seconds=locate_scroll_settle_seconds,
+        diagnostics=locate_diagnostics,
     )
     if locate_error or card is None:
         return _lifecycle_failure(
@@ -779,6 +841,7 @@ def run_quick_identify_if_enabled(
             "ambiguous" if locate_error == "runtime_card_ambiguous" else "unknown",
             [locate_error] if locate_error else ["runtime_card_not_found"],
             artifact_dir,
+            locator_diagnostics=locate_diagnostics,
         )
     if not _tap_card(client, dev, card, before_nodes):
         return _lifecycle_failure(
@@ -789,6 +852,7 @@ def run_quick_identify_if_enabled(
             "failed",
             ["card_open_failed"],
             artifact_dir,
+            locator_diagnostics=locate_diagnostics,
         )
 
     talkback_speech = _text(
@@ -808,6 +872,36 @@ def run_quick_identify_if_enabled(
     restored_nodes, restore_error = _capture_helper(client, dev)
     restored_card, restored_locate_error = _locate_inventory_item(restored_nodes, item)
     location_state = device_tab_logic.detect_selected_device_location(restored_nodes)
+    restore_diagnostics: dict[str, Any] = {
+        "phase": "inventory_restore",
+        "back_sent": back_sent,
+        "initial_capture_error": restore_error,
+        "initial_locate_error": restored_locate_error,
+        "initial_location_selected": bool(location_state.get("selected")),
+        "rescan_attempted": False,
+    }
+
+    # Some plugin exits reset the Devices list to its top. Only rescan when the
+    # parent Devices/All devices context is verified and the initial match is
+    # absent, never when the initial viewport is ambiguous.
+    if (
+        back_sent
+        and not restore_error
+        and restored_locate_error == "runtime_card_not_visible"
+        and location_state.get("selected")
+    ):
+        restore_diagnostics["rescan_attempted"] = True
+        restored_nodes, restored_card, restored_locate_error = _locate_inventory_item_bounded(
+            client,
+            dev,
+            item,
+            sleep=sleep,
+            max_scrolls=locate_max_scrolls,
+            settle_seconds=locate_scroll_settle_seconds,
+            diagnostics=restore_diagnostics,
+        )
+        location_state = device_tab_logic.detect_selected_device_location(restored_nodes)
+
     restore_success = bool(
         back_sent
         and not restore_error
@@ -828,6 +922,16 @@ def run_quick_identify_if_enabled(
         errors.append("screen_stabilization_unconfirmed")
     if not restore_success:
         errors.append("inventory_restore_failed")
+        restore_reason = (
+            restore_error
+            or restored_locate_error
+            or (
+                "all_devices_context_not_selected"
+                if not location_state.get("selected")
+                else "restore_validation_failed"
+            )
+        )
+        errors.append(f"inventory_restore_failed:{restore_reason}")
     if not restore_success:
         decision = "failed"
     elif stabilization.get("status") != "stable":
@@ -853,6 +957,10 @@ def run_quick_identify_if_enabled(
             "xml_sha256": _snapshot_hash(xml_text) if xml_text else "",
         },
         stabilization=stabilization,
+        locator_diagnostics={
+            "card_locate": locate_diagnostics,
+            "inventory_restore": restore_diagnostics,
+        },
     )
     path = write_identify_artifact(result, artifact_dir=artifact_dir)
     return {"status": decision, "result": result, "artifact_path": str(path)}

@@ -122,7 +122,7 @@ def build_v10_preparation_config(value: Any = None) -> dict[str, Any]:
             "inventory": True,
             "quick_identify": True,
             "policy_mapping": True,
-            "shadow_validation": False,
+            "shadow_validation": True,
         },
         "feature_flags": flags.as_dict(),
         "versions": versions.as_dict(),

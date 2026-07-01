@@ -1,0 +1,45 @@
+{
+  "schema_version": "v10-shadow-compare-fixture-v1",
+  "cases": [
+    {
+      "id": "motion_match",
+      "legacy_scenario": "device_motion_sensor_plugin",
+      "legacy_decision": "resolved",
+      "shadow_scenario": "device_motion_sensor_plugin",
+      "shadow_eligibility": "eligible",
+      "expected_result": "MATCH"
+    },
+    {
+      "id": "door_lock_mismatch",
+      "legacy_scenario": "device_door_lock_plugin",
+      "legacy_decision": "resolved",
+      "shadow_scenario": "device_motion_sensor_plugin",
+      "shadow_eligibility": "eligible",
+      "expected_result": "MISMATCH"
+    },
+    {
+      "id": "unknown_identify",
+      "legacy_scenario": "device_tv_plugin",
+      "legacy_decision": "resolved",
+      "shadow_scenario": "",
+      "shadow_eligibility": "unknown",
+      "expected_result": "UNKNOWN"
+    },
+    {
+      "id": "ambiguous_mapping",
+      "legacy_scenario": "device_audio_plugin",
+      "legacy_decision": "resolved",
+      "shadow_scenario": "",
+      "shadow_eligibility": "ambiguous",
+      "expected_result": "AMBIGUOUS"
+    },
+    {
+      "id": "identify_failed",
+      "legacy_scenario": "device_washer_plugin",
+      "legacy_decision": "resolved",
+      "shadow_scenario": "",
+      "shadow_eligibility": "failed",
+      "expected_result": "FAILED"
+    }
+  ]
+}

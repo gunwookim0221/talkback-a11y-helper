@@ -1018,7 +1018,9 @@ class BatchRunManager:
                         crash_log(
                             "[QA_FRONTEND][shadow] "
                             f"status='{shadow_result.get('status', 'unknown')}' "
-                            f"artifact_dir='{shadow_result.get('artifact_dir', '')}'"
+                            f"artifact_dir='{shadow_result.get('artifact_dir', '')}' "
+                            f"warning='{shadow_result.get('warning', '')}' "
+                            "legacy_result_preserved=true"
                         )
                     except Exception as shadow_exc:
                         crash_log(

@@ -63,7 +63,7 @@ def test_feature_flags_can_be_parsed_independently_with_inventory_shadow_only():
         "inventory": True,
         "quick_identify": True,
         "policy_mapping": True,
-        "shadow_validation": False,
+        "shadow_validation": True,
     }
 
 

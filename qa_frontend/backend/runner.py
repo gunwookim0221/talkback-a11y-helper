@@ -459,7 +459,9 @@ class RunManager:
             self._append_log_line(
                 "[QA_FRONTEND][shadow] "
                 f"status='{result.get('status', 'unknown')}' "
-                f"artifact_dir='{result.get('artifact_dir', '')}'"
+                f"artifact_dir='{result.get('artifact_dir', '')}' "
+                f"warning='{result.get('warning', '')}' "
+                "legacy_result_preserved=true"
             )
         except Exception as exc:
             self._append_log_line(

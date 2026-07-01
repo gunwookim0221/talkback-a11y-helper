@@ -8,7 +8,10 @@ from types import SimpleNamespace
 from qa_frontend.backend.main import BatchStartReq, StartRunRequest
 from qa_frontend.backend import main
 from qa_frontend.backend.runner import RunManager
-from qa_frontend.backend.shadow_pipeline import run_shadow_validation_pipeline
+from qa_frontend.backend.shadow_pipeline import (
+    prepare_device_inventory_surface,
+    run_shadow_validation_pipeline,
+)
 
 
 def _runtime_config(path: Path, *, enabled: bool) -> Path:
@@ -192,6 +195,84 @@ def test_both_gates_run_pipeline_and_write_run_local_artifacts(tmp_path):
     assert "# V10 Shadow Validation Report" in (
         shadow_dir / "shadow_report.md"
     ).read_text(encoding="utf-8")
+
+
+def test_device_surface_preparation_backs_out_of_plugin_before_tab_selection(monkeypatch):
+    device_tab = {
+        "viewIdResourceName": "com.samsung.android.oneconnect:id/menu_devices",
+        "contentDescription": "Devices",
+        "bounds": "0,2200,200,2400",
+    }
+
+    class Client:
+        def __init__(self):
+            self.back_count = 0
+            self.scroll_to_top_count = 0
+
+        def dump_tree(self, **kwargs):
+            if self.back_count == 0:
+                return [
+                    {
+                        "viewIdResourceName": "com.samsung.android.plugin.lightsync:id/done_button",
+                        "text": "Start",
+                        "bounds": "100,200,300,400",
+                    }
+                ]
+            return [device_tab]
+
+        def _run(self, *args, **kwargs):
+            self.back_count += 1
+
+        def scroll_to_top(self, **kwargs):
+            self.scroll_to_top_count += 1
+            return {"ok": True, "reached_top": True, "reason": "no_visible_change"}
+
+    client = Client()
+    monkeypatch.setattr(
+        "qa_frontend.backend.shadow_pipeline.stabilize_tab_selection",
+        lambda *args, **kwargs: {"ok": True},
+    )
+    monkeypatch.setattr(
+        "qa_frontend.backend.shadow_pipeline._ensure_all_devices_location_selected",
+        lambda *args, **kwargs: (True, [device_tab], "all_devices_already_selected"),
+    )
+    monkeypatch.setattr(
+        "qa_frontend.backend.shadow_pipeline.device_tab_logic.detect_selected_device_location",
+        lambda nodes: {"selected": True},
+    )
+
+    prepare_device_inventory_surface(client, "SERIAL", sleep=lambda _: None)
+
+    assert client.back_count == 1
+    assert client.scroll_to_top_count == 1
+
+
+def test_device_surface_failure_writes_error_artifacts_and_preserves_legacy(tmp_path):
+    config_path = _runtime_config(tmp_path / "runtime.json", enabled=True)
+    output_dir = tmp_path / "run"
+
+    result = run_shadow_validation_pipeline(
+        runtime_config_path=config_path,
+        requested=True,
+        output_dir=output_dir,
+        scenario_ids=[],
+        client_factory=lambda **kwargs: object(),
+        surface_preparer=lambda client, serial: (_ for _ in ()).throw(
+            RuntimeError("device_tab_selection_failed:test")
+        ),
+    )
+
+    shadow_dir = output_dir / "shadow"
+    assert result["status"] == "warning"
+    assert result["legacy_result_preserved"] is True
+    assert result["warning"] == "device_tab_selection_failed:test"
+    error = json.loads((shadow_dir / "shadow_error.json").read_text(encoding="utf-8"))
+    assert error["stage"] == "device_surface_preparation"
+    assert error["error"] == "device_tab_selection_failed:test"
+    assert error["legacy_result_preserved"] is True
+    report = (shadow_dir / "shadow_report.md").read_text(encoding="utf-8")
+    assert "Result: FAILED" in report
+    assert "Legacy result preserved: true" in report
 
 
 def test_shadow_exception_is_logged_without_changing_legacy_state(tmp_path, monkeypatch):

@@ -11,6 +11,8 @@ from tb_runner.quick_plugin_identify import (
     classify_plugin_family,
     collect_identify_evidence,
     identify_from_snapshots,
+    _locate_inventory_item,
+    _locate_inventory_item_bounded,
     run_quick_identify_if_enabled,
     write_identify_artifact,
 )
@@ -380,6 +382,148 @@ def test_runtime_locator_replays_inventory_viewport_with_bounded_scroll(
     assert result["result"]["restore_success"] is True
     assert client.scroll_calls == 1
     assert client.viewport == 1
+
+
+def test_runtime_locator_does_not_treat_generic_resource_and_class_as_identity():
+    nodes = [
+        {
+            "text": "Smoke sensor Clear",
+            "viewIdResourceName": DEVICE_CARD_ID,
+            "className": "android.view.ViewGroup",
+            "boundsInScreen": "40,420,500,760",
+            "clickable": True,
+            "visibleToUser": True,
+        },
+        {
+            "text": "Motion sensor Motion detected",
+            "viewIdResourceName": DEVICE_CARD_ID,
+            "className": "android.view.ViewGroup",
+            "boundsInScreen": "540,420,1040,760",
+            "clickable": True,
+            "visibleToUser": True,
+        },
+    ]
+    item = {
+        "stable_label": "Motion sensor",
+        "display_label": "Motion sensor Motion detected",
+        "resource_id": DEVICE_CARD_ID,
+        "class_name": "android.view.ViewGroup",
+        "bounds": "540,420,1040,760",
+    }
+
+    card, error = _locate_inventory_item(nodes, item)
+
+    assert error == ""
+    assert card is not None
+    assert card["stable_label"] == "Motion sensor"
+
+
+def test_repeated_viewport_still_matches_visible_target_before_termination():
+    target = {
+        "text": "Door Lock Locked",
+        "viewIdResourceName": DEVICE_CARD_ID,
+        "className": "android.view.ViewGroup",
+        "boundsInScreen": "40,420,1040,760",
+        "clickable": True,
+        "visibleToUser": True,
+    }
+    item = {
+        "stable_label": "Door Lock",
+        "display_label": "Door Lock Locked",
+        "resource_id": DEVICE_CARD_ID,
+        "class_name": "android.view.ViewGroup",
+        "bounds": "40,420,1040,760",
+        # Simulate an inventory whose viewport origin differed from this replay.
+        "viewport_index": 3,
+        "observed_viewport_indexes": [3],
+    }
+
+    class Client:
+        def dump_tree(self, **kwargs):
+            return [target]
+
+    diagnostics = {}
+    _nodes, card, error = _locate_inventory_item_bounded(
+        Client(),
+        "serial",
+        item,
+        sleep=lambda _: None,
+        max_scrolls=2,
+        settle_seconds=0,
+        diagnostics=diagnostics,
+    )
+
+    assert error == ""
+    assert card is not None
+    assert card["stable_label"] == "Door Lock"
+    assert diagnostics["matched_viewport_index"] == 0
+
+
+def test_repeated_viewport_without_target_remains_fail_closed():
+    other = {
+        "text": "Smoke sensor Clear",
+        "viewIdResourceName": DEVICE_CARD_ID,
+        "className": "android.view.ViewGroup",
+        "boundsInScreen": "40,420,1040,760",
+        "clickable": True,
+        "visibleToUser": True,
+    }
+    item = {
+        "stable_label": "Door Lock",
+        "display_label": "Door Lock Locked",
+        "resource_id": DEVICE_CARD_ID,
+        "class_name": "android.view.ViewGroup",
+        "bounds": "40,800,1040,1140",
+        "viewport_index": 0,
+    }
+
+    class Client:
+        def dump_tree(self, **kwargs):
+            return [other]
+
+        def scroll(self, **kwargs):
+            return True
+
+    diagnostics = {}
+    _nodes, card, error = _locate_inventory_item_bounded(
+        Client(),
+        "serial",
+        item,
+        sleep=lambda _: None,
+        max_scrolls=2,
+        settle_seconds=0,
+        diagnostics=diagnostics,
+    )
+
+    assert card is None
+    assert error == "runtime_card_not_found_before_viewport_repeat"
+    assert diagnostics["termination_reason"] == error
+
+
+def test_duplicate_strong_locator_match_remains_ambiguous():
+    nodes = [
+        {
+            "text": "Shared Lock Locked",
+            "viewIdResourceName": DEVICE_CARD_ID,
+            "className": "android.view.ViewGroup",
+            "boundsInScreen": bounds,
+            "clickable": True,
+            "visibleToUser": True,
+        }
+        for bounds in ("40,420,500,760", "540,420,1040,760")
+    ]
+    item = {
+        "stable_label": "Shared Lock",
+        "display_label": "Shared Lock Locked",
+        "resource_id": DEVICE_CARD_ID,
+        "class_name": "android.view.ViewGroup",
+        "bounds": "",
+    }
+
+    card, error = _locate_inventory_item(nodes, item)
+
+    assert card is None
+    assert error == "runtime_card_ambiguous"
 
 
 def test_fixture_replay_covers_six_families_and_unknown():
