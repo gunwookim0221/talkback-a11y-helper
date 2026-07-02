@@ -237,7 +237,7 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     )
 
 
-def _write_shadow_error_artifacts(
+def write_shadow_error_artifacts(
     shadow_dir: Path,
     *,
     error: Exception,
@@ -287,6 +287,7 @@ def run_shadow_validation_pipeline(
     runtime_config_path: str | Path,
     requested: bool,
     output_dir: str | Path,
+    artifact_dir: str | Path | None = None,
     scenario_ids: Sequence[str],
     serial: str | None = None,
     run_id: str = "",
@@ -305,7 +306,7 @@ def run_shadow_validation_pipeline(
 
         client_factory = A11yAdbClient
 
-    shadow_dir = Path(output_dir) / "shadow"
+    shadow_dir = Path(artifact_dir) if artifact_dir is not None else Path(output_dir) / "shadow"
     shadow_dir.mkdir(parents=True, exist_ok=True)
     stage = "initialization"
     try:
@@ -437,7 +438,7 @@ def run_shadow_validation_pipeline(
             "metrics": dict(report.get("metrics", {})),
         }
     except Exception as exc:
-        _write_shadow_error_artifacts(
+        write_shadow_error_artifacts(
             shadow_dir,
             error=exc,
             stage=stage,
