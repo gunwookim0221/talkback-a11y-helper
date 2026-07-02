@@ -1,0 +1,172 @@
+{
+  "schema_version": "v10-inventory-boundary-fixture-v1",
+  "cases": {
+    "boundary_overlap": {
+      "viewports": [
+        [
+          {
+            "text": "Door Lock Locked",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+            "className": "android.view.ViewGroup",
+            "boundsInScreen": "42,1446,519,1791",
+            "clickable": true,
+            "visibleToUser": true
+          },
+          {
+            "text": "Washer On",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+            "className": "android.view.ViewGroup",
+            "boundsInScreen": "561,1833,1038,2178",
+            "clickable": true,
+            "visibleToUser": true
+          }
+        ],
+        [
+          {
+            "text": "Door Lock Locked",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+            "className": "android.view.ViewGroup",
+            "boundsInScreen": "42,520,519,708",
+            "clickable": true,
+            "visibleToUser": true
+          },
+          {
+            "text": "Washer On",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+            "className": "android.view.ViewGroup",
+            "boundsInScreen": "561,750,1038,1095",
+            "clickable": true,
+            "visibleToUser": true
+          }
+        ]
+      ],
+      "expected_item_count": 2
+    },
+    "same_label_distinct_devices": {
+      "viewports": [
+        [
+          {
+            "text": "Shared name",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+            "className": "android.view.ViewGroup",
+            "boundsInScreen": "42,600,519,945",
+            "clickable": true,
+            "visibleToUser": true
+          },
+          {
+            "text": "Anchor device On",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+            "className": "android.view.ViewGroup",
+            "boundsInScreen": "561,1500,1038,1845",
+            "clickable": true,
+            "visibleToUser": true
+          },
+          {
+            "text": "Anchor device two On",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+            "className": "android.view.ViewGroup",
+            "boundsInScreen": "42,1800,519,2145",
+            "clickable": true,
+            "visibleToUser": true
+          }
+        ],
+        [
+          {
+            "text": "Shared name",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+            "className": "android.view.ViewGroup",
+            "boundsInScreen": "42,300,519,645",
+            "clickable": true,
+            "visibleToUser": true
+          },
+          {
+            "text": "Anchor device On",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+            "className": "android.view.ViewGroup",
+            "boundsInScreen": "561,417,1038,762",
+            "clickable": true,
+            "visibleToUser": true
+          },
+          {
+            "text": "Anchor device two On",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+            "className": "android.view.ViewGroup",
+            "boundsInScreen": "42,717,519,1062",
+            "clickable": true,
+            "visibleToUser": true
+          }
+        ]
+      ],
+      "expected_shared_name_count": 2
+    },
+    "same_bounds_different_labels": {
+      "viewports": [
+        [
+          {
+            "text": "Door Lock Locked",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+            "className": "android.view.ViewGroup",
+            "boundsInScreen": "42,520,519,865",
+            "clickable": true,
+            "visibleToUser": true
+          },
+          {
+            "text": "TV On",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+            "className": "android.view.ViewGroup",
+            "boundsInScreen": "42,520,519,865",
+            "clickable": true,
+            "visibleToUser": true
+          }
+        ]
+      ],
+      "expected_item_count": 2
+    },
+    "same_resource_id_only": {
+      "viewports": [
+        [
+          {
+            "text": "Motion Sensor No motion",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+            "className": "android.view.ViewGroup",
+            "boundsInScreen": "42,520,519,865",
+            "clickable": true,
+            "visibleToUser": true
+          },
+          {
+            "text": "Leak Sensor Dry",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+            "className": "android.view.ViewGroup",
+            "boundsInScreen": "561,520,1038,865",
+            "clickable": true,
+            "visibleToUser": true
+          }
+        ]
+      ],
+      "expected_item_count": 2
+    },
+    "same_viewport_helper_duplicate": {
+      "viewports": [
+        [
+          {
+            "text": "Motion Sensor No motion",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+            "className": "android.view.ViewGroup",
+            "boundsInScreen": "42,520,519,865",
+            "clickable": true,
+            "visibleToUser": true
+          },
+          {
+            "text": "Motion Sensor No motion",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/device_card",
+            "className": "android.view.ViewGroup",
+            "boundsInScreen": "42,520,519,865",
+            "clickable": true,
+            "visibleToUser": true
+          }
+        ]
+      ],
+      "expected_item_count": 1
+    }
+  }
+}

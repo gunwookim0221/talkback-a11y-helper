@@ -53,6 +53,15 @@ def _replay(viewports: list[list[dict]], *, max_scrolls: int = 6) -> dict:
     )
 
 
+def _boundary_fixture_case(name: str) -> dict:
+    fixture_path = (
+        REPO_ROOT
+        / "tests/fixtures/v10/inventory/device_cards_boundary_overlap.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    return fixture["cases"][name]
+
+
 def test_inventory_schema_contains_required_runtime_card_fields():
     inventory = collect_runtime_inventory(
         lambda: [_card("거실 모션 Motion detected", "40,420,1040,760")],
@@ -132,6 +141,76 @@ def test_unique_composite_fingerprint_merges_boundary_observation():
     assert motion[0]["observed_viewport_indexes"] == [0, 1]
     assert len(motion[0]["observations"]) == 2
     assert inventory["item_count"] == 2
+
+
+def test_clipped_boundary_overlap_merges_with_translated_edge_evidence():
+    case = _boundary_fixture_case("boundary_overlap")
+
+    inventory = _replay(case["viewports"])
+
+    assert inventory["item_count"] == case["expected_item_count"]
+    assert [item["stable_label"] for item in inventory["items"]] == [
+        "Door Lock",
+        "Washer",
+    ]
+    assert len({item["runtime_card_id"] for item in inventory["items"]}) == 2
+    door = inventory["items"][0]
+    assert door["observed_viewport_indexes"] == [0, 1]
+    assert door["merge_reason"] == "boundary_overlap_translated_edge"
+    assert any(
+        diagnostic["reason"] == "boundary_overlap_translated_edge"
+        and diagnostic["evidence"]["translated_bottom_edge_match"] is True
+        for diagnostic in door["identity_diagnostics"]
+    )
+
+
+def test_same_label_distinct_devices_are_not_merged():
+    case = _boundary_fixture_case("same_label_distinct_devices")
+
+    inventory = _replay(case["viewports"])
+
+    shared = [
+        item for item in inventory["items"] if item["stable_label"] == "Shared name"
+    ]
+    assert len(shared) == case["expected_shared_name_count"]
+    assert shared[1]["merge_reason"] == "not_merged_same_label"
+    assert len({item["runtime_card_id"] for item in shared}) == 2
+
+
+def test_same_bounds_with_different_labels_are_not_merged():
+    case = _boundary_fixture_case("same_bounds_different_labels")
+
+    inventory = _replay(case["viewports"])
+
+    assert inventory["item_count"] == case["expected_item_count"]
+    assert {item["stable_label"] for item in inventory["items"]} == {
+        "Door Lock",
+        "TV",
+    }
+
+
+def test_same_resource_id_alone_does_not_merge():
+    case = _boundary_fixture_case("same_resource_id_only")
+
+    inventory = _replay(case["viewports"])
+
+    assert inventory["item_count"] == case["expected_item_count"]
+    assert len({item["resource_id"] for item in inventory["items"]}) == 1
+    assert len({item["runtime_card_id"] for item in inventory["items"]}) == 2
+
+
+def test_same_viewport_exact_helper_duplicate_is_ignored():
+    case = _boundary_fixture_case("same_viewport_helper_duplicate")
+
+    inventory = _replay(case["viewports"])
+
+    assert inventory["item_count"] == case["expected_item_count"]
+    item = inventory["items"][0]
+    assert item["merge_reason"] == "new_runtime_card"
+    assert any(
+        diagnostic["reason"] == "same_viewport_exact_duplicate"
+        for diagnostic in item["identity_diagnostics"]
+    )
 
 
 def test_scroll_terminates_on_repeated_viewport():

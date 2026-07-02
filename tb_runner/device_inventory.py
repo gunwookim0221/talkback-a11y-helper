@@ -106,6 +106,7 @@ class InventoryObservation:
     source: str
     capture_timestamp: str
     fingerprint: str
+    visible_order: int
 
 
 @dataclass
@@ -132,6 +133,8 @@ class RuntimeInventoryItem:
     observed_viewport_indexes: list[int] = field(default_factory=list)
     observations: list[InventoryObservation] = field(default_factory=list)
     evidence_fingerprint: str = ""
+    merge_reason: str = "new_runtime_card"
+    identity_diagnostics: list[dict[str, Any]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -157,6 +160,7 @@ def _make_observation(
     viewport_index: int,
     scroll_generation: int,
     captured_at: str,
+    visible_order: int,
 ) -> InventoryObservation:
     display_label = str(card.get("label") or "")
     stable_label = device_tab_logic.normalize_device_stable_label(
@@ -173,6 +177,7 @@ def _make_observation(
         source="helper",
         capture_timestamp=captured_at,
         fingerprint=_observation_fingerprint(card),
+        visible_order=visible_order,
     )
 
 
@@ -212,21 +217,215 @@ def _make_item(
             "stable_label": observation.stable_label,
             "actionable": actionable,
             "source_index": int(card.get("source_index", -1) or -1),
+            "visible_order": observation.visible_order,
         },
         artifact_version=INVENTORY_ARTIFACT_VERSION,
         visibility=_visibility(card),
         observed_viewport_indexes=[observation.viewport_index],
         observations=[observation],
         evidence_fingerprint=_structural_fingerprint(card),
+        identity_diagnostics=[
+            {
+                "decision": "created",
+                "reason": "new_runtime_card",
+                "viewport_index": observation.viewport_index,
+                "visible_order": observation.visible_order,
+            }
+        ],
     )
 
 
-def _merge_observation(item: RuntimeInventoryItem, observation: InventoryObservation) -> None:
+def _record_identity_diagnostic(
+    item: RuntimeInventoryItem,
+    *,
+    decision: str,
+    reason: str,
+    observation: InventoryObservation,
+    evidence: Mapping[str, Any] | None = None,
+) -> None:
+    diagnostic = {
+        "decision": decision,
+        "reason": reason,
+        "viewport_index": observation.viewport_index,
+        "visible_order": observation.visible_order,
+    }
+    if evidence:
+        diagnostic["evidence"] = dict(evidence)
+    item.identity_diagnostics.append(diagnostic)
+
+
+def _merge_observation(
+    item: RuntimeInventoryItem,
+    observation: InventoryObservation,
+    *,
+    reason: str,
+    evidence: Mapping[str, Any] | None = None,
+) -> None:
     if observation.fingerprint in {entry.fingerprint for entry in item.observations}:
+        _record_identity_diagnostic(
+            item,
+            decision="ignored",
+            reason="same_viewport_exact_duplicate",
+            observation=observation,
+        )
         return
     item.observations.append(observation)
     if observation.viewport_index not in item.observed_viewport_indexes:
         item.observed_viewport_indexes.append(observation.viewport_index)
+    item.merge_reason = reason
+    _record_identity_diagnostic(
+        item,
+        decision="merged",
+        reason=reason,
+        observation=observation,
+        evidence=evidence,
+    )
+
+
+def _observation_bounds(
+    observation: InventoryObservation,
+) -> tuple[int, int, int, int] | None:
+    return _bounds_parts(observation.bounds)
+
+
+def _observation_structural_fingerprint(observation: InventoryObservation) -> str:
+    bounds = _observation_bounds(observation)
+    left, top, right, bottom = bounds or (0, 0, 0, 0)
+    return _digest(
+        [
+            observation.stable_label,
+            observation.resource_id,
+            observation.class_name,
+            left,
+            max(0, right - left),
+            max(0, bottom - top),
+        ]
+    )
+
+
+def _same_descriptor(
+    previous: InventoryObservation,
+    current: InventoryObservation,
+) -> bool:
+    previous_bounds = _observation_bounds(previous)
+    current_bounds = _observation_bounds(current)
+    if not previous_bounds or not current_bounds:
+        return False
+    previous_left, _previous_top, previous_right, _previous_bottom = previous_bounds
+    current_left, _current_top, current_right, _current_bottom = current_bounds
+    return bool(
+        _normalized(previous.stable_label)
+        and _normalized(previous.stable_label) == _normalized(current.stable_label)
+        and _normalized(previous.display_label) == _normalized(current.display_label)
+        and previous.resource_id
+        and previous.resource_id == current.resource_id
+        and previous.class_name
+        and previous.class_name == current.class_name
+        and previous_left == current_left
+        and previous_right == current_right
+    )
+
+
+def _is_full_card_transition_match(
+    item: RuntimeInventoryItem,
+    observation: InventoryObservation,
+) -> bool:
+    previous = item.observations[-1]
+    if not _same_descriptor(previous, observation):
+        return False
+    previous_bounds = _observation_bounds(previous)
+    current_bounds = _observation_bounds(observation)
+    if not previous_bounds or not current_bounds:
+        return False
+    _left, previous_top, _right, previous_bottom = previous_bounds
+    _left, current_top, _right, current_bottom = current_bounds
+    return bool(
+        current_top < previous_top
+        and current_bottom < previous_bottom
+        and (previous_bottom - previous_top) == (current_bottom - current_top)
+    )
+
+
+def _dominant_scroll_delta(
+    previous_items: list[RuntimeInventoryItem],
+    observations: list[InventoryObservation],
+) -> int | None:
+    previous_groups: dict[str, list[RuntimeInventoryItem]] = {}
+    current_groups: dict[str, list[InventoryObservation]] = {}
+    for item in previous_items:
+        previous_groups.setdefault(item.evidence_fingerprint, []).append(item)
+    for observation in observations:
+        current_groups.setdefault(
+            _observation_structural_fingerprint(observation),
+            [],
+        ).append(observation)
+
+    deltas: list[int] = []
+    for structural_key, items in previous_groups.items():
+        current = current_groups.get(structural_key, [])
+        if len(items) != 1 or len(current) != 1:
+            continue
+        previous_observation = items[0].observations[-1]
+        current_observation = current[0]
+        if not _is_full_card_transition_match(items[0], current_observation):
+            continue
+        previous_bounds = _observation_bounds(previous_observation)
+        current_bounds = _observation_bounds(current_observation)
+        if previous_bounds and current_bounds:
+            deltas.append(current_bounds[1] - previous_bounds[1])
+    if not deltas:
+        return None
+    counts = {delta: deltas.count(delta) for delta in set(deltas)}
+    highest_count = max(counts.values())
+    winners = [delta for delta, count in counts.items() if count == highest_count]
+    return winners[0] if len(winners) == 1 else None
+
+
+def _matches_scroll_delta(
+    item: RuntimeInventoryItem,
+    observation: InventoryObservation,
+    *,
+    scroll_delta: int | None,
+    tolerance: int = 8,
+) -> bool:
+    if scroll_delta is None:
+        return False
+    previous_bounds = _observation_bounds(item.observations[-1])
+    current_bounds = _observation_bounds(observation)
+    if not previous_bounds or not current_bounds:
+        return False
+    return abs((current_bounds[1] - previous_bounds[1]) - scroll_delta) <= tolerance
+
+
+def _is_boundary_overlap_match(
+    item: RuntimeInventoryItem,
+    observation: InventoryObservation,
+    *,
+    scroll_delta: int | None,
+    viewport_top: int,
+    edge_tolerance: int = 8,
+    boundary_tolerance: int = 12,
+) -> bool:
+    if scroll_delta is None or scroll_delta >= 0:
+        return False
+    previous = item.observations[-1]
+    if not _same_descriptor(previous, observation):
+        return False
+    previous_bounds = _observation_bounds(previous)
+    current_bounds = _observation_bounds(observation)
+    if not previous_bounds or not current_bounds:
+        return False
+    _left, previous_top, _right, previous_bottom = previous_bounds
+    _left, current_top, _right, current_bottom = current_bounds
+    projected_top = previous_top + scroll_delta
+    projected_bottom = previous_bottom + scroll_delta
+    return bool(
+        abs(current_top - viewport_top) <= boundary_tolerance
+        and current_top > projected_top + edge_tolerance
+        and abs(current_bottom - projected_bottom) <= edge_tolerance
+        and current_bottom > current_top
+        and (current_bottom - current_top) < (previous_bottom - previous_top)
+    )
 
 
 def collect_runtime_inventory(
@@ -275,43 +474,150 @@ def collect_runtime_inventory(
         viewport_count += 1
         captured_at = _timestamp(clock())
         matched_item_ids: set[str] = set()
-        structural_groups: dict[str, list[RuntimeInventoryItem]] = {}
-        for item in items:
-            if item.observed_viewport_indexes[-1] == viewport_index - 1:
-                structural_groups.setdefault(item.evidence_fingerprint, []).append(item)
-
-        for card in cards:
-            observation = _make_observation(
+        current_observation_items: dict[str, RuntimeInventoryItem] = {}
+        observations = [
+            _make_observation(
                 card,
                 viewport_index=viewport_index,
                 scroll_generation=scroll_generation,
                 captured_at=captured_at,
+                visible_order=visible_order,
             )
+            for visible_order, card in enumerate(cards)
+        ]
+        previous_items = [
+            item
+            for item in items
+            if item.observed_viewport_indexes[-1] == viewport_index - 1
+        ]
+        scroll_delta = _dominant_scroll_delta(previous_items, observations)
+        viewport_tops = [
+            bounds[1]
+            for observation in observations
+            if (bounds := _observation_bounds(observation))
+        ]
+        viewport_top = min(viewport_tops, default=0)
+        structural_groups: dict[str, list[RuntimeInventoryItem]] = {}
+        for item in previous_items:
+            structural_groups.setdefault(item.evidence_fingerprint, []).append(item)
+
+        for card, observation in zip(cards, observations):
+            duplicate_item = current_observation_items.get(observation.fingerprint)
+            if duplicate_item is not None:
+                _merge_observation(
+                    duplicate_item,
+                    observation,
+                    reason="same_viewport_exact_duplicate",
+                )
+                continue
+
             structural_key = _structural_fingerprint(card)
             candidates = [
                 item
                 for item in structural_groups.get(structural_key, [])
                 if item.runtime_card_id not in matched_item_ids
+                and _is_full_card_transition_match(item, observation)
+                and _matches_scroll_delta(
+                    item,
+                    observation,
+                    scroll_delta=scroll_delta,
+                )
             ]
             if len(candidates) == 1:
                 item = candidates[0]
-                _merge_observation(item, observation)
-                matched_item_ids.add(item.runtime_card_id)
-                continue
-            if len(candidates) > 1:
-                warnings.append(
-                    f"ambiguous_boundary_match:viewport={viewport_index}:fingerprint={structural_key}"
+                previous_bounds = _observation_bounds(item.observations[-1])
+                current_bounds = _observation_bounds(observation)
+                transition_delta = (
+                    current_bounds[1] - previous_bounds[1]
+                    if previous_bounds and current_bounds
+                    else None
                 )
+                _merge_observation(
+                    item,
+                    observation,
+                    reason="adjacent_viewport_composite_match",
+                    evidence={
+                        "scroll_direction": "down",
+                        "top_delta": transition_delta,
+                        "descriptor_match": True,
+                        "full_card_geometry_match": True,
+                    },
+                )
+                matched_item_ids.add(item.runtime_card_id)
+                current_observation_items[observation.fingerprint] = item
+                continue
+
+            boundary_candidates = [
+                item
+                for item in previous_items
+                if item.runtime_card_id not in matched_item_ids
+                and _is_boundary_overlap_match(
+                    item,
+                    observation,
+                    scroll_delta=scroll_delta,
+                    viewport_top=viewport_top,
+                )
+            ]
+            if len(boundary_candidates) == 1:
+                item = boundary_candidates[0]
+                _merge_observation(
+                    item,
+                    observation,
+                    reason="boundary_overlap_translated_edge",
+                    evidence={
+                        "scroll_direction": "down",
+                        "dominant_scroll_delta": scroll_delta,
+                        "viewport_top": viewport_top,
+                        "descriptor_match": True,
+                        "translated_bottom_edge_match": True,
+                    },
+                )
+                matched_item_ids.add(item.runtime_card_id)
+                current_observation_items[observation.fingerprint] = item
+                continue
+
+            ambiguous_candidates = candidates or boundary_candidates
+            if len(ambiguous_candidates) > 1:
+                warnings.append(
+                    f"ambiguous_boundary_match:viewport={viewport_index}:"
+                    f"fingerprint={structural_key}"
+                )
+            same_label_previous = [
+                item
+                for item in previous_items
+                if _normalized(item.stable_label) == _normalized(observation.stable_label)
+            ]
             item = _make_item(
                 card,
                 observation,
                 inventory_id=inventory_id,
                 sequence=len(items) + 1,
             )
-            if len(candidates) > 1:
+            if len(ambiguous_candidates) > 1:
                 item.identity_confidence = "low"
+                item.merge_reason = "ambiguous_duplicate"
+                _record_identity_diagnostic(
+                    item,
+                    decision="not_merged",
+                    reason="ambiguous_duplicate",
+                    observation=observation,
+                    evidence={"candidate_count": len(ambiguous_candidates)},
+                )
+            elif same_label_previous:
+                item.merge_reason = "not_merged_same_label"
+                _record_identity_diagnostic(
+                    item,
+                    decision="not_merged",
+                    reason="not_merged_same_label",
+                    observation=observation,
+                    evidence={
+                        "candidate_count": len(same_label_previous),
+                        "strong_boundary_evidence": False,
+                    },
+                )
             items.append(item)
             matched_item_ids.add(item.runtime_card_id)
+            current_observation_items[observation.fingerprint] = item
 
         if scroll_down is None:
             termination_reason = "viewport_only"
