@@ -183,6 +183,8 @@ def test_both_gates_run_pipeline_and_write_run_local_artifacts(tmp_path):
     assert result["status"] == "completed"
     assert result["metrics"]["match_count"] == 1
     assert sorted(path.name for path in shadow_dir.iterdir()) == [
+        "promotion_readiness.json",
+        "promotion_readiness.md",
         "shadow_compare.json",
         "shadow_identify.json",
         "shadow_inventory.json",
@@ -192,6 +194,11 @@ def test_both_gates_run_pipeline_and_write_run_local_artifacts(tmp_path):
     report = json.loads((shadow_dir / "shadow_compare.json").read_text(encoding="utf-8"))
     assert report["legacy_authoritative"] is True
     assert report["v10_routing_performed"] is False
+    readiness = json.loads(
+        (shadow_dir / "promotion_readiness.json").read_text(encoding="utf-8")
+    )
+    assert readiness["overall_status"] == "HOLD"
+    assert readiness["controlled_routing_enabled"] is False
     assert "# V10 Shadow Validation Report" in (
         shadow_dir / "shadow_report.md"
     ).read_text(encoding="utf-8")

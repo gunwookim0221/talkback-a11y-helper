@@ -108,6 +108,31 @@ def _write_completed_shadow(device_dir: Path) -> None:
         },
     )
     (shadow_dir / "shadow_report.md").write_text("# report", encoding="utf-8")
+    _write_json(
+        shadow_dir / "promotion_readiness.json",
+        {
+            "overall_status": "HOLD",
+            "legacy_preserved": True,
+            "controlled_routing_enabled": False,
+            "status_counts": {
+                "READY": 1,
+                "HOLD": 1,
+                "BLOCKED": 0,
+                "INSUFFICIENT_DATA": 1,
+                "UNKNOWN_ONLY": 0,
+            },
+            "families": [
+                {
+                    "plugin_family": "Door Lock",
+                    "status": "READY",
+                    "reason": "readiness_gates_satisfied",
+                }
+            ],
+        },
+    )
+    (shadow_dir / "promotion_readiness.md").write_text(
+        "# readiness", encoding="utf-8"
+    )
 
 
 def test_shadow_summary_matches_completed_artifacts(tmp_path):
@@ -131,6 +156,11 @@ def test_shadow_summary_matches_completed_artifacts(tmp_path):
     assert summary["runtime_seconds"] == 240.0
     assert summary["result_groups"]["MATCH"] == ["Motion", "Door Lock"]
     assert summary["result_groups"]["UNKNOWN"] == ["Audio"]
+    assert summary["promotion_readiness"]["overall_status"] == "HOLD"
+    assert summary["promotion_readiness"]["status_counts"]["READY"] == 1
+    assert summary["artifacts"]["readiness_report"].endswith(
+        "shadow/promotion_readiness.md"
+    )
     assert summary["artifacts"]["report"].endswith("shadow/shadow_report.md")
     assert summary["artifacts"]["compare"].endswith("shadow/shadow_compare.json")
 
@@ -238,5 +268,8 @@ def test_frontend_renders_shadow_summary_and_artifact_actions():
     assert "Open Shadow Report" in panel
     assert "Open Compare JSON" in panel
     assert "Open Shadow Folder" in panel
+    assert "Promotion Readiness" in panel
+    assert "Controlled routing remains disabled" in panel
+    assert "Open Readiness Report" in panel
     assert "shadowValidation?.available" in panel
     assert "openShadowFolder" in api

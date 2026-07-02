@@ -63,6 +63,7 @@ def load_shadow_validation_summary(
     inventory_payload = _read_json(shadow_dir / "shadow_inventory.json")
     identify_payload = _read_json(shadow_dir / "shadow_identify.json")
     compare_payload = _read_json(shadow_dir / "shadow_compare.json")
+    readiness_payload = _read_json(shadow_dir / "promotion_readiness.json")
     error_payload = _read_json(shadow_dir / "shadow_error.json")
 
     if not any((inventory_payload, identify_payload, compare_payload, error_payload)):
@@ -101,13 +102,43 @@ def load_shadow_validation_summary(
         "legacy_preserved": legacy_preserved,
         "runtime_seconds": runtime_seconds,
         "result_groups": _result_groups(comparisons, identify_results),
+        "promotion_readiness": _promotion_readiness_summary(readiness_payload),
         "error": str(error_payload.get("error") or "") if error_payload else "",
         "error_stage": str(error_payload.get("stage") or "") if error_payload else "",
         "artifacts": {
             "report": _relative_artifact(shadow_dir / "shadow_report.md", root_dir),
             "compare": _relative_artifact(shadow_dir / "shadow_compare.json", root_dir),
+            "readiness_report": _relative_artifact(
+                shadow_dir / "promotion_readiness.md", root_dir
+            ),
+            "readiness_json": _relative_artifact(
+                shadow_dir / "promotion_readiness.json", root_dir
+            ),
             "folder_available": True,
         },
+    }
+
+
+def _promotion_readiness_summary(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    if not payload:
+        return None
+    counts = _mapping(payload.get("status_counts"))
+    families = _mapping_list(payload.get("families"))
+    return {
+        "overall_status": str(payload.get("overall_status") or "HOLD"),
+        "legacy_preserved": payload.get("legacy_preserved") is True,
+        "status_counts": {
+            status: _int_or_default(counts.get(status), 0)
+            for status in (
+                "READY",
+                "HOLD",
+                "BLOCKED",
+                "INSUFFICIENT_DATA",
+                "UNKNOWN_ONLY",
+            )
+        },
+        "families": [dict(item) for item in families],
+        "controlled_routing_enabled": False,
     }
 
 

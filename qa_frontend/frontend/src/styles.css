@@ -1167,6 +1167,97 @@ h3 {
   padding: 8px;
 }
 
+.promotionReadiness {
+  background: #f8faf7;
+  border: 1px solid #d3ddd1;
+  border-radius: 7px;
+  margin-top: 14px;
+  padding: 10px;
+}
+
+.promotionReadinessHeader {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.promotionReadinessHint {
+  color: #5e6c78;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.readinessCountGrid {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-top: 10px;
+}
+
+.readinessCount {
+  background: #fff;
+  border: 1px solid #dce3df;
+  border-radius: 5px;
+  display: flex;
+  flex-direction: column;
+  padding: 7px;
+  text-align: center;
+}
+
+.readinessCount small {
+  color: #64716a;
+  font-size: 9px;
+}
+
+.readinessCount strong {
+  font-size: 17px;
+}
+
+.readinessBadge {
+  background: #e7edf3;
+  border-radius: 999px;
+  color: #43515c;
+  font-size: 9px;
+  padding: 3px 7px;
+}
+
+.readiness-ready {
+  color: #247039;
+}
+
+.readiness-hold,
+.readiness-insufficient_data {
+  color: #986000;
+}
+
+.readiness-blocked {
+  color: #b3261e;
+}
+
+.readiness-unknown_only {
+  color: #66737d;
+}
+
+.readinessFamilyList {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.readinessFamilyRow {
+  align-items: center;
+  border-top: 1px solid #e2e7e3;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(120px, 1fr) auto minmax(180px, 2fr);
+  padding-top: 5px;
+}
+
+.readinessFamilyRow small {
+  color: #5e6c78;
+}
+
 .shadowArtifactActions {
   display: flex;
   flex-wrap: wrap;
@@ -1194,6 +1285,11 @@ h3 {
   .probeSeedGrid,
   .draftPreviewGrid,
   .shadowMetricGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .readinessCountGrid,
+  .readinessFamilyRow {
     grid-template-columns: 1fr;
   }
 

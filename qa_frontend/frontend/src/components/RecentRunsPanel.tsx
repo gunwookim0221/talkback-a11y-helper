@@ -355,6 +355,43 @@ export function RecentRunsPanel({
               </div>
             )}
 
+            {shadowValidation.promotion_readiness && (
+              <div className="promotionReadiness">
+                <div className="promotionReadinessHeader">
+                  <strong>Promotion Readiness</strong>
+                  <span className={`readinessBadge readiness-${shadowValidation.promotion_readiness.overall_status.toLowerCase()}`}>
+                    {shadowValidation.promotion_readiness.overall_status}
+                  </span>
+                </div>
+                <div className="promotionReadinessHint">
+                  Evaluation only. Controlled routing remains disabled.
+                </div>
+                <div className="readinessCountGrid">
+                  {(['READY', 'HOLD', 'BLOCKED', 'INSUFFICIENT_DATA', 'UNKNOWN_ONLY'] as const).map(status => (
+                    <div key={status} className={`readinessCount readiness-${status.toLowerCase()}`}>
+                      <small>{status.replace('_', ' ')}</small>
+                      <strong>{shadowValidation.promotion_readiness?.status_counts[status] ?? 0}</strong>
+                    </div>
+                  ))}
+                </div>
+                <div className="readinessFamilyList">
+                  {shadowValidation.promotion_readiness.families.map(item => (
+                    <div key={item.plugin_family} className="readinessFamilyRow">
+                      <strong>{item.plugin_family}</strong>
+                      <span className={`readinessBadge readiness-${item.status.toLowerCase()}`}>
+                        {item.status}
+                      </span>
+                      <small>
+                        {item.ready_candidate ? 'READY CANDIDATE · ' : ''}
+                        MATCH {item.counts.MATCH} · UNKNOWN {item.counts.UNKNOWN} ·
+                        confidence {item.minimum_confidence} · {item.reason}
+                      </small>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {shadowValidation.error && (
               <div className="shadowValidationError">
                 {shadowValidation.error_stage ? `${shadowValidation.error_stage}: ` : ''}
@@ -380,6 +417,24 @@ export function RecentRunsPanel({
                     rel="noreferrer"
                   >
                     Open Compare JSON
+                  </a>
+                )}
+                {shadowValidation.artifacts.readiness_report && (
+                  <a
+                    href={`/api/batch/file?path=${encodeURIComponent(shadowValidation.artifacts.readiness_report)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open Readiness Report
+                  </a>
+                )}
+                {shadowValidation.artifacts.readiness_json && (
+                  <a
+                    href={`/api/batch/file?path=${encodeURIComponent(shadowValidation.artifacts.readiness_json)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open Readiness JSON
                   </a>
                 )}
                 {shadowValidation.artifacts.folder_available && (

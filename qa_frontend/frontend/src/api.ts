@@ -304,11 +304,30 @@ export type ShadowValidationSummary = {
   legacy_preserved: boolean;
   runtime_seconds: number | null;
   result_groups: Record<'MATCH' | 'UNKNOWN' | 'AMBIGUOUS' | 'MISMATCH' | 'FAILED', string[]>;
+  promotion_readiness?: {
+    overall_status: 'READY' | 'HOLD' | 'BLOCKED' | 'INSUFFICIENT_DATA' | 'UNKNOWN_ONLY' | string;
+    legacy_preserved: boolean;
+    controlled_routing_enabled: false;
+    status_counts: Record<'READY' | 'HOLD' | 'BLOCKED' | 'INSUFFICIENT_DATA' | 'UNKNOWN_ONLY', number>;
+    families: Array<{
+      plugin_family: string;
+      status: 'READY' | 'HOLD' | 'BLOCKED' | 'INSUFFICIENT_DATA' | 'UNKNOWN_ONLY' | string;
+      reason: string;
+      observation_count: number;
+      counts: Record<'MATCH' | 'UNKNOWN' | 'AMBIGUOUS' | 'MISMATCH' | 'FAILED', number>;
+      promotion_eligible_count: number;
+      minimum_confidence: number;
+      average_confidence: number;
+      ready_candidate: boolean;
+    }>;
+  } | null;
   error?: string;
   error_stage?: string;
   artifacts: {
     report: string | null;
     compare: string | null;
+    readiness_report: string | null;
+    readiness_json: string | null;
     folder_available: boolean;
   };
 };

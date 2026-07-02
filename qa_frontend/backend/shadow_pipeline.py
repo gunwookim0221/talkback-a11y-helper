@@ -24,6 +24,10 @@ from tb_runner.tab_logic import (
     stabilize_tab_selection,
 )
 from tb_runner.v10_preparation import V10VersionSchema, build_v10_preparation_config
+from .promotion_readiness import (
+    evaluate_promotion_readiness,
+    write_promotion_readiness_artifacts,
+)
 
 SHADOW_PIPELINE_SCHEMA_VERSION = "v10-shadow-pipeline-v1"
 
@@ -431,11 +435,19 @@ def run_shadow_validation_pipeline(
             render_shadow_report_markdown(report),
             encoding="utf-8",
         )
+        stage = "promotion_readiness"
+        readiness = evaluate_promotion_readiness(
+            comparisons,
+            identify_results=identify_results,
+            legacy_preserved=report.get("legacy_authoritative") is True,
+        )
+        write_promotion_readiness_artifacts(readiness, shadow_dir=shadow_dir)
         return {
             "status": "completed",
             "artifact_dir": str(shadow_dir),
             "warning": "",
             "metrics": dict(report.get("metrics", {})),
+            "promotion_readiness": readiness["overall_status"],
         }
     except Exception as exc:
         write_shadow_error_artifacts(
