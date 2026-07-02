@@ -30,10 +30,21 @@
 - TalkBack 접근성 품질 판독: [talkback-quality-guide.md](talkback-quality-guide.md)
 - Crash Capture Design: [crash-capture-design.md](crash-capture-design.md)
 
-## V10 Design
+## V10 Design and Closure
 
 - V10 Overview: [design/v10/v10-overview.md](design/v10/v10-overview.md)
 - V10 Phase Plan: [design/v10/v10-phase-plan.md](design/v10/v10-phase-plan.md)
+- V10 Device Inventory: [design/v10/v10-device-inventory-design.md](design/v10/v10-device-inventory-design.md)
+- V10 Quick Plugin Identify: [design/v10/v10-quick-plugin-identify-design.md](design/v10/v10-quick-plugin-identify-design.md)
+- V10 Policy Mapping: [design/v10/v10-policy-mapping-design.md](design/v10/v10-policy-mapping-design.md)
+- V10 Shadow Validation: [design/v10/v10-shadow-validation-design.md](design/v10/v10-shadow-validation-design.md)
+- V10 Implementation Roadmap: [design/v10/v10-implementation-roadmap.md](design/v10/v10-implementation-roadmap.md)
+- V10 Phase Closure: [design/v10/v10-phase-closure.md](design/v10/v10-phase-closure.md)
+
+V10 Sprint 0~6 구현은 완료됐다. Runtime Inventory, Quick Plugin Identify, Policy
+Registry, Shadow Validation, Shadow-only Runner, QA Frontend reporting과 Promotion
+Readiness는 현재 제공된다. Legacy routing/traversal은 계속 authoritative이며
+Controlled Routing은 V11 이후 계획이다.
 
 ## Plugin Onboarding Wizard MVP
 

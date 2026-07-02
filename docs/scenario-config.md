@@ -2,6 +2,8 @@
 
 이 문서는 `tb_runner/scenario_config.py`의 운영 관점 설명이다.
 
+Updated for V10: 2026-07-03
+
 ## 1) Scenario 실행 골격
 
 1. tab stabilize
@@ -60,7 +62,7 @@ Devices plugin pre-navigation은 `enter_device_card_plugin`을 사용한다.
 
 ## 5) Stable label policy
 
-- target은 stable device identity 기준
+- Legacy production target은 stable device locator 기준
 - 동적 상태 문구는 target/verify에 넣지 않음
 - 상태 suffix는 normalize에서 제거
 
@@ -71,6 +73,20 @@ Devices plugin pre-navigation은 `enter_device_card_plugin`을 사용한다.
 - `Audio Pause -> Audio`
 - `Camera Connected -> Camera`
 - `온습도 센서 Vibration detected -> 온습도 센서`
+
+현재 경로를 구분해야 한다.
+
+- Legacy routing/traversal: `target_stable_labels` exact normalized match로 device
+  card를 찾아 실제 scenario를 실행한다.
+- V10 Shadow: display/stable label은 inventory locator evidence이며 classifier의
+  primary identity가 아니다.
+- V10 Quick Identify: post-open capability resource-id, XML structure, header/label
+  evidence로 plugin family candidate를 생성한다.
+- V10 Policy Registry: family candidate를 기존 `scenario_id` candidate로 매핑하지만
+  traversal을 시작하지 않는다.
+
+Controlled Routing이 미구현이므로 V10 candidate가 `target_stable_labels`를 대체한다고
+해석하면 안 된다.
 
 ## 6) Life / Device 차이
 

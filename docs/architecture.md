@@ -1,6 +1,8 @@
-  # Architecture (현재 운영 기준)
+# Architecture (현재 운영 기준)
 
 [System Overview](system-overview.md) | [Current Client Architecture](current-client-architecture.md) | [Device Plugin Guide](device-plugin-guide.md)
+
+Updated for V10: 2026-07-03
 
 ## 1) 상위 구조
 
@@ -17,6 +19,15 @@ Android Helper
   app/*
     -> AccessibilityService
     -> target action / dump_tree / SMART_NEXT bridge
+
+QA Frontend / V10 Shadow
+  qa_frontend/backend/*
+  tb_runner/device_inventory.py
+  tb_runner/quick_plugin_identify.py
+  tb_runner/policy_registry.py
+  tb_runner/shadow_compare.py
+    -> inventory / identify / candidate / comparison
+    -> promotion readiness / Recent Runs reporting
 ```
 
 ## 2) 운영 계층
@@ -37,6 +48,34 @@ Android Helper
 - Global / main tabs
 - Life plugins
 - Device plugins
+
+### V10 Shadow 계층
+
+- `device_inventory.py`: bounded Device Card inventory와 conservative boundary dedupe
+- `quick_plugin_identify.py`: post-open helper/XML evidence와 fail-closed classification
+- `policy_registry.py`: versioned plugin-family-to-scenario candidate mapping
+- `shadow_compare.py`: Legacy/V10 comparison과 metrics
+- `shadow_pipeline.py`: Full Run 이후 별도 pass orchestration
+- `promotion_readiness.py`: family별 readiness 평가와 JSON/Markdown 생성
+- `shadow_reporting.py`: Recent Runs용 optional summary
+
+현재 실행 관계:
+
+```text
+Legacy Full Run (authoritative)
+  -> Legacy artifact 저장
+  -> [Shadow requested + run-local flags ON]
+     Runtime Inventory
+       -> Quick Plugin Identify
+       -> Policy Registry candidate
+       -> Legacy/V10 Shadow Compare
+       -> Promotion Readiness
+       -> Shadow Reporting
+  -> Legacy result 반환
+```
+
+V10 경로는 scenario candidate를 만들지만 production routing이나 traversal을 수행하지
+않는다.
 
 ## 3) Devices plugin 운영 추가점
 
@@ -69,3 +108,6 @@ focus 기준**이다.
 - stop reason 해석 유지
 - 운영 로그 키 유지
 - row schema는 additive change를 우선
+- Shadow 실패는 Legacy 결과로 전파하지 않음
+- `unknown`, `ambiguous`, `failed`는 fail-closed
+- Controlled Routing과 V10 traversal은 비활성/미구현

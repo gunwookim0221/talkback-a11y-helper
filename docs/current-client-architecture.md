@@ -2,6 +2,8 @@
 
 이 문서는 현재 `talkback_lib`와 runner integration의 운영 기준을 정리한다.
 
+Updated for V10: 2026-07-03
+
 ## 1) 현재 `talkback_lib` 구조
 
 - `talkback_lib/__init__.py`
@@ -83,3 +85,13 @@
   - [testing-pipeline.md](testing-pipeline.md)
   - [device-plugin-guide.md](device-plugin-guide.md)
   - [report-schema.md](report-schema.md)
+
+## 7) V10과 client 경계
+
+V10은 `A11yAdbClient`의 public API나 helper protocol을 변경하지 않는다. Runtime
+Inventory와 Quick Identify는 기존 `dump_tree`, focus/helper snapshot, ADB action을
+조합하는 runner/backend 상위 계층이다. Policy Registry, Shadow Compare, Promotion
+Readiness는 client 밖의 순수 decision/reporting 계층이다.
+
+따라서 V10 Shadow를 켜거나 꺼도 기존 traversal row 계약과 client façade 계약은
+동일하다.

@@ -2,6 +2,8 @@
 
 이 문서는 `talkback_lib/__init__.py`의 `A11yAdbClient` public API 기준 문서다.
 
+Updated for V10: 2026-07-03
+
 운영 흐름 자체는 아래 문서를 우선한다.
 
 - [runner_flow.md](runner_flow.md)
@@ -35,6 +37,90 @@
 - representative traversal 정보는 `representative_*` 컬럼으로 분리 저장된다
 
 세부 row semantics는 [report-schema.md](report-schema.md)를 본다.
+
+## QA Frontend V10 Shadow API
+
+### Run request
+
+Single/Batch request는 optional `shadow_validation` boolean을 받는다.
+
+```http
+POST /api/run/start
+POST /api/batch/start
+```
+
+```json
+{
+  "mode": "full",
+  "shadow_validation": true
+}
+```
+
+- 기본값은 `false`다.
+- `mode=full`에서만 true가 유효하다.
+- Full + request true인 경우에만 run-local runtime config의 V10 네 flag가
+  활성화된다.
+- source `config/runtime_config.json`은 변경하지 않는다.
+
+### Recent Batch response
+
+```http
+GET /api/batch/recent
+```
+
+Shadow artifact가 있는 device에는 optional `shadow_validation` field가 포함된다.
+
+```json
+{
+  "shadow_validation": {
+    "available": true,
+    "status": "completed",
+    "inventory_count": 15,
+    "identified_count": 6,
+    "identify_unknown_count": 9,
+    "match_count": 6,
+    "unknown_count": 9,
+    "ambiguous_count": 0,
+    "mismatch_count": 0,
+    "failed_count": 0,
+    "promotion_eligible_count": 6,
+    "legacy_preserved": true,
+    "promotion_readiness": {
+      "overall_status": "HOLD",
+      "status_counts": {
+        "READY": 0,
+        "HOLD": 6,
+        "BLOCKED": 0,
+        "INSUFFICIENT_DATA": 6,
+        "UNKNOWN_ONLY": 1
+      },
+      "controlled_routing_enabled": false,
+      "families": []
+    },
+    "artifacts": {
+      "report": "qa_frontend_runs/.../shadow/shadow_report.md",
+      "compare": "qa_frontend_runs/.../shadow/shadow_compare.json",
+      "readiness_report": "qa_frontend_runs/.../shadow/promotion_readiness.md",
+      "readiness_json": "qa_frontend_runs/.../shadow/promotion_readiness.json",
+      "folder_available": true
+    }
+  }
+}
+```
+
+Shadow artifact가 없는 run에서는 `shadow_validation`이 `null`이거나 UI에서
+표시되지 않는다.
+
+### Shadow artifact access
+
+```http
+GET /api/batch/file?path=<relative-artifact-path>
+POST /api/runs/{run_id}/devices/{device_id}/shadow/open-folder
+```
+
+첫 endpoint는 `qa_frontend_runs/` 내부의 Shadow JSON/Markdown을 반환한다. 두 번째
+endpoint는 검증된 device run의 `shadow/` directory를 로컬 파일 탐색기로 연다.
+Promotion Readiness 전용 mutation endpoint나 routing 활성화 endpoint는 없다.
 
 ## QA Frontend Crash API
 

@@ -2,6 +2,8 @@
 
 이 문서는 현재 Python runner의 운영 흐름을 요약한다.
 
+Updated for V10: 2026-07-03
+
 ## 1) scenario start
 
 `script_test.py`는 runtime 설정을 병합한 뒤 scenario별로
@@ -88,3 +90,36 @@ crop 기본 source도 `actual_focus`다.
 - Devices plugin long-run: 실질 pass
 - Global / Life / Device long-run 완료
 - row semantics는 actual focus 기준으로 변경 완료
+
+## 8) Full Run 이후 V10 Shadow pass
+
+QA Frontend Full Run에서 request의 `shadow_validation=true`이고 run-local
+`runtime_config.json`의 V10 네 flag가 모두 true일 때만 Legacy 종료 후 Shadow
+Pipeline이 실행된다.
+
+```text
+Legacy traversal/report 저장
+-> Devices surface 준비
+-> Runtime Inventory
+-> Quick Plugin Identify
+-> Policy Registry candidate
+-> Shadow Compare
+-> Promotion Readiness
+-> shadow JSON/Markdown 저장
+-> Legacy result 반환
+```
+
+- Legacy만 실제 traversal을 수행한다.
+- V10 candidate는 scenario 실행이나 routing을 수행하지 않는다.
+- Shadow 예외는 warning과 `shadow_error.json`/report로 격리되며 Legacy PASS를
+  변경하지 않는다.
+- Shadow artifact는 Excel, `normal.log`, `batch_summary.json`과 분리된다.
+
+기존 run을 대상으로 Shadow만 다시 실행하는 개발 도구:
+
+```powershell
+python tools/run_v10_shadow_only.py --run-dir "<device-run-dir>"
+```
+
+`--dry-run`, `--overwrite-shadow`, `--output-suffix`, `--device-id`를 지원하며 legacy
+artifact의 size/mtime/hash 보존을 검사한다.

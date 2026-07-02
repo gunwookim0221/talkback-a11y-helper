@@ -2,6 +2,8 @@
 
 [README](README.md) | [Architecture](architecture.md) | [Runner Flow](runner_flow.md) | [Testing Pipeline](testing-pipeline.md)
 
+Updated for V10: 2026-07-03
+
 ## 1) 시스템 목적
 
 `talkback-a11y-helper`는 SmartThings TalkBack 환경에서 일반 자동화만으로
@@ -21,6 +23,8 @@
 - Device plugin scenarios
 - Excel raw/result report export
 - ko-KR 및 English SmartThings UI 지원
+- Full Run 이후 opt-in V10 Shadow Validation
+- plugin family별 Promotion Readiness reporting
 
 최근 운영 상태:
 
@@ -42,6 +46,15 @@
 - checkpoint / final Excel 저장
 - raw/result row semantics 관리
 
+### V10 Shadow 계층 (`tb_runner/`, `qa_frontend/backend/`)
+
+- Devices 화면의 Runtime Inventory 수집
+- capability resource-id, XML 구조, header/label evidence 기반 Quick Identify
+- versioned Policy Registry를 통한 scenario candidate 생성
+- Legacy scenario와 V10 candidate 비교
+- Promotion Readiness JSON/Markdown 및 QA Frontend summary 제공
+- 기존 run artifact를 입력으로 Shadow만 재실행하는 developer tool 제공
+
 ## 4) 현재 중요 운영 정책
 
 - Devices plugin card search는 helper scroll이 아니라 **ADB swipe 기반 bounded
@@ -49,6 +62,9 @@
 - Devices 진입은 `enter_device_card_plugin` pre-navigation으로 통일
 - result/raw 기본 visible 계열은 **actual TalkBack focus 기준**
 - representative traversal 정보는 `representative_*` 컬럼에 분리 저장
+- V10 Shadow는 Full Run에서 runtime flag와 request가 모두 ON일 때만 실행
+- Shadow 실패는 Legacy 결과를 실패로 바꾸지 않으며 `legacy_result_preserved=true`
+- Controlled Routing은 구현되지 않았고 V10 candidate는 traversal을 시작하지 않음
 
 ## 5) 문서 우선순위
 
