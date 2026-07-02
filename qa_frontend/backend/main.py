@@ -14,6 +14,7 @@ from .batch_runner import global_batch_manager, get_recent_batches
 from .scenarios import list_scenarios
 from .mismatch_viewer import get_run_mismatch_summary
 from .crash_summary import build_crash_artifact_zip, build_crash_detail, build_crash_summary, safe_crash_event_dir
+from .shadow_reporting import open_shadow_folder
 from .plugin_discovery import PluginDiscoveryRequest, discover_plugins
 from .plugin_draft import (
     PluginDraftApplyRequest,
@@ -407,6 +408,19 @@ def api_batch_log_tail(path: str) -> dict[str, object]:
         return {"text": text}
     except Exception as e:
         return {"text": f"Error reading log: {e}"}
+
+
+@app.post("/api/runs/{run_id}/devices/{device_id}/shadow/open-folder")
+def run_device_shadow_open_folder(run_id: str, device_id: str) -> dict[str, object]:
+    try:
+        path = open_shadow_folder(run_id, device_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="shadow artifacts not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"failed to open shadow folder: {exc}") from exc
+    return {"ok": True, "path": str(path)}
 
 
 @app.get("/api/run/status")

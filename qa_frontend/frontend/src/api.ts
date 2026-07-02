@@ -289,6 +289,30 @@ export type CoverageProbeSummary = {
   total_scenario_filtered_count?: number | null;
 };
 
+export type ShadowValidationSummary = {
+  available: boolean;
+  status: 'completed' | 'incomplete' | 'failed' | string;
+  inventory_count: number;
+  identified_count: number;
+  identify_unknown_count: number;
+  match_count: number;
+  unknown_count: number;
+  ambiguous_count: number;
+  mismatch_count: number;
+  failed_count: number;
+  promotion_eligible_count: number;
+  legacy_preserved: boolean;
+  runtime_seconds: number | null;
+  result_groups: Record<'MATCH' | 'UNKNOWN' | 'AMBIGUOUS' | 'MISMATCH' | 'FAILED', string[]>;
+  error?: string;
+  error_stage?: string;
+  artifacts: {
+    report: string | null;
+    compare: string | null;
+    folder_available: boolean;
+  };
+};
+
 export type RecentBatchDevice = {
   serial: string;
   model: string;
@@ -326,6 +350,7 @@ export type RecentBatchDevice = {
   focusable_issues?: FocusableCoverageIssue[];
   coverage_probe_summary?: CoverageProbeSummary | null;
   coverage_probe?: CoverageProbeSummary | null;
+  shadow_validation?: ShadowValidationSummary | null;
   process_status?: string;
   scenario_result_status?: string;
   passed_scenarios?: number;
@@ -946,6 +971,11 @@ export const api = {
   recentRuns: () => request<{ runs: RecentRun[] }>('/api/runs/recent'),
   recentBatches: () => request<RecentBatch[]>('/api/batch/recent'),
   getBatchLogTail: (path: string) => request<{ text: string }>(`/api/batch/log-tail?path=${encodeURIComponent(path)}`),
+  openShadowFolder: (runId: string, deviceId: string) =>
+    request<{ ok: boolean; path: string }>(
+      `/api/runs/${encodeURIComponent(runId)}/devices/${encodeURIComponent(deviceId)}/shadow/open-folder`,
+      { method: 'POST' },
+    ),
   getRunDeviceCrashes: (runId: string, deviceId: string) =>
     request<CrashSummary>(`/api/runs/${encodeURIComponent(runId)}/devices/${encodeURIComponent(deviceId)}/crashes`),
   getRunDeviceCrash: (runId: string, deviceId: string, crashEventId: string) =>

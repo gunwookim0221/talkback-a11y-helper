@@ -27,6 +27,7 @@ from .sleep_prevention import (
     restore_device_stay_awake,
 )
 from .shadow_pipeline import run_shadow_validation_pipeline
+from .shadow_reporting import load_shadow_validation_summary
 
 def _json_safe(value):
     if isinstance(value, Path):
@@ -1113,9 +1114,11 @@ def get_recent_batches() -> list[dict]:
                     "model": d.get("model"),
                     "state": d.get("state"),
                     "return_code": d.get("return_code"),
+                    "output_dir": out_dir_str,
                     "log_path": None,
                     "xlsx_path": None,
-                    "quality": None
+                    "quality": None,
+                    "shadow_validation": None,
                 }
                 if out_dir_str:
                     out_dir = ROOT_DIR / out_dir_str
@@ -1196,6 +1199,10 @@ def get_recent_batches() -> list[dict]:
                             dev_info["coverage_probe"] = coverage_probe_summary
                         if "enable_coverage_probe" in data:
                             coverage_probe_summary["probe_enabled"] = bool(data.get("enable_coverage_probe"))
+                        dev_info["shadow_validation"] = load_shadow_validation_summary(
+                            out_dir,
+                            root_dir=ROOT_DIR,
+                        )
                 devices_info.append(dev_info)
 
             batches.append({

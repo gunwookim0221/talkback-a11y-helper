@@ -1047,6 +1047,144 @@ h3 {
   padding: 10px 12px;
 }
 
+.shadowValidationCard {
+  border: 1px solid #cad4dc;
+  border-radius: 8px;
+  margin-top: 16px;
+  padding: 12px;
+}
+
+.shadowValidationCard > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-size: 14px;
+  font-weight: 700;
+  gap: 8px;
+}
+
+.shadowStatusBadge {
+  background: #e7edf3;
+  border-radius: 999px;
+  color: #43515c;
+  font-size: 10px;
+  padding: 3px 7px;
+  text-transform: uppercase;
+}
+
+.shadowStatus-completed {
+  background: #d8f4df;
+  color: #215a2f;
+}
+
+.shadowStatus-failed {
+  background: #ffd8d8;
+  color: #8d1e1e;
+}
+
+.shadowValidationHint {
+  color: #5e6c78;
+  font-size: 12px;
+  margin: 8px 0 10px;
+}
+
+.shadowMetricGrid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.shadowMetric {
+  align-items: center;
+  background: #f5f7f9;
+  border: 1px solid #dde4e9;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 6px;
+  text-align: center;
+}
+
+.shadowMetric small {
+  color: #5e6c78;
+}
+
+.shadowMetric strong {
+  font-size: 20px;
+  margin-top: 2px;
+}
+
+.shadowMetric-match strong {
+  color: #27763a;
+}
+
+.shadowMetric-unknown strong {
+  color: #66737d;
+}
+
+.shadowMetric-warning strong {
+  color: #a45e00;
+}
+
+.shadowMetric-failed strong {
+  color: #b3261e;
+}
+
+.shadowFamilyGroups {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.shadowFamilyGroup {
+  border-left: 3px solid #98a6b1;
+  display: grid;
+  font-size: 12px;
+  gap: 2px;
+  grid-template-columns: 92px minmax(0, 1fr);
+  padding: 5px 8px;
+}
+
+.shadowFamily-match {
+  border-color: #3f9654;
+}
+
+.shadowFamily-mismatch,
+.shadowFamily-ambiguous {
+  border-color: #d57a00;
+}
+
+.shadowFamily-failed {
+  border-color: #c83d35;
+}
+
+.shadowValidationError {
+  background: #ffe4e4;
+  border-radius: 6px;
+  color: #8d1e1e;
+  font-size: 12px;
+  margin-top: 10px;
+  padding: 8px;
+}
+
+.shadowArtifactActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.shadowArtifactActions a,
+.shadowArtifactActions button {
+  background: #fff;
+  border: 1px solid #b8c2cc;
+  border-radius: 6px;
+  color: #245f82;
+  font-size: 12px;
+  padding: 7px 10px;
+  text-decoration: none;
+}
+
 @media (max-width: 900px) {
   .grid,
   .split,
@@ -1054,7 +1192,8 @@ h3 {
   .metricGrid,
   .probeSummaryGrid,
   .probeSeedGrid,
-  .draftPreviewGrid {
+  .draftPreviewGrid,
+  .shadowMetricGrid {
     grid-template-columns: 1fr;
   }
 

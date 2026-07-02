@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { RecentRun, api, RecentBatch, RecentBatchDevice, CoverageProbeSummary } from '../api';
+import { RecentRun, api, RecentBatch, RecentBatchDevice, CoverageProbeSummary, ShadowValidationSummary } from '../api';
 import { CrashIssuesPanel } from './CrashIssuesPanel';
 import { formatTime, formatDuration, healthClass, scenarioRunText, languageLabel, scenarioReasonText } from '../utils/formatters';
 
@@ -181,6 +181,7 @@ export function RecentRunsPanel({
     const coverageProbe = (
       runData?.coverage_probe_summary ?? runData?.coverage_probe
     ) as CoverageProbeSummary | null | undefined;
+    const shadowValidation = runData?.shadow_validation as ShadowValidationSummary | null | undefined;
     const probeCandidateCount = coverageProbe?.candidate_count ?? coverageProbe?.total_candidate_count ?? 0;
     const probeAttemptedCount = coverageProbe?.attempted_count ?? coverageProbe?.total_attempted_count ?? 0;
     const probeSuccessCount = coverageProbe?.success_count ?? coverageProbe?.total_success_count ?? 0;
@@ -304,6 +305,98 @@ export function RecentRunsPanel({
             </details>
           </div>
         </details>
+
+        {shadowValidation?.available && (
+          <details open className="shadowValidationCard">
+            <summary>
+              V10 Shadow Validation
+              <span className={`shadowStatusBadge shadowStatus-${shadowValidation.status}`}>
+                {shadowValidation.status}
+              </span>
+            </summary>
+            <div className="shadowValidationHint">
+              Capability routing comparison only. Legacy remains authoritative.
+            </div>
+            <div className="shadowMetricGrid">
+              {[
+                ['Inventory', shadowValidation.inventory_count, 'neutral'],
+                ['Identified', shadowValidation.identified_count, 'neutral'],
+                ['Identify Unknown', shadowValidation.identify_unknown_count, 'unknown'],
+                ['MATCH', shadowValidation.match_count, 'match'],
+                ['UNKNOWN', shadowValidation.unknown_count, 'unknown'],
+                ['AMBIGUOUS', shadowValidation.ambiguous_count, 'warning'],
+                ['MISMATCH', shadowValidation.mismatch_count, 'warning'],
+                ['FAILED', shadowValidation.failed_count, 'failed'],
+                ['Promotion Eligible', shadowValidation.promotion_eligible_count, 'match'],
+                ['Legacy Preserved', shadowValidation.legacy_preserved ? 'YES' : 'NO', shadowValidation.legacy_preserved ? 'match' : 'failed'],
+                ['Runtime', shadowValidation.runtime_seconds == null ? '-' : formatDuration(Math.round(shadowValidation.runtime_seconds)), 'neutral'],
+              ].map(([label, value, tone]) => (
+                <div key={String(label)} className={`shadowMetric shadowMetric-${tone}`}>
+                  <small>{label}</small>
+                  <strong>{value}</strong>
+                </div>
+              ))}
+            </div>
+
+            {(['MATCH', 'UNKNOWN', 'AMBIGUOUS', 'MISMATCH', 'FAILED'] as const).some(
+              result => (shadowValidation.result_groups[result] || []).length > 0,
+            ) && (
+              <div className="shadowFamilyGroups">
+                {(['MATCH', 'UNKNOWN', 'AMBIGUOUS', 'MISMATCH', 'FAILED'] as const).map(result => {
+                  const families = shadowValidation.result_groups[result] || [];
+                  if (!families.length) return null;
+                  return (
+                    <div key={result} className={`shadowFamilyGroup shadowFamily-${result.toLowerCase()}`}>
+                      <strong>{result}</strong>
+                      <span>{families.join(' · ')}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {shadowValidation.error && (
+              <div className="shadowValidationError">
+                {shadowValidation.error_stage ? `${shadowValidation.error_stage}: ` : ''}
+                {shadowValidation.error}
+              </div>
+            )}
+
+            {crashContext && (
+              <div className="shadowArtifactActions">
+                {shadowValidation.artifacts.report && (
+                  <a
+                    href={`/api/batch/file?path=${encodeURIComponent(shadowValidation.artifacts.report)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open Shadow Report
+                  </a>
+                )}
+                {shadowValidation.artifacts.compare && (
+                  <a
+                    href={`/api/batch/file?path=${encodeURIComponent(shadowValidation.artifacts.compare)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open Compare JSON
+                  </a>
+                )}
+                {shadowValidation.artifacts.folder_available && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      api.openShadowFolder(crashContext.runId, crashContext.deviceId)
+                        .catch(error => window.alert(`Unable to open shadow folder: ${String(error)}`));
+                    }}
+                  >
+                    Open Shadow Folder
+                  </button>
+                )}
+              </div>
+            )}
+          </details>
+        )}
         
         {runData?.quality && (
           <details open style={{ marginTop: '16px' }}>
