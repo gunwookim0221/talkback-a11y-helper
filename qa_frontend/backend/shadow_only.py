@@ -12,6 +12,7 @@ from .shadow_pipeline import (
     run_shadow_validation_pipeline,
     write_shadow_error_artifacts,
 )
+from .v10_shadow_corpus import update_shadow_corpus
 
 
 SHADOW_ARTIFACT_NAMES = (
@@ -180,7 +181,10 @@ def run_shadow_only(
     output_suffix: str | None = None,
     device_id: str | None = None,
     dry_run: bool = False,
+    update_corpus: bool = False,
+    corpus_dir: str | Path = "artifacts/v10/corpus",
     pipeline_runner: Callable[..., dict[str, Any]] = run_shadow_validation_pipeline,
+    corpus_updater: Callable[..., dict[str, Any]] = update_shadow_corpus,
 ) -> dict[str, Any]:
     context = inspect_shadow_only_run(run_dir, device_id=device_id)
     output_dir = resolve_shadow_output_dir(
@@ -199,6 +203,7 @@ def run_shadow_only(
         "artifact_dir": str(output_dir),
         "legacy_artifacts": [str(path) for path in context.legacy_artifacts],
         "legacy_result_preserved": True,
+        "corpus_update": {"status": "not_requested"},
     }
     if dry_run:
         return result
@@ -237,9 +242,33 @@ def run_shadow_only(
     after = snapshot_legacy_artifacts(context)
     if before != after:
         raise RuntimeError("legacy_artifact_modified")
-    return {
+    final_result = {
         **result,
         **pipeline_result,
         "artifact_dir": str(output_dir),
         "legacy_result_preserved": True,
     }
+    if update_corpus and final_result.get("status") == "completed":
+        try:
+            corpus_result = corpus_updater(
+                corpus_dir=corpus_dir,
+                run_dir=context.run_dir,
+                shadow_dir=output_dir,
+            )
+            final_result["corpus_update"] = {
+                "status": corpus_result.get("status", "completed"),
+                "operation": corpus_result.get("operation"),
+                "corpus_dir": corpus_result.get("corpus_dir"),
+                "corpus_entry_id": (
+                    corpus_result.get("entry", {}).get("corpus_entry_id")
+                    if isinstance(corpus_result.get("entry"), Mapping)
+                    else None
+                ),
+            }
+        except (OSError, ValueError) as exc:
+            final_result["status"] = "warning"
+            final_result["corpus_update"] = {
+                "status": "error",
+                "error": str(exc) or exc.__class__.__name__,
+            }
+    return final_result

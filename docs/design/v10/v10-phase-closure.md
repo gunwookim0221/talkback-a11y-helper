@@ -5,9 +5,9 @@
 | Status | Completed |
 | Phase | V10 Closure |
 | Owner | TalkBack Automation |
-| Last Updated | 2026-07-03 |
+| Last Updated | 2026-07-06 |
 | Depends On | [V10 Implementation Roadmap](v10-implementation-roadmap.md) |
-| Related Documents | [V10 Overview](v10-overview.md), [V10 Phase Plan](v10-phase-plan.md), [V10 Shadow Validation Design](v10-shadow-validation-design.md) |
+| Related Documents | [V10 Overview](v10-overview.md), [V10 Phase Plan](v10-phase-plan.md), [V10 Shadow Validation Design](v10-shadow-validation-design.md), [V10 Shadow Corpus Design](v10-shadow-corpus-design.md) |
 | Next | V11 Controlled Routing Pilot |
 
 ## 1. V10 Goal
@@ -40,6 +40,7 @@ Device Card Inventory
 | Sprint 4.7 | conservative Inventory boundary duplicate merge |
 | Sprint 5 | QA Frontend Shadow Validation summary와 artifact access |
 | Sprint 6 | plugin family별 Promotion Readiness 평가와 reporting |
+| V10 후속 | Shadow Corpus / History와 family/readiness 장기 요약 |
 
 ## 3. Implemented Features
 
@@ -51,6 +52,7 @@ Device Card Inventory
 - Inventory boundary duplicate diagnostics/merge
 - QA Frontend Shadow reporting
 - Promotion Readiness JSON/Markdown 및 UI
+- run-local shadow 결과의 compact Corpus / History
 - Shadow exception 격리와 `legacy_result_preserved=true`
 
 Display/stable name은 V10 classifier의 primary identity가 아니라 locator evidence다.
@@ -96,7 +98,7 @@ V10 구현 phase는 완료한다. 이 판단은 V10을 production routing으로 
 
 ## 7. Remaining Work
 
-- locale/account/device cohort별 독립 표본 확대
+- Shadow Corpus에 locale/account/device cohort별 독립 표본 확대
 - UNKNOWN-only family의 capability signature 보강
 - mixed MATCH/UNKNOWN family의 evidence 원인 분석
 - confidence drift와 registry/mapping revision cohort 추적
@@ -109,7 +111,7 @@ V11 후보 범위:
 - family allowlist 기반 Controlled Routing Pilot
 - Legacy fallback과 즉시 rollback이 가능한 kill switch
 - capability-first entry/traversal 실험
-- multi-run Promotion Readiness aggregation
+- Shadow Corpus를 근거로 한 multi-run pilot review
 - READY family 확대와 UNKNOWN 감소
 - Legacy display-name locator 의존성의 단계적 축소
 

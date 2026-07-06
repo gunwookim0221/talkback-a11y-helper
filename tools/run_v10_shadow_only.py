@@ -33,6 +33,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Validate run metadata without connecting to a device",
     )
+    parser.add_argument(
+        "--update-corpus",
+        action="store_true",
+        help="Append completed shadow results to the V10 corpus (default: off)",
+    )
+    parser.add_argument(
+        "--corpus-dir",
+        default="artifacts/v10/corpus",
+        help="Corpus root used with --update-corpus",
+    )
     return parser
 
 
@@ -45,6 +55,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             output_suffix=args.output_suffix,
             device_id=args.device_id,
             dry_run=args.dry_run,
+            update_corpus=args.update_corpus,
+            corpus_dir=args.corpus_dir,
         )
     except (OSError, RuntimeError, ValueError) as exc:
         print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False))

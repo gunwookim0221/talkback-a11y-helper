@@ -5,9 +5,9 @@
 | Status | Completed |
 | Phase | V10 |
 | Owner | TalkBack Automation |
-| Last Updated | 2026-07-05 |
+| Last Updated | 2026-07-06 |
 | Depends On | [V10 Phase Closure](v10-phase-closure.md) |
-| Related Documents | [V10 Overview](v10-overview.md), [V10 Device Inventory Design](v10-device-inventory-design.md), [V10 Quick Plugin Identify Design](v10-quick-plugin-identify-design.md), [V10 Policy Mapping Design](v10-policy-mapping-design.md), [V10 Shadow Validation Design](v10-shadow-validation-design.md), [V10 Implementation Roadmap](v10-implementation-roadmap.md), [QA Frontend Guide](../../qa-frontend-guide.md), [Runner Flow](../../runner_flow.md) |
+| Related Documents | [V10 Overview](v10-overview.md), [V10 Device Inventory Design](v10-device-inventory-design.md), [V10 Quick Plugin Identify Design](v10-quick-plugin-identify-design.md), [V10 Policy Mapping Design](v10-policy-mapping-design.md), [V10 Shadow Validation Design](v10-shadow-validation-design.md), [V10 Shadow Corpus Design](v10-shadow-corpus-design.md), [V10 Implementation Roadmap](v10-implementation-roadmap.md), [QA Frontend Guide](../../qa-frontend-guide.md), [Runner Flow](../../runner_flow.md) |
 
 ## 1. Executive Summary
 
@@ -412,7 +412,7 @@ V10 종료 시점에도 다음 한계는 의도적으로 남겨 두었다.
 - MATCH가 있어도 표본이 작으면 promotion은 계속 `HOLD`다.
 - Controlled Routing은 구현하지 않았다.
 - Legacy display-name locator 의존성은 runtime traversal entry에서 여전히 남아 있다.
-- multi-run corpus 축적과 drift monitoring이 부족하다.
+- account metadata와 충분한 multi-device/locale corpus 표본은 아직 부족하다.
 
 즉 V10은 "routing replacement"가 아니라 "routing replacement를 평가할 수 있는
 measurement system"까지 완성한 상태다.
@@ -433,6 +433,11 @@ V11에서 가장 직접적으로 이어질 일은 Controlled Routing pilot이다
 
 V11은 "V10이 충분히 맞았는가"보다 "어떤 family를 어떤 cohort에서 제한적으로 켤 수
 있는가"를 묻는 단계가 되어야 한다.
+
+V10 후속 작업으로 run-local shadow 결과를 compact entry로 누적하는 Shadow Corpus를
+추가했다. 이 corpus는 MISMATCH/FAILED/UNKNOWN을 장기 보존하고 단말·모델·locale
+다양성을 MATCH 수와 분리한다. V11은 이 요약을 pilot review 근거로 사용할 수 있지만,
+corpus candidate flag를 routing 승인으로 해석해서는 안 된다.
 
 ## 11. Lessons for Future Projects
 

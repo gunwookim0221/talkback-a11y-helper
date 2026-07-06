@@ -9,7 +9,7 @@ from qa_frontend.backend.shadow_only import (
     inspect_shadow_only_run,
     run_shadow_only,
 )
-from tools.run_v10_shadow_only import main
+from tools.run_v10_shadow_only import build_parser, main
 
 
 def _device_run(tmp_path: Path, *, shadow_enabled: bool = False) -> Path:
@@ -166,3 +166,52 @@ def test_shadow_only_forces_temp_flags_and_preserves_legacy_artifacts(tmp_path):
     assert result["status"] == "completed"
     for path in protected:
         assert (path.read_bytes(), path.stat().st_mtime_ns) == before[path]
+
+
+def test_shadow_only_corpus_update_is_default_off(tmp_path):
+    run_dir = _device_run(tmp_path)
+    corpus_calls = []
+
+    result = run_shadow_only(
+        run_dir,
+        pipeline_runner=lambda **kwargs: {"status": "completed"},
+        corpus_updater=lambda **kwargs: corpus_calls.append(kwargs),
+    )
+
+    assert result["status"] == "completed"
+    assert result["corpus_update"] == {"status": "not_requested"}
+    assert corpus_calls == []
+
+
+def test_shadow_only_cli_update_corpus_flag_defaults_off():
+    args = build_parser().parse_args(["--run-dir", "device-run"])
+
+    assert args.update_corpus is False
+    assert args.corpus_dir == "artifacts/v10/corpus"
+
+
+def test_shadow_only_can_update_corpus_after_completed_pipeline(tmp_path):
+    run_dir = _device_run(tmp_path)
+    corpus_calls = []
+
+    def corpus_updater(**kwargs):
+        corpus_calls.append(kwargs)
+        return {
+            "status": "completed",
+            "operation": "appended",
+            "corpus_dir": str(tmp_path / "corpus"),
+            "entry": {"corpus_entry_id": "entry-1"},
+        }
+
+    result = run_shadow_only(
+        run_dir,
+        output_suffix="test",
+        update_corpus=True,
+        corpus_dir=tmp_path / "corpus",
+        pipeline_runner=lambda **kwargs: {"status": "completed"},
+        corpus_updater=corpus_updater,
+    )
+
+    assert result["status"] == "completed"
+    assert result["corpus_update"]["corpus_entry_id"] == "entry-1"
+    assert corpus_calls[0]["shadow_dir"] == run_dir / "shadow_test"

@@ -38,6 +38,7 @@
 - V10 Quick Plugin Identify: [design/v10/v10-quick-plugin-identify-design.md](design/v10/v10-quick-plugin-identify-design.md)
 - V10 Policy Mapping: [design/v10/v10-policy-mapping-design.md](design/v10/v10-policy-mapping-design.md)
 - V10 Shadow Validation: [design/v10/v10-shadow-validation-design.md](design/v10/v10-shadow-validation-design.md)
+- V10 Shadow Corpus / History: [design/v10/v10-shadow-corpus-design.md](design/v10/v10-shadow-corpus-design.md)
 - V10 Implementation Roadmap: [design/v10/v10-implementation-roadmap.md](design/v10/v10-implementation-roadmap.md)
 - V10 Phase Closure: [design/v10/v10-phase-closure.md](design/v10/v10-phase-closure.md)
 
@@ -45,6 +46,11 @@ V10 Sprint 0~6 구현은 완료됐다. Runtime Inventory, Quick Plugin Identify,
 Registry, Shadow Validation, Shadow-only Runner, QA Frontend reporting과 Promotion
 Readiness는 현재 제공된다. Legacy routing/traversal은 계속 authoritative이며
 Controlled Routing은 V11 이후 계획이다.
+
+V10 후속 Shadow Corpus는 run-local shadow 결과의 compact history와 family/readiness
+요약을 `artifacts/v10/corpus/`에 누적한다. raw XLSX, screenshot, full log는 복사하지
+않으며 `python tools/update_v10_shadow_corpus.py --run-dir "<device-run-dir>"`로
+갱신한다.
 
 ## Plugin Onboarding Wizard MVP
 
