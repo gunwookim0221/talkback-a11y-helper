@@ -2,6 +2,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test:selection": "tsc -p tsconfig.test.json && node --test tests/scenarioSelection.test.cjs",
     "preview": "vite preview"
   },
   "dependencies": {

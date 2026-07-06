@@ -1,4 +1,5 @@
 import type { Scenario } from './api';
+import { NAVIGATION_SCENARIO_ID_SET } from './utils/scenarioIds';
 
 export type ScenarioPresetId =
   | 'global'
@@ -77,10 +78,13 @@ export function applyPresetSelection(presetId: ScenarioPresetId, scenarios: Scen
   if (presetId === 'global') {
     for (const scenario of scenarios) {
       if (
-        scenario.id.startsWith('global_') || 
+        NAVIGATION_SCENARIO_ID_SET.has(scenario.id) ||
+        scenario.id.startsWith('global_') ||
         scenario.id.startsWith('settings_') ||
         scenario.id.startsWith('home_') ||
-        scenario.id.startsWith('devices_')
+        scenario.id.startsWith('devices_') ||
+        scenario.id.startsWith('routines_') ||
+        scenario.id.startsWith('menu_')
       ) {
         newSelection.add(scenario.id);
       }
