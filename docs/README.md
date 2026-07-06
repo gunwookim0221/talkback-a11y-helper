@@ -52,6 +52,11 @@ V10 후속 Shadow Corpus는 run-local shadow 결과의 compact history와 family
 않으며 `python tools/update_v10_shadow_corpus.py --run-dir "<device-run-dir>"`로
 갱신한다.
 
+QA Frontend의 별도 `V10 Corpus Readiness` 카드에서 누적 entry, overall readiness,
+family별 MATCH/UNKNOWN/MISMATCH/FAILED, 단말·locale 다양성과 V11 pilot 후보를
+확인할 수 있다. 이 dashboard는 `/api/v10/corpus/summary`를 읽기만 하며 Controlled
+Routing을 활성화하거나 Promotion Readiness를 재판정하지 않는다.
+
 ## Plugin Onboarding Wizard MVP
 
 신규 Life / Device plugin 추가 흐름은 [plugin-onboarding-guide.md](plugin-onboarding-guide.md)

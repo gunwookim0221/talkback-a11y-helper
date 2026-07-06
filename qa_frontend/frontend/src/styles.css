@@ -1276,6 +1276,174 @@ h3 {
   text-decoration: none;
 }
 
+.corpusReadinessPanel {
+  border-top: 4px solid #bd5b2d;
+  overflow: hidden;
+}
+
+.corpusHeader {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.corpusHeader h2 {
+  margin: 2px 0 4px;
+}
+
+.corpusHeader p {
+  color: #5e6c78;
+  font-size: 12px;
+  margin: 0;
+}
+
+.corpusEyebrow {
+  color: #9a431d;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.corpusMetrics {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin-top: 16px;
+}
+
+.corpusMetrics > div {
+  background: linear-gradient(145deg, #fffaf5, #f2f5f6);
+  border: 1px solid #dce2e5;
+  border-radius: 7px;
+  display: flex;
+  flex-direction: column;
+  min-height: 58px;
+  padding: 9px;
+}
+
+.corpusMetrics small,
+.corpusFooter small {
+  color: #69757d;
+  font-size: 9px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.corpusMetrics strong {
+  font-size: 18px;
+  margin-top: 4px;
+}
+
+.corpusMetrics .corpusDate {
+  font-size: 11px;
+}
+
+.corpusEvidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.corpusEvidence span {
+  background: #edf1f2;
+  border-radius: 999px;
+  color: #53616a;
+  font-size: 10px;
+  padding: 5px 9px;
+}
+
+.corpusEvidence strong {
+  color: #18242c;
+  margin-left: 3px;
+}
+
+.corpusTableWrap {
+  border: 1px solid #d7dfe3;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.corpusTable {
+  border-collapse: collapse;
+  font-size: 11px;
+  min-width: 1040px;
+  width: 100%;
+}
+
+.corpusTable th,
+.corpusTable td {
+  border-bottom: 1px solid #e4e9eb;
+  padding: 8px 7px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.corpusTable thead th {
+  background: #26353d;
+  color: #f8fafb;
+  font-size: 9px;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+
+.corpusTable tbody th {
+  color: #26353d;
+  text-align: left;
+}
+
+.corpusTable tbody tr:hover {
+  background: #fff8f2;
+}
+
+.corpusMatch {
+  color: #247039;
+  font-weight: 700;
+}
+
+.corpusRisk {
+  color: #b3261e;
+  font-weight: 800;
+}
+
+.corpusFooter {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.corpusFooter > div:not(.corpusActions) {
+  display: flex;
+  flex-direction: column;
+}
+
+.corpusActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.corpusActions button {
+  background: #fff;
+  border: 1px solid #b9c4ca;
+  border-radius: 5px;
+  color: #365c70;
+  font-size: 10px;
+  padding: 6px 8px;
+}
+
+.corpusEmpty {
+  background: repeating-linear-gradient(-45deg, #f4f6f7, #f4f6f7 8px, #eef1f2 8px, #eef1f2 16px);
+  border: 1px dashed #aeb9bf;
+  border-radius: 8px;
+  color: #627079;
+  margin-top: 14px;
+  padding: 28px;
+  text-align: center;
+}
+
 @media (max-width: 900px) {
   .grid,
   .split,
@@ -1286,6 +1454,10 @@ h3 {
   .draftPreviewGrid,
   .shadowMetricGrid {
     grid-template-columns: 1fr;
+  }
+
+  .corpusMetrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .readinessCountGrid,

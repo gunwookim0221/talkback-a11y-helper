@@ -9,6 +9,7 @@ import { RuntimeDashboardPanel } from './components/RuntimeDashboard';
 import { PluginDiscoveryPanel } from './components/PluginDiscoveryPanel';
 
 import { RecentRunsPanel } from './components/RecentRunsPanel';
+import { CorpusReadinessPanel } from './components/CorpusReadinessPanel';
 
 import { formatTime, formatDuration, formatBytes, healthClass, helperBadgeText, scenarioRunText, resolveSmokeSteps, describeScenarioSteps, languageLabel, scenarioReasonText } from './utils/formatters';
 import { useRunPolling } from './hooks/useRunPolling';
@@ -539,6 +540,7 @@ export default function App() {
         </article>
 
         <div className="stack">
+          <CorpusReadinessPanel />
           <RecentRunsPanel
             recentRuns={recentRuns}
             selectedRecentRunId={selectedRecentRunId}

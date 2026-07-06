@@ -15,6 +15,7 @@ from .scenarios import list_scenarios
 from .mismatch_viewer import get_run_mismatch_summary
 from .crash_summary import build_crash_artifact_zip, build_crash_detail, build_crash_summary, safe_crash_event_dir
 from .shadow_reporting import open_shadow_folder
+from .v10_corpus_analytics import load_corpus_dashboard, open_corpus_target
 from .plugin_discovery import PluginDiscoveryRequest, discover_plugins
 from .plugin_draft import (
     PluginDraftApplyRequest,
@@ -317,6 +318,26 @@ def scenarios() -> dict[str, object]:
         return {"scenarios": list_scenarios()}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/v10/corpus/summary")
+def v10_corpus_summary() -> dict[str, object]:
+    return load_corpus_dashboard()
+
+
+@app.post("/api/v10/corpus/open/{target}")
+def v10_corpus_open(target: str) -> dict[str, object]:
+    try:
+        path = open_corpus_target(target)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="corpus target not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500, detail=f"failed to open corpus target: {exc}"
+        ) from exc
+    return {"ok": True, "path": str(path)}
 
 
 @app.post("/api/run/start")

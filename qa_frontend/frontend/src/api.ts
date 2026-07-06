@@ -539,6 +539,59 @@ export type OpenLanguageSettingsResponse = {
   error?: string;
 };
 
+export type CorpusReadinessDistribution = {
+  READY: number;
+  HOLD: number;
+  BLOCKED: number;
+  INSUFFICIENT_DATA: number;
+  UNKNOWN_ONLY: number;
+};
+
+export type CorpusFamilySummary = {
+  family: string;
+  total_runs: number;
+  total_observations: number;
+  match_count: number;
+  unknown_count: number;
+  ambiguous_count: number;
+  mismatch_count: number;
+  failed_count: number;
+  unique_device_label_count: number;
+  unique_device_model_count: number;
+  unique_device_serial_count: number;
+  unique_locale_count: number;
+  unique_app_version_count: number;
+  last_seen_at: string;
+  readiness: string;
+  readiness_distribution: CorpusReadinessDistribution;
+  candidate_for_v11_pilot: boolean;
+};
+
+export type CorpusDashboard = {
+  available: boolean;
+  corpus_dir: string;
+  entry_count: number;
+  last_updated: string;
+  overall_readiness: string;
+  overall_readiness_distribution: CorpusReadinessDistribution;
+  family_readiness_counts: CorpusReadinessDistribution;
+  totals: Record<'MATCH' | 'UNKNOWN' | 'AMBIGUOUS' | 'MISMATCH' | 'FAILED', number>;
+  family_count: number;
+  families: CorpusFamilySummary[];
+  candidate_for_v11_pilot: string[];
+  candidate_count: number;
+  blocking_families: string[];
+  unknown_only_families: string[];
+  diversity_metrics: {
+    unique_labels: number;
+    unique_device_models: number;
+    max_unique_devices_per_family: number;
+    unique_locales: number;
+    unique_app_versions: number;
+  };
+  controlled_routing_enabled: false;
+};
+
 export type PluginDiscoveryCard = {
   id: string;
   label: string;
@@ -962,6 +1015,9 @@ export const api = {
       method: 'DELETE',
     }),
   scenarios: () => request<{ scenarios: Scenario[] }>('/api/scenarios'),
+  getV10CorpusSummary: () => request<CorpusDashboard>('/api/v10/corpus/summary'),
+  openV10CorpusTarget: (target: 'folder' | 'index' | 'family-summary' | 'readiness-summary') =>
+    request<{ ok: boolean; path: string }>(`/api/v10/corpus/open/${target}`, { method: 'POST' }),
   startRun: (
     mode: 'smoke' | 'full',
     scenarioIds: string[],
