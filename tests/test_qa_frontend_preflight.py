@@ -39,6 +39,16 @@ def _samsung_account_popup_xml() -> str:
 </hierarchy>"""
 
 
+def _samsung_account_popup_ko_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<hierarchy>
+  <node text="삼성 계정을 더 안전하게" resource-id="android:id/alertTitle" class="android.widget.TextView" package="com.samsung.android.oneconnect" bounds="[102,1500][978,1600]" />
+  <node text="2단계 인증을 설정하면 다른 사람이 내 비밀번호를 알게 되어도 내 계정을 안전하게 보호할 수 있습니다." resource-id="android:id/message" class="android.widget.TextView" package="com.samsung.android.oneconnect" bounds="[102,1640][978,2040]" />
+  <node text="나중에" resource-id="android:id/button3" class="android.widget.Button" package="com.samsung.android.oneconnect" bounds="[102,2280][463,2388]" />
+  <node text="지금 설정하기" resource-id="android:id/button1" class="android.widget.Button" package="com.samsung.android.oneconnect" bounds="[466,2280][978,2388]" />
+</hierarchy>"""
+
+
 def _package_xml(package: str, *, focused_package: str | None = None) -> str:
     focused = focused_package or package
     return (
@@ -199,8 +209,39 @@ def test_samsung_account_popup_prefers_later_button3():
     assert candidate["label"] == "Later"
 
 
+def test_samsung_account_popup_ko_prefers_later_button3_and_not_setup():
+    candidate = preflight.find_dismiss_candidate_in_uiautomator_xml(_samsung_account_popup_ko_xml())
+
+    assert candidate is not None
+    assert candidate["popup_kind"] == "samsung_account_two_step"
+    assert candidate["resource_id"] == "android:id/button3"
+    assert candidate["label"] == "나중에"
+    assert candidate["locale"] == "ko"
+    assert candidate["x"] == 282
+    assert candidate["y"] == 2334
+
+
 def test_generic_later_popup_is_not_selected_without_samsung_evidence():
     candidate = preflight.find_dismiss_candidate_in_uiautomator_xml(_popup_xml("Later", "Open now"))
+
+    assert candidate is None
+
+
+def test_generic_ko_later_popup_is_not_selected_without_samsung_evidence():
+    candidate = preflight.find_dismiss_candidate_in_uiautomator_xml(_popup_xml("나중에", "열기"))
+
+    assert candidate is None
+
+
+def test_samsung_account_positive_button_is_not_selected_without_later_button():
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<hierarchy>
+  <node text="삼성 계정을 더 안전하게" resource-id="android:id/alertTitle" bounds="[100,800][900,900]" />
+  <node text="2단계 인증" resource-id="android:id/message" bounds="[100,920][980,1200]" />
+  <node text="지금 설정하기" resource-id="android:id/button1" bounds="[466,2280][978,2388]" />
+</hierarchy>"""
+
+    candidate = preflight.find_dismiss_candidate_in_uiautomator_xml(xml)
 
     assert candidate is None
 
@@ -242,6 +283,27 @@ def test_samsung_account_popup_dismiss_taps_later_only():
     assert result["popup_dismissed"] is True
     assert result["dismiss_method"] == "button3"
     assert ["shell", "input", "tap", "240", "1810"] in calls
+
+
+def test_samsung_account_popup_ko_dismiss_taps_later_only():
+    calls = []
+
+    def adb_runner(args, timeout):
+        calls.append(args)
+        if args == ["shell", "uiautomator", "dump", "/sdcard/qa_frontend_popup.xml"]:
+            return _ok()
+        if args == ["shell", "cat", "/sdcard/qa_frontend_popup.xml"]:
+            return _ok(_samsung_account_popup_ko_xml())
+        if args[:3] == ["shell", "input", "tap"]:
+            return _ok()
+        return _ok()
+
+    result = preflight.dismiss_samsung_account_popup(adb_runner)
+
+    assert result["popup_detected"] is True
+    assert result["popup_dismissed"] is True
+    assert ["shell", "input", "tap", "282", "2334"] in calls
+    assert ["shell", "input", "tap", "722", "2334"] not in calls
 
 
 def test_external_popup_detection_clicks_dismiss_candidate_and_clears_to_smartthings():

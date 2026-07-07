@@ -32,6 +32,20 @@ def _successful_adb(_adb_path, serial, *args, timeout=8.0):
     return True, ""
 
 
+def _samsung_account_popup_ko_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<hierarchy>
+  <node text="삼성 계정을 더 안전하게" resource-id="android:id/alertTitle" class="android.widget.TextView" package="com.samsung.android.oneconnect" bounds="[102,1500][978,1600]" />
+  <node text="2단계 인증을 설정하면 다른 사람이 내 비밀번호를 알게 되어도 내 계정을 안전하게 보호할 수 있습니다." resource-id="android:id/message" class="android.widget.TextView" package="com.samsung.android.oneconnect" bounds="[102,1640][978,2040]" />
+  <node text="나중에" resource-id="android:id/button3" class="android.widget.Button" package="com.samsung.android.oneconnect" bounds="[102,2280][463,2388]" />
+  <node text="지금 설정하기" resource-id="android:id/button1" class="android.widget.Button" package="com.samsung.android.oneconnect" bounds="[466,2280][978,2388]" />
+</hierarchy>"""
+
+
+def _smartthings_xml() -> str:
+    return f'<hierarchy><node package="{core_preflight.SMARTTHINGS_PACKAGE}" /></hierarchy>'
+
+
 def test_core_preflight_uses_one_serial_for_helper_and_talkback(monkeypatch):
     client = _Client()
     settings = AccessibilitySettings("helper", "1")
@@ -69,6 +83,63 @@ def test_core_preflight_uses_one_serial_for_helper_and_talkback(monkeypatch):
         "[PREFLIGHT] app_foreground PASS "
         "message='SmartThings foreground confirmed'"
     ) in logs
+    assert any("samsung_account_security detected=false" in line for line in logs)
+
+
+def test_core_preflight_dismisses_internal_samsung_account_popup_after_foreground_pass(monkeypatch):
+    client = _Client()
+    settings = AccessibilitySettings("helper", "1")
+    commands = []
+    dumped_popup = {"active": True}
+    logs = []
+
+    def adb_runner(_adb_path, serial, *args, timeout=8.0):
+        assert serial == "SERIAL"
+        commands.append(args)
+        if args == ("get-state",):
+            return True, "device"
+        if args == ("shell", "dumpsys", "window"):
+            return True, _smartthings_foreground()
+        if args == ("shell", "dumpsys", "window", "policy"):
+            return True, "mShowingLockscreen=false"
+        if args == ("shell", "cat", core_preflight.PREFLIGHT_UI_DUMP_PATH):
+            return True, _samsung_account_popup_ko_xml() if dumped_popup["active"] else _smartthings_xml()
+        if args == ("shell", "input", "tap", "282", "2334"):
+            dumped_popup["active"] = False
+            return True, ""
+        return True, ""
+
+    monkeypatch.setattr(
+        core_preflight,
+        "ensure_accessibility_service_enabled",
+        lambda **kwargs: AccessibilityPreflightResult(
+            True, "ok", settings, settings, False, bool(kwargs["helper_ready_check"]())
+        ),
+    )
+
+    result = core_preflight.run_preflight(
+        client=client,
+        serial="SERIAL",
+        log_fn=logs.append,
+        adb_runner=adb_runner,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.ok is True
+    assert ("shell", "input", "tap", "282", "2334") in commands
+    assert ("shell", "input", "tap", "722", "2334") not in commands
+    assert result.app_foreground["internal_popup_check"]["detected"] is True
+    assert result.app_foreground["internal_popup_check"]["dismissed"] is True
+    assert any(
+        "[PREFLIGHT][popup] samsung_account_security detected=true locale='ko' title='삼성 계정을 더 안전하게'"
+        in line
+        for line in logs
+    )
+    assert any(
+        "[PREFLIGHT][popup] samsung_account_security dismiss method=resource_id target='android:id/button3' label='나중에' ok=true"
+        in line
+        for line in logs
+    )
 
 
 def test_wake_screen_waits_for_screen_settle():
@@ -313,7 +384,7 @@ def test_core_preflight_recovers_play_store_popup_after_foreground_pass(monkeypa
     client = _Client()
     settings = AccessibilitySettings("helper", "1")
     commands = []
-    uia_packages = iter(["com.android.vending", core_preflight.SMARTTHINGS_PACKAGE])
+    uia_packages = ["com.android.vending", core_preflight.SMARTTHINGS_PACKAGE]
     logs = []
 
     def adb_runner(_adb_path, _serial, *args, timeout=8.0):
@@ -325,7 +396,8 @@ def test_core_preflight_recovers_play_store_popup_after_foreground_pass(monkeypa
         if args == ("shell", "dumpsys", "window"):
             return True, _smartthings_foreground()
         if args == ("shell", "cat", core_preflight.PREFLIGHT_UI_DUMP_PATH):
-            return True, f'<hierarchy><node package="{next(uia_packages)}" /></hierarchy>'
+            package = uia_packages.pop(0) if uia_packages else core_preflight.SMARTTHINGS_PACKAGE
+            return True, f'<hierarchy><node package="{package}" /></hierarchy>'
         return True, ""
 
     monkeypatch.setattr(

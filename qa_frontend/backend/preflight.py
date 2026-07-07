@@ -7,6 +7,10 @@ from collections.abc import Callable
 from typing import Literal
 
 from .adb import get_adb_status, get_helper_status, run_adb
+from tb_runner.samsung_account_popup import (
+    LATER_RESOURCE_ID as SAMSUNG_ACCOUNT_POPUP_LATER_RESOURCE_ID,
+    find_samsung_account_popup_candidate,
+)
 
 
 SMARTTHINGS_PACKAGE = "com.samsung.android.oneconnect"
@@ -17,10 +21,6 @@ TALKBACK_PACKAGES = {
 KNOWN_EXTERNAL_POPUP_PACKAGES = {
     "com.android.vending": "google_play_review_or_rating_popup",
 }
-SAMSUNG_ACCOUNT_POPUP_TITLE = "protect your samsung account"
-SAMSUNG_ACCOUNT_POPUP_MESSAGE = "two-step verification"
-SAMSUNG_ACCOUNT_POPUP_LATER_RESOURCE_ID = "android:id/button3"
-SAMSUNG_ACCOUNT_POPUP_SETUP_NOW_RESOURCE_ID = "android:id/button1"
 DISMISS_LABELS = (
     "not now",
     "no thanks",
@@ -357,48 +357,20 @@ def find_dismiss_candidate_in_uiautomator_xml(xml_text: str) -> dict[str, object
 
 
 def _find_samsung_account_popup_candidate(root: ET.Element) -> dict[str, object] | None:
-    title_detected = False
-    message_detected = False
-    later_candidate: dict[str, object] | None = None
-    fallback_candidate: dict[str, object] | None = None
-
-    for node in root.iter("node"):
-        resource_id = str(node.attrib.get("resource-id", "") or "").strip()
-        label = _node_label(node.attrib)
-        normalized_label = _normalize_label(label)
-        normalized_resource = resource_id.lower()
-
-        if normalized_resource == "android:id/alerttitle" and SAMSUNG_ACCOUNT_POPUP_TITLE in normalized_label:
-            title_detected = True
-        if normalized_resource == "android:id/message" and SAMSUNG_ACCOUNT_POPUP_MESSAGE in normalized_label:
-            message_detected = True
-        if SAMSUNG_ACCOUNT_POPUP_TITLE in normalized_label:
-            title_detected = True
-        if SAMSUNG_ACCOUNT_POPUP_MESSAGE in normalized_label:
-            message_detected = True
-
-        bounds = str(node.attrib.get("bounds", "") or "")
-        center = _bounds_center(bounds)
-        if not center:
-            continue
-        candidate = {
-            "label": label,
-            "bounds": bounds,
-            "x": center[0],
-            "y": center[1],
-            "resource_id": resource_id,
-            "popup_kind": "samsung_account_two_step",
-        }
-        if normalized_resource == SAMSUNG_ACCOUNT_POPUP_LATER_RESOURCE_ID:
-            later_candidate = candidate
-        elif normalized_label == "later" and fallback_candidate is None:
-            fallback_candidate = candidate
-        elif normalized_resource == SAMSUNG_ACCOUNT_POPUP_SETUP_NOW_RESOURCE_ID or "set up now" in normalized_label:
-            continue
-
-    if not (title_detected or message_detected):
+    candidate = find_samsung_account_popup_candidate(root.iter("node"))
+    if candidate is None:
         return None
-    return later_candidate or fallback_candidate
+    return {
+        "label": candidate.label,
+        "bounds": candidate.bounds,
+        "x": candidate.x,
+        "y": candidate.y,
+        "resource_id": candidate.resource_id,
+        "popup_kind": candidate.popup_kind,
+        "dismiss_method": candidate.method,
+        "locale": candidate.locale,
+        "title": candidate.title,
+    }
 
 
 def dismiss_samsung_account_popup(

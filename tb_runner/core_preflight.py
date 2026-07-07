@@ -14,6 +14,7 @@ from tb_runner.accessibility_preflight import (
     ensure_accessibility_service_enabled,
     run_adb_text,
 )
+from tb_runner.samsung_account_popup import find_samsung_account_popup_candidate_in_xml
 
 
 SMARTTHINGS_PACKAGE = "com.samsung.android.oneconnect"
@@ -355,6 +356,15 @@ def run_preflight(
         app_foreground["message"] = popup_status["message"]
         return _early_failure("external_popup_contamination", device_connected, screen_awake, unlock_status, app_foreground)
 
+    internal_popup_status = dismiss_samsung_account_security_popup(
+        serial=serial,
+        adb_path=adb_path,
+        adb_runner=adb_runner,
+        sleep_fn=sleep_fn,
+    )
+    app_foreground["internal_popup_check"] = internal_popup_status
+    _log_samsung_account_popup(log_fn, internal_popup_status)
+
     accessibility = ensure_accessibility_service_enabled(
         serial=serial,
         adb_path=adb_path,
@@ -463,6 +473,46 @@ def _read_uiautomator_xml(
         return ""
     ok, output = adb_runner(adb_path, serial, "shell", "cat", PREFLIGHT_UI_DUMP_PATH, timeout=8.0)
     return output if ok else ""
+
+
+def dismiss_samsung_account_security_popup(
+    *,
+    serial: str | None,
+    adb_path: str = DEFAULT_ADB_PATH,
+    adb_runner: Callable[..., tuple[bool, str]] = run_adb_text,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    settle_seconds: float = 0.7,
+) -> dict[str, object]:
+    xml_text = _read_uiautomator_xml(serial=serial, adb_path=adb_path, adb_runner=adb_runner)
+    candidate = find_samsung_account_popup_candidate_in_xml(xml_text)
+    if candidate is None:
+        return {"detected": False, "dismissed": False, "verified_gone": None}
+
+    tap_ok, tap_output = adb_runner(
+        adb_path,
+        serial,
+        "shell",
+        "input",
+        "tap",
+        str(candidate.x),
+        str(candidate.y),
+        timeout=8.0,
+    )
+    if tap_ok:
+        sleep_fn(max(0.0, settle_seconds))
+    verify_xml = _read_uiautomator_xml(serial=serial, adb_path=adb_path, adb_runner=adb_runner)
+    verified_gone = find_samsung_account_popup_candidate_in_xml(verify_xml) is None if verify_xml else None
+    return {
+        "detected": True,
+        "dismissed": bool(tap_ok),
+        "verified_gone": verified_gone,
+        "method": candidate.method,
+        "label": candidate.label,
+        "resource_id": candidate.resource_id,
+        "locale": candidate.locale,
+        "title": candidate.title,
+        "tap_output": tap_output,
+    }
 
 
 def _extract_uiautomator_package(output: str) -> str | None:
@@ -618,6 +668,26 @@ def _log_popup_recovery(
     log_fn(
         f"[PREFLIGHT][popup] recovered={str(bool(popup_status.get('recovered'))).lower()} "
         f"method='{popup_status.get('recovery') or 'back_or_relaunch'}'"
+    )
+
+
+def _log_samsung_account_popup(log_fn: Callable[[str], None], popup_status: dict[str, object]) -> None:
+    detected = bool(popup_status.get("detected"))
+    log_fn(
+        "[PREFLIGHT][popup] samsung_account_security "
+        f"detected={str(detected).lower()} "
+        f"locale='{popup_status.get('locale') or ''}' "
+        f"title='{popup_status.get('title') or ''}'"
+    )
+    if not detected:
+        return
+    log_fn(
+        "[PREFLIGHT][popup] samsung_account_security dismiss "
+        f"method={popup_status.get('method') or ''} "
+        f"target='{popup_status.get('resource_id') or ''}' "
+        f"label='{popup_status.get('label') or ''}' "
+        f"ok={str(bool(popup_status.get('dismissed'))).lower()} "
+        f"verified_gone='{popup_status.get('verified_gone')}'"
     )
 
 

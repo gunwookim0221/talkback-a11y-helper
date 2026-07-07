@@ -376,6 +376,16 @@ def _samsung_account_popup_xml() -> str:
 </hierarchy>"""
 
 
+def _samsung_account_popup_ko_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<hierarchy>
+  <node text="삼성 계정을 더 안전하게" resource-id="android:id/alertTitle" bounds="[102,1500][978,1600]" />
+  <node text="2단계 인증을 설정하면 다른 사람이 내 비밀번호를 알게 되어도 내 계정을 안전하게 보호할 수 있습니다." resource-id="android:id/message" bounds="[102,1640][978,2040]" />
+  <node text="나중에" resource-id="android:id/button3" bounds="[102,2280][463,2388]" />
+  <node text="지금 설정하기" resource-id="android:id/button1" bounds="[466,2280][978,2388]" />
+</hierarchy>"""
+
+
 def test_fix_talkback_enables_and_returns_fixed_when_readiness_ok(monkeypatch):
     calls = []
     monkeypatch.setattr(adb, "run_adb", lambda args, timeout=10.0: calls.append(tuple(args)) or {"ok": True, "status": "ok"})
@@ -473,6 +483,62 @@ def test_fix_talkback_dismisses_samsung_account_popup_before_readiness(monkeypat
     assert result["ok"] is True
     assert ("shell", "input", "tap", "240", "1810") in calls
     assert any(step["step"] == "dismiss_samsung_account_popup" and step["ok"] is True for step in result["steps"])
+
+
+def test_fix_talkback_dismisses_ko_samsung_account_popup_before_readiness(monkeypatch):
+    calls = []
+
+    def _run_adb(args, timeout=10.0):
+        calls.append(tuple(args))
+        if args == ["shell", "uiautomator", "dump", "/sdcard/fix_talkback_popup.xml"]:
+            return {"ok": True, "status": "ok"}
+        if args == ["shell", "cat", "/sdcard/fix_talkback_popup.xml"]:
+            return {"ok": True, "status": "ok", "stdout": _samsung_account_popup_ko_xml()}
+        return {"ok": True, "status": "ok"}
+
+    monkeypatch.setattr(adb, "run_adb", _run_adb)
+
+    result = adb.fix_talkback(
+        adb_status_fn=_adb_ready,
+        helper_status_fn=_helper_ready,
+        enable_talkback_fn=_ok_enable_talkback,
+        client_factory=_client_factory({"status": "enabled", "reason": "ok"}),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result["ok"] is True
+    assert ("shell", "input", "tap", "282", "2334") in calls
+    assert ("shell", "input", "tap", "722", "2334") not in calls
+    assert any(step["step"] == "dismiss_samsung_account_popup" and step["ok"] is True for step in result["steps"])
+
+
+def test_fix_talkback_does_not_dismiss_generic_ko_later_popup(monkeypatch):
+    calls = []
+
+    def _run_adb(args, timeout=10.0):
+        calls.append(tuple(args))
+        if args == ["shell", "uiautomator", "dump", "/sdcard/fix_talkback_popup.xml"]:
+            return {"ok": True, "status": "ok"}
+        if args == ["shell", "cat", "/sdcard/fix_talkback_popup.xml"]:
+            return {
+                "ok": True,
+                "status": "ok",
+                "stdout": '<hierarchy><node text="나중에" resource-id="android:id/button3" bounds="[102,2280][463,2388]" /></hierarchy>',
+            }
+        return {"ok": True, "status": "ok"}
+
+    monkeypatch.setattr(adb, "run_adb", _run_adb)
+
+    result = adb.fix_talkback(
+        adb_status_fn=_adb_ready,
+        helper_status_fn=_helper_ready,
+        enable_talkback_fn=_ok_enable_talkback,
+        client_factory=_client_factory({"status": "enabled", "reason": "ok"}),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result["ok"] is True
+    assert not any(call[:3] == ("shell", "input", "tap") for call in calls)
 
 
 def test_fix_talkback_returns_talkback_enable_error(monkeypatch):
