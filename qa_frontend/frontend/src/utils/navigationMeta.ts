@@ -1,6 +1,7 @@
 export function getNavigationName(scenarioId: string): string | null {
   const mapping: Record<string, string> = {
     'home_main': 'Home',
+    'home_safe_plugin': 'Safe',
     'devices_main': 'Devices',
     'life_main': 'Life',
     'routines_main': 'Routines',
@@ -10,4 +11,8 @@ export function getNavigationName(scenarioId: string): string | null {
   };
 
   return mapping[scenarioId] || null;
+}
+
+export function isOptionalNavigationScenario(scenarioId: string): boolean {
+  return scenarioId === 'home_safe_plugin';
 }

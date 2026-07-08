@@ -7,6 +7,7 @@ const { groupScenarios } = require('../.test-dist/utils/scenarioGrouping.js');
 
 const scenarios = [
   { id: 'home_main', enabled: true, max_steps: null },
+  { id: 'home_safe_plugin', enabled: false, max_steps: 30 },
   { id: 'devices_main', enabled: true, max_steps: null },
   { id: 'life_main', enabled: true, max_steps: null },
   { id: 'routines_main', enabled: true, max_steps: null },
@@ -33,6 +34,17 @@ test('life_main is grouped under Navigation', () => {
 
   assert.ok(navigationIds.includes('life_main'));
   assert.ok(!lifePluginIds.includes('life_main'));
+});
+
+test('home_safe_plugin stays under Navigation and has Safe display name', () => {
+  const navigationIds = scenarioIdsForGroup('Navigation');
+  const lifePluginIds = scenarioIdsForGroup('Life Plugins');
+  const devicePluginIds = scenarioIdsForGroup('Device Plugins');
+
+  assert.ok(navigationIds.includes('home_safe_plugin'));
+  assert.ok(!lifePluginIds.includes('home_safe_plugin'));
+  assert.ok(!devicePluginIds.includes('home_safe_plugin'));
+  assert.equal(getNavigationName('home_safe_plugin'), 'Safe');
 });
 
 test('life plugins remain in Life Plugins', () => {

@@ -16,7 +16,7 @@ import { useRunPolling } from './hooks/useRunPolling';
 import { groupScenarios } from './utils/scenarioGrouping';
 import { getDevicePluginName } from './utils/devicePluginMeta';
 import { getLifePluginName } from './utils/lifePluginMeta';
-import { getNavigationName } from './utils/navigationMeta';
+import { getNavigationName, isOptionalNavigationScenario } from './utils/navigationMeta';
 
 type LanguageMode = 'current' | 'ko-KR' | 'en-US';
 
@@ -484,6 +484,7 @@ export default function App() {
                     } else if (group.title === 'Navigation') {
                       pluginName = getNavigationName(scenario.id);
                     }
+                    const showOptionalBadge = group.title === 'Navigation' && isOptionalNavigationScenario(scenario.id);
                     return (
                       <label 
                         key={scenario.id} 
@@ -508,6 +509,21 @@ export default function App() {
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                             <strong style={{ fontSize: '1.05em', display: 'flex', gap: '8px', alignItems: 'center' }}>
                               {pluginName}
+                              {showOptionalBadge && (
+                                <span
+                                  style={{
+                                    fontSize: '10px',
+                                    fontWeight: 500,
+                                    padding: '2px 6px',
+                                    borderRadius: '999px',
+                                    border: '1px solid var(--color-border)',
+                                    color: 'var(--color-text-dim)',
+                                    background: 'var(--color-bg)',
+                                  }}
+                                >
+                                  optional
+                                </span>
+                              )}
                               {getScenarioHealth(scenario.id) && (
                                 <span className={`statusBadge ${getScenarioHealth(scenario.id) === 'PASS' ? 'healthOk' : getScenarioHealth(scenario.id) === 'WARN' ? 'healthWarn' : 'healthBad'}`} style={{ fontSize: '10px', padding: '2px 6px' }}>
                                   {getScenarioHealth(scenario.id)}

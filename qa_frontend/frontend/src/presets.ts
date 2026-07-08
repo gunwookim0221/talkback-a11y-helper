@@ -1,5 +1,6 @@
 import type { Scenario } from './api';
 import { NAVIGATION_SCENARIO_ID_SET } from './utils/scenarioIds';
+import { isOptionalNavigationScenario } from './utils/navigationMeta';
 
 export type ScenarioPresetId =
   | 'global'
@@ -77,6 +78,9 @@ export function applyPresetSelection(presetId: ScenarioPresetId, scenarios: Scen
 
   if (presetId === 'global') {
     for (const scenario of scenarios) {
+      if (isOptionalNavigationScenario(scenario.id)) {
+        continue;
+      }
       if (
         NAVIGATION_SCENARIO_ID_SET.has(scenario.id) ||
         scenario.id.startsWith('global_') ||
