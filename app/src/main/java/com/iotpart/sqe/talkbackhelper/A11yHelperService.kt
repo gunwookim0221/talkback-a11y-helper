@@ -593,7 +593,21 @@ class A11yHelperService : AccessibilityService() {
 
     private fun isEmptyStateContentLabel(label: String): Boolean {
         val normalized = label.trim().lowercase().replace(Regex("\\s+"), " ")
-        if (normalized in setOf("nothing yet", "no history", "no activity", "no data", "no events")) return true
+        if (normalized in setOf(
+                "nothing yet",
+                "no history",
+                "no activity",
+                "no data",
+                "no events",
+                "아직 없음",
+                "기록 없음",
+                "활동 없음",
+                "데이터 없음",
+                "이벤트 없음",
+                "내역 없음",
+                "사용 기록 없음"
+            )
+        ) return true
         return Regex("^no\\s+[a-z0-9][a-z0-9\\s\\-]{0,40}$").matches(normalized)
     }
 

@@ -195,7 +195,21 @@ def _is_fallback_chrome_candidate(candidate: dict[str, Any], screen_width: int, 
             return True
     if any(
         token in f"{resource_id} {class_name} {label_blob}"
-        for token in ("statusbar", "systemui", "more", "location", "home_button", "qr code", "change location", "add")
+        for token in (
+            "statusbar",
+            "systemui",
+            "more",
+            "location",
+            "home_button",
+            "qr code",
+            "change location",
+            "add",
+            "더보기",
+            "장소",
+            "장소 qr 코드",
+            "장소 변경",
+            "추가",
+        )
     ):
         return True
     if screen_width > 0 and (right <= 0 or left >= screen_width):

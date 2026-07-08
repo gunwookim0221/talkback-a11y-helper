@@ -61,11 +61,11 @@ TAB_CONFIGS = [
         },
         "screen_context_mode": "bottom_tab",
         "stabilization_mode": "anchor_then_context",
-        "anchor_name": "(?i).*location.*qr.*code.*",
+        "anchor_name": "(?i).*location.*qr.*code.*|.*장소\\s*qr\\s*코드.*",
         "anchor_type": "b",
         "anchor": {
-            "text_regex": "(?i).*location.*qr.*code.*",
-            "announcement_regex": "(?i).*qr.*code.*",
+            "text_regex": "(?i).*location.*qr.*code.*|.*장소\\s*qr\\s*코드.*",
+            "announcement_regex": "(?i).*qr.*code.*|.*qr\\s*코드.*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
@@ -127,20 +127,20 @@ TAB_CONFIGS = [
             },
         },
         "verify_tokens": ["smartthings cooking", "ingredients"],
-        "anchor_name": "(?i).*navigate\\s*up.*",
+        "anchor_name": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
         "anchor_type": "a",
         "anchor": {
-            "text_regex": "(?i).*navigate\\s*up.*",
-            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "text_regex": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
+            "announcement_regex": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
             "type": "screen_text",
-            "text_regex": "(?i).*smart\\s*things\\s*cooking.*|.*ingredients.*|.*푸드.*|.*모닝빵양배추샌드위치.*",
+            "text_regex": "(?i).*smart\\s*things\\s*cooking.*|.*ingredients.*|.*푸드.*|.*모닝빵양배추샌드위치.*|.*(식단\\s*플래너|저장한\\s*레시피|주요\\s*재료|레시피|요리).*|.*(식단\\s*플래너|저장한\\s*레시피|주요\\s*재료|레시피|요리|푸드).*(kcal|킬로칼로리).*|.*(kcal|킬로칼로리).*(식단\\s*플래너|저장한\\s*레시피|주요\\s*재료|레시피|요리|푸드).*",
         },
         "post_traversal_handoff": {
             "enabled": True,
-            "navigate_up_regex": "(?i).*navigate\\s*up.*",
+            "navigate_up_regex": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
             "recipe_detail_tokens": [
                 "recipe optimized",
                 "ingredients",
@@ -213,11 +213,11 @@ TAB_CONFIGS = [
         },
         "verify_tokens": ["air care", "outdoor air quality", "pm 10", "pm 2.5", "air control"],
 
-        "anchor_name": "(?i).*navigate\\s*up.*",
+        "anchor_name": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
         "anchor_type": "a",
         "anchor": {
-            "text_regex": "(?i).*navigate\\s*up.*",
-            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "text_regex": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
+            "announcement_regex": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
             "tie_breaker": "top_left",
         },
 
@@ -350,11 +350,11 @@ TAB_CONFIGS = [
         },
         "verify_tokens": ["energy", "smartthings energy", "energy usage", "measuring energy usage", "appliance"],
 
-        "anchor_name": "(?i).*navigate\\s*up.*",
+        "anchor_name": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
         "anchor_type": "a",
         "anchor": {
-            "text_regex": "(?i).*navigate\\s*up.*",
-            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "text_regex": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
+            "announcement_regex": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
             "tie_breaker": "top_left",
         },
 
@@ -390,11 +390,11 @@ TAB_CONFIGS = [
         },
         "screen_context_mode": "bottom_tab",
         "stabilization_mode": "anchor_then_context",
-        "anchor_name": "(?i).*location.*qr.*code.*",
+        "anchor_name": "(?i).*location.*qr.*code.*|.*장소\\s*qr\\s*코드.*",
         "anchor_type": "b",
         "anchor": {
-            "text_regex": "(?i).*location.*qr.*code.*",
-            "announcement_regex": "(?i).*qr.*code.*",
+            "text_regex": "(?i).*location.*qr.*code.*|.*장소\\s*qr\\s*코드.*",
+            "announcement_regex": "(?i).*qr.*code.*|.*qr\\s*코드.*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
@@ -880,11 +880,11 @@ TAB_CONFIGS = [
         },
         "screen_context_mode": "bottom_tab",
         "stabilization_mode": "anchor_then_context",
-        "anchor_name": "(?i).*location.*qr.*code.*",
+        "anchor_name": "(?i).*location.*qr.*code.*|.*장소\\s*qr\\s*코드.*",
         "anchor_type": "b",
         "anchor": {
-            "text_regex": "(?i).*location.*qr.*code.*",
-            "announcement_regex": "(?i).*qr.*code.*",
+            "text_regex": "(?i).*location.*qr.*code.*|.*장소\\s*qr\\s*코드.*",
+            "announcement_regex": "(?i).*qr.*code.*|.*qr\\s*코드.*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
@@ -926,11 +926,11 @@ TAB_CONFIGS = [
         },
         "screen_context_mode": "bottom_tab",
         "stabilization_mode": "anchor_then_context",
-        "anchor_name": "(?i).*location.*qr.*code.*",
+        "anchor_name": "(?i).*location.*qr.*code.*|.*장소\\s*qr\\s*코드.*",
         "anchor_type": "b",
         "anchor": {
-            "text_regex": "(?i).*location.*qr.*code.*",
-            "announcement_regex": "(?i).*qr.*code.*",
+            "text_regex": "(?i).*location.*qr.*code.*|.*장소\\s*qr\\s*코드.*",
+            "announcement_regex": "(?i).*qr.*code.*|.*qr\\s*코드.*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
@@ -972,11 +972,11 @@ TAB_CONFIGS = [
         },
         "screen_context_mode": "bottom_tab",
         "stabilization_mode": "anchor_then_context",
-        "anchor_name": "(?i).*smartthings settings.*|.*settings.*",
+        "anchor_name": "(?i).*smartthings settings.*|.*settings.*|.*스마트싱스\\s*설정.*",
         "anchor_type": "a",
         "anchor": {
-            "text_regex": "(?i).*smartthings settings.*|.*settings.*",
-            "announcement_regex": "(?i).*smartthings settings.*|.*settings.*",
+            "text_regex": "(?i).*smartthings settings.*|.*settings.*|.*스마트싱스\\s*설정.*",
+            "announcement_regex": "(?i).*smartthings settings.*|.*settings.*|.*스마트싱스\\s*설정.*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
@@ -1016,16 +1016,16 @@ TAB_CONFIGS = [
                 "type": "r",
             }
         ],
-        "anchor_name": "(?i).*navigate up.*",
+        "anchor_name": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
         "anchor_type": "a",
         "anchor": {
-            "text_regex": "(?i).*navigate up.*",
-            "announcement_regex": "(?i).*navigate up.*",
+            "text_regex": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
+            "announcement_regex": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
             "type": "screen_text",
-            "text_regex": "(?i).*smartthings settings.*|.*settings.*",
+            "text_regex": "(?i).*smartthings settings.*|.*settings.*|.*스마트싱스\\s*설정.*",
         },
         "enabled": False,
         "max_steps": 30,
@@ -1132,11 +1132,11 @@ TAB_CONFIGS = [
                 "generic_weak_tokens": [],
             },
         },
-        "anchor_name": "(?i).*navigate\\s*up.*",
+        "anchor_name": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
         "anchor_type": "a",
         "anchor": {
-            "text_regex": "(?i).*navigate\\s*up.*",
-            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "text_regex": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
+            "announcement_regex": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
@@ -1174,11 +1174,11 @@ TAB_CONFIGS = [
                 "generic_weak_tokens": [],
             },
         },
-        "anchor_name": "(?i).*navigate\\s*up.*",
+        "anchor_name": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
         "anchor_type": "a",
         "anchor": {
-            "text_regex": "(?i).*navigate\\s*up.*",
-            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "text_regex": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
+            "announcement_regex": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
@@ -1263,11 +1263,11 @@ TAB_CONFIGS = [
             "com.samsung.android.plugin.fme",
         ],
         "negative_verify_tokens": ["location qr code", "change location"],
-        "anchor_name": "(?i).*navigate\\s*up.*",
+        "anchor_name": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
         "anchor_type": "a",
         "anchor": {
-            "text_regex": "(?i).*navigate\\s*up.*",
-            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "text_regex": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
+            "announcement_regex": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
             "tie_breaker": "top_left",
         },
         "context_verify": {
@@ -1307,11 +1307,11 @@ TAB_CONFIGS = [
         },
         "verify_tokens": ["smart video", "live view", "daily clips", "recorded clips", "home camera", "홈카메라"],
         "negative_verify_tokens": ["location qr code", "change location"],
-        "anchor_name": "(?i).*navigate\\s*up.*",
+        "anchor_name": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
         "anchor_type": "a",
         "anchor": {
-            "text_regex": "(?i).*navigate\\s*up.*",
-            "announcement_regex": "(?i).*navigate\\s*up.*",
+            "text_regex": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
+            "announcement_regex": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
             "tie_breaker": "top_left",
         },
         "context_verify": {

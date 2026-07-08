@@ -94,7 +94,10 @@ def normalize(value: object) -> str:
 
 
 def bounds_center(bounds: str) -> tuple[int, int] | None:
-    match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", str(bounds or "").strip())
+    text = str(bounds or "").strip()
+    match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", text)
+    if not match:
+        match = re.fullmatch(r"(\d+),(\d+),(\d+),(\d+)", text)
     if not match:
         return None
     left, top, right, bottom = (int(part) for part in match.groups())
@@ -136,7 +139,8 @@ def _detect_evidence(node_attrs: list[Mapping[str, object]]) -> dict[str, object
         if not label:
             continue
         all_text.append(label)
-        if normalize(str(attrs.get("resource-id", "") or attrs.get("resourceId", "") or "")) == "android:id/alerttitle":
+        resource_id = str(attrs.get("resource-id", "") or attrs.get("resourceId", "") or attrs.get("viewIdResourceName", "") or "")
+        if normalize(resource_id) == "android:id/alerttitle":
             title = label
 
     haystack = normalize(" ".join(all_text))

@@ -2,6 +2,12 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from tb_runner.samsung_account_popup import (
+    LATER_RESOURCE_ID,
+    SETUP_RESOURCE_ID,
+    find_samsung_account_popup_candidate,
+    normalize as normalize_samsung_popup_label,
+)
 from tb_runner.utils import parse_bounds_str
 
 
@@ -22,10 +28,8 @@ SAFE_ACTION_LABELS = {
     "cancel",
 }
 
-SAMSUNG_ACCOUNT_TITLE_TOKEN = "protect your samsung account"
-SAMSUNG_ACCOUNT_MESSAGE_TOKEN = "two-step verification"
-SAMSUNG_ACCOUNT_LATER_RESOURCE_ID = "android:id/button3"
-SAMSUNG_ACCOUNT_SETUP_NOW_RESOURCE_ID = "android:id/button1"
+SAMSUNG_ACCOUNT_LATER_RESOURCE_ID = LATER_RESOURCE_ID
+SAMSUNG_ACCOUNT_SETUP_NOW_RESOURCE_ID = SETUP_RESOURCE_ID
 
 DANGEROUS_ACTION_LABELS = {
     "삭제",
@@ -197,29 +201,22 @@ def _modal_evidence(nodes: list[dict[str, Any]], labels: list[str], action_nodes
 
 
 def _is_samsung_account_popup(nodes: list[dict[str, Any]], labels: list[str]) -> bool:
-    title_match = False
-    message_match = False
-    for node in nodes:
-        resource_id = normalize_label(_node_resource_id(node))
-        label = normalize_label(node_label(node))
-        if resource_id == "android:id/alerttitle" and SAMSUNG_ACCOUNT_TITLE_TOKEN in label:
-            title_match = True
-        if resource_id == "android:id/message" and SAMSUNG_ACCOUNT_MESSAGE_TOKEN in label:
-            message_match = True
-    if title_match or message_match:
-        return True
-    return any(SAMSUNG_ACCOUNT_TITLE_TOKEN in normalize_label(label) for label in labels) or any(
-        SAMSUNG_ACCOUNT_MESSAGE_TOKEN in normalize_label(label) for label in labels
-    )
+    _ = labels
+    return find_samsung_account_popup_candidate(nodes) is not None
 
 
 def _samsung_account_safe_buttons(action_nodes: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     safe_buttons: list[dict[str, Any]] = []
     for node in action_nodes:
         label = node_label(node)
-        resource_id = normalize_label(_node_resource_id(node))
+        resource_id = normalize_samsung_popup_label(_node_resource_id(node))
+        normalized_label = normalize_samsung_popup_label(label)
         button = {"node": node, "label": label}
-        if resource_id == SAMSUNG_ACCOUNT_LATER_RESOURCE_ID or normalize_label(label) in {"later", "나중에", "나중에 하기"}:
+        if resource_id == SAMSUNG_ACCOUNT_SETUP_NOW_RESOURCE_ID:
+            continue
+        if resource_id == SAMSUNG_ACCOUNT_LATER_RESOURCE_ID and normalized_label in {"later", "나중에"}:
+            safe_buttons.append(button)
+        elif normalized_label in {"later", "나중에"}:
             safe_buttons.append(button)
     return safe_buttons, []
 

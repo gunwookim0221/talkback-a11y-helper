@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from talkback_lib import A11yAdbClient
-from tb_runner.label_matcher import canonicalize_label
+from tb_runner.label_matcher import EMPTY_STATE_LABEL_ALIASES, canonicalize_label
 from tb_runner.logging_utils import log
 from tb_runner.perf_stats import ScenarioPerfStats
 from tb_runner.utils import parse_bounds_str
@@ -216,7 +216,7 @@ def _is_empty_state_content_label(label: str) -> bool:
     normalized_label = re.sub(r"\s+", " ", str(label or "").strip()).lower()
     if not normalized_label:
         return False
-    if normalized_label in {"nothing yet", "no history", "no activity", "no data", "no events"}:
+    if normalized_label in {label.lower() for label in EMPTY_STATE_LABEL_ALIASES}:
         return True
     if re.fullmatch(r"no\s+[a-z0-9][a-z0-9\s\-]{0,40}", normalized_label):
         return True
@@ -1990,11 +1990,7 @@ def _is_passive_status_text(label: str, scenario_id: str = "") -> bool:
         "unavailable",
         "updated just now",
         "just now",
-        "no activity",
-        "no data",
-        "no events",
-        "no history",
-        "nothing yet",
+        *tuple(label.lower() for label in EMPTY_STATE_LABEL_ALIASES),
         "not available",
         "waiting",
         "loading",

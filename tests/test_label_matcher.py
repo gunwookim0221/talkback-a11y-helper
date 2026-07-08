@@ -1,4 +1,11 @@
-from tb_runner.label_matcher import canonicalize_label, expand_verify_token_aliases, matches_alias, normalize_label
+from tb_runner.label_matcher import (
+    EMPTY_STATE_LABEL_ALIASES,
+    ONBOARDING_CTA_ALIASES,
+    canonicalize_label,
+    expand_verify_token_aliases,
+    matches_alias,
+    normalize_label,
+)
 
 
 def test_normalize_label_handles_none_and_collapses_text():
@@ -53,6 +60,13 @@ def test_unknown_key_and_unknown_mode_are_safe():
 
 def test_minimal_korean_cta_aliases():
     assert matches_alias("시작", "start")
+    assert matches_alias("시작하기", "start", mode="contains")
+    assert matches_alias("계속", "continue")
+    assert matches_alias("다음", "next")
+    assert matches_alias("체크박스", "checkbox")
+    assert matches_alias("설정하기", "set_up")
+    assert matches_alias("열기", "open")
+    assert matches_alias("건너뛰기", "skip")
     assert matches_alias("닫기", "dismiss")
     assert matches_alias("다음에", "next_time")
     assert matches_alias("나중에", "next_time")
@@ -135,3 +149,18 @@ def test_negative_verify_token_aliases_are_minimal():
     assert "나중에" in expand_verify_token_aliases(["next time"])
     assert "닫기" in expand_verify_token_aliases(["dismiss"])
     assert "닫기" not in expand_verify_token_aliases(["air care"])
+
+
+def test_navigation_and_settings_verify_aliases_cover_korean_labels():
+    assert "상위 메뉴로 이동" in expand_verify_token_aliases(["navigate up"])
+    assert "더보기" in expand_verify_token_aliases(["more options"])
+    assert normalize_label("장소 QR 코드") in {normalize_label(value) for value in expand_verify_token_aliases(["location qr code"])}
+    assert "장소 변경" in expand_verify_token_aliases(["change location"])
+    assert "추가" in expand_verify_token_aliases(["add"])
+
+
+def test_empty_state_and_onboarding_alias_sets_include_korean_candidates():
+    for label in ("No history", "기록 없음", "아직 없음", "활동 없음", "사용 기록 없음"):
+        assert normalize_label(label) in {normalize_label(value) for value in EMPTY_STATE_LABEL_ALIASES}
+    for label in ("Later", "나중에", "Set up now", "지금 설정하기", "Continue", "계속"):
+        assert normalize_label(label) in {normalize_label(value) for value in ONBOARDING_CTA_ALIASES}

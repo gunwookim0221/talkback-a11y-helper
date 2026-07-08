@@ -1,4 +1,5 @@
 from tb_runner.context_verifier import verify_context
+from tb_runner.scenario_config import TAB_CONFIGS
 
 
 def _step(**kwargs):
@@ -37,6 +38,20 @@ def test_verify_context_screen_text_accepts_korean_settings_alias():
     assert result["ok"] is True
 
 
+def test_verify_context_life_food_accepts_korean_food_identity_cluster():
+    food_cfg = next(cfg for cfg in TAB_CONFIGS if cfg.get("scenario_id") == "life_food_plugin")
+    result = verify_context(
+        _step(
+            visible_label="식단 플래너에 추가 저장한 레시피 전자레인지로 간단하게 만드는 누드라자냐 1668 kcal 주요 재료",
+            merged_announcement="",
+            focus_view_id="com.test:id/food",
+        ),
+        food_cfg,
+    )
+
+    assert result["ok"] is True
+
+
 def test_verify_context_focused_anchor_accepts_korean_monitor_alias():
     result = verify_context(
         _step(visible_label="모니터링", focus_view_id="com.test:id/plugin_title"),
@@ -59,6 +74,29 @@ def test_verify_context_screen_announcement_type():
     )
 
     assert result["ok"] is True
+
+
+def test_verify_context_navigation_aliases_accept_korean_for_english_regex():
+    result = verify_context(
+        _step(visible_label="상위 메뉴로 이동", merged_announcement="상위 메뉴로 이동"),
+        {"context_verify": {"type": "screen_announcement", "announcement_regex": "(?i).*navigate\\s*up.*"}},
+    )
+
+    assert result["ok"] is True
+
+
+def test_verify_context_menu_and_settings_aliases_accept_korean_for_english_regex():
+    more_result = verify_context(
+        _step(visible_label="더보기", merged_announcement="더보기"),
+        {"context_verify": {"type": "screen_text", "text_regex": "(?i).*more\\s*options.*"}},
+    )
+    settings_result = verify_context(
+        _step(visible_label="스마트싱스 설정", merged_announcement="스마트싱스 설정"),
+        {"context_verify": {"type": "screen_text", "text_regex": "(?i).*smartthings settings.*"}},
+    )
+
+    assert more_result["ok"] is True
+    assert settings_result["ok"] is True
 
 
 def test_verify_context_focused_anchor_type_with_view_id():

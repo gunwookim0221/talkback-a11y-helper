@@ -710,7 +710,7 @@ def _has_plugin_entry_identity_evidence(scenario: str, line: str) -> bool:
     }.get(scenario, ())
     if not evidence_tokens:
         return False
-    negative_tokens = ("location qr code", "change location")
+    negative_tokens = ("location qr code", "change location", "장소 qr 코드", "장소 변경")
     has_evidence = any(token in lowered for token in evidence_tokens)
     has_negative_only = any(token in lowered for token in negative_tokens) and not has_evidence
     return bool(has_evidence and not has_negative_only)

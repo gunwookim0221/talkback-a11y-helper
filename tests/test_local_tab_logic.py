@@ -2,7 +2,7 @@ import sys
 from collections import deque
 from types import SimpleNamespace
 
-sys.modules.setdefault("pandas", SimpleNamespace(DataFrame=object, ExcelWriter=object))
+sys.modules.setdefault("pandas", SimpleNamespace(DataFrame=object, Series=object, ExcelWriter=object))
 sys.modules.setdefault("openpyxl", SimpleNamespace(load_workbook=lambda *_args, **_kwargs: None))
 sys.modules.setdefault("openpyxl.drawing.image", SimpleNamespace(Image=object))
 
@@ -90,6 +90,20 @@ def test_local_tab_state_defaults_are_empty():
     assert state.visited_by_signature == {}
     assert state.exhausted_signatures == set()
     assert state.candidates_by_signature == {}
+
+
+def test_empty_state_content_label_accepts_english_and_korean_aliases():
+    for label in (
+        "No history",
+        "기록 없음",
+        "아직 없음",
+        "활동 없음",
+        "데이터 없음",
+        "이벤트 없음",
+        "내역 없음",
+        "사용 기록 없음",
+    ):
+        assert local_tab_logic._is_empty_state_content_label(label)
 
 
 def test_local_tab_state_registers_candidates_by_signature():

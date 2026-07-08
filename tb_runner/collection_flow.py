@@ -21,7 +21,16 @@ from tb_runner.diagnostics import classify_step_result, detect_step_mismatch, no
 from tb_runner.diagnostics import is_global_nav_row
 from tb_runner.excel_report import save_excel
 from tb_runner.image_utils import maybe_capture_focus_crop
-from tb_runner.label_matcher import canonicalize_label, expand_verify_token_aliases, matches_alias
+from tb_runner.label_matcher import (
+    EMPTY_STATE_LABEL_ALIASES,
+    FAMILY_CARE_LATER_ALIASES,
+    FAMILY_CARE_ONBOARDING_BODY_ALIASES,
+    FAMILY_CARE_SETUP_ALIASES,
+    ONBOARDING_CTA_ALIASES,
+    canonicalize_label,
+    expand_verify_token_aliases,
+    matches_alias,
+)
 from tb_runner.logging_utils import _should_log, log
 from tb_runner.overlay_logic import (
     classify_post_click_result,
@@ -94,6 +103,41 @@ COLLECTION_FLOW_LIFE_RESET_VERSION = "pr61-life-reset-strict-global-nav-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
 COLLECTION_FLOW_OVERLAY_FIRSTROW_DEBUG_VERSION = "pr73-overlay-first-row-lifecycle-debug-v1"
 COLLECTION_FLOW_SYNTAX_FIX_VERSION = "pr110-strict-token-pattern-syntax-fix-v1"
+_ONBOARDING_BODY_EVIDENCE_TOKENS: tuple[str, ...] = (
+    "set up",
+    "get started",
+    "welcome",
+    "terms",
+    "privacy",
+    "permission",
+    "connect",
+    "learn more",
+    "시작하기",
+    "설정하기",
+    "약관",
+    "개인정보",
+    "권한",
+    "연결",
+    "환영",
+    "알아보기",
+)
+_GENERIC_CTA_REQUIRES_ONBOARDING_EVIDENCE: tuple[str, ...] = (
+    "next",
+    "start",
+    "open",
+    "settings",
+    "setting",
+    "set",
+    "다음",
+    "시작",
+    "열기",
+    "설정",
+)
+_SCENARIO_SUPPRESSED_SPECIAL_STATE_CTAS: dict[str, tuple[str, ...]] = {
+    "device_audio_plugin": ("next", "다음"),
+    "device_washer_plugin": ("start", "settings", "setting", "set", "시작", "설정"),
+    "settings_entry_example": ("settings", "setting", "set", "설정"),
+}
 _SPECIAL_STATE_GRACE_MAX_STEPS = 3
 _CTA_DESCEND_GRACE_STEPS = 2
 _REPEAT_SUPPRESSION_FINGERPRINT_THRESHOLD = 5
@@ -116,6 +160,12 @@ _STRIP_ONLY_TERMINAL_LABEL_DENYLIST = frozenset(
         "history",
         "controls",
         "routines",
+        "이벤트",
+        "활동",
+        "장소",
+        "기록",
+        "제어",
+        "자동화",
     }
 )
 _STRONG_ONBOARDING_TOKENS = (
@@ -130,6 +180,16 @@ _STRONG_ONBOARDING_TOKENS = (
     "checkbox",
     "set up",
     "setup",
+    "동의",
+    "약관",
+    "개인정보",
+    "허용",
+    "계속",
+    "시작하기",
+    "다음",
+    "체크박스",
+    "설정",
+    "설정하기",
 )
 _HOME_LIKE_TOKENS = ("profile", "view profile", "member", "family member", "me")
 SCROLLTOUCH_DEBUG_CAPTURE_ENABLED = False
@@ -2902,6 +2962,35 @@ def _has_life_list_post_open_evidence(post_open_identity: dict[str, Any]) -> boo
     return bool(top_chrome_hit and card_content_hit)
 
 
+def _special_state_cta_is_suppressed(token: str, scenario_id: str) -> bool:
+    normalized = str(token or "").strip().casefold()
+    if not normalized:
+        return False
+    suppressed = _SCENARIO_SUPPRESSED_SPECIAL_STATE_CTAS.get(str(scenario_id or "").strip(), ())
+    return normalized in {str(item or "").strip().casefold() for item in suppressed}
+
+
+def _special_state_cta_requires_onboarding_evidence(token: str) -> bool:
+    normalized = str(token or "").strip().casefold()
+    return normalized in {item.casefold() for item in _GENERIC_CTA_REQUIRES_ONBOARDING_EVIDENCE}
+
+
+def _filter_special_state_cta_hits(
+    hits: list[str],
+    *,
+    scenario_id: str,
+    has_onboarding_body_evidence: bool,
+) -> list[str]:
+    filtered: list[str] = []
+    for hit in hits:
+        if _special_state_cta_is_suppressed(hit, scenario_id):
+            continue
+        if _special_state_cta_requires_onboarding_evidence(hit) and not has_onboarding_body_evidence:
+            continue
+        filtered.append(hit)
+    return filtered
+
+
 def _format_special_state_debug_values(values: list[str] | tuple[str, ...] | None, *, max_items: int = 5, max_len: int = 72) -> str:
     if not isinstance(values, (list, tuple)):
         return "none"
@@ -2954,7 +3043,7 @@ def _collect_ready_content_cluster_signals(
     source_texts: list[str],
     cta_tokens: list[str],
 ) -> list[str]:
-    generic_cta_tokens = ("start", "get started", "connect", "set up", "setup", "continue", "next", "try", "dismiss")
+    generic_cta_tokens = (*ONBOARDING_CTA_ALIASES, "connect", "try", "dismiss")
     cta_like_tokens = tuple(sorted(set([*cta_tokens, *generic_cta_tokens])))
     signals: list[str] = []
     seen: set[str] = set()
@@ -3214,10 +3303,21 @@ def _classify_special_post_open_state(
         if len(visible_texts) < 5:
             visible_texts.append(lowered)
     source_texts = [post_label, post_speech, *top_visible, *visible_texts, *descendant_texts]
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip()
+    onboarding_body_hits = _collect_token_hits(list(_ONBOARDING_BODY_EVIDENCE_TOKENS), source_texts)
+    has_onboarding_body_evidence = bool(onboarding_body_hits)
     special_hits = _collect_strict_token_hits(special_tokens, source_texts)
-    cta_hits = _collect_strict_token_hits(cta_tokens, source_texts)
-    generic_cta_tokens = ("start", "get started", "connect", "set up", "setup", "continue", "next", "try")
-    generic_cta_hits = _collect_strict_token_hits(generic_cta_tokens, source_texts)
+    cta_hits = _filter_special_state_cta_hits(
+        _collect_strict_token_hits(cta_tokens, source_texts),
+        scenario_id=scenario_id,
+        has_onboarding_body_evidence=has_onboarding_body_evidence,
+    )
+    generic_cta_tokens = (*ONBOARDING_CTA_ALIASES, "connect", "try")
+    generic_cta_hits = _filter_special_state_cta_hits(
+        _collect_strict_token_hits(generic_cta_tokens, source_texts),
+        scenario_id=scenario_id,
+        has_onboarding_body_evidence=has_onboarding_body_evidence,
+    )
     if generic_cta_hits:
         cta_hits = sorted(set([*cta_hits, *generic_cta_hits]))
     ready_content_signals = _collect_ready_content_cluster_signals(
@@ -3236,6 +3336,15 @@ def _classify_special_post_open_state(
         long_intro_like = True
     special_hit_count = len(special_hits)
     cta_hit_count = len(cta_hits)
+    active_generic_cta_tokens = [
+        token
+        for token in generic_cta_tokens
+        if not _special_state_cta_is_suppressed(token, scenario_id)
+        and (
+            has_onboarding_body_evidence
+            or not _special_state_cta_requires_onboarding_evidence(token)
+        )
+    ]
 
     meaningful_texts: list[str] = []
     short_cta_nodes = 0
@@ -3252,7 +3361,7 @@ def _classify_special_post_open_state(
         lowered = text_blob.lower()
         meaningful_texts.append(lowered)
         token_len = len(lowered.split())
-        if token_len <= 4 and any(_text_matches_token_strict(lowered, token) for token in generic_cta_tokens):
+        if token_len <= 4 and any(_text_matches_token_strict(lowered, token) for token in active_generic_cta_tokens):
             short_cta_nodes += 1
     unique_text_count = len(set(meaningful_texts))
     low_content_diversity = bool(unique_text_count and unique_text_count <= 5)
@@ -3265,6 +3374,7 @@ def _classify_special_post_open_state(
         and (
             ((verify_hit and cta_hit_count >= 1 and special_hit_count >= 1 and (long_intro_like or special_hit_count >= 2)))
             or (verify_hit and cta_hit_count >= 1 and special_hit_count >= 1 and low_content_diversity)
+            or (verify_hit and cta_hit_count >= 1 and has_onboarding_body_evidence and low_content_diversity)
             or (
                 (cta_hit_count >= 1 or cta_pair)
                 and long_intro_like
@@ -3285,12 +3395,15 @@ def _classify_special_post_open_state(
         signals.append("intro_focus")
     if verify_hit and special_hit_count >= 1:
         signals.append("verify_and_special_token")
+    if has_onboarding_body_evidence:
+        signals.append("onboarding_body_evidence")
     if ready_content_cluster:
         signals.append("ready_content_cluster")
     return detected, "setup_needed_or_empty_state" if detected else "", {
         "signals": signals,
         "special_hits": special_hits,
         "cta_hits": cta_hits,
+        "onboarding_body_hits": onboarding_body_hits,
         "verify_hit": verify_hit,
         "long_intro_like": long_intro_like,
         "low_content_diversity": low_content_diversity,
@@ -9371,7 +9484,7 @@ def _collect_step_focus_debug_snapshot(row: dict[str, Any]) -> dict[str, str]:
         if len(visible_labels) >= 5:
             break
     body_texts = [label for label in visible_labels if len(label) >= 5][:5]
-    action_tokens = ("later", "set up now", "set up", "setup", "continue", "next")
+    action_tokens = ONBOARDING_CTA_ALIASES
     action_hits = [token for token in action_tokens if any(_text_matches_token_strict(label, token) for label in visible_labels)]
     class_name = str(
         row.get("focus_class_name", "")
@@ -9416,22 +9529,7 @@ def _collect_cta_grace_text_candidates(row: dict[str, Any]) -> list[str]:
 
 
 def _collect_cta_grace_action_hits(row: dict[str, Any]) -> list[str]:
-    action_tokens = (
-        "later",
-        "set up now",
-        "set up",
-        "setup",
-        "continue",
-        "next",
-        "allow",
-        "view information",
-        "learn more",
-        "not now",
-        "skip",
-        "try",
-        "start",
-        "open",
-    )
+    action_tokens = (*ONBOARDING_CTA_ALIASES, "view information", "learn more", "try")
     hits: list[str] = []
     seen: set[str] = set()
     for candidate in _collect_cta_grace_text_candidates(row):
@@ -9594,22 +9692,7 @@ def _select_actionable_cta_descendant(row: dict[str, Any]) -> tuple[dict[str, An
         for candidate in node_text_candidates:
             if not candidate:
                 continue
-            for token in (
-                "later",
-                "set up now",
-                "set up",
-                "setup",
-                "continue",
-                "next",
-                "allow",
-                "view information",
-                "learn more",
-                "not now",
-                "skip",
-                "try",
-                "start",
-                "open",
-            ):
+            for token in (*ONBOARDING_CTA_ALIASES, "view information", "learn more", "try"):
                 if _text_matches_token_strict(candidate, token):
                     node_action_hits.append(candidate)
                     break
@@ -9667,22 +9750,7 @@ def _collect_actionable_cta_descendants(row: dict[str, Any]) -> tuple[list[dict[
             continue
         node_action_hits: list[str] = []
         if node_label:
-            for token in (
-                "later",
-                "set up now",
-                "set up",
-                "setup",
-                "continue",
-                "next",
-                "allow",
-                "view information",
-                "learn more",
-                "not now",
-                "skip",
-                "try",
-                "start",
-                "open",
-            ):
+            for token in (*ONBOARDING_CTA_ALIASES, "view information", "learn more", "try"):
                 if _text_matches_token_strict(node_label, token):
                     node_action_hits.append(node_label)
                     break
@@ -12230,7 +12298,7 @@ def _row_matches_family_care_onboarding(
         str(row.get("actual_focus_speech", "") or "").strip(),
     ]
     normalized_blob = " ".join(text_candidates).lower()
-    if "want better insight into your daily life" in normalized_blob:
+    if any(token in normalized_blob for token in FAMILY_CARE_ONBOARDING_BODY_ALIASES):
         return True
     cluster_signature = str(row.get("cta_cluster_signature", "") or "").strip()
     if not cluster_signature or state is None:
@@ -12238,9 +12306,13 @@ def _row_matches_family_care_onboarding(
     cta_state = _cta_state(state)
     cta_nodes = cta_state.cta_cluster_nodes_by_signature.get(cluster_signature, [])
     labels = [_extract_cta_node_label(node).lower() for node in cta_nodes if isinstance(node, dict)]
-    has_later = any(_text_matches_token_strict(label, "later") for label in labels if label)
+    has_later = any(
+        any(_text_matches_token_strict(label, token) for token in FAMILY_CARE_LATER_ALIASES)
+        for label in labels
+        if label
+    )
     has_setup = any(
-        _text_matches_token_strict(label, "set up now") or _text_matches_token_strict(label, "set up")
+        any(_text_matches_token_strict(label, token) for token in FAMILY_CARE_SETUP_ALIASES)
         for label in labels
         if label
     )
@@ -12302,7 +12374,11 @@ def _maybe_recover_family_care_onboarding(
         (
             node
             for node in cta_nodes
-            if isinstance(node, dict) and _text_matches_token_strict(_extract_cta_node_label(node), "later")
+            if isinstance(node, dict)
+            and any(
+                _text_matches_token_strict(_extract_cta_node_label(node), token)
+                for token in FAMILY_CARE_LATER_ALIASES
+            )
         ),
         None,
     )
@@ -12350,7 +12426,7 @@ def _maybe_recover_family_care_onboarding(
             str(row.get("merged_announcement", "") or "").strip(),
         ]
     ).lower()
-    success = "want better insight into your daily life" not in post_blob
+    success = not any(token in post_blob for token in FAMILY_CARE_ONBOARDING_BODY_ALIASES)
     row["family_care_onboarding_recovered"] = success
     row["family_care_onboarding_recovery_reason"] = (
         "later_clicked_onboarding_cleared" if success else "later_clicked_unverified"

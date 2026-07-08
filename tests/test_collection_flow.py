@@ -1816,6 +1816,112 @@ def test_maybe_recover_family_care_onboarding_clicks_later_and_marks_move_recove
     assert any("[FAMILY_CARE][onboarding_recover]" in line and "success=true" in line for line in logs)
 
 
+def test_maybe_recover_family_care_onboarding_clicks_korean_later_only(monkeypatch):
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, *args, **kwargs: logs.append(message))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([])
+    client.focus_sequence = [
+        {
+            "viewIdResourceName": "com.example:id/device_usage_card",
+            "text": "기기 사용",
+            "talkbackLabel": "기기 사용",
+            "className": "android.widget.TextView",
+            "visibleToUser": True,
+            "boundsInScreen": "40,420,1040,760",
+        }
+    ]
+    cluster_signature = "family-care-ko-cluster"
+    row = {
+        "move_result": "failed",
+        "visible_label": "일상 생활을 더 잘 이해",
+        "merged_announcement": "일상 생활을 더 잘 이해 나중에 지금 설정하기",
+        "cta_cluster_signature": cluster_signature,
+    }
+    state = SimpleNamespace(
+        cta_state=SimpleNamespace(
+            cta_cluster_nodes_by_signature={
+                cluster_signature: [
+                    {
+                        "viewIdResourceName": "com.example.plugin:id/later_button",
+                        "className": "android.widget.FrameLayout",
+                        "clickable": True,
+                        "focusable": True,
+                        "effectiveClickable": True,
+                        "visibleToUser": True,
+                        "children": [{"text": "나중에", "className": "android.widget.TextView", "visibleToUser": True, "children": []}],
+                    },
+                    {
+                        "viewIdResourceName": "com.example.plugin:id/setup_button",
+                        "className": "android.widget.FrameLayout",
+                        "clickable": True,
+                        "focusable": True,
+                        "effectiveClickable": True,
+                        "visibleToUser": True,
+                        "children": [{"text": "지금 설정하기", "className": "android.widget.TextView", "visibleToUser": True, "children": []}],
+                    },
+                ]
+            }
+        )
+    )
+
+    updated = collection_flow._maybe_recover_family_care_onboarding(
+        row=row,
+        client=client,
+        dev="SERIAL",
+        state=state,
+        scenario_id="life_family_care_plugin",
+        step_idx=4,
+    )
+
+    assert updated["family_care_onboarding_recovery_attempted"] is True
+    assert updated["family_care_onboarding_recovered"] is True
+    assert client.select_calls[0]["name"] == "com.example.plugin:id/later_button"
+    assert all(call["name"] != "com.example.plugin:id/setup_button" for call in client.select_calls)
+
+
+def test_family_care_onboarding_does_not_click_generic_korean_later_without_evidence(monkeypatch):
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    client = DummyClient([])
+    cluster_signature = "generic-later-cluster"
+    row = {
+        "move_result": "failed",
+        "visible_label": "일반 안내",
+        "merged_announcement": "나중에",
+        "cta_cluster_signature": cluster_signature,
+    }
+    state = SimpleNamespace(
+        cta_state=SimpleNamespace(
+            cta_cluster_nodes_by_signature={
+                cluster_signature: [
+                    {
+                        "viewIdResourceName": "com.example.plugin:id/later_button",
+                        "className": "android.widget.Button",
+                        "clickable": True,
+                        "focusable": True,
+                        "effectiveClickable": True,
+                        "visibleToUser": True,
+                        "children": [{"text": "나중에", "className": "android.widget.TextView", "visibleToUser": True, "children": []}],
+                    }
+                ]
+            }
+        )
+    )
+
+    updated = collection_flow._maybe_recover_family_care_onboarding(
+        row=row,
+        client=client,
+        dev="SERIAL",
+        state=state,
+        scenario_id="life_family_care_plugin",
+        step_idx=4,
+    )
+
+    assert "family_care_onboarding_recovery_attempted" not in updated
+    assert client.select_calls == []
+    assert client.click_focused_calls == []
+
+
 def test_collect_tab_rows_allows_bounded_cta_descend_grace_for_card_container(monkeypatch):
     client = DummyClient(
         [
@@ -10017,6 +10123,131 @@ def test_special_state_initial_only_screen_still_routes_special_state():
     assert meta["ready_content_cluster"] is False
 
 
+def test_special_state_audio_next_korean_control_does_not_end_verified_screen():
+    nodes = [
+        {"text": "Spotify", "className": "android.widget.TextView"},
+        {"text": "다음", "className": "android.widget.Button", "clickable": True},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "device_audio_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["spotify"],
+        "special_state_tokens": ["spotify"],
+        "special_state_cta_tokens": ["다음"],
+        "special_state_handling": "back_after_read",
+    }
+
+    detected, kind, meta = collection_flow._classify_special_post_open_state(
+        tab_cfg,
+        post_view_id="com.example:id/audio",
+        post_label="Spotify",
+        post_speech="Spotify 다음",
+        visible_verify_text="Spotify 다음",
+        matches_verify=True,
+        post_nodes=nodes,
+    )
+
+    assert detected is False
+    assert kind == ""
+    assert "다음" not in meta["cta_hits"]
+
+
+def test_special_state_washer_start_settings_korean_controls_do_not_end_verified_screen():
+    nodes = [
+        {"text": "켜짐", "className": "android.widget.TextView"},
+        {"text": "모드 변경", "className": "android.widget.TextView"},
+        {"text": "설정", "className": "android.widget.Button", "clickable": True},
+        {"text": "시작", "className": "android.widget.Button", "clickable": True},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "device_washer_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["켜짐"],
+        "special_state_tokens": ["켜짐"],
+        "special_state_cta_tokens": ["설정", "시작"],
+        "special_state_handling": "back_after_read",
+    }
+
+    detected, kind, meta = collection_flow._classify_special_post_open_state(
+        tab_cfg,
+        post_view_id="com.example:id/washer",
+        post_label="켜짐",
+        post_speech="켜짐 모드 변경 설정 시작",
+        visible_verify_text="켜짐 모드 변경 설정 시작",
+        matches_verify=True,
+        post_nodes=nodes,
+    )
+
+    assert detected is False
+    assert kind == ""
+    assert "설정" not in meta["cta_hits"]
+    assert "시작" not in meta["cta_hits"]
+
+
+def test_special_state_settings_title_korean_settings_label_does_not_end_verified_screen():
+    nodes = [
+        {"text": "스마트싱스 설정", "className": "android.widget.TextView"},
+        {"text": "삼성 계정", "className": "android.widget.TextView"},
+        {"text": "설정", "className": "android.widget.TextView"},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "settings_entry_example",
+        "entry_type": "card",
+        "verify_tokens": ["smartthings settings"],
+        "special_state_tokens": ["설정"],
+        "special_state_cta_tokens": ["설정"],
+        "special_state_handling": "back_after_read",
+    }
+
+    detected, kind, meta = collection_flow._classify_special_post_open_state(
+        tab_cfg,
+        post_view_id="com.example:id/settings",
+        post_label="스마트싱스 설정",
+        post_speech="스마트싱스 설정 삼성 계정 설정",
+        visible_verify_text="스마트싱스 설정 삼성 계정 설정",
+        matches_verify=True,
+        post_nodes=nodes,
+    )
+
+    assert detected is False
+    assert kind == ""
+    assert "설정" not in meta["cta_hits"]
+
+
+def test_special_state_korean_onboarding_evidence_still_routes_special_state():
+    nodes = [
+        {"text": "권한을 연결해 주세요", "className": "android.widget.TextView"},
+        {"text": "설정하기", "className": "android.widget.Button", "clickable": True},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_home_care_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["home care"],
+        "special_state_tokens": ["권한"],
+        "special_state_cta_tokens": ["설정하기"],
+        "special_state_handling": "back_after_read",
+    }
+
+    detected, kind, meta = collection_flow._classify_special_post_open_state(
+        tab_cfg,
+        post_view_id="com.example:id/onboarding",
+        post_label="권한을 연결해 주세요",
+        post_speech="권한을 연결해 주세요 설정하기",
+        visible_verify_text="권한을 연결해 주세요 설정하기",
+        matches_verify=True,
+        post_nodes=nodes,
+    )
+
+    assert detected is True
+    assert kind == "setup_needed_or_empty_state"
+    assert "권한" in meta["onboarding_body_hits"]
+    assert "설정하기" in meta["cta_hits"]
+
+
 def test_special_state_cta_with_two_content_cards_uses_ready_override():
     nodes = [
         {"text": "Get started", "className": "android.widget.Button", "clickable": True},
@@ -14726,6 +14957,46 @@ def test_strip_only_terminal_guard_label_denylist_rows_do_not_reset_streak():
             31,
             visible_label="LocationButton",
             normalized_visible_label="locationbutton",
+            row_lifecycle_kind="content",
+            row_lifecycle_source="content_candidates_present",
+        ),
+    ]
+
+    for row in rows:
+        collection_flow._maybe_apply_strip_only_terminal_guard(
+            row=row,
+            state=state,
+            stop=False,
+            reason="",
+            step_idx=row["step_index"],
+            scenario_id="life_family_care_plugin",
+        )
+
+    assert state.strip_only_terminal_guard_state.streak == 3
+    assert rows[1]["strip_only_terminal_guard_control_reason"] == "strip_label_denylist"
+
+
+def test_strip_only_terminal_guard_korean_label_denylist_rows_do_not_reset_streak():
+    state = _phase_ordering_state()
+    rows = [
+        _strip_only_terminal_row(
+            29,
+            visible_label="기록",
+            normalized_visible_label="기록",
+            row_lifecycle_kind="content",
+            row_lifecycle_source="content_candidates_present",
+        ),
+        _strip_only_terminal_row(
+            30,
+            visible_label="제어",
+            normalized_visible_label="제어",
+            row_lifecycle_kind="content",
+            row_lifecycle_source="content_candidates_present",
+        ),
+        _strip_only_terminal_row(
+            31,
+            visible_label="자동화",
+            normalized_visible_label="자동화",
             row_lifecycle_kind="content",
             row_lifecycle_source="content_candidates_present",
         ),

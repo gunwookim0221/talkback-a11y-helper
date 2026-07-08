@@ -95,6 +95,47 @@ def _samsung_account_popup_row():
     }
 
 
+def _samsung_account_popup_ko_row():
+    return {
+        "focus_node": _node(
+            "나중에",
+            clickable=True,
+            class_name="android.widget.Button",
+            bounds="102,2280,463,2388",
+            resource_id="android:id/button3",
+        ),
+        "dump_tree_nodes": [
+            {
+                "className": "android.app.Dialog",
+                "boundsInScreen": "80,720,1000,2400",
+                "visibleToUser": True,
+                "children": [
+                    _node("삼성 계정을 더 안전하게", bounds="102,1500,978,1600", resource_id="android:id/alertTitle"),
+                    _node(
+                        "2단계 인증을 설정하면 다른 사람이 내 비밀번호를 알게 되어도 내 계정을 안전하게 보호할 수 있습니다.",
+                        bounds="102,1640,978,2040",
+                        resource_id="android:id/message",
+                    ),
+                    _node(
+                        "나중에",
+                        clickable=True,
+                        class_name="android.widget.Button",
+                        bounds="102,2280,463,2388",
+                        resource_id="android:id/button3",
+                    ),
+                    _node(
+                        "지금 설정하기",
+                        clickable=True,
+                        class_name="android.widget.Button",
+                        bounds="466,2280,978,2388",
+                        resource_id="android:id/button1",
+                    ),
+                ],
+            }
+        ],
+    }
+
+
 def _generic_later_popup_row():
     return {
         "focus_node": _node(
@@ -229,6 +270,15 @@ def test_samsung_account_popup_selects_later_only():
     assert [button["label"] for button in candidate.safe_buttons] == ["Later", "Later"]
     assert candidate.dangerous_buttons == []
     assert all(button["label"] != "Set up now" for button in candidate.safe_buttons)
+
+
+def test_korean_samsung_account_popup_selects_later_only():
+    candidate = popup_handler.detect_popup_candidate(_samsung_account_popup_ko_row())
+
+    assert candidate.detected is True
+    assert candidate.popup_kind == "samsung_account_two_step"
+    assert [button["label"] for button in candidate.safe_buttons] == ["나중에", "나중에"]
+    assert all(button["label"] != "지금 설정하기" for button in candidate.safe_buttons)
 
 
 def test_samsung_account_popup_tap_prefers_button3_resource_id():

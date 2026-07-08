@@ -31,7 +31,17 @@ _BOTTOM_TAB_RESOURCE_CANONICAL = {
     "more": "menu",
     "menu": "menu",
 }
-_CONTEXT_VERIFY_ALIAS_TOKENS = ("smartthings settings", "settings", "monitor", "my plants")
+_CONTEXT_VERIFY_ALIAS_TOKENS = (
+    "smartthings settings",
+    "settings",
+    "navigate up",
+    "more options",
+    "location qr code",
+    "change location",
+    "add",
+    "monitor",
+    "my plants",
+)
 
 
 def _expand_bottom_tab_aliases(value: str) -> str:
@@ -99,7 +109,9 @@ def _expand_context_verify_aliases(value: str | None, text_regex: str, announcem
     normalized_value = text.casefold()
     additions: list[str] = []
     for token in _CONTEXT_VERIFY_ALIAS_TOKENS:
-        if normalize_label(token) not in expected_source:
+        normalized_token = normalize_label(token)
+        token_parts = [part for part in normalized_token.split(" ") if part]
+        if normalized_token not in expected_source and not all(part in expected_source for part in token_parts):
             continue
         aliases = expand_verify_token_aliases([token])
         if any(alias != token and alias in normalized_value for alias in aliases):
