@@ -11,9 +11,16 @@ def test_safe_regex_search_returns_false_for_invalid_pattern():
 
 def test_menu_main_anchor_regex_has_single_leading_ignorecase_flag():
     menu_cfg = next(cfg for cfg in TAB_CONFIGS if cfg.get("scenario_id") == "menu_main")
-    assert menu_cfg["anchor_name"] == "(?i).*smartthings settings.*|.*settings.*"
-    assert menu_cfg["anchor"]["text_regex"] == "(?i).*smartthings settings.*|.*settings.*"
-    assert menu_cfg["anchor"]["announcement_regex"] == "(?i).*smartthings settings.*|.*settings.*"
+    for regex in (
+        menu_cfg["anchor_name"],
+        menu_cfg["anchor"]["text_regex"],
+        menu_cfg["anchor"]["announcement_regex"],
+    ):
+        assert regex.startswith("(?i)")
+        assert regex.count("(?i)") == 1
+        assert _safe_regex_search(regex, "SmartThings settings")
+        assert _safe_regex_search(regex, "Settings")
+        assert _safe_regex_search(regex, "스마트싱스 설정")
 
 
 def test_life_pet_care_plugin_uses_card_entry_spec():

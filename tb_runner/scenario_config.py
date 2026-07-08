@@ -92,6 +92,75 @@ TAB_CONFIGS = [
             "block_candidates": [],
         },
     },
+    {
+        "scenario_id": "home_safe_plugin",
+        "scenario_type": "content",
+        "entry_type": "card",
+        "tab_name": "(?i).*home.*",
+        "tab_type": "b",
+        "tab": {
+            "resource_id_regex": "com\\.samsung\\.android\\.oneconnect:id/menu_favorites",
+            "text_regex": "(?i).*home.*|.*홈.*",
+            "announcement_regex": "(?i).*(selected|선택됨)?.*(home|홈).*",
+            "tie_breaker": "bottom_nav_left_to_right",
+            "allow_resource_id_only": True,
+        },
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "optional_availability": True,
+        "pre_navigation": [
+            {
+                "action": "enter_safe_favorite_card",
+                "target": "Safe",
+                "type": "a",
+                "target_stable_labels": ["Safe Button", "세이프 버튼"],
+                "max_scroll_search_steps": 5,
+            }
+        ],
+        "verify_tokens": ["smartthings safe plugin", "safe button", "history", "ask for help"],
+        "anchor_name": "(?i).*(smartthings\\s*safe\\s*plugin|safe\\s*button|세이프\\s*버튼|history|기록|ask\\s*for\\s*help|도움\\s*요청).*",
+        "anchor_type": "a",
+        "anchor": {
+            "text_regex": "(?i).*(smartthings\\s*safe\\s*plugin|safe\\s*button|세이프\\s*버튼|history|기록|ask\\s*for\\s*help|도움\\s*요청).*",
+            "announcement_regex": "(?i).*(smartthings\\s*safe\\s*plugin|safe\\s*button|세이프\\s*버튼|history|기록|ask\\s*for\\s*help|도움\\s*요청).*",
+            "tie_breaker": "top_left",
+        },
+        "context_verify": {
+            "type": "screen_text",
+            "text_regex": "(?i).*smartthings\\s*safe\\s*plugin.*|.*safe\\s*button.*|.*세이프\\s*버튼.*|.*history.*|.*기록.*|.*no\\s*history.*|.*아직\\s*사용\\s*기록이\\s*없습니다.*|.*ask\\s*for\\s*help.*|.*도움\\s*요청.*|.*practice\\s*asking\\s*for\\s*help.*|.*도움\\s*요청\\s*연습하기.*",
+        },
+        "plugin_more_options_enabled": True,
+        "overlay_policy": {
+            "allow_candidates": [
+                {
+                    "resource_id": "SafeMain-more-options",
+                    "label": "More options",
+                },
+                {
+                    "label": "More options",
+                },
+                {
+                    "label": "옵션 더보기",
+                },
+            ],
+            "block_candidates": [
+                {"label": "Remove device"},
+                {"label": "기기 삭제"},
+                {"label": "삭제"},
+                {"label": "Remove"},
+                {"label": "Ask for help"},
+                {"label": "도움 요청"},
+                {"label": "Practice asking for help"},
+                {"label": "도움 요청 연습하기"},
+            ],
+        },
+        "stop_policy": {
+            "stop_on_global_nav_entry": True,
+        },
+        "global_nav": BOTTOM_TAB_GLOBAL_NAV,
+        "max_steps": 30,
+        "enabled": False,
+    },
 
     #Life 플러그인 Food
     {

@@ -123,6 +123,11 @@
         "stop_on_global_nav_entry": true
       }
     },
+    "home_safe_plugin": {
+      "group": "plugin_screen",
+      "enabled": false,
+      "max_steps": 30
+    },
     "devices_main": {
       "group": "main_tabs",
       "anchor_ref": "home_tab_anchor",

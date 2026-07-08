@@ -505,7 +505,7 @@ def _is_availability_candidate(
     if summary_save_excel_count not in {0, None}:
         return False
     pre_nav_action = str(signal.get("pre_nav_action") or "")
-    if pre_nav_action in {"enter_device_card_plugin", "xml_scroll_search_tap", "scrolltouch"}:
+    if pre_nav_action in {"enter_device_card_plugin", "enter_safe_favorite_card", "xml_scroll_search_tap", "scrolltouch"}:
         return True
     return bool(signal.get("anchor_insufficient") or signal.get("pre_nav_failed"))
 
@@ -515,8 +515,10 @@ def _classify_availability_signal(signal: dict[str, object]) -> dict[str, object
     target = str(signal.get("pre_nav_target") or "").strip()
     inventory = str(signal.get("device_inventory_labels") or "").strip()
     device_target_missing = bool(signal.get("device_target_not_visible") or signal.get("inventory_signature_unchanged"))
-    if action == "enter_device_card_plugin" and (inventory or device_target_missing):
+    if action in {"enter_device_card_plugin", "enter_safe_favorite_card"} and (inventory or device_target_missing or action == "enter_safe_favorite_card"):
         reason = "target device card not found"
+        if action == "enter_safe_favorite_card":
+            reason = "optional Safe card not found"
         if inventory:
             reason = f"{reason}; inventory only {inventory}"
         return {

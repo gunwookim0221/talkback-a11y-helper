@@ -10,12 +10,12 @@ def _base_tabs():
     ]
 
 
-def test_load_runtime_bundle_without_file_keeps_defaults(tmp_path):
+def test_load_runtime_bundle_without_file_keeps_runtime_disabled_policy(tmp_path):
     bundle = load_runtime_bundle(_base_tabs(), config_path=tmp_path / "missing.json")
 
     assert bundle["checkpoint_save_every"] == 3
     assert bundle["tab_configs"][0]["max_steps"] == 5
-    assert bundle["tab_configs"][0]["enabled"] is True
+    assert bundle["tab_configs"][0]["enabled"] is False
     assert bundle["tab_configs"][0]["tab_select_retry_count"] == 2
     assert bundle["tab_configs"][0]["pre_navigation_retry_count"] == 2
     assert bundle["tab_configs"][0]["main_announcement_idle_wait_seconds"] == 0.5
@@ -78,7 +78,7 @@ def test_load_runtime_bundle_ignores_invalid_values(tmp_path):
 
     home_cfg = bundle["tab_configs"][0]
     assert bundle["checkpoint_save_every"] == 3
-    assert home_cfg["enabled"] is True
+    assert home_cfg["enabled"] is False
     assert home_cfg["max_steps"] == 5
     assert home_cfg["tab_select_retry_count"] == 2
     assert home_cfg["anchor_retry_count"] == 2

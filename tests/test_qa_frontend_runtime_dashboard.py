@@ -350,6 +350,27 @@ def test_device_card_missing_is_not_available():
     assert "Galaxy Home Mini" in progress["device_tv_plugin"]["availability_reason"]
 
 
+def test_safe_card_missing_is_optional_not_available():
+    log_text = "\n".join(
+        [
+            "[QA_FRONTEND][scenario_selection] enabled_ids=['home_safe_plugin']",
+            "[19:04:52] [SCENARIO][pre_nav] step=1 action=enter_safe_favorite_card target='Safe'",
+            "[19:04:55] [SAFE][discover] safe card not found; skip optional scenario",
+            "[19:05:04] [SCENARIO][pre_nav] failed reason='action_failed' detail='safe_optional_not_available' step=1",
+            "[19:05:04] [PERF][scenario_summary] scenario=home_safe_plugin total_steps=1 save_excel_count=0",
+        ]
+    )
+
+    summary = parse_runtime_log(log_text)
+    progress = {item["id"]: item for item in summary["scenario_progress"]}
+
+    assert summary["not_available_scenarios"] == 1
+    assert progress["home_safe_plugin"]["status"] == "not_available"
+    assert progress["home_safe_plugin"]["availability_status"] == "NOT_AVAILABLE"
+    assert progress["home_safe_plugin"]["availability_confidence"] == "high"
+    assert "Safe card" in progress["home_safe_plugin"]["availability_reason"]
+
+
 def test_life_plugin_anchor_failure_is_no_target_candidate():
     log_text = "\n".join(
         [

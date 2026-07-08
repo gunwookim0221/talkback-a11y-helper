@@ -30,6 +30,7 @@ from tb_runner.label_matcher import (
     canonicalize_label,
     expand_verify_token_aliases,
     matches_alias,
+    normalize_label,
 )
 from tb_runner.logging_utils import _should_log, log
 from tb_runner.overlay_logic import (
@@ -199,6 +200,19 @@ _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _HOME_TAB_RESOURCE_ID = "com.samsung.android.oneconnect:id/menu_favorites"
 _LIFE_TAB_RESOURCE_ID = "com.samsung.android.oneconnect:id/menu_services"
+_SAFE_CARD_RESOURCE_TOKEN = "favorite_device_card"
+_SAFE_ACTION_RESOURCE_TOKEN = "image_button"
+_SAFE_TEXT_EVIDENCE = ("세이프 버튼", "safe button", "도움 요청", "ask for help")
+_SAFE_DANGEROUS_ACTION_LABELS = (
+    "도움 요청",
+    "ask for help",
+    "도움 요청 연습하기",
+    "practice asking for help",
+    "remove device",
+    "기기 삭제",
+    "삭제",
+    "remove",
+)
 _GLOBAL_BOTTOM_NAV_RESOURCE_TOKENS = (
     "menu_favorites",
     "menu_devices",
@@ -249,6 +263,7 @@ _ENTRY_REASON_FALSE_SUCCESS_GUARD = "false_success_guard"
 _ENTRY_REASON_VERIFY_FAILED = "verify_failed"
 _ENTRY_REASON_SUCCESS_VERIFIED = "success_verified"
 _ENTRY_REASON_SPECIAL_STATE_HANDLED = "special_state_handled"
+_ENTRY_REASON_OPTIONAL_NOT_AVAILABLE = "optional_not_available"
 _CARD_ENTRY_VERIFY_RECHECK_COUNT = 2
 _CARD_ENTRY_VERIFY_RECHECK_SLEEP_SECONDS = 0.2
 _DIRECT_SELECT_VERIFY_RECHECK_COUNT = 2
@@ -2383,6 +2398,8 @@ def _extract_window_focus_line(client: A11yAdbClient, dev: str) -> str:
 
 def _map_pre_nav_failure_reason_to_entry_reason(reason: str) -> str:
     normalized = str(reason or "").strip().lower()
+    if "safe_optional_not_available" in normalized:
+        return _ENTRY_REASON_OPTIONAL_NOT_AVAILABLE
     if "no_local_match" in normalized or "target node not found" in normalized:
         return _ENTRY_REASON_NO_MATCH
     if "non_actionable_without_promotion" in normalized:
@@ -5071,6 +5088,166 @@ def _tap_device_card_safe(
     return False, "device_card_tap_failed"
 
 
+def _safe_node_resource_id(node: dict[str, Any]) -> str:
+    return str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
+
+
+def _safe_node_label(node: dict[str, Any]) -> str:
+    return _node_label_blob(node).strip()
+
+
+def _safe_node_contains_text_evidence(node: dict[str, Any]) -> bool:
+    label = _safe_node_label(node).casefold()
+    return any(token.casefold() in label for token in _SAFE_TEXT_EVIDENCE)
+
+
+def _safe_bounds_contains(outer: tuple[int, int, int, int], inner: tuple[int, int, int, int]) -> bool:
+    return inner[0] >= outer[0] and inner[1] >= outer[1] and inner[2] <= outer[2] and inner[3] <= outer[3]
+
+
+def _find_safe_favorite_card(nodes: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    if not isinstance(nodes, list):
+        return None
+    flat_nodes = list(_iter_tree_nodes_with_parent(nodes))
+    for node, _parent in flat_nodes:
+        rid = _safe_node_resource_id(node).lower()
+        if _SAFE_CARD_RESOURCE_TOKEN not in rid:
+            continue
+        card_bounds = parse_bounds_str(str(node.get("boundsInScreen", "") or node.get("bounds", "") or ""))
+        if not card_bounds:
+            continue
+        evidence: list[str] = []
+        action_bounds: list[str] = []
+        for candidate, parent in flat_nodes:
+            candidate_bounds = parse_bounds_str(str(candidate.get("boundsInScreen", "") or candidate.get("bounds", "") or ""))
+            if candidate is not node and candidate_bounds and not _safe_bounds_contains(card_bounds, candidate_bounds):
+                continue
+            candidate_rid = _safe_node_resource_id(candidate)
+            candidate_label = _safe_node_label(candidate)
+            parent_is_card = parent is node
+            contained = bool(candidate is node or parent_is_card or (candidate_bounds and _safe_bounds_contains(card_bounds, candidate_bounds)))
+            if not contained:
+                continue
+            if _safe_node_contains_text_evidence(candidate):
+                evidence.append(candidate_label)
+            if _SAFE_ACTION_RESOURCE_TOKEN in candidate_rid.lower() or normalize_label(candidate_label) in {
+                normalize_label(label) for label in _SAFE_DANGEROUS_ACTION_LABELS
+            }:
+                bounds = str(candidate.get("boundsInScreen", "") or candidate.get("bounds", "") or "")
+                if bounds:
+                    action_bounds.append(bounds)
+        if not evidence:
+            continue
+        return {
+            "node": node,
+            "rid": _safe_node_resource_id(node),
+            "label": _safe_node_label(node),
+            "bounds": str(node.get("boundsInScreen", "") or node.get("bounds", "") or ""),
+            "evidence": evidence,
+            "avoid_bounds": action_bounds,
+        }
+    return None
+
+
+def _compute_safe_favorite_card_tap_point(card: dict[str, Any]) -> dict[str, Any] | None:
+    bounds = parse_bounds_str(str(card.get("bounds", "") or ""))
+    if not bounds:
+        return None
+    left, top, right, bottom = bounds
+    width = max(1, right - left)
+    y = (top + bottom) // 2
+    candidates = [
+        (left + int(width * 0.35), y, "left_center"),
+        (left + int(width * 0.25), y, "left_quarter"),
+        ((left + right) // 2, y, "center"),
+    ]
+    avoid_bounds = [parse_bounds_str(str(value or "")) for value in card.get("avoid_bounds", [])]
+    avoid_bounds = [value for value in avoid_bounds if value]
+    for x, candidate_y, strategy in candidates:
+        if not any(ab[0] <= x <= ab[2] and ab[1] <= candidate_y <= ab[3] for ab in avoid_bounds):
+            return {"x": int(x), "y": int(candidate_y), "strategy": strategy}
+    return {"x": left + max(8, int(width * 0.15)), "y": y, "strategy": "far_left_fallback"}
+
+
+def _tap_safe_favorite_card(
+    client: A11yAdbClient,
+    dev: str,
+    card: dict[str, Any],
+) -> tuple[bool, str]:
+    tap_point = _compute_safe_favorite_card_tap_point(card)
+    if tap_point is None:
+        return False, "safe_card_tap_point_unavailable"
+    x = int(tap_point["x"])
+    y = int(tap_point["y"])
+    log(
+        "[SAFE][discover] found safe card "
+        f"rid='{card.get('rid', '')}' bounds='{card.get('bounds', '')}' "
+        f"evidence='{','.join(card.get('evidence', []))}' tap='{x},{y}' "
+        f"strategy='{tap_point.get('strategy', '')}'"
+    )
+    tap_xy_adb = getattr(client, "tap_xy_adb", None)
+    if callable(tap_xy_adb):
+        return bool(tap_xy_adb(dev=dev, x=x, y=y)), "safe_card_tapped"
+    touch_point = getattr(client, "touch_point", None)
+    if callable(touch_point):
+        return bool(touch_point(dev=dev, x=x, y=y)), "safe_card_tapped"
+    return False, "safe_card_tap_failed"
+
+
+def _run_enter_safe_favorite_card(
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict[str, Any],
+    step: dict[str, Any],
+    *,
+    max_scroll_search_steps: int,
+    step_wait_seconds: float,
+    transition_fast_path: bool,
+) -> tuple[bool, str]:
+    dump_tree_fn = getattr(client, "dump_tree", None)
+    if not callable(dump_tree_fn):
+        return False, "dump_tree_unavailable"
+    scroll_to_top_fn = getattr(client, "scroll_to_top", None)
+    if callable(scroll_to_top_fn) and bool(step.get("scroll_to_top", True)):
+        try:
+            scroll_to_top_fn(dev=dev, max_swipes=int(step.get("scroll_to_top_max_swipes", 5) or 5), pause=0.6)
+        except Exception as exc:
+            log(f"[SAFE][discover] scroll_to_top_failed reason='{exc}'")
+
+    for search_step in range(1, max_scroll_search_steps + 1):
+        try:
+            nodes = dump_tree_fn(dev=dev)
+        except Exception as exc:
+            return False, f"safe_dump_failed:{exc}"
+        nodes = nodes if isinstance(nodes, list) else []
+        card = _find_safe_favorite_card(nodes)
+        if card is not None:
+            tap_ok, tap_reason = _tap_safe_favorite_card(client, dev, card)
+            if not tap_ok:
+                return False, tap_reason
+            confirm_ok, confirm_signal = _confirm_click_focused_transition(
+                client=client,
+                dev=dev,
+                tab_cfg=tab_cfg,
+                transition_fast_path=transition_fast_path,
+            )
+            setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
+            setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
+            if confirm_ok:
+                return True, "safe_card_opened"
+            return False, f"transition_not_confirmed:{confirm_signal}"
+
+        log(f"[SAFE][discover] safe card not visible search_step={search_step}/{max_scroll_search_steps}")
+        if search_step >= max_scroll_search_steps:
+            break
+        if callable(getattr(client, "scroll", None)):
+            client.scroll(dev, "down", step_=50, time_=1000)
+        time.sleep(step_wait_seconds)
+
+    log("[SAFE][discover] safe card not found; skip optional scenario")
+    return False, "safe_optional_not_available"
+
+
 def _device_location_label(state: dict[str, Any]) -> str:
     selected_label = str(state.get("selected_label", "") or "").strip()
     if selected_label:
@@ -7132,6 +7309,8 @@ def _run_pre_navigation_steps(
             action = "xml_scroll_search_tap"
         if action in {"enter_device_plugin", "enter_device_card_plugin", "shared_pre_navigation.enter_device_plugin"}:
             action = "enter_device_card_plugin"
+        if action in {"enter_safe_favorite_card", "enter_safe_card", "enter_home_safe_plugin"}:
+            action = "enter_safe_favorite_card"
         target = str(step.get("target", "") or "").strip()
         type_ = str(step.get("type", "a") or "a").strip()
         if not action or not target:
@@ -7148,6 +7327,7 @@ def _run_pre_navigation_steps(
             "select_and_tap_bounds_center_adb",
             "select_and_click_focused_or_tap_bounds_center_adb",
             "enter_device_card_plugin",
+            "enter_safe_favorite_card",
         }:
             log(f"[SCENARIO][pre_nav] failed reason='unsupported_action' step={index} action='{action}'")
             return False
@@ -7226,6 +7406,22 @@ def _run_pre_navigation_steps(
                     transition_fast_path=transition_fast_path,
                 )
                 actual_reason = device_reason
+                local_match_failed = not step_ok
+            elif action == "enter_safe_favorite_card":
+                max_scroll_search_steps = max(
+                    1,
+                    int(step.get("max_scroll_search_steps", tab_cfg.get("max_scroll_search_steps", _PLUGIN_SCROLL_SEARCH_MAX_STEPS)) or _PLUGIN_SCROLL_SEARCH_MAX_STEPS),
+                )
+                step_ok, safe_reason = _run_enter_safe_favorite_card(
+                    client=client,
+                    dev=dev,
+                    tab_cfg=tab_cfg,
+                    step=step,
+                    max_scroll_search_steps=max_scroll_search_steps,
+                    step_wait_seconds=step_wait_seconds,
+                    transition_fast_path=transition_fast_path,
+                )
+                actual_reason = safe_reason
                 local_match_failed = not step_ok
             elif action == "scrolltouch":
                 screen_context_mode = _resolve_screen_context_mode(tab_cfg)
@@ -14154,7 +14350,7 @@ def _execute_overlay_for_candidate(
 
 def _is_plugin_screen_top_bar_more_options(row: dict[str, Any], tab_cfg: dict[str, Any]) -> bool:
     scenario_id = str(tab_cfg.get("scenario_id", "") or "")
-    if not scenario_id.startswith("life_"):
+    if not (scenario_id.startswith("life_") or bool(tab_cfg.get("plugin_more_options_enabled"))):
         return False
     if str(tab_cfg.get("scenario_type", "content") or "content").strip().lower() == "global_nav":
         return False
@@ -14296,7 +14492,7 @@ def _overlay_phase(
     plugin_more_row = row
     plugin_more_enabled = bool(
         not is_global_nav_only_scenario
-        and str(tab_cfg.get("scenario_id", "") or "").startswith("life_")
+        and (str(tab_cfg.get("scenario_id", "") or "").startswith("life_") or bool(tab_cfg.get("plugin_more_options_enabled")))
         and plugin_more_done_marker not in expanded_overlay_entries
     )
     if plugin_more_enabled and not _is_plugin_screen_top_bar_more_options(plugin_more_row, tab_cfg):
@@ -15773,7 +15969,9 @@ def _run_start_pipeline(
             result.focus_align_ok = bool(focus_align_payload.get("ok"))
             result.focus_align_reason = str(focus_align_payload.get("reason", "") or "")
     if not opened:
-        if isinstance(crash_guard_result, dict) and crash_guard_result.get("reason"):
+        if result.entry_contract_reason == _ENTRY_REASON_OPTIONAL_NOT_AVAILABLE:
+            result.failure_reason = result.entry_contract_detail or _ENTRY_REASON_OPTIONAL_NOT_AVAILABLE
+        elif isinstance(crash_guard_result, dict) and crash_guard_result.get("reason"):
             result.failure_reason = str(crash_guard_result.get("reason") or "tab_or_anchor_failed")
         else:
             result.failure_reason = "tab_or_anchor_failed"
@@ -15930,10 +16128,15 @@ def collect_tab_rows(
         main_announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
     )
     if start_result.needs_open_failed_row:
+        terminal_status = "OPTIONAL_NOT_AVAILABLE" if start_result.entry_contract_reason == _ENTRY_REASON_OPTIONAL_NOT_AVAILABLE else "TAB_OPEN_FAILED"
         failed_row = _build_terminal_row(
             tab_cfg,
             stop_reason=start_result.failure_reason or "tab_or_anchor_failed",
+            status=terminal_status,
         )
+        if terminal_status == "OPTIONAL_NOT_AVAILABLE":
+            failed_row["entry_contract_reason"] = _ENTRY_REASON_OPTIONAL_NOT_AVAILABLE
+            failed_row["entry_contract_detail"] = start_result.entry_contract_detail or start_result.failure_reason
         failed_row = _annotate_report_row_context(failed_row, tab_cfg)
         persisted_failed_row = _build_persisted_row_semantics(failed_row)
         rows.append(persisted_failed_row)
