@@ -129,6 +129,313 @@ def test_local_tab_state_marks_visited_and_exhausted():
     assert state.exhausted_signatures == {"monitor||save"}
 
 
+def test_label_only_local_tab_uses_child_label_for_activation_target(monkeypatch):
+    _bind_local_tab_logic(monkeypatch, [])
+    candidate = {
+        "rid": "",
+        "label": "일정버튼 일정",
+        "bounds": "710,2316,1050,2496",
+        "node": {
+            "mergedLabel": "일정버튼 일정",
+            "contentDescription": "일정버튼",
+            "boundsInScreen": "710,2316,1050,2496",
+            "children": [{"text": "일정"}],
+        },
+    }
+    state = SimpleNamespace()
+
+    _rid, action_label, _bounds = local_tab_logic._record_pending_local_tab_progression(
+        state=state,
+        signature="location||schedule",
+        next_candidate=candidate,
+        reason="unit_test",
+    )
+
+    assert action_label == "일정버튼"
+    assert state.pending_local_tab_label == "일정버튼 일정"
+    assert state.pending_local_tab_action_label == "일정버튼"
+
+
+def test_label_only_local_tab_uses_english_child_label_for_activation_target(monkeypatch):
+    _bind_local_tab_logic(monkeypatch, [])
+    candidate = {
+        "rid": "",
+        "label": "Schedule button Schedule",
+        "bounds": "710,1700,1050,1860",
+        "node": {
+            "mergedLabel": "Schedule button Schedule",
+            "contentDescription": "Schedule button",
+            "boundsInScreen": "710,1700,1050,1860",
+        },
+    }
+    state = SimpleNamespace()
+
+    _rid, action_label, _bounds = local_tab_logic._record_pending_local_tab_progression(
+        state=state,
+        signature="location||schedule",
+        next_candidate=candidate,
+        reason="unit_test",
+    )
+
+    assert action_label == "Schedule button"
+
+
+def _recovery_dump_strip_node(display_label, concrete_label, bounds):
+    return {
+        "text": None,
+        "contentDescription": concrete_label,
+        "mergedLabel": display_label,
+        "talkbackLabel": display_label,
+        "className": "android.widget.LinearLayout",
+        "clickable": True,
+        "focusable": True,
+        "effectiveClickable": True,
+        "visibleToUser": True,
+        "isVisibleToUser": True,
+        "boundsInScreen": bounds,
+        "children": [
+            {
+                "text": concrete_label.replace(" button", "").replace("버튼", ""),
+                "visibleToUser": True,
+                "boundsInScreen": bounds,
+            }
+        ],
+    }
+
+
+def _recovery_dump_strip_candidates(*labels):
+    nodes = [{"visibleToUser": True, "boundsInScreen": "0,0,1080,2640", "children": []}]
+    nodes.extend(
+        _recovery_dump_strip_node(display, concrete, bounds)
+        for display, concrete, bounds in labels
+    )
+    _content, tabs, _meta = collection_flow._collect_step_candidate_priority_groups(
+        nodes,
+        scenario_id="life_family_care_plugin",
+    )
+    return tabs
+
+
+def test_recovery_dump_strip_keeps_korean_concrete_content_description(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    candidates = _recovery_dump_strip_candidates(
+        ("위치버튼 위치", "위치버튼", "370,2316,710,2496"),
+        ("일정버튼 일정", "일정버튼", "710,2316,1050,2496"),
+    )
+    state = SimpleNamespace(
+        current_local_tab_signature="",
+        current_local_tab_active_rid="",
+        current_local_tab_active_label="",
+        current_local_tab_active_age=0,
+        pending_local_tab_rid="",
+        pending_local_tab_label="",
+        local_tab_candidates_by_signature={},
+        visited_local_tabs_by_signature={},
+    )
+
+    _signature, rebuilt = local_tab_logic._recover_local_tab_state_from_bottom_strip(
+        state=state,
+        row={"visible_label": "위치버튼", "focus_bounds": "370,2316,710,2496"},
+        previous_row={},
+        bottom_strip_candidates=candidates,
+        reason="state_missing_but_dump_strip_seen",
+    )
+
+    schedule = next(candidate for candidate in rebuilt if candidate["label"] == "일정버튼 일정")
+    assert schedule["actionable_label"] == "일정버튼"
+    assert schedule["canonical_visit_key"] == "일정버튼"
+    assert schedule["node"]["text"] is None
+    assert schedule["node"]["contentDescription"] == "일정버튼"
+    assert schedule["node"]["mergedLabel"] == "일정버튼 일정"
+    _rid, target, _bounds = local_tab_logic._record_pending_local_tab_progression(
+        state=state,
+        signature="위치버튼 위치||일정버튼 일정",
+        next_candidate=schedule,
+        reason="unit_test",
+    )
+    assert target == "일정버튼"
+    assert state.pending_local_tab_visit_key == "일정버튼"
+    assert any("display='일정버튼 일정'" in line and "actionable='일정버튼'" in line for line in logs)
+    assert any("[LOCAL_TAB][forced_navigation]" in line and "target='일정버튼'" in line for line in logs)
+
+
+def test_recovery_dump_strip_keeps_english_concrete_content_description():
+    candidates = _recovery_dump_strip_candidates(
+        ("Location button Location", "Location button", "370,2316,710,2496"),
+        ("Schedule button Schedule", "Schedule button", "710,2316,1050,2496"),
+    )
+
+    schedule = next(candidate for candidate in candidates if candidate["label"] == "Schedule button Schedule")
+    assert schedule["actionable_label"] == "Schedule button"
+    assert schedule["canonical_visit_key"] == "schedule button"
+    assert schedule["node"]["text"] is None
+    assert schedule["node"]["contentDescription"] == "Schedule button"
+    assert schedule["node"]["mergedLabel"] == "Schedule button Schedule"
+
+
+def test_recovery_dump_strip_uses_distinct_concrete_keys_for_label_only_tabs():
+    candidates = _recovery_dump_strip_candidates(
+        ("활동버튼 활동", "활동버튼", "30,2316,370,2496"),
+        ("위치버튼 위치", "위치버튼", "370,2316,710,2496"),
+        ("일정버튼 일정", "일정버튼", "710,2316,1050,2496"),
+    )
+
+    assert {candidate["canonical_visit_key"] for candidate in candidates} == {"활동버튼", "위치버튼", "일정버튼"}
+
+
+def test_label_only_forced_activation_uses_actionable_label_for_helper_target(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    client = DummyClient([{"visible_label": "활동버튼", "focus_bounds": "20,2316,320,2496"}])
+    client.tap_xy_adb = lambda **_kwargs: False
+    client.select = lambda **kwargs: client.select_calls.append(kwargs) or False
+    state = SimpleNamespace(
+        forced_local_tab_target_signature="activity||schedule",
+        forced_local_tab_target_rid="",
+        forced_local_tab_target_label="일정버튼 일정",
+        forced_local_tab_target_action_label="일정버튼",
+        forced_local_tab_target_visit_key="일정버튼",
+        forced_local_tab_target_bounds="710,2316,1050,2496",
+        forced_local_tab_attempt_count=0,
+        pending_local_tab_signature="activity||schedule",
+        pending_local_tab_rid="",
+        pending_local_tab_label="일정버튼 일정",
+        pending_local_tab_action_label="일정버튼",
+        pending_local_tab_visit_key="일정버튼",
+        pending_local_tab_bounds="710,2316,1050,2496",
+        pending_local_tab_age=0,
+        visited_local_tabs_by_signature={"activity||schedule": set()},
+        local_tab_activation_failures={},
+    )
+
+    local_tab_logic._activate_forced_local_tab_target(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        step_idx=1,
+        wait_seconds=0.1,
+        announcement_wait_seconds=0.1,
+        announcement_idle_wait_seconds=0.0,
+        announcement_max_extra_wait_seconds=0.0,
+    )
+
+    assert [call["name"] for call in client.select_calls] == ["일정버튼"]
+    assert any("target='일정버튼'" in line and "source='actionable_label'" in line for line in logs)
+    assert not any("target='일정버튼 일정'" in line and "method='select_label'" in line for line in logs)
+
+
+def test_label_only_local_tab_matches_child_focus_without_exact_merged_label():
+    matched, matched_by = local_tab_logic._row_matches_pending_local_tab(
+        {"visible_label": "Schedule button", "merged_announcement": "Schedule button"},
+        pending_rid="",
+        pending_label="Schedule button Schedule",
+        pending_action_label="Schedule button",
+        pending_bounds="",
+    )
+
+    assert (matched, matched_by) == (True, "action_label")
+
+
+def test_pending_label_only_tab_commits_when_post_activation_content_is_observed(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    signature = "location||schedule"
+    state = SimpleNamespace(
+        pending_local_tab_signature=signature,
+        pending_local_tab_rid="",
+        pending_local_tab_label="Schedule button Schedule",
+        pending_local_tab_action_label="Schedule button",
+        pending_local_tab_visit_key="schedule button",
+        pending_local_tab_bounds="710,1700,1050,1860",
+        pending_local_tab_age=1,
+        current_local_tab_active_rid="",
+        current_local_tab_active_label="Location button Location",
+        visited_local_tabs_by_signature={signature: set()},
+    )
+
+    local_tab_logic._maybe_commit_pending_local_tab_progression(
+        state,
+        {
+            "visible_label": "Upcoming events",
+            "focus_view_id": "com.example:id/event_container",
+            "focus_bounds": "30,900,1050,1040",
+        },
+    )
+
+    assert state.pending_local_tab_label == ""
+    assert "schedule button" in state.visited_local_tabs_by_signature[signature]
+    assert signature in state.local_tab_activation_evidence_signatures
+    assert any("matched_by='observed_content_after_activation'" in line for line in logs)
+
+
+def test_pending_label_only_tab_stays_unvisited_without_content_evidence(monkeypatch):
+    _bind_local_tab_logic(monkeypatch, [])
+    state = SimpleNamespace(
+        pending_local_tab_signature="location||schedule",
+        pending_local_tab_rid="",
+        pending_local_tab_label="Schedule button Schedule",
+        pending_local_tab_action_label="Schedule button",
+        pending_local_tab_bounds="710,1700,1050,1860",
+        pending_local_tab_age=1,
+        visited_local_tabs_by_signature={},
+    )
+
+    local_tab_logic._maybe_commit_pending_local_tab_progression(
+        state,
+        {"visible_label": "", "focus_bounds": "30,900,1050,1040"},
+    )
+
+    assert state.pending_local_tab_label == "Schedule button Schedule"
+    assert not getattr(state, "local_tab_activation_evidence_signatures", set())
+
+
+def test_label_only_candidates_use_actionable_key_after_rebuild(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    signature = "activity||location||schedule"
+    candidates = [
+        {
+            **_bottom_strip_candidate("활동버튼 활동", 20, 320, rid=""),
+            "actionable_label": "활동버튼",
+            "canonical_visit_key": "활동버튼",
+        },
+        {
+            **_bottom_strip_candidate("위치버튼 위치", 360, 660, rid=""),
+            "actionable_label": "위치버튼",
+            "canonical_visit_key": "위치버튼",
+        },
+        {
+            **_bottom_strip_candidate("일정버튼 일정", 700, 1000, rid=""),
+            "actionable_label": "일정버튼",
+            "canonical_visit_key": "일정버튼",
+        },
+    ]
+    _patch_content_candidates(monkeypatch, [])
+    state = _local_tab_progression_state(
+        signature,
+        candidates,
+        active_rid="",
+        active_label="일정버튼 일정",
+        visited={"활동버튼", "위치버튼", "일정버튼"},
+    )
+    state.current_local_tab_active_label = "일정버튼 일정"
+
+    row = {"visible_label": "일정버튼 일정", "focus_bounds": "700,2338,1000,2473"}
+    advanced = local_tab_logic._maybe_select_next_local_tab(
+        client=DummyClient([]),
+        dev="SERIAL",
+        state=state,
+        row=row,
+        scenario_id="life_plugin",
+        step_idx=2,
+    )
+
+    assert advanced is False
+    assert row["local_tab_block_reason"] == "no_unvisited_local_tab"
+    assert any("reason='no_unvisited_local_tab'" in line for line in logs)
+
+
 def test_local_tab_state_updates_active_and_pending():
     state = local_tab_logic.LocalTabState()
 
@@ -1147,7 +1454,9 @@ def test_pending_local_tab_commit_matches_contained_label_direct(monkeypatch):
     assert state.pending_local_tab_label == ""
     assert state.local_tab_state.active_label == "LocationButton Location"
     assert state.local_tab_state.pending_label == ""
-    assert state.local_tab_state.visited_by_signature == {}
+    assert state.local_tab_state.visited_by_signature == {
+        "activity||location||events": {"locationbutton location"}
+    }
     assert any("[STEP][local_tab_commit_match]" in line and "matched_by='label_contains'" in line for line in logs)
     assert any("[STEP][local_tab_commit]" in line and "LocationButton Location" in line for line in logs)
 
@@ -1301,6 +1610,121 @@ def test_activate_forced_local_tab_target_taps_before_move_smart_direct(monkeypa
     assert any("[STEP][local_tab_target_activate_success]" in line and "matched_by='rid'" in line for line in logs)
     assert any("[STEP][local_tab_content_phase_reset]" in line and "EventsButton Events" in line for line in logs)
     assert any("[STEP][local_tab_commit]" in line and "target_activation_success" in line for line in logs)
+
+
+def test_activate_forced_local_tab_target_accepts_observed_content_after_tap(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    signature = "location||schedule"
+    client = DummyClient([
+        {
+            "visible_label": "상위 메뉴로 이동",
+            "merged_announcement": "상위 메뉴로 이동",
+            "focus_bounds": "0,118,180,310",
+            "focus_clickable": True,
+            "focus_focusable": True,
+        }
+    ])
+    client.focus_in_bounds = lambda **_kwargs: {
+        "success": True,
+        "raw": {
+            "focused": {
+                "text": "약",
+                "viewIdResourceName": "com.samsung.android.plugin.care:id/medicine_card",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "30,900,1050,1040",
+            }
+        },
+    }
+    state = _local_tab_progression_state(
+        signature,
+        [],
+        active_rid="",
+        active_label="위치버튼 위치",
+        visited={"위치버튼"},
+    )
+    state.forced_local_tab_target_signature = signature
+    state.forced_local_tab_target_rid = ""
+    state.forced_local_tab_target_label = "일정버튼 일정"
+    state.forced_local_tab_target_action_label = "일정버튼"
+    state.forced_local_tab_target_visit_key = "일정버튼"
+    state.forced_local_tab_target_bounds = "710,2316,1050,2496"
+    state.forced_local_tab_attempt_count = 0
+    state.pending_local_tab_signature = signature
+    state.pending_local_tab_label = "일정버튼 일정"
+    state.pending_local_tab_action_label = "일정버튼"
+    state.pending_local_tab_visit_key = "일정버튼"
+    state.pending_local_tab_bounds = "710,2316,1050,2496"
+    state.pending_local_tab_age = 0
+
+    row = local_tab_logic._activate_forced_local_tab_target(
+        client=client,
+        dev="SERIAL",
+        state=state,
+        step_idx=17,
+        wait_seconds=0.1,
+        announcement_wait_seconds=0.1,
+        announcement_idle_wait_seconds=0.0,
+        announcement_max_extra_wait_seconds=0.0,
+    )
+
+    assert row["local_tab_activation_evidence"] == "observed_content_after_activation"
+    assert "일정버튼" in state.visited_local_tabs_by_signature[signature]
+    assert state.forced_local_tab_target_label == ""
+    assert client.select_calls == []
+    assert client.move_focus_smart_calls == []
+    assert any("matched_by='observed_content_after_activation'" in line for line in logs)
+
+
+def test_current_bottom_strip_focus_commits_visited_before_stale_ttl_state(monkeypatch):
+    logs = []
+    _bind_local_tab_logic(monkeypatch, logs)
+    signature = "위치버튼 위치||일정버튼 일정"
+    candidates = [
+        {
+            **_bottom_strip_candidate("위치버튼 위치", 370, 710, rid=""),
+            "actionable_label": "위치버튼",
+            "canonical_visit_key": "위치버튼",
+        },
+        {
+            **_bottom_strip_candidate("일정버튼 일정", 710, 1050, rid=""),
+            "actionable_label": "일정버튼",
+            "canonical_visit_key": "일정버튼",
+        },
+    ]
+    _patch_content_candidates(monkeypatch, [])
+    state = _local_tab_progression_state(
+        signature,
+        candidates,
+        active_rid="",
+        active_label="일정버튼 일정",
+        visited={"일정버튼"},
+    )
+    state.current_local_tab_active_age = 1
+    row = {
+        "visible_label": "위치버튼",
+        "merged_announcement": "위치버튼",
+        "focus_bounds": "370,2338,710,2473",
+        "focus_clickable": True,
+        "focus_focusable": True,
+        "focus_effective_clickable": True,
+        "focus_class_name": "android.view.View",
+    }
+
+    advanced = local_tab_logic._maybe_select_next_local_tab(
+        client=DummyClient([]),
+        dev="SERIAL",
+        state=state,
+        row=row,
+        scenario_id="life_family_care_plugin",
+        step_idx=27,
+    )
+
+    assert advanced is False
+    assert "위치버튼" in state.visited_local_tabs_by_signature[signature]
+    assert row["local_tab_block_reason"] == "no_unvisited_local_tab"
+    assert any("source='current_focus'" in line for line in logs)
+    assert any("visit_key='위치버튼'" in line and "high_confidence_current_focus" in line for line in logs)
 
 
 def test_activate_forced_local_tab_target_guard_skips_repeated_failures_direct(monkeypatch):

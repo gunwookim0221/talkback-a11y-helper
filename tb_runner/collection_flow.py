@@ -449,6 +449,9 @@ class MainLoopState:
     pending_local_tab_label: str
     pending_local_tab_bounds: str
     pending_local_tab_age: int
+    pending_local_tab_action_label: str
+    pending_local_tab_visit_key: str
+    pending_local_tab_action_label_source: str
     current_local_tab_active_label: str
     current_local_tab_active_age: int
     forced_local_tab_target_signature: str
@@ -456,6 +459,9 @@ class MainLoopState:
     forced_local_tab_target_label: str
     forced_local_tab_target_bounds: str
     forced_local_tab_attempt_count: int
+    forced_local_tab_target_action_label: str
+    forced_local_tab_target_visit_key: str
+    forced_local_tab_target_action_label_source: str
     local_tab_activation_failures: dict[str, int]
     content_phase_grace_steps: int
     current_local_tab_content_phase_active: bool
@@ -12009,7 +12015,10 @@ def _collect_step_candidate_priority_groups(
         area_ratio = area / float(viewport_area)
         if area_ratio >= 0.82:
             continue
-        label = _extract_cta_node_label(node) or _node_label_blob(node)
+        raw_label = _extract_cta_node_label(node) or _node_label_blob(node)
+        merged_label = str(node.get("mergedLabel", "") or "").strip()
+        # Helper dumps preserve raw node identity separately from the derived container label.
+        label = merged_label or raw_label
         if not label:
             continue
         center_y = (top + bottom) // 2
@@ -12043,11 +12052,24 @@ def _collect_step_candidate_priority_groups(
         badged_tab_like = bool(local_tab_canonical_label and local_tab_canonical_label != label.strip())
         compact = width_ratio <= 0.52 and height_ratio <= 0.18
         if center_y >= bottom_band_top and actionable and short_tab_like and compact and (button_like or local_tab_canonical_word_count <= 2 or badged_tab_like):
+            children = node.get("children", []) if isinstance(node.get("children"), list) else []
             raw_bottom_strip_candidates.append(
                 {
                     "node": node,
                     "label": label,
                     "rid": resource_id,
+                    "node_text": str(node.get("text", "") or "").strip(),
+                    "node_content_description": str(node.get("contentDescription", "") or "").strip(),
+                    "child_texts": [
+                        str(child.get("text", "") or "").strip()
+                        for child in children
+                        if isinstance(child, dict) and str(child.get("text", "") or "").strip()
+                    ],
+                    "child_content_descriptions": [
+                        str(child.get("contentDescription", "") or "").strip()
+                        for child in children
+                        if isinstance(child, dict) and str(child.get("contentDescription", "") or "").strip()
+                    ],
                     "center_x": center_x,
                     "center_y": center_y,
                     "top": top,
@@ -13263,9 +13285,9 @@ def _local_tab_revisit_guard_block_reason(
         return "overlay"
     if bool(row.get("local_tab_transition", False)):
         return "local_tab_transition"
-    if str(getattr(state, "pending_local_tab_rid", "") or "").strip():
+    if str(getattr(state, "pending_local_tab_rid", "") or getattr(state, "pending_local_tab_action_label", "") or "").strip():
         return "pending_local_tab_transition"
-    if str(getattr(state, "forced_local_tab_target_rid", "") or "").strip():
+    if str(getattr(state, "forced_local_tab_target_rid", "") or getattr(state, "forced_local_tab_target_action_label", "") or "").strip():
         return "forced_local_tab_transition"
     if int(getattr(state, "post_realign_pending_steps", 0) or 0) > 0:
         return "recovery"
@@ -13431,6 +13453,34 @@ def _maybe_apply_exhausted_terminal_guard(
     row["exhausted_terminal_guard_triggered"] = True
     row["exhausted_terminal_guard_reason"] = _EXHAUSTED_TERMINAL_GUARD_STOP_REASON
     return True, _EXHAUSTED_TERMINAL_GUARD_STOP_REASON, True
+
+
+def _maybe_reclassify_confirmed_local_tab_exhaustion(
+    *,
+    row: dict[str, Any],
+    state: MainLoopState,
+    stop: bool,
+    reason: str,
+) -> tuple[bool, str, bool]:
+    """Keep a confirmed label-only tab end-of-order distinct from a real stall."""
+    if not stop or reason != "repeat_no_progress":
+        return stop, reason, False
+    if str(row.get("last_smart_nav_detail", "") or "").strip().lower() != "reached_end":
+        return stop, reason, False
+    if not bool(row.get("viewport_exhausted_eval_result", False)) or not bool(row.get("strip_focus_context", False)):
+        return stop, reason, False
+    if str(row.get("local_tab_block_reason", "") or "") != "no_unvisited_local_tab":
+        return stop, reason, False
+    signature = str(getattr(state, "current_local_tab_signature", "") or "").strip()
+    evidence = set(getattr(state, "local_tab_activation_evidence_signatures", set()) or set())
+    if not signature or signature not in evidence:
+        return stop, reason, False
+    row["local_tab_clean_exhaustion"] = True
+    row["local_tab_clean_exhaustion_reason"] = "confirmed_local_tab_end_of_order"
+    row["traversal_result"] = "PASS_EXHAUSTED"
+    row["final_result"] = "WARN"
+    row["failure_reason"] = ""
+    return True, "confirmed_local_tab_exhaustion", True
 
 
 def _maybe_apply_strip_only_terminal_guard(
@@ -14647,7 +14697,7 @@ def _apply_step_collection_phase_impl(
     phase_start_mono = mono_time_fn()
     forced_target = _local_tab_state_display(
         rid=str(getattr(state, "forced_local_tab_target_rid", "") or ""),
-        label=str(getattr(state, "forced_local_tab_target_label", "") or ""),
+        label=str(getattr(state, "forced_local_tab_target_action_label", "") or getattr(state, "forced_local_tab_target_label", "") or ""),
     )
     _ = (scenario_id, log_fn)
     row = None
@@ -15172,6 +15222,12 @@ def _main_loop_phase(
             step_idx=step_idx,
             scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
         )
+        stop, reason, local_tab_clean_exhaustion_applied = _maybe_reclassify_confirmed_local_tab_exhaustion(
+            row=row,
+            state=state,
+            stop=stop,
+            reason=reason,
+        )
         stop, reason, local_tab_revisit_guard_applied = (
             _maybe_apply_local_tab_revisit_no_new_semantic_guard(
                 row=row,
@@ -15578,6 +15634,9 @@ def _build_main_loop_state_from_anchor(
         pending_local_tab_label="",
         pending_local_tab_bounds="",
         pending_local_tab_age=0,
+        pending_local_tab_action_label="",
+        pending_local_tab_visit_key="",
+        pending_local_tab_action_label_source="",
         current_local_tab_active_label="",
         current_local_tab_active_age=0,
         forced_local_tab_target_signature="",
@@ -15585,6 +15644,9 @@ def _build_main_loop_state_from_anchor(
         forced_local_tab_target_label="",
         forced_local_tab_target_bounds="",
         forced_local_tab_attempt_count=0,
+        forced_local_tab_target_action_label="",
+        forced_local_tab_target_visit_key="",
+        forced_local_tab_target_action_label_source="",
         local_tab_activation_failures={},
         content_phase_grace_steps=0,
         current_local_tab_content_phase_active=False,

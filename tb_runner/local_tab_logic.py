@@ -900,6 +900,22 @@ def _resolve_active_local_tab_candidate_for_progression(
             f"ttl={LOCAL_TAB_ACTIVE_TTL_STEPS} "
             f"candidate_order='{_truncate_debug_text(_summarize_candidate_labels(sorted_tab_candidates), 120)}'"
         )
+    if _is_row_persistent_bottom_strip_candidate(row):
+        for candidate in sorted_tab_candidates:
+            matched, matched_by = _row_matches_pending_local_tab(
+                row,
+                pending_rid=str(candidate.get("rid", "") or "").strip(),
+                pending_label=str(candidate.get("label", "") or "").strip(),
+                pending_bounds=str(candidate.get("bounds", "") or "").strip(),
+                pending_action_label=_local_tab_candidate_activation_label(candidate),
+            )
+            if matched:
+                resolved_label = str(candidate.get("label", "") or candidate.get("rid", "") or "").strip()
+                log(
+                    f"[STEP][local_tab_active_focus_commit] active='{_truncate_debug_text(resolved_label, 96)}' "
+                    f"matched_by='{matched_by}' reason='high_confidence_current_focus'"
+                )
+                return candidate, "current_focus", resolved_label
     if (active_rid or active_label) and committed_active_age <= LOCAL_TAB_ACTIVE_TTL_STEPS:
         for candidate in sorted_tab_candidates:
             matched, _ = _local_tab_candidate_matches_identity(candidate, rid=active_rid, label=active_label)
@@ -988,6 +1004,15 @@ def _recover_local_tab_state_from_bottom_strip(
         log("[STEP][local_tab_recover_fail] reason='no_horizontal_strip_candidates'")
         return "", []
     sorted_candidates = _sort_local_tab_candidates_left_to_right(bottom_strip_candidates)
+    for candidate in sorted_candidates:
+        log(
+            f"[LOCAL_TAB][candidate_rebuild] reason='{reason}' "
+            f"display='{_truncate_debug_text(str(candidate.get('label', '') or ''), 96)}' "
+            f"node_text='{_truncate_debug_text(str(candidate.get('node_text', '') or ''), 96)}' "
+            f"node_content_desc='{_truncate_debug_text(str(candidate.get('node_content_description', '') or ''), 96)}' "
+            f"actionable='{_truncate_debug_text(str(candidate.get('actionable_label', '') or ''), 96)}' "
+            f"visit_key='{_truncate_debug_text(str(candidate.get('canonical_visit_key', '') or ''), 96)}'"
+        )
     local_tab_signature = _build_local_tab_strip_signature(sorted_candidates)
     if not local_tab_signature:
         log("[STEP][local_tab_recover_fail] reason='missing_signature'")
@@ -1047,6 +1072,7 @@ def _row_matches_pending_local_tab(
     pending_rid: str,
     pending_label: str,
     pending_bounds: str,
+    pending_action_label: str = "",
 ) -> tuple[bool, str]:
     row_rid = str(row.get("focus_view_id", "") or "").strip().lower()
     if row_rid and pending_rid and row_rid == pending_rid.strip().lower():
@@ -1060,6 +1086,13 @@ def _row_matches_pending_local_tab(
     combined_label = " ".join(value for value in (row_label, row_announcement) if value).strip()
     normalized_row_label = _normalize_logical_text(combined_label)
     normalized_pending_label = _normalize_logical_text(pending_label)
+    normalized_action_label = _normalize_logical_text(pending_action_label)
+    if normalized_row_label and normalized_action_label and (
+        normalized_row_label == normalized_action_label
+        or normalized_row_label in normalized_action_label
+        or normalized_action_label in normalized_row_label
+    ):
+        return True, "action_label"
     if normalized_row_label and normalized_pending_label and normalized_row_label == normalized_pending_label:
         return True, "label"
     if normalized_row_label and normalized_pending_label and (
@@ -1077,12 +1110,27 @@ def _row_matches_pending_local_tab(
         return True, "bounds"
     return False, "none"
 
+
+def _row_is_observed_local_tab_content(row: dict[str, Any], *, pending_bounds: str, pending_age: int) -> bool:
+    """Accept post-activation content only after a bounded label-only activation attempt."""
+    if pending_age < 1 or not pending_bounds:
+        return False
+    if _is_row_top_chrome_candidate(row) or _is_row_persistent_bottom_strip_candidate(row):
+        return False
+    row_bounds = parse_bounds_str(str(row.get("focus_bounds", "") or "").strip())
+    target_bounds = parse_bounds_str(pending_bounds)
+    if not row_bounds or not target_bounds or row_bounds[3] > target_bounds[1]:
+        return False
+    label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
+    return bool(label and (str(row.get("focus_view_id", "") or "").strip() or row.get("focus_node")))
+
 def _maybe_commit_pending_local_tab_progression(state: MainLoopState, row: dict[str, Any]) -> None:
     pending_snapshot = _get_pending_local_tab_snapshot(state, context="pending_commit")
     pending_rid = str(pending_snapshot.get("rid", "") or "").strip()
     pending_label = str(pending_snapshot.get("label", "") or "").strip()
     pending_signature = str(pending_snapshot.get("signature", "") or "").strip()
     pending_bounds = str(pending_snapshot.get("bounds", "") or "").strip()
+    pending_action_label = str(getattr(state, "pending_local_tab_action_label", "") or "").strip()
     pending_age_before = int(pending_snapshot.get("age", 0) or 0)
     if not pending_rid and not pending_label:
         return
@@ -1091,7 +1139,14 @@ def _maybe_commit_pending_local_tab_progression(state: MainLoopState, row: dict[
         pending_rid=pending_rid,
         pending_label=pending_label,
         pending_bounds=pending_bounds,
+        pending_action_label=pending_action_label,
     )
+    if not matched and _row_is_observed_local_tab_content(
+        row,
+        pending_bounds=pending_bounds,
+        pending_age=pending_age_before,
+    ):
+        matched, matched_by = True, "observed_content_after_activation"
     current_label_for_log = str(row.get("visible_label", "") or row.get("merged_announcement", "") or row.get("focus_view_id", "") or "").strip()
     current_focus_for_log = str(row.get("focus_view_id", "") or "").strip()
     log(
@@ -1108,8 +1163,10 @@ def _maybe_commit_pending_local_tab_progression(state: MainLoopState, row: dict[
     if matched:
         if pending_signature:
             state.current_local_tab_signature = pending_signature
-            state.visited_local_tabs_by_signature.setdefault(pending_signature, set()).add(pending_rid)
-            _local_tab_state_mirror(state).mark_visited(pending_signature, pending_rid)
+            visit_key = str(getattr(state, "pending_local_tab_visit_key", "") or "").strip() or _local_tab_visit_key(rid=pending_rid, label=pending_label)
+            if visit_key:
+                state.visited_local_tabs_by_signature.setdefault(pending_signature, set()).add(visit_key)
+                _local_tab_state_mirror(state).mark_visited(pending_signature, visit_key)
         if pending_rid:
             state.current_local_tab_active_rid = pending_rid
         state.current_local_tab_active_label = pending_label
@@ -1120,6 +1177,13 @@ def _maybe_commit_pending_local_tab_progression(state: MainLoopState, row: dict[
             label=pending_label,
             age=0,
         )
+        _mark_local_tab_activation_evidence(state, pending_signature)
+        if matched_by == "observed_content_after_activation":
+            _mark_current_local_tab_content_visited(state)
+            row["local_tab_content_entered"] = True
+            row["local_tab_content_candidate_visited"] = True
+            row["local_tab_content_visit_source"] = "pending_observed_content"
+        row["local_tab_activation_evidence"] = matched_by
         _write_last_selected_local_tab_hint(
             state,
             signature=pending_signature,
@@ -1148,6 +1212,9 @@ def _maybe_commit_pending_local_tab_progression(state: MainLoopState, row: dict[
         state.pending_local_tab_label = ""
         state.pending_local_tab_bounds = ""
         state.pending_local_tab_age = 0
+        state.pending_local_tab_action_label = ""
+        state.pending_local_tab_visit_key = ""
+        state.pending_local_tab_action_label_source = ""
         _local_tab_state_mirror(state).clear_pending()
         _clear_forced_local_tab_navigation(state, reason="pending_resolved")
         _log_local_tab_state_consistency_mismatch(state, context="pending_resolved")
@@ -1192,6 +1259,9 @@ def _maybe_commit_pending_local_tab_progression(state: MainLoopState, row: dict[
         state.pending_local_tab_label = ""
         state.pending_local_tab_bounds = ""
         state.pending_local_tab_age = 0
+        state.pending_local_tab_action_label = ""
+        state.pending_local_tab_visit_key = ""
+        state.pending_local_tab_action_label_source = ""
         _local_tab_state_mirror(state).clear_pending()
         _log_local_tab_state_consistency_mismatch(state, context="pending_expired")
     else:
@@ -1209,6 +1279,13 @@ def _record_pending_local_tab_progression(
 ) -> tuple[str, str, str]:
     target_rid = str(next_candidate.get("rid", "") or "").strip()
     target_label = str(next_candidate.get("label", "") or "").strip()
+    action_label = str(next_candidate.get("actionable_label", "") or "").strip()
+    if not action_label:
+        action_label = _local_tab_candidate_activation_label(next_candidate)
+    if not action_label:
+        action_label = target_label
+    visit_key = _local_tab_candidate_visit_key(next_candidate, action_label=action_label)
+    action_source = str(next_candidate.get("actionable_label_source", "") or "").strip() or "display_label"
     target_bounds = _format_bounds_for_log(_extract_local_tab_candidate_bounds(next_candidate))
     if not target_bounds:
         target_bounds = str(next_candidate.get("bounds", "") or "").strip()
@@ -1225,10 +1302,16 @@ def _record_pending_local_tab_progression(
     state.pending_local_tab_label = target_label
     state.pending_local_tab_bounds = target_bounds
     state.pending_local_tab_age = 0
+    state.pending_local_tab_action_label = action_label
+    state.pending_local_tab_visit_key = visit_key
+    state.pending_local_tab_action_label_source = action_source
     state.forced_local_tab_target_signature = str(signature or "").strip()
     state.forced_local_tab_target_rid = target_rid
     state.forced_local_tab_target_label = target_label
     state.forced_local_tab_target_bounds = target_bounds
+    state.forced_local_tab_target_action_label = action_label
+    state.forced_local_tab_target_visit_key = visit_key
+    state.forced_local_tab_target_action_label_source = action_source
     state.forced_local_tab_attempt_count = 0
     mirror = _local_tab_state_mirror(state)
     mirror.set_pending(
@@ -1250,16 +1333,26 @@ def _record_pending_local_tab_progression(
         f"selected='{_truncate_debug_text(target_label or target_rid, 96)}' "
         f"signature='{_truncate_debug_text(str(signature or ''), 120)}' "
         f"rid='{_truncate_debug_text(target_rid, 96)}' "
-        f"label='{_truncate_debug_text(target_label, 96)}' "
+        f"display_label='{_truncate_debug_text(target_label, 96)}' "
+        f"actionable_label='{_truncate_debug_text(action_label, 96)}' "
+        f"actionable_source='{_truncate_debug_text(action_source, 64)}' "
+        f"visit_key='{_truncate_debug_text(visit_key, 96)}' "
         f"bounds='{_truncate_debug_text(target_bounds, 96)}' "
         f"reason='{reason}'"
     )
     log(
-        f"[STEP][local_tab_force_navigation_set] target='{_truncate_debug_text(target_label or target_rid, 96)}' "
+        f"[STEP][local_tab_force_navigation_set] target='{_truncate_debug_text(target_rid or action_label or target_label, 96)}' "
+        f"source='{'resource_id' if target_rid else action_source}' "
+        f"display_label='{_truncate_debug_text(target_label, 96)}' visit_key='{_truncate_debug_text(visit_key, 96)}' "
         "reason='progression_next_tab'"
     )
+    log(
+        f"[LOCAL_TAB][forced_navigation] display='{_truncate_debug_text(target_label, 96)}' "
+        f"target='{_truncate_debug_text(target_rid or action_label or target_label, 96)}' "
+        f"source='{'resource_id' if target_rid else action_source}'"
+    )
     _log_local_tab_state_consistency_mismatch(state, context="pending_recorded")
-    return target_rid, target_label, target_bounds
+    return target_rid, action_label, target_bounds
 
 def _format_bounds_for_log(bounds: tuple[int, int, int, int] | None) -> str:
     if not bounds:
@@ -1390,6 +1483,9 @@ def _clear_forced_local_tab_navigation(state: MainLoopState, *, reason: str) -> 
     state.forced_local_tab_target_label = ""
     state.forced_local_tab_target_bounds = ""
     state.forced_local_tab_attempt_count = 0
+    state.forced_local_tab_target_action_label = ""
+    state.forced_local_tab_target_visit_key = ""
+    state.forced_local_tab_target_action_label_source = ""
     _local_tab_state_mirror(state).clear_forced()
     _log_local_tab_state_consistency_mismatch(state, context=f"forced_clear:{reason}")
 
@@ -1399,6 +1495,7 @@ def _forced_local_tab_target_matches_row(state: MainLoopState, row: dict[str, An
         pending_rid=str(getattr(state, "forced_local_tab_target_rid", "") or ""),
         pending_label=str(getattr(state, "forced_local_tab_target_label", "") or ""),
         pending_bounds=str(getattr(state, "forced_local_tab_target_bounds", "") or ""),
+        pending_action_label=str(getattr(state, "forced_local_tab_target_action_label", "") or ""),
     )
     return matched
 
@@ -1471,9 +1568,10 @@ def _commit_forced_local_tab_target_success(state: MainLoopState) -> None:
     target_signature = str(getattr(state, "forced_local_tab_target_signature", "") or "").strip()
     target_rid = str(getattr(state, "forced_local_tab_target_rid", "") or "").strip()
     target_label = str(getattr(state, "forced_local_tab_target_label", "") or "").strip()
-    if target_signature and target_rid:
-        state.visited_local_tabs_by_signature.setdefault(target_signature, set()).add(target_rid)
-        _local_tab_state_mirror(state).mark_visited(target_signature, target_rid)
+    target_visit_key = str(getattr(state, "forced_local_tab_target_visit_key", "") or "").strip() or _local_tab_visit_key(rid=target_rid, label=target_label)
+    if target_signature and target_visit_key:
+        state.visited_local_tabs_by_signature.setdefault(target_signature, set()).add(target_visit_key)
+        _local_tab_state_mirror(state).mark_visited(target_signature, target_visit_key)
     if target_signature:
         state.current_local_tab_signature = target_signature
     if target_rid:
@@ -1486,6 +1584,7 @@ def _commit_forced_local_tab_target_success(state: MainLoopState) -> None:
         label=target_label,
         age=0,
     )
+    _mark_local_tab_activation_evidence(state, target_signature)
     _reset_local_tab_activation_failure(
         state,
         signature=target_signature,
@@ -1505,6 +1604,9 @@ def _commit_forced_local_tab_target_success(state: MainLoopState) -> None:
     state.pending_local_tab_label = ""
     state.pending_local_tab_bounds = ""
     state.pending_local_tab_age = 0
+    state.pending_local_tab_action_label = ""
+    state.pending_local_tab_visit_key = ""
+    state.pending_local_tab_action_label_source = ""
     _local_tab_state_mirror(state).clear_pending()
     _log_local_tab_state_consistency_mismatch(state, context="forced_target_success")
     log(
@@ -1560,6 +1662,54 @@ def _apply_content_entry_probe_success(
     row["local_tab_content_visit_source"] = f"content_entry_probe:{source}"
     row["local_tab_content_entry_probe_result"] = "success"
     return row
+
+
+def _probe_forced_local_tab_activation_content(
+    *,
+    client: A11yAdbClient,
+    dev: str,
+    state: MainLoopState,
+    target_bounds: str,
+    collect_after_action: Callable[[], dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Confirm a tab switch from its representative content when focus leaves the tab button."""
+    content_bounds = _content_entry_bounds_from_tab_bounds(target_bounds)
+    focus_in_bounds = getattr(client, "focus_in_bounds", None)
+    if not content_bounds or not callable(focus_in_bounds):
+        return None
+    try:
+        result = focus_in_bounds(dev=dev, bounds=content_bounds, wait_=_TRANSITION_FAST_ACTION_WAIT_SECONDS)
+    except Exception:
+        return None
+    raw = _probe_result_raw_payload(result)
+    focused = raw.get("focused") if isinstance(raw.get("focused"), dict) else raw.get("target")
+    probe_row = _focus_snapshot_to_probe_row(focused) if isinstance(focused, dict) else {}
+    if not probe_row:
+        try:
+            probe_row = collect_after_action()
+        except Exception:
+            probe_row = {}
+    if not probe_row:
+        return None
+    helper_reason = str(raw.get("reason", "") or result.get("detail", "") if isinstance(result, dict) else "").strip()
+    empty_success = helper_reason == "empty_state_focused_row" and _row_matches_empty_state_content_candidate(
+        state=state,
+        row=probe_row,
+        empty_state_labels=[str(probe_row.get("visible_label", "") or probe_row.get("merged_announcement", "") or "").strip()],
+    )
+    content_success = _row_is_content_like_local_tab_focus(
+        state=state,
+        row=probe_row,
+        current_row_is_passive_status=False,
+        current_row_is_top_chrome=_is_row_top_chrome_candidate(probe_row),
+    )
+    if not (empty_success or content_success):
+        return None
+    probe_row["local_tab_activation_evidence"] = "observed_content_after_activation"
+    probe_row["local_tab_content_entered"] = True
+    probe_row["local_tab_content_candidate_visited"] = True
+    probe_row["local_tab_content_visit_source"] = "activation_observed_content"
+    return probe_row
 
 
 def _attempt_local_tab_content_entry_probe(
@@ -1655,12 +1805,11 @@ def _activate_forced_local_tab_target(
     announcement_idle_wait_seconds: float,
     announcement_max_extra_wait_seconds: float,
 ) -> dict[str, Any] | None:
-    target = _local_tab_state_display(
-        rid=str(getattr(state, "forced_local_tab_target_rid", "") or ""),
-        label=str(getattr(state, "forced_local_tab_target_label", "") or ""),
-    )
     target_rid = str(getattr(state, "forced_local_tab_target_rid", "") or "").strip()
     target_label = str(getattr(state, "forced_local_tab_target_label", "") or "").strip()
+    target_action_label = str(getattr(state, "forced_local_tab_target_action_label", "") or "").strip() or target_label
+    target_action_source = str(getattr(state, "forced_local_tab_target_action_label_source", "") or "").strip() or "display_label"
+    target = _local_tab_state_display(rid=target_rid, label=target_action_label)
     if not target:
         return None
     target_signature = str(getattr(state, "forced_local_tab_target_signature", "") or "").strip()
@@ -1725,6 +1874,7 @@ def _activate_forced_local_tab_target(
             pending_rid=target_rid,
             pending_label=target_label,
             pending_bounds=str(getattr(state, "forced_local_tab_target_bounds", "") or ""),
+            pending_action_label=target_action_label,
         )
         if matched:
             log(
@@ -1745,6 +1895,25 @@ def _activate_forced_local_tab_target(
             )
             _clear_forced_local_tab_navigation(state, reason="resolved")
             return last_row
+        observed_content_row = _probe_forced_local_tab_activation_content(
+            client=client,
+            dev=dev,
+            state=state,
+            target_bounds=str(getattr(state, "forced_local_tab_target_bounds", "") or "").strip(),
+            collect_after_action=collect_after_action,
+        )
+        if observed_content_row is not None:
+            log(
+                f"[STEP][local_tab_target_activate_success] target='{_truncate_debug_text(target, 96)}' "
+                "matched_by='observed_content_after_activation'"
+            )
+            _commit_forced_local_tab_target_success(state)
+            _mark_current_local_tab_content_visited(state)
+            log(
+                f"[STEP][local_tab_force_navigation_resolved] target='{_truncate_debug_text(target, 96)}'"
+            )
+            _clear_forced_local_tab_navigation(state, reason="observed_content_after_activation")
+            return observed_content_row
         log(
             f"[STEP][local_tab_target_activate_no_match] target='{_truncate_debug_text(target, 96)}' "
             "method='tap_bounds_center' reason='focus_not_target_after_tap'"
@@ -1758,13 +1927,14 @@ def _activate_forced_local_tab_target(
     select_fn = getattr(client, "select", None)
     if callable(select_fn) and target_rid:
         action_attempts.append(("select_rid", lambda: bool(select_fn(dev=dev, name=target_rid, type_="r", wait_=_TRANSITION_FAST_ACTION_WAIT_SECONDS))))
-    if callable(select_fn) and target_label:
-        action_attempts.append(("select_label", lambda: bool(select_fn(dev=dev, name=target_label, type_="a", wait_=_TRANSITION_FAST_ACTION_WAIT_SECONDS))))
+    if callable(select_fn) and target_action_label:
+        action_attempts.append(("select_label", lambda: bool(select_fn(dev=dev, name=target_action_label, type_="a", wait_=_TRANSITION_FAST_ACTION_WAIT_SECONDS))))
 
     for method, action_fn in action_attempts:
         log(
             f"[STEP][local_tab_target_activate] target='{_truncate_debug_text(target, 96)}' "
-            f"method='{method}'"
+            f"method='{method}' source='{'resource_id' if method == 'select_rid' else 'actionable_label'}' "
+            f"display_label='{_truncate_debug_text(target_label, 96)}' actionable_source='{_truncate_debug_text(target_action_source, 64)}'"
         )
         try:
             action_ok = bool(action_fn())
@@ -1778,6 +1948,7 @@ def _activate_forced_local_tab_target(
             pending_rid=target_rid,
             pending_label=target_label,
             pending_bounds=str(getattr(state, "forced_local_tab_target_bounds", "") or ""),
+            pending_action_label=target_action_label,
         )
         if matched:
             log(
@@ -2057,6 +2228,7 @@ def _annotate_row_lifecycle_kind(
         pending_rid=str(getattr(state, "pending_local_tab_rid", "") or ""),
         pending_label=str(getattr(state, "pending_local_tab_label", "") or ""),
         pending_bounds=str(getattr(state, "pending_local_tab_bounds", "") or ""),
+        pending_action_label=str(getattr(state, "pending_local_tab_action_label", "") or ""),
     )[0]:
         local_tab_source = "pending_local_tab"
     elif _forced_local_tab_target_matches_row(state, row):
@@ -2145,6 +2317,86 @@ def _local_tab_candidate_label(candidate: dict[str, Any]) -> str:
             if label:
                 return label
     return ""
+
+
+def _local_tab_candidate_actionable_label_details(candidate: dict[str, Any]) -> tuple[str, str]:
+    """Keep concrete dump-node labels separate from a merged display label."""
+    for key, source in (
+        ("node_content_description", "node_content_description"),
+        ("node_text", "node_text"),
+    ):
+        value = str(candidate.get(key, "") or "").strip()
+        if value:
+            return value, source
+
+    node = candidate.get("node", {})
+    if not isinstance(node, dict):
+        return str(candidate.get("label", "") or "").strip(), "display_label"
+
+    for key, source in (("contentDescription", "node_content_description"), ("text", "node_text")):
+        value = str(node.get(key, "") or "").strip()
+        if value:
+            return value, source
+
+    for key, source in (
+        ("child_content_descriptions", "child_content_description"),
+        ("child_texts", "child_text"),
+    ):
+        values = candidate.get(key, [])
+        if isinstance(values, list):
+            for value in values:
+                normalized = str(value or "").strip()
+                if normalized:
+                    return normalized, source
+
+    children = node.get("children", []) if isinstance(node.get("children"), list) else []
+    for clickable_only in (True, False):
+        for child in children:
+            if not isinstance(child, dict):
+                continue
+            if clickable_only and not bool(child.get("clickable") or child.get("focusable") or child.get("effectiveClickable")):
+                continue
+            for key, source in (("contentDescription", "child_content_description"), ("text", "child_text")):
+                value = str(child.get(key, "") or "").strip()
+                if value:
+                    return value, source
+
+    existing = str(candidate.get("actionable_label", "") or "").strip()
+    if existing:
+        return existing, str(candidate.get("actionable_label_source", "") or "existing_actionable_label")
+    value = str(node.get("actionableDescendantContentDescription", "") or "").strip()
+    if value:
+        return value, "actionable_descendant_content_description"
+    return str(candidate.get("label", "") or "").strip(), "display_label"
+
+
+def _local_tab_candidate_activation_label(candidate: dict[str, Any]) -> str:
+    return _local_tab_candidate_actionable_label_details(candidate)[0]
+
+
+def _local_tab_visit_key(*, rid: str, label: str) -> str:
+    if str(rid or "").strip():
+        return str(rid).strip().lower()
+    return re.sub(r"\s+", " ", str(label or "").strip()).lower()
+
+
+def _local_tab_candidate_visit_key(candidate: dict[str, Any], *, action_label: str = "") -> str:
+    explicit_key = str(candidate.get("canonical_visit_key", "") or "").strip()
+    if explicit_key:
+        return explicit_key.lower()
+    rid = str(candidate.get("rid", "") or "").strip()
+    label = str(action_label or candidate.get("actionable_label", "") or "").strip()
+    if not label:
+        label = _local_tab_candidate_activation_label(candidate) or str(candidate.get("label", "") or "").strip()
+    return _local_tab_visit_key(rid=rid, label=label)
+
+
+def _mark_local_tab_activation_evidence(state: Any, signature: str) -> None:
+    if not signature:
+        return
+    signatures = set(getattr(state, "local_tab_activation_evidence_signatures", set()) or set())
+    signatures.add(signature)
+    state.local_tab_activation_evidence_signatures = signatures
 
 def _local_tab_candidate_bool(candidate: dict[str, Any], keys: tuple[str, ...], default: bool = False) -> bool:
     values: list[Any] = [candidate.get(key) for key in keys]
@@ -2336,6 +2588,11 @@ def _filter_local_tab_strip_candidates(
         candidate["label"] = display_label
         candidate["canonical_label"] = canonical_label
         candidate["original_label"] = original_label
+        candidate["merged_label"] = original_label
+        actionable_label, actionable_source = _local_tab_candidate_actionable_label_details(candidate)
+        candidate["actionable_label"] = actionable_label
+        candidate["actionable_label_source"] = actionable_source
+        candidate["canonical_visit_key"] = _local_tab_candidate_visit_key(candidate)
         if display_label != original_label:
             candidate["label_canonicalized"] = True
         candidate.setdefault("left", int(item["left"]))
@@ -3618,7 +3875,8 @@ def _maybe_select_next_local_tab(
     )
     active_index = sorted_tab_candidates.index(active_candidate) if active_candidate in sorted_tab_candidates else -1
     active_rid = str(active_candidate.get("rid", "") or "").strip().lower() if isinstance(active_candidate, dict) else ""
-    if active_source not in {"committed", "last_selected_hint"} and active_rid:
+    active_visit_key = _local_tab_candidate_visit_key(active_candidate) if isinstance(active_candidate, dict) else ""
+    if active_source not in {"committed", "last_selected_hint"} and (active_rid or active_visit_key):
         state.current_local_tab_active_rid = active_rid
         state.current_local_tab_active_label = str(active_candidate.get("label", "") or "").strip()
         state.current_local_tab_active_age = 0
@@ -3627,6 +3885,15 @@ def _maybe_select_next_local_tab(
             rid=active_rid,
             label=state.current_local_tab_active_label,
             age=0,
+        )
+    if active_source == "current_focus" and active_visit_key:
+        visited_tabs.add(active_visit_key)
+        _local_tab_state_mirror(state).mark_visited(local_tab_signature, active_visit_key)
+        log(
+            f"[STEP][local_tab_state_write] kind='visited' "
+            f"active='{_truncate_debug_text(active_label, 96)}' "
+            f"visit_key='{_truncate_debug_text(active_visit_key, 96)}' "
+            "reason='high_confidence_current_focus'"
         )
     progression_tab = sorted_tab_candidates[active_index + 1] if 0 <= active_index < len(sorted_tab_candidates) - 1 else None
     if isinstance(progression_tab, dict):
@@ -3643,12 +3910,20 @@ def _maybe_select_next_local_tab(
                 "reason='activation_guard'"
             )
             progression_tab = None
+    visited_key_set = {str(visited).lower() for visited in visited_tabs}
+    for candidate in sorted_tab_candidates:
+        candidate_key = _local_tab_candidate_visit_key(candidate)
+        if candidate_key:
+            log(
+                f"[LOCAL_TAB][visited_check] candidate_key='{_truncate_debug_text(candidate_key, 96)}' "
+                f"visited={str(candidate_key in visited_key_set).lower()}"
+            )
     remaining_tabs_by_visit = [
         candidate
         for candidate in sorted_tab_candidates
-        if str(candidate.get("rid", "") or "").strip().lower()
-        and str(candidate.get("rid", "") or "").strip().lower() not in {rid.lower() for rid in visited_tabs}
-        and str(candidate.get("rid", "") or "").strip().lower() != active_rid
+        if (candidate_visit_key := _local_tab_candidate_visit_key(candidate))
+        and candidate_visit_key not in visited_key_set
+        and candidate_visit_key != active_visit_key
     ]
     guard_filtered_tabs: list[dict[str, Any]] = []
     for candidate in remaining_tabs_by_visit:
@@ -3673,8 +3948,8 @@ def _maybe_select_next_local_tab(
         if 0 <= active_index < len(sorted_tab_candidates):
             current_label = str(sorted_tab_candidates[active_index].get("label", "") or sorted_tab_candidates[active_index].get("rid", "") or "").strip()
         next_label = str(progression_tab.get("label", "") or progression_tab.get("rid", "") or "").strip()
-        next_rid = str(progression_tab.get("rid", "") or "").strip().lower()
-        if not (next_rid and next_rid in {rid.lower() for rid in visited_tabs}):
+        next_visit_key = _local_tab_candidate_visit_key(progression_tab)
+        if not (next_visit_key and next_visit_key in visited_key_set):
             log(
                 f"[STEP][local_tab_progression] current='{_truncate_debug_text(current_label or active_rid, 96)}' "
                 f"next='{_truncate_debug_text(next_label, 96)}'"
@@ -3749,8 +4024,10 @@ def _maybe_select_next_local_tab(
             click_focused_fn(dev=dev, wait_=_TRANSITION_FAST_ACTION_WAIT_SECONDS)
         except Exception:
             pass
-    visited_tabs.add(target_rid)
-    _local_tab_state_mirror(state).mark_visited(local_tab_signature, target_rid)
+    target_visit_key = str(getattr(state, "pending_local_tab_visit_key", "") or "").strip() or _local_tab_visit_key(rid=target_rid, label=target_label)
+    if target_visit_key:
+        visited_tabs.add(target_visit_key)
+        _local_tab_state_mirror(state).mark_visited(local_tab_signature, target_visit_key)
     state.current_local_tab_active_rid = target_rid
     state.current_local_tab_active_label = target_label
     state.current_local_tab_active_age = 0

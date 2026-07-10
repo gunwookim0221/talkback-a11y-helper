@@ -14729,6 +14729,52 @@ def test_exhausted_terminal_guard_preserves_existing_repeat_no_progress_stop():
     assert (stop, reason, applied) == (True, "repeat_no_progress", False)
 
 
+def test_confirmed_local_tab_exhaustion_reclassifies_reached_end_repeat():
+    signature = "location||schedule"
+    state = SimpleNamespace(
+        current_local_tab_signature=signature,
+        local_tab_activation_evidence_signatures={signature},
+    )
+    row = {
+        "last_smart_nav_detail": "reached_end",
+        "viewport_exhausted_eval_result": True,
+        "strip_focus_context": True,
+        "local_tab_block_reason": "no_unvisited_local_tab",
+        "traversal_result": "FAIL_STUCK",
+        "final_result": "FAIL",
+        "failure_reason": "repeat_no_progress",
+    }
+
+    stop, reason, applied = collection_flow._maybe_reclassify_confirmed_local_tab_exhaustion(
+        row=row,
+        state=state,
+        stop=True,
+        reason="repeat_no_progress",
+    )
+
+    assert (stop, reason, applied) == (True, "confirmed_local_tab_exhaustion", True)
+    assert row["traversal_result"] == "PASS_EXHAUSTED"
+    assert row["final_result"] == "WARN"
+    assert row["failure_reason"] == ""
+
+
+def test_confirmed_local_tab_exhaustion_keeps_repeat_without_activation_evidence():
+    state = SimpleNamespace(current_local_tab_signature="location||schedule")
+    row = {
+        "last_smart_nav_detail": "reached_end",
+        "viewport_exhausted_eval_result": True,
+        "strip_focus_context": True,
+        "local_tab_block_reason": "no_unvisited_local_tab",
+    }
+
+    assert collection_flow._maybe_reclassify_confirmed_local_tab_exhaustion(
+        row=row,
+        state=state,
+        stop=True,
+        reason="repeat_no_progress",
+    ) == (True, "repeat_no_progress", False)
+
+
 def test_exhausted_terminal_guard_main_loop_preserves_safety_limit(monkeypatch):
     row = {
         **_main_row(1),
