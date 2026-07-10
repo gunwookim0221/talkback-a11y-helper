@@ -37,6 +37,11 @@ def build_initial_get_focus_trace(serial: str, req_id: str, mode: str) -> dict[s
         "dump_replace_reason": "",
         "mode": "fast" if str(mode).strip().lower() == "fast" else "normal",
         "top_level_payload_sufficient": False,
+        "partial_parse_success": False,
+        "partial_payload_trusted": False,
+        "partial_fields_from_root_only": False,
+        "partial_children_truncated": False,
+        "untrusted_partial_payload_rejected": False,
     }
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from talkback_lib import A11yAdbClient
+from talkback_lib.action_result_parser import ActionResultParser
 from talkback_lib.logcat_reader import LogcatReader
 
 
@@ -120,6 +121,135 @@ def test_truncated_focus_result_without_salvageable_fields_remains_parse_error(m
     assert result["status"] == "parse_error"
     assert "partial_parse_success" not in result
     assert "node" not in result
+
+
+def test_truncated_focus_result_does_not_mix_child_fields_into_partial_node():
+    raw_payload = (
+        '{"reqId":"focus-mixed","success":false,"node":{'
+        '"text":null,"contentDescription":null,"viewIdResourceName":null,'
+        '"className":"android.widget.FrameLayout","children":['
+        '{"text":"패밀리 케어"},'
+        '{"contentDescription":"상위 메뉴로 이동"},'
+        '{"viewIdResourceName":"menu_main_invite_member"}'
+    )
+
+    result = ActionResultParser.focus_parse_error_result("focus-mixed", raw_payload, "truncated")
+
+    assert result["partial_parse_success"] is True
+    assert result["partial_fields_from_root_only"] is True
+    assert result["partial_children_truncated"] is True
+    assert result["partial_payload_trusted"] is False
+    assert result["node"] == {"className": "android.widget.FrameLayout"}
+
+
+def test_get_focus_rejects_untrusted_partial_payload_and_uses_dump_focus(monkeypatch):
+    client = A11yAdbClient(start_monitor=False)
+    monkeypatch.setattr(client, "_has_recent_helper_ok", lambda dev=None: True)
+    monkeypatch.setattr(client, "check_helper_status", lambda dev=None: True)
+    monkeypatch.setattr(
+        client._helper_bridge,
+        "_request_get_focus",
+        lambda dev, req_id, wait_seconds, poll_interval_sec=0.2: {
+            "success": False,
+            "status": "partial_parse_success",
+            "partial_parse_success": True,
+            "partial_payload_trusted": False,
+            "partial_fields_from_root_only": True,
+            "partial_children_truncated": True,
+            "node": {
+                "text": "패밀리 케어",
+                "contentDescription": "상위 메뉴로 이동",
+                "viewIdResourceName": "menu_main_invite_member",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        client,
+        "dump_tree",
+        lambda dev=None: [
+            {
+                "contentDescription": "상위 메뉴로 이동",
+                "viewIdResourceName": "menu_main_up",
+                "accessibilityFocused": True,
+                "boundsInScreen": {"l": 0, "t": 0, "r": 100, "b": 100},
+            },
+            {"text": "패밀리 케어"},
+            {"text": "가족 구성원 추가", "viewIdResourceName": "menu_main_invite_member"},
+        ],
+    )
+
+    result = client.get_focus(wait_seconds=1.0, allow_fallback_dump=True)
+
+    assert result["contentDescription"] == "상위 메뉴로 이동"
+    assert result["viewIdResourceName"] == "menu_main_up"
+    assert "text" not in result
+    assert client.last_get_focus_trace["untrusted_partial_payload_rejected"] is True
+    assert client.last_get_focus_trace["final_payload_source"] == "fallback_dump"
+
+
+def test_get_focus_untrusted_partial_without_dump_focus_returns_empty(monkeypatch):
+    client = A11yAdbClient(start_monitor=False)
+    monkeypatch.setattr(client, "_has_recent_helper_ok", lambda dev=None: True)
+    monkeypatch.setattr(client, "check_helper_status", lambda dev=None: True)
+    monkeypatch.setattr(
+        client._helper_bridge,
+        "_request_get_focus",
+        lambda dev, req_id, wait_seconds, poll_interval_sec=0.2: {
+            "success": False,
+            "status": "partial_parse_success",
+            "partial_parse_success": True,
+            "partial_payload_trusted": False,
+            "node": {"text": "패밀리 케어"},
+        },
+    )
+    monkeypatch.setattr(client, "dump_tree", lambda dev=None: [])
+
+    assert client.get_focus(wait_seconds=1.0, allow_fallback_dump=True) == {}
+    assert client.last_get_focus_trace["empty_reason"] == "untrusted_partial_payload"
+    assert client.last_get_focus_trace["final_focus_reason"] == "fallback_dump_not_found"
+
+
+def test_complete_bounded_partial_focus_payload_remains_usable():
+    raw_payload = (
+        '{"reqId":"focus-trusted","success":false,"node":{'
+        '"text":"Energy","boundsInScreen":{"l":1,"t":2,"r":30,"b":40}}'
+    )
+
+    result = ActionResultParser.focus_parse_error_result("focus-trusted", raw_payload, "truncated")
+
+    assert result["partial_parse_success"] is True
+    assert result["partial_root_complete"] is True
+    assert result["partial_payload_trusted"] is True
+    assert result["node"]["text"] == "Energy"
+    assert result["node"]["boundsInScreen"] == {"l": 1, "t": 2, "r": 30, "b": 40}
+
+
+def test_get_focus_accepts_trusted_complete_partial_payload_without_dump(monkeypatch):
+    client = A11yAdbClient(start_monitor=False)
+    monkeypatch.setattr(client, "_has_recent_helper_ok", lambda dev=None: True)
+    monkeypatch.setattr(client, "check_helper_status", lambda dev=None: True)
+    monkeypatch.setattr(
+        client._helper_bridge,
+        "_request_get_focus",
+        lambda dev, req_id, wait_seconds, poll_interval_sec=0.2: {
+            "success": False,
+            "status": "partial_parse_success",
+            "partial_parse_success": True,
+            "partial_payload_trusted": True,
+            "node": {
+                "text": "Energy",
+                "boundsInScreen": {"l": 1, "t": 2, "r": 30, "b": 40},
+            },
+        },
+    )
+    dump_called = {"value": False}
+    monkeypatch.setattr(client, "dump_tree", lambda dev=None: dump_called.update(value=True) or [])
+
+    result = client.get_focus(wait_seconds=1.0, allow_fallback_dump=True)
+
+    assert result["text"] == "Energy"
+    assert dump_called["value"] is False
+    assert client.last_get_focus_trace["final_focus_reason"] == "accepted_meaningful_payload"
 
 
 def test_get_focus_parse_error_uses_bounded_fallback_reason(monkeypatch):

@@ -93,6 +93,16 @@ class FocusService:
         self.client.last_get_focus_trace["success_field_present"] = success_field_present
         focus_node, payload_candidate_source = self.client._extract_focus_payload_candidate(result=result)
         self.client.last_get_focus_trace["focus_payload_source"] = payload_candidate_source
+        partial_parse_success = bool(result.get("partial_parse_success"))
+        partial_payload_trusted = bool(result.get("partial_payload_trusted"))
+        self.client.last_get_focus_trace["partial_parse_success"] = partial_parse_success
+        self.client.last_get_focus_trace["partial_payload_trusted"] = partial_payload_trusted
+        self.client.last_get_focus_trace["partial_fields_from_root_only"] = bool(
+            result.get("partial_fields_from_root_only")
+        )
+        self.client.last_get_focus_trace["partial_children_truncated"] = bool(
+            result.get("partial_children_truncated")
+        )
 
         major_keys = ("text", "contentDescription", "viewIdResourceName", "boundsInScreen")
         key_presence = {k: bool(str(result.get(k, "") or "").strip()) for k in major_keys}
@@ -101,6 +111,18 @@ class FocusService:
             f"success={response_success} keys={key_presence} result_keys={len(result.keys())} "
             f"payload_candidate_source={payload_candidate_source}"
         )
+
+        # A parse-error salvage can otherwise combine fields from unrelated child nodes.
+        # Only a complete, bounded root-node salvage may bypass the dump fallback.
+        if partial_parse_success and not partial_payload_trusted:
+            self.client.last_get_focus_trace["empty_reason"] = "untrusted_partial_payload"
+            self.client.last_get_focus_trace["fallback_reason"] = "untrusted_partial_payload"
+            self.client.last_get_focus_trace["untrusted_partial_payload_rejected"] = True
+            self.client._debug_print(
+                f"[DEBUG][get_focus] partial payload rejected serial={serial} req_id={req_id} "
+                "reason=untrusted_partial_payload"
+            )
+            focus_node = {}
 
         if self.client._is_meaningful_focus_node(focus_node):
             accepted_with_success_false = (
@@ -215,8 +237,8 @@ class FocusService:
             self.client.last_get_focus_trace["final_focus_reason"] = "accepted_meaningful_payload"
             return focus_node
 
-        empty_reason = "no_response"
-        if result:
+        empty_reason = str(self.client.last_get_focus_trace.get("empty_reason", "") or "") or "no_response"
+        if result and empty_reason != "untrusted_partial_payload":
             reason_text = str(result.get("reason", "") or "").lower()
             status_text = str(result.get("status", "") or "").lower()
             if status_text == "parse_error" or reason_text == "json_parse_failed":

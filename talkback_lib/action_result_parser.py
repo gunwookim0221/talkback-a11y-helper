@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -44,18 +45,71 @@ class ActionResultParser:
             raw_payload=raw_payload,
             error=error,
         )
-        salvaged_node: dict[str, str] = {}
+        root_scope, has_children = ActionResultParser._partial_focus_root_scope(str(raw_payload))
+        salvaged_node: dict[str, Any] = {}
         for key in ("text", "contentDescription", "className", "packageName", "viewIdResourceName"):
-            match = re.search(rf'"{key}"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)(?:"|$)', str(raw_payload))
+            match = re.search(rf'"{key}"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)(?:"|$)', root_scope)
             if match:
                 salvaged_node[key] = match.group(1).replace('\\"', '"')
-        
+
+        bounds_match = re.search(r'"boundsInScreen"\s*:\s*(\{[^{}]*\})', root_scope)
+        if bounds_match:
+            try:
+                bounds = json.loads(bounds_match.group(1))
+            except json.JSONDecodeError:
+                bounds = None
+            if isinstance(bounds, dict):
+                salvaged_node["boundsInScreen"] = bounds
+
         if salvaged_node:
             result["node"] = salvaged_node
             result["partial_parse_success"] = True
             result["status"] = "partial_parse_success"
-            
+        result["partial_fields_from_root_only"] = True
+        result["partial_children_truncated"] = has_children
+        result["partial_root_complete"] = ActionResultParser._is_complete_json_object(root_scope)
+        result["partial_payload_trusted"] = bool(
+            salvaged_node
+            and result["partial_root_complete"]
+            and "boundsInScreen" in salvaged_node
+            and any(str(salvaged_node.get(key, "") or "").strip() for key in ("text", "contentDescription", "viewIdResourceName"))
+        )
         return result
+
+    @staticmethod
+    def _partial_focus_root_scope(raw_payload: str) -> tuple[str, bool]:
+        """Return only scalar fields belonging to the focus node, never its children."""
+        node_match = re.search(r'"node"\s*:\s*\{', raw_payload)
+        scope = raw_payload[node_match.end() :] if node_match else raw_payload
+        children_match = re.search(r'"children"\s*:', scope)
+        if children_match:
+            return scope[: children_match.start()], True
+        return scope, False
+
+    @staticmethod
+    def _is_complete_json_object(scope: str) -> bool:
+        """Whether the salvaged node scope includes a balanced closing object."""
+        depth = 1
+        in_string = False
+        escaped = False
+        for char in scope:
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return True
+        return False
 
     @staticmethod
     def log_parse_error_result(
