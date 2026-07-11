@@ -32,6 +32,52 @@ from .shadow_reporting import load_shadow_validation_summary
 
 logger = logging.getLogger(__name__)
 
+_invalid_summary_warning_lock = threading.Lock()
+_invalid_summary_warning_cache: dict[Path, tuple[int, int, str, str]] = {}
+
+
+def _invalid_summary_warning_key(path: Path, exc: Exception) -> tuple[int, int, str, str]:
+    stat = path.stat()
+    return (
+        int(stat.st_size),
+        int(stat.st_mtime_ns),
+        type(exc).__name__,
+        str(exc),
+    )
+
+
+def _log_invalid_summary_warning_once(path: Path, exc: Exception, *, kind: str) -> None:
+    try:
+        resolved = path.resolve()
+        cache_key = _invalid_summary_warning_key(resolved, exc)
+    except OSError:
+        logger.warning("Skipping invalid %s summary: %s (%s)", kind, path, exc)
+        return
+
+    should_log = False
+    with _invalid_summary_warning_lock:
+        previous = _invalid_summary_warning_cache.get(resolved)
+        if previous != cache_key:
+            _invalid_summary_warning_cache[resolved] = cache_key
+            should_log = True
+
+    if should_log:
+        logger.warning("Skipping invalid %s summary: %s (%s)", kind, resolved, exc)
+
+
+def _clear_invalid_summary_warning_cache(path: Path) -> None:
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return
+    with _invalid_summary_warning_lock:
+        _invalid_summary_warning_cache.pop(resolved, None)
+
+
+def _reset_invalid_summary_warning_cache() -> None:
+    with _invalid_summary_warning_lock:
+        _invalid_summary_warning_cache.clear()
+
 
 def _json_safe(value):
     if isinstance(value, Path):
@@ -1107,6 +1153,7 @@ def get_recent_batches() -> list[dict]:
             
         try:
             data = json.loads(summary_path.read_text(encoding="utf-8"))
+            _clear_invalid_summary_warning_cache(summary_path)
             devices = data.get("devices", [])
             passed_count = sum(1 for d in devices if d.get("state") == "passed")
             failed_count = sum(1 for d in devices if d.get("state") in ("failed", "error"))
@@ -1146,6 +1193,7 @@ def get_recent_batches() -> list[dict]:
                         if dev_summary_path.exists():
                             try:
                                 dev_data = json.loads(dev_summary_path.read_text(encoding="utf-8"))
+                                _clear_invalid_summary_warning_cache(dev_summary_path)
                                 dev_info["quality"] = dev_data.get("quality")
                                 dev_info["shadow_quality"] = dev_data.get("shadow_quality")
                                 dev_info["shadow_scenarios"] = dev_data.get("shadow_scenarios")
@@ -1172,7 +1220,7 @@ def get_recent_batches() -> list[dict]:
                                 )
                                 dev_info.update(parsed)
                             except (OSError, json.JSONDecodeError) as exc:
-                                logger.warning("Skipping invalid device summary: %s (%s)", dev_summary_path, exc)
+                                _log_invalid_summary_warning_once(dev_summary_path, exc, kind="device")
                             except Exception:
                                 pass
                         coverage_probe_summary = dev_info.get("coverage_probe_summary")
@@ -1227,7 +1275,7 @@ def get_recent_batches() -> list[dict]:
                 "devices": devices_info
             })
         except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("Skipping invalid batch summary: %s (%s)", summary_path, exc)
+            _log_invalid_summary_warning_once(summary_path, exc, kind="batch")
             continue
         except Exception as e:
             import traceback
