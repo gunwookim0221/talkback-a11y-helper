@@ -41,6 +41,9 @@ class LocalTabState:
     last_selected_rid: str = ""
     last_selected_bounds: str = ""
     visited_by_signature: dict[str, set[str]] = field(default_factory=dict)
+    activation_attempted_by_signature: dict[str, set[str]] = field(default_factory=dict)
+    content_confirmed_by_signature: dict[str, set[str]] = field(default_factory=dict)
+    content_exhausted_by_signature: dict[str, set[str]] = field(default_factory=dict)
     exhausted_signatures: set[str] = field(default_factory=set)
     candidates_by_signature: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     current_content_phase_active: bool = False
@@ -61,6 +64,22 @@ class LocalTabState:
         if not normalized_signature or not normalized_tab_id:
             return
         self.visited_by_signature.setdefault(normalized_signature, set()).add(normalized_tab_id)
+
+    def mark_activation_attempted(self, signature: str, tab_id: str) -> None:
+        self._mark_lifecycle_key(self.activation_attempted_by_signature, signature, tab_id)
+
+    def mark_content_confirmed(self, signature: str, tab_id: str) -> None:
+        self._mark_lifecycle_key(self.content_confirmed_by_signature, signature, tab_id)
+
+    def mark_content_exhausted(self, signature: str, tab_id: str) -> None:
+        self._mark_lifecycle_key(self.content_exhausted_by_signature, signature, tab_id)
+
+    @staticmethod
+    def _mark_lifecycle_key(store: dict[str, set[str]], signature: str, tab_id: str) -> None:
+        normalized_signature = str(signature or "").strip()
+        normalized_tab_id = str(tab_id or "").strip()
+        if normalized_signature and normalized_tab_id:
+            store.setdefault(normalized_signature, set()).add(normalized_tab_id)
 
     def mark_exhausted(self, signature: str) -> None:
         normalized_signature = str(signature or "").strip()
@@ -318,6 +337,77 @@ def _normalize_local_tab_visited_map(value: Any) -> dict[str, set[str]]:
             normalized_ids = {str(tab_ids or "").strip()} if str(tab_ids or "").strip() else set()
         normalized[normalized_signature] = normalized_ids
     return normalized
+
+
+def _local_tab_lifecycle_map(state: Any, name: str) -> dict[str, set[str]]:
+    value = getattr(state, name, None)
+    if not isinstance(value, dict):
+        value = {}
+        setattr(state, name, value)
+    return value
+
+
+def _local_tab_lifecycle_keys(state: Any, name: str, signature: str) -> set[str]:
+    return _local_tab_lifecycle_map(state, name).setdefault(str(signature or "").strip(), set())
+
+
+def _local_tab_lifecycle_contains(state: Any, name: str, signature: str, visit_key: str) -> bool:
+    store = getattr(state, name, None)
+    if not isinstance(store, dict):
+        return False
+    return str(visit_key or "").strip().lower() in {
+        str(value or "").strip().lower()
+        for value in store.get(str(signature or "").strip(), set())
+    }
+
+
+def _record_local_tab_lifecycle(
+    state: Any,
+    *,
+    signature: str,
+    visit_key: str,
+    focus_seen: bool = False,
+    activation_attempted: bool = False,
+    content_confirmed: bool = False,
+    content_exhausted: bool = False,
+    evidence: str = "",
+) -> None:
+    signature = str(signature or "").strip()
+    visit_key = str(visit_key or "").strip().lower()
+    if not signature or not visit_key:
+        return
+    if focus_seen:
+        state.visited_local_tabs_by_signature.setdefault(signature, set()).add(visit_key)
+        _local_tab_state_mirror(state).mark_visited(signature, visit_key)
+    if activation_attempted:
+        _local_tab_lifecycle_keys(state, "local_tab_activation_attempted_by_signature", signature).add(visit_key)
+        _local_tab_state_mirror(state).mark_activation_attempted(signature, visit_key)
+    if content_confirmed:
+        _local_tab_lifecycle_keys(state, "local_tab_content_confirmed_by_signature", signature).add(visit_key)
+        _local_tab_state_mirror(state).mark_content_confirmed(signature, visit_key)
+    if content_exhausted:
+        _local_tab_lifecycle_keys(state, "local_tab_content_exhausted_by_signature", signature).add(visit_key)
+        _local_tab_state_mirror(state).mark_content_exhausted(signature, visit_key)
+    log(
+        f"[LOCAL_TAB][state] visit_key='{_truncate_debug_text(visit_key, 96)}' "
+        f"focus_seen={str(visit_key in state.visited_local_tabs_by_signature.get(signature, set())).lower()} "
+        f"activation_attempted={str(_local_tab_lifecycle_contains(state, 'local_tab_activation_attempted_by_signature', signature, visit_key)).lower()} "
+        f"content_confirmed={str(_local_tab_lifecycle_contains(state, 'local_tab_content_confirmed_by_signature', signature, visit_key)).lower()} "
+        f"content_exhausted={str(_local_tab_lifecycle_contains(state, 'local_tab_content_exhausted_by_signature', signature, visit_key)).lower()} "
+        f"evidence='{_truncate_debug_text(evidence, 96)}'"
+    )
+
+
+def _local_tab_content_confirmed_keys(state: Any, signature: str) -> set[str]:
+    store = getattr(state, "local_tab_content_confirmed_by_signature", None)
+    if not isinstance(store, dict):
+        # Older state fixtures used one visited set for completion. New runtime state
+        # always creates the explicit content map and never takes this fallback.
+        return {
+            str(value).lower()
+            for value in getattr(state, "visited_local_tabs_by_signature", {}).get(str(signature or "").strip(), set())
+        }
+    return {str(value).lower() for value in store.get(str(signature or "").strip(), set())}
 
 
 def _normalize_local_tab_signature_set(value: Any) -> set[str]:
@@ -753,9 +843,13 @@ def _skip_guarded_local_tab_target(
     max_failures: int = LOCAL_TAB_ACTIVATION_MAX_FAILURES,
 ) -> None:
     target = _local_tab_state_display(rid=rid, label=label)
-    if signature and rid:
-        state.visited_local_tabs_by_signature.setdefault(signature, set()).add(rid)
-        _local_tab_state_mirror(state).mark_visited(signature, rid)
+    _record_local_tab_lifecycle(
+        state,
+        signature=signature,
+        visit_key=_local_tab_visit_key(rid=rid, label=label),
+        activation_attempted=True,
+        evidence=reason,
+    )
     log(
         f"[LOCAL_TAB][activation_guard] target='{_truncate_debug_text(target, 96)}' "
         f"fail_count={fail_count} max_failures={max_failures} action='skip'"
@@ -1161,15 +1255,26 @@ def _maybe_commit_pending_local_tab_progression(state: MainLoopState, row: dict[
         f"current='{_truncate_debug_text(current_label_for_log, 96)}' matched_by='{matched_by}'"
     )
     if matched:
+        visit_key = str(getattr(state, "pending_local_tab_visit_key", "") or "").strip() or _local_tab_visit_key(
+            rid=pending_rid,
+            label=pending_label,
+        )
         if pending_signature:
             state.current_local_tab_signature = pending_signature
-            visit_key = str(getattr(state, "pending_local_tab_visit_key", "") or "").strip() or _local_tab_visit_key(rid=pending_rid, label=pending_label)
             if visit_key:
-                state.visited_local_tabs_by_signature.setdefault(pending_signature, set()).add(visit_key)
-                _local_tab_state_mirror(state).mark_visited(pending_signature, visit_key)
+                _record_local_tab_lifecycle(
+                    state,
+                    signature=pending_signature,
+                    visit_key=visit_key,
+                    focus_seen=True,
+                    activation_attempted=True,
+                    content_confirmed=matched_by == "observed_content_after_activation",
+                    evidence=matched_by,
+                )
         if pending_rid:
             state.current_local_tab_active_rid = pending_rid
         state.current_local_tab_active_label = pending_label
+        state.current_local_tab_active_visit_key = visit_key
         state.current_local_tab_active_age = 0
         _local_tab_state_mirror(state).set_active(
             signature=pending_signature,
@@ -1564,19 +1669,32 @@ def _reset_content_phase_after_tab_switch(
         f"active='{_truncate_debug_text(active_label or active_rid, 96)}'"
     )
 
-def _commit_forced_local_tab_target_success(state: MainLoopState) -> None:
+def _commit_forced_local_tab_target_success(
+    state: MainLoopState,
+    *,
+    content_confirmed: bool = False,
+    evidence: str = "target_focus",
+) -> None:
     target_signature = str(getattr(state, "forced_local_tab_target_signature", "") or "").strip()
     target_rid = str(getattr(state, "forced_local_tab_target_rid", "") or "").strip()
     target_label = str(getattr(state, "forced_local_tab_target_label", "") or "").strip()
     target_visit_key = str(getattr(state, "forced_local_tab_target_visit_key", "") or "").strip() or _local_tab_visit_key(rid=target_rid, label=target_label)
     if target_signature and target_visit_key:
-        state.visited_local_tabs_by_signature.setdefault(target_signature, set()).add(target_visit_key)
-        _local_tab_state_mirror(state).mark_visited(target_signature, target_visit_key)
+        _record_local_tab_lifecycle(
+            state,
+            signature=target_signature,
+            visit_key=target_visit_key,
+            focus_seen=True,
+            activation_attempted=True,
+            content_confirmed=content_confirmed,
+            evidence=evidence,
+        )
     if target_signature:
         state.current_local_tab_signature = target_signature
     if target_rid:
         state.current_local_tab_active_rid = target_rid
     state.current_local_tab_active_label = target_label
+    state.current_local_tab_active_visit_key = target_visit_key
     state.current_local_tab_active_age = 0
     _local_tab_state_mirror(state).set_active(
         signature=target_signature,
@@ -1656,6 +1774,16 @@ def _apply_content_entry_probe_success(
     row: dict[str, Any],
     source: str,
 ) -> dict[str, Any]:
+    signature = str(getattr(state, "current_local_tab_signature", "") or "").strip()
+    visit_key = str(getattr(state, "current_local_tab_active_visit_key", "") or "").strip()
+    if signature and visit_key:
+        _record_local_tab_lifecycle(
+            state,
+            signature=signature,
+            visit_key=visit_key,
+            content_confirmed=True,
+            evidence=source,
+        )
     _mark_current_local_tab_content_visited(state)
     row["local_tab_content_entered"] = True
     row["local_tab_content_candidate_visited"] = True
@@ -1907,7 +2035,11 @@ def _activate_forced_local_tab_target(
                 f"[STEP][local_tab_target_activate_success] target='{_truncate_debug_text(target, 96)}' "
                 "matched_by='observed_content_after_activation'"
             )
-            _commit_forced_local_tab_target_success(state)
+            _commit_forced_local_tab_target_success(
+                state,
+                content_confirmed=True,
+                evidence="observed_content_after_activation",
+            )
             _mark_current_local_tab_content_visited(state)
             log(
                 f"[STEP][local_tab_force_navigation_resolved] target='{_truncate_debug_text(target, 96)}'"
@@ -3879,6 +4011,7 @@ def _maybe_select_next_local_tab(
     if active_source not in {"committed", "last_selected_hint"} and (active_rid or active_visit_key):
         state.current_local_tab_active_rid = active_rid
         state.current_local_tab_active_label = str(active_candidate.get("label", "") or "").strip()
+        state.current_local_tab_active_visit_key = active_visit_key
         state.current_local_tab_active_age = 0
         _local_tab_state_mirror(state).set_active(
             signature=local_tab_signature,
@@ -3887,13 +4020,12 @@ def _maybe_select_next_local_tab(
             age=0,
         )
     if active_source == "current_focus" and active_visit_key:
-        visited_tabs.add(active_visit_key)
-        _local_tab_state_mirror(state).mark_visited(local_tab_signature, active_visit_key)
-        log(
-            f"[STEP][local_tab_state_write] kind='visited' "
-            f"active='{_truncate_debug_text(active_label, 96)}' "
-            f"visit_key='{_truncate_debug_text(active_visit_key, 96)}' "
-            "reason='high_confidence_current_focus'"
+        _record_local_tab_lifecycle(
+            state,
+            signature=local_tab_signature,
+            visit_key=active_visit_key,
+            focus_seen=True,
+            evidence="high_confidence_current_focus",
         )
     progression_tab = sorted_tab_candidates[active_index + 1] if 0 <= active_index < len(sorted_tab_candidates) - 1 else None
     if isinstance(progression_tab, dict):
@@ -3910,23 +4042,16 @@ def _maybe_select_next_local_tab(
                 "reason='activation_guard'"
             )
             progression_tab = None
-    visited_key_set = {str(visited).lower() for visited in visited_tabs}
-    for candidate in sorted_tab_candidates:
-        candidate_key = _local_tab_candidate_visit_key(candidate)
-        if candidate_key:
-            log(
-                f"[LOCAL_TAB][visited_check] candidate_key='{_truncate_debug_text(candidate_key, 96)}' "
-                f"visited={str(candidate_key in visited_key_set).lower()}"
-            )
-    remaining_tabs_by_visit = [
+    focused_key_set = {str(visited).lower() for visited in visited_tabs}
+    confirmed_key_set = _local_tab_content_confirmed_keys(state, local_tab_signature)
+    unconfirmed_tabs = [
         candidate
         for candidate in sorted_tab_candidates
         if (candidate_visit_key := _local_tab_candidate_visit_key(candidate))
-        and candidate_visit_key not in visited_key_set
-        and candidate_visit_key != active_visit_key
+        and candidate_visit_key not in confirmed_key_set
     ]
     guard_filtered_tabs: list[dict[str, Any]] = []
-    for candidate in remaining_tabs_by_visit:
+    for candidate in unconfirmed_tabs:
         candidate_rid = str(candidate.get("rid", "") or "").strip().lower()
         candidate_label = str(candidate.get("label", "") or "").strip()
         if _local_tab_activation_guarded(
@@ -3941,28 +4066,28 @@ def _maybe_select_next_local_tab(
             )
             continue
         guard_filtered_tabs.append(candidate)
-    remaining_tabs_by_visit = guard_filtered_tabs
-    remaining_tabs = list(remaining_tabs_by_visit)
-    if progression_tab is not None:
+    unconfirmed_tabs = guard_filtered_tabs
+    remaining_tabs = list(unconfirmed_tabs)
+    if active_visit_key and active_visit_key not in confirmed_key_set and isinstance(active_candidate, dict):
+        remaining_tabs = [active_candidate]
+        log(
+            f"[LOCAL_TAB][progression] focused_keys='{_truncate_debug_text('|'.join(sorted(focused_key_set)), 120)}' "
+            f"content_confirmed_keys='{_truncate_debug_text('|'.join(sorted(confirmed_key_set)), 120)}' "
+            f"unconfirmed_keys='{_truncate_debug_text('|'.join(_local_tab_candidate_visit_key(candidate) for candidate in unconfirmed_tabs), 120)}' "
+            f"next='{_truncate_debug_text(active_label, 96)}' reason='activate_already_focused_or_active_tab'"
+        )
+    elif progression_tab is not None:
         current_label = ""
         if 0 <= active_index < len(sorted_tab_candidates):
             current_label = str(sorted_tab_candidates[active_index].get("label", "") or sorted_tab_candidates[active_index].get("rid", "") or "").strip()
         next_label = str(progression_tab.get("label", "") or progression_tab.get("rid", "") or "").strip()
         next_visit_key = _local_tab_candidate_visit_key(progression_tab)
-        if not (next_visit_key and next_visit_key in visited_key_set):
+        if next_visit_key and next_visit_key not in confirmed_key_set:
             log(
                 f"[STEP][local_tab_progression] current='{_truncate_debug_text(current_label or active_rid, 96)}' "
                 f"next='{_truncate_debug_text(next_label, 96)}'"
             )
             remaining_tabs = [progression_tab]
-        elif remaining_tabs:
-            fallback_label = str(remaining_tabs[0].get("label", "") or remaining_tabs[0].get("rid", "") or "").strip()
-            log(
-                f"[STEP][local_tab_progression] current='{_truncate_debug_text(current_label or active_rid, 96)}' "
-                f"next='{_truncate_debug_text(fallback_label, 96)}' reason='skip_visited_progression'"
-            )
-        else:
-            log("[STEP][local_tab_skip_reason] reason='visited_progression_tab'")
     elif remaining_tabs:
         current_label = active_label
         if 0 <= active_index < len(sorted_tab_candidates):
@@ -3977,7 +4102,28 @@ def _maybe_select_next_local_tab(
             setattr(state, "food_force_local_tab_walk", False)
         row["local_tab_gate_evaluated"] = True
         row["local_tab_block_reason"] = "no_unvisited_local_tab"
-        _local_tab_state_mirror(state).mark_exhausted(local_tab_signature)
+        all_content_confirmed = bool(sorted_tab_candidates) and all(
+            _local_tab_candidate_visit_key(candidate) in confirmed_key_set
+            for candidate in sorted_tab_candidates
+        )
+        if all_content_confirmed:
+            for candidate in sorted_tab_candidates:
+                _record_local_tab_lifecycle(
+                    state,
+                    signature=local_tab_signature,
+                    visit_key=_local_tab_candidate_visit_key(candidate),
+                    content_exhausted=True,
+                    evidence="all_local_tab_content_confirmed",
+                )
+            _local_tab_state_mirror(state).mark_exhausted(local_tab_signature)
+        log(
+            f"[LOCAL_TAB][exhaustion] all_tabs_content_confirmed={str(all_content_confirmed).lower()} "
+            f"unconfirmed_keys='{_truncate_debug_text('|'.join(_local_tab_candidate_visit_key(candidate) for candidate in unconfirmed_tabs), 120)}' "
+            f"decision='{'clean_exhaustion' if all_content_confirmed else 'unresolved_content'}'"
+        )
+        if not all_content_confirmed:
+            row["local_tab_block_reason"] = "unconfirmed_local_tab_content"
+            return False
         if progression_tab is None:
             log("[STEP][local_tab_skip_reason] reason='none'")
         log(
@@ -3993,10 +4139,10 @@ def _maybe_select_next_local_tab(
         f"[STEP][local_tab_gate] allowed=true reason='{local_tab_gate_reason}' "
         f"tabs='{_truncate_debug_text(_summarize_candidate_labels(tab_candidates), 120)}' "
         f"active='{_truncate_debug_text(str(state.current_local_tab_active_rid or ''), 96)}' "
-        f"unvisited='{_truncate_debug_text(_summarize_candidate_labels(remaining_tabs_by_visit), 120)}'"
+        f"unvisited='{_truncate_debug_text(_summarize_candidate_labels(unconfirmed_tabs), 120)}'"
     )
     log(
-        f"[STEP][local_tab_allowed] tabs='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in (remaining_tabs_by_visit or remaining_tabs)[:5]), 120)}' "
+        f"[STEP][local_tab_allowed] tabs='{_truncate_debug_text('|'.join(str(candidate.get('label', '') or '').strip() for candidate in (unconfirmed_tabs or remaining_tabs)[:5]), 120)}' "
         "reason='content_candidates_exhausted'"
     )
     next_tab = remaining_tabs[0]
@@ -4006,11 +4152,14 @@ def _maybe_select_next_local_tab(
         next_candidate=next_tab,
         reason="progression_selected",
     )
-    select_ok = False
-    try:
-        select_ok = bool(client.select(dev=dev, name=target_rid, type_="r", wait_=_TRANSITION_FAST_ACTION_WAIT_SECONDS))
-    except Exception:
-        select_ok = False
+    target_visit_key = str(getattr(state, "pending_local_tab_visit_key", "") or "").strip() or _local_tab_visit_key(rid=target_rid, label=target_label)
+    already_focused = active_source == "current_focus" and target_visit_key == active_visit_key
+    select_ok = already_focused
+    if not select_ok and target_rid:
+        try:
+            select_ok = bool(client.select(dev=dev, name=target_rid, type_="r", wait_=_TRANSITION_FAST_ACTION_WAIT_SECONDS))
+        except Exception:
+            select_ok = False
     if not select_ok and target_label:
         try:
             select_ok = bool(client.select(dev=dev, name=target_label, type_="a", wait_=_TRANSITION_FAST_ACTION_WAIT_SECONDS))
@@ -4024,10 +4173,15 @@ def _maybe_select_next_local_tab(
             click_focused_fn(dev=dev, wait_=_TRANSITION_FAST_ACTION_WAIT_SECONDS)
         except Exception:
             pass
-    target_visit_key = str(getattr(state, "pending_local_tab_visit_key", "") or "").strip() or _local_tab_visit_key(rid=target_rid, label=target_label)
     if target_visit_key:
-        visited_tabs.add(target_visit_key)
-        _local_tab_state_mirror(state).mark_visited(local_tab_signature, target_visit_key)
+        _record_local_tab_lifecycle(
+            state,
+            signature=local_tab_signature,
+            visit_key=target_visit_key,
+            focus_seen=True,
+            activation_attempted=True,
+            evidence="already_focused_click" if already_focused else "select_and_click",
+        )
     state.current_local_tab_active_rid = target_rid
     state.current_local_tab_active_label = target_label
     state.current_local_tab_active_age = 0

@@ -5720,6 +5720,12 @@ def test_last_selected_hint_survives_committed_ttl_expiry_for_progression(monkey
             ]
         },
         visited_local_tabs_by_signature={signature: {"com.example:id/activity_button"}},
+        local_tab_content_confirmed_by_signature={
+            signature: {
+                "com.example:id/activity_button",
+                "com.example:id/location_button",
+            }
+        },
         pending_local_tab_signature="",
         pending_local_tab_rid="",
         pending_local_tab_label="",
@@ -14734,6 +14740,13 @@ def test_confirmed_local_tab_exhaustion_reclassifies_reached_end_repeat():
     state = SimpleNamespace(
         current_local_tab_signature=signature,
         local_tab_activation_evidence_signatures={signature},
+        local_tab_candidates_by_signature={
+            signature: [
+                {"rid": "", "label": "Location", "canonical_visit_key": "location"},
+                {"rid": "", "label": "Schedule", "canonical_visit_key": "schedule"},
+            ]
+        },
+        local_tab_content_confirmed_by_signature={signature: {"location", "schedule"}},
     )
     row = {
         "last_smart_nav_detail": "reached_end",
@@ -14754,12 +14767,40 @@ def test_confirmed_local_tab_exhaustion_reclassifies_reached_end_repeat():
 
     assert (stop, reason, applied) == (True, "confirmed_local_tab_exhaustion", True)
     assert row["traversal_result"] == "PASS_EXHAUSTED"
-    assert row["final_result"] == "WARN"
+    assert row["final_result"] == "PASS"
     assert row["failure_reason"] == ""
 
 
 def test_confirmed_local_tab_exhaustion_keeps_repeat_without_activation_evidence():
     state = SimpleNamespace(current_local_tab_signature="location||schedule")
+    row = {
+        "last_smart_nav_detail": "reached_end",
+        "viewport_exhausted_eval_result": True,
+        "strip_focus_context": True,
+        "local_tab_block_reason": "no_unvisited_local_tab",
+    }
+
+    assert collection_flow._maybe_reclassify_confirmed_local_tab_exhaustion(
+        row=row,
+        state=state,
+        stop=True,
+        reason="repeat_no_progress",
+    ) == (True, "repeat_no_progress", False)
+
+
+def test_confirmed_local_tab_exhaustion_keeps_repeat_when_any_tab_lacks_content_confirmation():
+    signature = "location||schedule"
+    state = SimpleNamespace(
+        current_local_tab_signature=signature,
+        local_tab_activation_evidence_signatures={signature},
+        local_tab_candidates_by_signature={
+            signature: [
+                {"rid": "", "label": "Location", "canonical_visit_key": "location"},
+                {"rid": "", "label": "Schedule", "canonical_visit_key": "schedule"},
+            ]
+        },
+        local_tab_content_confirmed_by_signature={signature: {"location"}},
+    )
     row = {
         "last_smart_nav_detail": "reached_end",
         "viewport_exhausted_eval_result": True,
@@ -15837,6 +15878,34 @@ def test_stop_explain_phase_sets_result_fields(monkeypatch):
     assert row["is_global_nav"] is False
     assert row["global_nav_reason"] == ""
     assert len(debug_calls) == 1
+
+
+def test_stop_explain_phase_preserves_confirmed_local_tab_exhaustion_result(monkeypatch):
+    monkeypatch.setattr(collection_flow, "_log_repeat_stop_debug", lambda **_kwargs: None)
+    row = _stop_explain_row(
+        local_tab_clean_exhaustion=True,
+        traversal_result="FAIL_STUCK",
+        final_result="FAIL",
+        failure_reason="repeat_no_progress",
+    )
+
+    collection_flow._apply_stop_explain_phase(
+        row=row,
+        previous_row=_anchor_row(),
+        tab_cfg={"scenario_id": "generic_local_tabs"},
+        stop=True,
+        reason="confirmed_local_tab_exhaustion",
+        stop_eval_inputs=_phase_ordering_stop_inputs(no_progress=True, strict_duplicate=True, eval_reason="repeat_no_progress"),
+        mismatch_reasons=[],
+        cta_descend_applied=False,
+        scroll_ready_continue_applied=False,
+        local_tab_transition_applied=False,
+        step_idx=7,
+    )
+
+    assert row["traversal_result"] == "PASS_EXHAUSTED"
+    assert row["final_result"] == "PASS"
+    assert row["failure_reason"] == ""
 
 
 def test_stop_explain_phase_handles_non_stop_row(monkeypatch):

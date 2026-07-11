@@ -442,8 +442,12 @@ class MainLoopState:
     consumed_semantic_card_signatures: set[str]
     current_local_tab_signature: str
     current_local_tab_active_rid: str
+    current_local_tab_active_visit_key: str
     local_tab_candidates_by_signature: dict[str, list[dict[str, Any]]]
     visited_local_tabs_by_signature: dict[str, set[str]]
+    local_tab_activation_attempted_by_signature: dict[str, set[str]]
+    local_tab_content_confirmed_by_signature: dict[str, set[str]]
+    local_tab_content_exhausted_by_signature: dict[str, set[str]]
     pending_local_tab_signature: str
     pending_local_tab_rid: str
     pending_local_tab_label: str
@@ -13455,6 +13459,13 @@ def _maybe_apply_exhausted_terminal_guard(
     return True, _EXHAUSTED_TERMINAL_GUARD_STOP_REASON, True
 
 
+def _apply_confirmed_local_tab_exhaustion_result(row: dict[str, Any]) -> None:
+    """Keep a verified local-tab exhaustion from being downgraded by repeat classification."""
+    row["traversal_result"] = "PASS_EXHAUSTED"
+    row["final_result"] = "PASS"
+    row["failure_reason"] = ""
+
+
 def _maybe_reclassify_confirmed_local_tab_exhaustion(
     *,
     row: dict[str, Any],
@@ -13475,11 +13486,21 @@ def _maybe_reclassify_confirmed_local_tab_exhaustion(
     evidence = set(getattr(state, "local_tab_activation_evidence_signatures", set()) or set())
     if not signature or signature not in evidence:
         return stop, reason, False
+    candidates = list(getattr(state, "local_tab_candidates_by_signature", {}).get(signature, []) or [])
+    confirmed = {
+        str(value).lower()
+        for value in getattr(state, "local_tab_content_confirmed_by_signature", {}).get(signature, set())
+    }
+    candidate_keys = {
+        local_tab_logic._local_tab_candidate_visit_key(candidate)
+        for candidate in candidates
+        if isinstance(candidate, dict) and local_tab_logic._local_tab_candidate_visit_key(candidate)
+    }
+    if not candidate_keys or not candidate_keys.issubset(confirmed):
+        return stop, reason, False
     row["local_tab_clean_exhaustion"] = True
     row["local_tab_clean_exhaustion_reason"] = "confirmed_local_tab_end_of_order"
-    row["traversal_result"] = "PASS_EXHAUSTED"
-    row["final_result"] = "WARN"
-    row["failure_reason"] = ""
+    _apply_confirmed_local_tab_exhaustion_result(row)
     return True, "confirmed_local_tab_exhaustion", True
 
 
@@ -13718,6 +13739,8 @@ def _apply_stop_explain_phase_impl(
         terminal_signal=terminal_signal,
     )
     row.update(result_summary)
+    if stop and reason == "confirmed_local_tab_exhaustion" and bool(row.get("local_tab_clean_exhaustion", False)):
+        _apply_confirmed_local_tab_exhaustion_result(row)
     pre_stop_summary_needed = bool(
         stop
         and (
@@ -15627,8 +15650,12 @@ def _build_main_loop_state_from_anchor(
         consumed_semantic_card_signatures=set(),
         current_local_tab_signature="",
         current_local_tab_active_rid="",
+        current_local_tab_active_visit_key="",
         local_tab_candidates_by_signature={},
         visited_local_tabs_by_signature={},
+        local_tab_activation_attempted_by_signature={},
+        local_tab_content_confirmed_by_signature={},
+        local_tab_content_exhausted_by_signature={},
         pending_local_tab_signature="",
         pending_local_tab_rid="",
         pending_local_tab_label="",

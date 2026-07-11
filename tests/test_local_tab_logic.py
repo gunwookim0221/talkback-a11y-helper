@@ -129,6 +129,20 @@ def test_local_tab_state_marks_visited_and_exhausted():
     assert state.exhausted_signatures == {"monitor||save"}
 
 
+def test_local_tab_state_tracks_focus_activation_and_content_separately():
+    state = local_tab_logic.LocalTabState()
+
+    state.mark_visited("monitor||save", "monitor")
+    state.mark_activation_attempted("monitor||save", "monitor")
+
+    assert state.visited_by_signature["monitor||save"] == {"monitor"}
+    assert state.activation_attempted_by_signature["monitor||save"] == {"monitor"}
+    assert state.content_confirmed_by_signature.get("monitor||save", set()) == set()
+
+    state.mark_content_confirmed("monitor||save", "monitor")
+    assert state.content_confirmed_by_signature["monitor||save"] == {"monitor"}
+
+
 def test_label_only_local_tab_uses_child_label_for_activation_target(monkeypatch):
     _bind_local_tab_logic(monkeypatch, [])
     candidate = {
@@ -365,6 +379,7 @@ def test_pending_label_only_tab_commits_when_post_activation_content_is_observed
 
     assert state.pending_local_tab_label == ""
     assert "schedule button" in state.visited_local_tabs_by_signature[signature]
+    assert "schedule button" in state.local_tab_content_confirmed_by_signature[signature]
     assert signature in state.local_tab_activation_evidence_signatures
     assert any("matched_by='observed_content_after_activation'" in line for line in logs)
 
@@ -1701,6 +1716,7 @@ def test_current_bottom_strip_focus_commits_visited_before_stale_ttl_state(monke
         visited={"일정버튼"},
     )
     state.current_local_tab_active_age = 1
+    state.local_tab_content_confirmed_by_signature = {signature: {"일정버튼"}}
     row = {
         "visible_label": "위치버튼",
         "merged_announcement": "위치버튼",
@@ -1711,8 +1727,9 @@ def test_current_bottom_strip_focus_commits_visited_before_stale_ttl_state(monke
         "focus_class_name": "android.view.View",
     }
 
+    client = DummyClient([])
     advanced = local_tab_logic._maybe_select_next_local_tab(
-        client=DummyClient([]),
+        client=client,
         dev="SERIAL",
         state=state,
         row=row,
@@ -1720,9 +1737,12 @@ def test_current_bottom_strip_focus_commits_visited_before_stale_ttl_state(monke
         step_idx=27,
     )
 
-    assert advanced is False
+    assert advanced is True
     assert "위치버튼" in state.visited_local_tabs_by_signature[signature]
-    assert row["local_tab_block_reason"] == "no_unvisited_local_tab"
+    assert "위치버튼" not in state.local_tab_content_confirmed_by_signature[signature]
+    assert row["local_tab_block_reason"] == ""
+    assert client.select_calls == []
+    assert len(client.click_focused_calls) == 1
     assert any("source='current_focus'" in line for line in logs)
     assert any("visit_key='위치버튼'" in line and "high_confidence_current_focus" in line for line in logs)
 
@@ -1781,7 +1801,8 @@ def test_activate_forced_local_tab_target_guard_skips_repeated_failures_direct(m
     assert row is None
     assert state.forced_local_tab_target_rid == ""
     assert state.pending_local_tab_rid == ""
-    assert "com.example:id/savings_button" in state.visited_local_tabs_by_signature[signature]
+    assert "com.example:id/savings_button" not in state.visited_local_tabs_by_signature[signature]
+    assert "com.example:id/savings_button" in state.local_tab_activation_attempted_by_signature[signature]
     assert any("[LOCAL_TAB][activation_guard]" in line and "Savings" in line for line in logs)
     assert any("[LOCAL_TAB][skip_target]" in line and "Savings" in line for line in logs)
 
@@ -1930,7 +1951,8 @@ def test_forced_local_tab_activation_fail_counter_survives_attempt_reset_direct(
         label="Savings",
     )
     assert state.local_tab_activation_failures[failure_key] == 4
-    assert "com.example:id/savings_button" in state.visited_local_tabs_by_signature[signature]
+    assert "com.example:id/savings_button" not in state.visited_local_tabs_by_signature[signature]
+    assert "com.example:id/savings_button" in state.local_tab_activation_attempted_by_signature[signature]
     assert state.pending_local_tab_rid == ""
     assert len([line for line in logs if "[STEP][local_tab_target_activate_fail]" in line]) == 4
     assert any("[LOCAL_TAB][activation_fail]" in line and "fail_count=4" in line for line in logs)
@@ -2009,7 +2031,8 @@ def test_pending_local_tab_ttl_guard_skips_target_after_cap_direct(monkeypatch):
     )
 
     assert state.local_tab_activation_failures[failure_key] == 4
-    assert "com.example:id/savings_button" in state.visited_local_tabs_by_signature[signature]
+    assert "com.example:id/savings_button" not in state.visited_local_tabs_by_signature[signature]
+    assert "com.example:id/savings_button" in state.local_tab_activation_attempted_by_signature[signature]
     assert any("[LOCAL_TAB][activation_guard]" in line and "fail_count=4" in line for line in logs)
     assert any("[LOCAL_TAB][skip_target]" in line and "Savings" in line for line in logs)
 
@@ -2031,6 +2054,13 @@ def test_maybe_select_next_local_tab_blocks_already_committed_progression_direct
             ]
         },
         visited_local_tabs_by_signature={
+            signature: {
+                "com.example:id/activity_button",
+                "com.example:id/location_button",
+                "com.example:id/events_button",
+            }
+        },
+        local_tab_content_confirmed_by_signature={
             signature: {
                 "com.example:id/activity_button",
                 "com.example:id/location_button",
@@ -2066,7 +2096,7 @@ def test_maybe_select_next_local_tab_blocks_already_committed_progression_direct
     assert client.select_calls == []
     assert state.pending_local_tab_rid == ""
     assert any("[STEP][local_tab_sorted]" in line and "Activity|Location|Events" in line for line in logs)
-    assert any("[STEP][local_tab_skip_reason]" in line and "visited_progression_tab" in line for line in logs)
+    assert any("[LOCAL_TAB][exhaustion]" in line and "all_tabs_content_confirmed=true" in line for line in logs)
     assert any("[STEP][local_tab_gate]" in line and "no_unvisited_local_tab" in line for line in logs)
 
 
@@ -2122,10 +2152,10 @@ def test_maybe_select_next_local_tab_guarded_target_converges_to_no_unvisited_di
 
     assert advanced is False
     assert client.select_calls == []
-    assert row["local_tab_block_reason"] == "no_unvisited_local_tab"
+    assert row["local_tab_block_reason"] == "unconfirmed_local_tab_content"
     assert state.pending_local_tab_rid == ""
     assert any("[LOCAL_TAB][skip_target]" in line and "Savings" in line for line in logs)
-    assert any("[STEP][local_tab_gate]" in line and "no_unvisited_local_tab" in line for line in logs)
+    assert any("[LOCAL_TAB][exhaustion]" in line and "all_tabs_content_confirmed=false" in line for line in logs)
 
 
 def _location_progression_state(*, active_label="LocationButton Location"):
