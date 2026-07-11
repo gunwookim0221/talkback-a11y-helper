@@ -535,6 +535,94 @@ def test_recent_batches_expose_coverage_probe_from_reporting_summary(tmp_path, m
     }
 
 
+def test_recent_batches_skips_invalid_batch_summary_and_preserves_valid_entries(tmp_path, monkeypatch, caplog):
+    run_log_dir = tmp_path / "qa_frontend_runs"
+    valid_batch_dir = run_log_dir / "batch_20260627_182220"
+    invalid_batch_dir = run_log_dir / "batch_20260627_182221"
+    empty_batch_dir = run_log_dir / "batch_20260627_182222"
+    valid_batch_dir.mkdir(parents=True)
+    invalid_batch_dir.mkdir(parents=True)
+    empty_batch_dir.mkdir(parents=True)
+    (valid_batch_dir / "batch_summary.json").write_text(
+        """{
+  "batch_id": "batch_20260627_182220",
+  "mode": "full",
+  "created_at": "2026-06-27T18:22:20+09:00",
+  "state": "finished",
+  "devices": []
+}""",
+        encoding="utf-8",
+    )
+    (invalid_batch_dir / "batch_summary.json").write_text("{", encoding="utf-8")
+    (empty_batch_dir / "batch_summary.json").write_text("", encoding="utf-8")
+    monkeypatch.setattr("qa_frontend.backend.batch_runner.RUN_LOG_DIR", run_log_dir)
+    monkeypatch.setattr("qa_frontend.backend.batch_runner.ROOT_DIR", tmp_path)
+
+    with caplog.at_level("WARNING"):
+        batches = get_recent_batches()
+
+    assert [batch["batch_id"] for batch in batches] == ["batch_20260627_182220"]
+    assert "Skipping invalid batch summary" in caplog.text
+
+
+def test_recent_batches_skips_invalid_device_summary_and_keeps_batch(tmp_path, monkeypatch, caplog):
+    run_log_dir = tmp_path / "qa_frontend_runs"
+    batch_dir = run_log_dir / "batch_20260627_182220"
+    valid_device_dir = batch_dir / "device_Model_SERIAL1"
+    invalid_device_dir = batch_dir / "device_Model_SERIAL2"
+    empty_device_dir = batch_dir / "device_Model_SERIAL3"
+    valid_device_dir.mkdir(parents=True)
+    invalid_device_dir.mkdir(parents=True)
+    empty_device_dir.mkdir(parents=True)
+    (valid_device_dir / "summary.json").write_text('{"quality": "PASS"}', encoding="utf-8")
+    (invalid_device_dir / "summary.json").write_text("{", encoding="utf-8")
+    (empty_device_dir / "summary.json").write_text("", encoding="utf-8")
+    (batch_dir / "batch_summary.json").write_text(
+        """{
+  "batch_id": "batch_20260627_182220",
+  "mode": "full",
+  "created_at": "2026-06-27T18:22:20+09:00",
+  "state": "finished",
+  "devices": [
+    {
+      "serial": "SERIAL1",
+      "model": "Model",
+      "state": "passed",
+      "return_code": 0,
+      "output_dir": "qa_frontend_runs/batch_20260627_182220/device_Model_SERIAL1"
+    },
+    {
+      "serial": "SERIAL2",
+      "model": "Model",
+      "state": "passed",
+      "return_code": 0,
+      "output_dir": "qa_frontend_runs/batch_20260627_182220/device_Model_SERIAL2"
+    },
+    {
+      "serial": "SERIAL3",
+      "model": "Model",
+      "state": "passed",
+      "return_code": 0,
+      "output_dir": "qa_frontend_runs/batch_20260627_182220/device_Model_SERIAL3"
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("qa_frontend.backend.batch_runner.RUN_LOG_DIR", run_log_dir)
+    monkeypatch.setattr("qa_frontend.backend.batch_runner.ROOT_DIR", tmp_path)
+
+    with caplog.at_level("WARNING"):
+        batches = get_recent_batches()
+
+    assert len(batches) == 1
+    assert [device["serial"] for device in batches[0]["devices"]] == ["SERIAL1", "SERIAL2", "SERIAL3"]
+    assert batches[0]["devices"][0]["quality"] == "PASS"
+    assert batches[0]["devices"][1]["quality"] is None
+    assert batches[0]["devices"][2]["quality"] is None
+    assert "Skipping invalid device summary" in caplog.text
+
+
 def test_open_language_settings_endpoint(monkeypatch):
     client = TestClient(app)
     monkeypatch.setattr(

@@ -1,6 +1,7 @@
 import threading
 import subprocess
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,9 @@ from .sleep_prevention import (
 )
 from .shadow_pipeline import run_shadow_validation_pipeline
 from .shadow_reporting import load_shadow_validation_summary
+
+logger = logging.getLogger(__name__)
+
 
 def _json_safe(value):
     if isinstance(value, Path):
@@ -1167,6 +1171,8 @@ def get_recent_batches() -> list[dict]:
                                     current_status=None,
                                 )
                                 dev_info.update(parsed)
+                            except (OSError, json.JSONDecodeError) as exc:
+                                logger.warning("Skipping invalid device summary: %s (%s)", dev_summary_path, exc)
                             except Exception:
                                 pass
                         coverage_probe_summary = dev_info.get("coverage_probe_summary")
@@ -1220,6 +1226,9 @@ def get_recent_batches() -> list[dict]:
                 "summary_path": str(summary_path.relative_to(ROOT_DIR)) if summary_path.is_relative_to(ROOT_DIR) else str(summary_path),
                 "devices": devices_info
             })
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Skipping invalid batch summary: %s (%s)", summary_path, exc)
+            continue
         except Exception as e:
             import traceback
             traceback.print_exc()
