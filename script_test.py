@@ -56,6 +56,7 @@ from tb_runner.crash_recovery import (
 from tb_runner.run_spec import RunContext, RunSpec
 from tb_runner.run_selection import apply_run_selection
 from tb_runner.utils import configure_process_temp_dir, generate_output_path
+from tb_runner.evidence import EvidenceRuntime, collect_run_provenance, evidence_enabled
 
 
 def _force_utf8_stdio():
@@ -147,12 +148,41 @@ def main() -> int:
     log(f"[MAIN] script start (version={SCRIPT_VERSION}, log_level={LOG_LEVEL})")
     target_serial = context.serial
     client = A11yAdbClient(dev_serial=target_serial)
+    evidence_runtime = None
+    if evidence_enabled():
+        try:
+            evidence_runtime = EvidenceRuntime(output_path=output_path, warning_fn=log, enabled=True)
+            client.set_evidence_runtime(evidence_runtime)
+            evidence_runtime.write_manifest(
+                collect_run_provenance(
+                    repo_root=Path(__file__).resolve().parent,
+                    runtime_config_path=context.spec.runtime_config_path,
+                    scenario_registry_path=Path(__file__).resolve().parent / "tb_runner" / "scenario_config.py",
+                    runner_path=Path(__file__).resolve(),
+                    client=client,
+                    serial=target_serial,
+                )
+            )
+            log(f"[EVIDENCE] enabled schema='evidence-event-v1' ledger='{evidence_runtime.ledger.path}'")
+        except Exception as exc:
+            log(f"[EVIDENCE][warning] initialization_failed error='{type(exc).__name__}: {exc}'")
+            evidence_runtime = None
+
+    def _finalize_evidence_early() -> None:
+        if evidence_runtime is None:
+            return
+        try:
+            evidence_runtime.finalize()
+        except Exception as exc:
+            log(f"[EVIDENCE][warning] early_finalize_failed error='{type(exc).__name__}: {exc}'")
+
     preflight = run_preflight(client=client, serial=target_serial, log_fn=log)
     if not preflight.ok:
         log(f"[PREFLIGHT] abort run reason='{preflight.reason}'")
     if preflight.talkback_status == "disabled":
         log("[PREFLIGHT] abort run reason='talkback_off'")
         log("TalkBack is OFF. Enable TalkBack and retry.")
+        _finalize_evidence_early()
         close_log_files()
         return 2
     if preflight.talkback_status == "enabled_but_not_ready":
@@ -165,9 +195,11 @@ def main() -> int:
         else:
             log("[PREFLIGHT] abort run reason='talkback_not_ready'")
             log("TalkBack is ON but not ready. Wait a moment and retry.")
+        _finalize_evidence_early()
         close_log_files()
         return 2
     if not preflight.ok:
+        _finalize_evidence_early()
         close_log_files()
         return 2
 
@@ -363,6 +395,15 @@ def main() -> int:
         save_excel_with_perf(save_excel, all_rows, output_path, with_images=True)
         log("[MAIN] final save complete")
         log(format_perf_summary("run_summary", run_perf.summary_dict()))
+        if evidence_runtime is not None:
+            try:
+                reconciliation = evidence_runtime.finalize()
+                log(
+                    f"[EVIDENCE] finalized status='{reconciliation.get('status', 'unknown')}' "
+                    f"events={reconciliation.get('ledger', {}).get('event_count', 0)}"
+                )
+            except Exception as exc:
+                log(f"[EVIDENCE][warning] finalize_failed error='{type(exc).__name__}: {exc}'")
         close_log_files()
 
     log("[MAIN] script end")

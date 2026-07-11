@@ -22,6 +22,8 @@
 - Audit V5 Traversal Engine Audit: [design/audit-v5-traversal-engine-audit.md](design/audit-v5-traversal-engine-audit.md)
 - Audit V5 Phase 5A Traversal Event Inventory: [design/audit-v5-phase5a-traversal-event-inventory.md](design/audit-v5-phase5a-traversal-event-inventory.md)
 - Audit V5 Phase 5A Normalized Event Schema: [design/audit-v5-phase5a-normalized-event-schema.md](design/audit-v5-phase5a-normalized-event-schema.md)
+- Traversal Evidence Architecture: [design/talkback-traversal-evidence-architecture.md](design/talkback-traversal-evidence-architecture.md)
+- Evidence Instrumentation: [design/talkback-traversal-evidence-implementation.md](design/talkback-traversal-evidence-implementation.md)
 - 신규 plugin onboarding: [plugin-onboarding-guide.md](plugin-onboarding-guide.md)
 - report row schema: [report-schema.md](report-schema.md)
 - i18n / locale matching: [i18n_locale_matching.md](i18n_locale_matching.md)

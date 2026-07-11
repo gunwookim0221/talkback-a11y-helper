@@ -28,6 +28,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val ACTION_SET_TEXT = "com.iotpart.sqe.talkbackhelper.SET_TEXT"
         private const val ACTION_PING = "com.iotpart.sqe.talkbackhelper.PING"
         private const val ACTION_COMMAND = "com.iotpart.sqe.talkbackhelper.ACTION_COMMAND"
+        private const val ACTION_EVIDENCE_EVENTS = "com.iotpart.sqe.talkbackhelper.EVIDENCE_EVENTS"
         private const val EXTRA_TARGET_NAME = "targetName"
         private const val EXTRA_TARGET_TYPE = "targetType"
         private const val EXTRA_TARGET_INDEX = "targetIndex"
@@ -53,6 +54,13 @@ class A11yCommandReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action ?: return
         val reqId = parseReqId(intent)
+        A11yEvidence.capture(intent, reqId)
+        A11yEvidence.emit(
+            "ACTION_EXECUTION_STARTED",
+            reqId,
+            org.json.JSONObject().put("action", action)
+        )
+        A11yEvidence.emit("TARGET_REQUESTED", reqId, A11yEvidence.requestedTarget(intent))
         if (action == ACTION_SMART_NEXT) {
             logSmartNextDiag(reqId, "receiver_onReceive", "action=$action receiver_version=$VERSION")
         }
@@ -89,6 +97,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
             ACTION_SET_TEXT -> handleSetText(intent)
             ACTION_PING -> handlePing(intent)
             ACTION_COMMAND -> handleExternalCommand(context, intent)
+            ACTION_EVIDENCE_EVENTS -> handleEvidenceEvents(intent)
             else -> Unit
         }
     }
@@ -174,6 +183,13 @@ class A11yCommandReceiver : BroadcastReceiver() {
             "[DEBUG][TARGET_ACTION][recv] reqId=$reqId action=TOUCH_BOUNDS_CENTER_TARGET targetName='${query.targetName}' targetType='${query.targetType}' targetIndex=${query.targetIndex}"
         )
         service.performTargetBoundsCenterTap(query, reqId)
+    }
+
+    private fun handleEvidenceEvents(intent: Intent) {
+        val reqId = parseReqId(intent)
+        val result = A11yEvidence.snapshotAndClear(reqId)
+        Log.i(TAG, "[EVIDENCE][helper_response] requestId=$reqId EVIDENCE_EVENTS_snapshot=${result.optJSONArray("evidenceEvents")?.length() ?: 0}")
+        Log.i(TAG, "EVIDENCE_EVENTS_RESULT $result")
     }
 
     private fun handleFocusInBounds(intent: Intent) {
@@ -267,6 +283,17 @@ class A11yCommandReceiver : BroadcastReceiver() {
                     TAG,
                     "[SMART_NEXT][trace_enter] stage='before_final_response' status='$status' detail='$detail'"
                 )
+                A11yEvidence.emit(
+                    "HELPER_ACK_SENT",
+                    reqId,
+                    org.json.JSONObject().put("status", status).put("detail", detail)
+                )
+                A11yEvidence.attach(result, reqId)
+                // The runner reads command results from logcat.  The service logs the
+                // pre-attachment result, so log the final, evidence-enriched payload here.
+                if (A11yEvidence.hasCorrelation(reqId)) {
+                    Log.i(TAG, "SMART_NAV_RESULT $result")
+                }
                 val reply = Intent("SMART_NAV_RESULT").apply {
                     setPackage(context.packageName)
                     putExtra("json", result.toString())
@@ -289,6 +316,11 @@ class A11yCommandReceiver : BroadcastReceiver() {
                     "[SMART_NEXT][final] success=false status='failed' detail='async_exception:${t.javaClass.simpleName}' requested_target_view_id='' resolved_focus_view_id=''"
                 )
                 logFailure("SMART_NAV_RESULT", reqId, "Smart next async execution failed: ${t.message}")
+                A11yEvidence.emit(
+                    "HELPER_ACK_SENT",
+                    reqId,
+                    org.json.JSONObject().put("status", "failed").put("detail", "async_exception")
+                )
             } finally {
                 pendingResult.finish()
             }

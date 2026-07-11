@@ -104,6 +104,63 @@ COLLECTION_FLOW_LIFE_RESET_VERSION = "pr61-life-reset-strict-global-nav-v1"
 COLLECTION_FLOW_SCROLLTOUCH_CAPTURE_GATE_VERSION = "pr51-scrolltouch-debug-capture-default-off-v2"
 COLLECTION_FLOW_OVERLAY_FIRSTROW_DEBUG_VERSION = "pr73-overlay-first-row-lifecycle-debug-v1"
 COLLECTION_FLOW_SYNTAX_FIX_VERSION = "pr110-strict-token-pattern-syntax-fix-v1"
+
+
+def _evidence_transaction_for_row(client: Any, row: dict[str, Any] | None) -> tuple[Any | None, dict[str, Any] | None]:
+    """Best-effort bridge to the opt-in evidence side channel.
+
+    This helper deliberately swallows instrumentation errors so existing traversal
+    behavior, row values, and stop semantics remain untouched.
+    """
+    runtime = getattr(client, "evidence_runtime", None)
+    if not bool(getattr(runtime, "is_enabled", False)):
+        return None, None
+    transaction_id = ""
+    step_index = (row or {}).get("step_index")
+    lookup = getattr(client, "_evidence_transaction_for_step", None)
+    if callable(lookup):
+        try:
+            transaction_id = str(lookup(step_index) or "")
+        except Exception:
+            transaction_id = ""
+    try:
+        transaction = runtime.transaction(transaction_id) if transaction_id else None
+    except Exception:
+        transaction = None
+    return runtime, transaction
+
+
+def _evidence_actual_focus_observation_id(client: Any, row: dict[str, Any] | None) -> str:
+    lookup = getattr(client, "_evidence_actual_observation_for_step", None)
+    if not callable(lookup):
+        return ""
+    try:
+        return str(lookup((row or {}).get("step_index")) or "")
+    except Exception:
+        return ""
+
+
+def _emit_row_evidence(
+    client: Any,
+    row: dict[str, Any] | None,
+    event_type: str,
+    *,
+    phase: str = "main_loop",
+    payload: dict[str, Any] | None = None,
+) -> None:
+    runtime, transaction = _evidence_transaction_for_row(client, row)
+    if runtime is None:
+        return
+    try:
+        runtime.emit(
+            event_type,
+            producer="runner",
+            phase=phase,
+            transaction=transaction,
+            payload=payload or {},
+        )
+    except Exception:
+        return
 _ONBOARDING_BODY_EVIDENCE_TOKENS: tuple[str, ...] = (
     "set up",
     "get started",
@@ -14977,9 +15034,76 @@ def _main_loop_phase(
             scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
             step_idx=step_idx,
         )
+        if str(row.get("row_source", "") or "") == "representative":
+            runtime, parent_transaction = _evidence_transaction_for_row(client, row)
+            if runtime is not None:
+                try:
+                    representative = runtime.observe(
+                        {
+                            "viewIdResourceName": row.get("focus_view_id", ""),
+                            "text": row.get("visible_label", ""),
+                            "talkbackLabel": row.get("merged_announcement", ""),
+                            "bounds": row.get("focus_bounds", ""),
+                            "className": row.get("focus_class_name", ""),
+                        },
+                        source="runner_representative_selection",
+                        transaction=parent_transaction,
+                        phase="representative",
+                        event_type="REPRESENTATIVE_OBSERVED",
+                    )
+                    runtime.emit(
+                        "REPRESENTATIVE_SELECTED",
+                        producer="runner",
+                        phase="representative",
+                        transaction=parent_transaction,
+                        payload={
+                            "actual_focus_observation_id": _evidence_actual_focus_observation_id(client, row),
+                            "representative_observation_id": representative.observation_id if representative else "",
+                            "representative_basis_snapshot_id": representative.snapshot_id if representative else "",
+                            "representative_selected_at": representative.captured_at if representative else "",
+                            "current_focus_at_selection": _evidence_actual_focus_observation_id(client, row),
+                            "realign_required": bool(row.get("cta_focus_align_requested", False)),
+                            "realign_attempted": False,
+                            "realign_result": "not_attempted",
+                            "selection_reason": str(row.get("cta_promote_source", "representative_row") or "representative_row"),
+                        },
+                    )
+                    if str(row.get("cta_cluster_signature", "") or ""):
+                        runtime.emit(
+                            "CANDIDATE_CONSUMED",
+                            producer="runner",
+                            phase="representative",
+                            transaction=parent_transaction,
+                            payload={
+                                "consumption_basis": "PLANNING_ONLY",
+                                "candidate_resource_id": str(row.get("focus_view_id", "") or ""),
+                                "candidate_label": str(row.get("visible_label", "") or ""),
+                                "cluster_signature": str(row.get("cta_cluster_signature", "") or ""),
+                            },
+                        )
+                except Exception:
+                    pass
         cta_focus_align_success = False
         cta_focus_align_reason = ""
         if bool(row.get("cta_focus_align_requested", False)) or bool(row.get("cta_promote_kept_committed", False)):
+            runtime, parent_transaction = _evidence_transaction_for_row(client, row)
+            realign_transaction = None
+            if runtime is not None:
+                try:
+                    realign_transaction = runtime.begin_transaction(
+                        "REALIGN_FOCUS",
+                        phase="realign",
+                        parent_transaction_id=str((parent_transaction or {}).get("transaction_id", "") or "") or None,
+                        payload={
+                            "target_resource_id": str(row.get("focus_view_id", "") or ""),
+                            "target_label": str(row.get("visible_label", "") or ""),
+                            "target_bounds": str(row.get("focus_bounds", "") or ""),
+                        },
+                    )
+                    setattr(client, "_evidence_active_transaction", realign_transaction)
+                    runtime.emit("REALIGN_STARTED", producer="runner", phase="realign", transaction=realign_transaction)
+                except Exception:
+                    realign_transaction = None
             cta_focus_align_success, cta_focus_align_reason = _align_focus_to_committed_cta(
                 client=client,
                 dev=dev,
@@ -14989,6 +15113,24 @@ def _main_loop_phase(
                 scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
                 step_idx=step_idx,
             )
+            if runtime is not None and realign_transaction is not None:
+                try:
+                    runtime.emit(
+                        "REALIGN_COMPLETED",
+                        producer="runner",
+                        phase="realign",
+                        transaction=realign_transaction,
+                        payload={"success": bool(cta_focus_align_success), "reason": cta_focus_align_reason},
+                    )
+                    runtime.close_transaction(
+                        realign_transaction,
+                        status="completed" if cta_focus_align_success else "failed",
+                        phase="realign",
+                        payload={"reason": cta_focus_align_reason},
+                    )
+                    setattr(client, "_evidence_active_transaction", None)
+                except Exception:
+                    pass
         row["cta_focus_align_success"] = cta_focus_align_success
         row["cta_focus_align_result"] = cta_focus_align_reason
         row = _maybe_recover_family_care_onboarding(
@@ -15459,6 +15601,30 @@ def _main_loop_phase(
             stop=persistence_stop,
             checkpoint_every=phase_ctx.checkpoint_every,
             output_path=phase_ctx.output_path,
+        )
+        _emit_row_evidence(
+            client,
+            row,
+            "VISIT_DECIDED",
+            payload={
+                "visit_kind": "INDETERMINATE",
+                "production_result": str(row.get("final_result", "") or row.get("status", "") or ""),
+                "stop": bool(stop),
+                "stop_reason": str(reason or ""),
+                "actual_focus_observation_id": _evidence_actual_focus_observation_id(client, row),
+                "rule": "evidence_only_no_production_semantic_override",
+            },
+        )
+        _emit_row_evidence(
+            client,
+            row,
+            "PERSIST_PROJECTED",
+            phase="persist",
+            payload={
+                "row_step_index": step_idx,
+                "projection": "legacy_row_unchanged",
+                "actual_focus_observation_id": _evidence_actual_focus_observation_id(client, row),
+            },
         )
         if persistence_stop or (step_idx % phase_ctx.checkpoint_every == 0):
             _save_focusable_inventory(client, phase_ctx.output_path)
@@ -16175,6 +16341,15 @@ def collect_tab_rows(
     rows: list[dict] = []
     _ensure_focusable_inventory(client, output_path)
     scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    evidence_runtime = getattr(client, "evidence_runtime", None)
+    if bool(getattr(evidence_runtime, "is_enabled", False)):
+        try:
+            evidence_runtime.start_scenario(
+                scenario_id,
+                plugin_family=str(tab_cfg.get("plugin_family", "") or tab_cfg.get("scenario_type", "") or ""),
+            )
+        except Exception:
+            pass
     crash_attempt = _crash_guard_attempt_for_tab_cfg(tab_cfg)
     _reset_crash_guard_latch(client, scenario_id=scenario_id, attempt=crash_attempt)
     setattr(
@@ -16238,6 +16413,24 @@ def collect_tab_rows(
         _save_focusable_inventory(client, output_path)
         _save_focusable_coverage(client, output_path, all_rows)
         _maybe_execute_coverage_probe_engine(client, dev, output_path, str(tab_cfg.get("scenario_id", "") or ""))
+        if bool(getattr(evidence_runtime, "is_enabled", False)):
+            try:
+                failure = str(start_result.failure_reason or "")
+                # Preserve the start pipeline's existing anchor-state fact in the
+                # shadow ledger.  This does not change the legacy terminal row.
+                anchor_failure = (not bool(start_result.anchor_stable)) or "anchor" in failure.lower()
+                terminal_reason = "ANCHOR_ABORT" if anchor_failure else "SCENARIO_OPEN_FAILED"
+                evidence_runtime.emit(
+                    "SCENARIO_TERMINAL",
+                    producer="runner",
+                    phase="scenario_start",
+                    payload={"reason": terminal_reason, "legacy_reason": failure, "traversal_started": False},
+                )
+                if terminal_reason == "ANCHOR_ABORT":
+                    evidence_runtime.emit("ANCHOR_ABORT", producer="runner", phase="scenario_start", payload={"reason": failure})
+                evidence_runtime.emit("ABORTED_BEFORE_COLLECTION", producer="runner", phase="scenario_start", payload={"reason": failure})
+            except Exception:
+                pass
         return rows
     if not start_result.should_enter_main_loop:
         if start_result.entry_contract_reason == _ENTRY_REASON_SPECIAL_STATE_HANDLED:
@@ -16335,5 +16528,20 @@ def collect_tab_rows(
             "traversal_finished": True,
         },
     )
+    if bool(getattr(evidence_runtime, "is_enabled", False)):
+        try:
+            evidence_runtime.emit(
+                "SCENARIO_TERMINAL",
+                producer="runner",
+                phase="scenario_end",
+                payload={
+                    "reason": "TRAVERSAL_STOPPED" if state.stop_reason else "TRAVERSAL_COMPLETED",
+                    "legacy_stop_reason": str(state.stop_reason or ""),
+                    "main_steps_completed": int(main_steps_completed),
+                    "traversal_started": True,
+                },
+            )
+        except Exception:
+            pass
 
     return rows

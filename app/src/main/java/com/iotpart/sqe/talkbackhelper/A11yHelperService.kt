@@ -90,6 +90,8 @@ class A11yHelperService : AccessibilityService() {
         if (type != AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED &&
             type != AccessibilityEvent.TYPE_VIEW_FOCUSED &&
             type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+            type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
+            type != AccessibilityEvent.TYPE_VIEW_SELECTED &&
             type != AccessibilityEvent.TYPE_ANNOUNCEMENT
         ) {
             return
@@ -114,6 +116,11 @@ class A11yHelperService : AccessibilityService() {
             val announcement = extractAnnouncementText(event)
             if (announcement.isNotBlank()) {
                 Log.i(TAG, "A11Y_ANNOUNCEMENT: $announcement")
+                A11yEvidence.emit(
+                    "ANNOUNCEMENT_OBSERVED",
+                    A11yHistoryManager.activeSmartNextReqId,
+                    JSONObject().put("text", announcement).put("eventType", type)
+                )
             }
         }
 
@@ -122,7 +129,18 @@ class A11yHelperService : AccessibilityService() {
         }
 
         runCatching {
-            A11yStateStore.update(FocusSnapshot.fromNode(node))
+            val snapshot = FocusSnapshot.fromNode(node)
+            A11yStateStore.update(snapshot)
+            A11yEvidence.emit(
+                "ACCESSIBILITY_EVENT",
+                A11yHistoryManager.activeSmartNextReqId,
+                JSONObject().put("eventType", type).put("eventClass", event.className?.toString()).put("focus", snapshot.toJson())
+            )
+            A11yEvidence.emit(
+                "ACCESSIBILITY_FOCUS_EVENT",
+                A11yHistoryManager.activeSmartNextReqId,
+                JSONObject().put("eventType", type).put("focus", snapshot.toJson())
+            )
         }.onFailure {
             Log.e(TAG, "Failed to capture focus snapshot", it)
         }
@@ -208,6 +226,28 @@ class A11yHelperService : AccessibilityService() {
             "[DEBUG][TARGET_ACTION][service_start] reqId=$reqId accessibilityAction=$actionLabel target='${query.targetName}' type='${query.targetType}'"
         )
         val outcome = A11yTargetFinder.findAndPerformAction(rootInActiveWindow, query, action, reqId)
+        A11yEvidence.emit(
+            "TARGET_RESOLVED",
+            reqId,
+            JSONObject().apply {
+                put("targetName", query.targetName)
+                put("targetType", query.targetType)
+                put("resolvedTarget", outcome.target?.let { FocusSnapshot.fromNode(it).toJson() } ?: JSONObject.NULL)
+            }
+        )
+        A11yEvidence.emit(
+            "ACTION_API_RESULT",
+            reqId,
+            JSONObject().put("success", outcome.success).put("reason", outcome.reason).put("action", actionLabel)
+        )
+        if (outcome.success) {
+            A11yEvidence.emit(
+                "FOCUS_COMMIT_CLAIMED",
+                reqId,
+                JSONObject().put("claim", "target_action_success").put("action", actionLabel)
+            )
+        }
+        recordActionFocusEvidence(reqId)
         val resultJson = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
             put("reqId", reqId)
@@ -245,7 +285,13 @@ class A11yHelperService : AccessibilityService() {
             TAG,
             "[DEBUG][TARGET_ACTION][broadcast_result] reqId=$reqId success=${outcome.success} reason='$safeReason' attemptedResourceId='$safeResourceId' attemptedClassName='$safeClassName'"
         )
+        A11yEvidence.attach(resultJson, reqId)
         Log.i(TAG, "TARGET_ACTION_RESULT $resultJson")
+        A11yEvidence.emit(
+            "HELPER_ACK_SENT",
+            reqId,
+            JSONObject().put("resultTag", "TARGET_ACTION_RESULT").put("success", outcome.success)
+        )
         if (outcome.success && outcome.target != null) {
             A11yStateStore.update(FocusSnapshot.fromNode(outcome.target))
         }
@@ -358,6 +404,7 @@ class A11yHelperService : AccessibilityService() {
             success -> "content_like_focused_row"
             else -> "focus_action_failed"
         }
+        recordActionFocusEvidence(reqId)
         val resultJson = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
             put("reqId", reqId)
@@ -383,7 +430,13 @@ class A11yHelperService : AccessibilityService() {
             TAG,
             "[FOCUS_IN_BOUNDS] reqId=$reqId success=$success reason='$reason' bounds='${targetRegion.toShortString()}' candidates=${candidates.size} target='${target?.label.orEmpty().replace("\n", " ")}'"
         )
+        A11yEvidence.attach(resultJson, reqId)
         Log.i(TAG, "TARGET_ACTION_RESULT $resultJson")
+        A11yEvidence.emit(
+            "HELPER_ACK_SENT",
+            reqId,
+            JSONObject().put("resultTag", "TARGET_ACTION_RESULT").put("success", success)
+        )
         if (success && actualFocusedNode != null) {
             A11yStateStore.update(FocusSnapshot.fromNode(actualFocusedNode))
         }
@@ -470,6 +523,39 @@ class A11yHelperService : AccessibilityService() {
         val hasFocusableDescendant: Boolean,
         val source: String
     )
+
+    private val evidenceObservationHandler = Handler()
+
+    /**
+     * Evidence-only focus snapshots.  Posted callbacks neither alter focus nor
+     * participate in navigation/stop/reporting logic.
+     */
+    private fun recordActionFocusEvidence(reqId: String) {
+        if (!A11yEvidence.hasCorrelation(reqId)) return
+        fun capture(eventType: String, source: String, offsetMs: Long) {
+            val node = resolveCurrentFocusNode()
+            val payload = JSONObject().apply {
+                put("captureSource", source)
+                put("offsetMs", offsetMs)
+                put("observation", node?.let {
+                    FocusSnapshot.fromNode(it).toJson().apply {
+                        put("windowId", it.windowId)
+                        put("nodePath", JSONObject.NULL)
+                        put("parentPath", JSONObject.NULL)
+                        put("childIndex", JSONObject.NULL)
+                    }
+                } ?: JSONObject.NULL)
+            }
+            A11yEvidence.emit(eventType, reqId, payload)
+        }
+        capture("POST_ACTION_OBSERVATION", "helper_immediate", 0L)
+        listOf(100L, 300L, 1000L).forEach { offset ->
+            evidenceObservationHandler.postDelayed(
+                { capture("DELAYED_OBSERVATION", "helper_delayed", offset) },
+                offset
+            )
+        }
+    }
 
     private fun parseShortBounds(value: String): Rect? {
         val numbers = Regex("-?\\d+").findAll(value).mapNotNull { it.value.toIntOrNull() }.toList()
@@ -766,6 +852,24 @@ class A11yHelperService : AccessibilityService() {
             }
 
             val detail = outcome.reason
+            A11yEvidence.emit(
+                "TARGET_RESOLVED",
+                reqId,
+                JSONObject().put("resolvedTarget", outcome.target?.let { FocusSnapshot.fromNode(it).toJson() } ?: JSONObject.NULL)
+            )
+            A11yEvidence.emit(
+                "ACTION_API_RESULT",
+                reqId,
+                JSONObject().put("success", outcome.success).put("reason", detail).put("action", "SMART_NEXT")
+            )
+            if (outcome.success) {
+                A11yEvidence.emit(
+                    "FOCUS_COMMIT_CLAIMED",
+                    reqId,
+                    JSONObject().put("claim", "navigator_outcome_success").put("reason", detail)
+                )
+            }
+            recordActionFocusEvidence(reqId)
             val normalizedStatus = normalizeSmartNavStatus(outcome.success, detail)
             val flags = buildSmartNavFlags(detail)
             val resolvedFocusNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)

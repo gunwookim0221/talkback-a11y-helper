@@ -20,6 +20,7 @@ ACTION_SCROLL = "com.iotpart.sqe.talkbackhelper.SCROLL"
 ACTION_SET_TEXT = "com.iotpart.sqe.talkbackhelper.SET_TEXT"
 ACTION_PING = "com.iotpart.sqe.talkbackhelper.PING"
 ACTION_COMMAND = "com.iotpart.sqe.talkbackhelper.ACTION_COMMAND"
+ACTION_EVIDENCE_EVENTS = "com.iotpart.sqe.talkbackhelper.EVIDENCE_EVENTS"
 
 LOG_TAG = "A11Y_HELPER"
 LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]

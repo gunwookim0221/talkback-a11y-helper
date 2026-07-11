@@ -9,6 +9,7 @@ from typing import Any
 
 from talkback_lib.constants import (
     ACTION_GET_FOCUS,
+    ACTION_EVIDENCE_EVENTS,
     ACTION_PING,
     ACTION_SMART_NEXT,
     RED_TEXT,
@@ -165,7 +166,18 @@ class HelperBridge:
             f"[SMART_NEXT_TRACE] before_broadcast action={ACTION_SMART_NEXT} "
             f"req_id={req_id} fallback=false full_adb_command=\"{full_cmd}\""
         )
-        raw_stdout = self._client._broadcast(dev, ACTION_SMART_NEXT, ["--es", "reqId", req_id])
+        correlation_extras = []
+        get_correlation_extras = getattr(self._client, "_evidence_correlation_extras", None)
+        if callable(get_correlation_extras):
+            try:
+                correlation_extras = list(get_correlation_extras() or [])
+            except Exception:
+                correlation_extras = []
+        raw_stdout = self._client._broadcast(
+            dev,
+            ACTION_SMART_NEXT,
+            ["--es", "reqId", req_id, *correlation_extras],
+        )
         self._client._safe_trace_print(
             f"[SMART_NEXT_TRACE] adb_raw_response req_id={req_id} raw_stdout=\"{raw_stdout}\""
         )
@@ -180,6 +192,19 @@ class HelperBridge:
             f"[SMART_NEXT_TRACE] parsed_broadcast_result req_id={req_id} raw_json={result}"
         )
         return result
+
+    def request_evidence_events(self, dev: Any, req_id: str) -> dict[str, Any]:
+        """Read an optional Helper evidence snapshot; never affects navigation results."""
+        # Do not clear logcat here: delayed per-event evidence is collected by
+        # the Runner immediately before this legacy snapshot request.
+        self._client._broadcast(dev, ACTION_EVIDENCE_EVENTS, ["--es", "reqId", req_id])
+        return self._client._read_log_result(
+            dev,
+            "EVIDENCE_EVENTS_RESULT",
+            req_id,
+            wait_seconds=0.1,
+            poll_interval_sec=0.05,
+        )
 
     @staticmethod
     def normalize_smart_next_status(result: dict[str, Any]) -> tuple[str, bool, str, set[str]]:

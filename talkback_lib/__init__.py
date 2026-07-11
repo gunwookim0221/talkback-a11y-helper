@@ -11,6 +11,7 @@ import subprocess
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -112,6 +113,17 @@ class A11yAdbClient:
         self._last_action_payload: dict[str, Any] | None = None
         self._last_action_req_id: str = ""
         self._last_action_timestamp: float = 0.0
+        # Evidence is an opt-in side channel.  It is deliberately not consulted by
+        # any production navigation, stop, or reporting decision.
+        self.evidence_runtime: Any | None = None
+        self._evidence_active_transaction: dict[str, Any] | None = None
+        self._evidence_last_focus_node: dict[str, Any] = {}
+        self._evidence_transaction_by_step: dict[str, str] = {}
+        self._evidence_actual_observation_by_step: dict[str, str] = {}
+        self._evidence_seen_helper_event_ids: set[str] = set()
+        self._evidence_active_request_id = ""
+        self._evidence_pending_helper_events: list[dict[str, Any]] = []
+        self._evidence_pending_helper_event_ids: set[str] = set()
         self.log_level = LOG_LEVEL if LOG_LEVEL in LOG_LEVEL_ORDER else "NORMAL"
         self._adb_device = AdbDevice(
             adb_path=self.adb_path,
@@ -122,6 +134,356 @@ class A11yAdbClient:
         self._helper_bridge = HelperBridge(client=self)
         self._focus_service = FocusService(client=self)
         self._step_collection_service = StepCollectionService(client=self)
+
+    def set_evidence_runtime(self, runtime: Any | None) -> None:
+        """Attach an optional shadow evidence runtime without changing client API semantics."""
+        self.evidence_runtime = runtime
+        add_hook = getattr(runtime, "add_finalize_hook", None)
+        if callable(add_hook):
+            add_hook(self._evidence_finalize_pending)
+
+    def _evidence_is_enabled(self) -> bool:
+        return bool(getattr(self.evidence_runtime, "is_enabled", False))
+
+    def _evidence_set_step(self, step_index: int | str | None, phase: str = "main_loop") -> None:
+        runtime = self.evidence_runtime
+        if self._evidence_is_enabled() and runtime is not None:
+            runtime.set_step(step_index, phase=phase)
+
+    def _evidence_begin_step_action(self, action_type: str, *, direction: str = "next") -> dict[str, Any] | None:
+        runtime = self.evidence_runtime
+        if not self._evidence_is_enabled() or runtime is None:
+            return None
+        transaction = runtime.begin_transaction(action_type, phase="main_loop", payload={"direction": direction})
+        self._evidence_active_transaction = transaction
+        runtime.observe(
+            self._evidence_last_focus_node or None,
+            source="runner_last_known_focus",
+            transaction=transaction,
+            phase="main_loop",
+            event_type="PRE_FOCUS_OBSERVED",
+            capture_status="captured" if self._evidence_last_focus_node else "unavailable",
+            payload={"observation_kind": "cached_pre_action"},
+        )
+        runtime.emit(
+            "TARGET_REQUESTED",
+            producer="runner",
+            phase="main_loop",
+            transaction=transaction,
+            payload={"request_kind": "direction", "direction": direction},
+        )
+        return transaction
+
+    def _evidence_correlation_extras(self) -> list[str]:
+        runtime = self.evidence_runtime
+        if not self._evidence_is_enabled() or runtime is None:
+            return []
+        return runtime.correlation_extras(self._evidence_active_transaction)
+
+    def _evidence_action_sent(self, *, action: str, req_id: str) -> None:
+        runtime = self.evidence_runtime
+        if self._evidence_is_enabled() and runtime is not None and self._evidence_active_transaction:
+            self._evidence_active_request_id = req_id
+            runtime.emit(
+                "ACTION_SENT",
+                producer="runner",
+                phase="main_loop",
+                transaction=self._evidence_active_transaction,
+                payload={"command_type": action, "request_id": req_id},
+            )
+
+    def _evidence_helper_ack(self, result: dict[str, Any], *, req_id: str, source: str = "inline", emit_ack: bool = True) -> dict[str, int]:
+        runtime = self.evidence_runtime
+        stats = {"parsed": 0, "merged": 0, "dedup": 0}
+        if self._evidence_is_enabled() and runtime is not None and self._evidence_active_transaction:
+            helper_events = self._coerce_evidence_events(result.get("evidenceEvents") if isinstance(result, dict) else None)
+            merged_count = 0
+            duplicate_count = 0
+            if helper_events:
+                for helper_event in helper_events:
+                    if not isinstance(helper_event, dict):
+                        continue
+                    helper_event_id = str(helper_event.get("eventId") or "").strip()
+                    if helper_event_id and helper_event_id in self._evidence_seen_helper_event_ids:
+                        duplicate_count += 1
+                        continue
+                    if helper_event_id:
+                        self._evidence_seen_helper_event_ids.add(helper_event_id)
+                    try:
+                        helper_payload = helper_event.get("payload") or {}
+                        if not isinstance(helper_payload, dict):
+                            helper_payload = {"raw_payload": helper_payload}
+                        runtime.emit(
+                            str(helper_event.get("event_type") or helper_event.get("eventType") or "HELPER_EVIDENCE"),
+                            producer="helper",
+                            phase="helper",
+                            transaction=self._evidence_active_transaction,
+                            payload={
+                                **helper_payload,
+                                "helper_event_source": source,
+                                "helper_event_id": helper_event_id,
+                                "helper_event_timestamp": helper_event.get("timestamp"),
+                                "helper_payload": helper_payload,
+                                "correlation": helper_event.get("correlation") or {},
+                            },
+                            runner_received_wall_time_utc=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                        )
+                        merged_count += 1
+                    except Exception:
+                        continue
+            self._safe_trace_print(
+                f"[EVIDENCE][helper_ack] requestId={req_id} "
+                f"transactionId={self._evidence_active_transaction.get('transaction_id', '')} "
+                f"source={source} inlineEvidenceCount={len(helper_events)} mergedCount={merged_count} duplicateCount={duplicate_count}"
+            )
+            if emit_ack:
+                runtime.emit(
+                    "HELPER_ACK_RECEIVED",
+                    producer="runner",
+                    phase="main_loop",
+                    transaction=self._evidence_active_transaction,
+                    payload={"request_id": req_id, "helper_result": self._json_safe_value(result)},
+                    runner_received_wall_time_utc=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                )
+            stats = {"parsed": len(helper_events), "merged": merged_count, "dedup": duplicate_count}
+        return stats
+
+    def _evidence_collect_helper_logcat_events(self, dev: Any, *, req_id: str | None = None) -> dict[str, int]:
+        """Merge bounded, individual Helper records without consuming production logs."""
+        runtime = self.evidence_runtime
+        active = self._evidence_active_transaction
+        if not self._evidence_is_enabled() or runtime is None:
+            return {"logcat": 0, "parsed": 0, "merged": 0, "dedup": 0, "incomplete": 0}
+        result = {"raw": 0, "prefix": 0, "json": 0, "request": 0, "transaction": 0, "logcat": 0, "parsed": 0, "merged": 0, "dedup": 0, "incomplete": 0}
+        drop_reasons: dict[str, int] = {}
+        command = f"{self.adb_path} logcat -d {' '.join(LOGCAT_FILTER_SPECS)}"
+        active_tx_id = str(active.get("transaction_id") if active else "")
+        active_state = str(active.get("state") if active else "missing")
+        self._safe_trace_print(
+            f"[EVIDENCE][collector_start] requestId={req_id or ''} transactionId={active_tx_id} "
+            f"cursor=buffer_current collectorCommand=\"{command}\" transactionState={active_state}"
+        )
+        try:
+            logs = self._logcat_reader.dump_filtered(dev=dev)
+        except Exception as exc:
+            self._safe_trace_print(
+                f"[EVIDENCE][collector_error] exceptionType={type(exc).__name__} message={str(exc)[:240]!r} "
+                f"command=\"{command}\" outputSummary=''"
+            )
+            return result
+        raw_lines = logs.splitlines()
+        result["raw"] = len(raw_lines)
+        result["prefix"] = sum(1 for line in raw_lines if "EVIDENCE_HELPER_EVENT" in line)
+        payloads = self._extract_all_payloads(logs, "EVIDENCE_HELPER_EVENT")
+        for payload in payloads:
+            try:
+                helper_event = self._parse_json_payload(payload, "EVIDENCE_HELPER_EVENT")
+            except Exception:
+                result["incomplete"] += 1
+                drop_reasons["malformed"] = drop_reasons.get("malformed", 0) + 1
+                continue
+            result["json"] += 1
+            event_req_id = str(helper_event.get("requestId") or helper_event.get("reqId") or "")
+            correlation = helper_event.get("correlation") or {}
+            helper_tx_id = str(helper_event.get("transactionId") or (correlation.get("transaction_id") if isinstance(correlation, dict) else "") or "")
+            transaction = runtime.transaction(helper_tx_id) if helper_tx_id else None
+            request_matches = not req_id or event_req_id == req_id or (transaction is not None and helper_tx_id != active_tx_id)
+            if not request_matches:
+                drop_reasons["unrelated_request"] = drop_reasons.get("unrelated_request", 0) + 1
+                continue
+            result["request"] += 1
+            if transaction is None and active is not None and (not req_id or event_req_id == req_id):
+                transaction = active
+            if transaction is None:
+                helper_event_id = str(helper_event.get("eventId") or "")
+                if helper_event_id and helper_event_id in self._evidence_pending_helper_event_ids:
+                    result["dedup"] += 1
+                    drop_reasons["pending_duplicate"] = drop_reasons.get("pending_duplicate", 0) + 1
+                    continue
+                self._evidence_pending_helper_events.append({"event": helper_event, "request_id": event_req_id, "transaction_id": helper_tx_id})
+                if helper_event_id:
+                    self._evidence_pending_helper_event_ids.add(helper_event_id)
+                drop_reasons["transaction_not_found_queued"] = drop_reasons.get("transaction_not_found_queued", 0) + 1
+                self._safe_trace_print(
+                    f"[EVIDENCE][late_event] eventId={helper_event.get('eventId', '')} transactionId={helper_tx_id} "
+                    "state=missing action=queue"
+                )
+                continue
+            result["transaction"] += 1
+            result["logcat"] += 1
+            if isinstance(helper_event.get("payload"), dict) and helper_event["payload"].get("transportTruncated"):
+                result["incomplete"] += 1
+            helper_event["reqId"] = event_req_id
+            helper_event["eventType"] = helper_event.get("eventType") or helper_event.get("event_type")
+            previous = self._evidence_active_transaction
+            self._evidence_active_transaction = transaction
+            stats = self._evidence_helper_ack({"evidenceEvents": [helper_event]}, req_id=event_req_id, source="logcat_event", emit_ack=False)
+            self._evidence_active_transaction = previous
+            result["parsed"] += stats["parsed"]
+            result["merged"] += stats["merged"]
+            result["dedup"] += stats["dedup"]
+            state = str(transaction.get("state") or "open")
+            self._safe_trace_print(
+                f"[EVIDENCE][late_event] eventId={helper_event.get('eventId', '')} transactionId={helper_tx_id} "
+                f"state={state} action={'append' if stats['merged'] else 'dedup'}"
+            )
+        pending_stats = self._evidence_retry_pending()
+        result["merged"] += pending_stats["merged"]
+        result["dedup"] += pending_stats["dedup"]
+        self._safe_trace_print(
+            f"[EVIDENCE][collector_pipeline] rawLogLineCount={result['raw']} prefixMatchedCount={result['prefix']} "
+            f"jsonParsedCount={result['json']} requestMatchedCount={result['request']} "
+            f"transactionMatchedCount={result['transaction']} dedupAcceptedCount={max(0, result['parsed'] - result['dedup'])} "
+            f"ledgerAppendedCount={result['merged']} dropReasons={drop_reasons}"
+        )
+        return result
+
+    def _evidence_retry_pending(self) -> dict[str, int]:
+        runtime = self.evidence_runtime
+        stats = {"merged": 0, "dedup": 0}
+        if not self._evidence_is_enabled() or runtime is None or not self._evidence_pending_helper_events:
+            return stats
+        remaining: list[dict[str, Any]] = []
+        for item in self._evidence_pending_helper_events:
+            transaction = runtime.transaction(str(item.get("transaction_id") or ""))
+            if transaction is None:
+                remaining.append(item)
+                continue
+            pending_event_id = str(item.get("event", {}).get("eventId") or "") if isinstance(item.get("event"), dict) else ""
+            previous = self._evidence_active_transaction
+            self._evidence_active_transaction = transaction
+            merged = self._evidence_helper_ack(
+                {"evidenceEvents": [item["event"]]},
+                req_id=str(item.get("request_id") or ""),
+                source="logcat_event",
+                emit_ack=False,
+            )
+            self._evidence_active_transaction = previous
+            stats["merged"] += merged["merged"]
+            stats["dedup"] += merged["dedup"]
+            if pending_event_id:
+                self._evidence_pending_helper_event_ids.discard(pending_event_id)
+        self._evidence_pending_helper_events = remaining
+        return stats
+
+    def _evidence_finalize_pending(self) -> None:
+        if not self._evidence_is_enabled():
+            return
+        self._evidence_collect_helper_logcat_events(None, req_id=None)
+        self._evidence_retry_pending()
+        runtime = self.evidence_runtime
+        for item in self._evidence_pending_helper_events:
+            event = item.get("event") if isinstance(item.get("event"), dict) else {}
+            runtime.emit(
+                "ORPHAN_HELPER_EVIDENCE",
+                producer="helper",
+                phase="finalize",
+                payload={
+                    "reason": "transaction_not_found",
+                    "helper_event_id": event.get("eventId"),
+                    "helper_event_type": event.get("eventType") or event.get("event_type"),
+                    "request_id": item.get("request_id"),
+                    "transaction_id": item.get("transaction_id"),
+                },
+            )
+            self._safe_trace_print(
+                f"[EVIDENCE][late_event] eventId={event.get('eventId', '')} transactionId={item.get('transaction_id', '')} "
+                "state=missing action=orphan"
+            )
+        self._evidence_pending_helper_events.clear()
+        self._evidence_pending_helper_event_ids.clear()
+
+    def _evidence_fetch_helper_events(self, dev: Any, *, req_id: str) -> None:
+        """Best-effort side-channel drain after normal focus/announcement collection."""
+        if not self._evidence_is_enabled() or not req_id:
+            return
+        try:
+            logcat_stats = self._evidence_collect_helper_logcat_events(dev, req_id=req_id)
+            result = self._helper_bridge.request_evidence_events(dev, req_id)
+            events = self._coerce_evidence_events(result.get("evidenceEvents") if isinstance(result, dict) else None)
+            snapshot_stats = self._evidence_helper_ack({"evidenceEvents": events}, req_id=req_id, source="snapshot") if events else {"parsed": 0, "merged": 0, "dedup": 0}
+            self._safe_trace_print(
+                f"[EVIDENCE][snapshot] requestedKey={req_id} returnedCount={len(events)} parsedCount={snapshot_stats['parsed']} "
+                f"mergedCount={snapshot_stats['merged']} duplicateCount={snapshot_stats['dedup']} "
+                f"logcatEventCount={logcat_stats['logcat']}"
+            )
+        except Exception as exc:
+            self._safe_trace_print(f"[EVIDENCE][snapshot] requestedKey={req_id} error={type(exc).__name__}")
+
+    @staticmethod
+    def _coerce_evidence_events(value: Any) -> list[dict[str, Any]]:
+        """Accept the optional Helper field whether logcat supplied JSON or a decoded list."""
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except (TypeError, ValueError):
+                return []
+        if not isinstance(value, list):
+            return []
+        return [item for item in value if isinstance(item, dict)]
+
+    def _evidence_complete_step_action(self, step: dict[str, Any], focus_node: dict[str, Any], dev: Any = None) -> None:
+        runtime = self.evidence_runtime
+        transaction = self._evidence_active_transaction
+        if not self._evidence_is_enabled() or runtime is None or not transaction:
+            if isinstance(focus_node, dict) and focus_node:
+                self._evidence_last_focus_node = dict(focus_node)
+            return
+        smart_result = self.last_smart_nav_result if isinstance(self.last_smart_nav_result, dict) else {}
+        self._evidence_fetch_helper_events(dev, req_id=str(smart_result.get("reqId") or ""))
+        observation = runtime.observe(
+            focus_node,
+            source="runner_focus_payload",
+            transaction=transaction,
+            phase="main_loop",
+            event_type="POST_FOCUS_OBSERVED",
+            capture_status="captured" if focus_node else "unavailable",
+            payload={"focus_payload_source": str(step.get("focus_payload_source", "") or "")},
+        )
+        step_key = str(step.get("step_index", "") or "")
+        if observation is not None and step_key:
+            self._evidence_actual_observation_by_step[step_key] = observation.observation_id
+        announcement = str(step.get("merged_announcement", "") or "").strip()
+        if announcement:
+            runtime.emit(
+                "ANNOUNCEMENT_OBSERVED",
+                producer="runner",
+                phase="main_loop",
+                transaction=transaction,
+                payload={"text": announcement, "normalized_text": self.normalize_for_comparison(announcement), "association": "step_collection"},
+            )
+        runtime.emit(
+            "FOCUS_STABILITY_WINDOW_CLOSED",
+            producer="runner",
+            phase="main_loop",
+            transaction=transaction,
+            payload={
+                "stability": "INDETERMINATE",
+                "window_mode": "immediate_only",
+                "observation_id": observation.observation_id if observation else "",
+                "reason": "shadow_non_blocking_no_additional_reads",
+            },
+        )
+        shadow = runtime.reduce_shadow(str(transaction.get("transaction_id") or ""))
+        runtime.emit(
+            "SHADOW_ACTION_REDUCED",
+            producer="runner",
+            phase="main_loop",
+            transaction=transaction,
+            payload=shadow,
+        )
+        runtime.close_transaction(transaction, status="completed", phase="main_loop", payload={"shadow_verdict": shadow.get("verdict", "INDETERMINATE")})
+        if isinstance(focus_node, dict) and focus_node:
+            self._evidence_last_focus_node = dict(focus_node)
+        if step_key:
+            self._evidence_transaction_by_step[step_key] = str(transaction.get("transaction_id", "") or "")
+        self._evidence_active_transaction = None
+
+    def _evidence_transaction_for_step(self, step_index: Any) -> str:
+        return self._evidence_transaction_by_step.get(str(step_index or ""), "")
+
+    def _evidence_actual_observation_for_step(self, step_index: Any) -> str:
+        return self._evidence_actual_observation_by_step.get(str(step_index or ""), "")
 
     def _is_debug_log_enabled(self) -> bool:
         return LOG_LEVEL_ORDER.get(self.log_level, 1) >= LOG_LEVEL_ORDER["DEBUG"]
@@ -311,6 +673,12 @@ class A11yAdbClient:
         cmd = ["shell", "am", "broadcast", "-a", action, "-p", self.package_name]
         if extras:
             cmd.extend(extras)
+        # Unknown extras are ignored by older Helper APKs.  Keeping this at the
+        # transport boundary makes all existing commands correlation-capable
+        # without changing their public signatures or result semantics.
+        correlation_extras = self._evidence_correlation_extras()
+        if correlation_extras and "evidenceTransactionId" not in cmd:
+            cmd.extend(correlation_extras)
         return self._run(cmd, dev=dev)
 
     @staticmethod
@@ -478,6 +846,8 @@ class A11yAdbClient:
         return LogcatReader.has_req_marker(log_text=log_text, prefix=prefix, req_id=req_id)
 
     def clear_logcat(self, dev: Any = None) -> str:
+        if self._evidence_is_enabled():
+            self._evidence_collect_helper_logcat_events(dev, req_id=self._evidence_active_request_id or None)
         return self._adb_device._clear_logcat_best_effort(dev=dev, timeout=1.5)
 
     def _take_snapshot(self, dev: Any, save_path: str) -> None:
@@ -1870,8 +2240,10 @@ class A11yAdbClient:
         def _attempt_smart_next() -> tuple[bool, dict[str, Any]]:
             req_id = str(uuid.uuid4())[:8]
             self._safe_trace_print(f"[SMART_NEXT_TRACE] req_id_generated req_id={req_id} source=move_focus_smart")
+            self._evidence_action_sent(action=ACTION_SMART_NEXT, req_id=req_id)
             result = self._helper_bridge._request_smart_next(dev=dev, req_id=req_id)
             self.last_smart_nav_result = result
+            self._evidence_helper_ack(result if isinstance(result, dict) else {}, req_id=req_id)
             normalized, terminal, _, _ = self._helper_bridge.normalize_smart_next_status(result)
             self.last_smart_nav_terminal = terminal
             self._safe_trace_print(

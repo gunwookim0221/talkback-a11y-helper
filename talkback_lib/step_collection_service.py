@@ -122,10 +122,20 @@ class StepCollectionService:
             f"[ANN][baseline] text='{baseline_announcement}' ts={baseline_announcement_ts:.3f}"
         )
         step: dict[str, Any] = create_base_step_row(step_index=step_index)
+        set_evidence_step = getattr(self.client, "_evidence_set_step", None)
+        begin_evidence_action = getattr(self.client, "_evidence_begin_step_action", None)
+        if callable(set_evidence_step):
+            try:
+                set_evidence_step(step_index, phase="main_loop")
+            except Exception:
+                pass
 
         if move:
             move_started = time.monotonic()
             try:
+                if callable(begin_evidence_action):
+                    action_type = "SMART_NEXT" if str(direction).strip().lower() == "next" else "SMART_PREVIOUS"
+                    begin_evidence_action(action_type, direction=direction)
                 if str(direction).strip().lower() == "next":
                     step["move_result"] = self.client.move_focus_smart(dev=dev, direction=direction)
                 else:
@@ -530,6 +540,13 @@ class StepCollectionService:
         )
         self.client._prev_step_merged_announcement = curr_merged
         self._snapshot_actual_focus_fields(step)
+        complete_evidence_action = getattr(self.client, "_evidence_complete_step_action", None)
+        if callable(complete_evidence_action):
+            try:
+                complete_evidence_action(step, safe_focus_node, dev=dev)
+            except Exception:
+                # Evidence is a side channel and must not influence the production row.
+                pass
 
         self.client._debug_print(
             f"[DEBUG][collect_focus_step] step={step_index} move={step['move_elapsed_sec']:.3f}s "
