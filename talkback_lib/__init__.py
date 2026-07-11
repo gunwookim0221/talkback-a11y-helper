@@ -472,6 +472,18 @@ class A11yAdbClient:
             transaction=transaction,
             payload=shadow,
         )
+        try:
+            shadow_v2 = runtime.reduce_identity_shadow(str(transaction.get("transaction_id") or ""))
+            if shadow_v2 is not None:
+                runtime.emit(
+                    "SHADOW_ACTION_REDUCED_V2",
+                    producer="runner",
+                    phase="main_loop",
+                    transaction=transaction,
+                    payload=shadow_v2,
+                )
+        except Exception as exc:
+            self._safe_trace_print(f"[EVIDENCE][identity_shadow_error] error={type(exc).__name__}")
         runtime.close_transaction(transaction, status="completed", phase="main_loop", payload={"shadow_verdict": shadow.get("verdict", "INDETERMINATE")})
         if isinstance(focus_node, dict) and focus_node:
             self._evidence_last_focus_node = dict(focus_node)

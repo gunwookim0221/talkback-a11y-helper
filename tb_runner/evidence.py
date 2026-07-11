@@ -19,6 +19,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from .evidence_identity import identity_shadow_enabled, reduce_shadow_v2
+
 
 EVIDENCE_SCHEMA_VERSION = "evidence-event-v1"
 EVIDENCE_ENABLED_ENV = "TB_EVIDENCE_LEDGER_ENABLED"
@@ -260,10 +262,14 @@ class EvidenceRuntime:
         run_id: str | None = None,
         warning_fn: Callable[[str], None] | None = None,
         enabled: bool = True,
+        identity_shadow: bool | None = None,
     ) -> None:
         prefix = Path(output_path).with_suffix("")
         self.run_id = run_id or f"run_{uuid.uuid4().hex}"
         self.enabled = bool(enabled)
+        self.identity_shadow_enabled = self.enabled and (
+            identity_shadow_enabled() if identity_shadow is None else bool(identity_shadow)
+        )
         self.warning_fn = warning_fn or (lambda _message: None)
         self.ledger = AppendOnlyEvidenceLedger(prefix.with_suffix(".evidence.jsonl"), warning_fn=self.warning_fn)
         self.manifest_path = prefix.with_suffix(".evidence_manifest.json")
@@ -457,6 +463,13 @@ class EvidenceRuntime:
     def reduce_shadow(self, transaction_id: str) -> dict[str, str]:
         events = [event for event in self._all_events if event.transaction_id == transaction_id]
         return reduce_shadow_events(events)
+
+    def reduce_identity_shadow(self, transaction_id: str) -> dict[str, Any] | None:
+        """Run V2 only when explicitly enabled; never influence legacy reduction."""
+        if not self.enabled or not self.identity_shadow_enabled:
+            return None
+        events = [event for event in self._all_events if event.transaction_id == transaction_id]
+        return reduce_shadow_v2(events)
 
     def write_manifest(self, manifest: Mapping[str, Any]) -> None:
         if not self.enabled:
