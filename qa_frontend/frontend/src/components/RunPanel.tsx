@@ -23,6 +23,10 @@ export interface RunPanelProps {
   setEnableCoverageProbe: (enabled: boolean) => void;
   shadowValidation: boolean;
   setShadowValidation: (enabled: boolean) => void;
+  evidenceLedger: boolean;
+  setEvidenceLedger: (enabled: boolean) => void;
+  identityShadowV2: boolean;
+  setIdentityShadowV2: (enabled: boolean) => void;
 }
 
 export function RunPanel({
@@ -44,6 +48,7 @@ export function RunPanel({
   setEnableCoverageProbe,
   shadowValidation,
   setShadowValidation,
+  evidenceLedger, setEvidenceLedger, identityShadowV2, setIdentityShadowV2,
 }: RunPanelProps) {
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [loadingDevices, setLoadingDevices] = useState(false);
@@ -133,6 +138,8 @@ export function RunPanel({
           scenario_ids,
           enable_coverage_probe: enableCoverageProbe,
           shadow_validation: plannedMode === 'full' && shadowValidation,
+          evidence_ledger: evidenceLedger,
+          identity_shadow_v2: identityShadowV2,
         });
         setBatchStatus(res);
       } catch (err: any) {
@@ -334,6 +341,15 @@ export function RunPanel({
                 Runs coverage-driven TalkBack probe after traversal to validate expected device/plugin content. Recommended for Full runs.
               </small>
             </div>
+            <label style={{ padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input type="checkbox" checked={evidenceLedger} onChange={e => { setEvidenceLedger(e.target.checked); if (!e.target.checked) setIdentityShadowV2(false); }} disabled={running} />
+              <span style={{ fontSize: '14px' }}>Evidence Ledger</span>
+            </label>
+            <label style={{ padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input type="checkbox" checked={identityShadowV2} onChange={e => { setIdentityShadowV2(e.target.checked); if (e.target.checked) setEvidenceLedger(true); }} disabled={running} />
+              <span style={{ fontSize: '14px' }}>Identity Shadow V2 (Experimental)</span>
+            </label>
+            <div style={{ padding: '0 8px', marginTop: '-4px' }}><small style={{ fontSize: '11px', color: 'var(--color-text-dim)' }}>Identity Shadow V2 requires Evidence Ledger and enables it automatically.</small></div>
             <label style={{ padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <input
                 type="checkbox"

@@ -146,6 +146,7 @@ def main() -> int:
     )
 
     log(f"[MAIN] script start (version={SCRIPT_VERSION}, log_level={LOG_LEVEL})")
+    log(f"[EVIDENCE][startup] env_ledger={os.environ.get('TB_EVIDENCE_LEDGER_ENABLED')!r} env_identity={os.environ.get('TB_EVIDENCE_IDENTITY_SHADOW_ENABLED')!r} ledger_enabled={evidence_enabled()} identity_enabled={os.environ.get('TB_EVIDENCE_IDENTITY_SHADOW_ENABLED') == '1'} output_path={output_path}")
     target_serial = context.serial
     client = A11yAdbClient(dev_serial=target_serial)
     evidence_runtime = None

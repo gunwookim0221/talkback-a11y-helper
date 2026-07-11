@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import subprocess
 import threading
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, TextIO
 
 from tb_runner.run_spec import RunSpec
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -26,10 +29,12 @@ def start_execution(
     log_path: Path,
     popen_factory: Callable[..., subprocess.Popen[str]] = subprocess.Popen,
 ) -> RunExecution:
+    env = spec.build_subprocess_env()
+    logger.info("[FEATURE_FLAGS][subprocess_env] TB_EVIDENCE_LEDGER_ENABLED=%s TB_EVIDENCE_IDENTITY_SHADOW_ENABLED=%s", env.get("TB_EVIDENCE_LEDGER_ENABLED"), env.get("TB_EVIDENCE_IDENTITY_SHADOW_ENABLED"))
     process = popen_factory(
         spec.build_script_command(script_path),
         cwd=cwd,
-        env=spec.build_subprocess_env(),
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -67,4 +72,3 @@ def _tee_output(process: subprocess.Popen[str], log_file: TextIO) -> None:
     except Exception as exc:
         log_file.write(f"\n[TEE ERROR] {exc}\n")
         log_file.flush()
-

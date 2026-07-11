@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
@@ -15,6 +16,7 @@ from .scenarios import list_scenarios
 from .mismatch_viewer import get_run_mismatch_summary
 from .crash_summary import build_crash_artifact_zip, build_crash_detail, build_crash_summary, safe_crash_event_dir
 from .shadow_reporting import open_shadow_folder
+from .evidence_identity_reporting import identity_shadow_report
 from .v10_corpus_analytics import load_corpus_dashboard, open_corpus_target
 from .plugin_discovery import PluginDiscoveryRequest, discover_plugins
 from .plugin_draft import (
@@ -48,6 +50,7 @@ from .plugin_onboarding_session import (
 
 
 app = FastAPI(title="TalkBack QA Local Control Panel", version="0.1.0")
+logger = logging.getLogger(__name__)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -66,6 +69,8 @@ class StartRunRequest(BaseModel):
     language_mode: str = "current"
     enable_coverage_probe: bool = False
     shadow_validation: bool = False
+    evidence_ledger: bool = False
+    identity_shadow_v2: bool = False
 
 
 class BatchDeviceReq(BaseModel):
@@ -81,6 +86,8 @@ class BatchStartReq(BaseModel):
     scenario_ids: list[str] | None = None
     enable_coverage_probe: bool = False
     shadow_validation: bool = False
+    evidence_ledger: bool = False
+    identity_shadow_v2: bool = False
 
 
 @app.get("/api/health")
@@ -357,6 +364,8 @@ def run_start(request: StartRunRequest) -> dict[str, object]:
             language_mode=language_mode,
             enable_coverage_probe=request.enable_coverage_probe,
             shadow_validation=request.shadow_validation,
+            evidence_ledger=request.evidence_ledger,
+            identity_shadow_v2=request.identity_shadow_v2,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -372,6 +381,7 @@ def run_stop() -> dict[str, object]:
 @app.post("/api/batch/start")
 def batch_start(request: BatchStartReq) -> dict[str, object]:
     try:
+        logger.info("[FEATURE_FLAGS][request] evidence_ledger=%s identity_shadow_v2=%s mode=%s", request.evidence_ledger, request.identity_shadow_v2, request.mode)
         devices = [d.model_dump() if hasattr(d, "model_dump") else d.dict() for d in request.devices]
         return global_batch_manager.start_batch(
             devices=devices, 
@@ -381,6 +391,8 @@ def batch_start(request: BatchStartReq) -> dict[str, object]:
             scenario_ids=request.scenario_ids,
             enable_coverage_probe=request.enable_coverage_probe,
             shadow_validation=request.shadow_validation,
+            evidence_ledger=request.evidence_ledger,
+            identity_shadow_v2=request.identity_shadow_v2,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -442,6 +454,17 @@ def run_device_shadow_open_folder(run_id: str, device_id: str) -> dict[str, obje
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"failed to open shadow folder: {exc}") from exc
     return {"ok": True, "path": str(path)}
+
+
+@app.get("/api/runs/{run_id}/devices/{device_id}/identity-shadow")
+def run_device_identity_shadow(run_id: str, device_id: str) -> dict[str, object]:
+    """Read-only V2 shadow report; unavailable evidence is a normal response."""
+    try:
+        return identity_shadow_report(run_id, device_id)
+    except FileNotFoundError:
+        return {"available": False, "schema": "identity-shadow-report-v1", "availability": "NO_EVIDENCE_FILE", "transactions": []}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/run/status")

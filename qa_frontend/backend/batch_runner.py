@@ -468,7 +468,7 @@ class BatchRunManager:
     def _sanitize_name(self, name: str) -> str:
         return re.sub(r'[^0-9a-zA-Z_-]+', '_', name)
 
-    def start_batch(self, devices: list[dict], mode: str, launch_mode: str = "clean", language_mode: str = "current", scenario_ids: list[str] | None = None, enable_coverage_probe: bool = False, shadow_validation: bool = False) -> dict:
+    def start_batch(self, devices: list[dict], mode: str, launch_mode: str = "clean", language_mode: str = "current", scenario_ids: list[str] | None = None, enable_coverage_probe: bool = False, shadow_validation: bool = False, evidence_ledger: bool = False, identity_shadow_v2: bool = False) -> dict:
         with self._lock:
             if self._state == "running":
                 raise RuntimeError("Batch run is already in progress")
@@ -485,6 +485,9 @@ class BatchRunManager:
             self._shadow_validation_requested = (
                 shadow_validation is True and str(mode).lower() == "full"
             )
+            self._evidence_ledger = bool(evidence_ledger or identity_shadow_v2)
+            self._identity_shadow_v2 = bool(identity_shadow_v2)
+            logger.info("[FEATURE_FLAGS][batch] batch_id=%s evidence_ledger=%s identity_shadow_v2=%s", self._batch_id, self._evidence_ledger, self._identity_shadow_v2)
             self._created_at = datetime.now(timezone.utc).isoformat()
             
             batch_dir = RUN_LOG_DIR / self._batch_id
@@ -682,6 +685,7 @@ class BatchRunManager:
             "state": self._state,
             "enable_coverage_probe": self._enable_coverage_probe,
             "shadow_validation": self._shadow_validation_requested,
+            "feature_flags": {"evidence_ledger": bool(getattr(self, "_evidence_ledger", False)), "identity_shadow_v2": bool(getattr(self, "_identity_shadow_v2", False))},
             "devices": self._devices
         }
         try:
@@ -834,6 +838,10 @@ class BatchRunManager:
                 "xlsx_path": xlsx_path,
                 "enable_coverage_probe": self._enable_coverage_probe,
                 "shadow_validation": self._shadow_validation_requested,
+                "feature_flags": {
+                    "evidence_ledger": self._evidence_ledger,
+                    "identity_shadow_v2": self._identity_shadow_v2,
+                },
                 "quality": quality,
                 "scenarios": parsed_summary.get("scenarios", []),
                 "process_status": parsed_summary.get("process_status"),
@@ -963,6 +971,7 @@ class BatchRunManager:
                     shadow_validation=self._shadow_validation_requested,
                 )
                 log_file.write(f"[BATCH] Config generated for {dev_serial}\n")
+                log_file.write(f"[FEATURE_FLAGS][runspec] serial={dev_serial} evidence_ledger={self._evidence_ledger} identity_shadow_v2={self._identity_shadow_v2}\n")
                 log_file.flush()
                 spec = RunSpec(
                     serial=dev_serial,
@@ -973,6 +982,8 @@ class BatchRunManager:
                     output_dir=dev_output_dir,
                     runtime_config_path=str(runtime_config["path"]),
                     enable_coverage_probe=self._enable_coverage_probe,
+                    evidence_ledger=self._evidence_ledger,
+                    identity_shadow_v2=self._identity_shadow_v2,
                 )
                 language_status, preflight = prepare_runtime(
                     spec,

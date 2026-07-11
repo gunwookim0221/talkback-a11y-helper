@@ -70,6 +70,8 @@ class RunManager:
         max_steps_overrides: dict[str, int] | None = None,
         enable_coverage_probe: bool = False,
         shadow_validation: bool = False,
+        evidence_ledger: bool = False,
+        identity_shadow_v2: bool = False,
     ) -> dict[str, object]:
         with self._lock:
             self._refresh_locked()
@@ -187,6 +189,8 @@ class RunManager:
                     scenario_ids=tuple(scenario_ids),
                     runtime_config_path=self._runtime_config_path,
                     enable_coverage_probe=enable_coverage_probe,
+                    evidence_ledger=evidence_ledger,
+                    identity_shadow_v2=identity_shadow_v2,
                 )
                 language_status, preflight = prepare_runtime(
                     spec,

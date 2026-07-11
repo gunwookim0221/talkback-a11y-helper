@@ -94,3 +94,6 @@ Routing을 활성화하거나 Promotion Readiness를 재판정하지 않는다.
 - [v8-coverage-driven-traversal.md](design/v8-coverage-driven-traversal.md)
 - [audit-v7-focusable-coverage-design.md](design/audit-v7-focusable-coverage-design.md)
 - [semantic-value-shadow-audit.md](design/semantic-value-shadow-audit.md)
+# Identity shadow frontend
+
+- [Identity Shadow V2 frontend integration](design/talkback-identity-shadow-frontend-integration.md)

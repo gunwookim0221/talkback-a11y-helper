@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { RecentRun, api, RecentBatch, RecentBatchDevice, CoverageProbeSummary, ShadowValidationSummary } from '../api';
 import { CrashIssuesPanel } from './CrashIssuesPanel';
+import { IdentityShadowCard } from './IdentityShadowCard';
 import { formatTime, formatDuration, healthClass, scenarioRunText, languageLabel, scenarioReasonText } from '../utils/formatters';
 
 type MismatchSummary = {
@@ -707,6 +708,8 @@ export function RecentRunsPanel({
             </div>
           </details>
         )}
+
+        {crashContext && <IdentityShadowCard runId={crashContext.runId} deviceId={crashContext.deviceId} />}
 
         {crashContext && (
           <CrashIssuesPanel runId={crashContext.runId} deviceId={crashContext.deviceId} />

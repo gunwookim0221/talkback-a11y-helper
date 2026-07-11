@@ -54,6 +54,17 @@ def test_run_spec_builds_subprocess_env_with_coverage_probe():
     assert "TB_V8_COVERAGE_PROBE" not in env_disabled
 
 
+def test_run_spec_evidence_flags_are_run_scoped_and_identity_implies_ledger():
+    base = {"TB_EVIDENCE_LEDGER_ENABLED": "1", "TB_EVIDENCE_IDENTITY_SHADOW_ENABLED": "1"}
+    assert "TB_EVIDENCE_LEDGER_ENABLED" not in RunSpec().build_subprocess_env(base)
+    ledger = RunSpec(evidence_ledger=True).build_subprocess_env({})
+    assert ledger["TB_EVIDENCE_LEDGER_ENABLED"] == "1"
+    assert "TB_EVIDENCE_IDENTITY_SHADOW_ENABLED" not in ledger
+    identity = RunSpec(identity_shadow_v2=True).build_subprocess_env({})
+    assert identity["TB_EVIDENCE_LEDGER_ENABLED"] == "1"
+    assert identity["TB_EVIDENCE_IDENTITY_SHADOW_ENABLED"] == "1"
+
+
 def test_prepare_runtime_scopes_android_serial(monkeypatch):
     monkeypatch.setenv("ANDROID_SERIAL", "PREVIOUS")
     seen = []

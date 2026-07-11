@@ -61,6 +61,16 @@ export type BatchDeviceRequest = {
   model: string;
 };
 
+export type IdentityShadowReport = {
+  available: boolean;
+  schema: 'identity-shadow-report-v1' | string;
+  availability: string;
+  legacy_available?: boolean;
+  v2_available?: boolean;
+  summary: { transactions: number; changed: number; incomplete: number; strong_physical: number; insufficient: number; v2_verdicts: Record<string, number> };
+  transactions: Array<{ transaction_id: string; step_index?: number | null; action_type?: string | null; legacy_verdict?: string | null; v2_verdict?: string | null; verdict_changed: boolean; target_relation?: string | null; temporal_relation?: string | null; confidence?: string | null; evidence_complete: boolean }>;
+};
+
 export type BatchStartRequest = {
   devices: BatchDeviceRequest[];
   mode: string;
@@ -1025,13 +1035,15 @@ export const api = {
     languageMode: 'current' | 'ko-KR' | 'en-US',
     enableCoverageProbe?: boolean,
     shadowValidation?: boolean,
+    evidenceLedger?: boolean,
+    identityShadowV2?: boolean,
   ) =>
     request<RunStatus>('/api/run/start', {
       method: 'POST',
-      body: JSON.stringify({ mode, scenario_ids: scenarioIds, launch_mode: launchMode, language_mode: languageMode, enable_coverage_probe: enableCoverageProbe, shadow_validation: shadowValidation }),
+      body: JSON.stringify({ mode, scenario_ids: scenarioIds, launch_mode: launchMode, language_mode: languageMode, enable_coverage_probe: enableCoverageProbe, shadow_validation: shadowValidation, evidence_ledger: evidenceLedger, identity_shadow_v2: identityShadowV2 }),
     }),
   stopRun: () => request<RunStatus>('/api/run/stop', { method: 'POST' }),
-  startBatch: async (data: { mode: string; devices: { serial: string; model: string }[]; launch_mode: string; language_mode: string; scenario_ids: string[]; enable_coverage_probe?: boolean; shadow_validation?: boolean }) => {
+  startBatch: async (data: { mode: string; devices: { serial: string; model: string }[]; launch_mode: string; language_mode: string; scenario_ids: string[]; enable_coverage_probe?: boolean; shadow_validation?: boolean; evidence_ledger?: boolean; identity_shadow_v2?: boolean }) => {
     return request<BatchStatus>('/api/batch/start', {
       method: 'POST',
       body: JSON.stringify(data)
@@ -1051,6 +1063,8 @@ export const api = {
       `/api/runs/${encodeURIComponent(runId)}/devices/${encodeURIComponent(deviceId)}/shadow/open-folder`,
       { method: 'POST' },
     ),
+  getIdentityShadow: (runId: string, deviceId: string) =>
+    request<IdentityShadowReport>(`/api/runs/${encodeURIComponent(runId)}/devices/${encodeURIComponent(deviceId)}/identity-shadow`),
   getRunDeviceCrashes: (runId: string, deviceId: string) =>
     request<CrashSummary>(`/api/runs/${encodeURIComponent(runId)}/devices/${encodeURIComponent(deviceId)}/crashes`),
   getRunDeviceCrash: (runId: string, deviceId: string, crashEventId: string) =>

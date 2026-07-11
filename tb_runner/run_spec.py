@@ -19,6 +19,8 @@ class RunSpec:
     output_dir: str | None = None
     runtime_config_path: str | None = None
     enable_coverage_probe: bool = False
+    evidence_ledger: bool = False
+    identity_shadow_v2: bool = False
 
     def build_script_command(self, script_path: str | Path) -> list[str]:
         command = [sys.executable, str(script_path)]
@@ -43,6 +45,14 @@ class RunSpec:
             env[RUNTIME_CONFIG_PATH_ENV] = self.runtime_config_path
         if self.enable_coverage_probe:
             env["TB_V8_COVERAGE_PROBE"] = "1"
+        if self.evidence_ledger or self.identity_shadow_v2:
+            env["TB_EVIDENCE_LEDGER_ENABLED"] = "1"
+        else:
+            env.pop("TB_EVIDENCE_LEDGER_ENABLED", None)
+        if self.identity_shadow_v2:
+            env["TB_EVIDENCE_IDENTITY_SHADOW_ENABLED"] = "1"
+        else:
+            env.pop("TB_EVIDENCE_IDENTITY_SHADOW_ENABLED", None)
         return env
 
 
@@ -57,4 +67,3 @@ class RunContext:
     @property
     def output_dir(self) -> str:
         return self.spec.output_dir or os.environ.get("TB_OUTPUT_DIR", "output")
-

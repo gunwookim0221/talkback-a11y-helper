@@ -33,6 +33,8 @@ export default function App() {
   const [plannedMode, setPlannedMode] = useState<'smoke' | 'full'>('smoke');
   const [enableCoverageProbe, setEnableCoverageProbe] = useState(false);
   const [shadowValidation, setShadowValidation] = useState(false);
+  const [evidenceLedger, setEvidenceLedger] = useState(false);
+  const [identityShadowV2, setIdentityShadowV2] = useState(false);
   const [fixTalkBackRunning, setFixTalkBackRunning] = useState(false);
   const [fixTalkBackMessage, setFixTalkBackMessage] = useState<string | null>(null);
   const preflightRef = useRef<HTMLElement | null>(null);
@@ -147,6 +149,8 @@ export default function App() {
         languageMode,
         enableCoverageProbe,
         mode === 'full' && shadowValidation,
+        evidenceLedger,
+        identityShadowV2,
       );
       await refreshRun();
     } catch (err) {
@@ -376,6 +380,10 @@ export default function App() {
           setEnableCoverageProbe={setEnableCoverageProbe}
           shadowValidation={shadowValidation}
           setShadowValidation={setShadowValidation}
+          evidenceLedger={evidenceLedger}
+          setEvidenceLedger={setEvidenceLedger}
+          identityShadowV2={identityShadowV2}
+          setIdentityShadowV2={setIdentityShadowV2}
         />
       </section>
 
