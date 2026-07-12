@@ -24,6 +24,9 @@
 - Audit V5 Phase 5A Normalized Event Schema: [design/audit-v5-phase5a-normalized-event-schema.md](design/audit-v5-phase5a-normalized-event-schema.md)
 - Traversal Evidence Architecture: [design/talkback-traversal-evidence-architecture.md](design/talkback-traversal-evidence-architecture.md)
 - Evidence Instrumentation: [design/talkback-traversal-evidence-implementation.md](design/talkback-traversal-evidence-implementation.md)
+- Canonical Identity & Target Relation: [design/talkback-canonical-identity-and-target-relation.md](design/talkback-canonical-identity-and-target-relation.md)
+- Identity Shadow Frontend Integration: [design/talkback-identity-shadow-frontend-integration.md](design/talkback-identity-shadow-frontend-integration.md)
+- Canonical Identity Shadow Phase 8 Completion: [design/talkback-identity-shadow-phase8-completion.md](design/talkback-identity-shadow-phase8-completion.md)
 - 신규 plugin onboarding: [plugin-onboarding-guide.md](plugin-onboarding-guide.md)
 - report row schema: [report-schema.md](report-schema.md)
 - i18n / locale matching: [i18n_locale_matching.md](i18n_locale_matching.md)
@@ -94,6 +97,3 @@ Routing을 활성화하거나 Promotion Readiness를 재판정하지 않는다.
 - [v8-coverage-driven-traversal.md](design/v8-coverage-driven-traversal.md)
 - [audit-v7-focusable-coverage-design.md](design/audit-v7-focusable-coverage-design.md)
 - [semantic-value-shadow-audit.md](design/semantic-value-shadow-audit.md)
-# Identity shadow frontend
-
-- [Identity Shadow V2 frontend integration](design/talkback-identity-shadow-frontend-integration.md)

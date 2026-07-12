@@ -223,8 +223,6 @@ def _scenario_summaries(parsed: dict[str, object]) -> list[dict[str, object]]:
     progress = parsed.get("scenario_progress")
     if not isinstance(progress, list):
         return []
-    stop_reason = parsed.get("stop_reason")
-    traversal_result = parsed.get("traversal_result")
     scenarios: list[dict[str, object]] = []
     for item in progress:
         if not isinstance(item, dict):
@@ -234,8 +232,8 @@ def _scenario_summaries(parsed: dict[str, object]) -> list[dict[str, object]]:
                 "id": item.get("id"),
                 "status": item.get("status"),
                 "steps": int(item.get("steps") or 0),
-                "stop_reason": stop_reason,
-                "traversal_result": traversal_result,
+                "stop_reason": item.get("stop_reason"),
+                "traversal_result": item.get("traversal_result"),
                 "availability_status": item.get("availability_status"),
                 "availability_confidence": item.get("availability_confidence"),
                 "availability_reason": item.get("availability_reason"),

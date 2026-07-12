@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from talkback_lib import A11yAdbClient
-from tb_runner.evidence import EvidenceEvent, EvidenceRuntime, reduce_shadow_events
+from tb_runner.evidence import (
+    EvidenceEvent,
+    EvidenceRuntime,
+    build_reconciliation_report,
+    reduce_shadow_events,
+)
 from tb_runner.evidence_identity import (
     ComparatorPolicy,
     FieldComparison,
@@ -101,6 +106,30 @@ def _event(event_id: str, event_type: str, payload: dict | None = None, *, trans
         "payload": payload or {},
         "provenance": {},
     }
+
+
+def _shadow_case(
+    *,
+    pre: dict,
+    resolved: dict,
+    post: dict,
+    delayed: list[dict] | None = None,
+    success: bool = True,
+    reason: str = "moved",
+) -> list[dict]:
+    samples = delayed if delayed is not None else [post, post, post]
+    events = [
+        _event("pre", "PRE_FOCUS_OBSERVED", {"observation": pre}),
+        _event("api", "ACTION_API_RESULT", {"success": success, "reason": reason}),
+        _event("resolved", "TARGET_RESOLVED", {"resolvedTarget": resolved}),
+        _event("post", "POST_ACTION_OBSERVATION", {"observation": post}),
+    ]
+    events.extend(
+        _event(f"d{index}", "DELAYED_OBSERVATION", {"observation": sample, "offsetMs": offset})
+        for index, (offset, sample) in enumerate(zip((100, 300, 1000), samples, strict=False))
+    )
+    events.append(_event("ack", "HELPER_ACK_RECEIVED"))
+    return events
 
 
 def test_normalize_observation_accepts_camel_and_snake_aliases_once() -> None:
@@ -226,12 +255,38 @@ def test_stability_detects_snap_back() -> None:
     assert evaluate_stability(pre, immediate, delayed).relation == TemporalRelation.SNAP_BACK
 
 
+def test_resolved_target_without_immediate_focus_cannot_prove_snap_back() -> None:
+    pre = _canonical(_raw_node("before", 0, label="before"), event_id="pre")
+    resolved = _canonical(_raw_node("target", 20, label="target"), event_id="resolved")
+    delayed = [_canonical(_raw_node("before", 0, label="before"), event_id="late")]
+    assert evaluate_stability(pre, None, delayed, resolved=resolved).relation != TemporalRelation.SNAP_BACK
+
+
 def test_target_relation_prefers_strong_physical_link_over_missing_window() -> None:
     resolved = _canonical(_raw_node(None, 20, label="target", window_id=None), event_id="resolved")
     landing = _canonical(_raw_node(None, 20, label="target", window_id=7), event_id="landing")
     result = evaluate_target_relation(None, resolved, landing)
     assert result.aggregate_relation == TargetRelation.STRONG_PHYSICAL_LINK
     assert result.allows_move_confirmation is True
+
+
+def test_physical_scope_conflict_is_not_masked_by_semantic_similarity() -> None:
+    target = _canonical(_raw_node("same", 20, label="same"), event_id="target")
+    other_package = _raw_node("same", 20, label="same")
+    other_package["packageName"] = "other.pkg"
+    landing = _canonical(other_package, event_id="landing")
+    result = evaluate_target_relation(None, target, landing)
+    assert result.semantic_relation == TargetRelation.SAME_SEMANTIC_OBJECT
+    assert result.aggregate_relation == TargetRelation.DIFFERENT_PHYSICAL_NODE
+    assert result.allows_move_confirmation is False
+
+
+def test_repeated_resource_diagnostic_does_not_mask_other_physical_node() -> None:
+    target = _canonical(_raw_node("same", 0, label="first"), event_id="target")
+    landing = _canonical(_raw_node("same", 20, label="second"), event_id="landing")
+    result = evaluate_target_relation(None, target, landing)
+    assert result.semantic_relation == TargetRelation.SAME_RESOURCE_DIFFERENT_INSTANCE
+    assert result.aggregate_relation == TargetRelation.DIFFERENT_PHYSICAL_NODE
 
 
 def test_shadow_v2_does_not_classify_missing_window_as_other_node() -> None:
@@ -253,6 +308,129 @@ def test_shadow_v2_does_not_classify_missing_window_as_other_node() -> None:
     result = reduce_shadow_v2(events)
     assert result["target_relation"] == "STRONG_PHYSICAL_LINK"
     assert result["verdict"] == "MOVE_CONFIRMED"
+    assert result["confidence"] == "HIGH_CONFIDENCE"
+    assert result["evidence_complete"] is True
+    assert result["normalization_version"] == "canonical-observation-v1"
+
+
+def test_reached_end_with_stable_unchanged_focus_is_static() -> None:
+    node = _raw_node("end", 20, label="end")
+    result = reduce_shadow_v2(
+        _shadow_case(pre=node, resolved=node, post=node, success=False, reason="reached_end")
+    )
+    assert result["action_api"] == "REJECTED"
+    assert result["verdict"] == "STATIC_FOCUS"
+    assert result["verdict_reason"] == "REACHED_END_STABLE_UNCHANGED"
+    assert result["confidence"] == "HIGH_CONFIDENCE"
+
+
+def test_arbitrary_rejection_with_unchanged_focus_remains_indeterminate() -> None:
+    node = _raw_node("node", 20, label="node")
+    result = reduce_shadow_v2(
+        _shadow_case(pre=node, resolved=node, post=node, success=False, reason="unsupported")
+    )
+    assert result["verdict"] == "INDETERMINATE"
+    assert result["verdict_reason"] == "ACTION_NOT_ACCEPTED"
+
+
+def test_v2_completeness_requires_delayed_stability_evidence() -> None:
+    node = _raw_node("node", 20, label="node")
+    events = _shadow_case(pre=node, resolved=node, post=node)
+    events = [event for event in events if event["event_type"] != "DELAYED_OBSERVATION"]
+    result = reduce_shadow_v2(events)
+    assert result["evidence_complete"] is False
+    assert result["evidence_completeness"] == "PARTIAL"
+    assert result["verdict"] == "INDETERMINATE"
+    assert result["verdict_reason"] == "EVIDENCE_INCOMPLETE"
+
+
+def test_static_focus_requires_zero_physical_contradictions() -> None:
+    before = _raw_node("before", 20, label="same")
+    after = _raw_node("after", 20, label="same")
+    result = reduce_shadow_v2(_shadow_case(pre=before, resolved=after, post=after))
+    assert result["physical_focus_delta"] == "INDETERMINATE"
+    assert "resource_id" in result["contradicting_fields"]
+    assert result["verdict"] == "INDETERMINATE"
+
+
+def test_delayed_series_with_single_strong_contradiction_is_not_stable() -> None:
+    before = _raw_node("before", 20, label="same")
+    replaced = _raw_node("after", 20, label="same")
+    result = reduce_shadow_v2(
+        _shadow_case(
+            pre=before,
+            resolved=before,
+            post=before,
+            delayed=[replaced, replaced, replaced],
+        )
+    )
+    assert result["stability"] == "UNSTABLE"
+    assert result["verdict"] == "INDETERMINATE"
+
+
+def test_dynamic_label_on_same_accessibility_node_remains_static_physical_focus() -> None:
+    before = _raw_node(
+        "status",
+        20,
+        label="off",
+        accessibility_node_id="node-42",
+    )
+    after = _raw_node(
+        "status",
+        20,
+        label="on",
+        accessibility_node_id="node-42",
+    )
+    result = reduce_shadow_v2(_shadow_case(pre=before, resolved=after, post=after))
+    assert result["physical_focus_delta"] == "UNCHANGED"
+    assert "semantic_label" in result["contradicting_fields"]
+    assert result["verdict"] == "STATIC_FOCUS"
+
+
+def test_unstable_landing_cannot_be_move_confirmed() -> None:
+    before = _raw_node("before", 0, label="before")
+    target = _raw_node("target", 20, label="target")
+    drift = _raw_node("drift", 40, label="drift")
+    result = reduce_shadow_v2(
+        _shadow_case(pre=before, resolved=target, post=target, delayed=[target, drift, drift])
+    )
+    assert result["stability"] == "UNSTABLE"
+    assert result["verdict"] == "INDETERMINATE"
+    assert result["verdict_reason"] == "LANDING_NOT_STABLE"
+
+
+def test_delayed_commit_is_not_misclassified_as_static_focus() -> None:
+    before = _raw_node("before", 0, label="before")
+    target = _raw_node("target", 20, label="target")
+    result = reduce_shadow_v2(
+        _shadow_case(pre=before, resolved=target, post=before, delayed=[target, target, target])
+    )
+    assert result["stability"] == "DELAYED_COMMIT"
+    assert result["verdict"] == "INDETERMINATE"
+    assert result["verdict_reason"] == "DELAYED_COMMIT_UNCONFIRMED"
+
+
+def test_single_delayed_sample_cannot_complete_stable_landing() -> None:
+    before = _raw_node("before", 0, label="before")
+    target = _raw_node("target", 20, label="target")
+    result = reduce_shadow_v2(
+        _shadow_case(pre=before, resolved=target, post=target, delayed=[target])
+    )
+    assert result["stability"] == "INSUFFICIENT_EVIDENCE"
+    assert result["evidence_complete"] is False
+    assert result["verdict"] == "INDETERMINATE"
+    assert "delayed_300ms" in result["missing_fields"]
+    assert "delayed_1000ms" in result["missing_fields"]
+
+
+def test_stable_other_node_is_reported_only_with_positive_contradiction() -> None:
+    before = _raw_node("before", 0, label="before")
+    target = _raw_node("target", 20, label="target")
+    other = _raw_node("other", 40, label="other", class_name="android.widget.Button")
+    result = reduce_shadow_v2(_shadow_case(pre=before, resolved=target, post=other))
+    assert result["target_relation"] == "DIFFERENT_PHYSICAL_NODE"
+    assert result["verdict"] == "MOVE_TO_OTHER_NODE"
+    assert result["verdict_reason"] == "ACCEPTED_STABLE_OTHER_NODE"
 
 
 def test_replay_groups_transactions_without_mutating_events() -> None:
@@ -322,6 +500,34 @@ def test_runtime_emits_legacy_and_optional_v2_side_by_side(
     assert ("SHADOW_ACTION_REDUCED_V2" in event_types) is expect_v2
 
 
+def test_reconciliation_adds_non_blocking_identity_shadow_metrics() -> None:
+    events = [
+        EvidenceEvent(**_event("legacy", "SHADOW_ACTION_REDUCED", {"verdict": "MOVE_TO_OTHER_NODE"})),
+        EvidenceEvent(
+            **_event(
+                "v2",
+                "SHADOW_ACTION_REDUCED_V2",
+                {
+                    "verdict": "MOVE_CONFIRMED",
+                    "confidence": "HIGH_CONFIDENCE",
+                    "evidence_complete": True,
+                },
+            )
+        ),
+    ]
+    report = build_reconciliation_report(events)
+    assert report["status"] == "PASS"
+    assert report["identity_shadow_v2"] == {
+        "available": True,
+        "transaction_count": 1,
+        "legacy_transaction_count": 1,
+        "legacy_transactions_without_v2": 0,
+        "verdicts": {"MOVE_CONFIRMED": 1},
+        "confidence": {"HIGH_CONFIDENCE": 1},
+        "completeness": {"COMPLETE": 1, "PARTIAL": 0},
+    }
+
+
 def _frozen_ledger_paths() -> dict[str, Path]:
     root = Path(__file__).resolve().parents[1]
     return {
@@ -356,9 +562,9 @@ def test_frozen_motion_safe_replay_removes_window_missing_false_other_node(
     assert verdicts["MOVE_TO_OTHER_NODE"] == 0
     assert relations["STRONG_PHYSICAL_LINK"] == expected_transactions
     if scenario == "Motion":
-        assert verdicts == {"MOVE_CONFIRMED": 11, "STATIC_FOCUS": 3, "INDETERMINATE": 2}
+        assert verdicts == {"MOVE_CONFIRMED": 11, "STATIC_FOCUS": 5}
     else:
-        assert verdicts == {"MOVE_CONFIRMED": 11, "STATIC_FOCUS": 6, "INDETERMINATE": 3}
+        assert verdicts == {"MOVE_CONFIRMED": 11, "STATIC_FOCUS": 9}
 
 
 def test_comparator_policy_never_grants_visit_credit_by_default() -> None:

@@ -598,11 +598,40 @@ def build_reconciliation_report(events: list[EvidenceEvent]) -> dict[str, Any]:
     types = {event.event_type for event in events}
     scenario_terminal = [event for event in events if event.event_type == "SCENARIO_TERMINAL"]
     terminal_reason = str(scenario_terminal[-1].payload.get("reason") or "") if scenario_terminal else ""
+    # Scenario-start aborts have no action transaction by design.  Preserve them
+    # against terminals from later scenarios by correlating lifecycle evidence at
+    # the scenario transaction boundary (and by scenario id for legacy events).
+    def scenario_key(event: EvidenceEvent) -> tuple[str, str] | None:
+        if event.scenario_tx_id:
+            return ("scenario_tx", event.scenario_tx_id)
+        if event.scenario_id:
+            return ("scenario_id", event.scenario_id)
+        return None
+
+    terminal_reasons_by_scenario: dict[tuple[str, str], set[str]] = {}
+    anchor_abort_scenarios: set[tuple[str, str]] = set()
+    for event in events:
+        key = scenario_key(event)
+        if key is None:
+            continue
+        if event.event_type == "ANCHOR_ABORT":
+            anchor_abort_scenarios.add(key)
+        elif event.event_type == "SCENARIO_TERMINAL":
+            reason = str(event.payload.get("reason") or "")
+            terminal_reasons_by_scenario.setdefault(key, set()).add(reason)
+    # An observed abort is monotonic when no terminal is recorded, or when its
+    # own scenario terminal records the same abort.  A conflicting terminal in
+    # the same scenario remains a reconciliation failure.
+    anchor_abort_conflicting_terminal = sorted(
+        ":".join(key)
+        for key in anchor_abort_scenarios
+        if (reasons := terminal_reasons_by_scenario.get(key)) and "ANCHOR_ABORT" not in reasons
+    )
     checks = {
         "card_found_not_regressed_to_not_found": not ("CARD_FOUND" in types and terminal_reason == "CARD_NOT_FOUND"),
         "card_activated_not_regressed_to_activation_failure": not ("CARD_ACTIVATED" in types and terminal_reason == "CARD_ACTIVATION_FAILED"),
         "screen_transition_not_regressed_to_card_absence": not ("SCREEN_TRANSITION_CONFIRMED" in types and terminal_reason == "CARD_NOT_FOUND"),
-        "anchor_abort_preserved": not ("ANCHOR_ABORT" in types) or terminal_reason in {"ANCHOR_ABORT", ""},
+        "anchor_abort_preserved": not anchor_abort_conflicting_terminal,
         "aborted_before_collection_distinct_from_zero_valid": not ("ABORTED_BEFORE_COLLECTION" in types and "ZERO_VALID" in types),
         "no_eligible_candidate_distinct_from_not_run": not ("NO_ELIGIBLE_CANDIDATE" in types and "NOT_RUN" in types),
     }
@@ -611,13 +640,50 @@ def build_reconciliation_report(events: list[EvidenceEvent]) -> dict[str, Any]:
     for event in orphan_events:
         reason = str(event.payload.get("reason") or "unknown")
         orphan_reasons[reason] = orphan_reasons.get(reason, 0) + 1
+    legacy_transactions = {
+        event.transaction_id
+        for event in events
+        if event.event_type == "SHADOW_ACTION_REDUCED" and event.transaction_id
+    }
+    v2_by_transaction: dict[str, Mapping[str, Any]] = {}
+    for event in events:
+        if event.event_type != "SHADOW_ACTION_REDUCED_V2" or not event.transaction_id:
+            continue
+        result = event.payload.get("result")
+        v2_by_transaction[event.transaction_id] = result if isinstance(result, Mapping) else event.payload
+    v2_verdicts: dict[str, int] = {}
+    v2_confidence: dict[str, int] = {}
+    v2_completeness = {"COMPLETE": 0, "PARTIAL": 0}
+    for result in v2_by_transaction.values():
+        verdict = str(result.get("verdict") or "INDETERMINATE")
+        confidence = str(result.get("confidence") or "INDETERMINATE")
+        completeness = (
+            "COMPLETE"
+            if result.get("evidence_complete") is True
+            or str(result.get("evidence_completeness") or "").upper() == "COMPLETE"
+            else "PARTIAL"
+        )
+        v2_verdicts[verdict] = v2_verdicts.get(verdict, 0) + 1
+        v2_confidence[confidence] = v2_confidence.get(confidence, 0) + 1
+        v2_completeness[completeness] += 1
     return {
         "schema_version": "evidence-reconciliation-v1",
         "status": "PASS" if all(checks.values()) else "FAIL",
         "checks": checks,
         "terminal_reason": terminal_reason or "unavailable",
+        "anchor_abort_scenarios": len(anchor_abort_scenarios),
+        "anchor_abort_conflicting_terminal": anchor_abort_conflicting_terminal,
         "event_count": len(events),
         "orphan_evidence": {"count": len(orphan_events), "reasons": orphan_reasons},
+        "identity_shadow_v2": {
+            "available": bool(v2_by_transaction),
+            "transaction_count": len(v2_by_transaction),
+            "legacy_transaction_count": len(legacy_transactions),
+            "legacy_transactions_without_v2": len(legacy_transactions.difference(v2_by_transaction)),
+            "verdicts": dict(sorted(v2_verdicts.items())),
+            "confidence": dict(sorted(v2_confidence.items())),
+            "completeness": v2_completeness,
+        },
     }
 
 

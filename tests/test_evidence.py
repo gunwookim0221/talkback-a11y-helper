@@ -424,3 +424,48 @@ def test_reconciliation_preserves_anchor_abort_and_zero_meaning() -> None:
     report = build_reconciliation_report(events)
     assert report["status"] == "PASS"
     assert report["checks"]["anchor_abort_preserved"] is True
+
+
+def test_reconciliation_keeps_anchor_abort_when_later_scenario_has_different_terminal() -> None:
+    anchor_abort = _event("anchor_abort", "ANCHOR_ABORT")
+    anchor_terminal = EvidenceEvent(
+        **{
+            **_event("anchor_terminal", "SCENARIO_TERMINAL").to_dict(),
+            "payload": {"reason": "ANCHOR_ABORT"},
+        }
+    )
+    later_terminal = EvidenceEvent(
+        **{
+            **_event("later_terminal", "SCENARIO_TERMINAL").to_dict(),
+            "scenario_tx_id": "stx_later",
+            "scenario_id": "later_scenario",
+            "payload": {"reason": "NO_TARGET_CANDIDATE"},
+        }
+    )
+
+    report = build_reconciliation_report([anchor_abort, anchor_terminal, later_terminal])
+
+    assert report["checks"]["anchor_abort_preserved"] is True
+    assert report["anchor_abort_scenarios"] == 1
+    assert report["anchor_abort_conflicting_terminal"] == []
+
+
+def test_reconciliation_does_not_create_anchor_abort_or_hide_same_scenario_conflict() -> None:
+    no_abort = EvidenceEvent(
+        **{
+            **_event("no_abort_terminal", "SCENARIO_TERMINAL").to_dict(),
+            "payload": {"reason": "NO_TARGET_CANDIDATE"},
+        }
+    )
+    no_abort_report = build_reconciliation_report([no_abort])
+    assert no_abort_report["checks"]["anchor_abort_preserved"] is True
+    assert no_abort_report["anchor_abort_scenarios"] == 0
+
+    conflicting_terminal = EvidenceEvent(
+        **{
+            **_event("anchor_conflict", "SCENARIO_TERMINAL").to_dict(),
+            "payload": {"reason": "NO_TARGET_CANDIDATE"},
+        }
+    )
+    conflict_report = build_reconciliation_report([_event("anchor", "ANCHOR_ABORT"), conflicting_terminal])
+    assert conflict_report["checks"]["anchor_abort_preserved"] is False

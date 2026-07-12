@@ -2,7 +2,7 @@
 
 [System Overview](system-overview.md) | [Current Client Architecture](current-client-architecture.md) | [Device Plugin Guide](device-plugin-guide.md)
 
-Updated for V10: 2026-07-03
+Updated for Canonical Identity Shadow Phase 8: 2026-07-12
 
 ## 1) 상위 구조
 
@@ -28,6 +28,15 @@ QA Frontend / V10 Shadow
   tb_runner/shadow_compare.py
     -> inventory / identify / candidate / comparison
     -> promotion readiness / Recent Runs reporting
+
+Traversal Evidence / Canonical Identity Shadow
+  tb_runner/evidence.py
+  tb_runner/evidence_identity.py
+  qa_frontend/backend/evidence_identity_reporting.py
+    -> append-only action evidence
+    -> canonical observation normalization
+    -> V2 physical/semantic/hierarchy/temporal relation
+    -> read-only verdict distribution reporting
 ```
 
 ## 2) 운영 계층
@@ -77,6 +86,32 @@ Legacy Full Run (authoritative)
 V10 경로는 scenario candidate를 만들지만 production routing이나 traversal을 수행하지
 않는다.
 
+### Canonical Identity Shadow 계층
+
+Canonical Identity Shadow는 위 Device Card V10 Shadow와 독립된 evidence 분석 계층이다.
+
+```text
+Helper evidenceEvents
+  -> Runner transaction correlation
+  -> evidence-event-v1 ledger
+  -> Legacy shadow reducer (retained)
+  -> CanonicalObservation normalization
+  -> target-relation-v2 reducer
+  -> append-only SHADOW_ACTION_REDUCED_V2
+  -> reconciliation metrics / QA Frontend read-only report
+```
+
+Raw camelCase/snake_case observation은 normalization boundary에서 한 번만 변환한다.
+이후 physical, semantic, hierarchy, temporal comparator는 CanonicalObservation만 읽는다.
+Missing은 difference가 아니라 unavailable이며, hierarchy는 path/parent/assertion evidence만
+사용한다. Bounds-only container inference는 금지한다.
+
+최종 V2 verdict는 `MOVE_CONFIRMED`, `STATIC_FOCUS`, `MOVE_TO_OTHER_NODE`,
+`SNAP_BACK`, `INDETERMINATE`다. 이 verdict는 traversal, visit, coverage, audit,
+production summary/PASS/FAIL 또는 XLSX의 입력이 아니다. 상세 acceptance와 limitation은
+[talkback-identity-shadow-phase8-completion.md](design/talkback-identity-shadow-phase8-completion.md)를
+따른다.
+
 ## 3) Devices plugin 운영 추가점
 
 Devices plugin은 일반 Life plugin과 다르게 Devices list normalization을 먼저
@@ -111,3 +146,4 @@ focus 기준**이다.
 - Shadow 실패는 Legacy 결과로 전파하지 않음
 - `unknown`, `ambiguous`, `failed`는 fail-closed
 - Controlled Routing과 V10 traversal은 비활성/미구현
+- Canonical Identity V2 verdict는 shadow-only이며 production consumer가 없음

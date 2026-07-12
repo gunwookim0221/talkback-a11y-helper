@@ -2,7 +2,7 @@
 
 이 문서는 `talkback_lib/__init__.py`의 `A11yAdbClient` public API 기준 문서다.
 
-Updated for V10: 2026-07-03
+Updated for Canonical Identity Shadow Phase 8: 2026-07-12
 
 운영 흐름 자체는 아래 문서를 우선한다.
 
@@ -121,6 +121,65 @@ POST /api/runs/{run_id}/devices/{device_id}/shadow/open-folder
 첫 endpoint는 `qa_frontend_runs/` 내부의 Shadow JSON/Markdown을 반환한다. 두 번째
 endpoint는 검증된 device run의 `shadow/` directory를 로컬 파일 탐색기로 연다.
 Promotion Readiness 전용 mutation endpoint나 routing 활성화 endpoint는 없다.
+
+## QA Frontend Canonical Identity Shadow API
+
+### Run-scoped feature flags
+
+Single/Batch start request는 다음 optional boolean을 받는다.
+
+```json
+{
+  "evidence_ledger": true,
+  "identity_shadow_v2": true
+}
+```
+
+둘 다 기본값은 `false`다. `identity_shadow_v2=true`이면 backend가 해당 run에만
+Evidence Ledger도 활성화한다. Uvicorn process의 global state나 source runtime config는
+변경하지 않는다.
+
+### Read-only Identity report
+
+```http
+GET /api/runs/{run_id}/devices/{device_id}/identity-shadow
+```
+
+응답 schema 이름은 `identity-shadow-report-v1`을 유지하며 Phase 8 field는 additive다.
+
+```json
+{
+  "available": true,
+  "schema": "identity-shadow-report-v1",
+  "availability": "V2_AVAILABLE",
+  "legacy_available": true,
+  "v2_available": true,
+  "summary": {
+    "transactions": 20,
+    "v2_verdicts": {
+      "MOVE_CONFIRMED": 11,
+      "STATIC_FOCUS": 9
+    },
+    "v2_verdict_percentages": {
+      "MOVE_CONFIRMED": 55.0,
+      "STATIC_FOCUS": 45.0,
+      "MOVE_TO_OTHER_NODE": 0.0,
+      "SNAP_BACK": 0.0,
+      "INDETERMINATE": 0.0
+    },
+    "confidence_counts": {"HIGH_CONFIDENCE": 20},
+    "confidence_percentages": {"HIGH_CONFIDENCE": 100.0},
+    "relation_counts": {"STRONG_PHYSICAL_LINK": 20},
+    "relation_percentages": {"STRONG_PHYSICAL_LINK": 100.0}
+  },
+  "transactions": []
+}
+```
+
+Percentage denominator는 V2 verdict가 기록된 transaction 수다. Legacy-only transaction은
+`V2_PARTIAL` 상태에는 포함되지만 V2 percentage denominator에는 포함되지 않는다.
+Endpoint는 ledger를 읽어 projection만 만들며 ledger, traversal, summary, coverage,
+audit, XLSX를 수정하지 않는다.
 
 ## QA Frontend Crash API
 

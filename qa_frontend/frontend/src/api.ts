@@ -67,7 +67,20 @@ export type IdentityShadowReport = {
   availability: string;
   legacy_available?: boolean;
   v2_available?: boolean;
-  summary: { transactions: number; changed: number; incomplete: number; strong_physical: number; insufficient: number; v2_verdicts: Record<string, number> };
+  summary: {
+    transactions: number;
+    changed: number;
+    incomplete: number;
+    strong_physical: number;
+    insufficient: number;
+    v2_verdicts: Record<string, number>;
+    target_relations?: Record<string, number>;
+    v2_verdict_percentages?: Record<string, number>;
+    confidence_counts?: Record<string, number>;
+    confidence_percentages?: Record<string, number>;
+    relation_counts?: Record<string, number>;
+    relation_percentages?: Record<string, number>;
+  };
   transactions: Array<{ transaction_id: string; step_index?: number | null; action_type?: string | null; legacy_verdict?: string | null; v2_verdict?: string | null; verdict_changed: boolean; target_relation?: string | null; temporal_relation?: string | null; confidence?: string | null; evidence_complete: boolean }>;
 };
 

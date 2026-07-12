@@ -15,9 +15,16 @@ _LOCK = threading.Lock()
 _CACHE: dict[Path, tuple[tuple[int, int], dict[str, Any]]] = {}
 _EVENTS = {
     "SHADOW_ACTION_REDUCED", "SHADOW_ACTION_REDUCED_V2", "TARGET_RESOLVED",
-    "POST_ACTION_OBSERVATION", "DELAYED_OBSERVATION", "REPRESENTATIVE_SELECTED",
-    "TRANSACTION_CLOSED",
+    "PRE_FOCUS_OBSERVED", "POST_ACTION_OBSERVATION", "DELAYED_OBSERVATION",
+    "REPRESENTATIVE_SELECTED", "TRANSACTION_CLOSED",
 }
+_V2_VERDICTS = (
+    "MOVE_CONFIRMED",
+    "STATIC_FOCUS",
+    "MOVE_TO_OTHER_NODE",
+    "SNAP_BACK",
+    "INDETERMINATE",
+)
 
 
 def identity_shadow_report(run_id: str, device_id: str, *, run_log_dir: Path = RUN_LOG_DIR) -> dict[str, Any]:
@@ -77,17 +84,32 @@ def _load(path: Path) -> dict[str, Any]:
 def _row(tx: Mapping[str, Any]) -> dict[str, Any]:
     events = tx["events"]; legacy = events.get("SHADOW_ACTION_REDUCED", {}); v2 = events.get("SHADOW_ACTION_REDUCED_V2", {})
     result = v2.get("result", v2) if isinstance(v2, Mapping) else {}; result = result if isinstance(result, Mapping) else {}
+    diagnostics = result.get("identity_diagnostics") if isinstance(result.get("identity_diagnostics"), Mapping) else {}
+    target_landing = diagnostics.get("target_landing") if isinstance(diagnostics.get("target_landing"), Mapping) else {}
+    stability = diagnostics.get("stability") if isinstance(diagnostics.get("stability"), Mapping) else {}
     verdict = lambda value: str(value or "") or None
-    supporting = result.get("supporting_fields", result.get("supporting", [])); missing = result.get("missing_fields", result.get("missing", []))
+    supporting = result.get("supporting_fields", result.get("supporting"))
+    if not isinstance(supporting, list): supporting = target_landing.get("supporting_fields", [])
+    contradicting = result.get("contradicting_fields")
+    if not isinstance(contradicting, list): contradicting = target_landing.get("contradictions", [])
+    missing = result.get("missing_fields", result.get("missing"))
+    if not isinstance(missing, list): missing = target_landing.get("missing_fields", [])
+    evidence_complete = result.get("evidence_complete") is True or str(result.get("evidence_completeness") or "").upper() == "COMPLETE"
     return {"transaction_id": tx["transaction_id"], "scenario_id": tx.get("scenario_id"), "plugin_family": tx.get("plugin_family"),
       "step_index": tx.get("step_index"), "logical_action_id": tx.get("logical_action_id"), "action_type": tx.get("action_type"),
       "legacy_verdict": verdict(legacy.get("verdict") if isinstance(legacy, Mapping) else None), "v2_verdict": verdict(result.get("verdict")),
       "verdict_changed": bool(legacy and result and legacy.get("verdict") != result.get("verdict")),
-      "target_relation": verdict(result.get("target_relation")), "physical_relation": verdict(result.get("physical_relation")),
-      "semantic_relation": verdict(result.get("semantic_relation")), "hierarchy_relation": verdict(result.get("hierarchy_relation")),
-      "temporal_relation": verdict(result.get("temporal_relation")), "confidence": verdict(result.get("confidence")),
-      "supporting_fields": list(supporting) if isinstance(supporting, list) else [], "contradicting_fields": list(result.get("contradicting_fields", [])),
-      "missing_fields": list(missing) if isinstance(missing, list) else [], "evidence_complete": result.get("evidence_complete") is True,
+      "target_relation": verdict(result.get("target_relation") or target_landing.get("aggregate_relation")),
+      "physical_relation": verdict(result.get("physical_relation") or target_landing.get("physical_relation")),
+      "semantic_relation": verdict(result.get("semantic_relation") or target_landing.get("semantic_relation")),
+      "hierarchy_relation": verdict(result.get("hierarchy_relation") or target_landing.get("hierarchy_relation")),
+      "temporal_relation": verdict(result.get("temporal_relation") or target_landing.get("temporal_relation") or result.get("stability") or stability.get("relation")),
+      # Nested target_landing confidence describes only that relation.  It is
+      # not a historical verdict confidence and must not be promoted as one.
+      "confidence": verdict(result.get("confidence")),
+      "supporting_fields": list(supporting) if isinstance(supporting, list) else [],
+      "contradicting_fields": list(contradicting) if isinstance(contradicting, list) else [],
+      "missing_fields": list(missing) if isinstance(missing, list) else [], "evidence_complete": evidence_complete,
       "reducer_version": result.get("reducer_version", "v2" if result else "legacy"), "normalization_version": result.get("normalization_version"),
       "pre_focus_summary": _safe(events.get("PRE_FOCUS_OBSERVED", {})), "resolved_target_summary": _safe(events.get("TARGET_RESOLVED", {})),
       "landing_summary": _safe(events.get("POST_ACTION_OBSERVATION", {})), "delayed_stability_summary": _safe(events.get("DELAYED_OBSERVATION", {})),
@@ -102,7 +124,21 @@ def _safe(value: Any) -> dict[str, Any] | None:
 
 def _summary(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
     counts = Counter(str(r.get("v2_verdict") or "NO_V2") for r in rows); relations = Counter(str(r.get("target_relation") or "INSUFFICIENT_EVIDENCE") for r in rows)
+    v2_counts = Counter(str(r.get("v2_verdict")) for r in rows if r.get("v2_verdict"))
+    confidence_counts = Counter(str(r.get("confidence") or "UNAVAILABLE") for r in rows if r.get("v2_verdict"))
+    relation_counts = Counter(str(r.get("target_relation")) for r in rows if r.get("v2_verdict") and r.get("target_relation"))
     return {"transactions": len(rows), "v2_verdicts": dict(counts), "target_relations": dict(relations),
+      "v2_verdict_percentages": _percentages(v2_counts, required=_V2_VERDICTS),
+      "confidence_counts": dict(sorted(confidence_counts.items())), "confidence_percentages": _percentages(confidence_counts),
+      "relation_counts": dict(sorted(relation_counts.items())), "relation_percentages": _percentages(relation_counts),
       "changed": sum(bool(r.get("verdict_changed")) for r in rows), "incomplete": sum(not bool(r.get("evidence_complete")) for r in rows),
       "strong_physical": sum(r.get("target_relation") in {"EXACT_PHYSICAL_NODE", "STRONG_PHYSICAL_LINK"} for r in rows),
       "insufficient": sum(r.get("target_relation") == "INSUFFICIENT_EVIDENCE" for r in rows)}
+
+
+def _percentages(counts: Mapping[str, int], *, required: tuple[str, ...] = ()) -> dict[str, float]:
+    total = sum(int(value) for value in counts.values())
+    keys = required or tuple(sorted(counts))
+    if total <= 0:
+        return {key: 0.0 for key in keys}
+    return {key: round(int(counts.get(key, 0)) * 100.0 / total, 1) for key in keys}

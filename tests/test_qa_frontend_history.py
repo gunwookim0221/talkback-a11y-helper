@@ -10,6 +10,7 @@ from qa_frontend.backend.main import app, runner
 from qa_frontend.backend.batch_runner import get_recent_batches
 from qa_frontend.backend.recent_runs import list_recent_runs, safe_recent_run_log_path
 from qa_frontend.backend.run_summary import build_run_summary, summary_path_for_log, write_summary_file
+from qa_frontend.backend.runtime_dashboard import parse_runtime_log
 
 
 def _write_log(path: Path, *, body: str) -> None:
@@ -24,6 +25,41 @@ def _set_batch_runner_paths(monkeypatch, run_log_dir: Path, root_dir: Path) -> N
 
 def _warning_messages(caplog, text: str) -> list[str]:
     return [record.message for record in caplog.records if text in record.message]
+
+
+def test_run_summary_keeps_stop_result_scoped_to_its_scenario(tmp_path: Path) -> None:
+    log_path = tmp_path / "20260712_092642_full.log"
+    _write_log(
+        log_path,
+        body="\n".join(
+            [
+                "[STEP] END scenario='life_family_care_plugin' step=43 visible='Family care'",
+                "[STOP][eval] step=43 scenario='life_family_care_plugin' decision='stop' reason='repeat_no_progress' traversal_result='PASS_EXHAUSTED' final_result='PASS'",
+                "[PERF][scenario_summary] scenario=life_family_care_plugin total_steps=44",
+                "[STEP] END scenario='device_motion_sensor_plugin' step=8 visible='Motion sensor'",
+                "[STOP][eval] step=8 scenario='device_motion_sensor_plugin' decision='stop' reason='repeat_no_progress' traversal_result='FAIL_STUCK' final_result='FAIL'",
+                "[PERF][scenario_summary] scenario=device_motion_sensor_plugin total_steps=9",
+            ]
+        ),
+    )
+
+    parsed = parse_runtime_log(
+        log_path.read_text(encoding="utf-8"),
+        scenario_ids=["life_family_care_plugin", "device_motion_sensor_plugin"],
+    )
+    summary = build_run_summary(
+        status={"state": "finished", "run_id": "20260712_092642", "mode": "full"},
+        log_path=log_path,
+        scenario_ids=["life_family_care_plugin", "device_motion_sensor_plugin"],
+    )
+
+    progress = {item["id"]: item for item in parsed["scenario_progress"]}
+    scenarios = {item["id"]: item for item in summary["scenarios"]}
+    assert progress["life_family_care_plugin"]["traversal_result"] == "PASS_EXHAUSTED"
+    assert progress["device_motion_sensor_plugin"]["traversal_result"] == "FAIL_STUCK"
+    assert scenarios["life_family_care_plugin"]["traversal_result"] == "PASS_EXHAUSTED"
+    assert scenarios["life_family_care_plugin"]["stop_reason"] == "repeat_no_progress"
+    assert scenarios["device_motion_sensor_plugin"]["traversal_result"] == "FAIL_STUCK"
 
 
 def test_list_recent_runs_limits_to_newest_twenty_and_extracts_excel(tmp_path):

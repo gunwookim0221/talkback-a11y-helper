@@ -20,7 +20,8 @@ from typing import Any, Mapping, Protocol, Sequence
 
 IDENTITY_SHADOW_ENABLED_ENV = "TB_EVIDENCE_IDENTITY_SHADOW_ENABLED"
 IDENTITY_NORMALIZATION_VERSION = "canonical-observation-v1"
-IDENTITY_RULE_VERSION = "target-relation-v1"
+IDENTITY_RULE_VERSION = "target-relation-v2"
+REQUIRED_DELAYED_OFFSETS_MS = (100, 300, 1000)
 
 
 class _StringEnum(str, Enum):
@@ -803,7 +804,23 @@ def evaluate_hierarchy(
 
 
 def _same_link(result: PhysicalIdentityResult) -> bool:
-    return result.relation in {TargetRelation.EXACT_PHYSICAL_NODE, TargetRelation.STRONG_PHYSICAL_LINK}
+    if result.relation == TargetRelation.EXACT_PHYSICAL_NODE:
+        return True
+    physical_contradictions = {
+        "package_name",
+        "window_id",
+        "display_id",
+        "class_name",
+        "resource_id",
+        "bounds",
+        "node_path",
+        "parent_path",
+        "accessibility_node_id",
+    }
+    return (
+        result.relation == TargetRelation.STRONG_PHYSICAL_LINK
+        and not physical_contradictions.intersection(result.contradictions)
+    )
 
 
 def evaluate_stability(
@@ -813,6 +830,7 @@ def evaluate_stability(
     events: Sequence[Any] = (),
     *,
     resolved: CanonicalObservation | None = None,
+    delayed_offsets_ms: Sequence[int] | None = None,
     policy: ComparatorPolicy | None = None,
 ) -> TemporalStabilityResult:
     del events  # reserved for future event-stream attribution; observations remain authoritative here
@@ -826,6 +844,15 @@ def evaluate_stability(
         missing.append("immediate")
     if not ordered:
         missing.append("delayed")
+    if delayed_offsets_ms is None:
+        delayed_window_complete = len(ordered) >= len(REQUIRED_DELAYED_OFFSETS_MS)
+        if not delayed_window_complete:
+            missing.append("delayed_window")
+    else:
+        observed_offsets = {int(offset) for offset in delayed_offsets_ms}
+        missing_offsets = [offset for offset in REQUIRED_DELAYED_OFFSETS_MS if offset not in observed_offsets]
+        delayed_window_complete = not missing_offsets
+        missing.extend(f"delayed_{offset}ms" for offset in missing_offsets)
 
     anchor = immediate or resolved or (ordered[0] if ordered else None)
     if anchor is None or not ordered:
@@ -843,12 +870,30 @@ def evaluate_stability(
     pre_to_anchor = compare_physical(pre, anchor, policy) if pre is not None else None
     final_to_pre = compare_physical(pre, ordered[-1], policy) if pre is not None else None
 
-    if pre_to_anchor and pre_to_anchor.relation == TargetRelation.DIFFERENT_PHYSICAL_NODE and final_to_pre and _same_link(final_to_pre):
+    # A resolved target is an action-plan fact, not proof that focus ever landed
+    # there.  Snap-back therefore requires an observed immediate focus (A -> B
+    # -> A), even though resolved may still anchor a delayed-only stable series.
+    if (
+        immediate is not None
+        and pre_to_anchor
+        and pre_to_anchor.relation == TargetRelation.DIFFERENT_PHYSICAL_NODE
+        and final_to_pre
+        and _same_link(final_to_pre)
+    ):
         return TemporalStabilityResult(
             TemporalRelation.SNAP_BACK,
             "HIGH_CONFIDENCE",
             observation_ids,
             (str(pre_to_anchor.relation), str(final_to_pre.relation)),
+            tuple(missing),
+            policy.rule_version,
+        )
+    if not delayed_window_complete:
+        return TemporalStabilityResult(
+            TemporalRelation.INSUFFICIENT_EVIDENCE,
+            "INDETERMINATE",
+            observation_ids,
+            tuple(str(result.relation) for result in delayed_links),
             tuple(missing),
             policy.rule_version,
         )
@@ -915,18 +960,34 @@ def evaluate_target_relation(
     aggregate = TargetRelation.INSUFFICIENT_EVIDENCE
     confidence = "INDETERMINATE"
     allows_move = False
+    scope_contradiction = bool(
+        {"package_name", "window_id"}.intersection(physical.contradictions)
+    )
     if physical.relation in {TargetRelation.EXACT_PHYSICAL_NODE, TargetRelation.STRONG_PHYSICAL_LINK}:
         aggregate = physical.relation
         confidence = physical.confidence
         allows_move = True
-    elif hierarchy.relation != TargetRelation.INSUFFICIENT_EVIDENCE and policy.allow_hierarchy_target_compatibility:
+    elif (
+        hierarchy.relation != TargetRelation.INSUFFICIENT_EVIDENCE
+        and policy.allow_hierarchy_target_compatibility
+        and not scope_contradiction
+    ):
         aggregate = hierarchy.container_relation if hierarchy.container_relation != TargetRelation.INSUFFICIENT_EVIDENCE else hierarchy.relation
         confidence = hierarchy.confidence
         allows_move = True
-    elif semantic.relation == TargetRelation.SAME_SEMANTIC_OBJECT and policy.allow_semantic_target_compatibility:
+    elif (
+        semantic.relation == TargetRelation.SAME_SEMANTIC_OBJECT
+        and policy.allow_semantic_target_compatibility
+        and not scope_contradiction
+    ):
         aggregate = semantic.relation
         confidence = semantic.confidence
         allows_move = True
+    elif physical.relation == TargetRelation.DIFFERENT_PHYSICAL_NODE:
+        # Positive physical contradiction must not be hidden by weak semantic
+        # diagnostics such as a repeated resource-id or label.
+        aggregate = physical.relation
+        confidence = physical.confidence
     elif semantic.relation in {
         TargetRelation.ANNOUNCEMENT_EQUIVALENT,
         TargetRelation.SAME_RESOURCE_DIFFERENT_INSTANCE,
@@ -935,9 +996,6 @@ def evaluate_target_relation(
     }:
         aggregate = semantic.relation
         confidence = semantic.confidence
-    elif physical.relation == TargetRelation.DIFFERENT_PHYSICAL_NODE:
-        aggregate = physical.relation
-        confidence = physical.confidence
     elif physical.relation == TargetRelation.WEAK_PHYSICAL_LINK:
         aggregate = physical.relation
         confidence = physical.confidence
@@ -976,6 +1034,18 @@ def _event_payload(event: Any) -> Mapping[str, Any]:
 
 def _event_type(event: Any) -> str:
     return str(_event_dict(event).get("event_type") or "")
+
+
+def _minimum_confidence(*values: str) -> str:
+    order = {
+        "INDETERMINATE": 0,
+        "SPECULATION": 1,
+        "PLAUSIBLE": 2,
+        "HIGH_CONFIDENCE": 3,
+        "CONFIRMED": 4,
+    }
+    normalized = [str(value or "INDETERMINATE") for value in values]
+    return min(normalized, key=lambda value: order.get(value, 0)) if normalized else "INDETERMINATE"
 
 
 def reduce_shadow_v2(events: Sequence[Any]) -> dict[str, Any]:
@@ -1020,6 +1090,7 @@ def reduce_shadow_v2(events: Sequence[Any]) -> dict[str, Any]:
         if value is not None:
             delayed_pairs.append((_integer(payload.get("offsetMs")) or 0, value))
     delayed_pairs.sort(key=lambda item: item[0])
+    delayed_offsets = [offset for offset, _ in delayed_pairs]
     delayed = [value for _, value in delayed_pairs]
 
     requested: CanonicalObservation | None = None
@@ -1046,6 +1117,7 @@ def reduce_shadow_v2(events: Sequence[Any]) -> dict[str, Any]:
         delayed,
         transaction_events,
         resolved=resolved,
+        delayed_offsets_ms=delayed_offsets,
     )
 
     announcements = [
@@ -1074,37 +1146,142 @@ def reduce_shadow_v2(events: Sequence[Any]) -> dict[str, Any]:
         _event_payload(event) for event in transaction_events if _event_type(event) == "ACTION_API_RESULT"
     ]
     action_api = "INDETERMINATE"
+    action_reason = ""
     if action_results:
         action_api = "ACCEPTED" if any(bool(payload.get("success")) or payload.get("result") == "ACCEPTED" for payload in action_results) else "REJECTED"
+        for payload in reversed(action_results):
+            helper_payload = payload.get("helper_payload")
+            helper_reason = helper_payload.get("reason") if isinstance(helper_payload, Mapping) else None
+            action_reason = str(payload.get("reason") or helper_reason or "").strip()
+            if action_reason:
+                break
 
+    complete = bool(
+        pre is not None
+        and landing is not None
+        and (resolved is not None or requested is not None)
+        and action_results
+        and set(REQUIRED_DELAYED_OFFSETS_MS).issubset(delayed_offsets)
+        and "HELPER_ACK_RECEIVED" in event_types
+    )
+    stable_landing = stability.relation == TemporalRelation.STABLE_LANDING
+    unchanged_without_contradiction = bool(
+        delta_result
+        and _same_link(delta_result)
+    )
+    verdict_confidence = "INDETERMINATE"
+    verdict_reason = "INSUFFICIENT_EVIDENCE"
     if stability.relation == TemporalRelation.SNAP_BACK:
         verdict = "SNAP_BACK"
-    elif action_api == "ACCEPTED" and physical_delta == "UNCHANGED":
-        verdict = "STATIC_FOCUS"
-    elif action_api == "ACCEPTED" and physical_delta == "CHANGED" and target_relation.allows_move_confirmation:
-        verdict = "MOVE_CONFIRMED"
+        verdict_confidence = stability.confidence
+        verdict_reason = "SNAP_BACK_OBSERVED"
     elif (
-        action_api == "ACCEPTED"
+        complete
+        and stable_landing
+        and physical_delta == "UNCHANGED"
+        and unchanged_without_contradiction
+        and action_api == "ACCEPTED"
+    ):
+        verdict = "STATIC_FOCUS"
+        verdict_confidence = _minimum_confidence(delta_result.confidence, stability.confidence)
+        verdict_reason = "ACCEPTED_STABLE_UNCHANGED"
+    elif (
+        complete
+        and stable_landing
+        and physical_delta == "UNCHANGED"
+        and unchanged_without_contradiction
+        and action_api == "REJECTED"
+        and action_reason == "reached_end"
+    ):
+        verdict = "STATIC_FOCUS"
+        verdict_confidence = _minimum_confidence(delta_result.confidence, stability.confidence)
+        verdict_reason = "REACHED_END_STABLE_UNCHANGED"
+    elif (
+        complete
+        and stable_landing
+        and action_api == "ACCEPTED"
+        and physical_delta == "CHANGED"
+        and target_relation.allows_move_confirmation
+    ):
+        verdict = "MOVE_CONFIRMED"
+        verdict_confidence = _minimum_confidence(
+            delta_result.confidence if delta_result else "INDETERMINATE",
+            target_relation.confidence,
+            stability.confidence,
+        )
+        verdict_reason = "ACCEPTED_STABLE_TARGET_LANDING"
+    elif (
+        complete
+        and stable_landing
+        and action_api == "ACCEPTED"
         and physical_delta == "CHANGED"
         and target_relation.aggregate_relation == TargetRelation.DIFFERENT_PHYSICAL_NODE
     ):
         verdict = "MOVE_TO_OTHER_NODE"
+        verdict_confidence = _minimum_confidence(
+            delta_result.confidence if delta_result else "INDETERMINATE",
+            target_relation.confidence,
+            stability.confidence,
+        )
+        verdict_reason = "ACCEPTED_STABLE_OTHER_NODE"
     else:
         verdict = "INDETERMINATE"
+        if not complete:
+            verdict_reason = "EVIDENCE_INCOMPLETE"
+        elif stability.relation == TemporalRelation.DELAYED_COMMIT:
+            verdict_reason = "DELAYED_COMMIT_UNCONFIRMED"
+        elif not stable_landing:
+            verdict_reason = "LANDING_NOT_STABLE"
+        elif action_api != "ACCEPTED":
+            verdict_reason = "ACTION_NOT_ACCEPTED"
+        elif physical_delta == "INDETERMINATE":
+            verdict_reason = "PHYSICAL_DELTA_INDETERMINATE"
+        else:
+            verdict_reason = "TARGET_RELATION_INDETERMINATE"
 
-    complete = pre is not None and landing is not None and "HELPER_ACK_RECEIVED" in event_types
+    supporting_fields = tuple(
+        sorted(
+            set((delta_result.supporting_fields if delta_result else ()))
+            | set(target_relation.supporting_fields)
+        )
+    )
+    contradicting_fields = tuple(
+        sorted(
+            set((delta_result.contradictions if delta_result else ()))
+            | set(target_relation.contradictions)
+        )
+    )
+    missing_fields = tuple(
+        sorted(
+            set((delta_result.missing_fields if delta_result else ()))
+            | set(target_relation.missing_fields)
+            | set(stability.missing_samples)
+        )
+    )
     return {
         "reducer_version": IDENTITY_RULE_VERSION,
+        "normalization_version": IDENTITY_NORMALIZATION_VERSION,
         "transport": "ACKED" if "HELPER_ACK_RECEIVED" in event_types else "INDETERMINATE",
         "action_api": action_api,
+        "action_reason": action_reason or None,
         "target_relation": str(target_relation.aggregate_relation),
+        "physical_relation": str(target_relation.physical_relation),
+        "semantic_relation": str(target_relation.semantic_relation),
+        "hierarchy_relation": str(target_relation.hierarchy_relation),
+        "temporal_relation": str(stability.relation),
+        "confidence": verdict_confidence,
         "focus_commit_claim": "CLAIMED" if "FOCUS_COMMIT_CLAIMED" in event_types else "INDETERMINATE",
         "physical_focus_delta": physical_delta,
         "target_landing": str(target_relation.aggregate_relation),
         "stability": str(stability.relation),
         "announcement": "OBSERVED" if announcement else "INDETERMINATE",
         "evidence_completeness": "COMPLETE" if complete else "PARTIAL",
+        "evidence_complete": complete,
         "verdict": verdict,
+        "verdict_reason": verdict_reason,
+        "supporting_fields": supporting_fields,
+        "contradicting_fields": contradicting_fields,
+        "missing_fields": missing_fields,
         "normalization_count": len(normalization_cache),
         "identity_diagnostics": {
             "pre_post": delta_result.to_dict() if delta_result else None,

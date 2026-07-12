@@ -3,6 +3,7 @@
 상태: evidence-only shadow instrumentation
 Schema: `evidence-event-v1`
 Feature flag: `TB_EVIDENCE_LEDGER_ENABLED=1`
+Identity shadow flag: `TB_EVIDENCE_IDENTITY_SHADOW_ENABLED=1` (requires ledger)
 
 ## Purpose
 
@@ -81,9 +82,15 @@ The reducer produces only side-channel fields:
 - stability
 - announcement
 - evidence_completeness
-- verdict: `MOVE_CONFIRMED`, `MOVE_CLAIMED_BUT_UNVERIFIED`, `STATIC_FOCUS`, `MOVE_TO_OTHER_NODE`, `SNAP_BACK`, or `INDETERMINATE`
+- verdict: `MOVE_CONFIRMED`, `STATIC_FOCUS`, `MOVE_TO_OTHER_NODE`, `SNAP_BACK`, or `INDETERMINATE`
 
-The current non-blocking runner collection only captures the immediate post-focus observation. It deliberately returns `INDETERMINATE` for stability unless independently supplied evidence establishes a stability outcome. It does not add `+100/+300/+1000 ms` focus reads yet because those reads could alter production timing.
+Legacy `SHADOW_ACTION_REDUCED`는 비교를 위해 유지한다. Identity flag가 켜진 run은 raw
+observation을 `CanonicalObservation`으로 한 번 정규화한 뒤
+`SHADOW_ACTION_REDUCED_V2`를 추가한다. V2는 immediate/100/300/1000 ms Helper observation을
+사용하며, unstable 또는 unsupported delayed commit은 `INDETERMINATE`로 유지한다. 상세
+판정 규칙은
+[talkback-identity-shadow-phase8-completion.md](talkback-identity-shadow-phase8-completion.md)를
+따른다.
 
 ## Provenance
 
@@ -95,7 +102,7 @@ The manifest records repository SHA/dirty state, runner hash, runtime config and
 
 ## Reconciliation
 
-The shadow report checks that lifecycle facts do not regress, including card-found versus card-not-found, activation/transition stage regression, anchor abort retention, aborted-before-collection versus zero-valid, and no-eligible versus not-run.
+The shadow report checks that lifecycle facts do not regress, including card-found versus card-not-found, activation/transition stage regression, anchor abort retention, aborted-before-collection versus zero-valid, and no-eligible versus not-run. Phase 8 reconciliation also records non-blocking V2 transaction, verdict, confidence, and completeness metrics.
 
 It never edits `summary.json` or changes a production verdict.
 
@@ -110,7 +117,7 @@ It never edits `summary.json` or changes a production verdict.
 
 Evidence disabled is near-zero cost: no runtime object is created and hooks return immediately.
 
-Evidence enabled performs synchronous JSONL append/flush per event and writes elapsed time/event count to the reconciliation artifact. The initial implementation uses immediate-only stability observation to avoid extra ADB/focus reads. Real-device collection must compare flag-off and flag-on runs using average step time, Helper response time, focus read time, ledger write time, event count, and file size.
+Evidence enabled performs synchronous JSONL append/flush per event and writes elapsed time/event count to the reconciliation artifact. Delayed focus sampling is produced by best-effort Android Handler callbacks and transported by the read-only evidence snapshot path; it does not add Runner sleep or retry. Real-device collection must compare flag-off and flag-on runs using average step time, Helper response time, focus read time, ledger write time, event count, and file size.
 
 ## Real-device validation
 
@@ -128,5 +135,6 @@ For an off/on comparison, repeat with the flag removed and compare only producti
 - Runner currently ingests Helper facts returned with `SMART_NEXT`; facts emitted by other target-action commands remain in correlated Helper logs until a read-only collector is added.
 - Delayed observations are best-effort Android Handler callbacks. A transaction remains `INDETERMINATE` if its snapshot is collected before the required callback, the Helper is restarted, or an older Helper does not support `EVIDENCE_EVENTS`.
 - Node path, parent path, child index, window id, and display id are recorded when supplied by an observation source; current legacy focus payloads may leave them unavailable.
+- Current Safe/Motion resolved nodes omit children and hierarchy paths, so container relation stays `INSUFFICIENT_EVIDENCE`; bounds-only hierarchy inference is forbidden.
 - `VISIT_DECIDED` is fact-only and defaults to `INDETERMINATE`; it does not replace production visited semantics.
 - Reconciliation is a shadow check; it does not rewrite historical `summary.json`.

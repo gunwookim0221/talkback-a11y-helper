@@ -258,8 +258,18 @@ def parse_runtime_log(
             _add_event(events, index, "save_excel", line, scenario=current_scenario)
         elif "[STOP][eval]" in line:
             final_result = _extract_first(FINAL_RESULT_RE, line)
-            traversal_result = _extract_first(TRAVERSAL_RESULT_RE, line) or traversal_result
-            stop_reason = _extract_first(STOP_REASON_RE, line) or stop_reason
+            event_traversal_result = _extract_first(TRAVERSAL_RESULT_RE, line)
+            event_stop_reason = _extract_first(STOP_REASON_RE, line)
+            traversal_result = event_traversal_result or traversal_result
+            stop_reason = event_stop_reason or stop_reason
+            if scenario:
+                # These are scenario-scoped runner facts.  Keeping them on the
+                # progress item prevents the final stop of a full run from being
+                # copied into every scenario summary.
+                if event_traversal_result:
+                    progress[scenario]["traversal_result"] = event_traversal_result
+                if event_stop_reason:
+                    progress[scenario]["stop_reason"] = event_stop_reason
             if scenario and _is_global_nav_terminal(line, scenario):
                 global_nav_terminal.add(scenario)
                 progress[scenario]["status"] = "passed"
