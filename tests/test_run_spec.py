@@ -5,7 +5,7 @@ from pathlib import Path
 
 from qa_frontend.backend.runtime_setup import prepare_runtime
 from tb_runner.run_selection import apply_run_selection
-from tb_runner.run_spec import RunContext, RunSpec
+from tb_runner.run_spec import RunContext, RunSpec, resolve_identity_feature_flags
 
 
 def test_run_spec_builds_shared_cli_command_and_environment():
@@ -55,14 +55,31 @@ def test_run_spec_builds_subprocess_env_with_coverage_probe():
 
 
 def test_run_spec_evidence_flags_are_run_scoped_and_identity_implies_ledger():
-    base = {"TB_EVIDENCE_LEDGER_ENABLED": "1", "TB_EVIDENCE_IDENTITY_SHADOW_ENABLED": "1"}
-    assert "TB_EVIDENCE_LEDGER_ENABLED" not in RunSpec().build_subprocess_env(base)
+    base = {
+        "TB_EVIDENCE_LEDGER_ENABLED": "1",
+        "TB_EVIDENCE_IDENTITY_SHADOW_ENABLED": "1",
+        "TB_TRAVERSAL_IDENTITY_V2_ENABLED": "1",
+    }
+    disabled = RunSpec().build_subprocess_env(base)
+    assert "TB_EVIDENCE_LEDGER_ENABLED" not in disabled
+    assert "TB_EVIDENCE_IDENTITY_SHADOW_ENABLED" not in disabled
+    assert "TB_TRAVERSAL_IDENTITY_V2_ENABLED" not in disabled
     ledger = RunSpec(evidence_ledger=True).build_subprocess_env({})
     assert ledger["TB_EVIDENCE_LEDGER_ENABLED"] == "1"
     assert "TB_EVIDENCE_IDENTITY_SHADOW_ENABLED" not in ledger
     identity = RunSpec(identity_shadow_v2=True).build_subprocess_env({})
     assert identity["TB_EVIDENCE_LEDGER_ENABLED"] == "1"
     assert identity["TB_EVIDENCE_IDENTITY_SHADOW_ENABLED"] == "1"
+    traversal = RunSpec(traversal_identity_v2=True).build_subprocess_env({})
+    assert traversal["TB_EVIDENCE_LEDGER_ENABLED"] == "1"
+    assert traversal["TB_EVIDENCE_IDENTITY_SHADOW_ENABLED"] == "1"
+    assert traversal["TB_TRAVERSAL_IDENTITY_V2_ENABLED"] == "1"
+    assert RunSpec().build_subprocess_env(traversal).get("TB_TRAVERSAL_IDENTITY_V2_ENABLED") is None
+    assert resolve_identity_feature_flags(traversal_identity_v2=True) == {
+        "evidence_ledger": True,
+        "identity_shadow_v2": True,
+        "traversal_identity_v2": True,
+    }
 
 
 def test_prepare_runtime_scopes_android_serial(monkeypatch):

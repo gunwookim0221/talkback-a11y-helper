@@ -59,6 +59,14 @@ from tb_runner import device_tab_logic
 from tb_runner import focus_realign_logic
 from tb_runner import local_tab_logic
 from tb_runner import scroll_exhaustion_logic
+from tb_runner.traversal_evidence_gate import (
+    ProgressDecision,
+    TraversalDiagnostics,
+    VisitDecision,
+    evaluate_traversal_gate,
+    select_recovery_candidate,
+    traversal_identity_v2_enabled,
+)
 
 _VALID_SCREEN_CONTEXT_MODES = {"bottom_tab", "new_screen"}
 _VALID_STABILIZATION_MODES = {"tab_context", "anchor_only", "anchor_then_context"}
@@ -140,6 +148,76 @@ def _evidence_actual_focus_observation_id(client: Any, row: dict[str, Any] | Non
         return ""
 
 
+def _legacy_row_progressed(row: dict[str, Any]) -> bool:
+    return (normalize_move_result(row) or str(row.get("move_result", "") or "").strip().lower()) in {
+        "moved",
+        "scrolled",
+        "edge_realign_then_moved",
+    }
+
+
+def _resolve_traversal_evidence_decision(
+    *,
+    client: Any,
+    row: dict[str, Any],
+    state: "MainLoopState",
+) -> tuple[ProgressDecision | None, VisitDecision | None]:
+    """Resolve one closed Identity V2 transaction without affecting flag-OFF runs."""
+    if not traversal_identity_v2_enabled():
+        return None, None
+
+    transaction_id = ""
+    lookup_transaction = getattr(client, "_evidence_transaction_for_step", None)
+    if callable(lookup_transaction):
+        try:
+            transaction_id = str(lookup_transaction(row.get("step_index")) or "")
+        except Exception:
+            transaction_id = ""
+
+    result: dict[str, Any] | None = None
+    lookup_result = getattr(client, "_evidence_identity_result_for_step", None)
+    if callable(lookup_result):
+        try:
+            raw_result = lookup_result(row.get("step_index"))
+            result = raw_result if isinstance(raw_result, dict) else None
+        except Exception as exc:
+            log(f"[TRAVERSAL_V2][fallback] reason='identity_result_error' error='{type(exc).__name__}'")
+
+    legacy_progressed = _legacy_row_progressed(row)
+    progress, visit = evaluate_traversal_gate(
+        result,
+        transaction_id=transaction_id,
+        evidence_transaction_id=str((result or {}).get("runtime_transaction_id") or ""),
+        legacy_progressed=legacy_progressed,
+        legacy_visited=legacy_progressed,
+        # Consumption records that the planning candidate was attempted.  It
+        # remains separate from physical visit credit and must not be withheld
+        # merely because representative and actual focus diverge.
+        legacy_consumed=True,
+        row=row,
+        enabled=True,
+    )
+    state.traversal_diagnostics = state.traversal_diagnostics.record_gate(progress, visit)
+    _emit_row_evidence(
+        client,
+        row,
+        "PRODUCTION_TRAVERSAL_GATE_DECIDED",
+        phase="production_gate",
+        payload={
+            "progress": progress.to_payload(),
+            "visit": visit.to_payload(),
+            "rule": "strict_identity_v2_promotion_or_legacy_fallback",
+        },
+    )
+    log(
+        f"[TRAVERSAL_V2][gate] step={row.get('step_index')} verdict='{progress.verdict}' "
+        f"applied={str(progress.gate_applied).lower()} physical_progress={progress.physical_progress} "
+        f"visited={str(visit.visited).lower()} consumed={str(visit.consumed).lower()} "
+        f"representative_only={str(visit.representative_only).lower()} reason='{progress.reason}'"
+    )
+    return progress, visit
+
+
 def _emit_row_evidence(
     client: Any,
     row: dict[str, Any] | None,
@@ -161,6 +239,22 @@ def _emit_row_evidence(
         )
     except Exception:
         return
+
+
+def _emit_traversal_identity_diagnostics(runtime: Any, diagnostics: TraversalDiagnostics) -> None:
+    if not traversal_identity_v2_enabled() or not bool(getattr(runtime, "is_enabled", False)):
+        return
+    try:
+        runtime.emit(
+            "TRAVERSAL_IDENTITY_V2_DIAGNOSTICS",
+            producer="runner",
+            phase="scenario_end",
+            payload=diagnostics.to_payload(),
+        )
+    except Exception:
+        return
+
+
 _ONBOARDING_BODY_EVIDENCE_TOKENS: tuple[str, ...] = (
     "set up",
     "get started",
@@ -562,6 +656,10 @@ class MainLoopState:
         default_factory=LocalTabRevisitGuardState
     )
     local_tab_state: local_tab_logic.LocalTabState = field(default_factory=local_tab_logic.LocalTabState)
+    traversal_diagnostics: TraversalDiagnostics = field(default_factory=TraversalDiagnostics)
+    recovery_attempted_candidate_ids: set[str] = field(default_factory=set)
+    recovery_hard_failed_candidate_ids: set[str] = field(default_factory=set)
+    recovery_visited_candidate_ids: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -11095,10 +11193,33 @@ def _build_row_object_signature(row: dict[str, Any]) -> str:
     )
 
 
-def _record_recent_representative_signature(state: MainLoopState, row: dict[str, Any]) -> None:
+def _record_recent_representative_signature(
+    state: MainLoopState,
+    row: dict[str, Any],
+    *,
+    progress_decision: ProgressDecision | None = None,
+    visit_decision: VisitDecision | None = None,
+) -> None:
     signature = _build_row_object_signature(row)
     move_result = normalize_move_result(row) or str(row.get("move_result", "") or "").strip().lower()
     logical_signature = _row_logical_signature(row)
+    gate_applied = bool(progress_decision is not None and progress_decision.gate_applied and visit_decision is not None)
+    planning_consumed = bool(visit_decision.consumed) if gate_applied and visit_decision is not None else True
+    physical_visited = (
+        bool(visit_decision.visited)
+        if gate_applied and visit_decision is not None
+        else move_result in {"moved", "scrolled", "edge_realign_then_moved"}
+    )
+    visited_row = row
+    if gate_applied and physical_visited:
+        visited_row = dict(row)
+        visited_row["visible_label"] = str(row.get("actual_focus_visible", "") or row.get("actual_focus_speech", "") or row.get("visible_label", "") or "")
+        visited_row["merged_announcement"] = str(row.get("actual_focus_speech", "") or row.get("actual_focus_visible", "") or row.get("merged_announcement", "") or "")
+        visited_row["focus_view_id"] = str(row.get("actual_focus_resource_id", "") or row.get("focus_view_id", "") or "")
+        visited_row["focus_bounds"] = str(row.get("actual_focus_bounds", "") or row.get("focus_bounds", "") or "")
+        if str(row.get("row_source", "") or "").strip() == "representative":
+            visited_row["focus_class_name"] = ""
+    visited_logical_signature = _row_logical_signature(visited_row)
     visited_logical_signatures = set(getattr(state, "visited_logical_signatures", set()) or set())
     cluster_signature = str(row.get("focus_cluster_signature", "") or "").strip()
     cluster_logical_signature = str(row.get("focus_cluster_logical_signature", "") or "").strip()
@@ -11115,29 +11236,30 @@ def _record_recent_representative_signature(state: MainLoopState, row: dict[str,
     )
     if not signature:
         signature = ""
-    if signature:
+    if signature and planning_consumed:
         state.recent_representative_signatures.append(signature)
         state.consumed_representative_signatures.add(signature)
-    if move_result in {"moved", "scrolled", "edge_realign_then_moved"}:
-        if logical_signature and logical_signature != "none||none||none":
-            visited_logical_signatures.add(logical_signature)
+    if physical_visited:
+        if visited_logical_signature and visited_logical_signature != "none||none||none":
+            visited_logical_signatures.add(visited_logical_signature)
             state.visited_logical_signatures = visited_logical_signatures
-    if cluster_signature:
+    if cluster_signature and planning_consumed:
         consumed_clusters.add(cluster_signature)
         state.consumed_cluster_signatures = consumed_clusters
         log(f"[STEP][cluster_consumed] cluster='{_truncate_debug_text(cluster_signature, 120)}'")
-    if cluster_logical_signature:
+    if cluster_logical_signature and planning_consumed:
         consumed_cluster_logical.add(cluster_logical_signature)
         state.consumed_cluster_logical_signatures = consumed_cluster_logical
     semantic_consumed_signature = _semantic_card_consumed_signature(row, state)
-    if semantic_consumed_signature and _semantic_card_can_consume(row):
+    if semantic_consumed_signature and planning_consumed and _semantic_card_can_consume(row):
         consumed_semantic_cards.add(semantic_consumed_signature)
         state.consumed_semantic_card_signatures = consumed_semantic_cards
         row["semantic_card_consumed"] = True
         log(f"[STEP][semantic_card_consumed] card='{_truncate_debug_text(semantic_consumed_signature, 120)}'")
     elif semantic_consumed_signature:
         row["semantic_card_consumed"] = semantic_consumed_signature in consumed_semantic_cards
-    _record_active_container_group_progress(state, signature)
+    if planning_consumed:
+        _record_active_container_group_progress(state, signature)
 
 
 def _clear_active_container_group(state: Any, *, reason: str) -> None:
@@ -13928,11 +14050,18 @@ def _apply_row_quality_phase_impl(
     tab_cfg: dict[str, Any],
     step_idx: int,
     step_elapsed: float,
+    progress_decision: ProgressDecision | None = None,
+    visit_decision: VisitDecision | None = None,
     log_fn,
     detect_mismatch_fn,
 ) -> tuple[list[str], list[str]]:
     _enrich_row_semantic_card_metadata(row)
-    _record_recent_representative_signature(state, row)
+    _record_recent_representative_signature(
+        state,
+        row,
+        progress_decision=progress_decision,
+        visit_decision=visit_decision,
+    )
     state.last_fingerprint, state.fingerprint_repeat_count = _annotate_row_quality(
         row,
         last_fingerprint=state.last_fingerprint,
@@ -14011,6 +14140,8 @@ def _apply_row_quality_phase(
     tab_cfg: dict[str, Any],
     step_idx: int,
     step_elapsed: float,
+    progress_decision: ProgressDecision | None = None,
+    visit_decision: VisitDecision | None = None,
 ) -> tuple[list[str], list[str]]:
     return _apply_row_quality_phase_impl(
         row=row,
@@ -14018,6 +14149,8 @@ def _apply_row_quality_phase(
         tab_cfg=tab_cfg,
         step_idx=step_idx,
         step_elapsed=step_elapsed,
+        progress_decision=progress_decision,
+        visit_decision=visit_decision,
         log_fn=log,
         detect_mismatch_fn=detect_step_mismatch,
     )
@@ -14862,10 +14995,11 @@ def _apply_stop_evaluation_phase_impl(
     state: MainLoopState,
     previous_row: dict[str, Any] | None,
     tab_cfg: dict[str, Any],
+    progress_decision: ProgressDecision | None = None,
     should_stop_fn,
     build_inputs_fn,
 ) -> tuple[bool, str, dict[str, Any], dict[str, Any]]:
-    stop, state.fail_count, state.same_count, reason, state.prev_fingerprint, stop_details = should_stop_fn(
+    stop_kwargs = dict(
         row=row,
         prev_fingerprint=state.prev_fingerprint,
         fail_count=state.fail_count,
@@ -14875,6 +15009,9 @@ def _apply_stop_evaluation_phase_impl(
         stop_policy=tab_cfg.get("stop_policy", {}),
         scenario_cfg=tab_cfg,
     )
+    if progress_decision is not None and progress_decision.gate_applied:
+        stop_kwargs["progress_override"] = progress_decision
+    stop, state.fail_count, state.same_count, reason, state.prev_fingerprint, stop_details = should_stop_fn(**stop_kwargs)
     stop_eval_inputs = build_inputs_fn(stop_details=stop_details, row=row, tab_cfg=tab_cfg)
     return stop, reason, stop_details, stop_eval_inputs
 
@@ -14885,15 +15022,268 @@ def _apply_stop_evaluation_phase(
     state: MainLoopState,
     previous_row: dict[str, Any] | None,
     tab_cfg: dict[str, Any],
+    progress_decision: ProgressDecision | None = None,
 ) -> tuple[bool, str, dict[str, Any], dict[str, Any]]:
     return _apply_stop_evaluation_phase_impl(
         row=row,
         state=state,
         previous_row=previous_row,
         tab_cfg=tab_cfg,
+        progress_decision=progress_decision,
         should_stop_fn=should_stop,
         build_inputs_fn=_build_stop_evaluation_inputs,
     )
+
+
+_TRAVERSAL_V2_REPEAT_STOP_REASONS = {
+    "repeat_no_progress",
+    "bounded_two_card_loop",
+    "repeat_semantic_stall",
+    "repeat_semantic_stall_after_escape",
+}
+
+
+def _build_identity_recovery_inventory(
+    *,
+    client: Any,
+    phase_ctx: CollectionPhaseContext,
+) -> list[dict[str, Any]]:
+    inventory = _ensure_focusable_inventory(client, phase_ctx.output_path)
+    candidates: list[dict[str, Any]] = []
+    for item in _canonicalize_focusable_inventory(inventory):
+        if not isinstance(item, dict):
+            continue
+        taxonomy, taxonomy_reason = _focusable_taxonomy(item)
+        if (
+            taxonomy == "OPTIONAL"
+            and bool(item.get("clickable"))
+            and str(item.get("view_id", "") or "").strip()
+        ):
+            taxonomy = "REVIEW"
+            taxonomy_reason = "direct_actionable_resource"
+        match = _focusable_coverage_canonical_match(item, phase_ctx.all_rows)
+        coverage_status = str(match.get("status", "UNKNOWN") or "UNKNOWN").strip().upper()
+        if taxonomy == "IGNORE" or coverage_status == "COVERED":
+            continue
+        candidates.append(
+            {
+                **item,
+                "taxonomy": taxonomy,
+                "taxonomy_reason": taxonomy_reason,
+                "coverage_status": coverage_status,
+                "coverage_reason": str(match.get("reason", "") or ""),
+                "surface_id": str(item.get("local_tab_signature", "") or ""),
+            }
+        )
+    return candidates
+
+
+def _infer_identity_recovery_viewport(inventory: list[dict[str, Any]]) -> tuple[int, int, int, int] | None:
+    parsed = [
+        parse_bounds_str(str(item.get("bounds", "") or ""))
+        for item in inventory
+        if isinstance(item, dict)
+    ]
+    bounds = [value for value in parsed if value]
+    if not bounds:
+        return None
+    right = max(value[2] for value in bounds)
+    bottom = max(value[3] for value in bounds)
+    return (0, 0, right, bottom) if right > 0 and bottom > 0 else None
+
+
+def _identity_recovery_surface_id(state: MainLoopState, row: dict[str, Any]) -> str:
+    return str(
+        getattr(state, "current_local_tab_signature", "")
+        or row.get("local_tab_signature", "")
+        or row.get("current_local_tab_signature", "")
+        or ""
+    ).strip()
+
+
+def _select_identity_recovery_candidate(
+    *,
+    client: Any,
+    phase_ctx: CollectionPhaseContext,
+    state: MainLoopState,
+    row: dict[str, Any],
+) -> Any | None:
+    inventory = _build_identity_recovery_inventory(client=client, phase_ctx=phase_ctx)
+    return select_recovery_candidate(
+        inventory,
+        scenario_id=str(phase_ctx.tab_cfg.get("scenario_id", "") or ""),
+        surface_id=_identity_recovery_surface_id(state, row),
+        viewport_bounds=_infer_identity_recovery_viewport(inventory),
+        visited=set(state.recovery_visited_candidate_ids),
+        hard_failed=set(state.recovery_hard_failed_candidate_ids),
+        attempted=set(state.recovery_attempted_candidate_ids),
+    )
+
+
+def _attempt_identity_recovery(
+    *,
+    client: A11yAdbClient,
+    dev: str,
+    phase_ctx: CollectionPhaseContext,
+    state: MainLoopState,
+    row: dict[str, Any],
+    step_idx: int,
+) -> dict[str, Any]:
+    outcome: dict[str, Any] = {
+        "attempted": False,
+        "recovered": False,
+        "block_stop": False,
+        "row": None,
+        "progress": None,
+        "visit": None,
+    }
+    if not traversal_identity_v2_enabled():
+        return outcome
+    candidate = _select_identity_recovery_candidate(
+        client=client,
+        phase_ctx=phase_ctx,
+        state=state,
+        row=row,
+    )
+    if candidate is None:
+        return outcome
+
+    begin_target_action = getattr(client, "_evidence_begin_target_action", None)
+    set_evidence_step = getattr(client, "_evidence_set_step", None)
+    if not callable(begin_target_action):
+        log("[TRAVERSAL_V2][recovery_skip] reason='evidence_transaction_unavailable'")
+        return outcome
+
+    recovery_number = state.traversal_diagnostics.recovered_candidate_attempts + 1
+    recovery_step_key = f"{step_idx}:recovery:{recovery_number}"
+    if callable(set_evidence_step):
+        try:
+            set_evidence_step(recovery_step_key, phase="recovery")
+        except Exception:
+            pass
+    transaction = begin_target_action(
+        "FOCUS_IN_BOUNDS",
+        requested_target=candidate.requested_observation(),
+        phase="recovery",
+    )
+    if not transaction:
+        log("[TRAVERSAL_V2][recovery_skip] reason='evidence_transaction_not_opened'")
+        return outcome
+
+    state.recovery_attempted_candidate_ids.update({candidate.candidate_id, candidate.canonical_key})
+    state.traversal_diagnostics = state.traversal_diagnostics.record_recovery_attempt()
+    outcome["attempted"] = True
+    bounds = ",".join(str(value) for value in candidate.bounds)
+    log(
+        f"[TRAVERSAL_V2][recovery_attempt] step={step_idx} candidate='{candidate.candidate_id}' "
+        f"label='{_truncate_debug_text(candidate.label, 96)}' bounds='{bounds}'"
+    )
+
+    action_result: dict[str, Any] = {}
+    recovery_row: dict[str, Any] | None = None
+    try:
+        action_result = client.focus_in_bounds(
+            dev=dev,
+            bounds=bounds,
+            wait_=_TRANSITION_FAST_ACTION_WAIT_SECONDS,
+            prefer_empty_state=False,
+            exclude_top_chrome=True,
+            exclude_bottom_nav=True,
+        )
+        recovery_row = client.collect_focus_step(
+            dev=dev,
+            step_index=recovery_step_key,
+            move=False,
+            direction="next",
+            wait_seconds=phase_ctx.main_step_wait_seconds,
+            announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
+            announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
+            announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
+        )
+    except Exception as exc:
+        log(f"[TRAVERSAL_V2][recovery_error] candidate='{candidate.candidate_id}' error='{type(exc).__name__}'")
+        runtime = getattr(client, "evidence_runtime", None)
+        active = getattr(client, "_evidence_active_transaction", None)
+        if runtime is not None and active:
+            try:
+                runtime.close_transaction(active, status="failed", phase="recovery", payload={"reason": type(exc).__name__})
+            except Exception:
+                pass
+            setattr(client, "_evidence_active_transaction", None)
+
+    if not isinstance(recovery_row, dict):
+        state.recovery_hard_failed_candidate_ids.update({candidate.candidate_id, candidate.canonical_key})
+    else:
+        recovery_row["tab_name"] = phase_ctx.tab_cfg["tab_name"]
+        recovery_row["context_type"] = "main"
+        recovery_row["parent_step_index"] = ""
+        recovery_row["overlay_entry_label"] = ""
+        recovery_row["overlay_recovery_status"] = ""
+        recovery_row["status"] = "OK"
+        recovery_row["stop_reason"] = ""
+        recovery_row["scenario_type"] = str(phase_ctx.tab_cfg.get("scenario_type", "content") or "content")
+        recovery_row["scenario_id"] = str(phase_ctx.tab_cfg.get("scenario_id", "") or "")
+        recovery_row["last_smart_nav_result"] = ""
+        recovery_row["last_smart_nav_detail"] = ""
+        recovery_row["last_smart_nav_terminal"] = False
+        progress, visit = _resolve_traversal_evidence_decision(client=client, row=recovery_row, state=state)
+        outcome["progress"] = progress
+        outcome["visit"] = visit
+        strong_recovery = bool(
+            progress is not None
+            and visit is not None
+            and progress.gate_applied
+            and progress.verdict == "MOVE_CONFIRMED"
+            and progress.physical_progress is True
+            and visit.visited
+        )
+        _emit_row_evidence(
+            client,
+            recovery_row,
+            "RECOVERY_CANDIDATE_RESULT",
+            phase="recovery",
+            payload={
+                "candidate": candidate.to_payload(),
+                "helper_success": bool(action_result.get("success")),
+                "strong_recovery": strong_recovery,
+                "progress_reason": progress.reason if progress is not None else "unavailable",
+            },
+        )
+        if strong_recovery:
+            recovery_row["move_result"] = "moved"
+            recovery_row["step_index"] = step_idx
+            recovery_row["crop_image"] = "IMAGE"
+            recovery_row["_step_mono_start"] = time.monotonic() - float(recovery_row.get("t_step_start", 0.0) or 0.0)
+            recovery_row = maybe_capture_focus_crop(client, dev, recovery_row, phase_ctx.output_base_dir)
+            recovery_row.pop("_step_mono_start", None)
+            _register_focusable_inventory_from_row(
+                client,
+                output_path=phase_ctx.output_path,
+                row=recovery_row,
+                state=state,
+            )
+            state.recovery_visited_candidate_ids.update({candidate.candidate_id, candidate.canonical_key})
+            state.traversal_diagnostics = state.traversal_diagnostics.record_recovery_visit().record_stop_prevented()
+            outcome.update({"recovered": True, "block_stop": True, "row": recovery_row})
+            return outcome
+        if bool(action_result.get("success")) is False or (
+            progress is not None and progress.gate_applied and progress.verdict == "STATIC_FOCUS"
+        ):
+            state.recovery_hard_failed_candidate_ids.update({candidate.candidate_id, candidate.canonical_key})
+
+    remaining = _select_identity_recovery_candidate(
+        client=client,
+        phase_ctx=phase_ctx,
+        state=state,
+        row=row,
+    )
+    if remaining is not None:
+        outcome["block_stop"] = True
+        log(
+            f"[TRAVERSAL_V2][recovery_continue] reason='eligible_recovery_candidate_remaining' "
+            f"next_candidate='{remaining.candidate_id}'"
+        )
+    return outcome
 
 
 def _maybe_dismiss_runtime_popup(
@@ -15164,12 +15554,19 @@ def _main_loop_phase(
                 row["post_move_verdict_source"] = "smart_nav_result_resource_match"
             elif smart_success:
                 row["post_move_verdict_source"] = "smart_nav_result"
+        progress_decision, visit_decision = _resolve_traversal_evidence_decision(
+            client=client,
+            row=row,
+            state=state,
+        )
         mismatch_reasons, low_confidence_reasons = _apply_row_quality_phase(
             row=row,
             state=state,
             tab_cfg=tab_cfg,
             step_idx=step_idx,
             step_elapsed=step_elapsed,
+            progress_decision=progress_decision,
+            visit_decision=visit_decision,
         )
         scenario_id = str(tab_cfg.get("scenario_id", "") or "")
         crash_detection = _run_crash_guard_check(
@@ -15187,6 +15584,7 @@ def _main_loop_phase(
             previous_row=state.previous_step_row,
             state=state,
             tab_cfg=tab_cfg,
+            progress_decision=progress_decision,
         )
         if crash_detection:
             crash_event_id = str(crash_detection.get("crash_event_id") or "")
@@ -15419,6 +15817,87 @@ def _main_loop_phase(
             step_idx=step_idx,
             scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
         )
+        if stop and reason in _TRAVERSAL_V2_REPEAT_STOP_REASONS:
+            recovery_outcome = _attempt_identity_recovery(
+                client=client,
+                dev=dev,
+                phase_ctx=phase_ctx,
+                state=state,
+                row=row,
+                step_idx=step_idx,
+            )
+            while (
+                bool(recovery_outcome.get("attempted", False))
+                and bool(recovery_outcome.get("block_stop", False))
+                and not bool(recovery_outcome.get("recovered", False))
+            ):
+                recovery_outcome = _attempt_identity_recovery(
+                    client=client,
+                    dev=dev,
+                    phase_ctx=phase_ctx,
+                    state=state,
+                    row=row,
+                    step_idx=step_idx,
+                )
+            if bool(recovery_outcome.get("recovered", False)):
+                row = recovery_outcome["row"]
+                progress_decision = recovery_outcome.get("progress")
+                visit_decision = recovery_outcome.get("visit")
+                mismatch_reasons, low_confidence_reasons = _apply_row_quality_phase(
+                    row=row,
+                    state=state,
+                    tab_cfg=tab_cfg,
+                    step_idx=step_idx,
+                    step_elapsed=float(row.get("step_total_elapsed_sec", 0.0) or 0.0),
+                    progress_decision=progress_decision,
+                    visit_decision=visit_decision,
+                )
+                stop, reason, stop_details, stop_eval_inputs = _apply_stop_evaluation_phase(
+                    row=row,
+                    previous_row=state.previous_step_row,
+                    state=state,
+                    tab_cfg=tab_cfg,
+                    progress_decision=progress_decision,
+                )
+                if stop and reason in _TRAVERSAL_V2_REPEAT_STOP_REASONS:
+                    stop = False
+                    reason = ""
+                cta_descend_applied = False
+                scroll_ready_continue_applied = False
+                local_tab_transition_applied = False
+                state.exhausted_terminal_guard_state.streak = 0
+                state.strip_only_terminal_guard_state.streak = 0
+                log(
+                    f"[TRAVERSAL_V2][recovered] step={step_idx} "
+                    f"visible='{_truncate_debug_text(str(row.get('visible_label', '') or ''), 96)}'"
+                )
+            elif bool(recovery_outcome.get("block_stop", False)):
+                stop = False
+                reason = ""
+
+        terminal_signal = bool(stop_eval_inputs["terminal_signal"])
+        same_like_count = int(stop_eval_inputs["same_like_count"])
+        no_progress = bool(stop_eval_inputs["no_progress"])
+        scenario_type = str(stop_eval_inputs["scenario_type"])
+        is_global_nav_only_scenario = bool(stop_eval_inputs["is_global_nav_only_scenario"])
+        is_global_nav = bool(stop_eval_inputs["is_global_nav"])
+        global_nav_reason = str(stop_eval_inputs["global_nav_reason"])
+        after_realign = bool(stop_eval_inputs["after_realign"])
+        recent_repeat = bool(stop_eval_inputs["recent_repeat"])
+        bounded_two_card_loop = bool(stop_eval_inputs["bounded_two_card_loop"])
+        semantic_same_like = bool(stop_eval_inputs["semantic_same_like"])
+        recent_duplicate = bool(stop_eval_inputs["recent_duplicate"])
+        recent_duplicate_distance = int(stop_eval_inputs["recent_duplicate_distance"])
+        recent_semantic_duplicate = bool(stop_eval_inputs["recent_semantic_duplicate"])
+        recent_semantic_duplicate_distance = int(stop_eval_inputs["recent_semantic_duplicate_distance"])
+        recent_semantic_unique_count = int(stop_eval_inputs["recent_semantic_unique_count"])
+        repeat_class = str(stop_eval_inputs["repeat_class"])
+        loop_classification = str(stop_eval_inputs["loop_classification"])
+        strict_duplicate = bool(stop_eval_inputs["strict_duplicate"])
+        semantic_duplicate = bool(stop_eval_inputs["semantic_duplicate"])
+        hard_no_progress = bool(stop_eval_inputs["hard_no_progress"])
+        soft_no_progress = bool(stop_eval_inputs["soft_no_progress"])
+        no_progress_class = str(stop_eval_inputs["no_progress_class"])
         repeat_stop_hit = bool(stop_eval_inputs["repeat_stop_hit"])
 
         if stop and reason == "repeat_semantic_stall":
@@ -16530,6 +17009,7 @@ def collect_tab_rows(
     )
     if bool(getattr(evidence_runtime, "is_enabled", False)):
         try:
+            _emit_traversal_identity_diagnostics(evidence_runtime, state.traversal_diagnostics)
             evidence_runtime.emit(
                 "SCENARIO_TERMINAL",
                 producer="runner",

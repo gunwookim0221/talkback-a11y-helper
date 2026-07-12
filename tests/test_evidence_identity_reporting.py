@@ -129,3 +129,44 @@ def test_identity_report_cache_reloads_when_file_state_changes(tmp_path: Path):
     assert _load(path)["summary"]["transactions"] == 1
     path.write_text(path.read_text(encoding="utf-8") + "\n" + _event("SHADOW_ACTION_REDUCED", "tx-2", {"verdict": "STATIC_FOCUS"}, "b"), encoding="utf-8")
     assert _load(path)["summary"]["transactions"] == 2
+
+
+def test_identity_report_aggregates_traversal_diagnostics_across_scenarios(tmp_path: Path):
+    path = tmp_path / "diagnostics.evidence.jsonl"
+
+    def diagnostics(event_id: str, false_progress: int, recovered: int) -> str:
+        return _event(
+            "TRAVERSAL_IDENTITY_V2_DIAGNOSTICS",
+            "",
+            {
+                "available": True,
+                "schema": "traversal-identity-v2-diagnostics-v1",
+                "false_progress_suppressed": false_progress,
+                "representative_only_progress_ignored": 1,
+                "recovered_candidate_attempts": recovered,
+                "recovered_visits": recovered,
+                "premature_stop_prevented": recovered,
+                "fallback_to_legacy_count": 0,
+                "indeterminate_count": 0,
+            },
+            event_id,
+        )
+
+    path.write_text(
+        "\n".join(
+            [
+                _event("SHADOW_ACTION_REDUCED_V2", "tx-1", {"verdict": "STATIC_FOCUS"}, "tx"),
+                diagnostics("diag-1", 2, 0),
+                diagnostics("diag-2", 3, 1),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    result = _load(path)["traversal_identity_v2_diagnostics"]
+    assert result["available"] is True
+    assert result["scenario_event_count"] == 2
+    assert result["false_progress_suppressed"] == 5
+    assert result["representative_only_progress_ignored"] == 2
+    assert result["recovered_candidate_attempts"] == 1
+    assert result["recovered_visits"] == 1
+    assert result["premature_stop_prevented"] == 1

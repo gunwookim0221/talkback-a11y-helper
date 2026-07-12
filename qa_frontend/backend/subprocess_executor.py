@@ -30,7 +30,13 @@ def start_execution(
     popen_factory: Callable[..., subprocess.Popen[str]] = subprocess.Popen,
 ) -> RunExecution:
     env = spec.build_subprocess_env()
-    logger.info("[FEATURE_FLAGS][subprocess_env] TB_EVIDENCE_LEDGER_ENABLED=%s TB_EVIDENCE_IDENTITY_SHADOW_ENABLED=%s", env.get("TB_EVIDENCE_LEDGER_ENABLED"), env.get("TB_EVIDENCE_IDENTITY_SHADOW_ENABLED"))
+    logger.info(
+        "[FEATURE_FLAGS][subprocess_env] TB_EVIDENCE_LEDGER_ENABLED=%s "
+        "TB_EVIDENCE_IDENTITY_SHADOW_ENABLED=%s TB_TRAVERSAL_IDENTITY_V2_ENABLED=%s",
+        env.get("TB_EVIDENCE_LEDGER_ENABLED"),
+        env.get("TB_EVIDENCE_IDENTITY_SHADOW_ENABLED"),
+        env.get("TB_TRAVERSAL_IDENTITY_V2_ENABLED"),
+    )
     process = popen_factory(
         spec.build_script_command(script_path),
         cwd=cwd,

@@ -2,7 +2,7 @@
 
 [System Overview](system-overview.md) | [Current Client Architecture](current-client-architecture.md) | [Device Plugin Guide](device-plugin-guide.md)
 
-Updated for Canonical Identity Shadow Phase 8: 2026-07-12
+Updated for Production Traversal Migration Phase 8.5: 2026-07-13
 
 ## 1) 상위 구조
 
@@ -29,14 +29,17 @@ QA Frontend / V10 Shadow
     -> inventory / identify / candidate / comparison
     -> promotion readiness / Recent Runs reporting
 
-Traversal Evidence / Canonical Identity Shadow
+Traversal Evidence / Canonical Identity / Traversal Identity V2
   tb_runner/evidence.py
   tb_runner/evidence_identity.py
+  tb_runner/traversal_evidence_gate.py
+  tb_runner/collection_flow.py
   qa_frontend/backend/evidence_identity_reporting.py
     -> append-only action evidence
     -> canonical observation normalization
     -> V2 physical/semantic/hierarchy/temporal relation
     -> read-only verdict distribution reporting
+    -> default-OFF production progress/visit/stop/recovery gate
 ```
 
 ## 2) 운영 계층
@@ -112,6 +115,12 @@ production summary/PASS/FAIL 또는 XLSX의 입력이 아니다. 상세 acceptan
 [talkback-identity-shadow-phase8-completion.md](design/talkback-identity-shadow-phase8-completion.md)를
 따른다.
 
+`TB_TRAVERSAL_IDENTITY_V2_ENABLED`가 ON이면 위 V2 결과 중에서도 closed, complete,
+ACKed, stable, high-confidence `MOVE_CONFIRMED`/`STATIC_FOCUS`만
+`tb_runner/traversal_evidence_gate.py`를 통해 production progress/visit/stop/recovery에
+제한적으로 사용한다. `MOVE_TO_OTHER_NODE`, `SNAP_BACK`, incomplete, malformed, orphan,
+uncorrelated 결과는 모두 legacy fallback이다. Flag OFF에서는 이 경로를 전혀 읽지 않는다.
+
 ## 3) Devices plugin 운영 추가점
 
 Devices plugin은 일반 Life plugin과 다르게 Devices list normalization을 먼저
@@ -146,4 +155,5 @@ focus 기준**이다.
 - Shadow 실패는 Legacy 결과로 전파하지 않음
 - `unknown`, `ambiguous`, `failed`는 fail-closed
 - Controlled Routing과 V10 traversal은 비활성/미구현
-- Canonical Identity V2 verdict는 shadow-only이며 production consumer가 없음
+- Canonical Identity V2 verdict는 기본 shadow-only이며, optional Traversal Identity V2 flag ON일
+  때만 strong gate 결과가 production progress/visit/stop/recovery에 제한적으로 소비됨

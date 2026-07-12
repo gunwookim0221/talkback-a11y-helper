@@ -509,6 +509,7 @@ def test_recent_batches_include_duration_for_finished_batch(tmp_path, monkeypatc
   "mode": "full",
   "created_at": "2026-06-06T18:48:40+09:00",
   "state": "finished",
+  "feature_flags": {"evidence_ledger": true, "identity_shadow_v2": true, "traversal_identity_v2": true},
   "devices": [
     {
       "serial": "SERIAL1",
@@ -530,6 +531,8 @@ def test_recent_batches_include_duration_for_finished_batch(tmp_path, monkeypatc
     assert len(batches) == 1
     assert batches[0]["batch_id"] == "batch_20260606_184840"
     assert batches[0]["duration_seconds"] == 754
+    assert batches[0]["feature_flags"]["traversal_identity_v2"] is True
+    assert batches[0]["devices"][0]["feature_flags"]["traversal_identity_v2"] is True
 
 
 def test_recent_batches_expose_coverage_probe_from_reporting_summary(tmp_path, monkeypatch):

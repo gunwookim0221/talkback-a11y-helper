@@ -723,6 +723,7 @@ class StopEvaluator:
         scenario_type: str = "content",
         stop_policy: dict[str, Any] | None = None,
         scenario_cfg: dict[str, Any] | None = None,
+        progress_override: Any | None = None,
     ) -> tuple[bool, int, int, str, tuple[str, str, str], dict[str, Any]]:
         move_result = normalize_move_result(row)
         smart_nav_result = str(row.get("last_smart_nav_result", "") or "").strip().lower()
@@ -754,17 +755,36 @@ class StopEvaluator:
             recent_semantic_duplicate_distance=recent_semantic_duplicate_distance,
             recent_semantic_unique_count=recent_semantic_unique_count,
         )
+        physical_progress = getattr(progress_override, "physical_progress", None)
+        if isinstance(progress_override, dict):
+            physical_progress = progress_override.get("physical_progress")
+        if physical_progress is True:
+            repeat_eval["same_like"] = False
+        elif physical_progress is False:
+            repeat_eval["same_like"] = True
         same_like = bool(repeat_eval["same_like"])
         semantic_same_like = bool(repeat_eval["semantic_duplicate"] or repeat_eval["repeat_class"] == "mixed_repeat")
+        semantic_progress = getattr(progress_override, "semantic_progress", None)
+        if isinstance(progress_override, dict):
+            semantic_progress = progress_override.get("semantic_progress")
+        if semantic_progress is True:
+            semantic_same_like = False
+        elif semantic_progress is False:
+            semantic_same_like = True
+            repeat_eval["semantic_duplicate"] = True
+            if repeat_eval.get("repeat_class") == "none":
+                repeat_eval["repeat_class"] = "semantic_duplicate"
         same_count = same_count + 1 if same_like else 0
 
-        move_failed = move_result in self._MOVE_FAILURE_RESULTS
+        move_failed = move_result in self._MOVE_FAILURE_RESULTS and physical_progress is not True
         if move_failed:
             fail_count += 1
         else:
             fail_count = 0
 
-        move_terminal = smart_nav_result in self._MOVE_TERMINAL_RESULTS or move_result in self._MOVE_TERMINAL_RESULTS
+        move_terminal = (
+            smart_nav_result in self._MOVE_TERMINAL_RESULTS or move_result in self._MOVE_TERMINAL_RESULTS
+        ) and physical_progress is not True
 
         no_progress_eval = self.evaluate_no_progress(
             same_like=same_like,
@@ -858,6 +878,7 @@ class StopEvaluator:
             "hard_no_progress": bool(no_progress_eval["hard_no_progress"]),
             "soft_no_progress": bool(no_progress_eval["soft_no_progress"]),
             "no_progress_class": str(no_progress_eval["no_progress_class"]),
+            "evidence_physical_progress": physical_progress,
             "overlay_realign_grace_active": bool(overlay_ctx["realign_grace_active"]),
             "min_steps_before_repeat_stop": int(decision_meta["min_steps_before_repeat_stop"]),
             "min_step_gate_blocked": bool(decision_meta["min_step_gate_blocked"]),
@@ -880,6 +901,7 @@ def should_stop(
     scenario_type: str = "content",
     stop_policy: dict[str, Any] | None = None,
     scenario_cfg: dict[str, Any] | None = None,
+    progress_override: Any | None = None,
 ) -> tuple[bool, int, int, str, tuple[str, str, str], dict[str, Any]]:
     evaluator = StopEvaluator()
     return evaluator.evaluate(
@@ -891,4 +913,5 @@ def should_stop(
         scenario_type=scenario_type,
         stop_policy=stop_policy,
         scenario_cfg=scenario_cfg,
+        progress_override=progress_override,
     )

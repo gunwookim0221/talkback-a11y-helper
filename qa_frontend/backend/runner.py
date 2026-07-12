@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from tb_runner.run_spec import RunSpec
+from tb_runner.run_spec import RunSpec, resolve_identity_feature_flags
 
 from .paths import ROOT_DIR, RUN_LOG_DIR, SCRIPT_PATH, RUNTIME_CONFIG_PATH, OUTPUT_DIR
 from .device_locale import apply_language_mode, format_language_log_lines, normalize_language_mode
@@ -60,6 +60,7 @@ class RunManager:
         self._device_stay_awake_state: dict[str, object] | None = None
         self._run_dir: Path | None = None
         self._shadow_validation_requested = False
+        self._feature_flags = resolve_identity_feature_flags()
 
     def start_run(
         self,
@@ -72,6 +73,7 @@ class RunManager:
         shadow_validation: bool = False,
         evidence_ledger: bool = False,
         identity_shadow_v2: bool = False,
+        traversal_identity_v2: bool = False,
     ) -> dict[str, object]:
         with self._lock:
             self._refresh_locked()
@@ -106,6 +108,17 @@ class RunManager:
                 self._preflight = None
                 self._shadow_validation_requested = (
                     shadow_validation is True and str(mode).lower() == "full"
+                )
+                self._feature_flags = resolve_identity_feature_flags(
+                    evidence_ledger=evidence_ledger,
+                    identity_shadow_v2=identity_shadow_v2,
+                    traversal_identity_v2=traversal_identity_v2,
+                )
+                log_file.write(
+                    "[FEATURE_FLAGS][runspec] "
+                    f"evidence_ledger={self._feature_flags['evidence_ledger']} "
+                    f"identity_shadow_v2={self._feature_flags['identity_shadow_v2']} "
+                    f"traversal_identity_v2={self._feature_flags['traversal_identity_v2']}\n"
                 )
 
                 if not scenario_ids:
@@ -189,8 +202,9 @@ class RunManager:
                     scenario_ids=tuple(scenario_ids),
                     runtime_config_path=self._runtime_config_path,
                     enable_coverage_probe=enable_coverage_probe,
-                    evidence_ledger=evidence_ledger,
-                    identity_shadow_v2=identity_shadow_v2,
+                    evidence_ledger=self._feature_flags["evidence_ledger"],
+                    identity_shadow_v2=self._feature_flags["identity_shadow_v2"],
+                    traversal_identity_v2=self._feature_flags["traversal_identity_v2"],
                 )
                 language_status, preflight = prepare_runtime(
                     spec,
@@ -501,6 +515,7 @@ class RunManager:
             "max_steps_policy": self._max_steps_policy,
             "scenario_steps": self._scenario_steps,
             "shadow_validation": self._shadow_validation_requested,
+            "feature_flags": dict(self._feature_flags),
             "launch_mode": self._launch_mode,
             "language_mode": self._language_mode,
             "device_locale": language_status.get("device_locale") if language_status else None,

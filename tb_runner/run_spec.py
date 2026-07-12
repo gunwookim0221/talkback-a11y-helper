@@ -9,6 +9,22 @@ from typing import Mapping
 from tb_runner.runtime_config import RUNTIME_CONFIG_PATH_ENV
 
 
+def resolve_identity_feature_flags(
+    *,
+    evidence_ledger: bool = False,
+    identity_shadow_v2: bool = False,
+    traversal_identity_v2: bool = False,
+) -> dict[str, bool]:
+    traversal = bool(traversal_identity_v2)
+    identity = bool(identity_shadow_v2 or traversal)
+    evidence = bool(evidence_ledger or identity)
+    return {
+        "evidence_ledger": evidence,
+        "identity_shadow_v2": identity,
+        "traversal_identity_v2": traversal,
+    }
+
+
 @dataclass(frozen=True)
 class RunSpec:
     serial: str | None = None
@@ -21,6 +37,15 @@ class RunSpec:
     enable_coverage_probe: bool = False
     evidence_ledger: bool = False
     identity_shadow_v2: bool = False
+    traversal_identity_v2: bool = False
+
+    @property
+    def feature_flags(self) -> dict[str, bool]:
+        return resolve_identity_feature_flags(
+            evidence_ledger=self.evidence_ledger,
+            identity_shadow_v2=self.identity_shadow_v2,
+            traversal_identity_v2=self.traversal_identity_v2,
+        )
 
     def build_script_command(self, script_path: str | Path) -> list[str]:
         command = [sys.executable, str(script_path)]
@@ -45,14 +70,19 @@ class RunSpec:
             env[RUNTIME_CONFIG_PATH_ENV] = self.runtime_config_path
         if self.enable_coverage_probe:
             env["TB_V8_COVERAGE_PROBE"] = "1"
-        if self.evidence_ledger or self.identity_shadow_v2:
+        feature_flags = self.feature_flags
+        if feature_flags["evidence_ledger"]:
             env["TB_EVIDENCE_LEDGER_ENABLED"] = "1"
         else:
             env.pop("TB_EVIDENCE_LEDGER_ENABLED", None)
-        if self.identity_shadow_v2:
+        if feature_flags["identity_shadow_v2"]:
             env["TB_EVIDENCE_IDENTITY_SHADOW_ENABLED"] = "1"
         else:
             env.pop("TB_EVIDENCE_IDENTITY_SHADOW_ENABLED", None)
+        if feature_flags["traversal_identity_v2"]:
+            env["TB_TRAVERSAL_IDENTITY_V2_ENABLED"] = "1"
+        else:
+            env.pop("TB_TRAVERSAL_IDENTITY_V2_ENABLED", None)
         return env
 
 

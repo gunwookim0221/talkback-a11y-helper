@@ -15,6 +15,7 @@ import org.json.JSONObject
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.abs
 
 class A11yHelperService : AccessibilityService() {
     companion object {
@@ -322,6 +323,13 @@ class A11yHelperService : AccessibilityService() {
         excludeBottomNav: Boolean,
         reqId: String = "none"
     ): JSONObject {
+        val recoveryEvidence = A11yEvidence.hasCorrelation(reqId)
+        if (recoveryEvidence) {
+            Log.i(
+                TAG,
+                "[RECOVERY][helper_request] requestId=$reqId action=FOCUS_IN_BOUNDS bounds='$boundsString'"
+            )
+        }
         val root = rootInActiveWindow
         val targetRegion = parseShortBounds(boundsString)
         if (root == null || targetRegion == null || targetRegion.isEmpty) {
@@ -379,7 +387,30 @@ class A11yHelperService : AccessibilityService() {
             )
 
         val target = candidates.firstOrNull()
+        if (recoveryEvidence) {
+            val bestScore = target?.let { candidate ->
+                (if (candidate.source == "talkback_like") 100 else 0) +
+                    (if (candidate.effectiveClickable || candidate.hasFocusableDescendant) 10 else 0) +
+                    (if (candidate.emptyState && preferEmptyState) 1 else 0)
+            } ?: 0
+            Log.i(
+                TAG,
+                "[RECOVERY][candidate] requestId=$reqId nodeCount=${countAccessibleNodes(root)} " +
+                    "talkbackMatches=${talkBackCandidates.size} rawMatches=${rawContentCandidates.size} " +
+                    "matchingNodes=${candidates.size} bestScore=$bestScore " +
+                    "selected='${target?.label.orEmpty().replace("\n", " ")}' " +
+                    "selectedBounds='${target?.bounds?.toShortString().orEmpty()}' " +
+                    "selectedSource='${target?.source.orEmpty()}' reason='${if (target == null) "no_candidate_after_filters" else "ranked_candidate"}'"
+            )
+        }
         val focusExecution = if (target != null) {
+            if (recoveryEvidence) {
+                Log.i(
+                    TAG,
+                    "[RECOVERY][focus_attempt] requestId=$reqId node='${target.label.replace("\n", " ")}' " +
+                        "bounds='${target.bounds.toShortString()}' action=ACTION_ACCESSIBILITY_FOCUS"
+                )
+            }
             A11yFocusExecutor.requestAccessibilityFocusWithRetry(
                 target = target.node,
                 root = root,
@@ -403,6 +434,46 @@ class A11yHelperService : AccessibilityService() {
             success && target.emptyState -> "empty_state_focused_row"
             success -> "content_like_focused_row"
             else -> "focus_action_failed"
+        }
+        if (recoveryEvidence) {
+            val actualBounds = actualFocusedNode?.let { Rect().also(it::getBoundsInScreen) }
+            val distance = if (target != null && actualBounds != null) {
+                abs(target.bounds.centerX() - actualBounds.centerX()) + abs(target.bounds.centerY() - actualBounds.centerY())
+            } else {
+                -1
+            }
+            Log.i(
+                TAG,
+                "[RECOVERY][focus_commit] requestId=$reqId actionResult=${focusExecution?.success} " +
+                    "attempts=${focusExecution?.attempts ?: 0} expected='${target?.label.orEmpty().replace("\n", " ")}' " +
+                    "actual='${actualFocusedNode?.let(::resolveNodeLabel).orEmpty().replace("\n", " ")}' " +
+                    "expectedBounds='${target?.bounds?.toShortString().orEmpty()}' " +
+                    "actualBounds='${actualBounds?.toShortString().orEmpty()}' distance=$distance success=$success reason='$reason'"
+            )
+        }
+        A11yEvidence.emit(
+            "TARGET_RESOLVED",
+            reqId,
+            JSONObject().put("resolvedTarget", target?.let {
+                compactFocusInBoundsSnapshot(it.node, it.label, it.bounds)
+            } ?: JSONObject.NULL)
+        )
+        A11yEvidence.emit(
+            "ACTION_API_RESULT",
+            reqId,
+            JSONObject()
+                .put("success", success)
+                .put("status", if (success) "moved" else "failed")
+                .put("detail", reason)
+                .put("reason", reason)
+                .put("action", "FOCUS_IN_BOUNDS")
+        )
+        if (success) {
+            A11yEvidence.emit(
+                "FOCUS_COMMIT_CLAIMED",
+                reqId,
+                JSONObject().put("claim", "focus_in_bounds_success").put("action", "FOCUS_IN_BOUNDS")
+            )
         }
         recordActionFocusEvidence(reqId)
         val resultJson = JSONObject().apply {
@@ -431,6 +502,14 @@ class A11yHelperService : AccessibilityService() {
             "[FOCUS_IN_BOUNDS] reqId=$reqId success=$success reason='$reason' bounds='${targetRegion.toShortString()}' candidates=${candidates.size} target='${target?.label.orEmpty().replace("\n", " ")}'"
         )
         A11yEvidence.attach(resultJson, reqId)
+        if (recoveryEvidence) {
+            Log.i(
+                TAG,
+                "[RECOVERY][helper_result] requestId=$reqId success=$success " +
+                    "status=${if (success) "moved" else "failed"} detail='$reason' " +
+                    "serializedLength=${resultJson.toString().length}"
+            )
+        }
         Log.i(TAG, "TARGET_ACTION_RESULT $resultJson")
         A11yEvidence.emit(
             "HELPER_ACK_SENT",
@@ -561,6 +640,20 @@ class A11yHelperService : AccessibilityService() {
         val numbers = Regex("-?\\d+").findAll(value).mapNotNull { it.value.toIntOrNull() }.toList()
         if (numbers.size < 4) return null
         return Rect(numbers[0], numbers[1], numbers[2], numbers[3])
+    }
+
+    private fun countAccessibleNodes(root: AccessibilityNodeInfo): Int {
+        var count = 0
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            count += 1
+            for (index in 0 until node.childCount) {
+                node.getChild(index)?.let(queue::add)
+            }
+        }
+        return count
     }
 
     private fun resolveFocusCandidateLabel(focused: A11yTraversalAnalyzer.FocusedNode): String {

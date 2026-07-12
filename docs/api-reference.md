@@ -2,7 +2,7 @@
 
 이 문서는 `talkback_lib/__init__.py`의 `A11yAdbClient` public API 기준 문서다.
 
-Updated for Canonical Identity Shadow Phase 8: 2026-07-12
+Updated for Production Traversal Migration Phase 8.5: 2026-07-13
 
 운영 흐름 자체는 아래 문서를 우선한다.
 
@@ -131,13 +131,16 @@ Single/Batch start request는 다음 optional boolean을 받는다.
 ```json
 {
   "evidence_ledger": true,
-  "identity_shadow_v2": true
+  "identity_shadow_v2": true,
+  "traversal_identity_v2": true
 }
 ```
 
-둘 다 기본값은 `false`다. `identity_shadow_v2=true`이면 backend가 해당 run에만
-Evidence Ledger도 활성화한다. Uvicorn process의 global state나 source runtime config는
-변경하지 않는다.
+세 값 모두 기본값은 `false`다. `identity_shadow_v2=true`이면 backend가 해당 run에만
+Evidence Ledger도 활성화한다. `traversal_identity_v2=true`이면 Identity와 Evidence를
+모두 활성화하고 해당 subprocess에 `TB_TRAVERSAL_IDENTITY_V2_ENABLED=1`을 전달한다.
+Uvicorn process의 global state나 source runtime config는 변경하지 않는다.
+이 traversal flag는 experimental이며 default OFF다.
 
 ### Read-only Identity report
 
@@ -172,7 +175,19 @@ GET /api/runs/{run_id}/devices/{device_id}/identity-shadow
     "relation_counts": {"STRONG_PHYSICAL_LINK": 20},
     "relation_percentages": {"STRONG_PHYSICAL_LINK": 100.0}
   },
-  "transactions": []
+  "transactions": [],
+  "traversal_identity_v2_diagnostics": {
+    "available": true,
+    "schema": "traversal-identity-v2-diagnostics-v1",
+    "scenario_event_count": 1,
+    "false_progress_suppressed": 6,
+    "representative_only_progress_ignored": 3,
+    "recovered_candidate_attempts": 1,
+    "recovered_visits": 1,
+    "premature_stop_prevented": 1,
+    "fallback_to_legacy_count": 0,
+    "indeterminate_count": 0
+  }
 }
 ```
 

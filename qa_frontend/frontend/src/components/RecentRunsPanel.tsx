@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { RecentRun, api, RecentBatch, RecentBatchDevice, CoverageProbeSummary, ShadowValidationSummary } from '../api';
 import { CrashIssuesPanel } from './CrashIssuesPanel';
 import { IdentityShadowCard } from './IdentityShadowCard';
+import { TraversalIdentityV2Card } from './TraversalIdentityV2Card';
 import { formatTime, formatDuration, healthClass, scenarioRunText, languageLabel, scenarioReasonText } from '../utils/formatters';
 
 type MismatchSummary = {
@@ -710,6 +711,14 @@ export function RecentRunsPanel({
         )}
 
         {crashContext && <IdentityShadowCard runId={crashContext.runId} deviceId={crashContext.deviceId} />}
+        {crashContext && (
+          <TraversalIdentityV2Card
+            runId={crashContext.runId}
+            deviceId={crashContext.deviceId}
+            featureFlags={runData.feature_flags}
+            initialDiagnostics={runData.traversal_identity_v2_diagnostics}
+          />
+        )}
 
         {crashContext && (
           <CrashIssuesPanel runId={crashContext.runId} deviceId={crashContext.deviceId} />

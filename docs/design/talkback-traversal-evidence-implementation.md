@@ -94,7 +94,7 @@ observation을 `CanonicalObservation`으로 한 번 정규화한 뒤
 
 ## Provenance
 
-The manifest records repository SHA/dirty state, runner hash, runtime config and scenario registry hashes, Helper APK/device/app/TalkBack/WebView metadata, locale/display, and schema version. Unavailable values are emitted as:
+The manifest records repository SHA/dirty state, runner hash, runtime config and scenario registry hashes, Helper APK/device/app/TalkBack/WebView metadata, locale/display, schema version, and the effective run-scoped `feature_flags`. Unavailable values are emitted as:
 
 ```json
 {"status":"unavailable","value":null,"reason":"..."}
@@ -102,14 +102,15 @@ The manifest records repository SHA/dirty state, runner hash, runtime config and
 
 ## Reconciliation
 
-The shadow report checks that lifecycle facts do not regress, including card-found versus card-not-found, activation/transition stage regression, anchor abort retention, aborted-before-collection versus zero-valid, and no-eligible versus not-run. Phase 8 reconciliation also records non-blocking V2 transaction, verdict, confidence, and completeness metrics.
+The shadow report checks that lifecycle facts do not regress, including card-found versus card-not-found, activation/transition stage regression, anchor abort retention, aborted-before-collection versus zero-valid, and no-eligible versus not-run. Phase 8 reconciliation also records V2 transaction, verdict, confidence, and completeness metrics. Phase 8.5 adds scenario-level append-only traversal diagnostics; the QA projection sums these events without rewriting the ledger.
 
 It never edits `summary.json` or changes a production verdict.
 
 ## Backward compatibility and production isolation
 
 - No existing XLSX column is changed or repurposed.
-- No candidate selection, traversal order, SMART_NEXT meaning, realign, stop, duplicate, visited, consumed, Audit, Summary, or Coverage behavior reads evidence output.
+- With `TB_TRAVERSAL_IDENTITY_V2_ENABLED` absent/false, no candidate selection, traversal order, SMART_NEXT meaning, realign, stop, duplicate, visited, consumed, Audit, Summary, or Coverage behavior reads evidence output.
+- With the experimental traversal flag ON, only closed, complete, ACKed, stable, high-confidence `STATIC_FOCUS`/`MOVE_CONFIRMED` facts may change progress, internal visit/consumption, repeat stop, or bounded recovery. Every other verdict and incomplete fact falls back to legacy behavior.
 - Existing callers without evidence support continue because all hooks are duck-typed and failure-isolated.
 - Existing Helper installations ignore unknown broadcast extras.
 
@@ -130,11 +131,15 @@ Then verify the three evidence artifacts beside the XLSX and correlate a `SMART_
 
 For an off/on comparison, repeat with the flag removed and compare only production artifacts: rows, selected candidate, final result, stop reason, summary, coverage, and XLSX values must be unchanged. Evidence artifacts themselves are expected only with the flag on.
 
+Phase 8.5 production migration validation enables the three dependent flags together and follows
+[talkback-production-traversal-migration.md](talkback-production-traversal-migration.md). Evidence/
+Identity ON with Traversal OFF remains shadow-only; Traversal ON is experimental production behavior.
+
 ## Known limitations
 
-- Runner currently ingests Helper facts returned with `SMART_NEXT`; facts emitted by other target-action commands remain in correlated Helper logs until a read-only collector is added.
+- Runner ingests Helper facts returned with `SMART_NEXT`. Phase 8.5 also correlates the bounded `FOCUS_IN_BOUNDS` recovery action in its own child transaction; other target-action commands are not promoted by the production gate.
 - Delayed observations are best-effort Android Handler callbacks. A transaction remains `INDETERMINATE` if its snapshot is collected before the required callback, the Helper is restarted, or an older Helper does not support `EVIDENCE_EVENTS`.
 - Node path, parent path, child index, window id, and display id are recorded when supplied by an observation source; current legacy focus payloads may leave them unavailable.
 - Current Safe/Motion resolved nodes omit children and hierarchy paths, so container relation stays `INSUFFICIENT_EVIDENCE`; bounds-only hierarchy inference is forbidden.
-- `VISIT_DECIDED` is fact-only and defaults to `INDETERMINATE`; it does not replace production visited semantics.
+- Legacy `VISIT_DECIDED` remains fact-only. The Phase 8.5 gate emits a separate production-gate decision event and changes internal visit credit only when its strong gate is satisfied.
 - Reconciliation is a shadow check; it does not rewrite historical `summary.json`.

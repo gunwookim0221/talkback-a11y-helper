@@ -14,6 +14,7 @@ import subprocess
 import threading
 import time
 import uuid
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,8 +28,16 @@ EVIDENCE_ENABLED_ENV = "TB_EVIDENCE_LEDGER_ENABLED"
 
 
 def evidence_enabled(env: Mapping[str, str] | None = None) -> bool:
-    value = (env or os.environ).get(EVIDENCE_ENABLED_ENV, "").strip().lower()
-    return value in {"1", "true", "yes", "on"}
+    source = env or os.environ
+    truthy = {"1", "true", "yes", "on"}
+    return any(
+        source.get(name, "").strip().lower() in truthy
+        for name in (
+            EVIDENCE_ENABLED_ENV,
+            "TB_EVIDENCE_IDENTITY_SHADOW_ENABLED",
+            "TB_TRAVERSAL_IDENTITY_V2_ENABLED",
+        )
+    )
 
 
 def _utc_now() -> str:
@@ -285,6 +294,7 @@ class EvidenceRuntime:
         self._finalize_hooks: list[Callable[[], None]] = []
         self._latest_focus: NodeObservation | None = None
         self._all_events: list[EvidenceEvent] = []
+        self._identity_shadow_results: dict[str, dict[str, Any]] = {}
 
     @property
     def is_enabled(self) -> bool:
@@ -327,6 +337,7 @@ class EvidenceRuntime:
             "attempt_id": attempt_id,
             "parent_transaction_id": parent_transaction_id,
             "action_type": action_type,
+            "phase": phase,
             "state": "open",
         }
         event = self.emit(
@@ -469,7 +480,26 @@ class EvidenceRuntime:
         if not self.enabled or not self.identity_shadow_enabled:
             return None
         events = [event for event in self._all_events if event.transaction_id == transaction_id]
-        return reduce_shadow_v2(events)
+        result = reduce_shadow_v2(events)
+        self._identity_shadow_results[str(transaction_id)] = deepcopy(result)
+        return result
+
+    def identity_shadow_result(self, transaction_id: str | None) -> dict[str, Any] | None:
+        """Return a defensive copy of a completed V2 transaction reduction."""
+        if not self.enabled or not self.identity_shadow_enabled or not transaction_id:
+            return None
+        transaction = self._transactions.get(str(transaction_id))
+        if not isinstance(transaction, dict) or transaction.get("state") != "closed":
+            return None
+        result = self._identity_shadow_results.get(str(transaction_id))
+        if not isinstance(result, dict):
+            return None
+        copied = deepcopy(result)
+        copied["runtime_transaction_id"] = str(transaction_id)
+        copied["runtime_transaction_state"] = "closed"
+        copied["runtime_orphan_count"] = 0
+        copied["runtime_malformed_count"] = 0
+        return copied
 
     def write_manifest(self, manifest: Mapping[str, Any]) -> None:
         if not self.enabled:

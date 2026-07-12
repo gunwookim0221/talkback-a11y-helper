@@ -49,6 +49,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val EXTRA_COMMAND = "command"
         private const val DEFAULT_REQ_ID = "none"
         private val smartNextExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+        private val focusInBoundsExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     }
 
     override fun onReceive(context: Context, intent: Intent?) {
@@ -207,13 +208,23 @@ class A11yCommandReceiver : BroadcastReceiver() {
             TAG,
             "[DEBUG][FOCUS_IN_BOUNDS][recv] reqId=$reqId bounds='$bounds' preferEmptyState=$preferEmptyState excludeTopChrome=$excludeTopChrome excludeBottomNav=$excludeBottomNav"
         )
-        service.performFocusInBounds(
-            boundsString = bounds,
-            preferEmptyState = preferEmptyState,
-            excludeTopChrome = excludeTopChrome,
-            excludeBottomNav = excludeBottomNav,
-            reqId = reqId
-        )
+        val pendingResult = goAsync()
+        focusInBoundsExecutor.execute {
+            try {
+                service.performFocusInBounds(
+                    boundsString = bounds,
+                    preferEmptyState = preferEmptyState,
+                    excludeTopChrome = excludeTopChrome,
+                    excludeBottomNav = excludeBottomNav,
+                    reqId = reqId
+                )
+            } catch (error: Throwable) {
+                Log.e(TAG, "[RECOVERY][helper_failure] requestId=$reqId error=${error.javaClass.simpleName}", error)
+                logFailure("TARGET_ACTION_RESULT", reqId, "focus_in_bounds_exception:${error.javaClass.simpleName}")
+            } finally {
+                pendingResult.finish()
+            }
+        }
     }
 
 

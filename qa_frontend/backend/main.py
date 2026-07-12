@@ -71,6 +71,7 @@ class StartRunRequest(BaseModel):
     shadow_validation: bool = False
     evidence_ledger: bool = False
     identity_shadow_v2: bool = False
+    traversal_identity_v2: bool = False
 
 
 class BatchDeviceReq(BaseModel):
@@ -88,6 +89,7 @@ class BatchStartReq(BaseModel):
     shadow_validation: bool = False
     evidence_ledger: bool = False
     identity_shadow_v2: bool = False
+    traversal_identity_v2: bool = False
 
 
 @app.get("/api/health")
@@ -366,6 +368,7 @@ def run_start(request: StartRunRequest) -> dict[str, object]:
             shadow_validation=request.shadow_validation,
             evidence_ledger=request.evidence_ledger,
             identity_shadow_v2=request.identity_shadow_v2,
+            traversal_identity_v2=request.traversal_identity_v2,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -381,7 +384,13 @@ def run_stop() -> dict[str, object]:
 @app.post("/api/batch/start")
 def batch_start(request: BatchStartReq) -> dict[str, object]:
     try:
-        logger.info("[FEATURE_FLAGS][request] evidence_ledger=%s identity_shadow_v2=%s mode=%s", request.evidence_ledger, request.identity_shadow_v2, request.mode)
+        logger.info(
+            "[FEATURE_FLAGS][request] evidence_ledger=%s identity_shadow_v2=%s traversal_identity_v2=%s mode=%s",
+            request.evidence_ledger,
+            request.identity_shadow_v2,
+            request.traversal_identity_v2,
+            request.mode,
+        )
         devices = [d.model_dump() if hasattr(d, "model_dump") else d.dict() for d in request.devices]
         return global_batch_manager.start_batch(
             devices=devices, 
@@ -393,6 +402,7 @@ def batch_start(request: BatchStartReq) -> dict[str, object]:
             shadow_validation=request.shadow_validation,
             evidence_ledger=request.evidence_ledger,
             identity_shadow_v2=request.identity_shadow_v2,
+            traversal_identity_v2=request.traversal_identity_v2,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

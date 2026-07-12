@@ -27,6 +27,7 @@
 - Canonical Identity & Target Relation: [design/talkback-canonical-identity-and-target-relation.md](design/talkback-canonical-identity-and-target-relation.md)
 - Identity Shadow Frontend Integration: [design/talkback-identity-shadow-frontend-integration.md](design/talkback-identity-shadow-frontend-integration.md)
 - Canonical Identity Shadow Phase 8 Completion: [design/talkback-identity-shadow-phase8-completion.md](design/talkback-identity-shadow-phase8-completion.md)
+- Production Traversal Migration Phase 8.5: [design/talkback-production-traversal-migration.md](design/talkback-production-traversal-migration.md)
 - 신규 plugin onboarding: [plugin-onboarding-guide.md](plugin-onboarding-guide.md)
 - report row schema: [report-schema.md](report-schema.md)
 - i18n / locale matching: [i18n_locale_matching.md](i18n_locale_matching.md)
@@ -91,6 +92,11 @@ Routing을 활성화하거나 Promotion Readiness를 재판정하지 않는다.
 
 운영 판단은 archive 문서보다 운영 기준 문서를 우선합니다.
 *(최근의 Batch-First UX 통합 및 Known Issues 등에 대해서는 `qa-frontend-guide.md`를 참고하세요.)*
+
+Phase 8과 Phase 8.5는 모두 완료됐다. Phase 8.5는 default-OFF experimental feature flag로
+운영되며 Full Acceptance 기준 Safe recovery 개선, Motion parity, cross-plugin recovery,
+reconciliation PASS가 확인됐다. 남은 known limitation은 Home Monitor Shadow FAIL 1건,
+container hierarchy evidence 부족, positive `MOVE_TO_OTHER_NODE`/`SNAP_BACK` corpus 부족이다.
 
 ## Related design documents
 

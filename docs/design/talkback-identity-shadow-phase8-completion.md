@@ -9,6 +9,12 @@ Production traversal semantics 변경: 없음
 > Inventory, Quick Identify, Policy Mapping, Controlled Routing을 다루는 별도의 V10
 > 프로그램과 동일한 promotion gate가 아니다.
 
+> 후속 Phase 8.5는 별도 default-OFF production migration이다. 이 문서의
+> `production traversal unchanged` 판정은 Phase 8 shadow acceptance 경계에 대한 기록이며,
+> opt-in Phase 8.5 규칙은
+> [talkback-production-traversal-migration.md](talkback-production-traversal-migration.md)를
+> 따른다.
+
 ## 1. Outcome
 
 Identity reducer rule은 `target-relation-v2`로 갱신됐다. 변경은

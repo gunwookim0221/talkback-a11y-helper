@@ -101,10 +101,17 @@ def parse_recent_run(path: Path, *, current_status: dict[str, object] | None = N
     failed_scenarios = int(runtime_summary.get("failed_scenarios") or 0)
     total_scenarios = len(runtime_summary.get("scenario_progress") or [])
     event_warning_count = _count_warning_events(runtime_summary)
+    current_feature_flags = (
+        current_status.get("feature_flags")
+        if current_status and current_status.get("run_id") == run_id and isinstance(current_status.get("feature_flags"), dict)
+        else None
+    )
 
     return {
         "run_id": run_id,
         "mode": mode,
+        "feature_flags": current_feature_flags,
+        "traversal_identity_v2_diagnostics": None,
         "language_mode": _string_or_none(runtime_summary.get("language_mode")) or "current",
         "device_locale": _string_or_none(runtime_summary.get("device_locale")),
         "status": process_status,
@@ -158,6 +165,12 @@ def _recent_run_from_summary(
     return {
         "run_id": _string_or_none(summary.get("run_id")) or run_id,
         "mode": _string_or_none(summary.get("mode")) or mode,
+        "feature_flags": summary.get("feature_flags") if isinstance(summary.get("feature_flags"), dict) else None,
+        "traversal_identity_v2_diagnostics": (
+            summary.get("traversal_identity_v2_diagnostics")
+            if isinstance(summary.get("traversal_identity_v2_diagnostics"), dict)
+            else None
+        ),
         "language_mode": _string_or_none(summary.get("language_mode")) or "current",
         "device_locale": _string_or_none(summary.get("device_locale")),
         "status": process_status,

@@ -12,6 +12,7 @@ from tb_runner.evidence import (
     build_node_observation,
     build_reconciliation_report,
     deterministic_json,
+    evidence_enabled,
     reduce_shadow_events,
 )
 
@@ -87,6 +88,11 @@ def test_disabled_runtime_does_not_create_production_or_evidence_artifacts(tmp_p
     runtime.begin_transaction("SMART_NEXT", phase="main_loop")
     assert runtime.finalize() == {}
     assert not list(tmp_path.glob("*.evidence.*"))
+
+
+def test_traversal_flag_implies_evidence_but_default_remains_off() -> None:
+    assert evidence_enabled({}) is False
+    assert evidence_enabled({"TB_TRAVERSAL_IDENTITY_V2_ENABLED": "1"}) is True
 
 
 def test_evidence_transaction_links_do_not_add_fields_to_production_row(tmp_path: Path) -> None:

@@ -313,6 +313,7 @@ def test_batch_run_manager_restores_sleep_prevention_after_device_run(tmp_path, 
         devices=[{"serial": "SERIAL", "model": "Model"}],
         mode="smoke",
         scenario_ids=["global_nav_main"],
+        traversal_identity_v2=True,
     )
 
     deadline = time.time() + 1.0
@@ -322,6 +323,11 @@ def test_batch_run_manager_restores_sleep_prevention_after_device_run(tmp_path, 
         status = manager.get_status()
 
     assert status["state"] == "finished"
+    assert status["feature_flags"] == {
+        "evidence_ledger": True,
+        "identity_shadow_v2": True,
+        "traversal_identity_v2": True,
+    }
     assert calls == [
         "enable",
         ("enable_device", "SERIAL"),

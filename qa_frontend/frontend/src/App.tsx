@@ -35,6 +35,7 @@ export default function App() {
   const [shadowValidation, setShadowValidation] = useState(false);
   const [evidenceLedger, setEvidenceLedger] = useState(false);
   const [identityShadowV2, setIdentityShadowV2] = useState(false);
+  const [traversalIdentityV2, setTraversalIdentityV2] = useState(false);
   const [fixTalkBackRunning, setFixTalkBackRunning] = useState(false);
   const [fixTalkBackMessage, setFixTalkBackMessage] = useState<string | null>(null);
   const preflightRef = useRef<HTMLElement | null>(null);
@@ -151,6 +152,7 @@ export default function App() {
         mode === 'full' && shadowValidation,
         evidenceLedger,
         identityShadowV2,
+        traversalIdentityV2,
       );
       await refreshRun();
     } catch (err) {
@@ -384,6 +386,8 @@ export default function App() {
           setEvidenceLedger={setEvidenceLedger}
           identityShadowV2={identityShadowV2}
           setIdentityShadowV2={setIdentityShadowV2}
+          traversalIdentityV2={traversalIdentityV2}
+          setTraversalIdentityV2={setTraversalIdentityV2}
         />
       </section>
 

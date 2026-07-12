@@ -174,6 +174,36 @@ class A11yAdbClient:
         )
         return transaction
 
+    def _evidence_begin_target_action(
+        self,
+        action_type: str,
+        *,
+        requested_target: dict[str, Any],
+        phase: str = "recovery",
+    ) -> dict[str, Any] | None:
+        runtime = self.evidence_runtime
+        if not self._evidence_is_enabled() or runtime is None:
+            return None
+        transaction = runtime.begin_transaction(action_type, phase=phase, payload={"target_kind": "node"})
+        self._evidence_active_transaction = transaction
+        runtime.observe(
+            self._evidence_last_focus_node or None,
+            source="runner_last_known_focus",
+            transaction=transaction,
+            phase=phase,
+            event_type="PRE_FOCUS_OBSERVED",
+            capture_status="captured" if self._evidence_last_focus_node else "unavailable",
+            payload={"observation_kind": "cached_pre_action"},
+        )
+        runtime.emit(
+            "TARGET_REQUESTED",
+            producer="runner",
+            phase=phase,
+            transaction=transaction,
+            payload={"request_kind": "direct_target", "requestedTarget": dict(requested_target)},
+        )
+        return transaction
+
     def _evidence_correlation_extras(self) -> list[str]:
         runtime = self.evidence_runtime
         if not self._evidence_is_enabled() or runtime is None:
@@ -430,12 +460,18 @@ class A11yAdbClient:
                 self._evidence_last_focus_node = dict(focus_node)
             return
         smart_result = self.last_smart_nav_result if isinstance(self.last_smart_nav_result, dict) else {}
-        self._evidence_fetch_helper_events(dev, req_id=str(smart_result.get("reqId") or ""))
+        action_type = str(transaction.get("action_type") or "")
+        if action_type in {"SMART_NEXT", "SMART_PREVIOUS"}:
+            active_req_id = str(smart_result.get("reqId") or self._evidence_active_request_id or "")
+        else:
+            active_req_id = str(self._evidence_active_request_id or "")
+        self._evidence_fetch_helper_events(dev, req_id=active_req_id)
+        transaction_phase = str(transaction.get("phase") or "main_loop")
         observation = runtime.observe(
             focus_node,
             source="runner_focus_payload",
             transaction=transaction,
-            phase="main_loop",
+            phase=transaction_phase,
             event_type="POST_FOCUS_OBSERVED",
             capture_status="captured" if focus_node else "unavailable",
             payload={"focus_payload_source": str(step.get("focus_payload_source", "") or "")},
@@ -448,14 +484,14 @@ class A11yAdbClient:
             runtime.emit(
                 "ANNOUNCEMENT_OBSERVED",
                 producer="runner",
-                phase="main_loop",
+                phase=transaction_phase,
                 transaction=transaction,
                 payload={"text": announcement, "normalized_text": self.normalize_for_comparison(announcement), "association": "step_collection"},
             )
         runtime.emit(
             "FOCUS_STABILITY_WINDOW_CLOSED",
             producer="runner",
-            phase="main_loop",
+            phase=transaction_phase,
             transaction=transaction,
             payload={
                 "stability": "INDETERMINATE",
@@ -468,7 +504,7 @@ class A11yAdbClient:
         runtime.emit(
             "SHADOW_ACTION_REDUCED",
             producer="runner",
-            phase="main_loop",
+            phase=transaction_phase,
             transaction=transaction,
             payload=shadow,
         )
@@ -478,24 +514,33 @@ class A11yAdbClient:
                 runtime.emit(
                     "SHADOW_ACTION_REDUCED_V2",
                     producer="runner",
-                    phase="main_loop",
+                    phase=transaction_phase,
                     transaction=transaction,
                     payload=shadow_v2,
                 )
         except Exception as exc:
             self._safe_trace_print(f"[EVIDENCE][identity_shadow_error] error={type(exc).__name__}")
-        runtime.close_transaction(transaction, status="completed", phase="main_loop", payload={"shadow_verdict": shadow.get("verdict", "INDETERMINATE")})
+        runtime.close_transaction(transaction, status="completed", phase=transaction_phase, payload={"shadow_verdict": shadow.get("verdict", "INDETERMINATE")})
         if isinstance(focus_node, dict) and focus_node:
             self._evidence_last_focus_node = dict(focus_node)
         if step_key:
             self._evidence_transaction_by_step[step_key] = str(transaction.get("transaction_id", "") or "")
         self._evidence_active_transaction = None
+        self._evidence_active_request_id = ""
 
     def _evidence_transaction_for_step(self, step_index: Any) -> str:
         return self._evidence_transaction_by_step.get(str(step_index or ""), "")
 
     def _evidence_actual_observation_for_step(self, step_index: Any) -> str:
         return self._evidence_actual_observation_by_step.get(str(step_index or ""), "")
+
+    def _evidence_identity_result_for_step(self, step_index: Any) -> dict[str, Any] | None:
+        runtime = self.evidence_runtime
+        if not self._evidence_is_enabled() or runtime is None:
+            return None
+        transaction_id = self._evidence_transaction_for_step(step_index)
+        accessor = getattr(runtime, "identity_shadow_result", None)
+        return accessor(transaction_id) if callable(accessor) else None
 
     def _is_debug_log_enabled(self) -> bool:
         return LOG_LEVEL_ORDER.get(self.log_level, 1) >= LOG_LEVEL_ORDER["DEBUG"]
@@ -844,6 +889,85 @@ class A11yAdbClient:
             f"[SMART_NEXT_TRACE] read_log_result_miss prefix={prefix} req_id={req_id} parsed={miss}"
         )
         return miss
+
+    def _recovery_evidence_active(self) -> bool:
+        transaction = self._evidence_active_transaction
+        return bool(
+            transaction
+            and str(transaction.get("phase") or "").strip() == "recovery"
+            and str(os.environ.get("TB_TRAVERSAL_IDENTITY_V2_ENABLED", "") or "").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
+
+    def _read_recovery_action_ack(self, dev: Any, req_id: str) -> dict[str, Any] | None:
+        """Read the bounded Helper ACK transport for one active recovery request.
+
+        This is only a transport fallback after the legacy TARGET_ACTION_RESULT
+        line was malformed.  It never infers success from the post-focus node.
+        """
+        if not self._recovery_evidence_active():
+            return None
+        transaction = self._evidence_active_transaction or {}
+        transaction_id = str(transaction.get("transaction_id") or "")
+        stale_rejected = 0
+        try:
+            logs = self._logcat_reader.dump_filtered(dev=dev)
+        except Exception as exc:
+            self._safe_trace_print(
+                f"[RECOVERY][parse] requestId={req_id} jsonParsed=false errorType={type(exc).__name__} "
+                f"errorMessage={str(exc)[:160]!r}"
+            )
+            return None
+        matched_event: dict[str, Any] | None = None
+        matched_payload: dict[str, Any] | None = None
+        for raw in self._extract_all_payloads(logs, "EVIDENCE_HELPER_EVENT"):
+            try:
+                event = self._parse_json_payload(raw, "EVIDENCE_HELPER_EVENT")
+            except Exception:
+                continue
+            event_req_id = str(event.get("requestId") or event.get("reqId") or "")
+            if event_req_id != req_id:
+                stale_rejected += 1
+                continue
+            correlation = event.get("correlation") if isinstance(event.get("correlation"), dict) else {}
+            event_tx_id = str(event.get("transactionId") or correlation.get("transaction_id") or "")
+            if event_tx_id != transaction_id:
+                stale_rejected += 1
+                continue
+            if str(event.get("eventType") or "") != "ACTION_API_RESULT":
+                continue
+            payload = event.get("payload")
+            if not isinstance(payload, dict) or payload.get("transportTruncated") is True:
+                continue
+            if not isinstance(payload.get("success"), bool):
+                continue
+            matched_event = event
+            matched_payload = payload
+        if matched_event is not None and matched_payload is not None:
+            result = {
+                "reqId": req_id,
+                "success": bool(matched_payload["success"]),
+                "status": str(matched_payload.get("status") or (STATUS_MOVED if matched_payload["success"] else STATUS_FAILED)),
+                "detail": str(matched_payload.get("detail") or matched_payload.get("reason") or ""),
+                "reason": str(matched_payload.get("reason") or matched_payload.get("detail") or ""),
+                "action": str(matched_payload.get("action") or "FOCUS_IN_BOUNDS"),
+                "transportSource": "recovery_evidence_event",
+            }
+            self._evidence_collect_helper_logcat_events(dev, req_id=req_id)
+            self._safe_trace_print(
+                f"[RECOVERY][parse] requestId={req_id} jsonParsed=true parsedRequestId={str(matched_event.get('requestId') or matched_event.get('reqId') or '')} "
+                f"success={str(result['success']).lower()} status={result['status']!r} detail={result['detail'][:120]!r}"
+            )
+            self._safe_trace_print(
+                f"[RECOVERY][correlation] requestId={req_id} transactionId={transaction_id} "
+                f"matched=true staleResultRejected={stale_rejected}"
+            )
+            return result
+        self._safe_trace_print(
+            f"[RECOVERY][correlation] requestId={req_id} transactionId={transaction_id} "
+            f"matched=false staleResultRejected={stale_rejected}"
+        )
+        return None
 
     @staticmethod
     def _extract_all_payloads(log_text: str, prefix: str) -> list[str]:
@@ -1737,11 +1861,67 @@ class A11yAdbClient:
                 "--ez", "excludeBottomNav", "true" if exclude_bottom_nav else "false",
                 "--es", "reqId", req_id,
             ]
+            extras.extend(self._evidence_correlation_extras())
+            self._evidence_action_sent(action="FOCUS_IN_BOUNDS", req_id=req_id)
             self._broadcast(dev, ACTION_FOCUS_IN_BOUNDS, extras)
             result = self._read_log_result(dev, "TARGET_ACTION_RESULT", req_id)
+            if self._recovery_evidence_active():
+                raw_payload = str(result.get("rawSnippet") or "") if isinstance(result, dict) else ""
+                self._safe_trace_print(
+                    f"[RECOVERY][raw_response] requestId={req_id} expectedTag=TARGET_ACTION_RESULT "
+                    f"matchedTag={str(result.get('prefix') or 'TARGET_ACTION_RESULT') if isinstance(result, dict) else ''} "
+                    f"rawLength={len(raw_payload)} rawPrefix={raw_payload[:96]!r} rawSuffix={raw_payload[-96:]!r}"
+                )
+                if isinstance(result, dict) and str(result.get("reason") or "") == "json_parse_failed":
+                    recovered_ack = self._read_recovery_action_ack(dev, req_id)
+                    if recovered_ack is not None:
+                        result = recovered_ack
+                    else:
+                        self._safe_trace_print(
+                            f"[RECOVERY][parse] requestId={req_id} jsonParsed=false parsedRequestId='' "
+                            f"success='' status='' detail='' errorType={type(result.get('parseError')).__name__} "
+                            f"errorMessage={str(result.get('parseError') or '')[:160]!r}"
+                        )
             if self._is_target_action_payload_missing(result, req_id):
                 return False, {}
             self.last_target_action_result = self._normalize_target_action_payload(result)
+            runtime = self.evidence_runtime
+            transaction = self._evidence_active_transaction
+            if self._evidence_is_enabled() and runtime is not None and transaction:
+                phase = str(transaction.get("phase") or "recovery")
+                runtime.emit(
+                    "TARGET_RESOLVED",
+                    producer="runner",
+                    phase=phase,
+                    transaction=transaction,
+                    payload={
+                        "resolvedTarget": result.get("target"),
+                        "source": "helper_target_action_result",
+                    },
+                )
+                runtime.emit(
+                    "ACTION_API_RESULT",
+                    producer="runner",
+                    phase=phase,
+                    transaction=transaction,
+                    payload={
+                        "success": bool(result.get("success")),
+                        "status": str(result.get("status", "") or ""),
+                        "detail": str(result.get("detail") or result.get("reason", "") or ""),
+                        "reason": str(result.get("reason", "") or ""),
+                        "action": "FOCUS_IN_BOUNDS",
+                        "source": "helper_target_action_result",
+                    },
+                )
+                if bool(result.get("success")):
+                    runtime.emit(
+                        "FOCUS_COMMIT_CLAIMED",
+                        producer="runner",
+                        phase=phase,
+                        transaction=transaction,
+                        payload={"claim": "focus_in_bounds_helper_success"},
+                    )
+                self._evidence_helper_ack(result, req_id=req_id, source="inline")
             return True, self._normalize_action_result(
                 success=bool(result.get("success")),
                 status=STATUS_MOVED if bool(result.get("success")) else STATUS_FAILED,
@@ -1752,6 +1932,17 @@ class A11yAdbClient:
         def _focus_timeout() -> dict[str, Any]:
             result = {"success": False, "reason": "timeout"}
             self.last_target_action_result = result
+            runtime = self.evidence_runtime
+            transaction = self._evidence_active_transaction
+            if self._evidence_is_enabled() and runtime is not None and transaction:
+                runtime.emit(
+                    "ACTION_API_RESULT",
+                    producer="runner",
+                    phase=str(transaction.get("phase") or "recovery"),
+                    transaction=transaction,
+                    payload={"success": False, "reason": "timeout", "action": "FOCUS_IN_BOUNDS"},
+                )
+                self._evidence_helper_ack(result, req_id=self._evidence_active_request_id, source="timeout")
             return self._normalize_action_result(
                 success=False,
                 status=STATUS_FAILED,

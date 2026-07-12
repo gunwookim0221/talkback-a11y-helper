@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import traceback
-from tb_runner.run_spec import RunSpec
+from tb_runner.run_spec import RunSpec, resolve_identity_feature_flags
 from .paths import ROOT_DIR, RUN_LOG_DIR, SCRIPT_PATH, RUNTIME_CONFIG_PATH
 from .runtime_dashboard import parse_runtime_log
 from .runtime_config_selection import write_selected_runtime_config
@@ -464,11 +464,12 @@ class BatchRunManager:
         self._stop_requested = False
         self._current_execution: RunExecution | None = None
         self._shadow_validation_requested = False
+        self._feature_flags = resolve_identity_feature_flags()
 
     def _sanitize_name(self, name: str) -> str:
         return re.sub(r'[^0-9a-zA-Z_-]+', '_', name)
 
-    def start_batch(self, devices: list[dict], mode: str, launch_mode: str = "clean", language_mode: str = "current", scenario_ids: list[str] | None = None, enable_coverage_probe: bool = False, shadow_validation: bool = False, evidence_ledger: bool = False, identity_shadow_v2: bool = False) -> dict:
+    def start_batch(self, devices: list[dict], mode: str, launch_mode: str = "clean", language_mode: str = "current", scenario_ids: list[str] | None = None, enable_coverage_probe: bool = False, shadow_validation: bool = False, evidence_ledger: bool = False, identity_shadow_v2: bool = False, traversal_identity_v2: bool = False) -> dict:
         with self._lock:
             if self._state == "running":
                 raise RuntimeError("Batch run is already in progress")
@@ -485,9 +486,21 @@ class BatchRunManager:
             self._shadow_validation_requested = (
                 shadow_validation is True and str(mode).lower() == "full"
             )
-            self._evidence_ledger = bool(evidence_ledger or identity_shadow_v2)
-            self._identity_shadow_v2 = bool(identity_shadow_v2)
-            logger.info("[FEATURE_FLAGS][batch] batch_id=%s evidence_ledger=%s identity_shadow_v2=%s", self._batch_id, self._evidence_ledger, self._identity_shadow_v2)
+            self._feature_flags = resolve_identity_feature_flags(
+                evidence_ledger=evidence_ledger,
+                identity_shadow_v2=identity_shadow_v2,
+                traversal_identity_v2=traversal_identity_v2,
+            )
+            self._evidence_ledger = self._feature_flags["evidence_ledger"]
+            self._identity_shadow_v2 = self._feature_flags["identity_shadow_v2"]
+            self._traversal_identity_v2 = self._feature_flags["traversal_identity_v2"]
+            logger.info(
+                "[FEATURE_FLAGS][batch] batch_id=%s evidence_ledger=%s identity_shadow_v2=%s traversal_identity_v2=%s",
+                self._batch_id,
+                self._evidence_ledger,
+                self._identity_shadow_v2,
+                self._traversal_identity_v2,
+            )
             self._created_at = datetime.now(timezone.utc).isoformat()
             
             batch_dir = RUN_LOG_DIR / self._batch_id
@@ -576,6 +589,7 @@ class BatchRunManager:
             "batch_id": self._batch_id,
             "state": self._state,
             "mode": self._mode,
+            "feature_flags": dict(self._feature_flags),
             "current_device": current_serial,
             "devices": device_statuses,
             "batch": {
@@ -685,7 +699,7 @@ class BatchRunManager:
             "state": self._state,
             "enable_coverage_probe": self._enable_coverage_probe,
             "shadow_validation": self._shadow_validation_requested,
-            "feature_flags": {"evidence_ledger": bool(getattr(self, "_evidence_ledger", False)), "identity_shadow_v2": bool(getattr(self, "_identity_shadow_v2", False))},
+            "feature_flags": dict(self._feature_flags),
             "devices": self._devices
         }
         try:
@@ -730,7 +744,7 @@ class BatchRunManager:
                     try:
                         from .run_summary import build_run_summary
                         parsed_summary = build_run_summary(
-                            status={"state": device_info.get("state")},
+                            status={"state": device_info.get("state"), "feature_flags": dict(self._feature_flags)},
                             log_path=abs_log_path,
                             scenario_ids=self._scenario_ids
                         )
@@ -841,7 +855,13 @@ class BatchRunManager:
                 "feature_flags": {
                     "evidence_ledger": self._evidence_ledger,
                     "identity_shadow_v2": self._identity_shadow_v2,
+                    "traversal_identity_v2": self._traversal_identity_v2,
                 },
+                "traversal_identity_v2_diagnostics": (
+                    data.get("traversal_identity_v2_diagnostics")
+                    if isinstance(data.get("traversal_identity_v2_diagnostics"), dict)
+                    else parsed_summary.get("traversal_identity_v2_diagnostics")
+                ),
                 "quality": quality,
                 "scenarios": parsed_summary.get("scenarios", []),
                 "process_status": parsed_summary.get("process_status"),
@@ -879,6 +899,7 @@ class BatchRunManager:
                     "state": device_info.get("state"),
                     "return_code": device_info.get("return_code", 0),
                     "output_dir": device_info.get("output_dir"),
+                    "feature_flags": dict(self._feature_flags),
                     "log_path": None,
                     "xlsx_path": None,
                     "quality": None,
@@ -971,7 +992,12 @@ class BatchRunManager:
                     shadow_validation=self._shadow_validation_requested,
                 )
                 log_file.write(f"[BATCH] Config generated for {dev_serial}\n")
-                log_file.write(f"[FEATURE_FLAGS][runspec] serial={dev_serial} evidence_ledger={self._evidence_ledger} identity_shadow_v2={self._identity_shadow_v2}\n")
+                log_file.write(
+                    f"[FEATURE_FLAGS][runspec] serial={dev_serial} "
+                    f"evidence_ledger={self._evidence_ledger} "
+                    f"identity_shadow_v2={self._identity_shadow_v2} "
+                    f"traversal_identity_v2={self._traversal_identity_v2}\n"
+                )
                 log_file.flush()
                 spec = RunSpec(
                     serial=dev_serial,
@@ -984,6 +1010,7 @@ class BatchRunManager:
                     enable_coverage_probe=self._enable_coverage_probe,
                     evidence_ledger=self._evidence_ledger,
                     identity_shadow_v2=self._identity_shadow_v2,
+                    traversal_identity_v2=self._traversal_identity_v2,
                 )
                 language_status, preflight = prepare_runtime(
                     spec,
@@ -1166,6 +1193,7 @@ def get_recent_batches() -> list[dict]:
             data = json.loads(summary_path.read_text(encoding="utf-8"))
             _clear_invalid_summary_warning_cache(summary_path)
             devices = data.get("devices", [])
+            batch_feature_flags = data.get("feature_flags") if isinstance(data.get("feature_flags"), dict) else None
             passed_count = sum(1 for d in devices if d.get("state") == "passed")
             failed_count = sum(1 for d in devices if d.get("state") in ("failed", "error"))
             devices_info = []
@@ -1181,6 +1209,8 @@ def get_recent_batches() -> list[dict]:
                     "xlsx_path": None,
                     "quality": None,
                     "shadow_validation": None,
+                    "feature_flags": batch_feature_flags,
+                    "traversal_identity_v2_diagnostics": None,
                 }
                 if out_dir_str:
                     out_dir = ROOT_DIR / out_dir_str
@@ -1217,6 +1247,10 @@ def get_recent_batches() -> list[dict]:
                                 )
                                 dev_info["coverage_probe_summary"] = coverage_probe_summary
                                 dev_info["coverage_probe"] = coverage_probe_summary
+                                if isinstance(dev_data.get("feature_flags"), dict):
+                                    dev_info["feature_flags"] = dev_data["feature_flags"]
+                                if isinstance(dev_data.get("traversal_identity_v2_diagnostics"), dict):
+                                    dev_info["traversal_identity_v2_diagnostics"] = dev_data["traversal_identity_v2_diagnostics"]
                                 
                                 from .recent_runs import _recent_run_from_summary
                                 from datetime import datetime
@@ -1283,6 +1317,7 @@ def get_recent_batches() -> list[dict]:
                 "passed_count": passed_count,
                 "failed_count": failed_count,
                 "summary_path": str(summary_path.relative_to(ROOT_DIR)) if summary_path.is_relative_to(ROOT_DIR) else str(summary_path),
+                "feature_flags": batch_feature_flags,
                 "devices": devices_info
             })
         except (OSError, json.JSONDecodeError) as exc:

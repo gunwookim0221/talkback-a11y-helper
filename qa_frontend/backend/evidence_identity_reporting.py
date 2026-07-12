@@ -17,6 +17,7 @@ _EVENTS = {
     "SHADOW_ACTION_REDUCED", "SHADOW_ACTION_REDUCED_V2", "TARGET_RESOLVED",
     "PRE_FOCUS_OBSERVED", "POST_ACTION_OBSERVATION", "DELAYED_OBSERVATION",
     "REPRESENTATIVE_SELECTED", "TRANSACTION_CLOSED",
+    "TRAVERSAL_IDENTITY_V2_DIAGNOSTICS",
 }
 _V2_VERDICTS = (
     "MOVE_CONFIRMED",
@@ -24,6 +25,16 @@ _V2_VERDICTS = (
     "MOVE_TO_OTHER_NODE",
     "SNAP_BACK",
     "INDETERMINATE",
+)
+_TRAVERSAL_DIAGNOSTIC_SCHEMA = "traversal-identity-v2-diagnostics-v1"
+_TRAVERSAL_DIAGNOSTIC_COUNTERS = (
+    "false_progress_suppressed",
+    "representative_only_progress_ignored",
+    "recovered_candidate_attempts",
+    "recovered_visits",
+    "premature_stop_prevented",
+    "fallback_to_legacy_count",
+    "indeterminate_count",
 )
 
 
@@ -38,7 +49,8 @@ def identity_shadow_report(run_id: str, device_id: str, *, run_log_dir: Path = R
 
 def _unavailable(state: str) -> dict[str, Any]:
     return {"available": False, "schema": "identity-shadow-report-v1", "availability": state,
-            "legacy_available": False, "v2_available": False, "summary": _summary([]), "transactions": []}
+            "legacy_available": False, "v2_available": False, "summary": _summary([]), "transactions": [],
+            "traversal_identity_v2_diagnostics": _unavailable_traversal_diagnostics(state)}
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -51,6 +63,9 @@ def _load(path: Path) -> dict[str, Any]:
         if cached and cached[0] == key:
             return cached[1]
     transactions: dict[str, dict[str, Any]] = {}; seen: set[str] = set(); malformed = 0
+    traversal_diagnostics = _unavailable_traversal_diagnostics("NO_DIAGNOSTICS_EVENT")
+    traversal_diagnostic_totals: Counter[str] = Counter()
+    traversal_diagnostic_event_count = 0
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
@@ -64,19 +79,35 @@ def _load(path: Path) -> dict[str, Any]:
         if eid and eid in seen: continue
         seen.add(eid)
         payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
+        if event.get("event_type") == "TRAVERSAL_IDENTITY_V2_DIAGNOSTICS":
+            parsed_diagnostics = _traversal_diagnostics(payload)
+            if parsed_diagnostics.get("available") is True:
+                traversal_diagnostic_event_count += 1
+                for key in _TRAVERSAL_DIAGNOSTIC_COUNTERS:
+                    traversal_diagnostic_totals[key] += int(parsed_diagnostics.get(key, 0) or 0)
+            else:
+                traversal_diagnostics = parsed_diagnostics
+            continue
         txid = str(event.get("transaction_id") or payload.get("transaction_id") or "")
         if not txid: continue
         tx = transactions.setdefault(txid, {"transaction_id": txid, "events": {}})
         tx["events"][str(event["event_type"])] = payload
         for field in ("scenario_id", "plugin_family", "step_index", "logical_action_id", "action_type"):
             if field not in tx and (event.get(field) is not None or payload.get(field) is not None): tx[field] = event.get(field, payload.get(field))
+    if traversal_diagnostic_event_count:
+        traversal_diagnostics = {
+            "available": True,
+            "schema": _TRAVERSAL_DIAGNOSTIC_SCHEMA,
+            "scenario_event_count": traversal_diagnostic_event_count,
+            **{key: max(0, int(traversal_diagnostic_totals[key])) for key in _TRAVERSAL_DIAGNOSTIC_COUNTERS},
+        }
     rows = [_row(tx) for tx in transactions.values() if "SHADOW_ACTION_REDUCED" in tx["events"] or "SHADOW_ACTION_REDUCED_V2" in tx["events"]]
     rows.sort(key=lambda r: (str(r["scenario_id"]), int(r["step_index"] or 0), r["transaction_id"]))
     legacy = any(r["legacy_verdict"] for r in rows); v2 = any(r["v2_verdict"] for r in rows)
     state = "MALFORMED_EVIDENCE" if malformed and not rows else ("V2_AVAILABLE" if v2 and all(r["v2_verdict"] for r in rows) else "V2_PARTIAL" if v2 else "LEGACY_ONLY")
     report = {"available": bool(rows), "schema": "identity-shadow-report-v1", "availability": state,
               "legacy_available": legacy, "v2_available": v2, "summary": _summary(rows), "transactions": rows,
-              "parse_warnings": malformed}
+              "parse_warnings": malformed, "traversal_identity_v2_diagnostics": traversal_diagnostics}
     with _LOCK: _CACHE[resolved] = (key, report)
     return report
 
@@ -120,6 +151,31 @@ def _safe(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, Mapping): return None
     source = value.get("observation") if isinstance(value.get("observation"), Mapping) else value
     return {k: source.get(k) for k in ("text", "content_description", "resource_id", "class_name", "bounds", "window_id", "capture_source") if source.get(k) is not None} or None
+
+
+def _unavailable_traversal_diagnostics(reason: str) -> dict[str, Any]:
+    return {
+        "available": False,
+        "schema": _TRAVERSAL_DIAGNOSTIC_SCHEMA,
+        "reason": reason,
+    }
+
+
+def _traversal_diagnostics(payload: Mapping[str, Any]) -> dict[str, Any]:
+    source = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), Mapping) else payload
+    schema = str(source.get("schema") or source.get("schema_version") or "")
+    if schema != _TRAVERSAL_DIAGNOSTIC_SCHEMA:
+        return _unavailable_traversal_diagnostics("UNSUPPORTED_DIAGNOSTICS_SCHEMA")
+    missing = [key for key in _TRAVERSAL_DIAGNOSTIC_COUNTERS if not isinstance(source.get(key), int)]
+    if missing:
+        result = _unavailable_traversal_diagnostics("INCOMPLETE_DIAGNOSTICS_EVENT")
+        result["missing_counters"] = missing
+        return result
+    return {
+        "available": True,
+        "schema": _TRAVERSAL_DIAGNOSTIC_SCHEMA,
+        **{key: max(0, int(source[key])) for key in _TRAVERSAL_DIAGNOSTIC_COUNTERS},
+    }
 
 
 def _summary(rows: list[Mapping[str, Any]]) -> dict[str, Any]:

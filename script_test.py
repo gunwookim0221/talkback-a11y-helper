@@ -53,10 +53,12 @@ from tb_runner.crash_recovery import (
     update_crash_context_batch_policy,
     update_crash_run_stats,
 )
-from tb_runner.run_spec import RunContext, RunSpec
+from tb_runner.run_spec import RunContext, RunSpec, resolve_identity_feature_flags
 from tb_runner.run_selection import apply_run_selection
 from tb_runner.utils import configure_process_temp_dir, generate_output_path
 from tb_runner.evidence import EvidenceRuntime, collect_run_provenance, evidence_enabled
+from tb_runner.evidence_identity import identity_shadow_enabled
+from tb_runner.traversal_evidence_gate import traversal_identity_v2_enabled
 
 
 def _force_utf8_stdio():
@@ -146,7 +148,19 @@ def main() -> int:
     )
 
     log(f"[MAIN] script start (version={SCRIPT_VERSION}, log_level={LOG_LEVEL})")
-    log(f"[EVIDENCE][startup] env_ledger={os.environ.get('TB_EVIDENCE_LEDGER_ENABLED')!r} env_identity={os.environ.get('TB_EVIDENCE_IDENTITY_SHADOW_ENABLED')!r} ledger_enabled={evidence_enabled()} identity_enabled={os.environ.get('TB_EVIDENCE_IDENTITY_SHADOW_ENABLED') == '1'} output_path={output_path}")
+    feature_flags = resolve_identity_feature_flags(
+        evidence_ledger=evidence_enabled(),
+        identity_shadow_v2=identity_shadow_enabled(),
+        traversal_identity_v2=traversal_identity_v2_enabled(),
+    )
+    log(
+        f"[EVIDENCE][startup] env_ledger={os.environ.get('TB_EVIDENCE_LEDGER_ENABLED')!r} "
+        f"env_identity={os.environ.get('TB_EVIDENCE_IDENTITY_SHADOW_ENABLED')!r} "
+        f"env_traversal={os.environ.get('TB_TRAVERSAL_IDENTITY_V2_ENABLED')!r} "
+        f"ledger_enabled={feature_flags['evidence_ledger']} "
+        f"identity_enabled={feature_flags['identity_shadow_v2']} "
+        f"traversal_enabled={feature_flags['traversal_identity_v2']} output_path={output_path}"
+    )
     target_serial = context.serial
     client = A11yAdbClient(dev_serial=target_serial)
     evidence_runtime = None
@@ -154,8 +168,7 @@ def main() -> int:
         try:
             evidence_runtime = EvidenceRuntime(output_path=output_path, warning_fn=log, enabled=True)
             client.set_evidence_runtime(evidence_runtime)
-            evidence_runtime.write_manifest(
-                collect_run_provenance(
+            manifest = collect_run_provenance(
                     repo_root=Path(__file__).resolve().parent,
                     runtime_config_path=context.spec.runtime_config_path,
                     scenario_registry_path=Path(__file__).resolve().parent / "tb_runner" / "scenario_config.py",
@@ -163,7 +176,8 @@ def main() -> int:
                     client=client,
                     serial=target_serial,
                 )
-            )
+            manifest["feature_flags"] = dict(feature_flags)
+            evidence_runtime.write_manifest(manifest)
             log(f"[EVIDENCE] enabled schema='evidence-event-v1' ledger='{evidence_runtime.ledger.path}'")
         except Exception as exc:
             log(f"[EVIDENCE][warning] initialization_failed error='{type(exc).__name__}: {exc}'")

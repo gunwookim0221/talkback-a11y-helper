@@ -1,3 +1,23 @@
+export type IdentityFeatureFlags = {
+  evidence_ledger: boolean;
+  identity_shadow_v2: boolean;
+  traversal_identity_v2: boolean;
+};
+
+export type TraversalIdentityV2Diagnostics = {
+  available: boolean;
+  schema: 'traversal-identity-v2-diagnostics-v1' | string;
+  reason?: string;
+  missing_counters?: string[];
+  false_progress_suppressed?: number;
+  representative_only_progress_ignored?: number;
+  recovered_candidate_attempts?: number;
+  recovered_visits?: number;
+  premature_stop_prevented?: number;
+  fallback_to_legacy_count?: number;
+  indeterminate_count?: number;
+};
+
 export type RunStatus = {
   state: 'idle' | 'running' | 'stopped' | 'finished' | 'error';
   run_id: string | null;
@@ -38,6 +58,8 @@ export type RunStatus = {
   popup_result: string | null;
   accessibility_settings_opened: boolean;
   preflight: Record<string, unknown> | null;
+  feature_flags?: IdentityFeatureFlags | null;
+  traversal_identity_v2_diagnostics?: TraversalIdentityV2Diagnostics | null;
 };
 export type DeviceInfo = {
   serial: string;
@@ -82,6 +104,7 @@ export type IdentityShadowReport = {
     relation_percentages?: Record<string, number>;
   };
   transactions: Array<{ transaction_id: string; step_index?: number | null; action_type?: string | null; legacy_verdict?: string | null; v2_verdict?: string | null; verdict_changed: boolean; target_relation?: string | null; temporal_relation?: string | null; confidence?: string | null; evidence_complete: boolean }>;
+  traversal_identity_v2_diagnostics?: TraversalIdentityV2Diagnostics;
 };
 
 export type BatchStartRequest = {
@@ -102,6 +125,7 @@ export type BatchDeviceStatus = {
   current?: BatchCurrentStatus;
   progress?: BatchProgressStatus;
   logs?: BatchLogStatus;
+  feature_flags?: IdentityFeatureFlags | null;
 };
 
 export type BatchSummaryStatus = {
@@ -226,6 +250,8 @@ export type RecentRun = {
   xlsx_filename: string | null;
   summary_exists?: boolean;
   summary_source?: string;
+  feature_flags?: IdentityFeatureFlags | null;
+  traversal_identity_v2_diagnostics?: TraversalIdentityV2Diagnostics | null;
   scenarios?: Array<{
     id: string;
     status: 'passed' | 'warning' | 'failed' | 'skipped' | 'running' | 'queued' | string;
@@ -393,6 +419,8 @@ export type RecentBatchDevice = {
   coverage_probe_summary?: CoverageProbeSummary | null;
   coverage_probe?: CoverageProbeSummary | null;
   shadow_validation?: ShadowValidationSummary | null;
+  feature_flags?: IdentityFeatureFlags | null;
+  traversal_identity_v2_diagnostics?: TraversalIdentityV2Diagnostics | null;
   process_status?: string;
   scenario_result_status?: string;
   passed_scenarios?: number;
@@ -429,6 +457,7 @@ export type RecentBatch = {
   passed_count: number;
   failed_count: number;
   summary_path: string;
+  feature_flags?: IdentityFeatureFlags | null;
   devices?: RecentBatchDevice[];
 };
 
@@ -1050,13 +1079,14 @@ export const api = {
     shadowValidation?: boolean,
     evidenceLedger?: boolean,
     identityShadowV2?: boolean,
+    traversalIdentityV2?: boolean,
   ) =>
     request<RunStatus>('/api/run/start', {
       method: 'POST',
-      body: JSON.stringify({ mode, scenario_ids: scenarioIds, launch_mode: launchMode, language_mode: languageMode, enable_coverage_probe: enableCoverageProbe, shadow_validation: shadowValidation, evidence_ledger: evidenceLedger, identity_shadow_v2: identityShadowV2 }),
+      body: JSON.stringify({ mode, scenario_ids: scenarioIds, launch_mode: launchMode, language_mode: languageMode, enable_coverage_probe: enableCoverageProbe, shadow_validation: shadowValidation, evidence_ledger: evidenceLedger, identity_shadow_v2: identityShadowV2, traversal_identity_v2: traversalIdentityV2 }),
     }),
   stopRun: () => request<RunStatus>('/api/run/stop', { method: 'POST' }),
-  startBatch: async (data: { mode: string; devices: { serial: string; model: string }[]; launch_mode: string; language_mode: string; scenario_ids: string[]; enable_coverage_probe?: boolean; shadow_validation?: boolean; evidence_ledger?: boolean; identity_shadow_v2?: boolean }) => {
+  startBatch: async (data: { mode: string; devices: { serial: string; model: string }[]; launch_mode: string; language_mode: string; scenario_ids: string[]; enable_coverage_probe?: boolean; shadow_validation?: boolean; evidence_ledger?: boolean; identity_shadow_v2?: boolean; traversal_identity_v2?: boolean }) => {
     return request<BatchStatus>('/api/batch/start', {
       method: 'POST',
       body: JSON.stringify(data)

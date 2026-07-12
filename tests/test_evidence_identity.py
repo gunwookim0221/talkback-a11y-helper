@@ -450,6 +450,7 @@ def test_identity_shadow_flag_defaults_off_and_accepts_true(monkeypatch) -> None
     assert identity_shadow_enabled() is False
     monkeypatch.setenv("TB_EVIDENCE_IDENTITY_SHADOW_ENABLED", "1")
     assert identity_shadow_enabled() is True
+    assert identity_shadow_enabled({"TB_TRAVERSAL_IDENTITY_V2_ENABLED": "1"}) is True
 
 
 def test_runtime_feature_off_does_not_call_v2_reducer(tmp_path: Path, monkeypatch) -> None:
@@ -498,6 +499,22 @@ def test_runtime_emits_legacy_and_optional_v2_side_by_side(
     event_types = [json.loads(line)["event_type"] for line in runtime.ledger.path.read_text(encoding="utf-8").splitlines()]
     assert "SHADOW_ACTION_REDUCED" in event_types
     assert ("SHADOW_ACTION_REDUCED_V2" in event_types) is expect_v2
+
+
+def test_runtime_identity_result_is_available_only_after_transaction_close(tmp_path: Path) -> None:
+    runtime = EvidenceRuntime(output_path=tmp_path / "closed.xlsx", identity_shadow=True)
+    runtime.start_scenario("scenario")
+    transaction = runtime.begin_transaction("SMART_NEXT", phase="main_loop")
+    transaction_id = transaction["transaction_id"]
+    runtime.reduce_identity_shadow(transaction_id)
+    assert runtime.identity_shadow_result(transaction_id) is None
+    runtime.close_transaction(transaction, status="completed", phase="main_loop")
+    result = runtime.identity_shadow_result(transaction_id)
+    assert result is not None
+    assert result["runtime_transaction_id"] == transaction_id
+    assert result["runtime_transaction_state"] == "closed"
+    result["verdict"] = "MUTATED"
+    assert runtime.identity_shadow_result(transaction_id)["verdict"] != "MUTATED"
 
 
 def test_reconciliation_adds_non_blocking_identity_shadow_metrics() -> None:

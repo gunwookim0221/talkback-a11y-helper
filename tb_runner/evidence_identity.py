@@ -77,8 +77,12 @@ class TemporalRelation(_StringEnum):
 
 
 def identity_shadow_enabled(env: Mapping[str, str] | None = None) -> bool:
-    value = (env or os.environ).get(IDENTITY_SHADOW_ENABLED_ENV, "").strip().lower()
-    return value in {"1", "true", "yes", "on"}
+    source = env or os.environ
+    truthy = {"1", "true", "yes", "on"}
+    return (
+        source.get(IDENTITY_SHADOW_ENABLED_ENV, "").strip().lower() in truthy
+        or source.get("TB_TRAVERSAL_IDENTITY_V2_ENABLED", "").strip().lower() in truthy
+    )
 
 
 @dataclass(frozen=True)

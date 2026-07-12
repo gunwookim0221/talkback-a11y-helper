@@ -54,3 +54,20 @@ def test_frontend_initial_selection_defaults_to_global_nav_not_source_enabled():
     assert "if (batchStatus?.state === 'running')" in app_tsx
     assert "await api.stopBatch()" in app_tsx
     assert "await api.stopRun()" in app_tsx
+
+
+def test_traversal_identity_v2_ui_is_default_off_and_enforces_dependencies():
+    app_tsx = (ROOT / "qa_frontend" / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+    run_panel_tsx = (ROOT / "qa_frontend" / "frontend" / "src" / "components" / "RunPanel.tsx").read_text(encoding="utf-8")
+    recent_runs_tsx = (ROOT / "qa_frontend" / "frontend" / "src" / "components" / "RecentRunsPanel.tsx").read_text(encoding="utf-8")
+    api_ts = (ROOT / "qa_frontend" / "frontend" / "src" / "api.ts").read_text(encoding="utf-8")
+
+    assert "useState(false)" in app_tsx
+    assert "const [traversalIdentityV2, setTraversalIdentityV2] = useState(false)" in app_tsx
+    assert "setIdentityShadowV2(true); setEvidenceLedger(true);" in run_panel_tsx
+    assert "setIdentityShadowV2(false); setTraversalIdentityV2(false);" in run_panel_tsx
+    assert "else setTraversalIdentityV2(false)" in run_panel_tsx
+    assert "Traversal Identity V2 (Experimental)" in run_panel_tsx
+    assert "traversal_identity_v2: traversalIdentityV2" in run_panel_tsx
+    assert "TraversalIdentityV2Card" in recent_runs_tsx
+    assert "traversal_identity_v2: boolean" in api_ts

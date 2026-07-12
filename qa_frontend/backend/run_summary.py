@@ -45,11 +45,19 @@ def build_run_summary(
     started_at = _string_or_none(status.get("started_at"))
     finished_at = _string_or_none(status.get("finished_at"))
     run_id, mode = _run_identity(status=status, log_path=log_path)
+    feature_flags = status.get("feature_flags") if isinstance(status.get("feature_flags"), dict) else None
+    traversal_identity_diagnostics = (
+        status.get("traversal_identity_v2_diagnostics")
+        if isinstance(status.get("traversal_identity_v2_diagnostics"), dict)
+        else parsed.get("traversal_identity_v2_diagnostics")
+    )
 
     return {
         "schema_version": SUMMARY_SCHEMA_VERSION,
         "run_id": run_id,
         "mode": _string_or_none(status.get("mode")) or mode,
+        "feature_flags": feature_flags,
+        "traversal_identity_v2_diagnostics": traversal_identity_diagnostics,
         "launch_mode": _string_or_none(status.get("launch_mode")) or parsed.get("launch_mode"),
         "language_mode": _string_or_none(status.get("language_mode")) or parsed.get("language_mode"),
         "device_locale": _string_or_none(status.get("device_locale")) or parsed.get("device_locale"),
