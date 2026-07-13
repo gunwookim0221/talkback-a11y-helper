@@ -63,9 +63,15 @@ from tb_runner.traversal_evidence_gate import (
     ProgressDecision,
     TraversalDiagnostics,
     VisitDecision,
-    evaluate_traversal_gate,
     select_recovery_candidate,
     traversal_identity_v2_enabled,
+)
+from tb_runner.traversal_orchestration import (
+    RecoveryExecutionServices,
+    RecoveryExecutor,
+    TRAVERSAL_COORDINATOR,
+    TRAVERSAL_V2_STOP_POLICY,
+    VisitTracker,
 )
 
 _VALID_SCREEN_CONTEXT_MODES = {"bottom_tab", "new_screen"}
@@ -184,19 +190,14 @@ def _resolve_traversal_evidence_decision(
             log(f"[TRAVERSAL_V2][fallback] reason='identity_result_error' error='{type(exc).__name__}'")
 
     legacy_progressed = _legacy_row_progressed(row)
-    progress, visit = evaluate_traversal_gate(
-        result,
+    decision = TRAVERSAL_COORDINATOR.resolve_decision(
+        result=result,
         transaction_id=transaction_id,
         evidence_transaction_id=str((result or {}).get("runtime_transaction_id") or ""),
         legacy_progressed=legacy_progressed,
-        legacy_visited=legacy_progressed,
-        # Consumption records that the planning candidate was attempted.  It
-        # remains separate from physical visit credit and must not be withheld
-        # merely because representative and actual focus diverge.
-        legacy_consumed=True,
         row=row,
-        enabled=True,
     )
+    progress, visit = decision.progress, decision.visit
     state.traversal_diagnostics = state.traversal_diagnostics.record_gate(progress, visit)
     _emit_row_evidence(
         client,
@@ -11203,13 +11204,14 @@ def _record_recent_representative_signature(
     signature = _build_row_object_signature(row)
     move_result = normalize_move_result(row) or str(row.get("move_result", "") or "").strip().lower()
     logical_signature = _row_logical_signature(row)
-    gate_applied = bool(progress_decision is not None and progress_decision.gate_applied and visit_decision is not None)
-    planning_consumed = bool(visit_decision.consumed) if gate_applied and visit_decision is not None else True
-    physical_visited = (
-        bool(visit_decision.visited)
-        if gate_applied and visit_decision is not None
-        else move_result in {"moved", "scrolled", "edge_realign_then_moved"}
+    tracking = VisitTracker.resolve(
+        progress=progress_decision,
+        visit=visit_decision,
+        legacy_move_result=move_result,
     )
+    gate_applied = tracking.gate_applied
+    planning_consumed = tracking.planning_consumed
+    physical_visited = tracking.physical_visited
     visited_row = row
     if gate_applied and physical_visited:
         visited_row = dict(row)
@@ -15035,12 +15037,7 @@ def _apply_stop_evaluation_phase(
     )
 
 
-_TRAVERSAL_V2_REPEAT_STOP_REASONS = {
-    "repeat_no_progress",
-    "bounded_two_card_loop",
-    "repeat_semantic_stall",
-    "repeat_semantic_stall_after_escape",
-}
+_TRAVERSAL_V2_REPEAT_STOP_REASONS = TRAVERSAL_V2_STOP_POLICY.recovery_reasons
 
 
 def _build_identity_recovery_inventory(
@@ -15129,161 +15126,48 @@ def _attempt_identity_recovery(
     row: dict[str, Any],
     step_idx: int,
 ) -> dict[str, Any]:
-    outcome: dict[str, Any] = {
-        "attempted": False,
-        "recovered": False,
-        "block_stop": False,
-        "row": None,
-        "progress": None,
-        "visit": None,
-    }
-    if not traversal_identity_v2_enabled():
-        return outcome
-    candidate = _select_identity_recovery_candidate(
-        client=client,
-        phase_ctx=phase_ctx,
-        state=state,
-        row=row,
-    )
-    if candidate is None:
-        return outcome
-
-    begin_target_action = getattr(client, "_evidence_begin_target_action", None)
-    set_evidence_step = getattr(client, "_evidence_set_step", None)
-    if not callable(begin_target_action):
-        log("[TRAVERSAL_V2][recovery_skip] reason='evidence_transaction_unavailable'")
-        return outcome
-
-    recovery_number = state.traversal_diagnostics.recovered_candidate_attempts + 1
-    recovery_step_key = f"{step_idx}:recovery:{recovery_number}"
-    if callable(set_evidence_step):
-        try:
-            set_evidence_step(recovery_step_key, phase="recovery")
-        except Exception:
-            pass
-    transaction = begin_target_action(
-        "FOCUS_IN_BOUNDS",
-        requested_target=candidate.requested_observation(),
-        phase="recovery",
-    )
-    if not transaction:
-        log("[TRAVERSAL_V2][recovery_skip] reason='evidence_transaction_not_opened'")
-        return outcome
-
-    state.recovery_attempted_candidate_ids.update({candidate.candidate_id, candidate.canonical_key})
-    state.traversal_diagnostics = state.traversal_diagnostics.record_recovery_attempt()
-    outcome["attempted"] = True
-    bounds = ",".join(str(value) for value in candidate.bounds)
-    log(
-        f"[TRAVERSAL_V2][recovery_attempt] step={step_idx} candidate='{candidate.candidate_id}' "
-        f"label='{_truncate_debug_text(candidate.label, 96)}' bounds='{bounds}'"
-    )
-
-    action_result: dict[str, Any] = {}
-    recovery_row: dict[str, Any] | None = None
-    try:
-        action_result = client.focus_in_bounds(
-            dev=dev,
-            bounds=bounds,
-            wait_=_TRANSITION_FAST_ACTION_WAIT_SECONDS,
-            prefer_empty_state=False,
-            exclude_top_chrome=True,
-            exclude_bottom_nav=True,
-        )
-        recovery_row = client.collect_focus_step(
-            dev=dev,
-            step_index=recovery_step_key,
-            move=False,
-            direction="next",
-            wait_seconds=phase_ctx.main_step_wait_seconds,
-            announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
-            announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
-            announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
-        )
-    except Exception as exc:
-        log(f"[TRAVERSAL_V2][recovery_error] candidate='{candidate.candidate_id}' error='{type(exc).__name__}'")
-        runtime = getattr(client, "evidence_runtime", None)
-        active = getattr(client, "_evidence_active_transaction", None)
-        if runtime is not None and active:
-            try:
-                runtime.close_transaction(active, status="failed", phase="recovery", payload={"reason": type(exc).__name__})
-            except Exception:
-                pass
-            setattr(client, "_evidence_active_transaction", None)
-
-    if not isinstance(recovery_row, dict):
-        state.recovery_hard_failed_candidate_ids.update({candidate.candidate_id, candidate.canonical_key})
-    else:
-        recovery_row["tab_name"] = phase_ctx.tab_cfg["tab_name"]
-        recovery_row["context_type"] = "main"
-        recovery_row["parent_step_index"] = ""
-        recovery_row["overlay_entry_label"] = ""
-        recovery_row["overlay_recovery_status"] = ""
-        recovery_row["status"] = "OK"
-        recovery_row["stop_reason"] = ""
-        recovery_row["scenario_type"] = str(phase_ctx.tab_cfg.get("scenario_type", "content") or "content")
-        recovery_row["scenario_id"] = str(phase_ctx.tab_cfg.get("scenario_id", "") or "")
-        recovery_row["last_smart_nav_result"] = ""
-        recovery_row["last_smart_nav_detail"] = ""
-        recovery_row["last_smart_nav_terminal"] = False
-        progress, visit = _resolve_traversal_evidence_decision(client=client, row=recovery_row, state=state)
-        outcome["progress"] = progress
-        outcome["visit"] = visit
-        strong_recovery = bool(
-            progress is not None
-            and visit is not None
-            and progress.gate_applied
-            and progress.verdict == "MOVE_CONFIRMED"
-            and progress.physical_progress is True
-            and visit.visited
-        )
-        _emit_row_evidence(
+    services = RecoveryExecutionServices(
+        enabled=traversal_identity_v2_enabled,
+        select_candidate=lambda: _select_identity_recovery_candidate(
+            client=client,
+            phase_ctx=phase_ctx,
+            state=state,
+            row=row,
+        ),
+        resolve_decision=lambda recovery_row: _resolve_traversal_evidence_decision(
+            client=client,
+            row=recovery_row,
+            state=state,
+        ),
+        emit_evidence=lambda recovery_row, event_type, phase, payload: _emit_row_evidence(
             client,
             recovery_row,
-            "RECOVERY_CANDIDATE_RESULT",
-            phase="recovery",
-            payload={
-                "candidate": candidate.to_payload(),
-                "helper_success": bool(action_result.get("success")),
-                "strong_recovery": strong_recovery,
-                "progress_reason": progress.reason if progress is not None else "unavailable",
-            },
-        )
-        if strong_recovery:
-            recovery_row["move_result"] = "moved"
-            recovery_row["step_index"] = step_idx
-            recovery_row["crop_image"] = "IMAGE"
-            recovery_row["_step_mono_start"] = time.monotonic() - float(recovery_row.get("t_step_start", 0.0) or 0.0)
-            recovery_row = maybe_capture_focus_crop(client, dev, recovery_row, phase_ctx.output_base_dir)
-            recovery_row.pop("_step_mono_start", None)
-            _register_focusable_inventory_from_row(
-                client,
-                output_path=phase_ctx.output_path,
-                row=recovery_row,
-                state=state,
-            )
-            state.recovery_visited_candidate_ids.update({candidate.candidate_id, candidate.canonical_key})
-            state.traversal_diagnostics = state.traversal_diagnostics.record_recovery_visit().record_stop_prevented()
-            outcome.update({"recovered": True, "block_stop": True, "row": recovery_row})
-            return outcome
-        if bool(action_result.get("success")) is False or (
-            progress is not None and progress.gate_applied and progress.verdict == "STATIC_FOCUS"
-        ):
-            state.recovery_hard_failed_candidate_ids.update({candidate.candidate_id, candidate.canonical_key})
-
-    remaining = _select_identity_recovery_candidate(
+            event_type,
+            phase=phase,
+            payload=payload,
+        ),
+        capture_crop=maybe_capture_focus_crop,
+        register_inventory=lambda recovery_row: _register_focusable_inventory_from_row(
+            client,
+            output_path=phase_ctx.output_path,
+            row=recovery_row,
+            state=state,
+        ),
+        log=log,
+        truncate=_truncate_debug_text,
+        monotonic=time.monotonic,
+        action_wait_seconds=_TRANSITION_FAST_ACTION_WAIT_SECONDS,
+    )
+    return RecoveryExecutor.execute(
         client=client,
+        dev=dev,
         phase_ctx=phase_ctx,
         state=state,
         row=row,
+        step_idx=step_idx,
+        services=services,
     )
-    if remaining is not None:
-        outcome["block_stop"] = True
-        log(
-            f"[TRAVERSAL_V2][recovery_continue] reason='eligible_recovery_candidate_remaining' "
-            f"next_candidate='{remaining.candidate_id}'"
-        )
-    return outcome
+
 
 
 def _maybe_dismiss_runtime_popup(
@@ -15817,32 +15701,23 @@ def _main_loop_phase(
             step_idx=step_idx,
             scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
         )
-        if stop and reason in _TRAVERSAL_V2_REPEAT_STOP_REASONS:
-            recovery_outcome = _attempt_identity_recovery(
-                client=client,
-                dev=dev,
-                phase_ctx=phase_ctx,
-                state=state,
-                row=row,
-                step_idx=step_idx,
-            )
-            while (
-                bool(recovery_outcome.get("attempted", False))
-                and bool(recovery_outcome.get("block_stop", False))
-                and not bool(recovery_outcome.get("recovered", False))
-            ):
-                recovery_outcome = _attempt_identity_recovery(
+        recovery_outcome = TRAVERSAL_COORDINATOR.recover(
+            stop=stop,
+            reason=reason,
+            attempt=lambda: _attempt_identity_recovery(
                     client=client,
                     dev=dev,
                     phase_ctx=phase_ctx,
                     state=state,
                     row=row,
                     step_idx=step_idx,
-                )
-            if bool(recovery_outcome.get("recovered", False)):
-                row = recovery_outcome["row"]
-                progress_decision = recovery_outcome.get("progress")
-                visit_decision = recovery_outcome.get("visit")
+                ),
+        )
+        if recovery_outcome is not None:
+            if recovery_outcome.recovered:
+                row = recovery_outcome.row
+                progress_decision = recovery_outcome.progress
+                visit_decision = recovery_outcome.visit
                 mismatch_reasons, low_confidence_reasons = _apply_row_quality_phase(
                     row=row,
                     state=state,
@@ -15871,7 +15746,7 @@ def _main_loop_phase(
                     f"[TRAVERSAL_V2][recovered] step={step_idx} "
                     f"visible='{_truncate_debug_text(str(row.get('visible_label', '') or ''), 96)}'"
                 )
-            elif bool(recovery_outcome.get("block_stop", False)):
+            elif recovery_outcome.block_stop:
                 stop = False
                 reason = ""
 

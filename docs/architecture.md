@@ -121,6 +121,22 @@ ACKed, stable, high-confidence `MOVE_CONFIRMED`/`STATIC_FOCUS`만
 제한적으로 사용한다. `MOVE_TO_OTHER_NODE`, `SNAP_BACK`, incomplete, malformed, orphan,
 uncorrelated 결과는 모두 legacy fallback이다. Flag OFF에서는 이 경로를 전혀 읽지 않는다.
 
+Production traversal orchestration은 policy와 Android action을 다시 구현하지 않는다.
+`collection_flow`가 step lifecycle의 outer orchestrator로 남고, Phase 8.5 decision coordination은
+`tb_runner/traversal_orchestration.py`에 분리한다.
+
+```text
+collection_flow (step lifecycle / side-effect ordering)
+  -> TraversalCoordinator
+       -> StopPolicy (recovery eligibility reason set)
+       -> RecoveryCoordinator (existing one-candidate executor repetition)
+       -> RecoveryExecutor (existing FOCUS_IN_BOUNDS action lifecycle)
+       -> VisitTracker (planning consumed / physical visited projection)
+       -> traversal_evidence_gate (authoritative strong-evidence decision)
+```
+
+Candidate selection, focus action, recovery result construction, stop counter/threshold, row persistence,
+coverage, representative selection과 evidence emission 순서는 기존 phase 함수에 그대로 유지한다.
 ## 3) Devices plugin 운영 추가점
 
 Devices plugin은 일반 Life plugin과 다르게 Devices list normalization을 먼저
