@@ -300,7 +300,7 @@ UI는 backend가 재계산하지 않고 artifact 값을 그대로 사용한다.
 
 검증 상태:
 
-- 31-scenario full run 완료
+- 당시 31-scenario full run 완료 (현재 Phase 9.5 기준 registry는 32 scenario)
 - aggregate validation 동작 확인
 - promoted row / dedup skip 동작 확인
 - QA Frontend coverage probe summary 표시 확인
