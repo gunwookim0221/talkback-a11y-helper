@@ -43,7 +43,15 @@ def test_frontend_initial_selection_defaults_to_global_nav_not_source_enabled():
     assert "selected scenarios with reduced max_steps" in run_panel_tsx
     assert "Selected Full" in run_panel_tsx
     assert "selected scenarios with source max_steps" in run_panel_tsx
+    assert "Execution Options" in run_panel_tsx
     assert "Runtime Coverage Probe" in run_panel_tsx
+    assert "Advanced Diagnostics" in run_panel_tsx
+    assert "Experimental" in run_panel_tsx
+    assert "Collect additional coverage diagnostics after traversal." in run_panel_tsx
+    assert "Collect detailed traversal evidence." in run_panel_tsx
+    assert "Identity Shadow V2 (Read-only)" in run_panel_tsx
+    assert "Legacy Shadow Validation (Experimental)" in run_panel_tsx
+    assert "planned for removal" in run_panel_tsx
     assert "Recommended for Full runs." in run_panel_tsx
     assert "V8 Runtime Probe" not in run_panel_tsx
     assert "Experimental." not in run_panel_tsx

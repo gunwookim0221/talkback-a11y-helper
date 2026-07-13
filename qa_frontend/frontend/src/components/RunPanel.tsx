@@ -329,9 +329,9 @@ export function RunPanel({
         </div>
 
         <div>
-          <h3 style={{ margin: '0 0 6px', fontSize: '12px', color: 'var(--color-text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Options</h3>
+          <h3 style={{ margin: '0 0 6px', fontSize: '12px', color: 'var(--color-text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Execution Options</h3>
           <div className="launchMode" style={{ marginBottom: '0' }}>
-            <label style={{ padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <label title="Collect additional coverage diagnostics after traversal." style={{ padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <input
                 type="checkbox"
                 checked={enableCoverageProbe}
@@ -345,34 +345,44 @@ export function RunPanel({
                 Runs coverage-driven TalkBack probe after traversal to validate expected device/plugin content. Recommended for Full runs.
               </small>
             </div>
-            <label style={{ padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input type="checkbox" checked={evidenceLedger} onChange={e => { setEvidenceLedger(e.target.checked); if (!e.target.checked) { setIdentityShadowV2(false); setTraversalIdentityV2(false); } }} disabled={running} />
-              <span style={{ fontSize: '14px' }}>Evidence Ledger</span>
-            </label>
-            <label style={{ padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input type="checkbox" checked={identityShadowV2} onChange={e => { setIdentityShadowV2(e.target.checked); if (e.target.checked) setEvidenceLedger(true); else setTraversalIdentityV2(false); }} disabled={running} />
-              <span style={{ fontSize: '14px' }}>Identity Shadow V2 (Experimental)</span>
-            </label>
-            <div style={{ padding: '0 8px', marginTop: '-4px' }}><small style={{ fontSize: '11px', color: 'var(--color-text-dim)' }}>Identity Shadow V2 requires Evidence Ledger and enables it automatically.</small></div>
-            <label style={{ padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input type="checkbox" checked={traversalIdentityV2} onChange={e => { setTraversalIdentityV2(e.target.checked); if (e.target.checked) { setIdentityShadowV2(true); setEvidenceLedger(true); } }} disabled={running} />
-              <span style={{ fontSize: '14px' }}>Traversal Identity V2 (Experimental)</span>
-            </label>
-            <div style={{ padding: '0 8px', marginTop: '-4px' }}><small style={{ fontSize: '11px', color: 'var(--color-text-dim)' }}>Uses Canonical Identity V2 for traversal progress, recovery, and stop gates. Requires Identity Shadow V2 and Evidence Ledger.</small></div>
-            <label style={{ padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input
-                type="checkbox"
-                checked={shadowValidation}
-                onChange={(e) => setShadowValidation(e.target.checked)}
-                disabled={running || plannedMode !== 'full'}
-              />
-              <span style={{ fontSize: '14px' }}>Shadow Validation (Experimental)</span>
-            </label>
-            <div style={{ padding: '0 8px', marginTop: '-4px' }}>
-              <small style={{ fontSize: '11px', color: 'var(--color-text-dim)', display: 'block' }}>
-                Runs the V10 inventory, identify, policy, and comparison pipeline after the legacy run. Legacy remains authoritative.
-              </small>
-            </div>
+            <details style={{ padding: '4px 8px' }}>
+              <summary style={{ cursor: 'pointer', fontSize: '13px', color: 'var(--color-text-dim)' }}>Advanced Diagnostics</summary>
+              <div style={{ paddingTop: '6px' }}>
+                <label title="Collect detailed traversal evidence." style={{ padding: '4px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input type="checkbox" checked={evidenceLedger} onChange={e => { setEvidenceLedger(e.target.checked); if (!e.target.checked) { setIdentityShadowV2(false); setTraversalIdentityV2(false); } }} disabled={running} />
+                  <span style={{ fontSize: '14px' }}>Evidence Ledger</span>
+                </label>
+                <label title="Compare legacy and V2 identity results without changing traversal." style={{ padding: '4px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input type="checkbox" checked={identityShadowV2} onChange={e => { setIdentityShadowV2(e.target.checked); if (e.target.checked) setEvidenceLedger(true); else setTraversalIdentityV2(false); }} disabled={running} />
+                  <span style={{ fontSize: '14px' }}>Identity Shadow V2 (Read-only)</span>
+                </label>
+                <div style={{ padding: '0', marginTop: '-4px' }}><small style={{ fontSize: '11px', color: 'var(--color-text-dim)' }}>Read-only comparison. Requires Evidence Ledger and enables it automatically.</small></div>
+                <label title="Run the legacy validation pipeline after the run; legacy results remain authoritative." style={{ padding: '4px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="checkbox"
+                    checked={shadowValidation}
+                    onChange={(e) => setShadowValidation(e.target.checked)}
+                    disabled={running || plannedMode !== 'full'}
+                  />
+                  <span style={{ fontSize: '14px' }}>Legacy Shadow Validation (Experimental)</span>
+                </label>
+                <div style={{ padding: '0', marginTop: '-4px' }}>
+                  <small style={{ fontSize: '11px', color: 'var(--color-text-dim)', display: 'block' }}>
+                    Legacy validation is retained for comparison and is planned for removal. Legacy remains authoritative.
+                  </small>
+                </div>
+              </div>
+            </details>
+            <details style={{ padding: '4px 8px' }}>
+              <summary style={{ cursor: 'pointer', fontSize: '13px', color: 'var(--color-text-dim)' }}>Experimental</summary>
+              <div style={{ paddingTop: '6px' }}>
+                <label title="Use Canonical Identity V2 for traversal progress, recovery, and stop gates." style={{ padding: '4px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input type="checkbox" checked={traversalIdentityV2} onChange={e => { setTraversalIdentityV2(e.target.checked); if (e.target.checked) { setIdentityShadowV2(true); setEvidenceLedger(true); } }} disabled={running} />
+                  <span style={{ fontSize: '14px' }}>Traversal Identity V2 (Experimental)</span>
+                </label>
+                <div style={{ padding: '0', marginTop: '-4px' }}><small style={{ fontSize: '11px', color: 'var(--color-text-dim)' }}>Uses Canonical Identity V2 for traversal progress, recovery, and stop gates. Requires Identity Shadow V2 and Evidence Ledger.</small></div>
+              </div>
+            </details>
           </div>
         </div>
       </div>
