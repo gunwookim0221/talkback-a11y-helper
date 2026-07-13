@@ -469,7 +469,7 @@ class BatchRunManager:
     def _sanitize_name(self, name: str) -> str:
         return re.sub(r'[^0-9a-zA-Z_-]+', '_', name)
 
-    def start_batch(self, devices: list[dict], mode: str, launch_mode: str = "clean", language_mode: str = "current", scenario_ids: list[str] | None = None, enable_coverage_probe: bool = False, shadow_validation: bool = False, evidence_ledger: bool = False, identity_shadow_v2: bool = False, traversal_identity_v2: bool = True) -> dict:
+    def start_batch(self, devices: list[dict], mode: str, launch_mode: str = "clean", language_mode: str = "current", scenario_ids: list[str] | None = None, enable_coverage_probe: bool = False, shadow_validation: bool = False, evidence_ledger: bool = False, identity_shadow_v2: bool = False, traversal_identity_v2: bool = True, traversal_profiler: bool = False) -> dict:
         with self._lock:
             if self._state == "running":
                 raise RuntimeError("Batch run is already in progress")
@@ -490,16 +490,19 @@ class BatchRunManager:
                 evidence_ledger=evidence_ledger,
                 identity_shadow_v2=identity_shadow_v2,
                 traversal_identity_v2=traversal_identity_v2,
+                traversal_profiler=traversal_profiler,
             )
             self._evidence_ledger = self._feature_flags["evidence_ledger"]
             self._identity_shadow_v2 = self._feature_flags["identity_shadow_v2"]
             self._traversal_identity_v2 = self._feature_flags["traversal_identity_v2"]
+            self._traversal_profiler = self._feature_flags["runtime_profiler"]
             logger.info(
-                "[FEATURE_FLAGS][batch] batch_id=%s evidence_ledger=%s identity_shadow_v2=%s traversal_identity_v2=%s",
+                "[FEATURE_FLAGS][batch] batch_id=%s evidence_ledger=%s identity_shadow_v2=%s traversal_identity_v2=%s runtime_profiler=%s",
                 self._batch_id,
                 self._evidence_ledger,
                 self._identity_shadow_v2,
                 self._traversal_identity_v2,
+                self._traversal_profiler,
             )
             self._created_at = datetime.now(timezone.utc).isoformat()
             
@@ -856,6 +859,7 @@ class BatchRunManager:
                     "evidence_ledger": self._evidence_ledger,
                     "identity_shadow_v2": self._identity_shadow_v2,
                     "traversal_identity_v2": self._traversal_identity_v2,
+                    "runtime_profiler": self._traversal_profiler,
                 },
                 "traversal_identity_v2_diagnostics": (
                     data.get("traversal_identity_v2_diagnostics")
@@ -996,7 +1000,8 @@ class BatchRunManager:
                     f"[FEATURE_FLAGS][runspec] serial={dev_serial} "
                     f"evidence_ledger={self._evidence_ledger} "
                     f"identity_shadow_v2={self._identity_shadow_v2} "
-                    f"traversal_identity_v2={self._traversal_identity_v2}\n"
+                    f"traversal_identity_v2={self._traversal_identity_v2} "
+                    f"runtime_profiler={self._traversal_profiler}\n"
                 )
                 log_file.flush()
                 spec = RunSpec(
@@ -1011,6 +1016,7 @@ class BatchRunManager:
                     evidence_ledger=self._evidence_ledger,
                     identity_shadow_v2=self._identity_shadow_v2,
                     traversal_identity_v2=self._traversal_identity_v2,
+                    traversal_profiler=self._traversal_profiler,
                 )
                 language_status, preflight = prepare_runtime(
                     spec,

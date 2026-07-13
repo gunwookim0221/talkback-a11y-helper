@@ -29,6 +29,8 @@ export interface RunPanelProps {
   setIdentityShadowV2: (enabled: boolean) => void;
   traversalIdentityV2: boolean;
   setTraversalIdentityV2: (enabled: boolean) => void;
+  traversalProfiler: boolean;
+  setTraversalProfiler: (enabled: boolean) => void;
 }
 
 export function RunPanel({
@@ -52,6 +54,7 @@ export function RunPanel({
   setShadowValidation,
   evidenceLedger, setEvidenceLedger, identityShadowV2, setIdentityShadowV2,
   traversalIdentityV2, setTraversalIdentityV2,
+  traversalProfiler, setTraversalProfiler,
 }: RunPanelProps) {
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [loadingDevices, setLoadingDevices] = useState(false);
@@ -144,6 +147,7 @@ export function RunPanel({
           evidence_ledger: evidenceLedger,
           identity_shadow_v2: identityShadowV2,
           traversal_identity_v2: traversalIdentityV2,
+          traversal_profiler: traversalProfiler,
         });
         setBatchStatus(res);
       } catch (err: any) {
@@ -357,6 +361,11 @@ export function RunPanel({
                   <input type="checkbox" checked={evidenceLedger} onChange={e => { setEvidenceLedger(e.target.checked); if (!e.target.checked) { setIdentityShadowV2(false); setTraversalIdentityV2(false); } }} disabled={running} />
                   <span style={{ fontSize: '14px' }}>Evidence Ledger</span>
                 </label>
+                <label title="Collect runtime metrics and generate profiler artifacts. Does not change traversal behavior." style={{ padding: '4px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input type="checkbox" checked={traversalProfiler} onChange={e => setTraversalProfiler(e.target.checked)} disabled={running} />
+                  <span style={{ fontSize: '14px' }}>Runtime Profiler</span>
+                </label>
+                <div style={{ padding: '0', marginTop: '-4px' }}><small style={{ fontSize: '11px', color: 'var(--color-text-dim)' }}>Collect runtime metrics and generate profiler artifacts. Does not change traversal behavior.</small></div>
                 <label title="Compare legacy and V2 identity results without changing traversal." style={{ padding: '4px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <input type="checkbox" checked={identityShadowV2} onChange={e => { setIdentityShadowV2(e.target.checked); if (e.target.checked) setEvidenceLedger(true); else setTraversalIdentityV2(false); }} disabled={running} />
                   <span style={{ fontSize: '14px' }}>Identity Shadow V2 (Read-only)</span>

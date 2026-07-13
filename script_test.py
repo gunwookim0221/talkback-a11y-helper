@@ -59,6 +59,7 @@ from tb_runner.utils import configure_process_temp_dir, generate_output_path
 from tb_runner.evidence import EvidenceRuntime, collect_run_provenance, evidence_enabled
 from tb_runner.evidence_identity import identity_shadow_enabled
 from tb_runner.traversal_evidence_gate import traversal_identity_v2_enabled
+from tb_runner.traversal_profiler import traversal_profiler_enabled
 
 
 def _force_utf8_stdio():
@@ -155,6 +156,7 @@ def main() -> int:
         evidence_ledger=evidence_enabled(),
         identity_shadow_v2=identity_shadow_enabled(),
         traversal_identity_v2=traversal_identity_v2_enabled(),
+        traversal_profiler=traversal_profiler_enabled(),
     )
     log(
         f"[EVIDENCE][startup] env_ledger={os.environ.get('TB_EVIDENCE_LEDGER_ENABLED')!r} "
@@ -163,6 +165,10 @@ def main() -> int:
         f"ledger_enabled={feature_flags['evidence_ledger']} "
         f"identity_enabled={feature_flags['identity_shadow_v2']} "
         f"traversal_enabled={feature_flags['traversal_identity_v2']} output_path={output_path}"
+    )
+    log(
+        f"[PROFILER][startup] enabled={feature_flags['runtime_profiler']} "
+        f"artifact_root='{Path(output_path).with_suffix('.profiler')}'"
     )
     target_serial = context.serial
     client = A11yAdbClient(dev_serial=target_serial)

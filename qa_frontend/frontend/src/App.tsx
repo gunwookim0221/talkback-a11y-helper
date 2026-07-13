@@ -36,6 +36,7 @@ export default function App() {
   const [evidenceLedger, setEvidenceLedger] = useState(true);
   const [identityShadowV2, setIdentityShadowV2] = useState(true);
   const [traversalIdentityV2, setTraversalIdentityV2] = useState(true);
+  const [traversalProfiler, setTraversalProfiler] = useState(false);
   const [fixTalkBackRunning, setFixTalkBackRunning] = useState(false);
   const [fixTalkBackMessage, setFixTalkBackMessage] = useState<string | null>(null);
   const preflightRef = useRef<HTMLElement | null>(null);
@@ -153,6 +154,7 @@ export default function App() {
         evidenceLedger,
         identityShadowV2,
         traversalIdentityV2,
+        traversalProfiler,
       );
       await refreshRun();
     } catch (err) {
@@ -388,6 +390,8 @@ export default function App() {
           setIdentityShadowV2={setIdentityShadowV2}
           traversalIdentityV2={traversalIdentityV2}
           setTraversalIdentityV2={setTraversalIdentityV2}
+          traversalProfiler={traversalProfiler}
+          setTraversalProfiler={setTraversalProfiler}
         />
       </section>
 

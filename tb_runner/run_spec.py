@@ -14,6 +14,7 @@ def resolve_identity_feature_flags(
     evidence_ledger: bool = False,
     identity_shadow_v2: bool = False,
     traversal_identity_v2: bool = True,
+    traversal_profiler: bool = False,
 ) -> dict[str, bool]:
     traversal = bool(traversal_identity_v2)
     identity = bool(identity_shadow_v2 or traversal)
@@ -22,6 +23,7 @@ def resolve_identity_feature_flags(
         "evidence_ledger": evidence,
         "identity_shadow_v2": identity,
         "traversal_identity_v2": traversal,
+        "runtime_profiler": bool(traversal_profiler),
     }
 
 
@@ -38,6 +40,7 @@ class RunSpec:
     evidence_ledger: bool = False
     identity_shadow_v2: bool = False
     traversal_identity_v2: bool = True
+    traversal_profiler: bool = False
 
     @property
     def feature_flags(self) -> dict[str, bool]:
@@ -45,6 +48,7 @@ class RunSpec:
             evidence_ledger=self.evidence_ledger,
             identity_shadow_v2=self.identity_shadow_v2,
             traversal_identity_v2=self.traversal_identity_v2,
+            traversal_profiler=self.traversal_profiler,
         )
 
     def build_script_command(self, script_path: str | Path) -> list[str]:
@@ -85,6 +89,10 @@ class RunSpec:
             # Explicitly select the Legacy Compatibility path for this run.
             # This must not inherit a parent process value.
             env["TB_TRAVERSAL_IDENTITY_V2_ENABLED"] = "0"
+        if self.traversal_profiler:
+            env["TB_TRAVERSAL_PROFILER_ENABLED"] = "1"
+        else:
+            env.pop("TB_TRAVERSAL_PROFILER_ENABLED", None)
         return env
 
 

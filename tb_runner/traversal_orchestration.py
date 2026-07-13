@@ -15,6 +15,7 @@ from tb_runner.traversal_evidence_gate import (
     VisitDecision,
     evaluate_traversal_gate,
 )
+from tb_runner.traversal_profiler import active_profiler, measure_runtime
 
 
 @dataclass(frozen=True)
@@ -181,15 +182,17 @@ class RecoveryExecutor:
         action_result: dict[str, Any] = {}
         recovery_row: dict[str, Any] | None = None
         try:
-            action_result = client.focus_in_bounds(
+            with measure_runtime("focus_in_bounds"):
+                action_result = client.focus_in_bounds(
                 dev=dev,
                 bounds=bounds,
                 wait_=services.action_wait_seconds,
                 prefer_empty_state=False,
                 exclude_top_chrome=True,
                 exclude_bottom_nav=True,
-            )
-            recovery_row = client.collect_focus_step(
+                )
+            with measure_runtime("verification_poll"):
+                recovery_row = client.collect_focus_step(
                 dev=dev,
                 step_index=recovery_step_key,
                 move=False,
@@ -198,7 +201,7 @@ class RecoveryExecutor:
                 announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
                 announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
                 announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
-            )
+                )
         except Exception as exc:
             services.log(
                 f"[TRAVERSAL_V2][recovery_error] candidate='{candidate.candidate_id}' "
@@ -270,6 +273,9 @@ class RecoveryExecutor:
                     state.traversal_diagnostics.record_recovery_visit().record_stop_prevented()
                 )
                 outcome.update({"recovered": True, "block_stop": True, "row": recovery_row})
+                profiler = active_profiler()
+                if profiler is not None:
+                    profiler.record("resume_traversal", 0.0)
                 return outcome
             if bool(action_result.get("success")) is False or (
                 progress is not None and progress.gate_applied and progress.verdict == "STATIC_FOCUS"

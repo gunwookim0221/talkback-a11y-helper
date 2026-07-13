@@ -77,10 +77,19 @@ def test_run_spec_identity_v2_is_default_and_legacy_compatibility_is_explicit():
     assert traversal["TB_TRAVERSAL_IDENTITY_V2_ENABLED"] == "1"
     legacy = RunSpec(traversal_identity_v2=False).build_subprocess_env(traversal)
     assert legacy["TB_TRAVERSAL_IDENTITY_V2_ENABLED"] == "0"
+
+
+def test_run_spec_profiler_is_default_off_and_run_scoped():
+    inherited = {"TB_TRAVERSAL_PROFILER_ENABLED": "1"}
+    assert "TB_TRAVERSAL_PROFILER_ENABLED" not in RunSpec().build_subprocess_env(inherited)
+    enabled = RunSpec(traversal_profiler=True).build_subprocess_env({})
+    assert enabled["TB_TRAVERSAL_PROFILER_ENABLED"] == "1"
+    assert "TB_TRAVERSAL_PROFILER_ENABLED" not in RunSpec().build_subprocess_env(enabled)
     assert resolve_identity_feature_flags(traversal_identity_v2=True) == {
         "evidence_ledger": True,
         "identity_shadow_v2": True,
         "traversal_identity_v2": True,
+        "runtime_profiler": False,
     }
 
 

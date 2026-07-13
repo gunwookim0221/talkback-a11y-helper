@@ -74,6 +74,7 @@ class RunManager:
         evidence_ledger: bool = False,
         identity_shadow_v2: bool = False,
         traversal_identity_v2: bool = True,
+        traversal_profiler: bool = False,
     ) -> dict[str, object]:
         with self._lock:
             self._refresh_locked()
@@ -113,6 +114,7 @@ class RunManager:
                     evidence_ledger=evidence_ledger,
                     identity_shadow_v2=identity_shadow_v2,
                     traversal_identity_v2=traversal_identity_v2,
+                    traversal_profiler=traversal_profiler,
                 )
                 log_file.write(
                     "[FEATURE_FLAGS][runspec] "
@@ -205,6 +207,7 @@ class RunManager:
                     evidence_ledger=self._feature_flags["evidence_ledger"],
                     identity_shadow_v2=self._feature_flags["identity_shadow_v2"],
                     traversal_identity_v2=self._feature_flags["traversal_identity_v2"],
+                    traversal_profiler=self._feature_flags["runtime_profiler"],
                 )
                 language_status, preflight = prepare_runtime(
                     spec,

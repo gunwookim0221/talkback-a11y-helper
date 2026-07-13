@@ -48,6 +48,8 @@ def test_frontend_initial_selection_defaults_to_global_nav_not_source_enabled():
     assert "Advanced Diagnostics" in run_panel_tsx
     assert "Collect additional coverage diagnostics after traversal." in run_panel_tsx
     assert "Collect detailed traversal evidence." in run_panel_tsx
+    assert "Runtime Profiler" in run_panel_tsx
+    assert "Collect runtime metrics and generate profiler artifacts. Does not change traversal behavior." in run_panel_tsx
     assert "Identity Shadow V2 (Read-only)" in run_panel_tsx
     assert "Legacy Shadow Validation (Experimental)" in run_panel_tsx
     assert "planned for removal" in run_panel_tsx
@@ -82,5 +84,7 @@ def test_traversal_identity_v2_ui_is_default_on_and_enforces_dependencies():
     assert "planned for removal" in run_panel_tsx
     assert "Traversal Identity V2 (Experimental)" not in run_panel_tsx
     assert "traversal_identity_v2: traversalIdentityV2" in run_panel_tsx
+    assert "traversal_profiler: traversalProfiler" in run_panel_tsx
     assert "TraversalIdentityV2Card" in recent_runs_tsx
     assert "traversal_identity_v2: boolean" in api_ts
+    assert "traversal_profiler?: boolean" in api_ts

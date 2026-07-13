@@ -254,6 +254,7 @@ def test_parse_live_log_excludes_disabled_config_scenarios_from_observed_count()
 
 def test_batch_run_manager_restores_sleep_prevention_after_device_run(tmp_path, monkeypatch):
     calls = []
+    specs = []
     stay_awake_state = {
         "ok": True,
         "applied": True,
@@ -298,10 +299,10 @@ def test_batch_run_manager_restores_sleep_prevention_after_device_run(tmp_path, 
     monkeypatch.setattr(
         batch_runner,
         "prepare_runtime",
-        lambda spec, language_fn, preflight_fn: (
+        lambda spec, language_fn, preflight_fn: (specs.append(spec) or (
             {"ok": True, "status": "ok", "language_mode": "current"},
             {"ok": True, "state": "passed", "reason": "ok"},
-        ),
+        )),
     )
     monkeypatch.setattr(batch_runner, "start_execution", lambda **kwargs: SimpleNamespace())
     monkeypatch.setattr(batch_runner, "wait_for_execution", lambda execution: calls.append("wait") or 0)
@@ -314,6 +315,7 @@ def test_batch_run_manager_restores_sleep_prevention_after_device_run(tmp_path, 
         mode="smoke",
         scenario_ids=["global_nav_main"],
         traversal_identity_v2=True,
+        traversal_profiler=True,
     )
 
     deadline = time.time() + 1.0
@@ -327,7 +329,10 @@ def test_batch_run_manager_restores_sleep_prevention_after_device_run(tmp_path, 
         "evidence_ledger": True,
         "identity_shadow_v2": True,
         "traversal_identity_v2": True,
+        "runtime_profiler": True,
     }
+    assert specs[0].traversal_profiler is True
+    assert specs[0].build_subprocess_env({})["TB_TRAVERSAL_PROFILER_ENABLED"] == "1"
     assert calls == [
         "enable",
         ("enable_device", "SERIAL"),

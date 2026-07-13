@@ -73,6 +73,14 @@ from tb_runner.traversal_orchestration import (
     TRAVERSAL_V2_STOP_POLICY,
     VisitTracker,
 )
+from tb_runner.traversal_profiler import (
+    TraversalRuntimeProfiler,
+    active_profiler,
+    measure_runtime,
+    profiled,
+    profiler_scope,
+    traversal_profiler_enabled,
+)
 
 _VALID_SCREEN_CONTEXT_MODES = {"bottom_tab", "new_screen"}
 _VALID_STABILIZATION_MODES = {"tab_context", "anchor_only", "anchor_then_context"}
@@ -1125,6 +1133,7 @@ def _register_focusable_inventory_from_row(
             )
 
 
+@profiled("candidate_discovery")
 def _capture_focusable_inventory_snapshot(
     client: Any,
     *,
@@ -11006,6 +11015,7 @@ def _semantic_card_family_from_title_resource(resource_id: str) -> str:
     return value
 
 
+@profiled("representative_update")
 def _apply_representative_semantic_card_metadata(row: dict[str, Any]) -> bool:
     representative = _semantic_card_field_text(row.get("representative_visible", ""))
     title = _semantic_card_field_text(row.get("visible_label", ""))
@@ -12137,6 +12147,7 @@ def _filter_local_tab_strip_candidates(
     return local_tab_logic._filter_local_tab_strip_candidates(raw_candidates)
 
 
+@profiled("candidate_ranking")
 def _collect_step_candidate_priority_groups(
     nodes: Any,
     *,
@@ -14235,21 +14246,22 @@ def _apply_row_persistence_phase(
     checkpoint_every: int,
     output_path: str,
 ) -> tuple[bool, str]:
-    return _apply_row_persistence_phase_impl(
-        row=row,
-        tab_cfg=tab_cfg,
-        state=state,
-        rows=rows,
-        all_rows=all_rows,
-        scenario_perf=scenario_perf,
-        step_idx=step_idx,
-        stop=stop,
-        checkpoint_every=checkpoint_every,
-        output_path=output_path,
-        log_fn=log,
-        make_fingerprint_fn=make_main_fingerprint,
-        save_fn=save_excel_with_perf,
-    )
+    with measure_runtime("row_write"):
+        return _apply_row_persistence_phase_impl(
+            row=row,
+            tab_cfg=tab_cfg,
+            state=state,
+            rows=rows,
+            all_rows=all_rows,
+            scenario_perf=scenario_perf,
+            step_idx=step_idx,
+            stop=stop,
+            checkpoint_every=checkpoint_every,
+            output_path=output_path,
+            log_fn=log,
+            make_fingerprint_fn=make_main_fingerprint,
+            save_fn=save_excel_with_perf,
+        )
 
 
 def _log_repeat_stop_debug(
@@ -15026,15 +15038,16 @@ def _apply_stop_evaluation_phase(
     tab_cfg: dict[str, Any],
     progress_decision: ProgressDecision | None = None,
 ) -> tuple[bool, str, dict[str, Any], dict[str, Any]]:
-    return _apply_stop_evaluation_phase_impl(
-        row=row,
-        state=state,
-        previous_row=previous_row,
-        tab_cfg=tab_cfg,
-        progress_decision=progress_decision,
-        should_stop_fn=should_stop,
-        build_inputs_fn=_build_stop_evaluation_inputs,
-    )
+    with measure_runtime("stop_decision"):
+        return _apply_stop_evaluation_phase_impl(
+            row=row,
+            state=state,
+            previous_row=previous_row,
+            tab_cfg=tab_cfg,
+            progress_decision=progress_decision,
+            should_stop_fn=should_stop,
+            build_inputs_fn=_build_stop_evaluation_inputs,
+        )
 
 
 _TRAVERSAL_V2_REPEAT_STOP_REASONS = TRAVERSAL_V2_STOP_POLICY.recovery_reasons
@@ -15126,14 +15139,18 @@ def _attempt_identity_recovery(
     row: dict[str, Any],
     step_idx: int,
 ) -> dict[str, Any]:
+    def _select_profiled_candidate() -> Any | None:
+        with measure_runtime("recovery_planning"):
+            return _select_identity_recovery_candidate(
+                client=client,
+                phase_ctx=phase_ctx,
+                state=state,
+                row=row,
+            )
+
     services = RecoveryExecutionServices(
         enabled=traversal_identity_v2_enabled,
-        select_candidate=lambda: _select_identity_recovery_candidate(
-            client=client,
-            phase_ctx=phase_ctx,
-            state=state,
-            row=row,
-        ),
+        select_candidate=_select_profiled_candidate,
         resolve_decision=lambda recovery_row: _resolve_traversal_evidence_decision(
             client=client,
             row=recovery_row,
@@ -15267,15 +15284,20 @@ def _main_loop_phase(
         revisit_guard_state.representative_observation_available = False
         log(f"[STEP] START tab='{tab_cfg['tab_name']}' step={step_idx}")
 
-        row = _apply_step_collection_phase(
-            state=state,
-            client=client,
-            dev=dev,
-            phase_ctx=phase_ctx,
-            step_idx=step_idx,
-            tab_cfg=tab_cfg,
-            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
-        )
+        with measure_runtime("traversal_loop"):
+            row = _apply_step_collection_phase(
+                state=state,
+                client=client,
+                dev=dev,
+                phase_ctx=phase_ctx,
+                step_idx=step_idx,
+                tab_cfg=tab_cfg,
+                scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+            )
+        profiler = active_profiler()
+        if profiler is not None:
+            profiler.record("focus_in_bounds", float(row.get("move_elapsed_sec", 0.0) or 0.0) * 1000.0)
+            profiler.record("verification_poll", float(row.get("get_focus_elapsed_sec", 0.0) or 0.0) * 1000.0)
         step_elapsed = float(row.get("step_elapsed_sec", 0.0) or 0.0)
 
         _apply_scroll_ready_record_phase(
@@ -15438,11 +15460,12 @@ def _main_loop_phase(
                 row["post_move_verdict_source"] = "smart_nav_result_resource_match"
             elif smart_success:
                 row["post_move_verdict_source"] = "smart_nav_result"
-        progress_decision, visit_decision = _resolve_traversal_evidence_decision(
-            client=client,
-            row=row,
-            state=state,
-        )
+        with measure_runtime("evidence_gate"), measure_runtime("visit_commit"):
+            progress_decision, visit_decision = _resolve_traversal_evidence_decision(
+                client=client,
+                row=row,
+                state=state,
+            )
         mismatch_reasons, low_confidence_reasons = _apply_row_quality_phase(
             row=row,
             state=state,
@@ -15701,18 +15724,31 @@ def _main_loop_phase(
             step_idx=step_idx,
             scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
         )
-        recovery_outcome = TRAVERSAL_COORDINATOR.recover(
-            stop=stop,
-            reason=reason,
-            attempt=lambda: _attempt_identity_recovery(
-                    client=client,
-                    dev=dev,
-                    phase_ctx=phase_ctx,
-                    state=state,
-                    row=row,
-                    step_idx=step_idx,
-                ),
-        )
+        recovery_started = time.perf_counter()
+        with measure_runtime("recovery_executor"):
+            recovery_outcome = TRAVERSAL_COORDINATOR.recover(
+                stop=stop,
+                reason=reason,
+                attempt=lambda: _attempt_identity_recovery(
+                        client=client,
+                        dev=dev,
+                        phase_ctx=phase_ctx,
+                        state=state,
+                        row=row,
+                        step_idx=step_idx,
+                    ),
+            )
+        profiler = active_profiler()
+        if profiler is not None and recovery_outcome is not None:
+            recovery_duration_ms = max(0.0, (time.perf_counter() - recovery_started) * 1000.0)
+            profiler.record_recovery(
+                attempt=int(state.traversal_diagnostics.recovered_candidate_attempts),
+                candidate=str((recovery_outcome.row or {}).get("focus_view_id", "") or ""),
+                duration_ms=round(recovery_duration_ms, 3),
+                helper_ack=str((recovery_outcome.row or {}).get("move_result", "") or ""),
+                verification=(recovery_outcome.progress.reason if recovery_outcome.progress is not None else "unavailable"),
+                result="recovered" if recovery_outcome.recovered else "not_recovered",
+            )
         if recovery_outcome is not None:
             if recovery_outcome.recovered:
                 row = recovery_outcome.row
@@ -16016,6 +16052,7 @@ def _main_loop_phase(
     return state
 
 
+@profiled("persistence")
 def _persist_phase(phase_ctx: CollectionPhaseContext) -> None:
     rows = phase_ctx.rows
     tab_cfg = phase_ctx.tab_cfg
@@ -16682,7 +16719,7 @@ def _run_start_pipeline(
     return result
 
 
-def collect_tab_rows(
+def _collect_tab_rows_impl(
     client: A11yAdbClient,
     dev: str,
     tab_cfg: dict,
@@ -16900,3 +16937,53 @@ def collect_tab_rows(
             pass
 
     return rows
+
+
+def collect_tab_rows(
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict[str, Any],
+    all_rows: list[dict[str, Any]],
+    output_path: str,
+    output_base_dir: str,
+    scenario_perf: ScenarioPerfStats | None = None,
+    checkpoint_save_every: int = CHECKPOINT_SAVE_EVERY_STEPS,
+) -> list[dict[str, Any]]:
+    """Run one scenario, optionally observing it with the runtime profiler."""
+    if not traversal_profiler_enabled():
+        return _collect_tab_rows_impl(
+            client,
+            dev,
+            tab_cfg,
+            all_rows,
+            output_path,
+            output_base_dir,
+            scenario_perf=scenario_perf,
+            checkpoint_save_every=checkpoint_save_every,
+        )
+
+    scenario_id = str(tab_cfg.get("scenario_id", "") or tab_cfg.get("tab_name", "") or "scenario")
+    profiler = TraversalRuntimeProfiler(
+        scenario=scenario_id,
+        plugin=str(tab_cfg.get("plugin_family", "") or tab_cfg.get("scenario_type", "") or ""),
+        output_path=output_path,
+    )
+    try:
+        with profiler_scope(profiler), profiler.measure("scenario"):
+            return _collect_tab_rows_impl(
+                client,
+                dev,
+                tab_cfg,
+                all_rows,
+                output_path,
+                output_base_dir,
+                scenario_perf=scenario_perf,
+                checkpoint_save_every=checkpoint_save_every,
+            )
+    finally:
+        try:
+            artifact = profiler.finalize()
+            if artifact is not None:
+                log(f"[PROFILER] scenario='{scenario_id}' artifact='{artifact}'")
+        except Exception as exc:
+            log(f"[PROFILER][warning] finalize_failed scenario='{scenario_id}' error='{type(exc).__name__}'")

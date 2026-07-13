@@ -111,7 +111,9 @@ def test_start_run_request_defaults_launch_mode_to_clean_and_identity_v2_to_enab
     assert request.launch_mode == "clean"
     assert request.language_mode == "current"
     assert request.traversal_identity_v2 is True
+    assert request.traversal_profiler is False
     assert BatchStartReq(devices=[]).traversal_identity_v2 is True
+    assert BatchStartReq(devices=[]).traversal_profiler is False
 
 
 def test_run_manager_rejects_start_when_process_is_already_running():
@@ -527,6 +529,7 @@ def test_run_manager_uses_clean_launch_mode_when_omitted(tmp_path, monkeypatch):
         mode="smoke",
         scenario_ids=["global_nav_main"],
         traversal_identity_v2=True,
+        traversal_profiler=True,
     )
 
     assert state["launch_mode"] == "clean"
@@ -537,10 +540,12 @@ def test_run_manager_uses_clean_launch_mode_when_omitted(tmp_path, monkeypatch):
     assert captured["env"]["TB_EVIDENCE_LEDGER_ENABLED"] == "1"
     assert captured["env"]["TB_EVIDENCE_IDENTITY_SHADOW_ENABLED"] == "1"
     assert captured["env"]["TB_TRAVERSAL_IDENTITY_V2_ENABLED"] == "1"
+    assert captured["env"]["TB_TRAVERSAL_PROFILER_ENABLED"] == "1"
     assert state["feature_flags"] == {
         "evidence_ledger": True,
         "identity_shadow_v2": True,
         "traversal_identity_v2": True,
+        "runtime_profiler": True,
     }
 
 
