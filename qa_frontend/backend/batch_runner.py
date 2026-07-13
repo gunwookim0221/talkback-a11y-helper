@@ -469,7 +469,7 @@ class BatchRunManager:
     def _sanitize_name(self, name: str) -> str:
         return re.sub(r'[^0-9a-zA-Z_-]+', '_', name)
 
-    def start_batch(self, devices: list[dict], mode: str, launch_mode: str = "clean", language_mode: str = "current", scenario_ids: list[str] | None = None, enable_coverage_probe: bool = False, shadow_validation: bool = False, evidence_ledger: bool = False, identity_shadow_v2: bool = False, traversal_identity_v2: bool = False) -> dict:
+    def start_batch(self, devices: list[dict], mode: str, launch_mode: str = "clean", language_mode: str = "current", scenario_ids: list[str] | None = None, enable_coverage_probe: bool = False, shadow_validation: bool = False, evidence_ledger: bool = False, identity_shadow_v2: bool = False, traversal_identity_v2: bool = True) -> dict:
         with self._lock:
             if self._state == "running":
                 raise RuntimeError("Batch run is already in progress")

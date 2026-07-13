@@ -71,7 +71,7 @@ class StartRunRequest(BaseModel):
     shadow_validation: bool = False
     evidence_ledger: bool = False
     identity_shadow_v2: bool = False
-    traversal_identity_v2: bool = False
+    traversal_identity_v2: bool = True
 
 
 class BatchDeviceReq(BaseModel):
@@ -89,7 +89,7 @@ class BatchStartReq(BaseModel):
     shadow_validation: bool = False
     evidence_ledger: bool = False
     identity_shadow_v2: bool = False
-    traversal_identity_v2: bool = False
+    traversal_identity_v2: bool = True
 
 
 @app.get("/api/health")

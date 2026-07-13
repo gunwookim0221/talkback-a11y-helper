@@ -44,18 +44,18 @@ export function TraversalIdentityV2Card({
   return <details open style={{ marginTop: '16px' }}>
     <summary style={{ fontSize: '14px', fontWeight: 'bold' }}>
       Traversal Identity V2
-      <span className="statusBadge" style={{ marginLeft: '8px', fontSize: '10px' }}>Experimental · read-only diagnostics</span>
+      <span className="statusBadge" style={{ marginLeft: '8px', fontSize: '10px' }}>Production default · diagnostics</span>
     </summary>
     <div className="scenarioDetailList" style={{ marginTop: '8px' }}>
       {!metadataAvailable ? (
         <div className="scenarioDetailRow"><strong>Unavailable</strong><small>This run predates Traversal Identity V2 feature metadata.</small></div>
       ) : !enabled ? (
-        <div className="scenarioDetailRow"><strong>Disabled</strong><small>Traversal Identity V2 was not enabled for this run.</small></div>
+        <div className="scenarioDetailRow"><strong>Legacy Compatibility</strong><small>Traversal Identity V2 was disabled for this run.</small></div>
       ) : !diagnosticsAvailable ? (
         <div className="scenarioDetailRow"><strong>Diagnostics unavailable</strong><small>{diagnostics?.reason || 'No cumulative diagnostics event was recorded.'}</small></div>
       ) : (
         <>
-          <small>Post-run diagnostic projection only. Existing production result cards remain authoritative.</small>
+          <small>Read-only diagnostics for the production traversal engine.</small>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '8px' }}>
             {METRICS.map(([key, label]) => (
               <div className="scenarioDetailRow" key={String(key)}>

@@ -136,11 +136,11 @@ Single/Batch start request는 다음 optional boolean을 받는다.
 }
 ```
 
-세 값 모두 기본값은 `false`다. `identity_shadow_v2=true`이면 backend가 해당 run에만
-Evidence Ledger도 활성화한다. `traversal_identity_v2=true`이면 Identity와 Evidence를
-모두 활성화하고 해당 subprocess에 `TB_TRAVERSAL_IDENTITY_V2_ENABLED=1`을 전달한다.
-Uvicorn process의 global state나 source runtime config는 변경하지 않는다.
-이 traversal flag는 experimental이며 default OFF다.
+`traversal_identity_v2`의 기본값은 `true`다. 기본 V2 run에서는 backend가 해당 run에만
+Identity와 Evidence를 모두 활성화하고 subprocess에 `TB_TRAVERSAL_IDENTITY_V2_ENABLED=1`을
+전달한다. `traversal_identity_v2=false`이면 backend는 `TB_TRAVERSAL_IDENTITY_V2_ENABLED=0`을
+명시적으로 전달하여 Legacy Compatibility traversal을 선택한다. Uvicorn process의 global state나
+source runtime config는 변경하지 않는다.
 
 ### Read-only Identity report
 

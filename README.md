@@ -46,11 +46,13 @@ Traversal Evidence의 physical focus observation을 Canonical Identity로 정규
 `MOVE_CONFIRMED`, `STATIC_FOCUS`, `MOVE_TO_OTHER_NODE`, `SNAP_BACK`,
 `INDETERMINATE`를 판정하는 별도 shadow-only 경로가 제공됩니다.
 
-- 기본값: Evidence Ledger, Identity Shadow V2, Traversal Identity V2 모두 OFF
-- 실행 단위: QA Frontend Run 옵션으로 독립 활성화
+- 기본값: Traversal Identity V2가 Production Traversal Engine으로 ON이며, 필요한
+  Evidence Ledger와 Identity Shadow V2도 run-scoped로 함께 활성화
+- Legacy Compatibility: QA Frontend에서 Traversal Engine을 OFF하면 해당 run에만
+  `TB_TRAVERSAL_IDENTITY_V2_ENABLED=0`을 전달해 기존 Legacy traversal을 사용
 - 출력: append-only V2 ledger event, reconciliation metrics, read-only distribution card
 - Phase 8 보존: Legacy reducer와 production traversal semantics unchanged
-- Phase 8.5 opt-in: strong closed transaction만 progress/visit/stop/recovery gate에 사용;
+- Phase 8.5 production default: strong closed transaction만 progress/visit/stop/recovery gate에 사용;
   incomplete/indeterminate/other-node/snap-back은 legacy fallback
 - OFF 보존: Phase 8.5 flag OFF에서는 기존 traversal/anchor/representative/visit/coverage/
   audit/summary/XLSX 경로 유지
@@ -60,7 +62,7 @@ Traversal Evidence의 physical focus observation을 Canonical Identity로 정규
   Motion parity 유지, cross-plugin recovery 19회 중 11회 recovered, reconciliation/evidence PASS,
   orphan/duplicate/ledger failure 없음, scenario FAIL 0
 - Known limitation: Home Monitor Shadow FAIL 1건, container hierarchy evidence 부족,
-  positive `MOVE_TO_OTHER_NODE`/`SNAP_BACK` corpus 부족, traversal flag는 아직 default OFF experimental
+  positive `MOVE_TO_OTHER_NODE`/`SNAP_BACK` corpus 부족; Legacy traversal은 Compatibility Mode로 유지
 
 상세: `docs/design/talkback-identity-shadow-phase8-completion.md`,
 `docs/design/talkback-production-traversal-migration.md`

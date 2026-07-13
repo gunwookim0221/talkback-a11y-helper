@@ -127,6 +127,9 @@ def _log_crash_detected(signal) -> None:
 
 
 def main() -> int:
+    # V2 is the production default.  A run-scoped "0" from RunSpec selects
+    # Legacy Compatibility; direct CLI invocation receives the same default.
+    os.environ.setdefault("TB_TRAVERSAL_IDENTITY_V2_ENABLED", "1")
     spec = RunSpec(
         serial=args.serial,
         mode=args.mode,

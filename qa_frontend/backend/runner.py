@@ -73,7 +73,7 @@ class RunManager:
         shadow_validation: bool = False,
         evidence_ledger: bool = False,
         identity_shadow_v2: bool = False,
-        traversal_identity_v2: bool = False,
+        traversal_identity_v2: bool = True,
     ) -> dict[str, object]:
         with self._lock:
             self._refresh_locked()

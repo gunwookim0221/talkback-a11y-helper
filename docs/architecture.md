@@ -115,11 +115,18 @@ production summary/PASS/FAIL 또는 XLSX의 입력이 아니다. 상세 acceptan
 [talkback-identity-shadow-phase8-completion.md](design/talkback-identity-shadow-phase8-completion.md)를
 따른다.
 
-`TB_TRAVERSAL_IDENTITY_V2_ENABLED`가 ON이면 위 V2 결과 중에서도 closed, complete,
+Traversal Identity V2는 Production Default다. `TB_TRAVERSAL_IDENTITY_V2_ENABLED=0`이면
+Legacy Compatibility traversal을 명시적으로 선택한다. V2가 ON이면 위 V2 결과 중에서도 closed, complete,
 ACKed, stable, high-confidence `MOVE_CONFIRMED`/`STATIC_FOCUS`만
 `tb_runner/traversal_evidence_gate.py`를 통해 production progress/visit/stop/recovery에
 제한적으로 사용한다. `MOVE_TO_OTHER_NODE`, `SNAP_BACK`, incomplete, malformed, orphan,
 uncorrelated 결과는 모두 legacy fallback이다. Flag OFF에서는 이 경로를 전혀 읽지 않는다.
+
+```text
+Traversal Engine selection (run-scoped)
+  Traversal Identity V2  -- flag=1 / omitted --> Production Default
+  Legacy Traversal       -- flag=0 -----------> Compatibility Mode
+```
 
 Production traversal orchestration은 policy와 Android action을 다시 구현하지 않는다.
 `collection_flow`가 step lifecycle의 outer orchestrator로 남고, Phase 8.5 decision coordination은
@@ -137,6 +144,7 @@ collection_flow (step lifecycle / side-effect ordering)
 
 Candidate selection, focus action, recovery result construction, stop counter/threshold, row persistence,
 coverage, representative selection과 evidence emission 순서는 기존 phase 함수에 그대로 유지한다.
+
 ## 3) Devices plugin 운영 추가점
 
 Devices plugin은 일반 Life plugin과 다르게 Devices list normalization을 먼저
@@ -171,5 +179,6 @@ focus 기준**이다.
 - Shadow 실패는 Legacy 결과로 전파하지 않음
 - `unknown`, `ambiguous`, `failed`는 fail-closed
 - Controlled Routing과 V10 traversal은 비활성/미구현
-- Canonical Identity V2 verdict는 기본 shadow-only이며, optional Traversal Identity V2 flag ON일
-  때만 strong gate 결과가 production progress/visit/stop/recovery에 제한적으로 소비됨
+- Canonical Identity V2 verdict는 기본 shadow-only이며, Production Default Traversal Identity V2에서만
+  strong gate 결과가 production progress/visit/stop/recovery에 제한적으로 소비됨; Legacy Compatibility는
+  명시적 run-scoped OFF로 유지

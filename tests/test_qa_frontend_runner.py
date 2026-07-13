@@ -105,13 +105,13 @@ def test_run_manager_initial_state_is_idle():
     assert state["preflight_state"] is None
 
 
-def test_start_run_request_defaults_launch_mode_to_clean():
+def test_start_run_request_defaults_launch_mode_to_clean_and_identity_v2_to_enabled():
     request = StartRunRequest()
 
     assert request.launch_mode == "clean"
     assert request.language_mode == "current"
-    assert request.traversal_identity_v2 is False
-    assert BatchStartReq(devices=[]).traversal_identity_v2 is False
+    assert request.traversal_identity_v2 is True
+    assert BatchStartReq(devices=[]).traversal_identity_v2 is True
 
 
 def test_run_manager_rejects_start_when_process_is_already_running():

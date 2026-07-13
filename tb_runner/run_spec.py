@@ -13,7 +13,7 @@ def resolve_identity_feature_flags(
     *,
     evidence_ledger: bool = False,
     identity_shadow_v2: bool = False,
-    traversal_identity_v2: bool = False,
+    traversal_identity_v2: bool = True,
 ) -> dict[str, bool]:
     traversal = bool(traversal_identity_v2)
     identity = bool(identity_shadow_v2 or traversal)
@@ -37,7 +37,7 @@ class RunSpec:
     enable_coverage_probe: bool = False
     evidence_ledger: bool = False
     identity_shadow_v2: bool = False
-    traversal_identity_v2: bool = False
+    traversal_identity_v2: bool = True
 
     @property
     def feature_flags(self) -> dict[str, bool]:
@@ -61,7 +61,7 @@ class RunSpec:
         return command
 
     def build_subprocess_env(self, base_env: Mapping[str, str] | None = None) -> dict[str, str]:
-        env = dict(base_env or os.environ)
+        env = dict(os.environ if base_env is None else base_env)
         if self.serial:
             env["ANDROID_SERIAL"] = self.serial
         if self.output_dir:
@@ -82,7 +82,9 @@ class RunSpec:
         if feature_flags["traversal_identity_v2"]:
             env["TB_TRAVERSAL_IDENTITY_V2_ENABLED"] = "1"
         else:
-            env.pop("TB_TRAVERSAL_IDENTITY_V2_ENABLED", None)
+            # Explicitly select the Legacy Compatibility path for this run.
+            # This must not inherit a parent process value.
+            env["TB_TRAVERSAL_IDENTITY_V2_ENABLED"] = "0"
         return env
 
 

@@ -33,9 +33,9 @@ export default function App() {
   const [plannedMode, setPlannedMode] = useState<'smoke' | 'full'>('smoke');
   const [enableCoverageProbe, setEnableCoverageProbe] = useState(false);
   const [shadowValidation, setShadowValidation] = useState(false);
-  const [evidenceLedger, setEvidenceLedger] = useState(false);
-  const [identityShadowV2, setIdentityShadowV2] = useState(false);
-  const [traversalIdentityV2, setTraversalIdentityV2] = useState(false);
+  const [evidenceLedger, setEvidenceLedger] = useState(true);
+  const [identityShadowV2, setIdentityShadowV2] = useState(true);
+  const [traversalIdentityV2, setTraversalIdentityV2] = useState(true);
   const [fixTalkBackRunning, setFixTalkBackRunning] = useState(false);
   const [fixTalkBackMessage, setFixTalkBackMessage] = useState<string | null>(null);
   const preflightRef = useRef<HTMLElement | null>(null);

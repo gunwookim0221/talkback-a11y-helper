@@ -345,6 +345,11 @@ export function RunPanel({
                 Runs coverage-driven TalkBack probe after traversal to validate expected device/plugin content. Recommended for Full runs.
               </small>
             </div>
+            <label title="Uses the production traversal engine. Turn off to run the legacy compatibility traversal." style={{ padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input type="checkbox" checked={traversalIdentityV2} onChange={e => { setTraversalIdentityV2(e.target.checked); if (e.target.checked) { setIdentityShadowV2(true); setEvidenceLedger(true); } }} disabled={running} />
+              <span style={{ fontSize: '14px' }}>Traversal Engine</span>
+            </label>
+            <div style={{ padding: '0 8px', marginTop: '-4px' }}><small style={{ fontSize: '11px', color: 'var(--color-text-dim)' }}>V2 is the production default. Turn it off to run Legacy Compatibility traversal.</small></div>
             <details style={{ padding: '4px 8px' }}>
               <summary style={{ cursor: 'pointer', fontSize: '13px', color: 'var(--color-text-dim)' }}>Advanced Diagnostics</summary>
               <div style={{ paddingTop: '6px' }}>
@@ -371,16 +376,6 @@ export function RunPanel({
                     Legacy validation is retained for comparison and is planned for removal. Legacy remains authoritative.
                   </small>
                 </div>
-              </div>
-            </details>
-            <details style={{ padding: '4px 8px' }}>
-              <summary style={{ cursor: 'pointer', fontSize: '13px', color: 'var(--color-text-dim)' }}>Experimental</summary>
-              <div style={{ paddingTop: '6px' }}>
-                <label title="Use Canonical Identity V2 for traversal progress, recovery, and stop gates." style={{ padding: '4px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <input type="checkbox" checked={traversalIdentityV2} onChange={e => { setTraversalIdentityV2(e.target.checked); if (e.target.checked) { setIdentityShadowV2(true); setEvidenceLedger(true); } }} disabled={running} />
-                  <span style={{ fontSize: '14px' }}>Traversal Identity V2 (Experimental)</span>
-                </label>
-                <div style={{ padding: '0', marginTop: '-4px' }}><small style={{ fontSize: '11px', color: 'var(--color-text-dim)' }}>Uses Canonical Identity V2 for traversal progress, recovery, and stop gates. Requires Identity Shadow V2 and Evidence Ledger.</small></div>
               </div>
             </details>
           </div>
