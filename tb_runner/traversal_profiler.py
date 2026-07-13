@@ -51,6 +51,7 @@ class TraversalRuntimeProfiler:
     _ended_ns: int = field(init=False, default=0)
     _metrics: dict[str, _Metric] = field(init=False, default_factory=dict)
     _recovery: list[dict[str, Any]] = field(init=False, default_factory=list)
+    _counters: dict[str, int] = field(init=False, default_factory=dict)
     _lock: threading.Lock = field(init=False, default_factory=threading.Lock)
 
     def __post_init__(self) -> None:
@@ -103,6 +104,13 @@ class TraversalRuntimeProfiler:
         with self._lock:
             self._recovery.append(dict(values))
 
+    def increment_counter(self, name: str, amount: int = 1) -> None:
+        if not self.enabled:
+            return
+        with self._lock:
+            key = str(name)
+            self._counters[key] = self._counters.get(key, 0) + int(amount)
+
     @property
     def artifact_path(self) -> Path:
         output = Path(self.output_path)
@@ -123,6 +131,7 @@ class TraversalRuntimeProfiler:
                 for name, metric in sorted(self._metrics.items())
             }
             recovery = [dict(item) for item in self._recovery]
+            counters = dict(sorted(self._counters.items()))
         return {
             "schema_version": PROFILER_SCHEMA_VERSION,
             "scenario": self.scenario,
@@ -130,6 +139,7 @@ class TraversalRuntimeProfiler:
             "runtime_ms": round(runtime_ms, 3),
             "metrics": metrics,
             "recovery": recovery,
+            "counters": counters,
         }
 
     def finalize(self) -> Path | None:

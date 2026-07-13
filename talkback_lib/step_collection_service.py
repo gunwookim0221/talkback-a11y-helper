@@ -11,11 +11,127 @@ from talkback_lib.step_row_builder import (
     create_base_step_row,
     extract_smart_nav_row_fields,
 )
+from talkback_lib.verification_wait_policy import (
+    VerificationCompletionDecision,
+    VerificationObservation,
+    VerificationWaitPolicy,
+)
 
 
 class StepCollectionService:
+    _FAST_PATH_MINIMUM_WINDOW_SECONDS = 1.05
+    _REQUIRED_STABILITY_OFFSETS_MS = (100, 300, 1000)
+
     def __init__(self, client: Any) -> None:
         self.client = client
+
+    @staticmethod
+    def _profiler_counter(name: str, amount: int = 1) -> None:
+        try:
+            from tb_runner.traversal_profiler import active_profiler
+
+            profiler = active_profiler()
+            if profiler is not None:
+                profiler.increment_counter(name, amount)
+        except Exception:
+            pass
+
+    def _correlated_action_focus_observation(self, *, move: bool) -> dict[str, Any] | None:
+        """Return only a strongly correlated Helper post-action focus snapshot."""
+        transaction = getattr(self.client, "_evidence_active_transaction", None)
+        transaction_id = str(transaction.get("transaction_id") or "") if isinstance(transaction, dict) else ""
+        request_id = str(getattr(self.client, "_evidence_active_request_id", "") or "").strip()
+        if not transaction_id or not request_id:
+            return None
+        result = self.client.last_smart_nav_result if move else self.client.last_target_action_result
+        if not isinstance(result, dict) or not bool(result.get("success")):
+            return None
+        result_request_id = str(result.get("reqId") or result.get("requestId") or "").strip()
+        if result_request_id != request_id:
+            return None
+        coerce_events = getattr(self.client, "_coerce_evidence_events", None)
+        if not callable(coerce_events):
+            return None
+        events: list[Any] = coerce_events(result.get("evidenceEvents"))
+        runtime = getattr(self.client, "evidence_runtime", None)
+        runtime_events = getattr(runtime, "events_for_transaction", None)
+        if callable(runtime_events):
+            events.extend(runtime_events(transaction_id))
+        required = {"ACTION_API_RESULT", "FOCUS_COMMIT_CLAIMED", "POST_ACTION_OBSERVATION"}
+        matched: dict[str, Any] = {}
+        delayed: dict[int, dict[str, Any]] = {}
+        for event in events:
+            if isinstance(event, dict):
+                event_type = str(event.get("eventType") or event.get("event_type") or "")
+                correlation = event.get("correlation")
+                if not isinstance(correlation, dict) or str(correlation.get("transaction_id") or "") != transaction_id:
+                    continue
+            else:
+                event_type = str(getattr(event, "event_type", "") or "")
+                if str(getattr(event, "transaction_id", "") or "") != transaction_id:
+                    continue
+                if str(getattr(event, "producer", "") or "") != "helper":
+                    continue
+            if event_type in required:
+                matched[event_type] = event
+            if event_type == "DELAYED_OBSERVATION":
+                payload = event.get("payload") if isinstance(event, dict) else getattr(event, "payload", None)
+                if not isinstance(payload, dict):
+                    continue
+                try:
+                    offset_ms = int(payload.get("offsetMs"))
+                except (TypeError, ValueError):
+                    continue
+                delayed_observation = payload.get("observation")
+                if isinstance(delayed_observation, dict):
+                    delayed[offset_ms] = delayed_observation
+        if set(matched) != required:
+            return None
+        action_event = matched["ACTION_API_RESULT"]
+        action_payload = action_event.get("payload") if isinstance(action_event, dict) else getattr(action_event, "payload", None)
+        if not isinstance(action_payload, dict) or not bool(action_payload.get("success")):
+            return None
+        observation_event = matched["POST_ACTION_OBSERVATION"]
+        observation_payload = (
+            observation_event.get("payload")
+            if isinstance(observation_event, dict)
+            else getattr(observation_event, "payload", None)
+        )
+        observation = observation_payload.get("observation") if isinstance(observation_payload, dict) else None
+        if not isinstance(observation, dict) or not self.client._is_meaningful_focus_node(observation):
+            return None
+        if not bool(observation.get("accessibilityFocused") or observation.get("accessibility_focused")):
+            return None
+        immediate_signature = self._physical_focus_signature(observation)
+        if immediate_signature is None:
+            return None
+        for offset_ms in self._REQUIRED_STABILITY_OFFSETS_MS:
+            delayed_observation = delayed.get(offset_ms)
+            if (
+                not isinstance(delayed_observation, dict)
+                or not bool(
+                    delayed_observation.get("accessibilityFocused")
+                    or delayed_observation.get("accessibility_focused")
+                )
+                or self._physical_focus_signature(delayed_observation) != immediate_signature
+            ):
+                return None
+        return observation
+
+    def _physical_focus_signature(self, observation: dict[str, Any]) -> tuple[str, ...] | None:
+        bounds = str(self.client._normalize_bounds(observation) or "").strip()
+        class_name = str(observation.get("className") or observation.get("class") or "").strip()
+        package_name = str(observation.get("packageName") or observation.get("package") or "").strip()
+        window_id = str(observation.get("windowId") or observation.get("window_id") or "").strip()
+        resource_id = str(
+            observation.get("viewIdResourceName")
+            or observation.get("resourceId")
+            or observation.get("resource_id")
+            or ""
+        ).strip()
+        if not bounds or not class_name or not package_name:
+            return None
+        return package_name, window_id, class_name, resource_id, bounds
 
     @staticmethod
     def _snapshot_actual_focus_fields(step: dict[str, Any]) -> None:
@@ -160,6 +276,28 @@ class StepCollectionService:
         ann_wait = wait_seconds if announcement_wait_seconds is None else announcement_wait_seconds
 
         ann_started = time.monotonic()
+        focus_wait = wait_seconds if focus_wait_seconds is None else focus_wait_seconds
+        focus_node: dict[str, Any] = {}
+        safe_focus_node: dict[str, Any] = {}
+        focus_elapsed_sec = 0.0
+        focus_collected = False
+
+        def collect_focus_once() -> None:
+            nonlocal focus_node, safe_focus_node, focus_elapsed_sec, focus_collected
+            if focus_collected:
+                return
+            focus_started = time.monotonic()
+            focus_node = self.client._collect_focus_node_with_compat(
+                dev=dev,
+                focus_wait=focus_wait,
+                allow_get_focus_fallback_dump=allow_get_focus_fallback_dump,
+                get_focus_mode=get_focus_mode,
+            )
+            focus_elapsed_sec = round(time.monotonic() - focus_started, 3)
+            safe_focus_node = self.client._json_safe_value(focus_node) if isinstance(focus_node, dict) else {}
+            focus_collected = True
+            self._profiler_counter("focus_snapshot_read_count")
+
         selected_merged_announcement = ""
         raw_snapshot_announcement = ""
         trim_considered = False
@@ -171,11 +309,35 @@ class StepCollectionService:
         selected_reason = "result_row_snapshot"
         selected_source = "result_row_snapshot"
         try:
+            idle_wait = float(announcement_idle_wait_seconds or 0.0)
+            max_extra_wait = float(announcement_max_extra_wait_seconds or 0.0)
+            adaptive_enabled = idle_wait > 0 and max_extra_wait > 0
+            verification_policy = VerificationWaitPolicy(
+                minimum_window_seconds=min(
+                    max(float(ann_wait), 0.0),
+                    self._FAST_PATH_MINIMUM_WINDOW_SECONDS,
+                ),
+                announcement_idle_seconds=idle_wait,
+            )
+            initial_announcement_wait = (
+                min(float(ann_wait), verification_policy.minimum_window_seconds)
+                if adaptive_enabled
+                else float(ann_wait)
+            )
+            self._profiler_counter("verification_poll_attempts")
             partial_announcements = self.client.get_partial_announcements(
                 dev=dev,
-                wait_seconds=ann_wait,
+                wait_seconds=initial_announcement_wait,
                 only_new=True,
             )
+            if adaptive_enabled:
+                collect_helper_events = getattr(self.client, "_evidence_collect_helper_logcat_events", None)
+                active_request_id = str(getattr(self.client, "_evidence_active_request_id", "") or "").strip()
+                if callable(collect_helper_events) and active_request_id:
+                    try:
+                        collect_helper_events(dev, req_id=active_request_id)
+                    except Exception:
+                        pass
             stable_announcements = list(partial_announcements)
             stable_merged = self.client._merge_announcements(stable_announcements)
             stable_norm = self.client.normalize_for_comparison(stable_merged)
@@ -184,22 +346,52 @@ class StepCollectionService:
                 f"[ANN][poll] candidate='{stable_merged}' changed={newest_changed}"
             )
             stability_extra_wait = 0.0
-            idle_wait = float(announcement_idle_wait_seconds or 0.0)
-            max_extra_wait = float(announcement_max_extra_wait_seconds or 0.0)
             if idle_wait > 0 and max_extra_wait > 0:
                 self.client._debug_print(
                     f"[ANN][stability] mode='step' idle_wait={idle_wait:.2f} max_extra={max_extra_wait:.2f}"
                 )
                 stability_started = time.monotonic()
                 stable_seen = {msg for msg in stable_announcements if isinstance(msg, str) and msg.strip()}
-                stable_last_change_at = stability_started if newest_changed else 0.0
+                stable_last_change_at = stability_started if newest_changed else ann_started
                 reason = "max_extra_wait"
+                conservative_deadline = ann_started + float(ann_wait) + max_extra_wait
+                fallback_counted = False
                 while True:
-                    elapsed_extra = time.monotonic() - stability_started
-                    if elapsed_extra >= max_extra_wait:
-                        reason = "max_extra_wait"
+                    now = time.monotonic()
+                    elapsed_total = now - ann_started
+                    deadline_reached = now >= conservative_deadline
+                    action_focus = self._correlated_action_focus_observation(move=move)
+                    focus_confirmed = action_focus is not None
+                    evidence_correlated = action_focus is not None
+                    ambiguous_focus = not focus_confirmed
+                    decision = verification_policy.evaluate(
+                        VerificationObservation(
+                            elapsed_seconds=elapsed_total,
+                            focus_confirmed=focus_confirmed,
+                            evidence_correlated=evidence_correlated,
+                            announcement_idle_seconds=max(0.0, now - stable_last_change_at),
+                            announcement_active=False,
+                            ambiguous_focus=ambiguous_focus,
+                            deadline_reached=deadline_reached,
+                        )
+                    )
+                    if decision is VerificationCompletionDecision.COMPLETE_FAST_PATH:
+                        reason = "adaptive_fast_path"
+                        self._profiler_counter("verification_fast_path_hits")
+                        self._profiler_counter("verification_focus_stable_count")
+                        self._profiler_counter("verification_announcement_idle_count")
+                        active_transaction = getattr(self.client, "_evidence_active_transaction", None)
+                        if isinstance(active_transaction, dict) and str(active_transaction.get("phase", "")) == "recovery":
+                            self._profiler_counter("recovery_verification_fast_path_hits")
                         break
-                    remaining = max(max_extra_wait - elapsed_extra, 0.0)
+                    if decision is VerificationCompletionDecision.CONSERVATIVE_FALLBACK and not fallback_counted:
+                        self._profiler_counter("verification_fallback_count")
+                        fallback_counted = True
+                    if deadline_reached:
+                        reason = "max_extra_wait"
+                        self._profiler_counter("verification_timeout_count")
+                        break
+                    remaining = max(conservative_deadline - now, 0.0)
                     poll_wait_seconds = min(0.15, remaining)
                     if poll_wait_seconds <= 0:
                         reason = "max_extra_wait"
@@ -209,6 +401,7 @@ class StepCollectionService:
                         wait_seconds=poll_wait_seconds,
                         only_new=True,
                     )
+                    self._profiler_counter("verification_poll_attempts")
                     changed = False
                     if isinstance(delta_announcements, list):
                         for message in delta_announcements:
@@ -230,9 +423,6 @@ class StepCollectionService:
                         self.client._debug_print(
                             f"[ANN][poll] candidate='{stable_merged}' changed={newest_changed}"
                         )
-                    if newest_changed and stable_last_change_at > 0 and (now - stable_last_change_at >= idle_wait):
-                        reason = "idle_stable"
-                        break
                 stability_extra_wait = round(time.monotonic() - stability_started, 3)
                 partial_announcements = stable_announcements
                 self.client.last_announcements = list(stable_announcements)
@@ -306,17 +496,9 @@ class StepCollectionService:
         saved_last_announcements = list(self.client.last_announcements)
         saved_last_merged = self.client.last_merged_announcement
 
-        focus_wait = wait_seconds if focus_wait_seconds is None else focus_wait_seconds
-        focus_started = time.monotonic()
-        focus_node = self.client._collect_focus_node_with_compat(
-            dev=dev,
-            focus_wait=focus_wait,
-            allow_get_focus_fallback_dump=allow_get_focus_fallback_dump,
-            get_focus_mode=get_focus_mode,
-        )
-        step["get_focus_elapsed_sec"] = round(time.monotonic() - focus_started, 3)
+        collect_focus_once()
+        step["get_focus_elapsed_sec"] = focus_elapsed_sec
         step["t_after_get_focus"] = round(time.monotonic() - step_started, 3)
-        safe_focus_node = self.client._json_safe_value(focus_node) if isinstance(focus_node, dict) else {}
         self.client._populate_focus_fields_from_node(step=step, safe_focus_node=safe_focus_node)
 
         visible_label = self.client.extract_visible_label_from_focus(safe_focus_node)

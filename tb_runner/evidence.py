@@ -471,6 +471,12 @@ class EvidenceRuntime:
         value = self._transactions.get(str(transaction_id))
         return dict(value) if isinstance(value, dict) else None
 
+    def events_for_transaction(self, transaction_id: str | None) -> tuple[EvidenceEvent, ...]:
+        """Return an immutable snapshot for read-only runtime policy checks."""
+        if not self.enabled or not transaction_id:
+            return ()
+        return tuple(event for event in self._all_events if event.transaction_id == str(transaction_id))
+
     def reduce_shadow(self, transaction_id: str) -> dict[str, str]:
         events = [event for event in self._all_events if event.transaction_id == transaction_id]
         return reduce_shadow_events(events)

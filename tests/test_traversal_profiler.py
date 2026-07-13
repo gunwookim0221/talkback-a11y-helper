@@ -66,6 +66,17 @@ def test_recovery_summary_is_append_only_and_thread_safe(tmp_path: Path) -> None
     assert len(payload["recovery"]) == 8
 
 
+def test_profiler_counters_are_additive_and_backward_compatible(tmp_path: Path) -> None:
+    profiler = TraversalRuntimeProfiler("safe", tmp_path / "run.xlsx")
+    profiler.increment_counter("verification_poll_attempts")
+    profiler.increment_counter("verification_poll_attempts", 2)
+    profiler.increment_counter("verification_fast_path_hits")
+    payload = profiler.payload()
+    assert payload["counters"]["verification_poll_attempts"] == 3
+    assert payload["counters"]["verification_fast_path_hits"] == 1
+    assert "metrics" in payload and "recovery" in payload
+
+
 def test_feature_flag_truthy_values() -> None:
     for value in ("1", "true", "YES", "on"):
         assert traversal_profiler_enabled({"TB_TRAVERSAL_PROFILER_ENABLED": value}) is True

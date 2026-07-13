@@ -1060,6 +1060,14 @@ class A11yAdbClient:
     def dump_tree(self, dev: Any = None, wait_seconds: float = 5.0) -> list[dict[str, Any]]:
         if not self.check_helper_status(dev=dev):
             return []
+        try:
+            from tb_runner.traversal_profiler import active_profiler
+
+            profiler = active_profiler()
+            if profiler is not None:
+                profiler.increment_counter("xml_snapshot_read_count")
+        except Exception:
+            pass
         self.last_announcements = []
         self.last_merged_announcement = ""
         self.clear_logcat(dev=dev)
@@ -2884,6 +2892,7 @@ class A11yAdbClient:
         fallback_nodes = trace.get("fallback_dump_nodes")
         step["get_focus_fallback_dump_elapsed_sec"] = round(float(trace.get("fallback_dump_elapsed_sec", 0.0) or 0.0), 3)
         if isinstance(fallback_nodes, list) and fallback_nodes:
+            self._step_collection_service._profiler_counter("reused_snapshot_count")
             step["dump_tree_nodes"] = self._json_safe_value(fallback_nodes)
             step["step_dump_tree_elapsed_sec"] = 0.0
             step["step_dump_tree_used"] = False

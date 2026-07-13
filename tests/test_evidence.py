@@ -81,6 +81,23 @@ def test_runtime_parent_child_and_correlation_metadata(tmp_path: Path) -> None:
     assert "run_fixed" in extras
 
 
+def test_runtime_exposes_read_only_transaction_event_snapshot(tmp_path: Path) -> None:
+    runtime = EvidenceRuntime(output_path=tmp_path / "talkback_compare.xlsx")
+    runtime.start_scenario("home_safe_plugin", "home")
+    transaction = runtime.begin_transaction("SMART_NEXT", phase="main_loop")
+    runtime.emit(
+        "ACTION_API_RESULT",
+        producer="helper",
+        phase="helper",
+        transaction=transaction,
+        payload={"success": True},
+    )
+    events = runtime.events_for_transaction(transaction["transaction_id"])
+    assert isinstance(events, tuple)
+    assert [event.event_type for event in events] == ["TRANSACTION_OPENED", "ACTION_API_RESULT"]
+    assert runtime.events_for_transaction("missing") == ()
+
+
 def test_disabled_runtime_does_not_create_production_or_evidence_artifacts(tmp_path: Path) -> None:
     output = tmp_path / "talkback_compare.xlsx"
     runtime = EvidenceRuntime(output_path=output, enabled=False)
