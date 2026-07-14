@@ -1,4 +1,4 @@
-from tb_runner.diagnostics import classify_step_result, detect_step_mismatch, should_stop
+from tb_runner.diagnostics import classify_step_result, detect_step_mismatch, is_global_nav_row, should_stop
 
 
 def test_detect_step_mismatch_returns_speech_visible_diverged():
@@ -291,6 +291,330 @@ def test_should_stop_content_global_nav_entry():
     assert stop is True
     assert reason == "global_nav_entry"
     assert details["is_global_nav"] is True
+
+
+def test_global_nav_classifier_rejects_content_cards_with_nav_label_or_resource_substrings():
+    cfg = {
+        "global_nav": {
+            "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+            "resource_ids": [
+                "com.samsung.android.oneconnect:id/menu_favorites",
+                "com.samsung.android.oneconnect:id/menu_devices",
+                "com.samsung.android.oneconnect:id/menu_services",
+                "com.samsung.android.oneconnect:id/menu_automations",
+                "com.samsung.android.oneconnect:id/menu_more",
+            ],
+            "selected_pattern": "(?i).*(selected|선택됨).*",
+            "region_hint": "bottom_tabs",
+        }
+    }
+    rows = [
+        {
+            "visible_label": "Home profile Design your smart home to match your daily life",
+            "merged_announcement": "Home profile selected",
+            "focus_view_id": "com.samsung.android.oneconnect:id/my_profile_card_view",
+            "focus_bounds": "30,310,1050,671",
+            "screen_width": 1080,
+            "screen_height": 2640,
+            "selected": True,
+        },
+        {
+            "visible_label": "Supported devices Find out which devices work with SmartThings.",
+            "focus_view_id": "com.samsung.android.oneconnect:id/supported_devices_card_view_layout",
+            "focus_bounds": "30,1158,1050,1525",
+            "screen_width": 1080,
+            "screen_height": 2640,
+        },
+    ]
+    rows.extend(
+        {
+            "visible_label": f"{label} content card",
+            "focus_view_id": f"com.example:id/{label.lower()}_content_card",
+            "focus_bounds": "30,700,1050,1100",
+            "screen_width": 1080,
+            "screen_height": 2640,
+        }
+        for label in ("Home", "Devices", "Life", "Routines", "Menu")
+    )
+
+    results = [is_global_nav_row(row, cfg) for row in rows]
+
+    assert all(result[0] is False for result in results)
+    assert "label" in results[0][1]
+    assert "resource_hint" in results[1][1]
+
+
+def test_global_nav_classifier_accepts_dedicated_resource_without_geometry():
+    cfg = {
+        "global_nav": {
+            "labels": ["Devices"],
+            "resource_ids": ["com.samsung.android.oneconnect:id/menu_devices"],
+            "region_hint": "bottom_tabs",
+        }
+    }
+    row = {
+        "visible_label": "Devices",
+        "focus_view_id": "com.samsung.android.oneconnect:id/menu_devices",
+    }
+
+    is_global_nav, reason = is_global_nav_row(row, cfg)
+
+    assert is_global_nav is True
+    assert reason == "resource_id,label"
+
+
+def test_global_nav_classifier_accepts_production_bottom_navigation_corpus():
+    cfg = {
+        "global_nav": {
+            "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+            "resource_ids": [
+                "com.samsung.android.oneconnect:id/menu_favorites",
+                "com.samsung.android.oneconnect:id/menu_devices",
+                "com.samsung.android.oneconnect:id/menu_services",
+                "com.samsung.android.oneconnect:id/menu_automations",
+                "com.samsung.android.oneconnect:id/menu_more",
+            ],
+            "region_hint": "bottom_tabs",
+        }
+    }
+    rows = [
+        ("Home", "menu_favorites"),
+        ("Life", "menu_services"),
+        ("Routines", "menu_automations"),
+        ("Menu", "menu_more"),
+        ("홈", "menu_favorites"),
+        ("라이프", "menu_services"),
+        ("루틴", "menu_automations"),
+        ("메뉴", "menu_more"),
+    ]
+
+    results = [
+        is_global_nav_row(
+            {
+                "visible_label": label,
+                "focus_view_id": f"com.samsung.android.oneconnect:id/{resource_name}",
+                "focus_bounds": "0,2316,270,2640",
+                "screen_width": 1080,
+                "screen_height": 2640,
+            },
+            cfg,
+        )
+        for label, resource_name in rows
+    ]
+
+    assert all(result[0] is True for result in results)
+
+
+def test_global_nav_classifier_accepts_label_in_trusted_bottom_region():
+    cfg = {
+        "global_nav": {
+            "labels": ["메뉴"],
+            "resource_ids": [],
+            "region_hint": "bottom_tabs",
+        }
+    }
+    row = {
+        "visible_label": "메뉴",
+        "focus_view_id": "com.example:id/navigation_item",
+        "focus_bounds": "864,2316,1080,2640",
+        "screen_width": 1080,
+        "screen_height": 2640,
+    }
+
+    is_global_nav, reason = is_global_nav_row(row, cfg)
+
+    assert is_global_nav is True
+    assert reason == "label,region_hint"
+
+
+def test_global_nav_classifier_rejects_boundary_above_trusted_bottom_region():
+    cfg = {
+        "global_nav": {
+            "labels": ["Menu"],
+            "resource_ids": [],
+            "region_hint": "bottom_tabs",
+        }
+    }
+    row = {
+        "visible_label": "Menu",
+        "focus_view_id": "com.example:id/content_menu_card",
+        "focus_bounds": "30,1899,1050,2100",
+        "screen_width": 1080,
+        "screen_height": 2640,
+    }
+
+    is_global_nav, reason = is_global_nav_row(row, cfg)
+
+    assert is_global_nav is False
+    assert reason == "resource_hint,label"
+
+
+def test_global_nav_classifier_rejects_bottom_object_without_label_or_resource_evidence():
+    cfg = {
+        "global_nav": {
+            "labels": ["Menu"],
+            "resource_ids": ["com.example:id/menu_more"],
+            "region_hint": "bottom_tabs",
+        }
+    }
+    row = {
+        "visible_label": "Settings card",
+        "focus_view_id": "com.example:id/footer_card",
+        "focus_bounds": "30,2100,1050,2390",
+        "screen_width": 1080,
+        "screen_height": 2400,
+    }
+
+    is_global_nav, reason = is_global_nav_row(row, cfg)
+
+    assert is_global_nav is False
+    assert reason == "region_hint"
+
+
+def test_global_nav_classifier_rejects_configured_resource_prefix_without_region():
+    cfg = {
+        "global_nav": {
+            "labels": ["Devices"],
+            "resource_ids": ["com.example:id/menu_devices"],
+            "region_hint": "bottom_tabs",
+        }
+    }
+    row = {
+        "visible_label": "Supported devices",
+        "focus_view_id": "com.example:id/menu_devices_content_card",
+        "focus_bounds": "30,600,1050,1000",
+        "screen_width": 1080,
+        "screen_height": 2400,
+    }
+
+    is_global_nav, reason = is_global_nav_row(row, cfg)
+
+    assert is_global_nav is False
+    assert reason == "resource_hint,label"
+
+
+def test_global_nav_classifier_rejects_resource_substring_only():
+    cfg = {
+        "global_nav": {
+            "labels": ["Menu"],
+            "resource_ids": [],
+            "region_hint": "bottom_tabs",
+        }
+    }
+    row = {
+        "visible_label": "Account card",
+        "focus_view_id": "com.example:id/devices_content_card",
+        "focus_bounds": "30,600,1050,1000",
+        "screen_width": 1080,
+        "screen_height": 2400,
+    }
+
+    is_global_nav, reason = is_global_nav_row(row, cfg)
+
+    assert is_global_nav is False
+    assert reason == "resource_hint"
+
+
+def test_global_nav_classifier_rejects_label_substring_only():
+    cfg = {
+        "global_nav": {
+            "labels": ["Home"],
+            "resource_ids": [],
+            "region_hint": "bottom_tabs",
+        }
+    }
+    row = {
+        "visible_label": "Home profile card",
+        "focus_view_id": "com.example:id/profile_card",
+        "focus_bounds": "30,600,1050,1000",
+        "screen_width": 1080,
+        "screen_height": 2400,
+    }
+
+    is_global_nav, reason = is_global_nav_row(row, cfg)
+
+    assert is_global_nav is False
+    assert reason == "label"
+
+
+def test_global_nav_classifier_handles_different_screen_height_at_bottom_boundary():
+    cfg = {
+        "global_nav": {
+            "labels": ["Menu"],
+            "resource_ids": [],
+            "region_hint": "bottom_tabs",
+        }
+    }
+    row = {
+        "visible_label": "Menu",
+        "focus_view_id": "com.example:id/navigation_item",
+        "focus_bounds": "800,1900,1080,2200",
+        "screen_width": 1080,
+        "screen_height": 2400,
+    }
+
+    is_global_nav, reason = is_global_nav_row(row, cfg)
+
+    assert is_global_nav is True
+    assert reason == "label,region_hint"
+
+
+def test_global_nav_classifier_requires_geometry_when_only_label_matches():
+    cfg = {
+        "global_nav": {
+            "labels": ["Menu"],
+            "resource_ids": [],
+            "selected_pattern": "(?i).*selected.*",
+            "region_hint": "bottom_tabs",
+        }
+    }
+    row = {
+        "visible_label": "Menu selected",
+        "selected": True,
+    }
+
+    is_global_nav, reason = is_global_nav_row(row, cfg)
+
+    assert is_global_nav is False
+    assert reason == "label,selected_pattern,selected_state"
+
+
+def test_should_not_stop_content_on_false_global_nav_card():
+    previous = {
+        "visible_label": "Menu introduction",
+        "focus_view_id": "com.example:id/menu_intro_card",
+    }
+    row = {
+        "visible_label": "Supported devices Find out which devices work with SmartThings.",
+        "focus_view_id": "com.samsung.android.oneconnect:id/supported_devices_card_view_layout",
+        "focus_bounds": "30,1158,1050,1525",
+        "screen_width": 1080,
+        "screen_height": 2640,
+    }
+
+    stop, _, _, reason, _, details = should_stop(
+        row=row,
+        prev_fingerprint=("menu introduction", "com.example:id/menu_intro_card", "30,700,1050,1000"),
+        fail_count=0,
+        same_count=0,
+        previous_row=previous,
+        scenario_type="content",
+        stop_policy={"stop_on_global_nav_entry": True},
+        scenario_cfg={
+            "global_nav": {
+                "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+                "resource_ids": [
+                    "com.samsung.android.oneconnect:id/menu_devices",
+                    "com.samsung.android.oneconnect:id/menu_more",
+                ],
+                "region_hint": "bottom_tabs",
+            }
+        },
+    )
+
+    assert stop is False
+    assert reason == ""
+    assert details["is_global_nav"] is False
 
 
 def test_should_stop_global_nav_exit():

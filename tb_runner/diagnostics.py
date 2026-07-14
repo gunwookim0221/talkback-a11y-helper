@@ -337,14 +337,14 @@ def is_global_nav_row(
     smart_match = False
     if resource_ids:
         smart_match = any(
-            candidate and any(resource == candidate or resource in candidate for resource in resource_ids)
+            candidate and any(resource == candidate for resource in resource_ids)
             for candidate in (smart_resolved_id, smart_actual_id, smart_requested_id)
         )
     if smart_match:
         score += 4
         strong_signal = True
         reasons.append("smart_nav_resource_id")
-    if focus_id and resource_ids and any(resource in focus_id for resource in resource_ids):
+    if focus_id and resource_ids and any(resource == focus_id for resource in resource_ids):
         score += 3
         strong_signal = True
         reasons.append("resource_id")
@@ -355,7 +355,6 @@ def is_global_nav_row(
     labels = [str(item).strip().lower() for item in global_nav_cfg.get("labels", []) if isinstance(item, str)]
     if context_text and labels and any(label and label in context_text for label in labels):
         score += 2
-        strong_signal = True
         reasons.append("label")
     elif context_text and any(token in context_text for token in _GLOBAL_NAV_HINT_TOKENS):
         score += 1
@@ -366,7 +365,6 @@ def is_global_nav_row(
         try:
             if re.search(selected_pattern, context_text, flags=re.IGNORECASE):
                 score += 2
-                strong_signal = True
                 reasons.append("selected_pattern")
         except re.error:
             pass
@@ -378,8 +376,12 @@ def is_global_nav_row(
     region_hint = str(global_nav_cfg.get("region_hint", "auto") or "auto").strip().lower()
     if region_hint in {"bottom_tabs", "left_rail"} and _match_region_hint(row, region_hint):
         score += 1
+        strong_signal = True
         reasons.append("region_hint")
 
+    # Labels, generic resource tokens, and selected state are corroborating
+    # evidence only.  A configured navigation resource or trusted region is
+    # required before the accumulated score can classify a global-nav row.
     if strong_signal and score >= 3:
         return True, ",".join(reasons)
     return False, ",".join(reasons) if reasons else "none"
