@@ -142,6 +142,40 @@ def test_truncated_focus_result_does_not_mix_child_fields_into_partial_node():
     assert result["node"] == {"className": "android.widget.FrameLayout"}
 
 
+def test_truncated_focus_result_trusts_complete_root_fields_before_children():
+    raw_payload = (
+        '{"timestamp":1,"packageName":"com.samsung.android.oneconnect",'
+        '"className":"android.webkit.WebView","viewIdResourceName":null,'
+        '"text":"SmartThings Home Care","contentDescription":null,'
+        '"boundsInScreen":{"l":0,"t":100,"r":1080,"b":2200},'
+        '"children":[{"text":"truncated child'
+    )
+
+    result = ActionResultParser.focus_parse_error_result("focus-webview", raw_payload, "truncated")
+
+    assert result["partial_children_truncated"] is True
+    assert result["partial_root_complete"] is True
+    assert result["partial_payload_trusted"] is True
+    assert result["node"] == {
+        "text": "SmartThings Home Care",
+        "className": "android.webkit.WebView",
+        "packageName": "com.samsung.android.oneconnect",
+        "boundsInScreen": {"l": 0, "t": 100, "r": 1080, "b": 2200},
+    }
+
+
+def test_truncated_focus_result_rejects_incomplete_root_field_before_children():
+    raw_payload = (
+        '{"text":"SmartThings Home Care","boundsInScreen":'
+        '{"l":0,"t":100,"r":1080,"children":[{"text":"child"}'
+    )
+
+    result = ActionResultParser.focus_parse_error_result("focus-incomplete", raw_payload, "truncated")
+
+    assert result["partial_root_complete"] is False
+    assert result["partial_payload_trusted"] is False
+
+
 def test_get_focus_rejects_untrusted_partial_payload_and_uses_dump_focus(monkeypatch):
     client = A11yAdbClient(start_monitor=False)
     monkeypatch.setattr(client, "_has_recent_helper_ok", lambda dev=None: True)

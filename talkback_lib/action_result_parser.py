@@ -67,7 +67,13 @@ class ActionResultParser:
             result["status"] = "partial_parse_success"
         result["partial_fields_from_root_only"] = True
         result["partial_children_truncated"] = has_children
-        result["partial_root_complete"] = ActionResultParser._is_complete_json_object(root_scope)
+        result["partial_root_complete"] = bool(
+            ActionResultParser._is_complete_json_object(root_scope)
+            or (
+                has_children
+                and ActionResultParser._is_complete_root_field_prefix(root_scope)
+            )
+        )
         result["partial_payload_trusted"] = bool(
             salvaged_node
             and result["partial_root_complete"]
@@ -109,6 +115,31 @@ class ActionResultParser:
                 depth -= 1
                 if depth == 0:
                     return True
+        return False
+
+    @staticmethod
+    def _is_complete_root_field_prefix(scope: str) -> bool:
+        """Validate root fields serialized before a truncated children subtree.
+
+        FocusSnapshot serializes the root node fields before ``children``. Android
+        logcat may truncate inside that child array even though every root field is
+        intact. Parse the isolated prefix as its own object so child values can
+        never be mistaken for root identity evidence.
+        """
+        prefix = str(scope or "").strip().rstrip().rstrip(",").strip()
+        if not prefix:
+            return False
+        candidate = prefix if prefix.startswith("{") else "{" + prefix + "}"
+        candidates = [candidate]
+        if prefix.startswith("{"):
+            candidates.append(candidate + "}")
+        for value in candidates:
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict) and parsed:
+                return True
         return False
 
     @staticmethod
