@@ -15,6 +15,7 @@ adb.log
 /qa_frontend_runs/
 /qa_frontend/frontend/node_modules/
 /qa_frontend/frontend/dist/
+/qa_frontend/frontend/.test-dist/
 __pycache__/
 *.pyc
 .tmp/
