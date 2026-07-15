@@ -727,6 +727,18 @@ def _status(value: Any, reason: str = "") -> dict[str, Any]:
     return {"status": "available" if value not in (None, "") else "unavailable", "value": value, "reason": reason if value in (None, "") else ""}
 
 
+def _package_status(value: Any, reason: str = "") -> dict[str, Any]:
+    text = str(value or "").strip()
+    lowered = text.lower()
+    if not text:
+        return _status(None, reason)
+    if any(token in lowered for token in ("unable to find package", "unknown package", "package not found")):
+        return {"status": "unavailable", "value": None, "reason": "package_not_found"}
+    if "versionCode=" not in text or "versionName=" not in text:
+        return {"status": "unavailable", "value": None, "reason": "package_version_unparseable"}
+    return _status(text)
+
+
 def _sha256_file(path: Path) -> str | None:
     try:
         digest = hashlib.sha256()
@@ -746,6 +758,8 @@ def collect_run_provenance(
     runner_path: Path,
     client: Any | None = None,
     serial: str | None = None,
+    environment_profile_reference: Mapping[str, Any] | None = None,
+    talkback_package: str | None = None,
 ) -> dict[str, Any]:
     def git_value(*args: str) -> str | None:
         try:
@@ -770,20 +784,39 @@ def collect_run_provenance(
     if helper_path and helper_path.startswith("package:"):
         remote_path = helper_path.split("package:", 1)[1]
         helper_apk_hash = adb_value(["shell", "sha256sum", remote_path])
-    return {
+    if talkback_package:
+        resolved_talkback_package = str(talkback_package).strip()
+    elif environment_profile_reference:
+        # A new profile was captured but could not identify an active package.
+        # Do not reintroduce the historical Google-only guess.
+        resolved_talkback_package = ""
+    else:
+        resolved_talkback_package = "com.google.android.marvin.talkback"
+    manifest = {
         "repository_commit_sha": _status(commit, "git_unavailable"),
         "working_tree_dirty": {"status": "available", "value": bool(dirty), "reason": ""},
         "runner_source_hash": _status(_sha256_file(runner_path), "runner_file_unavailable"),
         "helper_apk_sha256": _status(helper_apk_hash, "adb_or_helper_apk_unavailable"),
-        "helper_version": _status(adb_value(["shell", "dumpsys", "package", "com.iotpart.sqe.talkbackhelper"]), "adb_unavailable"),
+        "helper_version": _package_status(adb_value(["shell", "dumpsys", "package", "com.iotpart.sqe.talkbackhelper"]), "adb_unavailable"),
         "runtime_config_hash": _status(_sha256_file(runtime_path) if runtime_path else None, "runtime_config_unavailable"),
         "scenario_registry_hash": _status(_sha256_file(scenario_registry_path) if scenario_registry_path else None, "registry_unavailable"),
-        "target_app_version": _status(adb_value(["shell", "dumpsys", "package", "com.samsung.android.oneconnect"]), "adb_unavailable"),
+        "target_app_version": _package_status(adb_value(["shell", "dumpsys", "package", "com.samsung.android.oneconnect"]), "adb_unavailable"),
         "android_build": _status(adb_value(["shell", "getprop", "ro.build.fingerprint"]), "adb_unavailable"),
-        "talkback_version": _status(adb_value(["shell", "dumpsys", "package", "com.google.android.marvin.talkback"]), "adb_unavailable"),
+        "talkback_version": _package_status(
+            (
+                adb_value(["shell", "dumpsys", "package", resolved_talkback_package])
+                if resolved_talkback_package
+                else None
+            ),
+            "adb_or_talkback_package_unavailable",
+        ),
+        "talkback_package": _status(resolved_talkback_package, "talkback_package_unavailable"),
         "webview_version": _status(adb_value(["shell", "dumpsys", "package", "com.google.android.webview"]), "adb_unavailable"),
         "device_model": _status(adb_value(["shell", "getprop", "ro.product.model"]), "adb_unavailable"),
         "locale": _status(adb_value(["shell", "getprop", "persist.sys.locale"]), "adb_unavailable"),
         "display_information": _status(adb_value(["shell", "wm", "size"]), "adb_unavailable"),
         "evidence_schema_version": {"status": "available", "value": EVIDENCE_SCHEMA_VERSION, "reason": ""},
     }
+    if environment_profile_reference:
+        manifest["environment_profile"] = dict(environment_profile_reference)
+    return manifest

@@ -57,6 +57,7 @@ from tb_runner.run_spec import RunContext, RunSpec, resolve_identity_feature_fla
 from tb_runner.run_selection import apply_run_selection
 from tb_runner.utils import configure_process_temp_dir, generate_output_path
 from tb_runner.evidence import EvidenceRuntime, collect_run_provenance, evidence_enabled
+from tb_runner.environment_collector import EnvironmentCollector, capture_and_write_environment
 from tb_runner.evidence_identity import identity_shadow_enabled
 from tb_runner.traversal_evidence_gate import traversal_identity_v2_enabled
 from tb_runner.traversal_profiler import traversal_profiler_enabled
@@ -172,6 +173,52 @@ def main() -> int:
     )
     target_serial = context.serial
     client = A11yAdbClient(dev_serial=target_serial)
+    environment_capture = None
+    try:
+        repo_root = Path(__file__).resolve().parent
+        resolved_runtime_config_path = (
+            Path(context.spec.runtime_config_path)
+            if context.spec.runtime_config_path
+            else repo_root / "config" / "runtime_config.json"
+        )
+        def environment_adb_runner(command: list[str], timeout: float = 8.0) -> dict[str, object]:
+            try:
+                value = client._run(command, dev=target_serial, timeout=max(1, int(timeout)))
+            except Exception as exc:
+                return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "stdout": ""}
+            return {"ok": True, "stdout": str(value), "stderr": ""}
+
+        environment_flags = {
+            **feature_flags,
+            "coverage_probe": str(os.environ.get("TB_V8_COVERAGE_PROBE", "")).strip().lower()
+            in {"1", "true", "yes", "on"},
+        }
+        environment_capture = capture_and_write_environment(
+            output_path=output_path,
+            collector=EnvironmentCollector(
+                adb_runner=environment_adb_runner,
+                repo_root=repo_root,
+                serial=target_serial,
+                runtime_config_path=resolved_runtime_config_path,
+                scenario_registry_path=repo_root / "tb_runner" / "scenario_config.py",
+                feature_flags=environment_flags,
+            ),
+        )
+        log(
+            "[ENVIRONMENT] "
+            f"profile filename='{environment_capture.path.name if environment_capture.path else ''}' "
+            f"schema='{environment_capture.reference.get('schema_version', '')}' "
+            f"sha256='{environment_capture.document_digest}' "
+            f"document_digest='{environment_capture.document_digest}' "
+            f"fingerprint_schema='{environment_capture.reference.get('fingerprint_schema', '')}' "
+            f"fingerprint_status='{environment_capture.reference.get('fingerprint_status', '')}' "
+            f"fingerprint_sha256='"
+            f"{(environment_capture.reference.get('environment_fingerprint') or {}).get('hash') or ''}' "
+            f"status_counts='{environment_capture.reference.get('status_counts', {})}'"
+        )
+    except Exception as exc:
+        log(f"[ENVIRONMENT][warning] capture_failed error='{type(exc).__name__}: {exc}'")
+
     evidence_runtime = None
     if evidence_enabled():
         try:
@@ -179,11 +226,23 @@ def main() -> int:
             client.set_evidence_runtime(evidence_runtime)
             manifest = collect_run_provenance(
                     repo_root=Path(__file__).resolve().parent,
-                    runtime_config_path=context.spec.runtime_config_path,
+                    runtime_config_path=(
+                        str(resolved_runtime_config_path)
+                        if environment_capture is not None
+                        else context.spec.runtime_config_path
+                    ),
                     scenario_registry_path=Path(__file__).resolve().parent / "tb_runner" / "scenario_config.py",
                     runner_path=Path(__file__).resolve(),
                     client=client,
                     serial=target_serial,
+                    environment_profile_reference=(
+                        environment_capture.reference if environment_capture is not None else None
+                    ),
+                    talkback_package=(
+                        str(environment_capture.local_profile.talkback.package.value or "") or None
+                        if environment_capture is not None
+                        else None
+                    ),
                 )
             manifest["feature_flags"] = dict(feature_flags)
             evidence_runtime.write_manifest(manifest)

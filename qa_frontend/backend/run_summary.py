@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from tb_runner.environment_fingerprint import document_digest_reference
+
 from .paths import OUTPUT_DIR
 from .runtime_dashboard import parse_runtime_log
 from .runtime_dashboard import extract_validation_scenario_evidence_from_log
@@ -13,6 +15,24 @@ from .runtime_dashboard import extract_validation_scenario_evidence_from_log
 SUMMARY_SCHEMA_VERSION = 1
 SAVED_EXCEL_PATTERN = re.compile(r"saved excel:\s+output/(?P<filename>[^/\s]+\.xlsx)", re.IGNORECASE)
 RUN_LOG_PATTERN = re.compile(r"^(?P<run_id>\d{8}_\d{6})_(?P<mode>smoke|full)\.log$")
+ENVIRONMENT_PROFILE_PATTERN = re.compile(
+    r"\[ENVIRONMENT\]\s+profile\s+"
+    r"filename='(?P<filename>[^']+)'\s+"
+    r"schema='(?P<schema>[^']+)'\s+"
+    r"sha256='(?P<sha256>[0-9a-fA-F]{64})'"
+)
+ENVIRONMENT_DOCUMENT_DIGEST_PATTERN = re.compile(
+    r"document_digest='(?P<digest>[0-9a-fA-F]{64})'"
+)
+ENVIRONMENT_FINGERPRINT_SCHEMA_PATTERN = re.compile(
+    r"fingerprint_schema='(?P<schema>[^']*)'"
+)
+ENVIRONMENT_FINGERPRINT_STATUS_PATTERN = re.compile(
+    r"fingerprint_status='(?P<status>COMPLETE|INCOMPLETE|UNUSABLE)'"
+)
+ENVIRONMENT_FINGERPRINT_HASH_PATTERN = re.compile(
+    r"fingerprint_sha256='(?P<digest>[0-9a-fA-F]{64})?'"
+)
 
 
 def summary_path_for_log(log_path: Path) -> Path:
@@ -51,12 +71,18 @@ def build_run_summary(
         if isinstance(status.get("traversal_identity_v2_diagnostics"), dict)
         else parsed.get("traversal_identity_v2_diagnostics")
     )
+    environment_profile = (
+        status.get("environment_profile")
+        if isinstance(status.get("environment_profile"), dict)
+        else extract_environment_profile_reference(log_text)
+    )
 
     return {
         "schema_version": SUMMARY_SCHEMA_VERSION,
         "run_id": run_id,
         "mode": _string_or_none(status.get("mode")) or mode,
         "feature_flags": feature_flags,
+        "environment_profile": environment_profile,
         "traversal_identity_v2_diagnostics": traversal_identity_diagnostics,
         "launch_mode": _string_or_none(status.get("launch_mode")) or parsed.get("launch_mode"),
         "language_mode": _string_or_none(status.get("language_mode")) or parsed.get("language_mode"),
@@ -99,6 +125,41 @@ def build_run_summary(
         "scenarios": scenarios,
         "parse_error": parsed.get("parse_error"),
     }
+
+
+def extract_environment_profile_reference(log_text: str) -> dict[str, object] | None:
+    text = str(log_text or "")
+    matches = list(ENVIRONMENT_PROFILE_PATTERN.finditer(text))
+    if not matches:
+        return None
+    match = matches[-1]
+    line_end = text.find("\n", match.end())
+    marker = text[match.start():line_end if line_end >= 0 else len(text)]
+    reference: dict[str, object] = {
+        "filename": match.group("filename"),
+        "schema_version": match.group("schema"),
+        "sha256": match.group("sha256").lower(),
+    }
+    document_match = ENVIRONMENT_DOCUMENT_DIGEST_PATTERN.search(marker)
+    fingerprint_schema_match = ENVIRONMENT_FINGERPRINT_SCHEMA_PATTERN.search(marker)
+    fingerprint_status_match = ENVIRONMENT_FINGERPRINT_STATUS_PATTERN.search(marker)
+    fingerprint_hash_match = ENVIRONMENT_FINGERPRINT_HASH_PATTERN.search(marker)
+    if document_match:
+        reference["document_digest"] = document_digest_reference(
+            document_match.group("digest").lower()
+        )
+    if fingerprint_schema_match and fingerprint_status_match:
+        fingerprint: dict[str, object] = {
+            "fingerprint_schema": fingerprint_schema_match.group("schema"),
+            "status": fingerprint_status_match.group("status"),
+            "hash": None,
+        }
+        if fingerprint_hash_match and fingerprint_hash_match.group("digest"):
+            fingerprint["hash"] = fingerprint_hash_match.group("digest").lower()
+        reference["environment_fingerprint"] = fingerprint
+        reference["fingerprint_schema"] = fingerprint["fingerprint_schema"]
+        reference["fingerprint_status"] = fingerprint["status"]
+    return reference
 
 
 def write_summary_file(

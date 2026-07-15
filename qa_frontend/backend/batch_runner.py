@@ -3,11 +3,17 @@ import subprocess
 import json
 import logging
 import re
+import hashlib
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import traceback
+from tb_runner.environment_fingerprint import (
+    build_environment_fingerprint,
+    document_digest_reference,
+)
+
 from tb_runner.run_spec import RunSpec, resolve_identity_feature_flags
 from .paths import ROOT_DIR, RUN_LOG_DIR, SCRIPT_PATH, RUNTIME_CONFIG_PATH
 from .runtime_dashboard import parse_runtime_log
@@ -34,6 +40,41 @@ logger = logging.getLogger(__name__)
 
 _invalid_summary_warning_lock = threading.Lock()
 _invalid_summary_warning_cache: dict[Path, tuple[int, int, str, str]] = {}
+
+
+def _environment_profile_reference_from_dir(output_dir: Path) -> dict[str, object] | None:
+    if not output_dir.is_dir():
+        return None
+    candidates = sorted(output_dir.glob("*.environment_profile.json"))
+    if len(candidates) != 1:
+        return None
+    path = candidates[0]
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        schema_version = str(payload.get("schema_version") or "")
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not schema_version:
+        return None
+    fingerprint_value = payload.get("environment_fingerprint")
+    fingerprint = (
+        dict(fingerprint_value)
+        if isinstance(fingerprint_value, dict)
+        else build_environment_fingerprint(payload).to_dict()
+    )
+    relative_path = path.relative_to(ROOT_DIR) if path.is_relative_to(ROOT_DIR) else path
+    return {
+        "filename": path.name,
+        "path": str(relative_path),
+        "schema_version": schema_version,
+        # Compatibility alias for the full canonical document digest.
+        "sha256": digest,
+        "document_digest": document_digest_reference(digest),
+        "environment_fingerprint": fingerprint,
+        "fingerprint_schema": fingerprint.get("fingerprint_schema"),
+        "fingerprint_status": fingerprint.get("status"),
+    }
 
 
 def _invalid_summary_warning_key(path: Path, exc: Exception) -> tuple[int, int, str, str]:
@@ -695,6 +736,15 @@ class BatchRunManager:
         if not self._batch_id:
             return
         summary_path = RUN_LOG_DIR / self._batch_id / "batch_summary.json"
+        devices = []
+        for device in self._devices:
+            item = dict(device)
+            raw_output_dir = str(device.get("output_dir") or "")
+            output_dir = ROOT_DIR / raw_output_dir if raw_output_dir else Path()
+            environment_profile = _environment_profile_reference_from_dir(output_dir)
+            if environment_profile:
+                item["environment_profile"] = environment_profile
+            devices.append(item)
         data = {
             "batch_id": self._batch_id,
             "mode": self._mode,
@@ -703,7 +753,7 @@ class BatchRunManager:
             "enable_coverage_probe": self._enable_coverage_probe,
             "shadow_validation": self._shadow_validation_requested,
             "feature_flags": dict(self._feature_flags),
-            "devices": self._devices
+            "devices": devices
         }
         try:
             summary_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -861,6 +911,11 @@ class BatchRunManager:
                     "traversal_identity_v2": self._traversal_identity_v2,
                     "runtime_profiler": self._traversal_profiler,
                 },
+                "environment_profile": (
+                    parsed_summary.get("environment_profile")
+                    if isinstance(parsed_summary.get("environment_profile"), dict)
+                    else _environment_profile_reference_from_dir(out_dir)
+                ),
                 "traversal_identity_v2_diagnostics": (
                     data.get("traversal_identity_v2_diagnostics")
                     if isinstance(data.get("traversal_identity_v2_diagnostics"), dict)
