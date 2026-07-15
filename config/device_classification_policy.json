@@ -1,0 +1,18 @@
+{
+  "schema_version": "talkback-device-classification-policy-v1",
+  "revision": 1,
+  "devices": {
+    "SM-F741N": {
+      "device_family": "galaxy-z-flip6",
+      "form_factor": "foldable_phone",
+      "expected_capabilities": {
+        "foldable": true
+      },
+      "review": {
+        "status": "REVIEWED",
+        "reason": "Project representative test device; verified by local ADB device-state smoke.",
+        "reviewed_at": "2026-07-15"
+      }
+    }
+  }
+}

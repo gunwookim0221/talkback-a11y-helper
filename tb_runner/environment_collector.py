@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from tb_runner.canonical_json import canonical_json_bytes, canonical_sha256
+from tb_runner.device_classification_policy import classify_device
 from tb_runner.environment_profile import (
     ENVIRONMENT_PROFILE_SCHEMA_VERSION,
     TRAVERSAL_CONTRACT_VERSION,
@@ -140,6 +141,7 @@ class EnvironmentCollector:
         runtime_config_path: str | Path | None,
         scenario_registry_path: str | Path | None,
         feature_flags: Mapping[str, Any] | None = None,
+        device_classification_policy_path: str | Path | None = None,
         git_reader: GitReader | None = None,
         captured_at: str | None = None,
     ) -> None:
@@ -149,6 +151,11 @@ class EnvironmentCollector:
         self.runtime_config_path = Path(runtime_config_path) if runtime_config_path else None
         self.scenario_registry_path = Path(scenario_registry_path) if scenario_registry_path else None
         self.feature_flags = dict(feature_flags or {})
+        self.device_classification_policy_path = (
+            Path(device_classification_policy_path)
+            if device_classification_policy_path is not None
+            else self.repo_root / "config" / "device_classification_policy.json"
+        )
         self.git_reader = git_reader or _default_git_reader(self.repo_root)
         self.captured_at = captured_at or utc_now()
 
@@ -364,6 +371,24 @@ class EnvironmentCollector:
             active_display=active_display,
         )
 
+    def _collect_device_classification(
+        self,
+        model: ValidationResult,
+        fold: FoldEnvironment,
+    ) -> tuple[EnvironmentField, EnvironmentField]:
+        capability = ValidationResult(
+            fold.capability.status,
+            fold.capability.value,
+            fold.capability.reason,
+        )
+        classified = classify_device(
+            model,
+            capability,
+            policy_path=self.device_classification_policy_path,
+        )
+        source = classified.source
+        return self._field(classified.device_family, source), self._field(classified.form_factor, source)
+
     def _collect_repository(self) -> RepositoryEnvironment:
         commit = validate_git_commit(self.git_reader(("rev-parse", "HEAD")))
         dirty_output = self.git_reader(("status", "--porcelain"))
@@ -413,6 +438,8 @@ class EnvironmentCollector:
 
     def collect(self) -> EnvironmentProfile:
         model_raw = self._adb_text(["shell", "getprop", "ro.product.model"])
+        fold = self._collect_fold()
+        device_family, form_factor = self._collect_device_classification(model_raw, fold)
         serial_source = "runspec:serial"
         if self.serial:
             serial_result = ValidationResult(FieldStatus.AVAILABLE, self.serial)
@@ -423,8 +450,8 @@ class EnvironmentCollector:
             model=self._field(model_raw, "adb:getprop:ro.product.model"),
             serial=self._field(serial_result, serial_source),
             serial_token=self._missing("redaction:serial_token_provider", "not_applied_to_local_profile"),
-            device_family=self._missing("policy:device_family", "device_family_mapping_not_configured"),
-            form_factor=self._missing("policy:form_factor", "form_factor_mapping_not_configured"),
+            device_family=device_family,
+            form_factor=form_factor,
         )
 
         release_raw = self._adb_text(["shell", "getprop", "ro.build.version.release"])
@@ -472,7 +499,7 @@ class EnvironmentCollector:
             helper=self._collect_helper(),
             locale=self._collect_locale(),
             display=self._collect_display(),
-            fold=self._collect_fold(),
+            fold=fold,
             repository=self._collect_repository(),
             runtime=runtime,
         )
