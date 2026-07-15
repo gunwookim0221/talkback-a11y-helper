@@ -736,6 +736,19 @@ class BatchRunManager:
         if not self._batch_id:
             return
         summary_path = RUN_LOG_DIR / self._batch_id / "batch_summary.json"
+        existing_candidates: dict[str, dict] = {}
+        if summary_path.is_file():
+            try:
+                existing_summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                for existing_device in existing_summary.get("devices", []):
+                    if not isinstance(existing_device, dict):
+                        continue
+                    candidate = existing_device.get("baseline_candidate")
+                    output_dir = str(existing_device.get("output_dir") or "")
+                    if output_dir and isinstance(candidate, dict):
+                        existing_candidates[output_dir] = dict(candidate)
+            except (OSError, json.JSONDecodeError, AttributeError):
+                pass
         devices = []
         for device in self._devices:
             item = dict(device)
@@ -744,6 +757,8 @@ class BatchRunManager:
             environment_profile = _environment_profile_reference_from_dir(output_dir)
             if environment_profile:
                 item["environment_profile"] = environment_profile
+            if raw_output_dir in existing_candidates:
+                item["baseline_candidate"] = existing_candidates[raw_output_dir]
             devices.append(item)
         data = {
             "batch_id": self._batch_id,

@@ -172,6 +172,9 @@ def write_summary_file(
     summary = build_run_summary(status=status, log_path=log_path, scenario_ids=scenario_ids)
     target = summary_path or summary_path_for_log(log_path)
     target.parent.mkdir(parents=True, exist_ok=True)
+    existing = read_summary_file(target) if target.is_file() else None
+    if isinstance(existing, dict) and isinstance(existing.get("baseline_candidate"), dict):
+        summary["baseline_candidate"] = dict(existing["baseline_candidate"])
     tmp_path = target.with_name(f"{target.name}.tmp")
     tmp_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp_path.replace(target)
