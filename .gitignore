@@ -13,6 +13,7 @@ app/build/
 !/artifacts/v10/*/.gitkeep
 adb.log
 /qa_frontend_runs/
+/.baseline-artifacts/
 /qa_frontend/frontend/node_modules/
 /qa_frontend/frontend/dist/
 /qa_frontend/frontend/.test-dist/
