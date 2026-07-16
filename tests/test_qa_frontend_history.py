@@ -62,6 +62,47 @@ def test_run_summary_keeps_stop_result_scoped_to_its_scenario(tmp_path: Path) ->
     assert scenarios["device_motion_sensor_plugin"]["traversal_result"] == "FAIL_STUCK"
 
 
+def test_run_summary_preserves_special_state_handled_terminal_metadata(tmp_path: Path) -> None:
+    log_path = tmp_path / "20260716_100000_smoke.log"
+    _write_log(
+        log_path,
+        body="\n".join(
+            [
+                "[QA_FRONTEND][scenario_selection] enabled_ids=['life_air_care_plugin']",
+                "[SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='Air care'",
+                "[SCENARIO][special_state] detected scenario='life_air_care_plugin' handling='back_after_read'",
+                "[SCENARIO][entry_contract] handled scenario='life_air_care_plugin' reason='special_state_handled' detail='onboarding_back_exit_recovered'",
+                "[PERF][scenario_summary] scenario=life_air_care_plugin total_steps=1 save_excel_count=0",
+            ]
+        ),
+    )
+
+    summary = build_run_summary(
+        status={"state": "finished", "run_id": "20260716_100000", "mode": "smoke"},
+        log_path=log_path,
+        scenario_ids=["life_air_care_plugin"],
+    )
+
+    assert summary["executed_scenarios"] == 1
+    assert summary["special_state_handled_scenarios"] == 1
+    assert summary["no_target_candidate_scenarios"] == 0
+    assert summary["scenarios"] == [
+        {
+            "id": "life_air_care_plugin",
+            "status": "passed",
+            "steps": 1,
+            "stop_reason": None,
+            "traversal_result": None,
+            "entry_contract_status": "handled",
+            "special_state_handled": True,
+            "availability_status": None,
+            "availability_confidence": None,
+            "availability_reason": None,
+            "availability_target": None,
+        }
+    ]
+
+
 def test_list_recent_runs_limits_to_newest_twenty_and_extracts_excel(tmp_path):
     for index in range(21):
         run_id = f"20260528_{90000 + index:06d}"

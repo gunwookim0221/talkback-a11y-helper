@@ -941,6 +941,7 @@ class BatchRunManager:
                 "process_status": parsed_summary.get("process_status"),
                 "scenario_result_status": parsed_summary.get("scenario_result_status"),
                 "passed_scenarios": parsed_summary.get("passed_scenarios", 0),
+                "special_state_handled_scenarios": parsed_summary.get("special_state_handled_scenarios", 0),
                 "warning_scenarios": parsed_summary.get("warning_scenarios", 0),
                 "completed_scenarios": parsed_summary.get("completed_scenarios", 0),
                 "executed_scenarios": parsed_summary.get("executed_scenarios", 0),

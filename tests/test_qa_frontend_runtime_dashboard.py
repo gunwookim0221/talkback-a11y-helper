@@ -393,6 +393,69 @@ def test_life_plugin_anchor_failure_is_no_target_candidate():
     assert progress["life_home_care_plugin"]["availability_confidence"] == "medium"
 
 
+def test_special_state_handled_contract_is_an_executed_terminal_not_no_target_candidate():
+    log_text = "\n".join(
+        [
+            "[QA_FRONTEND][scenario_selection] enabled_ids=['life_air_care_plugin']",
+            "[SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='Air care'",
+            "[SCENARIO][special_state] detected scenario='life_air_care_plugin' entry_type='card' kind='setup_needed_or_empty_state' handling='back_after_read' verify_hit=true",
+            "[SCENARIO][entry_contract] handled scenario='life_air_care_plugin' entry_type='card' reason='special_state_handled' detail='onboarding_back_exit_recovered' back_status='back_sent_exit'",
+            "[PERF][scenario_summary] scenario=life_air_care_plugin total_steps=1 save_excel_count=0",
+        ]
+    )
+
+    summary = parse_runtime_log(log_text)
+    progress = {item["id"]: item for item in summary["scenario_progress"]}
+
+    assert summary["passed_scenarios"] == 1
+    assert summary["executed_scenarios"] == 1
+    assert summary["completed_scenarios"] == 1
+    assert summary["special_state_handled_scenarios"] == 1
+    assert summary["no_target_candidate_scenarios"] == 0
+    assert summary["availability_candidate_scenarios"] == 0
+    assert progress["life_air_care_plugin"]["status"] == "passed"
+    assert progress["life_air_care_plugin"]["entry_contract_status"] == "handled"
+    assert progress["life_air_care_plugin"]["special_state_handled"] is True
+
+
+def test_handled_text_without_prior_canonical_special_state_remains_no_target_candidate():
+    log_text = "\n".join(
+        [
+            "[QA_FRONTEND][scenario_selection] enabled_ids=['life_air_care_plugin']",
+            "[SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='Air care'",
+            "[SCENARIO][entry_contract] handled scenario='life_air_care_plugin' entry_type='card' reason='special_state_handled' detail='onboarding_back_exit_recovered'",
+            "[SCENARIO][special_state] detected scenario='life_air_care_plugin' entry_type='card' kind='setup_needed_or_empty_state' handling='back_after_read'",
+            "[PERF][scenario_summary] scenario=life_air_care_plugin total_steps=1 save_excel_count=0",
+        ]
+    )
+
+    summary = parse_runtime_log(log_text)
+    progress = {item["id"]: item for item in summary["scenario_progress"]}
+
+    assert summary["executed_scenarios"] == 0
+    assert summary["no_target_candidate_scenarios"] == 1
+    assert progress["life_air_care_plugin"]["status"] == "no_target_candidate"
+
+
+def test_special_state_detection_with_failed_contract_remains_failed():
+    log_text = "\n".join(
+        [
+            "[QA_FRONTEND][scenario_selection] enabled_ids=['life_air_care_plugin']",
+            "[SCENARIO][pre_nav] step=1 action=xml_scroll_search_tap target='Air care'",
+            "[SCENARIO][special_state] detected scenario='life_air_care_plugin' entry_type='card' kind='setup_needed_or_empty_state' handling='back_after_read'",
+            "[SCENARIO][entry_contract] failed scenario='life_air_care_plugin' entry_type='card' reason='verify_failed'",
+            "[PERF][scenario_summary] scenario=life_air_care_plugin total_steps=1 save_excel_count=0",
+        ]
+    )
+
+    summary = parse_runtime_log(log_text)
+    progress = {item["id"]: item for item in summary["scenario_progress"]}
+
+    assert summary["failed_scenarios"] == 1
+    assert summary["no_target_candidate_scenarios"] == 0
+    assert progress["life_air_care_plugin"]["status"] == "failed"
+
+
 def test_crash_like_one_step_is_not_marked_not_available():
     log_text = "\n".join(
         [

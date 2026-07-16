@@ -4,7 +4,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from tb_runner.baseline_candidate_builder import build_baseline_candidate
+from tb_runner.baseline_candidate_builder import _run_summary, build_baseline_candidate
 from tb_runner.baseline_candidate_schema import BASELINE_CANDIDATE_SCHEMA_VERSION
 from tb_runner.baseline_candidate_validator import validate_baseline_candidate
 from tb_runner.canonical_json import canonical_json_bytes
@@ -92,6 +92,33 @@ def _environment_profile(*, complete: bool = True):
 def _write_json(path: Path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(canonical_json_bytes(payload))
+
+
+def test_candidate_run_summary_counts_handled_terminal_as_executed_and_terminal():
+    run_summary = _run_summary(
+        {
+            "completed_scenarios": 1,
+            "executed_scenarios": 1,
+            "passed_scenarios": 1,
+            "warning_scenarios": 0,
+            "failed_scenarios": 0,
+            "not_available_scenarios": 0,
+            "scenarios": [
+                {
+                    "id": "life_air_care_plugin",
+                    "status": "passed",
+                    "entry_contract_status": "handled",
+                    "special_state_handled": True,
+                }
+            ],
+        },
+        {"selected_scenario_count": 1},
+    )
+
+    assert run_summary["executed_scenarios"] == 1
+    assert run_summary["completed_scenarios"] == 1
+    assert run_summary["terminal_scenarios"] == 1
+    assert run_summary["scenarios"][0]["status"] == "passed"
 
 
 def _create_run(tmp_path: Path, *, complete_environment=True, targeted=False, legacy=False) -> Path:

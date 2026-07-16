@@ -116,6 +116,8 @@ def parse_runtime_log(
     summary_steps: dict[str, int] = {}
     summary_save_excel_counts: dict[str, int] = {}
     entry_success_scenarios: set[str] = set()
+    special_state_detected_at: dict[str, int] = {}
+    special_state_handled_at: dict[str, int] = {}
     soft_entry_evidence_scenarios: set[str] = set()
     summary_scenarios: set[str] = set()
     global_nav_start_gate_passed: set[str] = set()
@@ -197,6 +199,10 @@ def parse_runtime_log(
             global_nav_menu_reached.add(scenario)
         if scenario and "[SCENARIO][entry_contract] success" in line:
             entry_success_scenarios.add(scenario)
+        if scenario and _is_special_state_detected(line):
+            special_state_detected_at.setdefault(scenario, index)
+        if scenario and _is_special_state_handled_contract(line):
+            special_state_handled_at.setdefault(scenario, index)
         if scenario and "[ENTRY][post_open_identity]" in line and _has_plugin_entry_identity_evidence(scenario, line):
             soft_entry_evidence_scenarios.add(scenario)
         if scenario and "[SCENARIO][entry_contract]" in line and " fail" in line.lower():
@@ -335,7 +341,18 @@ def parse_runtime_log(
         elif "[QA_FRONTEND][run] stop_requested=true" in line:
             _add_event(events, index, "stop_requested", line, scenario=current_scenario)
 
+    special_state_handled_scenarios = {
+        scenario_id
+        for scenario_id, handled_index in special_state_handled_at.items()
+        if (detected_index := special_state_detected_at.get(scenario_id)) is not None
+        and detected_index < handled_index
+    }
+    entry_success_scenarios.update(special_state_handled_scenarios)
+
     for scenario_id, item in progress.items():
+        if scenario_id in special_state_handled_scenarios:
+            item["entry_contract_status"] = "handled"
+            item["special_state_handled"] = True
         if scenario_id in summary_steps:
             item["steps"] = summary_steps[scenario_id]
         elif scenario_id in step_end_counts:
@@ -400,6 +417,7 @@ def parse_runtime_log(
         "device_locale": device_locale,
         "current_scenario": current_scenario,
         "passed_scenarios": passed_count,
+        "special_state_handled_scenarios": len(special_state_handled_scenarios),
         "warning_scenarios": warning_count,
         "completed_scenarios": passed_count + warning_count,
         "executed_scenarios": executed_count,
@@ -449,6 +467,7 @@ def _empty_dashboard(*, status: dict[str, object], started_at: str | None, scena
         "failed_scenarios": 0,
         "scenario_progress": [{"id": item, "status": "queued", "steps": 0} for item in scenario_ids],
         "passed_scenarios": 0,
+        "special_state_handled_scenarios": 0,
         "warning_scenarios": 0,
         "current_step": None,
         "total_step_count": 0,
@@ -488,6 +507,21 @@ def _line_has_availability_signal(line: str) -> bool:
             "inventory_signature_changed=false",
             "insufficient_new_screen_evidence",
         )
+    )
+
+
+def _is_special_state_detected(line: str) -> bool:
+    return (
+        "[SCENARIO][special_state] detected" in line
+        and "handling='back_after_read'" in line
+    )
+
+
+def _is_special_state_handled_contract(line: str) -> bool:
+    return (
+        "[SCENARIO][entry_contract] handled" in line
+        and "reason='special_state_handled'" in line
+        and "detail='onboarding_back_exit_recovered'" in line
     )
 
 
