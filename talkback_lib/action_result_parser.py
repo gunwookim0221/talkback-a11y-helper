@@ -61,6 +61,11 @@ class ActionResultParser:
             if isinstance(bounds, dict):
                 salvaged_node["boundsInScreen"] = bounds
 
+        for key in ("accessibilityFocused", "focused", "visibleToUser"):
+            match = re.search(rf'"{key}"\s*:\s*(true|false)', root_scope, flags=re.IGNORECASE)
+            if match:
+                salvaged_node[key] = match.group(1).lower() == "true"
+
         if salvaged_node:
             result["node"] = salvaged_node
             result["partial_parse_success"] = True

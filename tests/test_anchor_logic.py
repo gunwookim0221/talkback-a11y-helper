@@ -1,4 +1,7 @@
+import time
 from unittest.mock import Mock
+
+import pytest
 
 from tb_runner import anchor_logic
 
@@ -45,6 +48,205 @@ def _focusable_node(
 
 def _verify_step(view_id="anchor_id", label="anchor_text", bounds="0,0,10,10"):
     return {"focus_view_id": view_id, "visible_label": label, "merged_announcement": label, "focus_bounds": bounds}
+
+
+def _empty_webview_snapshot(label="Home Care", *, resource_id=""):
+    return [
+        {
+            "packageName": "com.samsung.android.oneconnect",
+            "className": "android.webkit.WebView",
+            "text": "",
+            "contentDescription": None,
+            "viewIdResourceName": None,
+            "accessibilityFocused": True,
+            "visibleToUser": True,
+            "boundsInScreen": "[0,94][1080,2496]",
+            "children": [
+                {
+                    "className": "android.view.View",
+                    "text": label,
+                    "viewIdResourceName": resource_id or None,
+                    "visibleToUser": True,
+                    "boundsInScreen": "[40,220][1040,380]",
+                }
+            ],
+        }
+    ]
+
+
+def _landing_cfg(label_pattern="(?i).*home\\s*care.*", *, resource_pattern=""):
+    now = time.monotonic_ns()
+    return {
+        "scenario_id": "life_fixture_plugin",
+        "screen_context_mode": "new_screen",
+        "stabilization_mode": "anchor_only",
+        "entry_match": {
+            "title_patterns": [label_pattern] if label_pattern else [],
+            "resource_patterns": [resource_pattern] if resource_pattern else [],
+        },
+        "entry_transition_evidence": {
+            "correlation_id": f"life_fixture_plugin:{now}",
+            "scenario_id": "life_fixture_plugin",
+            "transition_confirmed": True,
+            "transition_signal": "package_or_surface_changed",
+            "observed_monotonic_ns": now,
+            "pre_entry_surface_signature": anchor_logic.build_landing_surface_signature(
+                [{"className": "android.widget.FrameLayout", "text": "Life card list", "boundsInScreen": "[0,0][1080,2496]"}]
+            ),
+        },
+    }
+
+
+def _evaluate_landing(cfg, first, second=None, verify_rows=None, *, now_ns=None):
+    return anchor_logic.evaluate_post_entry_landing_evidence(
+        tab_cfg=cfg,
+        phase="scenario_start",
+        first_nodes=first,
+        second_nodes=second if second is not None else first,
+        verify_rows=verify_rows or [],
+        now_monotonic_ns=now_ns,
+    )
+
+
+@pytest.mark.parametrize(
+    ("label", "pattern"),
+    [
+        ("Home Care", "(?i).*home\\s*care.*"),
+        ("홈 케어", "(?i).*홈\\s*케어.*"),
+        ("Clothing Care", "(?i).*clothing\\s*care.*"),
+        ("클로딩 케어", "(?i).*클로딩\\s*케어.*"),
+    ],
+)
+def test_correlated_empty_webview_with_stable_configured_child_is_accepted(label, pattern):
+    cfg = _landing_cfg(pattern)
+    snapshot = _empty_webview_snapshot(label)
+
+    result = _evaluate_landing(cfg, snapshot)
+
+    assert result.accepted is True
+    assert result.reason == "correlated_empty_webview_landing"
+    assert result.identity_source == "configured_child"
+
+
+def test_correlated_empty_webview_with_exact_resource_and_stable_observation_is_accepted():
+    cfg = _landing_cfg("", resource_pattern=r"^plugin_landing_title$")
+    snapshot = _empty_webview_snapshot("", resource_id="plugin_landing_title")
+
+    result = _evaluate_landing(cfg, snapshot)
+
+    assert result.accepted is True
+    assert result.identity_source == "exact_resource"
+
+
+def test_root_only_focus_evidence_combines_with_stable_dump_tree_identity():
+    cfg = _landing_cfg()
+    tree = [
+        {
+            "className": "android.widget.TextView",
+            "text": "Home Care",
+            "contentDescription": "Home Care",
+            "boundsInScreen": {"l": 168, "t": 196, "r": 486, "b": 280},
+        }
+    ]
+    root = {
+        "packageName": "com.samsung.android.oneconnect",
+        "className": "android.webkit.WebView",
+        "text": "",
+        "boundsInScreen": {"l": 0, "t": 94, "r": 1080, "b": 2496},
+        "accessibilityFocused": True,
+        "visibleToUser": True,
+    }
+    verify_rows = [
+        {"get_focus_partial_root_evidence": dict(root)},
+        {"get_focus_partial_root_evidence": dict(root)},
+    ]
+
+    result = _evaluate_landing(cfg, tree, verify_rows=verify_rows)
+
+    assert result.accepted is True
+    assert result.root_class == "android.webkit.WebView"
+    assert result.root_bounds == "0,94,1080,2496"
+    assert result.identity_value == "Home Care Home Care"
+
+
+def test_empty_webview_class_alone_is_rejected():
+    cfg = _landing_cfg()
+    snapshot = _empty_webview_snapshot("")
+
+    result = _evaluate_landing(cfg, snapshot)
+
+    assert result.accepted is False
+    assert result.reason == "configured_landing_identity_absent"
+
+
+def test_empty_webview_with_tap_but_without_confirmed_transition_is_rejected():
+    cfg = _landing_cfg()
+    cfg["entry_transition_evidence"]["transition_confirmed"] = False
+
+    result = _evaluate_landing(cfg, _empty_webview_snapshot("Home Care"))
+
+    assert result.accepted is False
+    assert result.reason == "transition_not_confirmed"
+
+
+def test_stale_fallback_tree_is_rejected():
+    cfg = _landing_cfg()
+    observed = int(cfg["entry_transition_evidence"]["observed_monotonic_ns"])
+
+    result = _evaluate_landing(
+        cfg,
+        _empty_webview_snapshot("Home Care"),
+        now_ns=observed + int((anchor_logic._POST_ENTRY_CORRELATION_MAX_AGE_SECONDS + 1) * 1_000_000_000),
+    )
+
+    assert result.accepted is False
+    assert result.reason == "stale_transition_evidence"
+
+
+def test_transaction_correlation_mismatch_is_rejected():
+    cfg = _landing_cfg()
+    cfg["entry_transition_evidence"]["scenario_id"] = "different_scenario"
+
+    result = _evaluate_landing(cfg, _empty_webview_snapshot("Home Care"))
+
+    assert result.accepted is False
+    assert result.reason == "transaction_correlation_mismatch"
+
+
+def test_delayed_focus_that_changes_to_non_webview_is_rejected():
+    cfg = _landing_cfg()
+    verify_rows = [
+        {"focus_node": {"className": "android.webkit.WebView"}, "focus_bounds": "[0,94][1080,2496]"},
+        {"focus_node": {"className": "android.widget.Button"}, "focus_bounds": "[0,0][100,100]", "visible_label": "Home"},
+    ]
+
+    result = _evaluate_landing(cfg, _empty_webview_snapshot("Home Care"), verify_rows=verify_rows)
+
+    assert result.accepted is False
+    assert result.reason == "delayed_focus_changed"
+
+
+def test_delayed_empty_webview_root_bounds_change_is_rejected():
+    cfg = _landing_cfg()
+    first = _empty_webview_snapshot("Home Care")
+    second = _empty_webview_snapshot("Home Care")
+    second[0]["boundsInScreen"] = "[0,94][1080,2200]"
+
+    result = _evaluate_landing(cfg, first, second)
+
+    assert result.accepted is False
+    assert result.reason == "delayed_webview_changed"
+
+
+def test_pre_and_post_same_surface_without_anchor_is_rejected():
+    cfg = _landing_cfg()
+    snapshot = _empty_webview_snapshot("Home Care")
+    cfg["entry_transition_evidence"]["pre_entry_surface_signature"] = anchor_logic.build_landing_surface_signature(snapshot)
+
+    result = _evaluate_landing(cfg, snapshot)
+
+    assert result.accepted is False
+    assert result.reason == "pre_post_surface_identity_unchanged"
 
 
 def test_stabilize_anchor_selects_best_candidate_resource_id(monkeypatch):

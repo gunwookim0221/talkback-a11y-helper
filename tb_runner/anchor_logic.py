@@ -1,5 +1,6 @@
 import re
 import time
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from talkback_lib import A11yAdbClient
@@ -12,6 +13,7 @@ from tb_runner.utils import _safe_regex_search, parse_bounds_str
 _VALID_STABILIZATION_MODES = {"tab_context", "anchor_only", "anchor_then_context"}
 _ANCHOR_VERIFY_SETTLE_SECONDS = 0.12
 _ANCHOR_VERIFY_SCORE_THRESHOLD = 100
+_POST_ENTRY_CORRELATION_MAX_AGE_SECONDS = 120.0
 _PLUGIN_FALLBACK_BOILERPLATE_TOKENS = (
     "privacy policy",
     "terms",
@@ -33,6 +35,267 @@ _DIRECT_SELECT_GENERIC_TOP_TOKENS = (
     "프로필",
     "가족",
 )
+
+
+@dataclass(frozen=True)
+class PostEntryLandingEvidence:
+    accepted: bool
+    reason: str
+    correlation_id: str = ""
+    transition_signal: str = ""
+    root_class: str = ""
+    root_package: str = ""
+    root_bounds: str = ""
+    identity_source: str = ""
+    identity_value: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def _iter_snapshot_nodes(nodes: list[dict[str, Any]] | None):
+    stack = list(reversed(nodes or []))
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, dict):
+            continue
+        yield node
+        children = node.get("children", [])
+        if isinstance(children, list):
+            stack.extend(reversed(children))
+
+
+def _normalized_node_identity(node: dict[str, Any]) -> str:
+    return " ".join(
+        str(node.get(key, "") or "").strip()
+        for key in ("text", "contentDescription", "talkbackLabel", "viewIdResourceName", "resourceId")
+        if str(node.get(key, "") or "").strip()
+    ).strip()
+
+
+def _node_bounds_key(node: dict[str, Any]) -> str:
+    value = node.get("boundsInScreen", "")
+    if isinstance(value, dict):
+        try:
+            return ",".join(str(int(value[key])) for key in ("l", "t", "r", "b"))
+        except (KeyError, TypeError, ValueError):
+            return ""
+    return str(value or node.get("bounds", "") or "").strip()
+
+
+def build_landing_surface_signature(nodes: list[dict[str, Any]] | None) -> str:
+    """Build a bounded identity signature shared by pre-entry and post-entry checks."""
+    parts: list[str] = []
+    for node in _iter_snapshot_nodes(nodes):
+        if node.get("visibleToUser") is False:
+            continue
+        identity = _normalized_node_identity(node)
+        class_name = str(node.get("className", "") or "").strip()
+        bounds = _node_bounds_key(node)
+        if not (identity or class_name or bounds):
+            continue
+        parts.append(f"{class_name}|{identity}|{bounds}")
+        if len(parts) >= 40:
+            break
+    return "||".join(parts)
+
+
+def _empty_focused_webview_roots(nodes: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    roots: list[dict[str, Any]] = []
+    for node in _iter_snapshot_nodes(nodes):
+        class_name = str(node.get("className", "") or "").strip()
+        if not class_name.lower().endswith("webview"):
+            continue
+        if _normalized_node_identity(node):
+            continue
+        if node.get("visibleToUser") is False or not bool(node.get("accessibilityFocused", False)):
+            continue
+        bounds = _node_bounds_key(node)
+        parsed_bounds = parse_bounds_str(bounds)
+        if not parsed_bounds:
+            nums = [int(value) for value in re.findall(r"-?\d+", bounds)]
+            parsed_bounds = tuple(nums[:4]) if len(nums) >= 4 else None
+        if not parsed_bounds:
+            continue
+        roots.append(node)
+    return roots
+
+
+def _stable_webview_root(
+    first_nodes: list[dict[str, Any]] | None,
+    second_nodes: list[dict[str, Any]] | None,
+) -> tuple[dict[str, Any] | None, str]:
+    first_roots = _empty_focused_webview_roots(first_nodes)
+    second_roots = _empty_focused_webview_roots(second_nodes)
+    if not first_roots or not second_roots:
+        return None, "empty_focused_webview_absent"
+    for first in first_roots:
+        first_key = (
+            str(first.get("packageName", "") or "").strip(),
+            str(first.get("className", "") or "").strip(),
+            _node_bounds_key(first),
+        )
+        for second in second_roots:
+            second_key = (
+                str(second.get("packageName", "") or "").strip(),
+                str(second.get("className", "") or "").strip(),
+                _node_bounds_key(second),
+            )
+            if first_key == second_key:
+                return second, "stable_empty_focused_webview"
+    return None, "delayed_webview_changed"
+
+
+def _stable_webview_root_from_rows(
+    verify_rows: list[dict[str, Any]] | None,
+) -> tuple[dict[str, Any] | None, str]:
+    roots: list[dict[str, Any]] = []
+    for row in verify_rows or []:
+        if not isinstance(row, dict):
+            continue
+        root = row.get("get_focus_partial_root_evidence", {})
+        if isinstance(root, dict) and _empty_focused_webview_roots([root]):
+            roots.append(root)
+    if len(roots) < 2:
+        return None, "empty_focused_webview_absent"
+    first_key = (
+        str(roots[0].get("packageName", "") or "").strip(),
+        str(roots[0].get("className", "") or "").strip(),
+        _node_bounds_key(roots[0]),
+    )
+    second_key = (
+        str(roots[1].get("packageName", "") or "").strip(),
+        str(roots[1].get("className", "") or "").strip(),
+        _node_bounds_key(roots[1]),
+    )
+    if first_key != second_key:
+        return None, "delayed_webview_changed"
+    return roots[1], "stable_empty_focused_webview"
+
+
+def _configured_landing_patterns(tab_cfg: dict[str, Any]) -> tuple[list[str], list[str]]:
+    label_patterns: list[str] = []
+    resource_patterns: list[str] = []
+    entry_match = tab_cfg.get("entry_match", {})
+    if isinstance(entry_match, dict):
+        label_patterns.extend(str(value or "") for value in entry_match.get("title_patterns", []) or [])
+        resource_patterns.extend(str(value or "") for value in entry_match.get("resource_patterns", []) or [])
+    context_verify = tab_cfg.get("context_verify", {})
+    if isinstance(context_verify, dict):
+        label_patterns.append(str(context_verify.get("text_regex", "") or ""))
+    anchor_cfg = _resolve_anchor_cfg(tab_cfg)
+    resource_patterns.append(str(anchor_cfg.get("resource_id_regex", "") or ""))
+    return [value for value in label_patterns if value], [value for value in resource_patterns if value]
+
+
+def _stable_configured_identity(
+    tab_cfg: dict[str, Any],
+    first_nodes: list[dict[str, Any]] | None,
+    second_nodes: list[dict[str, Any]] | None,
+) -> tuple[str, str]:
+    label_patterns, resource_patterns = _configured_landing_patterns(tab_cfg)
+
+    def collect(nodes: list[dict[str, Any]] | None) -> dict[tuple[str, str, str], tuple[str, str]]:
+        matches: dict[tuple[str, str, str], tuple[str, str]] = {}
+        for node in _iter_snapshot_nodes(nodes):
+            if node.get("visibleToUser") is False:
+                continue
+            class_name = str(node.get("className", "") or "").strip()
+            if class_name.lower().endswith("webview"):
+                continue
+            label = " ".join(
+                str(node.get(key, "") or "").strip()
+                for key in ("text", "contentDescription", "talkbackLabel")
+                if str(node.get(key, "") or "").strip()
+            ).strip()
+            resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
+            bounds = _node_bounds_key(node)
+            if resource_id and any(_safe_regex_search(pattern, resource_id) for pattern in resource_patterns):
+                matches[(resource_id, bounds, class_name)] = ("exact_resource", resource_id)
+            if label and any(_safe_regex_search(pattern, label) for pattern in label_patterns):
+                matches[(label, bounds, class_name)] = ("configured_child", label)
+        return matches
+
+    first = collect(first_nodes)
+    second = collect(second_nodes)
+    for key in first.keys() & second.keys():
+        return second[key]
+    return "", ""
+
+
+def _verify_rows_allow_empty_webview_bundle(verify_rows: list[dict[str, Any]] | None) -> bool:
+    observed_keys: list[tuple[str, str]] = []
+    for row in verify_rows or []:
+        if not isinstance(row, dict):
+            continue
+        focus_node = row.get("focus_node", {})
+        if not focus_node and isinstance(row.get("get_focus_partial_root_evidence"), dict):
+            focus_node = row.get("get_focus_partial_root_evidence", {})
+        class_name = str((focus_node or {}).get("className", "") or row.get("focus_class_name", "") or "").strip()
+        bounds = str(row.get("focus_bounds", "") or (focus_node or {}).get("boundsInScreen", "") or "").strip()
+        label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
+        if not (class_name or bounds or label):
+            continue
+        if class_name and not class_name.lower().endswith("webview"):
+            return False
+        observed_keys.append((class_name, bounds))
+    return len(set(observed_keys)) <= 1
+
+
+def evaluate_post_entry_landing_evidence(
+    *,
+    tab_cfg: dict[str, Any],
+    phase: str,
+    first_nodes: list[dict[str, Any]] | None,
+    second_nodes: list[dict[str, Any]] | None,
+    verify_rows: list[dict[str, Any]] | None,
+    now_monotonic_ns: int | None = None,
+) -> PostEntryLandingEvidence:
+    transition = tab_cfg.get("entry_transition_evidence", {})
+    if not isinstance(transition, dict):
+        transition = {}
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip()
+    correlation_id = str(transition.get("correlation_id", "") or "").strip()
+    if phase != "scenario_start" or str(tab_cfg.get("screen_context_mode", "") or "") != "new_screen":
+        return PostEntryLandingEvidence(False, "scope_not_eligible")
+    if str(tab_cfg.get("stabilization_mode", "") or "") != "anchor_only":
+        return PostEntryLandingEvidence(False, "scope_not_eligible")
+    if not correlation_id or str(transition.get("scenario_id", "") or "") != scenario_id:
+        return PostEntryLandingEvidence(False, "transaction_correlation_mismatch")
+    if not bool(transition.get("transition_confirmed")) or not str(transition.get("transition_signal", "") or "").strip():
+        return PostEntryLandingEvidence(False, "transition_not_confirmed", correlation_id=correlation_id)
+    observed_ns = int(transition.get("observed_monotonic_ns", 0) or 0)
+    current_ns = int(now_monotonic_ns if now_monotonic_ns is not None else time.monotonic_ns())
+    if observed_ns <= 0 or current_ns < observed_ns or (current_ns - observed_ns) / 1_000_000_000 > _POST_ENTRY_CORRELATION_MAX_AGE_SECONDS:
+        return PostEntryLandingEvidence(False, "stale_transition_evidence", correlation_id=correlation_id)
+    pre_signature = str(transition.get("pre_entry_surface_signature", "") or "")
+    first_signature = build_landing_surface_signature(first_nodes)
+    second_signature = build_landing_surface_signature(second_nodes)
+    if not pre_signature or not first_signature or not second_signature:
+        return PostEntryLandingEvidence(False, "surface_signature_missing", correlation_id=correlation_id)
+    if pre_signature in {first_signature, second_signature}:
+        return PostEntryLandingEvidence(False, "pre_post_surface_identity_unchanged", correlation_id=correlation_id)
+    if not _verify_rows_allow_empty_webview_bundle(verify_rows):
+        return PostEntryLandingEvidence(False, "delayed_focus_changed", correlation_id=correlation_id)
+    root, root_reason = _stable_webview_root_from_rows(verify_rows)
+    if root is None and root_reason == "empty_focused_webview_absent":
+        root, root_reason = _stable_webview_root(first_nodes, second_nodes)
+    if root is None:
+        return PostEntryLandingEvidence(False, root_reason, correlation_id=correlation_id)
+    identity_source, identity_value = _stable_configured_identity(tab_cfg, first_nodes, second_nodes)
+    if not identity_source:
+        return PostEntryLandingEvidence(False, "configured_landing_identity_absent", correlation_id=correlation_id)
+    return PostEntryLandingEvidence(
+        True,
+        "correlated_empty_webview_landing",
+        correlation_id=correlation_id,
+        transition_signal=str(transition.get("transition_signal", "") or ""),
+        root_class=str(root.get("className", "") or ""),
+        root_package=str(root.get("packageName", "") or ""),
+        root_bounds=_node_bounds_key(root),
+        identity_source=identity_source,
+        identity_value=identity_value,
+    )
 
 
 def _extract_candidate_from_node(node: dict[str, Any], index: int = -1) -> dict[str, Any]:
@@ -647,6 +910,7 @@ def stabilize_anchor(
     fallback_candidate_resource_id = ""
     fallback_candidate_rejected_reason = ""
     last_verify_row: dict[str, Any] = {}
+    landing_evidence = PostEntryLandingEvidence(False, "not_evaluated")
 
     for attempt in range(1, max_retries + 1):
         log(f"[ANCHOR][stabilize] attempt={attempt}/{max_retries} scenario='{scenario_id}'", level="DEBUG")
@@ -896,7 +1160,32 @@ def stabilize_anchor(
         else:
             success = verify_stable and context_ok
 
-        if select_attempted and not selected and not verify_stable:
+        landing_evidence = PostEntryLandingEvidence(False, "not_evaluated")
+        if not success and isinstance(tab_cfg.get("entry_transition_evidence"), dict):
+            try:
+                delayed_nodes = client.dump_tree(dev=dev)
+            except Exception:
+                delayed_nodes = []
+            landing_evidence = evaluate_post_entry_landing_evidence(
+                tab_cfg=tab_cfg,
+                phase=phase,
+                first_nodes=dump_nodes if isinstance(dump_nodes, list) else [],
+                second_nodes=delayed_nodes if isinstance(delayed_nodes, list) else [],
+                verify_rows=verify_rows,
+            )
+            log(
+                "[ANCHOR][post_entry_evidence] "
+                f"scenario='{scenario_id}' accepted={str(landing_evidence.accepted).lower()} "
+                f"reason='{landing_evidence.reason}' correlation_id='{landing_evidence.correlation_id}' "
+                f"root_class='{landing_evidence.root_class}' root_package='{landing_evidence.root_package}' "
+                f"root_bounds='{landing_evidence.root_bounds}' identity_source='{landing_evidence.identity_source}' "
+                f"identity_value='{landing_evidence.identity_value}'"
+            )
+            success = landing_evidence.accepted
+
+        if landing_evidence.accepted:
+            stabilize_reason = landing_evidence.reason
+        elif select_attempted and not selected and not verify_stable:
             stabilize_reason = "select_failed"
         else:
             stabilize_reason = str(verify_results.get("reason", "not_stable") or "not_stable")
@@ -922,7 +1211,9 @@ def stabilize_anchor(
             log(f"[CONTEXT] verification passed scenario='{scenario_id}'")
 
         if success:
-            if stabilization_mode == "tab_context":
+            if landing_evidence.accepted:
+                success_reason = landing_evidence.reason
+            elif stabilization_mode == "tab_context":
                 success_reason = "context_verified"
             elif selected:
                 success_reason = "selected_and_verified"
@@ -951,6 +1242,7 @@ def stabilize_anchor(
                 "fallback_candidate_label": fallback_candidate_label,
                 "fallback_candidate_resource_id": fallback_candidate_resource_id,
                 "fallback_candidate_rejected_reason": fallback_candidate_rejected_reason,
+                "post_entry_landing_evidence": landing_evidence.to_dict(),
             }
 
     return {
@@ -968,4 +1260,5 @@ def stabilize_anchor(
         "fallback_candidate_label": fallback_candidate_label,
         "fallback_candidate_resource_id": fallback_candidate_resource_id,
         "fallback_candidate_rejected_reason": fallback_candidate_rejected_reason,
+        "post_entry_landing_evidence": landing_evidence.to_dict(),
     }

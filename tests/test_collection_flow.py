@@ -13438,6 +13438,12 @@ def test_xml_entry_strict_target_gating_scrolls_until_target_then_selects(monkey
     assert reason == "xml_entry_success"
     assert client.scroll_calls == ["down"]
     assert len(client.tap_calls) == 1
+    transition_evidence = client.last_entry_transition_evidence
+    assert transition_evidence["scenario_id"] == "life_air_care_plugin"
+    assert transition_evidence["transition_confirmed"] is True
+    assert transition_evidence["transition_signal"] == "transition_confirmed"
+    assert transition_evidence["correlation_id"].startswith("life_air_care_plugin:")
+    assert transition_evidence["pre_entry_surface_signature"]
     assert any("target_candidates=0" in line for line in logs)
     assert any("[XMLENTRY][scroll]" in line and "reason='no_strict_target_candidate'" in line for line in logs)
     assert any("[XMLENTRY][select]" in line and "target_match=true" in line and "matched_phrase='air care'" in line for line in logs)

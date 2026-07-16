@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from talkback_lib import A11yAdbClient
-from tb_runner.anchor_logic import stabilize_anchor
+from tb_runner.anchor_logic import build_landing_surface_signature, stabilize_anchor
 from tb_runner.constants import (
     CHECKPOINT_SAVE_EVERY_STEPS,
     LOG_LEVEL,
@@ -5146,6 +5146,23 @@ def _run_xml_scroll_search_tap(
             setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
             setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
             if confirm_ok:
+                correlation_ns = time.monotonic_ns()
+                setattr(
+                    client,
+                    "last_entry_transition_evidence",
+                    {
+                        "correlation_id": f"{scenario_id or 'scenario'}:{correlation_ns}",
+                        "scenario_id": str(scenario_id or ""),
+                        "action": "xml_scroll_search_tap",
+                        "transition_confirmed": True,
+                        "transition_signal": str(confirm_signal or ""),
+                        "observed_monotonic_ns": correlation_ns,
+                        "pre_entry_surface_signature": build_landing_surface_signature(xml_nodes),
+                        "selected_resource_id": selected_resource,
+                        "selected_bounds": str(selected_node.get("boundsInScreen", "") or ""),
+                        "matched_phrase": str(selected.get("matched_phrase", "") or ""),
+                    },
+                )
                 log("[XMLENTRY][result] success=true reason='transition_confirmed'")
                 return True, "xml_entry_success"
             failure_reason = "tap_dispatched_but_no_transition"
@@ -7460,6 +7477,7 @@ def _run_pre_navigation_steps(
     setattr(client, "last_pre_nav_failure_reason", "")
     setattr(client, "last_post_click_transition_same_screen", True)
     setattr(client, "last_post_click_transition_signal", "")
+    setattr(client, "last_entry_transition_evidence", None)
     capture_run_id = ""
     if scrolltouch_debug_capture_enabled and scenario_id.strip().lower() == _LIFE_AIR_CARE_SCENARIO_ID:
         capture_run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -8607,6 +8625,9 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict, *, output_base
     anchor_stabilize_cfg = dict(tab_cfg)
     anchor_stabilize_cfg["screen_context_mode"] = screen_context_mode
     anchor_stabilize_cfg["stabilization_mode"] = stabilization_mode
+    entry_transition_evidence = getattr(client, "last_entry_transition_evidence", None)
+    if isinstance(entry_transition_evidence, dict):
+        anchor_stabilize_cfg["entry_transition_evidence"] = dict(entry_transition_evidence)
 
     stabilize_result = stabilize_anchor(
         client=client,

@@ -1,4 +1,5 @@
 from talkback_lib.step_collection_service import StepCollectionService
+from talkback_lib.step_row_builder import populate_get_focus_trace_fields
 from talkback_lib.utils import normalize_for_comparison
 
 
@@ -10,6 +11,29 @@ class _FakeClient:
 
 def _service() -> StepCollectionService:
     return StepCollectionService(client=_FakeClient())
+
+
+def test_focus_trace_preserves_partial_root_only_as_corroborating_evidence():
+    step = {}
+    root = {
+        "className": "android.webkit.WebView",
+        "packageName": "com.samsung.android.oneconnect",
+        "text": "",
+        "boundsInScreen": {"l": 0, "t": 94, "r": 1080, "b": 2496},
+        "accessibilityFocused": True,
+    }
+
+    populate_get_focus_trace_fields(
+        step,
+        {
+            "partial_root_evidence": root,
+            "empty_reason": "untrusted_partial_payload",
+            "final_payload_source": "none",
+        },
+    )
+
+    assert step["get_focus_partial_root_evidence"] == root
+    assert step["get_focus_final_payload_source"] == "none"
 
 
 def test_trim_context_to_focus_anchor_trims_merged_context():

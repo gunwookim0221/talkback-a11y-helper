@@ -148,6 +148,7 @@ def test_truncated_focus_result_trusts_complete_root_fields_before_children():
         '"className":"android.webkit.WebView","viewIdResourceName":null,'
         '"text":"SmartThings Home Care","contentDescription":null,'
         '"boundsInScreen":{"l":0,"t":100,"r":1080,"b":2200},'
+        '"accessibilityFocused":true,"focused":false,"visibleToUser":true,'
         '"children":[{"text":"truncated child'
     )
 
@@ -161,6 +162,9 @@ def test_truncated_focus_result_trusts_complete_root_fields_before_children():
         "className": "android.webkit.WebView",
         "packageName": "com.samsung.android.oneconnect",
         "boundsInScreen": {"l": 0, "t": 100, "r": 1080, "b": 2200},
+        "accessibilityFocused": True,
+        "focused": False,
+        "visibleToUser": True,
     }
 
 
@@ -219,6 +223,7 @@ def test_get_focus_rejects_untrusted_partial_payload_and_uses_dump_focus(monkeyp
     assert "text" not in result
     assert client.last_get_focus_trace["untrusted_partial_payload_rejected"] is True
     assert client.last_get_focus_trace["final_payload_source"] == "fallback_dump"
+    assert client.last_get_focus_trace["partial_root_evidence"]["text"] == "패밀리 케어"
 
 
 def test_get_focus_untrusted_partial_without_dump_focus_returns_empty(monkeypatch):

@@ -113,6 +113,10 @@ def populate_get_focus_trace_fields(step: dict[str, Any], trace: dict[str, Any])
     step["get_focus_final_payload_source"] = str(trace.get("final_payload_source", "none") or "none")
     step["get_focus_final_focus_reason"] = str(trace.get("final_focus_reason", "") or "")
     step["get_focus_dump_replace_reason"] = str(trace.get("dump_replace_reason", "") or "")
+    partial_root_evidence = trace.get("partial_root_evidence", {})
+    step["get_focus_partial_root_evidence"] = (
+        dict(partial_root_evidence) if isinstance(partial_root_evidence, dict) else {}
+    )
 
 
 def extract_smart_nav_row_fields(smart_nav_result: dict[str, Any], last_smart_nav_terminal: bool) -> dict[str, Any]:

@@ -103,6 +103,14 @@ class FocusService:
         self.client.last_get_focus_trace["partial_children_truncated"] = bool(
             result.get("partial_children_truncated")
         )
+        if (
+            partial_parse_success
+            and bool(result.get("partial_fields_from_root_only"))
+            and isinstance(focus_node, dict)
+        ):
+            # Preserve root-only metadata as corroborating evidence.  It remains
+            # untrusted as a standalone focus result and is still rejected below.
+            self.client.last_get_focus_trace["partial_root_evidence"] = dict(focus_node)
 
         major_keys = ("text", "contentDescription", "viewIdResourceName", "boundsInScreen")
         key_presence = {k: bool(str(result.get(k, "") or "").strip()) for k in major_keys}
