@@ -9756,6 +9756,60 @@ def test_post_open_verify_aliases_avoid_generic_false_positives():
     )
 
 
+def test_pet_care_korean_walk_start_verifies_post_open_screen():
+    tab_cfg = _scenario_config("life_pet_care_plugin")
+
+    assert collection_flow._matches_post_open_verify(
+        tab_cfg,
+        "",
+        "상위 메뉴로 이동",
+        "상위 메뉴로 이동",
+        extra_candidates=["프로필 추가 프로필 추가", "산책 시작 산책 시작", "활동 활동 케어 케어"],
+    ) is True
+
+
+def test_pet_care_english_verify_tokens_remain_supported():
+    tab_cfg = _scenario_config("life_pet_care_plugin")
+
+    assert collection_flow._matches_post_open_verify(
+        tab_cfg,
+        "",
+        "PetCare Service Plugin",
+        "Pet Care Add profile",
+    ) is True
+
+
+def test_pet_care_korean_post_open_verify_rejects_missing_and_partial_token():
+    tab_cfg = _scenario_config("life_pet_care_plugin")
+
+    assert not collection_flow._matches_post_open_verify(
+        tab_cfg,
+        "",
+        "상위 메뉴로 이동",
+        "옵션 더보기 프로필 추가",
+    )
+    assert not collection_flow._matches_post_open_verify(
+        tab_cfg,
+        "",
+        "산책 상태, 대기",
+        "산책",
+    )
+
+
+def test_pet_care_korean_walk_start_token_rejects_common_non_pet_screens():
+    tab_cfg = _scenario_config("life_pet_care_plugin")
+
+    for non_pet_screen in (
+        "홈 프로필 스마트 홈을 디자인해 보세요",
+        "상위 메뉴로 이동 옵션 더보기 설정",
+        "실외 공기질 모니터링을 위해 위치를 설정하세요",
+        "삼성 가전 기기를 연결하고 똑똑한 관리를 받으세요",
+        "의류 관리 서비스",
+        "시작",
+    ):
+        assert not collection_flow._matches_post_open_verify(tab_cfg, "", non_pet_screen, "")
+
+
 def test_open_scenario_card_entry_recovers_when_initial_focus_is_navigate_up(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(

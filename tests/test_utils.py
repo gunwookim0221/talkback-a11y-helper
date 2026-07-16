@@ -30,6 +30,7 @@ def test_life_pet_care_plugin_uses_card_entry_spec():
     assert pet_cfg["pre_navigation"][0]["action"] == "xml_scroll_search_tap"
     assert pet_cfg["entry_match"]["allow_description_match"] is True
     assert "(?i).*take care of your pet.*" in pet_cfg["entry_match"]["description_patterns"]
+    assert "산책 시작" in pet_cfg["verify_tokens"]
 
 
 def test_life_food_plugin_uses_xml_card_entry_spec():

@@ -1146,6 +1146,7 @@ TAB_CONFIGS = [
             "pet routine",
             "반려",
             "펫 케어",
+            "산책 시작",
         ],
         "special_state_tokens": [
             "petcare service plugin",
