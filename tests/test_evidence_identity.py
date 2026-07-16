@@ -447,6 +447,7 @@ def test_replay_groups_transactions_without_mutating_events() -> None:
 
 def test_identity_shadow_flag_defaults_off_and_accepts_true(monkeypatch) -> None:
     monkeypatch.delenv("TB_EVIDENCE_IDENTITY_SHADOW_ENABLED", raising=False)
+    monkeypatch.delenv("TB_TRAVERSAL_IDENTITY_V2_ENABLED", raising=False)
     assert identity_shadow_enabled() is False
     monkeypatch.setenv("TB_EVIDENCE_IDENTITY_SHADOW_ENABLED", "1")
     assert identity_shadow_enabled() is True

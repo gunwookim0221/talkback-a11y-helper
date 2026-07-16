@@ -28,7 +28,7 @@ EVIDENCE_ENABLED_ENV = "TB_EVIDENCE_LEDGER_ENABLED"
 
 
 def evidence_enabled(env: Mapping[str, str] | None = None) -> bool:
-    source = env or os.environ
+    source = os.environ if env is None else env
     truthy = {"1", "true", "yes", "on"}
     return any(
         source.get(name, "").strip().lower() in truthy

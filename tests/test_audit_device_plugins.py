@@ -227,6 +227,8 @@ def test_find_latest_normal_log_returns_newest_file(tmp_path):
     second = tmp_path / "b.normal.log"
     first.write_text("a", encoding="utf-8")
     second.write_text("b", encoding="utf-8")
+    os.utime(first, (1_000_000_000, 1_000_000_000))
+    os.utime(second, (1_000_000_001, 1_000_000_001))
 
     latest = find_latest_normal_log(tmp_path)
 

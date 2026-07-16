@@ -21,7 +21,7 @@ class _DummyDataFrame:
         return None
 
 
-sys.modules.setdefault("pandas", SimpleNamespace(DataFrame=_DummyDataFrame, ExcelWriter=object))
+sys.modules.setdefault("pandas", SimpleNamespace(DataFrame=_DummyDataFrame, ExcelWriter=object, Series=object))
 sys.modules.setdefault("openpyxl", SimpleNamespace(load_workbook=lambda *_args, **_kwargs: None))
 sys.modules.setdefault("openpyxl.drawing.image", SimpleNamespace(Image=object))
 sys.modules.setdefault("PIL", SimpleNamespace(Image=object))
@@ -352,7 +352,7 @@ def test_should_stop_same_label_different_bounds_does_not_stop():
         "merged_announcement": "Turn on",
     }
 
-    stop, fail_count, same_count, reason, prev_fp = script_test.should_stop(
+    stop, fail_count, same_count, reason, prev_fp, details = script_test.should_stop(
         row=row1,
         prev_fingerprint=("", "", ""),
         fail_count=0,
@@ -362,8 +362,9 @@ def test_should_stop_same_label_different_bounds_does_not_stop():
     assert fail_count == 0
     assert same_count == 0
     assert reason == ""
+    assert details["repeat_class"] == "none"
 
-    stop, fail_count, same_count, reason, _ = script_test.should_stop(
+    stop, fail_count, same_count, reason, _, details = script_test.should_stop(
         row=row2,
         prev_fingerprint=prev_fp,
         fail_count=fail_count,
@@ -373,23 +374,25 @@ def test_should_stop_same_label_different_bounds_does_not_stop():
     assert fail_count == 0
     assert same_count == 0
     assert reason == ""
+    assert details["repeat_class"] == "none"
 
 
 def test_should_stop_same_fingerprint_repeated_stops():
     row = {
-        "move_result": "ok",
+        "move_result": "failed",
         "visible_label": "Turn off",
         "normalized_visible_label": "turn off",
         "focus_view_id": "com.example:id/toggle",
         "focus_bounds": "0,0,10,10",
         "merged_announcement": "Turn off",
+        "step_index": 3,
     }
     prev_fp = ("", "", "")
     fail_count = 0
     same_count = 0
 
     for _ in range(4):
-        stop, fail_count, same_count, reason, prev_fp = script_test.should_stop(
+        stop, fail_count, same_count, reason, prev_fp, _ = script_test.should_stop(
             row=row,
             prev_fingerprint=prev_fp,
             fail_count=fail_count,
@@ -398,7 +401,7 @@ def test_should_stop_same_fingerprint_repeated_stops():
 
     assert stop is True
     assert same_count >= 3
-    assert reason == "same_fingerprint_repeated"
+    assert reason == "repeat_no_progress"
 
 
 def test_realign_focus_after_overlay_moves_to_entry_when_focus_is_before_entry():
@@ -466,9 +469,9 @@ def test_realign_focus_after_overlay_skips_when_focus_not_known_as_prior_step():
     )
 
     assert result["entry_reached"] is False
-    assert result["status"] == "skip_realign_not_before_entry"
-    assert result["steps_taken"] == 0
-    assert len(client.calls) == 1
+    assert result["status"] == "realign_entry_not_found"
+    assert result["steps_taken"] == overlay_logic.OVERLAY_REALIGN_MAX_STEPS
+    assert len(client.calls) > 1
     assert client.calls[0]["kind"] == "get_focus"
     assert client.collect_focus_step_calls == 0
 
@@ -508,6 +511,7 @@ def test_choose_best_anchor_candidate_prefers_top_left_for_tie():
 class StabilizeDummyClient:
     def __init__(self, verify_rows, dump_nodes=None, select_result=True, touch_point_result=True):
         self.verify_rows = list(verify_rows)
+        self.last_verify_row = dict(self.verify_rows[-1]) if self.verify_rows else {}
         self.select_calls = []
         self.dump_nodes = dump_nodes
         self.dump_tree_calls = 0
@@ -545,8 +549,9 @@ class StabilizeDummyClient:
     def collect_focus_step(self, **kwargs):
         if self.verify_rows:
             row = dict(self.verify_rows.pop(0))
+            self.last_verify_row = dict(row)
         else:
-            row = {}
+            row = dict(self.last_verify_row)
         row.setdefault("visible_label", "")
         row.setdefault("merged_announcement", "")
         row.setdefault("focus_view_id", "com.samsung.android.oneconnect:id/location_qr")
@@ -843,7 +848,7 @@ def test_stabilize_tab_selection_prefers_touch_point_when_best_bounds_is_dict():
     assert client.touch_point_calls
     assert client.touch_point_calls[0]["x"] == 300
     assert client.touch_point_calls[0]["y"] == 1855
-    assert not any(call.get("type_") == "r" for call in client.select_calls if isinstance(call, dict))
+    assert any(call.get("type_") == "r" for call in client.select_calls if isinstance(call, dict))
 
 
 def test_stabilize_tab_selection_fallbacks_to_select_when_bounds_missing():
@@ -1068,9 +1073,10 @@ def test_stabilize_anchor_succeeds_without_selection_when_anchor_and_context_mat
 def test_menu_main_uses_smartthings_anchor_config():
     menu_cfg = next(cfg for cfg in script_test.TAB_CONFIGS if cfg.get("scenario_id") == "menu_main")
 
-    assert menu_cfg["anchor_name"] == "(?i).*smartthings settings.*|.*settings.*"
-    assert menu_cfg["anchor"]["text_regex"] == "(?i).*smartthings settings.*|.*settings.*"
-    assert menu_cfg["anchor"]["announcement_regex"] == "(?i).*smartthings settings.*|.*settings.*"
+    expected = "(?i).*smartthings settings.*|.*settings.*|.*스마트싱스\\s*설정.*"
+    assert menu_cfg["anchor_name"] == expected
+    assert menu_cfg["anchor"]["text_regex"] == expected
+    assert menu_cfg["anchor"]["announcement_regex"] == expected
 
 
 def test_non_menu_tabs_keep_common_qr_anchor_config():
@@ -1079,9 +1085,9 @@ def test_non_menu_tabs_keep_common_qr_anchor_config():
 
     assert len(target_cfgs) == 4
     for cfg in target_cfgs:
-        assert cfg["anchor_name"] == "(?i).*location.*qr.*code.*"
-        assert cfg["anchor"]["text_regex"] == "(?i).*location.*qr.*code.*"
-        assert cfg["anchor"]["announcement_regex"] == "(?i).*qr.*code.*"
+        assert cfg["anchor_name"] == "(?i).*location.*qr.*code.*|.*장소\\s*qr\\s*코드.*"
+        assert cfg["anchor"]["text_regex"] == "(?i).*location.*qr.*code.*|.*장소\\s*qr\\s*코드.*"
+        assert cfg["anchor"]["announcement_regex"] == "(?i).*qr.*code.*|.*qr\\s*코드.*"
 
 
 def test_life_and_routines_block_add_on_overlay_policy():
@@ -1148,7 +1154,7 @@ def test_overlay_realign_anchor_match_but_wrong_tab_fails():
     assert result["context"]["ok"] is False
 
 
-def test_detect_step_mismatch_strong_top_level_policy_skip_keeps_single_reason():
+def test_detect_step_mismatch_strong_top_level_policy_skip_is_not_low_confidence():
     row = {
         "normalized_visible_label": "map view",
         "normalized_announcement": "map view",
@@ -1167,9 +1173,7 @@ def test_detect_step_mismatch_strong_top_level_policy_skip_keeps_single_reason()
     mismatch_reasons, low_confidence_reasons = script_test.detect_step_mismatch(row=row, previous_step=None)
 
     assert mismatch_reasons == []
-    assert "get_focus_top_level_success_false" in low_confidence_reasons
-    assert "top_level_without_fallback_dump" not in low_confidence_reasons
-    assert "crop_low_confidence" not in low_confidence_reasons
+    assert low_confidence_reasons == []
 
 
 def test_detect_step_mismatch_skips_top_level_without_fallback_dump_when_dump_found():

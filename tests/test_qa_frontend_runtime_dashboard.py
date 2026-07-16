@@ -156,7 +156,15 @@ def test_parser_ignores_disabled_skip_lines_when_enabled_ids_are_known():
     summary = parse_runtime_log(log_text)
 
     assert len(summary["scenario_progress"]) == 1
-    assert summary["scenario_progress"] == [{"id": "global_nav_main", "status": "passed", "steps": 6}]
+    assert summary["scenario_progress"] == [
+        {
+            "id": "global_nav_main",
+            "status": "passed",
+            "steps": 6,
+            "traversal_result": "FAIL_STUCK",
+            "stop_reason": "smart_nav_terminal",
+        }
+    ]
 
 
 def test_entry_success_summary_and_fail_stuck_is_warning():
