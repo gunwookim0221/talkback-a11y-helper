@@ -518,6 +518,7 @@ def adapt_candidate(
         artifacts=artifacts,
         provenance={
             "approval_state": candidate.get("approval_state"),
+            "created_at": candidate.get("created_at"),
             "source_run_id": candidate.get("source_run_id"),
             "source_batch_id": candidate.get("source_batch_id"),
             "evidence_run_id": candidate.get("evidence_run_id"),
@@ -547,7 +548,11 @@ def candidate_input_from_baseline(
         aggregates=dict(baseline.aggregates),
         reviewed_limitations=tuple(baseline.reviewed_limitations),
         artifacts=dict(baseline.artifacts),
-        provenance={"derived_for_self_compare": True},
+        provenance={
+            "derived_for_self_compare": True,
+            "created_at": baseline.provenance.get("approved_at"),
+            "source_baseline_id": baseline.source_id,
+        },
         diagnostics=tuple(baseline.diagnostics),
     )
 

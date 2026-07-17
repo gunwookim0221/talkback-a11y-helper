@@ -14,6 +14,7 @@ from tb_runner.comparison_compatibility import (
     build_compatibility_key,
 )
 from tb_runner.comparison_input import adapt_candidate
+from tb_runner.observation_comparator import enrich_comparison_result
 from tb_runner.comparator_schema import (
     COMPARATOR_VERSION,
     COMPARISON_RESULT_SCHEMA_VERSION,
@@ -104,6 +105,8 @@ def compare_selected_inputs(
     generated_at: str | None = None,
     selection_rationale: tuple[dict[str, Any], ...] = (),
     rejected_baselines: tuple[dict[str, Any], ...] = (),
+    repository_root: str | Path = ".",
+    include_observations: bool = True,
 ) -> dict[str, Any]:
     resolved_assessment = assessment or assess_compatibility(baseline, candidate)
     selection = SelectionResult(
@@ -119,7 +122,12 @@ def compare_selected_inputs(
         selection_rationale,
         rejected_baselines,
     )
-    return _build_result(candidate, selection, generated_at=generated_at)
+    result = _build_result(candidate, selection, generated_at=generated_at)
+    if include_observations:
+        result = enrich_comparison_result(
+            result, baseline, candidate, repository_root
+        )
+    return result
 
 
 def _empty_deltas(reason_code: str) -> dict[str, Any]:
@@ -258,7 +266,10 @@ def run_comparator_core(
             )
         )
         selection = select_baseline(candidate, repository_root)
-        return _build_result(candidate, selection, generated_at=generated_at)
+        result = _build_result(candidate, selection, generated_at=generated_at)
+        return enrich_comparison_result(
+            result, selection.selected, candidate, repository_root
+        )
     except ComparatorContractError as exc:
         return _error_result(exc, generated_at=generated_at)
 
