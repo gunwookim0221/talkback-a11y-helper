@@ -434,6 +434,9 @@ def adapt_approved_baseline(
             "revision": baseline.get("baseline_revision"),
             "approved_at": baseline.get("approved_at"),
             "source_candidate_id": baseline.get("source_candidate_id"),
+            "source_run_id": baseline.get("source_run_id"),
+            "source_batch_id": baseline.get("source_batch_id"),
+            "source_candidate_digest": _mapping(baseline.get("source_candidate_digest")).get("value"),
             "source_repository": baseline.get("source_repository"),
         },
         diagnostics=tuple(artifacts.get("diagnostics") or []),
@@ -518,6 +521,8 @@ def adapt_candidate(
         artifacts=artifacts,
         provenance={
             "approval_state": candidate.get("approval_state"),
+            "source_candidate_id": candidate.get("candidate_id"),
+            "source_candidate_digest": digest,
             "created_at": candidate.get("created_at"),
             "source_run_id": candidate.get("source_run_id"),
             "source_batch_id": candidate.get("source_batch_id"),

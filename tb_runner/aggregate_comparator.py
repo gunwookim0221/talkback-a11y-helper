@@ -30,6 +30,36 @@ def _status(value: AggregateStatus) -> str:
     return value.value
 
 
+def _verified_approved_source_pair(
+    baseline: ComparatorInput, candidate: ComparatorInput
+) -> bool:
+    """Accept the baseline's missing normalized hash only for its exact source run."""
+    bp, cp = baseline.provenance, candidate.provenance
+    source_repo = _mapping(bp.get("source_repository"))
+    candidate_repo = _mapping(cp.get("source_repository"))
+    return bool(
+        baseline.source_kind.value == "BASELINE"
+        and bp.get("source_candidate_id")
+        and bp.get("source_candidate_id") == cp.get("source_candidate_id")
+        and bp.get("source_run_id")
+        and bp.get("source_run_id") == cp.get("source_run_id")
+        and bp.get("source_batch_id")
+        and bp.get("source_batch_id") == cp.get("source_batch_id")
+        and bp.get("source_candidate_digest")
+        and bp.get("source_candidate_digest") == candidate.source_digest
+        and baseline.environment.get("app_package") == candidate.environment.get("app_package")
+        and baseline.environment.get("locale") == candidate.environment.get("locale")
+        and baseline.environment.get("app_version_name") == candidate.environment.get("app_version_name")
+        and baseline.environment.get("app_version_code") == candidate.environment.get("app_version_code")
+        and baseline.environment.get("runtime_config_hash") == candidate.environment.get("runtime_config_hash")
+        and baseline.schema_versions.get("comparison_contract") == candidate.schema_versions.get("comparison_contract")
+        and baseline.schema_versions.get("normalizer") == candidate.schema_versions.get("normalizer")
+        and source_repo.get("commit") == candidate_repo.get("commit")
+        and source_repo.get("dirty") is False
+        and candidate_repo.get("dirty") is False
+    )
+
+
 def compare_environment(
     baseline: ComparatorInput,
     candidate: ComparatorInput,
@@ -56,6 +86,14 @@ def compare_environment(
         for name in fields
         if left.get(name) != right.get(name)
     }
+    if _verified_approved_source_pair(baseline, candidate):
+        # Approved baseline packages predate this optional normalized field.  The
+        # exact source candidate digest/run contract proves that None is an
+        # absent field, not a changed value. Actual differing hashes remain
+        # structural changes.
+        normalized = changes.get("normalized_runtime_config_hash")
+        if normalized and (normalized["baseline"] is None or normalized["candidate"] is None):
+            changes.pop("normalized_runtime_config_hash", None)
     left_flags = _mapping(left.get("feature_flags"))
     right_flags = _mapping(right.get("feature_flags"))
     flag_names = sorted(set(left_flags) | set(right_flags))

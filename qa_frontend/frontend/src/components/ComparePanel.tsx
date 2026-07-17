@@ -50,6 +50,19 @@ function reasonLabel(reason: string): string {
   return labels[reason] ?? reason.replaceAll('_', ' ').toUpperCase();
 }
 
+function structuredReason(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object') {
+    const item = value as Record<string, unknown>;
+    const code = typeof item.code === 'string' ? item.code : typeof item.reason === 'string' ? item.reason : '';
+    const detail = item.details ?? item.message ?? item.locales;
+    if (code && detail !== undefined) return `${code}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`;
+    if (code) return code;
+    return JSON.stringify(value);
+  }
+  return String(value ?? 'UNKNOWN');
+}
+
 export function ComparePanel() {
   const [baselines, setBaselines] = useState<ComparatorBaseline[]>([]);
   const [candidates, setCandidates] = useState<ComparatorCandidate[]>([]);
@@ -94,7 +107,21 @@ export function ComparePanel() {
   }
   const result = selected?.result ?? {};
   const verdict = result.verdict ?? selected?.verdict;
-  const recommendation = (result.verdict as Record<string, unknown> | undefined)?.recommendation ?? '-';
+  const verdictObject = result.verdict && typeof result.verdict === 'object' ? result.verdict as Record<string, unknown> : {};
+  const verdictLabel = normalizeVerdict(verdict);
+  const recommendation = verdictObject.recommendation ?? '-';
+  const verdictReasons = Array.isArray(verdictObject.reasons) ? verdictObject.reasons : [];
+  const compatibilityReasons = Array.isArray(result.compatibility_reasons) ? result.compatibility_reasons : [];
+  const reviewItems = Array.isArray(result.review_items) ? result.review_items : [];
+  const sourceCandidate = candidates.find((item) => item.candidate_id === selected?.candidate_id);
+  const sourceWarnings = sourceCandidate && sourceCandidate.source_status !== 'APPROVED_SOURCE' && sourceCandidate.source_status_label
+    ? [sourceCandidate.source_status_label, ...(sourceCandidate.blocking_reasons ?? []).map(reasonLabel)] : [];
+  const reasonSections = verdictLabel === 'INCOMPARABLE' || verdictLabel === 'REVIEW_REQUIRED' || verdictLabel === 'FAIL'
+    ? [
+      ['Blocking reasons', [...compatibilityReasons, ...verdictReasons.filter((reason) => structuredReason(reason).toUpperCase().includes('INCOMPARABLE'))]],
+      ['Review reasons', [...verdictReasons, ...reviewItems]],
+      ['Source warnings', sourceWarnings],
+    ] as const : [];
 
   return <section className="panel comparePanel">
     <div className="compareHeader"><div><h2>Baseline Comparator</h2><p>Read-only comparison. Approval remains a manual workflow.</p></div><button onClick={refresh} disabled={busy}>Refresh inputs</button></div>
@@ -110,6 +137,7 @@ export function ComparePanel() {
     {!candidates.length && !error && <div className="notice">No candidate run is available.</div>}
     {selected && <div className="compareResult">
       <div className="compareResultHeader"><div><h3>Comparison result</h3><small>{selected.comparison_id}</small></div><VerdictBadge verdict={verdict} /></div>
+      {reasonSections.filter(([, items]) => items.length > 0).map(([label, items]) => <details className="verdictReasons" key={label} open><summary>{label}</summary><ul>{items.map((item, index) => <li key={`${label}-${index}`}>{structuredReason(item)}</li>)}</ul></details>)}
       <div className="compareMetrics">{dimensions.map(([key, label]) => <div key={key}><small>{label}</small><strong>{displayValue(valueAt(result, key))}</strong></div>)}</div>
       <div className="compareReview">{sections.map(([key, label]) => { const items = valueAt(result, key); const nested = items && typeof items === 'object' ? (items as Record<string, unknown>).bindings : undefined; const rows = Array.isArray(items) ? items : Array.isArray(nested) ? nested : []; return <details key={key}><summary>{label} <span>{rows.length}</span></summary><pre>{rows.length ? JSON.stringify(rows, null, 2) : 'None'}</pre></details>; })}</div>
       <div className="compareRecommendation"><strong>Recommendation</strong><p>{String(recommendation)}</p></div>
