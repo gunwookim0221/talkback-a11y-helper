@@ -1568,6 +1568,7 @@ h3 {
 .compareSelectors label { color: #5e6c78; display: grid; font-size: 12px; gap: 5px; }
 .compareSelectors select { background: #fff; border: 1px solid #b8c2cc; border-radius: 6px; color: #172026; min-height: 36px; padding: 6px; }
 .compareAction { background: #245f82; border-color: #245f82; color: #fff; min-height: 36px; }
+.compareInputHint { font-size: 12px; margin-top: 8px; }.compareCandidateDetail { background: #f6f8fa; border: 1px solid #dce3e9; border-radius: 6px; color: #5e6c78; font-size: 12px; margin-top: 8px; padding: 8px 10px; }.compareCandidateDetail strong { color: #172026; }
 .compareResult, .compareHistory { border-top: 1px solid #dce3e9; margin-top: 16px; padding-top: 14px; }
 .compareMetrics { display: grid; gap: 8px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 12px 0; }
 .compareMetrics div, .compareRecommendation { background: #f6f8fa; border: 1px solid #dce3e9; border-radius: 6px; padding: 9px; }
