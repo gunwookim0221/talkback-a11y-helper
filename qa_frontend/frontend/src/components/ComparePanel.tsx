@@ -1,0 +1,97 @@
+import { useEffect, useState } from 'react';
+import { api, ComparatorBaseline, ComparatorCandidate, ComparisonHistoryEntry } from '../api';
+
+const sections = [
+  ['limitation_binding_deltas', 'Known Limitation'], ['new_failure_items', 'New Failure'],
+  ['resolved_failure_items', 'Resolved Failure'], ['review_items', 'Review Item'],
+] as const;
+const dimensions = [
+  ['environment_delta', 'Environment'], ['app_version_delta', 'Version'], ['compatibility_grade', 'Compatibility'],
+  ['coverage_aggregate_delta', 'Coverage'], ['identity_aggregate_delta', 'Identity'], ['traversal_aggregate_delta', 'Traversal'],
+  ['recovery_aggregate_delta', 'Recovery'], ['profiler_aggregate_delta', 'Profiler'],
+] as const;
+
+function valueAt(result: Record<string, unknown>, name: string): unknown {
+  return result[name] ?? (result.summary as Record<string, unknown> | undefined)?.[name];
+}
+
+function VerdictBadge({ verdict }: { verdict: string }) {
+  const css = `compareVerdict compareVerdict-${verdict.toLowerCase().replaceAll('_', '-')}`;
+  return <span className={css}>{verdict.replaceAll('_', ' ')}</span>;
+}
+
+function displayValue(value: unknown): string {
+  if (value && typeof value === 'object') {
+    const item = value as Record<string, unknown>;
+    return String(item.status ?? item.relation ?? item.overall ?? '-');
+  }
+  return String(value ?? '-');
+}
+
+export function ComparePanel() {
+  const [baselines, setBaselines] = useState<ComparatorBaseline[]>([]);
+  const [candidates, setCandidates] = useState<ComparatorCandidate[]>([]);
+  const [baselineId, setBaselineId] = useState('');
+  const [candidateId, setCandidateId] = useState('');
+  const [history, setHistory] = useState<ComparisonHistoryEntry[]>([]);
+  const [selected, setSelected] = useState<ComparisonHistoryEntry | null>(null);
+  const [markdown, setMarkdown] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function refresh() {
+    setError('');
+    try {
+      const [baselineResponse, candidateResponse, historyResponse] = await Promise.all([
+        api.comparatorBaselines(), api.comparatorCandidates(), api.comparisonHistory(),
+      ]);
+      setBaselines(baselineResponse.baselines); setCandidates(candidateResponse.candidates); setHistory(historyResponse.comparisons);
+      setBaselineId((current) => current || baselineResponse.baselines[0]?.baseline_id || '');
+      setCandidateId((current) => current || candidateResponse.candidates[0]?.candidate_id || '');
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Comparator catalog could not be loaded.'); }
+  }
+  useEffect(() => { refresh(); }, []);
+
+  async function open(entry: ComparisonHistoryEntry) {
+    setBusy(true); setError('');
+    try {
+      const [detail, report] = await Promise.all([api.comparisonResult(entry.comparison_id), api.comparisonMarkdown(entry.comparison_id)]);
+      setSelected(detail); setMarkdown(report);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Comparison report could not be opened.'); }
+    finally { setBusy(false); }
+  }
+  async function compare() {
+    if (!baselineId || !candidateId) return;
+    setBusy(true); setError('');
+    try {
+      const result = await api.compare(baselineId, candidateId);
+      setHistory(await api.comparisonHistory().then((response) => response.comparisons));
+      await open(result);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Comparison failed.'); }
+    finally { setBusy(false); }
+  }
+  const result = selected?.result ?? {};
+  const verdict = (result.verdict as Record<string, unknown> | undefined)?.overall ?? selected?.verdict ?? '-';
+  const recommendation = (result.verdict as Record<string, unknown> | undefined)?.recommendation ?? '-';
+
+  return <section className="panel comparePanel">
+    <div className="compareHeader"><div><h2>Baseline Comparator</h2><p>Read-only comparison. Approval remains a manual workflow.</p></div><button onClick={refresh} disabled={busy}>Refresh inputs</button></div>
+    {error && <div className="error">{error}</div>}
+    <div className="compareSelectors">
+      <label>Candidate (run)<select value={candidateId} disabled={busy || !candidates.length} onChange={(event) => setCandidateId(event.target.value)}>{candidates.map((item) => <option key={`${item.candidate_id}-${item.source}`} value={item.candidate_id}>{item.locale ?? '-'} · {item.version ?? '-'} · {item.run}</option>)}</select></label>
+      <label>Approved baseline<select value={baselineId} disabled={busy || !baselines.length} onChange={(event) => setBaselineId(event.target.value)}>{baselines.map((item) => <option key={item.baseline_id} value={item.baseline_id}>{item.locale ?? '-'} · {item.version ?? '-'} · r{item.revision}</option>)}</select></label>
+      <button className="compareAction" onClick={compare} disabled={busy || !baselineId || !candidateId}>{busy ? 'Comparing…' : 'Compare'}</button>
+    </div>
+    {!baselines.length && !error && <div className="notice">No approved baseline is available.</div>}
+    {!candidates.length && !error && <div className="notice">No candidate run is available.</div>}
+    {selected && <div className="compareResult">
+      <div className="compareResultHeader"><div><h3>Comparison result</h3><small>{selected.comparison_id}</small></div><VerdictBadge verdict={String(verdict)} /></div>
+      <div className="compareMetrics">{dimensions.map(([key, label]) => <div key={key}><small>{label}</small><strong>{displayValue(valueAt(result, key))}</strong></div>)}</div>
+      <div className="compareReview">{sections.map(([key, label]) => { const items = valueAt(result, key); const nested = items && typeof items === 'object' ? (items as Record<string, unknown>).bindings : undefined; const rows = Array.isArray(items) ? items : Array.isArray(nested) ? nested : []; return <details key={key}><summary>{label} <span>{rows.length}</span></summary><pre>{rows.length ? JSON.stringify(rows, null, 2) : 'None'}</pre></details>; })}</div>
+      <div className="compareRecommendation"><strong>Recommendation</strong><p>{String(recommendation)}</p></div>
+      <details className="markdownViewer" open><summary>Markdown report</summary><pre>{markdown || 'Loading report…'}</pre></details>
+      <div className="downloadActions"><a className="downloadButton" href={api.comparisonJsonDownloadUrl(selected.comparison_id)}>Download JSON</a><a className="downloadButton" href={api.comparisonMarkdownDownloadUrl(selected.comparison_id)}>Download Markdown</a></div>
+    </div>}
+    <div className="compareHistory"><h3>Recent comparisons</h3>{history.length ? history.map((item) => <button key={`${item.comparison_id}-${item.compared_at}`} onClick={() => open(item)} disabled={busy}><VerdictBadge verdict={item.verdict} /><span>{item.candidate_id} → {item.baseline_id}</span><small>{item.compared_at}</small></button>) : <small>No comparison in this server session.</small>}</div>
+  </section>;
+}

@@ -18,6 +18,7 @@ from .crash_summary import build_crash_artifact_zip, build_crash_detail, build_c
 from .shadow_reporting import open_shadow_folder
 from .evidence_identity_reporting import identity_shadow_report
 from .v10_corpus_analytics import load_corpus_dashboard, open_corpus_target
+from .comparator_ui import ComparatorUiError, ComparatorUiService
 from .plugin_discovery import PluginDiscoveryRequest, discover_plugins
 from .plugin_draft import (
     PluginDraftApplyRequest,
@@ -60,6 +61,7 @@ app.add_middleware(
 )
 
 runner = RunManager()
+comparator_ui = ComparatorUiService()
 
 
 class StartRunRequest(BaseModel):
@@ -92,6 +94,79 @@ class BatchStartReq(BaseModel):
     identity_shadow_v2: bool = False
     traversal_identity_v2: bool = True
     traversal_profiler: bool = False
+
+
+class CompareRequest(BaseModel):
+    baseline_id: str
+    candidate_id: str
+
+
+def _comparator_error(exc: ComparatorUiError) -> HTTPException:
+    return HTTPException(status_code=exc.status_code, detail=exc.detail())
+
+
+@app.get("/api/comparator/baselines")
+def comparator_baselines() -> dict[str, object]:
+    try:
+        return {"baselines": comparator_ui.approved_baselines()}
+    except ComparatorUiError as exc:
+        raise _comparator_error(exc) from exc
+
+
+@app.get("/api/comparator/candidates")
+def comparator_candidates() -> dict[str, object]:
+    try:
+        return {"candidates": comparator_ui.candidates()}
+    except ComparatorUiError as exc:
+        raise _comparator_error(exc) from exc
+
+
+@app.post("/api/comparator/compare")
+def comparator_compare(request: CompareRequest) -> dict[str, object]:
+    try:
+        return comparator_ui.compare(baseline_id=request.baseline_id, candidate_id=request.candidate_id)
+    except ComparatorUiError as exc:
+        raise _comparator_error(exc) from exc
+
+
+@app.get("/api/comparator/history")
+def comparator_history() -> dict[str, object]:
+    return {"comparisons": comparator_ui.history()}
+
+
+@app.get("/api/comparator/results/{comparison_id}")
+def comparator_result(comparison_id: str) -> dict[str, object]:
+    try:
+        return comparator_ui.public_entry(comparator_ui.report(comparison_id), include_result=True)
+    except ComparatorUiError as exc:
+        raise _comparator_error(exc) from exc
+
+
+@app.get("/api/comparator/results/{comparison_id}/markdown")
+def comparator_markdown(comparison_id: str) -> Response:
+    try:
+        report = comparator_ui.report(comparison_id)
+    except ComparatorUiError as exc:
+        raise _comparator_error(exc) from exc
+    return Response(content=report["markdown"], media_type="text/markdown; charset=utf-8")
+
+
+@app.get("/api/comparator/results/{comparison_id}/report.json")
+def comparator_json_report(comparison_id: str) -> Response:
+    try:
+        report = comparator_ui.report(comparison_id)
+    except ComparatorUiError as exc:
+        raise _comparator_error(exc) from exc
+    return Response(content=report["canonical_json"], media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{comparison_id}.json"'})
+
+
+@app.get("/api/comparator/results/{comparison_id}/report.md")
+def comparator_markdown_report(comparison_id: str) -> Response:
+    try:
+        report = comparator_ui.report(comparison_id)
+    except ComparatorUiError as exc:
+        raise _comparator_error(exc) from exc
+    return Response(content=report["markdown"], media_type="text/markdown; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{comparison_id}.md"'})
 
 
 @app.get("/api/health")

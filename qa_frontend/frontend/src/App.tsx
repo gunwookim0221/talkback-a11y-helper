@@ -10,6 +10,7 @@ import { PluginDiscoveryPanel } from './components/PluginDiscoveryPanel';
 
 import { RecentRunsPanel } from './components/RecentRunsPanel';
 import { CorpusReadinessPanel } from './components/CorpusReadinessPanel';
+import { ComparePanel } from './components/ComparePanel';
 
 import { formatTime, formatDuration, formatBytes, healthClass, helperBadgeText, scenarioRunText, resolveSmokeSteps, describeScenarioSteps, languageLabel, scenarioReasonText } from './utils/formatters';
 import { useRunPolling } from './hooks/useRunPolling';
@@ -397,6 +398,10 @@ export default function App() {
 
       <section style={{ marginTop: '14px' }}>
         <PluginDiscoveryPanel running={running} reportError={reportError} />
+      </section>
+
+      <section style={{ marginTop: '14px' }}>
+        <ComparePanel />
       </section>
 
       <section className="panel preflightPanel" ref={preflightRef}>

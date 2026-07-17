@@ -224,6 +224,10 @@ export type OutputFile = {
   modified: number;
 };
 
+export type ComparatorBaseline = { baseline_id: string; revision: number | null; state: string; approved_at: string | null; app_package: string | null; version: string | null; locale: string | null };
+export type ComparatorCandidate = { candidate_id: string; run: string; source: string; app_package: string | null; version: string | null; locale: string | null };
+export type ComparisonHistoryEntry = { comparison_id: string; baseline_id: string; candidate_id: string; compared_at: string; verdict: string; result?: Record<string, unknown> };
+
 export type RecentRun = {
   run_id: string;
   mode: 'smoke' | 'full';
@@ -1101,6 +1105,16 @@ export const api = {
   runLog: () => request<{ text: string }>('/api/run/log'),
   runSnapshot: () => request<RunSnapshot>('/api/run/snapshot'),
   recentRuns: () => request<{ runs: RecentRun[] }>('/api/runs/recent'),
+  comparatorBaselines: () => request<{ baselines: ComparatorBaseline[] }>('/api/comparator/baselines'),
+  comparatorCandidates: () => request<{ candidates: ComparatorCandidate[] }>('/api/comparator/candidates'),
+  compare: (baselineId: string, candidateId: string) => request<ComparisonHistoryEntry>('/api/comparator/compare', {
+    method: 'POST', body: JSON.stringify({ baseline_id: baselineId, candidate_id: candidateId }),
+  }),
+  comparisonHistory: () => request<{ comparisons: ComparisonHistoryEntry[] }>('/api/comparator/history'),
+  comparisonResult: (comparisonId: string) => request<ComparisonHistoryEntry>(`/api/comparator/results/${encodeURIComponent(comparisonId)}`),
+  comparisonMarkdown: (comparisonId: string) => request<string>(`/api/comparator/results/${encodeURIComponent(comparisonId)}/markdown`),
+  comparisonJsonDownloadUrl: (comparisonId: string) => `/api/comparator/results/${encodeURIComponent(comparisonId)}/report.json`,
+  comparisonMarkdownDownloadUrl: (comparisonId: string) => `/api/comparator/results/${encodeURIComponent(comparisonId)}/report.md`,
   recentBatches: () => request<RecentBatch[]>('/api/batch/recent'),
   getBatchLogTail: (path: string) => request<{ text: string }>(`/api/batch/log-tail?path=${encodeURIComponent(path)}`),
   openShadowFolder: (runId: string, deviceId: string) =>

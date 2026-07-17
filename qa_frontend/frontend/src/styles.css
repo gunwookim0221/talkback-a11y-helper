@@ -1562,6 +1562,22 @@ h3 {
   text-align: center;
 }
 
+.comparePanel { border-top: 4px solid #526f87; }
+.compareHeader, .compareResultHeader { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
+.compareSelectors { align-items: end; display: grid; gap: 12px; grid-template-columns: 1fr 1fr auto; margin-top: 14px; }
+.compareSelectors label { color: #5e6c78; display: grid; font-size: 12px; gap: 5px; }
+.compareSelectors select { background: #fff; border: 1px solid #b8c2cc; border-radius: 6px; color: #172026; min-height: 36px; padding: 6px; }
+.compareAction { background: #245f82; border-color: #245f82; color: #fff; min-height: 36px; }
+.compareResult, .compareHistory { border-top: 1px solid #dce3e9; margin-top: 16px; padding-top: 14px; }
+.compareMetrics { display: grid; gap: 8px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 12px 0; }
+.compareMetrics div, .compareRecommendation { background: #f6f8fa; border: 1px solid #dce3e9; border-radius: 6px; padding: 9px; }
+.compareMetrics small { display: block; text-transform: capitalize; }
+.compareMetrics strong { display: block; font-size: 13px; margin-top: 4px; overflow-wrap: anywhere; }
+.compareVerdict { border-radius: 999px; font-size: 11px; font-weight: 800; padding: 4px 8px; white-space: nowrap; }
+.compareVerdict-pass { background: #d8f4df; color: #215a2f; }.compareVerdict-pass-with-limitations { background: #fff2bf; color: #725a00; }.compareVerdict-review-required, .compareVerdict-incomparable { background: #e7edf3; color: #43515c; }.compareVerdict-fail { background: #ffd8d8; color: #8d1e1e; }
+.compareReview { display: grid; gap: 7px; }.compareReview details, .markdownViewer { border: 1px solid #dce3e9; border-radius: 6px; padding: 8px 10px; }.compareReview summary, .markdownViewer summary { cursor: pointer; font-weight: 700; }.compareReview summary span { color: #667480; font-size: 12px; }.compareReview pre, .markdownViewer pre { max-height: 280px; overflow: auto; }.compareRecommendation { margin: 10px 0; }.compareRecommendation p { overflow-wrap: anywhere; }
+.compareHistory { display: grid; gap: 7px; }.compareHistory button { align-items: center; display: grid; gap: 8px; grid-template-columns: auto minmax(0, 1fr) auto; text-align: left; }.compareHistory button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 @media (max-width: 900px) {
   .runProfileChoices {
     grid-template-columns: 1fr;
@@ -1591,6 +1607,8 @@ h3 {
   .corpusMetrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .compareSelectors, .compareMetrics { grid-template-columns: 1fr; }
 
   .readinessCountGrid,
   .readinessFamilyRow {
