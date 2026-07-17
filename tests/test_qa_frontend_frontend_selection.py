@@ -122,3 +122,6 @@ def test_compare_verdict_badge_normalizes_string_object_and_null_payloads():
     assert "(value as Record<string, unknown>).overall" in compare_tsx
     assert "return 'UNKNOWN';" in compare_tsx
     assert "verdict: unknown" in (ROOT / "qa_frontend" / "frontend" / "src" / "api.ts").read_text(encoding="utf-8")
+    assert "verdictLabel === 'INCOMPARABLE'" in compare_tsx
+    assert "['input', 'selection'].includes" in compare_tsx
+    assert "structuredReason(reason).toUpperCase().includes('INCOMPARABLE')" not in compare_tsx

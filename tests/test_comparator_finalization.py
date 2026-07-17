@@ -10,8 +10,10 @@ import pytest
 
 from tb_runner.comparison_input import (
     adapt_approved_baseline,
+    adapt_candidate,
     candidate_input_from_baseline,
 )
+from tb_runner.aggregate_comparator import compare_environment
 from tb_runner.comparison_replay import (
     replay_selected_inputs,
     run_comparison_replay,
@@ -36,6 +38,17 @@ ROOT = Path(__file__).resolve().parents[1]
 APP_ROOT = ROOT / "baselines" / "com.samsung.android.oneconnect"
 ENGLISH_ID = "baseline_8f00aed49e61a07b_r0001"
 KOREAN_ID = "baseline_1f697e9b60c655df_r0001"
+ENGLISH_SOURCE_ID = "candidate_79f130ede3a544b327c8bdd4"
+KOREAN_SOURCE_ID = "candidate_c5cea23b40370f9a257e0eeb"
+
+
+def _source_candidate(candidate_id: str):
+    path = next(
+        (ROOT / "qa_frontend_runs").glob(
+            f"**/{candidate_id}.baseline_candidate.json"
+        )
+    )
+    return adapt_candidate(path)
 
 
 @pytest.fixture(scope="module")
@@ -79,6 +92,65 @@ def test_korean_self_compare_acceptance(korean_baseline):
     assert replay.result["verdict"]["overall"] == "PASS_WITH_LIMITATIONS"
     assert replay.result["node_match_summary"]["node_delta_counts"] == {
         "SAME_NODE_UNCHANGED": 879
+    }
+
+
+@pytest.mark.parametrize(
+    ("baseline_fixture", "candidate_id"),
+    (
+        ("english_baseline", ENGLISH_SOURCE_ID),
+        ("korean_baseline", KOREAN_SOURCE_ID),
+    ),
+)
+def test_approved_source_artifact_self_compare_acceptance(
+    request, baseline_fixture, candidate_id
+):
+    baseline = request.getfixturevalue(baseline_fixture)
+    candidate = _source_candidate(candidate_id)
+    replay = replay_selected_inputs(baseline, candidate, repository_root=ROOT)
+
+    assert replay.result["environment_delta"]["status"] == "UNCHANGED"
+    assert replay.result["environment_delta"]["changes"] == {}
+    assert replay.result["compatibility_grade"] == "EXACT_MATCH"
+    assert replay.result["app_version_delta"]["relation"] == "SAME"
+    assert replay.result["verdict"]["known_limitation_count"] == 5
+    assert replay.result["verdict"]["new_failure_count"] == 0
+    assert replay.result["verdict"]["resolved_failure_count"] == 0
+    assert replay.result["verdict"]["review_item_count"] == 0
+    assert replay.result["verdict"]["overall"] == "PASS_WITH_LIMITATIONS"
+    assert "normalized_runtime_config_hash" not in replay.markdown
+
+
+def test_missing_normalized_hash_is_not_ignored_for_predecessor(
+    english_baseline,
+):
+    candidate = _source_candidate(ENGLISH_SOURCE_ID)
+    provenance = dict(candidate.provenance)
+    provenance["source_run_id"] = "different_predecessor_run"
+    candidate = replace(candidate, provenance=provenance)
+
+    environment, _ = compare_environment(english_baseline, candidate)
+    assert environment["status"] == "STRUCTURAL_CHANGE"
+    assert "normalized_runtime_config_hash" in environment["changes"]
+
+
+def test_actual_normalized_hash_mismatch_remains_structural(
+    english_baseline,
+):
+    candidate = _source_candidate(ENGLISH_SOURCE_ID)
+    baseline_environment = dict(english_baseline.environment)
+    candidate_environment = dict(candidate.environment)
+    baseline_environment["normalized_runtime_config_hash"] = "baseline-hash"
+    candidate_environment["normalized_runtime_config_hash"] = "candidate-hash"
+
+    environment, _ = compare_environment(
+        replace(english_baseline, environment=baseline_environment),
+        replace(candidate, environment=candidate_environment),
+    )
+    assert environment["status"] == "STRUCTURAL_CHANGE"
+    assert environment["changes"]["normalized_runtime_config_hash"] == {
+        "baseline": "baseline-hash",
+        "candidate": "candidate-hash",
     }
 
 

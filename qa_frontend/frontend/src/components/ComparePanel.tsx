@@ -63,6 +63,12 @@ function structuredReason(value: unknown): string {
   return String(value ?? 'UNKNOWN');
 }
 
+function reasonField(value: unknown, field: string): unknown {
+  return value && typeof value === 'object'
+    ? (value as Record<string, unknown>)[field]
+    : undefined;
+}
+
 export function ComparePanel() {
   const [baselines, setBaselines] = useState<ComparatorBaseline[]>([]);
   const [candidates, setCandidates] = useState<ComparatorCandidate[]>([]);
@@ -116,9 +122,15 @@ export function ComparePanel() {
   const sourceCandidate = candidates.find((item) => item.candidate_id === selected?.candidate_id);
   const sourceWarnings = sourceCandidate && sourceCandidate.source_status !== 'APPROVED_SOURCE' && sourceCandidate.source_status_label
     ? [sourceCandidate.source_status_label, ...(sourceCandidate.blocking_reasons ?? []).map(reasonLabel)] : [];
+  const blockingReasons = verdictLabel === 'INCOMPARABLE'
+    ? [
+      ...compatibilityReasons,
+      ...verdictReasons.filter((reason) => ['input', 'selection'].includes(String(reasonField(reason, 'dimension') ?? ''))),
+    ]
+    : [];
   const reasonSections = verdictLabel === 'INCOMPARABLE' || verdictLabel === 'REVIEW_REQUIRED' || verdictLabel === 'FAIL'
     ? [
-      ['Blocking reasons', [...compatibilityReasons, ...verdictReasons.filter((reason) => structuredReason(reason).toUpperCase().includes('INCOMPARABLE'))]],
+      ['Blocking reasons', blockingReasons],
       ['Review reasons', [...verdictReasons, ...reviewItems]],
       ['Source warnings', sourceWarnings],
     ] as const : [];

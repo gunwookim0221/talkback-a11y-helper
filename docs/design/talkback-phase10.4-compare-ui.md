@@ -48,3 +48,11 @@ still treat a missing-versus-present value as a change/review condition.
 For `INCOMPARABLE`, `REVIEW_REQUIRED`, and `FAIL`, ComparePanel reuses
 structured verdict, compatibility, review-item, and source-status data in
 separate Blocking reasons, Review reasons, and Source warnings sections.
+Informational compatibility metadata such as `APP_VERSION_RELATION: SAME` is
+not a blocking reason. Compatibility reasons are shown as blockers only for an
+`INCOMPARABLE` result.
+
+Comparator Python modules and in-memory comparison history belong to the
+Backend process. After updating comparator code, restart the Backend before
+acceptance; existing session reports are immutable snapshots and are not
+recomputed by a browser refresh.
