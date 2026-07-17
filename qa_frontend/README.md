@@ -54,6 +54,14 @@ APIs:
 - `GET /api/outputs`
 - `GET /api/outputs/{filename}`
 
+Phase 10 Compare APIs are documented in the repository [operational runbook](../docs/operations/talkback-operational-runbook.md):
+
+- `GET /api/comparator/baselines`
+- `GET /api/comparator/candidates`
+- `POST /api/comparator/compare`
+- `GET /api/comparator/history`
+- `GET /api/comparator/results/{comparison_id}` and report/download routes
+
 Run logs are written under `qa_frontend_runs/`. Runner output files continue to be written under `output/`.
 When a run reaches a terminal state, the backend writes `qa_frontend_runs/<run_id>_summary.json` as a structured sidecar. The log remains the source of truth; the summary is a secondary cache/index for Recent Runs, dashboards, and future queue/statistics work.
 

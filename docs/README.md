@@ -4,6 +4,9 @@
 
 ## 운영 기준
 
+- Phase 10 운영 Runbook: [operations/talkback-operational-runbook.md](operations/talkback-operational-runbook.md)
+- Phase 10 종료/Handoff: [design/talkback-phase10-phase-closure.md](design/talkback-phase10-phase-closure.md)
+
 - 시스템 개요: [system-overview.md](system-overview.md)
 - 아키텍처: [architecture.md](architecture.md)
 - 현재 client 구조: [current-client-architecture.md](current-client-architecture.md)
