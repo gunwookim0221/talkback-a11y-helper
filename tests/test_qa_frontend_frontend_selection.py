@@ -114,3 +114,11 @@ def test_run_profiles_readiness_smoke_confirmation_and_locale_are_wired():
     assert "currentLanguageLabel(effectiveLocale)" in run_panel_tsx
     assert "status?.state === 'running' || batchStatus?.state === 'running'" in app_tsx
     assert "disabled={controlsLocked}" in run_panel_tsx
+
+
+def test_compare_verdict_badge_normalizes_string_object_and_null_payloads():
+    compare_tsx = (ROOT / "qa_frontend" / "frontend" / "src" / "components" / "ComparePanel.tsx").read_text(encoding="utf-8")
+    assert "function normalizeVerdict(value: unknown): string" in compare_tsx
+    assert "(value as Record<string, unknown>).overall" in compare_tsx
+    assert "return 'UNKNOWN';" in compare_tsx
+    assert "verdict: unknown" in (ROOT / "qa_frontend" / "frontend" / "src" / "api.ts").read_text(encoding="utf-8")

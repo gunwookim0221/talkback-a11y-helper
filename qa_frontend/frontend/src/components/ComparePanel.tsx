@@ -15,9 +15,23 @@ function valueAt(result: Record<string, unknown>, name: string): unknown {
   return result[name] ?? (result.summary as Record<string, unknown> | undefined)?.[name];
 }
 
-function VerdictBadge({ verdict }: { verdict: string }) {
-  const css = `compareVerdict compareVerdict-${verdict.toLowerCase().replaceAll('_', '-')}`;
-  return <span className={css}>{verdict.replaceAll('_', ' ')}</span>;
+function normalizeVerdict(value: unknown): string {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+  if (value && typeof value === 'object') {
+    const overall = (value as Record<string, unknown>).overall;
+    if (typeof overall === 'string' && overall.trim()) {
+      return overall.trim();
+    }
+  }
+  return 'UNKNOWN';
+}
+
+function VerdictBadge({ verdict }: { verdict: unknown }) {
+  const label = normalizeVerdict(verdict);
+  const css = `compareVerdict compareVerdict-${label.toLowerCase().replaceAll('_', '-')}`;
+  return <span className={css}>{label.replaceAll('_', ' ')}</span>;
 }
 
 function displayValue(value: unknown): string {
@@ -26,6 +40,14 @@ function displayValue(value: unknown): string {
     return String(item.status ?? item.relation ?? item.overall ?? '-');
   }
   return String(value ?? '-');
+}
+
+function reasonLabel(reason: string): string {
+  const labels: Record<string, string> = {
+    DIRTY: 'DIRTY', full_scenario_set: 'TARGETED', working_tree_clean: 'DIRTY',
+    required_artifacts: 'MISSING ARTIFACT', environment_fingerprint_complete: 'INCOMPLETE ENVIRONMENT',
+  };
+  return labels[reason] ?? reason.replaceAll('_', ' ').toUpperCase();
 }
 
 export function ComparePanel() {
@@ -71,21 +93,23 @@ export function ComparePanel() {
     finally { setBusy(false); }
   }
   const result = selected?.result ?? {};
-  const verdict = (result.verdict as Record<string, unknown> | undefined)?.overall ?? selected?.verdict ?? '-';
+  const verdict = result.verdict ?? selected?.verdict;
   const recommendation = (result.verdict as Record<string, unknown> | undefined)?.recommendation ?? '-';
 
   return <section className="panel comparePanel">
     <div className="compareHeader"><div><h2>Baseline Comparator</h2><p>Read-only comparison. Approval remains a manual workflow.</p></div><button onClick={refresh} disabled={busy}>Refresh inputs</button></div>
     {error && <div className="error">{error}</div>}
     <div className="compareSelectors">
-      <label>Candidate (run)<select value={candidateId} disabled={busy || !candidates.length} onChange={(event) => setCandidateId(event.target.value)}>{candidates.map((item) => <option key={`${item.candidate_id}-${item.source}`} value={item.candidate_id}>{item.locale ?? '-'} · {item.version ?? '-'} · {item.run}</option>)}</select></label>
+      <label>Available run / candidate<select value={candidateId} disabled={busy || !candidates.length} onChange={(event) => setCandidateId(event.target.value)}>{candidates.map((item) => <option key={`${item.candidate_id}-${item.source}`} value={item.candidate_id}>{item.locale ?? '-'} · {item.version ?? '-'} · {item.run} · {item.source_status_label ?? 'UNKNOWN'}</option>)}</select></label>
       <label>Approved baseline<select value={baselineId} disabled={busy || !baselines.length} onChange={(event) => setBaselineId(event.target.value)}>{baselines.map((item) => <option key={item.baseline_id} value={item.baseline_id}>{item.locale ?? '-'} · {item.version ?? '-'} · r{item.revision}</option>)}</select></label>
       <button className="compareAction" onClick={compare} disabled={busy || !baselineId || !candidateId}>{busy ? 'Comparing…' : 'Compare'}</button>
     </div>
+    <p className="compareInputHint">Runs are local comparison inputs. Approved baselines are managed separately.</p>
+    {candidateId && (() => { const item = candidates.find((candidate) => candidate.candidate_id === candidateId); if (!item) return null; const reasons = item.blocking_reasons?.map(reasonLabel) ?? []; return <div className="compareCandidateDetail"><strong>{item.source_status_label ?? 'UNKNOWN'}</strong>{item.approved_baseline_id && <span> · {item.approved_baseline_id}</span>}{reasons.length > 0 && <span> · Reason: {reasons.join(', ')}</span>}</div>; })()}
     {!baselines.length && !error && <div className="notice">No approved baseline is available.</div>}
     {!candidates.length && !error && <div className="notice">No candidate run is available.</div>}
     {selected && <div className="compareResult">
-      <div className="compareResultHeader"><div><h3>Comparison result</h3><small>{selected.comparison_id}</small></div><VerdictBadge verdict={String(verdict)} /></div>
+      <div className="compareResultHeader"><div><h3>Comparison result</h3><small>{selected.comparison_id}</small></div><VerdictBadge verdict={verdict} /></div>
       <div className="compareMetrics">{dimensions.map(([key, label]) => <div key={key}><small>{label}</small><strong>{displayValue(valueAt(result, key))}</strong></div>)}</div>
       <div className="compareReview">{sections.map(([key, label]) => { const items = valueAt(result, key); const nested = items && typeof items === 'object' ? (items as Record<string, unknown>).bindings : undefined; const rows = Array.isArray(items) ? items : Array.isArray(nested) ? nested : []; return <details key={key}><summary>{label} <span>{rows.length}</span></summary><pre>{rows.length ? JSON.stringify(rows, null, 2) : 'None'}</pre></details>; })}</div>
       <div className="compareRecommendation"><strong>Recommendation</strong><p>{String(recommendation)}</p></div>
