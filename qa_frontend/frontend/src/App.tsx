@@ -17,8 +17,10 @@ import { groupScenarios } from './utils/scenarioGrouping';
 import { getDevicePluginName } from './utils/devicePluginMeta';
 import { getLifePluginName } from './utils/lifePluginMeta';
 import { getNavigationName, isOptionalNavigationScenario } from './utils/navigationMeta';
+import { RUN_PROFILES } from './runProfiles';
 
 type LanguageMode = 'current' | 'ko-KR' | 'en-US';
+const DEFAULT_RUN_PROFILE = RUN_PROFILES['full-validation'];
 
 export default function App() {
   const [adb, setAdb] = useState<Record<string, unknown> | null>(null);
@@ -28,15 +30,15 @@ export default function App() {
   const [outputs, setOutputs] = useState<OutputFile[]>([]);
   const [recentRuns, setRecentRuns] = useState<RecentRun[]>([]);
   const [selectedRecentRunId, setSelectedRecentRunId] = useState<string | null>(null);
-  const [launchMode, setLaunchMode] = useState<'warm' | 'clean'>('clean');
+  const [launchMode, setLaunchMode] = useState<'warm' | 'clean'>(DEFAULT_RUN_PROFILE.launchMode);
   const [languageMode, setLanguageMode] = useState<LanguageMode>('current');
-  const [plannedMode, setPlannedMode] = useState<'smoke' | 'full'>('smoke');
-  const [enableCoverageProbe, setEnableCoverageProbe] = useState(false);
-  const [shadowValidation, setShadowValidation] = useState(false);
-  const [evidenceLedger, setEvidenceLedger] = useState(true);
-  const [identityShadowV2, setIdentityShadowV2] = useState(true);
-  const [traversalIdentityV2, setTraversalIdentityV2] = useState(true);
-  const [traversalProfiler, setTraversalProfiler] = useState(false);
+  const [plannedMode, setPlannedMode] = useState<'smoke' | 'full'>(DEFAULT_RUN_PROFILE.plannedMode);
+  const [enableCoverageProbe, setEnableCoverageProbe] = useState(DEFAULT_RUN_PROFILE.enableCoverageProbe);
+  const [shadowValidation, setShadowValidation] = useState(DEFAULT_RUN_PROFILE.shadowValidation);
+  const [evidenceLedger, setEvidenceLedger] = useState(DEFAULT_RUN_PROFILE.evidenceLedger);
+  const [identityShadowV2, setIdentityShadowV2] = useState(DEFAULT_RUN_PROFILE.identityShadowV2);
+  const [traversalIdentityV2, setTraversalIdentityV2] = useState(DEFAULT_RUN_PROFILE.traversalIdentityV2);
+  const [traversalProfiler, setTraversalProfiler] = useState(DEFAULT_RUN_PROFILE.traversalProfiler);
   const [fixTalkBackRunning, setFixTalkBackRunning] = useState(false);
   const [fixTalkBackMessage, setFixTalkBackMessage] = useState<string | null>(null);
   const preflightRef = useRef<HTMLElement | null>(null);
@@ -65,7 +67,7 @@ export default function App() {
     },
   });
 
-  const running = status?.state === 'running';
+  const running = status?.state === 'running' || batchStatus?.state === 'running';
   const enabledCount = useMemo(() => scenarios.filter((scenario) => scenario.enabled).length, [scenarios]);
   const selectedCount = selected.size;
   const effectiveMode = status?.state === 'running' ? ((status.mode as 'smoke' | 'full' | null) ?? plannedMode) : plannedMode;
@@ -124,10 +126,6 @@ export default function App() {
   useEffect(() => {
     refreshStatic().then(refreshRun).catch((err) => reportError(err));
   }, [refreshRun]);
-
-  useEffect(() => {
-    setEnableCoverageProbe(plannedMode === 'full');
-  }, [plannedMode]);
 
   useEffect(() => {
     if (!shouldScrollToPreflight || !status?.run_id) {
@@ -379,7 +377,9 @@ export default function App() {
           status={status}
           stepPolicyText={stepPolicyText}
           selectedCount={selectedCount}
+          registryScenarioCount={scenarios.length}
           selectedScenarios={selected}
+          effectiveLocale={status?.device_locale ?? dashboard?.device_locale}
           enableCoverageProbe={enableCoverageProbe}
           setEnableCoverageProbe={setEnableCoverageProbe}
           shadowValidation={shadowValidation}

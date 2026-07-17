@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { RunStatus, api, DeviceInfo, BatchStatus } from '../api';
-import { languageLabel } from '../utils/formatters';
+import {
+  RunProfileId,
+  currentLanguageLabel,
+  getValidationReadiness,
+  resolveRunProfile,
+} from '../runProfiles';
 
 type LanguageMode = 'current' | 'ko-KR' | 'en-US';
 
@@ -18,7 +23,9 @@ export interface RunPanelProps {
   status: RunStatus | null;
   stepPolicyText: string;
   selectedCount: number;
+  registryScenarioCount: number;
   selectedScenarios: Set<string>;
+  effectiveLocale?: string | null;
   enableCoverageProbe: boolean;
   setEnableCoverageProbe: (enabled: boolean) => void;
   shadowValidation: boolean;
@@ -47,7 +54,9 @@ export function RunPanel({
   status,
   stepPolicyText,
   selectedCount,
+  registryScenarioCount,
   selectedScenarios,
+  effectiveLocale,
   enableCoverageProbe,
   setEnableCoverageProbe,
   shadowValidation,
@@ -59,6 +68,8 @@ export function RunPanel({
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [selectedDevices, setSelectedDevices] = useState<Set<string>>(new Set());
+  const [runProfile, setRunProfile] = useState<RunProfileId>('full-validation');
+  const [showSmokeConfirmation, setShowSmokeConfirmation] = useState(false);
 
   const fetchDevices = async () => {
     setLoadingDevices(true);
@@ -102,6 +113,22 @@ export function RunPanel({
   };
 
   const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
+  const controlsLocked = running || batchStatus?.state === 'running';
+  const customOptionsEnabled = runProfile === 'custom-debug' && !controlsLocked;
+  const showLegacyShadowValidation =
+    import.meta.env.DEV || import.meta.env.VITE_SHOW_LEGACY_SHADOW_VALIDATION === 'true';
+  const readiness = getValidationReadiness({
+    launchMode,
+    plannedMode,
+    enableCoverageProbe,
+    shadowValidation,
+    evidenceLedger,
+    identityShadowV2,
+    traversalIdentityV2,
+    traversalProfiler,
+    selectedScenarioCount: selectedCount,
+    registryScenarioCount,
+  });
 
   useEffect(() => {
     let timer: number;
@@ -122,7 +149,30 @@ export function RunPanel({
     return () => window.clearTimeout(timer);
   }, []);
 
-  const handleRunClick = async () => {
+  const applyRunProfile = (profile: RunProfileId) => {
+    if (controlsLocked) return;
+    setRunProfile(profile);
+    const settings = resolveRunProfile(profile, {
+      launchMode,
+      plannedMode,
+      enableCoverageProbe,
+      shadowValidation,
+      evidenceLedger,
+      identityShadowV2,
+      traversalIdentityV2,
+      traversalProfiler,
+    });
+    setLaunchMode(settings.launchMode);
+    setPlannedMode(settings.plannedMode);
+    setEnableCoverageProbe(settings.enableCoverageProbe);
+    setShadowValidation(settings.shadowValidation);
+    setEvidenceLedger(settings.evidenceLedger);
+    setIdentityShadowV2(settings.identityShadowV2);
+    setTraversalIdentityV2(settings.traversalIdentityV2);
+    setTraversalProfiler(settings.traversalProfiler);
+  };
+
+  const executeRun = async () => {
     if (selectedDevices.size > 0) {
       const selected = devices.filter(d => selectedDevices.has(d.serial) && d.state === 'device');
       if (selected.length === 0) {
@@ -158,6 +208,19 @@ export function RunPanel({
     }
   };
 
+  const handleRunClick = () => {
+    if (plannedMode === 'smoke') {
+      setShowSmokeConfirmation(true);
+      return;
+    }
+    void executeRun();
+  };
+
+  const confirmSmokeRun = () => {
+    setShowSmokeConfirmation(false);
+    void executeRun();
+  };
+
   return (
     <article className="panel controls">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
@@ -171,10 +234,52 @@ export function RunPanel({
         )}
       </div>
 
+      <section className="runProfiles" aria-label="Run Profile">
+        <div className="runProfilesHeader">
+          <div>
+            <h3>Run Profile</h3>
+            <small>Choose a safe operating preset, or unlock individual controls for debugging.</small>
+          </div>
+          <span className="profileDefault">Full Validation is default</span>
+        </div>
+        <div className="runProfileChoices">
+          <button
+            type="button"
+            className={runProfile === 'full-validation' ? 'runProfileActive' : ''}
+            aria-pressed={runProfile === 'full-validation'}
+            onClick={() => applyRunProfile('full-validation')}
+            disabled={controlsLocked}
+          >
+            Full Validation
+            <small>Clean · Selected Full · approval diagnostics on</small>
+          </button>
+          <button
+            type="button"
+            className={runProfile === 'quick-smoke' ? 'runProfileActive' : ''}
+            aria-pressed={runProfile === 'quick-smoke'}
+            onClick={() => applyRunProfile('quick-smoke')}
+            disabled={controlsLocked}
+          >
+            Quick Smoke
+            <small>Clean · Selected Smoke · fast verification</small>
+          </button>
+          <button
+            type="button"
+            className={runProfile === 'custom-debug' ? 'runProfileActive' : ''}
+            aria-pressed={runProfile === 'custom-debug'}
+            onClick={() => applyRunProfile('custom-debug')}
+            disabled={controlsLocked}
+          >
+            Custom / Debug
+            <small>Unlock all run options</small>
+          </button>
+        </div>
+      </section>
+
       <div style={{ marginBottom: '20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
           <h3 style={{ margin: 0, fontSize: '12px', color: 'var(--color-text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Devices</h3>
-          <button onClick={fetchDevices} disabled={loadingDevices || running} style={{ fontSize: '11px', padding: '2px 8px', minWidth: 'auto' }}>
+          <button onClick={fetchDevices} disabled={loadingDevices || controlsLocked} style={{ fontSize: '11px', padding: '2px 8px', minWidth: 'auto' }}>
             {loadingDevices ? '...' : 'Refresh'}
           </button>
         </div>
@@ -193,12 +298,12 @@ export function RunPanel({
               const isSelectable = d.state === 'device';
 
               return (
-                <label key={d.serial} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '8px 12px', background: 'var(--color-bg-dim)', borderRadius: '6px', opacity: isSelectable ? 1 : 0.6, cursor: isSelectable && !running ? 'pointer' : 'not-allowed', border: '1px solid var(--color-border)' }}>
+                <label key={d.serial} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '8px 12px', background: 'var(--color-bg-dim)', borderRadius: '6px', opacity: isSelectable ? 1 : 0.6, cursor: isSelectable && !controlsLocked ? 'pointer' : 'not-allowed', border: '1px solid var(--color-border)' }}>
                   <input 
                     type="checkbox" 
                     checked={selectedDevices.has(d.serial)} 
                     onChange={() => toggleDevice(d.serial)}
-                    disabled={!isSelectable || running}
+                    disabled={!isSelectable || controlsLocked}
                     style={{ marginTop: '3px' }}
                   />
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -251,7 +356,7 @@ export function RunPanel({
                 name="launch_mode"
                 checked={launchMode === 'clean'}
                 onChange={() => setLaunchMode('clean')}
-                disabled={running}
+                disabled={!customOptionsEnabled}
               />
               <span style={{ fontSize: '14px' }}>Clean</span>
             </label>
@@ -261,7 +366,7 @@ export function RunPanel({
                 name="launch_mode"
                 checked={launchMode === 'warm'}
                 onChange={() => setLaunchMode('warm')}
-                disabled={running}
+                disabled={!customOptionsEnabled}
               />
               <span style={{ fontSize: '14px' }}>Warm</span>
             </label>
@@ -277,9 +382,9 @@ export function RunPanel({
                 name="language_mode"
                 checked={languageMode === 'current'}
                 onChange={() => setLanguageMode('current')}
-                disabled={running}
+                disabled={controlsLocked}
               />
-              <span style={{ fontSize: '14px' }}>Current</span>
+              <span style={{ fontSize: '14px' }}>{currentLanguageLabel(effectiveLocale)}</span>
             </label>
             <label style={{ padding: '4px 8px', gridTemplateColumns: 'auto auto', gap: '4px' }}>
               <input
@@ -287,7 +392,7 @@ export function RunPanel({
                 name="language_mode"
                 checked={languageMode === 'ko-KR'}
                 onChange={() => setLanguageMode('ko-KR')}
-                disabled={running}
+                disabled={controlsLocked}
               />
               <span style={{ fontSize: '14px' }}>Korean</span>
             </label>
@@ -297,7 +402,7 @@ export function RunPanel({
                 name="language_mode"
                 checked={languageMode === 'en-US'}
                 onChange={() => setLanguageMode('en-US')}
-                disabled={running}
+                disabled={controlsLocked}
               />
               <span style={{ fontSize: '14px' }}>English</span>
             </label>
@@ -313,7 +418,7 @@ export function RunPanel({
                 name="planned_mode"
                 checked={plannedMode === 'smoke'}
                 onChange={() => setPlannedMode('smoke')}
-                disabled={running}
+                disabled={!customOptionsEnabled}
               />
               <span style={{ fontSize: '14px' }}>Selected Smoke</span>
               <small style={{ fontSize: '11px', margin: 0 }}>selected scenarios with reduced max_steps</small>
@@ -324,7 +429,7 @@ export function RunPanel({
                 name="planned_mode"
                 checked={plannedMode === 'full'}
                 onChange={() => setPlannedMode('full')}
-                disabled={running}
+                disabled={!customOptionsEnabled}
               />
               <span style={{ fontSize: '14px' }}>Selected Full</span>
               <small style={{ fontSize: '11px', margin: 0 }}>selected scenarios with source max_steps</small>
@@ -340,7 +445,7 @@ export function RunPanel({
                 type="checkbox"
                 checked={enableCoverageProbe}
                 onChange={(e) => setEnableCoverageProbe(e.target.checked)}
-                disabled={running}
+                disabled={!customOptionsEnabled}
               />
               <span style={{ fontSize: '14px' }}>Runtime Coverage Probe</span>
             </label>
@@ -350,7 +455,7 @@ export function RunPanel({
               </small>
             </div>
             <label title="Uses the production traversal engine. Turn off to run the legacy compatibility traversal." style={{ padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input type="checkbox" checked={traversalIdentityV2} onChange={e => { setTraversalIdentityV2(e.target.checked); if (e.target.checked) { setIdentityShadowV2(true); setEvidenceLedger(true); } }} disabled={running} />
+              <input type="checkbox" checked={traversalIdentityV2} onChange={e => { setTraversalIdentityV2(e.target.checked); if (e.target.checked) { setIdentityShadowV2(true); setEvidenceLedger(true); } }} disabled={!customOptionsEnabled} />
               <span style={{ fontSize: '14px' }}>Traversal Engine</span>
             </label>
             <div style={{ padding: '0 8px', marginTop: '-4px' }}><small style={{ fontSize: '11px', color: 'var(--color-text-dim)' }}>V2 is the production default. Turn it off to run Legacy Compatibility traversal.</small></div>
@@ -358,25 +463,27 @@ export function RunPanel({
               <summary style={{ cursor: 'pointer', fontSize: '13px', color: 'var(--color-text-dim)' }}>Advanced Diagnostics</summary>
               <div style={{ paddingTop: '6px' }}>
                 <label title="Collect detailed traversal evidence." style={{ padding: '4px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <input type="checkbox" checked={evidenceLedger} onChange={e => { setEvidenceLedger(e.target.checked); if (!e.target.checked) { setIdentityShadowV2(false); setTraversalIdentityV2(false); } }} disabled={running} />
+                  <input type="checkbox" checked={evidenceLedger} onChange={e => { setEvidenceLedger(e.target.checked); if (!e.target.checked) { setIdentityShadowV2(false); setTraversalIdentityV2(false); } }} disabled={!customOptionsEnabled} />
                   <span style={{ fontSize: '14px' }}>Evidence Ledger</span>
                 </label>
                 <label title="Collect runtime metrics and generate profiler artifacts. Does not change traversal behavior." style={{ padding: '4px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <input type="checkbox" checked={traversalProfiler} onChange={e => setTraversalProfiler(e.target.checked)} disabled={running} />
+                  <input type="checkbox" checked={traversalProfiler} onChange={e => setTraversalProfiler(e.target.checked)} disabled={!customOptionsEnabled} />
                   <span style={{ fontSize: '14px' }}>Runtime Profiler</span>
                 </label>
                 <div style={{ padding: '0', marginTop: '-4px' }}><small style={{ fontSize: '11px', color: 'var(--color-text-dim)' }}>Collect runtime metrics and generate profiler artifacts. Does not change traversal behavior.</small></div>
                 <label title="Compare legacy and V2 identity results without changing traversal." style={{ padding: '4px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <input type="checkbox" checked={identityShadowV2} onChange={e => { setIdentityShadowV2(e.target.checked); if (e.target.checked) setEvidenceLedger(true); else setTraversalIdentityV2(false); }} disabled={running} />
+                  <input type="checkbox" checked={identityShadowV2} onChange={e => { setIdentityShadowV2(e.target.checked); if (e.target.checked) setEvidenceLedger(true); else setTraversalIdentityV2(false); }} disabled={!customOptionsEnabled} />
                   <span style={{ fontSize: '14px' }}>Identity Shadow V2 (Read-only)</span>
                 </label>
                 <div style={{ padding: '0', marginTop: '-4px' }}><small style={{ fontSize: '11px', color: 'var(--color-text-dim)' }}>Read-only comparison. Requires Evidence Ledger and enables it automatically.</small></div>
+                {showLegacyShadowValidation && (
+                <div className="legacyShadowControl">
                 <label title="Run the legacy validation pipeline after the run; legacy results remain authoritative." style={{ padding: '4px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <input
                     type="checkbox"
                     checked={shadowValidation}
                     onChange={(e) => setShadowValidation(e.target.checked)}
-                    disabled={running || plannedMode !== 'full'}
+                    disabled={!customOptionsEnabled || plannedMode !== 'full'}
                   />
                   <span style={{ fontSize: '14px' }}>Legacy Shadow Validation (Experimental)</span>
                 </label>
@@ -385,25 +492,60 @@ export function RunPanel({
                     Legacy validation is retained for comparison and is planned for removal. Legacy remains authoritative.
                   </small>
                 </div>
+                </div>
+                )}
               </div>
             </details>
           </div>
         </div>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px' }}>
-        <div style={{ fontSize: '13px', color: 'var(--color-text-dim)' }}>
-          <strong>Current:</strong> {effectiveMode === 'smoke' ? 'Selected Smoke' : 'Selected Full'} &middot; {String(status?.launch_mode ?? launchMode).replace(/^\w/, c => c.toUpperCase())} &middot; {String(status?.language_mode ?? languageMode).replace(/^\w/, c => c.toUpperCase())} &middot; Selected {selectedCount}
+      <div className="runFooter">
+        <div>
+          <div style={{ fontSize: '13px', color: 'var(--color-text-dim)' }}>
+            <strong>Current:</strong> {effectiveMode === 'smoke' ? 'Selected Smoke' : 'Selected Full'} &middot; {String(status?.launch_mode ?? launchMode).replace(/^\w/, c => c.toUpperCase())} &middot; {languageMode === 'current' ? currentLanguageLabel(effectiveLocale) : String(status?.language_mode ?? languageMode).replace(/^\w/, c => c.toUpperCase())} &middot; Selected {selectedCount}
+          </div>
+          <div className={`validationReadiness ${readiness.ready ? 'validationReady' : 'validationNotReady'}`} aria-live="polite">
+            <strong>{readiness.ready ? 'READY' : 'NOT READY'}</strong>
+            <span>
+              {readiness.ready
+                ? 'Candidate-impacting run inputs are enabled.'
+                : readiness.reasons.join(' · ')}
+            </span>
+          </div>
         </div>
         <div className="buttonRow" style={{ marginBottom: '0', justifyContent: 'flex-end', gap: '12px' }}>
-          <button onClick={handleRunClick} disabled={running || batchStatus?.state === 'running'} style={{ minWidth: '100px' }}>
+          <button onClick={handleRunClick} disabled={controlsLocked} style={{ minWidth: '100px' }}>
             Run
           </button>
-          <button className="danger" onClick={stop} disabled={!running} style={{ minWidth: '100px' }}>
+          <button className="danger" onClick={stop} disabled={!controlsLocked} style={{ minWidth: '100px' }}>
             Stop
           </button>
         </div>
       </div>
+
+      {showSmokeConfirmation && (
+        <div className="confirmationBackdrop" role="presentation" onClick={() => setShowSmokeConfirmation(false)}>
+          <div
+            className="confirmationDialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="smoke-confirmation-title"
+            onClick={event => event.stopPropagation()}
+          >
+            <h2 id="smoke-confirmation-title">Quick Smoke</h2>
+            <p>
+              Smoke Run은 빠른 확인을 위한 실행이며<br />
+              정식 검증 결과로 사용되지 않습니다.
+            </p>
+            <p>계속 실행하시겠습니까?</p>
+            <div className="buttonRow">
+              <button type="button" onClick={() => setShowSmokeConfirmation(false)}>Cancel</button>
+              <button type="button" className="primary" onClick={confirmSmokeRun}>Run Smoke</button>
+            </div>
+          </div>
+        </div>
+      )}
     </article>
   );
 }

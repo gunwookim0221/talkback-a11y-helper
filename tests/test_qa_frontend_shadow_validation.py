@@ -68,11 +68,12 @@ def test_frontend_sends_shadow_validation_for_single_and_batch_runs():
     api = (root / "qa_frontend/frontend/src/api.ts").read_text(encoding="utf-8")
 
     assert "useState(false)" in app
-    assert "setEnableCoverageProbe(plannedMode === 'full')" in app
+    assert "useState(DEFAULT_RUN_PROFILE.enableCoverageProbe)" in app
     assert "Runtime Coverage Probe" in panel
     assert "Recommended for Full runs." in panel
     assert "Shadow Validation (Experimental)" in panel
-    assert "disabled={running || plannedMode !== 'full'}" in panel
+    assert "disabled={!customOptionsEnabled || plannedMode !== 'full'}" in panel
+    assert "VITE_SHOW_LEGACY_SHADOW_VALIDATION" in panel
     assert "shadow_validation: plannedMode === 'full' && shadowValidation" in panel
     assert "shadow_validation: shadowValidation" in api
 

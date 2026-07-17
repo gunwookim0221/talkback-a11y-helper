@@ -17,9 +17,12 @@ def test_frontend_initial_selection_defaults_to_global_nav_not_source_enabled():
     assert "new Set([DEFAULT_SCENARIO_ID])" in selection_ts
     assert "scenario.enabled" not in selection_ts
     assert "setSelected(initialScenarioSelection(response.scenarios))" in app_tsx
-    assert "setEnableCoverageProbe(plannedMode === 'full')" in app_tsx
+    assert "const DEFAULT_RUN_PROFILE = RUN_PROFILES['full-validation']" in app_tsx
+    assert "useState<'smoke' | 'full'>(DEFAULT_RUN_PROFILE.plannedMode)" in app_tsx
+    assert "useState(DEFAULT_RUN_PROFILE.enableCoverageProbe)" in app_tsx
+    assert "useState(DEFAULT_RUN_PROFILE.traversalProfiler)" in app_tsx
     assert "filter((scenario) => scenario.enabled).map((scenario) => scenario.id)" not in app_tsx
-    assert "useState<'warm' | 'clean'>('clean')" in app_tsx
+    assert "useState<'warm' | 'clean'>(DEFAULT_RUN_PROFILE.launchMode)" in app_tsx
     assert "Run blocked: language change required" in app_tsx
     assert "Open Language Settings" in app_tsx
     assert "then run again with Current device language" in app_tsx
@@ -52,6 +55,7 @@ def test_frontend_initial_selection_defaults_to_global_nav_not_source_enabled():
     assert "Collect runtime metrics and generate profiler artifacts. Does not change traversal behavior." in run_panel_tsx
     assert "Identity Shadow V2 (Read-only)" in run_panel_tsx
     assert "Legacy Shadow Validation (Experimental)" in run_panel_tsx
+    assert "VITE_SHOW_LEGACY_SHADOW_VALIDATION" in run_panel_tsx
     assert "planned for removal" in run_panel_tsx
     assert "Recommended for Full runs." in run_panel_tsx
     assert "V8 Runtime Probe" not in run_panel_tsx
@@ -71,7 +75,7 @@ def test_traversal_identity_v2_ui_is_default_on_and_enforces_dependencies():
     recent_runs_tsx = (ROOT / "qa_frontend" / "frontend" / "src" / "components" / "RecentRunsPanel.tsx").read_text(encoding="utf-8")
     api_ts = (ROOT / "qa_frontend" / "frontend" / "src" / "api.ts").read_text(encoding="utf-8")
 
-    assert "const [traversalIdentityV2, setTraversalIdentityV2] = useState(true)" in app_tsx
+    assert "useState(DEFAULT_RUN_PROFILE.traversalIdentityV2)" in app_tsx
     assert "setIdentityShadowV2(true); setEvidenceLedger(true);" in run_panel_tsx
     assert "setIdentityShadowV2(false); setTraversalIdentityV2(false);" in run_panel_tsx
     assert "else setTraversalIdentityV2(false)" in run_panel_tsx
@@ -88,3 +92,25 @@ def test_traversal_identity_v2_ui_is_default_on_and_enforces_dependencies():
     assert "TraversalIdentityV2Card" in recent_runs_tsx
     assert "traversal_identity_v2: boolean" in api_ts
     assert "traversal_profiler?: boolean" in api_ts
+
+
+def test_run_profiles_readiness_smoke_confirmation_and_locale_are_wired():
+    app_tsx = (ROOT / "qa_frontend" / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+    run_panel_tsx = (ROOT / "qa_frontend" / "frontend" / "src" / "components" / "RunPanel.tsx").read_text(encoding="utf-8")
+    profiles_ts = (ROOT / "qa_frontend" / "frontend" / "src" / "runProfiles.ts").read_text(encoding="utf-8")
+
+    assert "useState<RunProfileId>('full-validation')" in run_panel_tsx
+    assert "Full Validation" in run_panel_tsx
+    assert "Quick Smoke" in run_panel_tsx
+    assert "Custom / Debug" in run_panel_tsx
+    assert "getValidationReadiness" in run_panel_tsx
+    assert "'Mode is Smoke'" in profiles_ts
+    assert "'Runtime Profiler disabled'" in profiles_ts
+    assert "'Coverage disabled'" in profiles_ts
+    assert "'Identity disabled'" in profiles_ts
+    assert "Smoke Run은 빠른 확인을 위한 실행이며" in run_panel_tsx
+    assert "정식 검증 결과로 사용되지 않습니다." in run_panel_tsx
+    assert "Run Smoke" in run_panel_tsx
+    assert "currentLanguageLabel(effectiveLocale)" in run_panel_tsx
+    assert "status?.state === 'running' || batchStatus?.state === 'running'" in app_tsx
+    assert "disabled={controlsLocked}" in run_panel_tsx

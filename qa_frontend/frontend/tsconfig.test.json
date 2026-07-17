@@ -11,6 +11,7 @@
   "include": [
     "src/api.ts",
     "src/presets.ts",
+    "src/runProfiles.ts",
     "src/utils/navigationMeta.ts",
     "src/utils/scenarioGrouping.ts",
     "src/utils/scenarioIds.ts"
