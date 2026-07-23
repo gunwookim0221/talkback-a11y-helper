@@ -1,6 +1,6 @@
 {
   "schema_version": "talkback-device-classification-policy-v1",
-  "revision": 1,
+  "revision": 2,
   "devices": {
     "SM-F741N": {
       "device_family": "galaxy-z-flip6",
@@ -12,6 +12,18 @@
         "status": "REVIEWED",
         "reason": "Project representative test device; verified by local ADB device-state smoke.",
         "reviewed_at": "2026-07-15"
+      }
+    },
+    "SM-F971B": {
+      "device_family": "galaxy-z-fold8",
+      "form_factor": "foldable_phone",
+      "expected_capabilities": {
+        "foldable": true
+      },
+      "review": {
+        "status": "REVIEWED",
+        "reason": "Exact model verified through ADB discovery and Samsung model information; classified as Galaxy Z Fold8.",
+        "reviewed_at": "2026-07-23"
       }
     }
   }
