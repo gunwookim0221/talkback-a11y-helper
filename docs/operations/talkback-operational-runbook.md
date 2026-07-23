@@ -66,7 +66,20 @@ Run once with English (en-US) and once with Korean (ko-KR). Resolve manual langu
 
 ## 9. Candidate Generation
 
-The implemented Candidate builder is a Python API. Run it on a completed device run containing summary.json:
+Batch Runner automatically creates `candidate_*.baseline_candidate.json` after a Full Validation only when the batch is `finished`, the device is `passed` with return code `0`, the full Scenario Registry was selected and reached terminal state, `no_target_candidate_scenarios` is `0`, and all required artifacts are available. Smoke, targeted/custom/debug runs, stopped/cancelled/crashed runs, device failures, partial runs, and incomplete artifacts do not create a Candidate.
+
+Automatic generation is additive (`write=True, integrate=False`): it does not approve, integrate, or overwrite an existing Candidate. A readable `NOT_ELIGIBLE` Candidate is still created and remains selectable for Comparator review. The operating flow is:
+
+```text
+Full Validation
+  -> Candidate automatic generation (when all conditions pass)
+  -> Comparator
+  -> Human Review
+  -> Approval
+  -> Baseline
+```
+
+The implemented Candidate builder remains available for historical backfill or explicit regeneration on a completed device run containing `summary.json`:
 
     from pathlib import Path
     from tb_runner.baseline_candidate_builder import build_baseline_candidate
@@ -75,7 +88,7 @@ The implemented Candidate builder is a Python API. Run it on a completed device 
     print(result.path)
     print(result.candidate.candidate_id, result.candidate.approval_state.value)
 
-Use this in a PowerShell here-string piped to python. integrate=False keeps generation additive and unapproved. NOT_ELIGIBLE Candidates remain selectable when readable.
+Use this in a PowerShell here-string piped to python. `integrate=False` keeps explicit generation additive and unapproved. `NOT_ELIGIBLE` Candidates remain selectable when readable.
 
 ## 10. Offline Validation
 
@@ -152,7 +165,7 @@ Never stage qa_frontend_runs, raw logs, XLSX, screenshots, local CAS, or tempora
 
 1. Confirm APK/version and reviewed policy changes.
 2. Confirm clean tree and current origin.
-3. English Full Validation → Candidate → Offline Validation → predecessor Compare.
+3. English Full Validation → automatic Candidate generation (when qualified) → Offline Validation → predecessor Compare.
 4. Review failures, structural changes, limitations, availability, and report.
 5. Fix/RCA or obtain Human Approval.
 6. Repeat the full sequence for Korean.
@@ -210,7 +223,7 @@ Stop new approvals and preserve evidence. Do not rewrite/delete an active Baseli
 - [ ] Clean tree, diff check, and current commit recorded.
 - [ ] ADB, model policy, Helper, TalkBack, locale, and preflight verified.
 - [ ] Full Validation/all scenarios reached terminal state.
-- [ ] Candidate generated with integrate=False and offline-validated.
+- [ ] Candidate was automatically generated after a qualified Full Validation (or explicitly backfilled with `integrate=False`) and offline-validated.
 - [ ] Locale-matching predecessor and report reviewed.
 - [ ] Verdict, limitations, failures, structural changes, and availability dispositioned.
 - [ ] Human Approval explicitly recorded, if applicable.

@@ -305,11 +305,11 @@ Automatic approval disabled와 raw limitation retention을 명시한다.
 
 ## 11. Operational Workflow
 
-Controlled manual workflow:
+Controlled workflow:
 
 ```text
 Full Validation
-  -> Candidate build
+  -> Candidate automatic generation (when terminal Full Validation conditions pass)
   -> Comparator replay
   -> Canonical JSON + Markdown report
   -> Human review

@@ -4,6 +4,8 @@
 
 The QA Frontend is a read-only adapter over the completed Phase 10.3 comparator. It discovers approved packages from `baselines/` and candidate artifacts from `qa_frontend_runs/`, adapts the selected pair, and calls `replay_selected_inputs`. It neither writes reports nor changes Baselines, Candidates, repository lifecycle state, or approval state.
 
+Batch Runner creates a Candidate before this read-only discovery step only for a terminal, successful Full Validation with the complete Scenario Registry, zero `NO_TARGET_CANDIDATE` results, and required artifacts. The Comparator continues to discover only `candidate_*.baseline_candidate.json`; it does not generate Candidates, filter `NOT_ELIGIBLE` Candidates, or grant approval.
+
 Reports and recent-comparison history live only in the backend process memory (maximum 25 entries). A server restart clears that UI history; the canonical Phase 10.3 report remains reproducible by selecting the same immutable inputs again.
 
 ## API

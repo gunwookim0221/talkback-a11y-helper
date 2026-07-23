@@ -13,6 +13,7 @@ from tb_runner.environment_fingerprint import (
     build_environment_fingerprint,
     document_digest_reference,
 )
+from tb_runner.baseline_candidate_builder import build_baseline_candidate
 
 from tb_runner.run_spec import RunSpec, resolve_identity_feature_flags
 from .paths import ROOT_DIR, RUN_LOG_DIR, SCRIPT_PATH, RUNTIME_CONFIG_PATH
@@ -40,6 +41,9 @@ logger = logging.getLogger(__name__)
 
 _invalid_summary_warning_lock = threading.Lock()
 _invalid_summary_warning_cache: dict[Path, tuple[int, int, str, str]] = {}
+_AUTO_CANDIDATE_REQUIRED_CHECKS = frozenset(
+    {"full_scenario_set", "scenario_terminal", "required_artifacts"}
+)
 
 
 def _environment_profile_reference_from_dir(output_dir: Path) -> dict[str, object] | None:
@@ -986,6 +990,48 @@ class BatchRunManager:
             except Exception:
                 pass
 
+    @staticmethod
+    def _has_required_auto_candidate_checks(candidate) -> bool:
+        checks = candidate.validation_report.get("checks")
+        if not isinstance(checks, list):
+            return False
+        statuses = {
+            str(item.get("check_id")): str(item.get("status"))
+            for item in checks
+            if isinstance(item, dict)
+        }
+        return all(statuses.get(check_id) == "PASS" for check_id in _AUTO_CANDIDATE_REQUIRED_CHECKS)
+
+    def _auto_generate_full_candidates(self, devices: list[dict[str, Any]]) -> None:
+        if self._state != "finished" or self._mode != "full":
+            return
+        for device in devices:
+            if device.get("state") != "passed" or device.get("return_code") != 0:
+                continue
+            output_dir = device.get("output_dir")
+            if not output_dir:
+                continue
+            run_root = ROOT_DIR / str(output_dir)
+            try:
+                summary = json.loads((run_root / "summary.json").read_text(encoding="utf-8"))
+                if not isinstance(summary, dict) or summary.get("no_target_candidate_scenarios") != 0:
+                    continue
+                preview = build_baseline_candidate(run_root, write=False, integrate=False)
+                scenario_set = preview.candidate.comparison_contract.get("scenario_set", {})
+                if (
+                    scenario_set.get("run_kind") != "FULL"
+                    or not self._has_required_auto_candidate_checks(preview.candidate)
+                ):
+                    continue
+                candidate_path = run_root / f"{preview.candidate.candidate_id}.baseline_candidate.json"
+                if candidate_path.exists():
+                    logger.info("Automatic Candidate already exists: %s", candidate_path)
+                    continue
+                result = build_baseline_candidate(run_root, write=True, integrate=False)
+                logger.info("Automatic Candidate created: %s", result.path)
+            except Exception:
+                logger.exception("Automatic Candidate generation failed for %s", run_root)
+
     def _run_loop(self):
         while True:
             with self._lock:
@@ -997,11 +1043,23 @@ class BatchRunManager:
                     if self._state != "stopped":
                         self._state = "finished"
                     self._write_summary_locked()
-                    break
-                device_info = self._devices[self._current_device_idx]
-                device_info["state"] = "running"
-                device_info["started_at"] = datetime.now(timezone.utc).isoformat()
-                self._write_summary_locked()
+                    finished_devices = [dict(device) for device in self._devices]
+                    should_build_candidates = self._state == "finished" and self._mode == "full"
+                else:
+                    finished_devices = []
+                    should_build_candidates = False
+                if self._current_device_idx >= len(self._devices):
+                    device_info = None
+                else:
+                    device_info = self._devices[self._current_device_idx]
+                    device_info["state"] = "running"
+                    device_info["started_at"] = datetime.now(timezone.utc).isoformat()
+                    self._write_summary_locked()
+            if should_build_candidates:
+                self._auto_generate_full_candidates(finished_devices)
+                break
+            if device_info is None:
+                break
             
             dev_serial = device_info["serial"]
             dev_output_dir_rel = device_info["output_dir"]
