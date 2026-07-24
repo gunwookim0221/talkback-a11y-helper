@@ -14,6 +14,7 @@ from tb_runner.environment_fingerprint import (
     document_digest_reference,
 )
 from tb_runner.baseline_candidate_builder import build_baseline_candidate
+from tb_runner.canonical_json import canonical_sha256
 
 from tb_runner.run_spec import RunSpec, resolve_identity_feature_flags
 from .paths import ROOT_DIR, RUN_LOG_DIR, SCRIPT_PATH, RUNTIME_CONFIG_PATH
@@ -44,6 +45,8 @@ _invalid_summary_warning_cache: dict[Path, tuple[int, int, str, str]] = {}
 _AUTO_CANDIDATE_REQUIRED_CHECKS = frozenset(
     {"full_scenario_set", "scenario_terminal", "required_artifacts"}
 )
+_AUTO_CANDIDATE_DIAGNOSTIC_FILENAME = "candidate_generation.json"
+_AUTO_CANDIDATE_DIAGNOSTIC_SCHEMA = "qa-auto-candidate-generation-v1"
 
 
 def _environment_profile_reference_from_dir(output_dir: Path) -> dict[str, object] | None:
@@ -1002,35 +1005,199 @@ class BatchRunManager:
         }
         return all(statuses.get(check_id) == "PASS" for check_id in _AUTO_CANDIDATE_REQUIRED_CHECKS)
 
+    def _record_auto_candidate_event(
+        self,
+        run_root: Path,
+        device: dict[str, Any],
+        event: str,
+        *,
+        candidate_id: str | None = None,
+        candidate_digest: str | None = None,
+        output_path: Path | None = None,
+        skip_reason: str | None = None,
+        exception: Exception | None = None,
+    ) -> None:
+        diagnostic_path = run_root / _AUTO_CANDIDATE_DIAGNOSTIC_FILENAME
+        event_payload = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": event,
+            "batch_id": self._batch_id,
+            "device_serial": device.get("serial"),
+            "run_root": str(run_root),
+            "run_mode": self._mode,
+            "batch_state": self._state,
+            "device_state": device.get("state"),
+            "return_code": device.get("return_code"),
+            "candidate_id": candidate_id,
+            "candidate_digest": candidate_digest,
+            "output_path": str(output_path) if output_path is not None else None,
+            "skip_reason": skip_reason,
+            "exception_type": type(exception).__name__ if exception is not None else None,
+            "exception_message": str(exception)[:500] if exception is not None else None,
+        }
+        try:
+            existing = json.loads(diagnostic_path.read_text(encoding="utf-8")) if diagnostic_path.is_file() else {}
+            events = existing.get("events") if isinstance(existing, dict) else None
+            payload = {
+                "schema_version": _AUTO_CANDIDATE_DIAGNOSTIC_SCHEMA,
+                "events": [*events, event_payload] if isinstance(events, list) else [event_payload],
+            }
+            temporary_path = diagnostic_path.with_suffix(".json.tmp")
+            temporary_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            temporary_path.replace(diagnostic_path)
+        except (OSError, json.JSONDecodeError) as diagnostic_error:
+            logger.warning(
+                "[AUTO_CANDIDATE][%s] persistent diagnostic write failed for %s: %s",
+                event,
+                run_root,
+                diagnostic_error,
+            )
+        logger.info(
+            "[AUTO_CANDIDATE][%s] batch=%s device=%s run_root=%s candidate=%s reason=%s",
+            event,
+            self._batch_id,
+            device.get("serial"),
+            run_root,
+            candidate_id,
+            skip_reason or (type(exception).__name__ if exception is not None else ""),
+        )
+
     def _auto_generate_full_candidates(self, devices: list[dict[str, Any]]) -> None:
-        if self._state != "finished" or self._mode != "full":
-            return
         for device in devices:
-            if device.get("state") != "passed" or device.get("return_code") != 0:
-                continue
             output_dir = device.get("output_dir")
             if not output_dir:
+                logger.warning("[AUTO_CANDIDATE][AUTO_CANDIDATE_SKIPPED] missing output_dir for device=%s", device.get("serial"))
                 continue
             run_root = ROOT_DIR / str(output_dir)
+            self._record_auto_candidate_event(run_root, device, "AUTO_CANDIDATE_STARTED")
+            if self._state != "finished":
+                self._record_auto_candidate_event(run_root, device, "AUTO_CANDIDATE_SKIPPED", skip_reason="batch_not_finished")
+                continue
+            if self._mode != "full":
+                self._record_auto_candidate_event(run_root, device, "AUTO_CANDIDATE_SKIPPED", skip_reason="batch_mode_not_full")
+                continue
+            if device.get("state") != "passed":
+                self._record_auto_candidate_event(run_root, device, "AUTO_CANDIDATE_SKIPPED", skip_reason="device_not_passed")
+                continue
+            if device.get("return_code") != 0:
+                self._record_auto_candidate_event(run_root, device, "AUTO_CANDIDATE_SKIPPED", skip_reason="return_code_not_zero")
+                continue
             try:
                 summary = json.loads((run_root / "summary.json").read_text(encoding="utf-8"))
                 if not isinstance(summary, dict) or summary.get("no_target_candidate_scenarios") != 0:
+                    self._record_auto_candidate_event(run_root, device, "AUTO_CANDIDATE_SKIPPED", skip_reason="no_target_candidate_scenarios")
                     continue
                 preview = build_baseline_candidate(run_root, write=False, integrate=False)
+                candidate_id = preview.candidate.candidate_id
+                candidate_digest = preview.document_digest
+                self._record_auto_candidate_event(
+                    run_root,
+                    device,
+                    "AUTO_CANDIDATE_PREVIEW_SUCCEEDED",
+                    candidate_id=candidate_id,
+                    candidate_digest=candidate_digest,
+                )
                 scenario_set = preview.candidate.comparison_contract.get("scenario_set", {})
-                if (
-                    scenario_set.get("run_kind") != "FULL"
-                    or not self._has_required_auto_candidate_checks(preview.candidate)
-                ):
+                if scenario_set.get("run_kind") != "FULL":
+                    self._record_auto_candidate_event(
+                        run_root,
+                        device,
+                        "AUTO_CANDIDATE_SKIPPED",
+                        candidate_id=candidate_id,
+                        candidate_digest=candidate_digest,
+                        skip_reason="scenario_set_not_full",
+                    )
                     continue
-                candidate_path = run_root / f"{preview.candidate.candidate_id}.baseline_candidate.json"
+                if not self._has_required_auto_candidate_checks(preview.candidate):
+                    checks = preview.candidate.validation_report.get("checks")
+                    failed_checks = {
+                        str(check.get("check_id"))
+                        for check in checks
+                        if isinstance(check, dict) and check.get("status") == "FAIL"
+                    } if isinstance(checks, list) else set()
+                    skip_reason = (
+                        "scenario_terminal_not_complete"
+                        if "scenario_terminal" in failed_checks
+                        else "required_artifacts_failed"
+                        if "required_artifacts" in failed_checks
+                        else "required_checks_failed"
+                    )
+                    self._record_auto_candidate_event(
+                        run_root,
+                        device,
+                        "AUTO_CANDIDATE_SKIPPED",
+                        candidate_id=candidate_id,
+                        candidate_digest=candidate_digest,
+                        skip_reason=skip_reason,
+                    )
+                    continue
+                candidate_path = run_root / f"{candidate_id}.baseline_candidate.json"
                 if candidate_path.exists():
-                    logger.info("Automatic Candidate already exists: %s", candidate_path)
+                    self._record_auto_candidate_event(
+                        run_root,
+                        device,
+                        "AUTO_CANDIDATE_ALREADY_EXISTS",
+                        candidate_id=candidate_id,
+                        candidate_digest=candidate_digest,
+                        output_path=candidate_path,
+                    )
                     continue
+            except Exception as preview_error:  # noqa: BROAD_EXCEPT_OK
+                self._record_auto_candidate_event(
+                    run_root,
+                    device,
+                    "AUTO_CANDIDATE_PREVIEW_FAILED",
+                    exception=preview_error,
+                )
+                logger.exception("Automatic Candidate preview failed for %s", run_root)
+                continue
+            self._record_auto_candidate_event(
+                run_root,
+                device,
+                "AUTO_CANDIDATE_WRITE_STARTED",
+                candidate_id=candidate_id,
+                candidate_digest=candidate_digest,
+                output_path=candidate_path,
+            )
+            try:
                 result = build_baseline_candidate(run_root, write=True, integrate=False)
-                logger.info("Automatic Candidate created: %s", result.path)
-            except Exception:
-                logger.exception("Automatic Candidate generation failed for %s", run_root)
+                actual_payload = json.loads(candidate_path.read_text(encoding="utf-8")) if candidate_path.is_file() else None
+                actual_digest = canonical_sha256(actual_payload) if isinstance(actual_payload, dict) else None
+                if (
+                    result.path != candidate_path
+                    or not isinstance(actual_payload, dict)
+                    or actual_payload.get("candidate_id") != result.candidate.candidate_id
+                    or actual_digest != result.document_digest
+                ):
+                    self._record_auto_candidate_event(
+                        run_root,
+                        device,
+                        "AUTO_CANDIDATE_WRITE_FAILED",
+                        candidate_id=result.candidate.candidate_id,
+                        candidate_digest=result.document_digest,
+                        output_path=candidate_path,
+                        skip_reason="candidate_file_missing_after_write" if not candidate_path.is_file() else "candidate_write_verification_failed",
+                    )
+                    continue
+                self._record_auto_candidate_event(
+                    run_root,
+                    device,
+                    "AUTO_CANDIDATE_WRITE_SUCCEEDED",
+                    candidate_id=result.candidate.candidate_id,
+                    candidate_digest=result.document_digest,
+                    output_path=candidate_path,
+                )
+            except Exception as write_error:  # noqa: BROAD_EXCEPT_OK
+                self._record_auto_candidate_event(
+                    run_root,
+                    device,
+                    "AUTO_CANDIDATE_WRITE_FAILED",
+                    candidate_id=candidate_id,
+                    candidate_digest=candidate_digest,
+                    output_path=candidate_path,
+                    exception=write_error,
+                )
+                logger.exception("Automatic Candidate write failed for %s", run_root)
 
     def _run_loop(self):
         while True:
