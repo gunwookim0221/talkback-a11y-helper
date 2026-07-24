@@ -14,6 +14,7 @@ from tb_runner.environment_fingerprint import (
     document_digest_reference,
 )
 from tb_runner.baseline_candidate_builder import build_baseline_candidate
+from tools.review_checklist.auto import auto_generate_review
 from tb_runner.canonical_json import canonical_sha256
 
 from tb_runner.run_spec import RunSpec, resolve_identity_feature_flags
@@ -1224,6 +1225,16 @@ class BatchRunManager:
                     self._write_summary_locked()
             if should_build_candidates:
                 self._auto_generate_full_candidates(finished_devices)
+                for device in finished_devices:
+                    output_dir = device.get("output_dir")
+                    if output_dir:
+                        auto_generate_review(
+                            ROOT_DIR / str(output_dir),
+                            batch_id=self._batch_id,
+                            run_mode=self._mode,
+                            batch_state=self._state,
+                            device=device,
+                        )
                 break
             if device_info is None:
                 break

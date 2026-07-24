@@ -98,6 +98,57 @@ Use this in a PowerShell here-string piped to python. `integrate=False` keeps ex
 
 ## 10. Offline Validation
 
+### Review Checklist generation
+
+The source `talkback_compare_*.xlsx` remains the complete audit report. A separate
+Run-local Review Checklist is a human verification aid and never changes Comparator,
+Candidate, Baseline, or approval behavior.
+
+Generate one detail workbook for a completed device Run without rerunning the device:
+
+    python -m tools.review_checklist generate \
+      ".\qa_frontend_runs\<batch_id>\<device_run>\talkback_compare_<timestamp>.xlsx"
+
+The output is `<source-stem>.review.generated.xlsx` beside the source workbook. QA uses only
+`Review Checklist`: it contains human-verifiable TalkBack/text failures with a Focus Target,
+position-guided instruction, annotated crop thumbnail, and validator decision. Automation-only
+engine diagnostics are excluded from QA and appear only in the developer-facing `Automation
+Diagnostic` sheet. It also contains `Summary` and `Additional Review` (one representative WARN
+per scenario/type). A missing crop is shown as `No screenshot captured`; Evidence JSONL remains
+developer evidence and is never shown as a screenshot.
+
+For future Runs, the collector stores a full-screen PNG at the same observation moment as crop evidence.
+The Review Checklist prefers an annotated full-screen copy with scaled/clamped focus bounds; crop-only is
+explicitly marked as a legacy fallback. Historic Runs without a full screenshot cannot be reconstructed.
+Generation preserves existing workbooks by default. Use `--force-regenerate` only for the unreviewed
+default generated filename; use `--output` for a separate preview, and never replace a reviewed workbook.
+
+On successful Full batch completion, BatchRunManager automatically invokes this same generator after
+Candidate post-processing. It writes `review_generation.json` in the device Run root; a Review failure is
+diagnostic-only and does not alter batch/device state, return code, Candidate, Baseline, or approval.
+The source Excel is not modified. If an existing generated workbook contains a decision other than
+`미검토`, it is preserved; use a
+new explicit `--output` path for a separate generation. The supported decisions are `미검토`, `정상 발화`, `실제 접근성 문제`,
+`False Positive`, `재현 불가`, and `추가 조사 필요`. Completion and overall status are
+formula-driven in the detail workbook.
+
+PASS sampling is opt-in and deterministic from Run ID:
+
+    python -m tools.review_checklist generate \
+      ".\qa_frontend_runs\<batch_id>\<device_run>\talkback_compare_<timestamp>.xlsx" \
+      --pass-sample-rate 0.02
+
+To create an explicit multi-Run progress workbook, combine only detail files:
+
+    python -m tools.review_checklist summary \
+      ".\path\run-a.review.generated.xlsx" ".\path\run-b.review.generated.xlsx" \
+      --output ".\talkback_review_summary_202607.xlsx"
+
+The combined Summary links back to each detail workbook and is not a replacement for any
+detail file. QA Frontend UI integration is intentionally deferred; the CLI is the supported
+post-run entry point. Review Checklist generation is not part of Candidate generation or
+Baseline approval, and no automatic approval is performed.
+
     python -m tb_runner.baseline_cli inspect-candidate .\path\candidate_x.baseline_candidate.json
     python -m tb_runner.baseline_cli validate-candidate .\path\candidate_x.baseline_candidate.json
 
