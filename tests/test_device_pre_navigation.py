@@ -273,7 +273,8 @@ def test_enter_device_card_plugin_marks_exhaustion_after_repeated_inventory_sign
         repeated_nodes,
         repeated_nodes,
     ])
-    monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
+    logs = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, *_args, **_kwargs: logs.append(str(message)))
 
     ok, reason = collection_flow._run_enter_device_card_plugin(
         client=client,
@@ -289,6 +290,13 @@ def test_enter_device_card_plugin_marks_exhaustion_after_repeated_inventory_sign
     assert ok is False
     assert reason == "bounded_scroll_exhausted"
     assert len(client.swipe_calls) == 2
+    assert any("[DEVICE_SCROLL_ATTEMPT]" in line and "viewport_before=" in line for line in logs)
+    assert any(
+        "[DEVICE_SCROLL_RESULT]" in line
+        and "scroll_effective=false" in line
+        and "visible_card_count_after=" in line
+        for line in logs
+    )
 
 
 def test_enter_device_card_plugin_taps_all_devices_and_high_confidence_collapsed_room(monkeypatch):

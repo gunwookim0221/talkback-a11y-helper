@@ -5463,6 +5463,89 @@ def _device_inventory_signature(nodes: list[dict[str, Any]]) -> str:
     return "|".join(parts)
 
 
+def _parse_device_entry_bounds(value: Any) -> tuple[int, int, int, int] | None:
+    bounds = parse_bounds_str(value)
+    if bounds:
+        return bounds
+    values = re.findall(r"-?\d+", str(value or ""))
+    if len(values) != 4:
+        return None
+    left, top, right, bottom = (int(item) for item in values)
+    if right <= left or bottom <= top:
+        return None
+    return left, top, right, bottom
+
+
+def _device_list_scroll_geometry(nodes: list[dict[str, Any]]) -> dict[str, Any]:
+    visible_cards = device_tab_logic.collect_visible_device_cards(nodes)
+    card_bounds = [
+        bounds
+        for card in visible_cards
+        if (bounds := _parse_device_entry_bounds(card.get("bounds", "")))
+    ]
+    scrollable_bounds: list[tuple[int, int, int, int]] = []
+    bottom_navigation_bounds: list[tuple[int, int, int, int]] = []
+    content_bounds: list[tuple[int, int, int, int]] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        bounds = _parse_device_entry_bounds(node.get("boundsInScreen", node.get("bounds", "")))
+        if not bounds:
+            continue
+        resource_id = str(node.get("viewIdResourceName", node.get("resourceId", "")) or "").lower()
+        class_name = str(node.get("className", "") or "").lower()
+        if any(token in resource_id for token in _GLOBAL_BOTTOM_NAV_RESOURCE_TOKENS):
+            bottom_navigation_bounds.append(bounds)
+            continue
+        content_bounds.append(bounds)
+        if bool(node.get("scrollable")) or "recyclerview" in class_name or "scrollview" in class_name:
+            scrollable_bounds.append(bounds)
+
+    viewport: tuple[int, int, int, int] | None = None
+    if scrollable_bounds and card_bounds:
+        def card_coverage(bounds: tuple[int, int, int, int]) -> tuple[int, int]:
+            covered_cards = sum(
+                bounds[0] <= (card[0] + card[2]) // 2 <= bounds[2]
+                and bounds[1] <= (card[1] + card[3]) // 2 <= bounds[3]
+                for card in card_bounds
+            )
+            area = (bounds[2] - bounds[0]) * (bounds[3] - bounds[1])
+            return covered_cards, -area
+
+        viewport = max(scrollable_bounds, key=card_coverage)
+    elif scrollable_bounds:
+        viewport = max(scrollable_bounds, key=lambda bounds: (bounds[2] - bounds[0]) * (bounds[3] - bounds[1]))
+    elif card_bounds:
+        viewport = (
+            min(bounds[0] for bounds in card_bounds),
+            min(bounds[1] for bounds in card_bounds),
+            max(bounds[2] for bounds in card_bounds),
+            max(bounds[3] for bounds in card_bounds),
+        )
+    elif content_bounds:
+        viewport = (
+            min(bounds[0] for bounds in content_bounds),
+            min(bounds[1] for bounds in content_bounds),
+            max(bounds[2] for bounds in content_bounds),
+            max(bounds[3] for bounds in content_bounds),
+        )
+
+    if viewport and bottom_navigation_bounds:
+        navigation_top = min(bounds[1] for bounds in bottom_navigation_bounds)
+        viewport = (viewport[0], viewport[1], viewport[2], min(viewport[3], navigation_top))
+
+    def format_bounds(bounds: tuple[int, int, int, int] | None) -> str:
+        return ",".join(str(value) for value in bounds) if bounds else ""
+
+    return {
+        "viewport": viewport,
+        "scrollable_bounds": "|".join(format_bounds(bounds) for bounds in scrollable_bounds),
+        "visible_card_bounds": "|".join(format_bounds(bounds) for bounds in card_bounds),
+        "bottom_navigation_bounds": "|".join(format_bounds(bounds) for bounds in bottom_navigation_bounds),
+        "visible_card_count": len(visible_cards),
+    }
+
+
 def _perform_device_list_adb_swipe(
     client: A11yAdbClient,
     dev: str,
@@ -5477,31 +5560,39 @@ def _perform_device_list_adb_swipe(
             "reason": "adb_swipe_unavailable",
         }
 
-    max_right = 0
-    max_bottom = 0
-    for node in nodes:
-        if not isinstance(node, dict):
-            continue
-        bounds = parse_bounds_str(node.get("boundsInScreen", node.get("bounds", "")))
-        if not bounds:
-            continue
-        _left, _top, right, bottom = bounds
-        max_right = max(max_right, int(right))
-        max_bottom = max(max_bottom, int(bottom))
+    geometry = _device_list_scroll_geometry(nodes)
+    viewport = geometry["viewport"]
+    if not isinstance(viewport, tuple) or len(viewport) != 4:
+        return False, {"method": "adb_swipe", "reason": "device_list_viewport_unavailable", **geometry}
+    left, top, right, bottom = viewport
+    viewport_height = bottom - top
+    if right <= left or viewport_height < 2:
+        return False, {"method": "adb_swipe", "reason": "device_list_viewport_invalid", **geometry}
 
-    width = max(max_right, 1080)
-    height = max(max_bottom, 2400)
-    x = int(width * 0.5)
-    y_start = int(height * 0.78)
-    y_end = int(height * 0.45)
+    x = left + ((right - left) // 2)
+    y_start = top + int(viewport_height * 0.82)
+    y_end = top + int(viewport_height * 0.38)
+    y_start = min(y_start, bottom - 1)
+    y_end = max(y_end, top + 1)
     duration_ms = 500
     result = swipe_fn(dev=dev, x1=x, y1=y_start, x2=x, y2=y_end, duration_ms=duration_ms)
+    bottom_navigation_overlap = any(
+        bounds[0] <= x <= bounds[2] and bounds[1] <= y_start <= bounds[3]
+        for bounds in [_parse_device_entry_bounds(value) for value in geometry["bottom_navigation_bounds"].split("|") if value]
+        if bounds
+    )
     return True, {
         "method": "adb_swipe",
         "x": x,
         "y_start": y_start,
         "y_end": y_end,
         "duration_ms": duration_ms,
+        "viewport_before": ",".join(str(value) for value in viewport),
+        "scrollable_bounds": geometry["scrollable_bounds"],
+        "visible_card_bounds": geometry["visible_card_bounds"],
+        "visible_card_count_before": geometry["visible_card_count"],
+        "bottom_navigation_overlap": bottom_navigation_overlap,
+        "scroll_delta": y_start - y_end,
         "raw_result": result,
     }
 
@@ -5524,7 +5615,26 @@ def _scroll_device_list_for_card_search(
     inventory_before = _device_inventory_signature(nodes_before)
     swipe_ok, swipe_meta = _perform_device_list_adb_swipe(client, dev, nodes=nodes_before)
     if not swipe_ok:
+        log(
+            "[DEVICE_SCROLL_ATTEMPT] "
+            f"success=false reason='{swipe_meta.get('reason', '')}' "
+            f"viewport_before='{swipe_meta.get('viewport', '')}' "
+            f"scrollable_bounds='{swipe_meta.get('scrollable_bounds', '')}' "
+            f"visible_card_bounds='{swipe_meta.get('visible_card_bounds', '')}' "
+            f"bottom_navigation_overlap={str(bool(swipe_meta.get('bottom_navigation_overlap'))).lower()}"
+        )
         return False, nodes_before, str(swipe_meta.get("reason", "device_list_adb_swipe_unavailable")), False
+    log(
+        "[DEVICE_SCROLL_ATTEMPT] "
+        f"viewport_before='{swipe_meta.get('viewport_before', '')}' "
+        f"scrollable_bounds='{swipe_meta.get('scrollable_bounds', '')}' "
+        f"visible_card_bounds='{swipe_meta.get('visible_card_bounds', '')}' "
+        f"swipe_start='{swipe_meta.get('x', '')},{swipe_meta.get('y_start', '')}' "
+        f"swipe_end='{swipe_meta.get('x', '')},{swipe_meta.get('y_end', '')}' "
+        f"scroll_delta={int(swipe_meta.get('scroll_delta', 0) or 0)} "
+        f"visible_card_count_before={int(swipe_meta.get('visible_card_count_before', 0) or 0)} "
+        f"bottom_navigation_overlap={str(bool(swipe_meta.get('bottom_navigation_overlap'))).lower()}"
+    )
     log(
         "[DEVICE][scroll] "
         f"method='{swipe_meta.get('method', 'adb_swipe')}' "
@@ -5549,6 +5659,17 @@ def _scroll_device_list_for_card_search(
 
     inventory_after = _device_inventory_signature(nodes_after)
     signature_changed = inventory_after != inventory_before
+    geometry_after = _device_list_scroll_geometry(nodes_after)
+    viewport_after = geometry_after.get("viewport")
+    viewport_after_text = ",".join(str(value) for value in viewport_after) if isinstance(viewport_after, tuple) else ""
+    log(
+        "[DEVICE_SCROLL_RESULT] "
+        f"viewport_after='{viewport_after_text}' "
+        f"visible_card_count_after={int(geometry_after.get('visible_card_count', 0) or 0)} "
+        f"inventory_signature_changed={str(signature_changed).lower()} "
+        f"scroll_effective={str(signature_changed).lower()} "
+        f"bottom_navigation_overlap={str(bool(swipe_meta.get('bottom_navigation_overlap'))).lower()}"
+    )
     log(f"[DEVICE][scroll] inventory_signature_changed={str(signature_changed).lower()}")
     return True, nodes_after, "device_list_scrolled", signature_changed
 

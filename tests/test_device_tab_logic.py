@@ -605,6 +605,15 @@ def test_find_device_card_by_stable_label_matches_observed_device_labels():
     assert temp_humidity["stable_label"] == "온습도 센서"
 
 
+def test_find_device_card_by_stable_label_matches_home_camera_with_last_updated_suffix():
+    nodes = [_device_card("홈카메라 360 Last updated: 07/23 11:48 PM", 42, 628)]
+
+    home_camera = device_tab_logic.find_device_card_by_stable_label(nodes, ["홈카메라 360"])
+
+    assert home_camera is not None
+    assert home_camera["stable_label"] == "홈카메라 360"
+
+
 def test_find_device_card_by_stable_label_matches_english_observed_state_suffix_labels():
     nodes = [
         _device_card("연기 Clear", 42, 628),

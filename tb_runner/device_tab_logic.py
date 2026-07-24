@@ -168,6 +168,7 @@ def _strip_device_state_suffixes(label: str) -> str:
 
 def normalize_device_stable_label(label: str) -> str:
     stable = _dedupe_repeated_words(_text(label))
+    stable = re.sub(r"\s+last\s+updated\s*:\s*.+$", "", stable, flags=re.IGNORECASE).strip()
     return _strip_device_state_suffixes(stable)
 
 

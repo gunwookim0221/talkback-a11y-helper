@@ -80,6 +80,44 @@ def test_scroll_search_finds_motion_sensor():
     success, meta = _perform_device_list_adb_swipe(client, "dev1", nodes=nodes)
     
     assert success is True
-    # Verify the new conservative swipe distance
-    assert meta["y_start"] == int(1500 * 0.78) or meta["y_start"] == int(2400 * 0.78)
-    assert meta["y_end"] == int(1500 * 0.45) or meta["y_end"] == int(2400 * 0.45)
+    assert meta["y_start"] == int(1500 * 0.82)
+    assert meta["y_end"] == int(1500 * 0.38)
+
+
+def test_device_list_swipe_stays_inside_scrollable_viewport_above_bottom_navigation():
+    nodes = [
+        _node(
+            "",
+            "com.samsung.android.oneconnect:id/device_list",
+            "[0,180][1248,1775]",
+            class_name="androidx.recyclerview.widget.RecyclerView",
+        ) | {"scrollable": True},
+        _node("Door Lock", "com.samsung.android.oneconnect:id/device_card", "[42,520][606,900]"),
+        _node("TV", "com.samsung.android.oneconnect:id/device_card", "[642,520][1206,900]"),
+        _node("Devices", "com.samsung.android.oneconnect:id/menu_devices", "[510,1775][740,1933]"),
+    ]
+
+    client = MockAdbClient()
+
+    success, meta = _perform_device_list_adb_swipe(client, "fold8", nodes=nodes)
+
+    assert success is True
+    assert meta["viewport_before"] == "0,180,1248,1775"
+    assert 180 < meta["y_end"] < meta["y_start"] < 1775
+    assert meta["bottom_navigation_overlap"] is False
+    assert meta["visible_card_count_before"] == 2
+
+
+def test_device_list_swipe_prefers_scrollable_viewport_that_contains_device_cards():
+    nodes = [
+        _node("", "com.samsung.android.oneconnect:id/root", "[0,80][1248,1775]", class_name="android.widget.ScrollView") | {"scrollable": True},
+        _node("", "com.samsung.android.oneconnect:id/device_list", "[0,400][1248,1650]", class_name="androidx.recyclerview.widget.RecyclerView") | {"scrollable": True},
+        _node("Door Lock", "com.samsung.android.oneconnect:id/device_card", "[42,520][606,900]"),
+        _node("TV", "com.samsung.android.oneconnect:id/device_card", "[642,520][1206,900]"),
+        _node("Devices", "com.samsung.android.oneconnect:id/menu_devices", "[510,1775][740,1933]"),
+    ]
+
+    success, meta = _perform_device_list_adb_swipe(MockAdbClient(), "fold8", nodes=nodes)
+
+    assert success is True
+    assert meta["viewport_before"] == "0,400,1248,1650"
