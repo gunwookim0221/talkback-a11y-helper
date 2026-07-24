@@ -223,6 +223,34 @@ def test_17_removed_node():
     assert match_observations([_obs()], [])[0]["node_delta"] == "REMOVED_NODE"
 
 
+@pytest.mark.parametrize("speech", ("View sensors", "센서 보기"))
+def test_added_focusable_with_meaningful_speech_requires_review(speech):
+    result = compare_observation_sets(
+        _set([], kind="BASELINE", source_id="b"),
+        _set([_obs(text="", speech=speech)], kind="CANDIDATE", source_id="c"),
+    )
+
+    assert result["accessibility_failure_summary"]["classification_counts"] == {
+        "STRUCTURAL_CHANGE": 1
+    }
+    assert result["observation_review_items"][0]["code"] == (
+        "NEW_FOCUSABLE_SPEECH_ONLY"
+    )
+
+
+@pytest.mark.parametrize("speech", ("", "   ", "button", "container", "Error", "timeout", "Label, Label"))
+def test_added_focusable_without_meaningful_speech_remains_failure(speech):
+    result = compare_observation_sets(
+        _set([], kind="BASELINE", source_id="b"),
+        _set([_obs(text="", speech=speech)], kind="CANDIDATE", source_id="c"),
+    )
+
+    assert result["accessibility_failure_summary"]["classification_counts"] == {
+        "NEW_ACCESSIBILITY_FAILURE": 1
+    }
+    assert result["observation_review_items"] == []
+
+
 def test_18_traversal_order_changed():
     match = _matched(_obs(step=1, transaction=""), _obs(step=2, transaction=""))
     assert match["node_delta"] == "SAME_NODE_CHANGED_ORDER"

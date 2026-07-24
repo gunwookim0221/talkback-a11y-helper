@@ -18,6 +18,7 @@ from tb_runner.observation_bundle import (
 )
 from tb_runner.observation_schema import (
     OBSERVATION_COMPARATOR_VERSION,
+    CanonicalObservation,
     ObservationAvailability,
     ObservationSet,
 )
@@ -25,6 +26,17 @@ from tb_runner.text_speech_comparator import classify_text_speech
 
 
 _SET_CACHE: dict[tuple[str, str, str], ObservationSet] = {}
+_GENERIC_SPEECH_MARKERS = frozenset({"container", "error", "timeout"})
+
+
+def _has_meaningful_talkback_speech(candidate: CanonicalObservation) -> bool:
+    normalized = candidate.normalized_speech
+    semantic = str(normalized.get("role_stripped") or "")
+    return bool(
+        semantic
+        and semantic not in _GENERIC_SPEECH_MARKERS
+        and not normalized.get("duplicate_segment_detected")
+    )
 
 
 def _workspace_root(path: Path) -> Path:
@@ -149,6 +161,7 @@ def compare_observation_sets(
     }
     text_rows: list[dict[str, Any]] = []
     failure_counts: Counter[str] = Counter()
+    speech_only_reviews: list[dict[str, Any]] = []
     for match in matches:
         base = left.get((match.get("baseline") or {}).get("observation_id"))
         cand = right.get((match.get("candidate") or {}).get("observation_id"))
@@ -166,7 +179,16 @@ def compare_observation_sets(
             and not cand.visible_text
             and not cand.content_description
         ):
-            failure = "NEW_ACCESSIBILITY_FAILURE"
+            if _has_meaningful_talkback_speech(cand):
+                failure = "STRUCTURAL_CHANGE"
+                speech_only_reviews.append(
+                    reason(
+                        "NEW_FOCUSABLE_SPEECH_ONLY",
+                        candidate=match.get("candidate"),
+                    )
+                )
+            else:
+                failure = "NEW_ACCESSIBILITY_FAILURE"
         elif match["node_delta"] in {"ADDED_NODE", "REMOVED_NODE", "SPLIT_NODE", "MERGED_NODE"}:
             failure = "STRUCTURAL_CHANGE"
         elif match["node_delta"] == "AMBIGUOUS_MATCH":
@@ -218,6 +240,7 @@ def compare_observation_sets(
         for item in matches
         if item["node_delta"] == "AMBIGUOUS_MATCH" or item["confidence"] == "LOW"
     ]
+    review_items.extend(speech_only_reviews)
     review_items.extend(
         reason("LIMITATION_BINDING_REVIEW_REQUIRED", issue_id=item.get("issue_id"), status=item["status"])
         for item in limitation_rows
