@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, ComparatorBaseline, ComparatorCandidate, ComparisonHistoryEntry } from '../api';
+import { api, ComparatorBaseline, ComparatorCandidate, ComparatorEnvironment, ComparisonHistoryEntry } from '../api';
 
 const sections = [
   ['limitation_binding_deltas', 'Known Limitation'], ['new_failure_items', 'New Failure'],
@@ -69,6 +69,83 @@ function reasonField(value: unknown, field: string): unknown {
     : undefined;
 }
 
+function unknownValue(value: string | number | null | undefined): string {
+  return value === null || value === undefined || String(value).trim() === '' ? 'Unknown' : String(value);
+}
+
+function majorValue(value: string | number | null | undefined): string {
+  const text = unknownValue(value);
+  return text === 'Unknown' ? text : text.split('.')[0];
+}
+
+function androidToken(value: string | number | null | undefined): string {
+  const major = majorValue(value);
+  return major === 'Unknown' ? 'Unknown Android' : `A${major}`;
+}
+
+function shortDeviceFamily(item: ComparatorCandidate | ComparatorBaseline): string {
+  const family = item.device_family?.toLowerCase();
+  const labels: Record<string, string> = {
+    'galaxy-z-flip6': 'Flip6',
+    'galaxy-z-fold8': 'Fold8',
+  };
+  return labels[family ?? ''] ?? (item.device_model ? item.device_model : 'Unknown device');
+}
+
+function formFactorLabel(value: string | null): string {
+  if (!value) return 'Unknown';
+  return value.replaceAll('_', ' ');
+}
+
+function talkBackLabel(packageName: string | null): string {
+  if (!packageName) return 'Unknown';
+  if (packageName === 'com.google.android.marvin.talkback') return 'Google TalkBack';
+  if (packageName === 'com.samsung.android.accessibility.talkback') return 'Samsung TalkBack';
+  return packageName;
+}
+
+function candidateLabel(item: ComparatorCandidate): string {
+  const batch = item.run.startsWith('batch_') ? item.run.slice('batch_'.length) : item.run;
+  return `${unknownValue(item.locale)} · ${shortDeviceFamily(item)} · ${androidToken(item.android_major)} · ${unknownValue(item.app_version)} · ${batch} · ${unknownValue(item.source_status_label)}`;
+}
+
+function baselineLabel(item: ComparatorBaseline): string {
+  return `${unknownValue(item.locale)} · ${shortDeviceFamily(item)} · ${androidToken(item.android_major)} · ${unknownValue(item.app_version)} · r${unknownValue(item.revision)}`;
+}
+
+function deviceSummary(item: ComparatorCandidate | ComparatorBaseline): string {
+  const family = shortDeviceFamily(item);
+  return item.device_model && item.device_model !== family ? `${family} · ${item.device_model}` : family;
+}
+
+function talkBackSummary(item: ComparatorCandidate | ComparatorBaseline): string {
+  const provider = talkBackLabel(item.talkback_package);
+  const major = majorValue(item.talkback_major);
+  return provider === 'Unknown' && major === 'Unknown' ? 'Unknown TalkBack' : `${provider} ${major}`;
+}
+
+function environmentDifferences(candidate: ComparatorCandidate, baseline: ComparatorBaseline): string[] {
+  const fields: Array<[keyof ComparatorEnvironment, string]> = [
+    ['locale', 'Locale'], ['device_family', 'Device'], ['form_factor', 'Form factor'],
+    ['android_major', 'Android'], ['one_ui_major', 'One UI'], ['talkback_package', 'TalkBack package'],
+    ['talkback_major', 'TalkBack major'], ['app_version', 'App version'],
+  ];
+  return fields.filter(([field]) => String(candidate[field] ?? '') !== String(baseline[field] ?? '')).map(([, label]) => label);
+}
+
+function EnvironmentCard({ label, item }: { label: string; item: ComparatorCandidate | ComparatorBaseline }) {
+  return <article className="environmentCard">
+    <h4>{label}</h4>
+    <div className="environmentCardSummary">
+      <p title={deviceSummary(item)}>{deviceSummary(item)}</p>
+      <p title={`Android ${majorValue(item.android_major)} · One UI ${majorValue(item.one_ui_major)}`}>{`Android ${majorValue(item.android_major)} · One UI ${majorValue(item.one_ui_major)}`}</p>
+      <p title={talkBackSummary(item)}>{talkBackSummary(item)}</p>
+      <p title={`Fingerprint ${unknownValue(item.fingerprint_status)}`}>{`Fingerprint ${unknownValue(item.fingerprint_status)}`}</p>
+    </div>
+    <div className="environmentCardMeta">Locale {unknownValue(item.locale)} · App {unknownValue(item.app_version)} · {formFactorLabel(item.form_factor)}</div>
+  </article>;
+}
+
 export function ComparePanel() {
   const [baselines, setBaselines] = useState<ComparatorBaseline[]>([]);
   const [candidates, setCandidates] = useState<ComparatorCandidate[]>([]);
@@ -134,17 +211,32 @@ export function ComparePanel() {
       ['Review reasons', [...verdictReasons, ...reviewItems]],
       ['Source warnings', sourceWarnings],
     ] as const : [];
+  const selectedCandidate = candidates.find((item) => item.candidate_id === candidateId) ?? null;
+  const selectedBaseline = baselines.find((item) => item.baseline_id === baselineId) ?? null;
+  const environmentDifferenceLabels = selectedCandidate && selectedBaseline
+    ? environmentDifferences(selectedCandidate, selectedBaseline)
+    : [];
 
   return <section className="panel comparePanel">
     <div className="compareHeader"><div><h2>Baseline Comparator</h2><p>Read-only comparison. Approval remains a manual workflow.</p></div><button onClick={refresh} disabled={busy}>Refresh inputs</button></div>
     {error && <div className="error">{error}</div>}
     <div className="compareSelectors">
-      <label>Available run / candidate<select value={candidateId} disabled={busy || !candidates.length} onChange={(event) => setCandidateId(event.target.value)}>{candidates.map((item) => <option key={`${item.candidate_id}-${item.source}`} value={item.candidate_id}>{item.locale ?? '-'} · {item.version ?? '-'} · {item.run} · {item.source_status_label ?? 'UNKNOWN'}</option>)}</select></label>
-      <label>Approved baseline<select value={baselineId} disabled={busy || !baselines.length} onChange={(event) => setBaselineId(event.target.value)}>{baselines.map((item) => <option key={item.baseline_id} value={item.baseline_id}>{item.locale ?? '-'} · {item.version ?? '-'} · r{item.revision}</option>)}</select></label>
+      <label htmlFor="comparator-candidate">Available run / candidate<select id="comparator-candidate" title={selectedCandidate ? candidateLabel(selectedCandidate) : undefined} aria-describedby="comparator-input-hint" value={candidateId} disabled={busy || !candidates.length} onChange={(event) => setCandidateId(event.target.value)}>{candidates.map((item) => <option key={`${item.candidate_id}-${item.source}`} title={candidateLabel(item)} value={item.candidate_id}>{candidateLabel(item)}</option>)}</select></label>
+      <label htmlFor="comparator-baseline">Approved baseline<select id="comparator-baseline" title={selectedBaseline ? baselineLabel(selectedBaseline) : undefined} aria-describedby="comparator-input-hint" value={baselineId} disabled={busy || !baselines.length} onChange={(event) => setBaselineId(event.target.value)}>{baselines.map((item) => <option key={item.baseline_id} title={baselineLabel(item)} value={item.baseline_id}>{baselineLabel(item)}</option>)}</select></label>
       <button className="compareAction" onClick={compare} disabled={busy || !baselineId || !candidateId}>{busy ? 'Comparing…' : 'Compare'}</button>
     </div>
-    <p className="compareInputHint">Runs are local comparison inputs. Approved baselines are managed separately.</p>
-    {candidateId && (() => { const item = candidates.find((candidate) => candidate.candidate_id === candidateId); if (!item) return null; const reasons = item.blocking_reasons?.map(reasonLabel) ?? []; return <div className="compareCandidateDetail"><strong>{item.source_status_label ?? 'UNKNOWN'}</strong>{item.approved_baseline_id && <span> · {item.approved_baseline_id}</span>}{reasons.length > 0 && <span> · Reason: {reasons.join(', ')}</span>}</div>; })()}
+    <p id="comparator-input-hint" className="compareInputHint">Runs are local comparison inputs. Approved baselines are managed separately. Full environment values are available below each selection.</p>
+    {selectedCandidate && (() => { const reasons = selectedCandidate.blocking_reasons?.map(reasonLabel) ?? []; return <div className="compareCandidateDetail"><strong>{selectedCandidate.source_status_label ?? 'UNKNOWN'}</strong>{selectedCandidate.approved_baseline_id && <span> · {selectedCandidate.approved_baseline_id}</span>}{reasons.length > 0 && <span> · Reason: {reasons.join(', ')}</span>}</div>; })()}
+    {selectedCandidate && selectedBaseline && <>
+      <div className="environmentCards" aria-live="polite">
+        <EnvironmentCard label="Candidate environment" item={selectedCandidate} />
+        <EnvironmentCard label="Baseline environment" item={selectedBaseline} />
+      </div>
+      <div className={`environmentNotice ${environmentDifferenceLabels.length ? 'environmentNoticeWarn' : 'environmentNoticeCompatible'}`} role="status">
+        <strong>{environmentDifferenceLabels.length ? 'Environment differs' : 'Environment appears compatible'}</strong>
+        <span>{environmentDifferenceLabels.length ? `Compared fields: ${environmentDifferenceLabels.join(', ')}. This is guidance only; Comparator Core still determines compatibility and verdict.` : 'No configured environment fields differ. Fingerprint status alone is not used as an equality decision.'}</span>
+      </div>
+    </>}
     {!baselines.length && !error && <div className="notice">No approved baseline is available.</div>}
     {!candidates.length && !error && <div className="notice">No candidate run is available.</div>}
     {selected && <div className="compareResult">

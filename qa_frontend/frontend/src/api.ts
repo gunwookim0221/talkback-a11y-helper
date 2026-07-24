@@ -224,8 +224,20 @@ export type OutputFile = {
   modified: number;
 };
 
-export type ComparatorBaseline = { baseline_id: string; revision: number | null; state: string; approved_at: string | null; app_package: string | null; version: string | null; locale: string | null; source_candidate_id?: string | null; source_run_id?: string | null; source_batch_id?: string | null };
-export type ComparatorCandidate = { candidate_id: string; run: string; source: string; app_package: string | null; version: string | null; locale: string | null; source_status?: string; source_status_label?: string; eligibility?: boolean | null; run_kind?: string | null; dirty?: boolean | null; approved_baseline_id?: string | null; blocking_reasons?: string[] };
+export type ComparatorEnvironment = {
+  locale: string | null;
+  app_version: string | null;
+  device_family: string | null;
+  device_model: string | null;
+  form_factor: string | null;
+  android_major: string | number | null;
+  one_ui_major: string | number | null;
+  talkback_package: string | null;
+  talkback_major: string | number | null;
+  fingerprint_status: string | null;
+};
+export type ComparatorBaseline = ComparatorEnvironment & { baseline_id: string; revision: number | null; state: string; approved_at: string | null; app_package: string | null; version: string | null; locale: string | null; source_candidate_id?: string | null; source_run_id?: string | null; source_batch_id?: string | null };
+export type ComparatorCandidate = ComparatorEnvironment & { candidate_id: string; run: string; source: string; app_package: string | null; version: string | null; locale: string | null; source_status?: string; source_status_label?: string; eligibility?: boolean | null; run_kind?: string | null; dirty?: boolean | null; approved_baseline_id?: string | null; blocking_reasons?: string[] };
 export type ComparisonHistoryEntry = { comparison_id: string; baseline_id: string; candidate_id: string; compared_at: string; verdict: unknown; result?: Record<string, unknown> };
 
 export type RecentRun = {

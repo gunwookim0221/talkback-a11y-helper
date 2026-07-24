@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
-from qa_frontend.backend.comparator_ui import ComparatorUiService
+from qa_frontend.backend.comparator_ui import ComparatorUiService, _environment_details
 from qa_frontend.backend.main import app
 
 
@@ -78,3 +80,50 @@ def test_candidate_catalog_exposes_status_without_restricting_selection():
     assert approved["approved_baseline_id"]
     assert any("SMOKE" in item["blocking_reasons"] for item in candidates)
     assert any(item["dirty"] is True and "DIRTY" in item["blocking_reasons"] for item in candidates)
+
+
+def test_catalog_exposes_canonical_environment_details_additively():
+    baseline_response = TestClient(app).get("/api/comparator/baselines")
+    candidate_response = TestClient(app).get("/api/comparator/candidates")
+
+    assert baseline_response.status_code == 200
+    assert candidate_response.status_code == 200
+    baseline = next(item for item in baseline_response.json()["baselines"] if item["device_family"] == "galaxy-z-flip6")
+    candidate = next(item for item in candidate_response.json()["candidates"] if item["device_family"] == "galaxy-z-fold8")
+    environment_fields = {
+        "locale", "app_version", "device_family", "device_model", "form_factor",
+        "android_major", "one_ui_major", "talkback_package", "talkback_major", "fingerprint_status",
+    }
+    assert environment_fields <= baseline.keys()
+    assert environment_fields <= candidate.keys()
+    assert baseline["device_model"] == "SM-F741N"
+    assert str(baseline["android_major"]) == "15"
+    assert str(baseline["one_ui_major"]).split(".")[0] == "7"
+    assert str(baseline["talkback_major"]).startswith("15")
+    assert candidate["device_model"] == "SM-F971B"
+    assert str(candidate["android_major"]) == "17"
+    assert str(candidate["one_ui_major"]).split(".")[0] == "9"
+    assert candidate["talkback_package"] == "com.google.android.marvin.talkback"
+    assert str(candidate["talkback_major"]).startswith("17")
+    assert baseline["fingerprint_status"] == "COMPLETE"
+    assert candidate["fingerprint_status"] == "COMPLETE"
+
+
+def test_missing_environment_profile_values_are_safe():
+    details = _environment_details(environment={}, fingerprint={}, profile={"device": None})
+
+    assert details["device_family"] is None
+    assert details["device_model"] is None
+    assert details["fingerprint_status"] == "UNKNOWN"
+
+
+def test_compact_environment_card_contract_is_not_character_broken():
+    source = Path("qa_frontend/frontend/src/components/ComparePanel.tsx").read_text(encoding="utf-8")
+    styles = Path("qa_frontend/frontend/src/styles.css").read_text(encoding="utf-8")
+
+    assert "environmentCardSummary" in source
+    assert "Unknown Android" in source
+    card_styles = styles.split(".environmentCardSummary", 1)[1].split(".environmentNotice", 1)[0]
+    assert "word-break: break-all" not in card_styles
+    assert "overflow-wrap: anywhere" not in card_styles
+    assert ".environmentCards { grid-template-columns: 1fr; }" in styles or ".environmentCards {" in styles

@@ -26,6 +26,59 @@ class ComparatorUiError(RuntimeError):
         return {"code": self.code, "message": str(self)}
 
 
+def _profile_value(profile: dict[str, Any], group: str, field: str) -> Any:
+    group_value = profile.get(group)
+    if not isinstance(group_value, dict):
+        return None
+    value = group_value.get(field)
+    if isinstance(value, dict):
+        return value.get("value")
+    return value
+
+
+def _environment_details(
+    *,
+    environment: dict[str, Any],
+    fingerprint: dict[str, Any],
+    profile: dict[str, Any] | None,
+) -> dict[str, Any]:
+    profile = profile or {}
+    source = fingerprint.get("fingerprint_source", {})
+    family = source.get("family", {}) if isinstance(source, dict) else {}
+    direct = source.get("direct", {}) if isinstance(source, dict) else {}
+    if not isinstance(family, dict):
+        family = {}
+    if not isinstance(direct, dict):
+        direct = {}
+
+    def first(*values: Any) -> Any:
+        for value in values:
+            if value is not None and value != "":
+                return value
+        return None
+
+    return {
+        "locale": first(direct.get("locale"), environment.get("locale"), _profile_value(profile, "locale", "value")),
+        "app_version": first(direct.get("target_app_release_train"), environment.get("app_version_name"), _profile_value(profile, "target_app", "version_name")),
+        "device_family": first(family.get("device_family"), environment.get("device_family"), _profile_value(profile, "device", "device_family")),
+        "device_model": _profile_value(profile, "device", "model"),
+        "form_factor": first(family.get("form_factor"), environment.get("form_factor"), _profile_value(profile, "device", "form_factor")),
+        "android_major": first(family.get("android_major"), environment.get("android_major"), _profile_value(profile, "android", "release")),
+        "one_ui_major": first(family.get("one_ui_major"), environment.get("one_ui_major"), _profile_value(profile, "android", "one_ui_version")),
+        "talkback_package": first(family.get("talkback_package"), environment.get("talkback_package"), _profile_value(profile, "talkback", "package")),
+        "talkback_major": first(family.get("talkback_major"), environment.get("talkback_major"), _profile_value(profile, "talkback", "version_name")),
+        "fingerprint_status": fingerprint.get("status") or "UNKNOWN",
+    }
+
+
+def _read_environment_profile(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 class ComparatorUiService:
     """Catalogues immutable inputs and retains reports only for this process."""
 
@@ -59,10 +112,22 @@ class ComparatorUiService:
         baselines = []
         for item in summaries:
             fingerprint = item.get("environment_fingerprint", {}).get("fingerprint_source", {}).get("direct", {})
+            package = repository.inspect_baseline(str(item["baseline_id"]))
+            package_path = self.baseline_root / str(package["package_path"])
+            profile = _read_environment_profile(package_path / "environment_profile.json")
+            fingerprint_document = item.get("environment_fingerprint")
+            if not isinstance(fingerprint_document, dict):
+                fingerprint_document = {}
+            environment = _environment_details(
+                environment={},
+                fingerprint=fingerprint_document,
+                profile=profile,
+            )
             baselines.append({
                 "baseline_id": item["baseline_id"], "revision": item.get("revision"), "state": item.get("state"),
                 "approved_at": item.get("approved_at"), "app_package": item.get("app_key"),
                 "version": fingerprint.get("target_app_release_train"), "locale": fingerprint.get("locale"),
+                **environment,
                 "source_candidate_id": item.get("source_candidate_id"),
                 "source_run_id": item.get("source_run_id"), "source_batch_id": item.get("source_batch_id"),
             })
@@ -86,6 +151,15 @@ class ComparatorUiService:
             except (OSError, ValueError, KeyError):
                 continue
             environment = dict(candidate.environment)
+            fingerprint = dict(candidate.environment_fingerprint)
+            environment_profile = metadata.get("environment_reference", {})
+            profile_filename = environment_profile.get("filename") if isinstance(environment_profile, dict) else None
+            profile = _read_environment_profile(path.parent / str(profile_filename)) if profile_filename else None
+            environment_details = _environment_details(
+                environment=environment,
+                fingerprint=fingerprint,
+                profile=profile,
+            )
             contract = metadata.get("comparison_contract", {})
             scenario_set = contract.get("scenario_set") or {}
             run_kind = scenario_set.get("run_kind") or contract.get("scenario_set", {}).get("run_kind")
@@ -111,8 +185,8 @@ class ComparatorUiService:
                 "run": path.parent.parent.name,
                 "source": path.relative_to(self.run_log_dir).as_posix(),
                 "app_package": environment.get("app_package"),
-                "version": environment.get("app_version_name"),
-                "locale": environment.get("locale"),
+                "version": environment_details["app_version"],
+                **environment_details,
                 "source_status": source_status,
                 "source_status_label": source_status_label,
                 "eligibility": eligibility.get("eligible"),

@@ -1566,9 +1566,20 @@ h3 {
 .compareHeader, .compareResultHeader { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
 .compareSelectors { align-items: end; display: grid; gap: 12px; grid-template-columns: 1fr 1fr auto; margin-top: 14px; }
 .compareSelectors label { color: #5e6c78; display: grid; font-size: 12px; gap: 5px; }
-.compareSelectors select { background: #fff; border: 1px solid #b8c2cc; border-radius: 6px; color: #172026; min-height: 36px; padding: 6px; }
+.compareSelectors select { background: #fff; border: 1px solid #b8c2cc; border-radius: 6px; color: #172026; min-height: 36px; max-width: 100%; overflow: hidden; padding: 6px; text-overflow: ellipsis; white-space: nowrap; }
 .compareAction { background: #245f82; border-color: #245f82; color: #fff; min-height: 36px; }
 .compareInputHint { font-size: 12px; margin-top: 8px; }.compareCandidateDetail { background: #f6f8fa; border: 1px solid #dce3e9; border-radius: 6px; color: #5e6c78; font-size: 12px; margin-top: 8px; padding: 8px 10px; }.compareCandidateDetail strong { color: #172026; }
+.environmentCards { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 12px; }
+.environmentCard { background: #fbfcfd; border: 1px solid #dce3e9; border-radius: 7px; min-width: 0; padding: 10px; }
+.environmentCard h4 { color: #172026; font-size: 13px; margin: 0 0 8px; }
+.environmentCardSummary { display: grid; gap: 4px; min-width: 0; }
+.environmentCardSummary p { color: #172026; font-size: 12px; margin: 0; min-width: 0; overflow-wrap: break-word; white-space: normal; word-break: normal; }
+.environmentCardMeta { color: #69757d; font-size: 10px; line-height: 1.4; margin-top: 8px; overflow-wrap: break-word; white-space: normal; word-break: normal; }
+.environmentNotice { align-items: flex-start; border-radius: 7px; display: grid; gap: 3px; margin-top: 10px; padding: 9px 10px 9px 12px; }
+.environmentNotice strong { font-size: 12px; }
+.environmentNotice span { font-size: 11px; line-height: 1.45; }
+.environmentNoticeWarn { background: #fff5dd; border: 1px solid #e5c77a; color: #684f00; }
+.environmentNoticeCompatible { background: #edf8f0; border: 1px solid #b9d9c0; color: #215a2f; }
 .compareResult, .compareHistory { border-top: 1px solid #dce3e9; margin-top: 16px; padding-top: 14px; }
 .compareMetrics { display: grid; gap: 8px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 12px 0; }
 .compareMetrics div, .compareRecommendation { background: #f6f8fa; border: 1px solid #dce3e9; border-radius: 6px; padding: 9px; }
@@ -1609,7 +1620,7 @@ h3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .compareSelectors, .compareMetrics { grid-template-columns: 1fr; }
+  .compareSelectors, .compareMetrics, .environmentCards { grid-template-columns: 1fr; }
 
   .readinessCountGrid,
   .readinessFamilyRow {

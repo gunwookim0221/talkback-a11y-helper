@@ -26,6 +26,21 @@ The Compare panel presents an `Available run / candidate` selection on the left 
 
 The panel explains: “Runs are local comparison inputs. Approved baselines are managed separately.” A clean clone on another PC may have no local `qa_frontend_runs/` artifacts, so its Candidate list can be empty even when Approved Baselines are present.
 
+### Environment identification UX
+
+Candidate and Baseline options use a compact, human-readable label:
+
+```text
+Candidate: en-US · Fold8 · A17 · 1.8.47.24 · 20260723_234824 · NOT ELIGIBLE
+Baseline:  ko-KR · Flip6 · A15 · 1.8.47.24 · r1
+```
+
+The label uses canonical fields from `environment_fingerprint.fingerprint_source.direct` and `.family`, with the shared `environment_profile.json` as the fallback source. Exact model is read only from the profile's canonical device model field. Known device families are shortened for readability (`galaxy-z-fold8` → `Fold8`, `galaxy-z-flip6` → `Flip6`). Unknown family values fall back to the exact model, then `Unknown device`; no filename parsing or inference is used. Missing Android major is shown as `Unknown Android`, never `AUnknown`. Long native-select labels may be ellipsized by the browser, while the selected environment card exposes the complete values.
+
+Below the selectors, compact Candidate and Baseline cards use four summary rows: device family/model, Android plus One UI, TalkBack provider plus major, and fingerprint status. Locale, app version, and form factor remain in a small metadata row. The two cards use a two-column layout on wide screens and one column below 900px; values wrap by word and do not use character-level breaking. Missing values are rendered per field as `Unknown`.
+
+When both inputs are selected, the UI displays `Environment differs` with the differing fields, or `Environment appears compatible` when the configured fields are equal. This is an informational pre-comparison warning only. It does not block Compare, replace Comparator Core compatibility/verdict logic, or get stored in the result payload. `Fingerprint COMPLETE` is displayed as provenance status and is not treated as proof that environments are identical.
+
 While a comparison or report load is in progress, inputs and actions are disabled and the action displays progress. The result includes environment, version, compatibility, coverage, identity, traversal, recovery, profiler, final verdict badge, recommendation, expandable limitation/failure/review groups, Markdown viewer, downloads, and recent history.
 
 Verdict badges map PASS to green, PASS WITH LIMITATIONS to amber, REVIEW REQUIRED and INCOMPARABLE to neutral, and FAIL to red. `DATA_UNAVAILABLE` remains a result/diagnostic from the comparator when data can be compared partially; unreadable selected input is an API error.
