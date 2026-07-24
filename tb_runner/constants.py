@@ -30,4 +30,6 @@ OVERLAY_REALIGN_MAX_STEPS = 8
 
 ENABLE_IMAGE_CROP = True
 ENABLE_IMAGE_INSERT_TO_EXCEL = True
+_full_screen_evidence_setting = os.getenv("TB_ENABLE_FULL_SCREEN_EVIDENCE", "").strip().lower()
+ENABLE_FULL_SCREEN_EVIDENCE = _full_screen_evidence_setting not in {"0", "false", "off", "no"}
 IMAGE_DIR = os.environ.get("TB_OUTPUT_DIR", "output") + "/crops"

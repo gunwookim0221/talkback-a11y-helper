@@ -1,3 +1,5 @@
+import hashlib
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -7,7 +9,7 @@ from openpyxl.drawing.image import Image as XLImage
 from PIL import Image
 
 from talkback_lib import A11yAdbClient
-from tb_runner.constants import ENABLE_IMAGE_CROP, ENABLE_IMAGE_INSERT_TO_EXCEL
+from tb_runner.constants import ENABLE_FULL_SCREEN_EVIDENCE, ENABLE_IMAGE_CROP, ENABLE_IMAGE_INSERT_TO_EXCEL
 from tb_runner.logging_utils import log
 from tb_runner.utils import parse_bounds_str, sanitize_filename
 
@@ -59,19 +61,19 @@ def crop_image_by_bounds(
     if not bounds:
         return False
 
-    l, t, r, b = bounds
+    left, top, right, bottom = bounds
     with Image.open(screenshot_path) as img:
         width, height = img.size
 
-        l = max(0, l + shrink_px)
-        t = max(0, t + shrink_px)
-        r = min(width, r - shrink_px)
-        b = min(height, b - shrink_px)
+        left = max(0, left + shrink_px)
+        top = max(0, top + shrink_px)
+        right = min(width, right - shrink_px)
+        bottom = min(height, bottom - shrink_px)
 
-        if r <= l or b <= t:
+        if right <= left or bottom <= top:
             return False
 
-        cropped = img.crop((l, t, r, b))
+        cropped = img.crop((left, top, right, bottom))
         Path(crop_path).parent.mkdir(parents=True, exist_ok=True)
         cropped.save(crop_path)
         cropped.close()
@@ -90,13 +92,19 @@ def maybe_capture_focus_crop(
     row["crop_bounds"] = str(row.get("focus_bounds", "") or "").strip()
     row["crop_source"] = str(row.get("crop_source", "") or "focus_bounds")
     row["crop_focus_confidence_low"] = False
+    row["full_screenshot_path"] = ""
+    row["full_screenshot_saved"] = False
+    row["full_screenshot_width"] = 0
+    row["full_screenshot_height"] = 0
+    row["full_screenshot_capture_timestamp"] = 0.0
+    row["full_screenshot_correlation_id"] = ""
 
-    if not ENABLE_IMAGE_CROP:
+    if not ENABLE_IMAGE_CROP and not ENABLE_FULL_SCREEN_EVIDENCE:
         row["t_after_crop"] = row["t_before_crop"]
         return row
 
     bounds_str = str(row.get("focus_bounds", "") or "").strip()
-    if not bounds_str:
+    if not bounds_str and not ENABLE_FULL_SCREEN_EVIDENCE:
         row["t_after_crop"] = row["t_before_crop"]
         return row
 
@@ -104,10 +112,12 @@ def maybe_capture_focus_crop(
     step_index = row.get("step_index", -1)
     visible_label = sanitize_filename(str(row.get("visible_label", "") or "")[:40])
 
-    crop_dir = Path(output_base_dir) / "crops"
-    crop_dir.mkdir(parents=True, exist_ok=True)
-
-    crop_path = crop_dir / f"{tab_name}_step_{step_index}_{visible_label}.png"
+    crop_path = Path(output_base_dir) / "crops" / f"{tab_name}_step_{step_index}_{visible_label}.png"
+    scenario_id = sanitize_filename(str(row.get("scenario_id", "unknown")))
+    context_type = sanitize_filename(str(row.get("context_type", "main")))
+    correlation_seed = f"{scenario_id}:{context_type}:{step_index}:{row.get('parent_step_index', '')}"
+    correlation_id = hashlib.sha256(correlation_seed.encode("utf-8")).hexdigest()[:12]
+    full_path = Path(output_base_dir) / "screens" / f"{scenario_id}_{context_type}_{step_index}_{correlation_id}.full.png"
 
     capture_started = time.perf_counter()
     screenshot_path = ""
@@ -119,18 +129,35 @@ def maybe_capture_focus_crop(
         ) as temp_file:
             screenshot_path = temp_file.name
         capture_full_screenshot(client, dev, screenshot_path)
-        ok = crop_image_by_bounds(
-            screenshot_path=screenshot_path,
-            bounds_str=bounds_str,
-            crop_path=str(crop_path),
-            shrink_px=2,
-        )
-        if ok:
-            row["crop_image_path"] = str(crop_path)
-            row["crop_image_saved"] = True
+        if ENABLE_FULL_SCREEN_EVIDENCE:
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(screenshot_path, full_path)
+            full_image = Image.open(full_path)
+            width, height = full_image.size
+            close = getattr(full_image, "close", None)
+            if callable(close):
+                close()
+            row["full_screenshot_path"] = str(full_path)
+            row["full_screenshot_saved"] = True
+            row["full_screenshot_width"] = width
+            row["full_screenshot_height"] = height
+            row["full_screenshot_capture_timestamp"] = round(time.time(), 3)
+            row["full_screenshot_correlation_id"] = correlation_id
+        if ENABLE_IMAGE_CROP and bounds_str:
+            ok = crop_image_by_bounds(
+                screenshot_path=screenshot_path,
+                bounds_str=bounds_str,
+                crop_path=str(crop_path),
+                shrink_px=2,
+            )
+            if ok:
+                row["crop_image_path"] = str(crop_path)
+                row["crop_image_saved"] = True
         row["screenshot_capture_elapsed"] = round(time.perf_counter() - capture_started, 3)
-    except Exception as exc:
+    except (AttributeError, OSError, RuntimeError, TypeError) as exc:
         log(f"[IMAGE] crop failed step={step_index}: {exc}")
+        if full_path.is_file() and not row["full_screenshot_saved"]:
+            full_path.unlink(missing_ok=True)
     finally:
         if screenshot_path:
             try:
