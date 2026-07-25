@@ -9,6 +9,7 @@ from .models import RunMetadata, SourceRow
 from .classification import classify_review
 from .images import create_focus_annotation, create_full_screen_annotation
 from .qa_context import focus_context
+from .speech_status import classify_speech_status, evidence_for_row, speech_evidence_index, speech_review_instruction
 
 _FAIL_RESULTS: Final = {"FAIL"}
 _ISSUE_TYPES: Final = {
@@ -103,6 +104,17 @@ def _value(result: dict[str, object], raw: dict[str, object], *names: str) -> st
     return ""
 
 
+def _focus_node_class(raw: dict[str, object]) -> str:
+    value = raw.get("focus_node")
+    if not isinstance(value, str):
+        return ""
+    try:
+        node = json.loads(value)
+    except json.JSONDecodeError:
+        return ""
+    return _text(node.get("className")) if isinstance(node, dict) else ""
+
+
 def _qa_display_text(*values: str, placeholder: str) -> str:
     for value in values:
         if value:
@@ -151,6 +163,7 @@ def read_review_rows(source: Path) -> tuple[RunMetadata, list[SourceRow], list[d
     result_headers, result_rows = _row_map(workbook["result"])
     del result_headers
     raw = _raw_index(workbook["raw"]) if "raw" in workbook.sheetnames else {}
+    evidence_events = speech_evidence_index(run_root / f"{source.stem}.evidence.jsonl")
     metadata = _metadata(run_root, source)
     failures: list[SourceRow] = []
     warnings: dict[tuple[str, str], dict[str, str]] = {}
@@ -172,6 +185,15 @@ def read_review_rows(source: Path) -> tuple[RunMetadata, list[SourceRow], list[d
             parent_text = _value(result, raw_row, "semantic_card_title", "parent_visible", "parent_text")
             representative_text = _value(result, raw_row, "representative_visible", "representative_speech")
             bounds = _value(result, raw_row, "focus_bounds", "actual_focus_bounds")
+            content_description = _value(result, raw_row, "focus_content_description")
+            class_name = _value(result, raw_row, "class_name", "focus_class_name") or _focus_node_class(raw_row)
+            speech_status = classify_speech_status(
+                speech=speech,
+                visible_text=visible_text,
+                content_description=content_description,
+                class_name=class_name,
+                evidence=evidence_for_row(evidence_events.get((scenario, step), []), resource_id),
+            )
             context = focus_context(raw=raw_row, visible_text=visible_text, speech=speech, resource_id=resource_id, parent_text=parent_text, representative_text=representative_text, screen=_value(result, raw_row, "context_type", "tab_name") or scenario, bounds=bounds, crop_path=crop_path, display_width=metadata.display_width, display_height=metadata.display_height)
             if full_path is not None:
                 screenshot = _relative_artifact(run_root, full_value, "Full screenshot not captured for this run")
@@ -191,6 +213,7 @@ def read_review_rows(source: Path) -> tuple[RunMetadata, list[SourceRow], list[d
                 review_description = f"전체 화면 증거가 없어 자동 위치 안내가 제한됩니다. {_value(result, raw_row, 'context_type', 'tab_name') or scenario} 화면의 {context.approximate_position} 근처에서 {context.target} Focus Target을 수동 탐색하여 실제 TalkBack 발화를 확인하세요."
             else:
                 review_description = context.description
+            review_description = f"{review_description}\n\n{speech_review_instruction(speech_status, speech)}"
             failure_reason = _value(result, raw_row, "failure_reason")
             classification = classify_review(mismatch_type=_value(result, raw_row, "mismatch_type"), failure_reason=failure_reason)
             failures.append(SourceRow(
@@ -204,9 +227,11 @@ def read_review_rows(source: Path) -> tuple[RunMetadata, list[SourceRow], list[d
                 mismatch_reason=failure_reason or _value(result, raw_row, "mismatch_type"),
                 visible_text=_qa_display_text(visible_text, context.target if context.target_source == "OCR(crop)" else "", placeholder="화면 텍스트 없음\n(실제 화면 표시 여부 확인)"),
                 speech=_qa_display_text(expected_speech, speech, context.target if context.target_source == "OCR(crop)" else "", visible_text, placeholder="예상 발화 없음\n(새로운 Focus가 실제로 발화하는지 확인)"),
+                speech_status=speech_status.label,
+                speech_diagnostic=speech_status.diagnostic,
                 expected=representative_text,
                 resource_id=resource_id,
-                class_name=_value(result, raw_row, "class_name", "focus_class_name"),
+                class_name=class_name,
                 bounds=bounds,
                 screenshot=screenshot,
                 screenshot_annotation=annotation,

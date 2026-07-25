@@ -111,11 +111,21 @@ Generate one detail workbook for a completed device Run without rerunning the de
 
 The output is `<source-stem>.review.generated.xlsx` beside the source workbook. QA uses only
 `Review Checklist`: it contains human-verifiable TalkBack/text failures with a Focus Target,
-position-guided instruction, annotated crop thumbnail, and validator decision. Automation-only
+position-guided instruction, annotated crop thumbnail, Speech Status, and validator decision. Automation-only
 engine diagnostics are excluded from QA and appear only in the developer-facing `Automation
 Diagnostic` sheet. It also contains `Summary` and `Additional Review` (one representative WARN
 per scenario/type). A missing crop is shown as `No screenshot captured`; Evidence JSONL remains
 developer evidence and is never shown as a screenshot.
+
+`Speech Status` is a QA aid, not a Comparator verdict. `Speech Observed` is meaningful helper-captured
+speech. `Role-only Speech` is a captured role such as `Button` without an accessible name. `Speech Missing`
+means the helper observed a platform focus/announcement path but found no meaningful speech or metadata;
+QA must determine whether the app is genuinely silent. `Speech Unobserved` means a focus snapshot exists
+but the helper received neither a matching focus event nor announcement, so actual TalkBack TTS may have
+occurred without being observable. `Unknown` is used for legacy artifacts without enough provenance.
+QA must not record `Speech Unobserved` as an app defect solely from the generated workbook. Automation
+Diagnostic retains the original engine reason and adds capture-oriented developer detail such as
+`focus_event_missing`, `announcement_missing`, or `speech_capture_missing` when available.
 
 For future Runs, the collector stores a full-screen PNG at the same observation moment as crop evidence.
 The Review Checklist prefers an annotated full-screen copy with scaled/clamped focus bounds; crop-only is

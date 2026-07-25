@@ -14,7 +14,7 @@ from .source import deterministic_pass_sample, read_pass_rows, read_review_rows
 
 QA_REVIEW_COLUMNS = [
     "Review ID", "Scenario", "Focus Target", "Approximate Position", "Review Description",
-    "Screenshot", "TalkBack Speech", "Visible Text", "Validator Checklist", "Validator Comment",
+    "Screenshot", "Speech Status", "Visible Text", "Validator Checklist", "Validator Comment",
     "Step",
 ]
 DECISIONS = ["미검토", "정상 발화", "실제 접근성 문제", "False Positive", "재현 불가", "추가 조사 필요"]
@@ -64,6 +64,7 @@ def _write_summary(sheet: openpyxl.worksheet.worksheet.Worksheet, metadata: RunM
     unknown_count = sum(row.focus_target == "Unknown" for row in qa_rows)
     resource_target_count = sum(row.focus_target_source == "resource id" for row in qa_rows)
     screenshot_missing = sum(row.screenshot_evidence_type == "No screenshot" for row in qa_rows)
+    speech_status_counts = Counter(row.speech_status for row in qa_rows)
     values: list[tuple[str, object]] = [
         ("Run ID", metadata.run_id), ("Batch ID", metadata.batch_id), ("Device", metadata.device_model),
         ("Android / One UI", f"{metadata.android_version} / {metadata.one_ui_version}"),
@@ -74,18 +75,23 @@ def _write_summary(sheet: openpyxl.worksheet.worksheet.Worksheet, metadata: RunM
         ("QA 예상 검토 시간", f"약 {ceil(review_count * 1.5)}분"), ("Unknown Target count", unknown_count),
         ("Screenshot 없는 항목 count", screenshot_missing),
         ("Resource-derived Target count", resource_target_count),
+        ("Speech Observed count", speech_status_counts["Speech Observed"]),
+        ("Speech Unobserved count", speech_status_counts["Speech Unobserved"]),
+        ("Speech Missing count", speech_status_counts["Speech Missing"]),
+        ("Role-only Speech count", speech_status_counts["Role-only Speech"]),
+        ("Unknown Speech Status count", speech_status_counts["Unknown"]),
         ("정상 발화", '=COUNTIF(\'Review Checklist\'!$I:$I,"정상 발화")'),
         ("실제 접근성 문제", '=COUNTIF(\'Review Checklist\'!$I:$I,"실제 접근성 문제")'),
         ("False Positive", '=COUNTIF(\'Review Checklist\'!$I:$I,"False Positive")'),
         ("재현 불가", '=COUNTIF(\'Review Checklist\'!$I:$I,"재현 불가")'),
         ("추가 조사 필요", '=COUNTIF(\'Review Checklist\'!$I:$I,"추가 조사 필요")'),
         ("미검토", '=COUNTIF(\'Review Checklist\'!$I:$I,"미검토")'),
-        ("Review completion %", '=IF(B13=0,1,(B18+B19+B20+B21+B22)/B13)'),
-        ("Overall Human Review Status", '=IF(B13=0,"COMPLETED_NO_ISSUE",IF(B23=B13,"NOT_STARTED",IF(B23>0,"IN_PROGRESS",IF(B22>0,"RETEST_REQUIRED",IF(B19>0,"COMPLETED_WITH_ISSUES","COMPLETED_NO_ISSUE")))))'),
+        ("Review completion %", '=IF(B13=0,1,(B25+B26+B27+B28+B29)/B13)'),
+        ("Overall Human Review Status", '=IF(B13=0,"COMPLETED_NO_ISSUE",IF(B30=B13,"NOT_STARTED",IF(B30>0,"IN_PROGRESS",IF(B29>0,"RETEST_REQUIRED",IF(B26>0,"COMPLETED_WITH_ISSUES","COMPLETED_NO_ISSUE")))))'),
     ]
     for item in values:
         sheet.append(list(item))
-    sheet["B25"].number_format = "0%"
+    sheet["B31"].number_format = "0%"
     sheet.append([])
     sheet.append(["Scenario", "FAIL count"])
     for scenario, count in sorted(scenario_counts.items()):
@@ -119,7 +125,7 @@ def _write_checklist(sheet: openpyxl.worksheet.worksheet.Worksheet, rows: list[S
     for index, row in enumerate(rows, start=1):
         values = [
             f"{metadata.run_id}-R{index:03d}", row.scenario_name, row.focus_target, row.approximate_position,
-            row.review_description, row.screenshot, row.speech, row.visible_text, row.validator_decision,
+            row.review_description, row.screenshot, row.speech_status, row.visible_text, row.validator_decision,
             row.validator_comment, row.step,
         ]
         sheet.append(values)
@@ -152,18 +158,18 @@ def _write_additional(sheet: openpyxl.worksheet.worksheet.Worksheet, warnings: l
 
 
 def _write_automation_diagnostic(sheet: openpyxl.worksheet.worksheet.Worksheet, rows: list[SourceRow], source: Path) -> None:
-    headers = ["Scenario", "Issue", "Reason", "Step", "Traversal State", "Recovery State", "Terminal State", "Resource ID", "Bounds", "Focus Center / Relative %", "Automatic Result", "Issue Type", "TalkBack Speech", "Visible Text", "Expected/Reference Text or Speech", "Developer Evidence", "Notes"]
+    headers = ["Scenario", "Issue", "Reason", "Step", "Traversal State", "Recovery State", "Terminal State", "Resource ID", "Bounds", "Focus Center / Relative %", "Automatic Result", "Issue Type", "Speech Status", "Speech Capture Diagnostic", "TalkBack Speech", "Visible Text", "Expected/Reference Text or Speech", "Developer Evidence", "Notes"]
     sheet.append(headers)
     for row in rows:
-        sheet.append([row.scenario_name, row.classification_reason, row.mismatch_reason, row.step, row.traversal_state, row.recovery_state, row.terminal_state, row.resource_id, row.bounds, row.focus_center_relative, row.automatic_result, row.issue_type, row.speech, row.visible_text, row.expected, row.evidence, ""])
-        evidence_cell = sheet.cell(sheet.max_row, 16)
+        sheet.append([row.scenario_name, row.classification_reason, row.mismatch_reason, row.step, row.traversal_state, row.recovery_state, row.terminal_state, row.resource_id, row.bounds, row.focus_center_relative, row.automatic_result, row.issue_type, row.speech_status, row.speech_diagnostic, row.speech, row.visible_text, row.expected, row.evidence, ""])
+        evidence_cell = sheet.cell(sheet.max_row, 18)
         evidence_path = source.parent / row.evidence if row.evidence != "Not available" else None
         if evidence_path is not None and evidence_path.is_file():
             evidence_cell.hyperlink = row.evidence.replace("\\", "/")
             evidence_cell.style = "Hyperlink"
         else:
             evidence_cell.value = "Not available"
-    _style_sheet(sheet, {1: 30, 2: 28, 3: 28, 4: 12, 5: 20, 6: 20, 7: 28, 8: 36, 9: 24, 10: 22, 11: 18, 12: 26, 13: 42, 14: 34, 15: 42, 16: 42, 17: 36})
+    _style_sheet(sheet, {1: 30, 2: 28, 3: 28, 4: 12, 5: 20, 6: 20, 7: 28, 8: 36, 9: 24, 10: 22, 11: 18, 12: 26, 13: 22, 14: 38, 15: 42, 16: 34, 17: 42, 18: 42, 19: 36})
 
 
 def _review_target(source: Path) -> Path:

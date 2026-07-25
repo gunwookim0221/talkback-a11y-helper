@@ -31,6 +31,8 @@ class SourceRow:
     mismatch_reason: str
     visible_text: str
     speech: str
+    speech_status: str
+    speech_diagnostic: str
     expected: str
     resource_id: str
     class_name: str

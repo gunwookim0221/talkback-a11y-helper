@@ -11,7 +11,7 @@ from tools.review_checklist.qa_context import _resource_label
 
 QA_HEADERS = [
     "Review ID", "Scenario", "Focus Target", "Approximate Position", "Review Description",
-    "Screenshot", "TalkBack Speech", "Visible Text", "Validator Checklist", "Validator Comment",
+    "Screenshot", "Speech Status", "Visible Text", "Validator Checklist", "Validator Comment",
     "Step",
 ]
 
@@ -64,7 +64,7 @@ def test_generate_review_checklist_selects_failures_and_preserves_missing_eviden
     assert checklist.column_dimensions["K"].hidden is True
     assert checklist.cell(2, 2).value == "Food"
     assert checklist.cell(2, 6).value == "Full screenshot not captured for this run"
-    assert checklist.cell(2, 7).value == "예상 발화 없음\n(새로운 Focus가 실제로 발화하는지 확인)"
+    assert checklist.cell(2, 7).value == "Unknown"
     assert checklist.cell(2, 8).value == "화면 텍스트 없음\n(실제 화면 표시 여부 확인)"
     assert any(isinstance(item, DataValidation) for item in checklist.data_validations.dataValidation)
     assert "실제 접근성 문제" in checklist.data_validations.dataValidation[0].formula1
@@ -167,7 +167,7 @@ def test_review_checklist_uses_ocr_only_after_text_sources_are_empty(tmp_path: P
     headers = [cell.value for cell in checklist[1]]
     values = {header: checklist.cell(2, index + 1).value for index, header in enumerate(headers)}
     assert values["Focus Target"] == "Low Battery"
-    assert values["TalkBack Speech"] == "Low Battery"
+    assert values["Speech Status"] == "Unknown"
 
 
 def test_review_checklist_uses_position_when_screenshot_is_missing(tmp_path: Path) -> None:
@@ -237,3 +237,45 @@ def test_review_checklist_separates_automation_diagnostics_from_manual_review(tm
     summary_values = {row[0]: row[1] for row in workbook["Summary"].iter_rows(min_row=2, values_only=True) if row[0]}
     assert summary_values["QA Review Count"] == 1
     assert summary_values["Automation Diagnostic Count"] == 1
+
+
+def test_review_checklist_distinguishes_speech_statuses_from_evidence_provenance(tmp_path: Path) -> None:
+    source = _write_source_run(tmp_path / "device_run")
+    workbook = openpyxl.load_workbook(source)
+    result = workbook["result"]
+    result.append(["Devices", "Water Leak Sensor", "device_water_leak_sensor_plugin", 2, "main", "", "", "", "EMPTY_VISIBLE", "FAIL", "speech_visible_diverged", "", "lowBattery"])
+    result.append(["Devices", "Motion Sensor", "device_motion_sensor_plugin", 2, "main", "", "", "", "EMPTY_VISIBLE", "FAIL", "speech_visible_diverged", "", "lowBattery"])
+    result.append(["Life", "Home Monitor", "life_home_monitor_plugin", 1, "main", "", "", "", "EMPTY_SPEECH", "FAIL", "speech_visible_diverged", "", "shm_setting_button"])
+    result.append(["Life", "Observed", "life_observed_plugin", 1, "main", "Settings", "Settings", "", "SPEECH_MISMATCH", "FAIL", "speech_visible_diverged", "", "settings"])
+    result.append(["Life", "Missing", "life_missing_plugin", 1, "main", "", "", "", "EMPTY_SPEECH", "FAIL", "speech_visible_diverged", "", "missing_label"])
+    workbook.save(source)
+    workbook = openpyxl.load_workbook(source)
+    raw = workbook["raw"]
+    raw.cell(1, 8, "focus_class_name")
+    raw.append(["life_home_monitor_plugin", 1, "", "", False, "shm_setting_button", "", "android.widget.Button"])
+    workbook.save(source)
+    evidence = [
+        {"scenario_id": "device_water_leak_sensor_plugin", "step_index": 2, "event_type": "POST_FOCUS_OBSERVED", "payload": {"observation": {"resource_id": "lowBattery"}}},
+        {"scenario_id": "device_motion_sensor_plugin", "step_index": 2, "event_type": "POST_FOCUS_OBSERVED", "payload": {"observation": {"resource_id": "lowBattery"}}},
+        {"scenario_id": "life_home_monitor_plugin", "step_index": 1, "event_type": "ACCESSIBILITY_FOCUS_EVENT", "payload": {"focus": {"resource_id": "shm_setting_button"}}},
+        {"scenario_id": "life_missing_plugin", "step_index": 1, "event_type": "ACCESSIBILITY_FOCUS_EVENT", "payload": {"focus": {"resource_id": "missing_label"}}},
+    ]
+    (source.parent / f"{source.stem}.evidence.jsonl").write_text("\n".join(json.dumps(item) for item in evidence), encoding="utf-8")
+
+    output = generate_review_checklist(source)
+
+    checklist = openpyxl.load_workbook(output, data_only=False)["Review Checklist"]
+    headers = [cell.value for cell in checklist[1]]
+    statuses = {checklist.cell(row, headers.index("Scenario") + 1).value: checklist.cell(row, headers.index("Speech Status") + 1).value for row in range(2, checklist.max_row + 1)}
+    assert statuses["Water Leak Sensor"] == "Speech Unobserved"
+    assert statuses["Motion Sensor"] == "Speech Unobserved"
+    assert statuses["Home Monitor"] == "Role-only Speech"
+    assert statuses["Observed"] == "Speech Observed"
+    assert statuses["Missing"] == "Speech Missing"
+    assert statuses["Food"] == "Unknown"
+    summary = {row[0]: row[1] for row in openpyxl.load_workbook(output, data_only=False)["Summary"].iter_rows(min_row=2, values_only=True) if row[0]}
+    assert summary["Speech Unobserved count"] == 2
+    assert summary["Role-only Speech count"] == 1
+    assert summary["Speech Observed count"] == 1
+    assert summary["Speech Missing count"] == 1
+    assert summary["Unknown Speech Status count"] == 1
