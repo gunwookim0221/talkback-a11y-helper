@@ -1,5 +1,11 @@
 # Phase 10 First Baseline Blocker Root Cause Analysis
 
+> Historical RCA note (2026-07-26): Phase 10 Candidate Pipeline stabilization supersedes the
+> profiler-packaging and raw-anchor-blocker recommendations below for new Full Runs. New Full batches
+> force profiler capture, create a deterministic manifested profiler archive before Candidate preview,
+> and correlate high-confidence availability terminals with anchor provenance. Historical artifacts
+> retain the legacy interpretation documented in this RCA.
+
 ## 1. Executive Summary
 
 This RCA compares the English Full Run `batch_20260715_223507`, the Korean Full Run `batch_20260716_082517`, and the last Phase 9.5.4 comparison run `batch_20260715_082735`. No new Full Run was executed.

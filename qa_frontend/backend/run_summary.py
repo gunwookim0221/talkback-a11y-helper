@@ -4,8 +4,6 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any
-
 from tb_runner.environment_fingerprint import document_digest_reference
 
 from .paths import OUTPUT_DIR
@@ -97,6 +95,10 @@ def build_run_summary(
         "warning_scenarios": int(parsed.get("warning_scenarios") or 0),
         "completed_scenarios": int(parsed.get("completed_scenarios") or 0),
         "executed_scenarios": int(parsed.get("executed_scenarios") or 0),
+        "terminal_scenarios": int(parsed.get("terminal_scenarios") or 0),
+        "availability_terminal_scenarios": int(
+            parsed.get("availability_terminal_scenarios") or 0
+        ),
         "not_available_scenarios": int(parsed.get("not_available_scenarios") or 0),
         "not_available_candidate_scenarios": int(parsed.get("not_available_candidate_scenarios") or 0),
         "no_target_candidate_scenarios": int(parsed.get("no_target_candidate_scenarios") or 0),
@@ -300,21 +302,24 @@ def _scenario_summaries(parsed: dict[str, object]) -> list[dict[str, object]]:
     for item in progress:
         if not isinstance(item, dict):
             continue
-        scenarios.append(
-            {
-                "id": item.get("id"),
-                "status": item.get("status"),
-                "steps": int(item.get("steps") or 0),
-                "stop_reason": item.get("stop_reason"),
-                "traversal_result": item.get("traversal_result"),
-                "entry_contract_status": item.get("entry_contract_status"),
-                "special_state_handled": bool(item.get("special_state_handled")),
-                "availability_status": item.get("availability_status"),
-                "availability_confidence": item.get("availability_confidence"),
-                "availability_reason": item.get("availability_reason"),
-                "availability_target": item.get("availability_target"),
-            }
-        )
+        scenario = {
+            "id": item.get("id"),
+            "status": item.get("status"),
+            "steps": int(item.get("steps") or 0),
+            "stop_reason": item.get("stop_reason"),
+            "traversal_result": item.get("traversal_result"),
+            "entry_contract_status": item.get("entry_contract_status"),
+            "special_state_handled": bool(item.get("special_state_handled")),
+            "availability_status": item.get("availability_status"),
+            "availability_confidence": item.get("availability_confidence"),
+            "availability_reason": item.get("availability_reason"),
+            "availability_target": item.get("availability_target"),
+        }
+        if item.get("terminal_provenance") is not None:
+            scenario["terminal_provenance"] = item.get("terminal_provenance")
+        if item.get("availability_evidence") is not None:
+            scenario["availability_evidence"] = item.get("availability_evidence")
+        scenarios.append(scenario)
     return scenarios
 
 

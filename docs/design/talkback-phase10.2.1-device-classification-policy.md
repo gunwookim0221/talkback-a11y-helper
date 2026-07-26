@@ -114,14 +114,18 @@ Existing shared-profile redaction은 raw serial을 제거한다.
 
 ## 10. 현재 등록 모델
 
-`SM-F741N`만 등록했다.
+현재 reviewed exact-model mapping은 다음과 같다.
 
-- family: `galaxy-z-flip6`
-- form factor: `foldable_phone`
-- 근거: 현재 project representative device에서 `cmd device_state`가 CLOSED/TENT/HALF_OPENED/OPENED
-  states와 current OPENED state를 제공하는 local read-only smoke
+| Exact model | Device family | Form factor | Expected foldable |
+|---|---|---|---|
+| `SM-F741N` | `galaxy-z-flip6` | `foldable_phone` | `true` |
+| `SM-F971B` | `galaxy-z-fold8` | `foldable_phone` | `true` |
+| `SM-S908B` | `galaxy-s22-ultra` | `slab_phone` | `false` |
 
-확인되지 않은 `SM-S936B` 등은 등록하지 않았다.
+`SM-S908B`는 reviewed exact key로만 매칭하며 marketing name, `SM-S908` prefix 또는 유사
+model에서 추론하지 않는다. ADB fold capability가 `false`로 확인될 때 family와 form factor가
+AVAILABLE이 되어 EnvironmentFingerprint COMPLETE 조건을 충족한다. 확인되지 않은
+`SM-S936B` 등은 등록하지 않았다.
 
 ## 11. Smoke 결과
 

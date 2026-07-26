@@ -1,6 +1,6 @@
 {
   "schema_version": "talkback-device-classification-policy-v1",
-  "revision": 2,
+  "revision": 3,
   "devices": {
     "SM-F741N": {
       "device_family": "galaxy-z-flip6",
@@ -24,6 +24,18 @@
         "status": "REVIEWED",
         "reason": "Exact model verified through ADB discovery and Samsung model information; classified as Galaxy Z Fold8.",
         "reviewed_at": "2026-07-23"
+      }
+    },
+    "SM-S908B": {
+      "device_family": "galaxy-s22-ultra",
+      "form_factor": "slab_phone",
+      "expected_capabilities": {
+        "foldable": false
+      },
+      "review": {
+        "status": "REVIEWED",
+        "reason": "Exact model reviewed for the Phase 10 representative Galaxy S22 Ultra slab-phone environment.",
+        "reviewed_at": "2026-07-26"
       }
     }
   }

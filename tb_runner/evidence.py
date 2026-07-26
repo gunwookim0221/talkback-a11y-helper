@@ -646,12 +646,39 @@ def build_reconciliation_report(events: list[EvidenceEvent]) -> dict[str, Any]:
 
     terminal_reasons_by_scenario: dict[tuple[str, str], set[str]] = {}
     anchor_abort_scenarios: set[tuple[str, str]] = set()
+    anchor_abort_records: list[dict[str, str]] = []
+    terminal_events_by_scenario: dict[tuple[str, str], EvidenceEvent] = {}
+    for terminal_event in scenario_terminal:
+        key = scenario_key(terminal_event)
+        if key is not None:
+            terminal_events_by_scenario[key] = terminal_event
     for event in events:
         key = scenario_key(event)
         if key is None:
             continue
         if event.event_type == "ANCHOR_ABORT":
             anchor_abort_scenarios.add(key)
+            terminal_event = terminal_events_by_scenario.get(key)
+            provenance = str(event.payload.get("provenance") or "")
+            if not provenance:
+                traversal_started = (
+                    terminal_event.payload.get("traversal_started")
+                    if terminal_event is not None
+                    else None
+                )
+                provenance = (
+                    "pre_navigation_stop"
+                    if traversal_started is False
+                    else "anchor_failure"
+                )
+            anchor_abort_records.append(
+                {
+                    "scenario_id": event.scenario_id,
+                    "scenario_tx_id": event.scenario_tx_id,
+                    "provenance": provenance,
+                    "reason": str(event.payload.get("reason") or ""),
+                }
+            )
         elif event.event_type == "SCENARIO_TERMINAL":
             reason = str(event.payload.get("reason") or "")
             terminal_reasons_by_scenario.setdefault(key, set()).add(reason)
@@ -708,6 +735,7 @@ def build_reconciliation_report(events: list[EvidenceEvent]) -> dict[str, Any]:
         "checks": checks,
         "terminal_reason": terminal_reason or "unavailable",
         "anchor_abort_scenarios": len(anchor_abort_scenarios),
+        "anchor_abort_records": anchor_abort_records,
         "anchor_abort_conflicting_terminal": anchor_abort_conflicting_terminal,
         "event_count": len(events),
         "orphan_evidence": {"count": len(orphan_events), "reasons": orphan_reasons},

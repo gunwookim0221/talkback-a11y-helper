@@ -68,10 +68,18 @@ Run once with English (en-US) and once with Korean (ko-KR). Resolve manual langu
 
 Batch Runner automatically creates `candidate_*.baseline_candidate.json` after a Full Validation only when the batch is `finished`, the device is `passed` with return code `0`, the full Scenario Registry was selected and reached terminal state, `no_target_candidate_scenarios` is `0`, and all required artifacts are available. Smoke, targeted/custom/debug runs, stopped/cancelled/crashed runs, device failures, partial runs, and incomplete artifacts do not create a Candidate.
 
+Full mode always enables Runtime Profiler. Before Candidate preview, Batch Runner packages the
+existing per-scenario JSON directory as a deterministic `<report>.profiler.zip`. The archive starts
+with `manifest.json`, followed by lexically ordered `profiler/*.profiler.json` entries; the source JSON
+files remain available. Archive generation is best-effort and cannot change a completed device/batch
+result. A packaging failure is logged and the unchanged required-artifact gate prevents Candidate
+generation.
+
 Automatic generation is additive (`write=True, integrate=False`): it does not approve, integrate, or overwrite an existing Candidate. After a qualifying run completes, Batch Runner first builds a read-only preview and then writes exactly one Candidate. It verifies the output file, Candidate ID, and canonical document digest before recording success. A readable `NOT_ELIGIBLE` Candidate is still created and remains selectable for Comparator review. The operating flow is:
 
 ```text
 Full Validation
+  -> deterministic profiler archive
   -> Candidate automatic generation (when all conditions pass)
   -> Comparator
   -> Human Review
@@ -84,6 +92,27 @@ Full Validation
 Each automatic attempt appends an event to `<device_run>/candidate_generation.json`. This additive, machine-readable artifact retains timestamp, batch/device/run context, Candidate ID/digest/output path, and a bounded failure message where applicable. Event values are `AUTO_CANDIDATE_STARTED`, `AUTO_CANDIDATE_SKIPPED`, `AUTO_CANDIDATE_PREVIEW_SUCCEEDED`, `AUTO_CANDIDATE_PREVIEW_FAILED`, `AUTO_CANDIDATE_WRITE_STARTED`, `AUTO_CANDIDATE_WRITE_SUCCEEDED`, `AUTO_CANDIDATE_WRITE_FAILED`, and `AUTO_CANDIDATE_ALREADY_EXISTS`. Batch Runner also emits the same event name to its backend logger for live operator visibility.
 
 `AUTO_CANDIDATE_WRITE_FAILED` does not change a finished Batch or cause a device run to fail. When the completed run still has terminal summaries, zero `NO_TARGET_CANDIDATE`, and all required artifacts, a Full Run does not need to be repeated: inspect `candidate_generation.json`, correct the local write/runtime issue, then safely use the existing explicit builder command below with `write=True, integrate=False`. Verify the new Candidate with the offline validation commands before Comparator review.
+
+Candidate validation output includes `decision` and a `blockers` list. Use each blocker's title,
+category, details, and remediation instead of inferring action from an internal check ID alone.
+Typical titles are `Profiler archive missing or invalid`, `Environment fingerprint incomplete`,
+`Scenario terminal outcomes incomplete`, and `Repository dirty`. The clean-working-tree gate is
+unchanged.
+
+### Availability terminal interpretation
+
+A scenario is a normal availability terminal only when Summary records `NOT_AVAILABLE` with high
+confidence, `terminal_provenance=availability_terminal`, and concrete availability evidence. It
+counts as executed and terminal without becoming PASS. Medium/low-confidence target candidates remain
+non-terminal and block automatic Candidate generation.
+
+Evidence keeps raw anchor-abort history plus normalized provenance. `pre_navigation_stop` correlated
+to the same high-confidence availability outcome is non-blocking; an actual `anchor_failure` remains a
+reconciliation blocker. For legacy Runs without provenance records, raw `ANCHOR_ABORT` retains its
+original blocking meaning. Do not manually reinterpret old artifacts.
+
+The reviewed device policy currently includes `SM-F741N`, `SM-F971B`, and exact model `SM-S908B`.
+The S22 mapping is `galaxy-s22-ultra` / `slab_phone`; no marketing-name or prefix inference is allowed.
 
 The implemented Candidate builder remains available for historical backfill or explicit regeneration on a completed device run containing `summary.json`:
 

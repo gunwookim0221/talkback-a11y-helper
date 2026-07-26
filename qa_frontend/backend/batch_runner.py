@@ -16,6 +16,7 @@ from tb_runner.environment_fingerprint import (
 from tb_runner.baseline_candidate_builder import build_baseline_candidate
 from tools.review_checklist.auto import auto_generate_review
 from tb_runner.canonical_json import canonical_sha256
+from tb_runner.profiler_archive import create_profiler_archives
 
 from tb_runner.run_spec import RunSpec, resolve_identity_feature_flags
 from .paths import ROOT_DIR, RUN_LOG_DIR, SCRIPT_PATH, RUNTIME_CONFIG_PATH
@@ -539,7 +540,9 @@ class BatchRunManager:
                 evidence_ledger=evidence_ledger,
                 identity_shadow_v2=identity_shadow_v2,
                 traversal_identity_v2=traversal_identity_v2,
-                traversal_profiler=traversal_profiler,
+                traversal_profiler=(
+                    traversal_profiler or str(mode).lower() == "full"
+                ),
             )
             self._evidence_ledger = self._feature_flags["evidence_ledger"]
             self._identity_shadow_v2 = self._feature_flags["identity_shadow_v2"]
@@ -1017,6 +1020,7 @@ class BatchRunManager:
         output_path: Path | None = None,
         skip_reason: str | None = None,
         exception: Exception | None = None,
+        blockers: list[dict[str, Any]] | None = None,
     ) -> None:
         diagnostic_path = run_root / _AUTO_CANDIDATE_DIAGNOSTIC_FILENAME
         event_payload = {
@@ -1035,6 +1039,7 @@ class BatchRunManager:
             "skip_reason": skip_reason,
             "exception_type": type(exception).__name__ if exception is not None else None,
             "exception_message": str(exception)[:500] if exception is not None else None,
+            "blockers": _json_safe(blockers or []),
         }
         try:
             existing = json.loads(diagnostic_path.read_text(encoding="utf-8")) if diagnostic_path.is_file() else {}
@@ -1130,6 +1135,14 @@ class BatchRunManager:
                         candidate_id=candidate_id,
                         candidate_digest=candidate_digest,
                         skip_reason=skip_reason,
+                        blockers=(
+                            preview.candidate.validation_report.get("blockers")
+                            if isinstance(
+                                preview.candidate.validation_report.get("blockers"),
+                                list,
+                            )
+                            else []
+                        ),
                     )
                     continue
                 candidate_path = run_root / f"{candidate_id}.baseline_candidate.json"
@@ -1143,7 +1156,7 @@ class BatchRunManager:
                         output_path=candidate_path,
                     )
                     continue
-            except Exception as preview_error:  # noqa: BROAD_EXCEPT_OK
+            except Exception as preview_error:  # noqa: BLE001
                 self._record_auto_candidate_event(
                     run_root,
                     device,
@@ -1188,7 +1201,7 @@ class BatchRunManager:
                     candidate_digest=result.document_digest,
                     output_path=candidate_path,
                 )
-            except Exception as write_error:  # noqa: BROAD_EXCEPT_OK
+            except Exception as write_error:  # noqa: BLE001
                 self._record_auto_candidate_event(
                     run_root,
                     device,
@@ -1199,6 +1212,30 @@ class BatchRunManager:
                     exception=write_error,
                 )
                 logger.exception("Automatic Candidate write failed for %s", run_root)
+
+    def _finalize_full_run_profiler_archives(
+        self,
+        devices: list[dict[str, Any]],
+    ) -> None:
+        if self._mode != "full":
+            return
+        for device in devices:
+            output_dir = device.get("output_dir")
+            if not output_dir:
+                continue
+            run_root = ROOT_DIR / str(output_dir)
+            try:
+                archives = create_profiler_archives(run_root)
+                logger.info(
+                    "[PROFILER_ARCHIVE] run_root=%s archive_count=%d",
+                    run_root,
+                    len(archives),
+                )
+            except Exception:
+                logger.exception(
+                    "Profiler archive generation failed without failing run %s",
+                    run_root,
+                )
 
     def _run_loop(self):
         while True:
@@ -1224,6 +1261,7 @@ class BatchRunManager:
                     device_info["started_at"] = datetime.now(timezone.utc).isoformat()
                     self._write_summary_locked()
             if should_build_candidates:
+                self._finalize_full_run_profiler_archives(finished_devices)
                 self._auto_generate_full_candidates(finished_devices)
                 for device in finished_devices:
                     output_dir = device.get("output_dir")

@@ -28,8 +28,8 @@ from tb_runner.environment_fingerprint import (
     build_environment_fingerprint,
     document_digest_reference,
 )
-from tb_runner.environment_profile import ENVIRONMENT_PROFILE_SCHEMA_VERSION
 from tb_runner.environment_validator import parse_package_metadata
+from tb_runner.profiler_archive import read_profiler_archive
 from tb_runner.scenario_config import SCENARIO_CONFIG_VERSION, TAB_CONFIGS
 
 
@@ -497,13 +497,54 @@ def _coverage_summary(root: Path) -> dict[str, Any]:
     }
 
 
-def _reconciliation_summary(root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+def _reconciliation_summary(
+    root: Path,
+    run_summary: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
     path = _find_one(root, "*.evidence_reconciliation.json")
     payload = _load_json(path)
     if not payload:
         return {"available": False, "status": "MISSING"}, {"available": False}
     ledger = payload.get("ledger") if isinstance(payload.get("ledger"), Mapping) else {}
     orphan = payload.get("orphan_evidence") if isinstance(payload.get("orphan_evidence"), Mapping) else {}
+    raw_records = (
+        payload.get("anchor_abort_records")
+        if isinstance(payload.get("anchor_abort_records"), list)
+        else []
+    )
+    availability_terminal_ids = {
+        str(item.get("id"))
+        for item in run_summary.get("scenarios", [])
+        if isinstance(item, Mapping)
+        and item.get("terminal_provenance") == "availability_terminal"
+    }
+    normalized_records: list[dict[str, Any]] = []
+    availability_terminal_count = 0
+    blocking_anchor_abort_count = 0
+    for value in raw_records:
+        if not isinstance(value, Mapping):
+            continue
+        record = dict(value)
+        scenario_id = str(record.get("scenario_id") or "")
+        provenance = str(record.get("provenance") or "anchor_failure")
+        is_availability = provenance == "availability_terminal" or (
+            provenance == "pre_navigation_stop"
+            and scenario_id in availability_terminal_ids
+        )
+        normalized_provenance = (
+            "availability_terminal" if is_availability else "anchor_failure"
+        )
+        record["normalized_provenance"] = normalized_provenance
+        normalized_records.append(record)
+        if is_availability:
+            availability_terminal_count += 1
+        else:
+            blocking_anchor_abort_count += 1
+    raw_anchor_abort_count = int(payload.get("anchor_abort_scenarios") or 0)
+    if not raw_records:
+        blocking_anchor_abort_count = raw_anchor_abort_count
+    elif raw_anchor_abort_count > len(normalized_records):
+        blocking_anchor_abort_count += raw_anchor_abort_count - len(normalized_records)
     reconciliation = {
         "available": True,
         "source_schema_version": payload.get("schema_version"),
@@ -511,7 +552,10 @@ def _reconciliation_summary(root: Path) -> tuple[dict[str, Any], dict[str, Any]]
         "source_artifact_id": "evidence_reconciliation",
         "status": payload.get("status"),
         "event_count": payload.get("event_count"),
-        "anchor_abort_count": int(payload.get("anchor_abort_scenarios") or 0),
+        "anchor_abort_count": raw_anchor_abort_count,
+        "blocking_anchor_abort_count": blocking_anchor_abort_count,
+        "availability_terminal_count": availability_terminal_count,
+        "anchor_abort_records": normalized_records,
         "orphan_count": int(orphan.get("count") or 0),
         "duplicate_event_count": int(ledger.get("duplicate_event_count") or 0),
         "write_failure_count": int(ledger.get("write_failure_count") or 0),
@@ -537,35 +581,30 @@ def _profiler_summary(root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     scenarios: list[dict[str, Any]] = []
     results: Counter[str] = Counter()
     try:
-        with zipfile.ZipFile(path) as archive:
-            for name in sorted(archive.namelist()):
-                if not name.endswith(".profiler.json"):
-                    continue
-                payload = json.loads(archive.read(name))
-                if not isinstance(payload, dict):
-                    continue
-                recovery = payload.get("recovery") if isinstance(payload.get("recovery"), list) else []
-                results.update(
-                    str(item.get("result") or "unknown")
-                    for item in recovery if isinstance(item, dict)
-                )
-                metrics = payload.get("metrics") if isinstance(payload.get("metrics"), Mapping) else {}
-                metric_summary = {
-                    str(metric): {
-                        "count": int(value.get("count") or 0),
-                        "duration_ms": float(value.get("duration_ms") or 0.0),
-                    }
-                    for metric, value in metrics.items() if isinstance(value, Mapping)
+        profiler_archive = read_profiler_archive(path)
+        for payload in profiler_archive.profiles:
+            recovery = payload.get("recovery") if isinstance(payload.get("recovery"), list) else []
+            results.update(
+                str(item.get("result") or "unknown")
+                for item in recovery if isinstance(item, dict)
+            )
+            metrics = payload.get("metrics") if isinstance(payload.get("metrics"), Mapping) else {}
+            metric_summary = {
+                str(metric): {
+                    "count": int(value.get("count") or 0),
+                    "duration_ms": float(value.get("duration_ms") or 0.0),
                 }
-                scenarios.append(
-                    {
-                        "scenario_id": payload.get("scenario"),
-                        "runtime_ms": payload.get("runtime_ms"),
-                        "metrics": metric_summary,
-                        "counters": payload.get("counters") if isinstance(payload.get("counters"), Mapping) else {},
-                    }
-                )
-    except (OSError, zipfile.BadZipFile, json.JSONDecodeError):
+                for metric, value in metrics.items() if isinstance(value, Mapping)
+            }
+            scenarios.append(
+                {
+                    "scenario_id": payload.get("scenario"),
+                    "runtime_ms": payload.get("runtime_ms"),
+                    "metrics": metric_summary,
+                    "counters": payload.get("counters") if isinstance(payload.get("counters"), Mapping) else {},
+                }
+            )
+    except (OSError, ValueError, json.JSONDecodeError):
         return {"available": False}, {"available": False}
     profiler = {
         "available": bool(scenarios),
@@ -599,10 +638,8 @@ def _run_summary(summary: Mapping[str, Any], scenario_set: Mapping[str, Any]) ->
             "passed_scenarios",
             "warning_scenarios",
             "failed_scenarios",
-            "not_available_scenarios",
         )
     )
-    terminal = max(completed, reduced_terminal)
     raw_scenarios = summary.get("scenarios") if isinstance(summary.get("scenarios"), list) else []
     scenarios = [
         {
@@ -616,19 +653,38 @@ def _run_summary(summary: Mapping[str, Any], scenario_set: Mapping[str, Any]) ->
                 "availability_status",
                 "availability_confidence",
                 "availability_reason",
+                "terminal_provenance",
+                "availability_evidence",
             )
         }
         for item in raw_scenarios
         if isinstance(item, Mapping) and item.get("id")
     ]
+    availability_terminal_count = sum(
+        1
+        for item in scenarios
+        if item.get("status") == "not_available"
+        and item.get("availability_status") == "NOT_AVAILABLE"
+        and item.get("availability_confidence") == "high"
+        and item.get("terminal_provenance") == "availability_terminal"
+        and isinstance(item.get("availability_evidence"), list)
+        and bool(item.get("availability_evidence"))
+    )
+    normalized_terminal = reduced_terminal + availability_terminal_count
+    terminal = max(completed, normalized_terminal)
+    executed = max(
+        int(summary.get("executed_scenarios") or 0),
+        normalized_terminal,
+    )
     return {
         "source_schema_version": summary.get("schema_version") or "legacy-batch-device-summary-v0",
         "normalizer_version": CANDIDATE_NORMALIZER_VERSION,
         "source_artifact_id": "run_summary",
         "selected_scenarios": scenario_set.get("selected_scenario_count"),
-        "executed_scenarios": int(summary.get("executed_scenarios") or 0),
+        "executed_scenarios": executed,
         "terminal_scenarios": terminal,
-        "completed_scenarios": completed,
+        "completed_scenarios": max(completed, normalized_terminal),
+        "availability_terminal_scenarios": availability_terminal_count,
         "failed_scenarios": int(summary.get("failed_scenarios") or 0),
         "process_status": summary.get("process_status") or summary.get("state"),
         "scenario_result_status": summary.get("scenario_result_status"),
@@ -784,9 +840,9 @@ def build_baseline_candidate(
     )
     scenario_set = _scenario_set(summary, batch, device_entry, runtime)
     coverage = _coverage_summary(root)
-    reconciliation, identity = _reconciliation_summary(root)
     profiler, recovery = _profiler_summary(root)
     run = _run_summary(summary, scenario_set)
+    reconciliation, identity = _reconciliation_summary(root, run)
     comparison_contract = {
         "contract_version": COMPARISON_CONTRACT_VERSION,
         "normalizer_version": CANDIDATE_NORMALIZER_VERSION,

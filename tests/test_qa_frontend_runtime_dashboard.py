@@ -349,7 +349,9 @@ def test_device_card_missing_is_not_available():
     progress = {item["id"]: item for item in summary["scenario_progress"]}
 
     assert summary["passed_scenarios"] == 0
-    assert summary["executed_scenarios"] == 0
+    assert summary["executed_scenarios"] == 1
+    assert summary["terminal_scenarios"] == 1
+    assert summary["availability_terminal_scenarios"] == 1
     assert summary["not_available_scenarios"] == 1
     assert summary["availability_candidate_scenarios"] == 1
     assert progress["device_tv_plugin"]["status"] == "not_available"
@@ -499,7 +501,7 @@ def test_one_step_with_result_row_is_executed_not_availability_candidate():
     assert progress["device_tv_plugin"]["status"] == "passed"
 
 
-def test_availability_counts_are_excluded_from_passed_and_executed_totals():
+def test_high_confidence_availability_is_an_executed_terminal_outcome():
     executed_ids = [f"executed_{index}" for index in range(17)]
     not_available_ids = [f"device_missing_{index}" for index in range(12)]
     no_target_ids = ["life_food_plugin", "life_home_care_plugin"]
@@ -536,14 +538,20 @@ def test_availability_counts_are_excluded_from_passed_and_executed_totals():
     summary = parse_runtime_log("\n".join(lines))
 
     assert len(summary["scenario_progress"]) == 31
-    assert summary["executed_scenarios"] == 17
+    assert summary["executed_scenarios"] == 29
+    assert summary["terminal_scenarios"] == 29
+    assert summary["availability_terminal_scenarios"] == 12
     assert summary["availability_candidate_scenarios"] == 14
     assert summary["not_available_scenarios"] == 12
     assert summary["no_target_candidate_scenarios"] == 2
     assert summary["failed_scenarios"] == 0
     assert summary["passed_scenarios"] == 17
     assert summary["passed_scenarios"] + summary["availability_candidate_scenarios"] == 31
-    assert summary["executed_scenarios"] + summary["availability_candidate_scenarios"] == 31
+    assert summary["executed_scenarios"] + summary["no_target_candidate_scenarios"] == 31
+    progress = {item["id"]: item for item in summary["scenario_progress"]}
+    availability = progress[not_available_ids[0]]
+    assert availability["terminal_provenance"] == "availability_terminal"
+    assert availability["availability_evidence"]
 
 
 def test_runtime_log_parser_handles_malformed_log_without_exception():

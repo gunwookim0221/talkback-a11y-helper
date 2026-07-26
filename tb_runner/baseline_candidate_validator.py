@@ -23,6 +23,39 @@ REQUIRED_ARTIFACT_TYPES = {
     "profiler_archive",
 }
 
+_BLOCKER_DETAILS = {
+    "environment_fingerprint_complete": (
+        "Environment fingerprint incomplete",
+        "environment",
+        "Collect all required environment fields using a reviewed exact-model policy.",
+    ),
+    "profiler_summary": (
+        "Profiler archive missing or invalid",
+        "artifact",
+        "Create the deterministic profiler archive before Candidate validation.",
+    ),
+    "reconciliation_integrity": (
+        "Evidence reconciliation has blocking failures",
+        "evidence",
+        "Inspect real anchor failures, orphan evidence, duplicates, and write failures.",
+    ),
+    "working_tree_clean": (
+        "Repository dirty",
+        "repository",
+        "Run the Full Run from a clean working tree.",
+    ),
+    "scenario_terminal": (
+        "Scenario terminal outcomes incomplete",
+        "execution",
+        "Verify every selected scenario executed or has a proven high-confidence availability terminal.",
+    ),
+    "required_artifacts": (
+        "Required Candidate artifacts missing",
+        "artifact",
+        "Regenerate the missing required artifacts before Candidate creation.",
+    ),
+}
+
 
 @dataclass(frozen=True)
 class CandidateValidationCheck:
@@ -122,8 +155,19 @@ def validate_baseline_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]:
         int(reconciliation.get("orphan_count") or 0) == 0
         and int(reconciliation.get("duplicate_event_count") or 0) == 0
         and int(reconciliation.get("write_failure_count") or 0) == 0
-        and int(reconciliation.get("anchor_abort_count") or 0) == 0,
-        "orphan, duplicate, write failure and anchor abort counts are zero",
+        and int(
+            reconciliation.get(
+                "blocking_anchor_abort_count",
+                reconciliation.get("anchor_abort_count"),
+            )
+            or 0
+        )
+        == 0,
+        "orphan, duplicate, write failure and blocking anchor failure counts are zero",
+        blocking_anchor_abort_count=reconciliation.get(
+            "blocking_anchor_abort_count",
+            reconciliation.get("anchor_abort_count"),
+        ),
     )
 
     runtime = _mapping(comparison.get("runtime"))
@@ -245,10 +289,33 @@ def validate_baseline_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]:
     failure_reasons = tuple(
         check.check_id for check in checks if check.status == ValidationStatus.FAIL
     )
+    blockers = []
+    for check in checks:
+        if check.status != ValidationStatus.FAIL:
+            continue
+        title, category, remediation = _BLOCKER_DETAILS.get(
+            check.check_id,
+            (check.message, "contract", "Inspect the failed validation check details."),
+        )
+        blockers.append(
+            {
+                "code": check.check_id,
+                "title": title,
+                "category": category,
+                "details": dict(check.details),
+                "remediation": remediation,
+            }
+        )
     return {
-        "validator_version": "phase10.1b-validator-v1",
+        "validator_version": "phase10.1b-validator-v2",
         "status": "PASS" if eligible else "FAIL",
         "approval_eligible": eligible,
+        "decision": {
+            "code": "CANDIDATE_READY" if eligible else "CANDIDATE_BLOCKED",
+            "summary": "Candidate ready" if eligible else "Candidate blocked",
+            "blocker_count": len(blockers),
+        },
+        "blockers": blockers,
         "failure_reasons": list(failure_reasons),
         "counts": counts,
         "checks": [check.to_dict() for check in checks],

@@ -115,6 +115,14 @@ def test_non_qualifying_runs_do_not_create_candidates(
     assert _candidate_paths(run_root) == []
     assert _diagnostic_events(run_root)[-1]["event"] == "AUTO_CANDIDATE_SKIPPED"
     assert _diagnostic_events(run_root)[-1]["skip_reason"] == reason
+    if remove_artifact:
+        blockers = {
+            item["code"]: item
+            for item in _diagnostic_events(run_root)[-1]["blockers"]
+        }
+        assert blockers["required_artifacts"]["title"] == (
+            "Required Candidate artifacts missing"
+        )
 
 
 def test_non_zero_return_code_records_a_distinct_skip_reason(tmp_path, monkeypatch):
@@ -234,9 +242,55 @@ def test_run_loop_invokes_auto_generation_only_after_batch_is_finished(monkeypat
     manager._devices = [{"state": "passed", "return_code": 0, "output_dir": "batch/device"}]
     manager._current_device_idx = 1
     observed = []
-    monkeypatch.setattr(manager, "_auto_generate_full_candidates", lambda devices: observed.extend(devices))
+    monkeypatch.setattr(
+        manager,
+        "_finalize_full_run_profiler_archives",
+        lambda devices: observed.append(("archive", list(devices))),
+    )
+    monkeypatch.setattr(
+        manager,
+        "_auto_generate_full_candidates",
+        lambda devices: observed.append(("candidate", list(devices))),
+    )
 
     manager._run_loop()
 
     assert manager._state == "finished"
-    assert observed == [{"state": "passed", "return_code": 0, "output_dir": "batch/device"}]
+    expected = [{"state": "passed", "return_code": 0, "output_dir": "batch/device"}]
+    assert observed == [("archive", expected), ("candidate", expected)]
+
+
+def test_profiler_archive_failure_does_not_change_finished_batch(tmp_path, monkeypatch):
+    manager = batch_runner.BatchRunManager()
+    manager._mode = "full"
+    manager._state = "finished"
+    monkeypatch.setattr(batch_runner, "ROOT_DIR", tmp_path)
+
+    def fail_archive(_run_root):
+        raise OSError("archive destination unavailable")
+
+    monkeypatch.setattr(batch_runner, "create_profiler_archives", fail_archive)
+
+    manager._finalize_full_run_profiler_archives(
+        [{"output_dir": "batch/device"}]
+    )
+
+    assert manager._state == "finished"
+
+
+def test_full_batch_enables_required_runtime_profiler(tmp_path, monkeypatch):
+    class IdleThread:
+        def __init__(self, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(batch_runner, "RUN_LOG_DIR", tmp_path)
+    monkeypatch.setattr(batch_runner.threading, "Thread", IdleThread)
+    manager = batch_runner.BatchRunManager()
+
+    manager.start_batch([], mode="full", traversal_profiler=False)
+
+    assert manager._traversal_profiler is True
+    assert manager._feature_flags["runtime_profiler"] is True

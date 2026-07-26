@@ -121,6 +121,44 @@ def test_candidate_run_summary_counts_handled_terminal_as_executed_and_terminal(
     assert run_summary["scenarios"][0]["status"] == "passed"
 
 
+def test_candidate_run_summary_accepts_only_provenanced_high_confidence_not_available():
+    confirmed = {
+        "id": "device_optional_plugin",
+        "status": "not_available",
+        "availability_status": "NOT_AVAILABLE",
+        "availability_confidence": "high",
+        "availability_reason": "target device card not found",
+        "terminal_provenance": "availability_terminal",
+        "availability_evidence": ["device_inventory", "target_not_visible"],
+    }
+    legacy = {key: value for key, value in confirmed.items() if key != "terminal_provenance"}
+
+    confirmed_summary = _run_summary(
+        {
+            "completed_scenarios": 0,
+            "executed_scenarios": 0,
+            "not_available_scenarios": 1,
+            "scenarios": [confirmed],
+        },
+        {"selected_scenario_count": 1},
+    )
+    legacy_summary = _run_summary(
+        {
+            "completed_scenarios": 0,
+            "executed_scenarios": 0,
+            "not_available_scenarios": 1,
+            "scenarios": [legacy],
+        },
+        {"selected_scenario_count": 1},
+    )
+
+    assert confirmed_summary["executed_scenarios"] == 1
+    assert confirmed_summary["terminal_scenarios"] == 1
+    assert confirmed_summary["availability_terminal_scenarios"] == 1
+    assert legacy_summary["executed_scenarios"] == 0
+    assert legacy_summary["terminal_scenarios"] == 0
+
+
 def _create_run(tmp_path: Path, *, complete_environment=True, targeted=False, legacy=False) -> Path:
     scenario_ids = [str(item["scenario_id"]) for item in TAB_CONFIGS]
     selected = scenario_ids[:2] if targeted else scenario_ids
@@ -269,6 +307,24 @@ def test_missing_required_artifact_is_validation_failure(tmp_path):
     assert "required_artifacts" in result.candidate.approval_eligibility.reasons
 
 
+def test_missing_profiler_has_human_readable_validator_blockers(tmp_path):
+    run_root = _create_run(tmp_path)
+    (run_root / "talkback_compare.profiler.zip").unlink()
+
+    result = build_baseline_candidate(run_root, write=False)
+    blockers = {
+        item["code"]: item
+        for item in result.candidate.validation_report["blockers"]
+    }
+
+    assert blockers["profiler_summary"]["title"] == (
+        "Profiler archive missing or invalid"
+    )
+    assert blockers["required_artifacts"]["details"]["missing"] == [
+        "profiler_archive"
+    ]
+
+
 def test_targeted_run_has_stable_scenario_contract_and_is_not_eligible(tmp_path):
     run_root = _create_run(tmp_path, targeted=True)
     result = build_baseline_candidate(run_root, write=False)
@@ -325,6 +381,108 @@ def test_validator_reports_pass_warning_and_fail(tmp_path):
     payload["environment_fingerprint"]["status"] = "INVALID"
     fail_report = validate_baseline_candidate(payload)
     assert fail_report["counts"]["FAIL"] >= 1
+    assert fail_report["decision"]["code"] == "CANDIDATE_BLOCKED"
+    blockers = {item["code"]: item for item in fail_report["blockers"]}
+    assert blockers["environment_fingerprint_complete"]["title"] == (
+        "Environment fingerprint incomplete"
+    )
+    assert blockers["environment_fingerprint_complete"]["category"] == "environment"
+
+
+def test_availability_terminal_does_not_hide_a_real_anchor_failure(tmp_path):
+    run_root = _create_run(tmp_path)
+    summary_path = run_root / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["scenarios"][0].update(
+        {
+            "status": "not_available",
+            "availability_status": "NOT_AVAILABLE",
+            "availability_confidence": "high",
+            "availability_reason": "target device card not found",
+            "terminal_provenance": "availability_terminal",
+            "availability_evidence": ["device_inventory", "target_not_visible"],
+        }
+    )
+    _write_json(summary_path, summary)
+    reconciliation_path = run_root / "talkback_compare.evidence_reconciliation.json"
+    reconciliation = json.loads(reconciliation_path.read_text(encoding="utf-8"))
+    reconciliation.update(
+        {
+            "anchor_abort_scenarios": 2,
+            "anchor_abort_records": [
+                {
+                    "scenario_id": summary["scenarios"][0]["id"],
+                    "provenance": "pre_navigation_stop",
+                },
+                {
+                    "scenario_id": summary["scenarios"][1]["id"],
+                    "provenance": "anchor_failure",
+                },
+            ],
+        }
+    )
+    _write_json(reconciliation_path, reconciliation)
+
+    result = build_baseline_candidate(run_root, write=False)
+    normalized = result.candidate.comparison_contract["reconciliation"]
+
+    assert normalized["anchor_abort_count"] == 2
+    assert normalized["availability_terminal_count"] == 1
+    assert normalized["blocking_anchor_abort_count"] == 1
+    assert "reconciliation_integrity" in result.candidate.approval_eligibility.reasons
+
+
+def test_provenanced_availability_terminal_is_candidate_eligible(tmp_path):
+    run_root = _create_run(tmp_path)
+    summary_path = run_root / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    availability_scenario = summary["scenarios"][0]
+    availability_scenario.update(
+        {
+            "status": "not_available",
+            "availability_status": "NOT_AVAILABLE",
+            "availability_confidence": "high",
+            "availability_reason": "target device card not found",
+            "terminal_provenance": "availability_terminal",
+            "availability_evidence": ["device_inventory", "target_not_visible"],
+        }
+    )
+    summary.update(
+        {
+            "passed_scenarios": len(summary["scenarios"]) - 1,
+            "completed_scenarios": len(summary["scenarios"]) - 1,
+            "executed_scenarios": len(summary["scenarios"]),
+            "not_available_scenarios": 1,
+        }
+    )
+    _write_json(summary_path, summary)
+    reconciliation_path = run_root / "talkback_compare.evidence_reconciliation.json"
+    reconciliation = json.loads(reconciliation_path.read_text(encoding="utf-8"))
+    reconciliation.update(
+        {
+            "anchor_abort_scenarios": 1,
+            "anchor_abort_records": [
+                {
+                    "scenario_id": availability_scenario["id"],
+                    "provenance": "pre_navigation_stop",
+                }
+            ],
+        }
+    )
+    _write_json(reconciliation_path, reconciliation)
+
+    result = build_baseline_candidate(run_root, write=False)
+
+    assert result.candidate.comparison_contract["run"]["terminal_scenarios"] == len(
+        summary["scenarios"]
+    )
+    assert (
+        result.candidate.comparison_contract["reconciliation"][
+            "blocking_anchor_abort_count"
+        ]
+        == 0
+    )
+    assert result.candidate.approval_eligibility.eligible is True
 
 
 def test_builder_writes_candidate_and_additive_references(tmp_path):

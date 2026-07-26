@@ -329,7 +329,9 @@ def test_run_summary_and_recent_runs_preserve_availability_counts(tmp_path):
     )
     run = list_recent_runs(run_log_dir=tmp_path)[0]
 
-    assert summary["executed_scenarios"] == 0
+    assert summary["executed_scenarios"] == 1
+    assert summary["terminal_scenarios"] == 1
+    assert summary["availability_terminal_scenarios"] == 1
     assert summary["not_available_scenarios"] == 1
     assert summary["no_target_candidate_scenarios"] == 1
     assert summary["availability_candidate_scenarios"] == 2

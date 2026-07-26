@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+from pathlib import Path
 
 from tb_runner.device_classification_policy import (
     DEVICE_CLASSIFICATION_POLICY_SCHEMA_VERSION,
@@ -54,6 +55,30 @@ def test_exact_reviewed_model_and_fold_capability_are_available(tmp_path):
     assert "revision-1" in result.source
     assert "sha256-" in result.source
     assert str(path) not in result.source
+
+
+def test_reviewed_s22_exact_model_produces_complete_slab_fingerprint():
+    result = classify_device(
+        _available("SM-S908B"),
+        _available(False),
+        policy_path=(
+            Path(__file__).parents[1]
+            / "config"
+            / "device_classification_policy.json"
+        ),
+    )
+    profile = _fingerprint_ready_payload()
+    profile["device"]["model"]["value"] = "SM-S908B"
+    profile["device"]["device_family"].update(
+        {"value": result.device_family.value, "status": result.device_family.status.value}
+    )
+    profile["device"]["form_factor"].update(
+        {"value": result.form_factor.value, "status": result.form_factor.status.value}
+    )
+
+    assert result.device_family.value == "galaxy-s22-ultra"
+    assert result.form_factor.value == "slab_phone"
+    assert build_environment_fingerprint(profile).status == FingerprintStatus.COMPLETE
 
 
 def test_unknown_and_prefix_models_are_not_inferred(tmp_path):

@@ -56,7 +56,7 @@ Eligibility는 다음을 모두 요구한다.
 3. supported comparison contract
 4. coverage/identity/profiler normalized summary 존재
 5. reconciliation PASS
-6. orphan/duplicate/write failure/anchor abort 0
+6. orphan/duplicate/write failure/blocking anchor failure 0
 7. scenario/runtime hashes와 traversal/identity/collection contracts 존재
 8. target app package/version 존재
 9. repository commit 존재, dirty false
@@ -73,6 +73,12 @@ WARNING은 Candidate에 남지만 현재 automatic eligibility를 직접 false�
 FAIL은 `approval_eligibility.reasons`로 축약된다. 주요 FAIL check는 environment completeness,
 document integrity metadata, schema/contracts, workload terminal parity, reconciliation, clean Git,
 required artifacts다.
+
+Validator report는 기존 `failure_reasons`와 `checks`를 유지하면서 `decision`과 `blockers`를
+추가한다. 각 blocker는 stable `code`, 사람이 읽을 수 있는 `title`, `category`, structured
+`details`, `remediation`을 가진다. 따라서 운영자는 내부 check ID만 보지 않고
+`Profiler archive missing or invalid`, `Environment fingerprint incomplete`,
+`Repository dirty`처럼 즉시 조치 가능한 원인을 확인할 수 있다.
 
 `limitations_present`, `historical_backfill`은 WARNING이다. Known Issue matching이나 suppression은
 하지 않는다.
@@ -96,6 +102,20 @@ profiler ZIP, logs와 coverage 원본을 Candidate 안에 복사하지 않는다
 Absolute path와 raw serial이 들어간 device directory name은 canonical Candidate에 복사하지 않는다.
 Required core는 run summary, EnvironmentProfile, Evidence Manifest/Reconciliation, Coverage,
 Profiler archive다. Inventory, evidence JSONL, XLSX, runtime config와 logs는 supporting reference다.
+
+### 5.1 Profiler archive contract
+
+Full batch는 Runtime Profiler를 필수 활성화하고 Candidate preview 전에 각
+`<report>.profiler/` directory를 `<report>.profiler.zip`으로 조립한다. 개별
+`*.profiler.json`은 삭제하거나 변경하지 않는다.
+
+새 archive schema는 `traversal-profiler-archive-v1`이다. ZIP entry는 fixed timestamp,
+fixed permissions, stored compression과 lexical ordering을 사용한다. 첫 entry인
+`manifest.json`은 profiler schema, entry count, scenario, canonical JSON byte size와 SHA-256을
+기록하고, 뒤이어 `profiler/<scenario>.profiler.json`이 정렬되어 들어간다. Builder는 writer와
+같은 archive reader를 사용한다. Manifest가 없는 기존 profiler ZIP도 legacy contract로 계속
+읽어 replay compatibility를 유지한다. Archive 생성 실패는 Full Run 결과를 실패로 바꾸지
+않지만 required artifact gate는 그대로 FAIL하므로 Candidate 자동 생성은 중단된다.
 
 Candidate reference를 source summary에 쓸 때 candidate document digest는 의도적으로 제외한다.
 source summary 자체가 Candidate artifact input이므로 digest를 양방향으로 embed하면 checksum cycle이
@@ -136,6 +156,25 @@ Contract version은 `talkback-comparison-input-v1`이다. 비교는 수행하지
 각 metric summary는 `source_schema_version`, `normalizer_version`, `source_artifact_id`를 보존한다.
 Profiler metric duration은 기존 inclusive semantics를 명시한다.
 
+### 7.1 Availability terminal과 anchor provenance
+
+`NOT_AVAILABLE`은 다음 조건을 모두 만족할 때만 정상 terminal outcome으로 집계한다.
+
+- 최종 status와 availability status가 각각 `not_available`, `NOT_AVAILABLE`
+- confidence가 `high`
+- `terminal_provenance=availability_terminal`
+- inventory, target absence, optional-target contract 같은 `availability_evidence`가 하나 이상 존재
+
+이 outcome은 `executed_scenarios`와 `terminal_scenarios`에 포함되지만 PASS로 바뀌지는 않는다.
+중간 confidence의 `NO_TARGET_CANDIDATE`와 low-confidence availability candidate는 terminal로
+승격하지 않는다.
+
+Evidence reconciliation은 raw `ANCHOR_ABORT` count와 record를 보존한다. 새 record는
+`anchor_failure`, `availability_terminal`, `pre_navigation_stop` provenance를 가진다.
+`pre_navigation_stop`은 Summary의 고신뢰 availability evidence와 동일 scenario로 상관된
+경우에만 `availability_terminal`로 normalize하며, 그 외에는 `anchor_failure` blocker다.
+Validator는 `blocking_anchor_abort_count`만 eligibility blocker로 사용한다.
+
 ## 8. Limitations
 
 Builder는 다음 limitation을 구조화할 수 있다.
@@ -172,6 +211,11 @@ Legacy fingerprint는 `INCOMPLETE`, hash null이며 EnvironmentProfile document 
 따라서 approval eligibility는 false다. 현재 연결된 장치 조회나 model-name inference는 하지
 않는다.
 
+Legacy reconciliation에 `anchor_abort_records`가 없으면 기존 raw anchor-abort count를 그대로
+blocking count로 사용한다. Legacy Summary에 새 terminal provenance/evidence가 없으면
+`NOT_AVAILABLE`을 새 정책으로 추정 승격하지 않는다. 기존 Candidate/Baseline schema와
+comparison contract version은 변경하지 않는다.
+
 `batch_20260715_082735` dry-run 결과:
 
 - Candidate ID: `candidate_c2aa06decb4c456c860cff17`
@@ -192,8 +236,7 @@ profiler ZIP의 recovery records는 23이다. Builder는 source semantics를 섞
 
 ## 11. Known Limitations
 
-- current Environment Collector에는 reviewed device-family/form-factor mapping이 없어 fresh
-  Candidate도 fingerprint가 INCOMPLETE일 수 있다.
+- reviewed exact-model policy에 없는 장치는 fresh Candidate fingerprint가 INCOMPLETE다.
 - runtime config canonical hash는 run-local JSON snapshot hash이며 fully expanded effective
   scenario descriptor는 아직 별도 snapshot이 아니다.
 - historical TalkBack version/One UI/SDK/fold/display density는 current device에서 보충하지 않는다.

@@ -492,3 +492,66 @@ def test_reconciliation_does_not_create_anchor_abort_or_hide_same_scenario_confl
     )
     conflict_report = build_reconciliation_report([_event("anchor", "ANCHOR_ABORT"), conflicting_terminal])
     assert conflict_report["checks"]["anchor_abort_preserved"] is False
+
+
+def test_reconciliation_preserves_anchor_provenance_records() -> None:
+    availability_abort = EvidenceEvent(
+        **{
+            **_event("availability_abort", "ANCHOR_ABORT").to_dict(),
+            "scenario_id": "device_optional_plugin",
+            "payload": {
+                "reason": "target missing",
+                "provenance": "pre_navigation_stop",
+            },
+        }
+    )
+    anchor_failure = EvidenceEvent(
+        **{
+            **_event("anchor_failure", "ANCHOR_ABORT").to_dict(),
+            "scenario_tx_id": "stx_anchor_failure",
+            "scenario_id": "life_plugin",
+            "payload": {
+                "reason": "anchor unstable",
+                "provenance": "anchor_failure",
+            },
+        }
+    )
+
+    report = build_reconciliation_report([availability_abort, anchor_failure])
+
+    assert report["anchor_abort_records"] == [
+        {
+            "scenario_id": "device_optional_plugin",
+            "scenario_tx_id": "stx_test",
+            "provenance": "pre_navigation_stop",
+            "reason": "target missing",
+        },
+        {
+            "scenario_id": "life_plugin",
+            "scenario_tx_id": "stx_anchor_failure",
+            "provenance": "anchor_failure",
+            "reason": "anchor unstable",
+        },
+    ]
+
+
+def test_reconciliation_infers_pre_navigation_stop_from_terminal_lifecycle() -> None:
+    abort = EvidenceEvent(
+        **{
+            **_event("abort", "ANCHOR_ABORT").to_dict(),
+            "payload": {"reason": "target missing"},
+        }
+    )
+    terminal = EvidenceEvent(
+        **{
+            **_event("terminal", "SCENARIO_TERMINAL").to_dict(),
+            "payload": {
+                "reason": "ANCHOR_ABORT",
+                "traversal_started": False,
+            },
+        }
+    )
+
+    report = build_reconciliation_report([abort, terminal])
+
+    assert report["anchor_abort_records"][0]["provenance"] == "pre_navigation_stop"

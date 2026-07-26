@@ -4,8 +4,6 @@ import ast
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
-
 from .paths import OUTPUT_DIR
 
 
@@ -408,7 +406,17 @@ def parse_runtime_log(
     not_available_candidate_count = len([item for item in progress.values() if item["status"] == "not_available_candidate"])
     no_target_candidate_count = len([item for item in progress.values() if item["status"] == "no_target_candidate"])
     availability_candidate_count = not_available_count + not_available_candidate_count + no_target_candidate_count
-    executed_count = passed_count + warning_count + failed_count
+    availability_terminal_count = len(
+        [
+            item
+            for item in progress.values()
+            if item.get("terminal_provenance") == "availability_terminal"
+        ]
+    )
+    executed_count = (
+        passed_count + warning_count + failed_count + availability_terminal_count
+    )
+    terminal_count = executed_count
     completed_count = len([item for item in progress.values() if item["status"] in {"passed", "warning", "failed", "skipped", "not_available", "not_available_candidate", "no_target_candidate"}])
     return {
         "mode": mode,
@@ -421,6 +429,8 @@ def parse_runtime_log(
         "warning_scenarios": warning_count,
         "completed_scenarios": passed_count + warning_count,
         "executed_scenarios": executed_count,
+        "terminal_scenarios": terminal_count,
+        "availability_terminal_scenarios": availability_terminal_count,
         "not_available_scenarios": not_available_count,
         "not_available_candidate_scenarios": not_available_candidate_count,
         "no_target_candidate_scenarios": no_target_candidate_count,
@@ -565,12 +575,23 @@ def _classify_availability_signal(signal: dict[str, object]) -> dict[str, object
             reason = "optional Safe card not found"
         if inventory:
             reason = f"{reason}; inventory only {inventory}"
+        evidence = []
+        if inventory:
+            evidence.append("device_inventory")
+        if bool(signal.get("device_target_not_visible")):
+            evidence.append("target_not_visible")
+        if bool(signal.get("inventory_signature_unchanged")):
+            evidence.append("inventory_signature_unchanged")
+        if action == "enter_safe_favorite_card":
+            evidence.append("optional_target_contract")
         return {
             "status": "not_available",
             "availability_status": "NOT_AVAILABLE",
             "availability_confidence": "high",
             "availability_reason": reason,
             "availability_target": target,
+            "terminal_provenance": "availability_terminal",
+            "availability_evidence": evidence,
         }
     if action in {"xml_scroll_search_tap", "scrolltouch"}:
         reason = "target plugin/card anchor not found"
